@@ -18,6 +18,7 @@ let all_layers =
     L.Autonomous_trigger;
     L.Scheduled_automation;
     L.Completion_authority;
+    L.Task_cancellations;
     L.Pending_mentions;
     L.Scope_messages;
     L.Own_board_posts;
@@ -65,9 +66,9 @@ let test_assemble_empty_when_all_absent () =
   check string "no layers -> empty body" "" (L.assemble ~content_of:(fun _ -> None))
 
 let test_assemble_all_present_follows_ordered () =
-  (* Each layer renders its own order index; the result must read 0..10. *)
+  (* Each layer renders its own order index; the result must read 0..11. *)
   let content_of id = Some (string_of_int (L.order_index id)) in
-  check string "every layer present -> indices in order" "012345678910"
+  check string "every layer present -> indices in order" "01234567891011"
     (L.assemble ~content_of)
 let () =
   run "keeper_context_layers"

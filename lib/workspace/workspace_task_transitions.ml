@@ -44,26 +44,15 @@ type verification_submission =
    [handoff_context], so the production release tool — which requires a handoff
    context for a strict release — reached this function with an empty [reason]
    and published a bare "Released <id>", dropping the explanation it was given.
-   [handoff_context.reason] is the same concept under a different argument, not
-   a second one being folded in, so it is read when [reason] is empty. *)
+   [Masc_domain.stated_reason] owns that rule so the author wake resolves the
+   same "why" from the same task rather than reading only the status field. *)
 let transition_broadcast_content ~action ~task_id ~reason ~handoff_context
   : string option
   =
-  let stated_reason =
-    match String.trim reason with
-    | "" ->
-      (match (handoff_context : Masc_domain.task_handoff_context option) with
-       | None -> ""
-       | Some context ->
-         (match context.reason with
-          | Some context_reason -> String.trim context_reason
-          | None -> ""))
-    | reason -> reason
-  in
   let with_reason verb =
-    match stated_reason with
-    | "" -> Some (Printf.sprintf "%s %s" verb task_id)
-    | reason -> Some (Printf.sprintf "%s %s - %s" verb task_id reason)
+    match Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context with
+    | None -> Some (Printf.sprintf "%s %s" verb task_id)
+    | Some reason -> Some (Printf.sprintf "%s %s - %s" verb task_id reason)
   in
   match (action : Masc_domain.task_action) with
   | Masc_domain.Claim -> Some (Printf.sprintf "Claimed %s" task_id)

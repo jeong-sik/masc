@@ -86,9 +86,17 @@ let keeper_of_canceller ~config ~agent_name =
     if names_a_keeper_lane ~config agent_name then Ok (Some agent_name) else Ok None
 ;;
 
+(* The wake resolves the same "why" the committed broadcast published. A
+   [masc_transition] cancel with no top-level reason but a persisted handoff
+   context commits with an explanation; reading only [Cancelled.reason] here
+   delivered the author a row with none, losing exactly the context this wake
+   exists to carry. [Masc_domain.stated_reason] is the shared rule. *)
 let cancellation_of_task (task : Masc_domain.task) =
   match task.task_status with
-  | Masc_domain.Cancelled { cancelled_by; reason; _ } -> Some (cancelled_by, reason)
+  | Masc_domain.Cancelled { cancelled_by; reason; _ } ->
+    Some
+      ( cancelled_by
+      , Masc_domain.stated_reason ~reason ~handoff_context:task.handoff_context )
   | Masc_domain.Todo
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _

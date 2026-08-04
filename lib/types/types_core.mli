@@ -161,6 +161,20 @@ type task_handoff_context =
   }
 [@@deriving show, yojson { strict = false }]
 
+(** The "why" behind a transition that stopped work, from whichever argument
+    carried it. [transition_task_r] takes an explicit [reason];
+    [release_task_r] takes none and forwards only a handoff context, which the
+    production release tool requires for a strict release.
+    [task_handoff_context.reason] is the same concept under a different
+    argument, so it is read when the explicit one is blank.
+
+    Single definition on purpose: the committed broadcast and the author wake
+    both answer "why did this stop", and resolving it separately let them
+    disagree about the same cancellation. [None] when neither carries a
+    non-blank reason. *)
+val stated_reason :
+  reason:string option -> handoff_context:task_handoff_context option -> string option
+
 type task =
   { id : string
   ; title : string

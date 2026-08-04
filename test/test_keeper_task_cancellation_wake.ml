@@ -58,7 +58,7 @@ let ensure_keeper config ~keeper_name ~agent_name =
   | Error err -> fail ("write keeper meta failed: " ^ err)
 ;;
 
-let seed_task config ~task_id ~created_by ~status =
+let seed_task ?handoff_context config ~task_id ~created_by ~status =
   let task : D.task =
     { id = task_id
     ; title = "cancelled work"
@@ -70,7 +70,7 @@ let seed_task config ~task_id ~created_by ~status =
     ; created_by
     ; predecessor_task_id = None
     ; contract = None
-    ; handoff_context = None
+    ; handoff_context
     ; cycle_count = 0
     ; reclaim_policy = None
     ; do_not_reclaim_reason = None
@@ -163,6 +163,47 @@ let test_self_cancellation_across_naming_forms_is_silent () =
       (Wake.outcome_label outcome);
     check int "nothing queued" 0
       (List.length (queued_cancellations ~base_path:config.base_path ~keeper_name:"sangsu")))
+;;
+
+(* A [masc_transition] cancel with no top-level reason but a persisted handoff
+   context commits with an explanation, and the broadcast publishes it. Reading
+   only [Cancelled.reason] here handed the author a row with no reason at all —
+   the two channels describing the same cancellation differently, and the wake
+   losing exactly the context it exists to carry. *)
+let test_handoff_reason_reaches_the_author_when_the_status_carries_none () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent";
+    ensure_keeper config ~keeper_name:"rondo" ~agent_name:"keeper-rondo-agent";
+    seed_task
+      config
+      ~task_id:"task-171"
+      ~created_by:(Some "sangsu")
+      ~handoff_context:
+        { D.summary = "sandbox lacks the request-menu service"
+        ; D.reason = Some "cannot verify without the service"
+        ; next_step = None
+        ; failure_mode = None
+        ; reclaim_policy = None
+        ; evidence_refs = []
+        ; updated_at = None
+        ; updated_by = None
+        }
+      ~status:(cancelled ~by:"keeper-rondo-agent" ~reason:None);
+    let outcome =
+      Wake.notify_author
+        ~config
+        ~cancelling_agent_name:"keeper-rondo-agent"
+        ~task_id:"task-171"
+    in
+    check string "delivered" "delivered" (Wake.outcome_label outcome);
+    match queued_cancellations ~base_path:config.base_path ~keeper_name:"sangsu" with
+    | [ cancellation ] ->
+      check
+        (option string)
+        "the handoff reason travels with the wake"
+        (Some "cannot verify without the service")
+        cancellation.Event_queue.tc_reason
+    | queued -> failf "expected one queued cancellation, got %d" (List.length queued))
 ;;
 
 let test_author_without_a_keeper_lane_is_not_an_error () =
@@ -295,7 +336,9 @@ let () =
             test_repeat_delivery_dedups_on_task_identity
         ] )
     ; ( "declined"
-      , [ test_case "author without a keeper lane" `Quick
+      , [ test_case "handoff reason reaches the author" `Quick
+            test_handoff_reason_reaches_the_author_when_the_status_carries_none
+        ; test_case "author without a keeper lane" `Quick
             test_author_without_a_keeper_lane_is_not_an_error
         ; test_case "task without author" `Quick test_task_without_author_has_no_addressee
         ; test_case "completion is not a cancellation" `Quick

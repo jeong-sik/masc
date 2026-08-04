@@ -46,8 +46,15 @@ val keeper_raw_trace_dir : Workspace.config -> string -> string
 
 (** Retention bound for the per-turn raw-trace store (log retention, not
     a behavioral cap): the oldest turn files beyond this count are removed
-    by {!prune_keeper_raw_trace_turn_files}. *)
+    by {!prune_keeper_raw_trace_turn_files}. Also bounds how far back
+    {!Keeper_autonomous_turn_source} can render autonomous turns, since no
+    other store holds a turn body. *)
 val raw_trace_retained_turn_files : int
+
+(** File extension of a per-turn raw-trace file, including the dot. The
+    writer's retention scan and {!Keeper_autonomous_turn_source}'s read
+    both select directory entries by this suffix. *)
+val raw_trace_file_extension : string
 
 (** Fresh per-turn raw-trace file path under {!keeper_raw_trace_dir}.
     Ensures the directory exists (keeper dir included) and returns a path

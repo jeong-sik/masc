@@ -1002,9 +1002,63 @@ let keeper_chat_history_freshness config name =
      never conflated with a real (mtime, size) pair. A half-readable
      stat (racing writer) also maps to "absent", which only costs a
      recompute on the next request. *)
-  match Fs_compat.file_mtime path, Fs_compat.file_size path with
-  | Some mtime, Some size -> Printf.sprintf "%h:%d" mtime size
-  | Some _, None | None, Some _ | None, None -> "absent"
+  let chat_stamp =
+    match Fs_compat.file_mtime path, Fs_compat.file_size path with
+    | Some mtime, Some size -> Printf.sprintf "%h:%d" mtime size
+    | Some _, None | None, Some _ | None, None -> "absent"
+  in
+  (* Autonomous turns never touch the chat file, so the chat stat alone
+     would pin a stale body for the whole TTL. Each turn writes a NEW file
+     in the raw-trace dir, which bumps that directory's mtime; a turn still
+     appending to its own file does not, and rides the TTL like the
+     enrichment drift above. *)
+  let trace_stamp =
+    match Fs_compat.file_mtime (Keeper_types_support.keeper_raw_trace_dir config name) with
+    | Some mtime -> Printf.sprintf "%h" mtime
+    | None -> "absent"
+  in
+  Printf.sprintf "%s|%s" chat_stamp trace_stamp
+;;
+
+let autonomous_block_json (block : Keeper_autonomous_turn_source.block) =
+  match block with
+  | Keeper_autonomous_turn_source.Thinking content ->
+    `Assoc [ "kind", `String "thinking"; "content", `String content ]
+  | Keeper_autonomous_turn_source.Text content ->
+    `Assoc [ "kind", `String "text"; "content", `String content ]
+  | Keeper_autonomous_turn_source.Tool_use { name; input } ->
+    `Assoc
+      (("kind", `String "tool_use")
+       :: ("name", `String name)
+       :: (match input with
+           | Some input -> [ "input", input ]
+           | None -> []))
+;;
+
+(* An autonomous turn is not a chat row and must not become one (see
+   {!Keeper_autonomous_turn_source}): it carries [autonomous_turn] so the
+   dashboard groups it instead of rendering it as conversation. [content]
+   repeats the terminal text so a client that ignores the field shows the
+   turn's outcome rather than an empty bubble. *)
+let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
+  let optional_fields =
+    List.filter_map Fun.id
+      [ Option.map (fun ts -> "finished_at", `Float ts) turn.finished_at
+      ; Option.map (fun model -> "model", `String model) turn.model
+      ; Option.map (fun reason -> "stop_reason", `String reason) turn.stop_reason
+      ]
+  in
+  `Assoc
+    [ "id", `String ("autonomous:" ^ turn.turn_id)
+    ; "role", `String "assistant"
+    ; "ts", `Float turn.started_at
+    ; "content", `String (Option.value turn.final_text ~default:"")
+    ; ( "autonomous_turn"
+      , `Assoc
+          (("turn_id", `String turn.turn_id)
+           :: ("blocks", `List (List.map autonomous_block_json turn.blocks))
+           :: optional_fields) )
+    ]
 ;;
 
 let keeper_chat_history_json config name =
@@ -1028,7 +1082,25 @@ let keeper_chat_history_json config name =
         err;
       None
   in
-  Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages
+  let chat_rows = Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages in
+  (* Appended, not merged by timestamp: the client already sorts the whole
+     transcript by [ts] and breaks ties by original index, and rows the chat
+     store persisted without a [ts] must keep their relative order rather
+     than be repositioned by a sort here. *)
+  let autonomous_rows =
+    Keeper_autonomous_turn_source.load_recent ~config ~keeper_name:name ()
+    |> List.map autonomous_turn_json
+  in
+  match autonomous_rows, chat_rows with
+  | [], _ -> chat_rows
+  | _ :: _, `List rows -> `List (rows @ autonomous_rows)
+  | _ :: _, other ->
+    Log.Keeper.warn
+      "dashboard keeper chat history: chat store for %s did not emit an array; %d \
+       autonomous turn(s) omitted"
+      name
+      (List.length autonomous_rows);
+    other
 ;;
 
 let cached_keeper_chat_history_json config name =

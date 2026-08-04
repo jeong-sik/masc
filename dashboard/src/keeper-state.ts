@@ -133,8 +133,19 @@ export function isVisibleDirectConversationEntry(entry: KeeperConversationEntry)
   if (entry.role !== 'user' && entry.role !== 'assistant') return false
   return entry.source !== 'world_state_prompt'
     && entry.source !== 'internal_assistant'
+    // An autonomous turn is visible by default but is not direct conversation:
+    // nobody addressed the keeper. It stays out of this predicate so callers
+    // asking "is this part of the dialogue" keep getting the same answer.
+    && entry.source !== 'autonomous_turn'
     && entry.source !== 'tool_result'
     && entry.source !== 'system'
+}
+
+/** Turns the keeper ran on its own (projected from the raw-trace store, never
+ *  persisted to the chat store). Shown without the internal toggle because the
+ *  transcript folds them into one collapsed group rather than listing each. */
+export function isAutonomousTurnEntry(entry: KeeperConversationEntry): boolean {
+  return entry.source === 'autonomous_turn'
 }
 
 /** Tool-call rows (role 'tool', minted live by keeper-stream and persisted to
@@ -149,7 +160,9 @@ export function isToolConversationEntry(entry: KeeperConversationEntry): boolean
  *  turns plus tool-call rows. Only the truly-internal sources
  *  (world_state_prompt, internal_assistant, system) stay behind the toggle. */
 export function isDefaultVisibleConversationEntry(entry: KeeperConversationEntry): boolean {
-  return isVisibleDirectConversationEntry(entry) || isToolConversationEntry(entry)
+  return isVisibleDirectConversationEntry(entry)
+    || isToolConversationEntry(entry)
+    || isAutonomousTurnEntry(entry)
 }
 
 // --- Audio helpers (RFC-0235 P1/P3) ---
@@ -1602,6 +1615,73 @@ interface RestChatHistoryMessage {
   // prefers them over its local parser.
   blocks?: unknown
   stream_contract?: unknown
+  // Present only on rows the backend projected from the raw-trace store
+  // (Keeper_autonomous_turn_source): a turn the keeper ran on its own, which
+  // by design has no chat-store row. Its presence, not `role`, marks the row.
+  autonomous_turn?: unknown
+}
+
+/** Project one autonomous turn's recorded blocks onto the ChatTraceStep shape
+ *  live turns already use, so the transcript renders them with the existing
+ *  "작업 과정" card rather than a second trace renderer. The turn's `text`
+ *  blocks are not steps — they are the entry body. */
+function autonomousTraceSteps(blocks: unknown, ts: string | null | undefined): ChatTraceStep[] {
+  if (!Array.isArray(blocks)) return []
+  const steps: ChatTraceStep[] = []
+  blocks.forEach((block) => {
+    if (!isRecord(block)) return
+    const kind = asString(block.kind)
+    if (kind === 'thinking') {
+      const text = asString(block.content)
+      if (text) steps.push({ kind: 'think', text, ts: ts ?? undefined })
+      return
+    }
+    if (kind === 'tool_use') {
+      const name = asString(block.name)
+      if (!name) return
+      steps.push({
+        kind: 'tool',
+        name,
+        args: block.input === undefined ? undefined : JSON.stringify(block.input),
+        ts: ts ?? undefined,
+      })
+    }
+  })
+  return steps
+}
+
+/** Convert a raw-trace-projected autonomous turn into a conversation entry.
+ *  Marked `autonomous_turn` so the transcript folds consecutive ones into a
+ *  single collapsed group: a keeper wakes far more often than anyone talks to
+ *  it, and listing each turn inline would bury the conversation. */
+function autonomousTurnEntry(
+  keeperName: string,
+  message: RestChatHistoryMessage,
+): KeeperConversationEntry | null {
+  if (!isRecord(message.autonomous_turn)) return null
+  const turnId = asString(message.autonomous_turn.turn_id)
+  if (!turnId) return null
+  const timestamp = toIsoTimestamp(message.ts)
+  return {
+    id: message.id ?? `autonomous-${turnId}`,
+    role: 'assistant',
+    source: 'autonomous_turn',
+    label: keeperName,
+    text: message.content,
+    rawText: message.content,
+    timestamp,
+    delivery: 'history',
+    streamState: null,
+    streamContract: keeperStreamContract('rest_history', 'history_without_stream_events', {
+      reason: 'autonomous turns are projected from the raw-trace store, never streamed',
+    }),
+    traceSteps: autonomousTraceSteps(message.autonomous_turn.blocks, timestamp),
+    details: null,
+    // The raw-trace store carries no surface or turn_ref (RFC-0358 adds the
+    // latter); inventing either would fake provenance the row does not have.
+    surface: null,
+    turnRef: null,
+  }
 }
 
 /** Convert a persisted tool-call row into the same entry shape the live
@@ -1651,6 +1731,13 @@ export function chatHistoryEntriesFromRest(
   let previousSource: KeeperConversationSource | null = null
   const entries: KeeperConversationEntry[] = []
   messages.forEach((message) => {
+    if (message.autonomous_turn !== undefined) {
+      // Nobody addressed the keeper, so this row must not advance the
+      // user/assistant source chain that infers direct-conversation roles.
+      const autonomousEntry = autonomousTurnEntry(keeperName, message)
+      if (autonomousEntry) entries.push(autonomousEntry)
+      return
+    }
     if (message.role === 'tool') {
       // Tool rows do not participate in user/assistant source chaining.
       const toolEntry = toolHistoryEntry(message)

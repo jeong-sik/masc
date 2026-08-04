@@ -3779,10 +3779,84 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
 // transcript stops yanking the viewport while old messages are read.
 const STICK_TO_BOTTOM_THRESHOLD_PX = 80
 
+/** "21:44–00:28" for a collapsed run. Returns null when no turn in the run
+ *  carried a timestamp, so the header omits the range instead of showing a
+ *  fabricated one. */
+function autonomousGroupSpanLabel(entries: KeeperConversationEntry[]): string | null {
+  const start = timeLabel(entries[0]?.timestamp)
+  const end = timeLabel(entries[entries.length - 1]?.timestamp)
+  if (!start && !end) return null
+  if (!start) return end
+  if (!end || start === end) return start
+  return `${start}–${end}`
+}
+
+/** A run of consecutive autonomous turns, collapsed into a single row. Starts
+ *  closed: these turns are the keeper working on its own, and the transcript's
+ *  subject is the conversation around them. Expanding renders each turn through
+ *  TurnWorkBundle — the same component a direct turn uses — so an opened wake
+ *  shows its thinking and tool calls exactly the way a direct answer does. */
+function AutonomousTurnGroup({
+  entries,
+  showMetadata,
+  variant,
+  showSourceBadge,
+  toolOutputsCoveredSinceMs,
+  toolOutputsCoveredThroughMs,
+  toolOutputHydrationContract,
+  action,
+}: {
+  entries: KeeperConversationEntry[]
+  showMetadata?: boolean
+  variant: ChatTranscriptVariant
+  showSourceBadge: boolean
+  toolOutputsCoveredSinceMs: number | null
+  toolOutputsCoveredThroughMs: number | null
+  toolOutputHydrationContract: ToolCallOutputHydrationContract | null
+  action?: ChatTranscriptAction
+}) {
+  const [open, setOpen] = useState(false)
+  const span = autonomousGroupSpanLabel(entries)
+  return html`
+    <div class="chat-block-trace ${open ? 'open' : ''}">
+      <button
+        type="button"
+        class="chat-block-trace-hd"
+        onClick=${() => setOpen((o) => !o)}
+        aria-expanded=${open}
+      >
+        <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
+        <span class="chat-block-trace-label">자율턴</span>
+        <span class="chat-block-trace-count">${entries.length}개</span>
+        ${span ? html`<span class="chat-block-trace-meta">${span}</span>` : null}
+      </button>
+      ${open
+        ? entries.map((entry) => html`<${TurnWorkBundle}
+            key=${entry.id}
+            tools=${[]}
+            assistant=${entry}
+            showMetadata=${showMetadata}
+            variant=${variant}
+            showSourceBadge=${showSourceBadge}
+            toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
+            toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+            toolOutputHydrationContract=${toolOutputHydrationContract}
+            action=${action}
+          />`)
+        : null}
+    </div>
+  `
+}
+
 type ChatRenderUnit =
   | { kind: 'entry'; entry: KeeperConversationEntry }
   | { kind: 'toolGroup'; id: string; entries: KeeperConversationEntry[] }
   | { kind: 'turnBundle'; id: string; entries: KeeperConversationEntry[]; entry: KeeperConversationEntry }
+  // A run of turns the keeper took on its own, collapsed into one row. Kept
+  // separate from turnBundle because these are not answers to anyone: a keeper
+  // wakes on the order of once a minute, so rendering each one inline would
+  // bury the conversation it sits between.
+  | { kind: 'autonomousGroup'; id: string; entries: KeeperConversationEntry[] }
 
 function entryTurnRef(entry: KeeperConversationEntry): string | null {
   const value = entry.turnRef?.trim()
@@ -3819,13 +3893,23 @@ function canBundleToolsWithAssistant(run: KeeperConversationEntry[], assistant: 
 // belongs to the following assistant entry, render both as one turn bundle so
 // "작업 과정" visually belongs to the answer it produced. Assistant traceSteps
 // can also produce a bundle without tools (thinking-only turns).
-function buildChatRenderUnits(
+// Mirrors isAutonomousTurnEntry in keeper-state. Kept local because this module
+// is a leaf renderer and must not import the state module; KeeperConversationSource
+// is the shared type, so a drifting label fails to compile rather than silently
+// matching nothing.
+function isAutonomousTurnEntry(entry: KeeperConversationEntry): boolean {
+  return entry.source === 'autonomous_turn'
+}
+
+// Exported for unit testing (same convention as interleaveTraceAndTools): the
+// grouping contract is asserted on the unit list, without a jsdom render.
+export function buildChatRenderUnits(
   entries: KeeperConversationEntry[],
   groupToolCalls: boolean,
 ): ChatRenderUnit[] {
-  if (!groupToolCalls) return entries.map((entry) => ({ kind: 'entry', entry }))
   const units: ChatRenderUnit[] = []
   let run: KeeperConversationEntry[] = []
+  let autonomousRun: KeeperConversationEntry[] = []
   const flush = () => {
     if (run.length === 0) return
     const first = run[0]
@@ -3833,7 +3917,27 @@ function buildChatRenderUnits(
     units.push({ kind: 'toolGroup', id: `tracegroup-${first.id}`, entries: run })
     run = []
   }
+  // Autonomous turns collapse whether or not tool folding is on: grouping them
+  // guards against their volume, it is not a tool-rendering preference.
+  const flushAutonomous = () => {
+    if (autonomousRun.length === 0) return
+    const first = autonomousRun[0]
+    if (!first) return
+    units.push({ kind: 'autonomousGroup', id: `autonomous-${first.id}`, entries: autonomousRun })
+    autonomousRun = []
+  }
   for (const entry of entries) {
+    if (isAutonomousTurnEntry(entry)) {
+      // Any open tool run belongs to the direct turn that preceded this wake.
+      flush()
+      autonomousRun.push(entry)
+      continue
+    }
+    flushAutonomous()
+    if (!groupToolCalls) {
+      units.push({ kind: 'entry', entry })
+      continue
+    }
     if (entry.role === 'tool') {
       if (!canAppendToolToRun(run, entry)) flush()
       run.push(entry)
@@ -3866,6 +3970,7 @@ function buildChatRenderUnits(
     }
   }
   flush()
+  flushAutonomous()
   return units
 }
 
@@ -3928,7 +4033,19 @@ function renderChatTranscriptBody(opts: {
     if (unreadAnchorKey !== null && unitKey(unit) === unreadAnchorKey) {
       out.push(html`<div class="kw-daydiv kw-unreaddiv" key="unread-divider">${UNREAD_DIVIDER_LABEL}</div>`)
     }
-    if (unit.kind === 'toolGroup') {
+    if (unit.kind === 'autonomousGroup') {
+      out.push(html`<${AutonomousTurnGroup}
+        key=${unit.id}
+        entries=${unit.entries}
+        showMetadata=${showMetadata}
+        variant=${variant}
+        showSourceBadge=${showSourceBadge}
+        toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
+        toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+        toolOutputHydrationContract=${toolOutputHydrationContract}
+        action=${action}
+      />`)
+    } else if (unit.kind === 'toolGroup') {
       out.push(html`<${ToolTraceCard}
         key=${unit.id}
         tools=${unit.entries}

@@ -31,6 +31,14 @@ let autonomous_wake_marker =
   "(autonomous wake — the current observation frame is provided per-turn in \
    system context)"
 
+(* Reader-side counterpart of [autonomous_wake_marker]: the raw-trace store
+   records this string as a wake turn's [run_started] prompt, and that is
+   the only field distinguishing a wake turn from a direct one there. The
+   .mli documents why the discriminator lives in the prompt today and what
+   replaces it (RFC-0358). *)
+let is_autonomous_wake_prompt prompt =
+  String.equal prompt autonomous_wake_marker
+
 let format_pending_messages
       (messages : Keeper_world_observation_message_scope.pending_message list)
   : string

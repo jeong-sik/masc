@@ -313,7 +313,7 @@ let test_recent_direct_context_renders_prior_reply_and_tool_evidence () =
         ~user_attachments:[]
         ~tool_calls:
           [ { K.call_id = "toolu_board";
-              call_name = "keeper_board_list";
+              call_name = "masc_board_list";
               args = {|{"limit":20}|} } ]
         ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
         ~assistant_content:"This time I checked the board list."
@@ -329,7 +329,7 @@ let test_recent_direct_context_renders_prior_reply_and_tool_evidence () =
       Alcotest.(check bool) "previous assistant utterance is visible" true
         (contains_substring rendered "I was reading the board.");
       Alcotest.(check bool) "tool evidence keeps only call name" true
-        (contains_substring rendered "tool_call: keeper_board_list");
+        (contains_substring rendered "tool_call: masc_board_list");
       Alcotest.(check bool) "tool args are not prompt evidence" false
         (contains_substring rendered {|{"limit":20}|});
       Alcotest.(check bool) "grounding guard present" true

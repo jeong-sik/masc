@@ -189,13 +189,6 @@ const STALE_RULES: Array<{
   expected: string
 }> = [
   {
-    id: 'retired-board-get',
-    severity: 'critical',
-    title: 'Retired board read alias',
-    pattern: /\bkeeper_board_get\b/,
-    expected: 'Use keeper_board_post_get with an exact post_id.',
-  },
-  {
     id: 'task-done-notes',
     severity: 'critical',
     title: 'Stale keeper_task_done argument',
@@ -227,7 +220,7 @@ const STALE_RULES: Array<{
 
 const DUPLICATED_TOOL_TERMS = [
   'keeper_task_done',
-  'keeper_board_post_get',
+  'masc_board_post_get',
   'Execute',
   'repos/REPO_NAME/.worktrees/TASK_NAME',
 ]

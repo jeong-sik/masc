@@ -409,10 +409,6 @@ let explicit_metadata : (string * metadata) list =
       hidden_runtime_tool
         "Keeper task-completion runtime tool; callable but hidden from the public MCP schema surface."
         complete_task_tool );
-    ( "keeper_board_search",
-      hidden_runtime_tool
-        "Keeper board-search runtime tool; callable but hidden from the public MCP schema surface."
-        read_state_tool );
     ( "keeper_tools_list",
       hidden_runtime_tool
         "Keeper tool-list runtime tool; callable but hidden from the public MCP schema surface."
@@ -442,20 +438,6 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_broadcast", keeper_shard_write);
     ("keeper_handoff", keeper_shard_write);
     ("keeper_task_create", keeper_shard_add_task);
-    ("keeper_board_comment", keeper_shard_write);
-    ("keeper_board_comment_vote", keeper_shard_vote);
-    ("keeper_board_curation_read", keeper_shard_read);
-    ("keeper_board_curation_submit", keeper_shard_write);
-    ("keeper_board_post_get", keeper_shard_read);
-    ("keeper_board_list", keeper_shard_read);
-    ("keeper_board_post", keeper_shard_write);
-    ("keeper_board_stats", keeper_shard_read);
-    ("keeper_board_vote", keeper_shard_vote);
-    ("keeper_board_sub_board_list", keeper_shard_read);
-    ("keeper_board_sub_board_get", keeper_shard_read);
-    ("keeper_board_sub_board_create", keeper_shard_write);
-    ("keeper_board_sub_board_update", keeper_shard_write);
-    ("keeper_board_sub_board_delete", keeper_shard_write);
     ("analyze_image", keeper_shard_read);
     ("tool_edit_file", keeper_shard_write);
     ("tool_write_file", keeper_shard_write);

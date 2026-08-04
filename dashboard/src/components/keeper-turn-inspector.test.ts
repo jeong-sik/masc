@@ -64,7 +64,7 @@ function toolCallsForTurn(): ToolCallsResponse {
       {
         ts: 1_781_587_556,
         keeper: 'albini',
-        tool: 'keeper_board_post_get',
+        tool: 'masc_board_post_get',
         input: { post_id: 'p-1' },
         output: 'ok',
         success: true,
@@ -674,7 +674,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(drawerText).toContain('keeper turn')
     expect(drawerText).toContain('agent subturns')
     expect(drawerText).toContain('T9001')
-    expect(drawerText).toContain('keeper_board_post_get')
+    expect(drawerText).toContain('masc_board_post_get')
     // RFC-0233 §9/§10: the gen (response-generation) phase carries
     // request_latency_ms from the record (1234ms → "1.2s") plus ttfrc_ms
     // (567.8ms → "568ms"), so it renders a measured duration with the
@@ -708,7 +708,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
 
     const drawerText = container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent ?? ''
-    expect(drawerText).toContain('keeper_board_post_get')
+    expect(drawerText).toContain('masc_board_post_get')
     expect(drawerText).toContain('측정 없음')
     expect(drawerText).not.toContain('0ms')
     expect(drawerText).not.toContain('0.50s')

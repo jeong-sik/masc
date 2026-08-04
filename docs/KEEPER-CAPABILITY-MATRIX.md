@@ -17,7 +17,7 @@ Keeper가 실제로 호출할 수 있는 이름과 인자는 매 turn에 제공�
 | 목적 | 현재 capability | Source SSOT |
 |---|---|---|
 | 현재 identity, Task, sandbox, repository checkout 확인 | `keeper_context_status` | `lib/tool_surface/tool_shard_types_schemas_base.ml` |
-| Board 읽기/쓰기 | `keeper_board_list`, `keeper_board_post_get`, `keeper_board_search`, `keeper_board_post`, `keeper_board_comment`, `keeper_board_vote`, `keeper_board_stats`, `keeper_board_curation_read`, `keeper_board_curation_submit` | `lib/tool_surface/tool_shard_types_schemas_board.ml` |
+| Board 읽기/쓰기 | `masc_board_list`, `masc_board_post_get`, `masc_board_search`, `masc_board_post`, `masc_board_comment`, `masc_board_vote`, `masc_board_stats`, `masc_board_curation_read`, `masc_board_curation_submit` | `lib/board_tool_adapter/board_tool_registry.ml` + Keeper projection `lib/tool_surface/tool_shard_types_board_keeper_projection.ml` |
 | Task 조회/소유/완료/생성 | `keeper_tasks_list`, `keeper_tasks_audit`, `keeper_task_claim`, `keeper_task_done`, `keeper_task_create` | `lib/tool_surface/tool_shard_types_schemas_taskboard.ml` |
 | Goal 조회/변경 | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition` | `lib/tool_schemas/tool_schemas_workspace_extra.ml` |
 | Schedule 생성/조회/취소 | `masc_schedule_create`, `masc_schedule_list`, `masc_schedule_get`, `masc_schedule_cancel` | `lib/tool_schemas/tool_schemas_schedule.ml` |

@@ -67,11 +67,11 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(report.rows.find(row => row.promptKey === 'keeper.recovery_block')?.missing).toBe(true)
   })
 
-  it('detects stale tool aliases and argument shapes in effective prompt text', () => {
+  it('detects stale argument shapes in effective prompt text', () => {
     const report = buildKeeperPromptAssemblyReport([
       prompt({
         key: 'keeper.tool_hints',
-        effective: 'Call keeper_board_get then keeper_task_done { notes: "evidence" }',
+        effective: 'Call keeper_task_done { notes: "evidence" }',
       }),
       prompt({
         key: 'keeper.capabilities',
@@ -81,13 +81,12 @@ describe('buildKeeperPromptAssemblyReport', () => {
 
     expect(report.warnings.map(warning => warning.id)).toEqual(
       expect.arrayContaining([
-        'retired-board-get',
         'task-done-notes',
         'keeper-pr-create',
         'hardcoded-masc-path',
       ]),
     )
-    expect(report.stats.criticalCount).toBe(2)
+    expect(report.stats.criticalCount).toBe(1)
   })
 
   it('labels host-storage prompt residue without legacy-era wording', () => {

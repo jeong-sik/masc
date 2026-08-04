@@ -1165,7 +1165,7 @@ let test_thinking_with_tool_use_is_accepted () =
              Agent_sdk.Types.Thinking
                { signature = None; content = "internal chain" };
              Agent_sdk.Types.ToolUse
-               { id = "tool-1"; name = "keeper_board_search"; input = `Assoc [] };
+               { id = "tool-1"; name = "masc_board_search"; input = `Assoc [] };
            ]
          ())
   in
@@ -1202,7 +1202,7 @@ let test_accept_contract_delegates_to_oas_response_shape () =
     "tool use"
     [
       Agent_sdk.Types.ToolUse
-        { id = "tool-1"; name = "keeper_board_search"; input = `Assoc [] };
+        { id = "tool-1"; name = "masc_board_search"; input = `Assoc [] };
     ];
   check_accept_matches_oas_shape
     "tool result"

@@ -59,6 +59,12 @@ val with_web_fetch_http_get_for_test :
 
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
+(** Keeper-model dispatch uses the descriptor-owned model projection for
+    [masc_tool_help], so help describes the exact schema admitted by the
+    Keeper runtime rather than the broader public MCP schema. *)
+val dispatch_for_keeper :
+  context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
+
 val tool_inventory_json :
   context -> include_hidden:bool -> Yojson.Safe.t
 

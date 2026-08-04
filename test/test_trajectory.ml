@@ -11,7 +11,7 @@ let () =
 (* ================================================================ *)
 
 let test_tool_cost_known () =
-  let cost = Trajectory.tool_cost_estimate "keeper_board_post" in
+  let cost = Trajectory.tool_cost_estimate "masc_board_post" in
   Alcotest.(check (float 0.001)) "board_post cost" 0.002 cost
 
 let test_tool_cost_unknown () =

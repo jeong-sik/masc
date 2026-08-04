@@ -9,7 +9,7 @@
 include Tool_shard_types_enum_mirrors
 include Tool_shard_types_core
 include Tool_shard_types_schemas_base
-include Tool_shard_types_schemas_board
+include Tool_shard_types_board_keeper_projection
 include Tool_shard_types_schemas_filesystem
 include Tool_shard_types_schemas_search_files
 include Tool_shard_types_schemas_execute

@@ -308,7 +308,7 @@ describe('KeeperDetailPage', () => {
       context_ratio: 0.000008,
       context_tokens: 8,
       context_max: 1000000,
-      recent_tool_names: ['keeper_board_post', 'keeper_tasks_list', 'Execute'],
+      recent_tool_names: ['masc_board_post', 'keeper_tasks_list', 'Execute'],
       agent: {
         exists: true,
         name: 'keeper-analyst-agent',

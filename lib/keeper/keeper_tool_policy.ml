@@ -30,7 +30,8 @@ let missing_canonical_schema_names descriptors =
     | Keeper_tool_descriptor.Missing_canonical_registry ->
       Some descriptor.internal_name
     | Keeper_tool_descriptor.Descriptor_owned
-    | Keeper_tool_descriptor.Canonical_registry -> None)
+    | Keeper_tool_descriptor.Canonical_registry
+    | Keeper_tool_descriptor.Keeper_projection -> None)
   |> List.sort_uniq String.compare
 ;;
 

@@ -656,7 +656,7 @@ let test_dispatch_refuses_unknown_operations () =
          (operation ^ " has no replay continuation")
          true
          (replayable_of_operation operation = None))
-    [ "keeper_board_post"; "" ]
+    [ "masc_board_post"; "" ]
 ;;
 
 let test_large_connector_post_preserves_exact_durable_request () =

@@ -806,89 +806,6 @@ let handle_task ~config ~(meta : keeper_meta) ~name ~args =
   Keeper_tool_task_runtime.handle_keeper_task_tool ~config ~meta ~name ~args
 ;;
 
-let handle_board ~(meta : keeper_meta) ~name ~args =
-  Keeper_tool_board_runtime.handle_keeper_board_tool ~meta ~name ~args
-;;
-
-type board_projection_error =
-  | Unknown_board_route
-  | Keeper_wrapper_required of
-      { board_name : Tool_name.Board_name.t
-      ; keeper_tool : Keeper_tool_name.t
-      }
-
-let board_projection_error_kind = function
-  | Unknown_board_route -> "unknown_board_route"
-  | Keeper_wrapper_required _ -> "keeper_wrapper_required"
-;;
-
-let board_projection_error_class = function
-  | Unknown_board_route -> Tool_result.Runtime_failure
-  | Keeper_wrapper_required _ -> Tool_result.Policy_rejection
-;;
-
-let board_projection_error_fields error =
-  let route_fields =
-    match error with
-    | Unknown_board_route -> []
-    | Keeper_wrapper_required { board_name; keeper_tool } ->
-      [ "board_operation", `String (Tool_name.Board_name.operation_name board_name)
-      ; "required_tool", `String (Keeper_tool_name.to_string keeper_tool)
-      ]
-  in
-  ("error_kind", `String (board_projection_error_kind error)) :: route_fields
-;;
-
-let reject_board_projection_with_outcome ~(meta : keeper_meta) ~name error =
-  let class_ = board_projection_error_class error in
-  let fields =
-    ("ok", `Bool false)
-    :: ("error", `String (board_projection_error_kind error))
-    :: ("tool", `String name)
-    :: ( "failure_class"
-       , `String (Tool_result.tool_failure_class_to_string class_) )
-    :: board_projection_error_fields error
-  in
-  let data = `Assoc fields in
-  Log.Keeper.emit
-    (Tool_result.log_level_of_failure_class class_)
-    ~keeper_name:meta.name
-    ~category:Log.Tool
-    ~details:data
-    "board projection rejected";
-  Keeper_tool_execution.failure ~class_ (Yojson.Safe.to_string data)
-;;
-
-let reject_board_projection ~meta ~name error =
-  (reject_board_projection_with_outcome ~meta ~name error).raw_output
-;;
-
-let handle_masc_board_with_outcome ~(meta : keeper_meta) ~name ~args =
-  match Tool_name.Board_name.of_string name with
-  | None -> reject_board_projection_with_outcome ~meta ~name Unknown_board_route
-  | Some board_name ->
-    (match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-     | Keeper_tool_name.Keeper_wrapper keeper_tool ->
-       reject_board_projection_with_outcome
-         ~meta
-         ~name
-         (Keeper_wrapper_required { board_name; keeper_tool })
-     | Keeper_tool_name.Direct_masc ->
-       let args =
-         List.fold_left
-           (fun args field ->
-              Keeper_tool_shared_runtime.assoc_override_string field meta.name args)
-           args
-           (Board_tool_registry.identity_fields_for_board_name board_name)
-       in
-       Board_tool_dispatch.handle_tool name args
-       |> Keeper_tool_execution.of_tool_result)
-;;
-
-let handle_masc_board ~meta ~name ~args =
-  (handle_masc_board_with_outcome ~meta ~name ~args).raw_output
-;;
-
 (* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.result option]
    returned by [Tool_*.dispatch] to the producer-owned execution outcome.
    [None] means the dispatcher does not recognise the name (the descriptor →
@@ -915,7 +832,7 @@ let handle_masc_task_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
      [same_task_actor] compares raw strings, so release/done on a task the
      same physical keeper claimed was refused with
      [task_release_requires_current_owner] — whose tool_suggestion then
-     prescribed keeper_board_post every wake (the 2026-07-18 40× duplicate
+     prescribed masc_board_post every wake (the 2026-07-18 40× duplicate
      board post loop, executor/task-2296). Root ratchet stays open: fold both
      spellings into one typed actor id so the mismatch is unrepresentable. *)
   let ctx : Task.Tool.context =
@@ -963,7 +880,8 @@ let handle_masc_workspace_with_outcome ~(config : Workspace.config) ~(meta : kee
    Keeper_tool_in_process_runtime. *)
 let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_misc.context = { config; agent_name = meta.name } in
-  Tool_misc.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
+  Tool_misc.dispatch_for_keeper ctx ~name ~args
+  |> dispatch_option_to_execution ~name
 ;;
 
 let handle_masc_control_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =

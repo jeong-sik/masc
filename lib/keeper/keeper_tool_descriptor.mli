@@ -53,6 +53,7 @@ type keeper_tool_group =
 type input_schema_source =
   | Descriptor_owned
   | Canonical_registry
+  | Keeper_projection
   | Missing_canonical_registry
 
 type readonly_of_input = Yojson.Safe.t -> bool option
@@ -97,8 +98,7 @@ type runtime_handler =
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
-  | Board_tool_dispatch
-  | Tool_masc_board_dispatch
+  | Tool_board_dispatch
   | Tool_masc_task_dispatch
   | Tool_masc_plan_dispatch
   | Tool_masc_run_dispatch

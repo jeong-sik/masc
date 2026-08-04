@@ -2,7 +2,7 @@ module HK = Masc.Keeper_hooks_oas
 module Metrics = Masc.Otel_metric_store
 
 let keeper = "test-keeper-tool-duration-buckets"
-let tool = "keeper_board_list"
+let tool = "masc_board_list"
 let provider = HK.runtime_lane_label
 let outcome = "ok"
 
@@ -25,6 +25,10 @@ let summary duration_ms =
     ~duration_ms
 
 let test_metric_names_match_dashboard_queries () =
+  Alcotest.(check string)
+    "canonical Board tool type"
+    "board"
+    (Masc.Tool_telemetry.tool_type_of_name tool);
   Alcotest.(check string)
     "bucket metric"
     "masc_keeper_tool_call_duration_seconds_bucket_total"

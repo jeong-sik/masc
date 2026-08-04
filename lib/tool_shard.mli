@@ -9,8 +9,6 @@ val fs_write_mode_enum_strings : string list
 val vote_direction_enum_strings : string list
 
 val base_tools : Masc_domain.tool_schema list
-val board_tools : Masc_domain.tool_schema list
-
 val all_keeper_tool_schemas : Masc_domain.tool_schema list
 (** Every Keeper-handler schema family, de-duplicated by exact internal tool
     name while preserving catalog order. Model visibility is owned solely by

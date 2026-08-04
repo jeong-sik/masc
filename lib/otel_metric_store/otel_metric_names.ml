@@ -94,7 +94,7 @@
 
 (* #10569: board persist mutex acquire / held latency.  Recorded by
    [Board_core.with_persist_lock] so operators can distinguish
-   queueing from syscall stall when keeper_board_post / comment / vote
+   queueing from syscall stall when masc_board_post / comment / vote
    tool calls hit the 60s default tool timeout. *)
 let metric_board_persist_lock_acquire_sec = "masc_board_persist_lock_acquire_sec"
 let metric_board_persist_lock_held_sec = "masc_board_persist_lock_held_sec"

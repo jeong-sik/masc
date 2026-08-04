@@ -280,11 +280,11 @@ let prepare_keeper_name fixture name =
   if
     List.mem name
       [
-        "keeper_board_post_get";
-        "keeper_board_comment";
-        "keeper_board_vote";
-        "keeper_board_comment_vote";
-        "keeper_board_search";
+        "masc_board_post_get";
+        "masc_board_comment";
+        "masc_board_vote";
+        "masc_board_comment_vote";
+        "masc_board_search";
       ]
   then
     ignore (Generic.ensure_board_post fixture.generic);
@@ -335,41 +335,41 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("line_start", `Int 1);
           ("content", `String "tool matrix ide annotation");
         ]
-  | "keeper_board_post" ->
+  | "masc_board_post" ->
       `Assoc
         [
           ("title", `String "Keeper Tool Matrix");
           ("content", `String "tool-matrix-post");
           ("visibility", `String "internal");
         ]
-  | "keeper_board_post_get" ->
+  | "masc_board_post_get" ->
       `Assoc [ ("post_id", `String (Generic.ensure_board_post fixture.generic)) ]
-  | "keeper_board_list" -> `Assoc [ ("limit", `Int 5) ]
-  | "keeper_board_curation_read" -> `Assoc []
-  | "keeper_board_curation_submit" ->
+  | "masc_board_list" -> `Assoc [ ("limit", `Int 5) ]
+  | "masc_board_curation_read" -> `Assoc []
+  | "masc_board_curation_submit" ->
       `Assoc [ ("rationale", `String "tool matrix curation") ]
-  | "keeper_board_comment" ->
+  | "masc_board_comment" ->
       `Assoc
         [
           ("post_id", `String (Generic.ensure_board_post fixture.generic));
           ("content", `String "tool-matrix-comment");
         ]
-  | "keeper_board_vote" ->
+  | "masc_board_vote" ->
       `Assoc
         [
           ("post_id", `String (Generic.ensure_board_post fixture.generic));
           ("direction", `String "up");
         ]
-  | "keeper_board_comment_vote" ->
+  | "masc_board_comment_vote" ->
       `Assoc
         [
           ("comment_id", `String (ensure_board_comment fixture));
           ("direction", `String "up");
         ]
-  | "keeper_board_stats" -> `Assoc []
-  | "keeper_board_search" ->
+  | "masc_board_stats" -> `Assoc []
+  | "masc_board_search" ->
       `Assoc [ ("query", `String "tool-matrix"); ("limit", `Int 5) ]
-  | "keeper_board_sub_board_create" ->
+  | "masc_board_sub_board_create" ->
       `Assoc
         [
           ("slug", `String (sub_board_slug fixture));
@@ -377,16 +377,16 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("description", `String "Sub-board fixture for keeper matrix");
           ("access", `String "open");
         ]
-  | "keeper_board_sub_board_list" -> `Assoc []
-  | "keeper_board_sub_board_get" ->
+  | "masc_board_sub_board_list" -> `Assoc []
+  | "masc_board_sub_board_get" ->
       `Assoc [ ("sub_board_id", `String (ensure_sub_board fixture)) ]
-  | "keeper_board_sub_board_update" ->
+  | "masc_board_sub_board_update" ->
       `Assoc
         [
           ("sub_board_id", `String (ensure_sub_board fixture));
           ("name", `String "Tool Matrix SubBoard Updated");
         ]
-  | "keeper_board_sub_board_delete" ->
+  | "masc_board_sub_board_delete" ->
       `Assoc [ ("sub_board_id", `String (ensure_sub_board fixture)) ]
   | "tool_read_file" ->
       `Assoc [ ("file_path", `String (ensure_sample_file fixture)) ]

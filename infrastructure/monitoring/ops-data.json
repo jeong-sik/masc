@@ -130,7 +130,7 @@
         "B": {"issue": "#15527", "name": "keeper_bash Path syntax blocked", "rate": "0.4/min", "status": "decelerating"},
         "D": {"issue": "#15529", "name": "sandbox cwd/config missing", "rate": null, "status": "sangsu re-fired (3 events)."},
         "E": {"issue": "#15530", "name": "decisions.jsonl missing_success_model", "rate": null, "status": "stopped (66min)."},
-        "K": {"issue": "#15542", "name": "Completion contract require_tool_use violated", "error_count": 233, "warn_count": 246, "cumulative": 479, "duration_hours": 13, "rate": null, "status": "recovered. model picks read-only tool (keeper_board_list) in required_tool=true turn → contract violation."}
+        "K": {"issue": "#15542", "name": "Completion contract require_tool_use violated", "error_count": 233, "warn_count": 246, "cumulative": 479, "duration_hours": 13, "rate": null, "status": "recovered. model picks read-only tool (masc_board_list) in required_tool=true turn → contract violation."}
       },
       "recovery_count": 0,
       "success_count": 0,

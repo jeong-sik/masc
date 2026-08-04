@@ -141,7 +141,11 @@ let dispatch
         }
         ~name
         ~args
-    | Mod_misc -> Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args
+    | Mod_misc ->
+      Tool_misc.dispatch_for_keeper
+        { Tool_misc.config; agent_name }
+        ~name
+        ~args
     | Mod_library -> Tool_library.dispatch { Tool_library.agent_name } ~name ~args
     (* ── Tier B: Eio-dependent ─────────────────────────────────── *)
     | Mod_task ->

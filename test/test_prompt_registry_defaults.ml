@@ -33,7 +33,7 @@ let prompt_metadata key =
   | "keeper.deliberation" ->
       ("test prompt for " ^ key,
        [ "keeper_name"; "soul_profile"; "goal"; "triggers"; "world_state" ])
-  | "dashboard.gate_judge" ->
+  | "test.templated" ->
       ("test prompt for " ^ key, [ "facts_json" ])
   | "keeper.board_attention_judgment_batch" ->
       ("test prompt for " ^ key, [ "batch_request_json" ])
@@ -59,16 +59,17 @@ let markdown_fixture key body =
   in
   String.concat "\n" (meta_lines @ [ body ])
 
+(* One fixture file per key: [with_registry] writes [<key>.md], so a repeated
+   key would silently overwrite its own file and make [fixture] disagree with
+   the registry. [test_fixture_keys_are_unique] pins that. *)
 let fixtures =
   [
-    ("keeper.constitution", "Continuity rules from file");
-    ("keeper.world", "MASC world from markdown");
-    ("keeper.capabilities", "Capabilities from markdown");
+    ("keeper.system", "Keeper system contract from file");
+    ("keeper.reply_guidelines", "Reply guidelines from markdown");
     ("test.render", "{{identity_header}}\n{{instructions_block}}{{goal_lines}}");
     ("keeper.deliberation", "Keeper {{keeper_name}} {{soul_profile}} {{goal}} {{triggers}} {{world_state}}");
-    ("deliberation.decision", "structured deliberation prompt");
-    ("analysis.dry_run", "DRY RUN analysis prompt");
-    ("dashboard.gate_judge", "Gate facts {{facts_json}}");
+    ("test.plain", "plain body, no template variables");
+    ("test.templated", "templated body {{facts_json}}");
     ( "keeper.board_attention_judgment_batch"
     , "Board attention {{batch_request_json}}" );
     ("test.unlisted.vars", "template body still has {{missing_var}}");
@@ -138,6 +139,15 @@ let () =
     [
       ( "registration",
         [
+          (* Guards the count assertion below: a bulk key rename that maps two
+             fixtures onto one key writes one file, and "registered prompt
+             count" would then fail with an unrelated-looking off-by-one while
+             [fixture key] silently returned the shadowed body. *)
+          test_case "fixture keys are unique" `Quick (fun () ->
+              let keys = List.map fst fixtures in
+              check int "one fixture per key"
+                (List.length keys)
+                (List.length (List.sort_uniq String.compare keys)));
           test_case "all markdown-backed prompts are registered" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               let prompts = Prompt_registry.list_prompts () in
@@ -147,23 +157,23 @@ let () =
                 (List.length prompts));
           test_case "get_prompt resolves markdown content" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
-              check string "keeper.constitution"
-                (fixture "keeper.constitution")
-                (Prompt_registry.get_prompt "keeper.constitution");
-              check string "analysis.dry_run"
-                (fixture "analysis.dry_run")
-                (Prompt_registry.get_prompt "analysis.dry_run"));
+              check string "keeper.system"
+                (fixture "keeper.system")
+                (Prompt_registry.get_prompt "keeper.system");
+              check string "test.plain"
+                (fixture "test.plain")
+                (Prompt_registry.get_prompt "test.plain"));
           test_case "prompt_source reports file" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               check string "file source" "file"
-                (Prompt_registry.prompt_source "keeper.world"));
+                (Prompt_registry.prompt_source "keeper.reply_guidelines"));
           test_case "validate_required_prompt_files detects missing file" `Quick
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir ->
-              Sys.remove (Filename.concat prompts_dir "dashboard.gate_judge.md");
+              Sys.remove (Filename.concat prompts_dir "test.templated.md");
               let missing = Prompt_registry.validate_required_prompt_files () in
               check bool "missing file found" true
-                (List.mem_assoc "dashboard.gate_judge" missing));
+                (List.mem_assoc "test.templated" missing));
         ] );
       ( "rendering",
         [
@@ -188,7 +198,7 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               match
-                Prompt_registry.render_prompt_template "dashboard.gate_judge"
+                Prompt_registry.render_prompt_template "test.templated"
                   [ ("facts_json", {|{"template":"{{ .Release.Name }}"}|}) ]
               with
               | Ok rendered ->
@@ -234,11 +244,11 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir ->
               write_file
-                (Filename.concat prompts_dir "dashboard.gate_judge.md")
-                (markdown_fixture "dashboard.gate_judge"
+                (Filename.concat prompts_dir "test.templated.md")
+                (markdown_fixture "test.templated"
                    "Gate facts {{runtime_only}}");
               match
-                Prompt_registry.render_prompt_template "dashboard.gate_judge"
+                Prompt_registry.render_prompt_template "test.templated"
                   [ ("facts_json", "{}") ]
               with
               | Error msg ->
@@ -257,30 +267,30 @@ let () =
         [
           test_case "set_override replaces file content" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
-              let override_text = "override constitution" in
+              let override_text = "override the shared system contract" in
               (match
-                 Prompt_registry.set_override "keeper.constitution"
+                 Prompt_registry.set_override "keeper.system"
                    override_text
                with
               | Ok () -> ()
               | Error msg -> fail msg);
               check string "override value" override_text
-                (Prompt_registry.get_prompt "keeper.constitution");
+                (Prompt_registry.get_prompt "keeper.system");
               check string "override source" "override"
-                (Prompt_registry.prompt_source "keeper.constitution"));
+                (Prompt_registry.prompt_source "keeper.system"));
           test_case "clear_override reverts to file" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               (match
-                 Prompt_registry.set_override "keeper.world"
+                 Prompt_registry.set_override "keeper.reply_guidelines"
                    "temporary override"
                with
               | Ok () -> ()
               | Error msg -> fail msg);
-              Prompt_registry.clear_prompt_override "keeper.world";
-              check string "back to file baseline" (fixture "keeper.world")
-                (Prompt_registry.get_prompt "keeper.world");
+              Prompt_registry.clear_prompt_override "keeper.reply_guidelines";
+              check string "back to file baseline" (fixture "keeper.reply_guidelines")
+                (Prompt_registry.get_prompt "keeper.reply_guidelines");
               check string "source is file" "file"
-                (Prompt_registry.prompt_source "keeper.world"));
+                (Prompt_registry.prompt_source "keeper.reply_guidelines"));
           test_case "set_override rejects unknown key" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               match Prompt_registry.set_override "unknown.prompt" "x" with
@@ -309,7 +319,7 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir:_ ->
               (match
-                 Prompt_registry.set_override "keeper.constitution"
+                 Prompt_registry.set_override "keeper.system"
                    "pre-existing live override"
                with
               | Ok () -> ()
@@ -319,20 +329,20 @@ let () =
               Unix.mkdir masc_dir 0o755;
               write_file
                 (prompt_overrides_path dir)
-                {|{"keeper.constitution":"[STATE] NEXT Constraints BDI"}|};
+                {|{"keeper.system":"[STATE] NEXT Constraints BDI"}|};
               Prompt_registry.restore_overrides dir;
               check (float 0.0001) "restore rejection counted"
                 (before +. 1.0)
                 (override_restore_failure_count ());
               check string "legacy override not applied"
-                (fixture "keeper.constitution")
-                (Prompt_registry.get_prompt "keeper.constitution"));
+                (fixture "keeper.system")
+                (Prompt_registry.get_prompt "keeper.system"));
           test_case "matching contract revision round-trips and applies" `Quick
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir ->
-              let override_text = "persisted constitution override" in
+              let override_text = "persisted system contract override" in
               (match
-                 Prompt_registry.set_override "keeper.constitution"
+                 Prompt_registry.set_override "keeper.system"
                    override_text
                with
               | Ok () -> ()
@@ -341,9 +351,9 @@ let () =
               reload_registry prompts_dir;
               Prompt_registry.restore_overrides dir;
               check string "matching override restored" override_text
-                (Prompt_registry.get_prompt "keeper.constitution");
+                (Prompt_registry.get_prompt "keeper.system");
               check string "matching override source" "override"
-                (Prompt_registry.prompt_source "keeper.constitution"));
+                (Prompt_registry.prompt_source "keeper.system"));
           test_case "contract revision canonicalizes variable ordering" `Quick
             (fun () ->
               let left =
@@ -359,17 +369,17 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir ->
               (match
-                 Prompt_registry.set_override "keeper.world"
-                   "persisted world override"
+                 Prompt_registry.set_override "keeper.reply_guidelines"
+                   "persisted reply-guidelines override"
                with
               | Ok () -> ()
               | Error message -> fail message);
               persist_overrides_or_fail dir;
               reload_registry prompts_dir;
-              let changed_body = "MASC world contract changed" in
+              let changed_body = "Reply guidelines contract changed" in
               write_file
-                (Filename.concat prompts_dir "keeper.world.md")
-                (markdown_fixture "keeper.world" changed_body);
+                (Filename.concat prompts_dir "keeper.reply_guidelines.md")
+                (markdown_fixture "keeper.reply_guidelines" changed_body);
               reload_registry prompts_dir;
               let before = override_restore_failure_count () in
               Prompt_registry.restore_overrides dir;
@@ -377,23 +387,23 @@ let () =
                 (before +. 1.0)
                 (override_restore_failure_count ());
               check string "body drift falls back to changed file" changed_body
-                (Prompt_registry.get_prompt "keeper.world");
+                (Prompt_registry.get_prompt "keeper.reply_guidelines");
               check string "body drift source" "file"
-                (Prompt_registry.prompt_source "keeper.world"));
+                (Prompt_registry.prompt_source "keeper.reply_guidelines"));
           test_case
             "template-variable drift invalidates persisted override"
             `Quick (fun () ->
               with_registry @@ fun ~dir ~prompts_dir ->
               (match
-                 Prompt_registry.set_override "dashboard.gate_judge"
+                 Prompt_registry.set_override "test.templated"
                    "persisted facts {{facts_json}}"
                with
               | Ok () -> ()
               | Error message -> fail message);
               persist_overrides_or_fail dir;
-              let body = fixture "dashboard.gate_judge" in
+              let body = fixture "test.templated" in
               write_file
-                (Filename.concat prompts_dir "dashboard.gate_judge.md")
+                (Filename.concat prompts_dir "test.templated.md")
                 (String.concat "\n"
                    [
                      "---";
@@ -410,9 +420,9 @@ let () =
                 (before +. 1.0)
                 (override_restore_failure_count ());
               check string "variable drift falls back to file" body
-                (Prompt_registry.get_prompt "dashboard.gate_judge");
+                (Prompt_registry.get_prompt "test.templated");
               check string "variable drift source" "file"
-                (Prompt_registry.prompt_source "dashboard.gate_judge"));
+                (Prompt_registry.prompt_source "test.templated"));
           test_case "malformed versioned envelopes fail closed observably" `Quick
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir:_ ->
@@ -423,13 +433,13 @@ let () =
                   ("wrong schema", {|{"schema_version":2,"overrides":[]}|});
                   ("top-level array", {|[]|});
                   ( "non-string value",
-                    {|{"schema_version":1,"overrides":[{"key":"keeper.world","value":42,"contract_revision":"r"}]}|}
+                    {|{"schema_version":1,"overrides":[{"key":"keeper.reply_guidelines","value":42,"contract_revision":"r"}]}|}
                   );
                   ( "duplicate entry field",
-                    {|{"schema_version":1,"overrides":[{"key":"keeper.world","key":"keeper.constitution","value":"x","contract_revision":"r"}]}|}
+                    {|{"schema_version":1,"overrides":[{"key":"keeper.reply_guidelines","key":"keeper.system","value":"x","contract_revision":"r"}]}|}
                   );
                   ( "duplicate override key",
-                    {|{"schema_version":1,"overrides":[{"key":"keeper.world","value":"x","contract_revision":"r"},{"key":"keeper.world","value":"y","contract_revision":"r"}]}|}
+                    {|{"schema_version":1,"overrides":[{"key":"keeper.reply_guidelines","value":"x","contract_revision":"r"},{"key":"keeper.reply_guidelines","value":"y","contract_revision":"r"}]}|}
                   );
                   ("invalid JSON", {|{"schema_version":1|});
                 ]
@@ -442,8 +452,8 @@ let () =
                   check (float 0.0001) (name ^ " rejection counted")
                     (before +. 1.0)
                     (override_restore_failure_count ());
-                  check string (name ^ " fallback") (fixture "keeper.world")
-                    (Prompt_registry.get_prompt "keeper.world"))
+                  check string (name ^ " fallback") (fixture "keeper.reply_guidelines")
+                    (Prompt_registry.get_prompt "keeper.reply_guidelines"))
                 malformed);
           test_case
             "persisted set and clear leave live state unchanged on write failure"
@@ -451,42 +461,43 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir:_ ->
               let old_value = "pre-existing override" in
-              (match Prompt_registry.set_override "keeper.world" old_value with
+              (match Prompt_registry.set_override "keeper.reply_guidelines" old_value with
                | Ok () -> ()
                | Error message -> fail message);
               write_file (Filename.concat dir ".masc") "not a directory";
               (match
                  Prompt_registry.set_override_persisted ~base_path:dir
-                   "keeper.world" "new override"
+                   "keeper.reply_guidelines" "new override"
                with
               | Error (Prompt_registry.Persistence_error _) -> ()
               | Error (Prompt_registry.Validation_error message) ->
                   fail ("unexpected validation failure: " ^ message)
               | Ok () -> fail "failed persisted set must not report success");
               check string "failed set preserves live value" old_value
-                (Prompt_registry.get_prompt "keeper.world");
+                (Prompt_registry.get_prompt "keeper.reply_guidelines");
               (match
                  Prompt_registry.clear_prompt_override_persisted ~base_path:dir
-                   "keeper.world"
+                   "keeper.reply_guidelines"
                with
               | Error _ -> ()
               | Ok () -> fail "failed persisted clear must not report success");
               check string "failed clear preserves live value" old_value
-                (Prompt_registry.get_prompt "keeper.world"));
+                (Prompt_registry.get_prompt "keeper.reply_guidelines"));
           test_case
             "set_override rejects placeholder syntax on a prompt with no \
              declared template_variables"
             `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
-              (* keeper.constitution has no template_variables, matching
-                 config/prompts/keeper.constitution.md after masc#23929
-                 dropped [template_variables: [state_block_instruction]]
-                 along with the retired STATE-block protocol. A restored
-                 legacy override still carrying that placeholder syntax
-                 must not be treated as "no variables declared, anything
-                 goes". *)
+              (* keeper.system declares [template_variables: []], matching
+                 config/prompts/keeper.system.md. Its predecessor
+                 keeper.constitution dropped
+                 [template_variables: [state_block_instruction]] in
+                 masc#23929 along with the retired STATE-block protocol, so
+                 a persisted operator override can still carry that
+                 placeholder syntax. It must not be treated as "no
+                 variables declared, anything goes". *)
               match
-                Prompt_registry.set_override "keeper.constitution"
+                Prompt_registry.set_override "keeper.system"
                   "Legacy rules {{state_block_instruction}} more text"
               with
               | Error msg ->
@@ -504,17 +515,17 @@ let () =
                      template_variables are declared");
           test_case
             "set_override rejects placeholder syntax on any zero-variable \
-             prompt, not just keeper.constitution"
+             prompt, not just keeper.system"
             `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               match
-                Prompt_registry.set_override "keeper.world"
-                  "{{unexpected}} world override"
+                Prompt_registry.set_override "keeper.reply_guidelines"
+                  "{{unexpected}} reply-guidelines override"
               with
               | Error _ -> ()
               | Ok () ->
                   fail
-                    "should reject {{placeholder}} syntax for keeper.world \
+                    "should reject {{placeholder}} syntax for keeper.reply_guidelines \
                      too");
           test_case
             "restore_overrides rejects a persisted placeholder override and \
@@ -526,27 +537,27 @@ let () =
               Unix.mkdir masc_dir 0o755;
               write_file
                 (prompt_overrides_path dir)
-                {|{"keeper.constitution":"Legacy STATE rules {{state_block_instruction}}"}|};
+                {|{"keeper.system":"Legacy STATE rules {{state_block_instruction}}"}|};
               Prompt_registry.restore_overrides dir;
               check (float 0.0001) "restore rejection counted"
                 (before +. 1.0)
                 (override_restore_failure_count ());
               check string "stale placeholder override not applied"
-                (fixture "keeper.constitution")
-                (Prompt_registry.get_prompt "keeper.constitution");
+                (fixture "keeper.system")
+                (Prompt_registry.get_prompt "keeper.system");
               check string "source falls back to file" "file"
-                (Prompt_registry.prompt_source "keeper.constitution"));
+                (Prompt_registry.prompt_source "keeper.system"));
         ] );
       ( "integration",
         [
-          test_case "keeper_constitution reads markdown-backed registry" `Quick
+          test_case "system_prompt_body reads markdown-backed registry" `Quick
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
-              check string "keeper constitution function"
-                (fixture "keeper.constitution")
-                (Lib.Keeper_prompt.keeper_constitution ()));
+              check string "keeper system function"
+                (fixture "keeper.system")
+                (Lib.Keeper_prompt.system_prompt_body ()));
           test_case
-            "keeper_constitution falls back to file when a persisted \
+            "system_prompt_body falls back to file when a persisted \
              override still carries the retired {{state_block_instruction}} \
              placeholder"
             `Quick (fun () ->
@@ -555,11 +566,11 @@ let () =
               Unix.mkdir masc_dir 0o755;
               write_file
                 (prompt_overrides_path dir)
-                {|{"keeper.constitution":"Legacy STATE rules {{state_block_instruction}}"}|};
+                {|{"keeper.system":"Legacy STATE rules {{state_block_instruction}}"}|};
               Prompt_registry.restore_overrides dir;
-              check string "keeper_constitution ignores the rejected override"
-                (fixture "keeper.constitution")
-                (Lib.Keeper_prompt.keeper_constitution ()));
+              check string "system_prompt_body ignores the rejected override"
+                (fixture "keeper.system")
+                (Lib.Keeper_prompt.system_prompt_body ()));
         ] );
       ( "prompts_json",
         [
@@ -567,7 +578,7 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               (match
-                 Prompt_registry.set_override "keeper.capabilities"
+                 Prompt_registry.set_override "keeper.system"
                    "runtime override"
                with
               | Ok () -> ()
@@ -575,27 +586,27 @@ let () =
               let json = Prompt_registry.prompts_json () in
               let open Yojson.Safe.Util in
               let prompts = json |> member "prompts" |> to_list in
-              let keeper_capabilities =
+              let keeper_system =
                 prompts
                 |> List.find (fun item ->
-                       get_string_field "key" item = Some "keeper.capabilities")
+                       get_string_field "key" item = Some "keeper.system")
               in
               check (option string) "effective value"
                 (Some "runtime override")
-                (get_string_field "effective" keeper_capabilities);
+                (get_string_field "effective" keeper_system);
               check (option string) "file value"
-                (Some (fixture "keeper.capabilities"))
-                (get_string_field "file_value" keeper_capabilities);
+                (Some (fixture "keeper.system"))
+                (get_string_field "file_value" keeper_system);
               check (option string) "override value"
                 (Some "runtime override")
-                (get_string_field "override_value" keeper_capabilities);
+                (get_string_field "override_value" keeper_system);
               check (option string) "source"
                 (Some "override")
-                (get_string_field "source" keeper_capabilities);
+                (get_string_field "source" keeper_system);
               check (option bool) "required_file"
                 (Some true)
-                (get_bool_field "required_file" keeper_capabilities);
-              match keeper_capabilities with
+                (get_bool_field "required_file" keeper_system);
+              match keeper_system with
               | `Assoc fields ->
                   check int "template_variables field exists" 0
                     (match List.assoc_opt "template_variables" fields with

@@ -196,7 +196,7 @@ let make_config_root root =
     repo_model_catalog_overlay_toml;
   write_file (Filename.concat root "oas-models.toml") "legacy full catalog must be ignored";
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
-  write_file (Filename.concat config "prompts/keeper.world.md") "prompt";
+  write_file (Filename.concat config "prompts/keeper.system.md") "prompt";
   write_file
     (Filename.concat config "keepers/example.toml")
     "[keeper]\nautoboot_enabled = true\n";
@@ -856,7 +856,7 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
         (Sys.file_exists (Filename.concat config_root "oas-models.toml"));
       Alcotest.(check bool) "prompt copied" true
         (Sys.file_exists
-           (Filename.concat config_root "prompts/keeper.world.md"));
+           (Filename.concat config_root "prompts/keeper.system.md"));
       Alcotest.(check bool) "keepers dir created" true
         (Sys.file_exists (Filename.concat config_root "keepers"));
       Alcotest.(check bool) "repo keeper TOML not copied" false
@@ -885,9 +885,9 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay (
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml"));
       Alcotest.(check bool) "versioned prompt backfilled" true
         (Sys.file_exists
-           (Filename.concat config_root "prompts/keeper.world.md"));
+           (Filename.concat config_root "prompts/keeper.system.md"));
       Alcotest.(check string) "backfilled prompt content" "prompt"
-        (read_file (Filename.concat config_root "prompts/keeper.world.md"));
+        (read_file (Filename.concat config_root "prompts/keeper.system.md"));
       Alcotest.(check string)
         "model catalog overlay backfilled"
         repo_model_catalog_overlay_toml

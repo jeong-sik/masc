@@ -346,7 +346,7 @@ let resolved_of_snapshot (s : prompt_snapshot) =
 
 (* [expected = []] means the prompt is never rendered through
    {!render}/{!render_prompt_template} — it is spliced raw via
-   [get_prompt] (e.g. [keeper_constitution]) or otherwise has no
+   [get_prompt] (e.g. [Keeper_prompt.system_prompt_body]) or otherwise has no
    substitution points.  [List.mem variable []] is always [false], so
    omitting an [expected = []] special case already treats every
    [{{ident}}] found in [template] as unexpected for those prompts,

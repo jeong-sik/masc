@@ -304,7 +304,6 @@
   test_keeper_typed_labels
   test_exec_shell_command_gate
   test_keeper_classifier_helper
-  test_keeper_unified_persona_block
   test_persona_crud_profile_shape
   test_turn_id_propagation
   test_auth_strict_mode
@@ -608,7 +607,6 @@
   test_keeper_typed_labels
   test_exec_shell_command_gate
   test_keeper_classifier_helper
-  test_keeper_unified_persona_block
   test_persona_crud_profile_shape
   test_turn_id_propagation
   test_auth_strict_mode

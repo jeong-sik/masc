@@ -49,7 +49,6 @@ val exact_direct_mention_present : targets:string list -> string -> bool
 (** Build system prompt for keeper agent. *)
 val build_keeper_system_prompt :
   instructions:string ->
-  ?persona_extended:string ->
   ?keeper_name:string ->
   ?workspace_root:string ->
   ?active_goals:(string * string) list ->

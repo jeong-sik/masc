@@ -20,12 +20,11 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
 
-let keeper_constitution () =
-  Prompt_registry.get_prompt Keeper_prompt_names.constitution
-
-let critical_prompt_anchors =
-  [ ("continuity", "<continuity>");
-    ("world", "<world>") ]
+(* One anchor, because there is now one shared block. The former
+   [<continuity>] / [<world>] pair anchored two of the four shared prompts,
+   so a partial load that dropped [capabilities] or [core_behavior] passed
+   the check. [<system>] covers the whole merged block. *)
+let critical_prompt_anchors = [ ("system", "<system>") ]
 
 let missing_critical_prompt_anchors prompt =
   List.filter_map
@@ -35,14 +34,11 @@ let missing_critical_prompt_anchors prompt =
 
 let critical_prompt_recovery_block_fallback =
   String.concat "\n"
-    [ "<continuity>";
+    [ "<system>";
       "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
       "Continuity is runtime-owned: use the checkpoint, typed task/goal state, events, and tool results. Never infer a runtime transition from prose.";
-      "</continuity>";
-      "";
-      "<world>";
-      "Recovery guard: act from the configured base path and active runtime tool schema; do not invent paths, repos, PRs, tasks, or tools.";
-      "</world>" ]
+      "Act from the configured base path and active runtime tool schema; do not invent paths, repos, PRs, tasks, or tools.";
+      "</system>" ]
 
 (* Recovery fallback content normally lives at
    config/prompts/keeper.recovery_block.md so operators can edit it with the
@@ -50,7 +46,7 @@ let critical_prompt_recovery_block_fallback =
    when prompt file loading is exactly what degraded.
 
    The registry version is trusted only when it carries all required anchors:
-   an operator who accidentally edits out [<continuity>]
+   an operator who accidentally edits out [<system>]
    would otherwise produce a non-empty block that [ensure_critical_prompt_anchors]
    appends without restoring the missing safeguard — a silent regression vs the
    previous hardcoded path. Drift triggers the existing prompt failure counter
@@ -88,54 +84,15 @@ let ensure_critical_prompt_anchors prompt =
         (String.concat "," missing);
       prompt ^ "\n\n" ^ critical_prompt_recovery_block ()
 
-(** Resolve the <world> prompt. Falls back to the raw template text if
-    rendering fails so prompt wiring bugs do not brick keepers. *)
-let render_world_prompt () : string =
-  match
-    Prompt_registry.render_prompt_template Keeper_prompt_names.world []
-  with
-  | Ok rendered -> rendered
-  | Error msg ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string PromptFailures)
-        ~labels:[("prompt", Keeper_prompt_names.world)]
-        ();
-      Log.Keeper.warn
-        "render_world_prompt: template render failed, falling back to raw \
-         template (keepers may see unrendered placeholders): %s"
-        msg;
-      Prompt_registry.get_prompt Keeper_prompt_names.world
-
-let behavior_prompt_block name =
-  match Keeper_prompt_external.get name with
-  | Some content -> String.trim content
-  | None ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string PromptFailures)
-        ~labels:[("prompt", "behavior/" ^ name)]
-        ();
-      Log.Keeper.warn
-        "build_keeper_system_prompt: behavior prompt %s missing; \
-         rendering config-drift marker instead of generic in-source behavior"
-        name;
-      Printf.sprintf
-        "Behavior prompt config drift: missing config/prompts/behavior/%s.md. \
-         Preserve the keeper's persona and runtime policy; \
-         ask the operator to restore the missing behavior prompt file."
-        name
-
+(* [keeper.system] declares no template variables, so it is read directly.
+   The former [render_world_prompt] carried a render-failure fallback for a
+   template that never had a variable to render. *)
+let system_prompt_body () : string =
+  Prompt_registry.get_prompt Keeper_prompt_names.system
 
 let build_keeper_system_prompt
-    ~instructions ?(persona_extended = "") ?(keeper_name = "")
+    ~instructions ?(keeper_name = "")
     ?(workspace_root = "") ?(active_goals = []) () =
-  (* Behavior prompt blocks live under
-     [<prompts_dir>/behavior/<name>.md] and are read once per process via
-     [Keeper_prompt_external.get]. Missing/unreadable files no longer inject
-     generic in-source behavior text: they produce an operator-visible drift
-     marker so the prompt tells the keeper that config is incomplete instead
-     of silently changing persona policy. *)
-  let profile_policy = behavior_prompt_block "profile_policy" in
-  let continuity_contract = behavior_prompt_block "continuity_contract" in
   let custom =
     let s = String.trim instructions in
     if s = "" then ""
@@ -147,14 +104,6 @@ let build_keeper_system_prompt
       s
       |> Re.replace_string re_keeper_name_curly ~by:keeper_name
       |> Re.replace_string re_keeper_name_upper ~by:keeper_name
-  in
-  let persona_block =
-    (* Inner bytes are the shared SSOT ([Keeper_persona_block.render]); the
-       trailing blank line is chat-lane layout, frozen to keep historical
-       prompt bytes stable. *)
-    match Keeper_persona_block.render ~persona_extended with
-    | None -> ""
-    | Some block -> block ^ "\n\n"
   in
   let active_goals_block =
     match active_goals with
@@ -188,20 +137,9 @@ let build_keeper_system_prompt
          </workspace>\n"
         (String_util.escape_xml workspace_root)
   in
-  let repositories_block =
-    "\n\
-     <repository_checkouts>\n\
-     Before repository work, inspect the typed repository_checkouts context. \
-     The catalog owns repository identity, a checkout entry proves execution \
-     availability, and freshness is measured against its stated local tracking \
-     ref. Treat unregistered, ambiguous, behind, diverged, dirty, or unavailable \
-     evidence explicitly.\n\
-     </repository_checkouts>\n"
-  in
-  (* Prefix ordering: common blocks first for LLM KV cache sharing.
-     All keepers share the same autonomous-behavior, policy, continuity,
-     and most of <world>/<capabilities> text.  Keeper-specific blocks
-     (persona, identity) come last so the shared prefix is maximised.
+  (* Prefix ordering: the shared block comes first for LLM KV cache sharing.
+     All keepers share the same <system> text.  Keeper-specific blocks
+     (workspace, identity) come last so the shared prefix is maximised.
 
      Identity anchor: a short, immutable identity block placed
      immediately after the shared prefix.  This survives compaction
@@ -225,31 +163,13 @@ let build_keeper_system_prompt
   String.concat ""
     [
       (* ── Shared prefix (identical across all keepers) ────────── *)
-      Prompt_registry.get_prompt Keeper_prompt_names.core_behavior;
-      "\n\n";
-      profile_policy;
-      "\n\
-       \n\
-       <continuity>\n";
-      continuity_contract;
-      "\n";
-      keeper_constitution ();
-      "\n\
-       </continuity>\n\
-       \n\
-       <world>\n";
-      substitute_keeper_name (render_world_prompt ());
-      "\n</world>\n\
-       \n\
-       <capabilities>\n";
-      substitute_keeper_name (Prompt_registry.get_prompt Keeper_prompt_names.capabilities);
-      "\n</capabilities>\n\n";
+      "<system>\n";
+      substitute_keeper_name (system_prompt_body ());
+      "\n</system>\n\n";
       (* ── Identity anchor (compaction-safe, ~50 tokens) ──────── *)
       identity_anchor;
       workspace_block;
-      repositories_block;
       (* ── Keeper-specific blocks ─────────────────────────────── *)
-      persona_block;
       "<identity>";
       custom;
       active_goals_block;

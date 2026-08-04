@@ -1160,6 +1160,17 @@ function KeeperQueueControlPanel({
                     >${item.rejectionTaskId ? `${item.rejectionTaskId}: ` : ''}${item.rejectionReason}</div>
                   `
                 : null}
+              <!-- A cancellation row names the task and the canceller even when
+                   no reason was given: "task_cancelled" alone tells an operator
+                   nothing they can triage. -->
+              ${item.cancelledTaskId
+                ? html`
+                    <div
+                      class="whitespace-pre-wrap text-2xs text-[var(--color-fg-secondary)]"
+                      data-operator-event-cancellation
+                    >${item.cancelledTaskId} 취소${item.cancelledBy ? ` · ${item.cancelledBy}` : ''}${item.cancelledReason ? ` · ${item.cancelledReason}` : ''}</div>
+                  `
+                : null}
               <div class="break-all font-mono text-3xs text-[var(--color-fg-muted)]">
                 source ref ${item.sourceRef}
               </div>

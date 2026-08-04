@@ -745,6 +745,12 @@ export interface KeeperEventQueuePendingItem {
       other kinds. */
   rejectionReason?: string
   rejectionTaskId?: string
+  /** Cancellation of a Task this Keeper authored. `cancelledReason` is absent
+      when the canceller gave none, which is a different fact from an empty
+      one. Absent on a backend that predates the fields. */
+  cancelledTaskId?: string
+  cancelledBy?: string
+  cancelledReason?: string
 }
 
 export interface KeeperEventQueuePendingSnapshot {
@@ -1170,6 +1176,15 @@ export function parseKeeperEventQueuePendingSnapshot(
         : {}),
       ...(typeof raw.rejection_task_id === 'string' && raw.rejection_task_id.trim()
         ? { rejectionTaskId: raw.rejection_task_id.trim() }
+        : {}),
+      ...(typeof raw.cancelled_task_id === 'string' && raw.cancelled_task_id.trim()
+        ? { cancelledTaskId: raw.cancelled_task_id.trim() }
+        : {}),
+      ...(typeof raw.cancelled_by === 'string' && raw.cancelled_by.trim()
+        ? { cancelledBy: raw.cancelled_by.trim() }
+        : {}),
+      ...(typeof raw.cancelled_reason === 'string' && raw.cancelled_reason.trim()
+        ? { cancelledReason: raw.cancelled_reason.trim() }
         : {}),
     }
   })

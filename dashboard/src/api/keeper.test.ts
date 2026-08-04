@@ -23,6 +23,7 @@ import {
   deleteKeeperHistorySnapshots,
   editKeeperChatPendingReceipt,
   fetchKeeperEventQueuePending,
+  parseKeeperEventQueuePendingSnapshot,
   fetchKeeperChatHistory,
   fetchKeeperChatPending,
   fetchKeeperChatReceipt,
@@ -1971,5 +1972,51 @@ describe('keeper lifecycle', () => {
 
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Keeper not found')
+  })
+})
+
+describe('parseKeeperEventQueuePendingSnapshot cancellation fields', () => {
+  const snapshot = (extra: Record<string, unknown>) => ({
+    schema: 'keeper_event_queue.pending.v2',
+    ok: true,
+    keeper_name: 'sangsu',
+    revision: '7',
+    total_pending: 1,
+    next_after: null,
+    pending: [{
+      queue_index: 0,
+      post_id: 'task-cancelled:task-161',
+      source_ref: 'a'.repeat(64),
+      source_incarnation: '7',
+      urgency: 'normal',
+      arrived_at_unix: 1785863467,
+      payload_kind: 'task_cancelled',
+      ...extra,
+    }],
+  })
+
+  // The operator row rendered only "wake reason task_cancelled". The backend
+  // sends the task, the canceller and the reason; the parser dropped all three.
+  it('carries task id, canceller and reason through', () => {
+    const parsed = parseKeeperEventQueuePendingSnapshot(snapshot({
+      cancelled_task_id: 'task-161',
+      cancelled_by: 'keeper-rondo-agent',
+      cancelled_reason: 'BLOCKED: service absent from sandbox',
+    }))
+    expect(parsed.pending[0].cancelledTaskId).toBe('task-161')
+    expect(parsed.pending[0].cancelledBy).toBe('keeper-rondo-agent')
+    expect(parsed.pending[0].cancelledReason).toBe('BLOCKED: service absent from sandbox')
+  })
+
+  // An unexplained cancellation still has to be triageable, and an absent
+  // reason must stay absent rather than becoming an empty string.
+  it('keeps the row identifiable when no reason was given', () => {
+    const parsed = parseKeeperEventQueuePendingSnapshot(snapshot({
+      cancelled_task_id: 'task-162',
+      cancelled_by: 'keeper-rondo-agent',
+    }))
+    expect(parsed.pending[0].cancelledTaskId).toBe('task-162')
+    expect(parsed.pending[0].cancelledBy).toBe('keeper-rondo-agent')
+    expect(parsed.pending[0].cancelledReason).toBeUndefined()
   })
 })

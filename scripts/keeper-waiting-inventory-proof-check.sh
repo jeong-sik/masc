@@ -152,7 +152,7 @@ report="$(
       def inventory_projection_errors($projection; $label):
         emit(object_value($projection); ($label + " must be an object"))
         + if object_value($projection) then
-            emit(($projection.schema == "masc.dashboard.keeper_waiting_inventory.v1");
+            emit(($projection.schema == "masc.dashboard.keeper_waiting_inventory.v3");
                  ($label + " schema mismatch"))
             + emit(($projection.source == "server_keeper_waiting_inventory");
                    ($label + " source mismatch"))
@@ -307,7 +307,7 @@ report="$(
                  "tool implementationStatus must be real")
           + emit((.waiting_projection.present == true);
                  "waiting_projection.present must be true")
-          + emit((.waiting_projection.schema == "masc.dashboard.keeper_waiting_inventory.v1");
+          + emit((.waiting_projection.schema == "masc.dashboard.keeper_waiting_inventory.v3");
                  "waiting_projection schema mismatch")
           + emit((.waiting_projection.source == "server_keeper_waiting_inventory");
                  "waiting_projection source mismatch")

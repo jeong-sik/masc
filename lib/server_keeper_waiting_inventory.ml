@@ -7,7 +7,6 @@ type waiting_source =
   | Hitl_pending
   | External_attention
   | Fusion_running
-  | Background_task
   | Schedule_waiting
   | Turn_admission_waiting
   | Turn_admission_shutdown
@@ -26,7 +25,6 @@ type wake_producer =
   | Keeper_chat_queue_store
   | Keeper_supervisor
   | Fusion_sink
-  | Bg_task_completion
   | Connector_attention_hook
   | Hitl_resolution_hook
   | External_attention_store
@@ -62,7 +60,6 @@ let source_to_string = function
   | Hitl_pending -> "hitl_pending"
   | External_attention -> "external_attention"
   | Fusion_running -> "fusion_running"
-  | Background_task -> "background_task"
   | Schedule_waiting -> "schedule_waiting"
   | Turn_admission_waiting -> "turn_admission_waiting"
   | Turn_admission_shutdown -> "turn_admission_shutdown"
@@ -79,7 +76,6 @@ let all_waiting_sources =
   ; Hitl_pending
   ; External_attention
   ; Fusion_running
-  ; Background_task
   ; Schedule_waiting
   ; Turn_admission_waiting
   ; Turn_admission_shutdown
@@ -103,7 +99,6 @@ let wake_producer_to_string = function
   | Keeper_chat_queue_store -> "keeper_chat_queue_store"
   | Keeper_supervisor -> "keeper_supervisor"
   | Fusion_sink -> "fusion_sink"
-  | Bg_task_completion -> "bg_task_completion"
   | Connector_attention_hook -> "connector_attention_hook"
   | Hitl_resolution_hook -> "hitl_resolution_hook"
   | External_attention_store -> "external_attention_store"
@@ -124,7 +119,6 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Board_attention _ -> Board_attention_judge
   | Bootstrap -> Keeper_supervisor
   | Fusion_completed _ -> Fusion_sink
-  | Bg_completed _ -> Bg_task_completion
   | Schedule_due _ -> Schedule_runner
   | Connector_attention _ -> Connector_attention_hook
   | Hitl_resolved _ -> Hitl_resolution_hook
@@ -558,20 +552,6 @@ let fusion_rows keeper_name runs =
       | Completed _ -> None)
 ;;
 
-let background_task_rows keeper_name =
-  Bg_task.list_with_started_at ~keeper:keeper_name
-  |> List.map (fun (task_id, started_at) ->
-    let task_id = Bg_task.task_id_to_string task_id in
-    { keeper_name = Some keeper_name
-    ; source = Background_task
-    ; waiting_on = task_id
-    ; wake_producer = Bg_task_completion
-    ; since = Some started_at
-    ; due_at = None
-    ; next_action = "poll_background_task"
-    ; detail = `Assoc [ "task_id", `String task_id ]
-    })
-;;
 
 let pending_confirm_row ?keeper_name
       (entry : Workspace_hooks.operator_pending_confirm_request)
@@ -716,7 +696,6 @@ let row_state rows =
     List.exists
       (fun row ->
          row.source = Fusion_running
-         || row.source = Background_task
          || row.source = Turn_admission_shutdown)
       rows
   then Deferred
@@ -934,7 +913,6 @@ let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms kee
       @ hitl_rows keeper_name pending_approvals
       @ external_attention_rows
       @ fusion_rows keeper_name fusion_runs
-      @ background_task_rows keeper_name
       @ pending_confirm_rows [ keeper_name ] pending_confirms
     in
     keeper_name, rows, external_attention_truncated)

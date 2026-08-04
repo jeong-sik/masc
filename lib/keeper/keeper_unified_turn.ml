@@ -156,7 +156,6 @@ let is_manual_compaction_payload = function
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Fusion_completed _
-  | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _

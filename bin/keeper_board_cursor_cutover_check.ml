@@ -50,7 +50,18 @@ let validate_metadata config keeper_names =
     keeper_names
 ;;
 
+let bind_explicit_base_path base_path =
+  let resolved_base_path =
+    Workspace_utils_backend_setup.resolve_requested_base_path base_path
+  in
+  Unix.putenv Env_config_core.base_path_input_env_key base_path;
+  Unix.putenv Env_config_core.base_path_env_key resolved_base_path;
+  Workspace_utils_backend_setup.cache_resolved_base_path resolved_base_path;
+  resolved_base_path
+;;
+
 let main base_path =
+  let base_path = bind_explicit_base_path base_path in
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

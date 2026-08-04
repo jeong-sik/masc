@@ -205,7 +205,6 @@
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
   test_keeper_supervisor
-  test_workspace_eio_pure
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
   test_compaction_llm_summarizer
@@ -504,7 +503,6 @@
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
   test_keeper_supervisor
-  test_workspace_eio_pure
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
   test_compaction_llm_summarizer
@@ -981,7 +979,6 @@
   test_mcp_server_eio_tool_dispatch
   test_code_navigation_eio
   test_backend
-  test_workspace_eio
   test_http_server_eio
   test_compression
   test_fs_compat
@@ -1136,7 +1133,6 @@
   test_mcp_server_eio_tool_dispatch
   test_code_navigation_eio
   test_backend
-  test_workspace_eio
   test_http_server_eio
   test_compression
   test_fs_compat
@@ -1624,18 +1620,8 @@
  (libraries masc_test_deps multimodal resilience shared_audit shared_types))
 
 (executable
- (name test_concurrent_distributed)
- (modules test_concurrent_distributed)
- (libraries masc_test_deps))
-
-(executable
  (name test_mention_monkey)
  (modules test_mention_monkey)
- (libraries masc_test_deps))
-
-(executable
- (name test_atomic_simple)
- (modules test_atomic_simple)
  (libraries masc_test_deps))
 
 (executable

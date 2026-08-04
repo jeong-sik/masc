@@ -106,7 +106,6 @@ val consume_single_heartbeat_stimulus
 
 type spent_selection_reconciliation =
   | Selection_actionable
-  | Spent_schedule_acknowledged
   | Spent_grant_replay_acknowledged
 
 val reconcile_spent_selection
@@ -114,14 +113,7 @@ val reconcile_spent_selection
   -> keeper_name:string
   -> Keeper_event_queue_state.pending_selection
   -> (spent_selection_reconciliation, string) result
-(** Acknowledges a selection whose work has already settled elsewhere, so no
-    turn is spent re-observing it. Two kinds settle that way.
-
-    An exact schedule stimulus is acknowledged only when its execution is
-    terminal; the schedule ledger stays locked through the queue ACK, so a
-    same-occurrence retry cannot start between the observation and deletion.
-
-    An approved Gate resolution is acknowledged once its one-shot grant is
+(** An approved Gate resolution is acknowledged once its one-shot grant is
     consumed, because the replay then authorizes nothing and a turn spent on it
     can only re-read the same entry. That path takes no lock: consumption is
     monotonic, so a consumed state cannot revert to usable. A read error leaves

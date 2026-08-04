@@ -385,7 +385,6 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
    here, before a turn is spent on them. *)
 type spent_selection_reconciliation =
   | Selection_actionable
-  | Spent_schedule_acknowledged
   | Spent_grant_replay_acknowledged
 
 let reconcile_spent_selection
@@ -394,50 +393,7 @@ let reconcile_spent_selection
       (selection : Keeper_event_queue_state.pending_selection)
   =
   match selection.source.Keeper_event_queue.payload with
-  | Schedule_due wake ->
-    (* The schedule lock covers both the terminal read and queue ACK. A retry
-       must start under the same lock, so either it starts first and this sees
-       its non-terminal execution, or this removes the old wake first and the
-       retry enqueues it again afterwards. *)
-    Workspace_utils.with_file_lock config (Schedule_store.schedules_path config)
-    @@ fun () ->
-    (match Schedule_store.read_state_result config with
-     | Error err ->
-       Error
-         ("schedule terminal reconciliation read failed: "
-          ^ Schedule_store.read_error_to_string err)
-     | Ok state ->
-       (match
-          Schedule_store.execution_for_occurrence
-            state
-            ~schedule_instance_id:wake.schedule_instance_id
-            ~schedule_id:wake.schedule_id
-            ~due_at:wake.due_at
-            ~payload_digest:wake.payload_digest
-        with
-        | Some
-            { Schedule_domain.status =
-                ( Schedule_domain.Execution_succeeded
-                | Schedule_domain.Execution_failed )
-            ; _
-            } ->
-          (match
-             Keeper_registry_event_queue.ack_pending_result
-               ~base_path:config.Workspace_utils.base_path
-               keeper_name
-               ~selection
-           with
-           | Error message ->
-             Error ("schedule terminal reconciliation ack failed: " ^ message)
-           | Ok () -> Ok Spent_schedule_acknowledged)
-        | Some
-            { Schedule_domain.status =
-                ( Schedule_domain.Execution_running
-                | Schedule_domain.Execution_dispatched )
-            ; _
-            }
-        | None ->
-          Ok Selection_actionable))
+  | Schedule_due _ -> Ok Selection_actionable
   | Hitl_resolved
       { approval_id; decision = Keeper_event_queue.Hitl_approved; _ } ->
     (* An approved grant is one-shot, but consumption alone is not terminal:
@@ -554,12 +510,6 @@ let heartbeat_event_intake
        with
        | Error message -> Error message
        | Ok Selection_actionable -> Ok (Some selection)
-       | Ok Spent_schedule_acknowledged ->
-         Log.Keeper.info
-           "turn entry: acknowledged already-terminal scheduled occurrence \
-            without duplicate turn keeper=%s"
-           keeper_name;
-         select_pending_after_spent_reconciliation ()
        | Ok Spent_grant_replay_acknowledged ->
          Log.Keeper.info
            "turn entry: acknowledged spent Gate grant replay without a turn \

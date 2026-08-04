@@ -80,21 +80,19 @@ type schedule_request =
   ; recurrence : recurrence
   }
 
-type execution_status =
-  | Execution_running
-  | Execution_dispatched
-  | Execution_succeeded
-  | Execution_failed
+type wake_status =
+  | Wake_running
+  | Wake_succeeded
+  | Wake_failed
 
-type execution_record =
-  { execution_id : string
-  ; schedule_instance_id : string
+type wake_record =
+  { schedule_instance_id : string
   ; schedule_id : string
   ; started_at : float
   ; finished_at : float option
   ; due_at : float
   ; payload_digest : string
-  ; status : execution_status
+  ; status : wake_status
   ; detail : Yojson.Safe.t option
   ; error : string option
   }
@@ -142,15 +140,15 @@ val recurrence_summary : recurrence -> string
 (** Stable, human-readable recurrence summary for dashboard and keeper tool
     outputs. This is presentation-only; schedule eligibility still uses the
     typed [recurrence] value. *)
-val execution_status_to_string : execution_status -> string
-val execution_status_of_string : string -> (execution_status, string) result
+val wake_status_to_string : wake_status -> string
+val wake_status_of_string : string -> (wake_status, string) result
 
 val actor_to_yojson : actor -> Yojson.Safe.t
 val actor_of_yojson : Yojson.Safe.t -> (actor, string) result
 val recurrence_to_yojson : recurrence -> Yojson.Safe.t
 val recurrence_of_yojson : Yojson.Safe.t -> (recurrence, string) result
-val execution_record_to_yojson : execution_record -> Yojson.Safe.t
-val execution_record_of_yojson :
-  Yojson.Safe.t -> (execution_record, string) result
+val wake_record_to_yojson : wake_record -> Yojson.Safe.t
+val wake_record_of_yojson :
+  Yojson.Safe.t -> (wake_record, string) result
 val schedule_request_to_yojson : schedule_request -> Yojson.Safe.t
 val schedule_request_of_yojson : Yojson.Safe.t -> (schedule_request, string) result

@@ -75,7 +75,7 @@ let update config ~schedule_id ~due_at ~expires_at ~payload =
 let due_candidates config ~now =
   match Schedule_store.refresh_due config ~now with
   | Error err -> Error (Store_error err)
-  | Ok (state, _) -> Ok (Schedule_store.due_execution_candidates state)
+  | Ok (state, _) -> Ok (Schedule_store.due_wake_candidates state)
 ;;
 
 let prune config =

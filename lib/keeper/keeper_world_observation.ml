@@ -347,7 +347,7 @@ let read_scheduled_automation_observation
       List.filter (schedule_visible_to_keeper keeper_name) state.schedules
     in
     let due_ready =
-      Schedule_store.due_execution_candidates state
+      Schedule_store.due_wake_candidates state
       |> List.filter (schedule_visible_to_keeper keeper_name)
       |> List.filter (fun request -> not (schedule_effectively_expired ~now request))
     in

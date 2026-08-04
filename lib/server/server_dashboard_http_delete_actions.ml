@@ -472,7 +472,7 @@ let purge_dashboard_keeper_artifacts config operation =
     Error "dashboard Keeper purge artifacts require a dashboard purge operation"
 ;;
 
-let handle_dashboard_keeper_purge_completion ~now config operation =
+let handle_dashboard_keeper_purge_completion config operation =
   match Event_bus_slots.get_masc () with
   | None -> Error "MASC lifecycle event bus is not installed"
   | Some _ ->
@@ -482,14 +482,12 @@ let handle_dashboard_keeper_purge_completion ~now config operation =
          Keeper_shutdown_types.Operation_id.to_string operation.operation_id
        in
        (match
-          Server_schedule_consumers.settle_keeper_purge_occurrences
+          Server_schedule_consumers.cancel_keeper_schedules
             config
             ~keeper_name:operation.keeper_name
-            ~operation_id
-            ~now
         with
         | Error error ->
-          Error (Server_schedule_consumers.keeper_purge_error_to_string error)
+          Error (Schedule_store.store_error_to_string error)
         | Ok () ->
           (match purge_dashboard_keeper_artifacts config operation with
            | Error _ as error -> error
@@ -516,9 +514,9 @@ let handle_dashboard_keeper_purge_completion ~now config operation =
        Error "dashboard purge completion does not belong to a dashboard purge operation")
 ;;
 
-let handle_keeper_lifecycle_completion ~now config operation = function
+let handle_keeper_lifecycle_completion config operation = function
   | Keeper_shutdown_types.Dashboard_keeper_purged ->
-    handle_dashboard_keeper_purge_completion ~now config operation
+    handle_dashboard_keeper_purge_completion config operation
   | Dead_tombstone_reaped as action ->
     Keeper_supervisor_cleanup_tombstone.handle_completion config operation action
 ;;

@@ -4,7 +4,7 @@ type state =
   { version : int
   ; updated_at : float
   ; schedules : Schedule_domain.schedule_request list
-  ; executions : Schedule_domain.execution_record list
+  ; wakes : Schedule_domain.wake_record list
   }
 
 type store_error =
@@ -28,19 +28,6 @@ type store_error =
 type running_recovery_reason =
   | Retryable_dispatch_failure of string
   | Interrupted_by_process_restart
-
-type dispatched_occurrence_outcome =
-  | Dispatched_occurrence_succeeded
-  | Dispatched_occurrence_failed of string
-
-type dispatched_occurrence_settlement =
-  { execution_id : string
-  ; schedule_instance_id : string
-  ; schedule_id : string
-  ; due_at : float
-  ; payload_digest : string
-  ; outcome : dispatched_occurrence_outcome
-  }
 
 type read_error =
   | Corrupt_read_ledger of
@@ -111,7 +98,7 @@ let running_recovery_reason_to_string = function
   | Retryable_dispatch_failure detail ->
     "retryable schedule dispatch failure: " ^ detail
   | Interrupted_by_process_restart ->
-    "schedule execution interrupted by process restart"
+    "schedule wake interrupted by process restart"
 ;;
 
 let read_error_to_string = function
@@ -132,7 +119,7 @@ let recovery_path config = schedules_path config ^ ".last-good"
 let ensure_dirs config = Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
 
 let default_state () =
-  { version = 1; updated_at = now (); schedules = []; executions = [] }
+  { version = 1; updated_at = now (); schedules = []; wakes = [] }
 ;;
 
 let state_to_yojson (state : state) =
@@ -142,9 +129,9 @@ let state_to_yojson (state : state) =
     ; ( "schedules"
       , `List (List.map Schedule_domain.schedule_request_to_yojson state.schedules)
       )
-    ; ( "executions"
+    ; ( "wakes"
       , `List
-          (List.map Schedule_domain.execution_record_to_yojson state.executions) )
+          (List.map Schedule_domain.wake_record_to_yojson state.wakes) )
     ]
 ;;
 
@@ -170,13 +157,6 @@ let list_field name fields =
   | None -> Error ("missing field: " ^ name)
 ;;
 
-let optional_list_field name fields =
-  match List.assoc_opt name fields with
-  | None -> Ok []
-  | Some (`List value) -> Ok value
-  | Some _ -> Error ("expected list field: " ^ name)
-;;
-
 let collect_results parse rows =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
@@ -192,14 +172,14 @@ let state_of_yojson = function
     let* version = int_field "version" fields in
     let* updated_at = float_field "updated_at" fields in
     let* schedules_json = list_field "schedules" fields in
-    let* executions_json = optional_list_field "executions" fields in
+    let* wakes_json = list_field "wakes" fields in
     let* schedules =
       collect_results Schedule_domain.schedule_request_of_yojson schedules_json
     in
-    let* executions =
-      collect_results Schedule_domain.execution_record_of_yojson executions_json
+    let* wakes =
+      collect_results Schedule_domain.wake_record_of_yojson wakes_json
     in
-    Ok { version; updated_at; schedules; executions }
+    Ok { version; updated_at; schedules; wakes }
   | json -> Error ("state_of_yojson: " ^ Yojson.Safe.to_string json)
 ;;
 
@@ -294,8 +274,8 @@ let write_state config state =
   Ok ()
 ;;
 
-let bump_state state ~schedules ~executions =
-  { version = state.version + 1; updated_at = now (); schedules; executions }
+let bump_state state ~schedules ~wakes =
+  { version = state.version + 1; updated_at = now (); schedules; wakes }
 ;;
 
 let find_schedule state schedule_id =
@@ -315,7 +295,7 @@ let replace_schedule schedules (updated : schedule_request) =
     schedules
 ;;
 
-let is_due_execution_candidate (request : schedule_request) =
+let is_due_wake_candidate (request : schedule_request) =
   match request.status with
   | Due -> true
   | Scheduled | Running | Succeeded | Failed | Cancelled | Expired ->
@@ -326,56 +306,58 @@ let list_schedules config = (read_state config).schedules
 
 let get_schedule config ~schedule_id = find_schedule (read_state config) schedule_id
 
-let make_execution_record ~now (request : schedule_request) =
-  { execution_id = "exec-" ^ Random_id.uuid_v7 ()
-  ; schedule_instance_id = request.schedule_instance_id
+let make_wake_record ~now (request : schedule_request) =
+  { schedule_instance_id = request.schedule_instance_id
   ; schedule_id = request.schedule_id
   ; started_at = now
   ; finished_at = None
   ; due_at = request.due_at
   ; payload_digest = Schedule_domain.payload_digest request.payload
-  ; status = Execution_running
+  ; status = Wake_running
   ; detail = None
   ; error = None
   }
 ;;
 
-let compare_execution_desc (left : execution_record) (right : execution_record) =
+let compare_wake_desc (left : wake_record) (right : wake_record) =
   match compare right.started_at left.started_at with
-  | 0 -> String.compare right.execution_id left.execution_id
+  | 0 ->
+    (match compare right.due_at left.due_at with
+     | 0 -> String.compare right.payload_digest left.payload_digest
+     | cmp -> cmp)
   | cmp -> cmp
 ;;
 
-let executions_for_schedule state ~schedule_id =
-  state.executions
-  |> List.filter (fun (execution : execution_record) ->
-    String.equal execution.schedule_id schedule_id)
-  |> List.sort compare_execution_desc
+let wakes_for_schedule state ~schedule_id =
+  state.wakes
+  |> List.filter (fun (wake : wake_record) ->
+    String.equal wake.schedule_id schedule_id)
+  |> List.sort compare_wake_desc
 ;;
 
-let last_execution_for_schedule_instance state ~schedule_instance_id ~schedule_id =
+let last_wake_for_schedule_instance state ~schedule_instance_id ~schedule_id =
   match
-    executions_for_schedule state ~schedule_id
-    |> List.filter (fun (execution : execution_record) ->
-      String.equal execution.schedule_instance_id schedule_instance_id)
+    wakes_for_schedule state ~schedule_id
+    |> List.filter (fun (wake : wake_record) ->
+      String.equal wake.schedule_instance_id schedule_instance_id)
   with
   | [] -> None
-  | execution :: _ -> Some execution
+  | wake :: _ -> Some wake
 ;;
 
-let execution_matches_occurrence
+let wake_matches_occurrence
       ~schedule_instance_id
       ~schedule_id
       ~due_at
       ~payload_digest
-      (execution : execution_record) =
-  String.equal execution.schedule_instance_id schedule_instance_id
-  && String.equal execution.schedule_id schedule_id
-  && Float.equal execution.due_at due_at
-  && String.equal execution.payload_digest payload_digest
+      (wake : wake_record) =
+  String.equal wake.schedule_instance_id schedule_instance_id
+  && String.equal wake.schedule_id schedule_id
+  && Float.equal wake.due_at due_at
+  && String.equal wake.payload_digest payload_digest
 ;;
 
-let execution_for_occurrence
+let wake_for_occurrence
       state
       ~schedule_instance_id
       ~schedule_id
@@ -383,78 +365,32 @@ let execution_for_occurrence
       ~payload_digest
   =
   List.find_opt
-    (execution_matches_occurrence
+    (wake_matches_occurrence
        ~schedule_instance_id
        ~schedule_id
        ~due_at
        ~payload_digest)
-    state.executions
+    state.wakes
 ;;
 
-let execution_by_id state ~execution_id =
-  List.find_opt
-    (fun (execution : execution_record) ->
-       String.equal execution.execution_id execution_id)
-    state.executions
-;;
-
-let update_latest_running_execution executions ~schedule_id update =
+let update_latest_running_wake wakes ~schedule_id update =
   let rec loop acc = function
     | [] ->
       Error
         (Invalid_status_transition
-           "running schedule has no matching running execution record")
-    | (execution : execution_record) :: rest
-      when String.equal execution.schedule_id schedule_id
-           && execution.status = Execution_running ->
-      Ok (List.rev_append acc (update execution :: rest))
-    | execution :: rest -> loop (execution :: acc) rest
+           "running schedule has no matching running wake record")
+    | (wake : wake_record) :: rest
+      when String.equal wake.schedule_id schedule_id
+           && wake.status = Wake_running ->
+      Ok (List.rev_append acc (update wake :: rest))
+    | wake :: rest -> loop (wake :: acc) rest
   in
-  loop [] executions
+  loop [] wakes
 ;;
 
-let update_occurrence_execution
-      executions
-      ~schedule_instance_id
-      ~schedule_id
-      ~due_at
-      ~payload_digest
-      update =
-  let rec loop acc = function
-    | [] ->
-      Error
-        (Invalid_status_transition
-           "schedule occurrence has no matching execution record")
-    | execution :: rest
-      when execution_matches_occurrence
-             ~schedule_instance_id
-             ~schedule_id
-             ~due_at
-             ~payload_digest
-             execution ->
-      Ok (List.rev_append acc (update execution :: rest))
-    | execution :: rest -> loop (execution :: acc) rest
-  in
-  loop [] executions
-;;
-
-let update_execution_by_id executions ~execution_id update =
-  let rec loop acc = function
-    | [] ->
-      Error
-        (Invalid_status_transition
-           "schedule settlement has no matching execution id")
-    | (execution : execution_record) :: rest
-      when String.equal execution.execution_id execution_id ->
-      Ok (List.rev_append acc (update execution :: rest))
-    | execution :: rest -> loop (execution :: acc) rest
-  in
-  loop [] executions
-;;
-
-let fail_execution_for_recovery ~now ~reason execution =
-  { execution with
-    status = Execution_failed
+let fail_wake_for_recovery ~now ~reason wake =
+  { wake with
+    status = Wake_failed
   ; finished_at = Some now
   ; detail = None
   ; error = Some (running_recovery_reason_to_string reason)
@@ -482,7 +418,7 @@ let insert_request config (request : Schedule_domain.schedule_request) =
       let* () = validate_initial_request request in
       let schedules = request :: state.schedules in
       let next_state =
-        bump_state state ~schedules ~executions:state.executions
+        bump_state state ~schedules ~wakes:state.wakes
       in
       let* () = write_state config next_state in
       Ok request)
@@ -505,7 +441,7 @@ let cancel_request config ~schedule_id =
         in
         let schedules = replace_schedule state.schedules updated_request in
         let next_state =
-          bump_state state ~schedules ~executions:state.executions
+          bump_state state ~schedules ~wakes:state.wakes
         in
         let* () = write_state config next_state in
         Ok updated_request)
@@ -527,7 +463,7 @@ let update_request config ~schedule_id ~due_at ~expires_at ~payload =
       else
         let payload_digest = Schedule_domain.payload_digest payload in
         match
-          execution_for_occurrence
+          wake_for_occurrence
             state
             ~schedule_instance_id:request.schedule_instance_id
             ~schedule_id:request.schedule_id
@@ -551,7 +487,7 @@ let update_request config ~schedule_id ~due_at ~expires_at ~payload =
           in
           let schedules = replace_schedule state.schedules updated_request in
           let next_state =
-            bump_state state ~schedules ~executions:state.executions
+            bump_state state ~schedules ~wakes:state.wakes
           in
           let* () = write_state config next_state in
           Ok updated_request)
@@ -574,7 +510,7 @@ let refresh_due config ~now =
       Ok (state, 0)
     else (
       let next_state =
-        bump_state state ~schedules ~executions:state.executions
+        bump_state state ~schedules ~wakes:state.wakes
       in
       let* () = write_state config next_state in
       Ok (next_state, !changed)))
@@ -603,7 +539,7 @@ let reschedule_due_recurring config ~now ~schedule_ids =
       Ok (state, 0)
     else (
       let next_state =
-        bump_state state ~schedules ~executions:state.executions
+        bump_state state ~schedules ~wakes:state.wakes
       in
       let* () = write_state config next_state in
       Ok (next_state, !changed)))
@@ -615,43 +551,13 @@ let start_due_candidate config ~now ~schedule_id =
     match find_schedule state schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
-      if not (is_due_execution_candidate request) then
+      if not (is_due_wake_candidate request) then
         Error Schedule_not_due_candidate
       else
         let updated = { request with status = Running } in
         let schedules = replace_schedule state.schedules updated in
-        let executions = make_execution_record ~now request :: state.executions in
-        let next_state = bump_state state ~schedules ~executions in
-        let* () = write_state config next_state in
-        Ok updated)
-;;
-
-let complete_running config ~now ~schedule_id ?detail () =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let* state = load_for_mutation config in
-    match find_schedule state schedule_id with
-    | None -> Error Schedule_not_found
-    | Some request ->
-      if request.status <> Running then
-        Error Schedule_not_running
-      else
-        let updated =
-          match Schedule_domain.next_due_after ~now request with
-          | Some due_at -> { request with status = Scheduled; due_at }
-          | None -> { request with status = Succeeded }
-        in
-        let schedules = replace_schedule state.schedules updated in
-        let* executions =
-          update_latest_running_execution state.executions ~schedule_id
-            (fun execution ->
-               { execution with
-                 status = Execution_succeeded
-               ; finished_at = Some now
-               ; detail
-               ; error = None
-               })
-        in
-        let next_state = bump_state state ~schedules ~executions in
+        let wakes = make_wake_record ~now request :: state.wakes in
+        let next_state = bump_state state ~schedules ~wakes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -665,321 +571,40 @@ let accept_running config ~now ~schedule_id ?detail () =
       if request.status <> Running
       then (
         match
-          last_execution_for_schedule_instance
+          last_wake_for_schedule_instance
             state
             ~schedule_instance_id:request.schedule_instance_id
             ~schedule_id
         with
-        | Some
-            { status =
-                (Execution_dispatched | Execution_succeeded | Execution_failed)
-            ; _
-            } ->
+        | Some { status = (Wake_succeeded | Wake_failed); _ } ->
           Ok request
-        | Some { status = Execution_running; _ } | None ->
+        | Some { status = Wake_running; _ } | None ->
           Error Schedule_not_running)
       else
         let updated =
           match Schedule_domain.next_due_after ~now request with
           | Some due_at -> { request with status = Scheduled; due_at }
-          | None -> request
+          | None -> { request with status = Succeeded }
         in
         let schedules = replace_schedule state.schedules updated in
-        let* executions =
-          update_latest_running_execution state.executions ~schedule_id
-            (fun execution ->
-               { execution with
-                 status = Execution_dispatched
+        let* wakes =
+          update_latest_running_wake state.wakes ~schedule_id
+            (fun wake ->
+               { wake with
+                 status = Wake_succeeded
+               ; finished_at = Some now
                ; detail
                ; error = None
                })
         in
-        let next_state = bump_state state ~schedules ~executions in
+        let next_state = bump_state state ~schedules ~wakes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
 
-let request_matches_occurrence
-      (request : schedule_request)
-      ~due_at
-      ~payload_digest =
-  Float.equal request.due_at due_at
-  && String.equal
-       (Schedule_domain.payload_digest request.payload)
-       payload_digest
-;;
-
-let advance_current_recurring_occurrence
-      ~now
-      (request : schedule_request)
-      ~due_at
-      ~payload_digest =
-  if
-    request.status = Running
-    && request_matches_occurrence request ~due_at ~payload_digest
-  then
-    match Schedule_domain.next_due_after ~now request with
-    | Some next_due_at -> { request with status = Scheduled; due_at = next_due_at }
-    | None -> request
-  else request
-;;
-
-let settle_dispatched_occurrence_in_state ~now state settlement =
-  let { execution_id
-      ; schedule_instance_id
-      ; schedule_id
-      ; due_at
-      ; payload_digest
-      ; outcome
-      }
-    = settlement
-  in
-  match execution_by_id state ~execution_id with
-  | None ->
-    Error
-      (Invalid_status_transition
-         "schedule settlement has no matching execution id")
-  | Some execution
-    when not
-           (execution_matches_occurrence
-              ~schedule_instance_id
-              ~schedule_id
-              ~due_at
-              ~payload_digest
-              execution) ->
-    Error
-      (Invalid_status_transition
-         "schedule settlement execution id does not match occurrence identity")
-  | Some { status = Execution_succeeded; _ } ->
-    (match outcome with
-     | Dispatched_occurrence_succeeded ->
-       Ok (state, find_schedule state schedule_id, false)
-     | Dispatched_occurrence_failed _ ->
-       Error
-         (Invalid_status_transition
-            "succeeded schedule occurrence cannot become failed"))
-  | Some { status = Execution_failed; _ } ->
-    (match outcome with
-     | Dispatched_occurrence_failed _ ->
-       Ok (state, find_schedule state schedule_id, false)
-     | Dispatched_occurrence_succeeded ->
-       Error
-         (Invalid_status_transition
-            "failed schedule occurrence cannot become succeeded"))
-  | Some { status = (Execution_running | Execution_dispatched); _ } ->
-    let terminal_status =
-      match outcome with
-      | Dispatched_occurrence_succeeded -> Succeeded
-      | Dispatched_occurrence_failed _ -> Failed
-    in
-    let schedules, updated =
-      match find_schedule state schedule_id with
-      | None -> state.schedules, None
-      | Some request
-        when not
-               (String.equal
-                  request.schedule_instance_id
-                  schedule_instance_id) ->
-        state.schedules, None
-      | Some request ->
-        let updated =
-          match request.recurrence with
-          | One_shot
-            when request.status = Running
-                 && request_matches_occurrence request ~due_at ~payload_digest ->
-            { request with status = terminal_status }
-          | One_shot -> request
-          | Interval _ | Daily _ | Cron _ ->
-            advance_current_recurring_occurrence
-              ~now
-              request
-              ~due_at
-              ~payload_digest
-        in
-        replace_schedule state.schedules updated, Some updated
-    in
-    let* executions =
-      update_execution_by_id
-        state.executions
-        ~execution_id
-        (fun execution ->
-           match outcome with
-           | Dispatched_occurrence_succeeded ->
-             { execution with
-               status = Execution_succeeded
-             ; finished_at = Some now
-             ; error = None
-             }
-           | Dispatched_occurrence_failed error ->
-             { execution with
-               status = Execution_failed
-             ; finished_at = Some now
-             ; error = Some error
-             })
-    in
-    Ok ({ state with schedules; executions }, updated, true)
-;;
-
-let settlement_executions_for_occurrence
-      state
-      ~schedule_instance_id
-      ~schedule_id
-      ~due_at
-      ~payload_digest
-      ~outcome
-  =
-  let occurrence_matches =
-    List.filter
-      (execution_matches_occurrence
-         ~schedule_instance_id
-         ~schedule_id
-         ~due_at
-         ~payload_digest)
-      state.executions
-  in
-  let agrees_with_outcome (execution : execution_record) =
-    match execution.status, outcome with
-    | (Execution_running | Execution_dispatched), _ -> true
-    | Execution_succeeded, Dispatched_occurrence_succeeded -> true
-    | Execution_failed, Dispatched_occurrence_failed _ -> true
-    | Execution_succeeded, Dispatched_occurrence_failed _
-    | Execution_failed, Dispatched_occurrence_succeeded -> false
-  in
-  let matches = List.filter agrees_with_outcome occurrence_matches in
-  match matches with
-  | [] when occurrence_matches <> [] ->
-    Error
-      (Invalid_status_transition
-         "schedule occurrence has only executions with a conflicting terminal outcome")
-  | [] ->
-    Error
-      (Invalid_status_transition
-         "schedule occurrence has no matching execution record")
-  | execution :: rest -> Ok (execution, rest)
-;;
-
-let settle_dispatched_occurrence
-      config
-      ~now
-      ~schedule_instance_id
-      ~schedule_id
-      ~due_at
-      ~payload_digest
-      ~outcome
-  =
+let cancel_matching config ~should_cancel =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
-    let* () =
-      match find_schedule state schedule_id with
-      | Some _ -> Ok ()
-      | None -> Error Schedule_not_found
-    in
-    let* execution, rest =
-      settlement_executions_for_occurrence
-        state
-        ~schedule_instance_id
-        ~schedule_id
-        ~due_at
-        ~payload_digest
-        ~outcome
-    in
-    let settle_execution next_state (execution : execution_record) =
-      settle_dispatched_occurrence_in_state
-        ~now
-        next_state
-        { execution_id = execution.execution_id
-        ; schedule_instance_id
-        ; schedule_id
-        ; due_at
-        ; payload_digest
-        ; outcome
-        }
-    in
-    let* next_state, updated, changed = settle_execution state execution in
-    let rec settle next_state updated changed = function
-      | [] -> Ok (next_state, updated, changed)
-      | execution :: rest ->
-        let* next_state, updated, execution_changed =
-          settle_execution next_state execution
-        in
-        settle next_state updated (changed || execution_changed) rest
-    in
-    let* next_state, updated, changed = settle next_state updated changed rest in
-    let* updated =
-      match updated with
-      | Some request -> Ok request
-      | None ->
-        Error
-          (Invalid_status_transition
-             "schedule settlement lost its matching schedule")
-    in
-    let* () =
-      if changed
-      then
-        write_state
-          config
-          (bump_state
-             state
-             ~schedules:next_state.schedules
-             ~executions:next_state.executions)
-      else Ok ()
-    in
-    Ok updated)
-;;
-
-let complete_dispatched_occurrence
-      config
-      ~now
-      ~schedule_instance_id
-      ~schedule_id
-      ~due_at
-      ~payload_digest
-      () =
-  settle_dispatched_occurrence
-    config
-    ~now
-    ~schedule_instance_id
-    ~schedule_id
-    ~due_at
-    ~payload_digest
-    ~outcome:Dispatched_occurrence_succeeded
-;;
-
-let fail_dispatched_occurrence
-      config
-      ~now
-      ~schedule_instance_id
-      ~schedule_id
-      ~due_at
-      ~payload_digest
-      ~error =
-  settle_dispatched_occurrence
-    config
-    ~now
-    ~schedule_instance_id
-    ~schedule_id
-    ~due_at
-    ~payload_digest
-    ~outcome:(Dispatched_occurrence_failed error)
-;;
-
-let settle_dispatched_occurrences_and_cancel_matching
-      config
-      ~now
-      ~settlements
-      ~should_cancel
-  =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let* state = load_for_mutation config in
-    let rec settle next_state changed = function
-      | [] -> Ok (next_state, changed)
-      | settlement :: rest ->
-        let* next_state, _, settlement_changed =
-          settle_dispatched_occurrence_in_state ~now next_state settlement
-        in
-        settle next_state (changed || settlement_changed) rest
-    in
-    let* next_state, settlement_changed = settle state false settlements in
     let rec cancel schedules changed = function
       | [] -> Ok (List.rev schedules, changed)
       | (request : schedule_request) :: rest when not (should_cancel request) ->
@@ -994,58 +619,13 @@ let settle_dispatched_occurrences_and_cancel_matching
                 request.schedule_id))
       | request :: rest -> cancel (request :: schedules) changed rest
     in
-    let* schedules, cancellation_changed =
-      cancel [] false next_state.schedules
-    in
-    let changed = settlement_changed || cancellation_changed in
+    let* schedules, changed = cancel [] false state.schedules in
     if changed
     then
       write_state
         config
-        (bump_state
-           state
-           ~schedules
-           ~executions:next_state.executions)
+        (bump_state state ~schedules ~wakes:state.wakes)
     else Ok ())
-;;
-
-let settle_dispatched_occurrences config ~now settlements =
-  settle_dispatched_occurrences_and_cancel_matching
-    config
-    ~now
-    ~settlements
-    ~should_cancel:(Fun.const false)
-;;
-
-let settle_dispatched_occurrences_collect_errors config ~now settlements =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let* state = load_for_mutation config in
-    let rec settle next_state changed results = function
-      | [] -> Ok (next_state, changed, List.rev results)
-      | settlement :: rest ->
-        (match settle_dispatched_occurrence_in_state ~now next_state settlement with
-         | Ok (settled_state, _, settlement_changed) ->
-           settle
-             settled_state
-             (changed || settlement_changed)
-             (Ok () :: results)
-             rest
-         | Error error ->
-           settle next_state changed (Error error :: results) rest)
-    in
-    let* next_state, changed, results = settle state false [] settlements in
-    let* () =
-      if changed
-      then
-        write_state
-          config
-          (bump_state
-             state
-             ~schedules:next_state.schedules
-             ~executions:next_state.executions)
-      else Ok ()
-    in
-    Ok results)
 ;;
 
 let fail_running config ~now ~schedule_id ~error =
@@ -1059,17 +639,17 @@ let fail_running config ~now ~schedule_id ~error =
       else
         let updated = { request with status = Failed } in
         let schedules = replace_schedule state.schedules updated in
-        let* executions =
-          update_latest_running_execution state.executions ~schedule_id
-            (fun execution ->
-               { execution with
-                 status = Execution_failed
+        let* wakes =
+          update_latest_running_wake state.wakes ~schedule_id
+            (fun wake ->
+               { wake with
+                 status = Wake_failed
                ; finished_at = Some now
                ; detail = None
                ; error = Some error
                })
         in
-        let next_state = bump_state state ~schedules ~executions in
+        let next_state = bump_state state ~schedules ~wakes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -1085,11 +665,11 @@ let retry_running config ~now ~schedule_id ~reason =
       else
         let updated = { request with status = Due } in
         let schedules = replace_schedule state.schedules updated in
-        let* executions =
-          update_latest_running_execution state.executions ~schedule_id
-            (fail_execution_for_recovery ~now ~reason)
+        let* wakes =
+          update_latest_running_wake state.wakes ~schedule_id
+            (fail_wake_for_recovery ~now ~reason)
         in
-        let next_state = bump_state state ~schedules ~executions in
+        let next_state = bump_state state ~schedules ~wakes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -1098,47 +678,45 @@ let recover_running_on_startup config ~now =
   let reason = Interrupted_by_process_restart in
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
-    let rec recover schedules_rev executions recovered = function
-      | [] -> Ok (List.rev schedules_rev, executions, recovered)
+    let rec recover schedules_rev wakes recovered = function
+      | [] -> Ok (List.rev schedules_rev, wakes, recovered)
       | (request : schedule_request) :: rest ->
         (match request.status with
          | Running ->
            (match
-              execution_for_occurrence
-                { state with executions }
+              wake_for_occurrence
+                { state with wakes }
                 ~schedule_instance_id:request.schedule_instance_id
                 ~schedule_id:request.schedule_id
                 ~due_at:request.due_at
                 ~payload_digest:(Schedule_domain.payload_digest request.payload)
             with
-            | Some { status = Execution_dispatched; _ } ->
-              recover (request :: schedules_rev) executions recovered rest
-            | Some { status = Execution_running; _ } ->
-              let* executions =
-                update_latest_running_execution executions
+            | Some { status = Wake_running; _ } ->
+              let* wakes =
+                update_latest_running_wake wakes
                   ~schedule_id:request.schedule_id
-                  (fail_execution_for_recovery ~now ~reason)
+                  (fail_wake_for_recovery ~now ~reason)
               in
               recover
                 ({ request with status = Due } :: schedules_rev)
-                executions
+                wakes
                 (recovered + 1)
                 rest
-            | Some { status = (Execution_succeeded | Execution_failed); _ }
+            | Some { status = (Wake_succeeded | Wake_failed); _ }
             | None ->
               Error
                 (Invalid_status_transition
-                   "running schedule has no active execution record"))
+                   "running schedule has no active wake record"))
          | Scheduled | Due | Succeeded | Failed | Cancelled | Expired ->
-           recover (request :: schedules_rev) executions recovered rest)
+           recover (request :: schedules_rev) wakes recovered rest)
     in
-    let* schedules, executions, recovered =
-      recover [] state.executions 0 state.schedules
+    let* schedules, wakes, recovered =
+      recover [] state.wakes 0 state.schedules
     in
     if recovered = 0 then
       Ok (state, 0)
     else
-      let next_state = bump_state state ~schedules ~executions in
+      let next_state = bump_state state ~schedules ~wakes in
       let* () = write_state config next_state in
       Ok (next_state, recovered))
 ;;
@@ -1149,34 +727,22 @@ let fail_due_candidate config ~now ~schedule_id ~error =
     match find_schedule state schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
-      if not (is_due_execution_candidate request) then
+      if not (is_due_wake_candidate request) then
         Error Schedule_not_due_candidate
       else
         let updated = { request with status = Failed } in
-        let execution =
-          { (make_execution_record ~now request) with
-            status = Execution_failed
+        let wake =
+          { (make_wake_record ~now request) with
+            status = Wake_failed
           ; finished_at = Some now
           ; error = Some error
           }
         in
         let schedules = replace_schedule state.schedules updated in
-        let executions = execution :: state.executions in
-        let next_state = bump_state state ~schedules ~executions in
+        let wakes = wake :: state.wakes in
+        let next_state = bump_state state ~schedules ~wakes in
         let* () = write_state config next_state in
         Ok updated)
-;;
-
-let has_unsettled_execution executions ~schedule_instance_id ~schedule_id =
-  List.exists
-    (fun (execution : execution_record) ->
-       String.equal execution.schedule_instance_id schedule_instance_id
-       && String.equal execution.schedule_id schedule_id
-       &&
-       match execution.status with
-       | Execution_running | Execution_dispatched -> true
-       | Execution_succeeded | Execution_failed -> false)
-    executions
 ;;
 
 let prune_completed config =
@@ -1188,18 +754,7 @@ let prune_completed config =
         (fun (request : schedule_request) ->
            match request.status with
            | Scheduled | Due | Running -> true
-           | Succeeded | Failed | Cancelled | Expired ->
-             (* A terminal request instance can still own work nobody has reported on:
-                accept_running advances a recurring request past an occurrence
-                that stays Execution_dispatched, and the request can then be
-                cancelled from Scheduled. Dropping the pair would delete the only
-                durable record of that work, and the settlement functions need
-                this exact instance row -- both of them return Schedule_not_found
-                without it. *)
-             has_unsettled_execution
-               state.executions
-               ~schedule_instance_id:request.schedule_instance_id
-               ~schedule_id:request.schedule_id)
+           | Succeeded | Failed | Cancelled | Expired -> false)
         state.schedules
     in
     let after_count = List.length schedules in
@@ -1207,26 +762,18 @@ let prune_completed config =
     let remaining_ids =
       List.map (fun (r : schedule_request) -> r.schedule_id) schedules
     in
-    let executions =
+    let wakes =
       List.filter
-        (fun (exec : execution_record) ->
-           List.mem exec.schedule_id remaining_ids)
-        state.executions
+        (fun (wake : wake_record) ->
+           List.mem wake.schedule_id remaining_ids)
+        state.wakes
     in
-    let next_state = bump_state state ~schedules ~executions in
+    let next_state = bump_state state ~schedules ~wakes in
     let* () = write_state config next_state in
     Ok (next_state, pruned_count))
 ;;
 
-let due_execution_candidates state =
+let due_wake_candidates state =
   state.schedules
-  |> List.filter is_due_execution_candidate
-;;
-
-let unsettled_dispatched_occurrences state =
-  state.executions
-  |> List.filter (fun (execution : execution_record) ->
-    match execution.status with
-    | Execution_dispatched -> true
-    | Execution_running | Execution_succeeded | Execution_failed -> false)
+  |> List.filter is_due_wake_candidate
 ;;

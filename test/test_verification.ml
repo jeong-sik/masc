@@ -46,6 +46,13 @@ let with_eio_temp_dir f =
     ~finally:Fs_compat.clear_fs
     (fun () -> with_temp_dir f)
 
+let with_eio_temp_dir_and_clock f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect
+    ~finally:Fs_compat.clear_fs
+    (fun () -> with_temp_dir (f ~clock:(Eio.Stdenv.clock env)))
+
 let contains_substring text needle =
   let text_len = String.length text in
   let needle_len = String.length needle in
@@ -640,7 +647,7 @@ let test_system_llm_rejection_does_not_derive_unregistered_keeper () =
   )
 
 let test_system_llm_agent_commits_without_a_keeper_verifier () =
-  with_eio_temp_dir (fun base_path ->
+  with_eio_temp_dir_and_clock (fun ~clock base_path ->
     Masc.Workspace_metric_hooks.install ();
     let prompt_dir =
       match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -694,7 +701,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            with
            | Ok _ -> ()
            | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
-          CA.start ~sw ~config;
+          CA.start ~sw ~clock ~config;
           (match
              W.transition_task_r
                config
@@ -718,7 +725,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
   )
 
 let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
-  with_eio_temp_dir (fun base_path ->
+  with_eio_temp_dir_and_clock (fun ~clock base_path ->
     Masc.Workspace_metric_hooks.install ();
     let prompt_dir =
       match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -812,7 +819,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
               backlog.tasks
           in
           W.write_backlog config { backlog with tasks };
-          CA.start ~sw ~config;
+          CA.start ~sw ~clock ~config;
           Eio.Promise.await reviewer_called;
           Eio.Promise.await verdict_committed;
           (match !captured_prompt with

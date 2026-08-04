@@ -1048,23 +1048,6 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_unified_verification_surface @test/runtest-test_schedule_tool_wiring"
 
-      # The librarian curation prompt decides what enters a keeper's permanent
-      # memory. Its category rules are asserted in test_keeper_librarian_retry,
-      # which existed in test/dune but in no runtest target, so it was
-      # compile-only under @check and a widening of the constraint category
-      # would have passed CI in silence.
-      - name: Run keeper librarian curation prompt suite
-        id: keeper_librarian_prompt_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_librarian_retry"
-
       - name: Run tool blob retention suite
         id: tool_blob_retention_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

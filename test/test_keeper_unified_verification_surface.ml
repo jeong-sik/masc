@@ -638,6 +638,82 @@ let test_untitled_wake_keeps_pointer_out_of_prose () =
     fail "scheduled wake must project to Schedule_due"
 ;;
 
+(* A cancellation of a Task this Keeper authored. Rendered in its own section:
+   no Board post exists for a cancellation, so routing it through Board Activity
+   would point the Keeper at a post that was never created. *)
+let sample_task_cancellation : WO.pending_board_event =
+  let cancellation : Keeper_event_queue.task_cancellation =
+    { tc_task_id = "task-161"
+    ; tc_cancelled_by = "keeper-rondo-agent"
+    ; tc_reason = Some "BLOCKED: request-menu service absent from sandbox"
+    }
+  in
+  { sample_board_event with
+    event_kind = WO.Task_cancelled cancellation
+  ; post_id = "task-cancelled:task-161"
+  ; author = "keeper-rondo-agent"
+  ; title = "Task task-161 was cancelled"
+  ; preview = "Task task-161, which you created, was cancelled by keeper-rondo-agent"
+  ; post_kind = Masc.Board.System_post
+  }
+;;
+
+let test_task_cancellation_has_own_prompt_layer () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  init_runtime_default_for_tests ();
+  let obs =
+    { base_observation with
+      pending_board_events = [ sample_board_event; sample_task_cancellation ]
+    }
+  in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  check bool "cancellation section is present" true
+    (contains_sub "### Cancelled Tasks You Created (1)" world_state);
+  check bool "the canceller is named" true
+    (contains_sub "cancelled_by=\"keeper-rondo-agent\"" world_state);
+  check bool "the reason reaches the author" true
+    (contains_sub
+       "reason=\"BLOCKED: request-menu service absent from sandbox\""
+       world_state);
+  check bool "cancellation is not rendered as Board activity" false
+    (contains_sub
+       sample_task_cancellation.post_id
+       (match
+          String.split_on_char '#' world_state
+          |> List.find_opt (contains_sub "Board Activity")
+        with
+        | Some section -> section
+        | None -> ""))
+;;
+
+(* An absent reason must render as an empty field, not as "None" or the string
+   "null": the author has to be able to tell "no reason given" from a reason. *)
+let test_task_cancellation_without_reason_renders_empty_field () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  init_runtime_default_for_tests ();
+  let cancellation : Keeper_event_queue.task_cancellation =
+    { tc_task_id = "task-162"; tc_cancelled_by = "keeper-rondo-agent"; tc_reason = None }
+  in
+  let obs =
+    { base_observation with
+      pending_board_events =
+        [ { sample_task_cancellation with
+            event_kind = WO.Task_cancelled cancellation
+          ; post_id = "task-cancelled:task-162"
+          }
+        ]
+    }
+  in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  check bool "empty reason field" true (contains_sub "reason=\"\"" world_state);
+  check bool "no OCaml option leaks into the prompt" false
+    (contains_sub "None" world_state)
+;;
+
 let test_completion_authority_rejection_has_own_prompt_layer () =
   Masc_test_deps.init_keeper_tool_registry ();
   init_runtime_default_for_tests ();
@@ -928,6 +1004,10 @@ let () =
           test_case
             "prompt: completion authority rejection has its own layer"
             `Quick test_completion_authority_rejection_has_own_prompt_layer;
+          test_case "prompt: task cancellation has its own layer" `Quick
+            test_task_cancellation_has_own_prompt_layer;
+          test_case "prompt: task cancellation without reason renders empty" `Quick
+            test_task_cancellation_without_reason_renders_empty_field;
           test_case
             "prompt: completion authority rejection preserves human provenance"
             `Quick test_completion_authority_rejection_preserves_human_provenance;

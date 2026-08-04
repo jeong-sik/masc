@@ -29,22 +29,37 @@ let outcome_label = function
   | Enqueue_failed _ -> "enqueue_failed"
 ;;
 
-(* Author and canceller are compared through the Keeper identity binding rather
-   than by string equality: the backlog records an author under its canonical
-   Keeper name ("sangsu") while the canceller arrives as an agent name
-   ("keeper-sangsu-agent"), so a raw comparison reads a self-cancellation as a
-   cross-Keeper one and wakes a Keeper about its own decision. *)
-let keeper_of_agent_name ~config ~agent_name =
-  match Keeper_identity_binding.resolve ~config ~agent_name with
-  | Keeper_identity_binding.Not_found -> Ok None
-  | Keeper_identity_binding.Unique keeper_name -> Ok (Some keeper_name)
-  | Keeper_identity_binding.Ambiguous keeper_names ->
-    Error
-      (Printf.sprintf
-         "multiple registered or persisted Keepers share agent_name=%s: %s"
-         agent_name
-         (String.concat "," keeper_names))
-  | Keeper_identity_binding.Lookup_failed detail -> Error detail
+(* Both actor fields are resolved to a canonical Keeper name before they are
+   compared, because they are recorded in different vocabularies:
+   [created_by] holds a canonical Keeper name ("sangsu", "lane-smith") while
+   [cancelled_by] holds an agent name ("keeper-sangsu-agent"). Comparing the raw
+   strings reads a self-cancellation as a cross-Keeper one and wakes a Keeper
+   about a decision it just made itself; resolving only by agent name finds no
+   author at all.
+
+   Both directions are tried for each actor: an actor string is a Keeper if it
+   names a Keeper lane directly, or if it is the agent name bound to one.
+   Anything else — an operator, a client id, a retired Keeper — has no lane. *)
+let keeper_of_actor ~config ~actor =
+  let names_a_keeper_lane name =
+    Option.is_some (Keeper_registry_lookup.find_by_name name)
+    || List.exists
+         (String.equal name)
+         (Keeper_meta_store.persisted_keeper_names config)
+  in
+  if names_a_keeper_lane actor
+  then Ok (Some actor)
+  else (
+    match Keeper_identity_binding.resolve ~config ~agent_name:actor with
+    | Keeper_identity_binding.Not_found -> Ok None
+    | Keeper_identity_binding.Unique keeper_name -> Ok (Some keeper_name)
+    | Keeper_identity_binding.Ambiguous keeper_names ->
+      Error
+        (Printf.sprintf
+           "multiple registered or persisted Keepers share agent_name=%s: %s"
+           actor
+           (String.concat "," keeper_names))
+    | Keeper_identity_binding.Lookup_failed detail -> Error detail)
 ;;
 
 let cancellation_of_task (task : Masc_domain.task) =
@@ -109,14 +124,12 @@ let notify_author ~config ~cancelling_agent_name ~task_id =
           (match task.created_by with
            | None -> No_author
            | Some author ->
-             (match keeper_of_agent_name ~config ~agent_name:author with
+             (match keeper_of_actor ~config ~actor:author with
               | Error detail -> Author_lookup_failed { author; detail }
               | Ok None -> Author_not_a_keeper { author }
               | Ok (Some author_keeper) ->
                 let canceller_keeper =
-                  match
-                    keeper_of_agent_name ~config ~agent_name:cancelling_agent_name
-                  with
+                  match keeper_of_actor ~config ~actor:cancelling_agent_name with
                   | Ok (Some keeper_name) -> Some keeper_name
                   | Ok None | Error _ -> None
                 in

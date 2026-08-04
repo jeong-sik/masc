@@ -479,9 +479,9 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
    | None -> fail "retry schedule missing after success");
   check Alcotest.(list string) "failed attempt remains beside successful retry"
     [ "succeeded"; "failed" ]
-    (Schedule_store.wakes_for_schedule
-       (Schedule_store.read_state config)
-       ~schedule_id:retry_request.schedule_id
+    ((Schedule_store.read_state config).wakes
+     |> List.filter (fun (wake : wake_record) ->
+       String.equal wake.schedule_id retry_request.schedule_id)
      |> List.map (fun (wake : wake_record) ->
        wake_status_to_string wake.status))
 ;;

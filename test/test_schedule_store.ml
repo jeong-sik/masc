@@ -2,6 +2,10 @@ open Alcotest
 open Schedule_domain
 open Schedule_store
 
+let schedules_path config =
+  Filename.concat (Workspace_utils.masc_dir config) "schedules.json"
+;;
+
 let json = testable Yojson.Safe.pp Yojson.Safe.equal
 
 let with_workspace f =
@@ -470,15 +474,15 @@ let test_startup_recovery_refuses_corrupt_ledger () =
     (Workspace_core.read_text config (recovery_path config))
 ;;
 
-let test_load_fresh_when_file_absent () =
+let test_read_empty_when_file_absent () =
   with_workspace
   @@ fun config ->
   (* A pristine workspace has no schedules.json yet. *)
-  (match Schedule_store.load config with
-   | Fresh -> ()
-   | Loaded _ -> fail "absent ledger reported as Loaded"
-   | Corrupt _ -> fail "absent ledger reported as Corrupt");
-  let state = read_state config in
+  let state =
+    match read_state_result config with
+    | Ok state -> state
+    | Error error -> fail (read_error_to_string error)
+  in
   check int "fresh store has no schedules" 0 (List.length state.schedules);
   check int "fresh store has no wakes" 0 (List.length state.wakes)
 ;;
@@ -667,18 +671,17 @@ let test_recurring_occurrences_remain_dispatchable () =
     (List.length (due_wake_candidates (read_state config)))
 ;;
 
-let test_load_corrupt_when_both_unparseable () =
+let test_read_error_when_both_unparseable () =
   with_workspace
   @@ fun config ->
   let req = make_request () in
   ignore (insert_ok config req);
   corrupt_both config;
-  match Schedule_store.load config with
-  | Corrupt { primary_err; recovery_err } ->
+  match read_state_result config with
+  | Error (Corrupt_read_ledger { primary_err; recovery_err }) ->
     check bool "primary error is non-empty" true (String.length primary_err > 0);
     check bool "recovery error reported" true (Option.is_some recovery_err)
-  | Fresh -> fail "corrupt-but-present ledger reported as Fresh"
-  | Loaded _ -> fail "corrupt ledger reported as Loaded"
+  | Ok _ -> fail "corrupt ledger returned a readable state"
 ;;
 
 let test_read_state_raises_on_corrupt () =
@@ -721,7 +724,7 @@ let test_insert_surfaces_primary_write_failure () =
      readv, which load classifies as Corrupt_ledger) - it never exercises the
      write-failure path this test names. Inject a write-only failure instead:
      the ledger directory itself is made read-only *after* the (nonexistent-
-     file / Fresh) read succeeds, so save_file_atomic's temp-file creation for
+     file) read succeeds, so save_file_atomic's temp-file creation for
      the write is what fails. *)
   let masc_dir = Workspace_utils.masc_dir config in
   Unix.chmod masc_dir 0o500;
@@ -840,7 +843,17 @@ let test_prune_does_not_bind_orphan_receipt_to_reused_public_id () =
   Workspace_core.write_text
     config
     (schedules_path config)
-    (Yojson.Safe.to_string (state_to_yojson { old_state with schedules = [] }));
+    (Yojson.Safe.to_string
+       (`Assoc
+          [ "version", `Int old_state.version
+          ; "updated_at", `Float old_state.updated_at
+          ; "schedules", `List []
+          ; ( "wakes"
+            , `List
+                (List.map
+                   Schedule_domain.wake_record_to_yojson
+                   old_state.wakes) )
+          ]));
   let new_request = make_request ~schedule_id:old_request.schedule_id () in
   check bool "public ID reuse mints a new instance" false
     (String.equal
@@ -880,10 +893,10 @@ let () =
         ] );
       ( "corruption",
         [
-          test_case "absent ledger loads Fresh" `Quick
-            test_load_fresh_when_file_absent;
-          test_case "both unparseable loads Corrupt" `Quick
-            test_load_corrupt_when_both_unparseable;
+          test_case "absent ledger reads empty" `Quick
+            test_read_empty_when_file_absent;
+          test_case "both unparseable return read error" `Quick
+            test_read_error_when_both_unparseable;
           test_case "startup recovery refuses corrupt ledger" `Quick
             test_startup_recovery_refuses_corrupt_ledger;
           test_case "read_state raises on corrupt ledger" `Quick

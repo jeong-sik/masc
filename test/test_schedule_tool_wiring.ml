@@ -523,7 +523,10 @@ let test_due_signal_and_dashboard_projection () =
 let test_schedule_store_error_is_explicit () =
   with_config
   @@ fun config ->
-  Workspace_core.write_text config (Schedule_store.schedules_path config) "{not-json";
+  Workspace_core.write_text
+    config
+    (Filename.concat (Workspace_utils.masc_dir config) "schedules.json")
+    "{not-json";
   let result =
     dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc [])
   in

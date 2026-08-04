@@ -381,6 +381,22 @@ let latest_wake_exn config (request : Schedule_domain.schedule_request) =
   | None -> fail ("missing wake for schedule " ^ request.schedule_id)
 ;;
 
+let find_wake
+      state
+      ~schedule_instance_id
+      ~schedule_id
+      ~due_at
+      ~payload_digest
+  =
+  List.find_opt
+    (fun (wake : Schedule_domain.wake_record) ->
+       String.equal wake.schedule_instance_id schedule_instance_id
+       && String.equal wake.schedule_id schedule_id
+       && Float.equal wake.due_at due_at
+       && String.equal wake.payload_digest payload_digest)
+    state.Schedule_store.wakes
+;;
+
 let single_occurrence_id (result : Schedule_runner.tick_result) =
   match result.emitted with
   | [ signal ] -> Schedule_occurrence_id.to_string signal.occurrence_id
@@ -676,7 +692,7 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
   check bool "recreated occurrence has a new identity" false
     (Schedule_occurrence_id.equal first_signal.occurrence_id second_signal.occurrence_id);
   match
-    Schedule_store.wake_for_occurrence
+    find_wake
       (Schedule_store.read_state config)
       ~schedule_instance_id:second.schedule_instance_id
       ~schedule_id:second.schedule_id
@@ -1208,7 +1224,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
            (Schedule_domain.schedule_status_to_string stored.status)
        | None -> fail "cancelled schedule missing");
       (match
-         Schedule_store.wake_for_occurrence
+         find_wake
            (Schedule_store.read_state config)
            ~schedule_instance_id:request.schedule_instance_id
            ~schedule_id:request.schedule_id

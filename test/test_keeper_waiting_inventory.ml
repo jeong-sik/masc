@@ -759,7 +759,9 @@ let write_pending_confirms_exn config entries =
 let test_corrupt_schedule_ledger_is_read_error () =
   with_workspace
   @@ fun config ->
-  save_text (Schedule_store.schedules_path config) "{not-json";
+  save_text
+    (Filename.concat (Workspace_utils.masc_dir config) "schedules.json")
+    "{not-json";
   let json = Server_keeper_waiting_inventory.dashboard_json config in
   check_metric_float "global read error metric"
     Otel_metric_store.metric_keeper_waiting_count

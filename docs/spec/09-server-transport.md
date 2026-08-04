@@ -741,7 +741,6 @@ sequenceDiagram
 2. `create_server_state`: 서버 상태 생성 (Workspace config, Eio context 설정)
 3. `bootstrap_server_state`: Workspace 초기화, Chain bootstrap, Tool registry warm-up, JSONL pruning
 4. `bootstrap_keepers`: Keeper 에이전트 부트스트랩
-5. `init_task_backend`: 태스크 백엔드 초기화
 6. `start_background_maintenance`: 주기적 cleanup fiber 시작
 7. HTTP 서버 listen 시작
 

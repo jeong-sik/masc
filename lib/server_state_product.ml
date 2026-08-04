@@ -1,5 +1,5 @@
-(** Orthogonal state machine composition — Server Lifecycle x Backend x
-    LazyTaskQueue x Readiness.
+(** Orthogonal state machine composition — Server Lifecycle x LazyTaskQueue x
+    Readiness.
 
     Mirrors [specs/server-state/ServerState.tla].
 
@@ -48,53 +48,7 @@ module Lifecycle = struct
   let pp_phase fmt p = Format.fprintf fmt "%s" (phase_to_string p)
 end
 
-(* ── Dimension 2: Backend ───────────────────────────────── *)
-
-module Backend = struct
-  type phase =
-    | Uninitialized
-    | Memory
-    | Filesystem
-    | Degraded
-
-  let phase_to_string = function
-    | Uninitialized -> "uninitialized"
-    | Memory -> "memory"
-    | Filesystem -> "filesystem"
-    | Degraded -> "degraded"
-
-  let all_phases = [Uninitialized; Memory; Filesystem; Degraded]
-
-  type event =
-    | Resolve_memory
-    | Resolve_fs
-    | Degrade of string
-    | Recover
-
-  let event_to_string = function
-    | Resolve_memory -> "resolve_memory"
-    | Resolve_fs -> "resolve_fs"
-    | Degrade s -> "degrade:" ^ s
-    | Recover -> "recover"
-
-  type transition = Applied of phase | Ignored of { phase: phase; event: event }
-
-  let apply_event ~current event =
-    match current, event with
-    | Uninitialized, Resolve_memory -> Applied Memory
-    | Uninitialized, Resolve_fs -> Applied Filesystem
-    | (Memory | Filesystem), Degrade _ -> Applied Degraded
-    | Degraded, Recover -> Applied Filesystem
-    | phase, event -> Ignored { phase; event }
-
-  let apply_event_lossy ~current event =
-    match apply_event ~current event with
-    | Applied p | Ignored { phase = p; _ } -> p
-
-  let pp_phase fmt p = Format.fprintf fmt "%s" (phase_to_string p)
-end
-
-(* ── Dimension 3: Lazy Task Queue ───────────────────────── *)
+(* ── Dimension 2: Lazy Task Queue ───────────────────────── *)
 
 module Lazy_task_queue = struct
   type t =
@@ -136,7 +90,7 @@ module Lazy_task_queue = struct
     | Pending tasks -> Format.fprintf fmt "pending[%d]" (List.length tasks)
 end
 
-(* ── Dimension 4: Readiness ─────────────────────────────── *)
+(* ── Dimension 3: Readiness ─────────────────────────────── *)
 
 module Readiness = struct
   type phase =
@@ -176,20 +130,16 @@ end
 
 type product = {
   lifecycle : Lifecycle.phase;
-  backend : Backend.phase;
   lazy_tasks : Lazy_task_queue.t;
   readiness : Readiness.phase;
   last_error : string option;
-  fallback_reason : string option;
 }
 
 let initial = {
   lifecycle = Lifecycle.Booting;
-  backend = Backend.Uninitialized;
   lazy_tasks = Lazy_task_queue.Complete;
   readiness = Readiness.NotReady;
   last_error = None;
-  fallback_reason = None;
 }
 
 (* ── Cross-Dimension Invariants ─────────────────────────── *)
@@ -222,34 +172,11 @@ let check_invariants (state : product) : (unit, string) result =
        | Lifecycle.Booting | Lifecycle.Serving | Lifecycle.Draining -> None)
     | Lazy_task_queue.Complete -> None
   in
-  let degraded_implies_not_ready =
-    match state.backend with
-    | Backend.Degraded ->
-      (match state.readiness with
-       | Readiness.Ready ->
-         Some "backend=Degraded but readiness=Ready (degraded backend must not serve traffic)"
-       | Readiness.NotReady -> None)
-    | Backend.Uninitialized | Backend.Memory | Backend.Filesystem -> None
-  in
-  (* Every initialized backend variant is enumerated explicitly so a new
-     Backend variant fails compilation here rather than silently passing. *)
-  let booting_implies_uninitialized_backend =
-    match state.lifecycle with
-    | Lifecycle.Booting ->
-      (match state.backend with
-       | Backend.Uninitialized -> None
-       | (Backend.Memory | Backend.Filesystem | Backend.Degraded) as b ->
-         Some (Printf.sprintf "lifecycle=Booting but backend=%s (expected Uninitialized)"
-                 (Backend.phase_to_string b)))
-    | Lifecycle.Serving | Lifecycle.Draining | Lifecycle.Stopped -> None
-  in
   let violations =
     List.filter_map Fun.id
       [ ready_implies_not_booting
       ; stopped_implies_not_ready
       ; pending_blocks_stop
-      ; degraded_implies_not_ready
-      ; booting_implies_uninitialized_backend
       ]
   in
   match violations with
@@ -261,13 +188,6 @@ let check_invariants (state : product) : (unit, string) result =
 let apply_lifecycle_event state event =
   let new_lifecycle = Lifecycle.apply_event_lossy ~current:state.lifecycle event in
   let new_state = { state with lifecycle = new_lifecycle } in
-  match check_invariants new_state with
-  | Ok () -> Ok new_state
-  | Error reason -> Error reason
-
-let apply_backend_event state event =
-  let new_backend = Backend.apply_event_lossy ~current:state.backend event in
-  let new_state = { state with backend = new_backend } in
   match check_invariants new_state with
   | Ok () -> Ok new_state
   | Error reason -> Error reason
@@ -295,11 +215,11 @@ type flat_phase =
   | Degraded
 
 let derive_flat_phase (state : product) : flat_phase =
-  match state.lifecycle, state.backend, state.lazy_tasks, state.readiness with
+  match state.lifecycle, state.last_error, state.lazy_tasks, state.readiness with
   | Lifecycle.Booting, _, _, _ -> Blocking
-  | _, Backend.Degraded, _, _ -> Degraded
-  | Lifecycle.Serving, _, Lazy_task_queue.Pending _, Readiness.Ready -> Lazy
-  | Lifecycle.Serving, _, Lazy_task_queue.Complete, Readiness.Ready -> Ready
+  | Lifecycle.Serving, Some _, _, Readiness.Ready -> Degraded
+  | Lifecycle.Serving, None, Lazy_task_queue.Pending _, Readiness.Ready -> Lazy
+  | Lifecycle.Serving, None, Lazy_task_queue.Complete, Readiness.Ready -> Ready
   | Lifecycle.Draining, _, _, Readiness.Ready -> Ready
   | Lifecycle.Draining, _, _, Readiness.NotReady -> Blocking
   | Lifecycle.Stopped, _, _, _ -> Blocking
@@ -318,7 +238,6 @@ let pp_flat_phase fmt p = Format.fprintf fmt "%s" (flat_phase_to_string p)
 let product_to_json state =
   `Assoc [
     ("lifecycle", `String (Lifecycle.phase_to_string state.lifecycle));
-    ("backend", `String (Backend.phase_to_string state.backend));
     ("lazy_tasks",
      match state.lazy_tasks with
      | Lazy_task_queue.Complete -> `String "complete"
@@ -326,7 +245,6 @@ let product_to_json state =
        `Assoc [("pending", `List (List.map (fun t -> `String t) tasks))]);
     ("readiness", `String (Readiness.phase_to_string state.readiness));
     ("last_error", Json_util.string_opt_to_json state.last_error);
-    ("fallback_reason", Json_util.string_opt_to_json state.fallback_reason);
     ("flat_phase",
      `String (match derive_flat_phase state with
        | Blocking -> "blocking"

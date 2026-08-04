@@ -1,9 +1,5 @@
-include module type of struct
-  include Masc_task_handlers.Task
-end
 module Tool : module type of Masc_task_handlers.Tool_task
 module Anti_rationalization : module type of Masc_task_handlers.Anti_rationalization
-module Dispatch : module type of Masc_task_handlers.Task_dispatch
 module Goal_assignment : module type of Masc_task_handlers.Task_goal_assignment
 module Schemas : module type of Masc_task_handlers.Tool_task_schemas
 module Payloads : module type of Masc_task_handlers.Tool_task_payloads

@@ -500,7 +500,6 @@ let extra_guard_fragments_for_name = function
       [ "agent_name must match the authenticated agent";
         "no credential found" ]
   | "masc_auth_revoke" -> [ "no credential found" ]
-  | "masc_board_migrate" -> [ "requires postgresql backend" ]
   | "masc_dashboard" -> [ "Dashboard handler not registered" ]
   | "masc_get_metrics" -> [ "no metrics found" ]
   | "masc_fusion" ->

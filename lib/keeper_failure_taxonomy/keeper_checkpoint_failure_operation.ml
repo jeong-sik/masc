@@ -1,6 +1,4 @@
 type t =
-  | Migrate_main_history
-  | Migrate_internal_history
   | Oas_parse
   | Oas_store
   | Oas_io
@@ -10,8 +8,6 @@ type t =
   | Compaction_save
 
 let to_label = function
-  | Migrate_main_history -> "migrate_main_history"
-  | Migrate_internal_history -> "migrate_internal_history"
   | Oas_parse -> "oas_parse"
   | Oas_store -> "oas_store"
   | Oas_io -> "oas_io"

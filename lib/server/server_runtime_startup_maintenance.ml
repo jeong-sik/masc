@@ -1,6 +1,6 @@
-(* Server_runtime_startup_maintenance — startup pruning and keeper history cleanup.
+(* Server_runtime_startup_maintenance — startup pruning.
    Extracted from server_runtime_bootstrap.ml during godfile decomposition.
-   Contains JSONL/auth-archive pruning and keeper history migration. *)
+   Contains JSONL and auth-archive pruning. *)
 
 (* ── Startup pruning ───────────────────────────────── *)
 
@@ -185,47 +185,3 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn -> Log.Misc.warn "startup prune failed: %s (next boot retries; disk impact bounded by retention)" (Printexc.to_string exn))
-
-
-let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
-  (try
-     let traces_dir =
-       Filename.concat (Workspace.masc_root_dir (Mcp_server.workspace_config state)) "traces"
-     in
-     if Sys.file_exists traces_dir then begin
-       let moved_total = ref 0 in
-       let dropped_total = ref 0 in
-       let sessions_migrated = ref 0 in
-       Array.iter
-         (fun trace_name ->
-            let trace_dir = Filename.concat traces_dir trace_name in
-            if Sys.is_directory trace_dir then
-              let stats =
-                Keeper_context_core.migrate_session_history_logs
-                  ~session_dir:trace_dir
-              in
-              if stats.moved_lines > 0 || stats.dropped_lines > 0 then begin
-                incr sessions_migrated;
-                moved_total := !moved_total + stats.moved_lines;
-                dropped_total := !dropped_total + stats.dropped_lines;
-                Log.Misc.info
-                  "startup history migration: trace=%s moved=%d dropped=%d kept=%d malformed=%d"
-                  trace_name
-                  stats.moved_lines
-                  stats.dropped_lines
-                  stats.kept_lines
-                  stats.malformed_lines
-              end)
-         (Sys.readdir traces_dir);
-       if !sessions_migrated > 0 then
-         Log.Misc.info
-           "startup history migration: migrated %d session(s), moved %d internal line(s), dropped %d prompt line(s)"
-           !sessions_migrated
-           !moved_total
-           !dropped_total
-     end
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-       Log.Misc.warn "startup history migration failed: %s (next boot retries; legacy format readable)"
-         (Printexc.to_string exn))

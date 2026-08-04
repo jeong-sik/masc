@@ -279,7 +279,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
               (`Assoc [
                  ("ready", `Bool true);
                  ("phase", `String (Server_startup_state.phase_to_string current.phase));
-                 ("backend_mode", `String current.backend_mode);
                ],
                `OK)
             else

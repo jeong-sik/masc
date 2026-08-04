@@ -1,6 +1,6 @@
 (** Server_startup_state — In-memory singleton that tracks which
-    startup phase the server is in, plus backend identification,
-    pending lazy-task list, error/fallback notes, and path/config
+    startup phase the server is in, plus the pending lazy-task list, errors,
+    and path/config
     resolution snapshots.
 
     The state is a process-global mutable [ref]. All observers and
@@ -25,10 +25,8 @@ val phase_to_string : phase -> string
 type t = {
   phase : phase;
   state_ready : bool;
-  backend_mode : string;
   pending_lazy_tasks : string list;
   last_error : string option;
-  fallback_reason : string option;
   path_diagnostics : Yojson.Safe.t option;
   config_resolution : Yojson.Safe.t option;
   started_at : float;
@@ -61,28 +59,20 @@ val default_watchdog_timeout_sec : float
 val watchdog_timeout_sec : unit -> float
 
 (** Current snapshot as JSON:
-    [{phase, state_ready, backend_mode, pending_lazy_tasks,
-      last_error, fallback_reason, path_diagnostics,
+    [{phase, state_ready, pending_lazy_tasks,
+      last_error, path_diagnostics,
       config_resolution, elapsed_sec, watchdog_timeout_sec}]. *)
 val to_yojson : unit -> Yojson.Safe.t
 
 (** {1 Transitions} *)
 
-(** Reset to [Blocking] / not-ready. [backend_mode] defaults to
-    ["unknown"]. *)
-val reset : ?backend_mode:string -> unit -> unit
+(** Reset to [Blocking] / not-ready. *)
+val reset : unit -> unit
 
-val mark_blocking : backend_mode:string -> unit
-
-type ready_backend =
-  | Memory_backend
-  | Filesystem_backend
-
-val ready_backend_to_string : ready_backend -> string
+val mark_blocking : unit -> unit
 
 type state_ready_transition_stage =
   | Boot_completion
-  | Backend_resolution
   | Readiness_publication
 
 type state_ready_error =
@@ -93,10 +83,10 @@ type state_ready_error =
 
 val state_ready_error_to_string : state_ready_error -> string
 
-(** Complete the lifecycle, resolve the exact initialized backend, and publish
-    readiness as one validated state update. No partial transition is stored
+(** Complete the lifecycle and publish readiness as one validated state
+    update. No partial transition is stored
     when any product invariant rejects the publication. *)
-val mark_state_ready : backend:ready_backend -> (unit, state_ready_error) result
+val mark_state_ready : unit -> (unit, state_ready_error) result
 
 (** Record the lazy-task inventory while startup is still blocking. This does
     not publish readiness or transition the server lifecycle to [Serving]. It
@@ -118,10 +108,6 @@ val finish_lazy_task : task:string -> unit
 val fail_lazy_task : task:string -> error:string -> unit
 
 val mark_degraded : error:string -> unit
-
-(** Record the fallback reason (e.g. ["using filesystem backend
-    because PG unreachable"]). *)
-val note_fallback : string -> unit
 
 (** Persist path-diagnostics and config-resolution JSON snapshots
     for the next {!to_yojson} call. *)

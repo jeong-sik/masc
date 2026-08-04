@@ -1,9 +1,9 @@
 (** Isolated MCP session-bound Task lifecycle smoke.
 
     This exercises protocol admission, session identity, typed tool dispatch,
-    workspace persistence, and Task completion once inside an isolated
-    workspace. It is not evidence for the product-level Keeper Full Lifecycle
-    contract. *)
+    workspace persistence, and Task verification submission once inside an
+    isolated workspace. It is not evidence for the product-level Keeper Full
+    Lifecycle contract. *)
 
 open Alcotest
 
@@ -173,19 +173,26 @@ let test_session_task_lifecycle () =
            (`Assoc
              [ ("agent_name", `String "session-task-smoke")
              ; ("task_id", `String claimed_task.id)
-             ; ("action", `String "done")
-             ; ("notes", `String "Synthetic MCP Task lifecycle completed")
+             ; ("action", `String "submit_for_verification")
+             ; ( "notes"
+               , `String
+                   "completion_notes: Synthetic MCP Task lifecycle completed. \
+                    reviewable_evidence_ref: note:session lifecycle smoke passed."
+               )
              ]))
-      |> check_tool_success "masc_transition done";
+      |> check_tool_success "masc_transition submit_for_verification";
 
-      let completed_task = task_exn config in
-      (match completed_task.Masc_domain.task_status with
-       | Masc_domain.Done { assignee; notes; _ } ->
-         check string "completion owner" "session-task-smoke" assignee;
-         check (option string) "durable completion note"
-           (Some "Synthetic MCP Task lifecycle completed") notes
+      let submitted_task = task_exn config in
+      (match submitted_task.Masc_domain.task_status with
+       | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
+         check string "submission owner" "session-task-smoke" assignee;
+         check bool "verification id persisted" true
+           (String.trim verification_id <> "");
+         check bool "verification request persisted" true
+           (Sys.file_exists
+              (Workspace_verification_store.request_path base_path verification_id))
        | status ->
-         failf "task did not reach done: %s"
+         failf "task did not reach awaiting_verification: %s"
            (Masc_domain.task_status_to_string status));
       check (option string) "current task cleared" None
         (Masc.Task.Planning_eio.get_current_task config))

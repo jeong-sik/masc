@@ -46,6 +46,13 @@ let with_eio_temp_dir f =
     ~finally:Fs_compat.clear_fs
     (fun () -> with_temp_dir f)
 
+let with_eio_temp_dir_and_clock f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect
+    ~finally:Fs_compat.clear_fs
+    (fun () -> with_temp_dir (f ~clock:(Eio.Stdenv.clock env)))
+
 let contains_substring text needle =
   let text_len = String.length text in
   let needle_len = String.length needle in
@@ -640,7 +647,7 @@ let test_system_llm_rejection_does_not_derive_unregistered_keeper () =
   )
 
 let test_system_llm_agent_commits_without_a_keeper_verifier () =
-  with_eio_temp_dir (fun base_path ->
+  with_eio_temp_dir_and_clock (fun ~clock base_path ->
     Masc.Workspace_metric_hooks.install ();
     let prompt_dir =
       match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -694,7 +701,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            with
            | Ok _ -> ()
            | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
-          CA.start ~sw ~config;
+          CA.start ~sw ~clock ~config;
           (match
              W.transition_task_r
                config
@@ -717,8 +724,86 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
           | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)))
   )
 
+let test_system_llm_agent_rejects_invalid_contract_without_stalling () =
+  with_eio_temp_dir_and_clock (fun ~clock base_path ->
+    Masc.Workspace_metric_hooks.install ();
+    let previous_notification =
+      Atomic.get Workspace_hooks.verification_notify_verdict_fn
+    in
+    let previous_submitted = Atomic.get Workspace_hooks.verification_submitted_fn in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
+        Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted)
+      (fun () ->
+        Eio.Switch.run (fun sw ->
+          let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
+          Atomic.set Workspace_hooks.verification_notify_verdict_fn
+            (fun ~task_id ~authority ~verification_id ~decision ->
+               previous_notification
+                 ~task_id
+                 ~authority
+                 ~verification_id
+                 ~decision;
+               Eio.Promise.resolve resolve_verdict_committed ());
+          let config = W.default_config base_path in
+          ignore (W.init config ~agent_name:(Some "contract-retry-worker"));
+          ignore
+            (W.add_task
+               config
+               ~title:"invalid completion contract"
+               ~priority:1
+               ~description:"the producer must be able to resubmit");
+          let original_started_at = "2026-08-04T00:00:00Z" in
+          let verification_id = "vrf-missing-contract" in
+          let backlog = W.read_backlog config in
+          let tasks =
+            List.map
+              (fun (task : Masc_domain.task) ->
+                 { task with
+                   task_status =
+                     Masc_domain.AwaitingVerification
+                       { assignee = "contract-retry-worker"
+                       ; started_at = original_started_at
+                       ; submitted_at = "2026-08-04T00:01:00Z"
+                       ; verification_id
+                       }
+                 })
+              backlog.tasks
+          in
+          W.write_backlog config { backlog with tasks };
+          let task =
+            match tasks with
+            | [ task ] -> task
+            | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)
+          in
+          CA.start ~sw ~clock ~config;
+          let submitted = Atomic.get Workspace_hooks.verification_submitted_fn in
+          submitted
+            config
+            ~task
+            ~assignee:"contract-retry-worker"
+            ~verification_id;
+          Eio.Promise.await verdict_committed;
+          match W.get_tasks_raw config with
+          | [ { task_status = Masc_domain.InProgress { assignee; started_at }; _ } ] ->
+            Alcotest.(check string)
+              "rejection returns task to its producer"
+              "contract-retry-worker"
+              assignee;
+            Alcotest.(check string)
+              "rejection preserves original claim time"
+              original_started_at
+              started_at
+          | [ task ] ->
+            Alcotest.failf
+              "invalid contract left task stranded: %s"
+              (Masc_domain.task_status_to_string task.task_status)
+          | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)))
+  )
+
 let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
-  with_eio_temp_dir (fun base_path ->
+  with_eio_temp_dir_and_clock (fun ~clock base_path ->
     Masc.Workspace_metric_hooks.install ();
     let prompt_dir =
       match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -812,7 +897,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
               backlog.tasks
           in
           W.write_backlog config { backlog with tasks };
-          CA.start ~sw ~config;
+          CA.start ~sw ~clock ~config;
           Eio.Promise.await reviewer_called;
           Eio.Promise.await verdict_committed;
           (match !captured_prompt with
@@ -863,6 +948,7 @@ let test_rejected_verdict_audit_preserves_reason () =
                task_status =
                  Masc_domain.AwaitingVerification
                    { assignee = "audit-producer"
+                   ; started_at = "2026-07-27T23:59:00Z"
                    ; submitted_at = Masc_domain.now_iso ()
                    ; verification_id = "vrf-audit-rejected"
                    }
@@ -1741,6 +1827,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
              task_status =
                Masc_domain.AwaitingVerification
                  { assignee = "keeper-executor-agent"
+                 ; started_at = "2026-07-27T23:59:00Z"
                  ; submitted_at = "2026-07-28T00:00:00Z"
                  ; verification_id = request_id
                  }
@@ -1835,6 +1922,8 @@ let () =
         test_system_llm_rejection_does_not_derive_unregistered_keeper;
       Alcotest.test_case "system LLM commits without Keeper verifier" `Quick
         test_system_llm_agent_commits_without_a_keeper_verifier;
+      Alcotest.test_case "system LLM invalid contract returns to producer" `Quick
+        test_system_llm_agent_rejects_invalid_contract_without_stalling;
       Alcotest.test_case "system LLM uses persisted request contract" `Quick
         test_system_llm_agent_uses_persisted_request_contract_snapshot;
       Alcotest.test_case "rejected verdict audit keeps reason" `Quick

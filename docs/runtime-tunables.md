@@ -181,22 +181,22 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_AUTONOMY_QUIET_END` | typed:int | unclassified | unclassified | 85 | Quiet hours end (0-23). |
 | `MASC_AUTONOMY_QUIET_START` | typed:int | unclassified | unclassified | 81 | Quiet hours start (0-23). Keeper suppresses actions in this window. |
 | `MASC_AUTONOMY_VOTE_DECAY_FACTOR` | typed:float | unclassified | unclassified | 93 | {1 Thompson Sampling / Agent Selection Configuration} Primary env vars: MASC_AUTONOMY_*. |
-| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 174 | Dashboard fixture name override. |
-| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 170 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
-| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 183 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
-| `MASC_MAINTENANCE_PULSE_INTERVAL_SEC` | typed:float | Runtime | operator | 106 | Maintenance Pulse interval (seconds). Controls the orphan-observation and channel-dedup consumers. Clamped to >= 1.0 ... |
+| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 175 | Dashboard fixture name override. |
+| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 171 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
+| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 184 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
+| `MASC_MAINTENANCE_PULSE_INTERVAL_SEC` | typed:float | Runtime | operator | 107 | Maintenance Pulse interval (seconds). Controls the orphan-observation and channel-dedup consumers, and bounds resched... |
 | `MASC_OAUTH_ACCESS_TOKEN_TTL_SEC` | typed:int | Security | operator | 37 | Access-token lifetime in seconds. @category Security @ops_class operator |
 | `MASC_OAUTH_CODE_TTL_SEC` | typed:int | Security | operator | 30 | Authorization-code lifetime in seconds. @category Security @ops_class operator |
 | `MASC_OAUTH_ENABLED` | typed:bool | Security | operator | 24 | Enable the OAuth authorization server. @category Security @ops_class operator |
 | `MASC_OAUTH_MAX_CLIENTS` | typed:int | Security | operator | 59 | Maximum durable dynamic-client registrations. Exact idempotent retries remain admissible at capacity; a distinct regi... |
 | `MASC_OAUTH_MAX_PENDING_CODES` | typed:int | Security | operator | 51 | Maximum process-local pending authorization codes. @category Security @ops_class operator |
 | `MASC_OAUTH_REFRESH_TOKEN_TTL_SEC` | typed:int | Security | operator | 44 | Refresh-token lifetime in seconds. @category Security @ops_class operator |
-| `MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE` | feature_flag | n/a | n/a | 161 | Enable background revalidation when serving stale snapshots. Default: true. Disabling makes stale entries behave like... |
-| `MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR` | typed:float | Timeouts | operator | 155 | Stale-while-revalidate grace factor. After the TTL expires, the previous snapshot is still served for [ttl * factor] ... |
-| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 147 | Operator snapshot cache TTL (seconds). Default: 30. |
+| `MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE` | feature_flag | n/a | n/a | 162 | Enable background revalidation when serving stale snapshots. Default: true. Disabling makes stale entries behave like... |
+| `MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR` | typed:float | Timeouts | operator | 156 | Stale-while-revalidate grace factor. After the TTL expires, the previous snapshot is still served for [ttl * factor] ... |
+| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 148 | Operator snapshot cache TTL (seconds). Default: 30. |
 | `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 68 | Cleanup interval for stale rate limit buckets (seconds) |
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 72 | Max age for rate limit entries before cleanup (seconds) |
-| `MASC_SCHEDULE_RUNNER_INTERVAL_SEC` | typed:float | unclassified | unclassified | 140 |  |
+| `MASC_SCHEDULE_RUNNER_INTERVAL_SEC` | typed:float | unclassified | unclassified | 141 |  |
 
 ## Env_config_sandbox (15 knobs; typed classification 1/14)
 

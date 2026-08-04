@@ -99,11 +99,13 @@ type task_status =
   | InProgress of { assignee : string; started_at : string }
   | AwaitingVerification of
       { assignee : string
+      ; started_at : string
       ; submitted_at : string
       ; verification_id : string
       }
-      (** No verifier binding. [verification_id] joins to the evidence record
-          the authority reads. *)
+      (** No verifier binding. [started_at] preserves the producer's original
+          work start across submission and rejection; [verification_id] joins
+          to the evidence record the authority reads. *)
   | Done of { assignee : string; completed_at : string; notes : string option }
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string option }
 [@@deriving show]
@@ -181,13 +183,6 @@ type task =
 
 val task_to_yojson : task -> Yojson.Safe.t
 val task_of_yojson : Yojson.Safe.t -> (task, string) result
-
-val task_requires_verification : task -> bool
-(** RFC-0323 W1 Phase A (implements RFC-0308): true when the task's contract
-    opts into strict verification — completion must route through
-    submit -> approve instead of a direct done. Contract presence is not the
-    trigger (creation auto-fills an advisory contract for every task);
-    [strict] is the explicit persisted opt-in. *)
 
 type task_claim_readiness =
   | Claim_ready

@@ -22,6 +22,7 @@ let in_progress =
 let awaiting =
   T.AwaitingVerification {
     assignee = "k1";
+    started_at = now_iso;
     submitted_at = now_iso;
     verification_id = "req-1";
   }

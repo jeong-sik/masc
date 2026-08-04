@@ -203,7 +203,7 @@ let task_status_snapshot_fields (status : Masc_domain.task_status) =
   | Masc_domain.Todo -> None, None, None
   | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
     Some assignee, None, None
-  | Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id } ->
+  | Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id; _ } ->
     Some assignee, Some submitted_at, Some verification_id
   | Masc_domain.Done { assignee; _ } -> Some assignee, None, None
   | Masc_domain.Cancelled { cancelled_by; _ } -> Some cancelled_by, None, None

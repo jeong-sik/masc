@@ -284,6 +284,7 @@ type task_status =
   | InProgress of { assignee: string; started_at: string }
   | AwaitingVerification of {
       assignee: string;
+      started_at: string;
       submitted_at: string;
       verification_id: string;
         (** An obligation with no assignable satisfier. There is deliberately no
@@ -382,6 +383,7 @@ let task_status_schema_witnesses : task_status list =
   ; InProgress { assignee = placeholder; started_at = placeholder }
   ; AwaitingVerification
       { assignee = placeholder
+      ; started_at = placeholder
       ; submitted_at = placeholder
       ; verification_id = placeholder
       }
@@ -417,10 +419,11 @@ let task_status_to_yojson = function
         ("completed_at", `String completed_at);
         ("notes", Json_util.string_opt_to_json notes);
       ]
-  | AwaitingVerification { assignee; submitted_at; verification_id } ->
+  | AwaitingVerification { assignee; started_at; submitted_at; verification_id } ->
       `Assoc [
         ("status", `String "awaiting_verification");
         ("assignee", `String assignee);
+        ("started_at", `String started_at);
         ("submitted_at", `String submitted_at);
         ("verification_id", `String verification_id);
       ]
@@ -445,11 +448,21 @@ let task_status_of_yojson json =
     | "done" ->
         Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
     | "awaiting_verification" ->
-        Ok (AwaitingVerification
-              { assignee = req "assignee"
-              ; submitted_at = req "submitted_at"
-              ; verification_id = req "verification_id"
-              })
+        (match Json_util.get_string json "started_at" with
+         | Some started_at when Option.is_some (parse_iso8601_opt started_at) ->
+           Ok
+             (AwaitingVerification
+                { assignee = req "assignee"
+                ; started_at
+                ; submitted_at = req "submitted_at"
+                ; verification_id = req "verification_id"
+                })
+         | Some started_at ->
+           Error
+             (Printf.sprintf
+                "awaiting_verification started_at must be RFC 3339, got %S"
+                started_at)
+         | None -> Error "awaiting_verification requires started_at")
     | "cancelled" ->
         Ok (Cancelled
               { cancelled_by = req "cancelled_by"
@@ -541,19 +554,6 @@ type task = {
   reclaim_policy: task_reclaim_policy option; [@default None]
   do_not_reclaim_reason: string option; [@default None]
 } [@@deriving show]
-
-(* RFC-0323 W1 Phase A (implements RFC-0308): completion must route through
-   submit -> approve when the contract opts into strict verification.
-   Contract *presence* is deliberately NOT the trigger: task creation
-   auto-fills an advisory contract for every task
-   (ensure_task_contract_for_verification), so presence is vacuously true
-   fleet-wide and would flip Phase B semantics on unannounced. [strict] is
-   the explicit, persisted opt-in — it already gates release-handoff the
-   same way. Phase B replaces this predicate with a default-on one. *)
-let task_requires_verification (t : task) =
-  match t.contract with
-  | Some contract -> contract.strict
-  | None -> false
 
 (* RFC-0323 G-10: the typed reclaim claim gate is retired. #23661 removed its
    Todo producer; this change removes the Done producer, so nothing can be

@@ -1020,9 +1020,7 @@ let () =
 (* Issue #7646: valid_next_actions_for_status hint tests. One per
    [Masc_domain.task_status] variant. The witness ensures every variant has a
    defined hint AND the ones with content list each action canonically. *)
-let next_hint ?(requires_verification = false) status =
-  Workspace_task.next_actions_hint ~requires_verification status
-;;
+let next_hint = Workspace_task.next_actions_hint
 
 let () =
   test "next_hint_todo lists claim, release, and cancel" (fun () ->
@@ -1034,32 +1032,23 @@ let () =
 ;;
 
 let () =
-  test "next_hint_claimed lists start, done, release, cancel" (fun () ->
+  test "next_hint_claimed lists submit, start, release, cancel" (fun () ->
     let h = next_hint (Masc_domain.Claimed { assignee = "a"; claimed_at = "t" }) in
     assert (str_contains h "start");
-    assert (str_contains h "done");
+    assert (str_contains h "submit_for_verification");
+    assert (not (str_contains h "done"));
     assert (str_contains h "release");
     assert (str_contains h "cancel"))
 ;;
 
 let () =
-  test "next_hint_in_progress lists done and release" (fun () ->
+  test "next_hint_in_progress lists submit and release" (fun () ->
     let h = next_hint (Masc_domain.InProgress { assignee = "a"; started_at = "t" }) in
-    assert (str_contains h "done");
+    assert (str_contains h "submit_for_verification");
+    assert (not (str_contains h "done"));
     assert (str_contains h "release");
     assert (not (str_contains h "claim"))
     (* Claim is not legal from InProgress *))
-;;
-
-let () =
-  test "next_hint_strict_in_progress lists submit but not done" (fun () ->
-    let h =
-      next_hint
-        ~requires_verification:true
-        (Masc_domain.InProgress { assignee = "a"; started_at = "t" })
-    in
-    assert (str_contains h "submit_for_verification");
-    assert (not (str_contains h "done")))
 ;;
 
 let () =
@@ -1067,7 +1056,11 @@ let () =
     let h =
       next_hint
         (Masc_domain.AwaitingVerification
-           { assignee = "a"; submitted_at = "t"; verification_id = "v" })
+           { assignee = "a"
+           ; started_at = "2026-07-13T00:00:00Z"
+           ; submitted_at = "t"
+           ; verification_id = "v"
+           })
     in
     assert (String.equal h ""))
 ;;

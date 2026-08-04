@@ -5,7 +5,6 @@ let owner = "alice"
 let now = "2026-07-13T00:00:00Z"
 
 let decide
-      ?(requires_verification = true)
       ?(notes = "evidence at /tmp/proof")
       ?(reason = "")
       ~same_agent
@@ -19,7 +18,6 @@ let decide
     ~agent_name:owner
     ~task_id:"task-1"
     ~task_status
-    ~requires_verification
     ~action
     ~now
     ~notes
@@ -31,6 +29,7 @@ let in_progress = D.InProgress { assignee = owner; started_at = now }
 let awaiting =
   D.AwaitingVerification
     { assignee = owner
+    ; started_at = now
     ; submitted_at = now
     ; verification_id = "vrf-1"
     }
@@ -60,18 +59,66 @@ let test_claimed_done_requires_verification_submission () =
   |> expect_error L.Verification_submission_required
 ;;
 
-let test_default_done_is_terminal () =
+let test_done_has_no_non_verification_lane () =
+  decide ~same_agent:true ~task_status:in_progress ~action:D.Done_action ()
+  |> expect_error L.Verification_submission_required
+;;
+
+let test_verification_preserves_original_start_time () =
+  let original_started_at = "2026-07-12T23:45:00Z" in
+  let submitted =
+    match
+      decide
+        ~same_agent:true
+        ~task_status:(D.InProgress { assignee = owner; started_at = original_started_at })
+        ~action:D.Submit_for_verification
+        ()
+    with
+    | Ok
+        { new_status =
+            D.AwaitingVerification { started_at; submitted_at; verification_id; _ }
+        ; _
+        }
+      when String.equal started_at original_started_at
+           && String.equal submitted_at now
+           && String.equal verification_id "vrf-1" ->
+      D.AwaitingVerification
+        { assignee = owner; started_at; submitted_at; verification_id }
+    | Ok _ | Error _ -> failwith "submission must preserve the producer start time"
+  in
   match
-    decide
-      ~requires_verification:false
-      ~same_agent:true
-      ~task_status:in_progress
-      ~action:D.Done_action
-      ()
+    L.decide_verdict
+      ~authority:(D.System_llm_agent { agent_run_id = "judge-run-preserve-start" })
+      ~verdict:(D.Verdict_rejected { reason = "missing evidence" })
+      ~task_id:"task-1"
+      ~verification_id:"vrf-1"
+      ~task_status:submitted
+      ~now:"2026-07-13T00:10:00Z"
+      ~notes:""
   with
-  | Ok { new_status = D.Done { assignee; _ }; _ }
-    when String.equal assignee owner -> ()
-  | Ok _ | Error _ -> failwith "advisory/default owner completion must be terminal"
+  | Ok { decision = { new_status = D.InProgress { started_at; _ }; _ }; _ }
+    when String.equal started_at original_started_at -> ()
+  | Ok _ | Error _ -> failwith "rejection must restore the original producer start time"
+;;
+
+let test_awaiting_metrics_use_original_start_time () =
+  let original_started_at = "2026-07-12T23:45:00Z" in
+  let expected =
+    match D.parse_iso8601_opt original_started_at with
+    | Some timestamp -> timestamp
+    | None -> failwith "test timestamp must be valid RFC 3339"
+  in
+  let actual =
+    Workspace_task_classify.task_started_at_unix
+      (D.AwaitingVerification
+         { assignee = owner
+         ; started_at = original_started_at
+         ; submitted_at = "2026-07-13T00:00:00Z"
+         ; verification_id = "vrf-metrics"
+         })
+  in
+  if Float.compare expected actual <> 0
+  then failwith "awaiting metrics must use the original producer start time"
 ;;
 
 (* A verdict is not an agent action. There is no [task_action] constructor for it,
@@ -220,7 +267,9 @@ let test_awaiting_is_claimable_by_nobody () =
 let () =
   test_done_requires_verification_submission ();
   test_claimed_done_requires_verification_submission ();
-  test_default_done_is_terminal ();
+  test_done_has_no_non_verification_lane ();
+  test_verification_preserves_original_start_time ();
+  test_awaiting_metrics_use_original_start_time ();
   test_verdict_is_not_an_agent_action ();
   test_verdict_requires_authority_and_reason ();
   test_verdict_rejects_stale_verification_id ();

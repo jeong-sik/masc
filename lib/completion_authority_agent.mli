@@ -5,7 +5,11 @@
     an immutable verification request/evidence snapshot and commits a typed
     completion verdict through the workspace authority boundary. *)
 
-val start : sw:Eio.Switch.t -> config:Workspace_utils_backend_setup.config -> unit
+val start :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  config:Workspace_utils_backend_setup.config ->
+  unit
 
 module For_testing : sig
   val evidence_refs_of_output :

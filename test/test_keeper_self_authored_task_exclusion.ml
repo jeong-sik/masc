@@ -92,6 +92,7 @@ let test_self_authored_verification_remains_eligible () =
   let task_status =
     Masc_domain.AwaitingVerification
       { assignee = "executor"
+      ; started_at = "2026-07-20T00:00:00Z"
       ; submitted_at = "2026-07-20T01:00:00Z"
       ; verification_id = "verification-1"
       }

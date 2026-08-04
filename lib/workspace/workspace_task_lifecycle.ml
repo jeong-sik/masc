@@ -58,7 +58,6 @@ let decide
       ~agent_name
       ~task_id
       ~task_status
-      ~requires_verification
       ~action
       ~now
       ~notes
@@ -102,9 +101,7 @@ let decide
       | Masc_domain.InProgress { assignee; _ } ) ) ->
     if not (same_agent assignee)
     then Error Invalid_transition
-    else if requires_verification
-    then Error Verification_submission_required
-    else ok (done_status ~assignee ~now ~notes)
+    else Error Verification_submission_required
   | Masc_domain.Done_action, Masc_domain.Done _ -> ok task_status
   | ( Masc_domain.Done_action
     , ( Masc_domain.Todo
@@ -132,12 +129,28 @@ let decide
     , (Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Cancelled _) ) ->
     Error Invalid_transition
   | ( Masc_domain.Submit_for_verification
-    , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _}) ) ->
+    , Masc_domain.Claimed { assignee; claimed_at } ) ->
     if same_agent assignee
     then
       ok
         (Masc_domain.AwaitingVerification
-           { assignee; submitted_at = now; verification_id = new_verification_id () })
+           { assignee
+           ; started_at = claimed_at
+           ; submitted_at = now
+           ; verification_id = new_verification_id ()
+           })
+    else Error Invalid_transition
+  | ( Masc_domain.Submit_for_verification
+    , Masc_domain.InProgress { assignee; started_at } ) ->
+    if same_agent assignee
+    then
+      ok
+        (Masc_domain.AwaitingVerification
+           { assignee
+           ; started_at
+           ; submitted_at = now
+           ; verification_id = new_verification_id ()
+           })
     else Error Invalid_transition
   | ( Masc_domain.Submit_for_verification
     , ( Masc_domain.Todo
@@ -187,7 +200,7 @@ let decide_verdict
   in
   match task_status with
   | Masc_domain.AwaitingVerification
-      { assignee; verification_id = actual_verification_id; _ } ->
+      { assignee; started_at; verification_id = actual_verification_id; _ } ->
     if not (String.equal expected_verification_id actual_verification_id)
     then
       Error
@@ -207,7 +220,7 @@ let decide_verdict
            provenance
              ~producer:assignee
              ~verification_id:actual_verification_id
-             { new_status = Masc_domain.InProgress { assignee; started_at = now }
+             { new_status = Masc_domain.InProgress { assignee; started_at }
              ; set_current = Some task_id
              })
   | Masc_domain.Todo
@@ -217,7 +230,7 @@ let decide_verdict
   | Masc_domain.Cancelled _ -> Error Invalid_transition
 ;;
 
-let valid_next_actions ~same_agent ~task_status ~requires_verification =
+let valid_next_actions ~same_agent ~task_status =
   let same_agent_pred _ = same_agent in
   let try_action action =
     match
@@ -227,7 +240,6 @@ let valid_next_actions ~same_agent ~task_status ~requires_verification =
         ~agent_name:""
         ~task_id:""
         ~task_status
-        ~requires_verification
         ~action
         ~now:""
         ~notes:"preview"

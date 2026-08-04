@@ -31,6 +31,7 @@ let status_in_progress =
 let status_awaiting =
   T.AwaitingVerification
     { assignee = "k1"
+    ; started_at = now
     ; submitted_at = now
     ; verification_id = "req-1"
     }

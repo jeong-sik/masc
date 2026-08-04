@@ -2,117 +2,197 @@
 
 include Board_core
 
-let record_post_meta_json_read_drop () =
-  Board_metrics_hooks.inc_persistence_read_drop
-    ~surface:Board_metrics_hooks.Board_post_meta_json
-    ~reason:Read_drop_reason.Invalid_payload
-;;
-
 let visibility_of_string = Board_core_classify.visibility_of_string
 
-(* RFC-0233 §7: decode the typed post origin. Parse, don't repair — an absent
-   [origin], a non-object value, or a malformed sub-field all degrade to [None]
-   (per-field for the sub-fields), NEVER dropping the row: origin is provenance
-   metadata, not load-bearing identity (contrast the [meta] row-drop below).
-   [Ids.Turn_ref.of_string] is total and returns [None] on a malformed join
-   key. An all-[None] origin decodes to [None] (no empty record carried). *)
+let has_exact_field_set ~allowed fields =
+  let rec loop seen = function
+    | [] -> true
+    | (name, _) :: rest ->
+      if List.mem name seen || not (List.mem name allowed)
+      then false
+      else loop (name :: seen) rest
+  in
+  loop [] fields
+;;
+
+let post_field_names =
+  [ "id"
+  ; "author"
+  ; "title"
+  ; "body"
+  ; "post_kind"
+  ; "content"
+  ; "visibility"
+  ; "created_at"
+  ; "updated_at"
+  ; "expires_at"
+  ; "votes_up"
+  ; "votes_down"
+  ; "score"
+  ; "reply_count"
+  ; "pinned"
+  ; "hearth"
+  ; "thread_id"
+  ; "origin"
+  ; "classification_reason"
+  ; "meta"
+  ]
+;;
+
+let comment_field_names =
+  [ "id"
+  ; "post_id"
+  ; "parent_id"
+  ; "author"
+  ; "content"
+  ; "created_at"
+  ; "expires_at"
+  ; "votes_up"
+  ; "votes_down"
+  ; "score"
+  ]
+;;
+
+let required_string fields key =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> Some value
+  | None | Some _ -> None
+;;
+
+let required_float fields key =
+  match List.assoc_opt key fields with
+  | Some (`Float value) -> Some value
+  | None | Some _ -> None
+;;
+
+let required_int fields key =
+  match List.assoc_opt key fields with
+  | Some (`Int value) -> Some value
+  | None | Some _ -> None
+;;
+
+let required_bool fields key =
+  match List.assoc_opt key fields with
+  | Some (`Bool value) -> Some value
+  | None | Some _ -> None
+;;
+
+let optional_string fields key =
+  match List.assoc_opt key fields with
+  | None -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some _ -> Error ()
+;;
+
+let optional_meta fields =
+  match List.assoc_opt "meta" fields with
+  | None -> Ok None
+  | Some (`Assoc _ as meta) -> Ok (Some meta)
+  | Some _ -> Error ()
+;;
+
+(* RFC-0233 §7: an emitted origin is a current typed value, not a repairable
+   hint. Absent [origin] remains valid; a present malformed object rejects its
+   row at the caller. *)
 let post_origin_of_yojson (json : Yojson.Safe.t) : post_origin option =
   match json with
-  | `Assoc _ ->
+  | `Assoc fields ->
     let turn_ref =
-      match Safe_ops.json_string_opt "turn_ref" json with
-      | Some s -> Ids.Turn_ref.of_string s
-      | None -> None
+      match List.assoc_opt "turn_ref" fields with
+      | None -> Ok None
+      | Some (`String raw) ->
+        (match Ids.Turn_ref.of_string raw with
+         | Some turn_ref -> Ok (Some turn_ref)
+         | None -> Error ())
+      | Some _ -> Error ()
     in
-    let source = Safe_ops.json_string_opt "source" json in
-    let fusion_run_id = Safe_ops.json_string_opt "fusion_run_id" json in
+    let source = optional_string fields "source" in
+    let fusion_run_id = optional_string fields "fusion_run_id" in
     (match turn_ref, source, fusion_run_id with
-     | None, None, None -> None
-     | _ -> Some { turn_ref; source; fusion_run_id })
+     | Ok turn_ref, Ok source, Ok fusion_run_id ->
+       if Option.is_none turn_ref
+          && Option.is_none source
+          && Option.is_none fusion_run_id
+       then None
+       else Some { turn_ref; source; fusion_run_id }
+     | Error (), _, _ | _, Error (), _ | _, _, Error () -> None)
   | _ -> None
 ;;
 
+let optional_origin fields =
+  match List.assoc_opt "origin" fields with
+  | None -> Ok None
+  | Some json ->
+    (match post_origin_of_yojson json with
+     | Some origin -> Ok (Some origin)
+     | None -> Error ())
+;;
+
 let post_of_yojson (json : Yojson.Safe.t) : post option =
-  match
-    ( Safe_ops.json_string_opt "id" json
-    , Safe_ops.json_string_opt "author" json
-    , Safe_ops.json_string_opt "content" json
-    , Safe_ops.json_string_opt "visibility" json
-    , Safe_ops.json_float_opt "created_at" json
-    , Safe_ops.json_float_opt "expires_at" json )
-  with
-  | ( Some id_str
-    , Some author_str
-    , Some content
-    , Some vis_str
-    , Some created_at
-    , Some expires_at ) ->
-    let title_opt = Safe_ops.json_string_opt "title" json in
-    let body_opt = Safe_ops.json_string_opt "body" json in
-    (* Backward compat: default updated_at to created_at if missing *)
-    let updated_at =
-      Safe_ops.json_float_opt "updated_at" json |> Option.value ~default:created_at
-    in
-    let votes_up = Safe_ops.json_int ~default:0 "votes_up" json in
-    let votes_down = Safe_ops.json_int ~default:0 "votes_down" json in
-    let reply_count = Safe_ops.json_int ~default:0 "reply_count" json in
-    let hearth = Safe_ops.json_string_opt "hearth" json in
-    let thread_id = Safe_ops.json_string_opt "thread_id" json in
-    (* Missing on legacy rows persisted before the pin field existed -> default false. *)
-    let pinned = Safe_ops.json_bool ~default:false "pinned" json in
+  match json with
+  | `Assoc fields
+    when has_exact_field_set ~allowed:post_field_names fields ->
+    (match
+       ( required_string fields "id"
+       , required_string fields "author"
+       , required_string fields "title"
+       , required_string fields "body"
+       , required_string fields "content"
+       , required_string fields "post_kind"
+       , required_string fields "visibility"
+       , required_float fields "created_at"
+       , required_float fields "updated_at"
+       , required_float fields "expires_at"
+       , required_int fields "votes_up"
+       , required_int fields "votes_down"
+       , required_int fields "score"
+       , required_int fields "reply_count"
+       , required_bool fields "pinned"
+       , optional_string fields "hearth"
+       , optional_string fields "thread_id"
+       , optional_string fields "classification_reason"
+       , optional_meta fields
+       , optional_origin fields )
+     with
+     | ( Some id_str
+       , Some author_str
+       , Some title
+       , Some body
+       , Some content
+       , Some post_kind_raw
+       , Some vis_str
+       , Some created_at
+       , Some updated_at
+       , Some expires_at
+       , Some votes_up
+       , Some votes_down
+       , Some score
+       , Some reply_count
+       , Some pinned
+       , Ok hearth
+       , Ok thread_id
+       , Ok classification_reason
+       , Ok meta_json
+       , Ok origin ) ->
     let post_kind_opt =
-      match Safe_ops.json_string_opt "post_kind" json with
-      | Some raw -> post_kind_of_string raw
-      | None -> None
+      post_kind_of_string post_kind_raw
     in
     if Option.is_none post_kind_opt
     then
       Log.BoardLog.warn
         "dropping persisted board post %s: missing or invalid post_kind"
         id_str;
-    let meta_json =
-      match Safe_ops.json_member_opt "meta" json with
-      | Some (`Assoc _ as meta) -> Some meta
-      | Some _ | None ->
-        (match Safe_ops.json_string_opt "meta_json" json with
-         | Some raw ->
-           (try Some (Yojson.Safe.from_string raw) with
-            | Yojson.Json_error _ ->
-              record_post_meta_json_read_drop ();
-              None)
-         | None -> None)
-    in
-    let origin =
-      match Safe_ops.json_member_opt "origin" json with
-      | Some o -> post_origin_of_yojson o
-      | None -> None
-    in
-    (match
-       ( Post_id.of_string id_str
-       , Agent_id.of_string author_str
-       , visibility_of_string vis_str
-       , post_kind_opt )
-     with
-     | Ok id, Ok author, Some visibility, Some post_kind ->
-       (match
-          normalize_post_payload
-            ~content
-            ?title:title_opt
-            ?body:body_opt
-            ~post_kind
-            ?meta_json
-            ()
-        with
-        | Error (Board_core_payload.Meta_not_assoc _) ->
-          (* Row-level malformed meta_json: drop the row. The legacy
-             code path silently coerced the same payload to an empty
-             meta object at board_core_payload.ml:73, persisting a
-             "successful" row with the original meta vaporised. We
-             now reject the row outright so callers see the load
-             count drop instead of an invisible data shape change. *)
-          None
-        | Ok (title, body, post_kind, meta_json) ->
-          Some
+    if not (String.equal content body) || score <> votes_up - votes_down
+    then None
+    else
+      (match
+         ( Post_id.of_string id_str
+         , Agent_id.of_string author_str
+         , visibility_of_string vis_str
+         , post_kind_opt )
+       with
+       | Ok id, Ok author, Some visibility, Some post_kind ->
+          let post =
             { id
             ; author
             ; title
@@ -131,54 +211,75 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
             ; hearth
             ; thread_id
             ; origin
-            })
+            }
+          in
+          if Option.equal
+               String.equal
+               classification_reason
+               (post_classification_reason post)
+          then Some post
+          else None
+       | _ -> None)
      | _ -> None)
-  | _ -> None
+  | `Assoc _ | _ -> None
 ;;
 
 let comment_of_yojson (json : Yojson.Safe.t) : comment option =
-  match
-    ( Safe_ops.json_string_opt "id" json
-    , Safe_ops.json_string_opt "post_id" json
-    , Safe_ops.json_string_opt "author" json
-    , Safe_ops.json_string_opt "content" json
-    , Safe_ops.json_float_opt "created_at" json
-    , Safe_ops.json_float_opt "expires_at" json )
-  with
-  | ( Some id_str
-    , Some post_id_str
-    , Some author_str
-    , Some content
-    , Some created_at
-    , Some expires_at ) ->
-    let parent_id_opt = Safe_ops.json_string_opt "parent_id" json in
-    let votes_up = Safe_ops.json_int ~default:0 "votes_up" json in
-    let votes_down = Safe_ops.json_int ~default:0 "votes_down" json in
+  match json with
+  | `Assoc fields
+    when has_exact_field_set ~allowed:comment_field_names fields ->
+    let parent_id =
+      match List.assoc_opt "parent_id" fields with
+      | Some `Null -> Ok None
+      | Some (`String raw) ->
+        (match Comment_id.of_string raw with
+         | Ok parent_id -> Ok (Some parent_id)
+         | Error _ -> Error ())
+      | None | Some _ -> Error ()
+    in
     (match
-       ( Comment_id.of_string id_str
-       , Post_id.of_string post_id_str
-       , Agent_id.of_string author_str )
+       ( required_string fields "id"
+       , required_string fields "post_id"
+       , required_string fields "author"
+       , required_string fields "content"
+       , required_float fields "created_at"
+       , required_float fields "expires_at"
+       , required_int fields "votes_up"
+       , required_int fields "votes_down"
+       , required_int fields "score"
+       , parent_id )
      with
-     | Ok id, Ok post_id, Ok author ->
-       let parent_id =
-         match parent_id_opt with
-         | Some s ->
-           (match Comment_id.of_string s with
-            | Ok cid -> Some cid
-            | _ -> None)
-         | None -> None
-       in
-       Some
-         { id
-         ; post_id
-         ; parent_id
-         ; author
-         ; content
-         ; created_at
-         ; expires_at
-         ; votes_up
-         ; votes_down
-         }
+     | ( Some id_str
+       , Some post_id_str
+       , Some author_str
+       , Some content
+       , Some created_at
+       , Some expires_at
+       , Some votes_up
+       , Some votes_down
+       , Some score
+       , Ok parent_id ) ->
+       if score <> votes_up - votes_down
+       then None
+       else
+         (match
+          ( Comment_id.of_string id_str
+          , Post_id.of_string post_id_str
+          , Agent_id.of_string author_str )
+        with
+        | Ok id, Ok post_id, Ok author ->
+          Some
+            { id
+            ; post_id
+            ; parent_id
+            ; author
+            ; content
+            ; created_at
+            ; expires_at
+            ; votes_up
+            ; votes_down
+            }
+          | _ -> None)
      | _ -> None)
   | _ -> None
 ;;

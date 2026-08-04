@@ -6,7 +6,11 @@ end
 
 val visibility_of_string : string -> visibility option
 val post_of_yojson : Yojson.Safe.t -> post option
+(** Accepts only the exact current {!post_to_yojson} wire shape. *)
+
 val comment_of_yojson : Yojson.Safe.t -> comment option
+(** Accepts only the exact current {!comment_to_yojson} wire shape. *)
+
 val load_persisted_posts : store -> (int, string * exn) result
 (** Load posts from disk into [store].  Returns [Ok loaded_count] on success
     (including when the persistence file is absent: [Ok 0]).  Returns

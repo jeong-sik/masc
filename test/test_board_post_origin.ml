@@ -1,19 +1,14 @@
-(** RFC-0233 §7 (PR-B): board post typed [origin] codec + secondary indexes.
+(** Board persisted-row schema, typed origin codec, and secondary indexes.
 
     Pins the board-side half of the turn-identity contract:
     - {!Board_core_json.post_to_yojson} / {!Board_votes_json.post_of_yojson}
       round-trip the typed [origin] (turn_ref / source / fusion_run_id).
-    - decode is parse-don't-repair: a non-object origin or a malformed
-      [turn_ref] degrades to [None] WITHOUT dropping the post (origin is
-      provenance, not load-bearing identity — contrast the [meta] row-drop).
+    - decoding accepts only the exact current writer shape; malformed origins,
+      missing current fields, legacy keys, coercions, duplicates, and unknown
+      fields reject the row.
     - {!Board_core.find_post_by_turn_ref} / {!find_post_by_run_id} are exact
       O(1) index lookups (RFC §7.6 guard #2/#3, no meta_json scan, no window),
-      and the indexes are rebuilt on load.
-
-    The producer side (which keeper turn populates [origin.turn_ref]) is a
-    named follow-up; PR-B wires only fusion's [fusion_run_id], whose effect —
-    a post findable by [find_post_by_run_id] — is exercised here via a
-    fusion-shaped origin. *)
+      and the indexes are rebuilt on load. *)
 
 open Masc
 
@@ -74,6 +69,19 @@ let replace_key json key value =
   | other -> other
 ;;
 
+let remove_key json key =
+  match json with
+  | `Assoc fields ->
+    `Assoc (List.filter (fun (name, _) -> not (String.equal name key)) fields)
+  | other -> other
+;;
+
+let prepend_field json field =
+  match json with
+  | `Assoc fields -> `Assoc (field :: fields)
+  | other -> other
+;;
+
 let test_codec_round_trip () =
   let store = Board_core.create_store () in
   let tr = Ids.Turn_ref.make ~trace_id:"trace-abc" ~absolute_turn:42 in
@@ -107,28 +115,125 @@ let test_codec_absent_origin () =
   Alcotest.(check bool) "absent origin decodes to None" true (Option.is_none decoded.origin)
 ;;
 
-let test_malformed_origin_preserves_post () =
+let test_malformed_origin_rejected () =
   let store = Board_core.create_store () in
   let tr = Ids.Turn_ref.make ~trace_id:"t" ~absolute_turn:1 in
   let post = create store ~origin:(make_origin ~turn_ref:tr ()) ~content:"malformed origin" in
   let json = Board_core.post_to_yojson post in
-  (* origin as a non-object value -> degrade to None, keep the row. *)
-  (match decode (replace_key json "origin" (`Int 5)) with
-   | Some p -> Alcotest.(check bool) "non-object origin -> None" true (Option.is_none p.origin)
-   | None -> Alcotest.fail "row dropped on non-object origin (must be preserved)");
-  (* malformed turn_ref string -> turn_ref None, but a valid sibling field is
-     kept (per-field degrade, not whole-origin drop, not row drop). *)
+  Alcotest.(check bool)
+    "non-object origin rejected"
+    true
+    (Option.is_none (decode (replace_key json "origin" (`Int 5))));
   let bad_origin =
     `Assoc [ "turn_ref", `String "no-separator"; "source", `String "fusion" ]
   in
-  match decode (replace_key json "origin" bad_origin) with
-  | Some p ->
-    (match p.origin with
-     | Some (o : Board.post_origin) ->
-       Alcotest.(check bool) "malformed turn_ref -> None" true (Option.is_none o.turn_ref);
-       Alcotest.(check (option string)) "valid sibling kept" (Some "fusion") o.source
-     | None -> Alcotest.fail "origin fully dropped though source was valid")
-  | None -> Alcotest.fail "row dropped on malformed turn_ref (must be preserved)"
+  Alcotest.(check bool)
+    "malformed turn_ref rejected"
+    true
+    (Option.is_none (decode (replace_key json "origin" bad_origin)));
+  Alcotest.(check bool)
+    "empty origin rejected"
+    true
+    (Option.is_none (decode (replace_key json "origin" (`Assoc []))))
+;;
+
+let test_current_post_schema_is_exact () =
+  let store = Board_core.create_store () in
+  let post = create_no_origin store ~content:"current schema" in
+  let json = Board_core.post_to_yojson post in
+  List.iter
+    (fun field ->
+       Alcotest.(check bool)
+         (field ^ " is required")
+         true
+         (Option.is_none (decode (remove_key json field))))
+    [ "id"
+    ; "author"
+    ; "title"
+    ; "body"
+    ; "post_kind"
+    ; "content"
+    ; "visibility"
+    ; "created_at"
+    ; "updated_at"
+    ; "expires_at"
+    ; "votes_up"
+    ; "votes_down"
+    ; "score"
+    ; "reply_count"
+    ; "pinned"
+    ];
+  let rejected label candidate =
+    Alcotest.(check bool) label true (Option.is_none (decode candidate))
+  in
+  rejected
+    "legacy meta_json rejected"
+    (prepend_field json ("meta_json", `String "{}"));
+  rejected "unknown field rejected" (prepend_field json ("unknown", `Int 1));
+  rejected "duplicate field rejected" (prepend_field json ("id", `String "duplicate"));
+  rejected
+    "string timestamp rejected"
+    (replace_key json "updated_at" (`String "1.0"));
+  rejected "float counter rejected" (replace_key json "votes_up" (`Float 0.0));
+  rejected "string bool rejected" (replace_key json "pinned" (`String "false"));
+  rejected "body/content mismatch rejected" (replace_key json "content" (`String "other"));
+  rejected "score mismatch rejected" (replace_key json "score" (`Int 1));
+  rejected
+    "classification mismatch rejected"
+    (prepend_field json ("classification_reason", `String "fabricated"))
+;;
+
+let test_current_comment_schema_is_exact () =
+  let store = Board_core.create_store () in
+  let post = create_no_origin store ~content:"comment parent" in
+  let comment =
+    match
+      Board_core.add_comment
+        store
+        ~post_id:(Board.Post_id.to_string post.id)
+        ~author:"commenter"
+        ~content:"current comment"
+        ()
+    with
+    | Ok comment -> comment
+    | Error error -> Alcotest.failf "add_comment failed: %s" (Board.show_board_error error)
+  in
+  let json = Board_core.comment_to_yojson comment in
+  let decode_comment = Masc_board_handlers.Board_votes_json.comment_of_yojson in
+  Alcotest.(check bool)
+    "canonical comment round trip"
+    true
+    (Option.is_some (decode_comment json));
+  List.iter
+    (fun field ->
+       Alcotest.(check bool)
+         (field ^ " is required")
+         true
+         (Option.is_none (decode_comment (remove_key json field))))
+    [ "id"
+    ; "post_id"
+    ; "parent_id"
+    ; "author"
+    ; "content"
+    ; "created_at"
+    ; "expires_at"
+    ; "votes_up"
+    ; "votes_down"
+    ; "score"
+    ];
+  Alcotest.(check bool)
+    "malformed parent id rejected"
+    true
+    (Option.is_none
+       (decode_comment (replace_key json "parent_id" (`String ""))));
+  Alcotest.(check bool)
+    "comment score mismatch rejected"
+    true
+    (Option.is_none (decode_comment (replace_key json "score" (`Int 1))));
+  Alcotest.(check bool)
+    "comment unknown field rejected"
+    true
+    (Option.is_none (decode_comment (prepend_field json ("unknown", `Int 1))))
 ;;
 
 (* Producer side (RFC-0233 §7): the keeper-authored origin constructor used by
@@ -235,9 +340,17 @@ let () =
       , [ Alcotest.test_case "origin round trip" `Quick (with_eio test_codec_round_trip)
         ; Alcotest.test_case "absent origin -> None" `Quick (with_eio test_codec_absent_origin)
         ; Alcotest.test_case
-            "malformed origin -> None, post preserved"
+            "malformed origin rejects row"
             `Quick
-            (with_eio test_malformed_origin_preserves_post)
+            (with_eio test_malformed_origin_rejected)
+        ; Alcotest.test_case
+            "current post schema is exact"
+            `Quick
+            (with_eio test_current_post_schema_is_exact)
+        ; Alcotest.test_case
+            "current comment schema is exact"
+            `Quick
+            (with_eio test_current_comment_schema_is_exact)
         ; Alcotest.test_case
             "keeper-authored origin carries turn_ref"
             `Quick

@@ -58,7 +58,7 @@ CI 필수 게이트. 외부 의존성 없이 재현 가능.
 | 항목 | 실행 방법 | 범위 |
 |------|----------|------|
 | 단위/통합 테스트 묶음 | `dune test --root .` / `make test` | 40+ 테스트 바이너리 |
-| SSE Storm E2E | `./_build/default/test/test_sse_storm_e2e.exe` | SSE reconnect 시나리오 |
+| SSE Storm E2E | `MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e` | SSE reconnect 시나리오 |
 | Contract Harness | `make test-contract` | Streamable HTTP and Golden Path contracts |
 
 Contract harness는 서버가 이미 떠 있다고 가정하지 않고 hermetic bootstrap 경로로 실행된다.
@@ -231,9 +231,8 @@ CI 테스트 실행기. 다음 기능을 제공한다:
 make test                    # dune test --root .
 make test-contract           # scripts/harness/contract/run_all.sh
 
-# 수동 검증
-scripts/dune-local.sh build ./test/test_sse_storm_e2e.exe
-./_build/default/test/test_sse_storm_e2e.exe
+# 수동 검증 — Dune action이 exact worktree server executable을 주입한다.
+MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e
 ```
 
 ### 6.3 Contract Harness

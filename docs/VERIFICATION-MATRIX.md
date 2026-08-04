@@ -11,7 +11,7 @@
 - `dune test --root .`
   - 기본 단위/통합 테스트 묶음
   - 실행 진입점은 `make test` 또는 `scripts/ci-run-tests.sh "opam exec -- dune test"`를 기준으로 본다
-- `./_build/default/test/test_sse_storm_e2e.exe`
+- `MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e`
   - server executable 기반 SSE reconnect e2e
 - transport harness suite
   - `scripts/harness/transport/run_all.sh`
@@ -27,7 +27,7 @@ dune build --root .
 make test
 make test-transport
 make test-contract
-./_build/default/test/test_sse_storm_e2e.exe
+MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e
 ```
 
 의도:
@@ -89,7 +89,7 @@ make test-contract
 
 - `make test`
 - `make test-transport`
-- `test_sse_storm_e2e.exe`
+- `@test/runtest-test_sse_storm_e2e`
 - contract harness 3종
 
 그리고 이번 변경에서 **필수로 올리지 않는 것**은:

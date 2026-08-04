@@ -10,10 +10,18 @@ fail() {
 fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/deploy-cutover-gates.XXXXXX")"
 trap 'rm -rf "$fixture_root"' EXIT
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+real_board_cursor_checker="$repo_root/_build/default/bin/keeper_board_cursor_cutover_check.exe"
+
 mkdir -p \
     "$fixture_root/scripts" \
     "$fixture_root/_build/default/bin" \
-    "$fixture_root/base/.masc"
+    "$fixture_root/base/.masc/keepers"
+
+[ -x "$real_board_cursor_checker" ] \
+    || fail "real Board cursor cutover checker is not built: $real_board_cursor_checker"
+"$real_board_cursor_checker" --base-path "$fixture_root/base" >/dev/null \
+    || fail "empty canonical Keeper set was not vacuously ready"
 cp "$(dirname "${BASH_SOURCE[0]}")/deploy.sh" "$fixture_root/scripts/deploy.sh"
 
 cat >"$fixture_root/_build/default/bin/main_eio.exe" <<'EOF'

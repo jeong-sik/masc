@@ -69,14 +69,6 @@ let main base_path =
             ]
         ];
     exit 2
-  | Ok [] ->
-    print_result
-      ~status:"fail"
-      ~base_path
-      ~keeper_count:0
-      ~ready_count:0
-      ~issues:[ `Assoc [ "kind", `String "no_registered_keepers" ] ];
-    exit 2
   | Ok keeper_names ->
     let metadata_issues = validate_metadata workspace_config keeper_names in
     let report =

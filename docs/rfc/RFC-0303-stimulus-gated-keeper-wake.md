@@ -2,9 +2,8 @@
 
 - Status: Implemented
 - Updated: 2026-08-02
-- Superseded clause: the unconditional scheduled-autonomous admission ("a
-  scheduled heartbeat is itself the wake signal") is replaced by RFC-0357
-  typed-stimulus admission. The rejections below (progress scores, no-progress
+- Scheduled-autonomous admission remains unconditional: a scheduled heartbeat
+  is itself a wake signal. The rejections below (progress scores, no-progress
   counters, automatic pause, wake tombstones) remain in force.
 
 A Keeper can wake from a message, mention, Board activity, Task/Goal context,

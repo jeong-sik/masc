@@ -785,10 +785,10 @@ jobs:
           opam exec -- dune build --root . @test/runtest-test_runtime_config_validity
 
       - name: Run workspace backlog revision ratchet
-        # RFC-0357 PR-0: the backlog revision is stamped once at the commit
-        # point; this suite pins exactly-one bump per commit (a surviving
-        # manual bump surfaces as +2) and the decoder's absent-vs-corrupt
-        # split. An unwired ratchet does not bite, so it runs here.
+        # The backlog revision is stamped once at the commit point; this suite
+        # pins exactly-one bump per commit (a surviving manual bump surfaces as
+        # +2) and the decoder's absent-vs-corrupt split. An unwired ratchet does
+        # not bite, so it runs here.
         # Runs the "revision" suite only: the rest of the coverage file
         # carries two latent reds on main (verdict-commit audit gap,
         # #26445) that predate this PR. Alcotest exits non-zero when

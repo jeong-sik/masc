@@ -244,6 +244,75 @@ let observe_request_wire_error
     ()
 ;;
 
+(* Share of the declared request capacity held back for the parts of the
+   serialized body MASC does not encode: provider-specific request fields, the
+   JSON envelope, and any provider-side message reshaping. MASC measures
+   messages, tool schemas, and the system prompt with its own encoder, but OAS
+   owns the wire format, so the remainder is bounded rather than computed.
+   A share rather than a constant because the unmeasured remainder scales with
+   the request. Under-reserving does not corrupt state — the provider refusal
+   stays typed and the next assembly re-measures — so this trades transmitted
+   history for refusal margin, not for correctness. *)
+let unmeasured_request_reserve_divisor = 10
+
+(* The canonical MASC message encoder, also used for checkpoint serialization.
+   It is not the provider's encoder; [unmeasured_request_reserve_divisor]
+   carries that difference. *)
+let measure_message_bytes (message : Agent_sdk.Types.message) =
+  String.length
+    (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
+;;
+
+let declared_request_reserve_bytes ~capacity_bytes ~system_prompt ~tools =
+  let tool_schema_bytes =
+    List.fold_left
+      (fun acc tool ->
+         acc
+         + String.length
+             (Yojson.Safe.to_string (Agent_sdk.Tool.schema_to_json tool)))
+      0
+      tools
+  in
+  let system_prompt_bytes =
+    String.length (Yojson.Safe.to_string (`String system_prompt))
+  in
+  tool_schema_bytes
+  + system_prompt_bytes
+  + (capacity_bytes / unmeasured_request_reserve_divisor)
+;;
+
+(* The bounded transmission view runs here rather than in the caller because
+   its budget is [ctx.max_request_body_bytes], which
+   [Keeper_turn_driver.validate_provider_request_cap] resolves per runtime.
+   A caller that composed the window ahead of runtime selection would have to
+   guess which target's cap applies. The window stays ahead of
+   [ctx.model_input_projection] so that projection's projected-prefix
+   precondition keeps holding against the list it receives. *)
+let budgeted_model_input_projection (ctx : try_provider_ctx)
+  : Agent_sdk.Agent.model_input_projection
+  =
+  let reserved_bytes =
+    declared_request_reserve_bytes
+      ~capacity_bytes:ctx.max_request_body_bytes
+      ~system_prompt:ctx.system_prompt
+      ~tools:ctx.tools
+  in
+  fun messages ->
+    match
+      Runtime_model_input_tail_window.project
+        ~measure_message_bytes
+        ~capacity_bytes:ctx.max_request_body_bytes
+        ~reserved_bytes
+        messages
+    with
+    | Error error ->
+      Error (Runtime_model_input_tail_window.budget_error_to_string error)
+    | Ok windowed ->
+      (match ctx.model_input_projection with
+       | None -> Ok windowed
+       | Some inner -> inner windowed)
+;;
+
 let run_try_provider
       (ctx : try_provider_ctx)
       ?enable_thinking_override
@@ -305,7 +374,7 @@ let run_try_provider
           ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
           ; initial_messages = ctx.initial_messages
-          ; model_input_projection = ctx.model_input_projection
+          ; model_input_projection = Some (budgeted_model_input_projection ctx)
             (* The serialized request body is the quantity the provider admits
                against [max_request_body_bytes]. OAS's provider-specific
                serialization boundary reports every admitted request; a typed

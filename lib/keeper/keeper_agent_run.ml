@@ -693,14 +693,16 @@ let run_turn
       s.Keeper_run_tools.model_input_projection
     in
     let model_input_projection messages =
-      (* Bounded transmission view first (RFC #26534 PR-C). The source
-         projection appends only a bounded typed Gate replay reference; exact
-         replay bytes remain in the artifact store. The provenance check below
-         compares against the windowed list so its projected-prefix
-         precondition keeps holding. Durable state and checkpoints receive the
-         unwindowed history. *)
-      let windowed = Runtime_model_input_tail_window.project messages in
-      match source_model_input_projection windowed with
+      (* [messages] already carries the bounded transmission view: the provider
+         attempt applies it, because its budget is the target's declared
+         request-body cap and that is only resolved per runtime
+         ([Keeper_turn_driver_try_provider.budgeted_model_input_projection]).
+         The source projection appends only a bounded typed Gate replay
+         reference; exact replay bytes remain in the artifact store. The
+         provenance check below compares against the list as received, so its
+         projected-prefix precondition keeps holding. Durable state and
+         checkpoints receive the unwindowed history. *)
+      match source_model_input_projection messages with
       | Error _ as error ->
         current_request_input_messages_ref := None;
         error
@@ -711,7 +713,7 @@ let run_turn
         (match
            Keeper_agent_prompt_metrics.provider_content_messages
              ~prompt_context_present
-             ~projection_input:windowed
+             ~projection_input:messages
              ~projected_messages
          with
          | Some provider_content ->

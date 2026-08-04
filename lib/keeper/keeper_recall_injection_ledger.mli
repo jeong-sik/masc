@@ -24,9 +24,6 @@
     process's first row for a keeper is diffed against the empty set, so it is
     automatically a full accounting while retaining one current wire shape.
 
-    The read-only consumer is {!Keeper_recall_outcome_eval}, whose full-history
-    scan makes replay exact for the current store.
-
     Properties:
     - Append-only, never read on the hot path -> cannot change recall behaviour.
     - Best-effort: a write failure is logged and never aborts the turn.
@@ -112,9 +109,8 @@ type materialized =
 val materialize : record list -> materialized list
 (** Reconstruct the full injected key set at each record by replaying
     [delta] per [keeper_id]. Precondition: [records] is already in
-    chronological (oldest-first) order — {!Keeper_recall_outcome_eval}'s
-    full-tree scan already provides this, so no re-sort happens here (a
-    re-sort by [ts] would be *unsound*: true
+    chronological (oldest-first) order — the caller must supply them that
+    way, and no re-sort happens here (a re-sort by [ts] would be *unsound*: true
     chronology is append order, which the caller already preserves). Each
     delta applies added/removed keys to the keeper's state, starting from the
     empty set for its first appearance. Cross-keeper relative order in the

@@ -5,7 +5,6 @@
  (public_name masc.keeper_tooling)
  (wrapped false)
  (modules
-  keeper_tool_command_words
   keeper_tool_execute_shell_ir
   keeper_tool_name
   keeper_tool_response)

@@ -1,0 +1,38 @@
+name: Review Thread Carryover
+
+# When a PR merges with unresolved review threads, carry them into a
+# review-carryover issue so the findings stay in the fleet's supply loop
+# instead of evaporating with the deleted branch. Observation, not a gate:
+# see instructions/masc-workflow.md "강제 장치보다 자기 관측" (me repo) and
+# scripts/pr-review-thread-carryover.sh for the rationale.
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: review-thread-carryover-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  carryover:
+    name: Carry unresolved review threads
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # pull_request_target runs with the base ref checked out, so the script
+      # below always comes from the trusted base repo, never from the PR head.
+      - uses: actions/checkout@v7
+
+      - name: Carry unresolved review threads to an issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash scripts/pr-review-thread-carryover.sh "$GITHUB_REPOSITORY" "$PR_NUMBER"

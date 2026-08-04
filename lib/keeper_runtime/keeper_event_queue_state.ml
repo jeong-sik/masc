@@ -1111,9 +1111,7 @@ let transition_of_yojson json =
         in
         let* detail = string_field ~context "detail" fields in
         Ok (Turn_attempt_terminal { detail })
-      | ( "fusion_terminal"
-        | "background_job_terminal"
-        | "hitl_terminal" ) as expected_kind ->
+      | ("fusion_terminal" | "hitl_terminal") as expected_kind ->
         let* () = exact_fields ~context ~expected:common_fields fields in
         let* source_receipt = source_terminal_receipt_of_stimulus source in
         let* actual_kind =

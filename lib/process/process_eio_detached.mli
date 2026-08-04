@@ -41,8 +41,7 @@ val spawn_detached :
     SIGTERM → grace → SIGKILL sequence.
 
     Bypasses the [proc_mgr] so the child is not tracked by Eio;
-    callers are responsible for [Unix.waitpid] reaping (directly or
-    via a long-lived daemon fiber in [Bg_task]).
+    callers are responsible for [Unix.waitpid] reaping.
 
     The argv-only API is intentional: no shell interpolation,
     matching the rest of this module. *)

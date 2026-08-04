@@ -97,15 +97,6 @@ require_text \
   "legacy background task id rejection proof"
 
 require_text \
-  "lib/process/bg_task.mli" \
-  "Background shell task lifecycle" \
-  "internal Bg_task lifecycle owner"
-require_text "lib/process/bg_task.mli" "val spawn" "Bg_task spawn primitive"
-require_text "lib/process/bg_task.mli" "val read" "Bg_task read primitive"
-require_text "lib/process/bg_task.mli" "val kill" "Bg_task kill primitive"
-require_text "lib/process/bg_task.mli" "val list" "Bg_task list primitive"
-
-require_text \
   "lib/keeper/keeper_msg_async.mli" \
   "Fire-and-forget keeper message execution" \
   "keeper_msg async owner"

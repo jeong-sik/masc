@@ -123,9 +123,9 @@ type slot =
   ; keeper_name : string
   ; turn_mu : Eio.Mutex.t
     (* Held across the whole admitted turn (possibly minutes): must be
-       fiber-cooperative, hence Eio.Mutex. Manipulated with raw
-       lock/try_lock/unlock — [use_rw] would poison the slot when a turn
-       raises, deadlocking the keeper forever. *)
+       fiber-cooperative, hence Eio.Mutex. Admitted turns use raw
+       lock/try_lock/unlock — [use_rw] would poison the slot when a turn raises,
+       deadlocking the keeper forever. *)
   ; durable_effect_mu : Eio.Mutex.t
     (* Serializes suspending durable mutations whose state shutdown cleanup
        may delete. [begin_shutdown] closes admission under [state_mu], then
@@ -465,23 +465,14 @@ type 'a transfer_intake_result =
 
 let run_durable_effect_if_open ~base_path ~keeper_name durable_mutation =
   let slot = slot_for ~base_path ~keeper_name in
-  Eio.Mutex.lock slot.durable_effect_mu;
-  let release () = Eio.Mutex.unlock slot.durable_effect_mu in
-  match peek_shutdown slot with
-  | Some operation_id ->
-    release ();
-    Durable_effect_shutdown_reserved operation_id
-  | None ->
-    let intake_token = { intake_slot = slot; intake_active = true } in
-    (match durable_mutation intake_token with
-     | value ->
-       intake_token.intake_active <- false;
-       release ();
-       Durable_effect_committed value
-     | exception exn ->
-       intake_token.intake_active <- false;
-       release ();
-       raise exn)
+  Eio.Mutex.use_ro slot.durable_effect_mu (fun () ->
+    match peek_shutdown slot with
+    | Some operation_id -> Durable_effect_shutdown_reserved operation_id
+    | None ->
+      let intake_token = { intake_slot = slot; intake_active = true } in
+      Fun.protect
+        ~finally:(fun () -> intake_token.intake_active <- false)
+        (fun () -> Durable_effect_committed (durable_mutation intake_token)))
 ;;
 
 let run_transfer_intake_if_open
@@ -551,10 +542,8 @@ let intake_token_matches token ~base_path ~keeper_name =
 
 let await_idle_after_shutdown ~base_path ~keeper_name =
   let slot = slot_for ~base_path ~keeper_name in
-  Eio.Mutex.lock slot.turn_mu;
-  Eio.Mutex.unlock slot.turn_mu;
-  Eio.Mutex.lock slot.durable_effect_mu;
-  Eio.Mutex.unlock slot.durable_effect_mu
+  Eio.Mutex.use_ro slot.turn_mu (fun () -> ());
+  Eio.Mutex.use_ro slot.durable_effect_mu (fun () -> ())
 ;;
 
 let chat_waiting ~base_path ~keeper_name =

@@ -304,16 +304,18 @@ let prepare_review
 
 type process_outcome =
   | Committed
-  | Deferred
+  | Deferred of [ `Retry | `Stop ]
 
-let defer ~task_id ~verification_id ~authority ~reason =
+let defer ~retry ~task_id ~verification_id ~authority ~reason =
+  let disposition = if retry then "retry" else "stopped" in
   Log.Misc.warn
-    "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s reason=%s"
+    "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s disposition=%s reason=%s"
     task_id
     verification_id
     (Masc_domain.completion_authority_actor authority)
+    disposition
     reason;
-  Deferred
+  Deferred (if retry then `Retry else `Stop)
 ;;
 
 let process_task_once
@@ -333,7 +335,13 @@ let process_task_once
         ~verification_id
         ~authority
     with
-    | Error reason -> defer ~task_id:task.id ~verification_id ~authority ~reason
+    | Error reason ->
+      defer
+        ~retry:false
+        ~task_id:task.id
+        ~verification_id
+        ~authority
+        ~reason
     | Ok prepared ->
       let result =
         Task.Anti_rationalization.review
@@ -347,6 +355,7 @@ let process_task_once
       (match result.verdict with
        | None ->
          defer
+           ~retry:true
            ~task_id:task.id
            ~verification_id
            ~authority
@@ -460,6 +469,7 @@ let process_task_once
             Committed
           | Error error ->
             defer
+              ~retry:true
               ~task_id:task.id
               ~verification_id
               ~authority
@@ -468,6 +478,7 @@ let process_task_once
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     defer
+      ~retry:true
       ~task_id:task.id
       ~verification_id
       ~authority
@@ -499,7 +510,8 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
     in
     match outcome with
     | Committed -> ()
-    | Deferred -> schedule_retry runtime)
+    | Deferred `Retry -> schedule_retry runtime
+    | Deferred `Stop -> ())
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"

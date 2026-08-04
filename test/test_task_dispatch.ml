@@ -21,16 +21,9 @@ let with_temp_config f =
       in
       rm dir) (fun () -> f config)
 
-let test_default_backend_jsonl () =
-  Task.Dispatch.reset_for_test ();
-  match Task.Dispatch.backend () with
-  | Task.Dispatch.Jsonl -> ()
-
-let test_add_task_in_jsonl_mode () =
+let test_add_task () =
   with_temp_config (fun config ->
       ignore (Workspace.init config ~agent_name:(Some "tester"));
-      Task.Dispatch.reset_for_test ();
-      Task.Dispatch.init_jsonl ();
       match Task.Dispatch.add_task config ~title:"dispatch task" ~priority:3
               ~description:"from task dispatch test"
       with
@@ -41,11 +34,9 @@ let test_add_task_in_jsonl_mode () =
 
 (* update_status coverage was retired with the function (RFC-0323 G-7);
    delete_task keeps its locked-path pin. *)
-let test_delete_uses_locked_jsonl_path () =
+let test_delete_uses_locked_store_path () =
   with_temp_config (fun config ->
       ignore (Workspace.init config ~agent_name:(Some "tester"));
-      Task.Dispatch.reset_for_test ();
-      Task.Dispatch.init_jsonl ();
       let task_id =
         match
           Task.Dispatch.add_task config ~title:"locked dispatch task" ~priority:3
@@ -76,8 +67,6 @@ let write_string path content =
 let test_delete_returns_error_when_backlog_unreadable () =
   with_temp_config (fun config ->
       ignore (Workspace.init config ~agent_name:(Some "tester"));
-      Task.Dispatch.reset_for_test ();
-      Task.Dispatch.init_jsonl ();
       let backlog_path = Filename.concat (Workspace.tasks_dir config) "backlog.json" in
       write_string backlog_path "{not-json";
       write_string (backlog_path ^ ".last-good") "{not-json";
@@ -102,8 +91,6 @@ let test_delete_returns_error_when_backlog_unreadable () =
 let test_reads_return_error_when_backlog_unreadable () =
   with_temp_config (fun config ->
       ignore (Workspace.init config ~agent_name:(Some "tester"));
-      Task.Dispatch.reset_for_test ();
-      Task.Dispatch.init_jsonl ();
       let backlog_path = Filename.concat (Workspace.tasks_dir config) "backlog.json" in
       write_string backlog_path "{not-json";
       write_string (backlog_path ^ ".last-good") "{not-json";
@@ -122,9 +109,9 @@ let test_reads_return_error_when_backlog_unreadable () =
 let test_task_dispatch_source_pins_backlog_lock () =
   let candidates =
     [
-      "lib/task_dispatch.ml";
-      "../lib/task_dispatch.ml";
-      "../../lib/task_dispatch.ml";
+      "lib/task/task_dispatch.ml";
+      "../lib/task/task_dispatch.ml";
+      "../../lib/task/task_dispatch.ml";
     ]
   in
   let source =
@@ -148,33 +135,21 @@ let test_task_dispatch_source_pins_backlog_lock () =
   Alcotest.(check bool)
     "Task.Dispatch mutations use Workspace backlog lock"
     true
-    (contains source "Workspace.with_file_lock config (backlog_lock_path config)");
+    (contains source
+       "Workspace.with_file_lock config (Workspace.backlog_lock_path config)");
   Alcotest.(check bool)
     "Task.Dispatch mutations read backlog as result under lock"
     true
     (contains source "Workspace.read_backlog_r config")
 
-let test_reset_clears_pg_state_shape () =
-  Task.Dispatch.reset_for_test ();
-  Task.Dispatch.init_jsonl ();
-  Task.Dispatch.reset_for_test ();
-  match Task.Dispatch.backend () with
-  | Task.Dispatch.Jsonl -> ()
-
 let () =
   Alcotest.run "Task.Dispatch"
     [
-      ( "backend",
+      ( "task store",
         [
-          Alcotest.test_case "default jsonl" `Quick test_default_backend_jsonl;
-          Alcotest.test_case "reset clears state" `Quick
-            test_reset_clears_pg_state_shape;
-        ] );
-      ( "jsonl",
-        [
-          Alcotest.test_case "add task" `Quick test_add_task_in_jsonl_mode;
+          Alcotest.test_case "add task" `Quick test_add_task;
           Alcotest.test_case "delete uses locked path" `Quick
-            test_delete_uses_locked_jsonl_path;
+            test_delete_uses_locked_store_path;
           Alcotest.test_case "delete fails on unreadable backlog" `Quick
             test_delete_returns_error_when_backlog_unreadable;
           Alcotest.test_case "reads fail structurally on unreadable backlog" `Quick

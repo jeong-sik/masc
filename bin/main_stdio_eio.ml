@@ -73,8 +73,8 @@ let run_cmd cli_base_path =
   in
   Eio.Switch.on_release sw (fun () ->
     Server_startup_takeover.release_base_path_lease lease);
-  Server_startup_state.reset ~backend_mode:"filesystem" ();
-  Server_startup_state.mark_blocking ~backend_mode:"filesystem";
+  Server_startup_state.reset ();
+  Server_startup_state.mark_blocking ();
   let initialized =
     try
       Server_runtime_bootstrap.initialize_owner_state_blocking
@@ -125,7 +125,7 @@ let run_cmd cli_base_path =
       exit 1
   in
   let state = activated.Server_runtime_bootstrap.state in
-  (match Server_runtime_bootstrap.mark_owner_state_ready state with
+  (match Server_runtime_bootstrap.mark_owner_state_ready () with
    | Ok () -> ()
    | Error error ->
      Log.Server.error

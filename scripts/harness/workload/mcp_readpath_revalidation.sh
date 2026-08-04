@@ -499,8 +499,6 @@ run_mode() {
       --arg base_url "$base_url" \
       --arg server_log "$server_log" \
       --arg pass "$result_pass" \
-      --arg backend_mode "$(printf '%s' "$health_json" | jq -r '.startup.backend_mode // ""')" \
-      --arg fallback_reason "$(printf '%s' "$health_json" | jq -r '.startup.fallback_reason // ""')" \
       --arg health_json "$health_json" \
       --arg keeper_list_json "$keeper_json" \
       --arg keeper_status_json "$keeper_status_json" \
@@ -540,8 +538,6 @@ run_mode() {
         pass: ($pass == "true"),
         base_url: $base_url,
         server_log: $server_log,
-        backend_mode: $backend_mode,
-        fallback_reason: (if ($fallback_reason | length) > 0 then $fallback_reason else null end),
         thresholds: {
           masc_status_first_max_sec: ($ENV.MASC_STATUS_FIRST_MAX_SEC // "5" | tonumber),
           masc_status_second_max_sec: ($ENV.MASC_STATUS_SECOND_MAX_SEC // "1.5" | tonumber),

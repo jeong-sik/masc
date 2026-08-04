@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Breaking (startup/task storage contract)**: startup health and readiness
+  now expose only lifecycle, lazy-task, readiness, error, and path/config
+  diagnostics. Task operations bind directly to the supplied Workspace
+  configuration, and the server-state product models only lifecycle,
+  lazy-task, and readiness dimensions.
 - **Breaking (cost ledger storage/schema)**: the Keeper producer, `masc-cost`,
   and inference metrics now share one current row codec and the date-split
   `.masc/costs/YYYY-MM/DD.jsonl` store. Automatic rows carry the runtime-owned

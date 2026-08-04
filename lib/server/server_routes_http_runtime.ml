@@ -1347,7 +1347,6 @@ let readiness_handler _request reqd =
          [
            ("ready", `Bool true);
            ("phase", `String (Server_startup_state.phase_to_string current.phase));
-           ("backend_mode", `String current.backend_mode);
          ])
       reqd
   else

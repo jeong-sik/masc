@@ -671,9 +671,7 @@ type owner_initialization_error =
   | Lazy_startup_barrier_failed of Server_startup_state.lazy_prepare_error
   | Readiness_transition_failed of Server_startup_state.state_ready_error
   | Readiness_publication_failed of
-      { expected_backend_mode : string
-      ; observed_backend_mode : string
-      ; observed_phase : Server_startup_state.phase
+      { observed_phase : Server_startup_state.phase
       }
 
 exception Owner_initialization_failed of owner_initialization_error
@@ -718,12 +716,9 @@ let owner_initialization_error_to_string = function
     Server_startup_state.lazy_prepare_error_to_string error
   | Readiness_transition_failed error ->
     Server_startup_state.state_ready_error_to_string error
-  | Readiness_publication_failed
-      { expected_backend_mode; observed_backend_mode; observed_phase } ->
+  | Readiness_publication_failed { observed_phase } ->
     Printf.sprintf
-      "owner readiness publication failed for backend=%s (observed_backend=%s observed_phase=%s)"
-      expected_backend_mode
-      observed_backend_mode
+      "owner readiness publication failed (observed_phase=%s)"
       (Server_startup_state.phase_to_string observed_phase)
 
 let initialize_owner_state_blocking
@@ -1168,28 +1163,15 @@ let claim_and_start_keeper_persistence
          (Keeper_persistence_start_failed error))
 ;;
 
-let mark_owner_state_ready state =
-  let backend =
-    match (Mcp_server.workspace_config state).Workspace.backend with
-    | Workspace.Memory _ -> Server_startup_state.Memory_backend
-    | Workspace.FileSystem _ -> Server_startup_state.Filesystem_backend
-  in
-  let expected_backend_mode = Server_startup_state.ready_backend_to_string backend in
-  match Server_startup_state.mark_state_ready ~backend with
+let mark_owner_state_ready () =
+  match Server_startup_state.mark_state_ready () with
   | Error error -> Error (Readiness_transition_failed error)
   | Ok () ->
     let observed = Server_startup_state.(!state) in
-    if
-      observed.state_ready
-      && String.equal observed.backend_mode expected_backend_mode
-    then Ok ()
+    if observed.state_ready then Ok ()
     else
       Error
-        (Readiness_publication_failed
-           { expected_backend_mode
-           ; observed_backend_mode = observed.backend_mode
-           ; observed_phase = observed.phase
-           })
+        (Readiness_publication_failed { observed_phase = observed.phase })
 
 let start_completion_authority ~sw (state : Mcp_server.server_state) =
   Completion_authority_agent.start
@@ -1365,10 +1347,9 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
     | Env_config.Transport.Unknown_h2_mode _ -> `Auto
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
-  let initial_backend_mode = "filesystem" in
   Transport_metrics.set_ws_same_origin_runtime_ready false;
   server_state := None;
-  Server_startup_state.reset ~backend_mode:initial_backend_mode ();
+  Server_startup_state.reset ();
 
   (* 2. Run owner initialization outside the accept loop. The state and
      long-lived owner fibers attach to the parent switch because HTTP request
@@ -1393,7 +1374,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
           error
     in
     try
-      Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;
+      Server_startup_state.mark_blocking ();
       let initialized_owner =
         initialize_owner_state_blocking ~sw ~env ~base_path ?input_base_path
           ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
@@ -1417,7 +1398,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
          Discord/gRPC/WS/WebRTC/dashboard auxiliaries so one transport cannot
          turn an already-published HTTP owner into a process-wide fatal
          pre-readiness failure. Each auxiliary owns its typed health state. *)
-      (match mark_owner_state_ready state with
+      (match mark_owner_state_ready () with
        | Ok () -> ()
        | Error error -> raise (Owner_initialization_failed error));
       let path_diagnostics = activated_owner.path_diagnostics in
@@ -1747,10 +1728,9 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       if not current.state_ready then (
         let elapsed = Server_startup_state.elapsed_since_start () in
         Log.Server.error
-          "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s, backend=%s). Exiting."
+          "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s). Exiting."
           timeout_sec elapsed
-          (Server_startup_state.phase_to_string current.phase)
-          current.backend_mode;
+          (Server_startup_state.phase_to_string current.phase);
         exit 1)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

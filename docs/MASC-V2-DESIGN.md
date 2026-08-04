@@ -7,7 +7,7 @@
 MASC v2는 Git Worktree를 활용한 에이전트 격리와 `gh` CLI 기반 PR 워크플로우를 통해
 다중 AI 에이전트가 동일 코드베이스에서 충돌 없이 협업할 수 있게 합니다.
 
-**Current runtime status (2026-05):** mainline server bootstrap is filesystem-only by construction. There is no runtime storage selector; retired Redis/PostgreSQL storage modes are not operator targets.
+**Runtime state:** mainline server bootstrap owns collaboration state under the workspace `.masc` directory.
 
 ### Design Principles (MAGI 삼두 합의)
 

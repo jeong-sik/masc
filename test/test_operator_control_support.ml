@@ -4,8 +4,7 @@ module Types = Masc_domain
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () =
-  Server_startup_state.mark_state_ready
-    ~backend:Server_startup_state.Filesystem_backend
+  Server_startup_state.mark_state_ready ()
   |> Result.get_ok
 
 let temp_dir () =

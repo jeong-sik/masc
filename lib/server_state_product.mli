@@ -1,7 +1,7 @@
-(** Orthogonal state machine composition — Server Lifecycle x Backend x
-    LazyTaskQueue x Readiness.
+(** Orthogonal state machine composition — Server Lifecycle x LazyTaskQueue x
+    Readiness.
 
-    Four independent FSMs composed into a product state with cross-dimension
+    Three independent FSMs composed into a product state with cross-dimension
     invariant checking. Each dimension evolves independently; synchronization
     happens only at explicit guard points.
 
@@ -38,34 +38,7 @@ module Lifecycle : sig
   val pp_phase : Format.formatter -> phase -> unit
 end
 
-(** {2 Dimension 2: Backend} *)
-
-module Backend : sig
-  type phase =
-    | Uninitialized (** Backend not yet resolved *)
-    | Memory        (** In-process fallback backend *)
-    | Filesystem    (** Fallback to filesystem backend *)
-    | Degraded      (** Backend connection failed *)
-
-  val phase_to_string : phase -> string
-  val all_phases : phase list
-
-  type event =
-    | Resolve_memory
-    | Resolve_fs
-    | Degrade of string
-    | Recover
-
-  val event_to_string : event -> string
-
-  type transition = Applied of phase | Ignored of { phase: phase; event: event }
-
-  val apply_event : current:phase -> event -> transition
-  val apply_event_lossy : current:phase -> event -> phase
-  val pp_phase : Format.formatter -> phase -> unit
-end
-
-(** {3 Dimension 3: Lazy Task Queue} *)
+(** {2 Dimension 2: Lazy Task Queue} *)
 
 module Lazy_task_queue : sig
   type t =
@@ -86,7 +59,7 @@ module Lazy_task_queue : sig
   val pp : Format.formatter -> t -> unit
 end
 
-(** {4 Dimension 4: Readiness} *)
+(** {3 Dimension 3: Readiness} *)
 
 module Readiness : sig
   type phase =
@@ -109,30 +82,25 @@ module Readiness : sig
   val pp_phase : Format.formatter -> phase -> unit
 end
 
-(** {5 Product State} *)
+(** {4 Product State} *)
 
 type product = {
   lifecycle : Lifecycle.phase;
-  backend : Backend.phase;
   lazy_tasks : Lazy_task_queue.t;
   readiness : Readiness.phase;
   last_error : string option;
-  fallback_reason : string option;
 }
 
 val initial : product
 
-(** {6 Cross-Dimension Invariants} *)
+(** {5 Cross-Dimension Invariants} *)
 
 val check_invariants : product -> (unit, string) result
 
-(** {7 Per-Dimension Event Application} *)
+(** {6 Per-Dimension Event Application} *)
 
 val apply_lifecycle_event :
   product -> Lifecycle.event -> (product, string) result
-
-val apply_backend_event :
-  product -> Backend.event -> (product, string) result
 
 val apply_lazy_event :
   product -> Lazy_task_queue.event -> (product, string) result
@@ -140,7 +108,7 @@ val apply_lazy_event :
 val apply_readiness_event :
   product -> Readiness.event -> (product, string) result
 
-(** {8 Derived Flat Phase (backward compatibility)} *)
+(** {7 Derived Flat Phase} *)
 
 type flat_phase =
   | Blocking
@@ -152,6 +120,6 @@ val derive_flat_phase : product -> flat_phase
 val flat_phase_to_string : flat_phase -> string
 val pp_flat_phase : Format.formatter -> flat_phase -> unit
 
-(** {9 Serialization} *)
+(** {8 Serialization} *)
 
 val product_to_json : product -> Yojson.Safe.t

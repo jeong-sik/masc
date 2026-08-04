@@ -1859,8 +1859,7 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
       ignore Masc.Keeper_tool_surface.schemas;
       Masc.Server_startup_state.reset ();
       (match
-         Masc.Server_startup_state.mark_state_ready
-           ~backend:Masc.Server_startup_state.Memory_backend
+         Masc.Server_startup_state.mark_state_ready ()
        with
        | Ok () -> ()
        | Error error ->

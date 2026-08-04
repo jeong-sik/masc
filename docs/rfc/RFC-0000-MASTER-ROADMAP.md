@@ -137,7 +137,6 @@ MASC가 최적화하는 것은 단일 턴 지연이 아니라 **fleet 수준 재
 - 장기·일반 대화 메모리, cross-generation recall, active checkpoint window 밖 assistant reply recall, memory bank 부활.
 - cost/token/turn/latency를 runtime gate로 사용 (측정·용량계획 전용). provider의 실제 context/output ceiling만 protocol-correctness 제약으로 보존.
 - Qdrant 재도입 (Supabase pgvector only).
-- Runtime storage selector (filesystem `.masc/` 단일 lane; Redis/PostgreSQL mode 은퇴).
 - MASC를 AutoGPT/goal-decomposition loop로 보는 프레이밍, 또는 operator-governed phase-policy machine으로 보는 프레이밍. (둘 다 아니다: MASC는 keeper별 자율 lane substrate이며, 콘텐츠 판단=configured model / lifecycle 권한=operator로 분리된다. hierarchical phase-policy 승인은 RFC-0318/0319에서 폐기.)
 - MASC가 Provider SDK를 대체한다는 프레이밍 (MASC는 SDK 호출을 provider attempt로 emit하는 router).
 

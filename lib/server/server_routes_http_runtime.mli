@@ -310,7 +310,7 @@ val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 
     | State | HTTP status | Body fields |
     |---|---|---|
-    | ready | [200 OK] | [ready: true], [phase], [backend_mode] |
+    | ready | [200 OK] | [ready: true], [phase] |
     | not ready | [503 Service Unavailable] | [ready: false], [phase], [elapsed_sec] |
 
     Pinned at the contract seam — orchestrators (k8s, Railway)

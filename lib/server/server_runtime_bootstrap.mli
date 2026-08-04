@@ -149,9 +149,7 @@ type owner_initialization_error =
   | Lazy_startup_barrier_failed of Server_startup_state.lazy_prepare_error
   | Readiness_transition_failed of Server_startup_state.state_ready_error
   | Readiness_publication_failed of
-      { expected_backend_mode : string
-      ; observed_backend_mode : string
-      ; observed_phase : Server_startup_state.phase
+      { observed_phase : Server_startup_state.phase
       }
 
 exception Owner_initialization_failed of owner_initialization_error
@@ -201,7 +199,7 @@ val activate_owner_state
     commit after its required surfaces are installed. *)
 
 val mark_owner_state_ready
-  :  Mcp_server.server_state
+  :  unit
   -> (unit, owner_initialization_error) result
 (** Publish and verify readiness after the transport has installed every
     surface required by its own serving contract. *)

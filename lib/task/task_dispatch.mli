@@ -1,53 +1,15 @@
-(** Task_dispatch — runtime backend selection for MASC tasks.
+(** Task_dispatch — task operations over the bound Workspace store.
 
-    Currently routes everything to the JSONL backend (Workspace.* file
-    operations).  The variant is pinned at one constructor to keep
-    the compile-time pivot point explicit: a future second backend
-    (Postgres, etc.) extends {!task_backend} and forces every
-    [match] site to be revisited.
-
-    Backend state is initialised lazily — {!backend} auto-promotes
-    {!Uninitialized} to {!Active} {!Jsonl} on first call so callers
-    do not need an explicit init unless they want the side-effect
-    log.  The internal mutable state is hidden; callers reach it
-    through {!is_initialized} / {!init_jsonl} / {!reset_for_test} /
-    {!backend}.
+    Task persistence is the filesystem state owned by the supplied
+    {!Workspace.config}.
 
     @since 0.7.0 *)
 
 module Workspace = Workspace_core
 
-(** {1 Backend variant} *)
-
-type task_backend =
-  | Jsonl  (** JSONL backend (Workspace.* file operations) *)
-
-val is_initialized : unit -> bool
-(** [is_initialized ()] reports whether {!init_jsonl} or {!backend}
-    has run.  Useful for tests that need to assert the boot
-    sequence. *)
-
-val init_jsonl : unit -> unit
-(** [init_jsonl ()] explicitly activates the JSONL backend and logs
-    at [Log.Task.info].  Idempotent — calling twice logs a
-    [Log.Task.warn] but does not crash.  Most callers can omit this
-    and rely on {!backend}'s lazy promotion. *)
-
-val reset_for_test : unit -> unit
-(** [reset_for_test ()] returns the backend state to
-    {!Uninitialized} for fresh test setup.  Test-only; production
-    code must not call this. *)
-
-val backend : unit -> task_backend
-(** [backend ()] returns the active backend, auto-initialising
-    JSONL if {!Uninitialized}.  The auto-init logs at
-    [Log.Task.info] — the same line {!init_jsonl} would emit, so
-    repeated [backend] calls do not produce duplicate boot
-    messages. *)
-
 (** {1 Dispatch functions}
 
-    Each delegates to the {!Workspace} JSONL backend.  All take a
+    Each delegates to the bound {!Workspace} store. All take a
     {!Workspace.config} as the first positional argument.  Errors are
     returned as {!Masc_error.t} variants — the wording
     inside [TaskInvalidState] / [TaskNotFound] is operator-visible
@@ -60,17 +22,14 @@ val add_task :
   priority:int ->
   description:string ->
   (string, Masc_error.t) result
-(** [add_task config ~title ~priority ~description] persists a new
-    task via {!Workspace.add_task} and returns the freshly assigned
-    task id.  Always [Ok _] on the JSONL backend (the variant
-    return type leaves workspace for backends that can fail at insert
-    time). *)
+(** [add_task config ~title ~priority ~description] persists a new task via
+    {!Workspace.add_task} and returns the freshly assigned task id. *)
 
 val get_task :
   Workspace.config ->
   task_id:string ->
   (Masc_domain.task option, Masc_error.t) result
-(** [get_task config ~task_id] reads the JSONL backlog and returns
+(** [get_task config ~task_id] reads the task backlog and returns
     [Ok (Some task)] when a task with the given id exists,
     [Ok None] otherwise. A primary/recovery read failure is returned as a
     structured [System_error.IoError], never raised through this result API.
@@ -92,12 +51,6 @@ val list_tasks :
     [AwaitingVerification]) always pass through. A primary/recovery read
     failure is returned as a structured [System_error.IoError], never raised
     through this result API. *)
-
-(* [validate_transition] / [update_status] were retired by RFC-0323 G-7:
-   a direct status writer with its own 2-state terminal check bypassed the
-   workspace FSM ([Workspace.transition_task_r]) — including the RFC-0308
-   done lifecycle guard — and had zero production
-   callers. Status changes go through the FSM; there is no side door. *)
 
 val delete_task :
   Workspace.config ->

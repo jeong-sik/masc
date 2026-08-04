@@ -2336,16 +2336,6 @@
   (source_tree ../lib)
   (source_tree ../bin)))
 
-; RFC-0085 PR-7 — Retroactive AST test for retired_pg_env_keys +
-; clear_retired_pg_envs deletion (#15468 user-identified legacy;
-; shipped without a regression test; restored by #15495).
-
-(test
- (name test_rfc_0085_pr7_retired_pg_envs_purge)
- (modules test_rfc_0085_pr7_retired_pg_envs_purge)
- (libraries alcotest ast_grep)
- (deps ../lib/server/server_runtime_bootstrap.ml))
-
 ; RFC-0086 — keeper namespace bulk promotion invariant.
 ; Pins G-A (Phase 2.A wave 1, #15474): every .ml/.mli under
 ; lib/keeper/ carries the keeper_ prefix.

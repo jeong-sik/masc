@@ -1520,7 +1520,6 @@
   test_mcp_server_eio_coverage
   test_http_server_eio_coverage
   test_telemetry_eio_coverage
-  test_workspace_git_coverage
   test_tool_plan_coverage
   test_tool_agent_coverage
   test_tool_task_coverage
@@ -1563,7 +1562,6 @@
   test_mcp_server_eio_coverage
   test_http_server_eio_coverage
   test_telemetry_eio_coverage
-  test_workspace_git_coverage
   test_tool_plan_coverage
   test_tool_agent_coverage
   test_tool_task_coverage
@@ -1785,7 +1783,6 @@
 
 (include stanzas/test_docker_playground_gc_script.inc)
 
-(include stanzas/test_env_config_workspace_git_local_timeout.inc)
 
 (include stanzas/test_env_config_dashboard_compute_timeouts.inc)
 

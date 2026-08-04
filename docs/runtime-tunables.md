@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 211 unique knobs across 8 modules.
+**Total**: 210 unique knobs across 8 modules.
 
-**Typed getter classification**: 39/124 tagged (`operator`: 39, `algorithm`: 0, `unclassified`: 85).
+**Typed getter classification**: 38/123 tagged (`operator`: 38, `algorithm`: 0, `unclassified`: 85).
 
 ## Env_config_core (23 knobs; typed classification 2/5)
 
@@ -98,7 +98,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_DOMAIN_POOL_ENABLED` | feature_flag | n/a | n/a | 12 | Historical keeper Domain_pool pilot flag. The supervisor still reads this for observability, but keepalive fibers rem... |
 | `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | typed:float | Timeouts | operator | 17 | Interval between supervisor sweep runs (seconds). @category Timeouts @ops_class operator |
 
-## Env_config_runtime (71 knobs; typed classification 5/56)
+## Env_config_runtime (70 knobs; typed classification 4/55)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -169,8 +169,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_WEB_SEARCH_PROVIDER` | string_literal | n/a | n/a | 287 |  |
 | `MASC_WEB_SEARCH_PROVIDER_ORDER` | string_literal | n/a | n/a | 290 |  |
 | `MASC_WEB_SEARCH_TIMEOUT_SEC` | typed:int | unclassified | unclassified | 296 |  |
-| `MASC_WORKSPACE_FILE_MAX_READ_BYTES` | typed:int | Policies | operator | 654 | Maximum bytes served by the IDE workspace file endpoint in one response. The route rejects larger files instead of ma... |
-| `MASC_WORKSPACE_GIT_LOCAL_OP_TIMEOUT_SEC` | typed:float | Timeouts | operator | 644 | Budget (seconds) for local-only git operations under [Masc_exec.Exec_gate.run_argv*] in {!Workspace_git}: [rev-parse]... |
+| `MASC_WORKSPACE_FILE_MAX_READ_BYTES` | typed:int | Policies | operator | 619 | Maximum bytes served by the IDE workspace file endpoint in one response. The route rejects larger files instead of ma... |
 | `MASC_WS_ENABLED` | feature_flag | n/a | n/a | 213 | Whether WebSocket transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at... |
 | `MASC_WS_PORT` | string_literal | n/a | n/a | 209 | WebSocket server port. Default: 8937. |
 

@@ -1,6 +1,7 @@
 # RFC-0357 — Scheduled-autonomous 턴은 heartbeat가 아니라 typed stimulus의 변화로 admit한다
 
-- Status: Draft
+- Status: Withdrawn (2026-08-04)
+- Withdrawal: owner 판정 — keeper는 매 턴 task/board/goal 리스트를 직접 관측해 스스로 판단하고, 판이 비어 있으면 각자 능력 범위의 일을 생성한다. 서버측 revision 비교 admission은 그 모델에서 불필요하며, 구현 과정의 실측(consumption cursor 저장 위치를 둘러싼 PR #26690의 13 리뷰 라운드와 close)이 비용이 가치를 초과함을 보였다. PR-0(#26675)의 commit-point 스탬핑은 데이터 위생으로 존치하고, 관측 필드 `backlog_updated_since_last_scheduled_autonomous`는 제거한다. 남는 방향은 admission이 아니라 공급 — keeper instruction의 구체적 상시 목표.
 - Created: 2026-08-02
 - Fixes: #26018
 - Companion: #26487 (claimability 진실성 — 본 RFC와 직교, 아래 §6)

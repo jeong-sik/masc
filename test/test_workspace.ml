@@ -1672,7 +1672,7 @@ let test_read_backlog_counts_excludes_self_owned_orphan () =
     (* Remove the agent file to simulate a keeper with no active registry record. *)
     let _ = Workspace.end_session config ~agent_name:keeper in
     let meta = keeper_meta_for_self_filter keeper in
-    let _, _, failed, _, _ =
+    let _, _, failed, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int) "keeper's own orphan excluded from failed count" 0 failed
@@ -1686,7 +1686,7 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
         ~priority:1 ~description:""
     in
     let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
-    let _, claimable, _, _, _ =
+    let _, claimable, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1725,26 +1725,24 @@ let test_read_backlog_counts_preserves_unreadable_observation () =
      | Keeper_world_observation_inputs.Current_task_unavailable _ ->
        Alcotest.fail "valid recovery source was not preserved");
     let meta = keeper_meta_for_self_filter "keeper-backlog-recovery-agent" in
-    let unclaimed, claimable, failed, changed, revision =
+    let unclaimed, claimable, failed, revision =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int) "recovery unclaimed count is inert" 0 unclaimed;
     Alcotest.(check int) "recovery claimable count is inert" 0 claimable;
     Alcotest.(check int) "recovery failed count is inert" 0 failed;
-    Alcotest.(check bool) "recovery cannot report a backlog edge" false changed;
     Alcotest.(check (option int))
       "recovery has no authoritative revision"
       None
       revision;
     write_corrupt (Workspace.backlog_recovery_path config);
     let meta = keeper_meta_for_self_filter "keeper-backlog-failure-agent" in
-    let unclaimed, claimable, failed, changed, revision =
+    let unclaimed, claimable, failed, revision =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int) "unreadable unclaimed count is inert" 0 unclaimed;
     Alcotest.(check int) "unreadable claimable count is inert" 0 claimable;
     Alcotest.(check int) "unreadable failed count is inert" 0 failed;
-    Alcotest.(check bool) "unreadable backlog cannot report an edge" false changed;
     Alcotest.(check (option int))
       "unreadable backlog has no fabricated revision"
       None
@@ -1852,7 +1850,7 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
       Workspace.add_task config ~goal_id:"goal-b" ~created_by:"peer-keeper"
         ~title:"Peer work outside active goal" ~priority:1 ~description:""
     in
-    let _, claimable, _, _, _ =
+    let _, claimable, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1868,14 +1866,14 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
 let test_read_backlog_counts_excludes_self_authored_task () =
   with_test_env (fun config ->
     let meta = keeper_meta_for_self_filter "keeper-self-filter-agent" in
-    let _, claimable_before, _, _, _ =
+    let _, claimable_before, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     let _ =
       Workspace.add_task config ~created_by:meta.name
         ~title:"self-authored routing task" ~priority:3 ~description:""
     in
-    let unclaimed_after_self, claimable_after_self, _, _, _ =
+    let unclaimed_after_self, claimable_after_self, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)
@@ -1885,7 +1883,7 @@ let test_read_backlog_counts_excludes_self_authored_task () =
       Workspace.add_task config ~created_by:"peer-keeper"
         ~title:"peer authored task" ~priority:3 ~description:""
     in
-    let unclaimed_after_peer, claimable_after_peer, _, _, _ =
+    let unclaimed_after_peer, claimable_after_peer, _, _ =
       Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
     in
     Alcotest.(check int)

@@ -141,7 +141,6 @@ type world_observation = {
   (** Durable schedule-store state that needs keeper attention, such as due
       requests ready to dispatch. *)
 
-  backlog_updated_since_last_scheduled_autonomous : bool;
   (** [true] when the backlog changed after the keeper's last scheduled
       autonomous attempt. Lets task-triggered wakeups bypass cooldown once
       so newly added work is not delayed behind the previous turn's timer. *)

@@ -21,20 +21,6 @@ type current_task_observation =
       ; error : string
       }
 
-let backlog_updated_since_last_scheduled_autonomous
-      ~(meta : keeper_meta)
-      ~(backlog : Masc_domain.backlog)
-  : bool
-  =
-  let last_ts = meta.runtime.proactive_rt.last_ts in
-  if last_ts <= 0.0
-  then backlog.tasks <> []
-  else (
-    match Workspace_resilience.Time.parse_iso8601_opt backlog.last_updated with
-    | Some updated_at -> updated_at > last_ts
-    | None -> false)
-;;
-
 (* A keeper must not treat a task it authored itself as work waiting for it.
    Without this, a persona whose response to "an unclaimed task exists" is to
    create a routing/report task produces a closed positive feedback loop: the
@@ -78,7 +64,7 @@ let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
 
 (** Read workspace backlog counts. *)
 let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
-  : int * int * int * bool * int option
+  : int * int * int * int option
   =
   try
     match Workspace.read_backlog_observation_with_source_r config with
@@ -91,7 +77,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
           ]
         ();
       Log.Keeper.warn "read_backlog_counts: backlog read failed: %s" message;
-      0, 0, 0, false, None
+      0, 0, 0, None
     | Ok { Workspace.recovered_from = Some recovery; _ } ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ObservationQueryFailures)
@@ -103,7 +89,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
       Log.Keeper.warn
         "read_backlog_counts: recovery snapshot is non-authoritative: %s"
         recovery.primary_error;
-      0, 0, 0, false, None
+      0, 0, 0, None
     | Ok { Workspace.observed_backlog = backlog; recovered_from = None } ->
     let unclaimed_tasks =
       List.filter
@@ -138,13 +124,9 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
       |> List.filter claim_scope_filter
       |> List.length
     in
-    let backlog_updated_since_last_scheduled_autonomous =
-      backlog_updated_since_last_scheduled_autonomous ~meta ~backlog
-    in
     ( unclaimed
     , claimable
     , failed
-    , backlog_updated_since_last_scheduled_autonomous
     , Some backlog.version )
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

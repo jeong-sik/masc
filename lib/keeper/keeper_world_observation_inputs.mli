@@ -20,16 +20,11 @@ type current_task_observation =
       ; error : string
       }
 
-val backlog_updated_since_last_scheduled_autonomous
-  :  meta:keeper_meta
-  -> backlog:Masc_domain.backlog
-  -> bool
-
 val read_backlog_counts
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> int * int * int * bool * int option
-(** [(unclaimed, claimable, failed, backlog_changed, observed_revision)].
+  -> int * int * int * int option
+(** [(unclaimed, claimable, failed, observed_revision)].
     Uses the source-preserving observation contract. [observed_revision] is
     [Some backlog.version] only after a valid primary read and [None] when the
     primary is unreadable, including when a recovery snapshot is available.

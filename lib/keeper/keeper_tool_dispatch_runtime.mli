@@ -5,9 +5,6 @@ open Keeper_types_profile
 val keeper_model_tool_names : unit -> string list
 val keeper_model_tool_schemas : unit -> Masc_domain.tool_schema list
 
-(** Schema for the keeper_tool_search tool. *)
-val keeper_tool_search_schema : Masc_domain.tool_schema
-
 (** Replace injected MASC tool schemas.
     Startup calls this through [inject_masc_schemas]; runtime readers should
     use [masc_schemas_snapshot] rather than holding mutable state. *)
@@ -64,8 +61,6 @@ val execute_keeper_tool_call_with_outcome
        Keeper_publication_recovery_availability.turn_context
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> ?search_fn:
-       (query:string -> max_results:int -> Keeper_tool_execution.t)
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
@@ -91,8 +86,6 @@ val execute_keeper_tool_call
        Keeper_publication_recovery_availability.turn_context
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> ?search_fn:
-       (query:string -> max_results:int -> Keeper_tool_execution.t)
   -> name:string
   -> input:Yojson.Safe.t
   -> unit

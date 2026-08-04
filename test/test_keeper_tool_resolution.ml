@@ -184,7 +184,6 @@ let policy_tool_names =
       "keeper_tasks_audit";
       "keeper_tasks_list";
       "keeper_time_now";
-      "keeper_tool_search";
       "keeper_tools_list";
       "keeper_voice_agent";
       "keeper_voice_listen";

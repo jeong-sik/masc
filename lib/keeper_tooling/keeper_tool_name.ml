@@ -47,7 +47,6 @@ type t =
   | Tasks_audit
   | Tasks_list
   | Time_now
-  | Tool_search
   | Tools_list
   | Persona_create
   | Persona_update
@@ -99,7 +98,6 @@ let all : t list =
   ; Tasks_audit
   ; Tasks_list
   ; Time_now
-  ; Tool_search
   ; Tools_list
   ; Persona_create
   ; Persona_update
@@ -153,7 +151,6 @@ let to_string = function
   | Tasks_audit -> "keeper_tasks_audit"
   | Tasks_list -> "keeper_tasks_list"
   | Time_now -> "keeper_time_now"
-  | Tool_search -> "keeper_tool_search"
   | Tools_list -> "keeper_tools_list"
   | Persona_create -> "masc_persona_create"
   | Persona_update -> "masc_persona_update"
@@ -206,7 +203,6 @@ let of_string = function
   | "keeper_tasks_audit" -> Some Tasks_audit
   | "keeper_tasks_list" -> Some Tasks_list
   | "keeper_time_now" -> Some Time_now
-  | "keeper_tool_search" -> Some Tool_search
   | "keeper_tools_list" -> Some Tools_list
   | "keeper_voice_agent" -> Some Voice_agent
   | "keeper_voice_listen" -> Some Voice_listen

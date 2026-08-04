@@ -45,7 +45,6 @@ type t =
   | Tasks_audit
   | Tasks_list
   | Time_now
-  | Tool_search
   | Tools_list
   | Persona_create
   | Persona_update

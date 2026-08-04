@@ -251,9 +251,9 @@ let test_missing_required_selector_degrades_selection () =
       ~required_selectors:[ Eval_tool_selector.Descriptor_id "keeper.surface.read" ]
       ()
   in
-  let route_evidence = `Assoc [ ("descriptor_id", `String "keeper.tool_search") ] in
+  let route_evidence = `Assoc [ ("descriptor_id", `String "keeper.tools_list") ] in
   let run =
-    selector_run [ selector_tool_call ~route_evidence "keeper_tool_search" ]
+    selector_run [ selector_tool_call ~route_evidence "keeper_tools_list" ]
   in
   match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
   | Some score ->
@@ -315,7 +315,7 @@ let test_missing_arg_selector_degrades_arg_validity () =
         selector_tool_call
           ~route_evidence
           ~input:(`Assoc [ ("surface", `String "discord") ])
-          "keeper_tool_search";
+          "keeper_tools_list";
       ]
   in
   match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
@@ -473,7 +473,7 @@ let test_unavailable_route_evidence_excludes_run_from_scoring () =
         [ Eval_tool_selector.Descriptor_id "keeper.surface.read" ]
       ()
   in
-  let run = selector_run [ selector_tool_call "keeper_tool_search" ] in
+  let run = selector_run [ selector_tool_call "keeper_tools_list" ] in
   match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
   | Some _ -> fail "score_run should return None when route evidence is unavailable"
   | None -> ()

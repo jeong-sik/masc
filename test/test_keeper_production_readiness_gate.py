@@ -268,7 +268,7 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
                 tools = (
                     ["tool_execute_gh", "keeper_sandbox_docker"]
                     if i % 2 == 0
-                    else ["keeper_tool_search"]
+                    else ["keeper_tools_list"]
                 )
                 gate.write_fixture_turn(
                     root,

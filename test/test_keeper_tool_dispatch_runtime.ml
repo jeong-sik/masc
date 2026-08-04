@@ -1860,118 +1860,6 @@ let test_real_directory_release_failure_preserves_effect_truth () =
          (Atomic.get provider_reads))
 ;;
 
-let test_tool_search_without_session_searcher_is_unavailable () =
-  with_exec_fixture "keeper_tool_dispatch_runtime_search_unavailable"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
-      let result =
-        KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~publication_recovery ~ctx_work
-          ~name:"keeper_tool_search"
-          ~input:(`Assoc [ "query", `String "read files" ])
-          ()
-      in
-      check string "search outcome" "failure" (outcome_label result.disposition);
-      let json = Yojson.Safe.from_string result.raw_output in
-      check string "explicit unavailable error" "tool_search_unavailable"
-        Yojson.Safe.Util.(member "error" json |> to_string);
-      check string "exact unavailable reason" "catalog_provider_not_injected"
-        Yojson.Safe.Util.(member "reason" json |> to_string);
-      check bool "no guessed results" true
-        Yojson.Safe.Util.(member "results" json = `Null))
-
-let test_tool_search_uses_exact_injected_searcher () =
-  with_exec_fixture "keeper_tool_dispatch_runtime_injected_search"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
-      let observed = ref None in
-      let search_fn ~query ~max_results =
-        observed := Some (query, max_results);
-        Masc.Keeper_tool_execution.success
-          (Yojson.Safe.to_string
-             (`Assoc
-               [ "ok", `Bool true
-               ; "results", `List [ `Assoc [ "name", `String "injected-result" ] ]
-               ]))
-      in
-      let result =
-        KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~publication_recovery ~ctx_work ~search_fn
-          ~name:"keeper_tool_search"
-          ~input:
-            (`Assoc
-               [ "query", `String "read files"
-               ; "max_results", `Int 99
-               ])
-          ()
-      in
-      check string "search outcome" "success" (outcome_label result.disposition);
-      (match !observed with
-       | Some (query, max_results) ->
-         check string "query forwarded exactly" "read files" query;
-         check int "max_results capped at 10" 10 max_results
-       | None -> fail "injected catalog provider was not called");
-      let json = Yojson.Safe.from_string result.raw_output in
-      check string "injected result preserved" "injected-result"
-        Yojson.Safe.Util.(member "results" json |> to_list |> List.hd
-                          |> member "name" |> to_string))
-
-let test_tool_search_rejects_blank_query_before_provider () =
-  with_exec_fixture "keeper_tool_dispatch_runtime_blank_search"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
-      let called = ref false in
-      let search_fn ~query:_ ~max_results:_ =
-        called := true;
-        Masc.Keeper_tool_execution.success "{}"
-      in
-      let result =
-        KET.execute_keeper_tool_call_with_outcome
-          ~config
-          ~meta
-          ~publication_recovery
-          ~ctx_work
-          ~search_fn
-          ~name:"keeper_tool_search"
-          ~input:(`Assoc [ "query", `String "   " ])
-          ()
-      in
-      check string "blank query outcome" "failure" (outcome_label result.disposition);
-      check bool "provider not called for blank query" false !called;
-      let json = Yojson.Safe.from_string result.raw_output in
-      check string "typed invalid-query error" "invalid_tool_search_query"
-        Yojson.Safe.Util.(member "error" json |> to_string))
-
-let test_tool_search_ranks_and_limits_visible_catalog () =
-  let schema name description : Masc_domain.tool_schema =
-    { name
-    ; description
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; "properties", `Assoc []
-          ]
-    }
-  in
-  let catalog =
-    [ schema "tool_read_file" "Read an existing file."
-    ; schema "tool_edit_file" "Edit an existing file in place."
-    ; schema "keeper_time_now" "Return the current wall-clock time."
-    ]
-  in
-  let ranked =
-    Masc.Keeper_tool_registry.rank_tool_schemas
-      ~query:"edit file"
-      ~max_results:1
-      catalog
-  in
-  check int "query returns only requested count, not full catalog" 1
-    (List.length ranked);
-  match ranked with
-  | [ result ] ->
-    check string "most relevant schema ranks first" "tool_edit_file"
-      result.Masc.Keeper_tool_registry.schema.name;
-    check bool "rank exposes a positive relevance score" true
-      (result.score > 0.0)
-  | _ -> fail "expected exactly one ranked tool schema"
-
 let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
   with_exec_fixture
     ~process:true
@@ -4187,14 +4075,6 @@ let () =
         test_real_publication_release_failure_preserves_effect_truth;
       test_case "directory publication preserves cleanup failure truth" `Quick
         test_real_directory_release_failure_preserves_effect_truth;
-      test_case "tool search without session searcher is unavailable" `Quick
-        test_tool_search_without_session_searcher_is_unavailable;
-      test_case "tool search uses injected session searcher" `Quick
-        test_tool_search_uses_exact_injected_searcher;
-      test_case "tool search rejects blank query before provider" `Quick
-        test_tool_search_rejects_blank_query_before_provider;
-      test_case "tool search ranks and limits visible catalog" `Quick
-        test_tool_search_ranks_and_limits_visible_catalog;
       test_case "model-visible local tools dispatch to runtime handlers" `Quick
         test_model_visible_local_tools_dispatch_to_runtime_handlers;
       test_case "keeper_task_claim accepts explicit task_id" `Quick

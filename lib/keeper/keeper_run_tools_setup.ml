@@ -153,13 +153,6 @@ let prepare_agent_setup
     ; extra_system_context_size = None
     }
   in
-  let local_search_fn_ref
-    : (query:string -> max_results:int -> Keeper_tool_execution.t) ref
-    =
-    ref (fun ~query:_ ~max_results:_ ->
-      Keeper_tool_execution.success
-        (Yojson.Safe.to_string (`Assoc [ "results", `List [] ])))
-  in
   let
     { Keeper_tools_oas.tools = keeper_tools
     ; cleanup = keeper_tools_cleanup
@@ -172,8 +165,6 @@ let prepare_agent_setup
       ~meta
       ~publication_recovery
       ~ctx_snapshot
-      ~search_fn:(fun ~query ~max_results ->
-        !local_search_fn_ref ~query ~max_results)
       ?continuation_channel
       ~gate_context
       ?hitl_resolution
@@ -322,52 +313,6 @@ let prepare_agent_setup
            ; "actual_names", Json_util.json_string_list all_tool_names
            ])
       "Keeper model tool bundle differs from the descriptor projection";
-  let tool_catalog_schemas =
-    keeper_tools
-    |> List.map (fun (tool : Agent_sdk.Tool.t) ->
-      Masc_domain.
-        { name = tool.schema.name
-        ; description = tool.schema.description
-        ; input_schema =
-            Agent_sdk.Types.params_to_input_schema tool.schema.parameters
-        })
-  in
-  (local_search_fn_ref
-   := fun ~query ~max_results ->
-        let ranked =
-          Keeper_tool_registry.rank_tool_schemas
-            ~query
-            ~max_results
-            tool_catalog_schemas
-        in
-        let results =
-          List.map
-            (fun (ranked : Keeper_tool_registry.ranked_tool_schema) ->
-               `Assoc
-                 [ "name", `String ranked.schema.name
-                 ; "score", `Float ranked.score
-                 ; "description", `String ranked.schema.description
-                 ; "input_schema", ranked.schema.input_schema
-                 ; "already_visible", `Bool true
-                 ])
-            ranked
-        in
-        Keeper_tool_execution.success
-          (Yojson.Safe.to_string
-             (`Assoc
-               [ "ok", `Bool true
-               ; "query", `String query
-               ; "results", `List results
-               ; "result_count", `Int (List.length results)
-               ; "registered_descriptor_count", `Int (List.length registered_descriptors)
-               ; "model_visible_descriptor_count", `Int (List.length model_visible_descriptors)
-               ; "transport_alias_count", `Int transport_alias_count
-               ; "operator_only_count", `Int operator_only_count
-               ; "invalid_schema_count", `Int invalid_schema_count
-               ; "unexplained_exclusion_count", `Int unexplained_exclusion_count
-               ; ( "all_model_eligible_tools_visible"
-                 , `Bool all_model_eligible_tools_visible )
-               ])));
   Log.Keeper.routine
     "keeper:%s tool visibility: registered=%d visible=%d transport_alias=%d \
      operator_only=%d invalid_schema=%d unexplained=%d"

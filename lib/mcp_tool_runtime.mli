@@ -25,10 +25,6 @@ type context = Mcp_tool_runtime_types.context = {
     agent_name:string ->
     timeout:float ->
     Yojson.Safe.t option;
-  load_mcp_sessions :
-    Workspace.config -> Mcp_session_store.mcp_session_record list;
-  save_mcp_sessions :
-    Workspace.config -> Mcp_session_store.mcp_session_record list -> unit;
 }
 
 (** {1 Dispatch} *)

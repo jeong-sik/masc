@@ -422,8 +422,6 @@ let execute_tool_eio
                      ; wait_for_message =
                          (fun registry ~agent_name ~timeout ->
                            wait_for_message_eio ~clock registry ~agent_name ~timeout)
-                     ; load_mcp_sessions = Mcp_session_store.load_mcp_sessions
-                     ; save_mcp_sessions = Mcp_session_store.save_mcp_sessions
                      }
                    in
                    Mcp_tool_runtime.dispatch mcp_runtime_ctx ~name)

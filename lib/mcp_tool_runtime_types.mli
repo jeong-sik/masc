@@ -28,10 +28,4 @@ type context = {
     timeout:float ->
     Yojson.Safe.t option;
       (** Wait for a message from a given agent. *)
-  load_mcp_sessions :
-    Workspace.config -> Mcp_session_store.mcp_session_record list;
-  save_mcp_sessions :
-    Workspace.config ->
-    Mcp_session_store.mcp_session_record list ->
-    unit;
 }

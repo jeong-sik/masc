@@ -114,7 +114,7 @@ let test_session_task_lifecycle () =
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
-  let base_path = Filename.temp_dir "masc_session_task_smoke_" "" in
+  let base_path = Filename.temp_dir "mcp_session_task_smoke_" "" in
   Fun.protect
     ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
@@ -204,7 +204,7 @@ let test_task_creation_failure_remains_typed_error () =
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
-  let base_path = Filename.temp_dir "masc_session_task_failure_" "" in
+  let base_path = Filename.temp_dir "mcp_session_task_failure_" "" in
   Fun.protect
     ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->

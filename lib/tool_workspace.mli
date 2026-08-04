@@ -1,5 +1,5 @@
-(** Tool_workspace — Workspace management MCP tools (status / reset /
-    init / check / assertion).
+(** Tool_workspace — Workspace management MCP tools (status / init / check /
+    assertion).
 
     Note: [join] / [leave] / [set_workspace] / [who] require state +
     registry and remain in [mcp_server_eio.ml] — those tools are
@@ -19,7 +19,7 @@
     \[todo_completed_deliverable_conflicts]),
     \[resolve_current_binding], \[planning_context_state],
     \[assertion_kind_to_string], \[all_assertion_kinds], plus per-tool handlers
-    ([handle_status], [handle_reset], [handle_init],
+    ([handle_status], [handle_init],
     [handle_check], [handle_assertion]).
     All consumed only inside {!dispatch}'s pipeline. *)
 
@@ -75,8 +75,7 @@ val assertion_kind_of_string_lenient : string -> assertion_kind option
 val dispatchable_names : string list
 
 (** [dispatch ctx ~name ~args] routes [name] to the appropriate
-    private handler ([handle_status], [handle_reset],
-    [handle_init], [handle_check],
+    private handler ([handle_status], [handle_init], [handle_check],
     [handle_assertion]).  Returns [None] when [name] is not a
     workspace tool — caller treats as "not my tool".
 

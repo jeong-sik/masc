@@ -151,19 +151,3 @@ val clear_resource_subscriptions_for_session : string -> unit
     @param env Eio environment (for stdin/stdout)
     @param state Server state *)
 val run_stdio : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> server_state -> unit
-
-(** {1 MCP Sessions} *)
-
-(** MCP session record for HTTP session persistence *)
-type mcp_session_record = {
-  id: string;
-  agent_name: string option;
-  created_at: float;
-  last_seen: float;
-}
-
-(** Serialize MCP session to JSON *)
-val mcp_session_to_json : mcp_session_record -> Yojson.Safe.t
-
-(** Deserialize MCP session from JSON *)
-val mcp_session_of_json : Yojson.Safe.t -> mcp_session_record option

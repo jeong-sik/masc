@@ -338,28 +338,6 @@ let test_web_backends_are_in_complete_model_surface () =
         [ "WebSearch"; "WebFetch" ])
 ;;
 
-let test_masc_tool_stats_name_matches () =
-  let gen = find_by_name "masc_tool_stats" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_stats" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_tool_stats name" hand.name gen.name
-;;
-
-let test_masc_tool_stats_description_matches () =
-  let gen = find_by_name "masc_tool_stats" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_stats" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_tool_stats description" hand.description gen.description
-;;
-
-let test_masc_tool_stats_input_schema_matches () =
-  let gen = find_by_name "masc_tool_stats" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_stats" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "masc_tool_stats input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
-;;
-
 let () =
   Alcotest.run
     "tool_descriptors_gen"
@@ -424,14 +402,6 @@ let () =
             "remain in complete model surface after substrate injection"
             `Quick
             test_web_backends_are_in_complete_model_surface
-        ] )
-    ; ( "masc_tool_stats field-by-field"
-      , [ Alcotest.test_case "name" `Quick test_masc_tool_stats_name_matches
-        ; Alcotest.test_case "description" `Quick test_masc_tool_stats_description_matches
-        ; Alcotest.test_case
-            "input_schema"
-            `Quick
-            test_masc_tool_stats_input_schema_matches
         ] )
     ]
 ;;

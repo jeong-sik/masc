@@ -1953,8 +1953,6 @@ let internal_descriptors : t list =
       "Emit an agent heartbeat." ~readonly:false
   ; masc_workspace_descriptor "check" "masc_check"
       "Read a workspace assertion check." ~readonly:true
-  ; masc_workspace_descriptor "reset" "masc_reset"
-      "Reset workspace state." ~readonly:false
   ; masc_workspace_descriptor "goal_list" "masc_goal_list"
       "List workspace goals." ~readonly:true
   ; masc_workspace_descriptor "goal_upsert" "masc_goal_upsert"
@@ -1968,8 +1966,6 @@ let internal_descriptors : t list =
       "Read workspace dashboard summary." ~readonly:true
   ; masc_misc_descriptor "keeper_waiting_inventory" "masc_keeper_waiting_inventory"
       "Read keeper waiting inventory." ~readonly:true
-  ; masc_misc_descriptor "tool_stats" "masc_tool_stats"
-      "Read tool-usage statistics." ~readonly:true
   ; masc_misc_descriptor "tool_help" "masc_tool_help"
       "Read help text for a tool name." ~readonly:true
   ; masc_misc_descriptor "gc" "masc_gc"

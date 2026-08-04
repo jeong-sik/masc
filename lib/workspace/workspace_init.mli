@@ -1,8 +1,8 @@
 (** Workspace init / pause / resume / reset.
 
     Boot-time workspace state initialisation, pause/resume gating for
-    agent claims, and a destructive [reset] hook used by the
-    [masc_reset] tool. *)
+    agent claims, and a destructive [reset] helper for tests and explicit
+    internal maintenance. *)
 
 open Masc_domain
 open Workspace_utils
@@ -22,6 +22,6 @@ val resume :
   Workspace_utils_backend_setup.config ->
   by:string -> [> `Already_running | `Resumed ]
 
-(** Destructive reset of workspace state — primarily for the
-    [masc_reset] tool. *)
+(** Destructive reset of workspace state for tests and explicit internal
+    maintenance. *)
 val reset : Workspace_utils_backend_setup.config -> string

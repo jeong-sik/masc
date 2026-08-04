@@ -1151,7 +1151,7 @@ let test_wal_only_owner_is_recovered_and_settled () =
   let execution = latest_execution_exn config request in
   let state =
     Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
-    |> Result.fold ~ok:Fun.id ~error:fail
+    |> Result.fold ~ok:Fun.id ~error:(fun message -> fail message)
   in
   let selection =
     match Keeper_event_queue_state.pending_selections state with
@@ -1182,7 +1182,7 @@ let test_wal_only_owner_is_recovered_and_settled () =
    | Error detail -> fail detail);
   let checkpoint =
     Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
-    |> Result.fold ~ok:Fun.id ~error:fail
+    |> Result.fold ~ok:Fun.id ~error:(fun message -> fail message)
   in
   let entry =
     match Keeper_event_queue_state.transition_outbox checkpoint with
@@ -1221,7 +1221,7 @@ let test_wal_only_owner_is_recovered_and_settled () =
     Keeper_event_queue_persistence.validate_existing_state_read_only_result
       ~base_path
       ~keeper_name
-    |> Result.fold ~ok:Fun.id ~error:fail
+    |> Result.fold ~ok:Fun.id ~error:(fun message -> fail message)
   in
   check int "read-only WAL-only validation restores the committed outbox" 1
     (List.length (Keeper_event_queue_state.transition_outbox validated));
@@ -1231,7 +1231,7 @@ let test_wal_only_owner_is_recovered_and_settled () =
     Keeper_event_queue_persistence.load_existing_state_result
       ~base_path
       ~keeper_name
-    |> Result.fold ~ok:Fun.id ~error:fail
+    |> Result.fold ~ok:Fun.id ~error:(fun message -> fail message)
   in
   check int "WAL-only loader restores the committed outbox" 1
     (List.length (Keeper_event_queue_state.transition_outbox recovered));
@@ -1253,7 +1253,7 @@ let test_wal_only_owner_is_recovered_and_settled () =
     Keeper_event_queue_persistence.load_existing_state_result
       ~base_path
       ~keeper_name
-    |> Result.fold ~ok:Fun.id ~error:fail
+    |> Result.fold ~ok:Fun.id ~error:(fun message -> fail message)
   in
   check int "WAL-only recovery retires the outbox" 0
     (List.length (Keeper_event_queue_state.transition_outbox projected));

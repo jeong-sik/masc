@@ -1009,7 +1009,7 @@
   test_file_lock_eio
   test_error_logging_coverage
   test_client_identity
-  test_mcp_full_cycle
+  test_mcp_session_task_lifecycle
   test_client_registry_eio
   test_minted_name_gate
   test_identity_e2e
@@ -1167,7 +1167,7 @@
   test_file_lock_eio
   test_error_logging_coverage
   test_client_identity
-  test_mcp_full_cycle
+  test_mcp_session_task_lifecycle
   test_client_registry_eio
   test_minted_name_gate
   test_identity_e2e

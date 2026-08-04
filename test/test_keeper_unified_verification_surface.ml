@@ -124,9 +124,10 @@ let build_prompt ~meta observation =
   let turn_decision =
     Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation
   in
+  let config = Masc.Workspace.default_config "/tmp" in
   Masc.Keeper_unified_prompt.build_prompt
     ~meta
-    ~base_path:"/tmp"
+    ~config
     ~turn_decision
     ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
     ~observation

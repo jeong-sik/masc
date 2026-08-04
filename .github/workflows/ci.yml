@@ -912,6 +912,23 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_verification"
 
+      # MCP identity is session-bound behavior: compile-only coverage cannot
+      # prove that the complete handshake -> start -> status -> transition
+      # path preserves one identity through the durable Task lifecycle. The
+      # Keeper prompt target separately proves caller-owned config projection.
+      - name: Run MCP session Task lifecycle and Keeper prompt config suites
+        id: mcp_session_task_lifecycle_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          identity_targets="@test/runtest-test_client_identity @test/runtest-test_mcp_session_task_lifecycle @test/runtest-test_keeper_sandbox_docker_cwd_response"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${identity_targets}"
+
       # Goal store durability: the suite drives a real workspace and asserts
       # on-disk bytes, not source text — the read path stays lenient while a
       # write over an undecodable store must be refused and must leave both

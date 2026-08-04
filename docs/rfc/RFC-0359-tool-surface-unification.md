@@ -75,11 +75,16 @@ board·task 등의 기능이 **두 소비자(MCP 클라이언트 / keeper 모델
 
 도구는 **한 곳에서 한 번** 정의된다: `{ id; verb; description; input_schema; capability; surfaces }`. 표면(MCP/keeper)은 이 레지스트리를 **투영**할 뿐 재정의하지 않는다. `keeper_board_list` / `masc_board_list` 는 하나의 `board.list` 로 수렴, 표면별 이름 재작명 금지.
 
-### 3.2 기본 동사 + ToolSearch 발견
+### 3.2 기본 동사 + 발견 (측정으로 재정의됨, 2026-08-04)
 
-- **상시 노출 (기본 세트, ~8개)**: `Read` `Grep` `Write` `Edit` `Execute` `Search` + 관측 2개(`surface_read`, `surface_post`) + `tool_search`.
-- **나머지는 숨김**: `tool_search "board 에 글쓰기"` → 관련 도구 스키마를 그 턴에만 로드. `keeper_tool_search` 는 **이미 표면에 존재**한다 (인프라 있음, 정리만 안 됨).
-- 효과: 매 턴 컨텍스트 43~61 도구 → ~8. keeper 과부하(96% 관측형 회귀 = 수동성)의 공급측 완화.
+> **거짓 전제 정정**: 이 절의 초안은 "`keeper_tool_search` 는 **이미 표면에 존재**한다 (인프라 있음, 정리만 안 됨)"고 적었다. **실측 결과 거짓.** `keeper_tool_search` 는 발견 도구가 아니라 **이번 턴에 이미 노출된 집합(`keeper_tools`)을 Jaccard 유사도로 re-rank 하는 visible-set 필터**다 — 핸들러가 모든 결과에 `"already_visible": true` 를 하드코딩(`keeper_run_tools_setup.ml:335+`). 8월 keeper 호출 **0회**. 랭킹은 `Text_similarity.jaccard_similarity` = 하드코딩 휴리스틱(교리 위반).
+
+- **원안 (base 세트 ~8 + 나머지 숨김/검색발견)** 을 구현하려면 지금 **없는 능력 3개를 신규 빌드**해야 한다:
+  1. `search_fn` 이 노출분(`keeper_tools`)이 아니라 **전체 카탈로그**를 랭킹.
+  2. 런타임이 **턴에 없던 descriptor 를 dispatch** (현재 dispatch 는 번들 내 descriptor 매칭 → 숨은 도구는 찾아도 못 부름).
+  3. `already_visible:true` 하드코딩 제거 + lazy-load + 휴리스틱 아닌 랭킹.
+- 즉 base+search 는 config 조정이 아니라 **실기능 빌드**이며, 정당성은 per-turn 스키마 토큰 비용 측정에 달렸다(§6). 미측정 상태로 빌드 = "벤치마크 먼저" 원칙 위반.
+- **과잉노출 자체는 크지 않다**: keeper 월 distinct **54/61(89%)** 사용, per-day **13~43**(바쁜 날 39~43). "안 써서 숨긴다"는 성립 안 함. 유일한 실 비용은 per-turn 스키마 컨텍스트(미측정).
 
 ### 3.3 명명 단일화
 
@@ -102,13 +107,15 @@ board·task 등의 기능이 **두 소비자(MCP 클라이언트 / keeper 모델
 1. **명명 SSOT 도입 + 중복쌍 수렴**: 12 변주쌍이 하나의 레지스트리 엔트리를 투영하게. 삭제는 소비자 전수 이관 **후**에만. (실측: 각 쌍은 keeper 기준 한쪽만 라이브지만 코드 소비자는 양쪽 다 라이브 → 삭제-먼저 금지)
 2. **`masc_keeper_*` 이중 접두어 15개 정리**: `keeper_*` 또는 도메인 규칙으로.
 3. **tool_profile → surfaces 투영**: variant + 배관 제거 (별도 PR, execute/call_tool/protocol).
-4. **기본 세트 축소 + tool_search 승격**: 상시 노출을 ~8개로, 나머지 hidden + 검색 발견.
+4. **`keeper_tool_search` vestige 제거**: visible-set Jaccard re-ranker(0회 사용, `already_visible:true` 하드코딩, 없는 "선택적 가시성" 세계를 전제). 랭커(`rank_tool_schemas`/`ranked_tool_schema`/`keeper_tool_search_schema`) + `Tool_tool_search` variant + `search_fn` 배관(11 keeper 파일) 제거. `find_similar_names`(`tool_dispatch.ml:311`, unknown-tool 오타 제안)와 `Text_similarity.jaccard_similarity` 함수는 **별개 정당 용도 → 유지**.
+5. **(조건부) base+search 실발견 빌드**: §3.2 의 3개 신규 능력 구현. **선행 게이트**: per-turn 스키마 토큰 비용 측정이 빌드를 정당화할 때만. 아니면 drop.
 
 ## 6. 검증 / 미해결
 
 - [x] `masc_board_*` (keeper 0회) 소비자 실측 → **살아 있음**. `mcp_tool_runtime*`, `tool_bridge.ml`, `sdk_tool_contract.ml`, dashboard TS 다수가 소비. **결론: "삭제-먼저" 금지.** 1단계는 삭제가 아니라 **SSOT 수렴** — 두 이름(`keeper_board_list`/`masc_board_list`)이 하나의 레지스트리 엔트리를 가리키게 한 뒤, 표면 투영에서 이름을 하나로. keeper가 0회여도 MCP 클라이언트 경로는 라이브다.
 - [ ] `/mcp/operator` `/mcp/managed` 의 실외부 소비자 유무 (surfaces 투영 전환 전 확인).
-- [ ] 단계별 CI green (도구 등록 테스트 + tool_search 발견 회귀).
-- [ ] tool_search 발견 품질: keeper 가 숨은 도구를 검색으로 실제 도달하는지 (harness 측정).
+- [x] tool_search 발견 품질 → **측정 완료: 발견 불가.** `keeper_tool_search` 는 visible-set 필터(`already_visible:true` 하드코딩), 숨은 도구 도달 경로 없음. 8월 keeper 호출 0회. 결론: 승격 대상 아니라 **제거 대상**(Stage 4).
+- [ ] per-turn 스키마 토큰 비용 측정 (base+search 실빌드 정당성 게이트, Stage 5 조건).
+- [ ] 단계별 CI green (도구 등록 테스트 + 랭커 제거 회귀).
 
 근거 데이터: `scratchpad/census.py`, `keeper_census.py`, `dup_census.py` + activity-events 2026-08-04.

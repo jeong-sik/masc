@@ -82,6 +82,13 @@ type transfer_projection_result = State.transfer_projection_result =
 let snapshot_filename = "event-queue-v15.json"
 let transition_wal_filename = "event-queue-transitions-v6.jsonl"
 
+(* Same rejection set as scripts/check-keeper-event-queue-v15-cutover.sh: a
+   nonempty legacy WAL is committed evidence the current binary cannot replay,
+   so a launcher that skips the cutover gate must still fail closed on it. *)
+let legacy_transition_wal_filenames =
+  [ "event-queue-transitions-v4.jsonl"; "event-queue-transitions-v5.jsonl" ]
+;;
+
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
 let resolve_owner ~base_path ~keeper_name =
@@ -277,7 +284,46 @@ type primary_snapshot =
   | Primary_missing
   | Primary_current of State.t
 
-let read_primary_unlocked owner =
+let reject_legacy_transition_wal_unlocked owner =
+  let runtime_dir = keeper_runtime_dir_of_owner owner in
+  let first_violation filename =
+    let path = Filename.concat runtime_dir filename in
+    try
+      if not (Sys.file_exists path)
+      then None
+      else (
+        match Safe_ops.read_file_safe path with
+        | Error message ->
+          Some
+            (Printf.sprintf
+               "failed to read legacy transition WAL %s: %s"
+               path
+               message)
+        | Ok "" -> None
+        | Ok _ ->
+          Some
+            (Printf.sprintf
+               "legacy transition WAL still contains committed evidence \
+                keeper=%s path=%s: run \
+                scripts/check-keeper-event-queue-v15-cutover.sh before \
+                starting this binary"
+               (keeper_name_of_owner owner)
+               path))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Some
+        (Printf.sprintf
+           "failed to inspect legacy transition WAL %s: %s"
+           path
+           (Printexc.to_string exn))
+  in
+  match List.find_map first_violation legacy_transition_wal_filenames with
+  | Some message -> Error message
+  | None -> Ok ()
+;;
+
+let read_primary_current_unlocked owner =
   let path = snapshot_path_of_owner owner in
   match read_json_if_present path with
   | Error _ as error -> error
@@ -299,6 +345,12 @@ let read_primary_unlocked owner =
                ~path
                ~surface:"event queue snapshot"
                message)))
+;;
+
+let read_primary_unlocked owner =
+  match reject_legacy_transition_wal_unlocked owner with
+  | Error message -> Error message
+  | Ok () -> read_primary_current_unlocked owner
 ;;
 
 let bump_revision state =

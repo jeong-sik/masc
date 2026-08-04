@@ -282,9 +282,11 @@ function rosterPresenceDisplay(
         ? '반응형'
         : runState.wake_kind === 'proactive_tick'
           ? '자율'
-          : runState.wake_kind != null
-            ? `기원 ${runState.wake_kind}`
-            : '기원 확인 필요'
+          : runState.wake_kind === 'chat_request'
+            ? '대화'
+            : runState.wake_kind != null
+              ? `기원 ${runState.wake_kind}`
+              : '기원 확인 필요'
       return { status: 'busy', detail: `${state.turnPhase} live · ${wakeLabel}` }
     }
     if (runState?.kind === 'waiting') {

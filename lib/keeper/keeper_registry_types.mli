@@ -336,17 +336,26 @@ type turn_attempt_state = {
 }
 
 (** What entered a turn: its exact consumed event batch, an empty external
-    wake, or the proactive cadence tick. Closed over
-    {!Keeper_event_queue.stimulus_payload} so a new source cannot silently
-    collapse into a generic "running" label on the operator dashboard. *)
+    wake, the proactive cadence tick, or an operator/connector chat message.
+    Closed over {!Keeper_event_queue.stimulus_payload} so a new source cannot
+    silently collapse into a generic "running" label on the operator
+    dashboard. *)
 type wake_reason =
   | Proactive_tick
   | Woken of Keeper_event_queue.stimulus_payload list
+  | Chat_request
+      (** The chat lane ({!Keeper_turn.run_keeper_invocation_turn_admitted})
+          entered the turn. It carries no stimulus payload: a chat turn is
+          admitted from the chat queue, not selected from the event queue, so
+          there is nothing in {!Keeper_event_queue.stimulus_payload} that
+          describes it. Distinct from [Proactive_tick] because a chat turn is
+          requested, not scheduled — collapsing the two would report an
+          operator's message as autonomous activity. *)
 
 val wake_reason_label : wake_reason -> string
-(** Stable low-cardinality label: ["proactive_tick"] or ["woken"]. Use
-    {!Keeper_event_queue.payload_kind_label} on the carried stimuli (for
-    [Woken]) to surface the finer-grained wake cause. *)
+(** Stable low-cardinality label: ["proactive_tick"], ["woken"], or
+    ["chat_request"]. Use {!Keeper_event_queue.payload_kind_label} on the
+    carried stimuli (for [Woken]) to surface the finer-grained wake cause. *)
 
 type turn_measurement = {
   tm_captured_at : float;

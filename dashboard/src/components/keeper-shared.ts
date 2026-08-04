@@ -784,6 +784,14 @@ function KeeperQueueControlPanel({
   }
   useEffect(() => {
     void load()
+    // Without this the queue rows are fetched once and never again, while the
+    // parent's 15s tools poll keeps re-rendering the panel — so formatTimeAgo
+    // ticks '도착 N분 전' upward on rows that may already have been consumed.
+    // Same cadence and visibility gating the receipt strip below already uses;
+    // load(false) keeps a surfaced error visible across polls.
+    return setupVisibleAutoRefresh(() => {
+      void load(false)
+    }, BUSY_REFRESH_MS)
   }, [keeperName])
   const eventRows = eventSnapshot?.pending ?? []
   const activeChatRows = (keeper?.waiting_on ?? [])
@@ -1106,7 +1114,11 @@ function KeeperQueueControlPanel({
           : null}
       </div>
       <div class="grid gap-2 border-t border-[var(--color-border-subtle)] pt-3">
-        <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">자율 이벤트 대기 ${eventSnapshot?.totalPending ?? 0}</div>
+        <!-- eventSnapshot is fetched once per keeperName and after operator actions; it
+             does not poll. Falling back to the 15s-refreshed waiting inventory (the same
+             source 채팅 대기/배송 복구 already use) keeps the count from reading 0 before
+             the one-shot fetch resolves or after it throws. -->
+        <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">자율 이벤트 대기 ${eventSnapshot?.totalPending ?? keeper?.sources?.event_queue_pending ?? 0}</div>
         ${eventRecoveries.map(recovery => {
           const operationId = recovery.operation.operationId
           const key = `event-recovery:${operationId}`
@@ -1140,8 +1152,19 @@ function KeeperQueueControlPanel({
                 wake reason ${item.payloadKind} · urgency ${item.urgency}
                 · 도착 ${formatTimeAgo(item.arrivedAt)} (${new Date(item.arrivedAt * 1000).toLocaleString()})
               </div>
+              ${item.rejectionReason
+                ? html`
+                    <div
+                      class="whitespace-pre-wrap text-2xs text-[var(--color-fg-secondary)]"
+                      data-operator-event-reason
+                    >${item.rejectionTaskId ? `${item.rejectionTaskId}: ` : ''}${item.rejectionReason}</div>
+                  `
+                : null}
               <div class="break-all font-mono text-3xs text-[var(--color-fg-muted)]">
                 source ref ${item.sourceRef}
+              </div>
+              <div class="text-3xs text-[var(--color-fg-muted)]">
+                urgency 변경은 이 항목만이 아니라 대기열 전체를 urgency 순으로 다시 정렬합니다.
               </div>
               <div class="flex flex-wrap gap-1.5">
                 ${(['immediate', 'normal', 'low'] as const).map(urgency => html`

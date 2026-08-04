@@ -739,6 +739,12 @@ export interface KeeperEventQueuePendingItem {
   urgency: 'immediate' | 'normal' | 'low'
   arrivedAt: number
   payloadKind: string
+  /** Why a completion_authority_rejected stimulus exists. Only that kind
+      carries it, and it is absent on a backend that predates the field —
+      the projection deliberately does not emit raw payload content for the
+      other kinds. */
+  rejectionReason?: string
+  rejectionTaskId?: string
 }
 
 export interface KeeperEventQueuePendingSnapshot {
@@ -1159,6 +1165,12 @@ export function parseKeeperEventQueuePendingSnapshot(
       urgency: urgency as KeeperEventQueuePendingItem['urgency'],
       arrivedAt,
       payloadKind,
+      ...(typeof raw.rejection_reason === 'string' && raw.rejection_reason.trim()
+        ? { rejectionReason: raw.rejection_reason.trim() }
+        : {}),
+      ...(typeof raw.rejection_task_id === 'string' && raw.rejection_task_id.trim()
+        ? { rejectionTaskId: raw.rejection_task_id.trim() }
+        : {}),
     }
   })
   if (pending.length > totalPending) {

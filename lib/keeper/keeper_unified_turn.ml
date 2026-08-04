@@ -172,6 +172,14 @@ let manual_compaction_preemption_request ~wake ~now pending =
     | Keeper_registry.Woken (_ :: _ as payloads) ->
       not (List.exists is_manual_compaction_payload payloads)
     | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] -> false
+    (* Not reachable: the chat lane admits through
+       [Keeper_turn.run_keeper_invocation_turn_admitted] and never enters
+       [run_keeper_cycle], which is the only producer of the [~wake] threaded
+       here. Enumerated rather than folded into a catch-all so a future chat
+       lane that does reach this point fails the same way an autonomous tick
+       would — by declining to preempt — instead of silently matching a
+       branch written for a different lane. *)
+    | Keeper_registry.Chat_request -> false
   in
   if not source_can_yield
   then None
@@ -234,6 +242,13 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
            ~base_path
            ~keeper_name)
   | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] ->
+    fun () -> autonomous_yield_request ~base_path ~keeper_name
+  (* Not reachable, same reason as in [manual_compaction_preemption_request]:
+     [~wake] here originates in [run_keeper_cycle], which the chat lane does
+     not call. The autonomous yield request is the conservative answer — it
+     asks whether this lane should step aside, and a chat turn that somehow
+     arrived here should step aside on the same terms. *)
+  | Keeper_registry.Chat_request ->
     fun () -> autonomous_yield_request ~base_path ~keeper_name
 ;;
 

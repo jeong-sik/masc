@@ -506,6 +506,105 @@ let test_route_evidence_quality_treats_empty_evidence_as_missing () =
       ("empty receipt_labels", `Assoc [ ("receipt_labels", `Assoc []) ]);
     ]
 
+(* ── Case set vs live descriptor registry ──────────────────────────────
+   The shipped case set names tools indirectly, through selectors that
+   resolve via descriptor route evidence. [Eval_tool_selector] is
+   deliberately observational: it matches recorded calls and never
+   consults the registry. That leaves a gap no other check covers — a
+   selector naming a descriptor that no longer exists does not error, it
+   simply matches nothing, and scoring reports "the keeper did not do the
+   required thing" instead of "this case is stale".
+
+   #26785 removed keeper_tool_search and moved its capability_introspection
+   eval tag onto keeper_tools_list, whose input schema is empty. Every case
+   requiring that tag with an arg check on $.query became unsatisfiable,
+   and the suite stayed green because the evidence fixture was rewritten to
+   match. These two tests resolve the shipped case set against the live
+   registry so that class of drift fails here instead of surfacing as a
+   keeper quality number. *)
+
+let live_descriptor_calls () =
+  Keeper_tool_descriptor.all_descriptors ()
+  |> List.concat_map (fun (descriptor : Keeper_tool_descriptor.t) ->
+         let route_evidence =
+           Some (Keeper_tool_descriptor.route_evidence_json descriptor)
+         in
+         Keeper_tool_descriptor.registered_names descriptor
+         |> List.map (fun tool_name ->
+                (descriptor, { Eval_tool_selector.tool_name; route_evidence })))
+
+let descriptors_matching selector =
+  live_descriptor_calls ()
+  |> List.filter (fun (_, call) -> Eval_tool_selector.matches selector call)
+  |> List.map fst
+
+let case_selectors (benchmark_case : Tool_call_quality_benchmark.benchmark_case)
+    =
+  benchmark_case.required_selectors
+  @ benchmark_case.forbidden_selectors
+  @ List.map
+      (fun (arg_check : Tool_call_quality_benchmark.arg_check) ->
+        arg_check.selector)
+      benchmark_case.arg_checks
+
+let test_case_selectors_resolve_to_live_descriptors () =
+  let cases, _ = load_fixture () in
+  let unresolved =
+    List.concat_map
+      (fun (benchmark_case : Tool_call_quality_benchmark.benchmark_case) ->
+        case_selectors benchmark_case
+        |> List.filter (fun selector -> descriptors_matching selector = [])
+        |> List.map (fun selector ->
+               benchmark_case.id ^ " -> " ^ Eval_tool_selector.label selector))
+      cases
+  in
+  check (list string) "case selectors naming no live descriptor" [] unresolved
+
+(* Root property of a JSONPath-lite arg-check path: "$.pattern" -> "pattern".
+   Nested paths are checked at their root only; the registry schema is the
+   authority for the top-level argument name, which is what drifted. *)
+let arg_check_root_property path =
+  match String.split_on_char '.' path with
+  | "$" :: property :: _ when property <> "" -> Some property
+  | _ -> None
+
+let schema_property_names schema =
+  match schema with
+  | `Assoc fields -> (
+      match List.assoc_opt "properties" fields with
+      | Some (`Assoc properties) -> List.map fst properties
+      | _ -> [])
+  | _ -> []
+
+let test_arg_check_paths_exist_in_descriptor_schema () =
+  let cases, _ = load_fixture () in
+  let unsatisfiable =
+    List.concat_map
+      (fun (benchmark_case : Tool_call_quality_benchmark.benchmark_case) ->
+        benchmark_case.arg_checks
+        |> List.filter_map
+             (fun (arg_check : Tool_call_quality_benchmark.arg_check) ->
+               match arg_check_root_property arg_check.path with
+               | None -> None
+               | Some property ->
+                   let accepted =
+                     descriptors_matching arg_check.selector
+                     |> List.exists (fun (descriptor : Keeper_tool_descriptor.t)
+                                    ->
+                         List.mem property
+                           (schema_property_names descriptor.input_schema))
+                   in
+                   if accepted then None
+                   else
+                     Some
+                       (benchmark_case.id ^ " -> "
+                       ^ Eval_tool_selector.label arg_check.selector
+                       ^ " has no `" ^ property ^ "` in its input schema")))
+      cases
+  in
+  check (list string) "arg checks naming an absent schema property" []
+    unsatisfiable
+
 let () =
   run "tool_call_quality_benchmark"
     [
@@ -538,5 +637,9 @@ let () =
              `Quick test_route_evidence_quality_treats_empty_evidence_as_missing;
            test_case "unavailable route evidence excludes run from scoring"
              `Quick test_unavailable_route_evidence_excludes_run_from_scoring;
+           test_case "case selectors resolve to live descriptors" `Quick
+             test_case_selectors_resolve_to_live_descriptors;
+           test_case "arg check paths exist in descriptor schema" `Quick
+             test_arg_check_paths_exist_in_descriptor_schema;
          ]);
     ]

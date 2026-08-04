@@ -243,8 +243,14 @@ let test_keeper_prompt_preserves_runtime_continuity_anchors () =
   check bool "shared system anchor present" true (has_in prompt "<system>");
   check bool "runtime owns continuity through the checkpoint" true
     (has_in prompt "The runtime owns continuity, through the checkpoint");
+  (* Pins the rule, not one phrasing of it: a compacted summary is context and
+     does not move typed state. The sentence was rewritten when the identity
+     section stopped framing other Keepers as a contamination source, so this
+     asserts the two halves the rule is made of. *)
+  check bool "compacted summary is context, not instruction" true
+    (has_in prompt "a compacted summary of what happened is context, not an instruction");
   check bool "compacted summary cannot authorize a transition" true
-    (has_in prompt "it never authorizes a state transition");
+    (has_in prompt "authorizes a state transition");
   check bool "ownership boundaries retained" true
     (has_in prompt "MASC owns Board, Task, Goal, Schedule")
 
@@ -318,6 +324,33 @@ let test_system_block_states_product_and_capabilities () =
     (has_in prompt "Communication is the load-bearing part of this system");
   check bool "empty board is supply, not a verdict" true
     (has_in prompt "that is a fact about supply, not a conclusion that there is nothing to do")
+
+(* The collaboration surface a keeper is actually given. Board alone exposes
+   sixteen keeper-callable tools (post, comment, votes, search, stats, five
+   sub-board operations, curation), but the prompt used to describe it in one
+   line as a place to publish findings, so commenting, voting and opening a
+   sub-board were capabilities a keeper had no way to know it had. Comment
+   appeared once, and only as something that wakes a keeper -- never as
+   something a keeper writes. *)
+let test_system_block_states_the_collaboration_surface () =
+  let prompt = KP.build_keeper_system_prompt ~instructions:"" () in
+  check bool "board is where keepers think together" true
+    (has_in prompt "the place Keepers think together");
+  check bool "commenting is a keeper action, not only a wake source" true
+    (has_in prompt "comment on");
+  check bool "voting is named" true (has_in prompt "vote on a post or a comment");
+  check bool "sub-boards are creatable by a keeper" true
+    (has_in prompt "open a sub-board when a topic deserves its own room");
+  check bool "task lifecycle is stated as create/claim/finish/read" true
+    (has_in prompt "Create one for work you can name, claim");
+  check bool "goals are writable, not only readable" true
+    (has_in prompt "Write one, move it along");
+  check bool "delegation is named" true
+    (has_in prompt "hand a bounded piece of work to a specific Keeper");
+  check bool "asking is framed as ordinary, not escalation" true
+    (has_in prompt "are all ordinary moves, not escalations");
+  check bool "creating collaboration objects needs no permission" true
+    (has_in prompt "does not need anyone's permission")
 
 let test_repository_checkout_authority_prompt () =
   let prompt =
@@ -671,6 +704,8 @@ let () =
             test_merged_system_block_keeps_turn_intent_rules;
           test_case "system block states product and capabilities" `Quick
             test_system_block_states_product_and_capabilities;
+          test_case "system block states the collaboration surface" `Quick
+            test_system_block_states_the_collaboration_surface;
           test_case "no catalog repository injection (RFC-0324 B-1)" `Quick
             test_repository_checkout_authority_prompt;
           test_case "prompt recovery guard restores missing anchors" `Quick

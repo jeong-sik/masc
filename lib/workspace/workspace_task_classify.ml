@@ -309,8 +309,9 @@ let task_started_at_unix status =
     timestamp_or_default claimed_at
   | Masc_domain.InProgress { started_at; _ } ->
     timestamp_or_default started_at
+  | Masc_domain.AwaitingVerification { started_at; _ } ->
+    timestamp_or_default started_at
   | Masc_domain.Todo
-  | Masc_domain.AwaitingVerification _
   | Masc_domain.Done _
   | Masc_domain.Cancelled _ -> default_time
 ;;

@@ -186,7 +186,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 174 | Dashboard fixture name override. |
 | `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 170 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
 | `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 183 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
-| `MASC_MAINTENANCE_PULSE_INTERVAL_SEC` | typed:float | Runtime | operator | 106 | Maintenance Pulse interval (seconds). Controls the orphan-observation and channel-dedup consumers. Clamped to >= 1.0 ... |
+| `MASC_MAINTENANCE_PULSE_INTERVAL_SEC` | typed:float | Runtime | operator | 107 | Maintenance Pulse interval (seconds). Controls the orphan-observation and channel-dedup consumers, and bounds resched... |
 | `MASC_OAUTH_ACCESS_TOKEN_TTL_SEC` | typed:int | Security | operator | 37 | Access-token lifetime in seconds. @category Security @ops_class operator |
 | `MASC_OAUTH_CODE_TTL_SEC` | typed:int | Security | operator | 30 | Authorization-code lifetime in seconds. @category Security @ops_class operator |
 | `MASC_OAUTH_ENABLED` | typed:bool | Security | operator | 24 | Enable the OAuth authorization server. @category Security @ops_class operator |

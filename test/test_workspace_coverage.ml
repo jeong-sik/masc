@@ -2360,6 +2360,7 @@ let test_gc_preserves_awaiting_verification () =
         ~status:
           (Masc_domain.AwaitingVerification
              { assignee = "claude"
+             ; started_at = gc_ancient_ts
              ; submitted_at = gc_ancient_ts
              ; verification_id = "verif-900"
              })
@@ -2387,6 +2388,7 @@ let test_gc_restores_orphaned_nonterminal_from_archive () =
         ~status:
           (Masc_domain.AwaitingVerification
              { assignee = "claude"
+             ; started_at = gc_ancient_ts
              ; submitted_at = gc_ancient_ts
              ; verification_id = "verif-901"
              })
@@ -2421,6 +2423,7 @@ let test_gc_restored_task_preserves_old_messages_same_pass () =
         ~status:
           (Masc_domain.AwaitingVerification
              { assignee = "claude"
+             ; started_at = gc_ancient_ts
              ; submitted_at = gc_ancient_ts
              ; verification_id = "verif-904"
              })

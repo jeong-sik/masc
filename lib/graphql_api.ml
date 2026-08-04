@@ -145,12 +145,12 @@ let task_status_info_of_task (task : Masc_domain.task) =
         cancelled_at = Some cancelled_at;
         reason;
       }
-  | Masc_domain.AwaitingVerification { assignee; submitted_at; _ } ->
+  | Masc_domain.AwaitingVerification { assignee; started_at; _ } ->
       {
         status;
         assignee = Some assignee;
         claimed_at = None;
-        started_at = Some submitted_at;
+        started_at = Some started_at;
         completed_at = None;
         notes = None;
         cancelled_by = None;

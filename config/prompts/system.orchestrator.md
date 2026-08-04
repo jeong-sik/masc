@@ -35,15 +35,15 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
    An authenticated human operator or the application-owned system LLM agent
    then issues the verdict outside the agent task-action surface. No Keeper
    claims or approves the
-   pending obligation. Strict-contract tasks reject direct completion; only
-   non-strict tasks may use action: "done".
+   pending obligation. Every task completion uses this submission path; direct
+   action: "done" is rejected.
 
 7. **Broadcast progress**: Call `mcp__masc__masc_broadcast` to notify others
 
 ## Available MCP Tools:
 - mcp__masc__masc_status - Get project status
 - mcp__masc__masc_tasks - List all tasks
-- mcp__masc__masc_transition - Claim/start/submit/done/cancel/release a task
+- mcp__masc__masc_transition - Claim/start/submit/cancel/release a task
 - mcp__masc__masc_claim_next - Auto-claim highest priority
 - mcp__masc__masc_broadcast - Send message to all
 - mcp__masc__masc_heartbeat - Update your heartbeat

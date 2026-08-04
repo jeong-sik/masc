@@ -1173,9 +1173,10 @@ let mark_owner_state_ready state =
            ; observed_phase = observed.phase
            })
 
-let start_completion_authority ~sw (state : Mcp_server.server_state) =
+let start_completion_authority ~sw ~clock (state : Mcp_server.server_state) =
   Completion_authority_agent.start
     ~sw
+    ~clock
     ~config:(Mcp_server.workspace_config state)
 
 let start_post_ready_owner_lanes
@@ -1187,7 +1188,7 @@ let start_post_ready_owner_lanes
   (* Keep the transport-neutral post-readiness order in one place. Both HTTP
      and stdio must install the system-LLM authority before maintenance can
      observe or resume AwaitingVerification work. *)
-  start_completion_authority ~sw state;
+  start_completion_authority ~sw ~clock state;
   Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
 
 let install_keeper_gate_persistence state =

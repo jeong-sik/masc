@@ -88,12 +88,26 @@ let test_make_orchestrator_prompt_contains_transition_claim_path () =
       let _ = Str.search_forward (Str.regexp "masc_transition") prompt 0 in true
     with Not_found -> false)
 
-let test_make_orchestrator_prompt_contains_done () =
+let test_make_orchestrator_prompt_requires_verification_submission () =
   let prompt = Orchestrator.make_orchestrator_prompt ~port:8935 in
-  check bool "mentions masc_transition" true
-    (try
-      let _ = Str.search_forward (Str.regexp "masc_transition") prompt 0 in true
-    with Not_found -> false)
+  let contains literal =
+    try
+      ignore (Str.search_forward (Str.regexp_string literal) prompt 0);
+      true
+    with Not_found -> false
+  in
+  check bool
+    "requires submit_for_verification"
+    true
+    (contains "action: \"submit_for_verification\"");
+  check bool
+    "rejects direct done"
+    true
+    (contains "action: \"done\" is rejected");
+  check bool
+    "does not retain the non-strict done lane"
+    false
+    (contains "non-strict tasks may use action: \"done\"")
 
 let test_make_orchestrator_prompt_mentions_broadcast () =
   let prompt = Orchestrator.make_orchestrator_prompt ~port:8935 in
@@ -260,7 +274,8 @@ let () =
       test_case "contains tools" `Quick test_make_orchestrator_prompt_contains_tools;
       test_case "contains transition claim path" `Quick
         test_make_orchestrator_prompt_contains_transition_claim_path;
-      test_case "contains done" `Quick test_make_orchestrator_prompt_contains_done;
+      test_case "requires verification submission" `Quick
+        test_make_orchestrator_prompt_requires_verification_submission;
       test_case "mentions broadcast" `Quick test_make_orchestrator_prompt_mentions_broadcast;
       test_case "runtime and embedded fallback share asset" `Quick
         test_runtime_and_embedded_fallback_share_asset;

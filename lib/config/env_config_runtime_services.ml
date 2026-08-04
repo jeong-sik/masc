@@ -97,7 +97,8 @@ end
 
 module Timeouts = struct
   (** Maintenance Pulse interval (seconds).
-      Controls the orphan-observation and channel-dedup consumers.
+      Controls the orphan-observation and channel-dedup consumers, and bounds
+      rescheduling delay for unresolved completion-authority obligations.
       Clamped to >= 1.0 to prevent tight-loop when misconfigured.
       @category Runtime
       @ops_class operator *)

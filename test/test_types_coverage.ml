@@ -338,6 +338,55 @@ let test_task_status_to_yojson_in_progress () =
     check bool "has started_at" true (List.mem_assoc "started_at" fields)
   | _ -> fail "expected Assoc"
 
+let awaiting_status_json =
+  `Assoc
+    [ ("status", `String "awaiting_verification")
+    ; ("assignee", `String "producer")
+    ; ("started_at", `String "2026-07-12T23:59:00Z")
+    ; ("submitted_at", `String "2026-07-13T00:00:00Z")
+    ; ("verification_id", `String "vrf-006")
+    ]
+
+let test_task_status_awaiting_round_trip_preserves_start () =
+  match Masc_domain.task_status_of_yojson awaiting_status_json with
+  | Ok
+      (Masc_domain.AwaitingVerification
+         { assignee; started_at; submitted_at; verification_id }) ->
+    check string "assignee" "producer" assignee;
+    check string "started_at" "2026-07-12T23:59:00Z" started_at;
+    check string "submitted_at" "2026-07-13T00:00:00Z" submitted_at;
+    check string "verification_id" "vrf-006" verification_id;
+    check bool
+      "round trip"
+      true
+      (Yojson.Safe.equal
+         awaiting_status_json
+         (Masc_domain.task_status_to_yojson
+            (Masc_domain.AwaitingVerification
+               { assignee; started_at; submitted_at; verification_id })))
+  | Ok _ | Error _ -> fail "awaiting_verification must decode with its original start"
+
+let test_task_status_awaiting_rejects_missing_or_invalid_start () =
+  let without_start =
+    match awaiting_status_json with
+    | `Assoc fields -> `Assoc (List.remove_assoc "started_at" fields)
+    | _ -> assert false
+  in
+  let invalid_start =
+    match awaiting_status_json with
+    | `Assoc fields ->
+      `Assoc
+        (("started_at", `String "not-a-timestamp")
+         :: List.remove_assoc "started_at" fields)
+    | _ -> assert false
+  in
+  List.iter
+    (fun json ->
+       match Masc_domain.task_status_of_yojson json with
+       | Error _ -> ()
+       | Ok _ -> fail "awaiting_verification must reject missing or invalid started_at")
+    [ without_start; invalid_start ]
+
 let test_task_status_to_yojson_done_with_notes () =
   let status = Masc_domain.Done { assignee = "codex"; completed_at = "2024-01-01"; notes = Some "All tests pass" } in
   let json = Masc_domain.task_status_to_yojson status in
@@ -1402,6 +1451,7 @@ let test_task_claim_awaiting_verification_is_pending_verdict () =
     description = "";
     task_status = Masc_domain.AwaitingVerification {
       assignee = "producer";
+      started_at = "2026-07-12T23:59:00Z";
       submitted_at = "2026-07-13T00:00:00Z";
       verification_id = "vrf-006";
     };
@@ -1555,6 +1605,8 @@ let () =
       test_case "todo" `Quick test_task_status_to_yojson_todo;
       test_case "claimed" `Quick test_task_status_to_yojson_claimed;
       test_case "in_progress" `Quick test_task_status_to_yojson_in_progress;
+      test_case "awaiting preserves start" `Quick
+        test_task_status_awaiting_round_trip_preserves_start;
       test_case "done with notes" `Quick test_task_status_to_yojson_done_with_notes;
       test_case "done no notes" `Quick test_task_status_to_yojson_done_no_notes;
       test_case "cancelled with reason" `Quick test_task_status_to_yojson_cancelled_with_reason;
@@ -1563,6 +1615,8 @@ let () =
       test_case "todo" `Quick test_task_status_of_yojson_todo;
       test_case "claimed" `Quick test_task_status_of_yojson_claimed;
       test_case "in_progress" `Quick test_task_status_of_yojson_in_progress;
+      test_case "awaiting hard-cuts missing start" `Quick
+        test_task_status_awaiting_rejects_missing_or_invalid_start;
       test_case "done" `Quick test_task_status_of_yojson_done;
       test_case "cancelled" `Quick test_task_status_of_yojson_cancelled;
       test_case "unknown" `Quick test_task_status_of_yojson_unknown;

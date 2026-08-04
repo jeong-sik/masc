@@ -10,8 +10,11 @@ open Result.Syntax
 type runtime =
   { config : Workspace_utils_backend_setup.config
   ; sw : Eio.Switch.t
+  ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; wake : Eio.Condition.t
   ; pending : bool Atomic.t
+  ; retry_scheduled : bool Atomic.t
+  ; retry_interval_sec : float
   ; in_flight : review_key list Atomic.t
   }
 
@@ -299,13 +302,18 @@ let prepare_review
           }
 ;;
 
-let log_deferred ~task_id ~verification_id ~authority ~reason =
+type process_outcome =
+  | Committed
+  | Deferred
+
+let defer ~task_id ~verification_id ~authority ~reason =
   Log.Misc.warn
     "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s reason=%s"
     task_id
     verification_id
     (Masc_domain.completion_authority_actor authority)
-    reason
+    reason;
+  Deferred
 ;;
 
 let process_task_once
@@ -325,7 +333,7 @@ let process_task_once
         ~verification_id
         ~authority
     with
-    | Error reason -> log_deferred ~task_id:task.id ~verification_id ~authority ~reason
+    | Error reason -> defer ~task_id:task.id ~verification_id ~authority ~reason
     | Ok prepared ->
       let result =
         Task.Anti_rationalization.review
@@ -338,7 +346,7 @@ let process_task_once
       in
       (match result.verdict with
        | None ->
-         log_deferred
+         defer
            ~task_id:task.id
            ~verification_id
            ~authority
@@ -448,9 +456,10 @@ let process_task_once
               task.id
               verification_id
               (Masc_domain.completion_authority_actor authority)
-              (Task.Anti_rationalization.verdict_constructor_name review_verdict)
+              (Task.Anti_rationalization.verdict_constructor_name review_verdict);
+            Committed
           | Error error ->
-            log_deferred
+            defer
               ~task_id:task.id
               ~verification_id
               ~authority
@@ -458,20 +467,39 @@ let process_task_once
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    log_deferred
+    defer
       ~task_id:task.id
       ~verification_id
       ~authority
       ~reason:(Printexc.to_string exn)
 ;;
 
+let request_scan (runtime : runtime) =
+  Atomic.set runtime.pending true;
+  Eio.Condition.broadcast runtime.wake
+;;
+
+let schedule_retry (runtime : runtime) =
+  if Atomic.compare_and_set runtime.retry_scheduled false true
+  then
+    Eio.Fiber.fork ~sw:runtime.sw (fun () ->
+      Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
+      Atomic.set runtime.retry_scheduled false;
+      request_scan runtime)
+;;
+
 let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verification_id =
   let key = { task_id = task.id; verification_id } in
   if claim_review runtime key
-  then
-    Fun.protect
-      ~finally:(fun () -> release_review runtime key)
-      (fun () -> process_task_once runtime task ~assignee ~verification_id)
+  then (
+    let outcome =
+      Fun.protect
+        ~finally:(fun () -> release_review runtime key)
+        (fun () -> process_task_once runtime task ~assignee ~verification_id)
+    in
+    match outcome with
+    | Committed -> ()
+    | Deferred -> schedule_retry runtime)
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"
@@ -484,7 +512,8 @@ let process_pending (runtime : runtime) =
   | Error detail ->
     Log.Misc.error
       "system LLM completion authority backlog read failed; pending tasks remain unresolved: %s"
-      detail
+      detail;
+    schedule_retry runtime
   | Ok backlog ->
     List.iter
       (fun (task : Masc_domain.task) ->
@@ -524,8 +553,7 @@ let install_callback (runtime : runtime) =
            "system LLM completion authority rejected empty verification id task_id=%s"
            task.id
        else (
-         Atomic.set runtime.pending true;
-         Eio.Condition.broadcast runtime.wake;
+         request_scan runtime;
          Log.Misc.info
            "system LLM completion authority scheduled task_id=%s verification_id=%s producer=%s"
            task.id
@@ -533,13 +561,16 @@ let install_callback (runtime : runtime) =
            assignee))
 ;;
 
-let start ~sw ~(config : Workspace_utils_backend_setup.config) =
+let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
   Eio.Switch.check sw;
   let runtime =
     { config
     ; sw
+    ; clock
     ; wake = Eio.Condition.create ()
     ; pending = Atomic.make true
+    ; retry_scheduled = Atomic.make false
+    ; retry_interval_sec = Env_config.Timeouts.maintenance_pulse_interval_sec
     ; in_flight = Atomic.make []
     }
   in

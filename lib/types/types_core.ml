@@ -284,6 +284,7 @@ type task_status =
   | InProgress of { assignee: string; started_at: string }
   | AwaitingVerification of {
       assignee: string;
+      started_at: string;
       submitted_at: string;
       verification_id: string;
         (** An obligation with no assignable satisfier. There is deliberately no
@@ -382,6 +383,7 @@ let task_status_schema_witnesses : task_status list =
   ; InProgress { assignee = placeholder; started_at = placeholder }
   ; AwaitingVerification
       { assignee = placeholder
+      ; started_at = placeholder
       ; submitted_at = placeholder
       ; verification_id = placeholder
       }
@@ -417,10 +419,11 @@ let task_status_to_yojson = function
         ("completed_at", `String completed_at);
         ("notes", Json_util.string_opt_to_json notes);
       ]
-  | AwaitingVerification { assignee; submitted_at; verification_id } ->
+  | AwaitingVerification { assignee; started_at; submitted_at; verification_id } ->
       `Assoc [
         ("status", `String "awaiting_verification");
         ("assignee", `String assignee);
+        ("started_at", `String started_at);
         ("submitted_at", `String submitted_at);
         ("verification_id", `String verification_id);
       ]
@@ -445,11 +448,21 @@ let task_status_of_yojson json =
     | "done" ->
         Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
     | "awaiting_verification" ->
-        Ok (AwaitingVerification
-              { assignee = req "assignee"
-              ; submitted_at = req "submitted_at"
-              ; verification_id = req "verification_id"
-              })
+        (match Json_util.get_string json "started_at" with
+         | Some started_at when Option.is_some (parse_iso8601_opt started_at) ->
+           Ok
+             (AwaitingVerification
+                { assignee = req "assignee"
+                ; started_at
+                ; submitted_at = req "submitted_at"
+                ; verification_id = req "verification_id"
+                })
+         | Some started_at ->
+           Error
+             (Printf.sprintf
+                "awaiting_verification started_at must be RFC 3339, got %S"
+                started_at)
+         | None -> Error "awaiting_verification requires started_at")
     | "cancelled" ->
         Ok (Cancelled
               { cancelled_by = req "cancelled_by"

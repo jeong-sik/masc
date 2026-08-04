@@ -55,7 +55,8 @@ end
 module Timeouts : sig
   val maintenance_pulse_interval_sec : float
   (** [MASC_MAINTENANCE_PULSE_INTERVAL_SEC] (default [60.0]). Floor [1.0].
-      Controls the orphan-observation and channel-dedup consumers. *)
+      Controls the orphan-observation and channel-dedup consumers, and bounds
+      completion-authority retry delay. *)
 
 end
 

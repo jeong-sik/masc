@@ -863,6 +863,7 @@ let test_rejected_verdict_audit_preserves_reason () =
                task_status =
                  Masc_domain.AwaitingVerification
                    { assignee = "audit-producer"
+                   ; started_at = "2026-07-27T23:59:00Z"
                    ; submitted_at = Masc_domain.now_iso ()
                    ; verification_id = "vrf-audit-rejected"
                    }
@@ -1741,6 +1742,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
              task_status =
                Masc_domain.AwaitingVerification
                  { assignee = "keeper-executor-agent"
+                 ; started_at = "2026-07-27T23:59:00Z"
                  ; submitted_at = "2026-07-28T00:00:00Z"
                  ; verification_id = request_id
                  }

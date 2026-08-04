@@ -2099,6 +2099,7 @@ let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
               (Types.AwaitingVerification
                  {
                    assignee = "producer-agent";
+                   started_at = "2026-06-26T00:00:00Z";
                    submitted_at = "2026-06-26T00:00:01Z";
                    verification_id = "verification-system-llm-001";
                  })

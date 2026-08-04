@@ -1056,7 +1056,11 @@ let () =
     let h =
       next_hint
         (Masc_domain.AwaitingVerification
-           { assignee = "a"; submitted_at = "t"; verification_id = "v" })
+           { assignee = "a"
+           ; started_at = "2026-07-13T00:00:00Z"
+           ; submitted_at = "t"
+           ; verification_id = "v"
+           })
     in
     assert (String.equal h ""))
 ;;

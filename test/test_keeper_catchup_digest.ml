@@ -252,6 +252,7 @@ let write_rich_fixture base =
         ~status:
           (Masc_domain.AwaitingVerification
              { assignee = keeper
+             ; started_at = "2026-07-02T00:00:00Z"
              ; submitted_at = "2026-07-02T00:10:00Z"
              ; verification_id = "vrf-task-1"
              })

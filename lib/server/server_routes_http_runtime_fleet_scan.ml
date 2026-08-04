@@ -1246,7 +1246,7 @@ type active_task_assignment =
 
 let active_task_assignment (task : Masc_domain.task) =
   match task.task_status with
-  | Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id } ->
+  | Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id; _ } ->
       Some
         (Completion_authority_pending
            { producer_agent_name = assignee; submitted_at; verification_id })

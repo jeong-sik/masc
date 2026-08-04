@@ -3,9 +3,8 @@ type handle = string
 let to_string h = h
 let of_string s = s
 
-(* Content hash = SHA-256 hex of the raw bytes. Same construction as
-   [Review_artifact_store.component_hash] (which truncates to 16 chars); the
-   full digest is kept here because this is an identity, not a display label. *)
+(* Content hash = SHA-256 hex of the raw bytes. The full digest is kept rather
+   than a truncated prefix because this is an identity, not a display label. *)
 let hash (raw : string) : handle = Digestif.SHA256.(digest_string raw |> to_hex)
 
 (* A handle is the lowercase-hex SHA-256 of stored bytes: exactly 64 hex chars.

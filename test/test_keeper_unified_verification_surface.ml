@@ -715,6 +715,25 @@ let test_completion_authority_rejection_preserves_human_provenance () =
    both checks below go red: the marker check because the user message
    started with "## Current World State", and the containment check because
    the frame text was present in the persisted channel. *)
+(* The frame states its own provenance. Without it the sections read as the
+   keeper's own work -- "### Your Recent Board Posts" most of all -- so a keeper
+   reporting "I checked the board" over an injected block was misreading the
+   frame rather than inventing a tool call. The header keeps its exact
+   "## Current World State" prefix because
+   [Keeper_context_core_history.has_world_state_signature] matches that literal
+   to keep frames out of persisted chat history. *)
+let test_world_state_frame_states_its_provenance () =
+  let obs = { base_observation with pending_board_events = [ sample_board_event ] } in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  check bool "frame keeps its signature prefix" true
+    (contains_sub "## Current World State" world_state);
+  check bool "frame says the runtime assembled it" true
+    (contains_sub "The runtime assembled the sections below for this turn" world_state);
+  check bool "frame says the keeper did not retrieve it" true
+    (contains_sub "You did not retrieve them" world_state)
+
 let test_world_state_never_in_persisted_user_message () =
   let obs = { base_observation with pending_board_events = [ sample_board_event ] } in
   let { Masc.Keeper_unified_prompt.world_state; user_message; _ } =
@@ -938,6 +957,9 @@ let () =
           test_case
             "prompt: no own recent board posts renders no section"
             `Quick test_no_own_recent_board_posts_renders_no_section;
+          test_case
+            "world-state frame states that the runtime assembled it"
+            `Quick test_world_state_frame_states_its_provenance;
           test_case
             "invariant: world-state frame never enters the persisted user message"
             `Quick test_world_state_never_in_persisted_user_message;

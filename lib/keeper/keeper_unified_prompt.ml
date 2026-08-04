@@ -833,8 +833,21 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
         Some (Buffer.contents ubuf))
       else None
   in
+  (* The header keeps its exact "## Current World State" prefix:
+     [Keeper_context_core_history.has_world_state_signature] matches that
+     literal to keep world-state frames out of persisted chat history.
+
+     The provenance line is what the sections underneath do not carry. A block
+     headed "### Your Recent Board Posts" reads as something the keeper did,
+     and nothing in the frame says the runtime assembled it, so a keeper that
+     then reports "I checked the board" is misreading its own frame rather than
+     inventing a tool call. Stating where the frame came from is what makes
+     that distinction available to the model. *)
   let world_state =
-    "## Current World State\n\n" ^ Keeper_context_layers.assemble ~content_of
+    "## Current World State\n\
+     The runtime assembled the sections below for this turn. You did not \
+     retrieve them; call a tool when you need to look something up or act.\n\n"
+    ^ Keeper_context_layers.assemble ~content_of
   in
   let user_message = autonomous_wake_marker in
   { system_prompt; world_state; user_message }

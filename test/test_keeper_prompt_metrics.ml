@@ -193,14 +193,24 @@ let test_hard_constraints_in_system_only () =
   check bool "no direct_reply in dynamic" true
     (not (has_in tp.dynamic_context "<direct_reply_mode>"))
 
+(* Pins the three rules, not the sentences that carried them. The direct-reply
+   prompt used to spend seven "Do not ..." lines on this; the rules survive but
+   are stated once each, because the world-state frame now says outright that
+   the runtime assembled it, which is what a keeper was missing when it
+   reported "I checked the board" over an injected block. *)
 let test_direct_reply_prompt_requires_action_evidence () =
   let tp = build_separated () in
-  check bool "direct reply prompt binds action claims to tool evidence" true
-    (has_in tp.system_prompt "matching tool-call evidence");
-  check bool "board read claims require same-turn board evidence" true
-    (has_in tp.system_prompt "same-turn board-read evidence");
-  check bool "tool failures must be reported as attempts" true
-    (has_in tp.system_prompt "do not phrase the attempt as a completed check")
+  check bool "action claims rest on a tool result from this turn" true
+    (has_in tp.system_prompt
+       "rests on a matching tool result\n  in this turn");
+  check bool "the claim verbs are enumerated" true
+    (has_in tp.system_prompt
+       "checked, read, posted,\n  commented, voted, claimed, or changed");
+  check bool "frame content is distinguished from work done" true
+    (has_in tp.system_prompt
+       "describe anything you only saw in the\n  frame as something you were shown");
+  check bool "a failed call is reported as an attempt" true
+    (has_in tp.system_prompt "say you tried and what happened")
 
 let test_soft_context_in_dynamic_only () =
   let tp = build_separated () in

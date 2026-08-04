@@ -76,6 +76,29 @@ let test_keeper_surface_is_exact_descriptor_projection () =
     descriptor_names
     projected_names
 
+let test_keeper_projection_uses_descriptor_capability_identity () =
+  Lib.Capability_registry.all_projection_seeds_from
+    Lib.Config.raw_all_tool_schemas
+  |> List.iter (fun (seed : Lib.Capability_registry.capability_seed) ->
+    match seed.projection.surface with
+    | Lib.Capability_registry.Keeper ->
+      (match
+         Lib.Keeper_tool_descriptor_resolution.descriptor_for_tool_name
+           seed.projection.tool_name
+       with
+       | None ->
+         failf
+           "Keeper projection %S has no descriptor"
+           seed.projection.tool_name
+       | Some descriptor ->
+         check string
+           (seed.projection.tool_name ^ " capability identity")
+           descriptor.Lib.Keeper_tool_descriptor.capability_id
+           seed.capability_id)
+    | Lib.Capability_registry.Public_mcp
+    | Lib.Capability_registry.Spawned_agent_mcp
+    | Lib.Capability_registry.Local_worker -> ())
+
 let test_inventory_marks_only_projected_keeper_names () =
   let open Yojson.Safe.Util in
   let rows =
@@ -113,6 +136,8 @@ let () =
             test_spawned_agent_surface_stays_curated;
           test_case "Keeper surface is the exact descriptor projection" `Quick
             test_keeper_surface_is_exact_descriptor_projection;
+          test_case "Keeper capability identity is descriptor-owned" `Quick
+            test_keeper_projection_uses_descriptor_capability_identity;
           test_case "inventory marks only exact Keeper projections" `Quick
             test_inventory_marks_only_projected_keeper_names;
         ] );

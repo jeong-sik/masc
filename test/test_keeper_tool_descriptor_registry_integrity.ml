@@ -232,6 +232,16 @@ let test_semantic_capability_has_at_most_one_keeper_model_projection () =
         (String.concat ", " model_names))
 ;;
 
+let test_model_visible_descriptors_own_capability_identity () =
+  Descriptor.model_visible_descriptors ()
+  |> List.iter (fun (descriptor : Descriptor.t) ->
+    if String.equal (String.trim descriptor.capability_id) ""
+    then
+      Alcotest.failf
+        "model-visible descriptor %S has a blank capability_id"
+        descriptor.id)
+;;
+
 let test_model_visible_descriptors_have_canonical_input_schemas () =
   Descriptor.model_visible_descriptors ()
   |> List.iter (fun (descriptor : Descriptor.t) ->
@@ -1538,6 +1548,10 @@ let () =
             "semantic capability has at most one Keeper model projection"
             `Quick
             test_semantic_capability_has_at_most_one_keeper_model_projection
+        ; test_case
+            "model-visible descriptors own capability identity"
+            `Quick
+            test_model_visible_descriptors_own_capability_identity
         ; test_case
             "model-visible descriptors have canonical input schemas"
             `Quick

@@ -128,6 +128,7 @@ type policy =
 
 type t =
   { id : string
+  ; capability_id : string
   ; keeper_model_projection : keeper_model_projection
   ; keeper_tool_group : keeper_tool_group
   ; input_schema_source : input_schema_source

@@ -199,18 +199,6 @@ let local_worker_internal_seeds : capability_seed list =
 let keeper_projection_seeds : capability_seed list =
   Keeper_tool_descriptor.model_visible_descriptors ()
   |> List.concat_map (fun (descriptor : Keeper_tool_descriptor.t) ->
-         let capability_id =
-           match
-             Keeper_tool_name.masc_board_name_of_keeper_name
-               descriptor.internal_name
-           with
-           | Some board_name -> Some (Tool_name.Board_name.to_string board_name)
-           | None ->
-             (match Keeper_tool_name.of_string descriptor.internal_name with
-              | Some Keeper_tool_name.Tasks_list -> Some "masc_tasks"
-              | Some Keeper_tool_name.Broadcast -> Some "masc_broadcast"
-              | Some _ | None -> None)
-         in
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
                 let schema : Masc_domain.tool_schema =
@@ -219,7 +207,7 @@ let keeper_projection_seeds : capability_seed list =
                   ; input_schema = descriptor.input_schema
                   }
                 in
-                make_seed ?capability_id
+                make_seed ~capability_id:descriptor.capability_id
                   ~audiences:[ Keeper_agent ]
                   ~supports_audit_evidence:true
                   ~supports_direct_user_discovery:false

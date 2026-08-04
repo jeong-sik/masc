@@ -440,8 +440,6 @@ lib/keeper/keeper_reaction_ledger.ml,497,None,unclassified
 lib/keeper/keeper_reaction_ledger.ml,515,false,unclassified
 lib/keeper/keeper_reaction_ledger.ml,827,None,unclassified
 lib/keeper/keeper_reaction_ledger.ml,900,(),unclassified
-lib/keeper/keeper_recall_outcome_eval.ml,242,None,unclassified
-lib/keeper/keeper_recall_outcome_eval.ml,282,None,unclassified
 lib/keeper/keeper_recurring_tool.ml,82,None,unclassified
 lib/keeper/keeper_registry_entry_action_dispatch.ml,61,None,unclassified
 lib/keeper/keeper_registry_types.ml,267,false,unclassified

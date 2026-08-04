@@ -96,14 +96,12 @@ let raw_trace_file_extension = ".jsonl"
     [raw_trace_retained_turn_files + 1] files per keeper (the freshly
     created turn file materializes after the prune that precedes it).
 
-    The count also bounds how far back the dashboard chat can show
-    autonomous turns: {!Keeper_autonomous_turn_source} reads this store,
-    and no other store holds a turn's body (the turn-record store keeps
-    token and latency metadata only).  Sized for ~3 days against the
-    2026-08-04 measurement of one lane-smith turn per ~49s
-    (~1,760 turns/day at ~11.7KB/turn, so ~70MB per keeper at this
-    bound). *)
-let raw_trace_retained_turn_files = 6000
+    The count also bounds how far back the dashboard chat can show an
+    autonomous turn's public final text: the turn record keeps typed
+    identity and exact-run metadata, but the raw-trace store owns the body.
+    Dashboard display requirements do not enlarge this diagnostic-store
+    retention policy. *)
+let raw_trace_retained_turn_files = 200
 
 let keeper_raw_trace_dir config name =
   Filename.concat

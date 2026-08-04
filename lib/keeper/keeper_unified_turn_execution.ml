@@ -205,6 +205,7 @@ let run (ctx : ctx)
                  ~max_context:execution.max_context
                  ~build_turn_prompt
                  ~user_message
+                 ~turn_kind:Turn_record.Autonomous
                  ~runtime_id:execution.runtime_id
                  ~world_observation:observation
                  ~generation:run_generation

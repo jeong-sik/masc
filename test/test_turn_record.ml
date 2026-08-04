@@ -50,6 +50,9 @@ let sample_record () : Turn_record.t =
       ; Ids.Execution_id.of_string "exec-1781200000001-0002"
       ]
   ; keeper = "sangsu"
+  ; agent_name = "sangsu-agent"
+  ; generation = 12
+  ; turn_kind = Turn_record.Direct
   ; trace_id = "trace-1780648779957-00000"
   ; absolute_turn = 4071
   ; turn_ref =
@@ -79,6 +82,15 @@ let sample_record () : Turn_record.t =
       Some
         { runtime_profile = "ollama_cloud.deepseek-v4-flash"
         ; body_bytes = 560_513
+        }
+  ; raw_trace_run_ref =
+      Some
+        { worker_run_id = "worker-run-41"
+        ; path = "/tmp/turn-record-test.jsonl"
+        ; start_seq = 8
+        ; end_seq = 15
+        ; agent_name = "sangsu-agent"
+        ; session_id = "trace-1780648779957-00000"
         }
   ; sampling =
       { temperature = Some 0.3
@@ -139,6 +151,10 @@ let test_codec_roundtrip () =
       (List.for_all2 Ids.Execution_id.equal record.execution_ids
          decoded.execution_ids);
     check string "keeper" record.keeper decoded.keeper;
+    check string "agent_name" record.agent_name decoded.agent_name;
+    check int "generation" record.generation decoded.generation;
+    check string "turn_kind" (Turn_record.turn_kind_to_string record.turn_kind)
+      (Turn_record.turn_kind_to_string decoded.turn_kind);
     check string "trace_id" record.trace_id decoded.trace_id;
     check int "absolute_turn" record.absolute_turn decoded.absolute_turn;
     check turn_ref_t "turn_ref preserved" record.turn_ref decoded.turn_ref;
@@ -196,6 +212,13 @@ let test_codec_roundtrip () =
          (fun (observation : Turn_record.request_wire_observation) ->
            observation.body_bytes)
          decoded.request_wire_observation);
+    check (option string) "exact raw trace run survives"
+      (Option.map
+         (fun (run_ref : Turn_record.raw_trace_run_ref) -> run_ref.worker_run_id)
+         record.raw_trace_run_ref)
+      (Option.map
+         (fun (run_ref : Turn_record.raw_trace_run_ref) -> run_ref.worker_run_id)
+         decoded.raw_trace_run_ref);
     check (option (float 0.0001)) "temperature" record.sampling.temperature
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p" record.sampling.top_p
@@ -326,6 +349,10 @@ let test_codec_requires_current_observation_fields () =
         check bool "missing current field is explicit" true
           (Astring.String.is_infix ~affix:field message))
     [ "turn_ref"
+    ; "agent_name"
+    ; "generation"
+    ; "turn_kind"
+    ; "raw_trace_run_ref"
     ; "input_components"
     ; "request_runtime_profile"
     ; "request_body_bytes"
@@ -345,6 +372,32 @@ let test_codec_rejects_mismatched_turn_ref () =
   | Error message ->
     check bool "turn_ref mismatch is explicit" true
       (Astring.String.is_infix ~affix:"does not match" message)
+
+let test_codec_rejects_mismatched_raw_trace_identity () =
+  let replace_run_ref_field field value =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      let run_ref =
+        match List.assoc "raw_trace_run_ref" fields with
+        | `Assoc run_ref_fields ->
+          `Assoc ((field, value) :: List.remove_assoc field run_ref_fields)
+        | _ -> fail "sample raw trace run ref is not an object"
+      in
+      `Assoc
+        (("raw_trace_run_ref", run_ref)
+         :: List.remove_assoc "raw_trace_run_ref" fields)
+    | other -> other
+  in
+  List.iter
+    (fun (field, value, expected) ->
+      match Turn_record.of_json (replace_run_ref_field field value) with
+      | Ok _ -> failf "decoded mismatched raw trace %s" field
+      | Error message ->
+        check bool "raw trace mismatch is explicit" true
+          (Astring.String.is_infix ~affix:expected message))
+    [ "agent_name", `String "different-agent", "agent_name does not match"
+    ; "session_id", `String "different-trace", "session_id does not match"
+    ]
 
 let test_codec_rejects_partial_or_invalid_request_wire_observation () =
   let replace fields =
@@ -660,6 +713,8 @@ let () =
             test_codec_requires_current_observation_fields
         ; test_case "mismatched turn_ref rejected" `Quick
             test_codec_rejects_mismatched_turn_ref
+        ; test_case "mismatched raw trace identity rejected" `Quick
+            test_codec_rejects_mismatched_raw_trace_identity
         ; test_case "partial or invalid request wire observation rejected"
             `Quick
             test_codec_rejects_partial_or_invalid_request_wire_observation

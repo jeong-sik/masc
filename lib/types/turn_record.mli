@@ -64,9 +64,25 @@ type request_wire_observation =
   ; body_bytes : int
   }
 
+type turn_kind =
+  | Autonomous
+  | Direct
+
+type raw_trace_run_ref =
+  { worker_run_id : string
+  ; path : string
+  ; start_seq : int
+  ; end_seq : int
+  ; agent_name : string
+  ; session_id : string
+  }
+
 type t =
   { execution_ids : Ids.Execution_id.t list (* tool calls in this turn *)
   ; keeper : string
+  ; agent_name : string
+  ; generation : int
+  ; turn_kind : turn_kind
   ; trace_id : string
   ; absolute_turn : int
   ; turn_ref : Ids.Turn_ref.t
@@ -135,6 +151,10 @@ type t =
        indistinguishable from a measurement (§9.6), so decode stays
        not_recorded until a provider reports it natively. *)
   ; request_wire_observation : request_wire_observation option
+  ; raw_trace_run_ref : raw_trace_run_ref option
+    (* Exact OAS run selected by this turn's completed provider dispatch.
+       [None] is an explicit observation that the raw-trace sink degraded or
+       the turn ended before a run reference existed. *)
     (* Runtime id and exact serialized body size for the latest request OAS
        serialized. Admitted requests arrive through OAS's pre-dispatch
        observer; a locally rejected [Request_body_too_large] arrives through
@@ -150,6 +170,8 @@ type t =
 val prompt_block_to_json : prompt_block -> Yojson.Safe.t
 val input_component_id_to_string : input_component_id -> string
 val input_component_to_json : input_component -> Yojson.Safe.t
+val turn_kind_to_string : turn_kind -> string
+val raw_trace_run_ref_to_json : raw_trace_run_ref -> Yojson.Safe.t
 
 val to_json : t -> Yojson.Safe.t
 

@@ -34,24 +34,6 @@ val autonomous_wake_marker : string
     tiny by design: the observation frame lives in
     {!turn_prompt_parts.world_state}, not in the message history. *)
 
-val is_autonomous_wake_prompt : string -> bool
-(** [is_autonomous_wake_prompt prompt] holds exactly when [prompt] equals
-    {!autonomous_wake_marker} — the [run_started] prompt a raw trace
-    records for an autonomous wake turn.
-
-    The raw-trace store holds both turn kinds: [Keeper_turn] runs a direct
-    [masc_keeper_msg] turn through the same [Keeper_agent_run.run_turn]
-    that the autonomous cycle uses. A direct turn is already persisted in
-    the keeper chat store, so replaying it out of the trace store would
-    render it twice in the dashboard transcript. The recorded prompt is
-    the only discriminator that store carries today.
-
-    Stopgap by construction — the durable form stamps the turn kind on the
-    turn record itself (RFC-0358), which also survives raw-trace
-    retention. {!Keeper_autonomous_turn_source} is the only consumer;
-    [Keeper_agent_run_finalize_response] compares against the same
-    constant, so both sides move together if the marker changes. *)
-
 val format_current_task : Masc_domain.task -> string
 
 val format_current_task_observation

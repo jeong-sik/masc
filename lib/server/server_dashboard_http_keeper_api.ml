@@ -1008,31 +1008,31 @@ let keeper_chat_history_freshness config name =
     | Some _, None | None, Some _ | None, None -> "absent"
   in
   (* Autonomous turns never touch the chat file, so the chat stat alone
-     would pin a stale body for the whole TTL. Each turn writes a NEW file
-     in the raw-trace dir, which bumps that directory's mtime; a turn still
-     appending to its own file does not, and rides the TTL like the
-     enrichment drift above. *)
+     would pin a stale body for the whole TTL. Raw trace creation and the
+     authoritative turn-record append are separate commits: directory mtime
+     observes the former but cannot prove the latter. Fingerprint the newest
+     physical turn-record row as well, so a record appended after a racing
+     cache compute invalidates that value on the next request. *)
   let trace_stamp =
     match Fs_compat.file_mtime (Keeper_types_support.keeper_raw_trace_dir config name) with
     | Some mtime -> Printf.sprintf "%h" mtime
     | None -> "absent"
   in
-  Printf.sprintf "%s|%s" chat_stamp trace_stamp
-;;
-
-let autonomous_block_json (block : Keeper_autonomous_turn_source.block) =
-  match block with
-  | Keeper_autonomous_turn_source.Thinking content ->
-    `Assoc [ "kind", `String "thinking"; "content", `String content ]
-  | Keeper_autonomous_turn_source.Text content ->
-    `Assoc [ "kind", `String "text"; "content", `String content ]
-  | Keeper_autonomous_turn_source.Tool_use { name; input } ->
-    `Assoc
-      (("kind", `String "tool_use")
-       :: ("name", `String name)
-       :: (match input with
-           | Some input -> [ "input", input ]
-           | None -> []))
+  let turn_record_stamp =
+    let store = Keeper_types_support.keeper_turn_record_store config name in
+    match
+      Dated_jsonl.find_latest_entry_result store (fun entry -> Some entry)
+    with
+    | Error error -> "error:" ^ Dated_jsonl.read_error_to_string error
+    | Ok None -> "absent"
+    | Ok (Some (Dated_jsonl.Parsed json)) ->
+      Yojson.Safe.to_string json |> Digest.string |> Digest.to_hex
+    | Ok (Some (Dated_jsonl.Malformed_json { path; line_number; detail })) ->
+      Printf.sprintf "malformed:%s:%s:%s" path
+        (Option.fold ~none:"unknown" ~some:string_of_int line_number)
+        detail
+  in
+  Printf.sprintf "%s|%s|%s" chat_stamp trace_stamp turn_record_stamp
 ;;
 
 (* An autonomous turn is not a chat row and must not become one (see
@@ -1052,11 +1052,15 @@ let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
     [ "id", `String ("autonomous:" ^ turn.turn_id)
     ; "role", `String "assistant"
     ; "ts", `Float turn.started_at
-    ; "content", `String (Option.value turn.final_text ~default:"")
+    ; ( "content"
+      , match turn.final_text with
+        | Some text -> `String text
+        | None -> `Null )
     ; ( "autonomous_turn"
       , `Assoc
           (("turn_id", `String turn.turn_id)
-           :: ("blocks", `List (List.map autonomous_block_json turn.blocks))
+           :: ("agent_name", `String turn.agent_name)
+           :: ("generation", `Int turn.generation)
            :: optional_fields) )
     ]
 ;;

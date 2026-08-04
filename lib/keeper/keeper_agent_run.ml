@@ -255,6 +255,29 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
   | Ok () -> dispatch ()
 ;;
 
+let turn_record_raw_trace_run_ref
+      ~expected_agent_name
+      ~expected_session_id
+      (run_ref : Agent_sdk.Raw_trace.run_ref)
+  : (Turn_record.raw_trace_run_ref, string) result
+  =
+  match run_ref.session_id with
+  | None -> Error "missing session identity"
+  | Some _ when not (String.equal run_ref.agent_name expected_agent_name) ->
+    Error "agent identity does not match the keeper turn"
+  | Some session_id when not (String.equal session_id expected_session_id) ->
+    Error "session identity does not match the keeper trace"
+  | Some session_id ->
+    Ok
+      { worker_run_id = run_ref.worker_run_id
+      ; path = run_ref.path
+      ; start_seq = run_ref.start_seq
+      ; end_seq = run_ref.end_seq
+      ; agent_name = run_ref.agent_name
+      ; session_id
+      }
+;;
+
 let terminal_effect_boundary_decision = function
   | Keeper_tools_oas.Terminal_effect_open -> Ok Runtime_agent.Continue
   | Keeper_tools_oas.Deferred_tool_result ->
@@ -327,6 +350,7 @@ let run_turn
       ~(build_turn_prompt :
          base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
       ~(user_message : string)
+      ~(turn_kind : Turn_record.turn_kind)
       ?user_blocks
       ~(runtime_id : string)
       ?world_observation
@@ -1198,9 +1222,29 @@ let run_turn
           | Some evidence -> evidence.prompt_blocks
           | None -> acc.prompt_blocks
         in
+        let raw_trace_run_ref =
+          match turn_result with
+          | Ok { trace_ref = Some run_ref; _ } ->
+            (match
+               turn_record_raw_trace_run_ref
+                 ~expected_agent_name:meta.agent_name
+                 ~expected_session_id:trace_id
+                 run_ref
+             with
+             | Ok exact_ref -> Some exact_ref
+             | Error detail ->
+               Log.Keeper.warn ~keeper_name:meta.name
+                 "raw-trace run reference omitted from turn record: worker_run_id=%s: %s"
+                 run_ref.worker_run_id detail;
+               None)
+          | Ok { trace_ref = None; _ } | Error _ -> None
+        in
         Keeper_turn_record_writer.write
           ~config
           ~keeper_name:meta.name
+          ~agent_name:meta.agent_name
+          ~generation
+          ~turn_kind
           ~trace_id
           ~absolute_turn:manifest_keeper_turn_id
           ~runtime_profile:runtime_id_string
@@ -1218,6 +1262,7 @@ let run_turn
             (Option.map
                (fun evidence -> evidence.wire_observation)
                !request_evidence_ref)
+          ~raw_trace_run_ref
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id runtime_id_string

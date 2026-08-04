@@ -80,26 +80,20 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
     content: 'no work this cycle',
     ts: 1785770777,
     autonomous_turn: {
-      turn_id: 'turn-1',
-      blocks: [
-        { kind: 'thinking', content: 'weighing the board' },
-        { kind: 'tool_use', name: 'Read', input: { path: 'x.ml' } },
-        { kind: 'text', content: 'no work this cycle' },
-      ],
+      turn_id: 'trace-test#41',
+      agent_name: 'lane-smith-agent',
+      generation: 9,
       model: 'GLM-5-Turbo',
       stop_reason: 'end_turn',
     },
   }
 
-  it('projects thinking and tool calls onto trace steps, text into the body', () => {
+  it('projects the public outcome without raw thinking or tool arguments', () => {
     const [entryOut] = chatHistoryEntriesFromRest('lane-smith', [autonomousRow])
     expect(entryOut?.source).toBe('autonomous_turn')
     expect(entryOut?.text).toBe('no work this cycle')
-    expect(entryOut?.traceSteps?.map((step) => step.kind)).toEqual(['think', 'tool'])
-    const toolStep = entryOut?.traceSteps?.[1]
-    if (toolStep?.kind !== 'tool') throw new Error('expected a tool step')
-    expect(toolStep.name).toBe('Read')
-    expect(toolStep.args).toBe(JSON.stringify({ path: 'x.ml' }))
+    expect(entryOut?.traceSteps).toBeUndefined()
+    expect(entryOut?.turnRef).toBe('trace-test#41')
   })
 
   it('is visible without the internal-message toggle', () => {
@@ -125,8 +119,19 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
   it('drops a row whose autonomous_turn payload carries no turn id', () => {
     // Unknown shape is not rendered as an empty bubble.
     const entries = chatHistoryEntriesFromRest('lane-smith', [
-      { role: 'assistant', content: 'x', ts: 1785770777, autonomous_turn: { blocks: [] } },
+      { role: 'assistant', content: 'x', ts: 1785770777, autonomous_turn: {} },
     ])
     expect(entries).toEqual([])
+  })
+
+  it('keeps absent public text distinct from an explicit empty response', () => {
+    const [absent, empty] = chatHistoryEntriesFromRest('lane-smith', [
+      { ...autonomousRow, id: 'absent', content: null },
+      { ...autonomousRow, id: 'empty', content: '' },
+    ])
+    expect(absent?.text).toBe('공개된 응답 없음')
+    expect(absent?.rawText).toBeNull()
+    expect(empty?.text).toBe('')
+    expect(empty?.rawText).toBe('')
   })
 })

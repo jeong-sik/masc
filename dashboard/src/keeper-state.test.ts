@@ -1191,6 +1191,22 @@ describe('thread history merge & persistence', () => {
     expect(thread.at(-2)?.id).toBe('local-1')
   })
 
+  it('does not let autonomous history consume direct-conversation slots', () => {
+    const direct = Array.from({ length: THREAD_ENTRY_CAP }, (_, i) =>
+      entry({ id: `direct-${i}`, text: `d${i}`, delivery: 'history' }),
+    )
+    const autonomous = Array.from({ length: 25 }, (_, i) =>
+      entry({ id: `auto-${i}`, text: `a${i}`, delivery: 'history', source: 'autonomous_turn' }),
+    )
+
+    mergeServerHistoryEntries('echo', [...direct, ...autonomous])
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.filter(item => item.source !== 'autonomous_turn')).toHaveLength(THREAD_ENTRY_CAP)
+    expect(thread.filter(item => item.source === 'autonomous_turn')).toHaveLength(25)
+    expect(thread.some(item => item.id === 'direct-0')).toBe(true)
+  })
+
   it('sorts a stale locally-appended error into chronological position, not the bottom', () => {
     // A live turn failed days ago and appended an error entry, which stayed at
     // the end of the thread. Newer server history must not leave that days-old

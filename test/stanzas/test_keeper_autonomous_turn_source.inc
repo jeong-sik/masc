@@ -1,10 +1,8 @@
-; Dashboard reader for the per-turn raw-trace store. That store holds both
-; autonomous and direct turns (keeper_turn.ml runs direct masc_keeper_msg
-; turns through the same Keeper_agent_run.run_turn), and only the autonomous
-; ones belong in the dashboard transcript — a direct turn is already
-; persisted in the keeper chat store, so emitting it here would double it.
-; The reader also sits on the chat read path, so a corrupt turn file must
-; degrade to a skip rather than fail the request.
+; Dashboard reader for typed keeper turn records and their exact raw-trace
+; run references. Direct turns are already in the chat store; public
+; autonomous rows expose only the final text, never reasoning/tool payloads.
+; Corrupt current records and missing trace files must be visible in logs and
+; degrade to a skip rather than fail the dashboard request.
 
 (test
  (name test_keeper_autonomous_turn_source)

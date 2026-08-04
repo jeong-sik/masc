@@ -141,11 +141,25 @@ export function isVisibleDirectConversationEntry(entry: KeeperConversationEntry)
     && entry.source !== 'system'
 }
 
-/** Turns the keeper ran on its own (projected from the raw-trace store, never
+/** Turns the keeper ran on its own (projected from typed turn records, never
  *  persisted to the chat store). Shown without the internal toggle because the
  *  transcript folds them into one collapsed group rather than listing each. */
 export function isAutonomousTurnEntry(entry: KeeperConversationEntry): boolean {
   return entry.source === 'autonomous_turn'
+}
+
+function capThreadEntries(entries: KeeperConversationEntry[]): KeeperConversationEntry[] {
+  let conversationSlots = THREAD_ENTRY_CAP
+  const kept: KeeperConversationEntry[] = []
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]
+    if (!entry) continue
+    if (isAutonomousTurnEntry(entry) || conversationSlots > 0) {
+      kept.push(entry)
+      if (!isAutonomousTurnEntry(entry)) conversationSlots -= 1
+    }
+  }
+  return kept.reverse()
 }
 
 /** Tool-call rows (role 'tool', minted live by keeper-stream and persisted to
@@ -1006,7 +1020,7 @@ export function appendThreadEntry(name: string, entry: KeeperConversationEntry):
   const existing = keeperThreads.value[name] ?? []
   keeperThreads.value = {
     ...keeperThreads.value,
-    [name]: [...existing, entry].slice(-THREAD_ENTRY_CAP),
+    [name]: capThreadEntries([...existing, entry]),
   }
 }
 
@@ -1040,7 +1054,7 @@ export function insertThreadEntryBefore(
       : [...existing.slice(0, index), entry, ...existing.slice(index)]
   keeperThreads.value = {
     ...keeperThreads.value,
-    [name]: next.slice(-THREAD_ENTRY_CAP),
+    [name]: capThreadEntries(next),
   }
 }
 
@@ -1559,9 +1573,10 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
     .map((entry, index) => ({ entry, index }))
     .sort((a, b) => entryTimeMs(a.entry) - entryTimeMs(b.entry) || a.index - b.index)
     .map(({ entry }) => entry)
-  // Keep the newest THREAD_ENTRY_CAP entries. After the sort the in-flight tail
-  // is last, so the cap trims the oldest history rather than a live row.
-  const kept = merged.length > THREAD_ENTRY_CAP ? merged.slice(-THREAD_ENTRY_CAP) : merged
+  // Autonomous observations are separately bounded by the backend's exact
+  // current-record/raw-trace window. They do not consume dialogue slots: a
+  // busy keeper must never evict the direct conversation it is shown beside.
+  const kept = capThreadEntries(merged)
   keeperThreads.value = {
     ...keeperThreads.value,
     [name]: kept,
@@ -1582,7 +1597,7 @@ export function mergeServerHistoryEntries(
 interface RestChatHistoryMessage {
   id?: string
   role: string
-  content: string
+  content: string | null
   ts: number
   tool_call_id?: string
   tool_call_name?: string
@@ -1615,42 +1630,13 @@ interface RestChatHistoryMessage {
   // prefers them over its local parser.
   blocks?: unknown
   stream_contract?: unknown
-  // Present only on rows the backend projected from the raw-trace store
+  // Present only on rows the backend projected from a typed autonomous turn
   // (Keeper_autonomous_turn_source): a turn the keeper ran on its own, which
   // by design has no chat-store row. Its presence, not `role`, marks the row.
   autonomous_turn?: unknown
 }
 
-/** Project one autonomous turn's recorded blocks onto the ChatTraceStep shape
- *  live turns already use, so the transcript renders them with the existing
- *  "작업 과정" card rather than a second trace renderer. The turn's `text`
- *  blocks are not steps — they are the entry body. */
-function autonomousTraceSteps(blocks: unknown, ts: string | null | undefined): ChatTraceStep[] {
-  if (!Array.isArray(blocks)) return []
-  const steps: ChatTraceStep[] = []
-  blocks.forEach((block) => {
-    if (!isRecord(block)) return
-    const kind = asString(block.kind)
-    if (kind === 'thinking') {
-      const text = asString(block.content)
-      if (text) steps.push({ kind: 'think', text, ts: ts ?? undefined })
-      return
-    }
-    if (kind === 'tool_use') {
-      const name = asString(block.name)
-      if (!name) return
-      steps.push({
-        kind: 'tool',
-        name,
-        args: block.input === undefined ? undefined : JSON.stringify(block.input),
-        ts: ts ?? undefined,
-      })
-    }
-  })
-  return steps
-}
-
-/** Convert a raw-trace-projected autonomous turn into a conversation entry.
+/** Convert a current-record autonomous turn into a conversation entry.
  *  Marked `autonomous_turn` so the transcript folds consecutive ones into a
  *  single collapsed group: a keeper wakes far more often than anyone talks to
  *  it, and listing each turn inline would bury the conversation. */
@@ -1662,25 +1648,25 @@ function autonomousTurnEntry(
   const turnId = asString(message.autonomous_turn.turn_id)
   if (!turnId) return null
   const timestamp = toIsoTimestamp(message.ts)
+  const publicText = message.content ?? '공개된 응답 없음'
   return {
     id: message.id ?? `autonomous-${turnId}`,
     role: 'assistant',
     source: 'autonomous_turn',
     label: keeperName,
-    text: message.content,
+    text: publicText,
     rawText: message.content,
     timestamp,
     delivery: 'history',
     streamState: null,
     streamContract: keeperStreamContract('rest_history', 'history_without_stream_events', {
-      reason: 'autonomous turns are projected from the raw-trace store, never streamed',
+      reason: 'autonomous turns are projected from typed records and exact retained traces, never streamed',
     }),
-    traceSteps: autonomousTraceSteps(message.autonomous_turn.blocks, timestamp),
     details: null,
-    // The raw-trace store carries no surface or turn_ref (RFC-0358 adds the
-    // latter); inventing either would fake provenance the row does not have.
+    // The public projection intentionally carries no raw thinking or tool
+    // arguments. The typed record owns the exact turn reference.
     surface: null,
-    turnRef: null,
+    turnRef: turnId,
   }
 }
 
@@ -1694,7 +1680,7 @@ function autonomousTurnEntry(
 function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEntry | null {
   const toolCallId = nonBlankToolCallId(message.tool_call_id)
   const toolCallName = message.tool_call_name?.trim()
-  if (!toolCallId || !toolCallName) return null
+  if (!toolCallId || !toolCallName || typeof message.content !== 'string') return null
   return {
     id: toolEntryIdFromCallId(toolCallId),
     role: 'tool',
@@ -1744,6 +1730,7 @@ export function chatHistoryEntriesFromRest(
       if (toolEntry) entries.push(toolEntry)
       return
     }
+    if (typeof message.content !== 'string') return
     const normalized = normalizeHistoryEntry(
       {
         id: message.id,

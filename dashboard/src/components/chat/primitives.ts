@@ -3794,8 +3794,9 @@ function autonomousGroupSpanLabel(entries: KeeperConversationEntry[]): string | 
 /** A run of consecutive autonomous turns, collapsed into a single row. Starts
  *  closed: these turns are the keeper working on its own, and the transcript's
  *  subject is the conversation around them. Expanding renders each turn through
- *  TurnWorkBundle — the same component a direct turn uses — so an opened wake
- *  shows its thinking and tool calls exactly the way a direct answer does. */
+ *  TurnWorkBundle — the same component a direct turn uses. Public autonomous
+ *  rows contain only their visible outcome; raw thinking and tool arguments
+ *  never cross the history endpoint. */
 function AutonomousTurnGroup({
   entries,
   showMetadata,

@@ -43,9 +43,25 @@ type request_wire_observation =
   ; body_bytes : int
   }
 
+type turn_kind =
+  | Autonomous
+  | Direct
+
+type raw_trace_run_ref =
+  { worker_run_id : string
+  ; path : string
+  ; start_seq : int
+  ; end_seq : int
+  ; agent_name : string
+  ; session_id : string
+  }
+
 type t =
   { execution_ids : Ids.Execution_id.t list
   ; keeper : string
+  ; agent_name : string
+  ; generation : int
+  ; turn_kind : turn_kind
   ; trace_id : string
   ; absolute_turn : int
   ; turn_ref : Ids.Turn_ref.t
@@ -60,6 +76,7 @@ type t =
   ; request_latency_ms : int option
   ; ttfrc_ms : float option
   ; request_wire_observation : request_wire_observation option
+  ; raw_trace_run_ref : raw_trace_run_ref option
   ; sampling : sampling
   ; usage : usage
   ; ts : float
@@ -98,6 +115,25 @@ let input_component_to_json (component : input_component) : Yojson.Safe.t =
     ; "bytes", `Int component.bytes
     ]
 
+let turn_kind_to_string = function
+  | Autonomous -> "autonomous"
+  | Direct -> "direct"
+
+let turn_kind_of_string = function
+  | "autonomous" -> Ok Autonomous
+  | "direct" -> Ok Direct
+  | value -> Error (Printf.sprintf "turn_record: unknown turn_kind %S" value)
+
+let raw_trace_run_ref_to_json (run_ref : raw_trace_run_ref) : Yojson.Safe.t =
+  `Assoc
+    [ "worker_run_id", `String run_ref.worker_run_id
+    ; "path", `String run_ref.path
+    ; "start_seq", `Int run_ref.start_seq
+    ; "end_seq", `Int run_ref.end_seq
+    ; "agent_name", `String run_ref.agent_name
+    ; "session_id", `String run_ref.session_id
+    ]
+
 let to_json (r : t) : Yojson.Safe.t =
   let request_runtime_profile, request_body_bytes =
     match r.request_wire_observation with
@@ -109,6 +145,9 @@ let to_json (r : t) : Yojson.Safe.t =
     ([ ( "execution_ids"
        , `List (List.map Ids.Execution_id.to_yojson r.execution_ids) )
      ; ("keeper", `String r.keeper)
+     ; ("agent_name", `String r.agent_name)
+     ; ("generation", `Int r.generation)
+     ; ("turn_kind", `String (turn_kind_to_string r.turn_kind))
      ; ("trace_id", `String r.trace_id)
      ; ("absolute_turn", `Int r.absolute_turn)
      ; ("turn_ref", Ids.Turn_ref.to_yojson r.turn_ref)
@@ -121,6 +160,10 @@ let to_json (r : t) : Yojson.Safe.t =
      ; ("runtime_profile", `String r.runtime_profile)
      ; "request_runtime_profile", request_runtime_profile
      ; "request_body_bytes", request_body_bytes
+     ; ( "raw_trace_run_ref"
+       , match r.raw_trace_run_ref with
+         | Some run_ref -> raw_trace_run_ref_to_json run_ref
+         | None -> `Null )
      ]
     @ opt_field "model" (fun v -> `String v) r.model
     @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
@@ -289,6 +332,37 @@ let input_component_of_json
       Ok { component; bytes }
   | _ -> Error "turn_record: input component entry is not an object"
 
+let raw_trace_run_ref_of_json (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    let expected_fields =
+      [ "worker_run_id"; "path"; "start_seq"; "end_seq"; "agent_name"; "session_id" ]
+    in
+    let* () =
+      if fields_are_unique_known expected_fields fields
+      then Ok ()
+      else Error "turn_record: raw_trace_run_ref fields are not exact"
+    in
+    let* worker_run_id_json = require "worker_run_id" fields in
+    let* worker_run_id = as_nonempty_string "worker_run_id" worker_run_id_json in
+    let* path_json = require "path" fields in
+    let* path = as_nonempty_string "path" path_json in
+    let* start_seq_json = require "start_seq" fields in
+    let* start_seq = as_nonnegative_int "start_seq" start_seq_json in
+    let* end_seq_json = require "end_seq" fields in
+    let* end_seq = as_nonnegative_int "end_seq" end_seq_json in
+    let* () =
+      if end_seq >= start_seq
+      then Ok ()
+      else Error "turn_record: raw_trace_run_ref end_seq precedes start_seq"
+    in
+    let* agent_name_json = require "agent_name" fields in
+    let* agent_name = as_nonempty_string "agent_name" agent_name_json in
+    let* session_id_json = require "session_id" fields in
+    let* session_id = as_nonempty_string "session_id" session_id_json in
+    Ok { worker_run_id; path; start_seq; end_seq; agent_name; session_id }
+  | _ -> Error "turn_record: raw_trace_run_ref is not an object"
+
 let rec collect_results acc = function
   | [] -> Ok (List.rev acc)
   | item :: rest -> (
@@ -340,6 +414,9 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           fields_are_unique_known
             [ "execution_ids"
             ; "keeper"
+            ; "agent_name"
+            ; "generation"
+            ; "turn_kind"
             ; "trace_id"
             ; "absolute_turn"
             ; "turn_ref"
@@ -348,6 +425,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "runtime_profile"
             ; "request_runtime_profile"
             ; "request_body_bytes"
+            ; "raw_trace_run_ref"
             ; "model"
             ; "finish_reason"
             ; "context_window"
@@ -378,9 +456,16 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         | _ -> Error "turn_record: execution_ids is not a list"
       in
       let* keeper_json = require "keeper" fields in
-      let* keeper = as_string "keeper" keeper_json in
+      let* keeper = as_nonempty_string "keeper" keeper_json in
+      let* agent_name_json = require "agent_name" fields in
+      let* agent_name = as_nonempty_string "agent_name" agent_name_json in
+      let* generation_json = require "generation" fields in
+      let* generation = as_nonnegative_int "generation" generation_json in
+      let* turn_kind_json = require "turn_kind" fields in
+      let* turn_kind_string = as_string "turn_kind" turn_kind_json in
+      let* turn_kind = turn_kind_of_string turn_kind_string in
       let* trace_json = require "trace_id" fields in
-      let* trace_id = as_string "trace_id" trace_json in
+      let* trace_id = as_nonempty_string "trace_id" trace_json in
       let* turn_json = require "absolute_turn" fields in
       let* absolute_turn = as_int "absolute_turn" turn_json in
       let* turn_ref_json = require "turn_ref" fields in
@@ -434,6 +519,24 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             "turn_record: request_runtime_profile and request_body_bytes must \
              both be present or both be null"
       in
+      let* raw_trace_run_ref_json = require "raw_trace_run_ref" fields in
+      let* raw_trace_run_ref =
+        match raw_trace_run_ref_json with
+        | `Null -> Ok None
+        | json ->
+          let* run_ref = raw_trace_run_ref_of_json json in
+          let* () =
+            if String.equal run_ref.agent_name agent_name
+            then Ok ()
+            else Error "turn_record: raw trace agent_name does not match record identity"
+          in
+          let* () =
+            if String.equal run_ref.session_id trace_id
+            then Ok ()
+            else Error "turn_record: raw trace session_id does not match trace_id"
+          in
+          Ok (Some run_ref)
+      in
       let* model = opt_member "model" fields as_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in
       let* context_window = opt_member "context_window" fields as_int in
@@ -459,6 +562,9 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       Ok
         { execution_ids
         ; keeper
+        ; agent_name
+        ; generation
+        ; turn_kind
         ; trace_id
         ; absolute_turn
         ; turn_ref
@@ -473,6 +579,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; request_latency_ms
         ; ttfrc_ms
         ; request_wire_observation
+        ; raw_trace_run_ref
         ; sampling = { temperature; top_p; max_tokens; thinking_budget; enable_thinking }
         ; usage =
             { input_tokens

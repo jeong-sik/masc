@@ -84,7 +84,6 @@ let run_lines ~worker_run_id ~start_seq ~base_ts ~prompt ~final_text =
       ; "tool_planned_index", `Int 0
       ; "tool_batch_index", `Int 0
       ; "tool_batch_size", `Int 1
-      ; "tool_execution_mode", `String "serial"
       ]
   ; raw_record ~worker_run_id ~seq:(start_seq + 4) ~ts:(base_ts +. 4.)
       ~record_type:Agent_sdk.Raw_trace.Run_finished

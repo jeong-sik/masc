@@ -1,0 +1,233 @@
+(** Every committed [transition_task_r] action reaches the workspace message
+    log.
+
+    [claim_task_r] has always broadcast "Claimed <id>", but the transition
+    entry point emitted only an activity event. On the reference workspace that
+    produced 53 [task.cancelled] activity events against 0 cancellation
+    broadcasts over one month, while the claim path produced 196 messages: an
+    operator reading the message log saw tasks get claimed and never saw one
+    end, and a cancellation reason reached no reader at all.
+
+    These tests drive the real transition path and read the durable message
+    store, so a wording change is a failure and dropping the call entirely —
+    the original defect — is also a failure. *)
+
+module D = Masc_domain
+
+open Masc
+
+let now = "2026-08-04T00:00:00Z"
+let owner = "alice"
+
+let with_test_env f =
+  let tmp_dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc_transition_broadcast_%d_%d"
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1000.)))
+  in
+  Unix.mkdir tmp_dir 0o755;
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = Workspace.default_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:(Some owner) in
+  (* [init] binds a namespace session and broadcasts that fact, so the
+     assertions below read only what the transition itself produced. *)
+  let baseline_seq =
+    match Workspace.get_messages_raw config ~since_seq:0 ~limit:1 with
+    | (latest : D.message) :: _ -> latest.seq
+    | [] -> 0
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      let _ = Workspace.reset config in
+      try Unix.rmdir tmp_dir with Unix.Unix_error _ -> ())
+    (fun () -> f config ~baseline_seq)
+;;
+
+let make_task ~id ~status : D.task =
+  { id
+  ; title = "test task"
+  ; description = "desc"
+  ; task_status = status
+  ; priority = 3
+  ; files = []
+  ; created_at = now
+  ; created_by = None
+  ; predecessor_task_id = None
+  ; contract = None
+  ; handoff_context = None
+  ; cycle_count = 0
+  ; reclaim_policy = None
+  ; do_not_reclaim_reason = None
+  }
+;;
+
+let seed config task =
+  let backlog : D.backlog = { tasks = [ task ]; last_updated = now; version = 1 } in
+  Workspace_backlog.write_backlog config backlog
+;;
+
+let contents config ~baseline_seq =
+  Workspace.get_messages_raw config ~since_seq:baseline_seq ~limit:50
+  |> List.map (fun (message : D.message) -> message.content)
+;;
+
+let transition config ~task_id ~action ?prepare_verification_request ?(reason = "")
+      ?(notes = "") () =
+  Workspace.transition_task_r
+    config
+    ~agent_name:owner
+    ~task_id
+    ~action
+    ?prepare_verification_request
+    ~notes
+    ~reason
+    ()
+;;
+
+let check_ok label = function
+  | Ok (_ : string) -> ()
+  | Error err -> Alcotest.failf "%s: %s" label (D.masc_error_to_string err)
+;;
+
+(* The cancellation reason is the payload an operator or the task's author
+   needs; a bare "Cancelled task-1" would leave the message log as useless as
+   the silent activity event it replaced. *)
+let test_cancel_broadcasts_reason () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config
+      (make_task ~id:"task-1" ~status:(D.InProgress { assignee = owner; started_at = now }));
+    check_ok "cancel"
+      (transition config ~task_id:"task-1" ~action:D.Cancel
+         ~reason:"BLOCKED: service absent from sandbox" ());
+    Alcotest.(check (list string))
+      "cancellation reaches the message log with its reason"
+      [ "Cancelled task-1 - BLOCKED: service absent from sandbox" ]
+      (contents config ~baseline_seq))
+;;
+
+let test_cancel_without_reason_broadcasts_bare () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config (make_task ~id:"task-2" ~status:D.Todo);
+    check_ok "cancel" (transition config ~task_id:"task-2" ~action:D.Cancel ());
+    Alcotest.(check (list string))
+      "empty reason omits the separator"
+      [ "Cancelled task-2" ]
+      (contents config ~baseline_seq))
+;;
+
+(* Completion never commits here — the lifecycle demands verification first,
+   and the approved verdict commits through [commit_verdict_r], which posts to
+   Board. Pinned so that a future "Completed <id>" broadcast is recognised as
+   either a lifecycle change or a duplicate of the Board verdict. *)
+let test_done_action_is_rejected_and_silent () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config
+      (make_task ~id:"task-3" ~status:(D.InProgress { assignee = owner; started_at = now }));
+    (match
+       transition config ~task_id:"task-3" ~action:D.Done_action
+         ~notes:"evidence at /tmp/proof" ()
+     with
+     | Ok message -> Alcotest.failf "expected verification requirement, got: %s" message
+     | Error (_ : D.masc_error) -> ());
+    Alcotest.(check (list string))
+      "no message for a completion that never committed"
+      []
+      (contents config ~baseline_seq))
+;;
+
+let test_release_broadcasts_reason () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config
+      (make_task ~id:"task-4" ~status:(D.Claimed { assignee = owner; claimed_at = now }));
+    check_ok "release"
+      (transition config ~task_id:"task-4" ~action:D.Release
+         ~reason:"handing back to the backlog" ());
+    Alcotest.(check (list string))
+      "release reaches the message log with its reason"
+      [ "Released task-4 - handing back to the backlog" ]
+      (contents config ~baseline_seq))
+;;
+
+let test_claim_and_start_broadcast () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config (make_task ~id:"task-5" ~status:D.Todo);
+    check_ok "claim" (transition config ~task_id:"task-5" ~action:D.Claim ());
+    check_ok "start" (transition config ~task_id:"task-5" ~action:D.Start ());
+    Alcotest.(check (list string))
+      "both ownership steps reach the message log, newest first"
+      [ "Started task-5"; "Claimed task-5" ]
+      (contents config ~baseline_seq))
+;;
+
+(* Submission publishes the request, its criteria, and its evidence refs to
+   Board. A message row would restate a poorer version of that post, so the
+   transition stays silent here on purpose. *)
+let test_submit_defers_to_board () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config
+      (make_task ~id:"task-8" ~status:(D.InProgress { assignee = owner; started_at = now }));
+    check_ok "submit"
+      (transition config ~task_id:"task-8" ~action:D.Submit_for_verification
+         ~prepare_verification_request:
+           (fun ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ -> Ok ())
+         ~notes:"evidence at /tmp/proof" ());
+    Alcotest.(check (list string))
+      "submission does not duplicate its Board post as a message"
+      []
+      (contents config ~baseline_seq))
+;;
+
+(* The idempotent no-op returns before the commit, so it must not manufacture a
+   message for a transition that never happened. *)
+let test_noop_transition_is_silent () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config
+      (make_task ~id:"task-6"
+         ~status:(D.Cancelled { cancelled_by = owner; cancelled_at = now; reason = None }));
+    check_ok "cancel no-op" (transition config ~task_id:"task-6" ~action:D.Cancel ());
+    Alcotest.(check (list string)) "no message for a no-op" [] (contents config ~baseline_seq))
+;;
+
+(* A rejected transition must not announce work that did not happen. *)
+let test_rejected_transition_is_silent () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config
+      (make_task ~id:"task-7"
+         ~status:(D.InProgress { assignee = "bob"; started_at = now }));
+    (match transition config ~task_id:"task-7" ~action:D.Cancel ~reason:"not mine" () with
+     | Ok message -> Alcotest.failf "expected rejection, got: %s" message
+     | Error (_ : D.masc_error) -> ());
+    Alcotest.(check (list string))
+      "no message for a rejected transition"
+      []
+      (contents config ~baseline_seq))
+;;
+
+let () =
+  Alcotest.run
+    "task transition broadcast"
+    [ ( "committed transitions"
+      , [ Alcotest.test_case "cancel carries its reason" `Quick
+            test_cancel_broadcasts_reason
+        ; Alcotest.test_case "cancel without reason" `Quick
+            test_cancel_without_reason_broadcasts_bare
+        ; Alcotest.test_case "release carries its reason" `Quick
+            test_release_broadcasts_reason
+        ; Alcotest.test_case "claim and start" `Quick test_claim_and_start_broadcast
+        ; Alcotest.test_case "submit defers to its Board post" `Quick
+            test_submit_defers_to_board
+        ] )
+    ; ( "uncommitted transitions"
+      , [ Alcotest.test_case "no-op is silent" `Quick test_noop_transition_is_silent
+        ; Alcotest.test_case "rejected is silent" `Quick
+            test_rejected_transition_is_silent
+        ; Alcotest.test_case "done_action is rejected and silent" `Quick
+            test_done_action_is_rejected_and_silent
+        ] )
+    ]
+;;

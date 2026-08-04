@@ -23,6 +23,43 @@ type verification_submission =
   ; evidence_refs : string list
   }
 
+(* Workspace-visible wording for a committed transition, or [None] when the
+   action already reaches readers through a richer channel.
+
+   [claim_task_r] broadcasts "Claimed <id>", but this entry point emitted only
+   an activity event, so ownership changes taken through [masc_transition] left
+   the workspace message log silent. Measured on the reference workspace:
+   53 [task.cancelled] activity events in one month against 0 cancellation
+   broadcasts, while the claim path produced 196. An operator reading the
+   message log saw tasks get claimed and never saw one end, and a cancellation
+   reason reached no reader at all.
+
+   Exhaustive on [task_action]: a new action must state its own wording, or
+   state which channel already carries it. [reason] rides along on the two
+   actions that stop work in progress — it is the only place the "why" reaches
+   a reader who is not polling the backlog. *)
+let transition_broadcast_content ~action ~task_id ~reason : string option =
+  let with_reason verb =
+    match String.trim reason with
+    | "" -> Some (Printf.sprintf "%s %s" verb task_id)
+    | reason -> Some (Printf.sprintf "%s %s - %s" verb task_id reason)
+  in
+  match (action : Masc_domain.task_action) with
+  | Masc_domain.Claim -> Some (Printf.sprintf "Claimed %s" task_id)
+  | Masc_domain.Start -> Some (Printf.sprintf "Started %s" task_id)
+  | Masc_domain.Cancel -> with_reason "Cancelled"
+  | Masc_domain.Release -> with_reason "Released"
+  (* Submission posts the request, its criteria, and its evidence refs to Board
+     through [Verification_protocol.notify_submit_for_verification]. A message
+     row would restate a strictly poorer version of that post. *)
+  | Masc_domain.Submit_for_verification -> None
+  (* [Done_action] never reaches this commit: the lifecycle answers it with
+     [Verification_submission_required] from every non-terminal status, and
+     Done→Done is filtered earlier as a no-op. Completion commits through
+     [commit_verdict_r], which posts the verdict to Board. *)
+  | Masc_domain.Done_action -> None
+;;
+
 let transition_task_outcome_r
       config
       ~agent_name
@@ -441,6 +478,11 @@ let transition_task_outcome_r
                ?reason:(trim_opt (Some reason))
                ?handoff_context:backlog_update.persisted_handoff_context
                ());
+          (match transition_broadcast_content ~action ~task_id ~reason with
+           | None -> ()
+           | Some content ->
+             let _ = broadcast config ~from_agent:agent_name ~content in
+             ());
           (match action with
            | Masc_domain.Claim ->
              emit_task_activity config ~agent_name ~task_id

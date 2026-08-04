@@ -44,11 +44,6 @@ type stimulus_payload =
       (* RFC-0266: an async [masc_fusion] deliberation finished. Wakes the
          calling keeper so the resolved answer arrives as actionable turn
          input on its next cycle, instead of being discovered passively. *)
-  | Bg_completed of bg_job_completion
-      (* RFC-0290: a generic background job finished. Mirrors [Fusion_completed]
-         — wakes the calling keeper so the outcome arrives as actionable turn
-         input. Phase 1 adds the variant only; no producer emits it yet
-         (executor lands in RFC-0290 Phase 3). *)
   | Schedule_due of scheduled_wake
       (* A scheduled automation request reached its due time and explicitly
          targets this keeper. The scheduler/consumer side owns timing,
@@ -58,15 +53,15 @@ type stimulus_payload =
       (* RFC-connector-ambient-attention-wake: an ambient connector message
          recorded as external attention. Carries the [event_id] pointer (not
          content). Dormant — no producer emits it yet (handle_ambient enqueuer
-         lands in P3), same staging as [Bg_completed] above. *)
+         lands in P3). *)
   | Hitl_resolved of hitl_resolution
       (* A nonblocking HITL approval this keeper enqueued was resolved. Wakes
          the keeper so it re-evaluates and proceeds on its next independent
          cycle instead of waiting for unrelated stimulus, no-progress recovery,
          or the 30-minute approval janitor. Blocking approvals resume their
          resolver directly and do not emit this duplicate wake. Mirrors
-         [Fusion_completed]/[Bg_completed]: a HITL decision is an async
-         completion the waiting keeper must be notified of. *)
+         [Fusion_completed]: a HITL decision is an async completion the
+         waiting keeper must be notified of. *)
   | Manual_compaction_requested
   | Goal_assigned of goal_assignment
       (* RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids]
@@ -105,17 +100,6 @@ and fusion_terminal =
   | Fusion_failed of string
   | Fusion_cancelled
 
-and bg_job_completion = {
-  bg_run_id : string;
-  bg_kind : bg_job_kind;
-  bg_outcome : bg_job_outcome;
-  bg_board_post_id : string;
-  (* correlates to an optional board evidence post; "" if none was created. *)
-}
-
-and bg_job_kind = Subprocess
-      (* RFC-0290: closed sum of background job kinds (v1 = [Subprocess]); a new
-         kind forces every match to add an arm rather than defaulting. *)
 
 and hitl_resolution_decision =
   | Hitl_approved
@@ -132,10 +116,6 @@ and hitl_resolution = {
      approval-submission time and carried through so a woken keeper can reply
      into it. [Unrouted] when no originating connector was captured. *)
 }
-
-and bg_job_outcome =
-  | Bg_ok of string  (* result payload *)
-  | Bg_failed of string  (* failure label *)
 
 and connector_attention = {
   event_id : string;
@@ -186,10 +166,6 @@ and task_cancellation = {
 
 let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_id
 
-let bg_job_completion_post_id (c : bg_job_completion) =
-  if String.equal c.bg_board_post_id "" then "bg-run:" ^ c.bg_run_id
-  else c.bg_board_post_id
-
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
 let manual_compaction_post_id = "manual-compaction-request"
@@ -217,13 +193,6 @@ let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
   | Hitl_rejected _ -> "reject"
   | Hitl_edited _ -> "edit"
-
-let bg_job_kind_to_string = function
-  | Subprocess -> "subprocess"
-
-let bg_job_kind_of_string = function
-  | "subprocess" -> Ok Subprocess
-  | other -> Error (Printf.sprintf "unknown bg_job_kind: %s" other)
 
 type stimulus = {
   post_id : post_id;
@@ -262,7 +231,7 @@ let identity_payload = function
        it. *)
     Task_cancelled { cancellation with tc_reason = None }
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
-    | Bg_completed _ | Schedule_due _ | Connector_attention _ | Hitl_resolved _
+    | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Manual_compaction_requested | Goal_reconciliation_ready _
     | Completion_authority_rejected _
     ) as payload ->
@@ -362,7 +331,6 @@ let payload_kind_label = function
   | Board_attention _ -> "board_attention"
   | Bootstrap -> "bootstrap"
   | Fusion_completed _ -> "fusion_completed"
-  | Bg_completed _ -> "bg_completed"
   | Schedule_due _ -> "schedule_due"
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
@@ -374,7 +342,7 @@ let payload_kind_label = function
 
 let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
-  | Bootstrap | Fusion_completed _ | Bg_completed _
+  | Bootstrap | Fusion_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
   | Manual_compaction_requested | Goal_assigned _
   | Goal_reconciliation_ready _ | Completion_authority_rejected _
@@ -557,18 +525,6 @@ let payload_to_yojson = function
       ; "board_post_id", `String fusion.board_post_id
       ; "channel", Keeper_continuation_channel.to_yojson fusion.channel
       ]
-  | Bg_completed c ->
-    let ok, payload =
-      match c.bg_outcome with Bg_ok s -> (true, s) | Bg_failed s -> (false, s)
-    in
-    `Assoc
-      [ "kind", `String "bg_completed"
-      ; "run_id", `String c.bg_run_id
-      ; "job_kind", `String (bg_job_kind_to_string c.bg_kind)
-      ; "ok", `Bool ok
-      ; "payload", `String payload
-      ; "board_post_id", `String c.bg_board_post_id
-      ]
   | Schedule_due sw ->
     `Assoc
       [ "kind", `String "schedule_due"
@@ -740,17 +696,6 @@ let payload_of_yojson json =
     let* board_post_id = string_field ~context "board_post_id" fields in
     let* channel = continuation_channel_field fields in
     Ok (Fusion_completed { run_id; terminal; board_post_id; channel })
-  | "bg_completed" ->
-    let* run_id = string_field ~context "run_id" fields in
-    let* job_kind_s = string_field ~context "job_kind" fields in
-    let* bg_kind = bg_job_kind_of_string job_kind_s in
-    let* ok = bool_field ~context "ok" fields in
-    let* payload = string_field ~context "payload" fields in
-    let* board_post_id = string_field ~context "board_post_id" fields in
-    let bg_outcome = if ok then Bg_ok payload else Bg_failed payload in
-    Ok
-      (Bg_completed
-         { bg_run_id = run_id; bg_kind; bg_outcome; bg_board_post_id = board_post_id })
   | "schedule_due" ->
     let* schedule_instance_id = string_field ~context "schedule_instance_id" fields in
     let* schedule_id = string_field ~context "schedule_id" fields in

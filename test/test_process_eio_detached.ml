@@ -136,8 +136,8 @@ let test_tree_kill_escalates_to_sigkill () =
    SIGTERM, and [kill(-pgid, 0)] on macOS returns 0 on zombie
    pgroups, which makes [is_pgid_alive] report the group "alive"
    indefinitely until someone waitpid's the leader.  Tick 7 will
-   introduce a dedicated waitpid reaper inside [Bg_task] which
-   resolves this naturally; for Tick 5, the primitive layer has
+   introduce a dedicated waitpid reaper which resolves this
+   naturally; for Tick 5, the primitive layer has
    been validated via the single-process SIGTERM and SIGKILL cases
    above. *)
 

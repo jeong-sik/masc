@@ -69,7 +69,6 @@ type stimulus_payload =
           queue deduplication never derives it from post text or metadata. *)
   | Bootstrap
   | Fusion_completed of fusion_completion
-  | Bg_completed of bg_job_completion
   | Schedule_due of scheduled_wake
       (** A scheduled automation request has reached its due time and directly
           targeted this keeper. The Scheduler owns timing/approval; the keeper
@@ -86,7 +85,7 @@ type stimulus_payload =
           the keeper so it re-evaluates immediately instead of waiting for an
           unrelated stimulus, no-progress recovery, or the 30-minute approval
           janitor. Blocking approvals resume their resolver directly and do not
-          emit this duplicate wake. Mirrors [Fusion_completed]/[Bg_completed]. *)
+          emit this duplicate wake. Mirrors [Fusion_completed]. *)
   | Manual_compaction_requested
       (** Operator-requested MASC compaction. The tool only enqueues this
           stimulus; the owning Keeper consumes it under its turn slot. *)
@@ -138,26 +137,6 @@ and fusion_terminal =
     it from an error string. The string payloads are the synthesized answer or
     explicit failure detail. [board_post_id] correlates to the sink's board
     evidence post ("" when none was created). *)
-
-and bg_job_completion = {
-  bg_run_id : string;
-  bg_kind : bg_job_kind;
-  bg_outcome : bg_job_outcome;
-  bg_board_post_id : string;
-}
-(** RFC-0290 payload for [Bg_completed]: mirrors [fusion_completion]. [bg_kind]
-    is a closed sum so a new job kind forces exhaustive handling; [bg_outcome]
-    carries the result payload ([Bg_ok]) or a failure label ([Bg_failed]);
-    [bg_board_post_id] correlates to an optional board evidence post ("" if
-    none). *)
-
-and bg_job_kind = Subprocess
-(** RFC-0290: background job kinds. Closed sum (v1 = [Subprocess]); a new kind
-    forces every match to add an arm rather than defaulting. *)
-
-and bg_job_outcome =
-  | Bg_ok of string  (** result payload *)
-  | Bg_failed of string  (** failure label *)
 
 and hitl_resolution_decision =
   | Hitl_approved
@@ -234,10 +213,6 @@ val fusion_completion_post_id : fusion_completion -> post_id
     ["fusion-run:<run_id>"]. Board projection availability is not event
     identity. *)
 
-val bg_job_completion_post_id : bg_job_completion -> post_id
-(** RFC-0290 dedup/correlation id for [Bg_completed]. Uses [bg_board_post_id]
-    when the producer set it, otherwise falls back to ["bg-run:<run_id>"]. *)
-
 val hitl_resolution_post_id : hitl_resolution -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].
     De-dups repeat resolve wakes for the same approval within the dedup
@@ -259,10 +234,6 @@ val task_cancellation_post_id : task_cancellation -> post_id
 
 val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
 (** Stable wire/log label for a HITL resolution wake decision. *)
-
-val bg_job_kind_to_string : bg_job_kind -> string
-(** RFC-0290: stable label for a background job kind, for logs and correlation
-    (["subprocess"]). *)
 
 type stimulus = {
   post_id : post_id;

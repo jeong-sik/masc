@@ -23,7 +23,6 @@ type pending_board_event_kind =
   | Board_comment_added
   | Board_reaction_changed of board_reaction_event
   | Fusion_completed
-  | Bg_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
   | External_attention
   | Goal_assigned
@@ -55,7 +54,6 @@ let is_board_activity_event (event : pending_board_event) =
   | Board_comment_added
   | Board_reaction_changed _
   | Fusion_completed
-  | Bg_completed
   | External_attention
   | Goal_assigned
   (* Goal-lifecycle signal, not a schedule dispatch, so it sits with
@@ -75,7 +73,6 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Board_comment_added
   | Board_reaction_changed _
   | Fusion_completed
-  | Bg_completed
   | External_attention
   | Goal_assigned
   | Goal_reconciliation_ready
@@ -90,7 +87,6 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Board_comment_added
   | Board_reaction_changed _
   | Fusion_completed
-  | Bg_completed
   | Schedule_due _
   | External_attention
   | Goal_assigned
@@ -534,49 +530,6 @@ let pending_board_event_of_fusion_completion
   }
 ;;
 
-let bg_job_completion_message = function
-  | Keeper_event_queue.Bg_ok output -> output
-  | Keeper_event_queue.Bg_failed reason -> reason
-;;
-
-(* RFC-0290: mirror the async-fusion delivery contract for generic background
-   jobs. A [Bg_completed] stimulus already means the background producer has
-   decided the job is finished; converting it here keeps the queue consumer from
-   silently dropping the result. *)
-let pending_board_event_of_bg_job_completion
-      ~(meta : keeper_meta)
-      ~(arrived_at : float)
-      (c : Keeper_event_queue.bg_job_completion)
-  : pending_board_event
-  =
-  let post_id = Keeper_event_queue.bg_job_completion_post_id c in
-  let kind = Keeper_event_queue.bg_job_kind_to_string c.bg_kind in
-  let title =
-    match c.bg_outcome with
-    | Keeper_event_queue.Bg_ok _ ->
-      Printf.sprintf "Background %s complete (run %s)" kind c.bg_run_id
-    | Keeper_event_queue.Bg_failed _ ->
-      Printf.sprintf "Background %s failed (run %s)" kind c.bg_run_id
-  in
-  { event_kind = Bg_completed
-  ; post_id
-  ; author = meta.name
-  ; title
-  ; preview =
-      short_preview
-        ~max_len:fusion_result_preview_max_len
-        (bg_job_completion_message c.bg_outcome)
-  ; hearth = None
-  ; post_kind = Board.System_post
-  ; updated_at = arrived_at
-  ; explicit_mention = false
-  ; matched_targets = []
-  ; self_commented = false
-  ; new_external_since = 0
-  ; latest_external_author = None
-  ; latest_external_preview = None
-  }
-;;
 
 let scheduled_automation_actor = "scheduled_automation"
 
@@ -819,10 +772,6 @@ let pending_board_event_of_stimulus
             attention.signal))
   | Keeper_event_queue.Fusion_completed fc ->
     Ok (Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc))
-  | Keeper_event_queue.Bg_completed c ->
-    Ok
-      (Some
-         (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c))
   | Keeper_event_queue.Schedule_due sw ->
     Ok
       (Some

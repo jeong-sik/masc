@@ -59,7 +59,6 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Fusion_completed _
-  | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
@@ -207,7 +206,6 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Fusion_completed _
-  | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_reconciliation_ready _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
@@ -246,18 +244,6 @@ let consume_single_heartbeat_stimulus
       Log.Keeper.info
         "turn entry: fusion result delivered run_id=%s terminal=%s (keeper=%s)"
         c.run_id terminal meta_after_triage.name;
-      pending_board_events_of_stimulus_result ~meta_after_triage stim
-    | Keeper_event_queue.Bg_completed c ->
-      (* RFC-0290: a background job finished and woke this keeper. Surface the
-         outcome as a pending_board_event so this turn acts on it. *)
-      Log.Keeper.info
-        "turn entry: bg result delivered run_id=%s kind=%s ok=%b (keeper=%s)"
-        c.bg_run_id
-        (Keeper_event_queue.bg_job_kind_to_string c.bg_kind)
-        (match c.bg_outcome with
-         | Keeper_event_queue.Bg_ok _ -> true
-         | Keeper_event_queue.Bg_failed _ -> false)
-        meta_after_triage.name;
       pending_board_events_of_stimulus_result ~meta_after_triage stim
     | Keeper_event_queue.Schedule_due sw ->
       Log.Keeper.info
@@ -381,7 +367,6 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Fusion_completed _
-  | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Manual_compaction_requested
@@ -463,7 +448,6 @@ let reconcile_spent_selection
   | Board_attention _
   | Bootstrap
   | Fusion_completed _
-  | Bg_completed _
   | Connector_attention _
   | Manual_compaction_requested
   | Goal_assigned _
@@ -500,7 +484,6 @@ let heartbeat_event_intake
       | Keeper_event_queue.Board_attention _
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.Fusion_completed _
-      | Keeper_event_queue.Bg_completed _
       | Keeper_event_queue.Schedule_due _
       | Keeper_event_queue.Connector_attention _
       | Keeper_event_queue.Hitl_resolved _
@@ -584,7 +567,6 @@ let heartbeat_event_intake
             | Keeper_world_observation.Board_comment_added
             | Keeper_world_observation.Board_reaction_changed _
             | Keeper_world_observation.Fusion_completed
-            | Keeper_world_observation.Bg_completed
             | Keeper_world_observation.External_attention
             | Keeper_world_observation.Goal_assigned
             | Keeper_world_observation.Goal_reconciliation_ready

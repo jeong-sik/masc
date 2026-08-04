@@ -34,7 +34,6 @@ type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
 
 type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
-  | Background_job_terminal of Keeper_event_queue.bg_job_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_attempt_terminal of { detail : string }
 
@@ -316,7 +315,6 @@ let board_attention_event_id (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Fusion_completed _
-  | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _

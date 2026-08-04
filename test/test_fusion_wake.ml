@@ -140,7 +140,6 @@ let make_meta ?(name = "fusion-keeper") () : Keeper_meta_contract.keeper_meta =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ ("name", `String name)
-         ; ("agent_name", `String name)
          ; ("trace_id", `String "test-trace-fusion")
          ])
   with
@@ -217,29 +216,6 @@ let fusion_tool_policy () : Fusion_policy.t =
   ; default_preset = preset.name
   ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
   ; presets = [ validated_preset preset ]
-  }
-;;
-
-let bg_payload
-      ?(bg_run_id = "bg-1")
-      ?(bg_kind = Keeper_event_queue.Subprocess)
-      ?(bg_outcome = Keeper_event_queue.Bg_ok "background output")
-      ?(bg_board_post_id = "post-bg-1")
-      ()
-  : Keeper_event_queue.bg_job_completion
-  =
-  { bg_run_id; bg_kind; bg_outcome; bg_board_post_id }
-;;
-
-let bg_stimulus ?bg_run_id ?bg_kind ?bg_outcome ?bg_board_post_id ()
-  : Keeper_event_queue.stimulus
-  =
-  { post_id = "ignored-by-bg-arm"
-  ; urgency = Keeper_event_queue.Normal
-  ; arrived_at = 2000.0
-  ; payload =
-      Keeper_event_queue.Bg_completed
-        (bg_payload ?bg_run_id ?bg_kind ?bg_outcome ?bg_board_post_id ())
   }
 ;;
 
@@ -369,79 +345,6 @@ let test_fusion_missing_terminal_is_rejected () =
   match Keeper_event_queue.stimulus_of_yojson missing_terminal with
   | Error _ -> ()
   | Ok _ -> fail "fusion completion without terminal decoded"
-;;
-
-(* RFC-0290: a completed background job follows the same non-empty delivery
-   contract as Fusion_completed. *)
-let test_bg_completion_is_actionable () =
-  let meta = make_meta ~name:"bg-keeper" () in
-  let bg =
-    bg_payload
-      ~bg_run_id:"bg-42"
-      ~bg_outcome:(Keeper_event_queue.Bg_ok "BG-ANSWER-TOKEN")
-      ~bg_board_post_id:"post-bg-42"
-      ()
-  in
-  let ev : Keeper_world_observation.pending_board_event =
-    Keeper_world_observation.pending_board_event_of_bg_job_completion
-      ~meta
-      ~arrived_at:2000.0
-      bg
-  in
-  check string "post_id correlates to the board post" "post-bg-42" ev.post_id;
-  check
-    bool
-    "title names the background subprocess completion"
-    true
-    (contains ~needle:"Background subprocess complete" ev.title);
-  check
-    bool
-    "preview carries the background output"
-    true
-    (contains ~needle:"BG-ANSWER-TOKEN" ev.preview);
-  check string "author remains context" meta.name ev.author;
-  check bool "post kind remains context" true
-    (ev.post_kind = Board.System_post);
-  match
-    Keeper_world_observation.pending_board_event_of_stimulus
-      ~meta
-      (bg_stimulus ~bg_outcome:(Keeper_event_queue.Bg_ok "BG-ANSWER-TOKEN") ())
-  with
-  | Ok (Some (ev : Keeper_world_observation.pending_board_event)) ->
-    check
-      bool
-      "stimulus path preview carries the background output"
-      true
-      (contains ~needle:"BG-ANSWER-TOKEN" ev.preview)
-  | Ok None -> fail "Bg_completed stimulus must produce Some pending_board_event, not None"
-  | Error unavailable ->
-    fail
-      ("Bg_completed stimulus must not hit a board read: "
-       ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable)
-;;
-
-let test_bg_failure_missing_board_post_id_fallback () =
-  let meta = make_meta ~name:"bg-keeper" () in
-  let bg =
-    bg_payload
-      ~bg_run_id:"bg-9"
-      ~bg_outcome:(Keeper_event_queue.Bg_failed "exit status 127")
-      ~bg_board_post_id:""
-      ()
-  in
-  let ev : Keeper_world_observation.pending_board_event =
-    Keeper_world_observation.pending_board_event_of_bg_job_completion
-      ~meta
-      ~arrived_at:2000.0
-      bg
-  in
-  check string "synthetic fallback post id" "bg-run:bg-9" ev.post_id;
-  check bool "title marks failure" true (contains ~needle:"failed" ev.title);
-  check
-    bool
-    "preview carries failure reason"
-    true
-    (contains ~needle:"exit status 127" ev.preview)
 ;;
 
 let test_scheduled_wake_is_actionable () =
@@ -1111,14 +1014,6 @@ let () =
             "tool handle returns Running then async success projects evidence"
             `Quick
             test_tool_handle_async_success_projects_running_then_completed
-        ; test_case
-            "background completion is actionable (non-empty, carries output)"
-            `Quick
-            test_bg_completion_is_actionable
-        ; test_case
-            "background failure falls back to bg-run id"
-            `Quick
-            test_bg_failure_missing_board_post_id_fallback
         ; test_case
             "scheduled wake is actionable (non-empty, carries message)"
             `Quick

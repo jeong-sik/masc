@@ -207,7 +207,6 @@ let relevant_delivery_count ~base_path ~candidate_id =
           | Event_queue.Board_signal _
           | Event_queue.Bootstrap
           | Event_queue.Fusion_completed _
-          | Event_queue.Bg_completed _
           | Event_queue.Schedule_due _
           | Event_queue.Connector_attention _
           | Event_queue.Hitl_resolved _

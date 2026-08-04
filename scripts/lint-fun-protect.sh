@@ -30,7 +30,6 @@ ALLOWLIST=(
   # to keep PR #10395 scoped. Tracked for follow-up; do not extend this section
   # without an accompanying issue.
   "lib/backend/backend.ml"
-  "lib/process/bg_task.ml"
   "lib/process/process_eio.ml"
   "lib/gate/channel_gate_discord_names.ml"
   "lib/gate/channel_gate_imessage_state.ml"

@@ -148,18 +148,10 @@ let install_with_process_sandbox_exec_observer () =
     { With_process.run = (fun f -> observe ~kind:Sandbox_exec f) }
 ;;
 
-let install_bg_sandbox_exec_observer () =
-  Bg_task.set_lifetime_guard
-    { Bg_task.acquire =
-        (fun () -> acquire_lifetime_observation ~kind:Sandbox_exec ())
-    }
-;;
-
 let () =
   install_dated_jsonl_log_writer_observer ();
   install_process_eio_sandbox_exec_observer ();
-  install_with_process_sandbox_exec_observer ();
-  install_bg_sandbox_exec_observer ()
+  install_with_process_sandbox_exec_observer ()
 ;;
 
 let read_fd_open () =

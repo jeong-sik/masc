@@ -58,7 +58,6 @@ let continuation_binding_of_source source =
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Bootstrap
-  | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Goal_assigned _
@@ -149,8 +148,6 @@ let transfer_owner_to_yojson transfer =
 
 let source_terminal_receipt_kind = function
   | Keeper_event_queue_state.Fusion_terminal _ -> "fusion_terminal"
-  | Keeper_event_queue_state.Background_job_terminal _ ->
-    "background_job_terminal"
   | Keeper_event_queue_state.Hitl_terminal _ -> "hitl_terminal"
   | Keeper_event_queue_state.Turn_attempt_terminal _ ->
     "turn_attempt_terminal"

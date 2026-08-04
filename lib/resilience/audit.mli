@@ -59,8 +59,8 @@
     [Shared_audit.Envelope.category]. *)
 type category =
   | OutcomeRecorded
-      (** A {!Shared_types.Resilience_outcome.t} was emitted by a
-          keeper turn (FullSuccess / PartialSuccess / GracefulFailure). *)
+      (** A ternary outcome (FullSuccess / PartialSuccess / GracefulFailure)
+          was emitted by a keeper turn. No producer emits this category yet. *)
   | ConfidenceEvaluated
       (** A composite confidence score was computed for an artifact. *)
   | DegradationTriggered

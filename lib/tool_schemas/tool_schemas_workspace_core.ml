@@ -35,24 +35,6 @@ Call after masc_start to orient yourself. Pair with masc_tasks for detailed back
     ];
   };
   {
-    name = "masc_reset";
-    description = "DESTRUCTIVE: Reset the active MASC project completely. Deletes ALL data in .masc/ folder. \
-Removes: tasks, messages, agents, locks, cache, telemetry. Cannot be undone. \
-Use only for: fresh start, corrupted state recovery, testing. \
-Requires confirm=true to execute. Example: masc_reset({confirm: true})";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("confirm", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Set to true to confirm reset");
-          ("default", `Bool false);
-        ]);
-      ]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-  {
     name = "masc_check";
     description = "Assert task preconditions on your agent state (task claimed, current task set, etc). \
 Call when you want to confirm prerequisites before starting work; returns pass/fail with fix hints.";

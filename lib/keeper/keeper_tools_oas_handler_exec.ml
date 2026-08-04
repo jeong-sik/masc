@@ -22,7 +22,6 @@ let execute_with_observers
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?turn_sandbox_factory
-      ?search_fn
       ?sw
       ?clock
       ?proc_mgr
@@ -47,7 +46,6 @@ let execute_with_observers
           ~publication_recovery
           ~ctx_work:ctx_snapshot
           ?turn_sandbox_factory
-          ?search_fn
           ?sw
           ?clock
           ?proc_mgr

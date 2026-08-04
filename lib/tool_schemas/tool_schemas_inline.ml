@@ -21,5 +21,4 @@ let inline_workspace_from_codegen =
 
 let schemas =
   inline_workspace_from_codegen
-  @ Tool_schemas_inline_infra.schemas
   @ Tool_schemas_inline_episodes.schemas

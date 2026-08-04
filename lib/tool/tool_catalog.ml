@@ -312,7 +312,6 @@ let explicit_metadata : (string * metadata) list =
            ~required_permission:Masc_domain.CanAdmin
            "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface.") );
     (* Catalog-owned permissions for split/lazily registered tool modules. *)
-    ("masc_reset", reset_tool);
     ("masc_start", with_semantic_flags ~mcp_context_required:true init_tool);
     ("masc_task_history", read_state_tool);
     ("masc_add_task", add_task_tool);
@@ -379,7 +378,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_sub_board_delete", broadcast_tool);
     ("masc_board_cleanup", admin_tool);
     ("masc_board_delete", admin_tool);
-    ("masc_tool_stats", read_state_tool);
     ("masc_gc", admin_tool);
     ("masc_pause", broadcast_tool);
     ("masc_resume", broadcast_tool);
@@ -399,7 +397,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_library_add", broadcast_tool);
     ("masc_library_promote", broadcast_tool);
     ("masc_library_search", read_state_tool);
-    ("masc_session", read_state_tool);
     ( "keeper_tasks_list",
       hidden_runtime_tool
         "Keeper task-list runtime tool; callable but hidden from the public MCP schema surface."
@@ -425,7 +422,6 @@ let explicit_metadata : (string * metadata) list =
        permission authority here; descriptor policy remains the SSOT for
        execution axes such as readonly/idempotent. *)
     ("keeper_time_now", keeper_shard_read);
-    ("keeper_tool_search", keeper_shard_read);
     ("keeper_context_status", keeper_shard_read);
     ("keeper_artifact_read", keeper_shard_read);
     ("keeper_memory_search", keeper_shard_read);
@@ -460,6 +456,7 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_board_sub_board_create", keeper_shard_write);
     ("keeper_board_sub_board_update", keeper_shard_write);
     ("keeper_board_sub_board_delete", keeper_shard_write);
+    ("analyze_image", keeper_shard_read);
     ("tool_edit_file", keeper_shard_write);
     ("tool_write_file", keeper_shard_write);
     ( "tool_execute",

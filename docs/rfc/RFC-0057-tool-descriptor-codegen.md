@@ -46,7 +46,7 @@ progress_report.md §2.1에 기록된 8개 문제 중 미해결 4개:
 
 ### 1.3 Current Schema Architecture
 
-61개 도구는 `lib/tool_schemas/`의 13개 파일에 분산되어 있습니다:
+57개 도구는 `lib/tool_schemas/`의 12개 파일에 분산되어 있습니다:
 
 | 파일 | 도구 수 | 카테고리 |
 |------|--------|----------|
@@ -57,12 +57,11 @@ progress_report.md §2.1에 기록된 8개 문제 중 미해결 4개:
 | `tool_schemas_run.ml` | 6 | run, execution |
 | `tool_schemas_inline_workspace.ml` | 6 | inline workspace |
 | `tool_schemas_workspace_extra.ml` | 5 | workspace 부가 |
-| `tool_schemas_inline_infra.ml` | 4 | infra |
 | `tool_schemas_code.ml` | 3 | code 편집 |
 | `tool_schemas_worktree.ml` | 3 | worktree |
 | `tool_schemas_control.ml` | 2 | control |
 | `tool_schemas_inline_episodes.ml` | 0 | (empty, reserved) |
-| **합계** | **61** | |
+| **합계** | **57** | |
 
 각 도구는 `Masc_domain.tool_schema = {name: string; description: string; input_schema: Yojson.Safe.t}`로 정의됩니다. `input_schema`는 raw Yojson AST (`` `Assoc``, `` `String``, `` `List`` 등)로 하드코딩되어 있어 타입 안정성이 없습니다.
 

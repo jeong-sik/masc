@@ -1,5 +1,5 @@
 (* TEL-OK: this library returns structured [dispatch_result] values and persists
-   generic execution records through [Schedule_store]. The server maintenance
+   generic wake records through [Schedule_store]. The server maintenance
    loop owns runtime Log telemetry when it installs a concrete consumer. *)
 
 type signal_kind =
@@ -44,31 +44,10 @@ type consumer_dispatch_error =
 type acceptance_commit = Acceptance_committed
 
 type consumer_dispatch_result =
-  | Work_completed of Yojson.Safe.t
-  | Work_completed_after_acceptance of
-      { detail : Yojson.Safe.t
-      ; acceptance_commit : acceptance_commit
-      }
   | Work_accepted of
       { detail : Yojson.Safe.t
       ; acceptance_commit : acceptance_commit
       }
-  | Work_failed of
-      { error : string
-      ; detail : Yojson.Safe.t
-      }
-  | Work_failed_after_acceptance of
-      { error : string
-      ; detail : Yojson.Safe.t
-      ; acceptance_commit : acceptance_commit
-      }
-
-type settlement_evidence =
-  | Consumer_holds_occurrence
-  | Consumer_completed_occurrence
-  | Consumer_failed_occurrence of string
-  | Consumer_cancelled_occurrence of string
-  | Consumer_lost_occurrence of string
 
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
@@ -81,29 +60,6 @@ type consumer =
         (Yojson.Safe.t ->
          (acceptance_commit, consumer_dispatch_error) result) ->
       (consumer_dispatch_result, consumer_dispatch_error) result
-  ; settlements :
-      Workspace_utils.config ->
-      Schedule_domain.execution_record list ->
-      (settlement_evidence, string) result list
-  }
-
-type reclaim_failure =
-  | Occurrence_reclaim_failure of
-      { occurrence_id : string
-      ; error : string
-      }
-  | Settlement_batch_cardinality_mismatch of
-      { expected : int
-      ; actual : int
-      }
-  | Settlement_batch_consumer_failure of string
-
-type reclaim_outcome =
-  { examined : int
-  ; reclaimed : int
-  ; held : int
-  ; settled_elsewhere : int
-  ; failures : reclaim_failure list
   }
 
 type runner_error =
@@ -309,7 +265,7 @@ let append_new_signals config candidates =
 ;;
 
 let candidates ~now state =
-  Schedule_store.due_execution_candidates state
+  Schedule_store.due_wake_candidates state
   |> List.map (fun request -> request, make_signal ~now Due_candidate request)
 ;;
 
@@ -407,59 +363,8 @@ let dispatch_candidate
           finish_retryable_dispatch config ~now ~occurrence_id ~schedule_id detail
         | Error (Terminal_dispatch_rejection detail) ->
           finish_terminal_dispatch config ~now ~occurrence_id ~schedule_id detail
-        | Ok (Work_completed detail) ->
-          (match Schedule_store.complete_running config ~now ~schedule_id ~detail () with
-           | Ok _ ->
-             dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded
-           | Error err ->
-             dispatch_result ~detail
-               ~error:(Schedule_store.store_error_to_string err)
-               occurrence_id schedule_id Dispatch_failed)
-        | Ok
-            (Work_completed_after_acceptance
-               { detail; acceptance_commit = Acceptance_committed }) ->
-          (match
-             Schedule_store.complete_dispatched_occurrence
-               config
-               ~now
-               ~schedule_instance_id:signal.schedule_instance_id
-               ~schedule_id
-               ~due_at:signal.due_at
-               ~payload_digest:signal.payload_digest
-               ()
-           with
-           | Ok _ ->
-             dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded
-           | Error err ->
-             dispatch_result ~detail
-               ~error:(Schedule_store.store_error_to_string err)
-               occurrence_id schedule_id Dispatch_failed)
         | Ok (Work_accepted { detail; acceptance_commit = Acceptance_committed }) ->
-          dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded
-        | Ok (Work_failed { error; detail })
-        | Ok
-            (Work_failed_after_acceptance
-               { error; detail; acceptance_commit = Acceptance_committed }) ->
-          (match
-             Schedule_store.fail_dispatched_occurrence
-               config
-               ~now
-               ~schedule_instance_id:signal.schedule_instance_id
-               ~schedule_id
-               ~due_at:signal.due_at
-               ~payload_digest:signal.payload_digest
-               ~error
-           with
-           | Ok _ ->
-             dispatch_result ~detail ~error occurrence_id schedule_id Dispatch_failed
-           | Error err ->
-             let error =
-               Printf.sprintf
-                 "%s; failed to mark schedule occurrence failed: %s"
-                 error
-                 (Schedule_store.store_error_to_string err)
-             in
-             dispatch_result ~detail ~error occurrence_id schedule_id Dispatch_failed)))
+          dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded))
 ;;
 
 let dispatch_candidates config ~now consumer candidates =
@@ -467,18 +372,6 @@ let dispatch_candidates config ~now consumer candidates =
     (fun (request, signal) ->
        dispatch_candidate config ~now consumer signal request)
     candidates
-;;
-
-let read_recent_signals config n =
-  let rec decode ordinal acc = function
-    | [] -> Ok (List.rev acc)
-    | json :: rest ->
-      (match wake_signal_of_yojson json with
-       | Ok signal -> decode (ordinal + 1) (signal :: acc) rest
-       | Error error ->
-         Error (Printf.sprintf "schedule signal row %d: %s" ordinal error))
-  in
-  Dated_jsonl.read_recent (signal_store config) n |> decode 0 []
 ;;
 
 let tick ?consumer config ~now =
@@ -499,166 +392,4 @@ let tick ?consumer config ~now =
        (match Schedule_store.reschedule_due_recurring config ~now ~schedule_ids with
         | Error err -> Error (Service_error (Schedule_service.Store_error err))
         | Ok (_, rescheduled) -> Ok { due_changed; emitted; rescheduled; dispatches = [] }))
-;;
-
-let empty_reclaim_outcome =
-  { examined = 0
-  ; reclaimed = 0
-  ; held = 0
-  ; settled_elsewhere = 0
-  ; failures = []
-  }
-;;
-
-let safe_consumer_settlements consumer config executions =
-  Cancel_safe.protect
-    ~on_exn:(fun exn ->
-      Error ("consumer settlement raised: " ^ Printexc.to_string exn))
-    (fun () -> Ok (consumer.settlements config executions))
-;;
-
-type reclaim_counter =
-  | Count_reclaimed
-  | Count_settled_elsewhere
-
-type prepared_reclaim =
-  { occurrence_id : string
-  ; settlement : Schedule_store.dispatched_occurrence_settlement
-  ; counter : reclaim_counter
-  }
-
-let add_reclaim_failure acc ~occurrence_id error =
-  { acc with
-    failures = Occurrence_reclaim_failure { occurrence_id; error } :: acc.failures
-  }
-;;
-
-let prepare_reclaim acc (execution : Schedule_domain.execution_record) settlement =
-  let occurrence_id =
-    Schedule_occurrence_id.make
-      ~schedule_instance_id:execution.schedule_instance_id
-      ~schedule_id:execution.schedule_id
-      ~due_at:execution.due_at
-      ~payload_digest:execution.payload_digest
-    |> Schedule_occurrence_id.to_string
-  in
-  let acc = { acc with examined = acc.examined + 1 } in
-  let prepare counter outcome =
-    ( acc
-    , Some
-        { occurrence_id
-        ; settlement =
-            { execution_id = execution.execution_id
-            ; schedule_instance_id = execution.schedule_instance_id
-            ; schedule_id = execution.schedule_id
-            ; due_at = execution.due_at
-            ; payload_digest = execution.payload_digest
-            ; outcome
-            }
-        ; counter
-        } )
-  in
-  match settlement with
-  | Error message -> add_reclaim_failure acc ~occurrence_id message, None
-  | Ok Consumer_holds_occurrence -> { acc with held = acc.held + 1 }, None
-  | Ok Consumer_completed_occurrence ->
-    prepare Count_settled_elsewhere Schedule_store.Dispatched_occurrence_succeeded
-  | Ok (Consumer_failed_occurrence reason)
-  | Ok (Consumer_cancelled_occurrence reason) ->
-    prepare
-      Count_settled_elsewhere
-      (Schedule_store.Dispatched_occurrence_failed reason)
-  | Ok (Consumer_lost_occurrence reason) ->
-    prepare Count_reclaimed (Schedule_store.Dispatched_occurrence_failed reason)
-;;
-
-let apply_prepared_reclaims config ~now acc prepared =
-  match prepared with
-  | [] -> acc
-  | _ ->
-    let settlements = List.map (fun item -> item.settlement) prepared in
-    let apply_result acc item = function
-      | Error error ->
-        add_reclaim_failure
-          acc
-          ~occurrence_id:item.occurrence_id
-          (Schedule_store.store_error_to_string error)
-      | Ok () ->
-        (match item.counter with
-         | Count_reclaimed -> { acc with reclaimed = acc.reclaimed + 1 }
-         | Count_settled_elsewhere ->
-           { acc with settled_elsewhere = acc.settled_elsewhere + 1 })
-    in
-    (match
-       Schedule_store.settle_dispatched_occurrences_collect_errors
-         config
-         ~now
-         settlements
-     with
-     | Error error ->
-       let detail = Schedule_store.store_error_to_string error in
-       List.fold_left
-         (fun acc item ->
-            add_reclaim_failure acc ~occurrence_id:item.occurrence_id detail)
-         acc
-         prepared
-     | Ok results -> List.fold_left2 apply_result acc prepared results)
-;;
-
-let reclaim_lost_occurrences ~consumer config ~now =
-  match Schedule_store.read_state_result config with
-  | Error (Schedule_store.Corrupt_read_ledger { primary_err; recovery_err }) ->
-    Error
-      (Service_error
-         (Schedule_service.Store_error
-            (Schedule_store.Corrupt_ledger { primary_err; recovery_err })))
-  | Ok state ->
-    let executions = Schedule_store.unsettled_dispatched_occurrences state in
-    let outcome =
-      match safe_consumer_settlements consumer config executions with
-      | Error error ->
-        { empty_reclaim_outcome with
-          examined = List.length executions
-        ; failures = [ Settlement_batch_consumer_failure error ]
-        }
-      | Ok settlements when List.length executions <> List.length settlements ->
-        let expected = List.length executions in
-        let actual = List.length settlements in
-        let mismatch =
-          Printf.sprintf
-            "consumer settlement batch cardinality mismatch: expected=%d actual=%d"
-            expected
-            actual
-        in
-        { empty_reclaim_outcome with
-          examined = expected
-        ;
-          failures =
-            (match executions with
-             | [] ->
-               [ Settlement_batch_cardinality_mismatch { expected; actual } ]
-             | executions ->
-               List.map
-                 (fun execution ->
-                    Occurrence_reclaim_failure
-                      { occurrence_id = execution.Schedule_domain.execution_id
-                      ; error = mismatch
-                      })
-                 executions)
-        }
-      | Ok settlements ->
-        let outcome, prepared_rev =
-          List.fold_left2
-            (fun (acc, prepared) execution settlement ->
-               let acc, item = prepare_reclaim acc execution settlement in
-               match item with
-               | None -> acc, prepared
-               | Some item -> acc, item :: prepared)
-            (empty_reclaim_outcome, [])
-            executions
-            settlements
-        in
-        apply_prepared_reclaims config ~now outcome (List.rev prepared_rev)
-    in
-    Ok { outcome with failures = List.rev outcome.failures }
 ;;

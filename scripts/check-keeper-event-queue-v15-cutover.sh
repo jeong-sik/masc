@@ -104,7 +104,7 @@ run_gate() {
   local pending_count
   local outbox_count
   local accepted_count
-  local unsettled_count_total=0
+  local in_progress_count_total=0
 
   [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
     || fail "base path is not an exact directory: $BASE_PATH"
@@ -139,6 +139,18 @@ run_gate() {
       fi
     done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v4.jsonl' -print0)
 
+    while IFS= read -r -d '' queue_path; do
+      legacy_wal_count=$((legacy_wal_count + 1))
+      [[ -f "$queue_path" && ! -L "$queue_path" ]] \
+        || fail "v5 transition WAL is not an exact regular file: $queue_path"
+      [[ ! -s "$queue_path" ]] \
+        || fail "v5 transition WAL still contains committed evidence: $queue_path"
+      current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
+      if [[ ! -e "$current_queue_path" && ! -L "$current_queue_path" ]]; then
+        cutover_required=1
+      fi
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v5.jsonl' -print0)
+
     while IFS= read -r -d '' current_queue_path; do
       [[ -f "$current_queue_path" && ! -L "$current_queue_path" ]] \
         || fail "v15 queue snapshot is not an exact regular file: $current_queue_path"
@@ -147,13 +159,13 @@ run_gate() {
       "$CUTOVER_HELPER" validate-current-queue \
         --base-path "$BASE_PATH" \
         --keeper-name "$keeper_name" \
-        || fail "v15 queue snapshot or v5 transition WAL is invalid: $current_queue_path"
+        || fail "v15 queue snapshot or v6 transition WAL is invalid: $current_queue_path"
       current_owner_count=$((current_owner_count + 1))
     done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v15.json' -print0)
 
     while IFS= read -r -d '' queue_path; do
       [[ -f "$queue_path" && ! -L "$queue_path" ]] \
-        || fail "v5 transition WAL is not an exact regular file: $queue_path"
+        || fail "v6 transition WAL is not an exact regular file: $queue_path"
       current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
       if [[ -e "$current_queue_path" || -L "$current_queue_path" ]]; then
         continue
@@ -163,9 +175,9 @@ run_gate() {
       "$CUTOVER_HELPER" validate-current-wal \
         --base-path "$BASE_PATH" \
         --keeper-name "$keeper_name" \
-        || fail "v5 transition WAL is invalid: $queue_path"
+        || fail "v6 transition WAL is invalid: $queue_path"
       current_owner_count=$((current_owner_count + 1))
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v5.jsonl' -print0)
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v6.jsonl' -print0)
 
     while IFS= read -r -d '' queue_path; do
       current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
@@ -186,16 +198,16 @@ run_gate() {
       || fail "schedule ledger is not an exact regular file: $schedules_path"
     schedule_report="$("$CUTOVER_HELPER" validate-schedule-ledger "$schedules_path")" \
       || fail "schedule ledger contract is invalid: $schedules_path"
-    local unsettled_count
-    unsettled_count="$(jq -er '.unsettled_count' <<<"$schedule_report")" \
+    local in_progress_count
+    in_progress_count="$(jq -er '.in_progress_count' <<<"$schedule_report")" \
       || fail "typed schedule validator returned an invalid result: $schedules_path"
-    unsettled_count_total=$((unsettled_count_total + unsettled_count))
-    if [[ "$cutover_required" -eq 1 && "$unsettled_count" -ne 0 ]]; then
+    in_progress_count_total=$((in_progress_count_total + in_progress_count))
+    if [[ "$cutover_required" -eq 1 && "$in_progress_count" -ne 0 ]]; then
       jq -r '
-        .unsettled[]
-        | "  execution_id=\(.execution_id) schedule_id=\(.schedule_id) status=\(.status)"
+        .in_progress[]
+        | "  schedule_instance_id=\(.schedule_instance_id) schedule_id=\(.schedule_id) due_at=\(.due_at) status=\(.status)"
       ' <<<"$schedule_report" >&2
-      fail "schedule ledger still has $unsettled_count unsettled execution(s)"
+      fail "schedule ledger still has $in_progress_count wake delivery attempt(s) in progress"
     fi
   done
 
@@ -245,10 +257,10 @@ run_gate() {
     done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v14.json' -print0)
   fi
 
-  printf '[event-queue-v15-cutover] OK: base_path=%s cutover_required=%d schedule_ledgers=%d signal_files=%d signal_rows=%d v14_owners=%d current_owners=%d legacy_wals=%d unsettled=%d\n' \
+  printf '[event-queue-v15-cutover] OK: base_path=%s cutover_required=%d schedule_ledgers=%d signal_files=%d signal_rows=%d v14_owners=%d current_owners=%d legacy_wals=%d in_progress=%d\n' \
     "$BASE_PATH" "$cutover_required" "$schedule_ledger_count" \
     "$signal_file_count" "$signal_row_count" "$queue_count" \
-    "$current_owner_count" "$legacy_wal_count" "$unsettled_count_total"
+    "$current_owner_count" "$legacy_wal_count" "$in_progress_count_total"
 }
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
@@ -260,9 +272,9 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     local status="$2"
     mkdir -p "$target_root/.masc"
     jq -n --arg status "$status" '
-      {version: 1, updated_at: 1, schedules: [], executions:
+      {version: 1, updated_at: 1, schedules: [], wakes:
         (if $status == "none" then []
-         else [{execution_id: "exec-fixture", schedule_instance_id: "instance-fixture",
+         else [{schedule_instance_id: "instance-fixture",
                 schedule_id: "schedule-fixture", started_at: 1, finished_at: null,
                 due_at: 1, payload_digest: "digest-fixture", status: $status,
                 detail: null, error: null}]
@@ -362,15 +374,10 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     fail "self-test expected an active BasePath writer lease to block cutover"
   fi
 
-  dispatched_root="$fixture_root/dispatched"
-  write_schedules "$dispatched_root" dispatched
-  write_queue "$dispatched_root" 0 0 0
-  expect_failure dispatched_execution "$dispatched_root"
-
   running_root="$fixture_root/running"
   write_schedules "$running_root" running
   write_queue "$running_root" 0 0 0
-  expect_failure running_execution "$running_root"
+  expect_failure running_wake "$running_root"
 
   pending_root="$fixture_root/pending"
   write_schedules "$pending_root" none
@@ -394,6 +401,13 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     >"$legacy_wal_root/.masc/keepers/fixture/event-queue-transitions-v4.jsonl"
   expect_failure nonempty_v4_transition_wal "$legacy_wal_root"
 
+  legacy_v5_wal_root="$fixture_root/legacy-v5-wal"
+  write_schedules "$legacy_v5_wal_root" none
+  write_queue "$legacy_v5_wal_root" 0 0 0
+  printf '{"schema":"masc.keeper_event_queue.transition.v5"}\n' \
+    >"$legacy_v5_wal_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
+  expect_failure nonempty_v5_transition_wal "$legacy_v5_wal_root"
+
   current_root="$fixture_root/current"
   write_schedules "$current_root" running
   write_queue "$current_root" 1 1 1
@@ -412,20 +426,20 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   write_schedules "$malformed_current_wal_root" running
   write_current_queue "$malformed_current_wal_root"
   printf '{not-json\n' \
-    >"$malformed_current_wal_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
+    >"$malformed_current_wal_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
   expect_failure malformed_current_wal "$malformed_current_wal_root"
 
   wal_only_root="$fixture_root/wal-only"
   write_schedules "$wal_only_root" running
   mkdir -p "$wal_only_root/.masc/keepers/fixture"
-  : >"$wal_only_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
+  : >"$wal_only_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
   "$0" --base-path "$wal_only_root" >/dev/null
 
   malformed_wal_only_root="$fixture_root/malformed-wal-only"
   write_schedules "$malformed_wal_only_root" running
   mkdir -p "$malformed_wal_only_root/.masc/keepers/fixture"
   printf '{not-json\n' \
-    >"$malformed_wal_only_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
+    >"$malformed_wal_only_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
   expect_failure malformed_wal_without_snapshot "$malformed_wal_only_root"
 
   malformed_root="$fixture_root/malformed"
@@ -435,7 +449,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
 
   incomplete_contract_root="$fixture_root/incomplete-contract"
   mkdir -p "$incomplete_contract_root/.masc"
-  jq -n '{version: 1, schedules: [], executions: []}' \
+  jq -n '{version: 1, schedules: [], wakes: []}' \
     >"$incomplete_contract_root/.masc/schedules.json"
   expect_failure incomplete_schedule_contract "$incomplete_contract_root"
 
@@ -459,7 +473,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   jq -n '
     {version: 1, updated_at: 1,
      schedules: [{schedule_id: "legacy-schedule"}],
-     executions: []}
+     wakes: []}
   ' >"$pre_cut_root/.masc/schedules.json"
   expect_failure pre_cut_schedule "$pre_cut_root"
 
@@ -468,7 +482,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   jq -n '
     {version: 1, updated_at: 1,
      schedules: [{schedule_id: "pre-cut-schedule"}],
-     executions: []}
+     wakes: []}
   ' >"$pre_cut_recovery_root/.masc/schedules.json.last-good"
   expect_failure pre_cut_recovery "$pre_cut_recovery_root"
 

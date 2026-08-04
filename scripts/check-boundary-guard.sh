@@ -401,15 +401,11 @@ check "V9-masc-llama-envvar" 0 \
   "lib/"
 
 # V10: OAS-owned provider filters must not be re-owned outside compatibility loaders/scrubbers.
-# The .mli of keeper_meta_json_scrub is the public interface for the already-allowed
-# .ml; the doc-comment legitimately surfaces the legacy key name in its API contract.
 check_forbidden_outside "V10-provider-filter-ownership" \
   'allowed_providers' \
   "lib/" \
   "lib/keeper_types/keeper_types.ml" \
   "lib/keeper_types/keeper_types.mli" \
-  "lib/keeper/keeper_meta_json_scrub.ml" \
-  "lib/keeper/keeper_meta_json_scrub.mli" \
   "lib/keeper/keeper_config.ml" \
   "lib/keeper/keeper_config_text.ml" \
   "lib/keeper/keeper_config_text.mli"

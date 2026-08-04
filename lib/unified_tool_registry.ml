@@ -1,11 +1,7 @@
 (** Unified Tool Registry Ratchet — P0-1.
 
-    Single registration flow that brings together the four previously
-    scattered tool-name sources:
-
-    - [Keeper_tool_name] (keeper-owned typed vocabulary)
-    - [Config.raw_all_tool_schemas] (authoritative LLM schema inventory)
-    - [Keeper_tool_task_runtime] task-operation handlers
+    Single registration flow over the raw MCP schema inventory and the
+    descriptor-owned Keeper handler inventory.
 
     The flow registers a dispatch tag (+ schema) for every name that does not
     already have one, then enforces the startup invariant that every
@@ -23,29 +19,6 @@
       through the neutral Tool substrate. *)
 
 module TD = Tool_dispatch
-
-let empty_input_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; "properties", `Assoc []
-    ; "required", `List []
-    ]
-
-let minimal_schema name =
-  { Masc_domain.name
-  ; description = Printf.sprintf "Unified registry schema for %s" name
-  ; input_schema = empty_input_schema
-  }
-
-let find_raw_schema name =
-  List.find_opt
-    (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
-    Config.raw_all_tool_schemas
-
-let schema_for_name name =
-  match find_raw_schema name with
-  | Some s -> s
-  | None -> minimal_schema name
 
 (** Closed set of keeper task-operation names handled by
     [Keeper_tool_task_runtime.handle_keeper_task_tool]. Derived from
@@ -114,9 +87,9 @@ let tag_of_name name : TD.module_tag option =
 
 (** Register a tag + schema only if the name is not already in the tag
     registry. Existing [Tool_spec] registrations are preserved. *)
-let register_name_if_missing name tag =
-  if Option.is_none (TD.lookup_tag name)
-  then TD.register_module_tag ~schemas:[ schema_for_name name ] ~tag
+let register_schema_if_missing (schema : Masc_domain.tool_schema) tag =
+  if Option.is_none (TD.lookup_tag schema.name)
+  then TD.register_module_tag ~schemas:[ schema ] ~tag
 
 (** 1. Register every LLM-visible schema from [Config.raw_all_tool_schemas]
     that does not already have a tag. *)
@@ -126,25 +99,30 @@ let register_visible_raw_schemas () =
        if Tool_catalog.is_visible schema.name
        then
          match tag_of_name schema.name with
-         | Some tag -> register_name_if_missing schema.name tag
-         | None -> register_name_if_missing schema.name TD.Mod_external)
+         | Some tag -> register_schema_if_missing schema tag
+         | None -> register_schema_if_missing schema TD.Mod_external)
 
-(** 2. Register every name in [Keeper_tool_name.all] that is missing from
-    the registry. This covers keeper-internal tools and ratchets the task
-    cluster to [Mod_keeper_task]. *)
-let register_keeper_tool_names () =
-  Keeper_tool_name.all
-  |> List.iter (fun t ->
-       let name = Keeper_tool_name.to_string t in
-       match tag_of_name name with
-       | Some tag -> register_name_if_missing name tag
-       | None -> register_name_if_missing name TD.Mod_external)
+(** 2. Register each descriptor's internal handler name with the schema owned
+    by that descriptor. Model aliases are canonicalised before dispatch and
+    never receive fabricated placeholder schemas. *)
+let register_descriptor_handlers () =
+  Keeper_tool_descriptor.all_descriptors ()
+  |> List.iter (fun (descriptor : Keeper_tool_descriptor.t) ->
+         let schema : Masc_domain.tool_schema =
+           { name = descriptor.internal_name
+           ; description = descriptor.description
+           ; input_schema = descriptor.input_schema
+           }
+         in
+         match tag_of_name schema.name with
+         | Some tag -> register_schema_if_missing schema tag
+         | None -> register_schema_if_missing schema TD.Mod_external)
 
 (** Run the complete unified registration flow. Safe to call multiple times
     (subsequent calls are no-ops for already-registered names). *)
 let register_all () =
   register_visible_raw_schemas ();
-  register_keeper_tool_names ()
+  register_descriptor_handlers ()
 
 (** Names of LLM-visible schemas that still lack a dispatch tag. Empty when
     the ratchet is complete. *)

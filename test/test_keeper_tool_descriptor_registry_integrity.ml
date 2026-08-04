@@ -232,6 +232,16 @@ let test_semantic_capability_has_at_most_one_keeper_model_projection () =
         (String.concat ", " model_names))
 ;;
 
+let test_model_visible_descriptors_own_capability_identity () =
+  Descriptor.model_visible_descriptors ()
+  |> List.iter (fun (descriptor : Descriptor.t) ->
+    if String.equal (String.trim descriptor.capability_id) ""
+    then
+      Alcotest.failf
+        "model-visible descriptor %S has a blank capability_id"
+        descriptor.id)
+;;
+
 let test_model_visible_descriptors_have_canonical_input_schemas () =
   Descriptor.model_visible_descriptors ()
   |> List.iter (fun (descriptor : Descriptor.t) ->
@@ -358,6 +368,37 @@ let test_registered_cluster_model_projections_are_explicit () =
     ]
 ;;
 
+let test_keeper_management_projection_is_explicit () =
+  let check_projection internal_name expected =
+    let descriptor = required_internal_descriptor internal_name in
+    Alcotest.(check bool)
+      (internal_name ^ " model projection")
+      true
+      (descriptor.keeper_model_projection = expected)
+  in
+  List.iter
+    (fun name -> check_projection name Descriptor.Internal_name)
+    [ "masc_keeper_delegate"
+    ; "masc_keeper_delegate_status"
+    ; "masc_keeper_delegate_cancel"
+    ];
+  List.iter
+    (fun name -> check_projection name Descriptor.Operator_only)
+    [ "masc_keeper_waiting_inventory"
+    ; "masc_keeper_list"
+    ; "masc_keeper_delegate_list"
+    ; "masc_keeper_compact"
+    ; "masc_keeper_clear"
+    ; "masc_keeper_sandbox_start"
+    ; "masc_keeper_sandbox_stop"
+    ; "masc_keeper_reset"
+    ; "masc_keeper_persona_audit"
+    ; "masc_keeper_status"
+    ; "masc_keeper_down"
+    ; "masc_keeper_up"
+    ]
+;;
+
 let test_all_keeper_shard_schemas_are_descriptor_backed () =
   Tool_shard.all_keeper_tool_schemas
   |> List.iter (fun (schema : Masc_domain.tool_schema) ->
@@ -479,7 +520,6 @@ let test_seed_eval_tags_are_registered () =
       descriptor.Descriptor.eval_tags
   in
   check "keeper_tools_list" [ "capability_introspection" ];
-  check "keeper_tool_search" [ "capability_introspection" ];
   check "keeper_surface_read" [ "surface_context_read" ];
   check "masc_agent_card" [ "agent_profile_lookup" ];
   check "keeper_time_now" []
@@ -1187,25 +1227,6 @@ let test_library_search_descriptor_has_recoverable_query_schema () =
     (List.mem "query" (schema_required_fields descriptor.input_schema))
 ;;
 
-let test_tool_search_descriptor_uses_registry_schema () =
-  let descriptor = required_internal_descriptor "keeper_tool_search" in
-  let canonical =
-    Masc.Keeper_tool_registry.keeper_tool_search_schema
-  in
-  Alcotest.(check bool)
-    "descriptor and registry share one exact input schema"
-    true
-    (descriptor.Descriptor.input_schema = canonical.input_schema);
-  Alcotest.(check bool)
-    "query remains required"
-    true
-    (List.mem "query" (schema_required_fields canonical.input_schema));
-  Alcotest.(check bool)
-    "search schema rejects unowned fields"
-    true
-    (schema_forbids_additional_properties canonical.input_schema)
-;;
-
 let test_readonly_policy_projection_is_descriptor_owned () =
   let projected = Descriptor.readonly_internal_names () in
   List.iter
@@ -1528,6 +1549,10 @@ let () =
             `Quick
             test_semantic_capability_has_at_most_one_keeper_model_projection
         ; test_case
+            "model-visible descriptors own capability identity"
+            `Quick
+            test_model_visible_descriptors_own_capability_identity
+        ; test_case
             "model-visible descriptors have canonical input schemas"
             `Quick
             test_model_visible_descriptors_have_canonical_input_schemas
@@ -1555,6 +1580,10 @@ let () =
             "registered cluster model projections are explicit"
             `Quick
             test_registered_cluster_model_projections_are_explicit
+        ; test_case
+            "Keeper management projection is explicit"
+            `Quick
+            test_keeper_management_projection_is_explicit
         ; test_case
             "all Keeper shard schemas are descriptor-backed"
             `Quick
@@ -1630,10 +1659,6 @@ let () =
             "Library search query is runtime-recoverable"
             `Quick
             test_library_search_descriptor_has_recoverable_query_schema
-        ; test_case
-            "Tool search descriptor uses registry SSOT"
-            `Quick
-            test_tool_search_descriptor_uses_registry_schema
         ] )
     ; ( "masc-board"
       , [ test_case

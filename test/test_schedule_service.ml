@@ -45,22 +45,6 @@ let payload_json () =
     ]
 ;;
 
-let updated_payload_json () =
-  `Assoc
-    [ "kind", `String "consumer.note"
-    ; "schema_version", `Int 1
-    ; "body", `Assoc [ "text", `String "do now" ]
-    ]
-;;
-
-let payload_exn json =
-  match payload_of_yojson json with
-  | Ok payload -> payload
-  | Error msg -> fail msg
-;;
-
-let updated_payload () = payload_exn (updated_payload_json ())
-
 let has_prefix prefix value =
   let prefix_len = String.length prefix in
   String.length value >= prefix_len
@@ -84,12 +68,6 @@ let check_status label expected actual =
   check string label (schedule_status_to_string expected) (schedule_status_to_string actual)
 ;;
 
-let check_service_error label expected = function
-  | Ok _ -> fail (label ^ ": expected error")
-  | Error actual ->
-    check string label (service_error_to_string expected) (service_error_to_string actual)
-;;
-
 let test_create_mints_schedule_id () =
   with_workspace
   @@ fun config ->
@@ -101,96 +79,12 @@ let test_create_mints_schedule_id () =
   check_status "starts scheduled" Scheduled first.status
 ;;
 
-let test_list_and_get_by_status () =
-  with_workspace
-  @@ fun config ->
-  let cancelled = create_ok ~schedule_id:"cancelled-1" config in
-  let scheduled = create_ok ~schedule_id:"scheduled-1" config in
-  (match cancel config ~schedule_id:cancelled.schedule_id with
-   | Ok _ -> ()
-   | Error err -> fail (service_error_to_string err));
-  check int "all schedules" 2 (List.length (list config ()));
-  check int "scheduled only" 1 (List.length (list config ~status:Scheduled ()));
-  check int "cancelled only" 1 (List.length (list config ~status:Cancelled ()));
-  (match get config ~schedule_id:cancelled.schedule_id with
-   | Some stored -> check string "cancelled id" cancelled.schedule_id stored.schedule_id
-   | None -> fail "cancelled missing");
-  (match get config ~schedule_id:scheduled.schedule_id with
-   | Some stored -> check string "scheduled id" scheduled.schedule_id stored.schedule_id
-   | None -> fail "scheduled missing")
-;;
-
-let test_update_scheduled_request () =
-  with_workspace
-  @@ fun config ->
-  let request =
-    create_ok ~schedule_id:"service-update-1" config
-  in
-  let payload_json = updated_payload_json () in
-  let payload = payload_exn payload_json in
-  match
-    update config ~schedule_id:request.schedule_id ~due_at:260.0
-      ~expires_at:(Some 360.0) ~payload
-  with
-  | Ok updated ->
-    check_status "updated stays scheduled" Scheduled updated.status;
-    check (float 0.001) "due_at" 260.0 updated.due_at;
-    check (option (float 0.001)) "expires_at" (Some 360.0) updated.expires_at;
-    check string "payload" (Yojson.Safe.to_string payload_json)
-      (Yojson.Safe.to_string (payload_to_yojson updated.payload))
-  | Error err -> fail (service_error_to_string err)
-;;
-
-let test_update_due_request_reports_store_error () =
-  with_workspace
-  @@ fun config ->
-  let request =
-    create_ok ~schedule_id:"service-update-due" config
-  in
-  (match due_candidates config ~now:201.0 with
-   | Ok [ candidate ] -> check_status "candidate due" Due candidate.status
-   | Ok candidates ->
-     fail (Printf.sprintf "expected one candidate, got %d" (List.length candidates))
-   | Error err -> fail (service_error_to_string err));
-  check_service_error "due update"
-    (Store_error
-       (Schedule_store.Invalid_status_transition
-          "only scheduled requests can be updated"))
-    (update config ~schedule_id:request.schedule_id ~due_at:260.0
-       ~expires_at:None ~payload:(updated_payload ()))
-;;
-
-let test_due_candidates_do_not_execute () =
-  with_workspace
-  @@ fun config ->
-  let request = create_ok ~schedule_id:"due-1" config in
-  match due_candidates config ~now:201.0 with
-  | Ok [ candidate ] ->
-    check string "candidate id" request.schedule_id candidate.schedule_id;
-    check_status "candidate due" Due candidate.status
-  | Ok candidates ->
-    fail (Printf.sprintf "expected one candidate, got %d" (List.length candidates))
-  | Error err -> fail (service_error_to_string err)
-;;
-
 let () =
   run "Schedule_service"
     [
       ( "create",
         [
           test_case "create mints schedule id" `Quick test_create_mints_schedule_id;
-          test_case "list and get by status" `Quick test_list_and_get_by_status;
-        ] );
-      ( "update",
-        [
-          test_case "updates scheduled request" `Quick test_update_scheduled_request;
-          test_case "due request reports store error" `Quick
-            test_update_due_request_reports_store_error;
-        ] );
-      ( "due",
-        [
-          test_case "due candidates do not execute" `Quick
-            test_due_candidates_do_not_execute;
         ] );
     ]
 ;;

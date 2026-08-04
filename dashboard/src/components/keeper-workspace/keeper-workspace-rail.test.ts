@@ -62,6 +62,10 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
           record: {
             execution_ids: ['exec-cmp'],
             keeper: 'masc-improver',
+            agent_name: 'keeper-masc-improver-agent',
+            generation: 1,
+            turn_kind: 'autonomous',
+            raw_trace_run_ref: null,
             trace_id: 'trace-cmp',
             absolute_turn: 12,
             turn_ref: 'trace-cmp#12',

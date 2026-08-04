@@ -1,6 +1,6 @@
 (** Pure durable state machine for one Keeper event queue owner.
 
-    The current snapshot and source-bearing transition WAL jointly form the
+    The current snapshot and full-pre-state transition WAL jointly form the
     durable authority. This module performs no I/O; persistence supplies the
     atomic file boundary and publishes [pending] into the live registry only
     after a durable commit. *)

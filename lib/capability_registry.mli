@@ -12,9 +12,7 @@
     [public_projection_seeds_from], [local_worker_internal_seeds],
     [keeper_projection_seeds], [surface_tool_schemas_from],
     [surface_tool_names_from], [public_raw_tool_schemas_from],
-    [keeper_all_tool_names],
-    [keeper_wrapped_server_tools],
-    [keeper_wrapped_internal_tools], [capability_to_json],
+    [capability_to_json],
     [oauth_login_stage], the surface-name lists
     [spawned_agent_public_tool_names],
     [local_worker_public_tool_names],
@@ -105,16 +103,8 @@ val spawned_agent_prefixed_tools : string list
 (** Every spawned-agent tool name with the [mcp__masc__] prefix
     that external MCP clients see. *)
 
-(** {1 Keeper surface naming} *)
-
-val keeper_backend_tool_name : string -> string
-(** Resolve a keeper-facing tool alias to its [masc_*] backend
-    name; identity for non-aliased tools. Pulls from
-    runtime-owned aliases are resolved behind the runtime boundary. *)
-
 (** {1 Snapshot} *)
 
 val surface_snapshot_json : Masc_domain.tool_schema list -> Yojson.Safe.t
-(** Per-surface tool counts and tool name lists, plus the
-    [keeper_wrapped_server_tools] hardcoded set. Used by the
-    dashboard's capability inventory pane. *)
+(** Per-surface tool counts and tool name lists. Used by the dashboard's
+    capability inventory pane. *)

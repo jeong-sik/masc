@@ -25,12 +25,6 @@ let read_file path =
       let len = in_channel_length ic in
       really_input_string ic len)
 
-let write_file path content =
-  let oc = open_out_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc content)
-
 let trim_cr s =
   let n = String.length s in
   if n > 0 && s.[n - 1] = '\r' then String.sub s 0 (n - 1) else s
@@ -683,56 +677,6 @@ let test_dashboard_dev_token_cannot_call_admin_route () =
       ()
   in
   check_status "dashboard Worker token denied CanAdmin route" 403 result
-let test_dashboard_dev_token_cannot_reset_workspace () =
-  with_server @@ fun ~port ~auth_token ~base_path ->
-  let session_id = initialize_mcp_session ~port ~auth_token in
-  let sentinel =
-    Filename.concat (Filename.concat base_path ".masc") "reset-denial-sentinel"
-  in
-  write_file sentinel "must-survive";
-  let result =
-    run_curl
-      ~headers:
-        [ ("Accept", "application/json, text/event-stream")
-        ; ("Authorization", "Bearer " ^ auth_token)
-        ; ("Content-Type", "application/json")
-        ; ("Mcp-Session-Id", session_id)
-        ]
-      ~method_:"POST"
-      ~body:
-        {|{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"masc_reset","arguments":{"confirm":true}}}|}
-      ~max_time:2.0
-      ~port
-      ~path:"/mcp"
-      ()
-  in
-  check_status "dashboard Worker reset request completed as MCP rejection" 200 result;
-  check (option string)
-    "reset denial uses negotiated SSE framing"
-    (Some "text/event-stream")
-    (header_value result "content-type");
-  let response_body =
-    match Masc.Sse_jsonrpc_filter.event_data_payload result.body with
-    | Some body -> body
-    | None -> fail "reset denial response has no SSE data payload"
-  in
-  let response =
-    match Yojson.Safe.from_string response_body with
-    | json -> json
-    | exception Yojson.Json_error message ->
-      failf "reset denial SSE data is invalid JSON: %s" message
-  in
-  check string
-    "reset denial is typed"
-    "insufficient_role"
-    Yojson.Safe.Util.
-      (response
-       |> member "result"
-       |> member "structuredContent"
-       |> member "auth_error_code"
-       |> to_string);
-  check bool "workspace sentinel survives denied reset" true (Sys.file_exists sentinel);
-  check string "workspace sentinel content survives" "must-survive" (read_file sentinel)
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ~auth_token ~base_path:_ ->
   let sid = initialize_mcp_session ~port ~auth_token in
@@ -817,10 +761,6 @@ let () =
             "dev-token cannot call admin route"
             `Slow
             test_dashboard_dev_token_cannot_call_admin_route
-        ; test_case
-            "dev-token cannot reset workspace through MCP"
-            `Slow
-            test_dashboard_dev_token_cannot_reset_workspace
         ] )
     ; ("mcp", [test_case "follow-up reconnect accepted" `Slow test_mcp_reconnect_stays_accepted])
      ; ( "ag_ui"

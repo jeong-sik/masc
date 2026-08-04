@@ -137,24 +137,6 @@ let local_worker_public_tool_names : string list =
 let local_worker_internal_schemas : Masc_domain.tool_schema list =
   Keeper_tool_surfaces.local_worker_internal_schemas
 
-let keeper_backend_tool_name name = name
-
-let keeper_wrapped_server_tool_alias name =
-  match name with
-  | "masc_board_post" -> "keeper_board_post"
-  | "masc_board_comment" -> "keeper_board_comment"
-  | "masc_board_list" -> "keeper_board_list"
-  | "masc_tasks" -> "keeper_tasks_list"
-  | "masc_broadcast" -> "keeper_broadcast"
-  | _ -> name
-;;
-
-let keeper_wrapped_server_tools : string list =
-  [ "masc_board_post"; "masc_board_comment"; "masc_board_list";
-    "masc_tasks"; "masc_broadcast";
-  ]
-;;
-
 let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
   let public_schemas =
@@ -198,39 +180,7 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
       else
         with_spawned
     in
-    let with_keeper_wrapper =
-      if List.mem name keeper_wrapped_server_tools then
-        let alias_name = keeper_wrapped_server_tool_alias name in
-        let alias_schema =
-          match
-            List.find_opt
-              (fun (s : Masc_domain.tool_schema) -> String.equal s.name alias_name)
-              Tool_shard.all_keeper_tool_schemas
-          with
-          | Some s -> s
-          | None -> schema
-        in
-        with_local_worker
-        @ [
-            make_seed ~capability_id:name
-              ~audiences:[ Keeper_agent ]
-              ~supports_audit_evidence:true
-              ~supports_direct_user_discovery:false
-              ~surface:Keeper ~backend_tool_name:alias_name alias_schema;
-          ]
-      else
-        with_local_worker
-    in
-    if List.mem name Tool_catalog_surfaces.keeper_schedule_surface_tools then
-      with_keeper_wrapper
-      @ [
-          make_seed ~audiences:[ Keeper_agent ]
-            ~supports_audit_evidence
-            ~supports_direct_user_discovery:false ~surface:Keeper
-            schema;
-        ]
-    else
-      with_keeper_wrapper
+    with_local_worker
   in
   public_schemas |> List.concat_map make_public_seed
 
@@ -247,15 +197,23 @@ let local_worker_internal_seeds : capability_seed list =
   base
 
 let keeper_projection_seeds : capability_seed list =
-  Tool_shard.keeper_model_tools
-  |> List.map (fun (tool : Masc_domain.tool_schema) ->
-         let schema = tool in
-         let backend_tool_name = keeper_backend_tool_name tool.name in
-         make_seed
-           ~audiences:[ Keeper_agent ]
-           ~supports_audit_evidence:true
-           ~supports_direct_user_discovery:false ~surface:Keeper
-           ~backend_tool_name schema)
+  Keeper_tool_descriptor.model_visible_descriptors ()
+  |> List.concat_map (fun (descriptor : Keeper_tool_descriptor.t) ->
+         Keeper_tool_descriptor.keeper_model_names descriptor
+         |> List.map (fun model_name ->
+                let schema : Masc_domain.tool_schema =
+                  { name = model_name
+                  ; description = descriptor.description
+                  ; input_schema = descriptor.input_schema
+                  }
+                in
+                make_seed ~capability_id:descriptor.capability_id
+                  ~audiences:[ Keeper_agent ]
+                  ~supports_audit_evidence:true
+                  ~supports_direct_user_discovery:false
+                  ~surface:Keeper
+                  ~backend_tool_name:descriptor.internal_name
+                  schema))
 
 let all_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
@@ -355,14 +313,6 @@ let local_worker_tool_schemas ?names () :
     (Masc_domain.tool_schema list, string) result =
   Keeper_tool_surfaces.local_worker_tool_schemas ?names ()
 
-let keeper_all_tool_names : string list =
-  Tool_shard.keeper_model_tools
-  |> List.map (fun tool -> tool.Masc_domain.name)
-  |> Json_util.dedupe_keep_order
-
-let keeper_wrapped_internal_tools : string list =
-  keeper_all_tool_names
-
 let surface_snapshot_json
     (public_tool_source_schemas : Masc_domain.tool_schema list) =
   let surface_json surface =
@@ -379,8 +329,6 @@ let surface_snapshot_json
       ("spawned_agent_mcp", surface_json Spawned_agent_mcp);
       ("local_worker", surface_json Local_worker);
       ("keeper", surface_json Keeper);
-      ("keeper_wrapped_server_tools",
-        `List (List.map (fun name -> `String name) keeper_wrapped_server_tools));
     ]
 
 let capability_to_json (capability : capability_def) =

@@ -99,15 +99,6 @@ let handle_gc ~tool_name ~start_time ctx args : Tool_result.result =
     let gc_result = Workspace.gc ctx.config ~days () in
     text_ok ~tool_name ~start_time gc_result
 
-let handle_tool_stats ~tool_name ~start_time _ctx args : Tool_result.result =
-  let top_n = max 1 (min 100 (get_int args "top_n" 20)) in
-  let all_tool_names =
-    List.map (fun (s : Masc_domain.tool_schema) -> s.name)
-      Config.all_tool_schemas
-  in
-  let report = Tool_registry.stats_report ~top_n ~all_tool_names in
-  Tool_result.make_ok ~tool_name ~start_time ~data:report ()
-
 let handle_keeper_waiting_inventory ~tool_name ~start_time ctx args : Tool_result.result =
   match expect_no_args ~tool_name ~start_time args with
   | Error result -> result
@@ -177,8 +168,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | "masc_keeper_waiting_inventory" ->
       Some (handle_keeper_waiting_inventory ~tool_name:name ~start_time:start ctx args)
   | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
-  | "masc_tool_stats" ->
-      Some (handle_tool_stats ~tool_name:name ~start_time:start ctx args)
   | "masc_tool_help" ->
       Some (handle_tool_help ~tool_name:name ~start_time:start ctx args)
   | "masc_web_search" ->

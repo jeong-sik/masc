@@ -17,7 +17,6 @@ let make_keeper_tool_handler
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?turn_sandbox_factory
-      ?search_fn
       ?clock
       ?continuation_channel
       ?gate_context
@@ -162,7 +161,6 @@ let make_keeper_tool_handler
                 ~publication_recovery
                 ~ctx_snapshot
                 ?turn_sandbox_factory
-                ?search_fn
                 ?sw
                 ?clock
                 ?proc_mgr

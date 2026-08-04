@@ -13,6 +13,7 @@ Opt-out mechanisms (checked in order):
 3. Commit message contains "# ci:skip-test-coverage" — script-level check
 """
 
+import json
 import os
 from pathlib import Path, PurePosixPath
 import subprocess
@@ -59,6 +60,24 @@ def load_non_code_suffixes(path=NON_CODE_SUFFIXES_PATH):
 
 
 NON_CODE_SUFFIXES = load_non_code_suffixes()
+
+DEPENDENCY_LOCKFILE_NAMES = frozenset(
+    {"bun.lock", "bun.lockb", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"}
+)
+DEPENDENCY_MANIFEST_FIELDS = frozenset(
+    {
+        "bundleDependencies",
+        "bundledDependencies",
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+        "overrides",
+        "peerDependencies",
+        "peerDependenciesMeta",
+        "pnpm",
+        "resolutions",
+    }
+)
 
 
 def base_ref():
@@ -123,12 +142,64 @@ def run_diff_or_fail(args):
         sys.exit(2)
 
 
+def read_json_at_revision(revision, path):
+    """Read one JSON object exactly as committed at revision:path.
+
+    Missing files, invalid JSON, and non-object roots are not dependency-only:
+    the coverage gate must keep treating an unclassified manifest change as
+    product code rather than silently exempting it.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "show", f"{revision}:{path}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        value = json.loads(result.stdout)
+        return value if isinstance(value, dict) else None
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        return None
+
+
+def is_dependency_metadata_only(path):
+    """Return true only for generated lockfiles or dependency-only manifests.
+
+    package.json remains covered when scripts, exports, runtime metadata, or
+    any other non-dependency field changes. This is a structural JSON
+    comparison, not a branch-name, author, or diff-text heuristic.
+    """
+    normalized = PurePosixPath(path.replace("\\", "/"))
+    if normalized.name in DEPENDENCY_LOCKFILE_NAMES:
+        return True
+    if normalized.name != "package.json":
+        return False
+
+    base = read_json_at_revision(f"origin/{base_ref()}", path)
+    head = read_json_at_revision("HEAD", path)
+    if base is None or head is None or base == head:
+        return False
+
+    def without_dependencies(manifest):
+        return {
+            key: value
+            for key, value in manifest.items()
+            if key not in DEPENDENCY_MANIFEST_FIELDS
+        }
+
+    return without_dependencies(base) == without_dependencies(head)
+
+
 def get_changed_covered_files():
     """Get list of covered code files changed in this PR."""
     stdout = run_diff_or_fail(
         ["git", "diff", "--name-only", pr_diff_range(), "--", *COVERED_CODE_PATHS]
     )
-    return [f for f in stdout.strip().split("\n") if f and is_covered_code_file(f)]
+    return [
+        f
+        for f in stdout.strip().split("\n")
+        if f and is_covered_code_file(f) and not is_dependency_metadata_only(f)
+    ]
 
 
 def is_test_file(path):

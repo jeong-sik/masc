@@ -1,40 +1,4 @@
-(** Keeper_tool_resolution — typed resolution for policy tool name validation.
-
-    RFC-0080 Phase 2. Replaces the legacy multi-source OR boolean check with
-    a typed [resolve] function that returns provenance information.
-
-    @since 2.219.0 *)
-
-(** Which source admitted a tool name during resolution. *)
-type tried_source =
-  | Dispatch_table              (** Tool_dispatch.is_registered *)
-  | Public_descriptor           (** Keeper_tool_descriptor.find_public *)
-  | Alias_internal              (** Keeper_tool_alias.is_known_internal *)
-  | Tool_schema                 (** Tool_shard.all_keeper_tool_schemas + inline schemas *)
-  | Descriptor_registry         (** Keeper-tool candidate names projected by
-                                    Keeper_tool_descriptor.all_descriptors *)
-
-(** Resolution outcome for a tool name. *)
-type resolution =
-  | Resolved of { canonical : string; via : tried_source }
-  | Alias_to of { from_ : string; canonical : string; via : tried_source }
-  | Unknown of { name : string; tried : tried_source list }
-
-(** Resolve a tool name through the source chain.
-    Short-circuits on first hit, same order as the current source chain. *)
-val resolve : string -> resolution
-
-(** Human-readable label for a single source. *)
-val string_of_tried_source : tried_source -> string
-
-(** Comma-separated list of source labels. *)
-val string_of_tried : tried_source list -> string
-
-(** Full-probe analysis: return every source that would admit [name].
-    Unlike [resolve] which short-circuits, checks every current source. *)
-val all_admitting_sources : string -> tried_source list
-
-(** RFC-0084 §1.4 — Single-SSOT entry for runtime tool-name routing. *)
+(** Keeper tool-name canonicalisation over the descriptor-owned routing table. *)
 
 type runtime_decision_outcome =
   | Route_hit of { internal : string }

@@ -41,9 +41,6 @@ type context = {
     agent_name:string ->
     timeout:float ->
     Yojson.Safe.t option;
-  load_mcp_sessions : Workspace.config -> Mcp_session_store.mcp_session_record list;
-  save_mcp_sessions :
-    Workspace.config -> Mcp_session_store.mcp_session_record list -> unit;
 }
 
 (** Helper: run subprocess — uses [Dispatch] caller (default 120s).

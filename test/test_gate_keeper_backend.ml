@@ -1909,6 +1909,52 @@ let test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events () =
         "Provider stream incomplete: max_output_tokens" message
   | _ -> fail "expected visible events for unknown/incomplete provider stream"
 
+let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
+  let open Agent_sdk.Types in
+  let provider_kind = Agent_sdk.Llm_provider.Provider_kind.Gemini in
+  let part_raw = "{\"inlineData\":{}}" in
+  let response_raw = "{\"promptFeedback\":{}}" in
+  let events =
+    translate_oas_stream_events
+      [ SSEUnsupportedPart
+          { provider_kind; part = "inline_data"; raw = part_raw }
+      ; SSEUnsupportedResponse
+          { provider_kind; response = "prompt_feedback"; raw = response_raw }
+      ]
+  in
+  match events with
+  | [ Keeper_chat_events.Oas_stream_protocol_error
+        { kind = part_kind
+        ; event_type = Some "inline_data"
+        ; reason = Some "gemini.part.inline_data"
+        ; raw_bytes = Some part_bytes
+        ; _
+        }
+    ; Keeper_chat_events.Event_error { message = part_message }
+    ; Keeper_chat_events.Oas_stream_protocol_error
+        { kind = response_kind
+        ; event_type = Some "prompt_feedback"
+        ; reason = Some "gemini.response.prompt_feedback"
+        ; raw_bytes = Some response_bytes
+        ; _
+        }
+    ; Keeper_chat_events.Event_error { message = response_message }
+    ] ->
+      check string "unsupported part kind" "sse_unsupported_part"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string part_kind);
+      check string "unsupported response kind" "sse_unsupported_response"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string response_kind);
+      check int "unsupported part raw bytes" (String.length part_raw) part_bytes;
+      check int "unsupported response raw bytes" (String.length response_raw)
+        response_bytes;
+      check string "unsupported part is visible"
+        "Provider stream capability unsupported: gemini.part.inline_data"
+        part_message;
+      check string "unsupported response is visible"
+        "Provider stream capability unsupported: gemini.response.prompt_feedback"
+        response_message
+  | _ -> fail "expected typed visible failures for unsupported provider shapes"
+
 let test_keeper_stream_bridge_preserves_ndjson_parse_failure () =
   let open Agent_sdk.Types in
   let raw = "not-json" in
@@ -2961,6 +3007,8 @@ let () =
             test_stream_protocol_error_summary_includes_diagnostics;
           test_case "stream bridge surfaces unknown and incomplete events" `Quick
             test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events;
+          test_case "stream bridge surfaces unsupported provider shapes" `Quick
+            test_keeper_stream_bridge_surfaces_unsupported_provider_shapes;
           test_case "stream bridge preserves NDJSON parse failure" `Quick
             test_keeper_stream_bridge_preserves_ndjson_parse_failure;
           test_case "stream bridge preserves NDJSON provider error" `Quick

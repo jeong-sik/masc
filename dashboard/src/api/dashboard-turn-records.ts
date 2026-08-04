@@ -47,9 +47,29 @@ export type TurnRequestWireObservation =
       request_body_bytes: null
     }
 
+// lib/types/turn_record.ml:118-125 — the writer emits exactly these two.
+export type TurnKind = 'autonomous' | 'direct'
+
+// lib/types/turn_record.ml:127-135 — the exact-run reference into the keeper's
+// own raw-trace store. null when the turn recorded no exact run.
+export type TurnRawTraceRunRef = {
+  worker_run_id: string
+  path: string
+  start_seq: number
+  end_seq: number
+  agent_name: string
+  session_id: string
+}
+
 export type TurnRecordEntry = {
   execution_ids: string[]
   keeper: string
+  // lib/types/turn_record.ml:148-163 writes these four unconditionally and its
+  // own reader [require]s them, so the wire always carries them.
+  agent_name: string
+  generation: number
+  turn_kind: TurnKind
+  raw_trace_run_ref: TurnRawTraceRunRef | null
   trace_id: string
   absolute_turn: number
   turn_ref: string
@@ -423,10 +443,46 @@ function decodeTurnInputComponents(raw: unknown): TurnInputComponent[] | null {
     : null
 }
 
+// Mirrors [raw_trace_run_ref_to_json] (lib/types/turn_record.ml:127-135): six
+// fields, no optionals. A reference that names no run is written as null by the
+// producer, so a partial object is a producer defect and stays rejected.
+function decodeTurnRawTraceRunRef(raw: unknown): TurnRawTraceRunRef | null {
+  if (!isRecord(raw) || !hasExactKeys(raw, [
+    'worker_run_id',
+    'path',
+    'start_seq',
+    'end_seq',
+    'agent_name',
+    'session_id',
+  ])) return null
+  const worker_run_id = decodeExactNonEmptyString(raw.worker_run_id)
+  const path = decodeExactNonEmptyString(raw.path)
+  const start_seq = decodeNonNegativeSafeInteger(raw.start_seq)
+  const end_seq = decodeNonNegativeSafeInteger(raw.end_seq)
+  const agent_name = decodeExactNonEmptyString(raw.agent_name)
+  const session_id = decodeExactNonEmptyString(raw.session_id)
+  if (
+    worker_run_id === null
+    || path === null
+    || start_seq === null
+    || end_seq === null
+    || end_seq < start_seq
+    || agent_name === null
+    || session_id === null
+  ) {
+    return null
+  }
+  return { worker_run_id, path, start_seq, end_seq, agent_name, session_id }
+}
+
 function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   if (!isRecord(raw) || !hasNoUnknownKeys(raw, [
     'execution_ids',
     'keeper',
+    'agent_name',
+    'generation',
+    'turn_kind',
+    'raw_trace_run_ref',
     'trace_id',
     'absolute_turn',
     'turn_ref',
@@ -454,6 +510,12 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'ts',
   ])) return null
   const keeper = decodeExactNonEmptyString(raw.keeper)
+  const agent_name = decodeExactNonEmptyString(raw.agent_name)
+  const generation = decodeNonNegativeSafeInteger(raw.generation)
+  const turn_kind =
+    raw.turn_kind === 'autonomous' || raw.turn_kind === 'direct' ? raw.turn_kind : null
+  const raw_trace_run_ref =
+    raw.raw_trace_run_ref === null ? null : decodeTurnRawTraceRunRef(raw.raw_trace_run_ref)
   const trace_id = decodeExactNonEmptyString(raw.trace_id)
   const absolute_turn = asNumber(raw.absolute_turn)
   const turn_ref = decodeExactNonEmptyString(raw.turn_ref)
@@ -502,6 +564,11 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     decodeOptionalField(raw, 'cache_read_input_tokens', decodeNonNegativeSafeInteger)
   if (
     keeper === null
+    || agent_name === null
+    || generation === null
+    || turn_kind === null
+    || !Object.hasOwn(raw, 'raw_trace_run_ref')
+    || (raw_trace_run_ref === null && raw.raw_trace_run_ref !== null)
     || trace_id === null
     || absolute_turn == null
     || !Number.isSafeInteger(absolute_turn)
@@ -543,6 +610,10 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   return {
     execution_ids,
     keeper,
+    agent_name,
+    generation,
+    turn_kind,
+    raw_trace_run_ref,
     trace_id,
     absolute_turn,
     turn_ref,

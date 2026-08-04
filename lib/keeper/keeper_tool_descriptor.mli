@@ -85,7 +85,6 @@ type runtime_handler =
   | Tool_write_file
   | Tool_time_now
   | Tool_tools_list
-  | Tool_tool_search
   | Tool_context_status
   | Tool_artifact_read
   | Tool_memory_search
@@ -129,6 +128,7 @@ type policy =
 
 type t =
   { id : string
+  ; capability_id : string
   ; keeper_model_projection : keeper_model_projection
   ; keeper_tool_group : keeper_tool_group
   ; input_schema_source : input_schema_source

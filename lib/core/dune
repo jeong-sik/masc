@@ -30,7 +30,6 @@
   string_util
   list_util
   set_util
-  atomic_util
   read_drop_reason
   eval_tool_selector)
  (libraries

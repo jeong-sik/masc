@@ -310,8 +310,7 @@ function sampleAutomation(): DashboardScheduledAutomation {
         requested_at_iso: '2026-06-21T00:00:00Z',
         due_at_iso: '2026-06-21T01:00:00Z',
         expires_at_iso: '2026-06-21T02:00:00Z',
-        last_execution: {
-          execution_id: 'exec-1',
+        last_wake: {
           schedule_id: 'sched-keeper-review',
           started_at_iso: '2026-06-21T00:30:00Z',
           finished_at_iso: '2026-06-21T00:31:00Z',
@@ -361,8 +360,7 @@ function payloadSupportAutomation(): DashboardScheduledAutomation {
       payload_kind: 'backlog_depletion_check',
       payload_support: 'unsupported',
       payload_summary: 'Backlog depletion check cannot be executed by the current payload catalog.',
-      last_execution: {
-        execution_id: 'exec-unsupported',
+      last_wake: {
         schedule_id: 'sched-unsupported-failed',
         status: 'failed',
         error: 'unsupported payload kind',
@@ -416,7 +414,7 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.textContent).toContain('Completed keeper review sweep.')
     expect(container.textContent).toContain('{1 field}')
     expect(container.textContent).toContain('[2 items]')
-    expect(container.querySelector('[data-execution-detail-row="kind"]')).not.toBeNull()
+    expect(container.querySelector('[data-wake-detail-row="kind"]')).not.toBeNull()
     expect(container.textContent).not.toContain('"kind":"test.done"')
     expect(container.querySelector('[data-schedule-filter="all"]')).not.toBeNull()
     expect(container.querySelector('[data-schedule-filter="scheduled"]')).not.toBeNull()
@@ -436,8 +434,7 @@ describe('ScheduledAutomationPanel', () => {
         payload_support: 'supported',
         payload_target: 'keeper:schedule-keeper',
         payload_summary: 'Scheduled lane wake',
-        last_execution: {
-          execution_id: 'exec-keeper-wake',
+        last_wake: {
           schedule_id: 'sched-keeper-wake',
           status: 'succeeded',
           detail: {
@@ -636,8 +633,7 @@ describe('ScheduledAutomationPanel', () => {
       request({
         schedule_id: `sched-${activationReason}`,
         status: 'succeeded',
-        last_execution: {
-          execution_id: `exec-${activationReason}`,
+        last_wake: {
           schedule_id: `sched-${activationReason}`,
           status: 'succeeded',
         },
@@ -1327,7 +1323,7 @@ describe('ScheduleAside', () => {
         schedule_id: 'failed-1',
         status: 'failed',
         payload_summary: 'it broke',
-        last_execution: { execution_id: 'exec-1', schedule_id: 'failed-1', status: 'execution_failed', error: 'runtime refused' },
+        last_wake: { schedule_id: 'failed-1', status: 'failed', error: 'runtime refused' },
       }),
       request({
         schedule_id: 'unsupported-1',
@@ -1355,7 +1351,7 @@ describe('ScheduleAside', () => {
     expect(aside?.textContent).toContain('run first') // due → 해야 할 일
     expect(aside?.textContent).toContain('due soon') // due → 해야 할 일
     expect(aside?.textContent).toContain('it broke') // failed → 지금 상황
-    expect(aside?.textContent).toContain('runtime refused') // failed execution error
+    expect(aside?.textContent).toContain('runtime refused') // failed wake error
     expect(aside?.textContent).toContain('unsupported payload row') // unsupported payload → 지금 상황
     expect(aside?.textContent).toContain('orphan_auto_release')
     expect(aside?.textContent).toContain('all good') // terminal → 최근 실행

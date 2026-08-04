@@ -204,7 +204,7 @@ export type {
   ToolMetricsTopEntry,
   ToolMetricsResponse,
   DashboardScheduledAutomationFsm,
-  DashboardScheduledAutomationExecution,
+  DashboardScheduledAutomationWakeReceipt,
   DashboardScheduledAutomationDispatchReceipt,
   DashboardScheduledAutomationKeeperReactionEvidence,
   DashboardScheduledAutomationKeeperQueueEvidence,

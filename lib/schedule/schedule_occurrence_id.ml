@@ -16,5 +16,4 @@ let make ~schedule_instance_id ~schedule_id ~due_at ~payload_digest =
   |> Digestif.SHA256.to_hex
 ;;
 
-let equal = String.equal
 let to_string value = value

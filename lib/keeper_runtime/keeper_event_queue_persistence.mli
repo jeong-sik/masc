@@ -5,7 +5,15 @@
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v5.jsonl] WAL are queue authority. *)
+    [event-queue-transitions-v6.jsonl] WAL are queue authority. Every WAL row
+    carries the complete pre-transition state needed for snapshot-independent
+    recovery. The WAL accepts at most one row and is retired after projection,
+    so its retained size is bounded by one complete state. Serializing that
+    state on each transition is the intentional cost of recovery that does not
+    infer missing sibling work from a delta. Every load path rejects a
+    nonempty legacy transition WAL (v4/v5) as unmigrated committed evidence,
+    matching the cutover gate, so a launcher that skips the gate cannot load a
+    stale snapshot over an unprojected legacy transition. *)
 
 type owner_identity
 type owner_identity_error
@@ -160,22 +168,24 @@ val load_state_result :
 
 val load_existing_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Read already-created durable queue state. A current snapshot or v5 WAL is
-    durable owner evidence; a WAL-only owner is replayed from the empty state.
+(** Read already-created durable queue state. A current snapshot or v6 WAL is
+    durable owner evidence; a WAL-only owner is replayed from the row's exact
+    complete pre-transition state.
     Unlike {!load_state_result}, absence of both artifacts is an explicit
     [Error]. Use this when absence would be interpreted as evidence about prior
     durable work. *)
 
 val validate_state_read_only_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Decode a current snapshot when present and replay its v5 WAL without
-    checkpointing or WAL compaction. A missing snapshot starts from the empty
-    state, matching {!load_state_result}. *)
+(** Decode a current snapshot when present and replay its v6 WAL without
+    checkpointing or WAL compaction. A missing snapshot starts from the WAL
+    row's exact complete pre-transition state, matching {!load_state_result}. *)
 
 val validate_existing_state_read_only_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Decode existing durable state and replay its v5 WAL without checkpointing
-    or WAL compaction. A WAL-only owner is replayed from the empty state;
+(** Decode existing durable state and replay its v6 WAL without checkpointing
+    or WAL compaction. A WAL-only owner is replayed from the row's exact
+    complete pre-transition state;
     absence of both artifacts is an explicit error, matching
     {!load_existing_state_result}. *)
 

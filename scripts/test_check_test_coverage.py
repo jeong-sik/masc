@@ -35,10 +35,14 @@ class CheckTestCoverageTest(unittest.TestCase):
             return_value="lib/a.ml\ndashboard/app.ts\nconfig/runtime.toml\n",
         ) as run_diff:
             with mock.patch.dict(os.environ, {"GITHUB_BASE_REF": "main"}, clear=False):
-                self.assertEqual(
-                    coverage.get_changed_covered_files(),
-                    ["lib/a.ml", "dashboard/app.ts", "config/runtime.toml"],
-                )
+                with mock.patch(
+                    "check_test_coverage.is_dependency_metadata_only",
+                    return_value=False,
+                ):
+                    self.assertEqual(
+                        coverage.get_changed_covered_files(),
+                        ["lib/a.ml", "dashboard/app.ts", "config/runtime.toml"],
+                    )
 
         self.assertEqual(
             run_diff.call_args.args[0],
@@ -93,10 +97,62 @@ class CheckTestCoverageTest(unittest.TestCase):
             ),
         ):
             with mock.patch.dict(os.environ, {"GITHUB_BASE_REF": "main"}, clear=False):
-                self.assertEqual(
-                    coverage.get_changed_covered_files(),
-                    ["lib/app.ml"],
-                )
+                with mock.patch(
+                    "check_test_coverage.is_dependency_metadata_only",
+                    return_value=False,
+                ):
+                    self.assertEqual(
+                        coverage.get_changed_covered_files(),
+                        ["lib/app.ml"],
+                    )
+
+    def test_exact_dependency_lockfiles_are_metadata_not_source(self):
+        for path in (
+            "dashboard/pnpm-lock.yaml",
+            "web/package-lock.json",
+            "ui/yarn.lock",
+        ):
+            self.assertTrue(coverage.is_dependency_metadata_only(path))
+        self.assertFalse(coverage.is_dependency_metadata_only("config/runtime.yaml"))
+        self.assertFalse(
+            coverage.is_dependency_metadata_only("dashboard/package-data.json")
+        )
+
+    def test_package_manifest_dependency_only_change_is_metadata(self):
+        base = {
+            "name": "dashboard",
+            "scripts": {"test": "vitest"},
+            "devDependencies": {"postcss": "8.5.18"},
+        }
+        head = {
+            "name": "dashboard",
+            "scripts": {"test": "vitest"},
+            "devDependencies": {"postcss": "8.5.23"},
+        }
+        with mock.patch(
+            "check_test_coverage.read_json_at_revision", side_effect=[base, head]
+        ):
+            self.assertTrue(
+                coverage.is_dependency_metadata_only("dashboard/package.json")
+            )
+
+    def test_package_manifest_script_change_remains_covered(self):
+        base = {
+            "name": "dashboard",
+            "scripts": {"test": "vitest"},
+            "devDependencies": {"postcss": "8.5.18"},
+        }
+        head = {
+            "name": "dashboard",
+            "scripts": {"test": "vitest --watch"},
+            "devDependencies": {"postcss": "8.5.23"},
+        }
+        with mock.patch(
+            "check_test_coverage.read_json_at_revision", side_effect=[base, head]
+        ):
+            self.assertFalse(
+                coverage.is_dependency_metadata_only("dashboard/package.json")
+            )
 
     def test_test_file_predicate_does_not_match_production_checks(self):
         self.assertFalse(coverage.is_test_file("lib/exec/capability_check_typed.ml"))

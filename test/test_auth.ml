@@ -1111,7 +1111,7 @@ let test_authorize_tool_v2_enforces_catalog_permission () =
        with
        | Ok () -> ()
        | Error e -> fail (Masc_domain.masc_error_to_string e))
-    [ "masc_start"; "masc_reset"; "masc_keeper_down" ]
+    [ "masc_start"; "masc_keeper_reset"; "masc_keeper_down" ]
 ;;
 
 let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =

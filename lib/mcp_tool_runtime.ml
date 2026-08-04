@@ -47,23 +47,7 @@ type context = Mcp_tool_runtime_types.context = {
     agent_name:string ->
     timeout:float ->
     Yojson.Safe.t option;
-  load_mcp_sessions : Workspace.config -> Mcp_session_store.mcp_session_record list;
-  save_mcp_sessions :
-    Workspace.config -> Mcp_session_store.mcp_session_record list -> unit;
 }
-
-(* RFC-0189 PR-2: MCP runtime helpers return [Tool_result.result] directly.
-   [runtime_err_workflow] commits caller-input rejections to
-     [Workflow_rejection]: every error path in this dispatch
-     ("id is required", unknown enum action, not-found lookups) is
-     caller-side. *)
-let runtime_err_workflow ~tool_name ~start_time msg : Tool_result.result =
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Workflow_rejection
-    ~start_time
-    msg
-;;
 
 (** Dispatch a tool call.
     Returns [Some (Tool_result.result)] if the tool name is handled,
@@ -77,29 +61,6 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
   let clock = ctx.clock in
   let arguments = ctx.arguments in
 
-  (* Argument extraction helpers — delegate to Safe_ops *)
-  let arg_get_string key default =
-    Safe_ops.json_string ~default key arguments
-  in
-  let _arg_get_bool key default =
-    Safe_ops.json_bool ~default key arguments
-  in
-  let _arg_get_string_list key =
-    Safe_ops.json_string_list key arguments
-  in
-  let arg_get_string_opt key =
-    match Safe_ops.json_string_opt key arguments with
-    | Some "" -> None
-    | other -> other
-  in
-  let _arg_get_string_required key =
-    Tool_args.get_string_required arguments key
-  in
-  let _arg_get_int_opt _key = () in  (* unused but kept for symmetry *)
-  let _arg_get_float_opt key =
-    Safe_ops.json_float_opt key arguments
-  in
-
   match name with
   (* ── Workspace lifecycle (delegated) ─────────────────────────────── *)
   | "masc_start" ->
@@ -110,80 +71,6 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
       Mcp_tool_runtime_comm.handle_broadcast ~tool_name:name ~start_time:start ctx
   | "masc_messages" ->
       Mcp_tool_runtime_comm.handle_messages ~tool_name:name ~start_time:start ctx
-
-  (* Verification tools removed: pruned *)
-
-  (* ── MCP Session ────────────────────────────────────────────── *)
-  | "masc_session" ->
-      (* Issue #8520: parse via Mcp_session.action_of_string_opt;
-         dispatch via exhaustive match on the Variant — adding a 6th
-         action will fail compilation here, not silently break. *)
-      let raw = arg_get_string "action" "" in
-      (match Mcp_session.action_of_string_opt raw with
-       | None ->
-         Some (runtime_err_workflow ~tool_name:name ~start_time:start
-           (Printf.sprintf
-             "action must be one of [%s]; got %S"
-             (String.concat "|" Mcp_session.valid_action_strings) raw))
-       | Some action ->
-      let now = Time_compat.now () in
-      let sessions = ctx.load_mcp_sessions config in
-      let save sessions = ctx.save_mcp_sessions config sessions in
-      let response =
-        match action with
-        | Mcp_session.Create ->
-            let agent_name = arg_get_string_opt "agent_name" in
-            let id = Mcp_session.generate () in
-            let record : Mcp_session_store.mcp_session_record =
-              { id; agent_name; created_at = now; last_seen = now } in
-            save (record :: sessions);
-            Ok (`Assoc [
-              ("status", `String "created");
-              ("session", Mcp_session_store.mcp_session_to_json record);
-            ])
-        | Mcp_session.Get ->
-            let session_id = arg_get_string "session_id" "" in
-            (match List.find_opt (fun (s : Mcp_session_store.mcp_session_record) -> String.equal s.id session_id) sessions with
-             | None -> Error (Printf.sprintf "MCP session '%s' not found" session_id)
-             | Some s ->
-                 let updated = { s with last_seen = now } in
-                 let others = List.filter (fun (x : Mcp_session_store.mcp_session_record) -> not (String.equal x.id session_id)) sessions in
-                 save (updated :: others);
-                 Ok (Tool_args.ok_assoc [
-                   ("session", Mcp_session_store.mcp_session_to_json updated);
-                 ]))
-        | Mcp_session.List ->
-            Ok (`Assoc [
-              ("count", `Int (List.length sessions));
-              ("sessions", `List (List.map Mcp_session_store.mcp_session_to_json sessions));
-            ])
-        | Mcp_session.Cleanup ->
-            let cutoff = now -. Masc_time_constants.days_to_seconds 7 in
-            let remaining = List.filter (fun (s : Mcp_session_store.mcp_session_record) -> Stdlib.Float.compare s.last_seen cutoff >= 0) sessions in
-            let removed = List.length sessions - List.length remaining in
-            save remaining;
-            Ok (`Assoc [
-              ("status", `String "cleaned");
-              ("removed", `Int removed);
-              ("remaining", `Int (List.length remaining));
-            ])
-        | Mcp_session.Remove ->
-            let session_id = arg_get_string "session_id" "" in
-            let remaining = List.filter (fun (s : Mcp_session_store.mcp_session_record) -> not (String.equal s.id session_id)) sessions in
-            if List.length remaining = List.length sessions then
-              Error (Printf.sprintf "MCP session '%s' not found" session_id)
-            else begin
-              save remaining;
-              Ok (`Assoc [
-                ("status", `String "removed");
-                ("session_id", `String session_id);
-              ])
-            end
-      in
-      (match response with
-       | Ok json ->
-         Some (Tool_result.make_ok ~tool_name:name ~start_time:start ~data:json ())
-       | Error e -> Some (runtime_err_workflow ~tool_name:name ~start_time:start e)))
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | _ ->

@@ -244,7 +244,6 @@
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
   test_keeper_tool_visibility_projection
-  test_keeper_tool_resolution
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_repo_store
@@ -314,6 +313,7 @@
   test_keeper_event_queue_owner_lock
   test_cross_context_mutex
   test_keeper_event_queue_persist_poison
+  test_keeper_event_queue_legacy_wal_reject
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
@@ -547,7 +547,6 @@
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
   test_keeper_tool_visibility_projection
-  test_keeper_tool_resolution
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_repo_store
@@ -618,6 +617,7 @@
   test_keeper_event_queue_owner_lock
   test_cross_context_mutex
   test_keeper_event_queue_persist_poison
+  test_keeper_event_queue_legacy_wal_reject
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
@@ -1047,7 +1047,6 @@
   test_http_protocol_detect
   test_prompt_registry_defaults
   test_keeper_prompt_external
-  test_mcp_session_store_roundtrip
   test_eval_calibration
   test_goal_tools
   test_goal_upsert_fsm_bypass_10247
@@ -1204,7 +1203,6 @@
   test_http_protocol_detect
   test_prompt_registry_defaults
   test_keeper_prompt_external
-  test_mcp_session_store_roundtrip
   test_eval_calibration
   test_goal_tools
   test_goal_upsert_fsm_bypass_10247
@@ -1408,21 +1406,6 @@
  (name test_schedule_domain)
  (modules test_schedule_domain)
  (libraries alcotest yojson ptime masc_schedule))
-
-(test
- (name test_schedule_ical_recur)
- (modules test_schedule_ical_recur)
- (libraries alcotest masc_schedule))
-
-(test
- (name test_schedule_ical_content_line)
- (modules test_schedule_ical_content_line)
- (libraries alcotest masc_schedule))
-
-(test
- (name test_schedule_ical_vevent)
- (modules test_schedule_ical_vevent)
- (libraries alcotest masc_schedule))
 
 (test
  (name test_schedule_store)
@@ -2413,8 +2396,7 @@
  (modules test_rfc_0085_pr15_tool_schemas_inline_rename)
  (libraries alcotest ast_grep)
  (deps
-  ../lib/tool_schemas/tool_schemas_inline.ml
-  ../lib/tool_schemas/tool_schemas_inline_infra.ml))
+  ../lib/tool_schemas/tool_schemas_inline.ml))
 
 ; RFC-0085 PR-14 — dispatch / dispatch_structured / guarded_dispatch
 ; 3-step chain inlined; guarded_dispatch is the only dispatch entry.

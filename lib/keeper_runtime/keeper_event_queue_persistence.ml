@@ -80,7 +80,14 @@ type transfer_projection_result = State.transfer_projection_result =
 
 
 let snapshot_filename = "event-queue-v15.json"
-let transition_wal_filename = "event-queue-transitions-v5.jsonl"
+let transition_wal_filename = "event-queue-transitions-v6.jsonl"
+
+(* Same rejection set as scripts/check-keeper-event-queue-v15-cutover.sh: a
+   nonempty legacy WAL is committed evidence the current binary cannot replay,
+   so a launcher that skips the cutover gate must still fail closed on it. *)
+let legacy_transition_wal_filenames =
+  [ "event-queue-transitions-v4.jsonl"; "event-queue-transitions-v5.jsonl" ]
+;;
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -277,7 +284,46 @@ type primary_snapshot =
   | Primary_missing
   | Primary_current of State.t
 
-let read_primary_unlocked owner =
+let reject_legacy_transition_wal_unlocked owner =
+  let runtime_dir = keeper_runtime_dir_of_owner owner in
+  let first_violation filename =
+    let path = Filename.concat runtime_dir filename in
+    try
+      if not (Sys.file_exists path)
+      then None
+      else (
+        match Safe_ops.read_file_safe path with
+        | Error message ->
+          Some
+            (Printf.sprintf
+               "failed to read legacy transition WAL %s: %s"
+               path
+               message)
+        | Ok "" -> None
+        | Ok _ ->
+          Some
+            (Printf.sprintf
+               "legacy transition WAL still contains committed evidence \
+                keeper=%s path=%s: run \
+                scripts/check-keeper-event-queue-v15-cutover.sh before \
+                starting this binary"
+               (keeper_name_of_owner owner)
+               path))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Some
+        (Printf.sprintf
+           "failed to inspect legacy transition WAL %s: %s"
+           path
+           (Printexc.to_string exn))
+  in
+  match List.find_map first_violation legacy_transition_wal_filenames with
+  | Some message -> Error message
+  | None -> Ok ()
+;;
+
+let read_primary_current_unlocked owner =
   let path = snapshot_path_of_owner owner in
   match read_json_if_present path with
   | Error _ as error -> error
@@ -301,23 +347,46 @@ let read_primary_unlocked owner =
                message)))
 ;;
 
+let read_primary_unlocked owner =
+  match reject_legacy_transition_wal_unlocked owner with
+  | Error message -> Error message
+  | Ok () -> read_primary_current_unlocked owner
+;;
+
 let bump_revision state =
   if Int64.equal (State.revision state) Int64.max_int
   then Error "event queue revision exhausted"
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let transition_wal_schema = "masc.keeper_event_queue.transition.v5"
+let transition_wal_schema = "masc.keeper_event_queue.transition.v6"
 
-let transition_wal_entry_to_line owner entry =
+type transition_wal_row =
+  { pre_state : State.t
+  ; outbox_entry : State.outbox_entry
+  }
+
+let transition_wal_entry_to_line owner ~pre_state outbox_entry =
   `Assoc
     [ "schema", `String transition_wal_schema
     ; "base_path", `String (Owner_lock.base_path owner)
     ; "keeper_name", `String (keeper_name_of_owner owner)
-    ; "outbox_entry", State.outbox_entry_to_yojson entry
+    ; "pre_state", State.to_yojson pre_state
+    ; "outbox_entry", State.outbox_entry_to_yojson outbox_entry
     ]
   |> Yojson.Safe.to_string
   |> fun row -> row ^ "\n"
+;;
+
+let validate_transition_wal_row pre_state outbox_entry =
+  if State.transition_outbox pre_state <> []
+  then Error "transition WAL pre-state already contains an outbox entry"
+  else
+    match State.replay_transition_outbox_entry outbox_entry pre_state with
+    | Ok replayed when State.transition_outbox replayed = [ outbox_entry ] ->
+      Ok { pre_state; outbox_entry }
+    | Ok _ -> Error "transition WAL pre-state does not produce its exact outbox entry"
+    | Error detail -> Error ("transition WAL pre-state is invalid: " ^ detail)
 ;;
 
 let transition_wal_entry_of_json owner = function
@@ -328,6 +397,7 @@ let transition_wal_entry_of_json owner = function
         | [ ("base_path", `String base_path)
           ; ("keeper_name", `String keeper_name)
           ; ("outbox_entry", entry)
+          ; ("pre_state", pre_state)
           ; ("schema", `String row_schema)
           ] ->
           if not (String.equal row_schema schema)
@@ -337,28 +407,15 @@ let transition_wal_entry_of_json owner = function
               (String.equal base_path (Owner_lock.base_path owner)
                && String.equal keeper_name (keeper_name_of_owner owner))
           then Error "transition WAL row owner does not match its Keeper lane"
-          else State.outbox_entry_of_yojson entry
+          else
+            Result.bind (State.of_yojson pre_state) (fun pre_state ->
+              Result.bind (State.outbox_entry_of_yojson entry) (fun outbox_entry ->
+                validate_transition_wal_row pre_state outbox_entry))
         | _ -> Error "transition WAL row fields are not exact")
      | Some (`String schema) ->
        Error (Printf.sprintf "unsupported transition WAL schema: %s" schema)
      | Some _ | None -> Error "transition WAL schema must be a string")
   | _ -> Error "transition WAL row must be a JSON object"
-;;
-
-let wal_only_seed (entry : State.outbox_entry) =
-  let source_incarnation =
-    match entry.receipt.transition with
-    | State.Cancel_accepted cancellation -> cancellation.source_incarnation
-    | State.Transfer_accepted transfer -> transfer.source_incarnation
-    | State.Ack_source_terminal source_terminal ->
-      source_terminal.source_incarnation
-  in
-  let pending =
-    List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty entry.stimuli
-  in
-  State.empty
-  |> State.with_revision source_incarnation
-  |> State.with_pending pending
 ;;
 
 let replay_transition_wal_bytes ~wal_only owner state bytes =
@@ -381,10 +438,17 @@ let replay_transition_wal_bytes ~wal_only owner state bytes =
        | Ok json ->
          (match transition_wal_entry_of_json owner json with
           | Error _ as error -> error
-          | Ok entry ->
-            let state = if wal_only && not saw_row then wal_only_seed entry else state in
+          | Ok { pre_state; outbox_entry = entry } ->
+            let state = if wal_only && not saw_row then pre_state else state in
             let already_projected = row_is_already_projected entry state in
-            (match State.replay_transition_outbox_entry entry state with
+            let pre_state_matches =
+              already_projected
+              || State.transition_outbox state = [ entry ]
+              || State.to_yojson state = State.to_yojson pre_state
+            in
+            if not pre_state_matches
+            then Error "transition WAL pre-state conflicts with its durable snapshot"
+            else (match State.replay_transition_outbox_entry entry state with
              | Error _ as error -> error
              | Ok state ->
                replay
@@ -987,7 +1051,7 @@ let commit_transition_unlocked_with
        (match bump_revision state with
      | Error _ as error -> error
      | Ok checkpoint ->
-       let suffix = transition_wal_entry_to_line owner entry in
+       let suffix = transition_wal_entry_to_line owner ~pre_state:current entry in
        let path = transition_wal_path_of_owner owner in
        let continue_after_commit () =
          let pending = State.pending checkpoint in

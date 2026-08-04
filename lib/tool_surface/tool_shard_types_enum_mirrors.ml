@@ -2,10 +2,9 @@
     consumed by tool schema JSON producers in Tool_shard_types.
 
     These lists each mirror a [valid_*_strings] SSOT owned by a
-    downstream keeper/board module. A direct dependency would form a
-    cycle (Tool_shard -> Keeper_alerting -> Tool_shard via
-    [keeper_model_tools]), so each value is hand-kept in lock-step
-    and protected by a sync regression test in [test/test_types.ml].
+    downstream keeper/board module. The schema layer remains a leaf, so each
+    value is hand-kept in lock-step and protected by a sync regression test in
+    [test/test_types.ml].
 
     Canonical owners (single source of truth per enum):
       - [sort_order_enum_strings]

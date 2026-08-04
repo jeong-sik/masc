@@ -12,6 +12,13 @@ function entry(overrides: Record<string, unknown> = {}) {
   return {
     record: {
       keeper: 'sangsu',
+      // lib/types/turn_record.ml:148-163 writes these four on every row. The
+      // fixture carried none of them until #26792, so the suite stayed green
+      // against a shape the server had stopped sending.
+      agent_name: 'keeper-sangsu-agent',
+      generation: 1,
+      turn_kind: 'autonomous',
+      raw_trace_run_ref: null,
       trace_id: 'trace-1',
       absolute_turn: 7,
       turn_ref: 'trace-1#7',
@@ -144,6 +151,58 @@ describe('keeper turn record cache token counts', () => {
     getMock.mockResolvedValue(
       payload(entry({ cache_read_input_tokens: 'many', cache_creation_input_tokens: null })),
     )
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('projects the record identity fields the writer always emits', async () => {
+    getMock.mockResolvedValue(payload(entry()))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries[0]?.record).toMatchObject({
+      agent_name: 'keeper-sangsu-agent',
+      generation: 1,
+      turn_kind: 'autonomous',
+      raw_trace_run_ref: null,
+    })
+  })
+
+  it('projects a populated exact-run reference', async () => {
+    const run_ref = {
+      worker_run_id: 'wr-1',
+      path: '/keepers/sangsu/raw-traces/turn-1.jsonl',
+      start_seq: 1,
+      end_seq: 4,
+      agent_name: 'oas-ollama_cloud.deepseek-v4-flash',
+      session_id: 'trace-1',
+    }
+    getMock.mockResolvedValue(payload(entry({ raw_trace_run_ref: run_ref })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response.entries[0]?.record.raw_trace_run_ref).toEqual(run_ref)
+  })
+
+  it.each([
+    ['agent_name', { agent_name: '' }],
+    ['generation', { generation: -1 }],
+    ['turn_kind', { turn_kind: 'scheduled' }],
+    ['raw_trace_run_ref', { raw_trace_run_ref: { worker_run_id: 'wr-1' } }],
+  ])('rejects a row whose %s violates the writer contract', async (_field, override) => {
+    getMock.mockResolvedValue(payload(entry(override)))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects a row that omits a field the writer always emits', async () => {
+    const row = entry()
+    delete (row.record as Record<string, unknown>).turn_kind
+    getMock.mockResolvedValue(payload(row))
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',

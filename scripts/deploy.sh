@@ -116,6 +116,40 @@ if [ "$PREPARE_UNDER_CUTOVER_LEASE" = true ]; then
     exit 0
 fi
 
+# Load and validate runtime environment before stopping the serving process.
+# BasePath was frozen above and is intentionally not recomputed from env files.
+# Deployment control variables are frozen before sourcing: an env file entry
+# reusing one of these names aborts the deploy here, while the serving process
+# is still untouched, instead of silently redirecting which PID is stopped,
+# which launchd label is checked, or where the new runtime starts.
+KEEPER_ENV="$REPO_DIR/config/keeper.env"
+readonly SCRIPT_DIR REPO_DIR RELEASE_DIR PROD_PORT HEALTH_URL BASE_PATH \
+    RUNTIME_ROOT PID_FILE LOG_DIR LAUNCHD_LABEL SKIP_BUILD RESTART_TUNNEL \
+    PREPARE_UNDER_CUTOVER_LEASE BUILD_EXE BUILD_CUTOVER_HELPER RELEASE_EXE \
+    BACKUP_EXE KEEPER_ENV
+preserve_env_override MASC_CONFIG_DIR
+preserve_env_override MASC_PERSONAS_DIR
+if [ -f "$KEEPER_ENV" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$KEEPER_ENV"
+    set +a
+fi
+if [ -f "$REPO_DIR/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$REPO_DIR/.env"
+    set +a
+fi
+restore_env_override MASC_CONFIG_DIR
+restore_env_override MASC_PERSONAS_DIR
+
+if [ ! -d "$RUNTIME_ROOT" ] || [ -L "$RUNTIME_ROOT" ]; then
+    echo "Error: deployment requires an existing exact runtime directory at $RUNTIME_ROOT" >&2
+    exit 1
+fi
+mkdir -p "$LOG_DIR"
+
 # --- 2. Detect management mode ---
 if launchctl list "$LAUNCHD_LABEL" >/dev/null 2>&1; then
     echo "Error: loaded launchd service cannot receive the atomic BasePath lease handoff" >&2
@@ -146,33 +180,6 @@ fi
 # and installs the release, then execs the new runtime in that same process.
 # There is no unlock/reacquire window in which an older writer can enter.
 echo "==> Starting prod on :$PROD_PORT with atomic cutover lease handoff..." >&2
-
-# Load secrets needed at runtime (GRAPHQL_API_KEY, SSL_CERT_FILE, etc.)
-# Only repo-local env files are loaded; ~/.zshenv is intentionally skipped
-# to avoid environment contamination from user shell configuration.
-preserve_env_override MASC_CONFIG_DIR
-preserve_env_override MASC_PERSONAS_DIR
-KEEPER_ENV="$REPO_DIR/config/keeper.env"
-if [ -f "$KEEPER_ENV" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$KEEPER_ENV"
-    set +a
-fi
-if [ -f "$REPO_DIR/.env" ]; then
-    set -a
-    # shellcheck disable=SC1091
-    source "$REPO_DIR/.env"
-    set +a
-fi
-restore_env_override MASC_CONFIG_DIR
-restore_env_override MASC_PERSONAS_DIR
-
-if [ ! -d "$RUNTIME_ROOT" ] || [ -L "$RUNTIME_ROOT" ]; then
-    echo "Error: deployment requires an existing exact runtime directory at $RUNTIME_ROOT" >&2
-    exit 1
-fi
-mkdir -p "$LOG_DIR"
 
 HANDOFF_DIR="$(mktemp -d "$RUNTIME_ROOT/deploy-handoff.XXXXXX")"
 PREPARED_FILE="$HANDOFF_DIR/prepared"

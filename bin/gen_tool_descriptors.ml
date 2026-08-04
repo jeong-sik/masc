@@ -105,23 +105,6 @@ let masc_gc_spec : tool_spec =
   }
 ;;
 
-let masc_tool_stats_spec : tool_spec =
-  { name = "masc_tool_stats"
-  ; description =
-      "In-memory tool usage stats: top calls, stale (30+ days), never-called. Resets on \
-       server restart."
-  ; parameters =
-      [ { p_name = "top_n"
-        ; p_type = T_int { min = Some 1; max = Some 100; default = Some 20 }
-        ; p_description = "Number of top tools to return (default: 20)"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 let masc_pause_spec : tool_spec =
   { name = "masc_pause"
   ; description =
@@ -393,7 +376,6 @@ let phase6_specs : tool_spec list =
   ; masc_dashboard_spec
   ; masc_keeper_waiting_inventory_spec
   ; masc_gc_spec
-  ; masc_tool_stats_spec
     (* PR-2: plan group *)
   ; masc_plan_init_spec
   ; masc_plan_update_spec

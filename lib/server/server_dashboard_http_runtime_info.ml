@@ -2432,24 +2432,24 @@ let schedule_fsm_state schedules =
   else "idle"
 ;;
 
-let execution_record_dashboard_json (execution : Schedule_domain.execution_record) =
-  match Schedule_domain.execution_record_to_yojson execution with
+let wake_record_dashboard_json (wake : Schedule_domain.wake_record) =
+  match Schedule_domain.wake_record_to_yojson wake with
   | `Assoc fields ->
     `Assoc
       (fields
-       @ [ "started_at_iso", unix_iso_json execution.started_at
-         ; "finished_at_iso", unix_iso_option_json execution.finished_at
+       @ [ "started_at_iso", unix_iso_json wake.started_at
+         ; "finished_at_iso", unix_iso_option_json wake.finished_at
          ])
   | other -> other
 ;;
 
 let schedule_dispatch_receipt_dashboard_json
-  (execution : Schedule_domain.execution_record option)
+  (wake : Schedule_domain.wake_record option)
   =
-  match execution with
+  match wake with
   | None -> `Null
-  | Some execution ->
-    (match execution.Schedule_domain.detail with
+  | Some wake ->
+    (match wake.Schedule_domain.detail with
      | None -> `Null
      | Some detail ->
     (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
@@ -2539,12 +2539,12 @@ let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimu
 let schedule_keeper_queue_evidence_dashboard_json
   ~now
   (config : Workspace.config)
-  (execution : Schedule_domain.execution_record option)
+  (wake : Schedule_domain.wake_record option)
   =
-  match execution with
+  match wake with
   | None -> `Null
-  | Some execution ->
-    (match execution.Schedule_domain.detail with
+  | Some wake ->
+    (match wake.Schedule_domain.detail with
      | None -> `Null
      | Some detail ->
        (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
@@ -2567,8 +2567,8 @@ let schedule_keeper_queue_evidence_dashboard_json
               ; occurrence_status = _
               ; activation_outcome = _
               }) ->
-          let due_at = execution.Schedule_domain.due_at in
-          let payload_digest = execution.Schedule_domain.payload_digest in
+          let due_at = wake.Schedule_domain.due_at in
+          let payload_digest = wake.Schedule_domain.payload_digest in
           let snapshot =
             Keeper_event_queue_persistence.load_snapshot_with_errors
               ~base_path:config.Workspace_utils.base_path
@@ -2576,7 +2576,7 @@ let schedule_keeper_queue_evidence_dashboard_json
           in
           let pending_match =
             schedule_queue_match
-              ~schedule_instance_id:execution.schedule_instance_id
+              ~schedule_instance_id:wake.schedule_instance_id
               ~schedule_id
               ~due_at
               ~payload_digest
@@ -2591,12 +2591,12 @@ let schedule_keeper_queue_evidence_dashboard_json
             ; "queue", `String queue
             ; "stimulus", `String stimulus
             ; "keeper_name", `String keeper_name
-            ; "schedule_instance_id", `String execution.schedule_instance_id
+            ; "schedule_instance_id", `String wake.schedule_instance_id
             ; "schedule_id", `String schedule_id
             ; "post_id", `String post_id
-            ; "execution_due_at", `Float due_at
-            ; "execution_due_at_iso", unix_iso_json due_at
-            ; "execution_payload_digest", `String payload_digest
+            ; "wake_due_at", `Float due_at
+            ; "wake_due_at_iso", unix_iso_json due_at
+            ; "wake_payload_digest", `String payload_digest
             ; "pending_count", `Int (Keeper_event_queue.length snapshot.pending)
             ; "read_errors", `List read_errors
             ]
@@ -2615,12 +2615,12 @@ let schedule_keeper_queue_evidence_dashboard_json
 
 let schedule_keeper_reaction_evidence_dashboard_json
   (config : Workspace.config)
-  (execution : Schedule_domain.execution_record option)
+  (wake : Schedule_domain.wake_record option)
   =
-  match execution with
+  match wake with
   | None -> `Null
-  | Some execution ->
-    (match execution.Schedule_domain.detail with
+  | Some wake ->
+    (match wake.Schedule_domain.detail with
      | None -> `Null
      | Some detail ->
        (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
@@ -2759,7 +2759,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
                   if
                     evidence.event_queue_ack_seen
                     && evidence.event_queue_cancelled_seen
-                  then "conflicting_terminal_settlement"
+                  then "conflicting_terminal_evidence"
                   else if evidence.event_queue_cancelled_seen
                   then "matched_terminal_cancelled"
                   else if evidence.event_queue_ack_seen
@@ -2842,7 +2842,7 @@ let schedule_signal_rows_and_errors config limit =
 let schedule_request_dashboard_json
   ~now
   ~config
-  ?last_execution
+  ?last_wake
   (request : Schedule_domain.schedule_request)
   =
   let next_due_at =
@@ -2902,14 +2902,14 @@ let schedule_request_dashboard_json
       , match payload_summary with
         | None -> `Null
         | Some summary -> `String summary )
-    ; ( "last_execution"
-      , match last_execution with
+    ; ( "last_wake"
+      , match last_wake with
         | None -> `Null
-        | Some execution -> execution_record_dashboard_json execution )
-    ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_execution
-    ; "keeper_queue_evidence", schedule_keeper_queue_evidence_dashboard_json ~now config last_execution
+        | Some wake -> wake_record_dashboard_json wake )
+    ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_wake
+    ; "keeper_queue_evidence", schedule_keeper_queue_evidence_dashboard_json ~now config last_wake
     ; ( "keeper_reaction_evidence"
-      , schedule_keeper_reaction_evidence_dashboard_json config last_execution )
+      , schedule_keeper_reaction_evidence_dashboard_json config last_wake )
     ]
 ;;
 
@@ -3121,13 +3121,13 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
            , `List
                (List.map
                   (fun (request : Schedule_domain.schedule_request) ->
-                     let last_execution =
-                       Schedule_store.last_execution_for_schedule_instance state
+                     let last_wake =
+                       Schedule_store.last_wake_for_schedule_instance state
                          ~schedule_instance_id:
                            request.Schedule_domain.schedule_instance_id
                          ~schedule_id:request.Schedule_domain.schedule_id
                      in
-                     schedule_request_dashboard_json ~now ~config ?last_execution request)
+                     schedule_request_dashboard_json ~now ~config ?last_wake request)
                   request_rows) )
          ])
 ;;

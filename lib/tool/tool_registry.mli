@@ -43,15 +43,9 @@ val is_known_tool : string -> bool
     stats.  This is not a public-surface visibility predicate. *)
 val get_stats : unit -> (string * call_stats) list
 val get_top_n : int -> (string * call_stats) list
-val get_unused_since : float -> string list
 val get_never_called : string list -> string list
 val total_calls : unit -> int
 val distinct_tools_called : unit -> int
-
-(** {1 Reporting} *)
-
-val stats_to_json : string * call_stats -> Yojson.Safe.t
-val stats_report : top_n:int -> all_tool_names:string list -> Yojson.Safe.t
 
 (** {1 Lifecycle} *)
 

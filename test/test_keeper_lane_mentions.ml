@@ -1,4 +1,4 @@
-(* RFC-0232 P4: boundary mention parse + persisted mentions + backfill.
+(* RFC-0232 P4: boundary mention parse + persisted mentions.
 
    Pinned here:
    1. Parser goldens — the boundary tokenizer keeps the legacy
@@ -11,16 +11,13 @@
       with it everywhere (the corpus avoids keeper-shaped @-tokens,
       which are the documented widening, pinned separately).
    3. Store roundtrip — append parses at the boundary and [load]
-      returns the persisted ids; pre-P4 rows read as [].
-   4. Backfill — stamps exactly the user rows that need it,
-      byte-preserves everything else, and is idempotent. *)
+      returns the persisted ids; pre-P4 rows read as []. *)
 
 open Alcotest
 
 module Lane = Masc.Keeper_lane_mentions
 module Kid = Masc.Keeper_identity.Keeper_id
 module Store = Masc.Keeper_chat_store
-module Backfill = Masc.Keeper_chat_backfill
 
 let ids = list string
 
@@ -232,7 +229,7 @@ let test_extra_mentions_merge () =
 let test_pre_p4_row_reads_empty () =
   with_base "lane-mentions-prep4" (fun base ->
       (* A pre-P4 row: no [mentions] field even though the content has
-         an @-token.  Reads as [] — exactly the gap the backfill closes. *)
+         an @-token.  Reads as [], not an error. *)
       Store.append_user_message ~base_dir:base ~keeper_name:"alice"
         ~content:"seed" ();
       let dir =
@@ -250,53 +247,6 @@ let test_pre_p4_row_reads_empty () =
           check ids "absent field decodes as no mentions" []
             (message_mentions legacy)
       | other -> failf "expected 2 lane lines, got %d" (List.length other))
-
-(* ── 4. Backfill ── *)
-
-let test_backfill_line () =
-  check (option string) "legacy user row with mention is stamped"
-    (Some
-       "{\"role\":\"user\",\"content\":\"@alice legacy\",\"ts\":2.0,\"mentions\":[\"alice\"]}")
-    (Backfill.backfill_line
-       "{\"role\":\"user\",\"content\":\"@alice legacy\",\"ts\":2.0}");
-  check (option string) "mention-free row untouched" None
-    (Backfill.backfill_line
-       "{\"role\":\"user\",\"content\":\"no tokens\",\"ts\":2.0}");
-  check (option string) "already-stamped row untouched" None
-    (Backfill.backfill_line
-       "{\"role\":\"user\",\"content\":\"@alice x\",\"ts\":2.0,\"mentions\":[]}");
-  check (option string) "assistant row untouched" None
-    (Backfill.backfill_line
-       "{\"role\":\"assistant\",\"content\":\"@alice x\",\"ts\":2.0}");
-  check (option string) "garbage line untouched" None
-    (Backfill.backfill_line "not json at all")
-
-let test_backfill_file_idempotent () =
-  with_base "lane-mentions-backfill" (fun base ->
-      Store.append_user_message ~base_dir:base ~keeper_name:"alice"
-        ~content:"seed" ();
-      let dir =
-        Filename.concat (Filename.concat base ".masc") "keeper_chat"
-      in
-      let path = Filename.concat dir "alice.jsonl" in
-      let oc = open_out_gen [ Open_append ] 0o644 path in
-      output_string oc
-        "{\"role\":\"user\",\"content\":\"@alice legacy row\",\"ts\":2.0}\n";
-      output_string oc "{\"role\":\"assistant\",\"content\":\"hi\",\"ts\":3.0}\n";
-      close_out oc;
-      let dry = Backfill.backfill_file ~dry_run:true path in
-      check int "dry-run counts" 1 dry.rewritten;
-      let wet = Backfill.backfill_file ~dry_run:false path in
-      check int "stamped" 1 wet.rewritten;
-      (* The stamped row now registers as a pending mention through the
-         normal load path. *)
-      (match Store.load ~base_dir:base ~keeper_name:"alice" with
-       | [ _seed; legacy; _assistant ] ->
-           check ids "stamped row reads back" [ "alice" ]
-             (message_mentions legacy)
-       | other -> failf "expected 3 lane lines, got %d" (List.length other));
-      let again = Backfill.backfill_file ~dry_run:false path in
-      check int "idempotent" 0 again.rewritten)
 
 let () =
   Random.self_init ();
@@ -316,11 +266,5 @@ let () =
           test_case "extra mentions merge" `Quick test_extra_mentions_merge;
           test_case "pre-P4 row reads empty" `Quick
             test_pre_p4_row_reads_empty;
-        ] );
-      ( "backfill",
-        [
-          test_case "line" `Quick test_backfill_line;
-          test_case "file + idempotence" `Quick
-            test_backfill_file_idempotent;
         ] );
     ]

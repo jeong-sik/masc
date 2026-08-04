@@ -8,8 +8,7 @@ let dedupe_tool_names names =
   dedupe_keep_order (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
 ;;
 
-(* RFC-0160 S7: raw command parsing is centralized in {!Exec_policy};
-   word extraction is owned by {!Keeper_tool_command_words}. *)
+(* RFC-0160 S7: raw command parsing is centralized in {!Exec_policy}. *)
 
 (* ── Dynamic schema injection (masc_* tools) ──────────────────── *)
 

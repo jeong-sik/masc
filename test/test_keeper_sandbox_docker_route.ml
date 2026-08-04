@@ -1568,21 +1568,6 @@ let run_docker_shell_command ~config ~(meta : Keeper_meta_contract.keeper_meta) 
           result.Keeper_sandbox_docker.output;
       docker_run_line log_path
 
-let test_cmd_prefix_uses_shell_command_words () =
-  let check label expected cmd =
-    Alcotest.(check string)
-      label
-      expected
-      (Keeper_tool_command_words.cmd_prefix cmd)
-  in
-  check "plain command" "git" "git status";
-  check "env wrapper" "env" "env GH_TOKEN=redacted gh pr list";
-  check "opam wrapper" "opam" "opam exec -- dune runtest";
-  check
-    "unsupported shell shape reports leading command"
-    "cd"
-    "cd repos/masc && git status"
-
 let test_docker_shell_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2160,10 +2145,6 @@ let () =
           Alcotest.test_case
             "turn runtime projects keeper secret directory"
             `Quick test_turn_runtime_projects_keeper_secret_dir;
-          Alcotest.test_case
-            "history cmd_prefix uses shell command words"
-            `Quick
-            test_cmd_prefix_uses_shell_command_words;
           Alcotest.test_case
             "docker run does not retry generic timeout"
             `Quick

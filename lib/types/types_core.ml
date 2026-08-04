@@ -542,31 +542,6 @@ type task = {
   do_not_reclaim_reason: string option; [@default None]
 } [@@deriving show]
 
-(* Completion always routes through submit -> approve. The judgment boundary is
-   the configured completion LLM; a Keeper is not a verifier
-   ([workspace_task_transitions.ml] states that refusal verbatim).
-
-   This predicate previously read [contract.strict], which split Tasks into two
-   completion lanes. RFC-0308 and RFC-0323 are both Withdrawn and each rejects
-   exactly that split:
-
-     RFC-0308: "no contract-presence heuristic chooses a different completion
-               FSM"
-     RFC-0323: "Requiring a second identity, splitting Tasks by a strict flag
-               ... is withdrawn. The configured completion LLM is the judgment
-               boundary. Task, Goal, contract, evidence ... are context for that
-               call rather than deterministic routing criteria."
-
-   Live measurement before this change: 153/158 Tasks had no [strict] opt-in and
-   72/102 done Tasks carried no verification record, i.e. the lane the withdrawn
-   RFCs describe was the fleet-wide default. Returning [true] unconditionally
-   leaves [contract] as judge context only, which is what RFC-0323 specifies.
-
-   The withdrawal reason to preserve: a *second Keeper identity* must not be
-   required, because an absent verifier would stall the Task. The authority here
-   is the application-owned system LLM completion agent, not another Keeper. *)
-let task_requires_verification (_ : task) = true
-
 (* RFC-0323 G-10: the typed reclaim claim gate is retired. #23661 removed its
    Todo producer; this change removes the Done producer, so nothing can be
    blocked-by-reclaim at claim time anymore. Claim blocks now describe the

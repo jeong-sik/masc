@@ -265,21 +265,17 @@ let task_assignee_of_status = Masc_domain.task_assignee_of_status
     will fail to compile. Each branch lists actions that
     [transition_task_r]'s match-arms accept for that status — keep this
     in sync if you add new transitions there. *)
-let valid_next_actions_for_status ~requires_verification
-  : Masc_domain.task_status -> Masc_domain.task_action list
-  = function
+let valid_next_actions_for_status : Masc_domain.task_status -> Masc_domain.task_action list =
+  function
   | Masc_domain.Todo -> [ Masc_domain.Claim; Masc_domain.Release; Masc_domain.Cancel ]
   | Masc_domain.Claimed _ ->
     [ Masc_domain.Start
-    ]
-    @ (if requires_verification then [] else [ Masc_domain.Done_action ])
-    @ [ Masc_domain.Submit_for_verification
+    ; Masc_domain.Submit_for_verification
     ; Masc_domain.Release
     ; Masc_domain.Cancel
     ]
   | Masc_domain.InProgress _ ->
-    (if requires_verification then [] else [ Masc_domain.Done_action ])
-    @ [ Masc_domain.Submit_for_verification
+    [ Masc_domain.Submit_for_verification
     ; Masc_domain.Release
     ; Masc_domain.Cancel
     ]
@@ -292,8 +288,8 @@ let valid_next_actions_for_status ~requires_verification
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> [] (* terminal *)
 ;;
 
-let next_actions_hint ~requires_verification status =
-  match valid_next_actions_for_status ~requires_verification status with
+let next_actions_hint status =
+  match valid_next_actions_for_status status with
   | [] -> ""
   | xs ->
     Printf.sprintf

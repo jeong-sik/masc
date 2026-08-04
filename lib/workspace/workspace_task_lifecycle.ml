@@ -58,7 +58,6 @@ let decide
       ~agent_name
       ~task_id
       ~task_status
-      ~requires_verification
       ~action
       ~now
       ~notes
@@ -102,9 +101,7 @@ let decide
       | Masc_domain.InProgress { assignee; _ } ) ) ->
     if not (same_agent assignee)
     then Error Invalid_transition
-    else if requires_verification
-    then Error Verification_submission_required
-    else ok (done_status ~assignee ~now ~notes)
+    else Error Verification_submission_required
   | Masc_domain.Done_action, Masc_domain.Done _ -> ok task_status
   | ( Masc_domain.Done_action
     , ( Masc_domain.Todo
@@ -217,7 +214,7 @@ let decide_verdict
   | Masc_domain.Cancelled _ -> Error Invalid_transition
 ;;
 
-let valid_next_actions ~same_agent ~task_status ~requires_verification =
+let valid_next_actions ~same_agent ~task_status =
   let same_agent_pred _ = same_agent in
   let try_action action =
     match
@@ -227,7 +224,6 @@ let valid_next_actions ~same_agent ~task_status ~requires_verification =
         ~agent_name:""
         ~task_id:""
         ~task_status
-        ~requires_verification
         ~action
         ~now:""
         ~notes:"preview"

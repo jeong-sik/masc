@@ -5,7 +5,6 @@ let owner = "alice"
 let now = "2026-07-13T00:00:00Z"
 
 let decide
-      ?(requires_verification = true)
       ?(notes = "evidence at /tmp/proof")
       ?(reason = "")
       ~same_agent
@@ -19,7 +18,6 @@ let decide
     ~agent_name:owner
     ~task_id:"task-1"
     ~task_status
-    ~requires_verification
     ~action
     ~now
     ~notes
@@ -60,18 +58,9 @@ let test_claimed_done_requires_verification_submission () =
   |> expect_error L.Verification_submission_required
 ;;
 
-let test_default_done_is_terminal () =
-  match
-    decide
-      ~requires_verification:false
-      ~same_agent:true
-      ~task_status:in_progress
-      ~action:D.Done_action
-      ()
-  with
-  | Ok { new_status = D.Done { assignee; _ }; _ }
-    when String.equal assignee owner -> ()
-  | Ok _ | Error _ -> failwith "advisory/default owner completion must be terminal"
+let test_done_has_no_non_verification_lane () =
+  decide ~same_agent:true ~task_status:in_progress ~action:D.Done_action ()
+  |> expect_error L.Verification_submission_required
 ;;
 
 (* A verdict is not an agent action. There is no [task_action] constructor for it,
@@ -220,7 +209,7 @@ let test_awaiting_is_claimable_by_nobody () =
 let () =
   test_done_requires_verification_submission ();
   test_claimed_done_requires_verification_submission ();
-  test_default_done_is_terminal ();
+  test_done_has_no_non_verification_lane ();
   test_verdict_is_not_an_agent_action ();
   test_verdict_requires_authority_and_reason ();
   test_verdict_rejects_stale_verification_id ();

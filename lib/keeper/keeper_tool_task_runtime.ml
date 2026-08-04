@@ -807,19 +807,9 @@ let handle_keeper_task_tool_with_outcome
                   { reason = "keeper_task_done rejected: evidence_refs required" })
              message)
       | Ok evidence_refs ->
-      (* Map keeper vocabulary (`result`) onto MASC domain typed
-         handoff_context.summary. Strict contracts enter the out-of-band
-         completion-authority lane; advisory/default tasks complete directly
-         through the workspace FSM. *)
-      let action =
-        Workspace.get_tasks_raw config
-        |> List.find_opt (fun (task : Masc_domain.task) ->
-          String.equal task.id task_id)
-        |> Option.exists Masc_domain.task_requires_verification
-        |> function
-        | true -> "submit_for_verification"
-        | false -> "done"
-      in
+      (* A Keeper submits evidence; only the completion authority can issue the
+         terminal verdict. *)
+      let action = "submit_for_verification" in
       let args_for_transition =
         [
           "task_id", `String task_id;

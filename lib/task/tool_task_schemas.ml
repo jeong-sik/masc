@@ -41,8 +41,8 @@ let schemas : Masc_domain.tool_schema list = [
     name = masc_add_task_name;
     description = Printf.sprintf
       "Add a new task to the backlog for agents to claim. \
-Tasks default to an advisory verification contract with completion/evidence requirements. \
-Only tasks with contract.strict=true must be submitted for an out-of-band system LLM completion-authority verdict; advisory/default tasks may complete directly. \
+Task contracts provide completion/evidence context to the judge; they do not select a completion lane. \
+Every task must be submitted for an out-of-band system LLM completion-authority verdict. \
 submit_for_verification creates an asynchronous review state that no agent or Keeper can claim. The application-owned system LLM agent reads the immutable submitted-evidence snapshot and commits the typed verdict; an authenticated human operator is the separate HITL path. \
 To re-run completed work, create a new task with predecessor_task_id instead of touching the done one. \
 Priority 1=urgent, 5=low (default 3). \
@@ -221,7 +221,7 @@ Tip: Look for status='todo' tasks to claim.";
   {
     name = "masc_transition";
     description =
-      "Move a Task through the agent actions claim, start, submit_for_verification, done, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. Direct done is terminal for advisory/default tasks. Tasks with contract.strict=true require the assignee to submit completion evidence, then wait for an authenticated human-operator or typed auto-judge verdict outside this tool. approve/reject are deliberately unavailable here. Supports expected_version CAS.";
+      "Move a Task through the agent actions claim, start, submit_for_verification, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. Completion requires the assignee to submit evidence, then wait for an authenticated human-operator or typed auto-judge verdict outside this tool. Direct done and approve/reject are deliberately unavailable here. Supports expected_version CAS.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

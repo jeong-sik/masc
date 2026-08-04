@@ -426,7 +426,22 @@ let test_constraint_category_excludes_self_imposed_scope () =
          "do not claim unassigned work");
     check bool "narrowing one's own scope is not stored" true
       (String_util.contains_substring user_text
-         "Do not store what the agent decided to stop doing, stay out of, or wait for")
+         "Do not store what the agent decided to stop doing, stay out of, or wait for");
+    (* Narrowing the category alone would only gate new claims: the retention
+       criteria ask whether a stored fact is still true and important, and
+       "unclaimed tasks are outside my scope" passes all four. The five
+       self-imposed constraints already in the live stores would then never
+       leave. Retention has to re-apply the category rules for the fix to reach
+       the existing rows. *)
+    check bool "category rules re-apply to stored memories" true
+      (String_util.contains_substring user_text
+         "Apply the category criteria below to existing memories too");
+    check bool "already being stored is not a reason to retain" true
+      (String_util.contains_substring user_text
+         "does not earn retention by already being there");
+    check bool "stored self-scope constraints are dropped" true
+      (String_util.contains_substring user_text
+         "drop a stored `constraint` that no external rule enforces")
 ;;
 
 let test_repo_template_renders_persona () =

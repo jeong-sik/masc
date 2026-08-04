@@ -223,6 +223,17 @@ let hidden_runtime_tool reason meta =
     reason = Some reason;
   }
 
+let keeper_shard_permission required_permission =
+  hidden_runtime_tool
+    "Keeper shard runtime tool; permission is catalog-owned while execution policy is descriptor-owned."
+    (default_metadata ~required_permission)
+;;
+
+let keeper_shard_read = keeper_shard_permission Masc_domain.CanReadState
+let keeper_shard_write = keeper_shard_permission Masc_domain.CanBroadcast
+let keeper_shard_add_task = keeper_shard_permission Masc_domain.CanAddTask
+let keeper_shard_vote = keeper_shard_permission Masc_domain.CanVote
+
 (* ================================================================ *)
 (* Explicit metadata registry                                       *)
 (* ================================================================ *)
@@ -409,6 +420,47 @@ let explicit_metadata : (string * metadata) list =
       hidden_runtime_tool
         "Keeper tool-list runtime tool; callable but hidden from the public MCP schema surface."
         read_state_tool );
+    (* Keeper shard schemas are registered directly by [Unified_tool_registry],
+       not through [Tool_spec].  Their callable names still need an explicit
+       permission authority here; descriptor policy remains the SSOT for
+       execution axes such as readonly/idempotent. *)
+    ("keeper_time_now", keeper_shard_read);
+    ("keeper_tool_search", keeper_shard_read);
+    ("keeper_context_status", keeper_shard_read);
+    ("keeper_artifact_read", keeper_shard_read);
+    ("keeper_memory_search", keeper_shard_read);
+    ("keeper_memory_write", keeper_shard_write);
+    ("keeper_library_search", keeper_shard_read);
+    ("keeper_library_read", keeper_shard_read);
+    ("keeper_surface_read", keeper_shard_read);
+    ("keeper_surface_post", keeper_shard_write);
+    ("keeper_person_note_set", keeper_shard_write);
+    ("keeper_ide_annotate", keeper_shard_write);
+    ("keeper_voice_speak", keeper_shard_write);
+    ("keeper_voice_listen", keeper_shard_write);
+    ("keeper_voice_agent", keeper_shard_read);
+    ("keeper_voice_sessions", keeper_shard_read);
+    ("keeper_voice_session_start", keeper_shard_write);
+    ("keeper_voice_session_end", keeper_shard_write);
+    ("keeper_tasks_audit", keeper_shard_read);
+    ("keeper_broadcast", keeper_shard_write);
+    ("keeper_task_create", keeper_shard_add_task);
+    ("keeper_board_comment", keeper_shard_write);
+    ("keeper_board_comment_vote", keeper_shard_vote);
+    ("keeper_board_curation_read", keeper_shard_read);
+    ("keeper_board_curation_submit", keeper_shard_write);
+    ("keeper_board_post_get", keeper_shard_read);
+    ("keeper_board_list", keeper_shard_read);
+    ("keeper_board_post", keeper_shard_write);
+    ("keeper_board_stats", keeper_shard_read);
+    ("keeper_board_vote", keeper_shard_vote);
+    ("keeper_board_sub_board_list", keeper_shard_read);
+    ("keeper_board_sub_board_get", keeper_shard_read);
+    ("keeper_board_sub_board_create", keeper_shard_write);
+    ("keeper_board_sub_board_update", keeper_shard_write);
+    ("keeper_board_sub_board_delete", keeper_shard_write);
+    ("tool_edit_file", keeper_shard_write);
+    ("tool_write_file", keeper_shard_write);
     ( "tool_execute",
       hidden_runtime_tool
         "Typed command-execution runtime tool; callable but hidden from the public MCP schema surface."

@@ -304,18 +304,143 @@ let prepare_review
 
 type process_outcome =
   | Committed
-  | Deferred of [ `Retry | `Stop ]
+  | Deferred
 
-let defer ~retry ~task_id ~verification_id ~authority ~reason =
-  let disposition = if retry then "retry" else "stopped" in
+let defer ~task_id ~verification_id ~authority ~reason =
   Log.Misc.warn
-    "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s disposition=%s reason=%s"
+    "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s reason=%s"
     task_id
     verification_id
     (Masc_domain.completion_authority_actor authority)
-    disposition
     reason;
-  Deferred (if retry then `Retry else `Stop)
+  Deferred
+;;
+
+let observe_rejection_wakeup
+      (runtime : runtime)
+      (task : Masc_domain.task)
+      ~assignee
+      ~verification_id
+      ~reason
+      ~authority
+  =
+  match
+    Completion_authority_wakeup.wake_rejected_producer
+      ~config:runtime.config
+      ~producer:assignee
+      ~task_id:task.id
+      ~verification_id
+      ~reason
+      ~authority
+  with
+  | Completion_authority_wakeup.Signaled { keeper_name } ->
+    Log.Misc.info
+      "completion authority rejection durably queued and signaled producer Keeper task_id=%s verification_id=%s keeper=%s"
+      task.id
+      verification_id
+      keeper_name
+  | Completion_authority_wakeup.Durable_deferred { keeper_name; wakeup } ->
+    (match wakeup with
+     | Keeper_registry.Deferred_unregistered ->
+       Log.Misc.warn
+         "completion authority rejection durably queued; producer Keeper is unregistered task_id=%s verification_id=%s keeper=%s"
+         task.id
+         verification_id
+         keeper_name
+     | Keeper_registry.Deferred_not_running phase ->
+       Log.Misc.warn
+         "completion authority rejection durably queued; producer Keeper is not running task_id=%s verification_id=%s keeper=%s phase=%s"
+         task.id
+         verification_id
+         keeper_name
+         (Keeper_state_machine.phase_to_string phase)
+     | Keeper_registry.Deferred_lifecycle denial ->
+       Log.Misc.warn
+         "completion authority rejection durably queued; producer Keeper wake denied task_id=%s verification_id=%s keeper=%s reason=%s"
+         task.id
+         verification_id
+         keeper_name
+         (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+     | Keeper_registry.Signaled ->
+       Log.Misc.error
+         "completion authority rejection returned deferred Signaled outcome task_id=%s verification_id=%s keeper=%s"
+         task.id
+         verification_id
+         keeper_name)
+  | Completion_authority_wakeup.Durable_wake_failed { keeper_name; detail } ->
+    Log.Misc.error
+      "completion authority rejection durably queued but live wake failed task_id=%s verification_id=%s keeper=%s detail=%s"
+      task.id
+      verification_id
+      keeper_name
+      detail
+  | Completion_authority_wakeup.Unroutable_producer { producer; task_id } ->
+    Log.Misc.error
+      "completion authority rejection has no registered or persisted Keeper producer binding task_id=%s producer=%s verification_id=%s"
+      task_id
+      producer
+      verification_id
+  | Completion_authority_wakeup.Producer_identity_lookup_failed
+      { producer; task_id; detail } ->
+    Log.Misc.error
+      "completion authority rejection producer identity lookup failed task_id=%s producer=%s verification_id=%s detail=%s"
+      task_id
+      producer
+      verification_id
+      detail
+  | Completion_authority_wakeup.Durable_queue_failed { keeper_name; detail } ->
+    Log.Misc.error
+      "completion authority rejection durable queue failed task_id=%s verification_id=%s keeper=%s detail=%s"
+      task.id
+      verification_id
+      keeper_name
+      detail
+;;
+
+let commit_verdict
+      (runtime : runtime)
+      (task : Masc_domain.task)
+      ~assignee
+      ~verification_id
+      ~authority
+      ~verdict
+      ~notes
+      ~verdict_label
+  =
+  match
+    Workspace.commit_verdict_r
+      runtime.config
+      ~authority
+      ~verdict
+      ~task_id:task.id
+      ~verification_id
+      ~notes
+      ()
+  with
+  | Ok _ ->
+    (match verdict with
+     | Masc_domain.Verdict_approved -> ()
+     | Masc_domain.Verdict_rejected { reason } ->
+       observe_rejection_wakeup
+         runtime
+         task
+         ~assignee
+         ~verification_id
+         ~reason
+         ~authority);
+    Log.Misc.info
+      "system LLM completion authority committed task_id=%s verification_id=%s authority=%s verdict=%s"
+      task.id
+      verification_id
+      (Masc_domain.completion_authority_actor authority)
+      verdict_label;
+    Committed
+  | Error error ->
+    defer
+      ~task_id:task.id
+      ~verification_id
+      ~authority
+      ~reason:(Masc_domain.masc_error_to_string error)
 ;;
 
 let process_task_once
@@ -336,12 +461,16 @@ let process_task_once
         ~authority
     with
     | Error reason ->
-      defer
-        ~retry:false
-        ~task_id:task.id
+      let rejection_reason = "completion evidence contract invalid: " ^ reason in
+      commit_verdict
+        runtime
+        task
+        ~assignee
         ~verification_id
         ~authority
-        ~reason
+        ~verdict:(Masc_domain.Verdict_rejected { reason = rejection_reason })
+        ~notes:rejection_reason
+        ~verdict_label:"rejected_contract"
     | Ok prepared ->
       let result =
         Task.Anti_rationalization.review
@@ -355,7 +484,6 @@ let process_task_once
       (match result.verdict with
        | None ->
          defer
-           ~retry:true
            ~task_id:task.id
            ~verification_id
            ~authority
@@ -372,113 +500,20 @@ let process_task_once
              ~result
              ~authority
          in
-         (match
-            Workspace.commit_verdict_r
-              runtime.config
-              ~authority
-              ~verdict
-              ~task_id:task.id
-              ~verification_id
-              ~notes
-              ()
-          with
-          | Ok _ ->
-            (match verdict with
-             | Masc_domain.Verdict_approved -> ()
-             | Masc_domain.Verdict_rejected { reason } ->
-               (match
-                  Completion_authority_wakeup.wake_rejected_producer
-                    ~config:runtime.config
-                    ~producer:assignee
-                    ~task_id:task.id
-                    ~verification_id
-                    ~reason
-                    ~authority
-                with
-                | Completion_authority_wakeup.Signaled { keeper_name } ->
-                  Log.Misc.info
-                    "completion authority rejection durably queued and signaled producer Keeper task_id=%s verification_id=%s keeper=%s"
-                    task.id
-                    verification_id
-                    keeper_name
-                | Completion_authority_wakeup.Durable_deferred
-                    { keeper_name; wakeup } ->
-                  (match wakeup with
-                   | Keeper_registry.Deferred_unregistered ->
-                     Log.Misc.warn
-                       "completion authority rejection durably queued; producer Keeper is unregistered task_id=%s verification_id=%s keeper=%s"
-                       task.id
-                       verification_id
-                       keeper_name
-                   | Keeper_registry.Deferred_not_running phase ->
-                     Log.Misc.warn
-                       "completion authority rejection durably queued; producer Keeper is not running task_id=%s verification_id=%s keeper=%s phase=%s"
-                       task.id
-                       verification_id
-                       keeper_name
-                       (Keeper_state_machine.phase_to_string phase)
-                   | Keeper_registry.Deferred_lifecycle denial ->
-                     Log.Misc.warn
-                       "completion authority rejection durably queued; producer Keeper wake denied task_id=%s verification_id=%s keeper=%s reason=%s"
-                       task.id
-                       verification_id
-                       keeper_name
-                       (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
-                   | Keeper_registry.Signaled ->
-                     Log.Misc.error
-                       "completion authority rejection returned deferred Signaled outcome task_id=%s verification_id=%s keeper=%s"
-                       task.id
-                       verification_id
-                       keeper_name)
-                | Completion_authority_wakeup.Durable_wake_failed
-                    { keeper_name; detail } ->
-                  Log.Misc.error
-                    "completion authority rejection durably queued but live wake failed task_id=%s verification_id=%s keeper=%s detail=%s"
-                    task.id
-                    verification_id
-                    keeper_name
-                    detail
-                | Completion_authority_wakeup.Unroutable_producer { producer; task_id } ->
-                  Log.Misc.error
-                    "completion authority rejection has no registered or persisted Keeper producer binding task_id=%s producer=%s verification_id=%s"
-                    task_id
-                    producer
-                    verification_id
-                | Completion_authority_wakeup.Producer_identity_lookup_failed
-                    { producer; task_id; detail } ->
-                  Log.Misc.error
-                    "completion authority rejection producer identity lookup failed task_id=%s producer=%s verification_id=%s detail=%s"
-                    task_id
-                    producer
-                    verification_id
-                    detail
-                | Completion_authority_wakeup.Durable_queue_failed
-                    { keeper_name; detail } ->
-                  Log.Misc.error
-                    "completion authority rejection durable queue failed task_id=%s verification_id=%s keeper=%s detail=%s"
-                    task.id
-                    verification_id
-                    keeper_name
-                    detail));
-            Log.Misc.info
-              "system LLM completion authority committed task_id=%s verification_id=%s authority=%s verdict=%s"
-              task.id
-              verification_id
-              (Masc_domain.completion_authority_actor authority)
-              (Task.Anti_rationalization.verdict_constructor_name review_verdict);
-            Committed
-          | Error error ->
-            defer
-              ~retry:true
-              ~task_id:task.id
-              ~verification_id
-              ~authority
-              ~reason:(Masc_domain.masc_error_to_string error)))
+         commit_verdict
+           runtime
+           task
+           ~assignee
+           ~verification_id
+           ~authority
+           ~verdict
+           ~notes
+           ~verdict_label:
+             (Task.Anti_rationalization.verdict_constructor_name review_verdict))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     defer
-      ~retry:true
       ~task_id:task.id
       ~verification_id
       ~authority
@@ -510,8 +545,7 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
     in
     match outcome with
     | Committed -> ()
-    | Deferred `Retry -> schedule_retry runtime
-    | Deferred `Stop -> ())
+    | Deferred -> schedule_retry runtime)
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"

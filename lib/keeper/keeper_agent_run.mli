@@ -123,6 +123,15 @@ module For_testing : sig
     -> dispatch:(unit -> ('a, Agent_sdk.Error.sdk_error) result)
     -> ('a, Agent_sdk.Error.sdk_error) result
 
+  (** Exact-run reference recorded on the turn record. Accepts a reference
+      whose session identity matches the keeper trace; the OAS runtime
+      identity carried by the reference is recorded, not compared, because it
+      names a different identity space than the keeper agent name. *)
+  val turn_record_raw_trace_run_ref
+    :  expected_session_id:string
+    -> Agent_sdk.Raw_trace.run_ref
+    -> (Turn_record.raw_trace_run_ref, string) result
+
 end
 
 (** {1 Turn execution} *)

@@ -432,7 +432,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
    Precondition: the caller holds the keeper's turn slot. Public direct-message
    and typed-delegate entrypoints construct a valid invocation request before
    reaching this function. *)
-let run_keeper_invocation_turn_admitted
+let run_keeper_invocation_turn_admitted_inner
       ?on_text_delta
       ?on_event
       ?event_bus
@@ -986,6 +986,68 @@ let run_keeper_invocation_turn_admitted
               tool_result_ok_data reply_json
 
 ))))))))
+
+(* Turn-observation boundary for the chat lane.
+
+   [mark_turn_started] is the only installer of [current_turn_observation],
+   and the composite observer's live-turn projection reads [None] without it.
+   Before this wrapper a keeper answering an operator message therefore
+   reported no live turn for its whole duration, and the operator queue panel
+   rendered "live turn 상세 투영은 아직 없습니다" while the turn was running
+   tools. The autonomous lane has carried the same pair since #7122
+   ([Keeper_unified_turn.run_keeper_cycle]); this gives the chat lane that
+   lifecycle instead of adding a second projection beside it.
+
+   Placed on the admitted body, which is the single point all three chat entry
+   paths ([handle_keeper_invocation], [handle_keeper_msg_if_free], and the
+   [on_admitted] arm) funnel through, and which by construction runs while the
+   turn slot is held.
+
+   [mark_turn_finished] is idempotent and runs on both the normal and the
+   exceptional exit. Its own failure must not replace the turn's result or
+   mask an in-flight cancellation, so it is swallowed and logged the way the
+   autonomous lane's turn cleanup does. *)
+let run_keeper_invocation_turn_admitted
+      ?on_text_delta
+      ?on_event
+      ?event_bus
+      ?continuation_channel
+      ~surface
+      ~request
+      ctx
+      args
+  : tool_result
+  =
+  let base_path = ctx.config.base_path in
+  let name = Keeper_invocation_contract.target_name request in
+  Keeper_registry.mark_turn_started
+    ~base_path
+    ~wake:Keeper_registry.Chat_request
+    name;
+  let finish () =
+    try Keeper_registry.mark_turn_finished ~base_path name with
+    | Eio.Cancel.Cancelled _ -> ()
+    | exn ->
+      log_keeper_exn ~label:"mark_turn_finished in chat turn cleanup" exn
+  in
+  match
+    run_keeper_invocation_turn_admitted_inner
+      ?on_text_delta
+      ?on_event
+      ?event_bus
+      ?continuation_channel
+      ~surface
+      ~request
+      ctx
+      args
+  with
+  | result ->
+    finish ();
+    result
+  | exception exn ->
+    finish ();
+    raise exn
+;;
 
 let handle_keeper_invocation
       ?on_text_delta

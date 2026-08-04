@@ -28,7 +28,13 @@ let make_meta name =
       (`Assoc
         [
           ("name", `String name);
-          ("agent_name", `String ("agent-" ^ name));
+          (* Derived, not spelled out: [Keeper_meta_json_parse] rejects any
+             agent_name that is not [Keeper_identity.keeper_agent_name name],
+             and the literal this fixture used ("agent-" ^ name) stopped
+             matching that rule — every case in this file failed at
+             [make_meta] before reaching its assertions. *)
+          ( "agent_name"
+          , `String (Masc.Keeper_identity.keeper_agent_name name) );
           ("trace_id", `String ("trace-" ^ name));
           ("allowed_paths", `List [ `String "*" ]);
         ])
@@ -183,6 +189,59 @@ let test_run_state_in_turn_reports_proactive_tick () =
     (J.member "stimulus_kinds" rs |> J.to_list |> List.map J.to_string)
 ;;
 
+(* The chat lane installs the same live-turn observation the autonomous lane
+   does, so an operator message must project a live turn — not the idle
+   [waiting] state the dashboard rendered before the chat lane marked its turn
+   boundary. [chat_request] stays distinct from [proactive_tick] so a
+   requested turn is never reported as autonomous activity. *)
+let test_run_state_in_turn_reports_chat_request () =
+  let base = temp_base () in
+  let name = "chat-keeper" in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        Keeper_registry.mark_turn_started ~base_path:base
+          ~wake:Keeper_registry.Chat_request name;
+        Keeper_registry.record_turn_tool_inflight ~base_path:base name ~count:2)
+      ()
+  in
+  check bool "is_live true during a chat turn" true
+    (J.member "is_live" json |> J.to_bool);
+  let live = J.member "live_turn" json in
+  (match live with
+   | `Null -> fail "live_turn must be present while a chat turn is active"
+   | _ -> ());
+  check int "live_turn.active_tool_count surfaced for a chat turn" 2
+    (J.member "active_tool_count" live |> J.to_int);
+  let rs = J.member "run_state" json in
+  check string "run_state.kind is in_turn" "in_turn"
+    (J.member "kind" rs |> J.to_string);
+  check string "run_state.wake_kind is chat_request" "chat_request"
+    (J.member "wake_kind" rs |> J.to_string);
+  check (list string)
+    "run_state.stimulus_kinds is empty — a chat turn consumes no stimulus" []
+    (J.member "stimulus_kinds" rs |> J.to_list |> List.map J.to_string)
+;;
+
+let test_chat_turn_clears_live_turn_on_finish () =
+  let base = temp_base () in
+  let name = "chat-keeper-finish" in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        Keeper_registry.mark_turn_started ~base_path:base
+          ~wake:Keeper_registry.Chat_request name;
+        Keeper_registry.mark_turn_finished ~base_path:base name)
+      ()
+  in
+  check bool "is_live false after the chat turn finishes" false
+    (J.member "is_live" json |> J.to_bool);
+  check bool "live_turn cleared" true
+    (match J.member "live_turn" json with `Null -> true | _ -> false);
+  check string "run_state falls back to waiting" "waiting"
+    (J.member "run_state" json |> J.member "kind" |> J.to_string)
+;;
+
 let test_run_state_waiting_when_running_idle () =
   let base = temp_base () in
   let name = "waiting-keeper" in
@@ -250,6 +309,10 @@ let () =
             test_run_state_in_turn_reports_woken_wake;
           test_case "in_turn reports the proactive tick wake" `Quick
             test_run_state_in_turn_reports_proactive_tick;
+          test_case "in_turn reports a chat-lane turn" `Quick
+            test_run_state_in_turn_reports_chat_request;
+          test_case "chat turn clears the live turn on finish" `Quick
+            test_chat_turn_clears_live_turn_on_finish;
           test_case "waiting for a Running keeper with no live turn" `Quick
             test_run_state_waiting_when_running_idle;
           test_case "suspended for a non-Running phase" `Quick

@@ -799,6 +799,7 @@ let run_keeper_invocation_turn_admitted
 		                                ~max_context
 		                                ~build_turn_prompt
 		                                ~user_message:message
+		                                ~turn_kind:Turn_record.Direct
 			                                ?user_blocks
 			                                ~runtime_id
 			                                ~world_observation

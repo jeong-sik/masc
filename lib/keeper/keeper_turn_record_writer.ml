@@ -1,6 +1,9 @@
 let write
       ~config
       ~keeper_name
+      ~agent_name
+      ~generation
+      ~turn_kind
       ~trace_id
       ~absolute_turn
       ~runtime_profile
@@ -12,6 +15,7 @@ let write
       ~request_latency_ms
       ~ttfrc_ms
       ~request_wire_observation
+      ~raw_trace_run_ref
       ~sampling
       ~usage
       ~execution_ids
@@ -22,6 +26,9 @@ let write
   let record : Turn_record.t =
     { execution_ids
     ; keeper = keeper_name
+    ; agent_name
+    ; generation
+    ; turn_kind
     ; trace_id
     ; absolute_turn
     ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn
@@ -36,6 +43,7 @@ let write
     ; request_latency_ms
     ; ttfrc_ms
     ; request_wire_observation
+    ; raw_trace_run_ref
     ; sampling
     ; usage
     ; ts = Time_compat.now ()

@@ -133,8 +133,33 @@ export function isVisibleDirectConversationEntry(entry: KeeperConversationEntry)
   if (entry.role !== 'user' && entry.role !== 'assistant') return false
   return entry.source !== 'world_state_prompt'
     && entry.source !== 'internal_assistant'
+    // An autonomous turn is visible by default but is not direct conversation:
+    // nobody addressed the keeper. It stays out of this predicate so callers
+    // asking "is this part of the dialogue" keep getting the same answer.
+    && entry.source !== 'autonomous_turn'
     && entry.source !== 'tool_result'
     && entry.source !== 'system'
+}
+
+/** Turns the keeper ran on its own (projected from typed turn records, never
+ *  persisted to the chat store). Shown without the internal toggle because the
+ *  transcript folds them into one collapsed group rather than listing each. */
+export function isAutonomousTurnEntry(entry: KeeperConversationEntry): boolean {
+  return entry.source === 'autonomous_turn'
+}
+
+function capThreadEntries(entries: KeeperConversationEntry[]): KeeperConversationEntry[] {
+  let conversationSlots = THREAD_ENTRY_CAP
+  const kept: KeeperConversationEntry[] = []
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]
+    if (!entry) continue
+    if (isAutonomousTurnEntry(entry) || conversationSlots > 0) {
+      kept.push(entry)
+      if (!isAutonomousTurnEntry(entry)) conversationSlots -= 1
+    }
+  }
+  return kept.reverse()
 }
 
 /** Tool-call rows (role 'tool', minted live by keeper-stream and persisted to
@@ -149,7 +174,9 @@ export function isToolConversationEntry(entry: KeeperConversationEntry): boolean
  *  turns plus tool-call rows. Only the truly-internal sources
  *  (world_state_prompt, internal_assistant, system) stay behind the toggle. */
 export function isDefaultVisibleConversationEntry(entry: KeeperConversationEntry): boolean {
-  return isVisibleDirectConversationEntry(entry) || isToolConversationEntry(entry)
+  return isVisibleDirectConversationEntry(entry)
+    || isToolConversationEntry(entry)
+    || isAutonomousTurnEntry(entry)
 }
 
 // --- Audio helpers (RFC-0235 P1/P3) ---
@@ -993,7 +1020,7 @@ export function appendThreadEntry(name: string, entry: KeeperConversationEntry):
   const existing = keeperThreads.value[name] ?? []
   keeperThreads.value = {
     ...keeperThreads.value,
-    [name]: [...existing, entry].slice(-THREAD_ENTRY_CAP),
+    [name]: capThreadEntries([...existing, entry]),
   }
 }
 
@@ -1027,7 +1054,7 @@ export function insertThreadEntryBefore(
       : [...existing.slice(0, index), entry, ...existing.slice(index)]
   keeperThreads.value = {
     ...keeperThreads.value,
-    [name]: next.slice(-THREAD_ENTRY_CAP),
+    [name]: capThreadEntries(next),
   }
 }
 
@@ -1546,9 +1573,10 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
     .map((entry, index) => ({ entry, index }))
     .sort((a, b) => entryTimeMs(a.entry) - entryTimeMs(b.entry) || a.index - b.index)
     .map(({ entry }) => entry)
-  // Keep the newest THREAD_ENTRY_CAP entries. After the sort the in-flight tail
-  // is last, so the cap trims the oldest history rather than a live row.
-  const kept = merged.length > THREAD_ENTRY_CAP ? merged.slice(-THREAD_ENTRY_CAP) : merged
+  // Autonomous observations are separately bounded by the backend's exact
+  // current-record/raw-trace window. They do not consume dialogue slots: a
+  // busy keeper must never evict the direct conversation it is shown beside.
+  const kept = capThreadEntries(merged)
   keeperThreads.value = {
     ...keeperThreads.value,
     [name]: kept,
@@ -1569,7 +1597,7 @@ export function mergeServerHistoryEntries(
 interface RestChatHistoryMessage {
   id?: string
   role: string
-  content: string
+  content: string | null
   ts: number
   tool_call_id?: string
   tool_call_name?: string
@@ -1602,6 +1630,44 @@ interface RestChatHistoryMessage {
   // prefers them over its local parser.
   blocks?: unknown
   stream_contract?: unknown
+  // Present only on rows the backend projected from a typed autonomous turn
+  // (Keeper_autonomous_turn_source): a turn the keeper ran on its own, which
+  // by design has no chat-store row. Its presence, not `role`, marks the row.
+  autonomous_turn?: unknown
+}
+
+/** Convert a current-record autonomous turn into a conversation entry.
+ *  Marked `autonomous_turn` so the transcript folds consecutive ones into a
+ *  single collapsed group: a keeper wakes far more often than anyone talks to
+ *  it, and listing each turn inline would bury the conversation. */
+function autonomousTurnEntry(
+  keeperName: string,
+  message: RestChatHistoryMessage,
+): KeeperConversationEntry | null {
+  if (!isRecord(message.autonomous_turn)) return null
+  const turnId = asString(message.autonomous_turn.turn_id)
+  if (!turnId) return null
+  const timestamp = toIsoTimestamp(message.ts)
+  const publicText = message.content ?? '공개된 응답 없음'
+  return {
+    id: message.id ?? `autonomous-${turnId}`,
+    role: 'assistant',
+    source: 'autonomous_turn',
+    label: keeperName,
+    text: publicText,
+    rawText: message.content,
+    timestamp,
+    delivery: 'history',
+    streamState: null,
+    streamContract: keeperStreamContract('rest_history', 'history_without_stream_events', {
+      reason: 'autonomous turns are projected from typed records and exact retained traces, never streamed',
+    }),
+    details: null,
+    // The public projection intentionally carries no raw thinking or tool
+    // arguments. The typed record owns the exact turn reference.
+    surface: null,
+    turnRef: turnId,
+  }
 }
 
 /** Convert a persisted tool-call row into the same entry shape the live
@@ -1614,7 +1680,7 @@ interface RestChatHistoryMessage {
 function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEntry | null {
   const toolCallId = nonBlankToolCallId(message.tool_call_id)
   const toolCallName = message.tool_call_name?.trim()
-  if (!toolCallId || !toolCallName) return null
+  if (!toolCallId || !toolCallName || typeof message.content !== 'string') return null
   return {
     id: toolEntryIdFromCallId(toolCallId),
     role: 'tool',
@@ -1651,12 +1717,20 @@ export function chatHistoryEntriesFromRest(
   let previousSource: KeeperConversationSource | null = null
   const entries: KeeperConversationEntry[] = []
   messages.forEach((message) => {
+    if (message.autonomous_turn !== undefined) {
+      // Nobody addressed the keeper, so this row must not advance the
+      // user/assistant source chain that infers direct-conversation roles.
+      const autonomousEntry = autonomousTurnEntry(keeperName, message)
+      if (autonomousEntry) entries.push(autonomousEntry)
+      return
+    }
     if (message.role === 'tool') {
       // Tool rows do not participate in user/assistant source chaining.
       const toolEntry = toolHistoryEntry(message)
       if (toolEntry) entries.push(toolEntry)
       return
     }
+    if (typeof message.content !== 'string') return
     const normalized = normalizeHistoryEntry(
       {
         id: message.id,

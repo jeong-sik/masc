@@ -642,6 +642,13 @@ export type KeeperConversationSource =
   | 'direct_assistant'
   | 'world_state_prompt'
   | 'internal_assistant'
+  // A keeper turn that ran without anyone addressing the keeper. These rows
+  // are not in the chat store — RFC-0351 §5 keeps the wake marker and inert
+  // prose out of the durable transcript — and are projected from the raw-trace
+  // store by Keeper_autonomous_turn_source. Visible by default but folded into
+  // one collapsed group, because they outnumber direct conversation heavily
+  // (a keeper wakes on the order of once a minute).
+  | 'autonomous_turn'
   | 'tool_result'
   | 'system'
   | 'unknown'

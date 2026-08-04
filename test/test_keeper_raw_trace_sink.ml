@@ -317,15 +317,32 @@ let test_prune_removes_oldest_beyond_retention () =
 
 (* P1b end-to-end: creating sinks turn after turn keeps the store at the
    documented steady-state bound (retained + the freshly materialized
-   turn file), with the oldest turn files the ones pruned. *)
+   turn file), with the oldest turn files the ones pruned.
+
+   The store is filled to the retention boundary with placeholder turn
+   files instead of by running [retained] real turns. The subject here is
+   the sink -> prune wiring, which three real sinks exercise as well as
+   thousands do; running the full retention count of real turns costs
+   ~50s and asserts nothing the placeholders do not. Prune ordering and
+   idempotence are asserted directly in
+   [test_prune_removes_oldest_beyond_retention].
+
+   Placeholder names carry a zero-based index where the writer stamps the
+   current epoch millisecond, so they always sort below a freshly minted
+   turn file and are the prune candidates. *)
 let test_sink_creation_enforces_retention_bound () =
   with_workspace @@ fun config ->
   let meta = make_test_meta () in
   let retained = Keeper_types_support.raw_trace_retained_turn_files in
-  let turns = retained + 3 in
-  let first_path = ref "" in
+  let dir = Keeper_types_support.keeper_raw_trace_dir config meta.name in
+  Fs_compat.mkdir_p dir;
+  let placeholder i = Printf.sprintf "turn-%013d-0000-%06d.jsonl" i i in
+  for i = 0 to retained - 1 do
+    write_file (Filename.concat dir (placeholder i)) "{}\n"
+  done;
+  let oldest_placeholder = Filename.concat dir (placeholder 0) in
   let last_path = ref "" in
-  for turn = 1 to turns do
+  for turn = 1 to 3 do
     let sink =
       sink_or_fail "keeper_raw_trace_sink"
         (Keeper_agent_run.For_testing.keeper_raw_trace_sink ~config ~meta)
@@ -333,16 +350,13 @@ let test_sink_creation_enforces_retention_bound () =
     let (_ref : Agent_sdk.Raw_trace.run_ref) =
       materialize_turn ~meta ~turn sink
     in
-    let path = Agent_sdk.Raw_trace.file_path sink in
-    if turn = 1 then first_path := path;
-    last_path := path
+    last_path := Agent_sdk.Raw_trace.file_path sink
   done;
-  let dir = Keeper_types_support.keeper_raw_trace_dir config meta.name in
   Alcotest.(check int) "store is bounded at retained + 1 files"
     (retained + 1)
     (List.length (jsonl_files dir));
   Alcotest.(check bool) "oldest turn file was pruned" false
-    (Sys.file_exists !first_path);
+    (Sys.file_exists oldest_placeholder);
   Alcotest.(check bool) "newest turn file was retained" true
     (Sys.file_exists !last_path)
 

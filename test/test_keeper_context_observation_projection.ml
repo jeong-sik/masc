@@ -30,6 +30,9 @@ let sample_record
   =
   { execution_ids = []
   ; keeper = "rondo"
+  ; agent_name = "rondo-agent"
+  ; generation = 7
+  ; turn_kind = Turn_record.Direct
   ; trace_id = sample_trace
   ; absolute_turn
   ; turn_ref = Ids.Turn_ref.make ~trace_id:sample_trace ~absolute_turn
@@ -50,6 +53,7 @@ let sample_record
   ; ttfrc_ms = None
   ; request_wire_observation =
       Some { runtime_profile = "glm-coding.glm-5-turbo"; body_bytes = 560_513 }
+  ; raw_trace_run_ref = None
   ; sampling =
       { temperature = None
       ; top_p = None

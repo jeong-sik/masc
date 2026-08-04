@@ -1002,9 +1002,67 @@ let keeper_chat_history_freshness config name =
      never conflated with a real (mtime, size) pair. A half-readable
      stat (racing writer) also maps to "absent", which only costs a
      recompute on the next request. *)
-  match Fs_compat.file_mtime path, Fs_compat.file_size path with
-  | Some mtime, Some size -> Printf.sprintf "%h:%d" mtime size
-  | Some _, None | None, Some _ | None, None -> "absent"
+  let chat_stamp =
+    match Fs_compat.file_mtime path, Fs_compat.file_size path with
+    | Some mtime, Some size -> Printf.sprintf "%h:%d" mtime size
+    | Some _, None | None, Some _ | None, None -> "absent"
+  in
+  (* Autonomous turns never touch the chat file, so the chat stat alone
+     would pin a stale body for the whole TTL. Raw trace creation and the
+     authoritative turn-record append are separate commits: directory mtime
+     observes the former but cannot prove the latter. Fingerprint the newest
+     physical turn-record row as well, so a record appended after a racing
+     cache compute invalidates that value on the next request. *)
+  let trace_stamp =
+    match Fs_compat.file_mtime (Keeper_types_support.keeper_raw_trace_dir config name) with
+    | Some mtime -> Printf.sprintf "%h" mtime
+    | None -> "absent"
+  in
+  let turn_record_stamp =
+    let store = Keeper_types_support.keeper_turn_record_store config name in
+    match
+      Dated_jsonl.find_latest_entry_result store (fun entry -> Some entry)
+    with
+    | Error error -> "error:" ^ Dated_jsonl.read_error_to_string error
+    | Ok None -> "absent"
+    | Ok (Some (Dated_jsonl.Parsed json)) ->
+      Yojson.Safe.to_string json |> Digest.string |> Digest.to_hex
+    | Ok (Some (Dated_jsonl.Malformed_json { path; line_number; detail })) ->
+      Printf.sprintf "malformed:%s:%s:%s" path
+        (Option.fold ~none:"unknown" ~some:string_of_int line_number)
+        detail
+  in
+  Printf.sprintf "%s|%s|%s" chat_stamp trace_stamp turn_record_stamp
+;;
+
+(* An autonomous turn is not a chat row and must not become one (see
+   {!Keeper_autonomous_turn_source}): it carries [autonomous_turn] so the
+   dashboard groups it instead of rendering it as conversation. [content]
+   repeats the terminal text so a client that ignores the field shows the
+   turn's outcome rather than an empty bubble. *)
+let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
+  let optional_fields =
+    List.filter_map Fun.id
+      [ Option.map (fun ts -> "finished_at", `Float ts) turn.finished_at
+      ; Option.map (fun model -> "model", `String model) turn.model
+      ; Option.map (fun reason -> "stop_reason", `String reason) turn.stop_reason
+      ]
+  in
+  `Assoc
+    [ "id", `String ("autonomous:" ^ turn.turn_id)
+    ; "role", `String "assistant"
+    ; "ts", `Float turn.started_at
+    ; ( "content"
+      , match turn.final_text with
+        | Some text -> `String text
+        | None -> `Null )
+    ; ( "autonomous_turn"
+      , `Assoc
+          (("turn_id", `String turn.turn_id)
+           :: ("agent_name", `String turn.agent_name)
+           :: ("generation", `Int turn.generation)
+           :: optional_fields) )
+    ]
 ;;
 
 let keeper_chat_history_json config name =
@@ -1028,7 +1086,25 @@ let keeper_chat_history_json config name =
         err;
       None
   in
-  Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages
+  let chat_rows = Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages in
+  (* Appended, not merged by timestamp: the client already sorts the whole
+     transcript by [ts] and breaks ties by original index, and rows the chat
+     store persisted without a [ts] must keep their relative order rather
+     than be repositioned by a sort here. *)
+  let autonomous_rows =
+    Keeper_autonomous_turn_source.load_recent ~config ~keeper_name:name ()
+    |> List.map autonomous_turn_json
+  in
+  match autonomous_rows, chat_rows with
+  | [], _ -> chat_rows
+  | _ :: _, `List rows -> `List (rows @ autonomous_rows)
+  | _ :: _, other ->
+    Log.Keeper.warn
+      "dashboard keeper chat history: chat store for %s did not emit an array; %d \
+       autonomous turn(s) omitted"
+      name
+      (List.length autonomous_rows);
+    other
 ;;
 
 let cached_keeper_chat_history_json config name =

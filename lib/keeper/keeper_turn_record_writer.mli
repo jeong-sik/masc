@@ -8,6 +8,9 @@
 val write :
   config:Workspace.config ->
   keeper_name:string ->
+  agent_name:string ->
+  generation:int ->
+  turn_kind:Turn_record.turn_kind ->
   trace_id:string ->
   absolute_turn:int ->
   runtime_profile:string ->
@@ -19,6 +22,7 @@ val write :
   request_latency_ms:int option ->
   ttfrc_ms:float option ->
   request_wire_observation:Turn_record.request_wire_observation option ->
+  raw_trace_run_ref:Turn_record.raw_trace_run_ref option ->
   sampling:Turn_record.sampling ->
   usage:Turn_record.usage ->
   execution_ids:Ids.Execution_id.t list ->

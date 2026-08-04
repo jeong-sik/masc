@@ -94,7 +94,13 @@ let raw_trace_file_extension = ".jsonl"
     traces; only the oldest persisted turn files beyond this count are
     deleted at sink-creation time.  The steady-state on-disk bound is
     [raw_trace_retained_turn_files + 1] files per keeper (the freshly
-    created turn file materializes after the prune that precedes it). *)
+    created turn file materializes after the prune that precedes it).
+
+    The count also bounds how far back the dashboard chat can show an
+    autonomous turn's public final text: the turn record keeps typed
+    identity and exact-run metadata, but the raw-trace store owns the body.
+    Dashboard display requirements do not enlarge this diagnostic-store
+    retention policy. *)
 let raw_trace_retained_turn_files = 200
 
 let keeper_raw_trace_dir config name =

@@ -385,13 +385,6 @@ let links_to_json links =
    The previous substring-based redaction (§2 anti-pattern) has been removed;
    public filtering now uses explicit allowlists in {!public_projection_of_decision}. *)
 
-let manifest_top_level_allowlist =
-  StringSet.of_list
-    [ "schema_version"; "ts"; "keeper_name"; "agent_name"; "trace_id"
-    ; "generation"; "keeper_turn_id"; "oas_turn_count"; "logical_seq"; "event"
-    ; "runtime_id"; "status"; "decision"; "links"
-    ]
-
 (* [trigger_detail] keys come from the encoder that writes them, not from a
    copy kept here. The flat list below used to name only "kind" and
    "limit_tokens", so a [Request_body_over_capacity] refusal reached the public
@@ -454,62 +447,6 @@ let decision_child_scope scope key =
   else if String.equal key Keeper_compaction_evidence.exact_evidence_key
   then Compaction_evidence
   else scope
-
-let rec reject_unknown_fields ~allowlist path = function
-  | `Assoc fields ->
-      List.find_map
-        (fun (key, value) ->
-          let full_path = if String.equal path "" then key else path ^ "." ^ key in
-          if StringSet.mem key allowlist then
-            reject_unknown_fields ~allowlist full_path value
-          else Some full_path)
-        fields
-  | `List values ->
-      values
-      |> List.mapi (fun idx value -> idx, value)
-      |> List.find_map (fun (idx, value) ->
-        reject_unknown_fields ~allowlist
-          (Printf.sprintf "%s[%d]" path idx)
-          value)
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> None
-
-let reject_retired_manifest_fields fields =
-  match
-    reject_unknown_fields
-      ~allowlist:manifest_top_level_allowlist
-      "" (`Assoc fields)
-  with
-  | Some path ->
-      Error
-        (Printf.sprintf
-           "retired runtime manifest field %S is no longer accepted" path)
-  | None -> Ok ()
-
-let reject_retired_decision_fields decision =
-  let rec check scope path = function
-    | `Assoc fields ->
-        let allowlist = decision_allowlist scope in
-        List.find_map
-          (fun (key, value) ->
-            let full_path = if String.equal path "" then key else path ^ "." ^ key in
-            if StringSet.mem key allowlist then
-              check (decision_child_scope scope key) full_path value
-            else Some full_path)
-          fields
-    | `List values ->
-        values
-        |> List.mapi (fun idx value -> idx, value)
-        |> List.find_map (fun (idx, value) ->
-          check scope (Printf.sprintf "%s[%d]" path idx) value)
-    | _ -> None
-  in
-  match check Decision "" decision with
-  | Some path ->
-      Error
-        (Printf.sprintf
-           "retired runtime manifest decision field %S is no longer accepted"
-           path)
-  | None -> Ok ()
 
 let rec public_projection_of_decision decision =
   let rec project scope path = function

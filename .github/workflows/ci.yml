@@ -1035,7 +1035,7 @@ jobs:
           operator_targets="@test/runtest-test_operator_control_snapshot_state @test/runtest-test_operator_control_snapshot @test/runtest-test_operator_control_snapshot_cache @test/runtest-test_model_map_of_keeper_rows"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${operator_targets}"
 
-      - name: Run SSE reconnect e2e
+      - name: Run SSE unit and reconnect suites
         id: sse_reconnect_e2e
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
@@ -1046,7 +1046,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune exec --root . ./test/test_sse_storm_e2e.exe"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_sse_coverage @test/runtest-test_ag_ui_coverage @test/runtest-test_sse_storm_e2e"
 
       - name: Run transport harness suite
         id: transport_harness_suite

@@ -141,8 +141,6 @@ let classify_mcp_accept = Server_mcp_transport_http.classify_mcp_accept
 
 let force_json_response = Server_mcp_transport_http.force_json_response
 
-let get_last_event_id = Server_mcp_transport_http.get_last_event_id
-
 let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
   let mcp_eio_profile_of_transport_profile = function
     | Server_mcp_transport_http.Full -> Mcp_server_eio.Full

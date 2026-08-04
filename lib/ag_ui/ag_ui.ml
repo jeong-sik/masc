@@ -77,7 +77,7 @@ type event = {
 }
 
 (** Create an event with defaults *)
-let make_event ?(run_id=None) ?(message_id=None) ?(role=None)
+let make_event ?(timestamp = Time_compat.now ()) ?(run_id=None) ?(message_id=None) ?(role=None)
     ?(delta=None) ?(step_name=None) ?(tool_call_id=None)
     ?(tool_call_name=None) ?(snapshot=None)
     ?(message=None) ?(code=None)
@@ -126,7 +126,7 @@ let make_event ?(run_id=None) ?(message_id=None) ?(role=None)
     code;
     custom_name;
     custom_value;
-    timestamp = Time_compat.now ();
+    timestamp;
   }
 
 let run_error ~thread_id ?run_id ~message ?code () =
@@ -162,124 +162,19 @@ let event_to_json (e : event) : Yojson.Safe.t =
     @ optional "name" (fun s -> `String s) e.custom_name
     @ optional "value" (fun j -> j) e.custom_value)
 
-(** Format as SSE data line.
-
-    Builds the [data: <json>\n\n] frame directly into a buffer, skipping the
-    intermediate [Yojson.Safe.to_string] allocation and the [Printf.sprintf]
-    frame allocation — one buffer + one final string instead of two
-    short-lived strings per event.  This is on the per-event streaming hot
-    path: every [keeper_stream_send_event] serializes via this function, so
-    Text_delta/tool-call events each pay this cost once per token/chunk.
-    Mirrors [Sse.format_event_yojson] (sse.ml).  Byte-identical output:
-    [Yojson.Safe.to_buffer] emits the same bytes as [Yojson.Safe.to_string]. *)
-let event_to_sse (e : event) : string =
-  let buf = Buffer.create 128 in
-  Buffer.add_string buf "data: ";
-  Yojson.Safe.to_buffer buf (event_to_json e);
-  Buffer.add_string buf "\n\n";
-  Buffer.contents buf
-
-(* ---------- MASC → AG-UI Event Mapping ---------- *)
+(** Format as SSE data through the transport's canonical JSON encoder. *)
+let event_to_sse ?id (e : event) : string =
+  Sse_wire.format_event_yojson ?id (event_to_json e)
 
 (** Default thread ID for the single-namespace AG-UI bridge. *)
 let default_thread_id = "default"
 
-(** Map MASC agent_session_bound to AG-UI RUN_STARTED *)
-let of_agent_session_bound ~agent_name : event =
-  make_event ~thread_id:default_thread_id
-    ~run_id:(Some agent_name)
-    ~custom_name:(Some "AGENT_SESSION_BOUND")
-    ~custom_value:(Some (`Assoc [("agent", `String agent_name)]))
-    Run_started
-
-(** Map MASC agent_unbound to AG-UI RUN_FINISHED *)
-let of_agent_unbound ~agent_name : event =
-  make_event ~thread_id:default_thread_id
-    ~run_id:(Some agent_name)
-    ~custom_name:(Some "AGENT_UNBOUND")
-    ~custom_value:(Some (`Assoc [("agent", `String agent_name)]))
-    Run_finished
-
-(** Map MASC broadcast message to AG-UI text message sequence.
-    Returns a list of 3 events: START, CONTENT, END *)
-let of_broadcast ~agent_name ~message ~message_id : event list =
-  let thread_id = default_thread_id in
-  let mid = Some message_id in
-  [
-    make_event ~thread_id ~run_id:(Some agent_name)
-      ~message_id:mid ~role:(Some Assistant)
-      Text_message_start;
-    make_event ~thread_id ~run_id:(Some agent_name)
-      ~message_id:mid ~delta:(Some message)
-      Text_message_content;
-    make_event ~thread_id ~run_id:(Some agent_name)
-      ~message_id:mid
-      Text_message_end;
-  ]
-
-(** Map MASC task claim to AG-UI STEP_STARTED *)
-let of_task_claimed ~agent_name ~task_id : event =
-  make_event ~thread_id:default_thread_id
-    ~run_id:(Some agent_name)
-    ~step_name:(Some task_id)
-    Step_started
-
-(** Map MASC task done to AG-UI STEP_FINISHED *)
-let of_task_done ~agent_name ~task_id : event =
-  make_event ~thread_id:default_thread_id
-    ~run_id:(Some agent_name)
-    ~step_name:(Some task_id)
-    Step_finished
-
-(** Map MASC tool call to AG-UI TOOL_CALL_START *)
-let of_tool_call ~agent_name ~tool_name ~call_id ~args_json : event list =
-  let thread_id = default_thread_id in
-  [
-    make_event ~thread_id ~run_id:(Some agent_name)
-      ~tool_call_id:(Some call_id)
-      ~tool_call_name:(Some tool_name)
-      Tool_call_start;
-    make_event ~thread_id ~run_id:(Some agent_name)
-      ~tool_call_id:(Some call_id)
-      ~delta:(Some args_json)
-      Tool_call_args;
-    make_event ~thread_id ~run_id:(Some agent_name)
-      ~tool_call_id:(Some call_id)
-      Tool_call_end;
-  ]
-
-(** Map MASC workspace state to AG-UI STATE_SNAPSHOT *)
-let of_workspace_state (state : Yojson.Safe.t) : event =
-  make_event ~thread_id:default_thread_id
-    ~snapshot:(Some state)
-    State_snapshot
-
 (** Map any MASC-specific event to AG-UI CUSTOM *)
-let of_custom ~name (value : Yojson.Safe.t) : event =
-  make_event ~thread_id:default_thread_id
+let of_custom ?timestamp ~name (value : Yojson.Safe.t) : event =
+  make_event ?timestamp ~thread_id:default_thread_id
     ~custom_name:(Some name)
     ~custom_value:(Some value)
     Custom
-
-(** Map MASC task_update JSON to appropriate AG-UI event.
-    Inspects the "status" field to determine the event type. *)
-let of_task_update (task_json : Yojson.Safe.t) : event =
-  let task_id = Safe_ops.json_string ~default:"unknown" "id" task_json in
-  let status = Safe_ops.json_string ~default:"" "status" task_json in
-  let agent = Safe_ops.json_string ~default:"unknown" "agent" task_json in
-  match status with
-  | "claimed" ->
-    of_task_claimed ~agent_name:agent ~task_id
-  | "done" ->
-    of_task_done ~agent_name:agent ~task_id
-  | _ ->
-    of_custom
-      ~name:"TASK_UPDATE"
-      (`Assoc [
-        ("taskId", `String task_id);
-        ("status", `String status);
-        ("agent", `String agent);
-      ])
 
 (** Protocol version *)
 let protocol_version = "0.1.0"

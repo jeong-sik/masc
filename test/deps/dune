@@ -6,6 +6,11 @@
 (copy_files ../../lib/server/server_grpc_tool_dispatch.ml)
 
 (library
+ (name masc_test_runtime)
+ (modules masc_test_runtime)
+ (libraries unix))
+
+(library
  (name masc_test_deps)
  (modules masc_test_deps server_grpc_tool_dispatch)
  (foreign_stubs

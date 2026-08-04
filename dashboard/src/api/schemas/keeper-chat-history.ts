@@ -20,6 +20,7 @@ import {
   array,
   boolean,
   literal,
+  nullable,
   number,
   object,
   optional,
@@ -252,7 +253,14 @@ export const KeeperChatHistoryMessageSchema = object({
   // it is absent.
   id: optional(string()),
   role: string(),
-  content: string(),
+  // Nullable because the autonomous-turn projection emits `null` when the
+  // turn produced no terminal text (server_dashboard_http_keeper_api.ml
+  // :1055-1058 maps `final_text = None` to `` `Null ``). A required
+  // `string()` dropped those rows at this boundary even though every
+  // consumer already guards the field (`typeof message.content !==
+  // 'string'` in keeper-state.ts :1683/:1733, `?? '공개된 응답 없음'`
+  // at :1651).
+  content: nullable(string()),
   ts: number(),
   // Tool-call rows (role === 'tool') persisted by keeper_chat_store.ml
   // carry the executed tool's id/name; `content` holds the accumulated
@@ -310,6 +318,19 @@ export const KeeperChatHistoryMessageSchema = object({
   // legacy endpoints; consumers fall back to explicit "history without stream
   // events" instead of inventing a lifecycle.
   stream_contract: optional(KeeperChatHistoryStreamContractSchema),
+  // Rows the backend projected from a typed autonomous turn — a turn the
+  // keeper ran on its own, which by design writes no chat-store row
+  // (server_dashboard_http_keeper_api.ml :1043-1065 builds
+  // `{turn_id, agent_name, generation}` plus optional
+  // `finished_at`/`model`/`stop_reason`). Its presence, not `role`, marks
+  // the row so the transcript folds consecutive turns into one group.
+  // Accepted as `unknown` for the same reason as `audio` and
+  // `delivery_key`: the consumer extracts it tolerantly (`isRecord` +
+  // `asString(turn_id)` in keeper-state.ts :1647-1649), so a field added
+  // on the backend must not drop the whole row. Without this key valibot's
+  // `object()` stripped it, and the consumer's `autonomous_turn`
+  // branch was unreachable.
+  autonomous_turn: optional(unknown()),
 })
 
 export type KeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>

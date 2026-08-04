@@ -189,9 +189,8 @@ val activate_owner_state
   -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
   -> initialized_owner_state
   -> activated_owner_state
-(** Shared HTTP/stdio commit protocol: restore the durable Gate, schedule the
-    bounded legacy-temp migration in an observed maintenance fiber under the
-    exclusive BasePath lease, publish the lazy-task barrier, claim canonical
+(** Shared HTTP/stdio commit protocol: restore the durable Gate, publish the
+    lazy-task barrier under the exclusive BasePath lease, claim canonical
     persistence ownership, then immediately start the affine Keeper token.
     Current request writers use a disjoint staging namespace, so forensic
     cleanup cannot hold readiness. Readiness remains an explicit transport

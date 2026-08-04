@@ -3988,23 +3988,20 @@ let test_lazy_startup_plan_groups_independent_tasks () =
   let groups = Server_runtime_bootstrap.lazy_startup_plan () in
   Alcotest.(check (list string))
     "group order"
-    [ "initialize"; "tool_state"; "cleanup" ]
+    [ "initialize"; "cleanup" ]
     (List.map
        (fun group -> group.Server_runtime_bootstrap.group_name)
        groups);
   match groups with
-  | [ initialize; tool_state; cleanup ] ->
+  | [ initialize; cleanup ] ->
       check_lazy_group initialize ~name:"initialize" ~execution:"parallel"
         ~tasks:[ "restore_sessions" ];
-      check_lazy_group tool_state ~name:"tool_state" ~execution:"serial"
-        ~tasks:[ "tool_metrics_restore" ];
       check_lazy_group cleanup ~name:"cleanup" ~execution:"serial"
         ~tasks:[ "jsonl_prune" ];
       Alcotest.(check (list string))
         "flattened task order"
         [
           "restore_sessions";
-          "tool_metrics_restore";
           "jsonl_prune";
         ]
         (Server_runtime_bootstrap.lazy_startup_task_names ())
@@ -4113,7 +4110,7 @@ let test_startup_state_lazy_inventory_does_not_publish_readiness () =
   Server_startup_state.mark_blocking ();
   (match
      Server_startup_state.prepare_lazy_tasks
-       ~tasks:[ "restore_sessions"; "tool_metrics_restore" ]
+       ~tasks:[ "restore_sessions" ]
    with
    | Ok () -> ()
    | Error error ->
@@ -4125,7 +4122,7 @@ let test_startup_state_lazy_inventory_does_not_publish_readiness () =
     (Server_startup_state.phase_to_string current.phase);
   Alcotest.(check (list string))
     "autoboot observes the complete lazy barrier"
-    [ "restore_sessions"; "tool_metrics_restore" ]
+    [ "restore_sessions" ]
     current.pending_lazy_tasks;
   Server_startup_state.mark_state_ready ()
   |> Result.get_ok;

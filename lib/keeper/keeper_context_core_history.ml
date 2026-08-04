@@ -1,4 +1,4 @@
-(** History JSONL migration and persistence helpers for keeper context. *)
+(** History JSONL routing and persistence helpers for keeper context. *)
 
 open Keeper_types
 open Keeper_meta_contract

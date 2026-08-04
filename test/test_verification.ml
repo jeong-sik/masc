@@ -249,7 +249,6 @@ let test_system_llm_review_notes_are_metadata_only () =
               ; content = "secret artifact content must not be duplicated"
               ; bytes = 42
               ; truncated = true
-              ; content_sha256 = "sha256-proof"
               }
           ; VS.Evidence_artifact_unreadable
               { reference = "artifact:missing.txt"; reason = VS.Evidence_missing }
@@ -295,15 +294,9 @@ let test_system_llm_review_notes_are_metadata_only () =
     false
     (contains_substring notes "secret criterion should stay in the audit store");
   Alcotest.(check bool)
-    "artifact hash remains observable"
+    "artifact reference remains observable"
     true
-    (contains_substring notes "sha256-proof");
-  Alcotest.(check bool)
-    "note hash remains observable"
-    true
-    (contains_substring
-       notes
-       (Digestif.SHA256.(digest_string "secret narrative must not be duplicated" |> to_hex)));
+    (contains_substring notes "artifact:proof.txt");
   Alcotest.(check bool)
     "truncation remains observable"
     true
@@ -1365,19 +1358,15 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
     | VS.Evidence_available
         { items =
             VS.Evidence_artifact
-              { reference = "artifact:artifacts/proof.txt"
-              ; content = "docker-relative-proof"
-              ; content_sha256
-              ; _
-              }
+              { reference = "artifact:artifacts/proof.txt"; content; _ }
             :: VS.Evidence_note "executor summary"
             :: []
         ; _
         } ->
       Alcotest.(check string)
-        "snapshot hash covers persisted bounded content"
-        Digestif.SHA256.(digest_string "docker-relative-proof" |> to_hex)
-        content_sha256
+        "snapshot persists the bounded artifact content"
+        "docker-relative-proof"
+        content
     | _ ->
       (match
          inspect_evidence

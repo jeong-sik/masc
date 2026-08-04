@@ -2,10 +2,7 @@
   "managed_by": "MASC",
   "schema": "masc.prompt-managed-assets.v1",
   "paths": [
-    "analysis.dry_run.md",
     "behavior/conversation_routing.md",
-    "dashboard.gate_judge.md",
-    "deliberation.decision.md",
     "keeper.board_attention_judgment_batch.md",
     "keeper.deliberation.md",
     "keeper.gate_judgment.md",

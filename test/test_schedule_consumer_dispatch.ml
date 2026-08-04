@@ -874,7 +874,7 @@ let test_reclaim_follows_transfer_durable_state () =
       (Filename.concat
          (Common.keepers_runtime_dir_of_base ~base_path)
          target_keeper)
-      "event-queue-transitions-v5.jsonl"
+      "event-queue-transitions-v6.jsonl"
   in
   check string "checkpointed transition WAL compacted" ""
     (read_file transition_wal_path);
@@ -1082,7 +1082,7 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
   let wal_path =
     Filename.concat
       (Filename.dirname queue_path)
-      "event-queue-transitions-v5.jsonl"
+      "event-queue-transitions-v6.jsonl"
   in
   Sys.remove queue_path;
   let outcome =
@@ -1149,15 +1149,37 @@ let test_wal_only_owner_is_recovered_and_settled () =
   let request = create_keeper_wake_schedule config in
   ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
   let execution = latest_execution_exn config request in
+  let sibling : Keeper_event_queue.stimulus =
+    { post_id = "wal-only-sibling"
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = 201.5
+    ; payload = Keeper_event_queue.Bootstrap
+    }
+  in
+  (match
+     Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+       ~base_path
+       ~keeper_name
+       sibling
+   with
+   | Ok Keeper_event_queue_persistence.Enqueued -> ()
+   | Ok Keeper_event_queue_persistence.Already_present ->
+     fail "fresh WAL-only sibling was already present"
+   | Error detail -> fail detail);
   let state =
     Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
     |> Result.fold ~ok:Fun.id ~error:(fun message -> fail message)
   in
   let selection =
-    match Keeper_event_queue_state.pending_selections state with
-    | [ selection ] -> selection
-    | selections ->
-      failf "expected one WAL-only fixture selection, got %d" (List.length selections)
+    let selections = Keeper_event_queue_state.pending_selections state in
+    check int "WAL-only fixture includes source and sibling" 2
+      (List.length selections);
+    selections
+    |> List.find_opt (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      selection.source <> sibling)
+    |> function
+    | Some selection -> selection
+    | None -> fail "WAL-only source selection disappeared"
   in
   let source_terminal : Keeper_event_queue_state.accepted_source_terminal =
     { source = selection.source
@@ -1196,10 +1218,21 @@ let test_wal_only_owner_is_recovered_and_settled () =
       keeper_name
   in
   let snapshot_path = Filename.concat keeper_dir "event-queue-v15.json" in
-  let wal_path = Filename.concat keeper_dir "event-queue-transitions-v5.jsonl" in
+  let wal_path = Filename.concat keeper_dir "event-queue-transitions-v6.jsonl" in
   let wal_row =
     `Assoc
-      [ "schema", `String "masc.keeper_event_queue.transition.v5"
+      [ "schema", `String "masc.keeper_event_queue.transition.v6"
+      ; "base_path", `String base_path
+      ; "keeper_name", `String keeper_name
+      ; "pre_state", Keeper_event_queue_state.to_yojson state
+      ; "outbox_entry", Keeper_event_queue_state.outbox_entry_to_yojson entry
+      ]
+    |> Yojson.Safe.to_string
+    |> fun row -> row ^ "\n"
+  in
+  let incomplete_wal_row =
+    `Assoc
+      [ "schema", `String "masc.keeper_event_queue.transition.v6"
       ; "base_path", `String base_path
       ; "keeper_name", `String keeper_name
       ; "outbox_entry", Keeper_event_queue_state.outbox_entry_to_yojson entry
@@ -1216,6 +1249,14 @@ let test_wal_only_owner_is_recovered_and_settled () =
    with
    | Error _ -> ()
    | Ok _ -> fail "malformed WAL-only owner was accepted");
+  write_file wal_path incomplete_wal_row;
+  (match
+     Keeper_event_queue_persistence.load_existing_state_result
+       ~base_path
+       ~keeper_name
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "WAL-only owner without complete pre-state was accepted");
   write_file wal_path wal_row;
   let validated =
     Keeper_event_queue_persistence.validate_existing_state_read_only_result
@@ -1235,6 +1276,10 @@ let test_wal_only_owner_is_recovered_and_settled () =
   in
   check int "WAL-only loader restores the committed outbox" 1
     (List.length (Keeper_event_queue_state.transition_outbox recovered));
+  check bool "WAL-only loader preserves sibling pending work" true
+    (Keeper_event_queue_state.pending recovered
+     |> Keeper_event_queue.to_list
+     |> List.exists (( = ) sibling));
   let discovery =
     Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
       ~base_path
@@ -1257,6 +1302,10 @@ let test_wal_only_owner_is_recovered_and_settled () =
   in
   check int "WAL-only recovery retires the outbox" 0
     (List.length (Keeper_event_queue_state.transition_outbox projected));
+  check bool "WAL-only projection preserves sibling pending work" true
+    (Keeper_event_queue_state.pending projected
+     |> Keeper_event_queue.to_list
+     |> List.exists (( = ) sibling));
   let outcome =
     Schedule_runner.reclaim_lost_occurrences
       ~consumer:Server_schedule_consumers.consumer
@@ -2180,7 +2229,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
           (Filename.concat
              (Common.keepers_runtime_dir_of_base ~base_path)
              keeper_name)
-          "event-queue-transitions-v5.jsonl"
+          "event-queue-transitions-v6.jsonl"
       in
       check bool "cancellation WAL survives until projection" true
         (Sys.file_exists transition_wal_path

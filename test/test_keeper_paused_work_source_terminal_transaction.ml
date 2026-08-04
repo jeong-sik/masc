@@ -472,6 +472,12 @@ let test_reinserted_source_rejects_old_terminal_incarnation () =
 
 let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
   with_source_terminal_lane (fun config keeper_name _meta request ->
+    let pre_state =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load source-terminal ACK pre-state"
+    in
     let first =
       Transaction.ack_pending config ~keeper_name request
       |> Result.map_error Transaction.error_to_string
@@ -509,13 +515,14 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
         (Filename.concat
            (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
            keeper_name)
-        "event-queue-transitions-v5.jsonl"
+        "event-queue-transitions-v6.jsonl"
     in
     let residual_wal_row =
       `Assoc
-        [ "schema", `String "masc.keeper_event_queue.transition.v5"
+        [ "schema", `String "masc.keeper_event_queue.transition.v6"
         ; "base_path", `String config.Workspace.base_path
         ; "keeper_name", `String keeper_name
+        ; "pre_state", State.to_yojson pre_state
         ; "outbox_entry", State.outbox_entry_to_yojson outbox_entry
         ]
     in
@@ -594,6 +601,12 @@ let test_projected_wal_recovery_allows_next_source_ack () =
       ~keeper_name
       (fun pending -> Queue.enqueue pending second_source)
     |> require_ok "seed second source-terminal event";
+    let first_pre_state =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load first source-terminal ACK pre-state"
+    in
     let first_request = request in
     let first =
       Transaction.ack_pending config ~keeper_name first_request
@@ -622,13 +635,14 @@ let test_projected_wal_recovery_allows_next_source_ack () =
         (Filename.concat
            (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
            keeper_name)
-        "event-queue-transitions-v5.jsonl"
+        "event-queue-transitions-v6.jsonl"
     in
     let residual_wal_row =
       `Assoc
-        [ "schema", `String "masc.keeper_event_queue.transition.v5"
+        [ "schema", `String "masc.keeper_event_queue.transition.v6"
         ; "base_path", `String config.Workspace.base_path
         ; "keeper_name", `String keeper_name
+        ; "pre_state", State.to_yojson first_pre_state
         ; "outbox_entry", State.outbox_entry_to_yojson first_outbox
         ]
     in

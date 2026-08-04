@@ -575,6 +575,9 @@ export interface DashboardExecutionResponse {
   offline_worker_briefs?: unknown[]
   agents?: unknown[]
   tasks?: unknown[]
+  /** Backlog counts computed server-side. `total` is the whole backlog, while
+   *  `tasks` above carries only the rows the payload chose to send. */
+  task_counts?: unknown
   messages?: unknown[]
   keepers?: unknown[]
 }

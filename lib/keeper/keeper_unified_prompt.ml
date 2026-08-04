@@ -503,7 +503,12 @@ let format_task_cancellation_observations
       ("### Cancelled Tasks You Created ("
        ^ string_of_int (List.length rows)
        ^ ")\n"
-       ^ "Rows below record Tasks you created that another Keeper cancelled. "
+       (* "another actor", not "another Keeper": the wake is enqueued for any
+          canceller, and an operator cancelling a Task is routine. Naming the
+          canceller a Keeper would assign an operator's decision to a peer and
+          change how the author follows it up. The cancelled_by field on each
+          row carries who it actually was. *)
+       ^ "Rows below record Tasks you created that another actor cancelled. "
        ^ "They are observations, not instructions: the cancellation already "
        ^ "committed, and an empty reason means none was given. Re-read the "
        ^ "current Task and backlog state before re-filing, reassigning, or "

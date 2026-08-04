@@ -30,6 +30,7 @@ vi.mock('../store', () => ({
   goals: signal([]),
   tasks: signal([]),
   keepers: signal([]),
+  executionTaskTotal: signal<number | null>(null),
   refreshGoals: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -57,7 +58,7 @@ vi.mock('./repository-management', () => ({
   RepositoryManagement: () => html`<div data-testid="repository-panel">Repositories</div>`,
 }))
 
-import { goals, keepers, tasks } from '../store'
+import { executionTaskTotal, goals, keepers, tasks } from '../store'
 import { goalTreeData } from '../goal-tree-state'
 import { selectedTask } from './goals/task-detail-selection'
 import { showGoalCreate } from './goals/goal-create-state'
@@ -159,6 +160,9 @@ describe('Work', () => {
     goals.value = []
     tasks.value = []
     keepers.value = []
+    // Reset the reported backlog total too: it is a signal, so a value left by
+    // one test would silently drive every KPI assertion after it.
+    executionTaskTotal.value = null
     goalTreeData.value = null
     showGoalCreate.value = false
   })
@@ -876,6 +880,59 @@ describe('Work', () => {
           .querySelector('[data-testid="wka-blocker-item"]')
         expect(item?.textContent).toContain('superseded by G-2')
         expect(item?.textContent).not.toContain('waiting on sandbox')
+      })
+
+      it('leaves cancelled tasks out of the goal progress denominator', () => {
+        // Cancelled tasks were skipped for every numerator bucket while still
+        // counted in the total, so a goal whose only other task is complete
+        // sat at 1/2 and could never reach 1/1. Work called off is not work
+        // left to do.
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'J-done', title: 'Finished', goal_id: 'G-1', status: 'done' },
+          { id: 'J-cancelled', title: 'Called off', goal_id: 'G-1', status: 'cancelled', cancelled_by: 'keeper-rondo-agent' },
+        ]
+
+        render(html`<${Work} />`)
+
+        const card = screen.getByTestId('goal-card')
+        expect(card.textContent).toContain('1/1')
+        expect(card.textContent).not.toContain('1/2')
+      })
+
+      it('uses the reported backlog total over the rows the payload sent', () => {
+        // The payload sends active tasks plus a bounded window of recent
+        // terminal ones. Counting those rows understates a tile labelled
+        // 전체 작업 for every task that has left the window — which is where
+        // cancellations end up.
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'J-1', title: 'Visible', goal_id: 'G-1', status: 'in_progress' },
+        ]
+        executionTaskTotal.value = 137
+
+        render(html`<${Work} />`)
+
+        expect(screen.getByTestId('kpi-tasks')).toHaveTextContent('137')
+      })
+
+      it('falls back to the visible rows when no backlog total is reported', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'J-1', title: 'One', goal_id: 'G-1', status: 'in_progress' },
+          { id: 'J-2', title: 'Two', goal_id: 'G-1', status: 'cancelled', cancelled_by: 'keeper-rondo-agent' },
+        ]
+        executionTaskTotal.value = null
+
+        render(html`<${Work} />`)
+
+        expect(screen.getByTestId('kpi-tasks')).toHaveTextContent('2')
       })
 
       it('counts cancelled tasks in the 전체 작업 total', () => {

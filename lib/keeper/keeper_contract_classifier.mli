@@ -3,10 +3,12 @@
 type actionable_signal =
   | Has_unclaimed_tasks
   | Has_completion_authority_rejection
+  | Has_task_cancellation
   | Has_board_activity
   | No_actionable_signal
       (** Caller observed neither claimable tasks, completion-authority
-          decisions, nor Board activity in the structured world snapshot. *)
+          decisions, cancellations of Tasks it authored, nor Board activity in
+          the structured world snapshot. *)
 
 val actionable_signal_label : actionable_signal -> string
 
@@ -26,6 +28,10 @@ type world_observation = {
   completion_authority_rejection_count : int;
       (** Count of typed rejection decisions from the system LLM completion
           authority. This is separate from [board_activity_count]. *)
+  task_cancellation_count : int;
+      (** Count of cancellations of Tasks this Keeper authored. Separate from
+          [board_activity_count] because no Board post backs a cancellation;
+          folding it in there would misreport the reason the turn ran. *)
 }
 
 (** Project the full keeper heartbeat observation into the compact advisory

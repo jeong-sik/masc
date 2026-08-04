@@ -92,6 +92,12 @@ export const tasks = signal<Task[]>([])
 export const messages = signal<Message[]>([])
 export const keepers = signal<Keeper[]>([])
 export const serverStatus = signal<ServerStatus | null>(null)
+// Authoritative backlog size from the execution payload's `task_counts.total`.
+// The `tasks` signal holds only what the payload chose to send — active rows
+// plus a bounded window of recent terminal ones — so counting it understates a
+// tile labelled 전체 작업, most visibly for cancellations, which leave the
+// window and then appear nowhere. Null when the payload omits the count.
+export const executionTaskTotal = signal<number | null>(null)
 export const executionLoaded = signal(false)
 export const executionLoading = signal(false)
 export const executionError = signal<string | null>(null)
@@ -870,6 +876,9 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     .map(normalizeTask)
     .filter((row): row is Task => row !== null)
   setArrayByKeyIfChanged(tasks, normalizedTasks, t => t.id, stableValueEqual)
+  executionTaskTotal.value = isRecord(data.task_counts)
+    ? asNumber(data.task_counts.total) ?? null
+    : null
   const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
     .map(normalizeMessage)
     .filter((row): row is Message => row !== null)

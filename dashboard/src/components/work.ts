@@ -6,7 +6,7 @@ import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { route, navigate } from '../router'
-import { goals, tasks, keepers } from '../store'
+import { goals, tasks, keepers, executionTaskTotal } from '../store'
 import { goalTreeData } from '../goal-tree-state'
 import { normalizeTask } from '../store-normalizers'
 import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
@@ -225,9 +225,13 @@ function normalizeGoalStoreTaskStatus(value: unknown): GoalStoreTaskStatus {
 }
 
 function goalProgressCounts(goalTasks: Task[]): GoalProgressCounts {
-  const counts: GoalProgressCounts = { done: 0, wip: 0, verify: 0, blocked: 0, total: goalTasks.length }
-  for (const t of goalTasks) {
-    if (t.status === 'cancelled') continue
+  // Cancelled tasks leave the denominator as well as the numerators. They were
+  // already skipped for every bucket while still counted in `total`, so a goal
+  // with one completed and one cancelled task sat at 50% and could never
+  // reach 100%. Work that was called off is not work left to do.
+  const active = goalTasks.filter(t => t.status !== 'cancelled')
+  const counts: GoalProgressCounts = { done: 0, wip: 0, verify: 0, blocked: 0, total: active.length }
+  for (const t of active) {
     const bucket = jobStateForTask(t).bucket
     if (bucket === 'done') counts.done++
     else if (bucket === 'blocked') counts.blocked++
@@ -1263,18 +1267,23 @@ function WorkSurfaceV2() {
   // always derived from the merged task set so execution and tree tasks are
   // counted consistently.
   //
-  // The "전체 작업" tile counts every task. It previously ran off a set with
-  // cancelled filtered out while `done` stayed in, so a total labelled 전체 was
-  // short by exactly the cancelled tasks — the same tasks the rest of this view
-  // was hiding. The remaining sub-counts filter on status, which no cancelled
-  // task matches, so they need no separate set.
+  // The "전체 작업" tile counts every task, so it reads the backlog size the
+  // execution payload reports rather than counting the rows it happened to
+  // send. Those rows are active tasks plus a bounded window of recent terminal
+  // ones; anything older is in neither that window nor the goal tree, and
+  // cancellations leave the window like everything else. Counting the visible
+  // set understated a total labelled 전체 — and it previously ran off a set
+  // with cancelled filtered out while `done` stayed in, so it was short by the
+  // cancelled tasks twice over. The visible count remains the fallback for a
+  // payload that omits task_counts. The sub-counts below are deliberately
+  // visible-set counts: they describe rows this view can show.
   const totals = useMemo(() => ({
     goals: goalTreeSnapshot?.summary.active_goals ?? goalList.length,
-    tasks: claimedTasks.length,
+    tasks: executionTaskTotal.value ?? claimedTasks.length,
     wip: claimedTasks.filter(t => t.status === 'in_progress' || t.status === 'claimed').length,
     verify: claimedTasks.filter(t => t.status === 'awaiting_verification').length,
     backlog: claimedTasks.filter(t => isClaimableBacklogTask(t)).length,
-  }), [goalTreeSnapshot, goalList, claimedTasks])
+  }), [goalTreeSnapshot, goalList, claimedTasks, executionTaskTotal.value])
 
   // Goal title lookup: prefer execution-side goalList titles, but fall back
   // to Goal Store tree titles so tree-only goals still render context.

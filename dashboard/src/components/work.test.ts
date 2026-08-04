@@ -794,12 +794,16 @@ describe('Work', () => {
             handoff_context: { summary: '', reason: 'dependency unavailable' },
           },
           {
+            // The canceller's reason arrives top-level, the way the API
+            // flattens it out of the task status. Putting it in
+            // handoff_context here would pass even if the top-level reason
+            // were dropped on the way in.
             id: 'J-cancelled',
             title: 'Ended Task',
             goal_id: 'G-1',
             status: 'cancelled',
             cancelled_by: 'keeper-rondo-agent',
-            handoff_context: { summary: '', reason: 'BLOCKED: service absent from sandbox' },
+            reason: 'BLOCKED: service absent from sandbox',
           },
         ]
 
@@ -817,6 +821,61 @@ describe('Work', () => {
         expect(cancelled?.textContent).toContain('취소')
         expect(cancelled?.textContent).toContain('keeper-rondo-agent')
         expect(cancelled?.textContent).toContain('BLOCKED: service absent from sandbox')
+      })
+
+      it('labels a cancellation 취소 even when no canceller is carried', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        // Not every projection feeding this list carries the actor. Deriving
+        // the label from the actor rather than the status relabelled those
+        // cancellations as blocks, which is the separation this row exists for.
+        tasks.value = [
+          {
+            id: 'J-actorless',
+            title: 'Ended Without Actor',
+            goal_id: 'G-1',
+            status: 'cancelled',
+            reason: 'superseded by G-2',
+          },
+        ]
+
+        render(html`<${Work} />`)
+
+        const item = screen
+          .getByTestId('work-aside')
+          .querySelector('[data-testid="wka-blocker-item"]')
+        expect(item?.textContent).toContain('취소')
+        expect(item?.textContent).not.toContain('차단')
+        expect(item?.textContent).toContain('superseded by G-2')
+      })
+
+      it('prefers the task reason over an older handoff note on a cancellation', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        // handoff_context is a note the assignee left while working; the task
+        // reason is why the cancellation happened. Showing the note would
+        // answer a question the operator did not ask.
+        tasks.value = [
+          {
+            id: 'J-both',
+            title: 'Ended Task',
+            goal_id: 'G-1',
+            status: 'cancelled',
+            cancelled_by: 'keeper-rondo-agent',
+            reason: 'superseded by G-2',
+            handoff_context: { summary: '', reason: 'waiting on sandbox' },
+          },
+        ]
+
+        render(html`<${Work} />`)
+
+        const item = screen
+          .getByTestId('work-aside')
+          .querySelector('[data-testid="wka-blocker-item"]')
+        expect(item?.textContent).toContain('superseded by G-2')
+        expect(item?.textContent).not.toContain('waiting on sandbox')
       })
 
       it('counts cancelled tasks in the 전체 작업 total', () => {

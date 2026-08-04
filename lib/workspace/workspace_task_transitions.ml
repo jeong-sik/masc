@@ -478,11 +478,31 @@ let transition_task_outcome_r
                ?reason:(trim_opt (Some reason))
                ?handoff_context:backlog_update.persisted_handoff_context
                ());
+          (* Post-commit projection, isolated like the terminal hook below. The
+             backlog write already committed, so letting [broadcast] escape here
+             would report a committed transition as [IoError] and skip both the
+             activity event and [task_terminal_committed_fn] — the author would
+             never be woken about a cancellation that did happen, which is the
+             failure this change exists to remove. [Eio.Cancel.Cancelled] still
+             propagates: a cancelled fiber must not be resumed. *)
           (match transition_broadcast_content ~action ~task_id ~reason with
            | None -> ()
            | Some content ->
-             let _ = broadcast config ~from_agent:agent_name ~content in
-             ());
+             (try
+                let (_ : Workspace_broadcast.broadcast_delivery) =
+                  broadcast config ~from_agent:agent_name ~content
+                in
+                ()
+              with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn ->
+                Log.TaskState.error
+                  "task transition committed but broadcast failed task_id=%s \
+                   agent=%s action=%s detail=%s"
+                  task_id
+                  agent_name
+                  action_s
+                  (Printexc.to_string exn)));
           (match action with
            | Masc_domain.Claim ->
              emit_task_activity config ~agent_name ~task_id

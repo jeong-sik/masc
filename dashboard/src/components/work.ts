@@ -100,7 +100,11 @@ function jobStateForTask(task: Task): JobState {
 
 function blockerNoteForTask(task: Task): string | null {
   if (task.status === 'cancelled') {
-    return task.handoff_context?.reason
+    // The canceller's stated reason arrives on the task itself; handoff_context
+    // is a note the assignee left and is usually absent on a plain cancel, so
+    // reading it first would show the older note instead of why this stopped.
+    return task.reason
+      ?? task.handoff_context?.reason
       ?? task.handoff_context?.failure_mode
       ?? 'cancelled'
   }
@@ -698,10 +702,14 @@ interface WkaBlockerTask {
   readonly title: string
   readonly blocker: string
   readonly goalId: string
-  /** Set only for status=cancelled. A cancellation and a stall both landed in
+  /** Carried from the task status. A cancellation and a stall both landed in
    *  this list under the same 차단 label, which made an operator unable to tell
-   *  "someone ended this" from "this is stuck", and the canceller was never
-   *  shown even though the API sends it. */
+   *  "someone ended this" from "this is stuck". The status decides the label;
+   *  deriving it from `cancelledBy` instead would relabel every cancellation
+   *  that reaches this list without an actor as a block. */
+  readonly cancelled: boolean
+  /** The canceller, when the projection supplying this row carries one. Controls
+   *  only whether the actor is named, never whether the row reads as cancelled. */
   readonly cancelledBy?: string
 }
 
@@ -1110,7 +1118,7 @@ function WorkAside({
                 onClick=${() => onJump(t.goalId)}
                 data-testid="wka-blocker-item"
               >
-                <span class="wka-todo-k">${t.cancelledBy === undefined ? '차단' : '취소'}</span>
+                <span class="wka-todo-k">${t.cancelled ? '취소' : '차단'}</span>
                 <span class="wka-todo-t">${t.title}</span>
                 <span class="wka-todo-m">${t.cancelledBy === undefined ? t.blocker : `${t.cancelledBy} · ${t.blocker}`}</span>
               </button>
@@ -1365,6 +1373,7 @@ function WorkSurfaceV2() {
         title: t.title,
         blocker: blockerNoteForTask(t) ?? '',
         goalId: t.goal_id ?? '',
+        cancelled: t.status === 'cancelled',
         cancelledBy: t.status === 'cancelled' ? (t.cancelled_by ?? undefined) : undefined,
       })),
   [claimedTasks])

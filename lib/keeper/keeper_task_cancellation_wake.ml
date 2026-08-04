@@ -39,10 +39,16 @@ let outcome_label = function
 
    Both directions are tried for each actor: an actor string is a Keeper if it
    names a Keeper lane directly, or if it is the agent name bound to one.
-   Anything else — an operator, a client id, a retired Keeper — has no lane. *)
+   Anything else — an operator, a client id, a retired Keeper — has no lane.
+
+   Every lookup is scoped to [config.base_path]. A Keeper of the same name in
+   another workspace is not a lane here: enqueueing to it would write a
+   stimulus under this workspace's path that its own Keeper never reads, and
+   report delivery for a wake nobody receives. *)
 let keeper_of_actor ~config ~actor =
+  let base_path = config.Workspace.base_path in
   let names_a_keeper_lane name =
-    Option.is_some (Keeper_registry_lookup.find_by_name name)
+    Option.is_some (Keeper_registry_lookup.find_by_name_in_base_path ~base_path name)
     || List.exists
          (String.equal name)
          (Keeper_meta_store.persisted_keeper_names config)

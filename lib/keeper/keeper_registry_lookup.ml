@@ -14,6 +14,11 @@ let find_by_name name =
   |> List.find_opt (fun (v : registry_entry) -> String.equal v.name name)
 ;;
 
+let find_by_name_in_base_path ~base_path name =
+  Keeper_registry.all ~base_path ()
+  |> List.find_opt (fun (v : registry_entry) -> String.equal v.name name)
+;;
+
 let find_by_agent_name agent_name =
   Keeper_registry.all ()
   |> List.find_opt (fun (v : registry_entry) ->

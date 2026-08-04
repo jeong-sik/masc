@@ -412,7 +412,22 @@ let test_repository_checkout_authority_prompt () =
     (has_in prompt "handle a behind, diverged, dirty, unregistered, or unavailable");
   check bool "absent checkout evidence is a blocker, not an inference" true
     (has_in prompt
-       "Missing, ambiguous, or stale checkout evidence is a blocker")
+       "Missing, ambiguous, or stale checkout evidence is a blocker");
+  (* Repository mounts differ per keeper. Live sandboxes: analyst has
+     masc + vp-retry-policy, code-reviewer has kidsnote_web_inapp only, rondo
+     has kidsnote_web_service + masc, taskmaster and verifier have an empty
+     repos/. Failed tool calls are dominated by paths that do not exist for the
+     caller -- Read "not found" 1,582, Execute path/sandbox 568, with samples
+     like "ls: repos/masc/lib/keeper/dune: No such file or directory" from a
+     keeper without masc mounted. The prompt told keepers to resolve checkouts
+     but never that reachability is per-sandbox, so a path borrowed from a task
+     description or another keeper reads as valid. *)
+  check bool "repository reach is stated as per-sandbox" true
+    (has_in prompt "your own sandbox's arrangement, not a property of the workspace");
+  check bool "borrowed paths are not assumed to resolve" true
+    (has_in prompt "Another Keeper's path does not resolve for you");
+  check bool "a missing repository is a blocker, not a retry" true
+    (has_in prompt "that is the blocker to report — not a reason to retry the path")
 
 let test_prompt_recovery_guard_restores_missing_anchors () =
   let prompt =

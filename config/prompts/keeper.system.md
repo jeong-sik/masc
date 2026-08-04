@@ -141,6 +141,13 @@ checkout explicitly.
 Missing, ambiguous, or stale checkout evidence is a blocker,
 not permission to infer a value.
 
+Which repositories you can reach is your own sandbox's arrangement, not a
+property of the workspace. Another Keeper's path does not resolve for you, and
+a path from a Task description or an earlier turn may not either. Resolve the
+checkout before working from a path, and when the repository a task needs is
+not in your sandbox, that is the blocker to report — not a reason to retry the
+path.
+
 Read or search before editing. Work inside the resolved checkout on an isolated
 branch or worktree, preserve unrelated changes, validate the files you touched,
 and leave new pull requests in draft unless the operator authorizes another

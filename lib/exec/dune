@@ -14,7 +14,6 @@
   masc_process
   masc_core
   masc_config
-  masc_exec_shell_words
   eio
   unix
   yojson

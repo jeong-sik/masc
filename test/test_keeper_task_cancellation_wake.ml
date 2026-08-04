@@ -234,6 +234,32 @@ let test_ambiguous_canceller_suppresses_delivery () =
       (List.length (queued_cancellations ~base_path:config.base_path ~keeper_name:"alpha")))
 ;;
 
+(* [cancelled_by] holds the acting agent name verbatim, so a non-Keeper actor
+   lands here under its own id. When that id happens to equal a Keeper lane —
+   an operator called "sangsu" against lane "sangsu", whose agent is
+   "keeper-sangsu-agent" — resolving it as a lane, or comparing the raw string
+   against [created_by], read as a self-cancellation and swallowed the wake the
+   author was owed. A canceller with no lane is not the author, who has one. *)
+let test_operator_sharing_the_author_lane_name_still_delivers () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent";
+    seed_task
+      config
+      ~task_id:"task-177"
+      ~created_by:(Some "sangsu")
+      ~status:(cancelled ~by:"sangsu" ~reason:(Some "operator stood the work down"));
+    let outcome =
+      Wake.notify_author ~config ~cancelling_agent_name:"sangsu" ~task_id:"task-177"
+    in
+    check string "an operator cancellation still reaches the author" "delivered"
+      (Wake.outcome_label outcome);
+    match queued_cancellations ~base_path:config.base_path ~keeper_name:"sangsu" with
+    | [ cancellation ] ->
+      check string "canceller recorded as written" "sangsu"
+        cancellation.Event_queue.tc_cancelled_by
+    | queued -> failf "expected one queued cancellation, got %d" (List.length queued))
+;;
+
 let test_author_without_a_keeper_lane_is_not_an_error () =
   with_workspace (fun config ->
     ensure_keeper config ~keeper_name:"rondo" ~agent_name:"keeper-rondo-agent";
@@ -366,6 +392,8 @@ let () =
     ; ( "declined"
       , [ test_case "handoff reason reaches the author" `Quick
             test_handoff_reason_reaches_the_author_when_the_status_carries_none
+        ; test_case "operator sharing the author lane name still delivers" `Quick
+            test_operator_sharing_the_author_lane_name_still_delivers
         ; test_case "ambiguous canceller suppresses delivery" `Quick
             test_ambiguous_canceller_suppresses_delivery
         ; test_case "author without a keeper lane" `Quick

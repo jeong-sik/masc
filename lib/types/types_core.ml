@@ -551,13 +551,19 @@ let stated_reason ~(reason : string option)
     | "" -> None
     | trimmed -> Some trimmed
   in
+  (* [reason] then [summary]. A strict release is rejected without
+     [handoff_context.summary] while [reason] stays optional, so a release
+     whose whole explanation is its summary would otherwise publish a bare
+     "Released <id>" — dropping text the caller was required to supply.
+     [failure_mode] is left out: it classifies, it does not explain. *)
   let from_handoff () =
     match handoff_context with
     | None -> None
     | Some context ->
       (match context.reason with
-       | None -> None
-       | Some context_reason -> non_blank context_reason)
+       | Some context_reason when Option.is_some (non_blank context_reason) ->
+         non_blank context_reason
+       | Some _ | None -> non_blank context.summary)
   in
   match reason with
   | None -> from_handoff ()

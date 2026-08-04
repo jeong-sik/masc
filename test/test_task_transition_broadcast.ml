@@ -210,6 +210,34 @@ let test_release_wrapper_broadcasts_its_handoff_reason () =
       (contents config ~baseline_seq))
 ;;
 
+(* A strict release is rejected without [handoff_context.summary] while
+   [reason] stays optional, so a release whose whole explanation is its summary
+   is a valid and ordinary shape. Reading only [reason] published a bare
+   "Released <id>" and dropped text the caller was required to supply. *)
+let test_release_broadcasts_a_summary_only_handoff () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config
+      (make_task ~id:"task-12" ~status:(D.Claimed { assignee = owner; claimed_at = now }));
+    let handoff : D.task_handoff_context =
+      { summary = "returning to the backlog until the sandbox ships the service"
+      ; reason = None
+      ; next_step = None
+      ; failure_mode = None
+      ; reclaim_policy = None
+      ; evidence_refs = []
+      ; updated_at = None
+      ; updated_by = None
+      }
+    in
+    check_ok "release"
+      (Workspace.release_task_r config ~agent_name:owner ~task_id:"task-12"
+         ~handoff_context:handoff ());
+    Alcotest.(check (list string))
+      "the summary reaches the message log"
+      [ "Released task-12 - returning to the backlog until the sandbox ships the service" ]
+      (contents config ~baseline_seq))
+;;
+
 (* An explicit [reason] outranks the handoff context: the caller stated why for
    this transition, while the handoff context describes the work's state. *)
 let test_explicit_reason_outranks_handoff_context () =
@@ -278,6 +306,8 @@ let () =
             test_submit_defers_to_board
         ; Alcotest.test_case "release wrapper carries its handoff reason" `Quick
             test_release_wrapper_broadcasts_its_handoff_reason
+        ; Alcotest.test_case "release carries a summary-only handoff" `Quick
+            test_release_broadcasts_a_summary_only_handoff
         ; Alcotest.test_case "explicit reason outranks handoff context" `Quick
             test_explicit_reason_outranks_handoff_context
         ] )

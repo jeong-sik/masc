@@ -82,13 +82,15 @@ let keeper_of_author ~config ~author =
   else keeper_of_agent_binding ~config ~actor:author
 ;;
 
-(* [cancelled_by] is written as an agent name. *)
+(* [cancelled_by] is written as an agent name — [workspace_task_lifecycle]
+   stores the acting [agent_name] verbatim — so the agent binding answers it
+   completely. There is deliberately no lane-name fallback: no caller writes a
+   lane name here, and accepting one resolved a non-Keeper actor whose id
+   happens to match a lane (an operator called "sangsu" against Keeper lane
+   "sangsu") to that Keeper, which then read as a self-cancellation and
+   swallowed a wake the author was owed. *)
 let keeper_of_canceller ~config ~agent_name =
-  match keeper_of_agent_binding ~config ~actor:agent_name with
-  | Error _ as error -> error
-  | Ok (Some keeper_name) -> Ok (Some keeper_name)
-  | Ok None ->
-    if names_a_keeper_lane ~config agent_name then Ok (Some agent_name) else Ok None
+  keeper_of_agent_binding ~config ~actor:agent_name
 ;;
 
 (* The wake resolves the same "why" the committed broadcast published. A
@@ -181,10 +183,14 @@ let notify_author ~config ~cancelling_agent_name ~task_id =
                 | Error detail ->
                   Canceller_lookup_failed { agent_name = cancelling_agent_name; detail }
                 | Ok canceller_keeper ->
+                  (* A canceller that resolves to no lane is not the author,
+                     who resolved to one. Comparing the raw actor string
+                     against [created_by] instead made any non-Keeper actor
+                     sharing the author's name read as a self-cancellation. *)
                   let is_self =
                     match canceller_keeper with
                     | Some canceller -> String.equal canceller author_keeper
-                    | None -> String.equal cancelling_agent_name author
+                    | None -> false
                   in
                   if is_self
                   then Self_cancelled

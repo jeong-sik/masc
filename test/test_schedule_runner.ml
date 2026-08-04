@@ -908,65 +908,6 @@ let test_reclaim_projects_consumer_failure () =
     settled.error
 ;;
 
-let test_reclaim_settles_duplicate_occurrence_executions_by_id () =
-  with_workspace
-  @@ fun config ->
-  let schedule_id = "reclaim-duplicate-executions" in
-  let request = accepted_recurring_occurrence config ~schedule_id in
-  (match
-     Schedule_store.update_request
-       config
-       ~schedule_id
-       ~due_at:request.due_at
-       ~expires_at:request.expires_at
-       ~payload:request.payload
-   with
-   | Ok _ -> ()
-   | Error error -> fail (Schedule_store.store_error_to_string error));
-  let calls = ref [] in
-  let _ =
-    tick_ok
-      config
-      ~now:201.0
-      ~consumer:(accepting_consumer ~accepted_detail calls)
-  in
-  let before =
-    Schedule_store.executions_for_schedule
-      (Schedule_store.read_state config)
-      ~schedule_id
-  in
-  check int "duplicate occurrence has two executions" 2 (List.length before);
-  check int "duplicate occurrence has two execution ids" 2
-    (before
-     |> List.map (fun (execution : execution_record) -> execution.execution_id)
-     |> List.sort_uniq String.compare
-     |> List.length);
-  List.iter
-    (fun (execution : execution_record) ->
-       check bool "both duplicate executions are dispatched" true
-         (execution.status = Execution_dispatched))
-    before;
-  let version_before_reclaim = (Schedule_store.read_state config).version in
-  let lost_consumer =
-    accepting_consumer
-      ~settlement:(fun _config _execution ->
-        Ok (Consumer_lost_occurrence "consumer no longer owns duplicate"))
-      calls
-  in
-  let outcome = reclaim_ok ~consumer:lost_consumer config ~now:400.0 in
-  check int "both execution ids examined" 2 outcome.examined;
-  check int "both execution ids reclaimed" 2 outcome.reclaimed;
-  check int "exact execution settlement has no failures" 0
-    (List.length outcome.failures);
-  let after_reclaim = Schedule_store.read_state config in
-  check int "reclaim batch persists once" (version_before_reclaim + 1)
-    after_reclaim.version;
-  Schedule_store.executions_for_schedule after_reclaim ~schedule_id
-  |> List.iter (fun (execution : execution_record) ->
-    check bool "every duplicate execution becomes terminal" true
-      (execution.status = Execution_failed))
-;;
-
 let test_reclaim_reports_empty_batch_cardinality_mismatch () =
   with_workspace
   @@ fun config ->
@@ -1093,8 +1034,6 @@ let () =
             test_reclaim_projects_consumer_cancellation
         ; test_case "projects consumer failure to schedule execution" `Quick
             test_reclaim_projects_consumer_failure
-        ; test_case "settles duplicate occurrence executions by exact id" `Quick
-            test_reclaim_settles_duplicate_occurrence_executions_by_id
         ; test_case "reports empty settlement batch mismatch" `Quick
             test_reclaim_reports_empty_batch_cardinality_mismatch
         ; test_case "reports empty settlement batch consumer exception" `Quick

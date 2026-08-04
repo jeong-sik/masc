@@ -40,6 +40,12 @@ type pending_board_event_kind =
           choose completion, blocking, or follow-up work. *)
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
       (** A system LLM completion authority rejected this Keeper's evidence. *)
+  | Task_cancelled of Keeper_event_queue.task_cancellation
+      (** Another Keeper cancelled a Task this Keeper authored. Payload-carrying
+          like {!Completion_authority_rejected}: the canceller's reason is the
+          author's only account of why the work it asked for stopped, and the
+          flat [title]/[preview] fields are a rendering of it, not its only
+          copy. *)
 
 type pending_board_event = {
   event_kind : pending_board_event_kind;
@@ -90,6 +96,11 @@ val is_board_activity_event : pending_board_event -> bool
 val is_scheduled_automation_event : pending_board_event -> bool
 
 val is_completion_authority_rejection_event : pending_board_event -> bool
+
+val is_task_cancellation_event : pending_board_event -> bool
+(** A cancellation of a Task this Keeper authored. Disjoint from the Board
+    Activity and Scheduled Automation predicates: it has no Board post to point
+    at and no schedule behind it. *)
 
 (** Read-only projection of one schedule row that needs keeper attention. *)
 type scheduled_automation_item = {
@@ -178,6 +189,7 @@ type event_queue_trigger =
   | Connector_attention_stimulus
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
+  | Task_cancellation_stimulus
   | Manual_compaction_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
@@ -190,6 +202,7 @@ type turn_reason =
   | Connector_attention_pending
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
+  | Task_cancellation_pending
   | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due

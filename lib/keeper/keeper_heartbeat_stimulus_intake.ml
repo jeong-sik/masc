@@ -66,7 +66,8 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_reconciliation_ready _
-  | Keeper_event_queue.Completion_authority_rejected _ ->
+  | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_cancelled _ ->
     Keeper_world_observation.pending_board_event_of_stimulus
       ~meta:meta_after_triage
       stim
@@ -215,6 +216,11 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     None
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Some Keeper_world_observation.Completion_authority_rejection_stimulus
+  (* Dedicated turn_reason: the author has to be able to tell a cancellation
+     wake from an autonomous tick, otherwise the turn is indistinguishable from
+     the 96%-of-turns scheduled channel and the cancellation reads as noise. *)
+  | Keeper_event_queue.Task_cancelled _ ->
+    Some Keeper_world_observation.Task_cancellation_stimulus
 ;;
 
 let consume_single_heartbeat_stimulus
@@ -284,6 +290,14 @@ let consume_single_heartbeat_stimulus
          verification_id=%s (keeper=%s)"
         rejection.car_task_id
         rejection.car_verification_id
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~meta_after_triage stim
+    | Keeper_event_queue.Task_cancelled cancellation ->
+      Log.Keeper.info
+        "turn entry: task cancellation delivered task_id=%s cancelled_by=%s \
+         (keeper=%s)"
+        cancellation.tc_task_id
+        cancellation.tc_cancelled_by
         meta_after_triage.name;
       pending_board_events_of_stimulus_result ~meta_after_triage stim
     | Keeper_event_queue.Manual_compaction_requested ->
@@ -373,7 +387,8 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_reconciliation_ready _
-  | Keeper_event_queue.Completion_authority_rejected _ ->
+  | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_cancelled _ ->
     true
 ;;
 
@@ -453,7 +468,10 @@ let reconcile_spent_selection
   | Manual_compaction_requested
   | Goal_assigned _
   | Goal_reconciliation_ready _
-  | Completion_authority_rejected _ ->
+  | Completion_authority_rejected _
+  (* A committed cancellation cannot be undone or settled elsewhere, so the
+     selection is always still worth a turn. *)
+  | Task_cancelled _ ->
     Ok Selection_actionable
 ;;
 
@@ -488,7 +506,8 @@ let heartbeat_event_intake
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Goal_assigned _
       | Keeper_event_queue.Goal_reconciliation_ready _
-      | Keeper_event_queue.Completion_authority_rejected _ ->
+      | Keeper_event_queue.Completion_authority_rejected _
+      | Keeper_event_queue.Task_cancelled _ ->
         false
     in
     match select_pending_matching manual_compaction_ready with
@@ -569,7 +588,8 @@ let heartbeat_event_intake
             | Keeper_world_observation.External_attention
             | Keeper_world_observation.Goal_assigned
             | Keeper_world_observation.Goal_reconciliation_ready
-            | Keeper_world_observation.Completion_authority_rejected _ ->
+            | Keeper_world_observation.Completion_authority_rejected _
+            | Keeper_world_observation.Task_cancelled _ ->
               Log.Keeper.info
                 "turn entry: promoted queued observation post_id=%s keeper=%s"
                 event.Keeper_world_observation.post_id

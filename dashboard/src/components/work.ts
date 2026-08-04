@@ -49,11 +49,17 @@ type JobBucket = 'done' | 'wip' | 'verify' | 'blocked' | 'todo'
 type JobStateCls = 'done' | 'wip' | 'verify' | 'claimed' | 'cancelled' | 'todo' | 'blocked' | 'paused' | 'unknown'
 
 // ── Kanban view columns ─────────────────────────────────────────────────────
-// Closed tuple — cancelled is excluded by design (it has its own aside panel).
+// Closed tuple covering every terminal and non-terminal status.
 // Each entry: [task.status value, Korean column label, CSS modifier cls].
 // The cls values come directly from JobStateCls so KanbanCard can reuse the
 // same .wk-kcard.<cls> and .wk-kcol-dot.<cls> rules without extra mapping.
-type KanbanStatus = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification' | 'blocked' | 'paused' | 'unknown' | 'done'
+//
+// `cancelled` was previously the one status with no column, on the grounds that
+// the aside covers it — but the aside files it under 차단 alongside genuinely
+// blocked tasks, so a cancellation was indistinguishable from a stall and its
+// canceller was never shown. `done` was already a column, so excluding the
+// other terminal status was the inconsistency, not the fix.
+type KanbanStatus = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification' | 'blocked' | 'paused' | 'unknown' | 'done' | 'cancelled'
 type KanbanColumn = readonly [status: KanbanStatus, label: string, cls: JobStateCls]
 
 const KANBAN_COLUMNS: ReadonlyArray<KanbanColumn> = [
@@ -65,6 +71,7 @@ const KANBAN_COLUMNS: ReadonlyArray<KanbanColumn> = [
   ['paused',                statusLabel('paused'), 'paused'],
   ['unknown',               statusLabel('unknown'), 'unknown'],
   ['done',                  statusLabel('done'), 'done'],
+  ['cancelled',             statusLabel('cancelled'), 'cancelled'],
 ] as const
 
 interface JobState {

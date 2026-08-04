@@ -26,6 +26,15 @@ let warn_telemetry_drop ~(event : Workspace_telemetry_drop_event.t) exn =
       ())
 ;;
 
+(* Intermediate for the independent delivery paths of one terminal-task commit.
+   [Workspace_hooks.Task_terminal_delivery_degraded] carries an inline record,
+   which cannot be constructed as a standalone value, so each path reports
+   through this and the variant is built once after both have run. *)
+type terminal_delivery_degradation =
+  { degraded_kind : string
+  ; degraded_detail : string
+  }
+
 let task_action_of_transition : Masc_domain.task_action -> Audit_log.action = function
   | Masc_domain.Claim -> Audit_log.ClaimTask
   | Masc_domain.Start -> Audit_log.StartTask
@@ -436,40 +445,97 @@ let install () =
     ) in
     Subscriptions.push_event_to_sessions payload);
 
+  (* Two addressees, resolved from the same commit and neither substituting for
+     the other: the Goal owner learns that a Goal's linked Tasks are all
+     terminal, and the Task's author learns that work it filed was cancelled.
+     The Goal path reaches no one for a Task with no Goal link, which on the
+     reference workspace was every Task. Author delivery runs first so its
+     typed failure is not masked by the Goal path's [Not_ready]. *)
+  let deliver_task_cancellation config ~agent_name ~task_id =
+    match
+      Keeper_task_cancellation_wake.notify_author
+        ~config
+        ~cancelling_agent_name:agent_name
+        ~task_id
+    with
+    | Keeper_task_cancellation_wake.Delivered _
+    | Keeper_task_cancellation_wake.Already_present _
+    | Keeper_task_cancellation_wake.Not_cancelled
+    | Keeper_task_cancellation_wake.Self_cancelled
+    | Keeper_task_cancellation_wake.No_author
+    | Keeper_task_cancellation_wake.Author_not_a_keeper _ -> None
+    | Keeper_task_cancellation_wake.Backlog_read_failed { detail } ->
+      Some
+        { degraded_kind = "cancellation_author_backlog_read_failed"
+        ; degraded_detail = detail
+        }
+    | Keeper_task_cancellation_wake.Author_lookup_failed { author; detail } ->
+      Some
+        { degraded_kind = "cancellation_author_lookup_failed"
+        ; degraded_detail = Printf.sprintf "author=%s: %s" author detail
+        }
+    | Keeper_task_cancellation_wake.Enqueue_failed { keeper_name; detail } ->
+      Some
+        { degraded_kind = "cancellation_author_storage_error"
+        ; degraded_detail = Printf.sprintf "keeper=%s: %s" keeper_name detail
+        }
+  in
   Atomic.set Workspace_hooks.task_terminal_committed_fn
     (fun config ~agent_name ~task_id ->
-       match
-         Keeper_goal_reconciliation_wake.enqueue_if_ready
-           ~config
-           ~completing_agent_name:agent_name
-           ~task_id
-       with
-       | Keeper_goal_reconciliation_wake.Not_ready
-       | Keeper_goal_reconciliation_wake.Enqueued _
-       | Keeper_goal_reconciliation_wake.Already_present _ ->
-         Workspace_hooks.Task_terminal_delivered
-       | Keeper_goal_reconciliation_wake.Backlog_read_failed { detail } ->
+       let cancellation_degraded =
+         deliver_task_cancellation config ~agent_name ~task_id
+       in
+       let goal_delivery =
+         match
+           Keeper_goal_reconciliation_wake.enqueue_if_ready
+             ~config
+             ~completing_agent_name:agent_name
+             ~task_id
+         with
+         | Keeper_goal_reconciliation_wake.Not_ready
+         | Keeper_goal_reconciliation_wake.Enqueued _
+         | Keeper_goal_reconciliation_wake.Already_present _ -> None
+         | Keeper_goal_reconciliation_wake.Backlog_read_failed { detail } ->
+           Some { degraded_kind = "backlog_read_failed"; degraded_detail = detail }
+         | Keeper_goal_reconciliation_wake.No_keeper_target { goal_id } ->
+           Some
+             { degraded_kind = "no_keeper_target"
+             ; degraded_detail = "goal_id=" ^ goal_id
+             }
+         | Keeper_goal_reconciliation_wake.Keeper_target_lookup_failed
+             { goal_id; detail } ->
+           Some
+             { degraded_kind = "keeper_target_lookup_failed"
+             ; degraded_detail = Printf.sprintf "goal_id=%s: %s" goal_id detail
+             }
+         | Keeper_goal_reconciliation_wake.Enqueue_failed
+             { goal_id; keeper_name; detail } ->
+           Some
+             { degraded_kind = "storage_error"
+             ; degraded_detail =
+                 Printf.sprintf "keeper=%s goal_id=%s: %s" keeper_name goal_id detail
+             }
+       in
+       match cancellation_degraded, goal_delivery with
+       | None, None -> Workspace_hooks.Task_terminal_delivered
+       | Some degraded, None | None, Some degraded ->
          Workspace_hooks.Task_terminal_delivery_degraded
-           { kind = "backlog_read_failed"; detail }
-       | Keeper_goal_reconciliation_wake.No_keeper_target { goal_id } ->
+           { kind = degraded.degraded_kind; detail = degraded.degraded_detail }
+       | Some cancellation, Some goal ->
+         (* Both paths degraded. Reporting one would hide the other, and the
+            result type carries a single record, so the kinds and details are
+            joined rather than picked between. *)
          Workspace_hooks.Task_terminal_delivery_degraded
-           { kind = "no_keeper_target"; detail = "goal_id=" ^ goal_id }
-       | Keeper_goal_reconciliation_wake.Keeper_target_lookup_failed
-           { goal_id; detail } ->
-         Workspace_hooks.Task_terminal_delivery_degraded
-           { kind = "keeper_target_lookup_failed"
-           ; detail = Printf.sprintf "goal_id=%s: %s" goal_id detail
-           }
-       | Keeper_goal_reconciliation_wake.Enqueue_failed
-           { goal_id; keeper_name; detail } ->
-         Workspace_hooks.Task_terminal_delivery_degraded
-           { kind = "storage_error"
+           { kind =
+               Printf.sprintf
+                 "%s+%s"
+                 cancellation.degraded_kind
+                 goal.degraded_kind
            ; detail =
                Printf.sprintf
-                 "keeper=%s goal_id=%s: %s"
-                 keeper_name
-                 goal_id
-                 detail
+                 "%s; %s"
+                 cancellation.degraded_detail
+                 goal.degraded_detail
            });
 
   Atomic.set Workspace_hooks.verification_submit_request_fn

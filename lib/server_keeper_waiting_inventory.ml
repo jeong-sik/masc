@@ -37,6 +37,7 @@ type wake_producer =
   | Keeper_goal_assignment
   | Keeper_goal_reconciliation
   | Completion_authority
+  | Keeper_task_cancellation
   | Keeper_compaction_request
   | Read_model_reader
 
@@ -113,6 +114,7 @@ let wake_producer_to_string = function
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
   | Keeper_goal_assignment -> "keeper_goal_assignment"
   | Keeper_goal_reconciliation -> "keeper_goal_reconciliation"
+  | Keeper_task_cancellation -> "keeper_task_cancellation"
   | Completion_authority -> "completion_authority"
   | Keeper_compaction_request -> "keeper_compaction_request"
   | Read_model_reader -> "read_model_reader"
@@ -132,6 +134,7 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Goal_assigned _ -> Keeper_goal_assignment
   | Goal_reconciliation_ready _ -> Keeper_goal_reconciliation
   | Completion_authority_rejected _ -> Completion_authority
+  | Task_cancelled _ -> Keeper_task_cancellation
 ;;
 
 let unix_iso_json = function

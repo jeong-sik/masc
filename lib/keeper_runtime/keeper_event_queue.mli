@@ -100,6 +100,15 @@ type stimulus_payload =
       (** A system completion authority rejected this Keeper's submitted
           evidence. The event is delivered to the producer Keeper as typed
           follow-up context; the authority itself is not a Keeper. *)
+  | Task_cancelled of task_cancellation
+      (** Another Keeper cancelled a Task this Keeper authored. Cancellation is
+          the one terminal outcome with no Board projection — completion posts a
+          verdict, submission posts a request, but a cancellation left only a
+          backlog field and an activity row. [Goal_reconciliation_ready] does
+          not cover this: it targets the owner of the Task's Goal, and a Task
+          with no Goal link reaches no one. The cancelling Keeper's reason is
+          carried here because it is the author's only account of why the work
+          it asked for stopped. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -211,6 +220,15 @@ and completion_authority_rejection = {
 (** Typed follow-up context for a rejected completion-evidence submission,
     including the authenticated system-LLM or HITL authority provenance. *)
 
+and task_cancellation = {
+  tc_task_id : string;
+  tc_cancelled_by : string;
+  tc_reason : string option;
+}
+(** Payload for [Task_cancelled]. [tc_reason] is [None] when the canceller gave
+    none; it is not defaulted to a placeholder, so the author can tell "no
+    reason was given" from "the reason was empty text". *)
+
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Canonical dedup/correlation id for [Fusion_completed], always
     ["fusion-run:<run_id>"]. Board projection availability is not event
@@ -234,6 +252,10 @@ val goal_reconciliation_ready_post_id :
 
 val completion_authority_rejection_post_id :
   completion_authority_rejection -> post_id
+
+val task_cancellation_post_id : task_cancellation -> post_id
+(** Dedup/correlation id for [Task_cancelled]: ["task-cancelled:<task_id>"].
+    Cancellation is terminal, so the task id alone is a complete key. *)
 
 val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
 (** Stable wire/log label for a HITL resolution wake decision. *)

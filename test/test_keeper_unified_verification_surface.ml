@@ -633,7 +633,8 @@ let test_untitled_wake_keeps_pointer_out_of_prose () =
   | WO.External_attention
   | WO.Goal_assigned
   | WO.Goal_reconciliation_ready
-  | WO.Completion_authority_rejected _ ->
+  | WO.Completion_authority_rejected _
+  | WO.Task_cancelled _ ->
     fail "scheduled wake must project to Schedule_due"
 ;;
 

@@ -167,10 +167,10 @@ let init_runtime_default_for_tests () =
 ;;
 
 (* A verifier is not a Keeper. An AwaitingVerification obligation is decided by
-   the completion authority (HITL confirmation / fusion judge), never through
-   keeper tool surface, so no keeper — whatever its mention tags — is offered a
-   task_verify affordance. Guards against a keeper named "verifier" re-acquiring
-   approval authority. *)
+   the application-owned system LLM completion authority or an authenticated
+   HITL operator, never through the Keeper tool surface, so no Keeper — whatever
+   its mention tags — is offered a task_verify affordance. Guards against a
+   Keeper named "verifier" re-acquiring approval authority. *)
 let test_no_task_verify_affordance_for_any_keeper () =
   let tagged = { minimal_meta with mention_targets = [ "verifier" ] } in
   check bool "no task_verify for verifier-tagged keeper" false

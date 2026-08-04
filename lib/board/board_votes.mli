@@ -61,9 +61,10 @@ val vote_direction_of_string_opt : string -> vote_direction option
 
 val vote_log_path : unit -> string
 (** Path to the append-only vote log JSONL under
-    [<base>/.masc/board-votes.jsonl].  The internal append
-    + rotate path mirrors the post / comment writers in
-    {!Board_core}. *)
+    [<base>/.masc/board_votes.jsonl].  Each accepted row has exactly
+    [target], [voter], [direction], and positive finite [ts] fields; [target]
+    carries canonical typed target/voter identities and the derived [voter]
+    field must match it. *)
 
 (** {1 Voting} *)
 

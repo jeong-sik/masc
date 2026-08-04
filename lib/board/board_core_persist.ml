@@ -146,26 +146,14 @@ let with_persist_lock store f =
 ;;
 
 (** {1 Sweeper - Aggressive Cleanup} *)
-(* Extract [(target_kind, target_id)] from a vote_log key of the form
-   "post:<id>:<voter>" or "comment:<id>:<voter>".  Mirrors
-   [Board_votes.parse_vote_key], but lives in this lower module so [sweep] can
-   reclaim orphaned votes without an upward dependency on [Board_votes]. *)
 let vote_key_target key =
-  match String.index_opt key ':' with
+  match Board_vote_key.of_string key with
   | None -> None
-  | Some i1 ->
-    let kind = String.sub key 0 i1 in
-    let rest = String.sub key (i1 + 1) (String.length key - i1 - 1) in
-    (match String.index_opt rest ':' with
-     | None -> None
-     | Some i2 ->
-       let target_id = String.sub rest 0 i2 in
-       if String.equal target_id "" then None
-       else (
-         match kind with
-         | "post" -> Some (`Post, target_id)
-         | "comment" -> Some (`Comment, target_id)
-         | _ -> None))
+  | Some vote ->
+    let target_id = Board_vote_key.target_id vote in
+    (match Board_vote_key.target_kind vote with
+     | Board_vote_key.Post -> Some (`Post, target_id)
+     | Board_vote_key.Comment -> Some (`Comment, target_id))
 ;;
 
 let sweep store =

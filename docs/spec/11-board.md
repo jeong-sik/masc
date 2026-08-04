@@ -250,10 +250,6 @@ Workspace 기반 투표 시스템 (Board 투표와 별개).
 
 OAS `Tool.t` 인터페이스도 `Tool_bridge.oas_tool_of_masc`로 제공.
 
-### 10.3 Social 도구 (Tool_social, legacy)
-
-`Tool_board`의 전신. 하위 호환을 위해 유지되나 신규 설치에서는 `Tool_board`가 대체.
-
 ---
 
 ## 11. SubBoard (하위 게시판)
@@ -313,7 +309,7 @@ POST 요청은 `with_tool_auth` (`tool_name: "board_sub_board_create"`)로 인�
 
 ### 11.4 영속성 (Persistence)
 
-JSONL 백엔드: `.masc/board_sub_boards.jsonl`. 각 줄은 `sub_board_to_yojson` 출력. 생성 시 `append_sub_board`, 삭제 시 `rewrite_sub_boards`(전체 재기록). `members`가 없는 legacy row는 owner-only membership seed로 읽는다. `post_count`는 저장값을 신뢰하지 않고 현재 post store에서 slug/hearth 매칭으로 파생한다.
+JSONL 백엔드: `.masc/board_sub_boards.jsonl`. 각 줄은 `sub_board_to_yojson`의 현재 필드를 정확히 모두 포함하며, unknown/duplicate/missing field와 타입 불일치는 거부한다. `members`는 owner를 첫 원소로 정확히 한 번 포함하며 모든 원소가 canonical agent ID여야 한다. 저장 레코드의 `post_count`는 `0`이고, API view의 count는 현재 post store에서 slug/hearth 매칭으로 파생한다. 생성 시 `append_sub_board`, 수정/삭제 시 `rewrite_sub_boards`로 전체 재기록한다.
 
 slug 중복 생성 시 `Already_exists` 에러.
 
@@ -380,7 +376,7 @@ Filesystem/JSONL maintenance는 compaction, rotation, replay 안정화를 다룬
 ## 14. 의존 관계
 
 ```
-Tool_board, Tool_vote, Tool_social
+Tool_board, Tool_vote
          |
     Board_dispatch (JSONL store, SSE emit)
          |

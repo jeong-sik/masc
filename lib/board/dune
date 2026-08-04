@@ -23,6 +23,7 @@
   board_render
   board_sort
   board_sub_board_json
+  board_vote_key
   board_votes
   board_votes_json)
  (flags

@@ -314,6 +314,7 @@
   test_keeper_event_queue_owner_lock
   test_cross_context_mutex
   test_keeper_event_queue_persist_poison
+  test_keeper_event_queue_legacy_wal_reject
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
@@ -618,6 +619,7 @@
   test_keeper_event_queue_owner_lock
   test_cross_context_mutex
   test_keeper_event_queue_persist_poison
+  test_keeper_event_queue_legacy_wal_reject
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality

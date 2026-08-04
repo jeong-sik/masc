@@ -118,9 +118,17 @@ fi
 
 # Load and validate runtime environment before stopping the serving process.
 # BasePath was frozen above and is intentionally not recomputed from env files.
+# Deployment control variables are frozen before sourcing: an env file entry
+# reusing one of these names aborts the deploy here, while the serving process
+# is still untouched, instead of silently redirecting which PID is stopped,
+# which launchd label is checked, or where the new runtime starts.
+KEEPER_ENV="$REPO_DIR/config/keeper.env"
+readonly SCRIPT_DIR REPO_DIR RELEASE_DIR PROD_PORT HEALTH_URL BASE_PATH \
+    RUNTIME_ROOT PID_FILE LOG_DIR LAUNCHD_LABEL SKIP_BUILD RESTART_TUNNEL \
+    PREPARE_UNDER_CUTOVER_LEASE BUILD_EXE BUILD_CUTOVER_HELPER RELEASE_EXE \
+    BACKUP_EXE KEEPER_ENV
 preserve_env_override MASC_CONFIG_DIR
 preserve_env_override MASC_PERSONAS_DIR
-KEEPER_ENV="$REPO_DIR/config/keeper.env"
 if [ -f "$KEEPER_ENV" ]; then
     set -a
     # shellcheck disable=SC1090

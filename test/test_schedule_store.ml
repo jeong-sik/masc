@@ -261,6 +261,14 @@ let corrupt_both config =
   Workspace_core.write_text config (recovery_path config) "}also not json"
 ;;
 
+(* Remove the primary ledger while leaving the .last-good mirror alone, the way an
+   out-of-band deletion does (rm, partial rsync, a cleanup script). *)
+let delete_primary config =
+  Workspace_core.delete_path config (schedules_path config);
+  check bool "primary ledger removed" false
+    (Workspace_utils.path_exists config (schedules_path config))
+;;
+
 let test_startup_recovery_returns_only_running_schedule_to_due () =
   with_workspace
   @@ fun config ->
@@ -618,6 +626,14 @@ let test_insert_surfaces_primary_write_failure () =
 let test_insert_keeps_primary_commit_when_recovery_write_fails () =
   with_workspace
   @@ fun config ->
+  (* A directory at the mirror path breaks the mirror *write*. It also breaks the
+     mirror *read*, and load probes the mirror whenever the primary is absent, so
+     the injection needs a parseable primary in place first: load then resolves
+     from the primary and never reaches the probe, leaving write_state's mirror
+     write as the only failing step this test names. *)
+  let committed = make_request ~schedule_id:"recovery-mirror-committed" () in
+  ignore (insert_ok config committed);
+  Workspace_core.delete_path config (schedules_recovery_path config);
   Unix.mkdir (schedules_recovery_path config) 0o755;
   let request =
     make_request ~schedule_id:"recovery-mirror-fail" ()
@@ -628,9 +644,14 @@ let test_insert_keeps_primary_commit_when_recovery_write_fails () =
      fail
        ("recovery mirror failure should not fail committed primary write: "
         ^ store_error_to_string err));
-  match get_schedule config ~schedule_id:request.schedule_id with
-  | Some stored -> check string "primary has schedule" request.schedule_id stored.schedule_id
-  | None -> fail "primary schedule missing after recovery mirror failure"
+  (match get_schedule config ~schedule_id:request.schedule_id with
+   | Some stored -> check string "primary has schedule" request.schedule_id stored.schedule_id
+   | None -> fail "primary schedule missing after recovery mirror failure");
+  match get_schedule config ~schedule_id:committed.schedule_id with
+  | Some stored ->
+    check string "primary keeps the earlier schedule" committed.schedule_id
+      stored.schedule_id
+  | None -> fail "earlier schedule lost after recovery mirror failure"
 ;;
 
 let test_cancel_refused_on_corrupt_ledger () =
@@ -655,6 +676,78 @@ let test_last_good_is_parseable_after_good_write () =
   match Schedule_store.state_of_yojson recovery_json with
   | Ok state -> check int "last-good holds the schedule" 1 (List.length state.schedules)
   | Error msg -> fail (".last-good is not parseable: " ^ msg)
+;;
+
+(* The out-of-band-deletion arm of the same silent-failure-to-data-loss
+   regression: [write_state] commits the primary and the .last-good mirror
+   together, so an absent primary next to a parseable mirror is a deletion, not a
+   fresh store. Reading it as an empty state let the next write mirror that empty
+   state over the surviving copy. *)
+let test_absent_primary_recovers_from_last_good () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"vanished-primary" () in
+  ignore (insert_ok config req);
+  delete_primary config;
+  let recovered = read_state config in
+  check int "schedule recovered from last-good" 1 (List.length recovered.schedules);
+  check string "recovered schedule id" req.schedule_id
+    (List.hd recovered.schedules).schedule_id
+;;
+
+let test_absent_primary_write_restores_primary_without_dropping_schedules () =
+  with_workspace
+  @@ fun config ->
+  let before_deletion = make_request ~schedule_id:"vanished-primary-write" () in
+  ignore (insert_ok config before_deletion);
+  delete_primary config;
+  let after_deletion = make_request ~schedule_id:"added-after-deletion" () in
+  ignore (insert_ok config after_deletion);
+  check bool "primary ledger is restored by the next write" true
+    (Workspace_utils.path_exists config (schedules_path config));
+  check int "recovered and new schedule both persist" 2
+    (List.length (read_state config).schedules);
+  let mirror_json = Workspace_core.read_json config (recovery_path config) in
+  match Schedule_store.state_of_yojson mirror_json with
+  | Ok mirror ->
+    check int "last-good keeps both schedules" 2 (List.length mirror.schedules)
+  | Error msg -> fail (".last-good is not parseable: " ^ msg)
+;;
+
+let test_absent_primary_and_absent_mirror_reads_fresh () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert_ok config (make_request ()));
+  delete_primary config;
+  Workspace_core.delete_path config (recovery_path config);
+  match read_state_result config with
+  | Ok state ->
+    check int "no schedules when both files are gone" 0 (List.length state.schedules);
+    check int "no wakes when both files are gone" 0 (List.length state.wakes)
+  | Error error -> fail (read_error_to_string error)
+;;
+
+let test_absent_primary_with_unparseable_mirror_is_corrupt () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert_ok config (make_request ()));
+  Workspace_core.write_text config (recovery_path config) "}also not json";
+  delete_primary config;
+  let mirror_before = Workspace_core.read_text config (recovery_path config) in
+  (match read_state_result config with
+   | Error (Corrupt_read_ledger { primary_err; recovery_err }) ->
+     check bool "absent primary is described" true (String.length primary_err > 0);
+     check bool "mirror error reported" true (Option.is_some recovery_err)
+   | Ok _ ->
+     fail "absent primary with an unparseable mirror returned a readable state");
+  (match insert_request config (make_request ~schedule_id:"sched-2" ()) with
+   | Ok _ -> fail "insert unexpectedly succeeded against an unparseable mirror"
+   | Error (Corrupt_ledger _) -> ()
+   | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err));
+  check string "unparseable mirror preserved" mirror_before
+    (Workspace_core.read_text config (recovery_path config));
+  check bool "refused mutation did not recreate the primary" false
+    (Workspace_utils.path_exists config (schedules_path config))
 ;;
 
 let cancelled_request_with_wake_receipt config ~schedule_id =
@@ -784,6 +877,15 @@ let () =
             test_cancel_refused_on_corrupt_ledger;
           test_case "last-good is parseable after good write" `Quick
             test_last_good_is_parseable_after_good_write;
+          test_case "absent primary recovers from last-good" `Quick
+            test_absent_primary_recovers_from_last_good;
+          test_case "write after absent primary restores it without dropping schedules"
+            `Quick
+            test_absent_primary_write_restores_primary_without_dropping_schedules;
+          test_case "absent primary and absent mirror read fresh" `Quick
+            test_absent_primary_and_absent_mirror_reads_fresh;
+          test_case "absent primary with unparseable mirror is corrupt" `Quick
+            test_absent_primary_with_unparseable_mirror_is_corrupt;
         ] );
       ( "lifecycle",
         [

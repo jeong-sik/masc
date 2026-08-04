@@ -981,7 +981,8 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_registry_hardening @test/runtest-test_keeper_reaction_ledger @test/runtest-test_board_dispatch @test/runtest-test_keeper_registry_admission_no_suspend"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_registry_hardening @test/runtest-test_keeper_reaction_ledger @test/runtest-test_keeper_registry_admission_no_suspend"
+          scripts/ci-run-tests.sh "opam exec -- dune exec --root . test/test_board_dispatch.exe -- test board_cursor"
 
       # Keeper unified prompt surface: asserts what a Keeper is actually handed
       # on a turn. The schedule wake row carries two ids with different

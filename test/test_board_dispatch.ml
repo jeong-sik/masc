@@ -2430,6 +2430,23 @@ let () =
         (with_eio test_list_posts_negative_limit_returns_empty);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);
       Alcotest.test_case
+        "dashboard projection does not produce attention candidate"
+        `Quick
+        (with_eio test_dashboard_projection_does_not_produce_attention_candidate);
+      Alcotest.test_case "recent bypasses hot cutoff" `Quick
+        (with_eio test_recent_sort_bypasses_hot_cutoff);
+      Alcotest.test_case "filters" `Quick (with_eio test_list_posts_with_filters);
+      Alcotest.test_case "comment author filter" `Quick
+        (with_eio test_list_posts_matches_comment_author);
+      Alcotest.test_case "literal wildcard filter" `Quick
+        (with_eio test_author_filter_treats_wildcards_literally);
+      Alcotest.test_case "author match precedes recent result limit" `Quick
+        (with_eio test_recent_author_match_applies_before_limit);
+      Alcotest.test_case "legacy post without kind is rejected" `Quick
+        (with_eio test_legacy_post_without_kind_is_rejected);
+    ];
+    "board_cursor", [
+      Alcotest.test_case
         "durable cursor starts at creation head"
         `Quick
         (with_eio test_durable_board_cursor_starts_at_creation_head);
@@ -2453,21 +2470,6 @@ let () =
         "initial cursor requires lifecycle owner"
         `Quick
         (with_eio test_initial_cursor_requires_lifecycle_owner);
-      Alcotest.test_case
-        "dashboard projection does not produce attention candidate"
-        `Quick
-        (with_eio test_dashboard_projection_does_not_produce_attention_candidate);
-      Alcotest.test_case "recent bypasses hot cutoff" `Quick
-        (with_eio test_recent_sort_bypasses_hot_cutoff);
-      Alcotest.test_case "filters" `Quick (with_eio test_list_posts_with_filters);
-      Alcotest.test_case "comment author filter" `Quick
-        (with_eio test_list_posts_matches_comment_author);
-      Alcotest.test_case "literal wildcard filter" `Quick
-        (with_eio test_author_filter_treats_wildcards_literally);
-      Alcotest.test_case "author match precedes recent result limit" `Quick
-        (with_eio test_recent_author_match_applies_before_limit);
-      Alcotest.test_case "legacy post without kind is rejected" `Quick
-        (with_eio test_legacy_post_without_kind_is_rejected);
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick (with_eio test_add_and_get_comments);

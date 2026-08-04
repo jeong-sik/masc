@@ -112,7 +112,7 @@ board·task 등의 기능이 **두 소비자(MCP 클라이언트 / keeper 모델
 2. **`masc_keeper_*` 이중 접두어 15개 정리**: `keeper_*` 또는 도메인 규칙으로.
 3. **tool_profile → surfaces 투영**: variant + 배관 제거 (별도 PR, execute/call_tool/protocol).
 4. ~~**`keeper_tool_search` vestige 제거**~~ — **완료: #26785 (`3ac0b0b87e`)**. 랭커(`rank_tool_schemas`/`ranked_tool_schema`/`keeper_tool_search_schema`) + `Tool_tool_search` variant + `search_fn` 배관 제거됨. `find_similar_names`(`tool_dispatch.ml:316`, unknown-tool 오타 제안)와 `Text_similarity.jaccard_similarity` 는 별개 정당 용도로 **유지됨**(main 4파일 라이브).
-   - **잔여 (미완)**: 제거 후 소비자 스윕이 끝나지 않았다. `scripts/harness_tool_call_quality.sh` 의 벤치마크 케이스 3개(`read_search_prompt_fingerprint`, `recovery_after_failed_read`, `multi_step_board_update`)가 `tool_name == "keeper_tool_search"` 호출 유무로 `completed` 를 판정한다(`derive_final_result` :471/:507/:520 → `task_success_from_final_result`). 도구가 없으므로 keeper 는 그 호출을 낼 수 없고 세 케이스는 **품질과 무관하게 영구 실패**한다. 4케이스 중 남는 건 `text_only_triage`(도구 0회 요구) 하나. 이 스크립트는 `docs/BENCHMARK-RUNBOOK.md` / `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` 가 지목하는 라이브 경로다. → 별도 이슈로 추적.
+   - **잔여 (미완)**: 제거 후 소비자 스윕이 끝나지 않았다. `scripts/harness_tool_call_quality.sh` 의 벤치마크 케이스 3개(`read_search_prompt_fingerprint`, `recovery_after_failed_read`, `multi_step_board_update`)가 `tool_name == "keeper_tool_search"` 호출 유무로 `completed` 를 판정한다(`derive_final_result` :471/:507/:520 → `task_success_from_final_result`). 도구가 없으므로 keeper 는 그 호출을 낼 수 없고 세 케이스는 **품질과 무관하게 영구 실패**한다. 4케이스 중 남는 건 `text_only_triage`(도구 0회 요구) 하나. 이 스크립트는 `docs/BENCHMARK-RUNBOOK.md` / `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` 가 지목하는 라이브 경로다. → **#26811**.
 5. **(조건부) base+search 실발견 빌드**: §3.2 의 3개 신규 능력 구현. **선행 게이트**: per-turn 스키마 토큰 비용 측정이 빌드를 정당화할 때만. 아니면 drop.
 
 ## 6. 검증 / 미해결
@@ -120,7 +120,7 @@ board·task 등의 기능이 **두 소비자(MCP 클라이언트 / keeper 모델
 - [x] `masc_board_*` (keeper 0회) 소비자 실측 → **살아 있음**. `mcp_tool_runtime*`, `tool_bridge.ml`, `sdk_tool_contract.ml`, dashboard TS 다수가 소비. **결론: "삭제-먼저" 금지.** 1단계는 삭제가 아니라 **SSOT 수렴** — 두 이름(`keeper_board_list`/`masc_board_list`)이 하나의 레지스트리 엔트리를 가리키게 한 뒤, 표면 투영에서 이름을 하나로. keeper가 0회여도 MCP 클라이언트 경로는 라이브다.
 - [ ] `/mcp/operator` `/mcp/managed` 의 실외부 소비자 유무 (surfaces 투영 전환 전 확인).
 - [x] tool_search 발견 품질 → **측정 완료: 발견 불가.** `keeper_tool_search` 는 visible-set 필터(`already_visible:true` 하드코딩), 숨은 도구 도달 경로 없음. 8월 keeper 호출 0회. 결론: 승격 대상 아니라 **제거 대상** → **#26785 로 제거 완료**.
-- [ ] **제거 후 소비자 스윕 미완**: `harness_tool_call_quality.sh` 3케이스가 삭제된 도구명을 성공 조건으로 요구 (Stage 4 잔여 항목). 문자열 비교라 컴파일러·CI 어디에도 red 로 드러나지 않는다.
+- [ ] **제거 후 소비자 스윕 미완 (#26811)**: `harness_tool_call_quality.sh` 3케이스가 삭제된 도구명을 성공 조건으로 요구 (Stage 4 잔여 항목). 문자열 비교라 컴파일러·CI 어디에도 red 로 드러나지 않는다.
 - [ ] **repo 밖 도구명 하드코딩 실측** (Stage 1–3 개명의 실제 폭발 반경). 현재까지 확인분:
   - dashboard TS 도구명 리터럴 **유니크 124개** (`dashboard/src`)
   - MCP 클라이언트 설정의 permission allowlist (`mcp__masc__masc_*` 형태) — 저장소 밖이라 CI 가 못 잡는다. 표본 1개 환경에서 17개.

@@ -370,17 +370,6 @@ let tick_ok config ~now =
   | Error err -> fail (Schedule_runner.runner_error_to_string err)
 ;;
 
-let latest_wake_exn config (request : Schedule_domain.schedule_request) =
-  match
-    Schedule_store.last_wake_for_schedule_instance
-      (Schedule_store.read_state config)
-      ~schedule_instance_id:request.schedule_instance_id
-      ~schedule_id:request.schedule_id
-  with
-  | Some wake -> wake
-  | None -> fail ("missing wake for schedule " ^ request.schedule_id)
-;;
-
 let find_wake
       state
       ~schedule_instance_id
@@ -690,7 +679,9 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
     | signals -> failf "expected one second signal, got %d" (List.length signals)
   in
   check bool "recreated occurrence has a new identity" false
-    (Schedule_occurrence_id.equal first_signal.occurrence_id second_signal.occurrence_id);
+    (String.equal
+       (Schedule_occurrence_id.to_string first_signal.occurrence_id)
+       (Schedule_occurrence_id.to_string second_signal.occurrence_id));
   match
     find_wake
       (Schedule_store.read_state config)

@@ -15,11 +15,6 @@ type store_error =
   | Schedule_not_found
   | Invalid_initial_status of string
   | Invalid_status_transition of string
-  | Schedule_occurrence_already_used of
-      { schedule_instance_id : string
-      ; due_at : float
-      ; payload_digest : string
-      }
   | Schedule_not_due_candidate
   | Schedule_not_running
   | Persistence_failed of string
@@ -48,7 +43,7 @@ type read_error =
 
 val read_error_to_string : read_error -> string
 
-(** Raised by [read_state]/[list_schedules]/[get_schedule] on a corrupt ledger.
+(** Raised by [read_state]/[get_schedule] on a corrupt ledger.
     Read paths have no [result] channel, so they fail loud instead of returning
     an empty list. Mutating paths report [Corrupt_ledger] instead. *)
 exception
@@ -68,7 +63,6 @@ val read_state_result : Workspace_utils.config -> (state, read_error) result
 
 val state_of_yojson : Yojson.Safe.t -> (state, string) result
 
-val list_schedules : Workspace_utils.config -> Schedule_domain.schedule_request list
 val get_schedule :
   Workspace_utils.config -> schedule_id:string -> Schedule_domain.schedule_request option
 val last_wake_for_schedule_instance :
@@ -86,18 +80,6 @@ val cancel_request :
   Workspace_utils.config ->
   schedule_id:string ->
   (Schedule_domain.schedule_request, store_error) result
-
-val update_request :
-  Workspace_utils.config ->
-  schedule_id:string ->
-  due_at:float ->
-  expires_at:float option ->
-  payload:Schedule_domain.payload ->
-  (Schedule_domain.schedule_request, store_error) result
-(** Replaces [due_at], [expires_at], and [payload] of a scheduled request.
-    Returns [Invalid_status_transition] for due, terminal, or [Running]
-    requests. Returns [Schedule_occurrence_already_used] rather than reusing
-    an occurrence identity already present in wake history. *)
 
 val refresh_due :
   Workspace_utils.config ->

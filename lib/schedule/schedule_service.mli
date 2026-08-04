@@ -24,36 +24,10 @@ val create :
   unit ->
   (Schedule_domain.schedule_request, service_error) result
 
-val list :
-  Workspace_utils.config ->
-  ?status:Schedule_domain.schedule_status ->
-  unit ->
-  Schedule_domain.schedule_request list
-
-val get :
-  Workspace_utils.config ->
-  schedule_id:string ->
-  Schedule_domain.schedule_request option
-
 val cancel :
   Workspace_utils.config ->
   schedule_id:string ->
   (Schedule_domain.schedule_request, service_error) result
-
-val update :
-  Workspace_utils.config ->
-  schedule_id:string ->
-  due_at:float ->
-  expires_at:float option ->
-  payload:Schedule_domain.payload ->
-  (Schedule_domain.schedule_request, service_error) result
-
-val due_candidates :
-  Workspace_utils.config ->
-  now:float ->
-  (Schedule_domain.schedule_request list, service_error) result
-(** Refreshes due state and returns visible wake candidates. No wake
-    is performed here. *)
 
 val prune :
   Workspace_utils.config ->

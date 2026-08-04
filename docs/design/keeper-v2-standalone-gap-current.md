@@ -19,8 +19,8 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
 - Approvals are already represented by `dashboard/src/components/approvals/approvals-surface.ts`
   and use the live approval queue API.
 - Schedule automation data is already exposed by `/api/v1/dashboard/tools` as
-  `scheduled_automation` with request rows, derived counts, execution readiness,
-  keeper next action/tool, approval policy, payload metadata, and last execution.
+  `scheduled_automation` with request rows, derived counts, wake readiness,
+  keeper next action/tool, approval policy, payload metadata, and last wake.
 - The Tools surface already hosts the schedule automation projection under
   `예약 자동화 FSM`.
 
@@ -30,7 +30,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   schedule projection as v2 cards instead of a wide table.
 - Schedule cards expose effective status, raw status drift, readiness, operator
   posture, risk, approval policy, recurrence, due time, source, keeper next step,
-  payload, payload digest, separate-human-grant marker, and last execution.
+  payload, payload digest, separate-human-grant marker, and last wake.
 - The schedule panel now has local read-only filters for all, pending, due,
   ready, scheduled, and done states.
 - The schedule panel now has a selected-detail side panel, matching the prototype
@@ -39,11 +39,11 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   when the card list is filtered.
 - The selected-detail panel now renders schedule actor and timing metadata:
   requested by, scheduled by, requested time, due time, and expiration time.
-- The selected-detail panel now renders bounded `last_execution.detail` rows
+- The selected-detail panel now renders bounded `last_wake.detail` rows
   when present, collapsing nested JSON to object/array counts instead of
   dumping raw execution JSON into the card list.
 - `/api/v1/dashboard/tools` now includes bounded durable schedule runner
-  signals from `Schedule_runner.read_recent_signals`, and the panel prefers that
+  signals decoded from the durable signal store, and the panel prefers that
   feed over the request-derived fallback when signals are present.
 - The durable wake signal feed now uses a compact standalone-like row structure:
   `at`, kind, schedule id, secondary signal/payload evidence, and right-aligned

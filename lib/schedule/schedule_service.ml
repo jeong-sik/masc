@@ -50,32 +50,8 @@ let create
   Schedule_store.insert_request config request |> map_store
 ;;
 
-let list config ?status () =
-  let schedules = Schedule_store.list_schedules config in
-  match status with
-  | None -> schedules
-  | Some expected ->
-    List.filter
-      (fun (request : Schedule_domain.schedule_request) ->
-        request.status = expected)
-      schedules
-;;
-
-let get config ~schedule_id = Schedule_store.get_schedule config ~schedule_id
-
 let cancel config ~schedule_id =
   Schedule_store.cancel_request config ~schedule_id |> map_store
-;;
-
-let update config ~schedule_id ~due_at ~expires_at ~payload =
-  Schedule_store.update_request config ~schedule_id ~due_at ~expires_at ~payload
-  |> map_store
-;;
-
-let due_candidates config ~now =
-  match Schedule_store.refresh_due config ~now with
-  | Error err -> Error (Store_error err)
-  | Ok (state, _) -> Ok (Schedule_store.due_wake_candidates state)
 ;;
 
 let prune config =

@@ -83,10 +83,10 @@ let test_occurrence_id schedule_id =
     ~payload_digest:"test-payload"
 ;;
 
-let read_recent_signals_exn config n =
-  match read_recent_signals config n with
-  | Ok signals -> signals
-  | Error error -> fail error
+let read_recent_signal_rows config n =
+  Dated_jsonl.read_recent
+    (Dated_jsonl.create ~base_dir:(signals_dir config) ())
+    n
 ;;
 
 let json_field key = function
@@ -148,18 +148,6 @@ let accepting_consumer
 
 let accepted_detail = `Assoc [ "queued", `Bool true ]
 
-let latest_wake config (request : Schedule_domain.schedule_request) =
-  let state = Schedule_store.read_state config in
-  match
-    Schedule_store.last_wake_for_schedule_instance
-      state
-      ~schedule_instance_id:request.schedule_instance_id
-      ~schedule_id:request.schedule_id
-  with
-  | Some wake -> wake
-  | None -> failf "no wake recorded for %s" request.schedule_id
-;;
-
 let test_tick_emits_due_candidate_once () =
   with_workspace
   @@ fun config ->
@@ -179,7 +167,7 @@ let test_tick_emits_due_candidate_once () =
   let repeated = tick_ok config ~now:202.0 in
   check int "dedupe repeated tick" 0 (List.length repeated.emitted);
   check int "durable signal count" 1
-    (List.length (read_recent_signals_exn config 10))
+    (List.length (read_recent_signal_rows config 10))
 ;;
 
 let test_tick_dispatches_due_candidate_to_success () =
@@ -196,7 +184,9 @@ let test_tick_dispatches_due_candidate_to_success () =
   (match result.emitted, result.dispatches with
    | [ signal ], [ dispatch ] ->
      check bool "dispatch keeps exact occurrence identity" true
-       (Schedule_occurrence_id.equal signal.occurrence_id dispatch.occurrence_id)
+       (String.equal
+          (Schedule_occurrence_id.to_string signal.occurrence_id)
+          (Schedule_occurrence_id.to_string dispatch.occurrence_id))
    | _ -> fail "expected one emitted and dispatched occurrence");
   check Alcotest.(list string) "consumer called" [ request.schedule_id ] !calls;
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
@@ -321,7 +311,7 @@ let test_tick_reschedules_recurring_candidate_after_signal () =
   check int "second signal" 1 (List.length second_due.emitted);
   check int "second reschedule" 1 second_due.rescheduled;
   check int "two durable signals" 2
-    (List.length (read_recent_signals_exn config 10))
+    (List.length (read_recent_signal_rows config 10))
 ;;
 
 let test_tick_dispatches_recurring_candidate_to_next_due () =
@@ -486,22 +476,6 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
        wake_status_to_string wake.status))
 ;;
 
-let test_recent_signal_decode_error_is_explicit () =
-  with_workspace
-  @@ fun config ->
-  Dated_jsonl.append
-    (Dated_jsonl.create ~base_dir:(signals_dir config) ())
-    (`Assoc
-      [ "event_type", `String "schedule.due_candidate"
-      ; "occurrence_id", `String "malformed"
-      ]);
-  match read_recent_signals config 10 with
-  | Ok _ -> fail "malformed durable signal was silently ignored"
-  | Error error ->
-    check bool "decode error identifies row" true
-      (String_util.contains_substring error "schedule signal row 0")
-;;
-
 let test_occurrence_decode_rejects_tampered_facts () =
   with_workspace
   @@ fun config ->
@@ -509,11 +483,13 @@ let test_occurrence_decode_rejects_tampered_facts () =
   let signal =
     tick_ok config ~now:201.0 |> fun result -> List.hd result.emitted
   in
-  let encoded = wake_signal_to_yojson signal in
+  let encoded = List.hd (read_recent_signal_rows config 1) in
   (match wake_signal_of_yojson encoded with
    | Ok decoded ->
      check bool "round trip occurrence identity" true
-       (Schedule_occurrence_id.equal signal.occurrence_id decoded.occurrence_id)
+       (String.equal
+          (Schedule_occurrence_id.to_string signal.occurrence_id)
+          (Schedule_occurrence_id.to_string decoded.occurrence_id))
    | Error error -> fail error);
   let tampered_id =
     replace_json_field "occurrence_id" (`String "tampered") encoded
@@ -680,8 +656,6 @@ let () =
             test_tick_marks_terminal_dispatch_rejection_failed
         ; test_case "retries same occurrence without blocking other schedule" `Quick
             test_tick_retries_same_occurrence_without_blocking_other_schedule
-        ; test_case "recent signal decode error is explicit" `Quick
-            test_recent_signal_decode_error_is_explicit
         ; test_case "occurrence decode rejects tampered facts" `Quick
             test_occurrence_decode_rejects_tampered_facts
         ] )

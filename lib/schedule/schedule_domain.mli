@@ -111,7 +111,6 @@ val create_request :
   (schedule_request, string) result
 
 val is_terminal : schedule_status -> bool
-val is_recurring : recurrence -> bool
 val validate_recurrence : recurrence -> (recurrence, string) result
 val first_due_after : now:float -> recurrence -> float option
 (** Compute the first due time for calendar recurrences that do not need an
@@ -141,12 +140,9 @@ val recurrence_summary : recurrence -> string
     outputs. This is presentation-only; schedule eligibility still uses the
     typed [recurrence] value. *)
 val wake_status_to_string : wake_status -> string
-val wake_status_of_string : string -> (wake_status, string) result
 
 val actor_to_yojson : actor -> Yojson.Safe.t
-val actor_of_yojson : Yojson.Safe.t -> (actor, string) result
 val recurrence_to_yojson : recurrence -> Yojson.Safe.t
-val recurrence_of_yojson : Yojson.Safe.t -> (recurrence, string) result
 val wake_record_to_yojson : wake_record -> Yojson.Safe.t
 val wake_record_of_yojson :
   Yojson.Safe.t -> (wake_record, string) result

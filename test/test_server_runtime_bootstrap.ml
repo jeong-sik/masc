@@ -3537,60 +3537,6 @@ let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
               stale_reason
               (row |> member "last_failure_reason" |> to_string))))
 
-let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
-  with_temp_dir "health-reaction-ledger-cursor-sweep" (fun dir ->
-    with_env "MASC_BASE_PATH" (Some dir) (fun () ->
-      Fun.protect
-        ~finally:(fun () ->
-          Server_auth.server_state := None;
-          Config_dir_resolver.reset ())
-        (fun () ->
-        Config_dir_resolver.reset ();
-        let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
-        let config = (Mcp_server.workspace_config state) in
-        write_keeper_meta_exn config
-          (make_keeper_meta ~name:"cursor-swept" ~trace_id:"trace-cursor" ());
-        let stimulus post_id updated_at : Keeper_event_queue.stimulus =
-          { post_id
-          ; urgency = Immediate
-          ; arrived_at = updated_at +. 10.0
-          ; payload =
-              Keeper_event_queue.Board_signal
-                { kind = Keeper_event_queue.Post_created
-                ; author = ""
-                ; title = ""
-                ; content = ""
-                ; hearth = None
-                ; updated_at = Some updated_at
-                }
-          }
-        in
-        List.iter
-          (Keeper_reaction_ledger.record_event_queue_stimulus
-             ~base_path:dir
-             ~keeper_name:"cursor-swept")
-          [ stimulus "health-post-1" 10.0; stimulus "health-post-2" 20.0 ];
-        Keeper_reaction_ledger.record_board_cursor_ack
-          ~base_path:dir
-          ~keeper_name:"cursor-swept"
-          ~cursor_ts:20.0
-          ~post_id:(Some "health-post-2")
-          ();
-        let request = Httpun.Request.create `GET "/health" in
-        let json = Server_routes_http_runtime.make_health_json request in
-        let open Yojson.Safe.Util in
-        let reaction_ledger = json |> member "keeper_reaction_ledger" in
-        Alcotest.(check string) "health cursor-swept reaction ledger ok"
-          "ok"
-          (reaction_ledger |> member "status" |> to_string);
-        Alcotest.(check int) "health cursor-swept pending stimuli" 0
-          (reaction_ledger |> member "pending_stimulus_count" |> to_int);
-        Alcotest.(check bool)
-          "health cursor-swept reaction ledger clears operator action"
-          false
-          (reaction_ledger |> member "operator_action_required" |> to_bool))))
-
 let test_health_json_reaction_ledger_unavailable_shape () =
   let previous_state = !Server_auth.server_state in
   Fun.protect
@@ -5300,9 +5246,6 @@ let () =
             "health json restores crash-log failure reason"
             `Quick
             test_health_json_uses_crash_log_when_restore_clears_failure_reason;
-          Alcotest.test_case
-            "health json reaction ledger cursor sweep clears pending"
-            `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;
           Alcotest.test_case
             "health json reaction ledger unavailable shape"
             `Quick test_health_json_reaction_ledger_unavailable_shape;

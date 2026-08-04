@@ -808,7 +808,6 @@ describe('dashboardHealthChips', () => {
           keeper_reaction_ledger: {
             status: 'ok',
             operator_action_required: false,
-            cursor_ack_count: 4,
             cursor_swept_stimulus_count: 3,
             quarantined_row_count: 1,
             pending_stimulus_count: 0,
@@ -844,7 +843,6 @@ describe('dashboardHealthChips', () => {
           keeper_reaction_ledger: {
             status: 'degraded',
             operator_action_required: true,
-            cursor_ack_count: 4,
             cursor_swept_stimulus_count: 3,
             quarantined_row_count: 1,
             pending_stimulus_count: 2,
@@ -956,7 +954,6 @@ describe('dashboardHealthChips', () => {
             cursor_swept_stimulus_count: 0,
             quarantined_row_count: 0,
             read_error_count: 0,
-            cursor_ack_count: 5,
             operator_action_required: false,
           },
         },

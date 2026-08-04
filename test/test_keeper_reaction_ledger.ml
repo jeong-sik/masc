@@ -252,26 +252,66 @@ let test_current_rows_require_complete_writer_shape () =
     (List.mem "missing_reaction_post_id" reasons)
 ;;
 
-let test_cursor_ack_is_replayable_state_entry () =
+(* The durable board-cursor-ack write path ([record_board_cursor_ack]) was
+   removed: it wrote rows nobody restored a cursor from (producer without a
+   restore-side consumer). Historical stores may still carry
+   [record_kind = "cursor_ack"] rows from before the removal; the classifier's
+   [_ -> Error Unknown_record_kind] fallback must quarantine them per-row
+   rather than fail the whole read. *)
+let test_legacy_cursor_ack_row_is_quarantined_not_fatal () =
   with_temp_base @@ fun base_path ->
-  let keeper_name = "cursor-keeper" in
-  Keeper_reaction_ledger.record_board_cursor_ack
+  let keeper_name = "legacy-cursor-ack-keeper" in
+  let stimulus = board_stimulus ~post_id:"post-99" () in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  Keeper_reaction_ledger.record_event_queue_stimulus
     ~base_path
     ~keeper_name
-    ~cursor_ts:5678.25
-    ~post_id:(Some "post-99")
-    ();
-  let row =
-    read_recent_rows ~base_path ~keeper_name ~limit:1
-    |> latest_row
-  in
-  check_member_string "cursor ack record kind" "cursor_ack" "record_kind" row;
-  check_member_string "cursor ack stimulus id" "board:post-99" "stimulus_id" row;
-  check (float 0.0001) "cursor timestamp" 5678.25
-    (row |> member "cursor" |> member "cursor_ts" |> to_float);
-  check_member_string "cursor post id" "post-99" "post_id" (row |> member "cursor");
-  check bool "cursor acked" true
-    (row |> member "reaction" |> member "cursor_acked" |> to_bool)
+    stimulus;
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc
+        [ "schema", `String "keeper.reaction_ledger.v5"
+        ; "record_kind", `String "cursor_ack"
+        ; "event_id", `String "krl:legacy-cursor-ack-fixture"
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 5678.25
+        ; "stimulus_id", `String stimulus_id
+        ; ( "cursor"
+          , `Assoc
+              [ "scope", `String "board"
+              ; "cursor_ts", `Float 5678.25
+              ; "post_id", `String "post-99"
+              ] )
+        ; ( "reaction"
+          , `Assoc
+              [ "kind", `String "cursor_ack"
+              ; "source", `String "keeper_world_observation.board_cursor"
+              ; "cursor_acked", `Bool true
+              ] )
+        ]);
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  with
+  | Error error ->
+    failf
+      "legacy cursor_ack row must not surface a fatal evidence read error: %s"
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+    fail "legacy cursor_ack row must be quarantined, not silently accepted"
+  | Ok
+      (Keeper_reaction_ledger.Evidence_quarantined
+        { evidence; first_reason }) ->
+    check bool "normal stimulus row still matches" true evidence.stimulus_seen;
+    check int "one row matches (the stimulus)" 1 evidence.matched_record_count;
+    check int "legacy cursor_ack row is quarantined" 1
+      evidence.quarantined_record_count;
+    check string
+      "legacy cursor_ack row is an unknown record kind"
+      "unknown_record_kind"
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
 ;;
 
 let test_summary_marks_unreacted_and_reacted_stimuli () =
@@ -310,84 +350,6 @@ let test_summary_marks_unreacted_and_reacted_stimuli () =
     (reacted_summary |> member "pending_stimulus_count" |> to_int);
   check int "turn started count" 1
     (reacted_summary |> member "turn_started_count" |> to_int)
-;;
-
-let test_summary_cursor_ack_sweeps_covered_board_stimuli () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "cursor-sweep-keeper" in
-  let first = board_stimulus ~post_id:"post-1" ~updated_at:10.0 () in
-  let second = board_stimulus ~post_id:"post-2" ~updated_at:20.0 () in
-  let third = board_stimulus ~post_id:"post-3" ~updated_at:30.0 () in
-  List.iter
-    (Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name)
-    [ first; second ];
-  Keeper_reaction_ledger.record_board_cursor_ack
-    ~base_path
-    ~keeper_name
-    ~cursor_ts:20.0
-    ~post_id:(Some "post-2")
-    ();
-  let swept_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "cursor-swept summary status" "ok" "status" swept_summary;
-  check int "cursor-swept pending count" 0
-    (swept_summary |> member "pending_stimulus_count" |> to_int);
-  check int "cursor sweep count" 2
-    (swept_summary |> member "cursor_swept_stimulus_count" |> to_int);
-  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name third;
-  let future_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "future stimulus remains degraded" "degraded" "status" future_summary;
-  check int "future pending count" 1
-    (future_summary |> member "pending_stimulus_count" |> to_int);
-  check string "future pending stimulus id" "board:post-3"
-    (future_summary
-     |> member "pending_stimulus_ids"
-     |> to_list
-     |> List.hd
-     |> to_string)
-;;
-
-let test_summary_cursor_ack_respects_post_id_tiebreaker () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "cursor-tiebreaker-keeper" in
-  let first = board_stimulus ~post_id:"post-1" ~updated_at:50.0 () in
-  let second = board_stimulus ~post_id:"post-2" ~updated_at:50.0 () in
-  List.iter
-    (Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name)
-    [ first; second ];
-  Keeper_reaction_ledger.record_board_cursor_ack
-    ~base_path
-    ~keeper_name
-    ~cursor_ts:50.0
-    ~post_id:(Some "post-1")
-    ();
-  let partial_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "partial cursor summary status" "degraded" "status" partial_summary;
-  check int "one post remains pending" 1
-    (partial_summary |> member "pending_stimulus_count" |> to_int);
-  check string "later same-timestamp post remains pending" "board:post-2"
-    (partial_summary
-     |> member "pending_stimulus_ids"
-     |> to_list
-     |> List.hd
-     |> to_string);
-  Keeper_reaction_ledger.record_board_cursor_ack
-    ~base_path
-    ~keeper_name
-    ~cursor_ts:50.0
-    ~post_id:(Some "post-2")
-    ();
-  let complete_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "complete cursor summary status" "ok" "status" complete_summary;
-  check int "same timestamp posts cleared" 0
-    (complete_summary |> member "pending_stimulus_count" |> to_int)
 ;;
 
  let test_fleet_summary_surfaces_durable_event_queue_backlog () =
@@ -829,7 +791,6 @@ let test_reaction_kind_string_roundtrip () =
     [ Keeper_reaction_ledger.Turn_started
     ; Keeper_reaction_ledger.Event_queue_ack
     ; Keeper_reaction_ledger.Event_queue_cancelled
-    ; Keeper_reaction_ledger.Cursor_ack
     ];
   match Keeper_reaction_ledger.reaction_kind_of_string "unknown_custom" with
   | Error (Keeper_reaction_ledger.Unknown_reaction_kind value) ->
@@ -1093,21 +1054,13 @@ let () =
             `Quick
             test_current_rows_require_complete_writer_shape
         ; test_case
-            "cursor ack is replayable state entry"
+            "legacy cursor_ack row is quarantined, not fatal"
             `Quick
-            test_cursor_ack_is_replayable_state_entry
+            test_legacy_cursor_ack_row_is_quarantined_not_fatal
         ; test_case
             "summary marks unreacted and reacted stimuli"
             `Quick
             test_summary_marks_unreacted_and_reacted_stimuli
-        ; test_case
-            "summary cursor ack sweeps covered board stimuli"
-            `Quick
-            test_summary_cursor_ack_sweeps_covered_board_stimuli
-        ; test_case
-            "summary cursor ack respects board post id tiebreaker"
-            `Quick
-            test_summary_cursor_ack_respects_post_id_tiebreaker
         ; test_case
             "fleet summary surfaces durable event queue backlog"
             `Quick

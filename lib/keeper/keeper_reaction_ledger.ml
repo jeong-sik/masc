@@ -1,8 +1,3 @@
-type cursor =
-  { cursor_ts : float
-  ; post_id : string option
-  }
-
 type stimulus_kind =
   | Board_signal
   | Bootstrap
@@ -22,7 +17,6 @@ type reaction_kind =
   | Turn_started
   | Event_queue_ack
   | Event_queue_cancelled
-  | Cursor_ack
 
 type reaction_decode_error = Unknown_reaction_kind of string
 
@@ -70,7 +64,6 @@ let reaction_kind_to_string = function
   | Turn_started -> "turn_started"
   | Event_queue_ack -> "event_queue_ack"
   | Event_queue_cancelled -> "event_queue_cancelled"
-  | Cursor_ack -> "cursor_ack"
 ;;
 
 (* Closed inverse. Wire drift is a typed decoder failure rather than an open
@@ -79,7 +72,6 @@ let reaction_kind_of_string = function
   | "turn_started" -> Ok Turn_started
   | "event_queue_ack" -> Ok Event_queue_ack
   | "event_queue_cancelled" -> Ok Event_queue_cancelled
-  | "cursor_ack" -> Ok Cursor_ack
   | other -> Error (Unknown_reaction_kind other)
 ;;
 
@@ -454,55 +446,6 @@ module For_testing = struct
   ;;
 end
 
-let cursor_json { cursor_ts; post_id } =
-  `Assoc
-    [ "scope", `String "board"
-    ; "cursor_ts", `Float cursor_ts
-    ; "post_id", option_json (fun value -> `String value) post_id
-    ]
-;;
-
-let record_board_cursor_ack
-      ~base_path
-      ~keeper_name
-      ?stimulus_id
-      ~cursor_ts
-      ~post_id
-      ()
-  =
-  let cursor = { cursor_ts; post_id } in
-  let stimulus_id =
-    match stimulus_id, post_id with
-    | Some value, _ -> value
-    | None, Some post_id -> board_stimulus_id ~post_id
-    | None, None -> digest_id "cursor" (Printf.sprintf "%.6f" cursor_ts)
-  in
-  let recorded_at = Time_compat.now () in
-  let json =
-    `Assoc
-      (base_fields
-         ~record_kind:"cursor_ack"
-         ~event_id:
-           (digest_id
-              "krl"
-              (String.concat
-                 "|"
-                 [ stimulus_id; "cursor_ack"; Printf.sprintf "%.6f" cursor_ts ]))
-         ~keeper_name
-         ~recorded_at
-       @ [ "stimulus_id", `String stimulus_id
-         ; "cursor", cursor_json cursor
-         ; ( "reaction"
-           , `Assoc
-               [ "kind", `String (reaction_kind_to_string Cursor_ack)
-               ; "source", `String "keeper_world_observation.board_cursor"
-               ; "cursor_acked", `Bool true
-               ] )
-         ])
-  in
-  Dated_jsonl.append (store_for_base_path ~base_path ~keeper_name) json
-;;
-
 let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
@@ -584,11 +527,7 @@ type row_quarantine_reason =
   | Transition_source_identity_mismatch
   | Event_identity_mismatch
   | Transition_kind_mismatch
-  | Missing_cursor
-  | Missing_cursor_ts
-  | Non_finite_cursor_ts
   | Non_finite_board_updated_at
-  | Invalid_cursor_reaction
 
 let row_quarantine_reason_to_string = function
   | Malformed_json_row -> "malformed_json"
@@ -635,11 +574,7 @@ let row_quarantine_reason_to_string = function
   | Transition_source_identity_mismatch -> "transition_source_identity_mismatch"
   | Event_identity_mismatch -> "event_identity_mismatch"
   | Transition_kind_mismatch -> "transition_kind_mismatch"
-  | Missing_cursor -> "missing_cursor"
-  | Missing_cursor_ts -> "missing_cursor_ts"
-  | Non_finite_cursor_ts -> "non_finite_cursor_ts"
   | Non_finite_board_updated_at -> "non_finite_board_updated_at"
-  | Invalid_cursor_reaction -> "invalid_cursor_reaction"
 ;;
 
 type current_row_metadata =
@@ -658,10 +593,6 @@ type current_row =
       { metadata : current_row_metadata
       ; reaction_kind : reaction_kind
       ; transition_receipt : Keeper_event_queue_state.transition_receipt option
-      }
-  | Current_cursor_ack of
-      { metadata : current_row_metadata
-      ; cursor_token : float * string option
       }
 
 let require_string reason field json =
@@ -690,7 +621,6 @@ let reaction_kind_matches_transition reaction_kind transition =
   | Event_queue_ack, Keeper_event_queue_state.Ack_source_terminal _ -> true
   | Event_queue_cancelled, Keeper_event_queue_state.Cancel_accepted _ -> true
   | Turn_started, _
-  | Cursor_ack, _
   | Event_queue_ack, Keeper_event_queue_state.Cancel_accepted _
   | Event_queue_cancelled,
     ( Keeper_event_queue_state.Transfer_accepted _
@@ -827,55 +757,11 @@ let decode_reaction_row ~event_id metadata reaction =
     Ok
       (Current_reaction
          { metadata; reaction_kind; transition_receipt = Some transition_receipt })
-  | Cursor_ack, "keeper_world_observation.board_cursor" ->
-    Error Reaction_source_mismatch
   | Turn_started, "keeper_event_queue_transition"
   | (Event_queue_ack | Event_queue_cancelled),
-    "keeper_event_queue"
-  | Cursor_ack,
-    ("keeper_event_queue" | "keeper_event_queue_transition") ->
-    Error Reaction_source_mismatch
-  | (Turn_started | Event_queue_ack | Event_queue_cancelled | Cursor_ack),
+    "keeper_event_queue" -> Error Reaction_source_mismatch
+  | (Turn_started | Event_queue_ack | Event_queue_cancelled),
     _ -> Error Unknown_reaction_source
-;;
-
-let decode_cursor_ack_row metadata row =
-  let ( let* ) = Result.bind in
-  let* cursor =
-    match assoc_field "cursor" row with
-    | Some value -> Ok value
-    | None -> Error Missing_cursor
-  in
-  let* cursor_ts =
-    require_finite_float
-      ~missing:Missing_cursor_ts
-      ~non_finite:Non_finite_cursor_ts
-      "cursor_ts"
-      cursor
-  in
-  let post_id = string_field "post_id" cursor in
-  let* reaction =
-    match assoc_field "reaction" row with
-    | Some value -> Ok value
-    | None -> Error Invalid_cursor_reaction
-  in
-  let valid_reaction =
-    match string_field "kind" reaction, string_field "source" reaction with
-    | Some "cursor_ack", Some "keeper_world_observation.board_cursor" -> true
-    | _ -> false
-  in
-  let expected_event_id =
-    digest_id
-      "krl"
-      (String.concat
-         "|"
-         [ metadata.stimulus_id; "cursor_ack"; Printf.sprintf "%.6f" cursor_ts ])
-  in
-  if not valid_reaction
-  then Error Invalid_cursor_reaction
-  else if String.equal metadata.event_id expected_event_id
-  then Ok (Current_cursor_ack { metadata; cursor_token = cursor_ts, post_id })
-  else Error Event_identity_mismatch
 ;;
 
 let decode_current_row ~keeper_name row =
@@ -975,7 +861,6 @@ let decode_current_row ~keeper_name row =
       | None -> Error Missing_reaction
     in
     decode_reaction_row ~event_id metadata reaction
-  | "cursor_ack" -> decode_cursor_ack_row metadata row
   | _ -> Error Unknown_record_kind
 ;;
 
@@ -1063,8 +948,7 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
         let metadata =
           match current_row with
           | Current_stimulus { metadata; _ }
-          | Current_reaction { metadata; _ }
-          | Current_cursor_ack { metadata; _ } -> metadata
+          | Current_reaction { metadata; _ } -> metadata
         in
         let recorded_at = Some metadata.recorded_at in
         latest_recorded_at := max_recorded_at !latest_recorded_at recorded_at;
@@ -1084,9 +968,7 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
          | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
            event_queue_cancelled_seen := true;
            event_queue_cancelled_recorded_at
-             := max_recorded_at !event_queue_cancelled_recorded_at recorded_at
-         | Current_reaction { reaction_kind = Cursor_ack; _ }
-         | Current_cursor_ack _ -> ())
+             := max_recorded_at !event_queue_cancelled_recorded_at recorded_at)
   in
   let note_parsed_row row =
     match string_field "stimulus_id" row with
@@ -1152,10 +1034,7 @@ let event_queue_turn_started_seen_for_source_result
                    = Some expected_stimulus_kind ->
            turn_started_seen := true
          | Some _ | None -> ())
-      | Ok
-          ( Current_stimulus _
-          | Current_reaction _
-          | Current_cursor_ack _ )
+      | Ok (Current_stimulus _ | Current_reaction _)
       | Error _ ->
         ()
     in
@@ -1361,7 +1240,6 @@ let summarize_rows ~keeper_name ~limit rows =
   let turn_started_count = ref 0 in
   let event_queue_ack_count = ref 0 in
   let event_queue_cancelled_count = ref 0 in
-  let cursor_ack_count = ref 0 in
   let quarantined_row_count = ref 0 in
   let quarantine_reason_counts = Hashtbl.create 8 in
   let latest_recorded_at = ref None in
@@ -1393,19 +1271,6 @@ let summarize_rows ~keeper_name ~limit rows =
       incr cursor_swept_stimulus_count
     | Some true | None -> ()
   in
-  let mark_board_cursor_swept cursor_token =
-    Hashtbl.iter
-      (fun stimulus_id stimulus_token ->
-        if compare_board_cursor_token stimulus_token cursor_token <= 0
-        then mark_cursor_swept stimulus_id)
-      board_stimulus_tokens
-  in
-  let note_board_cursor cursor_token =
-    (match !latest_board_cursor with
-     | Some latest when compare_board_cursor_token latest cursor_token >= 0 -> ()
-     | _ -> latest_board_cursor := Some cursor_token);
-    mark_board_cursor_swept cursor_token
-  in
   let remember_board_stimulus metadata stimulus_kind =
     match board_stimulus_token metadata stimulus_kind with
     | Some stimulus_token ->
@@ -1422,17 +1287,14 @@ let summarize_rows ~keeper_name ~limit rows =
     | Turn_started, None -> incr turn_started_count
     | Event_queue_ack, Some _ -> incr event_queue_ack_count
     | Event_queue_cancelled, Some _ -> incr event_queue_cancelled_count
-    | Cursor_ack, None -> incr cursor_ack_count
     | Turn_started, Some _
-    | (Event_queue_ack | Event_queue_cancelled), None
-    | Cursor_ack, Some _ -> ()
+    | (Event_queue_ack | Event_queue_cancelled), None -> ()
   in
   let note_current_row current_row =
     let metadata =
       match current_row with
       | Current_stimulus { metadata; _ }
-      | Current_reaction { metadata; _ }
-      | Current_cursor_ack { metadata; _ } -> metadata
+      | Current_reaction { metadata; _ } -> metadata
     in
     if Event_id_set.mem metadata.event_id !current_event_ids
     then ()
@@ -1450,10 +1312,6 @@ let summarize_rows ~keeper_name ~limit rows =
         incr reaction_count;
         note_reaction_kind reaction_kind transition_receipt;
         mark_reacted metadata.stimulus_id
-      | Current_cursor_ack { cursor_token; _ } ->
-        incr reaction_count;
-        incr cursor_ack_count;
-        note_board_cursor cursor_token
     end
   in
   List.iter
@@ -1492,7 +1350,6 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "turn_started_count", `Int !turn_started_count
     ; "event_queue_ack_count", `Int !event_queue_ack_count
     ; "event_queue_cancelled_count", `Int !event_queue_cancelled_count
-    ; "cursor_ack_count", `Int !cursor_ack_count
     ; "quarantined_row_count", `Int !quarantined_row_count
     ; ( "quarantine_reason_counts"
       , string_count_table_json ~field:"reason" quarantine_reason_counts )
@@ -1523,7 +1380,6 @@ let error_summary ~keeper_name ~limit error =
     ; "turn_started_count", `Int 0
     ; "event_queue_ack_count", `Int 0
     ; "event_queue_cancelled_count", `Int 0
-    ; "cursor_ack_count", `Int 0
     ; "quarantined_row_count", `Int 0
     ; "quarantine_reason_counts", `List []
     ; "cursor_swept_stimulus_count", `Int 0
@@ -1581,7 +1437,6 @@ let unavailable_fleet_summary_json () =
     ; "turn_started_count", `Int 0
     ; "event_queue_ack_count", `Int 0
     ; "event_queue_cancelled_count", `Int 0
-    ; "cursor_ack_count", `Int 0
     ; "quarantined_row_count", `Int 0
     ; "quarantine_reason_counts", `List []
     ; "quarantined_rows_by_keeper", `List []
@@ -1836,7 +1691,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "event_queue_ack_count", `Int (total_int "event_queue_ack_count")
     ; ( "event_queue_cancelled_count"
       , `Int (total_int "event_queue_cancelled_count") )
-    ; "cursor_ack_count", `Int (total_int "cursor_ack_count")
     ; "quarantined_row_count", `Int quarantined_row_count
     ; "quarantine_reason_counts", quarantine_reason_counts
     ; "quarantined_rows_by_keeper", `List quarantined_rows_by_keeper

@@ -67,6 +67,11 @@ let canonical_keeper_name_from_agent_name agent_name =
       else
         None
 
+let keeper_name_of_agent agent_name =
+  match canonical_keeper_name_from_agent_name agent_name with
+  | Some keeper_name -> keeper_name
+  | None -> String.trim agent_name
+
 let is_keeper_principal_agent_name agent_name =
   let trimmed = String.trim agent_name in
   is_keeper_agent_alias trimmed

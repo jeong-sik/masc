@@ -22,6 +22,14 @@ val read_git_file : string -> string option
 val parse_gitdir_to_main_root : string -> string option
 val find_git_root : string -> string option
 val normalize_base_path : string -> string
+
+val canonical_base_path : string -> (string, string) result
+(** [canonical_base_path path] applies [normalize_base_path] and then resolves
+    the result with [Fs_compat.realpath]. Returns [Error "base_path is empty"]
+    when normalization yields [""], and [Error] with the printed exception when
+    resolution raises. [Eio.Cancel.Cancelled] is re-raised instead of being
+    returned as an error. *)
+
 val running_under_test_executable : unit -> bool
 val test_base_path_override_env : string
 val test_base_path_override_enabled : unit -> bool

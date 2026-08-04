@@ -2,16 +2,7 @@
 
 module StringSet = Set_util.StringSet
 
-let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
-  let unique, _ =
-    List.fold_left
-      (fun (acc, seen) (schema : Masc_domain.tool_schema) ->
-        if StringSet.mem schema.name seen then (acc, seen)
-        else (schema :: acc, StringSet.add schema.name seen))
-      ([], StringSet.empty)
-      schemas
-  in
-  List.rev unique
+let dedupe_schemas = Masc_domain.dedupe_tool_schemas
 
 
 (* Project every descriptor-owned masc_* backend schema into the substrate so

@@ -1177,6 +1177,20 @@ let count_entries = count_entries_incremental
 let reset_count_cache_for_testing () =
   Stdlib.Mutex.protect file_count_cache_mu (fun () -> Hashtbl.reset file_count_cache)
 ;;
+
+(* Day key for the [YYYY-MM/DD.jsonl] layout. Must stay UTC: the write path
+   ([Jsonl_writer.dated_path]) picks the day file with [Unix.gmtime], so a
+   local-time key here would look in the wrong file for the hours where the
+   two calendars disagree. Pinned by
+   [test_keeper_approval_resolved_history.ml]. *)
+let utc_day_string ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf
+    "%04d-%02d-%02d"
+    (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1)
+    tm.Unix.tm_mday
+
 let read_range t ~since ~until =
   let collected = ref [] in
   iter_range t ~since ~until (fun json -> collected := json :: !collected);

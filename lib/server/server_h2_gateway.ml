@@ -12,23 +12,9 @@ let h2_request_authority_bad_request ~error_code ~message h2_reqd =
     ~status:`Bad_request
 ;;
 
-let make_error_handler () =
-  (* HTTP/2 error handler *)
-  let h2_error_handler _client_addr ?request:_ error respond =
-    let message = match error with
-      | `Exn exn -> Printexc.to_string exn
-      | `Bad_request -> "Bad request"
-      | `Internal_server_error -> "Internal server error"
-    in
-    Log.Http.error "Error: %s" message;
-    let headers = H2.Headers.of_list [("content-type", "text/plain")] in
-    let body = respond headers in
-    H2.Body.Writer.write_string body message;
-    H2.Body.Writer.close body
-  in
-
-
-  h2_error_handler
+(* HTTP/2 error handler: same body as the one the h2 listener installs,
+   so both paths log and respond identically. *)
+let make_error_handler () = Http_server_h2.error_handler
 
 let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
   let mcp_eio_profile_of_transport_profile = function

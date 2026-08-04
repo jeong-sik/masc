@@ -81,14 +81,7 @@ let authorize_transition ~from ~to_ =
 
 (* ── Strategy adjustment ──────────────────────────────────────── *)
 
-let error_mode_kind_label (mode : Recovery.error_mode) : string =
-  match mode with
-  | Recovery.TransientError _ -> "Transient"
-  | Recovery.PermanentError _ -> "Permanent"
-  | Recovery.ResourceExhausted _ -> "ResourceExhausted"
-  | Recovery.AmbiguityError _ -> "Ambiguity"
-  | Recovery.ConsensusError _ -> "Consensus"
-  | Recovery.DegradationRequired _ -> "DegradationRequired"
+let error_mode_kind_label = Recovery.error_mode_kind
 
 let apply_level_to_strategy : type a.
     a level ->

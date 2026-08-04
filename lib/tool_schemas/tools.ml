@@ -6,17 +6,7 @@
 
 open Masc_domain
 
-module StringSet = Set_util.StringSet
-
-let dedupe_schemas_by_name (schemas : tool_schema list) =
-  let unique, _ =
-    List.fold_left
-      (fun (acc, seen) (schema : tool_schema) ->
-        if StringSet.mem schema.name seen then (acc, seen)
-        else (schema :: acc, StringSet.add schema.name seen))
-      ([], StringSet.empty) schemas
-  in
-  List.rev unique
+let dedupe_schemas_by_name = Masc_domain.dedupe_tool_schemas
 
 (** Tool schemas from modules that do NOT depend on Config
     (avoids Tools -> Config -> Tools cycle) *)

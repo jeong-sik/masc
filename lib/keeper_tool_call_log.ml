@@ -655,14 +655,7 @@ let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
     ring_keep_last ~n ~keep raw)
 ;;
 
-let iso_date_of_unix ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf
-    "%04d-%02d-%02d"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-;;
+let iso_date_of_unix = Dated_jsonl.utc_day_string
 
 let ts_of_entry (json : Yojson.Safe.t) : float option =
   match json with

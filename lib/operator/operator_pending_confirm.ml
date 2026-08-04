@@ -269,11 +269,7 @@ let remove_pending_confirms_by_target config ~target_type ~target_id =
   | Some target_type ->
     remove_pending_confirms_by_typed_target config { target_type; target_id }
 
-let normalize_pending_confirm_actor_filter = function
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
+let normalize_pending_confirm_actor_filter = Env_config_core.trim_opt
 
 let pending_confirm_scope_of_entries ?actor entries =
   let actor_filter =

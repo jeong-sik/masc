@@ -300,10 +300,27 @@ let strip_trailing_cr s =
   let len = String.length s in
   if len > 0 && s.[len - 1] = '\r' then String.sub s 0 (len - 1) else s
 
+let strip_one_final_newline value =
+  let len = String.length value in
+  if len >= 2 && Char.equal value.[len - 2] '\r' && Char.equal value.[len - 1] '\n'
+  then String.sub value 0 (len - 2)
+  else if len >= 1 && (Char.equal value.[len - 1] '\n' || Char.equal value.[len - 1] '\r')
+  then String.sub value 0 (len - 1)
+  else value
+
 let first_line text =
   match String.index_opt text '\n' with
   | Some i -> String.sub text 0 i
   | None -> text
+
+let flatten_inline_whitespace value =
+  value
+  |> String.to_seq
+  |> Seq.map (function
+       | '\n' | '\r' | '\t' -> ' '
+       | ch -> ch)
+  |> String.of_seq
+  |> String.trim
 
 (* XML 1.0 entity escape.  Order matters: [&] first so that the
    ampersands introduced by the other replacements are not

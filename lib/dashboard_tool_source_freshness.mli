@@ -9,9 +9,9 @@
     entry count, last-seen timestamp, and any active coverage
     gaps surfaced through {!Telemetry_coverage_gap}.
 
-    Internal helper [numeric_ts_field] (which extracts a unix
-    timestamp from [`Float] / [`Int] JSON shapes) is hidden —
-    callers consume the higher-level
+    Numeric timestamp extraction from [`Float] / [`Int] JSON
+    shapes is delegated to [Json_util.assoc_float_opt]; callers
+    consume the higher-level
     {!latest_ts_of_record} / {!freshness_fields} /
     {!health_fields} composition layer instead. *)
 

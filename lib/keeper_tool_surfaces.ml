@@ -25,19 +25,7 @@ module Random = Stdlib.Random
 
 open Masc_domain
 
-module SS = Set_util.StringSet
-
-
-let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
-  let unique, _ =
-    List.fold_left
-      (fun (acc, seen) (schema : Masc_domain.tool_schema) ->
-        if SS.mem schema.name seen then (acc, seen)
-        else (schema :: acc, SS.add schema.name seen))
-      ([], SS.empty)
-      schemas
-  in
-  List.rev unique
+let dedupe_schemas = Masc_domain.dedupe_tool_schemas
 
 (* Hashtbl materialisation helper for membership-only checks.  Used
    below where we'd otherwise scan a name list per element of a

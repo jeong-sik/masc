@@ -335,16 +335,7 @@ let workspace_state_path_available kind path =
   | Sys_error _ -> false
 ;;
 
-let unique_preserving_order values =
-  let rec loop seen acc = function
-    | [] -> List.rev acc
-    | value :: rest ->
-      if List.mem value seen
-      then loop seen acc rest
-      else loop (value :: seen) (value :: acc) rest
-  in
-  loop [] [] values
-;;
+let unique_preserving_order = Json_util.dedupe_keep_order
 
 let docker_workspace_state_mount_specs ~base_path ~container_root =
   let host_masc_root = Common.masc_dir_from_base_path ~base_path in

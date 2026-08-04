@@ -17,14 +17,7 @@ let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
     ]
 ;;
 
-let dashboard_task_assignee (task : Masc_domain.task) =
-  match task.task_status with
-  | Claimed { assignee; _ }
-  | InProgress { assignee; _ }
-  | AwaitingVerification { assignee; _ }
-  | Done { assignee; _ } -> Some assignee
-  | Todo | Cancelled _ -> None
-;;
+let dashboard_task_assignee = Dashboard_execution_builders.task_assignee
 
 let dashboard_task_json config (task : Masc_domain.task) =
   let base_fields =

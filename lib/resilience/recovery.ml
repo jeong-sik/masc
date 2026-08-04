@@ -197,6 +197,20 @@ let all_error_mode_tla_symbols =
     "Degradation";
   ]
 
+(* Not a TLA+ symbol. Distinct from [error_mode_to_tla_symbol] above in the
+   DegradationRequired case ("DegradationRequired" here vs "Degradation"
+   there): that one is pinned to specs/resilience/ResilienceDegradation.tla
+   [ErrorModes] and must not follow this one. Consumed by operator message
+   text (degradation.ml) and by the "kind" field of the keeper audit envelope
+   (keeper_bridge.ml), so changing a string here changes a wire value. *)
+let error_mode_kind = function
+  | TransientError _ -> "Transient"
+  | PermanentError _ -> "Permanent"
+  | ResourceExhausted _ -> "ResourceExhausted"
+  | AmbiguityError _ -> "Ambiguity"
+  | ConsensusError _ -> "Consensus"
+  | DegradationRequired _ -> "DegradationRequired"
+
 let strategy_to_tla_symbol : type a. a strategy -> string = function
   | Retry _ -> "Retry"
   | Fallback _ -> "Fallback"

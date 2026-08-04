@@ -231,14 +231,7 @@ let chat_queue_message_request ~channel ~channel_user_id ~keeper_name
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
 
-let normalized_context_value value =
-  value
-  |> String.to_seq
-  |> Seq.map (function
-       | '\n' | '\r' | '\t' -> ' '
-       | ch -> ch)
-  |> String.of_seq
-  |> String.trim
+let normalized_context_value = String_util.flatten_inline_whitespace
 
 let normalized_or_unknown value =
   match normalized_context_value value with

@@ -400,14 +400,7 @@ let task_operation_severity (task : Masc_domain.task) =
   | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Tone_ok
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> Tone_ok
 
-let task_operation_updated_at (task : Masc_domain.task) =
-  match task.task_status with
-  | Masc_domain.Done { completed_at; _ } -> completed_at
-  | Masc_domain.Cancelled { cancelled_at; _ } -> cancelled_at
-  | Masc_domain.InProgress { started_at; _ } -> started_at
-  | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
-  | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
-  | Masc_domain.Todo -> task.created_at
+let task_operation_updated_at = Dashboard_goals_types_accessor.task_updated_at
 
 let task_operation_id (task : Masc_domain.task) =
   match Option.bind task.contract (fun contract -> contract.links.operation_id) with

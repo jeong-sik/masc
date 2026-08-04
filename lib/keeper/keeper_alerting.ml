@@ -14,19 +14,8 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_memory
 
-let merge_usage
-    (a : Agent_sdk.Types.api_usage)
-    (b : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage =
-  { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
-    output_tokens = a.output_tokens + b.output_tokens;
-    cache_creation_input_tokens =
-      a.cache_creation_input_tokens + b.cache_creation_input_tokens;
-    cache_read_input_tokens =
-      a.cache_read_input_tokens + b.cache_read_input_tokens;
-    cost_usd =
-      (match a.cost_usd, b.cost_usd with
-       | Some x, Some y -> Some (x +. y)
-       | Some x, None | None, Some x -> Some x
-       | None, None -> None) }
+(* Alias kept so existing callers of [Keeper_alerting.merge_usage] are
+   unchanged; the arithmetic lives in {!Inference_utils}. *)
+let merge_usage = Inference_utils.merge_usage
 
 include Keeper_alerting_path

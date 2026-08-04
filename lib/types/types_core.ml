@@ -942,6 +942,19 @@ type tool_schema = {
   input_schema: Yojson.Safe.t;
 }
 
+(** Drop schemas whose [name] already appeared earlier in the list; the first
+    occurrence of each name is kept and the surviving order is preserved. *)
+let dedupe_tool_schemas (schemas : tool_schema list) =
+  let unique, _ =
+    List.fold_left
+      (fun (acc, seen) (schema : tool_schema) ->
+        if Set_util.StringSet.mem schema.name seen then (acc, seen)
+        else (schema :: acc, Set_util.StringSet.add schema.name seen))
+      ([], Set_util.StringSet.empty)
+      schemas
+  in
+  List.rev unique
+
 (** Structured result for claim_next scheduling (avoids brittle string parsing).
     Defined here so that both Workspace_task_schedule (producer) and consumers
     (tool_task, orchestrator) can reference the type without

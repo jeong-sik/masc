@@ -455,13 +455,8 @@ let validate_now now =
 ;;
 
 let canonical_base_path base_path =
-  let normalized = Workspace_utils_backend_setup.normalize_base_path base_path in
-  if String.equal normalized ""
-  then Error (Invalid_base_path "base_path is empty")
-  else
-    try Ok (Fs_compat.realpath normalized) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Invalid_base_path (Printexc.to_string exn))
+  Workspace_utils_backend_setup.canonical_base_path base_path
+  |> Result.map_error (fun detail -> Invalid_base_path detail)
 ;;
 
 let keeper_name_id keeper_name =

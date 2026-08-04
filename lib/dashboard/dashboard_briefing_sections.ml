@@ -281,11 +281,7 @@ let start_async_refresh ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cloc
 
 (* ── Public entry point ─────────────────────────────────────────── *)
 
-let actor_name = function
-  | Some value ->
-      let trimmed = String.trim value in
-      if trimmed <> "" then trimmed else "dashboard"
-  | None -> "dashboard"
+let actor_name = Dashboard_projection_cache.normalize_actor_name
 
 let json ?actor ?(force = false) ~config ~sw ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t) ~proc_mgr () =
   let now_ts = Unix.gettimeofday () in

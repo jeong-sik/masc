@@ -1,7 +1,8 @@
 (** Tool schema registry and visibility helpers. *)
 
 val dedupe_schemas : Masc_domain.tool_schema list -> Masc_domain.tool_schema list
-(** Remove duplicate tool schemas by name, keeping the first occurrence. *)
+(** Remove duplicate tool schemas by name, keeping the first occurrence.
+    Alias of {!Masc_domain.dedupe_tool_schemas}. *)
 
 val raw_all_tool_schemas : Masc_domain.tool_schema list
 (** All tool schemas before capability filtering. *)

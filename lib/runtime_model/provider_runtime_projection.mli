@@ -31,3 +31,7 @@ val default_model_candidate_for_runtime_prefix :
   ?getenv:(string -> string option) -> string -> default_model_candidate option
 
 val default_execution_model_strings : string -> string list
+
+val split_csv_nonempty : string -> string list
+(** Split on [','], trim each item, and drop the items that are empty after
+    trimming. Used for comma-separated environment variable values. *)

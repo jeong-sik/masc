@@ -124,6 +124,13 @@ val read_recent_lines : ?offset:int -> t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).
     Useful for tail-readers that do their own parsing. *)
 
+val utc_day_string : float -> string
+(** [utc_day_string ts] renders the unix timestamp [ts] as ["YYYY-MM-DD"] in
+    UTC, the day key consumed by [~since]/[~until] below. Uses
+    {!Unix.gmtime}, not localtime: the write path ([Jsonl_writer.dated_path])
+    picks the day file with [Unix.gmtime], so a local-time key would address
+    a different file during the hours where the two calendars disagree. *)
+
 val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
 (** [read_range t ~since ~until] returns entries whose day-file falls
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).

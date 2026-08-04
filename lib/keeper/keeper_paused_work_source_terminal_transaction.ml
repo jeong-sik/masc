@@ -145,23 +145,14 @@ let validate_paused_owner request (meta : Keeper_meta_contract.keeper_meta) =
 ;;
 
 let validate_source_queue config ~keeper_name request =
-  let* state =
-    Keeper_event_queue_persistence.load_state_result
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-    |> Result.map_error (fun detail -> Source_queue_validation_failed detail)
-  in
-  if Keeper_event_queue_state.transition_outbox state <> []
-  then Error (Source_queue_validation_failed "source lane has a pending transition outbox")
-  else
-    Keeper_event_queue_state.validate_pending_selection
-      ~selection:
-        { source = request.source
-        ; admitted_revision = request.source_incarnation
-        }
-      state
-    |> Result.map_error (fun detail ->
-      Source_queue_validation_failed detail)
+  Keeper_event_queue_persistence.validate_source_selection
+    ~base_path:config.Workspace.base_path
+    ~keeper_name
+    ~selection:
+      { source = request.source
+      ; admitted_revision = request.source_incarnation
+      }
+  |> Result.map_error (fun detail -> Source_queue_validation_failed detail)
 ;;
 
 let operation_of_receipt receipt =

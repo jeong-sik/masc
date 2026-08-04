@@ -100,19 +100,13 @@ let load_jsonl_safe (path : string) : Yojson.Safe.t list =
 
 (** Canonical keeper name used for identity comparison.  Shared with
     {!accountability_metrics} so both metrics fold an identity the same way:
-    via [Keeper_identity.canonical_keeper_name_from_agent_name], which unwraps
-    the full actor id and resolves a generated-nickname alias to its agent
-    type, falling back to the trimmed input for non-keeper principals.
-
-    Known residual: this canonicalizer collapses 3+-part hyphenated non-keeper
-    ids (e.g. "codex-mcp-client" -> "client") onto their last segment, so such
-    principals can share a canonical form.  Resolving that needs registry-aware
-    typed identity (RFC-0038 Phase 2); it does not affect single-token keeper
-    names, which are the subject of the undercount fixed below. *)
-let keeper_name_of_agent agent_name =
-  match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
-  | Some keeper_name -> keeper_name
-  | None -> String.trim agent_name
+    both call [Keeper_identity.keeper_name_of_agent], which unwraps the full
+    actor id and resolves a generated-nickname alias to its agent type, falling
+    back to the trimmed input for non-keeper principals.  Its residual on
+    3+-part hyphenated non-keeper ids is documented on the owner; it does not
+    affect single-token keeper names, which are the subject of the undercount
+    fixed below. *)
+let keeper_name_of_agent = Keeper_identity.keeper_name_of_agent
 
 (** Count tasks claimed and completed by an agent from the task backlog.
     Reads the canonical Workspace backlog so reputation follows the same storage

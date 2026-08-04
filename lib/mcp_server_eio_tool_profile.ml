@@ -39,18 +39,9 @@ let managed_agent_passthrough_tool_set : (string, unit) Hashtbl.t =
     managed_agent_passthrough_tool_names;
   tbl
 
-module StringSet = Set_util.StringSet
 module StringMap = Set_util.StringMap
 
-let dedupe_tool_schemas_by_name (schemas : Masc_domain.tool_schema list) =
-  let _, result =
-    List.fold_left
-      (fun (seen, acc) (schema : Masc_domain.tool_schema) ->
-        if StringSet.mem schema.name seen then (seen, acc)
-        else (StringSet.add schema.name seen, schema :: acc))
-      (StringSet.empty, []) schemas
-  in
-  List.rev result
+let dedupe_tool_schemas_by_name = Config.dedupe_schemas
 
 let default_instructions () =
   "MASC (Multi-Agent Streaming Workspace) enables AI agent collaboration. \

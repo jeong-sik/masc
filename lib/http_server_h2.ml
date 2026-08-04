@@ -258,20 +258,8 @@ module Compat = struct
   end
 end
 
-let disable_nagle flow =
-  (* TCP_NODELAY on accepted connections: small SSE frames (keeper token
-     deltas, dashboard broadcasts) are not held for Nagle coalescing (~up to
-     40ms/frame under Nagle + delayed ACK). Set per-connection after accept,
-     not on the listen socket, because TCP_NODELAY inheritance from a
-     listening socket is Linux-only and is NOT inherited on macOS. Graceful
-     degradation: if [setsockopt] fails on an unusual socket the connection
-     still works (just with Nagle enabled). *)
-  try
-    Eio_unix.Fd.use_exn "TCP_NODELAY" (Eio_unix.Net.fd flow) (fun ufd ->
-      Unix.setsockopt ufd Unix.TCP_NODELAY true)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> ()
+(* Shared with the HTTP/1.1 listener; see lib/socket_options.mli. *)
+let disable_nagle = Socket_options.disable_nagle
 
 (** Run HTTP/2 server with Eio *)
 let run ~sw ~net ~clock config request_handler =

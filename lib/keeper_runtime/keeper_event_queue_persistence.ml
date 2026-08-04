@@ -1020,6 +1020,15 @@ let validate_pending_selection_result ~base_path ~keeper_name ~selection =
   | Ok state -> State.validate_pending_selection ~selection state
 ;;
 
+let validate_source_selection ~base_path ~keeper_name ~selection =
+  match load_state_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok state ->
+    if State.transition_outbox state <> []
+    then Error "source lane has a pending transition outbox"
+    else State.validate_pending_selection ~selection state
+;;
+
 let ack_pending_result
       ?(after_commit = fun _ -> ())
       ~base_path

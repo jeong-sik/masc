@@ -5,11 +5,18 @@
 
 val make_error_handler :
   unit ->
-  'a ->
+  Eio.Net.Sockaddr.stream ->
   ?request:H2.Request.t ->
   H2.Server_connection.error ->
   (H2.Headers.t -> H2.Body.Writer.t) ->
   unit
+(** [make_error_handler ()] is {!Http_server_h2.error_handler}: it maps
+    the H2 connection error to a message, logs it via [Log.Http.error],
+    and writes that message as a [text/plain] body.
+
+    The client address argument is monomorphic in
+    [Eio.Net.Sockaddr.stream], matching the
+    [make_h2_error_handler] parameter of [Server_runtime_bootstrap.run]. *)
 
 val make_request_handler :
   trust_policy:Server_request_authority.trust_policy ->

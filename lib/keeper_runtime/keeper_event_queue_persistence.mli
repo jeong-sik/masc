@@ -122,6 +122,17 @@ val validate_pending_selection_result :
   selection:Keeper_event_queue_state.pending_selection ->
   (unit, string) result
 
+val validate_source_selection :
+  base_path:string ->
+  keeper_name:string ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  (unit, string) result
+(** {!validate_pending_selection_result} preceded by an empty-transition-outbox
+    precondition: a lane holding an unretired transition returns [Error "source
+    lane has a pending transition outbox"] before the selection is examined.
+    Used by the paused-work disposition transactions, which must not build a
+    receipt over a lane whose prior transition is still unprojected. *)
+
 val ack_pending_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->

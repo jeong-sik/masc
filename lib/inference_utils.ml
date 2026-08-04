@@ -37,6 +37,25 @@ let zero_usage = Agent_sdk.Types.zero_api_usage
 let usage_of_response (resp : Agent_sdk_response.api_response) : Agent_sdk.Types.api_usage =
   match resp.usage with Some u -> u | None -> zero_usage
 
+(** Field-wise sum of two usage records. [cost_usd] is summed when both sides
+    carry one, passed through when only one does, [None] otherwise. Forms the
+    monoid pair with [zero_usage]; OAS exposes [zero_api_usage] but no
+    corresponding merge, so the arithmetic lives here. *)
+let merge_usage
+    (a : Agent_sdk.Types.api_usage)
+    (b : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage =
+  { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
+    output_tokens = a.output_tokens + b.output_tokens;
+    cache_creation_input_tokens =
+      a.cache_creation_input_tokens + b.cache_creation_input_tokens;
+    cache_read_input_tokens =
+      a.cache_read_input_tokens + b.cache_read_input_tokens;
+    cost_usd =
+      (match a.cost_usd, b.cost_usd with
+       | Some x, Some y -> Some (x +. y)
+       | Some x, None | None, Some x -> Some x
+       | None, None -> None) }
+
 (** Convert elapsed seconds to integer milliseconds for telemetry. *)
 let elapsed_duration_ms elapsed_s =
   let elapsed_ms = elapsed_s *. 1000.0 in

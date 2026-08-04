@@ -60,14 +60,7 @@ let strategy_class_of_strategy : type a. a Recovery.strategy -> string =
   | Recovery.Handoff _ -> "Handoff"
   | Recovery.Abort _ -> "Abort"
 
-let error_mode_kind (mode : Recovery.error_mode) : string =
-  match mode with
-  | Recovery.TransientError _ -> "Transient"
-  | Recovery.PermanentError _ -> "Permanent"
-  | Recovery.ResourceExhausted _ -> "ResourceExhausted"
-  | Recovery.AmbiguityError _ -> "Ambiguity"
-  | Recovery.ConsensusError _ -> "Consensus"
-  | Recovery.DegradationRequired _ -> "DegradationRequired"
+let error_mode_kind = Recovery.error_mode_kind
 
 let execution_outcome_to_json
     (outcome : Recovery.execution_outcome) : Yojson.Safe.t =

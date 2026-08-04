@@ -80,12 +80,7 @@ let env_fragment value =
     | _ -> '_')
 ;;
 
-let csv_items raw =
-  raw
-  |> String.split_on_char ','
-  |> List.map String.trim
-  |> List.filter (fun value -> not (String.equal value ""))
-;;
+let csv_items = Provider_runtime_projection.split_csv_nonempty
 
 let default_auto_models_for_profile (profile : Provider_runtime_projection.provider_profile)
   =

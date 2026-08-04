@@ -28,13 +28,7 @@ let dashboard_actor_cache_segment state req =
 ;;
 
 let dashboard_error_json ?ok message =
-  let fields = [ ("error", `String message) ] in
-  let fields =
-    match ok with
-    | None -> fields
-    | Some value -> ("ok", `Bool value) :: fields
-  in
-  `Assoc fields
+  Server_dashboard_http_keeper_api_types.error_json ?ok message
 
 let respond_dashboard_error ?(status = `Bad_request) ?request ?ok reqd message =
   Http.Response.json_value ?request ~status

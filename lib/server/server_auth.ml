@@ -8,12 +8,7 @@ let trim_opt = Env_config_core.trim_opt
 let configured_bind_host () =
   Env_config_core.masc_host ()
 
-let ipaddr_is_loopback = function
-  | Ipaddr.V4 addr ->
-      let octets = Ipaddr.V4.to_octets addr in
-      String.length octets = 4 && Char.code octets.[0] = 127
-  | Ipaddr.V6 addr ->
-      Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
+let ipaddr_is_loopback = Masc_network_defaults.ipaddr_is_loopback
 
 let ipaddr_is_unspecified = function
   | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0

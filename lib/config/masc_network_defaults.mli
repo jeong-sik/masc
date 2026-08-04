@@ -75,6 +75,12 @@ val masc_http_default_host : string
 
 (** {1 Loopback detection} *)
 
+(** Classifies a parsed address: the whole IPv4 [127.0.0.0/8] block (first
+    octet 127), and the single IPv6 address [::1]. Broader on IPv4 than
+    {!is_loopback_host}, which compares against [Ipaddr.V4.localhost] and so
+    accepts only [127.0.0.1]. The two are not interchangeable. *)
+val ipaddr_is_loopback : (Ipaddr.V4.t, Ipaddr.V6.t) Ipaddr.v4v6 -> bool
+
 (** Treats ["localhost"] (case-insensitive, trimmed) and any IPv4/IPv6
     loopback literal as loopback. Unlike a prefix match, malformed
     addresses return [false] (so ["127.invalid"] is rejected). *)
@@ -82,6 +88,12 @@ val is_loopback_host : string -> bool
 
 (** Convenience for [Uri.host]-style inputs. [None] → [false]. *)
 val is_loopback_host_opt : string option -> bool
+
+val trim_trailing_slashes : string -> string
+(** Return the argument without its trailing ['/'] characters. Scans backwards
+    once and performs at most one [String.sub]; a string with no trailing slash
+    is returned unchanged. An all-slash string becomes [""], and [""] stays
+    [""]. Leading and interior slashes are untouched. *)
 
 val normalize_loopback_base_url : string -> string
 (** Strip trailing slashes from [base_url] and canonicalize loopback

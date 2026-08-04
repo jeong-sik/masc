@@ -14,20 +14,10 @@ let nickname_rng_mutex = Eio.Mutex.create ()
 let with_nickname_rng f =
   Eio.Mutex.use_ro nickname_rng_mutex (fun () -> f nickname_rng)
 
-let array_contains arr value =
-  let rec loop idx =
-    idx < Array.length arr
-    && (String.equal arr.(idx) value || loop (idx + 1))
-  in
-  loop 0
-
-let is_hex4 value =
-  String.length value = 4
-  && String.for_all
-       (function
-         | '0' .. '9' | 'a' .. 'f' -> true
-         | _ -> false)
-       value
+(* Word-list membership and the hex4 suffix shape come from the same
+   [Nickname_words] SSOT as the vocabulary above. *)
+let array_contains = Nickname_words.array_contains
+let is_hex4 = Nickname_words.is_hex4
 
 (** Generate a short random suffix (4 hex chars) for uniqueness *)
 let random_suffix () =

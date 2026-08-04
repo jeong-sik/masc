@@ -17,6 +17,14 @@ type pending_mutation =
 val pending_mutation_route : string -> (string * string * pending_mutation) option
 (** Parse one exact pending receipt mutation route. *)
 
+val mutation_error_status : Keeper_chat_queue.mutation_error -> Httpun.Status.t
+(** Map a {!Keeper_chat_queue.mutation_error} to the HTTP status the chat-queue
+    mutation boundaries answer with. [Invalid_input] maps to
+    [`Bad_request]; the six receipt-state and revision/lease mismatch
+    errors map to [`Conflict]; [Persistence_not_configured],
+    [Snapshot_unavailable], [Revision_exhausted] and [Persist_failed]
+    map to [`Service_unavailable]. *)
+
 val handle_get :
   Mcp_server.server_state ->
   Httpun.Request.t ->

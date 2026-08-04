@@ -17,6 +17,16 @@ val zero_usage : Agent_sdk.Types.api_usage
 (** Extract usage from an api_response, defaulting to {!zero_usage}. *)
 val usage_of_response : Agent_sdk_response.api_response -> Agent_sdk.Types.api_usage
 
+(** [merge_usage a b] sums the four token counters field-wise
+    ([input_tokens], [output_tokens], [cache_creation_input_tokens],
+    [cache_read_input_tokens]) and combines [cost_usd]: the sum when both
+    sides carry one, the present side when only one does, [None] when
+    neither does.  Forms the monoid pair with {!zero_usage}. *)
+val merge_usage :
+  Agent_sdk.Types.api_usage ->
+  Agent_sdk.Types.api_usage ->
+  Agent_sdk.Types.api_usage
+
 (** Convert elapsed seconds to integer milliseconds for telemetry. Positive
     sub-1ms intervals are rounded up to 1; non-positive or non-finite
     intervals return 0. *)

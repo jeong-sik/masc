@@ -104,6 +104,18 @@ let masc_http_default_port_s =
 (** Default host for the MASC HTTP server. *)
 let masc_http_default_host = "127.0.0.1"
 
+(** [ipaddr_is_loopback ip] classifies a parsed address as loopback:
+    the whole IPv4 [127.0.0.0/8] block (first octet 127), and the single
+    IPv6 address [::1].  Note this is broader on IPv4 than
+    {!is_loopback_host} below, which compares against [Ipaddr.V4.localhost]
+    and so accepts only [127.0.0.1].  The two are not interchangeable. *)
+let ipaddr_is_loopback = function
+  | Ipaddr.V4 addr ->
+      let octets = Ipaddr.V4.to_octets addr in
+      String.length octets = 4 && Char.code octets.[0] = 127
+  | Ipaddr.V6 addr ->
+      Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
+
 (** [is_loopback_host host] returns [true] when [host] resolves to any
     IPv4/IPv6 loopback address (via {!Ipaddr}).  Treats the literal
     "localhost" (after trim + lowercase) as loopback.  Malformed

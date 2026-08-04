@@ -49,13 +49,9 @@ let required_string key = function
       | _ -> Error (Printf.sprintf "missing string field %s" key))
   | _ -> Error "expected object"
 
-let optional_string key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`String value) when String.trim value <> "" -> Some value
-      | Some (`String _) | Some `Null | None -> None
-      | Some _ -> None)
-  | _ -> None
+(* Json_util.get_string_nonempty is the SSOT for the trim+empty filter;
+   it takes the json first, so the argument order is flipped here. *)
+let optional_string key json = Json_util.get_string_nonempty json key
 
 let optional_object key = function
   | `Assoc fields -> (

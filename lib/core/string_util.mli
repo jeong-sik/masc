@@ -131,9 +131,23 @@ val compact_text : ?max_len:int -> string -> string
 val strip_trailing_cr : string -> string
 (** [strip_trailing_cr s] removes a trailing ['\\r'] character if present. *)
 
+val strip_one_final_newline : string -> string
+(** [strip_one_final_newline value] removes at most one line terminator from
+    the end of [value]: a trailing ["\\r\\n"] pair, otherwise a single trailing
+    ['\\n'] or ['\\r']. Earlier terminators are left in place, so
+    ["a\\n\\n"] becomes ["a\\n"]. *)
+
 val first_line : string -> string
 (** [first_line text] returns the bytes of [text] before the first ['\\n'].
     Returns [text] unchanged when it contains no ['\\n']. Does not trim. *)
+
+val flatten_inline_whitespace : string -> string
+(** [flatten_inline_whitespace value] replaces every ['\\n'], ['\\r'] and
+    ['\\t'] in [value] with a space, then trims leading and trailing
+    whitespace. Runs of interior whitespace are not collapsed, so the result
+    can still contain consecutive spaces. Returns [""] for input that is empty
+    or entirely whitespace. *)
+
 val escape_xml : string -> string
 (** Escape the five XML 1.0 predefined entities: ampersand,
     less-than, greater-than, double-quote, and apostrophe.

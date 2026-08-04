@@ -71,45 +71,19 @@ let latest_receipt_ts_of_keeper_rows rows =
          | _ -> acc)
        None
 
-let freshness_fields ~now latest_ts =
-  match latest_ts with
-  | Some ts ->
-    [
-      ("latest_ts_unix", `Float ts);
-      ("latest_ts_iso", `String (Masc_domain.iso8601_of_unix_seconds ts));
-      ("latest_age_s", `Float (max 0.0 (now -. ts)));
-    ]
-  | None ->
-    [
-      ("latest_ts_unix", `Null);
-      ("latest_ts_iso", `Null);
-      ("latest_age_s", `Null);
-    ]
+let freshness_fields = Dashboard_tool_source_freshness.freshness_fields
 
+(* The only execution-trust-specific input is the SLO constant above; the
+   health ladder itself is shared with the dashboard source-freshness card. *)
 let source_health_fields ~now ~exists ~entry_count ~latest_ts ?coverage_gap () =
-  let health, stale_reason =
-    match coverage_gap with
-    | Some gap ->
-      ( "coverage_gap",
-        Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
-    | None ->
-      if not exists then ("missing", "store_missing")
-      else if entry_count = 0 then ("empty", "no_entries")
-      else
-        match latest_ts with
-        | None -> ("empty", "no_entries")
-        | Some ts ->
-          let latest_age_s = max 0.0 (now -. ts) in
-          if latest_age_s > execution_trust_freshness_slo_s then
-            ("stale", "freshness_slo_exceeded")
-          else
-            ("ok", "")
-  in
-  [
-    ("health", `String health);
-    ( "stale_reason",
-      if stale_reason = "" then `Null else `String stale_reason );
-  ]
+  Dashboard_tool_source_freshness.health_fields
+    ~now
+    ~exists
+    ~entry_count
+    ~latest_ts
+    ~freshness_slo_s:execution_trust_freshness_slo_s
+    ?coverage_gap
+    ()
 
 let nonempty_string_opt value =
   let trimmed = String.trim value in

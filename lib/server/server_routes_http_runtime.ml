@@ -24,33 +24,7 @@ let cors_preflight_headers origin =
 let json_rpc_error (code : Mcp_error_code.t) message =
   Mcp_error_code.jsonrpc_error_body code ~message
 
-let is_http_error_response = function
-  | `Assoc fields ->
-      let id_is_null =
-        match List.assoc_opt "id" fields with
-        | Some `Null -> true
-        | _ -> false
-      in
-      let code =
-        match List.assoc_opt "error" fields with
-        | Some (`Assoc err_fields) ->
-            (match List.assoc_opt "code" err_fields with
-             | Some (`Int c) -> Some c
-             | _ -> None)
-        | _ -> None
-      in
-      let is_parse_or_invalid = function
-        | Mcp_error_code.Parse_error | Invalid_request -> true
-        | _ -> false
-      in
-      id_is_null
-      && (match code with
-          | Some c ->
-              (match Mcp_error_code.of_wire_code c with
-               | Some ec -> is_parse_or_invalid ec
-               | None -> false)
-          | None -> false)
-  | _ -> false
+let is_http_error_response = Server_mcp_transport_http_headers.is_http_error_response
 
 (** Server start time for uptime calculation *)
 (* server_start_time moved to [Server_routes_http_runtime_health_helpers]

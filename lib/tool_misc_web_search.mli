@@ -14,7 +14,6 @@
     the pre-compiled whitespace normalizer,
     text cleaning helpers (\[normalize_spaces],
     \[clean_search_text], \[trim_nonempty]),
-    \[valid_search_result_url],
     \[parse_json_search_results] (the generic JSON parser
     behind the per-provider parsers), \[provider_to_string] /
     \[provider_of_string] / \[parse_provider_csv] /
@@ -117,6 +116,16 @@ val clean_search_text : string -> string
     HTML snippet — not limited to search result cleaning.  Exposed so
     [Tool_misc_web_fetch] can share the same pipeline without
     duplicating regexes and entity tables. *)
+
+(** {1 URL validation} *)
+
+val valid_search_result_url : string -> bool
+(** [valid_search_result_url url] trims [url], returns [false] on the
+    empty string, and otherwise parses it with [Uri.of_string] and
+    returns [true] when the scheme, lowercased, is [http] or [https].
+    Any other scheme, and a URL with no scheme, returns [false].
+    Exposed so [Tool_misc_web_fetch] applies the same test rather than
+    carrying a second copy. *)
 
 (** {1 Tool dispatch + simulation} *)
 

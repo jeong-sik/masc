@@ -15,6 +15,18 @@ val keeper_name_of_agent_alias : string -> string option
 
 val is_keeper_agent_alias : string -> bool
 val canonical_keeper_name_from_agent_name : string -> string option
+
+val keeper_name_of_agent : string -> string
+(** [keeper_name_of_agent s] is the canonical keeper name
+    {!canonical_keeper_name_from_agent_name} resolves [s] to, and [String.trim
+    s] when it resolves to none. Total, so metrics that group by identity can
+    fold keeper and non-keeper principals through one function. Known residual:
+    the canonicalizer collapses 3+-part hyphenated non-keeper ids
+    (["codex-mcp-client"] -> ["client"]) onto their last segment, so such
+    principals can share a canonical form. Resolving that needs registry-aware
+    typed identity (RFC-0038 Phase 2); single-token keeper names are
+    unaffected. *)
+
 val is_keeper_principal_agent_name : string -> bool
 (** [is_keeper_principal_agent_name name] returns true for task-owner
     principals that should be treated as keeper-owned work: canonical

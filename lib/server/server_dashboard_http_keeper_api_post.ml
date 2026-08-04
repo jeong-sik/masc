@@ -411,14 +411,7 @@ let dashboard_config_patch_allowed_fields =
   @ dashboard_config_bool_fields
   @ dashboard_config_string_list_fields
 
-let dedupe_keep_order_strings values =
-  let rec loop seen acc = function
-    | [] -> List.rev acc
-    | value :: rest ->
-        if List.mem value seen then loop seen acc rest
-        else loop (value :: seen) (value :: acc) rest
-  in
-  loop [] [] values
+let dedupe_keep_order_strings = Json_util.dedupe_keep_order
 
 let duplicate_assoc_keys fields =
   let rec loop seen dup = function
@@ -429,20 +422,10 @@ let duplicate_assoc_keys fields =
   in
   loop [] [] fields
 
-let keeper_chat_recovery_error_status = function
-  | Keeper_chat_queue.Invalid_input _ -> `Bad_request
-  | Keeper_chat_queue.Receipt_already_terminal _
-  | Keeper_chat_queue.Receipt_not_recovery_required _
-  | Keeper_chat_queue.Receipt_not_pending _
-  | Keeper_chat_queue.Pending_revision_mismatch _
-  | Keeper_chat_queue.Recovery_revision_mismatch _
-  | Keeper_chat_queue.Recovery_lease_mismatch _ ->
-      `Conflict
-  | Keeper_chat_queue.Persistence_not_configured
-  | Keeper_chat_queue.Snapshot_unavailable _
-  | Keeper_chat_queue.Revision_exhausted
-  | Keeper_chat_queue.Persist_failed _ ->
-      `Service_unavailable
+(* Same Keeper_chat_queue.error -> status mapping the pending-mutation
+   boundary uses; shared from there so the two HTTP surfaces cannot drift. *)
+let keeper_chat_recovery_error_status =
+  Server_dashboard_http_keeper_chat_pending.mutation_error_status
 
 let handle_keeper_chat_recovery_post state agent_name req reqd ~keeper_name
     ~raw_receipt_id body_str =

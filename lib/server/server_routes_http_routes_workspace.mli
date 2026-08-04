@@ -32,6 +32,23 @@ val classify_workspace_query :
            | `PlaygroundMissing of string
            | `KeeperUnknown of string ]
 
+(** Route-boundary wiring around {!classify_workspace_query}: reads the
+    [repo_id] and [keeper] query params from [uri], looks repositories up
+    through {!Repo_store} and keeper playgrounds through
+    {!Keeper_meta_store}/{!Keeper_sandbox}, and checks the candidate
+    directory with [Sys.file_exists]/[Sys.is_directory]. Returns the base
+    directory and its source tag. *)
+val resolve_workspace_base :
+  state:Mcp_server.server_state ->
+  uri:Uri.t ->
+  string * [ `Project
+           | `Repository of string
+           | `RepositoryMissing of string
+           | `RepositoryUnknown of string
+           | `Playground of string
+           | `PlaygroundMissing of string
+           | `KeeperUnknown of string ]
+
 (** Encode the workspace source tag as the [X-Workspace-Source] header
     so the frontend can render hints (e.g. "Playground 없음 — 프로젝트로
     fallback") without parsing the JSON body. Exposed for unit

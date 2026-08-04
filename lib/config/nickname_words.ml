@@ -72,3 +72,21 @@ let animals =
    ; "tapir"
    ; "zebra"
   |]
+
+(* The generator and the classifier both walk these arrays and both inspect the
+   hex suffix emitted by [Nickname.generate_unique], so the two predicates live
+   next to the vocabulary they read. *)
+
+let array_contains arr value =
+  let rec loop idx =
+    idx < Array.length arr && (String.equal arr.(idx) value || loop (idx + 1))
+  in
+  loop 0
+
+let is_hex4 value =
+  String.length value = 4
+  && String.for_all
+       (function
+         | '0' .. '9' | 'a' .. 'f' -> true
+         | _ -> false)
+       value

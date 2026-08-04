@@ -17,27 +17,24 @@ module Float = Stdlib.Float
 
 (** Dashboard_tool_source_freshness -- source freshness metadata helpers. *)
 
-let numeric_ts_field fields name =
-  match List.assoc_opt name fields with
-  | Some (`Float ts) -> Some ts
-  | Some (`Int ts) -> Some (Float.of_int ts)
-  | _ -> None
-
-let latest_ts_of_record = function
-  | `Assoc fields -> (
-      match numeric_ts_field fields "ts_unix" with
+(* Numeric field reads go through Json_util.assoc_float_opt (same `Float /
+   `Int -> float coercion, same None fallback for non-objects and missing
+   keys). The ts_iso branch stays on assoc_member_opt rather than
+   Json_util.assoc_string_opt because the latter additionally drops
+   whitespace-only strings, which this lookup never did. *)
+let latest_ts_of_record json =
+  match Json_util.assoc_float_opt "ts_unix" json with
+  | Some ts -> Some ts
+  | None -> (
+      match Json_util.assoc_float_opt "ts" json with
       | Some ts -> Some ts
       | None -> (
-          match numeric_ts_field fields "ts" with
+          match Json_util.assoc_float_opt "timestamp" json with
           | Some ts -> Some ts
           | None -> (
-              match numeric_ts_field fields "timestamp" with
-              | Some ts -> Some ts
-              | None -> (
-                  match List.assoc_opt "ts_iso" fields with
-                  | Some (`String iso) -> Masc_domain.parse_iso8601_opt iso
-                  | _ -> None))))
-  | _ -> None
+              match Json_util.assoc_member_opt "ts_iso" json with
+              | Some (`String iso) -> Masc_domain.parse_iso8601_opt iso
+              | _ -> None)))
 
 let count_source_entries dir =
   if not (Sys.file_exists dir) then 0

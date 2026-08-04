@@ -52,6 +52,11 @@ let binding_base_url_is_loopback binding =
   | Some base_url -> Uri.of_string base_url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
 ;;
 
+(* Kept local rather than shared with [Runtime_provider_binding]: that module
+   reaches this one through Provider_kind_resolver -> Runtime_model_resolve, so
+   calling into it here closes a module cycle. The match is total over an
+   OAS-owned closed variant, so a new [auth] constructor breaks both copies at
+   compile time. *)
 let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true

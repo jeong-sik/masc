@@ -682,18 +682,9 @@ let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () : Agent_sdk.Types.api
     cache_read_input_tokens = 0;
     cost_usd = None }
 
-let merge_usage (a : Agent_sdk.Types.api_usage) (b : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage =
-  { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
-    output_tokens = a.output_tokens + b.output_tokens;
-    cache_creation_input_tokens =
-      a.cache_creation_input_tokens + b.cache_creation_input_tokens;
-    cache_read_input_tokens =
-      a.cache_read_input_tokens + b.cache_read_input_tokens;
-    cost_usd =
-      (match a.cost_usd, b.cost_usd with
-       | Some x, Some y -> Some (x +. y)
-       | Some x, None | None, Some x -> Some x
-       | None, None -> None) }
+(* Alias kept so existing callers of [Worker_container_types.merge_usage]
+   are unchanged; the arithmetic lives in {!Inference_utils}. *)
+let merge_usage = Inference_utils.merge_usage
 
 let local_worker_heartbeat_interval_sec () = Env_config.Worker.local_worker_heartbeat_sec
 

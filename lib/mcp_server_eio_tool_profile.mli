@@ -15,7 +15,8 @@
     fields are part of the contract.  Cursor values themselves are
     opaque base64 strings produced by {!page_items_with_cursor}.
 
-    Internal: [StringSet] / [StringMap], [dedupe_tool_schemas_by_name],
+    Internal: [StringMap], [dedupe_tool_schemas_by_name] (an alias
+    of {!Config.dedupe_schemas}),
     [managed_agent_passthrough_tool_names] (consumed by
     {!tool_schemas_for_profile} only), [label_words_from_identifier]
     + the [custom_tool_titles] / [custom_title_table] data tables

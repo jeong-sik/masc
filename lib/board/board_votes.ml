@@ -589,13 +589,7 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
                   | _ -> ()));
                Error e)
 
-let posts_jsonl_snapshot store =
-  let buf = Buffer.create 4096 in
-  Hashtbl.iter (fun _ (pst : post) ->
-    Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst));
-    Buffer.add_char buf '\n'
-  ) store.posts;
-  Buffer.contents buf
+let posts_jsonl_snapshot store = Board_core_persist.posts_jsonl_unlocked store
 
 let comments_jsonl_snapshot store =
   let buf = Buffer.create 4096 in

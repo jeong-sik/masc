@@ -109,11 +109,7 @@ let record_emit_skip ~kind ~reason =
     ()
 ;;
 
-let keeper_name_of_agent agent_name =
-  match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
-  | Some keeper_name -> keeper_name
-  | None -> String.trim agent_name
-;;
+let keeper_name_of_agent = Keeper_identity.keeper_name_of_agent
 
 let normalize_keeper_name keeper_name =
   match Keeper_identity.canonical_keeper_name keeper_name with
@@ -205,14 +201,7 @@ let resolution_event_to_json (event : resolution_event) =
      @ option_string_field "reason" event.reason)
 ;;
 
-let event_date_string ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf
-    "%04d-%02d-%02d"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-;;
+let event_date_string = Dated_jsonl.utc_day_string
 
 let claim_event_of_json json =
   match json_string_opt "event_type" json with

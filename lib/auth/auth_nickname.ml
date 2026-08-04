@@ -8,21 +8,10 @@
 let nickname_adjectives = Nickname_words.adjectives
 let nickname_animals = Nickname_words.animals
 
-let array_contains arr value =
-  let rec loop idx =
-    idx < Array.length arr && (String.equal arr.(idx) value || loop (idx + 1))
-  in
-  loop 0
-;;
-
-let is_hex4 value =
-  String.length value = 4
-  && String.for_all
-       (function
-         | '0' .. '9' | 'a' .. 'f' -> true
-         | _ -> false)
-       value
-;;
+(* Word-list membership and the hex4 suffix shape come from the same
+   [Nickname_words] SSOT as the vocabulary above. *)
+let array_contains = Nickname_words.array_contains
+let is_hex4 = Nickname_words.is_hex4
 
 let extract_generated_nickname_prefix name =
   let parts = String.split_on_char '-' name in

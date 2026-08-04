@@ -37,28 +37,7 @@ let respond_ide_error ~status ~request err reqd =
     reqd
 ;;
 
-let resolve_workspace_base ~state ~uri =
-  let project_base = base_path_of_state state in
-  let config = (Mcp_server.workspace_config state) in
-  let lookup_repository repo_id =
-    match Repo_store.find ~base_path:project_base repo_id with
-    | Ok repo -> Some (Repo_store.local_path ~base_path:project_base repo)
-    | Error _ -> None
-  in
-  let lookup_playground name =
-    match Keeper_meta_store.read_meta config name with
-    | Ok (Some m) -> Some (Keeper_sandbox.host_root_abs_of_meta ~config m)
-    | _ -> None
-  in
-  let exists_dir p = Sys.file_exists p && Sys.is_directory p in
-  Server_routes_http_routes_workspace.classify_workspace_query
-    ~project_base
-    ~lookup_repository
-    ~lookup_playground
-    ~exists_dir
-    ~repo_param:(Uri.get_query_param uri "repo_id")
-    ~keeper_param:(Uri.get_query_param uri "keeper")
-;;
+let resolve_workspace_base = Server_routes_http_routes_workspace.resolve_workspace_base
 
 let nonempty_query_param uri key =
   match Uri.get_query_param uri key with

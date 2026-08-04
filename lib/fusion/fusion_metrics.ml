@@ -12,12 +12,10 @@ let metric_fusion_invocations_total =
 let metric_fusion_judge_executions_total =
   Otel_metric_store_core.declare_counter "masc_fusion_judge_executions_total"
 
-let topology_label = function
-  | Simple -> "simple"
-  | Refine -> "refine"
-  | Conditional -> "conditional"
-  | Judge_of_judges -> "judge_of_judges"
-  | Staged_judge_of_judges -> "staged_judge_of_judges"
+(* OTel label vocabulary is the wire vocabulary declared by the topology's
+   own module, so the label cannot drift from the parse/serialize pair
+   ([fusion_topology_of_string] / [all_fusion_topology_strings]). *)
+let topology_label = Fusion_types.fusion_topology_to_string
 
 let judge_role_of_outcome = function
   | Synthesized node -> node.role

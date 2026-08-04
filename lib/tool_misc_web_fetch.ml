@@ -92,15 +92,9 @@ let extract_description html =
   | Some _ as description -> description
   | None -> meta_content nodes "name" "description"
 
-(** URL validation *)
-let valid_url url =
-  let trimmed = String.trim url in
-  if String.equal trimmed "" then false
-  else
-    let uri = Uri.of_string trimmed in
-    match Uri.scheme uri |> Option.map String.lowercase_ascii with
-    | Some "http" | Some "https" -> true
-    | _ -> false
+(** URL validation — shared with the search tool, which already owns the
+    scheme test; see {!Tool_misc_web_search.valid_search_result_url}. *)
+let valid_url = Tool_misc_web_search.valid_search_result_url
 
 let ends_with ~suffix value =
   let value_length = String.length value in

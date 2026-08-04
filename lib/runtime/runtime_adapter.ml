@@ -29,66 +29,10 @@ let is_auth_header_key key =
   | _ -> false
 ;;
 
-let trim_trailing_slash path =
-  if String.length path > 1 && String.ends_with ~suffix:"/" path
-  then String.sub path 0 (String.length path - 1)
-  else path
-;;
-
-let is_digit c = c >= '0' && c <= '9'
-
-let is_version_segment s =
-  let len = String.length s in
-  len >= 2
-  && s.[0] = 'v'
-  &&
-  let rec all_digits i = i >= len || (is_digit s.[i] && all_digits (i + 1)) in
-  all_digits 1
-;;
-
-let last_path_segment path =
-  match String.rindex_opt path '/' with
-  | Some idx -> String.sub path (idx + 1) (String.length path - idx - 1)
-  | None -> path
-;;
-
-let strip_leading_version request_path =
-  let len = String.length request_path in
-  if len >= 4 && request_path.[0] = '/' && request_path.[1] = 'v' && is_digit request_path.[2]
-  then (
-    let rec find_slash i =
-      if i >= len then len
-      else if request_path.[i] = '/' then i
-      else find_slash (i + 1)
-    in
-    let slash_pos = find_slash 2 in
-    String.sub request_path slash_pos (len - slash_pos))
-  else request_path
-;;
-
-let normalize_openai_compat_request_path ~base_url ~request_path =
-  let request_path =
-    match String.trim request_path with
-    | "" -> Masc_network_defaults.openai_chat_completions_path
-    | path -> path
-  in
-  let base_path = Uri.path (Uri.of_string base_url) |> trim_trailing_slash in
-  if base_path = "" || base_path = "/"
-  then request_path
-  else (
-    let duplicated_prefix = base_path ^ "/" in
-    if String.starts_with ~prefix:duplicated_prefix request_path
-    then (
-      let suffix_start = String.length base_path + 1 in
-      "/"
-      ^ String.sub request_path suffix_start (String.length request_path - suffix_start))
-    else if is_version_segment (last_path_segment base_path)
-            && String.length request_path >= 4
-            && request_path.[0] = '/'
-            && request_path.[1] = 'v'
-            && is_digit request_path.[2]
-    then strip_leading_version request_path
-    else request_path)
+(* Request-path normalization (and its trim/version-segment helpers) is owned
+   by {!Runtime_provider_binding}; this alias keeps the local call site. *)
+let normalize_openai_compat_request_path =
+  Provider_binding.normalize_openai_compat_request_path
 ;;
 
 (* --- Provider resolution --- *)

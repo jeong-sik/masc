@@ -112,16 +112,7 @@ let input_error_to_json error =
      @ details)
 ;;
 
-let dedupe_keep_order values =
-  let rec loop seen acc = function
-    | [] -> List.rev acc
-    | value :: rest ->
-      if List.mem value seen
-      then loop seen acc rest
-      else loop (value :: seen) (value :: acc) rest
-  in
-  loop [] [] values
-;;
+let dedupe_keep_order = Json_util.dedupe_keep_order
 
 let duplicate_fields fields =
   let rec loop seen duplicates = function

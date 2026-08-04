@@ -15,7 +15,8 @@ open Keeper_memory
 
 (** {1 Usage Merging} *)
 
-(** Merge two API usage records by summing all fields. *)
+(** Merge two API usage records by summing all fields.
+    Alias of {!Inference_utils.merge_usage}. *)
 val merge_usage :
   Agent_sdk.Types.api_usage ->
   Agent_sdk.Types.api_usage ->

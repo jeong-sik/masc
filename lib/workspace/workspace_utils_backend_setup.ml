@@ -97,6 +97,18 @@ let normalize_base_path path =
     Filename.concat (Config_dir_resolver.current_working_dir ()) trimmed
   else trimmed
 
+(* Normalize then resolve, keeping the failure detail as a plain string so each
+   caller can wrap it in its own error variant. Cancellation is re-raised rather
+   than turned into an Error so a cancelled fiber is not reported as a bad
+   path. *)
+let canonical_base_path base_path =
+  let normalized = normalize_base_path base_path in
+  if String.equal normalized "" then Error "base_path is empty"
+  else
+    try Ok (Fs_compat.realpath normalized) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+
 let running_under_test_executable () =
   let executable =
     Sys.executable_name |> Filename.basename |> String.lowercase_ascii

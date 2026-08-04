@@ -129,6 +129,15 @@ val error_mode_to_tla_symbol : error_mode -> string
     {!error_mode} constructors. *)
 val all_error_mode_tla_symbols : string list
 
+(** Constructor label for {!error_mode}, used in operator message text and as
+    the [kind] field of the keeper audit envelope — so a change here changes a
+    wire value. Not a TLA+ symbol: it differs from
+    {!error_mode_to_tla_symbol} on [DegradationRequired]
+    (["DegradationRequired"] here, ["Degradation"] there, where the spelling is
+    pinned to [specs/resilience/ResilienceDegradation.tla]). The two must not
+    be collapsed. *)
+val error_mode_kind : error_mode -> string
+
 (** TLA+ symbol for {!strategy}, matching
     [specs/resilience/ResilienceDegradation.tla] [Strategies]. *)
 val strategy_to_tla_symbol : 'a strategy -> string

@@ -322,6 +322,11 @@ type tool_schema =
   ; input_schema : Yojson.Safe.t
   }
 
+val dedupe_tool_schemas : tool_schema list -> tool_schema list
+(** [dedupe_tool_schemas schemas] drops entries whose [name] already appeared
+    earlier in [schemas]. The first occurrence of each name is kept and the
+    surviving order is preserved. *)
+
 type claim_next_result =
   | Claim_next_claimed of
       { task_id : string

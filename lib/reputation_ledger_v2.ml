@@ -63,12 +63,7 @@ let get_store (config : Workspace.config) : Dated_jsonl.t =
         Hashtbl.replace store_cache base_path store;
         store)
 
-let event_date_string ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02d"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
+let event_date_string = Dated_jsonl.utc_day_string
 
 let opt_string_field key = function
   | Some s ->

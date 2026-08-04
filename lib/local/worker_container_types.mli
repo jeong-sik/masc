@@ -127,7 +127,7 @@ val merge_usage :
     [output_tokens], [cache_creation_input_tokens],
     [cache_read_input_tokens], and [cost_usd] (sum if both
     sides have it; pass through the side that does; [None]
-    if neither). *)
+    if neither).  Alias of {!Inference_utils.merge_usage}. *)
 
 (** {1 MCP / MASC transport URL} *)
 

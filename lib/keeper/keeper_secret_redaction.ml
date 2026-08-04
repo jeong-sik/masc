@@ -24,13 +24,7 @@ let read_regular_file path st =
     with
     | Sys_error _ | End_of_file -> None
 
-let strip_one_final_newline value =
-  let len = String.length value in
-  if len >= 2 && Char.equal value.[len - 2] '\r' && Char.equal value.[len - 1] '\n'
-  then String.sub value 0 (len - 2)
-  else if len >= 1 && (Char.equal value.[len - 1] '\n' || Char.equal value.[len - 1] '\r')
-  then String.sub value 0 (len - 1)
-  else value
+let strip_one_final_newline = String_util.strip_one_final_newline
 
 let add_value value acc =
   let trimmed = String.trim value in

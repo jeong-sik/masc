@@ -4,19 +4,10 @@ type http_context =
   ; include_configured : bool
   }
 
-let trim_trailing_slashes value =
-  (* Single-pass scan + at-most-one [String.sub], instead of recursing
-     once per trailing '/'.  base_url normalization runs on every
-     binding/handshake so even the small-N case adds up. *)
-  let len = String.length value in
-  let rec last_non_slash i =
-    if i < 0 || value.[i] <> '/' then i else last_non_slash (i - 1)
-  in
-  let last = last_non_slash (len - 1) in
-  if last = len - 1 then value else String.sub value 0 (last + 1)
-;;
-
-;;
+(* base_url normalization runs on every binding/handshake, so this shares the
+   owner's single-pass scan rather than keeping a second copy that could
+   drift. *)
+let trim_trailing_slashes = Masc_network_defaults.trim_trailing_slashes
 
 let websocket_scheme_for_http_scheme = function
   | Some scheme ->
@@ -43,12 +34,7 @@ let ipaddr_is_unspecified = function
   | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
 ;;
 
-let ipaddr_is_loopback = function
-  | Ipaddr.V4 addr ->
-    let octets = Ipaddr.V4.to_octets addr in
-    String.length octets = 4 && Char.code octets.[0] = 127
-  | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
-;;
+let ipaddr_is_loopback = Masc_network_defaults.ipaddr_is_loopback
 
 let is_unspecified_host host =
   match Ipaddr.of_string (String.trim host) with

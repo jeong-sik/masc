@@ -141,12 +141,7 @@ let direct_owner_conversation_context
 
 (* Flatten newlines/tabs to spaces and trim, so a co-view value never breaks
    the line-oriented instruction block. *)
-let normalized_surface_context_value value =
-  value
-  |> String.to_seq
-  |> Seq.map (function '\n' | '\r' | '\t' -> ' ' | ch -> ch)
-  |> String.of_seq
-  |> String.trim
+let normalized_surface_context_value = String_util.flatten_inline_whitespace
 
 let surface_context_field_value = function
   | `String s -> normalized_surface_context_value s

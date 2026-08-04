@@ -1,6 +1,6 @@
 (* Dashboard read model for autonomous keeper turns. Turn identity is
-   producer-owned in Turn_record; raw traces supply the final response and
-   typed work trace for that exact recorded OAS run. *)
+   producer-owned in Turn_record; the exact raw trace supplies the final
+   response and a content-free activity projection for that recorded OAS run. *)
 
 type turn =
   { turn_id : string
@@ -39,26 +39,14 @@ let check_trace_file ~dir path =
     | exception Unix.Unix_error _ -> Missing_or_non_regular
 ;;
 
-let non_blank value =
-  let value = String.trim value in
-  if String.equal value "" then None else Some value
-;;
-
-let json_of_text value =
-  try Yojson.Safe.from_string value with
-  | Yojson.Json_error _ -> `String value
-;;
-
 let trace_step_of_trajectory = function
-  | Agent_sdk.Trajectory.Think { content; ts } ->
-    Option.map
-      (fun text ->
-        Keeper_chat_blocks.Trace_think
-          { text
-          ; ts = Some (Masc_domain.iso8601_of_unix_seconds ts)
-          ; oas_block_index = None
-          })
-      (non_blank content)
+  | Agent_sdk.Trajectory.Think { ts; _ } ->
+    Some
+      (Keeper_chat_blocks.Trace_think
+         { text = "내부 판단 단계 (내용 비공개)"
+         ; ts = Some (Masc_domain.iso8601_of_unix_seconds ts)
+         ; oas_block_index = None
+         })
   | Agent_sdk.Trajectory.Act { tool_call; _ } ->
     let status =
       match tool_call.finished_at, tool_call.is_error with
@@ -80,11 +68,11 @@ let trace_step_of_trajectory = function
     Some
       (Keeper_chat_blocks.Trace_tool
          { name = tool_call.tool_name
-         ; tool_call_id = non_blank tool_call.tool_use_id
+         ; tool_call_id = None
          ; status
          ; dur
-         ; args = Some tool_call.tool_input
-         ; result = Option.map json_of_text tool_call.tool_result
+         ; args = None
+         ; result = None
          ; ts =
              Some
                (Masc_domain.iso8601_of_unix_seconds tool_call.started_at)

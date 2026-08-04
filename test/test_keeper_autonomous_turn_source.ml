@@ -180,16 +180,13 @@ let test_projects_exact_run_outcome_and_activity () =
      | [ Keeper_chat_blocks.Trace_think thinking
        ; Keeper_chat_blocks.Trace_tool tool
        ] ->
-       Alcotest.(check string) "thinking from selected run"
-         "private chain of thought" thinking.text;
+       Alcotest.(check string) "thinking content is not public"
+         "내부 판단 단계 (내용 비공개)" thinking.text;
        Alcotest.(check string) "tool name" "Read" tool.name;
-       Alcotest.(check (option string)) "tool id"
-         (Some "tool-run-selected") tool.tool_call_id;
+       Alcotest.(check (option string)) "tool id is not public" None tool.tool_call_id;
        Alcotest.(check (option string)) "tool duration" (Some "1000ms") tool.dur;
-       Alcotest.(check bool) "tool input" true
-         (tool.args = Some (`Assoc [ "path", `String "secret.ml" ]));
-       Alcotest.(check bool) "tool result" true
-         (tool.result = Some (`Assoc [ "files", `List [ `String "target.ml" ] ]))
+       Alcotest.(check bool) "tool input is not public" true (tool.args = None);
+       Alcotest.(check bool) "tool result is not public" true (tool.result = None)
      | trace ->
        Alcotest.failf "expected think + tool trace, got %d step(s)"
          (List.length trace))

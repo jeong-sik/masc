@@ -79,14 +79,11 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
     blocks: [{
       t: 'trace',
       trace: [
-        { kind: 'think', text: 'checking state' },
+        { kind: 'think', text: '내부 판단 단계 (내용 비공개)' },
         {
           kind: 'tool',
           name: 'keeper_tasks_list',
-          tool_call_id: 'tool-1',
           status: 'ok',
-          args: { status: 'pending' },
-          result: { tasks: [] },
         },
       ],
     }],
@@ -101,14 +98,11 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
     expect(entryOut?.text).toBe('no work this cycle')
     expect(entryOut?.blocks).toBeUndefined()
     expect(entryOut?.traceSteps).toEqual([
-      { kind: 'think', text: 'checking state' },
+      { kind: 'think', text: '내부 판단 단계 (내용 비공개)' },
       {
         kind: 'tool',
         name: 'keeper_tasks_list',
-        toolCallId: 'tool-1',
         status: 'ok',
-        args: '{\n  "status": "pending"\n}',
-        result: '{\n  "tasks": []\n}',
       },
     ])
     expect(entryOut?.turnRef).toBe('trace-test#41')
@@ -149,7 +143,9 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
     ])
     expect(absent?.text).toBe('텍스트 응답 없음')
     expect(absent?.rawText).toBeNull()
+    expect(absent?.delivery).toBe('no_reply')
     expect(empty?.text).toBe('')
     expect(empty?.rawText).toBe('')
+    expect(empty?.delivery).toBe('history')
   })
 })

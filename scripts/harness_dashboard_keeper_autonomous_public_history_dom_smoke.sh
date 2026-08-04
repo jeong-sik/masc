@@ -63,19 +63,20 @@ with sync_playwright() as playwright:
         group = page.locator('.chat-block-trace-hd', has_text='자율턴')
         assert group.get_attribute("aria-expanded") == "false"
         before = page.locator("body").inner_text()
-        assert "Checking the current task" not in before
+        assert "내부 판단 단계" not in before
         assert "keeper_tasks_list" not in before
         group.click()
         assert group.get_attribute("aria-expanded") == "true"
         page.get_by_text("텍스트 응답 없음", exact=True).last.wait_for()
         page.get_by_text("Observed one healthy follow-up.", exact=True).last.wait_for()
-        page.get_by_text("Checking the current task and pending board events.", exact=True).wait_for()
+        page.get_by_text("내부 판단 단계 (내용 비공개)", exact=True).wait_for()
         activity = page.locator('[data-chat-work-trace]')
         tool = activity.locator('[data-chat-trace-step="tool"]')
         assert "keeper_tasks_list" in tool.inner_text()
-        tool.locator('.chat-block-tstep-row').click()
-        page.get_by_text('"status": "pending"', exact=False).wait_for()
-        page.get_by_text('"tasks": []', exact=False).wait_for()
+        assert tool.get_attribute("data-chat-trace-link-state") == "structural"
+        assert "조인 불가" not in page.locator("body").inner_text()
+        assert '"status": "pending"' not in page.locator("body").inner_text()
+        assert '"tasks": []' not in page.locator("body").inner_text()
         page.screenshot(path=screenshot, full_page=True)
     finally:
         browser.close()

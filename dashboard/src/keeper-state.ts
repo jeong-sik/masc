@@ -1659,7 +1659,7 @@ function autonomousTurnEntry(
     blocks: blocks && blocks.length > 0 ? blocks : undefined,
     traceSteps: traceSteps && traceSteps.length > 0 ? traceSteps : undefined,
     timestamp,
-    delivery: 'history',
+    delivery: message.content === null ? 'no_reply' : 'history',
     streamState: null,
     streamContract: keeperStreamContract('rest_history', 'history_without_stream_events', {
       reason: 'autonomous turns are projected from typed records and exact retained traces, never streamed',

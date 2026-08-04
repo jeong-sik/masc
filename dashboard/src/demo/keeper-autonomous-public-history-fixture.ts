@@ -15,15 +15,12 @@ const rawHistory = [
     blocks: [{
       t: 'trace',
       trace: [
-        { kind: 'think', text: 'Checking the current task and pending board events.' },
+        { kind: 'think', text: '내부 판단 단계 (내용 비공개)' },
         {
           kind: 'tool',
           name: 'keeper_tasks_list',
-          tool_call_id: 'fixture-tool-1',
           status: 'ok',
           dur: '38ms',
-          args: { status: 'pending' },
-          result: { tasks: [] },
         },
       ],
     }],

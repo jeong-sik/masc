@@ -6,7 +6,8 @@
 type invalid =
   | Verification_submission_required
   | Verification_pending_verdict
-      (** An [AwaitingVerification] obligation is not claimable by any agent. *)
+      (** Agent actions cannot resolve an [AwaitingVerification] obligation;
+          the completion-authority entry point owns its verdict. *)
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
   | Verification_id_mismatch of { expected : string; actual : string }
@@ -23,10 +24,10 @@ type claim_resolution =
   | Held_by_other of string
   | Held_terminal of Masc_domain.task_status
   | Held_pending_verdict of { verification_id : string }
-      (** Awaiting the system LLM agent or authenticated HITL completion
-          authority's verdict. No Keeper may claim it or gain verifier
-          authority by winning a race. *)
 
+(** Project [Masc_domain.task_claim_decision_for_status] into the workspace
+    claim result. An [AwaitingVerification] obligation projects to
+    [Held_pending_verdict], never to [Worker_claim]. *)
 val resolve_claim
   :  same_actor:(string -> bool)
   -> agent_name:string

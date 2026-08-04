@@ -1,12 +1,6 @@
-(** Pure Task lifecycle transition helper. Producers submit completion evidence
-    for verification; the terminal verdict is issued by the configured system
-    LLM agent at the [Masc_domain.completion_authority] boundary (or by an
-    authenticated HITL operator), never by a Keeper action. *)
-
 type invalid =
   | Verification_submission_required
   | Verification_pending_verdict
-      (** An [AwaitingVerification] obligation is not claimable by any agent. *)
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
   | Verification_id_mismatch of { expected : string; actual : string }
@@ -43,11 +37,6 @@ let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
     Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
   | Masc_domain.Claim_unavailable
       (Masc_domain.Claim_block_pending_verdict { verification_id }) ->
-    (* No agent claims a pending obligation. The previous behaviour bound the
-       claiming agent as its verifier, which is exactly how a Keeper acquired
-       approval authority: claim was the authority-granting operation. The
-       verdict now comes from a [completion_authority] out of band, so the
-       obligation has no assignable satisfier and no keeper is offered it. *)
     Held_pending_verdict { verification_id }
   | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo task_status) ->
     (match task_status with
@@ -84,8 +73,6 @@ let decide
          (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
      | Masc_domain.Claim_unavailable
          (Masc_domain.Claim_block_pending_verdict _) ->
-       (* The completion authority is the system LLM boundary (or HITL), not
-          a Keeper that wins a claim race. *)
        Error Verification_pending_verdict
      | Masc_domain.Claim_unavailable
          (Masc_domain.Claim_block_not_todo status) ->

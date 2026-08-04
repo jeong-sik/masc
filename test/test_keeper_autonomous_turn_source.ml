@@ -216,6 +216,67 @@ let test_since_and_limit_use_current_records () =
     (List.map (fun (turn : Keeper_autonomous_turn_source.turn) -> turn.final_text) turns)
 ;;
 
+(* The reader above can only project turns whose record carries an exact run
+   reference, so the writer-side acceptance rule belongs to the same guard set.
+   [Keeper_turn_driver] mints the OAS runtime identity as "oas-<runtime_id>",
+   which never equals the keeper agent identity; comparing the two rejected
+   every reference and left every autonomous turn unprojectable. *)
+let sdk_run_ref ~agent_name ~session_id : Agent_sdk.Raw_trace.run_ref =
+  { worker_run_id = "wr-exact-run"
+  ; path = "/keepers/" ^ keeper_name ^ "/raw-traces/turn-exact.jsonl"
+  ; start_seq = 1
+  ; end_seq = 4
+  ; agent_name
+  ; session_id
+  }
+;;
+
+let test_runtime_identity_is_recorded_not_compared () =
+  let runtime_agent_name = "oas-ollama_cloud.deepseek-v4-flash" in
+  match
+    Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
+      ~expected_session_id:trace_id
+      (sdk_run_ref ~agent_name:runtime_agent_name ~session_id:(Some trace_id))
+  with
+  | Error detail -> Alcotest.failf "runtime identity was compared, not recorded: %s" detail
+  | Ok (recorded : Turn_record.raw_trace_run_ref) ->
+    Alcotest.(check string) "records the runtime identity verbatim" runtime_agent_name
+      recorded.agent_name;
+    Alcotest.(check string) "records the keeper session identity" trace_id
+      recorded.session_id
+;;
+
+let test_keeper_agent_identity_is_also_accepted () =
+  match
+    Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
+      ~expected_session_id:trace_id
+      (sdk_run_ref ~agent_name ~session_id:(Some trace_id))
+  with
+  | Error detail -> Alcotest.failf "expected the reference to be recorded: %s" detail
+  | Ok (recorded : Turn_record.raw_trace_run_ref) ->
+    Alcotest.(check string) "records the supplied identity" agent_name recorded.agent_name
+;;
+
+let test_session_identity_mismatch_is_rejected () =
+  match
+    Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
+      ~expected_session_id:trace_id
+      (sdk_run_ref ~agent_name ~session_id:(Some "trace-other-9999"))
+  with
+  | Ok _ -> Alcotest.fail "a foreign session identity was recorded"
+  | Error _ -> ()
+;;
+
+let test_absent_session_identity_is_rejected () =
+  match
+    Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
+      ~expected_session_id:trace_id
+      (sdk_run_ref ~agent_name ~session_id:None)
+  with
+  | Ok _ -> Alcotest.fail "a reference without session identity was recorded"
+  | Error _ -> ()
+;;
+
 let () =
   Alcotest.run "keeper_autonomous_turn_source"
     [ ( "load_recent"
@@ -227,5 +288,15 @@ let () =
             test_missing_or_outside_trace_is_skipped
         ; Alcotest.test_case "since and limit use current records" `Quick
             test_since_and_limit_use_current_records
+        ] )
+    ; ( "exact_run_reference"
+      , [ Alcotest.test_case "records the OAS runtime identity" `Quick
+            test_runtime_identity_is_recorded_not_compared
+        ; Alcotest.test_case "records a keeper-shaped identity" `Quick
+            test_keeper_agent_identity_is_also_accepted
+        ; Alcotest.test_case "rejects a foreign session identity" `Quick
+            test_session_identity_mismatch_is_rejected
+        ; Alcotest.test_case "rejects an absent session identity" `Quick
+            test_absent_session_identity_is_rejected
         ] )
     ]

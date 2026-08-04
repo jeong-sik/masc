@@ -255,16 +255,24 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
   | Ok () -> dispatch ()
 ;;
 
+(* [run_ref.agent_name] is the OAS runtime identity masc mints per dispatch
+   attempt ([Keeper_turn_driver] formats it as "oas-<runtime_id>"), not the
+   keeper agent identity the turn record carries ("keeper-<name>-agent").
+   Those are separate name spaces, so a [String.equal] between them can never
+   hold: #26756 shipped that comparison alongside the reader that consumes the
+   reference, so every autonomous turn was recorded with
+   [raw_trace_run_ref = None] and the dashboard read model dropped all of
+   them. Ownership is established by the session identity checked below plus
+   [Keeper_autonomous_turn_source.check_trace_file], which requires the
+   referenced file to be a regular file inside this keeper's own raw-trace
+   directory. The runtime identity is recorded, not compared. *)
 let turn_record_raw_trace_run_ref
-      ~expected_agent_name
       ~expected_session_id
       (run_ref : Agent_sdk.Raw_trace.run_ref)
   : (Turn_record.raw_trace_run_ref, string) result
   =
   match run_ref.session_id with
   | None -> Error "missing session identity"
-  | Some _ when not (String.equal run_ref.agent_name expected_agent_name) ->
-    Error "agent identity does not match the keeper turn"
   | Some session_id when not (String.equal session_id expected_session_id) ->
     Error "session identity does not match the keeper trace"
   | Some session_id ->
@@ -310,6 +318,7 @@ module For_testing = struct
   let provider_transcript_admission = provider_transcript_admission
   let dispatch_after_provider_transcript_admission =
     dispatch_after_provider_transcript_admission
+  let turn_record_raw_trace_run_ref = turn_record_raw_trace_run_ref
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -1226,10 +1235,7 @@ let run_turn
           match turn_result with
           | Ok { trace_ref = Some run_ref; _ } ->
             (match
-               turn_record_raw_trace_run_ref
-                 ~expected_agent_name:meta.agent_name
-                 ~expected_session_id:trace_id
-                 run_ref
+               turn_record_raw_trace_run_ref ~expected_session_id:trace_id run_ref
              with
              | Ok exact_ref -> Some exact_ref
              | Error detail ->

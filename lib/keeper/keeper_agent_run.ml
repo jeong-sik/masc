@@ -255,17 +255,10 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
   | Ok () -> dispatch ()
 ;;
 
-(* [run_ref.agent_name] is the OAS runtime identity masc mints per dispatch
-   attempt ([Keeper_turn_driver] formats it as "oas-<runtime_id>"), not the
-   keeper agent identity the turn record carries ("keeper-<name>-agent").
-   Those are separate name spaces, so a [String.equal] between them can never
-   hold: #26756 shipped that comparison alongside the reader that consumes the
-   reference, so every autonomous turn was recorded with
-   [raw_trace_run_ref = None] and the dashboard read model dropped all of
-   them. Ownership is established by the session identity checked below plus
-   [Keeper_autonomous_turn_source.check_trace_file], which requires the
-   referenced file to be a regular file inside this keeper's own raw-trace
-   directory. The runtime identity is recorded, not compared. *)
+(* [run_ref.agent_name] is the OAS runtime identity, not the Keeper identity.
+   The writer binds the reference to this turn's session; the autonomous-turn
+   reader validates the recorded OAS identity and session against every raw
+   trace row before projecting the run. *)
 let turn_record_raw_trace_run_ref
       ~expected_session_id
       (run_ref : Agent_sdk.Raw_trace.run_ref)

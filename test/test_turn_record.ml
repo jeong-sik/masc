@@ -89,7 +89,7 @@ let sample_record () : Turn_record.t =
         ; path = "/tmp/turn-record-test.jsonl"
         ; start_seq = 8
         ; end_seq = 15
-        ; agent_name = "sangsu-agent"
+        ; agent_name = "oas-test-runtime"
         ; session_id = "trace-1780648779957-00000"
         }
   ; sampling =
@@ -373,7 +373,7 @@ let test_codec_rejects_mismatched_turn_ref () =
     check bool "turn_ref mismatch is explicit" true
       (Astring.String.is_infix ~affix:"does not match" message)
 
-let test_codec_rejects_mismatched_raw_trace_identity () =
+let test_codec_rejects_mismatched_raw_trace_session () =
   let replace_run_ref_field field value =
     match Turn_record.to_json (sample_record ()) with
     | `Assoc fields ->
@@ -388,16 +388,14 @@ let test_codec_rejects_mismatched_raw_trace_identity () =
          :: List.remove_assoc "raw_trace_run_ref" fields)
     | other -> other
   in
-  List.iter
-    (fun (field, value, expected) ->
-      match Turn_record.of_json (replace_run_ref_field field value) with
-      | Ok _ -> failf "decoded mismatched raw trace %s" field
-      | Error message ->
-        check bool "raw trace mismatch is explicit" true
-          (Astring.String.is_infix ~affix:expected message))
-    [ "agent_name", `String "different-agent", "agent_name does not match"
-    ; "session_id", `String "different-trace", "session_id does not match"
-    ]
+  match
+    Turn_record.of_json
+      (replace_run_ref_field "session_id" (`String "different-trace"))
+  with
+  | Ok _ -> fail "decoded mismatched raw trace session_id"
+  | Error message ->
+    check bool "raw trace session mismatch is explicit" true
+      (Astring.String.is_infix ~affix:"session_id does not match" message)
 
 let test_codec_rejects_partial_or_invalid_request_wire_observation () =
   let replace fields =
@@ -713,8 +711,8 @@ let () =
             test_codec_requires_current_observation_fields
         ; test_case "mismatched turn_ref rejected" `Quick
             test_codec_rejects_mismatched_turn_ref
-        ; test_case "mismatched raw trace identity rejected" `Quick
-            test_codec_rejects_mismatched_raw_trace_identity
+        ; test_case "mismatched raw trace session rejected" `Quick
+            test_codec_rejects_mismatched_raw_trace_session
         ; test_case "partial or invalid request wire observation rejected"
             `Quick
             test_codec_rejects_partial_or_invalid_request_wire_observation

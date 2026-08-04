@@ -183,11 +183,19 @@ val task_to_yojson : task -> Yojson.Safe.t
 val task_of_yojson : Yojson.Safe.t -> (task, string) result
 
 val task_requires_verification : task -> bool
-(** RFC-0323 W1 Phase A (implements RFC-0308): true when the task's contract
-    opts into strict verification — completion must route through
-    submit -> approve instead of a direct done. Contract presence is not the
-    trigger (creation auto-fills an advisory contract for every task);
-    [strict] is the explicit persisted opt-in. *)
+(** Always [true]: completion routes through submit -> approve, never a direct
+    done. The judgment boundary is the configured completion LLM, not the
+    Keeper that produced the work.
+
+    This used to return [contract.strict], splitting Tasks into two completion
+    lanes. RFC-0308 and RFC-0323 are both Withdrawn and reject that split —
+    RFC-0323: "The configured completion LLM is the judgment boundary. Task,
+    Goal, contract, evidence ... are context for that call rather than
+    deterministic routing criteria."
+
+    [contract] therefore carries judge context only; it selects no FSM. The
+    withdrawal reason still applies to a *second Keeper identity*, which this
+    predicate does not introduce. *)
 
 type task_claim_readiness =
   | Claim_ready

@@ -23,7 +23,6 @@ import {
   deleteKeeperHistorySnapshots,
   editKeeperChatPendingReceipt,
   fetchKeeperEventQueuePending,
-  parseKeeperEventQueuePendingSnapshot,
   fetchKeeperChatHistory,
   fetchKeeperChatPending,
   fetchKeeperChatReceipt,
@@ -2003,9 +2002,11 @@ describe('parseKeeperEventQueuePendingSnapshot cancellation fields', () => {
       cancelled_by: 'keeper-rondo-agent',
       cancelled_reason: 'BLOCKED: service absent from sandbox',
     }))
-    expect(parsed.pending[0].cancelledTaskId).toBe('task-161')
-    expect(parsed.pending[0].cancelledBy).toBe('keeper-rondo-agent')
-    expect(parsed.pending[0].cancelledReason).toBe('BLOCKED: service absent from sandbox')
+    const row = parsed.pending[0]
+    expect(row).toBeDefined()
+    expect(row?.cancelledTaskId).toBe('task-161')
+    expect(row?.cancelledBy).toBe('keeper-rondo-agent')
+    expect(row?.cancelledReason).toBe('BLOCKED: service absent from sandbox')
   })
 
   // An unexplained cancellation still has to be triageable, and an absent
@@ -2015,8 +2016,10 @@ describe('parseKeeperEventQueuePendingSnapshot cancellation fields', () => {
       cancelled_task_id: 'task-162',
       cancelled_by: 'keeper-rondo-agent',
     }))
-    expect(parsed.pending[0].cancelledTaskId).toBe('task-162')
-    expect(parsed.pending[0].cancelledBy).toBe('keeper-rondo-agent')
-    expect(parsed.pending[0].cancelledReason).toBeUndefined()
+    const row = parsed.pending[0]
+    expect(row).toBeDefined()
+    expect(row?.cancelledTaskId).toBe('task-162')
+    expect(row?.cancelledBy).toBe('keeper-rondo-agent')
+    expect(row?.cancelledReason).toBeUndefined()
   })
 })

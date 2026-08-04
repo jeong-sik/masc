@@ -315,41 +315,13 @@ let wakeup_keeper ?base_path ?stimulus name =
    here it only picks urgency (explicit targets and broadcasts are [Immediate]). It is not
    carried in the payload — the next prompt re-derives board context from the
    typed [Board_signal] payload, not from a wake-reason string. *)
-let queue_reaction_target_of_board = function
-  | Board.Reaction_post -> Keeper_event_queue.Reaction_post
-  | Board.Reaction_comment -> Keeper_event_queue.Reaction_comment
-;;
-
-let queue_reaction_change_of_board
-      (reaction : Board_dispatch.board_reaction_change)
-  : Keeper_event_queue.board_reaction_change
-  =
-  { target_type = queue_reaction_target_of_board reaction.target_type
-  ; target_id = reaction.target_id
-  ; user_id = reaction.user_id
-  ; emoji = reaction.emoji
-  ; reacted = reaction.reacted
-  }
-;;
-
 let board_signal_stimulus
       ~(reason : Board_wake.wake_reason)
       (signal : Board_dispatch.board_signal)
   =
   let payload : Keeper_event_queue.stimulus_payload =
     Keeper_event_queue.Board_signal
-      { kind =
-          (match signal.kind with
-           | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
-           | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added
-           | Board_dispatch.Board_reaction_changed reaction ->
-             Keeper_event_queue.Reaction_changed (queue_reaction_change_of_board reaction))
-      ; author = signal.author
-      ; title = signal.title
-      ; content = signal.content
-      ; hearth = signal.hearth
-      ; updated_at = signal.updated_at
-      }
+      (Board_wake.board_stimulus_of_board_signal signal)
   in
   { Keeper_event_queue.post_id = signal.post_id
   ; urgency =

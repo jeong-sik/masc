@@ -137,12 +137,6 @@ let bool_member json key =
 let bool_option_member json key =
   Json_util.get_bool json key
 
-let connector_state_label ~available ~connected ~stale =
-  if not available then "offline"
-  else if stale then "stale"
-  else if connected then "connected"
-  else "disconnected"
-
 let bot_token_opt () =
   match Sys.getenv_opt "DISCORD_BOT_TOKEN" with
   | None -> None
@@ -235,7 +229,10 @@ let status_json ?(audit_limit = 10) () =
       ("connected", `Bool connected);
       ("stale", `Bool stale);
       ("stale_after_sec", `Int (stale_after_sec ()));
-      ("status", `String (connector_state_label ~available ~connected ~stale));
+      ( "status",
+        `String
+          (Channel_gate_connector.connector_state_label ~available ~connected
+             ~stale) );
       ("error", `String error);
       ("status_source", `String "in_process_gateway");
       ("gateway_state", `String (gateway_state_label gateway_state));
@@ -284,19 +281,6 @@ let list_assoc_field key = function
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
 
-let find_assoc_by_string_field ~field ~value = function
-  | `List rows ->
-      List.find_map
-        (function
-          | (`Assoc _ as row) -> (
-              match list_assoc_field field row with
-              | Some (`String candidate) when String.equal candidate value ->
-                  Some row
-              | _ -> None)
-          | _ -> None)
-        rows
-  | _ -> None
-
 let connector_json ?gate_status_json ?(audit_limit = 10) () =
   let status = status_json ~audit_limit () in
   let observed_channel =
@@ -306,8 +290,8 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
         match list_assoc_field "channels" json with
         | Some channels -> (
             match
-              find_assoc_by_string_field ~field:"channel" ~value:channel
-                channels
+              Json_util.find_assoc_row_by_string_field ~field:"channel"
+                ~value:channel channels
             with
             | Some row -> row
             | None -> `Null)
@@ -502,12 +486,6 @@ type keeper_binding_resolution = {
   via_parent : bool;
 }
 
-let binding_for_channel bindings ~channel_id =
-  List.find_map
-    (fun (b : binding) ->
-      if String.equal b.channel_id channel_id then Some b else None)
-    bindings
-
 let resolve_keeper_for_channel_result ~channel_id =
   let normalized = String.trim channel_id in
   if String.equal normalized "" then Ok None
@@ -515,7 +493,9 @@ let resolve_keeper_for_channel_result ~channel_id =
     match read_bindings_lookup_result () with
     | Error _ as error -> error
     | Ok candidates ->
-      (match binding_for_channel candidates ~channel_id:normalized with
+      (match
+         Store.find_binding_by_channel_id candidates ~channel_id:normalized
+       with
        | Some binding ->
          Ok
            (Some
@@ -532,7 +512,7 @@ let resolve_keeper_for_channel_result ~channel_id =
                 if String.equal parent_channel_id normalized
                 then None
                 else
-                  binding_for_channel candidates
+                  Store.find_binding_by_channel_id candidates
                     ~channel_id:parent_channel_id)
          in
          Ok

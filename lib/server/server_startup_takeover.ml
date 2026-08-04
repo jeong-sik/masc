@@ -81,16 +81,6 @@ type base_path_acquire_result =
   | Base_path_already_owned of { pid : int option }
   | Base_path_rejected of base_path_lock_rejection
 
-let file_kind_to_string = function
-  | Unix.S_REG -> "regular_file"
-  | Unix.S_DIR -> "directory"
-  | Unix.S_CHR -> "character_device"
-  | Unix.S_BLK -> "block_device"
-  | Unix.S_LNK -> "symbolic_link"
-  | Unix.S_FIFO -> "fifo"
-  | Unix.S_SOCK -> "socket"
-;;
-
 let base_path_lock_rejection_to_string = function
   | Base_path_canonicalization_failed { base_path; reason } ->
     Printf.sprintf "BasePath canonicalization failed path=%s error=%s" base_path reason
@@ -98,7 +88,7 @@ let base_path_lock_rejection_to_string = function
     Printf.sprintf
       "BasePath is not a directory path=%s kind=%s"
       path
-      (file_kind_to_string kind)
+      (Fs_compat.file_kind_to_string kind)
   | Run_directory_canonicalization_failed { run_dir; reason } ->
     Printf.sprintf
       "host run directory canonicalization failed path=%s error=%s"
@@ -108,7 +98,7 @@ let base_path_lock_rejection_to_string = function
     Printf.sprintf
       "host run directory is not a directory path=%s kind=%s"
       path
-      (file_kind_to_string kind)
+      (Fs_compat.file_kind_to_string kind)
   | Run_directory_untrusted_owner { path; effective_uid; observed_uid } ->
     Printf.sprintf
       "host run directory owner is outside the process/system trust boundary path=%s effective_uid=%d observed_uid=%d"
@@ -129,7 +119,7 @@ let base_path_lock_rejection_to_string = function
     Printf.sprintf
       "private BasePath lease path is not a directory path=%s kind=%s"
       path
-      (file_kind_to_string kind)
+      (Fs_compat.file_kind_to_string kind)
   | Lease_directory_wrong_owner { path; expected_uid; observed_uid } ->
     Printf.sprintf
       "private BasePath lease directory owner mismatch path=%s expected_uid=%d observed_uid=%d"
@@ -153,7 +143,7 @@ let base_path_lock_rejection_to_string = function
     Printf.sprintf
       "BasePath lease is not a regular file path=%s kind=%s"
       path
-      (file_kind_to_string kind)
+      (Fs_compat.file_kind_to_string kind)
   | Lease_file_multiply_linked { path; links } ->
     Printf.sprintf
       "BasePath lease has multiple hard links path=%s links=%d"

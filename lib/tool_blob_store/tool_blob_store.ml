@@ -373,16 +373,6 @@ let delete_error_to_string { sha256; path; reason } =
   Printf.sprintf "blob delete failed sha256=%s path=%s: %s" sha256 path reason
 ;;
 
-let file_kind_to_string = function
-  | Unix.S_REG -> "regular_file"
-  | Unix.S_DIR -> "directory"
-  | Unix.S_CHR -> "character_device"
-  | Unix.S_BLK -> "block_device"
-  | Unix.S_LNK -> "symbolic_link"
-  | Unix.S_FIFO -> "fifo"
-  | Unix.S_SOCK -> "socket"
-;;
-
 let delete t ~sha256 =
   match validate_sha256 sha256 with
   | Error invalid ->
@@ -419,7 +409,7 @@ let delete t ~sha256 =
               ; reason =
                   Printf.sprintf
                     "refusing to delete non-regular blob kind=%s"
-                    (file_kind_to_string target.st_kind)
+                    (Fs_compat.file_kind_to_string target.st_kind)
               }
           else
             (match

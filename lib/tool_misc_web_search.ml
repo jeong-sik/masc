@@ -702,19 +702,8 @@ let with_simulated_search_for_test ~outcomes f =
 let data_ok ~tool_name ~start_time data : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data ()
 
-let workflow_err ~tool_name ~start_time msg : Tool_result.result =
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Workflow_rejection
-    ~start_time
-    msg
-
-let runtime_err ~tool_name ~start_time msg : Tool_result.result =
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Runtime_failure
-    ~start_time
-    msg
+let workflow_err = Tool_result.workflow_err
+let runtime_err = Tool_result.runtime_err
 
 let handle ~tool_name ~start_time args : Tool_result.result =
   let query = get_string args "query" "" in

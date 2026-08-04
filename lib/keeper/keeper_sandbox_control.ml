@@ -80,12 +80,6 @@ let running_managed_container ~network_label containers =
       && c.network_label = Some network_label)
     containers
 
-let image_preflight_start_error (failure : Keeper_sandbox_runtime.classified_error) =
-  Keeper_sandbox_runtime.docker_image_preflight_failure_message
-    ~prefix:"docker_container_start_failed"
-    failure
-;;
-
 let start_managed_container
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
@@ -127,7 +121,8 @@ let start_managed_container
                   ~image
                   ~timeout_sec
               with
-              | Error failure -> Error (image_preflight_start_error failure)
+              | Error failure ->
+                Error (Keeper_sandbox_runtime.image_preflight_start_error failure)
               | Ok () ->
               let _cleanup =
                 Keeper_sandbox_runtime.maybe_cleanup_stale_containers

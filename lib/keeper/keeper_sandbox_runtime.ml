@@ -775,6 +775,12 @@ let docker_image_preflight_failure_message ~prefix failure =
     failure.message
 ;;
 
+let image_preflight_start_error (failure : classified_error) =
+  docker_image_preflight_failure_message
+    ~prefix:"docker_container_start_failed"
+    failure
+;;
+
 let docker_preflight_to_yojson (preflight : docker_preflight) =
   `Assoc
     [ "backend", `String "docker"

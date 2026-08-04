@@ -168,6 +168,11 @@ val inspect_owned_directory_chain
   -> (owned_directory_chain_observation, owned_directory_chain_rejection) result
 (** Shared no-follow ownership-boundary inspection. *)
 
+val file_kind_to_string : Unix.file_kind -> string
+(** Render a [Unix.file_kind] as the lowercase snake_case name of the
+    constructor ([S_REG] becomes ["regular_file"], [S_FIFO] becomes
+    ["fifo"]). *)
+
 val owned_directory_chain_rejection_to_string
   :  owned_directory_chain_rejection
   -> string

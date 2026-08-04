@@ -418,13 +418,7 @@ let keeper_constitution = Keeper_prompt.keeper_constitution
 
 let build_keeper_system_prompt = Keeper_prompt.build_keeper_system_prompt
 
-let append_trait_clause ~(base : string) ~(clause : string) : string =
-  let b = String.trim base in
-  let c = String.trim clause in
-  if c = "" then b
-  else if b = "" then c
-  else if String_util.contains_substring_ci b c then b
-  else Printf.sprintf "%s; %s" b c
+let append_trait_clause = Keeper_prompt.append_trait_clause
 
 
 include Keeper_text_processing

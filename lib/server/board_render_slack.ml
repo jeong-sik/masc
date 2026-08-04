@@ -5,19 +5,14 @@ type payload = {
   blocks : Yojson.Safe.t list;
 }
 
-let non_empty s =
-  match String.trim s with
-  | "" -> None
-  | trimmed -> Some trimmed
-
 let title_or_url name url =
-  match non_empty name with
+  match String_util.trim_nonempty name with
   | Some name -> name
   | None -> url
 
 let block_of_attachment = function
   | Board_render.Image { url; name; _ } ->
-    Keeper_chat_slack.image_block_json ~url ~caption:(non_empty name)
+    Keeper_chat_slack.image_block_json ~url ~caption:(String_util.trim_nonempty name)
   | Board_render.Video { url; name; _ } | Board_render.Youtube { url; name }
   | Board_render.External_link { url; name } ->
     Keeper_chat_slack.link_block_json ~url ~title:(title_or_url name url)

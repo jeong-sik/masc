@@ -29,14 +29,10 @@ let record_unsupported_payload_dispatch _request rejection =
   | Schedule_payload_projection.Dispatch_invalid_supported_payload _ -> ()
 ;;
 
-let assoc_field name fields =
-  match List.assoc_opt name fields with
-  | Some value -> Ok value
-  | None -> Error ("missing field: " ^ name)
-;;
-
+(* Consumer-local: rejects blank strings, so only the raw field lookup is
+   shared with the schedule domain. *)
 let string_field name fields =
-  let* value = assoc_field name fields in
+  let* value = Schedule_domain.assoc_field name fields in
   match value with
   | `String value when String.trim value <> "" -> Ok value
   | `String _ -> Error (name ^ " must be non-empty")

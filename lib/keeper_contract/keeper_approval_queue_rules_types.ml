@@ -344,59 +344,13 @@ let summary_attempt_disposition_to_yojson = function
     `Assoc [ "code", `String "settled" ]
 ;;
 
-let reject_unknown_fields ~surface ~allowed fields =
-  let rec duplicate seen = function
-    | [] -> None
-    | (key, _) :: rest ->
-      if List.mem key seen then Some key else duplicate (key :: seen) rest
-  in
-  match duplicate [] fields with
-  | Some field -> Error (Printf.sprintf "%s contains duplicate field %s" surface field)
-  | None ->
-    (match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
-     | None -> Ok ()
-     | Some (field, _) ->
-       Error (Printf.sprintf "%s contains unsupported field %s" surface field))
-;;
-
-let required_string ~surface field fields =
-  match List.assoc_opt field fields with
-  | Some (`String value) when String.trim value <> "" -> Ok value
-  | Some (`String _) ->
-    Error (Printf.sprintf "%s.%s must be non-blank" surface field)
-  | Some _ -> Error (Printf.sprintf "%s.%s must be a string" surface field)
-  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
-;;
-
-let required_float ~surface field fields =
-  match List.assoc_opt field fields with
-  | Some (`Float value) -> Ok value
-  | Some (`Int value) -> Ok (Float.of_int value)
-  | Some _ -> Error (Printf.sprintf "%s.%s must be a number" surface field)
-  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
-;;
-
-let required_positive_int ~surface field fields =
-  match List.assoc_opt field fields with
-  | Some (`Int value) when value > 0 -> Ok value
-  | Some _ -> Error (Printf.sprintf "%s.%s must be a positive integer" surface field)
-  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
-;;
-
-let required_string_list ~surface field fields =
-  match List.assoc_opt field fields with
-  | Some (`List values) ->
-    let rec parse index acc = function
-      | [] -> Ok (List.rev acc)
-      | `String value :: rest -> parse (index + 1) (value :: acc) rest
-      | _ :: _ ->
-        Error
-          (Printf.sprintf "%s.%s[%d] must be a string" surface field index)
-    in
-    parse 0 [] values
-  | Some _ -> Error (Printf.sprintf "%s.%s must be an array" surface field)
-  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
-;;
+(* Assoc-field validators live in Json_util; these aliases keep the call
+   sites in this module short. *)
+let reject_unknown_fields = Json_util.reject_unknown_fields
+let required_string = Json_util.require_field_string
+let required_float = Json_util.require_field_float
+let required_positive_int = Json_util.require_field_positive_int
+let required_string_list = Json_util.require_field_string_list
 
 let summary_attempt_disposition_of_yojson_with_error json =
   match json with

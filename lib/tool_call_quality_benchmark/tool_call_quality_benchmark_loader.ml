@@ -23,12 +23,6 @@ let default_case_set_path ~repo_root =
 let default_evidence_path ~repo_root =
   Filename.concat repo_root "test/fixtures/tool_call_quality_benchmark/evidence_runs.json"
 
-let normalize_string_list items =
-  items
-  |> List.map String.trim
-  |> List.filter (fun item -> not (String.equal item ""))
-  |> Json_util.dedupe_keep_order
-
 let errorf fmt = Printf.ksprintf (fun s -> Error s) fmt
 
 let ( let* ) = Result.bind
@@ -79,7 +73,7 @@ let string_list_field json key =
   let* items = list_field json key in
   Ok (items
       |> List.filter_map (function `String s -> Some s | _ -> None)
-      |> normalize_string_list)
+      |> Json_util.normalize_string_list)
 
 let selector_list_field json key =
   let* items = list_field json key in

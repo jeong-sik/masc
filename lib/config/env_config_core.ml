@@ -443,6 +443,15 @@ let base_path () =
         "MASC_BASE_PATH is not set. Set MASC_BASE_PATH to the project root \
          containing the .masc/ directory.")
 
+(** Resolve a configured path against the project base path. Relative
+    paths are concatenated onto [base_path ()]; absolute paths are
+    returned unchanged. *)
+let resolve_against_base_path raw_path =
+  if Filename.is_relative raw_path then
+    Filename.concat (base_path ()) raw_path
+  else
+    raw_path
+
 let sb_path_opt () =
   match base_path_opt () with
   | Some root ->

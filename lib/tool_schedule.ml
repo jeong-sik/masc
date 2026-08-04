@@ -11,15 +11,10 @@ type context =
 
 let ( let* ) = Result.bind
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if String.equal trimmed "" then None else Some trimmed
-;;
-
 let string_opt args key =
   match Json_util.get_string args key with
   | None -> None
-  | Some value -> trim_nonempty value
+  | Some value -> String_util.trim_nonempty value
 ;;
 
 let required_string args key =

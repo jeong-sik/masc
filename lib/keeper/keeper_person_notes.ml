@@ -15,12 +15,7 @@ let notes_path ~base_dir ~keeper_name =
 let persistence_surface = "keeper_person_notes"
 
 let report_read_drop ~reason ~path ~detail =
-  Safe_ops.report_persistence_read_drop
-    ~on_drop:(fun () ->
-      Otel_metric_store.inc_counter
-        Otel_metric_store.metric_persistence_read_drops
-        ~labels:[ ("surface", persistence_surface); ("reason", reason) ]
-        ())
+  Safe_ops.report_persistence_read_drop_counted
     ~surface:persistence_surface
     ~reason
     ~path

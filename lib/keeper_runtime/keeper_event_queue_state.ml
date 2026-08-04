@@ -244,20 +244,6 @@ let with_pending pending state =
 
 let with_revision revision state = { state with revision }
 
-let rec queue_contains queue stimulus =
-  match Keeper_event_queue.dequeue queue with
-  | None -> false
-  | Some (head, rest) ->
-    Keeper_event_queue.stimulus_identity_equal head stimulus
-    || queue_contains rest stimulus
-;;
-
-let enqueue_if_missing queue stimulus =
-  if queue_contains queue stimulus
-  then queue
-  else Keeper_event_queue.enqueue queue stimulus
-;;
-
 let transition_outbox_blocked state = state.transition_outbox <> []
 
 let rec first_ready_entry ~ready = function

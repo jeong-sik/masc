@@ -6,11 +6,6 @@ module Http = Http_server_eio
 let mappings_path = "/api/v1/keeper-repos"
 let mapping_prefix = "/api/v1/keeper-repos/"
 
-let path_parts rest =
-  rest
-  |> String.split_on_char '/'
-  |> List.filter (fun part -> String.trim part <> "")
-
 let extract_keeper_id path =
   match extract_path_param ~prefix:mapping_prefix path with
   | None | Some "" -> Error "missing keeper id"

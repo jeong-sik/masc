@@ -244,6 +244,10 @@ val extract_path_param : prefix:string -> string -> string option
     pre-extraction-helper code had three independent
     String.sub callsites that all crashed on edge inputs. *)
 
+val path_parts : string -> string list
+(** [path_parts rest] splits [rest] on ['/'] and drops the
+    segments that are empty after trimming. *)
+
 (** {1 Standard pagination} *)
 
 val standard_limit : Httpun.Request.t -> int

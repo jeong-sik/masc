@@ -16,19 +16,16 @@ let clamp_title s =
   then s
   else String.sub s 0 (embed_title_limit - 1) ^ "…"
 
-let non_empty s =
-  match String.trim s with
-  | "" -> None
-  | trimmed -> Some trimmed
-
 let title_or_url name url =
-  match non_empty name with
+  match String_util.trim_nonempty name with
   | Some name -> clamp_title name
   | None -> url
 
 let embed_of_attachment = function
   | Board_render.Image { url; name; _ } ->
-    Some (Discord_rest_client.image_embed ~url ~caption:(non_empty name))
+    Some
+      (Discord_rest_client.image_embed ~url
+         ~caption:(String_util.trim_nonempty name))
   | Board_render.Video { url; name; _ } | Board_render.Youtube { url; name }
   | Board_render.External_link { url; name } ->
     Some

@@ -26,56 +26,6 @@ let matching_action target_type target_id actions =
       | _ -> false)
     actions
 
-let incident_action_types kind =
-  match kind with
-  | "spawn_failure_present" -> [ "task_inject" ]
-  | "detached_actor_present"
-  | "empty_note_turn_present"
-  | "low_confidence_routing"
-  | "routing_escalation_present" ->
-      [ "broadcast" ]
-  | "planned_worker_without_turn" -> [ "task_inject"; "broadcast" ]
-  | "local64_role_gap" -> [ "task_inject" ]
-  | "stalled_session" -> [ "namespace_pause" ]
-  | "command_issue_pressure"
-  | "command_routing_confidence"
-  | "command_quality_per_token"
-  | "command_verification_gate_failures"
-  | "command_rework_rate"
-  | "command_artifact_scope_drift"
-  | "command_cache_contention"
-  | "command_speculative_posture"
-  | "intent_blocked"
-  | "intent_handoff_ready" ->
-      [ "broadcast" ]
-  | _ -> []
-
-let action_matches_incident incident action =
-  let target_type = string_field "target_type" incident in
-  let target_id = String_util.trim_to_option (string_field "target_id" incident) in
-  let action_target_type = string_field "target_type" action in
-  let action_target_id = String_util.trim_to_option (string_field "target_id" action) in
-  let same_target =
-    String.equal action_target_type target_type
-    &&
-    match target_id, action_target_id with
-    | Some left, Some right -> String.equal left right
-    | None, None -> true
-    | _ -> false
-  in
-  if not same_target then false
-  else
-    let incident_summary = normalized_text_key (string_field "summary" incident) in
-    let action_reason = normalized_text_key (string_field "reason" action) in
-    let reason_matches =
-      incident_summary <> "" && action_reason <> ""
-      && String.equal incident_summary action_reason
-    in
-    if reason_matches then true
-    else
-      let action_type = string_field "action_type" action in
-      List.mem action_type (incident_action_types (string_field "kind" incident))
-
 let matching_action_for_incident incident actions =
   let target_type = string_field "target_type" incident in
   let target_id = String_util.trim_to_option (string_field "target_id" incident) in
@@ -91,7 +41,11 @@ let matching_action_for_incident incident actions =
            | None, None -> true
            | _ -> false)
   in
-  match List.find_opt (action_matches_incident incident) candidates with
+  match
+    List.find_opt
+      (Dashboard_briefing_assembly.action_matches_incident incident)
+      candidates
+  with
   | Some action -> Some action
   | None -> (match candidates with action :: _ -> Some action | [] -> None)
 

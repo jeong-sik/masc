@@ -313,6 +313,12 @@ let remove_by_post_id post_id queue =
   in
   removed, of_list kept
 
+(* Scans both halves of the queue directly instead of rebuilding it through
+   repeated [dequeue], so membership stays allocation-free. *)
+let contains (queue : t) (stimulus : stimulus) : bool =
+  let same head = stimulus_identity_equal head stimulus in
+  List.exists same queue.front || List.exists same queue.back_rev
+
 let uniq_stimuli stimuli =
   List.fold_left
     (fun acc stimulus ->

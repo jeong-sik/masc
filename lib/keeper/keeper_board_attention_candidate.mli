@@ -183,6 +183,35 @@ val of_board_signal :
 val candidate_to_json : candidate -> Yojson.Safe.t
 val candidate_of_json : Yojson.Safe.t -> (candidate, string) result
 
+(** {1 Structural decode helpers}
+
+    Shared with {!Keeper_board_attention_partition}, which decodes the
+    same candidate JSON. [context] prefixes the error message. *)
+
+val assoc :
+  context:string ->
+  Yojson.Safe.t ->
+  ((string * Yojson.Safe.t) list, string) result
+(** [assoc ~context json] returns the fields of a [`Assoc], or an error
+    saying [context] must be an object. *)
+
+val exact_fields :
+  context:string ->
+  string list ->
+  (string * Yojson.Safe.t) list ->
+  (unit, string) result
+(** [exact_fields ~context expected fields] returns [Ok ()] when the keys
+    of [fields] are exactly [expected], counting duplicates.  The error
+    lists both the expected and the actual keys. *)
+
+val field :
+  context:string ->
+  string ->
+  (string * Yojson.Safe.t) list ->
+  (Yojson.Safe.t, string) result
+(** [field ~context key fields] returns the value bound to [key], or an
+    error naming the missing field. *)
+
 val load_candidates :
   base_path:string -> keeper_name:string -> (candidate list, string) result
 

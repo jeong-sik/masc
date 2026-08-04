@@ -122,6 +122,17 @@ val report_persistence_read_drop :
   unit
 (** Report a persisted read-model drop via WARN log + Otel_metric_store counter. *)
 
+val report_persistence_read_drop_counted :
+  surface:string ->
+  reason:string ->
+  path:string ->
+  detail:string ->
+  unit
+(** [report_persistence_read_drop_counted] calls
+    {!report_persistence_read_drop} with the drop counter every JSONL
+    surface uses: [masc_persistence_read_drops_total] incremented with
+    labels [surface] and [reason]. *)
+
 val result_to_option_logged :
   on_drop:(unit -> unit) ->
   surface:string ->
@@ -178,6 +189,12 @@ val json_float : ?default:float -> string -> Yojson.Safe.t -> float
 val json_bool : ?default:bool -> string -> Yojson.Safe.t -> bool
 val json_string_list : string -> Yojson.Safe.t -> string list
 val json_string_opt : string -> Yojson.Safe.t -> string option
+
+val json_string_nonempty_opt : string -> Yojson.Safe.t -> string option
+(** [json_string_nonempty_opt key json] returns the trimmed string field
+    [key], or [None] when the field is missing, is not a string, or is
+    empty after trimming. *)
+
 val json_int_opt : string -> Yojson.Safe.t -> int option
 val json_float_opt : string -> Yojson.Safe.t -> float option
 val json_bool_opt : string -> Yojson.Safe.t -> bool option

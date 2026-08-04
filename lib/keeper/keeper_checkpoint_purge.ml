@@ -44,11 +44,6 @@ type item =
   ; flat_last : int
   }
 
-let messages_of_unit = function
-  | Keeper_compaction_unit.Ordinary_message message -> [ message ]
-  | Keeper_compaction_unit.Closed_tool_cycle messages -> messages
-;;
-
 let is_text_only (message : Agent_sdk.Types.message) =
   (match message.role with
    | Agent_sdk.Types.User | Agent_sdk.Types.Assistant -> true
@@ -183,7 +178,7 @@ let purge_messages ~config messages =
         let flat_index = ref (-1) in
         List.map
           (fun unit_ ->
-             let unit_messages = messages_of_unit unit_ in
+             let unit_messages = Keeper_compaction_unit.messages_of_closed_unit unit_ in
              flat_index := !flat_index + List.length unit_messages;
              { unit_; flat_last = !flat_index })
           closed_prefix
@@ -206,7 +201,10 @@ let purge_messages ~config messages =
       in
       let purge_item item =
         if protected item
-        then { messages = messages_of_unit item.unit_; dedup_key = None }
+        then
+          { messages = Keeper_compaction_unit.messages_of_closed_unit item.unit_
+          ; dedup_key = None
+          }
         else (
           match item.unit_ with
           | Keeper_compaction_unit.Ordinary_message message ->

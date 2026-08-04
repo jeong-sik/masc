@@ -53,6 +53,10 @@ val string_opt_to_json_trimmed : string option -> Yojson.Safe.t
 (** [string_opt_to_json_trimmed] trims whitespace and returns [`Null]
     for empty or whitespace-only strings. *)
 val int_opt_to_json : int option -> Yojson.Safe.t
+val int_ratio_json : int -> int -> Yojson.Safe.t
+(** [int_ratio_json numerator denominator] returns
+    [`Float (numerator /. denominator)] as floats, or [`Null] when
+    [denominator] is 0. *)
 val float_opt_to_json : float option -> Yojson.Safe.t
 val bool_opt_to_json : bool option -> Yojson.Safe.t
 val string_opt_field : string -> string option -> string * Yojson.Safe.t
@@ -90,11 +94,75 @@ val assoc_bool_opt : string -> Yojson.Safe.t -> bool option
 val assoc_float_opt : string -> Yojson.Safe.t -> float option
 (** [assoc_float_opt name json] extracts float field, coerces int to float *)
 
+val find_assoc_row_by_string_field :
+  field:string -> value:string -> Yojson.Safe.t -> Yojson.Safe.t option
+(** [find_assoc_row_by_string_field ~field ~value json] returns the first
+    [`Assoc] row of the JSON array [json] whose [field] member is the
+    string [value].  Returns [None] when [json] is not an array or when
+    no row matches. *)
+
 val json_string_list_member : string -> Yojson.Safe.t -> string list
 (** [json_string_list_member name json] extracts a list of non-empty
     trimmed strings from the JSON array at field [name]. Returns [[]]
     if the field is missing or not an array. *)
+(** {1 Assoc field validation (Result-returning)}
+
+    These take an already-destructured [`Assoc] field list, unlike the
+    [require_*] family above which takes a whole [Yojson.Safe.t].
+    [surface] names the object in the error message, so a failure reads
+    ["<surface>.<field> is required"]. *)
+
+val reject_unknown_fields :
+  surface:string ->
+  allowed:string list ->
+  (string * Yojson.Safe.t) list ->
+  (unit, string) result
+(** [reject_unknown_fields ~surface ~allowed fields] returns [Ok ()] when
+    every key in [fields] appears in [allowed] and no key repeats.
+    Reports the duplicate key first, then the first unsupported key. *)
+
+val require_field_string :
+  surface:string ->
+  string ->
+  (string * Yojson.Safe.t) list ->
+  (string, string) result
+(** [require_field_string ~surface field fields] returns the string at
+    [field].  Errors when the field is missing, is not a string, or is
+    blank after trimming.  The value is returned untrimmed. *)
+
+val require_field_float :
+  surface:string ->
+  string ->
+  (string * Yojson.Safe.t) list ->
+  (float, string) result
+(** [require_field_float ~surface field fields] returns the float at
+    [field], widening [`Int] to float.  Errors when the field is missing
+    or is neither a float nor an int. *)
+
+val require_field_positive_int :
+  surface:string ->
+  string ->
+  (string * Yojson.Safe.t) list ->
+  (int, string) result
+(** [require_field_positive_int ~surface field fields] returns the int at
+    [field] when it is greater than 0.  Errors when the field is missing,
+    is not an int, or is 0 or negative. *)
+
+val require_field_string_list :
+  surface:string ->
+  string ->
+  (string * Yojson.Safe.t) list ->
+  (string list, string) result
+(** [require_field_string_list ~surface field fields] returns the array at
+    [field] as a string list.  Errors when the field is missing, is not an
+    array, or holds a non-string element (the error names its index). *)
+
 (** List utilities *)
 
 val dedupe_keep_order : 'a list -> 'a list
 (** [dedupe_keep_order xs] removes duplicates while preserving order *)
+
+val normalize_string_list : string list -> string list
+(** [normalize_string_list items] trims each item, drops the ones that
+    are empty after trimming, and removes duplicates while preserving
+    the order of first occurrence. *)

@@ -621,6 +621,18 @@ let log_gate_decision config ~agent_id ~trace_id ~decision ~action_type ~confirm
     ])
     ~outcome:Success ()
 
+(** Render the result of an audit write as a two-field JSON receipt.
+    [Ok ()] becomes [{"recorded": true}]; [Error detail] becomes
+    [{"recorded": false, "error": <detail>}] with the detail passed through
+    {!Observability_redact.redact_text}. *)
+let write_result_to_json = function
+  | Ok () -> `Assoc [("recorded", `Bool true)]
+  | Error detail ->
+    `Assoc [
+      ("recorded", `Bool false);
+      ("error", `String (Observability_redact.redact_text detail));
+    ]
+
 (** {1 Pruning (replaces rotation)} *)
 
 (** Prune audit entries older than [days] days.

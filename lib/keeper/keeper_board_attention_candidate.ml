@@ -196,11 +196,6 @@ let candidate_path ~base_path ~keeper_name =
     (Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name ^ ".jsonl")
 ;;
 
-let option_json f = function
-  | Some value -> f value
-  | None -> `Null
-;;
-
 let queue_reaction_to_yojson (reaction : Board_dispatch.board_reaction_change) =
   `Assoc
     [ ( "target_type"
@@ -225,8 +220,8 @@ let signal_to_yojson (signal : Board_dispatch.board_signal) =
     ; "author", `String signal.author
     ; "title", `String signal.title
     ; "content", `String signal.content
-    ; "hearth", option_json (fun value -> `String value) signal.hearth
-    ; "updated_at", option_json (fun value -> `Float value) signal.updated_at
+    ; "hearth", Json_util.option_to_yojson (fun value -> `String value) signal.hearth
+    ; "updated_at", Json_util.option_to_yojson (fun value -> `Float value) signal.updated_at
     ; ( "reaction"
       , match signal.kind with
         | Board_dispatch.Board_reaction_changed reaction ->
@@ -262,14 +257,14 @@ let keeper_context_to_yojson (meta : Keeper_meta_contract.keeper_meta) =
       (`Assoc
          [ "lane_keeper_name", `String meta.name
          ; "agent_name", `String meta.agent_name
-         ; "keeper_record_id", option_json Ids.Keeper_id.to_yojson meta.id
+         ; "keeper_record_id", Json_util.option_to_yojson Ids.Keeper_id.to_yojson meta.id
          ; ( "keeper_runtime_uid"
-           , option_json Keeper_id.uid_to_yojson meta.keeper_id )
-         ; "persona", option_json (fun value -> `String value) meta.persona
+           , Json_util.option_to_yojson Keeper_id.uid_to_yojson meta.keeper_id )
+         ; "persona", Json_util.option_to_yojson (fun value -> `String value) meta.persona
          ; "instructions", `String meta.instructions
          ; "active_goal_ids", json_string_list meta.active_goal_ids
          ; ( "current_task_id"
-           , option_json
+           , Json_util.option_to_yojson
                (fun task_id -> `String (Keeper_id.Task_id.to_string task_id))
                meta.current_task_id )
          ; "mention_keeper_ids", json_string_list mention_targets
@@ -361,7 +356,7 @@ let resumable_status_to_yojson = function
     `Assoc
       [ "kind", `String "pending"
       ; ( "last_delivery_failure"
-        , option_json
+        , Json_util.option_to_yojson
             delivery_failure_to_yojson
             pending.last_delivery_failure )
       ]
@@ -370,7 +365,7 @@ let resumable_status_to_yojson = function
       [ "kind", `String "judged"
       ; "judgment", judgment_to_yojson judged.judgment
       ; ( "last_delivery_failure"
-        , option_json
+        , Json_util.option_to_yojson
             delivery_failure_to_yojson
             judged.last_delivery_failure )
       ]
@@ -402,7 +397,7 @@ let quarantine_to_yojson quarantine =
       , `String
           (quarantine_failure_category_to_string quarantine.failure_category) )
     ; ( "attempt_provenance"
-      , option_json attempt_provenance_to_yojson quarantine.attempt_provenance )
+      , Json_util.option_to_yojson attempt_provenance_to_yojson quarantine.attempt_provenance )
     ; "quarantined_at", `Float quarantine.quarantined_at
     ; "prior_status", resumable_status_to_yojson quarantine.prior_status
     ]

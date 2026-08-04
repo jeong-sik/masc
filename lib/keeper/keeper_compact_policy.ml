@@ -174,11 +174,6 @@ let unit_message_count = function
   | Keeper_compaction_unit.Closed_tool_cycle messages -> List.length messages
 ;;
 
-let messages_of_unit = function
-  | Keeper_compaction_unit.Ordinary_message message -> [ message ]
-  | Keeper_compaction_unit.Closed_tool_cycle messages -> messages
-;;
-
 let selected_message_count units selected =
   let units = Array.of_list units in
   List.fold_left

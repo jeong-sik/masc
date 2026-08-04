@@ -95,14 +95,10 @@ let error_to_string error =
   let base = failure_to_string error.cause in
   match error.reservation_release with
   | None -> base
-  | Some Keeper_lifecycle_reservation.Released ->
-    base ^ "; reservation_release=released"
-  | Some Keeper_lifecycle_reservation.Release_missing ->
-    base ^ "; reservation_release=release_missing"
-  | Some (Keeper_lifecycle_reservation.Release_not_owner owner) ->
+  | Some outcome ->
     base
-    ^ "; reservation_release=release_not_owner: "
-    ^ Keeper_lifecycle_reservation.snapshot_to_string owner
+    ^ "; reservation_release="
+    ^ Keeper_lifecycle_reservation.release_outcome_to_string outcome
 ;;
 
 let validate_request request =

@@ -1119,45 +1119,15 @@ let of_yojson = function
   | _ -> Error (Decode_failed "direct delivery checkpoint must be an object")
 ;;
 
-type operation_lock =
-  { mutex : Eio.Mutex.t
-  ; mutable users : int
-  }
-
-let operation_locks : (string, operation_lock) Hashtbl.t = Hashtbl.create 16
-let operation_locks_mutex = Stdlib.Mutex.create ()
-
-let acquire_operation_lock key =
-  Stdlib.Mutex.protect operation_locks_mutex (fun () ->
-    match Hashtbl.find_opt operation_locks key with
-    | Some lock ->
-      lock.users <- lock.users + 1;
-      lock
-    | None ->
-      let lock = { mutex = Eio.Mutex.create (); users = 1 } in
-      Hashtbl.add operation_locks key lock;
-      lock)
-;;
-
-let release_operation_lock key lock =
-  Stdlib.Mutex.protect operation_locks_mutex (fun () ->
-    lock.users <- lock.users - 1;
-    if lock.users = 0
-    then
-      match Hashtbl.find_opt operation_locks key with
-      | Some current when current == lock -> Hashtbl.remove operation_locks key
-      | Some _ | None -> ())
-;;
-
 let with_operation_lock key f =
-  let lock = acquire_operation_lock key in
-  match Eio.Mutex.use_rw ~protect:true lock.mutex f with
+  let lock = Keeper_fs.acquire_path_lock key in
+  match Eio.Mutex.use_rw ~protect:true (Keeper_fs.path_lock_mutex lock) f with
   | value ->
-    release_operation_lock key lock;
+    Keeper_fs.release_path_lock key lock;
     value
   | exception exn ->
     let backtrace = Printexc.get_raw_backtrace () in
-    release_operation_lock key lock;
+    Keeper_fs.release_path_lock key lock;
     Printexc.raise_with_backtrace exn backtrace
 ;;
 

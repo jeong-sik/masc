@@ -609,19 +609,14 @@ let evaluate ~masc_root =
   }
 ;;
 
-let string_opt_to_json = function
-  | Some s -> `String s
-  | None -> `Null
-;;
-
 let receipt_to_json receipt =
   `Assoc
     [ "keeper_name", `String receipt.keeper_name
     ; "trace_id", `String receipt.trace_id
     ; "outcome", `String receipt.outcome
     ; "terminal_reason_code", `String receipt.terminal_reason_code
-    ; "current_task_id", string_opt_to_json receipt.current_task_id
-    ; "ended_at", string_opt_to_json receipt.ended_at
+    ; "current_task_id", Json_util.string_opt_to_json receipt.current_task_id
+    ; "ended_at", Json_util.string_opt_to_json receipt.ended_at
     ; "ended_at_unix", (match receipt.ended_at_unix with Some ts -> `Float ts | None -> `Null)
     ]
 ;;
@@ -629,7 +624,7 @@ let receipt_to_json receipt =
 let trace_row_to_json row =
   `Assoc
     [ "trace_id", `String row.trace_id
-    ; "keeper_id", string_opt_to_json row.keeper_id
+    ; "keeper_id", Json_util.string_opt_to_json row.keeper_id
     ; "recall_records", `Int row.recall_records
     ; "fact_keys", `List (List.map (fun key -> `String key) row.fact_keys)
     ; "injected_fact_keys", `Int row.injected_fact_keys

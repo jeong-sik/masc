@@ -17,15 +17,6 @@ let dedupe_thinking_lines = Trace.dedupe_thinking_lines
 let read_internal_history_lines = Trace.read_internal_history_lines
 let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
 
-let error_json ?ok message =
-  let fields = [ ("error", `String message) ] in
-  let fields =
-    match ok with
-    | None -> fields
-    | Some value -> ("ok", `Bool value) :: fields
-  in
-  `Assoc fields
-
 let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
   Http.Response.json_value ?request ~status (error_json ?ok message) reqd
 

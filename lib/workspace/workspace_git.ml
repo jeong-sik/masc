@@ -5,9 +5,6 @@
 
 open Masc_domain
 
-let exec_gate_raw_source argv =
-  String.concat " " (List.map Filename.quote argv)
-
 (* ============================================ *)
 (* argv-based process helpers                   *)
 (* ============================================ *)
@@ -17,7 +14,7 @@ let run_argv_line (argv : string list) : string option =
   let output =
     Masc_exec.Exec_gate.run_argv
       ~actor:(Masc_exec.Agent_id.of_string "workspace/git")
-      ~raw_source:(exec_gate_raw_source argv)
+      ~raw_source:(Masc_exec.Exec_gate.raw_source_of_argv argv)
       ~summary:"workspace_git argv"
       ~timeout_sec:Env_config_runtime.Workspace_git.local_op_timeout_sec
       argv
@@ -37,7 +34,7 @@ let run_argv_exit
   match
     Masc_exec.Exec_gate.run_argv_with_status
       ~actor:(Masc_exec.Agent_id.of_string "workspace/git")
-      ~raw_source:(exec_gate_raw_source argv)
+      ~raw_source:(Masc_exec.Exec_gate.raw_source_of_argv argv)
       ~summary:"workspace_git argv"
       ~timeout_sec
       argv

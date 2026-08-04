@@ -17,16 +17,10 @@ type name_map = {
 
 let default_names_path = ".gate/runtime/discord/names.json"
 
-let resolve_path raw_path =
-  if Filename.is_relative raw_path then
-    Filename.concat (Env_config_core.base_path ()) raw_path
-  else
-    raw_path
-
 let configured_write_path env_name ~default =
   match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
-  | Some raw -> resolve_path raw
-  | None -> resolve_path default
+  | Some raw -> Env_config_core.resolve_against_base_path raw
+  | None -> Env_config_core.resolve_against_base_path default
 
 let names_write_path () =
   configured_write_path "MASC_DISCORD_NAMES_PATH" ~default:default_names_path

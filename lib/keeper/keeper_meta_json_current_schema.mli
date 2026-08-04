@@ -71,6 +71,11 @@ val object_of_field_values :
 val current_field_names : string list
 (** Derived from {!all_fields}; never maintained as a separate string list. *)
 
+val find_duplicate : ('a * 'b) list -> 'a option
+(** Return [Some key] for the first key that already occurred earlier in the
+    association list, or [None] when every key is distinct. Callers decide how
+    to report the duplicate. *)
+
 val validate_current_object :
   Yojson.Safe.t -> ((string * Yojson.Safe.t) list, validation_error) result
 (** Require exactly the current top-level key set. Every field outside that set

@@ -361,11 +361,6 @@ let assoc_string_opt name json =
   | Some (`String value) -> Some value
   | _ -> None
 
-let assoc_bool_opt name json =
-  match assoc_member_opt name json with
-  | Some (`Bool value) -> Some value
-  | _ -> None
-
 let assoc_string_list name json =
   match assoc_member_opt name json with
   | Some (`List values) ->
@@ -396,7 +391,7 @@ let full_health_operator_summary ~keeper_fleet_safety
     in
     status := max_health_status !status component_status;
     let action_required =
-      match assoc_bool_opt "operator_action_required" json with
+      match Json_util.assoc_bool_opt "operator_action_required" json with
       | Some value -> value
       | None -> false
     in

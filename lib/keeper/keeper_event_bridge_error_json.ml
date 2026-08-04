@@ -35,16 +35,6 @@ let agent_completed_result_fields = function
     ]
 ;;
 
-let network_error_kind_to_wire = function
-  | Llm_provider.Http_client.Connection_refused -> "connection_refused"
-  | Llm_provider.Http_client.Dns_failure -> "dns_failure"
-  | Llm_provider.Http_client.Tls_error -> "tls_error"
-  | Llm_provider.Http_client.Timeout -> "timeout"
-  | Llm_provider.Http_client.Local_resource_exhaustion -> "local_resource_exhaustion"
-  | Llm_provider.Http_client.End_of_file -> "end_of_file"
-  | Llm_provider.Http_client.Unknown -> "unknown"
-;;
-
 let invalid_request_reason_to_wire = function
   | Agent_sdk.Retry.Json_parse_error -> "json_parse_error"
   | Agent_sdk.Retry.Request_body_too_large _ -> "request_body_too_large"
@@ -121,13 +111,6 @@ let input_capacity_reason_to_json = function
       ]
 ;;
 
-let terminal_effect_disposition_to_wire effect_disposition =
-  match Agent_sdk.Error.terminal_effect_disposition effect_disposition with
-  | Agent_sdk.Tool_contract.Proven_pre_effect -> "proven_pre_effect"
-  | Agent_sdk.Tool_contract.Proven_post_effect -> "proven_post_effect"
-  | Agent_sdk.Tool_contract.Effect_outcome_unknown -> "effect_outcome_unknown"
-;;
-
 let agent_failed_error_summary = function
   | Agent_sdk.Error.Agent (Agent_sdk.Error.TerminalToolEffectFailed _) ->
     "terminal_tool_effect_failed"
@@ -200,7 +183,7 @@ let sdk_api_error_fields = function
   | Agent_sdk.Retry.NetworkError { message; kind } ->
     [ "variant", `String "network_error"
     ; "message", `String message
-    ; "network_kind", `String (network_error_kind_to_wire kind)
+    ; "network_kind", `String (Keeper_agent_error.network_error_kind_to_wire kind)
     ]
   | Agent_sdk.Retry.Timeout { message } ->
     [ "variant", `String "timeout"; "message", `String message ]
@@ -223,7 +206,7 @@ let sdk_agent_error_fields = function
     [ "variant", `String "terminal_tool_effect_failed"
     ; "tool_use_id", `String tool_use_id
     ; ( "effect_disposition"
-      , `String (terminal_effect_disposition_to_wire effect_disposition) )
+      , `String (Keeper_agent_error.terminal_effect_disposition_to_wire effect_disposition) )
     ; "detail_digest", `String (sha256_hex detail)
     ]
   | Agent_sdk.Error.TerminalToolDurabilityFailed
@@ -234,7 +217,7 @@ let sdk_agent_error_fields = function
     ; "turn", `Int (Agent_sdk.Tool_contract.Invocation.turn invocation)
     ; "planned_index", `Int (Agent_sdk.Tool_contract.Invocation.planned_index invocation)
     ; ( "effect_disposition"
-      , `String (terminal_effect_disposition_to_wire effect_disposition) )
+      , `String (Keeper_agent_error.terminal_effect_disposition_to_wire effect_disposition) )
     ; "detail_digest", `String (sha256_hex detail)
     ]
   | Agent_sdk.Error.GuardrailViolation { validator; reason } ->
@@ -423,7 +406,7 @@ let sdk_provider_error_fields error =
     [ "variant", `String "network_error"
     ; "message", `String message
     ; "provider", `String provider
-    ; "network_kind", `String (network_error_kind_to_wire kind)
+    ; "network_kind", `String (Keeper_agent_error.network_error_kind_to_wire kind)
     ; ( "timeout_phase"
       , match timeout_phase with
         | Some phase -> `String (Llm_provider.Http_client.timeout_phase_to_label phase)

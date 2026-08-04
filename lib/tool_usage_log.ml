@@ -55,11 +55,6 @@ let retention_days () =
      | _ -> None)
   | None -> None
 
-let max_ts_opt current candidate =
-  match current with
-  | Some existing when existing >= candidate -> current
-  | _ -> Some candidate
-
 let numeric_ts_field fields name =
   match List.assoc_opt name fields with
   | Some (`Float ts) -> Some ts

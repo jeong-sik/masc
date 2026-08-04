@@ -80,7 +80,7 @@ type transfer_projection_result = State.transfer_projection_result =
 
 
 let snapshot_filename = "event-queue-v15.json"
-let transition_wal_filename = "event-queue-transitions-v5.jsonl"
+let transition_wal_filename = "event-queue-transitions-v6.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -307,7 +307,7 @@ let bump_revision state =
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let transition_wal_schema = "masc.keeper_event_queue.transition.v5"
+let transition_wal_schema = "masc.keeper_event_queue.transition.v6"
 
 type transition_wal_row =
   { pre_state : State.t
@@ -356,9 +356,9 @@ let transition_wal_entry_of_json owner = function
                && String.equal keeper_name (keeper_name_of_owner owner))
           then Error "transition WAL row owner does not match its Keeper lane"
           else
-            let* pre_state = State.of_yojson pre_state in
-            let* outbox_entry = State.outbox_entry_of_yojson entry in
-            validate_transition_wal_row pre_state outbox_entry
+            Result.bind (State.of_yojson pre_state) (fun pre_state ->
+              Result.bind (State.outbox_entry_of_yojson entry) (fun outbox_entry ->
+                validate_transition_wal_row pre_state outbox_entry))
         | _ -> Error "transition WAL row fields are not exact")
      | Some (`String schema) ->
        Error (Printf.sprintf "unsupported transition WAL schema: %s" schema)

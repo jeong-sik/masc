@@ -874,7 +874,7 @@ let test_reclaim_follows_transfer_durable_state () =
       (Filename.concat
          (Common.keepers_runtime_dir_of_base ~base_path)
          target_keeper)
-      "event-queue-transitions-v5.jsonl"
+      "event-queue-transitions-v6.jsonl"
   in
   check string "checkpointed transition WAL compacted" ""
     (read_file transition_wal_path);
@@ -1082,7 +1082,7 @@ let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
   let wal_path =
     Filename.concat
       (Filename.dirname queue_path)
-      "event-queue-transitions-v5.jsonl"
+      "event-queue-transitions-v6.jsonl"
   in
   Sys.remove queue_path;
   let outcome =
@@ -1175,7 +1175,8 @@ let test_wal_only_owner_is_recovered_and_settled () =
     check int "WAL-only fixture includes source and sibling" 2
       (List.length selections);
     selections
-    |> List.find_opt (fun selection -> selection.source <> sibling)
+    |> List.find_opt (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      selection.source <> sibling)
     |> function
     | Some selection -> selection
     | None -> fail "WAL-only source selection disappeared"
@@ -1217,10 +1218,10 @@ let test_wal_only_owner_is_recovered_and_settled () =
       keeper_name
   in
   let snapshot_path = Filename.concat keeper_dir "event-queue-v15.json" in
-  let wal_path = Filename.concat keeper_dir "event-queue-transitions-v5.jsonl" in
+  let wal_path = Filename.concat keeper_dir "event-queue-transitions-v6.jsonl" in
   let wal_row =
     `Assoc
-      [ "schema", `String "masc.keeper_event_queue.transition.v5"
+      [ "schema", `String "masc.keeper_event_queue.transition.v6"
       ; "base_path", `String base_path
       ; "keeper_name", `String keeper_name
       ; "pre_state", Keeper_event_queue_state.to_yojson state
@@ -1231,7 +1232,7 @@ let test_wal_only_owner_is_recovered_and_settled () =
   in
   let incomplete_wal_row =
     `Assoc
-      [ "schema", `String "masc.keeper_event_queue.transition.v5"
+      [ "schema", `String "masc.keeper_event_queue.transition.v6"
       ; "base_path", `String base_path
       ; "keeper_name", `String keeper_name
       ; "outbox_entry", Keeper_event_queue_state.outbox_entry_to_yojson entry
@@ -2228,7 +2229,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
           (Filename.concat
              (Common.keepers_runtime_dir_of_base ~base_path)
              keeper_name)
-          "event-queue-transitions-v5.jsonl"
+          "event-queue-transitions-v6.jsonl"
       in
       check bool "cancellation WAL survives until projection" true
         (Sys.file_exists transition_wal_path

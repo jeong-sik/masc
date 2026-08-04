@@ -139,6 +139,18 @@ run_gate() {
       fi
     done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v4.jsonl' -print0)
 
+    while IFS= read -r -d '' queue_path; do
+      legacy_wal_count=$((legacy_wal_count + 1))
+      [[ -f "$queue_path" && ! -L "$queue_path" ]] \
+        || fail "v5 transition WAL is not an exact regular file: $queue_path"
+      [[ ! -s "$queue_path" ]] \
+        || fail "v5 transition WAL still contains committed evidence: $queue_path"
+      current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
+      if [[ ! -e "$current_queue_path" && ! -L "$current_queue_path" ]]; then
+        cutover_required=1
+      fi
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v5.jsonl' -print0)
+
     while IFS= read -r -d '' current_queue_path; do
       [[ -f "$current_queue_path" && ! -L "$current_queue_path" ]] \
         || fail "v15 queue snapshot is not an exact regular file: $current_queue_path"
@@ -147,13 +159,13 @@ run_gate() {
       "$CUTOVER_HELPER" validate-current-queue \
         --base-path "$BASE_PATH" \
         --keeper-name "$keeper_name" \
-        || fail "v15 queue snapshot or v5 transition WAL is invalid: $current_queue_path"
+        || fail "v15 queue snapshot or v6 transition WAL is invalid: $current_queue_path"
       current_owner_count=$((current_owner_count + 1))
     done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v15.json' -print0)
 
     while IFS= read -r -d '' queue_path; do
       [[ -f "$queue_path" && ! -L "$queue_path" ]] \
-        || fail "v5 transition WAL is not an exact regular file: $queue_path"
+        || fail "v6 transition WAL is not an exact regular file: $queue_path"
       current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
       if [[ -e "$current_queue_path" || -L "$current_queue_path" ]]; then
         continue
@@ -163,9 +175,9 @@ run_gate() {
       "$CUTOVER_HELPER" validate-current-wal \
         --base-path "$BASE_PATH" \
         --keeper-name "$keeper_name" \
-        || fail "v5 transition WAL is invalid: $queue_path"
+        || fail "v6 transition WAL is invalid: $queue_path"
       current_owner_count=$((current_owner_count + 1))
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v5.jsonl' -print0)
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v6.jsonl' -print0)
 
     while IFS= read -r -d '' queue_path; do
       current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
@@ -394,6 +406,13 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     >"$legacy_wal_root/.masc/keepers/fixture/event-queue-transitions-v4.jsonl"
   expect_failure nonempty_v4_transition_wal "$legacy_wal_root"
 
+  legacy_v5_wal_root="$fixture_root/legacy-v5-wal"
+  write_schedules "$legacy_v5_wal_root" none
+  write_queue "$legacy_v5_wal_root" 0 0 0
+  printf '{"schema":"masc.keeper_event_queue.transition.v5"}\n' \
+    >"$legacy_v5_wal_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
+  expect_failure nonempty_v5_transition_wal "$legacy_v5_wal_root"
+
   current_root="$fixture_root/current"
   write_schedules "$current_root" running
   write_queue "$current_root" 1 1 1
@@ -412,20 +431,20 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   write_schedules "$malformed_current_wal_root" running
   write_current_queue "$malformed_current_wal_root"
   printf '{not-json\n' \
-    >"$malformed_current_wal_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
+    >"$malformed_current_wal_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
   expect_failure malformed_current_wal "$malformed_current_wal_root"
 
   wal_only_root="$fixture_root/wal-only"
   write_schedules "$wal_only_root" running
   mkdir -p "$wal_only_root/.masc/keepers/fixture"
-  : >"$wal_only_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
+  : >"$wal_only_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
   "$0" --base-path "$wal_only_root" >/dev/null
 
   malformed_wal_only_root="$fixture_root/malformed-wal-only"
   write_schedules "$malformed_wal_only_root" running
   mkdir -p "$malformed_wal_only_root/.masc/keepers/fixture"
   printf '{not-json\n' \
-    >"$malformed_wal_only_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
+    >"$malformed_wal_only_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
   expect_failure malformed_wal_without_snapshot "$malformed_wal_only_root"
 
   malformed_root="$fixture_root/malformed"

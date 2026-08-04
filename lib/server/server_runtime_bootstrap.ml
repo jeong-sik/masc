@@ -628,11 +628,6 @@ let lazy_startup_plan () =
             "keeper_history_migration";
           ];
       };
-      {
-        group_name = "tool_state";
-        execution = Serial;
-        task_names = [ "tool_metrics_restore" ];
-      };
     ]
   in
   let cleanup_groups =
@@ -1066,18 +1061,6 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
       |> String.concat ", ")
   end
 
-let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
-  (try
-     let n = Tool_metrics_persist.restore
-       ~base_path:(Mcp_server.workspace_config state).base_path in
-     if n > 0 then
-       Log.Misc.info "tool metrics: restored %d records from disk" n
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.Misc.warn "tool metrics restore failed: %s (metrics empty until next emission)"
-       (Printexc.to_string exn))
-
 let start_owner_lazy_tasks ~sw state =
   let run_lazy_task (task_name, task_fn) =
     Log.Server.info "lazy_task: starting %s" task_name;
@@ -1095,7 +1078,6 @@ let start_owner_lazy_tasks ~sw state =
   let task_fn = function
     | "restore_sessions" -> fun () -> restore_persisted_sessions state
     | "keeper_history_migration" -> fun () -> startup_migrate_keeper_histories state
-    | "tool_metrics_restore" -> fun () -> restore_tool_metrics_from_disk state
     | "jsonl_prune" -> fun () -> startup_prune_jsonl state
     | task_name ->
       raise

@@ -23,7 +23,6 @@ module Float = Stdlib.Float
     Design:
     - Each tool call is serialized as a single JSONL line.
     - Records are buffered in a bounded best-effort queue and flushed every 5 minutes.
-    - On startup, existing day-files are read and replayed into Tool_metrics.
     - All I/O failures are caught and logged (best-effort persistence).
 
     @since 2.108.0 — Issue #3280 *)
@@ -39,46 +38,6 @@ let record_to_json (r : Tool_result.result) : Yojson.Safe.t =
     ; ("duration_ms", `Float (Tool_result.duration_ms r))
     ; ("ts", `Float (Time_compat.now ()))
     ]
-
-type persisted_record = {
-  tool_name : string;
-  disposition : (unit, unit, unit) Tool_result.disposition;
-  duration_ms : float;
-}
-
-type parsed_record =
-  | Current_record of persisted_record
-  | Legacy_success_record
-
-let parse_record (json : Yojson.Safe.t)
-  : (parsed_record, string) Result.t =
-  let tool_name = Safe_ops.json_string_opt "tool_name" json in
-  let disposition = Safe_ops.json_string_opt "disposition" json in
-  let legacy_success = Safe_ops.json_bool_opt "success" json in
-  let duration_ms = Safe_ops.json_float_opt "duration_ms" json in
-  match tool_name, disposition, legacy_success, duration_ms with
-  | Some tool_name, Some disposition, _, Some duration_ms ->
-    Tool_result.unit_disposition_of_string disposition
-    |> Result.map (fun disposition ->
-      Current_record { tool_name; disposition; duration_ms })
-  | Some _, None, Some _, Some _ ->
-    (* The legacy success bit cannot distinguish the current Deferred and
-       Failed dispositions. Keep the execution-disposition SSOT intact while
-       classifying these rows separately from malformed data. *)
-    Ok Legacy_success_record
-  | _ ->
-    let missing =
-      [ ("tool_name", Option.is_none tool_name)
-      ; ("disposition", Option.is_none disposition)
-      ; ("duration_ms", Option.is_none duration_ms)
-      ]
-      |> List.filter_map (fun (field, is_missing) ->
-        if is_missing then Some field else None)
-    in
-    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
-    Error
-      (Printf.sprintf "missing required field(s): %s"
-         (String.concat ", " missing))
 
 (* ── Write queue ────────────────────────────────────── *)
 
@@ -168,18 +127,10 @@ let drain_to_store (store : Dated_jsonl.t) : int =
   drain ();
   !count
 
-let flush_now () =
-  match !store_ref with
-  | None ->
-    (* Store not yet initialized — drain and discard to prevent unbounded growth.
-       In practice, restore() initializes store_ref before any enqueue calls. *)
-    let dropped = drain_queue_without_store () in
-    if dropped > 0 then
-      Log.Metrics.warn "tool_metrics_persist: flush_now called before init, dropped %d records"
-        dropped
-  | Some (_, store) ->
-    let flushed = drain_to_store store in
-    Log.Metrics.debug "tool_metrics_persist: flushed %d records" flushed
+let flush_now ~base_path =
+  let store = get_or_create_store ~base_path in
+  let flushed = drain_to_store store in
+  Log.Metrics.debug "tool_metrics_persist: flushed %d records" flushed
 
 let start_flush_fiber ~sw ~clock ~base_path =
   let store = get_or_create_store ~base_path in
@@ -209,65 +160,3 @@ let start_flush_fiber ~sw ~clock ~base_path =
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Metrics.error "tool_metrics_persist: shutdown flush failed: %s"
         (Stdlib.Printexc.to_string exn))
-
-(* ── Restore on startup ─────────────────────────────── *)
-
-let restore ~base_path : int =
-  let store = get_or_create_store ~base_path in
-  let count = ref 0 in
-  let legacy = ref 0 in
-  let skipped = ref 0 in
-  let first_skip_reason = ref None in
-  (try
-     Dated_jsonl.iter_all store (fun json ->
-       match parse_record json with
-       | Ok (Current_record r) ->
-         let result : Tool_result.result =
-           match r.disposition with
-           | Tool_result.Completed () ->
-             Tool_result.Completed
-               { Tool_result.tool_name = r.tool_name
-               ; data = `Null
-               ; metadata = None
-               ; duration_ms = r.duration_ms
-               }
-           | Tool_result.Deferred () ->
-             Tool_result.Deferred
-               { Tool_result.tool_name = r.tool_name
-               ; data = `Null
-               ; metadata = None
-               ; duration_ms = r.duration_ms
-               }
-           | Tool_result.Failed () ->
-             Tool_result.Failed
-               { Tool_result.class_ = Tool_result.Runtime_failure
-               ; message = ""
-               ; data = `Null
-               ; tool_name = r.tool_name
-               ; duration_ms = r.duration_ms
-               }
-         in
-         Tool_metrics.record result;
-         Stdlib.incr count
-       | Ok Legacy_success_record -> Stdlib.incr legacy
-       | Error reason ->
-         Stdlib.incr skipped;
-         if Option.is_none !first_skip_reason then
-           first_skip_reason := Some reason);
-     if !legacy > 0 then
-       Log.Metrics.info
-         "tool_metrics_persist: ignored %d legacy success-only record(s); boolean success cannot reconstruct completed/deferred/failed disposition"
-         !legacy;
-     if !skipped > 0 then
-       Log.Metrics.warn
-         "tool_metrics_persist: skipped %d malformed restore record(s)%s"
-         !skipped
-         (match !first_skip_reason with
-          | Some reason -> Printf.sprintf " (first error: %s)" reason
-          | None -> "")
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.Metrics.error "tool_metrics_persist: restore failed: %s"
-       (Stdlib.Printexc.to_string exn));
-  !count

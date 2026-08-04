@@ -126,15 +126,13 @@ val visibility_of_string : string -> visibility option
     {!Board} facade unchanged. *)
 
 val post_of_yojson : Yojson.Safe.t -> post option
-(** Decodes a single persisted-post JSON row.  Returns
-    [None] when any required field is missing or any id /
-    visibility / post-kind parser rejects the value. Rows without an
-    explicit [post_kind] are rejected rather than classified from prose,
-    author names, or timing metadata. *)
+(** Decodes one row emitted by the current {!post_to_yojson} writer.  Returns
+    [None] unless the field set, JSON types, identifiers, derived values, and
+    optional typed objects match that current wire shape exactly. *)
 
 val comment_of_yojson : Yojson.Safe.t -> comment option
-(** Decodes a single persisted-comment JSON row.  Same
-    fail-soft contract as {!post_of_yojson}. *)
+(** Decodes one row emitted by the current {!comment_to_yojson} writer, with
+    the same exact current-wire contract as {!post_of_yojson}. *)
 
 (** {1 Hearth aggregation} *)
 

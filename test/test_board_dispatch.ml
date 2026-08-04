@@ -36,9 +36,9 @@ let block_board_masc_dir_with_file () =
   Fs_compat.save_file masc_dir "not a directory";
   base
 
-let seed_legacy_keeper_post () =
+let seed_post_without_kind () =
   let now = Time_compat.now () in
-  let post_id = Printf.sprintf "legacy-keeper-%06x" (Random.bits ()) in
+  let post_id = Printf.sprintf "missing-kind-%06x" (Random.bits ()) in
   let path = Board.persist_path () in
   let dir = Filename.dirname path in
   Fs_compat.mkdir_p dir;
@@ -47,7 +47,7 @@ let seed_legacy_keeper_post () =
       [
         ("id", `String post_id);
         ("author", `String "dm-keeper");
-        ("title", `String "Legacy keeper");
+        ("title", `String "Missing kind");
         ("body", `String "keeper");
         ("content", `String "keeper");
         ("visibility", `String "internal");
@@ -56,7 +56,9 @@ let seed_legacy_keeper_post () =
         ("expires_at", `Float 0.0);
         ("votes_up", `Int 0);
         ("votes_down", `Int 0);
+        ("score", `Int 0);
         ("reply_count", `Int 0);
+        ("pinned", `Bool false);
         ("meta", `Assoc [ ("source", `String "keeper_board_post") ]);
       ]
   in
@@ -802,12 +804,12 @@ let test_recent_author_match_applies_before_limit () =
       (Board.Post_id.to_string post.id)
   | _ -> Alcotest.fail "expected exactly one matching author post"
 
-let test_legacy_post_without_kind_is_rejected () =
-  let post_id = seed_legacy_keeper_post () in
+let test_post_without_kind_is_rejected () =
+  let post_id = seed_post_without_kind () in
   match Board_dispatch.get_post ~post_id with
   | Error (Board.Post_not_found _) -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)
-  | Ok _ -> Alcotest.fail "legacy post without post_kind must not be classified"
+  | Ok _ -> Alcotest.fail "post without post_kind must be rejected"
 
 (** {1 Comment Operations} *)
 
@@ -2141,8 +2143,8 @@ let () =
         (with_eio test_author_filter_treats_wildcards_literally);
       Alcotest.test_case "author match precedes recent result limit" `Quick
         (with_eio test_recent_author_match_applies_before_limit);
-      Alcotest.test_case "legacy post without kind is rejected" `Quick
-        (with_eio test_legacy_post_without_kind_is_rejected);
+      Alcotest.test_case "post without kind is rejected" `Quick
+        (with_eio test_post_without_kind_is_rejected);
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick (with_eio test_add_and_get_comments);

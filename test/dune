@@ -106,7 +106,7 @@
   test_server_dashboard_http_keeper_api_trace
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
-  test_keeper_reconcile_state
+  test_keeper_running_reconcile_attempt
   test_attempt_state
   test_runtime_attempt_fsm
   test_runtime_lane_preference
@@ -409,7 +409,7 @@
   test_server_dashboard_http_keeper_api_trace
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
-  test_keeper_reconcile_state
+  test_keeper_running_reconcile_attempt
   test_attempt_state
   test_runtime_attempt_fsm
   test_runtime_lane_preference

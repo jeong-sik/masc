@@ -688,7 +688,7 @@ let () =
     not
       (Masc.Keeper_world_observation.is_board_activity_event
          { prompt_event with
-           event_kind = Masc.Keeper_world_observation.Schedule_due
+           event_kind = Masc.Keeper_world_observation.Schedule_due scheduled_wake
          }));
 
   (* A completion-authority rejection is a system LLM result delivered to the

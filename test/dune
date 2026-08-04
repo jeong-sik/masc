@@ -999,7 +999,7 @@
   test_eio_guard_yield_meter
   test_board_dispatch
   test_board_sort
-  test_vote_ts_preservation_10086
+  test_board_vote_persistence
   test_board_karma_ledger
   test_workspace_task_delete
   test_workspace_task_lifecycle
@@ -1155,7 +1155,7 @@
   test_eio_guard_yield_meter
   test_board_dispatch
   test_board_sort
-  test_vote_ts_preservation_10086
+  test_board_vote_persistence
   test_board_karma_ledger
   test_workspace_task_delete
   test_workspace_task_lifecycle
@@ -1694,7 +1694,7 @@
 
 (include stanzas/test_board_persistence_load_contract.inc)
 
-(include stanzas/test_board_post_origin.inc)
+(include stanzas/test_board_persistence_schema.inc)
 
 (include stanzas/test_board_sse_canonical_event_type.inc)
 

@@ -1,4 +1,4 @@
-// MASC Dashboard — MCP-over-HTTP client with session lifecycle
+// MASC Dashboard — MCP 2026-07-28 over Streamable HTTP
 
 import {
   apiRequestErrorFromResponse,
@@ -11,54 +11,26 @@ import {
   getStoredTokenMeta,
 } from './core'
 import { ensureDevToken, resetDevTokenBootstrap } from './dev-token'
-import {
-  MCP_INIT_COOLDOWN_MS,
-  MCP_INITIALIZE_TIMEOUT_MS,
-  MCP_INITIALIZED_NOTIFY_TIMEOUT_MS,
-} from '../config/constants'
 import { reportToolHostFailure } from './tool-host-failure'
 import { showActionToast } from '../components/common/toast'
 import { errorToString } from '../lib/format-string'
 
-// --- MCP Session Management ---
-
+const MCP_PROTOCOL_VERSION = '2026-07-28'
 const MCP_BLOCKED_MESSAGE = 'MCP 연결이 차단되었습니다.'
 const MCP_AUTH_CHANGED_MESSAGE = 'MCP authentication changed during request'
 
-interface McpSessionBinding {
-  readonly sessionId: string | null
+interface McpRequestBinding {
   readonly authRevision: number
 }
 
-type McpSessionState =
-  | { readonly kind: 'ready'; readonly binding: McpSessionBinding }
-  | { readonly kind: 'blocked'; readonly authRevision: number }
-
-interface McpInitAttempt {
-  readonly generation: number
-  readonly promise: Promise<McpSessionBinding>
-  cooldownTimer: ReturnType<typeof setTimeout> | null
-}
-
-interface McpRequestTrace {
-  binding: McpSessionBinding | null
-}
-
-type McpErrorResponseContract =
-  | { readonly kind: 'unknown_session'; readonly replacementSessionId: string }
-  | { readonly kind: 'other' }
-
-let mcpSessionState: McpSessionState | null = null
+let blockedAuthRevision: number | null = null
 let observedTokenRevision = currentStoredTokenRevision()
-let initGeneration = 0
-let initAttempt: McpInitAttempt | null = null
 
 async function bestEffortReportToolHostFailure(payload: {
   toolName: string
   message: string
   phase: string
   requestId?: string
-  sessionId?: string
   timeoutMs?: number
 }) {
   try {
@@ -69,7 +41,6 @@ async function bestEffortReportToolHostFailure(payload: {
       phase: payload.phase,
       message: payload.message,
       request_id: payload.requestId,
-      session_id: payload.sessionId,
       timeout_ms: payload.timeoutMs,
     })
   } catch {
@@ -111,21 +82,21 @@ function implicitToolActor(): string | null {
 }
 
 function mcpHeadersForActor(
-  binding: McpSessionBinding,
+  binding: McpRequestBinding,
+  method: string,
+  name: string | null,
   actorName?: string | null,
-  extra?: Record<string, string>,
 ): Record<string, string> {
   assertAuthRevision(binding.authRevision)
   const headers: Record<string, string> = {
     ...authHeaders({ actorName }),
     'Content-Type': 'application/json',
     Accept: 'application/json, text/event-stream',
-    ...(extra ?? {}),
+    'Mcp-Protocol-Version': MCP_PROTOCOL_VERSION,
+    'Mcp-Method': method,
   }
+  if (name) headers['Mcp-Name'] = name
   assertAuthRevision(binding.authRevision)
-  if (binding.sessionId) {
-    headers['Mcp-Session-Id'] = binding.sessionId
-  }
   return headers
 }
 
@@ -139,223 +110,89 @@ function assertAuthRevision(expectedRevision: number): void {
   }
 }
 
-function assertPublishedBinding(binding: McpSessionBinding): void {
+function assertBinding(binding: McpRequestBinding): void {
   assertAuthRevision(binding.authRevision)
-  if (mcpSessionState?.kind !== 'ready' || mcpSessionState.binding !== binding) {
-    throw authChangedError()
-  }
-}
-
-function invalidateInitAttempt(): void {
-  initGeneration += 1
-  if (initAttempt?.cooldownTimer) {
-    clearTimeout(initAttempt.cooldownTimer)
-  }
-  initAttempt = null
-}
-
-function resetMcpSessionOnly(): void {
-  mcpSessionState = null
-  invalidateInitAttempt()
 }
 
 function synchronizeMcpAuthRevision(): void {
   const currentRevision = currentStoredTokenRevision()
   if (observedTokenRevision !== currentRevision) {
-    resetMcpSessionOnly()
+    blockedAuthRevision = null
     resetDevTokenBootstrap()
     observedTokenRevision = currentRevision
   }
 }
 
-function mcpBodyMethod(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null) return null
-  const method = (body as Record<string, unknown>).method
-  return typeof method === 'string' ? method : null
-}
-
-function canRetryUnknownSession(body: unknown): boolean {
-  const method = mcpBodyMethod(body)
-  return method !== 'initialize'
-    && method !== 'notifications/initialized'
-    && method !== 'ping'
-    && method !== 'server/discover'
-}
-
-function classifyMcpErrorResponse(
-  res: Response,
-  body: unknown,
-): McpErrorResponseContract {
-  const replacementSessionId = res.headers.get('Mcp-Session-Id')
-  if (
-    res.status === 404
-    && replacementSessionId
-    && canRetryUnknownSession(body)
-  ) {
-    return { kind: 'unknown_session', replacementSessionId }
+function currentRequest(body: unknown): {
+  body: Record<string, unknown>
+  method: string
+  name: string | null
+} {
+  if (typeof body !== 'object' || body === null) {
+    throw new Error('MCP request must be an object')
   }
-  return { kind: 'other' }
-}
-
-function invalidatePublishedBinding(binding: McpSessionBinding): void {
-  assertPublishedBinding(binding)
-  resetMcpSessionOnly()
+  const request = body as Record<string, unknown>
+  if (typeof request.method !== 'string') {
+    throw new Error('MCP request method is required')
+  }
+  const rawParams = request.params
+  const params = typeof rawParams === 'object' && rawParams !== null
+    ? rawParams as Record<string, unknown>
+    : {}
+  const rawMeta = params._meta
+  const meta = typeof rawMeta === 'object' && rawMeta !== null
+    ? rawMeta as Record<string, unknown>
+    : {}
+  const nameKey = request.method === 'resources/read' ? 'uri' : 'name'
+  const rawName = params[nameKey]
+  return {
+    body: {
+      ...request,
+      params: {
+        ...params,
+        _meta: {
+          ...meta,
+          'io.modelcontextprotocol/protocolVersion': MCP_PROTOCOL_VERSION,
+          'io.modelcontextprotocol/clientCapabilities': {},
+        },
+      },
+    },
+    method: request.method,
+    name: typeof rawName === 'string' ? rawName : null,
+  }
 }
 
 async function mcpPost(
   body: unknown,
-  binding: McpSessionBinding,
+  binding: McpRequestBinding,
   timeoutMs = DEFAULT_MCP_TIMEOUT_MS,
   actorName?: string | null,
-  retryUnknownSession = true,
-  requestTrace?: McpRequestTrace,
 ): Promise<string> {
-  assertPublishedBinding(binding)
-  if (requestTrace) requestTrace.binding = binding
+  assertBinding(binding)
+  const request = currentRequest(body)
   const res = await fetchWithTimeout('/mcp', {
     method: 'POST',
-    headers: mcpHeadersForActor(binding, actorName),
-    body: JSON.stringify(body),
+    headers: mcpHeadersForActor(binding, request.method, request.name, actorName),
+    body: JSON.stringify(request.body),
   }, timeoutMs)
-  assertPublishedBinding(binding)
+  assertBinding(binding)
   if (!res.ok) {
     if (res.status === 403) {
-      mcpSessionState = {
-        kind: 'blocked',
-        authRevision: binding.authRevision,
-      }
+      blockedAuthRevision = binding.authRevision
       throw new Error(MCP_BLOCKED_MESSAGE)
     }
-    const responseContract = classifyMcpErrorResponse(res, body)
-    const err = await apiRequestErrorFromResponse('POST', '/mcp', res)
-    if (
-      retryUnknownSession
-      && responseContract.kind === 'unknown_session'
-    ) {
-      invalidatePublishedBinding(binding)
-      const freshBinding = await ensureSession()
-      return mcpPost(body, freshBinding, timeoutMs, actorName, false, requestTrace)
-    }
-    throw err
+    throw await apiRequestErrorFromResponse('POST', '/mcp', res)
   }
-  // Capture session ID only after successful responses. A stale-session 404
-  // may include a fresh header, but that header is not initialized yet.
-  const sid = res.headers.get('Mcp-Session-Id')
   const text = await res.text()
-  assertPublishedBinding(binding)
-  if (sid && sid !== binding.sessionId) {
-    mcpSessionState = {
-      kind: 'ready',
-      binding: { sessionId: sid, authRevision: binding.authRevision },
-    }
-  }
+  assertBinding(binding)
   return text
 }
 
 let blockedToastShown = false
 
-function assertCurrentInitAttempt(
-  attempt: McpInitAttempt,
-  authRevision?: number,
-): void {
-  if (initAttempt !== attempt || attempt.generation !== initGeneration) {
-    throw authChangedError()
-  }
-  if (authRevision !== undefined) assertAuthRevision(authRevision)
-}
-
-async function initializeSession(
-  attempt: McpInitAttempt,
-): Promise<McpSessionBinding> {
-  await ensureDevToken()
-  assertCurrentInitAttempt(attempt)
-  const authRevision = currentStoredTokenRevision()
-  observedTokenRevision = authRevision
-  const initializingBinding: McpSessionBinding = {
-    sessionId: null,
-    authRevision,
-  }
-  const res = await fetchWithTimeout('/mcp', {
-    method: 'POST',
-    headers: mcpHeadersForActor(initializingBinding),
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'initialize',
-      params: {
-        protocolVersion: '2025-03-26',
-        capabilities: {},
-        clientInfo: { name: 'masc-dashboard', version: '1.0.0' },
-      },
-      id: 0,
-    }),
-  }, MCP_INITIALIZE_TIMEOUT_MS)
-  assertCurrentInitAttempt(attempt, authRevision)
-  if (!res.ok) {
-    if (res.status === 403) {
-      mcpSessionState = { kind: 'blocked', authRevision }
-      initAttempt = null
-      throw new Error(MCP_BLOCKED_MESSAGE)
-    }
-    throw await apiRequestErrorFromResponse('POST', '/mcp initialize', res)
-  }
-  const binding: McpSessionBinding = {
-    sessionId: res.headers.get('Mcp-Session-Id'),
-    authRevision,
-  }
-  if (binding.sessionId) {
-    try {
-      const initializedRes = await fetchWithTimeout('/mcp', {
-        method: 'POST',
-        headers: mcpHeadersForActor(binding),
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'notifications/initialized',
-        }),
-      }, MCP_INITIALIZED_NOTIFY_TIMEOUT_MS)
-      assertCurrentInitAttempt(attempt, authRevision)
-      if (!initializedRes.ok) {
-        throw await apiRequestErrorFromResponse(
-          'POST',
-          '/mcp notifications/initialized',
-          initializedRes,
-        )
-      }
-    } catch (err) {
-      assertCurrentInitAttempt(attempt, authRevision)
-      console.warn('[mcp] initialized notification failed:', err)
-      throw err
-    }
-  }
-  assertCurrentInitAttempt(attempt, authRevision)
-  mcpSessionState = { kind: 'ready', binding }
-  initAttempt = null
-  return binding
-}
-
-function startSessionInitialization(): Promise<McpSessionBinding> {
-  const generation = initGeneration + 1
-  initGeneration = generation
-  let attempt!: McpInitAttempt
-  const promise = Promise.resolve()
-    .then(() => initializeSession(attempt))
-    .catch((err: unknown) => {
-      if (initAttempt === attempt) {
-        if (attempt.cooldownTimer) clearTimeout(attempt.cooldownTimer)
-        attempt.cooldownTimer = setTimeout(() => {
-          if (initAttempt === attempt) initAttempt = null
-          attempt.cooldownTimer = null
-        }, MCP_INIT_COOLDOWN_MS)
-      }
-      throw err
-    })
-  attempt = { generation, promise, cooldownTimer: null }
-  initAttempt = attempt
-  return promise
-}
-
-async function ensureSession(): Promise<McpSessionBinding> {
+async function ensureBinding(): Promise<McpRequestBinding> {
   synchronizeMcpAuthRevision()
-  if (mcpSessionState?.kind === 'blocked') {
+  if (blockedAuthRevision === currentStoredTokenRevision()) {
     if (!blockedToastShown) {
       blockedToastShown = true
       showActionToast(
@@ -367,16 +204,15 @@ async function ensureSession(): Promise<McpSessionBinding> {
     }
     throw new Error(MCP_BLOCKED_MESSAGE)
   }
-  if (mcpSessionState?.kind === 'ready') {
-    assertAuthRevision(mcpSessionState.binding.authRevision)
-    return mcpSessionState.binding
-  }
-  if (initAttempt) return initAttempt.promise
-  return startSessionInitialization()
+  await ensureDevToken()
+  const authRevision = currentStoredTokenRevision()
+  observedTokenRevision = authRevision
+  return { authRevision }
 }
 
 export function resetMcpClientState(): void {
-  resetMcpSessionOnly()
+  blockedAuthRevision = null
+  blockedToastShown = false
   resetDevTokenBootstrap()
   observedTokenRevision = currentStoredTokenRevision()
 }
@@ -412,11 +248,8 @@ async function callMcpToolInternal(
 ): Promise<string> {
   const requestId = String(Math.floor(Date.now() % 1000000))
   synchronizeMcpAuthRevision()
-  let phase = mcpSessionState?.kind === 'ready' ? 'tools/call' : 'initialize'
-  const requestTrace: McpRequestTrace = { binding: null }
   try {
-    const binding = await ensureSession()
-    phase = 'tools/call'
+    const binding = await ensureBinding()
     const explicitActor = explicitToolActor(args)
     const actor = explicitActor ?? implicitToolActor()
     const toolArgs =
@@ -431,7 +264,7 @@ async function callMcpToolInternal(
         arguments: toolArgs,
       },
       id: Number.parseInt(requestId, 10),
-    }, binding, DEFAULT_MCP_TIMEOUT_MS, actor, true, requestTrace)
+    }, binding, DEFAULT_MCP_TIMEOUT_MS, actor)
     const parsed = parseMcpHttpResponse(text)
     return extractMcpText(parsed)
   } catch (err) {
@@ -440,10 +273,9 @@ async function callMcpToolInternal(
       await bestEffortReportToolHostFailure({
         toolName,
         message,
-        phase,
-        requestId: phase === 'tools/call' ? requestId : undefined,
-        sessionId: requestTrace.binding?.sessionId ?? undefined,
-        timeoutMs: phase === 'initialize' ? MCP_INITIALIZE_TIMEOUT_MS : DEFAULT_MCP_TIMEOUT_MS,
+        phase: 'tools/call',
+        requestId,
+        timeoutMs: DEFAULT_MCP_TIMEOUT_MS,
       })
     }
     throw err
@@ -482,7 +314,7 @@ function parseMcpListResponse(raw: string): McpListResponse {
 }
 
 async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
-  const binding = await ensureSession()
+  const binding = await ensureBinding()
   const text = await mcpPost({
     jsonrpc: '2.0',
     method: 'tools/list',

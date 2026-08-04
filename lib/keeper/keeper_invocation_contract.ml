@@ -60,9 +60,16 @@ let exact_fields ~field ~allowed fields =
     match List.find_opt (fun key -> not (List.mem key allowed)) keys with
     | None -> Ok ()
     | Some key ->
+      (* [allowed] is the answer the caller is looking for, and dropping it
+         made the rejection unactionable: live logs carry taskmaster trying
+         target.agent, then target.keeper_name, then target.keeper, one per
+         call, against an allowed list of kind and name. Naming the accepted
+         fields turns three round trips into one. *)
       invalid_wire_value
         ~field:(field ^ "." ^ key)
-        ~expected:"no undeclared field"
+        ~expected:
+          (Printf.sprintf "no undeclared field; accepted: %s"
+             (String.concat ", " allowed))
 ;;
 
 let required_field ~field name fields =

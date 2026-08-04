@@ -396,6 +396,39 @@ let test_prompt_carries_recall_fact_byte_budget () =
          "within 12345 UTF-8 bytes")
 ;;
 
+(* The constraint category is scoped to rules something outside the agent
+   applies. Measured on the live workspace 2026-08-05: excluding taskmaster,
+   12 of 25 stored facts were category constraint, and five of those were the
+   agent's own scope decisions -- "unclaimed implementation tasks are outside
+   the code-reviewer's scope and should be ignored", "only intervening when
+   directly mentioned", "does not autonomously claim backlog tasks". None was
+   set by an operator; each was a turn's operating judgment promoted to a
+   permanent boundary, and the same backlog held 56 cancelled tasks that no
+   keeper had claimed. The externally-enforced ones (a PR-title regex, a
+   review bot blocking on contrast ratio, a hook blocking commits to main) are
+   what the category is for and still qualify. *)
+let test_constraint_category_excludes_self_imposed_scope () =
+  match Runtime.messages_for_librarian (input ()) with
+  | Error detail -> failf "librarian render failed: %s" detail
+  | Ok messages ->
+    let user_text = user_text_of_messages messages in
+    check bool "constraint is defined as externally enforced" true
+      (String_util.contains_substring user_text
+         "a rule enforced from outside this agent");
+    check bool "external enforcement is the test" true
+      (String_util.contains_substring user_text
+         "something other than the agent applies it");
+    check bool "self-scope decisions are excluded from the category" true
+      (String_util.contains_substring user_text
+         "An agent's own choice about what it will or will not take on is NOT a constraint");
+    check bool "the excluded shapes are named" true
+      (String_util.contains_substring user_text
+         "do not claim unassigned work");
+    check bool "narrowing one's own scope is not stored" true
+      (String_util.contains_substring user_text
+         "Do not store what the agent decided to stop doing, stay out of, or wait for")
+;;
+
 let test_repo_template_renders_persona () =
   (match Runtime.messages_for_librarian (input ()) with
    | Error detail -> failf "librarian render failed: %s" detail
@@ -487,6 +520,8 @@ let () =
             test_prompt_carries_recall_fact_byte_budget
         ; test_case "repo template renders persona" `Quick
             test_repo_template_renders_persona
+        ; test_case "constraint category excludes self-imposed scope" `Quick
+            test_constraint_category_excludes_self_imposed_scope
         ] )
     ; ( "cadence"
       , [ test_case "fresh then periodic" `Quick test_cadence_fresh_then_periodic

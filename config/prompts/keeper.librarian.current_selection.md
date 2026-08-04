@@ -20,12 +20,13 @@ Retention criteria:
 New-claim criteria:
 - Add a claim only when it remains true and useful on a later day.
 - Do not store the act of running a cycle, calling a tool, checkpointing, waking, the current queue size/state, or a Keeper's momentary desire.
+- Do not store what the agent decided to stop doing, stay out of, or wait for. A choice to narrow its own scope belongs to the turn that made it; carried forward as memory it becomes a standing rule the agent never revisits, and it reads as authoritative in every later turn.
 - Do not duplicate code, git history, PR state, the task board, or other authoritative sources. Store the non-obvious decision, reason, constraint, stable preference, external fact, validated approach, or reusable lesson instead.
 - If unsure, do not add it.
 
 Category criteria — choose the FIRST that fits:
 - code_change: a concrete, lasting change to code or configuration (a file/function was modified, a setting now has value X), described so it is verifiable later.
-- constraint: a rule, limit, policy, invariant, or boundary that bounds future action (must / must not / only / at most). Includes a decision that establishes such a rule.
+- constraint: a rule enforced from outside this agent — an operator policy, a tool or API contract, a CI or review gate, a repository hook, a platform limit. It is a constraint because something other than the agent applies it, and a later keeper hitting the same wall would hit it too. An agent's own choice about what it will or will not take on is NOT a constraint: scope decisions, standing-by policies, "only act when mentioned", "do not claim unassigned work", polling cadence, and similar self-limits are this turn's operating judgment and expire with it. Storing one turns a momentary decision into a permanent boundary that no operator set. Omit it.
 - blocker: a specific external obstacle that prevents progress and persists beyond this turn (a dependency is missing, an API is down, a credential is absent). Not the keeper merely having no task to do.
 - goal: a durable objective or target the agent is working toward, beyond the current turn.
 - preference: a stable, stated preference about how work should be done (style, tooling, process) that holds across turns.

@@ -71,7 +71,7 @@ let pending_page ~after ~limit pending =
       let stimulus = selection.Keeper_event_queue_state.source in
       let item =
         `Assoc
-          [ "queue_index", `Int index
+          ([ "queue_index", `Int index
           ; "post_id", `String stimulus.Keeper_event_queue.post_id
           ; ( "source_ref"
             , `String
@@ -87,6 +87,30 @@ let pending_page ~after ~limit pending =
             , `String
                 (Keeper_event_queue.payload_kind_label stimulus.payload) )
           ]
+          (* [payload_kind] collapses every payload to a constant string, so a
+             completion_authority_rejected row reached the operator without the
+             rejection's reason — the one field that says why the keeper is
+             blocked. Only that field is added: this projection deliberately
+             omits raw payload content (a board stimulus carries post text),
+             so the whole payload must not be serialized here. Other kinds are
+             enumerated rather than folded into a wildcard so a new payload has
+             to make an explicit decision about operator visibility. *)
+          @ (match stimulus.payload with
+             | Keeper_event_queue.Completion_authority_rejected rejection ->
+               [ "rejection_reason", `String rejection.car_reason
+               ; "rejection_task_id", `String rejection.car_task_id
+               ]
+             | Keeper_event_queue.Board_signal _
+             | Keeper_event_queue.Board_attention _
+             | Keeper_event_queue.Bootstrap
+             | Keeper_event_queue.Fusion_completed _
+             | Keeper_event_queue.Bg_completed _
+             | Keeper_event_queue.Schedule_due _
+             | Keeper_event_queue.Connector_attention _
+             | Keeper_event_queue.Hitl_resolved _
+             | Keeper_event_queue.Manual_compaction_requested
+             | Keeper_event_queue.Goal_assigned _
+             | Keeper_event_queue.Goal_reconciliation_ready _ -> []))
       in
       loop (index + 1) (remaining - 1) (item :: page_rev) rest
   in

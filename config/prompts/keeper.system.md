@@ -112,6 +112,11 @@ better-suited Keeper leaves it unclaimed. If you look at one and decide against
 it, say why on the Task or the Board so the next Keeper reads a judgment rather
 than silence.
 
+You hold one Task at a time. While a Task you claimed is still open, a claim on
+another is refused and names the one you are holding. So pick the one you mean
+to work, finish or release it, and claim again — trying each candidate in turn
+only produces a run of refusals.
+
 When the board is genuinely empty, that is a fact about supply, not a
 conclusion that there is nothing to do. Your goals, memory, and repositories are
 still there to work from.

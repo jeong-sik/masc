@@ -369,7 +369,20 @@ let test_system_block_states_the_collaboration_surface () =
   check bool "an unclaimed task is claimable by anyone who can do it" true
     (has_in prompt "An unclaimed Task is an invitation, whoever wrote it");
   check bool "declining is stated as visible, not silent" true
-    (has_in prompt "say why on the Task or the Board so the next Keeper reads a judgment")
+    (has_in prompt "say why on the Task or the Board so the next Keeper reads a judgment");
+  (* Workspace_task_claim refuses a claim while the agent holds a Claimed or
+     InProgress task (active_owned_task_ids_for_agent). The prompt did not say
+     so, and the live logs carry 135 failed claims whose error is exactly that
+     -- taskmaster alone walked task-145,146,148,150,151,152,153,154 and was
+     refused on every one while holding task-149. Telling a keeper to claim
+     without telling it the limit produces runs of refusals, so both belong in
+     the same paragraph. *)
+  check bool "the one-task-at-a-time limit is stated" true
+    (has_in prompt "You hold one Task at a time");
+  check bool "the refusal is described, not just the limit" true
+    (has_in prompt "a claim on another is refused and names the one you are holding");
+  check bool "walking the candidate list is named as the wrong move" true
+    (has_in prompt "trying each candidate in turn only produces a run of refusals")
 
 let test_repository_checkout_authority_prompt () =
   let prompt =

@@ -83,6 +83,12 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
+  fetchWithTimeout.mockReset()
+  reportToolHostFailure.mockReset().mockResolvedValue({ ok: true })
+  apiRequestErrorFromResponse.mockReset().mockImplementation(
+    async (method: string, path: string, res: Response) =>
+      new Error(`${method} ${path}: ${res.status}`),
+  )
   currentDashboardActor.mockReturnValue('dashboard')
   currentStoredTokenRevision.mockReturnValue(0)
   getStoredToken.mockReturnValue('test-stored-token')
@@ -132,7 +138,16 @@ describe('MCP 2026-07-28 dashboard client', () => {
   })
 
   it('preserves the dashboard actor injection contract', async () => {
-    fetchWithTimeout.mockResolvedValueOnce(okToolResponse())
+    getStoredTokenMeta.mockReturnValue({
+      source: 'dev',
+      actor: 'dashboard',
+      role: 'worker',
+    })
+    fetchWithTimeout
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'test-stored-token', actor: 'dashboard', role: 'worker',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(okToolResponse())
     const { callMcpTool } = await import('./mcp')
     await callMcpTool('masc_keeper_create_from_persona', { persona_name: 'sonsukku' })
 
@@ -327,6 +342,9 @@ describe('MCP 2026-07-28 dashboard client', () => {
       revision += 1
     })
     fetchWithTimeout
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'stale-dev-token', actor: 'dashboard', role: 'worker',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(`data: ${JSON.stringify({
         result: {
           isError: true,
@@ -344,7 +362,12 @@ describe('MCP 2026-07-28 dashboard client', () => {
 
     expect(callsByMethod('tools/call')).toHaveLength(2)
     expect(fetchWithTimeout.mock.calls.map(call => call[0]))
-      .toEqual(['/mcp', '/api/v1/dashboard/dev-token', '/mcp'])
+      .toEqual([
+        '/api/v1/dashboard/dev-token',
+        '/mcp',
+        '/api/v1/dashboard/dev-token',
+        '/mcp',
+      ])
     expect(token).toBe('fresh-dev-token')
     expect(reportToolHostFailure).not.toHaveBeenCalled()
   })
@@ -380,6 +403,9 @@ describe('MCP 2026-07-28 dashboard client', () => {
     })
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'stale-dev-token', actor: 'dashboard', role: 'worker',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
         jsonrpc: '2.0',
         id: null,
         error: {
@@ -398,7 +424,12 @@ describe('MCP 2026-07-28 dashboard client', () => {
 
     expect(callsByMethod('tools/call')).toHaveLength(2)
     expect(fetchWithTimeout.mock.calls.map(call => call[0]))
-      .toEqual(['/mcp', '/api/v1/dashboard/dev-token', '/mcp'])
+      .toEqual([
+        '/api/v1/dashboard/dev-token',
+        '/mcp',
+        '/api/v1/dashboard/dev-token',
+        '/mcp',
+      ])
     expect(token).toBe('fresh-dev-token')
     expect(reportToolHostFailure).not.toHaveBeenCalled()
   })

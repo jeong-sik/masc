@@ -297,7 +297,6 @@ export type DashboardKeeperWaitingSource =
   | 'hitl_pending'
   | 'external_attention'
   | 'fusion_running'
-  | 'background_task'
   | 'schedule_waiting'
   | 'turn_admission_waiting'
   | 'turn_admission_shutdown'
@@ -313,7 +312,6 @@ export const DASHBOARD_KEEPER_WAITING_SOURCE_VALUES = [
   'hitl_pending',
   'external_attention',
   'fusion_running',
-  'background_task',
   'schedule_waiting',
   'turn_admission_waiting',
   'turn_admission_shutdown',

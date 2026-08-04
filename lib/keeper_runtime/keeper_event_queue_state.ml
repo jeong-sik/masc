@@ -19,7 +19,6 @@ type accepted_transfer =
 
 type source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
-  | Background_job_terminal of Keeper_event_queue.bg_job_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_attempt_terminal of { detail : string }
 
@@ -405,8 +404,6 @@ let source_terminal_receipt_of_stimulus source =
   match source.Keeper_event_queue.payload with
   | Keeper_event_queue.Fusion_completed completion ->
     Ok (Fusion_terminal completion)
-  | Keeper_event_queue.Bg_completed completion ->
-    Ok (Background_job_terminal completion)
   | Keeper_event_queue.Hitl_resolved resolution -> Ok (Hitl_terminal resolution)
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
@@ -434,7 +431,7 @@ let validate_accepted_source_terminal
   else (
     match source_terminal.source_receipt with
     | Turn_attempt_terminal _ -> Ok ()
-    | (Fusion_terminal _ | Background_job_terminal _ | Hitl_terminal _) as expected ->
+    | (Fusion_terminal _ | Hitl_terminal _) as expected ->
       let* receipt = source_terminal_receipt_of_stimulus source_terminal.source in
       if receipt = expected
       then Ok ()
@@ -995,8 +992,6 @@ let transition_to_yojson = function
       match source_terminal.source_receipt with
       | Fusion_terminal _ ->
         [ "source_receipt_kind", `String "fusion_terminal" ]
-      | Background_job_terminal _ ->
-        [ "source_receipt_kind", `String "background_job_terminal" ]
       | Hitl_terminal _ ->
         [ "source_receipt_kind", `String "hitl_terminal" ]
       | Turn_attempt_terminal { detail } ->
@@ -1116,15 +1111,12 @@ let transition_of_yojson json =
         in
         let* detail = string_field ~context "detail" fields in
         Ok (Turn_attempt_terminal { detail })
-      | ( "fusion_terminal"
-        | "background_job_terminal"
-        | "hitl_terminal" ) as expected_kind ->
+      | ("fusion_terminal" | "hitl_terminal") as expected_kind ->
         let* () = exact_fields ~context ~expected:common_fields fields in
         let* source_receipt = source_terminal_receipt_of_stimulus source in
         let* actual_kind =
           match source_receipt with
           | Fusion_terminal _ -> Ok "fusion_terminal"
-          | Background_job_terminal _ -> Ok "background_job_terminal"
           | Hitl_terminal _ -> Ok "hitl_terminal"
           | Turn_attempt_terminal _ ->
             Error "source payload produced a non-intrinsic terminal receipt"

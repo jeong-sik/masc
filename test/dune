@@ -956,7 +956,6 @@
   test_json_util
   test_process_eio_coverage
   test_with_process_coverage
-  test_bg_task_stub
   test_process_eio_detached
   test_voice_runtime_overlay
   test_worker_container_coverage
@@ -1112,7 +1111,6 @@
   test_json_util
   test_process_eio_coverage
   test_with_process_coverage
-  test_bg_task_stub
   test_process_eio_detached
   test_voice_runtime_overlay
   test_worker_container_coverage

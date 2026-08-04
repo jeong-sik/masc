@@ -2,7 +2,6 @@ type stimulus_kind =
   | Board_signal
   | Bootstrap
   | Fusion_completed  (* RFC-0266: async masc_fusion completion wake *)
-  | Bg_completed  (* RFC-0290: generic background job completion wake *)
   | Schedule_due  (* Scheduled automation due wake for a specific keeper *)
   | Connector_attention
       (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
@@ -31,7 +30,6 @@ let stimulus_kind_to_string = function
   | Board_signal -> "board_signal"
   | Bootstrap -> "bootstrap"
   | Fusion_completed -> "fusion_completed"
-  | Bg_completed -> "bg_completed"
   | Schedule_due -> "schedule_due"
   | Connector_attention -> "connector_attention"
   | Hitl_resolved -> "hitl_resolved"
@@ -49,7 +47,6 @@ let stimulus_kind_of_string = function
   | "board_signal" -> Some Board_signal
   | "bootstrap" -> Some Bootstrap
   | "fusion_completed" -> Some Fusion_completed
-  | "bg_completed" -> Some Bg_completed
   | "schedule_due" -> Some Schedule_due
   | "connector_attention" -> Some Connector_attention
   | "hitl_resolved" -> Some Hitl_resolved
@@ -89,7 +86,6 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
     Board_signal
   | Keeper_event_queue.Bootstrap -> Bootstrap
   | Keeper_event_queue.Fusion_completed _ -> Fusion_completed
-  | Keeper_event_queue.Bg_completed _ -> Bg_completed
   | Keeper_event_queue.Schedule_due _ -> Schedule_due
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
@@ -186,11 +182,6 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       | Keeper_event_queue.Fusion_cancelled -> "cancelled"
     in
     Printf.sprintf "fusion_completed run_id=%s terminal=%s" fc.run_id terminal
-  | Keeper_event_queue.Bg_completed c ->
-    Printf.sprintf
-      "bg_completed run_id=%s kind=%s"
-      c.bg_run_id
-      (Keeper_event_queue.bg_job_kind_to_string c.bg_kind)
   | Keeper_event_queue.Schedule_due sw ->
     Printf.sprintf "schedule_due schedule_id=%s due_at=%.3f" sw.schedule_id sw.due_at
   | Keeper_event_queue.Connector_attention ca ->
@@ -228,7 +219,6 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Board_attention { signal = bs; _ } -> bs.updated_at
     | Keeper_event_queue.Bootstrap
     | Keeper_event_queue.Fusion_completed _
-    | Keeper_event_queue.Bg_completed _
     | Keeper_event_queue.Schedule_due _
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
@@ -842,7 +832,7 @@ let decode_current_row ~keeper_name row =
       | Board_signal, Some value when not (Float.is_finite value) ->
         Error Non_finite_board_updated_at
       | Board_signal, (Some _ | None)
-      | ( Bootstrap | Fusion_completed | Bg_completed | Schedule_due
+      | ( Bootstrap | Fusion_completed | Schedule_due
         | Connector_attention | Hitl_resolved
         | Manual_compaction
         | Goal_assigned
@@ -1223,7 +1213,7 @@ let board_stimulus_token metadata stimulus_kind =
     in
     let post_id = nested_string_field "stimulus" "post_id" metadata.raw in
     Option.map (fun timestamp -> timestamp, post_id) updated_at
-  | Bootstrap | Fusion_completed | Bg_completed | Schedule_due
+  | Bootstrap | Fusion_completed | Schedule_due
   | Connector_attention | Hitl_resolved
   | Manual_compaction
   | Goal_assigned

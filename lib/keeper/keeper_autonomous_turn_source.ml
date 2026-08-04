@@ -39,6 +39,27 @@ let check_trace_file ~dir path =
     | exception Unix.Unix_error _ -> Missing_or_non_regular
 ;;
 
+type raw_trace_identity_mismatch =
+  | Runtime_agent_name_mismatch
+  | Session_id_mismatch
+
+let check_raw_trace_identity
+      (run_ref : Turn_record.raw_trace_run_ref)
+      (records : Agent_sdk.Raw_trace.record list)
+  =
+  let rec loop = function
+    | [] -> Ok ()
+    | (record : Agent_sdk.Raw_trace.record) :: rest ->
+      if not (String.equal record.agent_name run_ref.agent_name)
+      then Error Runtime_agent_name_mismatch
+      else (
+        match record.session_id with
+        | Some session_id when String.equal session_id run_ref.session_id -> loop rest
+        | Some _ | None -> Error Session_id_mismatch)
+  in
+  loop records
+;;
+
 let trace_step_of_trajectory = function
   | Agent_sdk.Trajectory.Think { ts; _ } ->
     Some
@@ -124,25 +145,37 @@ let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
              run_ref.worker_run_id;
            None
          | Ok ((first : Agent_sdk.Raw_trace.record) :: _ as records) ->
-           let final_text =
-             records
-             |> List.rev
-             |> List.find_opt (fun (row : Agent_sdk.Raw_trace.record) ->
-               row.record_type = Agent_sdk.Raw_trace.Run_finished)
-             |> Option.map (fun (row : Agent_sdk.Raw_trace.record) -> row.final_text)
-             |> Option.join
-           in
-           let trace =
-             Agent_sdk.Trajectory.of_raw_trace_records records
-             |> fun trajectory -> trajectory.steps
-             |> List.filter_map trace_step_of_trajectory
-           in
-           Some
-             { turn_id = Ids.Turn_ref.to_string record.turn_ref
-             ; started_at = first.ts
-             ; final_text
-             ; trace
-             })
+           (match check_raw_trace_identity run_ref records with
+            | Error Runtime_agent_name_mismatch ->
+              Log.Keeper.warn ~keeper_name
+                "autonomous turn source: exact run %s has a mismatched OAS runtime identity"
+                run_ref.worker_run_id;
+              None
+            | Error Session_id_mismatch ->
+              Log.Keeper.warn ~keeper_name
+                "autonomous turn source: exact run %s has a mismatched session identity"
+                run_ref.worker_run_id;
+              None
+            | Ok () ->
+              let final_text =
+                records
+                |> List.rev
+                |> List.find_opt (fun (row : Agent_sdk.Raw_trace.record) ->
+                  row.record_type = Agent_sdk.Raw_trace.Run_finished)
+                |> Option.map (fun (row : Agent_sdk.Raw_trace.record) -> row.final_text)
+                |> Option.join
+              in
+              let trace =
+                Agent_sdk.Trajectory.of_raw_trace_records records
+                |> fun trajectory -> trajectory.steps
+                |> List.filter_map trace_step_of_trajectory
+              in
+              Some
+                { turn_id = Ids.Turn_ref.to_string record.turn_ref
+                ; started_at = first.ts
+                ; final_text
+                ; trace
+                }))
 ;;
 
 let load_recent ~config ~keeper_name ?(limit = default_limit) ?since () =

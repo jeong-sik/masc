@@ -49,7 +49,6 @@ export function sourceTone(source: string | null | undefined): StatusChipTone {
     case 'turn_admission_waiting':
       return 'warn'
     case 'fusion_running':
-    case 'background_task':
     case 'turn_admission_shutdown':
       return 'info'
     default:

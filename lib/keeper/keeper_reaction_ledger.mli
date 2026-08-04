@@ -15,7 +15,6 @@ type stimulus_kind =
   | Board_signal
   | Bootstrap
   | Fusion_completed  (** RFC-0266: async masc_fusion completion wake *)
-  | Bg_completed  (** RFC-0290: generic background job completion wake *)
   | Schedule_due  (** Scheduled automation due wake for a specific keeper *)
   | Connector_attention
       (** RFC-connector-ambient-attention-wake: ambient connector message wake *)

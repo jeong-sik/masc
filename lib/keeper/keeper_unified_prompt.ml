@@ -158,7 +158,6 @@ let board_event_kind_label = function
   | Keeper_world_observation.Board_comment_added -> "comment_added"
   | Keeper_world_observation.Board_reaction_changed _ -> "reaction_changed"
   | Keeper_world_observation.Fusion_completed -> "fusion_completed"
-  | Keeper_world_observation.Bg_completed -> "bg_completed"
   | Keeper_world_observation.Schedule_due _ -> "schedule_due"
   | Keeper_world_observation.External_attention -> "external_attention"
   | Keeper_world_observation.Goal_assigned -> "goal_assigned"
@@ -236,7 +235,6 @@ let board_event_note_fields = function
   | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_comment_added
   | Keeper_world_observation.Fusion_completed
-  | Keeper_world_observation.Bg_completed
   | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Goal_assigned
   | Keeper_world_observation.Goal_reconciliation_ready
@@ -399,7 +397,6 @@ let format_scheduled_wake_observations
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
          | Keeper_world_observation.Fusion_completed
-         | Keeper_world_observation.Bg_completed
          | Keeper_world_observation.External_attention
          | Keeper_world_observation.Goal_assigned
          | Keeper_world_observation.Goal_reconciliation_ready
@@ -432,7 +429,6 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
          | Keeper_world_observation.Fusion_completed
-         | Keeper_world_observation.Bg_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention
          | Keeper_world_observation.Goal_assigned

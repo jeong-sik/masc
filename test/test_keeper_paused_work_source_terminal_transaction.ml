@@ -272,7 +272,6 @@ let test_source_ack_identity_survives_checkpoint_reload () =
       | State.Hitl_terminal resolution ->
         { resolution with approval_id = "approval-terminal-2" }
       | State.Fusion_terminal _
-      | State.Background_job_terminal _
       | State.Turn_attempt_terminal _ ->
         Alcotest.fail "fixture must carry a HITL terminal receipt"
     in
@@ -585,7 +584,6 @@ let test_projected_wal_recovery_allows_next_source_ack () =
       | State.Hitl_terminal resolution ->
         { resolution with approval_id = "approval-terminal-after-projection" }
       | State.Fusion_terminal _
-      | State.Background_job_terminal _
       | State.Turn_attempt_terminal _ ->
         Alcotest.fail "fixture must carry a HITL terminal receipt"
     in

@@ -526,11 +526,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         | json ->
           let* run_ref = raw_trace_run_ref_of_json json in
           let* () =
-            if String.equal run_ref.agent_name agent_name
-            then Ok ()
-            else Error "turn_record: raw trace agent_name does not match record identity"
-          in
-          let* () =
             if String.equal run_ref.session_id trace_id
             then Ok ()
             else Error "turn_record: raw trace session_id does not match trace_id"

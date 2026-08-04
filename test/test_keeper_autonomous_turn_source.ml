@@ -4,6 +4,7 @@ open Masc
 
 let keeper_name = "keeper-autonomous-source"
 let agent_name = "keeper-autonomous-agent"
+let runtime_agent_name = "oas-test-runtime"
 let trace_id = "trace-test-0000"
 
 let temp_dir () =
@@ -43,7 +44,7 @@ let raw_record ~worker_run_id ~seq ~ts ~record_type fields =
      :: ("worker_run_id", `String worker_run_id)
      :: ("seq", `Int seq)
      :: ("ts", `Float ts)
-     :: ("agent_name", `String agent_name)
+     :: ("agent_name", `String runtime_agent_name)
      :: ("session_id", `String trace_id)
      :: ("record_type", `String (Agent_sdk.Raw_trace.record_type_to_string record_type))
      :: fields)
@@ -106,7 +107,7 @@ let run_ref ~path ~worker_run_id ~start_seq =
   ; path
   ; start_seq
   ; end_seq = start_seq + 4
-  ; agent_name
+  ; agent_name = runtime_agent_name
   ; session_id = trace_id
   }
 ;;
@@ -218,6 +219,54 @@ let test_missing_or_outside_trace_is_skipped () =
     (List.length (Keeper_autonomous_turn_source.load_recent ~config ~keeper_name ()))
 ;;
 
+let replace_raw_field_at ~index ~field ~value records =
+  List.mapi
+    (fun current record ->
+      if current <> index
+      then record
+      else
+        match record with
+        | `Assoc fields -> `Assoc ((field, value) :: List.remove_assoc field fields)
+        | other -> other)
+    records
+;;
+
+let test_mismatched_raw_trace_runtime_identity_is_skipped () =
+  with_workspace @@ fun config ->
+  let path = trace_path config "runtime-identity-mismatch" in
+  let records =
+    run_lines ~worker_run_id:"run-mismatch" ~start_seq:1 ~base_ts:4500.
+      ~prompt:"ignored" ~final_text:"must not be attributed"
+    |> replace_raw_field_at ~index:3 ~field:"agent_name"
+         ~value:(`String "oas-other-runtime")
+  in
+  write_lines path records;
+  write_turn_record config ~absolute_turn:44 ~generation:9
+    ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:
+      (Some (run_ref ~path ~worker_run_id:"run-mismatch" ~start_seq:1));
+  Alcotest.(check int) "raw runtime identity mismatch is rejected" 0
+    (List.length (Keeper_autonomous_turn_source.load_recent ~config ~keeper_name ()))
+;;
+
+let test_mismatched_raw_trace_session_identity_is_skipped () =
+  with_workspace @@ fun config ->
+  let path = trace_path config "session-identity-mismatch" in
+  let records =
+    run_lines ~worker_run_id:"run-mismatch" ~start_seq:1 ~base_ts:4600.
+      ~prompt:"ignored" ~final_text:"must not be attributed"
+    |> replace_raw_field_at ~index:4 ~field:"session_id"
+         ~value:(`String "trace-other-9999")
+  in
+  write_lines path records;
+  write_turn_record config ~absolute_turn:45 ~generation:9
+    ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:
+      (Some (run_ref ~path ~worker_run_id:"run-mismatch" ~start_seq:1));
+  Alcotest.(check int) "raw session identity mismatch is rejected" 0
+    (List.length (Keeper_autonomous_turn_source.load_recent ~config ~keeper_name ()))
+;;
+
 let test_since_and_limit_use_current_records () =
   with_workspace @@ fun config ->
   let write index base_ts text =
@@ -239,11 +288,8 @@ let test_since_and_limit_use_current_records () =
     (List.map (fun (turn : Keeper_autonomous_turn_source.turn) -> turn.final_text) turns)
 ;;
 
-(* The reader above can only project turns whose record carries an exact run
-   reference, so the writer-side acceptance rule belongs to the same guard set.
-   [Keeper_turn_driver] mints the OAS runtime identity as "oas-<runtime_id>",
-   which never equals the keeper agent identity; comparing the two rejected
-   every reference and left every autonomous turn unprojectable. *)
+(* The OAS runtime identity is opaque here. The reader validates it against
+   the selected raw rows without comparing it to the Keeper identity. *)
 let sdk_run_ref ~agent_name ~session_id : Agent_sdk.Raw_trace.run_ref =
   { worker_run_id = "wr-exact-run"
   ; path = "/keepers/" ^ keeper_name ^ "/raw-traces/turn-exact.jsonl"
@@ -309,6 +355,10 @@ let () =
             test_direct_marker_spoof_is_excluded
         ; Alcotest.test_case "rejects trace paths outside keeper store" `Quick
             test_missing_or_outside_trace_is_skipped
+        ; Alcotest.test_case "rejects mismatched raw runtime identity" `Quick
+            test_mismatched_raw_trace_runtime_identity_is_skipped
+        ; Alcotest.test_case "rejects mismatched raw session identity" `Quick
+            test_mismatched_raw_trace_session_identity_is_skipped
         ; Alcotest.test_case "since and limit use current records" `Quick
             test_since_and_limit_use_current_records
         ] )

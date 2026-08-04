@@ -27,7 +27,6 @@ type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
 
 type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
-  | Background_job_terminal of Keeper_event_queue.bg_job_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_attempt_terminal of { detail : string }
 

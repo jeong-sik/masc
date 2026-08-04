@@ -22,9 +22,11 @@ type store_error =
       { primary_err : string
       ; recovery_err : string option
       }
-      (** RFC-0234: returned by mutating functions when the on-disk ledger is
-          present but neither it nor its [.last-good] recovery file parses. The
-          mutation is refused so the corrupt bytes are NOT overwritten. *)
+      (** RFC-0234: returned by mutating functions when at least one of the
+          ledger and its [.last-good] recovery file exists and no state can be
+          parsed from either. [recovery_err] is [None] when no recovery file
+          exists. The mutation is refused so the surviving bytes are NOT
+          overwritten. *)
 
 type running_recovery_reason =
   | Retryable_dispatch_failure of string
@@ -39,26 +41,31 @@ type read_error =
       { primary_err : string
       ; recovery_err : string option
       }
-      (** Read-only access found a present-but-unparseable ledger. *)
+      (** Read-only access found ledger bytes on disk that yield no state. *)
 
 val read_error_to_string : read_error -> string
 
-(** Raised by [read_state]/[get_schedule] on a corrupt ledger.
-    Read paths have no [result] channel, so they fail loud instead of returning
-    an empty list. Mutating paths report [Corrupt_ledger] instead. *)
+(** Raised by [read_state]/[get_schedule] when ledger bytes exist but yield no
+    state. Read paths have no [result] channel, so they fail loud instead of
+    returning an empty list. Mutating paths report [Corrupt_ledger] instead. *)
 exception
   Corrupt_ledger_exn of
     { primary_err : string
     ; recovery_err : string option
     }
 
-(** Read-only snapshot. Returns an empty state for an absent store and
-    raises {!Corrupt_ledger_exn} for a corrupt one. Never writes to disk. *)
+(** Read-only snapshot. Returns an empty state only when neither the ledger nor
+    its [.last-good] recovery file exists; when the ledger is gone but the
+    recovery file parses, the recovered state is returned and the substitution is
+    logged. Raises {!Corrupt_ledger_exn} when ledger bytes exist but yield no
+    state. Never writes to disk. *)
 val read_state : Workspace_utils.config -> state
 
-(** Result-returning read-only snapshot. Returns an empty state for an absent
-    store and [Error (Corrupt_read_ledger _)] for a corrupt one. Never
-    writes to disk. *)
+(** Result-returning read-only snapshot. Returns an empty state only when neither
+    the ledger nor its [.last-good] recovery file exists, the recovered state
+    when the ledger is gone but the recovery file parses, and
+    [Error (Corrupt_read_ledger _)] when ledger bytes exist but yield no state.
+    Never writes to disk. *)
 val read_state_result : Workspace_utils.config -> (state, read_error) result
 
 val state_of_yojson : Yojson.Safe.t -> (state, string) result

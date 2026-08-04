@@ -61,14 +61,16 @@ let with_workspace f =
   f config
 ;;
 
+(* Two drifts had made every case in this file fail at [write_meta] before it
+   reached an assertion:
+   - [agent_name] was spelled out as the bare keeper name, which
+     [Keeper_meta_json_parse] rejects; omitting it lets
+     [meta_of_json_fixture] fill in [Keeper_identity.keeper_agent_name], so
+     the fixture cannot drift from the canonical rule again;
+   - [sandbox_profile] / [network_mode] are keeper TOML fields, not keeper meta
+     JSON fields, and the meta parser rejects anything outside its schema. *)
 let keeper_meta_fixture keeper_name =
-  Masc_test_deps.meta_of_json_fixture
-    (`Assoc
-      [ "name", `String keeper_name
-      ; "agent_name", `String keeper_name
-      ; "sandbox_profile", `String "local"
-      ; "network_mode", `String "inherit"
-      ])
+  Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String keeper_name ])
 ;;
 
 let ensure_keeper config keeper_name =

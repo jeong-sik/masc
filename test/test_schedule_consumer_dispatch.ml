@@ -370,23 +370,20 @@ let tick_ok config ~now =
   | Error err -> fail (Schedule_runner.runner_error_to_string err)
 ;;
 
-let latest_execution_exn config (request : Schedule_domain.schedule_request) =
-  match
-    Schedule_store.last_execution_for_schedule_instance
-      (Schedule_store.read_state config)
-      ~schedule_instance_id:request.schedule_instance_id
-      ~schedule_id:request.schedule_id
-  with
-  | Some execution -> execution
-  | None -> fail ("missing execution for schedule " ^ request.schedule_id)
-;;
-
-let single_keeper_settlement_exn config execution =
-  match Server_schedule_consumers.consumer.settlements config [ execution ] with
-  | [ Ok settlement ] -> settlement
-  | [ Error detail ] -> fail detail
-  | settlements ->
-    failf "expected one settlement result, got %d" (List.length settlements)
+let find_wake
+      state
+      ~schedule_instance_id
+      ~schedule_id
+      ~due_at
+      ~payload_digest
+  =
+  List.find_opt
+    (fun (wake : Schedule_domain.wake_record) ->
+       String.equal wake.schedule_instance_id schedule_instance_id
+       && String.equal wake.schedule_id schedule_id
+       && Float.equal wake.due_at due_at
+       && String.equal wake.payload_digest payload_digest)
+    state.Schedule_store.wakes
 ;;
 
 let single_occurrence_id (result : Schedule_runner.tick_result) =
@@ -439,7 +436,7 @@ let test_board_post_schedule_is_rejected_without_mutation () =
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
 ;;
 
-let test_keeper_wake_consumer_records_dispatch_without_work_success () =
+let test_keeper_wake_consumer_records_wake_receipt () =
   with_workspace
   @@ fun config ->
   let request = create_keeper_wake_schedule config in
@@ -464,30 +461,30 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | None -> fail "accepted schedule missing"
    | Some stored ->
-     check string "one-shot remains running until work completion" "running"
+     check string "one-shot wake delivery completes" "succeeded"
        (Schedule_domain.schedule_status_to_string stored.status));
   (match
-     Schedule_store.last_execution_for_schedule_instance
+     Schedule_store.last_wake_for_schedule_instance
        (Schedule_store.read_state config)
        ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
-   | None -> fail "missing execution record"
-   | Some execution ->
-     check string "execution status" "dispatched"
-       (Schedule_domain.execution_status_to_string execution.status);
-     check (option (float 0.001)) "accepted work is unfinished" None
-       execution.finished_at;
-     (match execution.detail with
+   | None -> fail "missing wake record"
+   | Some wake ->
+     check string "wake receipt status" "succeeded"
+       (Schedule_domain.wake_status_to_string wake.status);
+     check (option (float 0.001)) "wake receipt is finished" (Some 201.0)
+       wake.finished_at;
+     (match wake.detail with
       | Some detail ->
         let open Yojson.Safe.Util in
-        check string "execution detail kind" "masc.keeper_wake.enqueued"
+        check string "wake detail kind" "masc.keeper_wake.enqueued"
           (detail |> member "kind" |> to_string);
-        check string "execution detail queue" "keeper_event_queue"
+        check string "wake detail queue" "keeper_event_queue"
           (detail |> member "queue" |> to_string);
-        check string "execution detail stimulus" "schedule_due"
+        check string "wake detail stimulus" "schedule_due"
           (detail |> member "stimulus" |> to_string);
-        check string "execution keeper" "schedule-keeper"
+        check string "wake keeper" "schedule-keeper"
           (detail |> member "keeper_name" |> to_string);
         check string "durable enqueue is separate from activation" "deferred"
           (detail |> member "activation_status" |> to_string);
@@ -497,7 +494,7 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
           "absent executor produces typed no-activation"
           "durable keeper metadata read unavailable: executor pool is not installed"
           (detail |> member "activation_detail" |> to_string)
-      | None -> fail "execution detail missing"));
+      | None -> fail "wake detail missing"));
   let queue =
     Keeper_registry_event_queue.snapshot
       ~base_path:config.Workspace_utils.base_path
@@ -577,11 +574,11 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
     check string "queue evidence matched schedule instance"
       request.schedule_instance_id
       (queue_evidence |> member "matched_schedule_instance_id" |> to_string);
-    check (float 0.001) "queue evidence execution due_at" request.due_at
-      (queue_evidence |> member "execution_due_at" |> to_float);
-    check string "queue evidence execution digest"
+    check (float 0.001) "queue evidence wake due_at" request.due_at
+      (queue_evidence |> member "wake_due_at" |> to_float);
+    check string "queue evidence wake digest"
       (Schedule_domain.payload_digest request.payload)
-      (queue_evidence |> member "execution_payload_digest" |> to_string);
+      (queue_evidence |> member "wake_payload_digest" |> to_string);
     check (float 0.001) "queue evidence matched due_at" request.due_at
       (queue_evidence |> member "matched_due_at" |> to_float);
     check string "queue evidence matched digest"
@@ -591,26 +588,14 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
       (queue_evidence |> member "pending_count" |> to_int);
     check int "queue evidence read errors" 0
       (queue_evidence |> member "read_errors" |> to_list |> List.length)
-  ; (match
-       Schedule_store.complete_dispatched_occurrence
-         config
-         ~now:202.0
-         ~schedule_instance_id:request.schedule_instance_id
-         ~schedule_id:request.schedule_id
-         ~due_at:request.due_at
-         ~payload_digest:(Schedule_domain.payload_digest request.payload)
-         ()
-     with
-     | Ok _ -> ()
-     | Error err -> fail (Schedule_store.store_error_to_string err));
-    let terminal_dashboard =
+  ; let terminal_dashboard =
       Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
     in
     let terminal_row =
       dashboard_schedule_row_exn terminal_dashboard ~schedule_id:request.schedule_id
     in
-    check string "terminal execution succeeded" "succeeded"
-      (terminal_row |> member "last_execution" |> member "status" |> to_string);
+    check string "wake receipt succeeded" "succeeded"
+      (terminal_row |> member "last_wake" |> member "status" |> to_string);
     check string "terminal projection retains recognized receipt" "recognized"
       (terminal_row
        |> member "dispatch_receipt"
@@ -678,18 +663,6 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
    | Ok _ -> fail "first terminal receipt projection did not converge"
    | Error error ->
      fail (Keeper_event_queue_recovery.projection_error_to_string error));
-  (match
-     Schedule_store.complete_dispatched_occurrence
-       config
-       ~now:203.0
-       ~schedule_instance_id:first.schedule_instance_id
-       ~schedule_id:first.schedule_id
-       ~due_at:first.due_at
-       ~payload_digest:(Schedule_domain.payload_digest first.payload)
-       ()
-   with
-   | Ok _ -> ()
-   | Error error -> fail (Schedule_store.store_error_to_string error));
   (match Schedule_store.prune_completed config with
    | Ok (_, 1) -> ()
    | Ok (_, count) -> failf "expected one pruned schedule, got %d" count
@@ -706,1100 +679,42 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
     | signals -> failf "expected one second signal, got %d" (List.length signals)
   in
   check bool "recreated occurrence has a new identity" false
-    (Schedule_occurrence_id.equal first_signal.occurrence_id second_signal.occurrence_id);
+    (String.equal
+       (Schedule_occurrence_id.to_string first_signal.occurrence_id)
+       (Schedule_occurrence_id.to_string second_signal.occurrence_id));
   match
-    Schedule_store.execution_for_occurrence
+    find_wake
       (Schedule_store.read_state config)
       ~schedule_instance_id:second.schedule_instance_id
       ~schedule_id:second.schedule_id
       ~due_at:second.due_at
       ~payload_digest:(Schedule_domain.payload_digest second.payload)
   with
-  | Some execution ->
-    check string "old terminal receipt does not settle recreated execution"
-      "dispatched"
-      (Schedule_domain.execution_status_to_string execution.status)
-  | None -> fail "recreated execution missing"
-;;
-
-let test_reclaim_uses_occurrence_keeper_after_recurring_request_update () =
-  with_workspace
-  @@ fun config ->
-  let request =
-    create_keeper_wake_schedule
-      ~recurrence:(Schedule_domain.Interval { interval_sec = 3600 })
-      config
-  in
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution = latest_execution_exn config request in
-  let updated_payload =
-    match Schedule_domain.payload_of_yojson (keeper_wake_payload_for "next-keeper") with
-    | Ok payload -> payload
-    | Error detail -> fail detail
-  in
-  (match
-     Schedule_service.update
-       config
-       ~schedule_id:request.schedule_id
-       ~due_at:3801.0
-       ~expires_at:None
-       ~payload:updated_payload
-   with
-   | Ok _ -> ()
-   | Error error ->
-     fail (Schedule_service.service_error_to_string error));
-  match single_keeper_settlement_exn config execution with
-  | Schedule_runner.Consumer_holds_occurrence -> ()
-  | Schedule_runner.Consumer_completed_occurrence
-  | Schedule_runner.Consumer_failed_occurrence _
-  | Schedule_runner.Consumer_cancelled_occurrence _ ->
-    fail "updated recurring request changed the occurrence owner to settled"
-  | Schedule_runner.Consumer_lost_occurrence detail ->
-    fail ("updated recurring request changed the occurrence owner: " ^ detail)
-;;
-
-let test_reclaim_follows_transfer_durable_state () =
-  with_workspace
-  @@ fun config ->
-  let source_keeper = "schedule-keeper" in
-  let target_keeper = "transferred-schedule-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  let request =
-    create_keeper_wake_schedule
-      ~recurrence:(Schedule_domain.Interval { interval_sec = 3600 })
-      config
-  in
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution = latest_execution_exn config request in
-  let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
-  let target_meta = persist_keeper_meta config target_keeper in
-  let transfer : Keeper_registry_event_queue.accepted_transfer =
-    { source = selection.source
-    ; source_incarnation = selection.admitted_revision
-    ; owner_nonce = 17
-    ; operator_operation_id = "transfer-scheduled-occurrence"
-    ; from_keeper = source_keeper
-    ; to_keeper = target_keeper
-    ; target_generation = target_meta.runtime.nonce
-    ; target_trace_id = target_meta.runtime.trace_id
-    }
-  in
-  (match
-     Keeper_registry_event_queue.transfer_pending_accepted_result
-       ~base_path
-       source_keeper
-       ~current_owner_nonce:17
-       ~applied_at:202.0
-       ~transfer
-   with
-   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
-   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
-     fail "first transfer was already applied"
-   | Ok
-       (Keeper_registry_event_queue.Transition_committed_followup_failed
-          { detail; _ }) ->
-     fail detail
-   | Error detail ->
-     fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
-  (match single_keeper_settlement_exn config execution with
-   | Schedule_runner.Consumer_holds_occurrence -> ()
-   | _ -> fail "unprojected transfer was not retained as durable work");
-  (match
-     Keeper_event_queue_recovery.project_owner_result
-       ~base_path
-       ~keeper_name:source_keeper
-   with
-   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-   | Ok _ -> fail "transfer projection did not converge"
-   | Error error ->
-     fail (Keeper_event_queue_recovery.projection_error_to_string error));
-  (match single_keeper_settlement_exn config execution with
-   | Schedule_runner.Consumer_holds_occurrence -> ()
-   | _ -> fail "projected target occurrence was not retained as durable work");
-  let target_selection =
-    pending_selection_exn ~base_path ~keeper_name:target_keeper
-  in
-  (match
-     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
-       ~base_path
-       target_keeper
-     ~current_owner_nonce:23
-     ~applied_at:203.0
-     ~selection:target_selection
-       ~detail:"scheduled occurrence failed"
-   with
-   | Ok (Keeper_registry_event_queue.Acked _)
-   | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
-   | Ok
-       (Keeper_registry_event_queue.Ack_committed_followup_failed
-          { detail; _ }) ->
-     fail detail
-   | Error detail -> fail detail);
-  (match single_keeper_settlement_exn config execution with
-   | Schedule_runner.Consumer_failed_occurrence detail ->
-     check string
-       "failed turn reason remains typed"
-       "scheduled occurrence failed"
-       detail
-   | _ -> fail "target failed-turn receipt did not preserve failure");
-  (match
-     Keeper_event_queue_recovery.project_owner_result
-       ~base_path
-       ~keeper_name:target_keeper
-   with
-   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-   | Ok _ -> fail "terminal ACK projection did not converge"
-   | Error error ->
-     fail (Keeper_event_queue_recovery.projection_error_to_string error));
-  let target_state =
-    match
-      Keeper_registry_event_queue.durable_state_result ~base_path target_keeper
-    with
-    | Ok state -> state
-    | Error detail -> fail detail
-  in
-  check int "terminal outbox retired after projection" 0
-    (Keeper_event_queue_state.transition_outbox target_state |> List.length);
-  check int "terminal receipt retained in checkpoint" 1
-    (Keeper_event_queue_state.projected_transition_receipts target_state
-     |> List.filter (fun receipt ->
-       match receipt.Keeper_event_queue_state.transition with
-       | Keeper_event_queue_state.Ack_source_terminal terminal ->
-         String.equal terminal.source.post_id selection.source.post_id
-       | Keeper_event_queue_state.Cancel_accepted _
-       | Keeper_event_queue_state.Transfer_accepted _ -> false)
-     |> List.length);
-  let transition_wal_path =
-    Filename.concat
-      (Filename.concat
-         (Common.keepers_runtime_dir_of_base ~base_path)
-         target_keeper)
-      "event-queue-transitions-v6.jsonl"
-  in
-  check string "checkpointed transition WAL compacted" ""
-    (read_file transition_wal_path);
-  match single_keeper_settlement_exn config execution with
-  | Schedule_runner.Consumer_failed_occurrence detail ->
-    check string
-      "checkpoint preserves failed turn reason"
-      "scheduled occurrence failed"
-      detail
-  | _ -> fail "checkpoint reload lost the failed occurrence disposition"
-;;
-
-let test_reclaim_resolves_current_incarnation_after_transfer_back () =
-  with_workspace
-  @@ fun config ->
-  let keeper_a = "schedule-keeper" in
-  let keeper_b = "transfer-return-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  let request =
-    create_keeper_wake_schedule
-      ~recurrence:(Schedule_domain.Interval { interval_sec = 3600 })
-      config
-  in
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution = latest_execution_exn config request in
-  let meta_a = persist_keeper_meta config keeper_a in
-  let meta_b = persist_keeper_meta config keeper_b in
-  let transfer ~from_keeper ~to_keeper ~owner_nonce ~operation_id ~applied_at =
-    let selection = pending_selection_exn ~base_path ~keeper_name:from_keeper in
-    let accepted : Keeper_registry_event_queue.accepted_transfer =
-      { source = selection.source
-      ; source_incarnation = selection.admitted_revision
-      ; owner_nonce
-      ; operator_operation_id = operation_id
-      ; from_keeper
-      ; to_keeper
-      ; target_generation =
-          (if String.equal to_keeper keeper_a then meta_a else meta_b).runtime.nonce
-      ; target_trace_id =
-          (if String.equal to_keeper keeper_a then meta_a else meta_b).runtime.trace_id
-      }
-    in
-    (match
-       Keeper_registry_event_queue.transfer_pending_accepted_result
-         ~base_path
-         from_keeper
-         ~current_owner_nonce:owner_nonce
-         ~applied_at
-         ~transfer:accepted
-     with
-     | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
-     | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
-       fail "first transfer application was reported as replay"
-     | Ok
-         (Keeper_registry_event_queue.Transition_committed_followup_failed
-            { detail; _ }) ->
-       fail detail
-     | Error detail ->
-       fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
-    match
-      Keeper_event_queue_recovery.project_owner_result
-        ~base_path
-        ~keeper_name:from_keeper
-    with
-    | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-    | Ok _ -> fail "transfer projection did not converge"
-    | Error error ->
-      fail (Keeper_event_queue_recovery.projection_error_to_string error)
-  in
-  transfer
-    ~from_keeper:keeper_a
-    ~to_keeper:keeper_b
-    ~owner_nonce:31
-    ~operation_id:"scheduled-a-to-b"
-    ~applied_at:202.0;
-  transfer
-    ~from_keeper:keeper_b
-    ~to_keeper:keeper_a
-    ~owner_nonce:32
-    ~operation_id:"scheduled-b-to-a"
-    ~applied_at:203.0;
-  match single_keeper_settlement_exn config execution with
-  | Schedule_runner.Consumer_holds_occurrence -> ()
-  | Schedule_runner.Consumer_completed_occurrence
-  | Schedule_runner.Consumer_failed_occurrence _
-  | Schedule_runner.Consumer_cancelled_occurrence _ ->
-    fail "returned current incarnation was mistaken for historical terminal state"
-  | Schedule_runner.Consumer_lost_occurrence detail ->
-    fail ("returned current incarnation was reported lost: " ^ detail)
-;;
-
-let test_reclaim_revalidates_cached_transfer_target_absence () =
-  with_workspace
-  @@ fun config ->
-  let keeper_a = "cached-transfer-source" in
-  let keeper_b = "cached-transfer-target" in
-  let base_path = config.Workspace_utils.base_path in
-  let request_x =
-    create_named_keeper_wake_schedule
-      config
-      ~schedule_id:"cached-target-existing"
-      ~keeper_name:keeper_b
-  in
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution_x = latest_execution_exn config request_x in
-  let stale_b_state =
-    match Keeper_registry_event_queue.existing_durable_state_result ~base_path keeper_b with
-    | Ok state -> state
-    | Error detail -> fail detail
-  in
-  let request_y =
-    create_named_keeper_wake_schedule
-      config
-      ~schedule_id:"cached-target-transferred"
-      ~keeper_name:keeper_a
-  in
-  ignore (tick_ok config ~now:202.0 : Schedule_runner.tick_result);
-  let execution_y = latest_execution_exn config request_y in
-  let selection = pending_selection_exn ~base_path ~keeper_name:keeper_a in
-  let target_meta = persist_keeper_meta config keeper_b in
-  let transfer : Keeper_registry_event_queue.accepted_transfer =
-    { source = selection.source
-    ; source_incarnation = selection.admitted_revision
-    ; owner_nonce = 41
-    ; operator_operation_id = "cached-a-to-b"
-    ; from_keeper = keeper_a
-    ; to_keeper = keeper_b
-    ; target_generation = target_meta.runtime.nonce
-    ; target_trace_id = target_meta.runtime.trace_id
-    }
-  in
-  (match
-     Keeper_registry_event_queue.transfer_pending_accepted_result
-       ~base_path
-       keeper_a
-       ~current_owner_nonce:41
-       ~applied_at:203.0
-       ~transfer
-   with
-   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
-   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
-     fail "first cached transfer was already applied"
-   | Ok
-       (Keeper_registry_event_queue.Transition_committed_followup_failed
-          { detail; _ }) ->
-     fail detail
-   | Error detail ->
-     fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
-  (match
-     Keeper_event_queue_recovery.project_owner_result
-       ~base_path
-       ~keeper_name:keeper_a
-   with
-   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-   | Ok _ -> fail "cached transfer projection did not converge"
-   | Error error ->
-     fail (Keeper_event_queue_recovery.projection_error_to_string error));
-  let target_reads = ref 0 in
-  let read_state ~base_path requested_keeper =
-    if String.equal requested_keeper keeper_b
-    then (
-      incr target_reads;
-      if Int.equal !target_reads 1
-      then Ok stale_b_state
-      else
-        Keeper_registry_event_queue.existing_durable_state_result
-          ~base_path
-          requested_keeper)
-    else
-      Keeper_registry_event_queue.existing_durable_state_result
-        ~base_path
-        requested_keeper
-  in
-  let settlements =
-    Server_schedule_consumers.For_testing.settlements_with_read_state
-      ~read_state
-      config
-      [ execution_x; execution_y ]
-  in
-  (match settlements with
-   | [ Ok Schedule_runner.Consumer_holds_occurrence
-     ; Ok Schedule_runner.Consumer_holds_occurrence
-     ] -> ()
-   | _ -> fail "fresh transfer target state was not revalidated");
-  check int "stale target absence triggers one exact reread" 2 !target_reads
-;;
-
-let test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "schedule-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  let request =
-    create_keeper_wake_schedule
-      ~recurrence:(Schedule_domain.Interval { interval_sec = 3600 })
-      config
-  in
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution = latest_execution_exn config request in
-  let queue_path =
-    Filename.concat
-      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-      "event-queue-v15.json"
-  in
-  let wal_path =
-    Filename.concat
-      (Filename.dirname queue_path)
-      "event-queue-transitions-v6.jsonl"
-  in
-  Sys.remove queue_path;
-  let outcome =
-    match
-      Schedule_runner.reclaim_lost_occurrences
-        ~consumer:Server_schedule_consumers.consumer
-        config
-        ~now:202.0
-    with
-    | Ok outcome -> outcome
-    | Error error -> fail (Schedule_runner.runner_error_to_string error)
-  in
-  check int "missing snapshot reclaims nothing" 0 outcome.reclaimed;
-  check int "missing snapshot is one typed consumer failure" 1
-    (List.length outcome.failures);
-  (match outcome.failures with
-   | [ Schedule_runner.Occurrence_reclaim_failure
-         { occurrence_id; error = detail }
-     ] ->
-     let expected_occurrence_id =
-       Schedule_occurrence_id.make
-         ~schedule_instance_id:execution.schedule_instance_id
-         ~schedule_id:execution.schedule_id
-         ~due_at:execution.due_at
-         ~payload_digest:execution.payload_digest
-       |> Schedule_occurrence_id.to_string
-     in
-     check string "failure keeps exact occurrence identity"
-       expected_occurrence_id
-       occurrence_id;
-     check string
-       "missing snapshot provenance is explicit"
-       (Printf.sprintf
-          "scheduled keeper wake durable state read failed keeper=%s: event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
-          keeper_name
-          keeper_name
-          queue_path
-          wal_path)
-       detail
-   | [ Schedule_runner.Settlement_batch_cardinality_mismatch _ ]
-   | [ Schedule_runner.Settlement_batch_consumer_failure _ ]
-   | []
-   | _ :: _ :: _ -> fail "expected one missing-snapshot reclaim failure");
-  match
-    Schedule_store.execution_for_occurrence
-      (Schedule_store.read_state config)
-      ~schedule_instance_id:execution.schedule_instance_id
-      ~schedule_id:execution.schedule_id
-      ~due_at:execution.due_at
-      ~payload_digest:execution.payload_digest
-  with
-  | Some retained ->
-    check string "unreadable occurrence remains dispatched"
-      "dispatched"
-      (Schedule_domain.execution_status_to_string retained.status)
-  | None -> fail "missing snapshot caused the occurrence to disappear"
-;;
-
-let test_wal_only_owner_is_recovered_and_settled () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "schedule-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  let request = create_keeper_wake_schedule config in
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let execution = latest_execution_exn config request in
-  let sibling : Keeper_event_queue.stimulus =
-    { post_id = "wal-only-sibling"
-    ; urgency = Keeper_event_queue.Normal
-    ; arrived_at = 201.5
-    ; payload = Keeper_event_queue.Bootstrap
-    }
-  in
-  (match
-     Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
-       ~base_path
-       ~keeper_name
-       sibling
-   with
-   | Ok Keeper_event_queue_persistence.Enqueued -> ()
-   | Ok Keeper_event_queue_persistence.Already_present ->
-     fail "fresh WAL-only sibling was already present"
-   | Error detail -> fail detail);
-  let state =
-    Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
-    |> Result.fold ~ok:Fun.id ~error:(fun message -> fail message)
-  in
-  let selection =
-    let selections = Keeper_event_queue_state.pending_selections state in
-    check int "WAL-only fixture includes source and sibling" 2
-      (List.length selections);
-    selections
-    |> List.find_opt (fun (selection : Keeper_event_queue_state.pending_selection) ->
-      selection.source <> sibling)
-    |> function
-    | Some selection -> selection
-    | None -> fail "WAL-only source selection disappeared"
-  in
-  let source_terminal : Keeper_event_queue_state.accepted_source_terminal =
-    { source = selection.source
-    ; source_incarnation = selection.admitted_revision
-    ; owner_nonce = 0
-    ; operator_operation_id = "wal-only-terminal"
-    ; source_receipt =
-        Keeper_event_queue_state.Turn_attempt_terminal
-          { detail = "wal-only terminal failure" }
-    }
-  in
-  (match
-     Keeper_event_queue_persistence.ack_pending_source_terminal_result
-       ~base_path
-       ~keeper_name
-       ~current_owner_nonce:0
-       ~acked_at:202.0
-       ~source_terminal
-       ()
-   with
-   | Ok _ -> ()
-   | Error detail -> fail detail);
-  let checkpoint =
-    Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
-    |> Result.fold ~ok:Fun.id ~error:(fun message -> fail message)
-  in
-  let entry =
-    match Keeper_event_queue_state.transition_outbox checkpoint with
-    | [ entry ] -> entry
-    | entries ->
-      failf "expected one WAL-only fixture outbox, got %d" (List.length entries)
-  in
-  let keeper_dir =
-    Filename.concat
-      (Common.keepers_runtime_dir_of_base ~base_path)
-      keeper_name
-  in
-  let snapshot_path = Filename.concat keeper_dir "event-queue-v15.json" in
-  let wal_path = Filename.concat keeper_dir "event-queue-transitions-v6.jsonl" in
-  let wal_row =
-    `Assoc
-      [ "schema", `String "masc.keeper_event_queue.transition.v6"
-      ; "base_path", `String base_path
-      ; "keeper_name", `String keeper_name
-      ; "pre_state", Keeper_event_queue_state.to_yojson state
-      ; "outbox_entry", Keeper_event_queue_state.outbox_entry_to_yojson entry
-      ]
-    |> Yojson.Safe.to_string
-    |> fun row -> row ^ "\n"
-  in
-  let incomplete_wal_row =
-    `Assoc
-      [ "schema", `String "masc.keeper_event_queue.transition.v6"
-      ; "base_path", `String base_path
-      ; "keeper_name", `String keeper_name
-      ; "outbox_entry", Keeper_event_queue_state.outbox_entry_to_yojson entry
-      ]
-    |> Yojson.Safe.to_string
-    |> fun row -> row ^ "\n"
-  in
-  Sys.remove snapshot_path;
-  write_file wal_path "{malformed\n";
-  (match
-     Keeper_event_queue_persistence.load_existing_state_result
-       ~base_path
-       ~keeper_name
-   with
-   | Error _ -> ()
-   | Ok _ -> fail "malformed WAL-only owner was accepted");
-  write_file wal_path incomplete_wal_row;
-  (match
-     Keeper_event_queue_persistence.load_existing_state_result
-       ~base_path
-       ~keeper_name
-   with
-   | Error _ -> ()
-   | Ok _ -> fail "WAL-only owner without complete pre-state was accepted");
-  write_file wal_path wal_row;
-  let validated =
-    Keeper_event_queue_persistence.validate_existing_state_read_only_result
-      ~base_path
-      ~keeper_name
-    |> Result.fold ~ok:Fun.id ~error:(fun message -> fail message)
-  in
-  check int "read-only WAL-only validation restores the committed outbox" 1
-    (List.length (Keeper_event_queue_state.transition_outbox validated));
-  check string "read-only WAL-only validation preserves bytes" wal_row
-    (read_file wal_path);
-  let recovered =
-    Keeper_event_queue_persistence.load_existing_state_result
-      ~base_path
-      ~keeper_name
-    |> Result.fold ~ok:Fun.id ~error:(fun message -> fail message)
-  in
-  check int "WAL-only loader restores the committed outbox" 1
-    (List.length (Keeper_event_queue_state.transition_outbox recovered));
-  check bool "WAL-only loader preserves sibling pending work" true
-    (Keeper_event_queue_state.pending recovered
-     |> Keeper_event_queue.to_list
-     |> List.exists (( = ) sibling));
-  let discovery =
-    Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
-      ~base_path
-  in
-  check (option string) "WAL-only discovery has no error" None discovery.read_error;
-  check bool "WAL-only owner is discovered" true
-    (List.mem keeper_name discovery.keeper_names);
-  (match Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name with
-   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-   | Ok Keeper_event_queue_recovery.No_pending_transition ->
-     fail "WAL-only recovery skipped the committed outbox"
-   | Ok Keeper_event_queue_recovery.Claim_busy ->
-     fail "WAL-only recovery unexpectedly found a busy owner"
-   | Error error -> fail (Keeper_event_queue_recovery.projection_error_to_string error));
-  let projected =
-    Keeper_event_queue_persistence.load_existing_state_result
-      ~base_path
-      ~keeper_name
-    |> Result.fold ~ok:Fun.id ~error:(fun message -> fail message)
-  in
-  check int "WAL-only recovery retires the outbox" 0
-    (List.length (Keeper_event_queue_state.transition_outbox projected));
-  check bool "WAL-only projection preserves sibling pending work" true
-    (Keeper_event_queue_state.pending projected
-     |> Keeper_event_queue.to_list
-     |> List.exists (( = ) sibling));
-  let outcome =
-    Schedule_runner.reclaim_lost_occurrences
-      ~consumer:Server_schedule_consumers.consumer
-      config
-      ~now:203.0
-    |> Result.fold
-         ~ok:Fun.id
-         ~error:(fun error -> fail (Schedule_runner.runner_error_to_string error))
-  in
-  check int "WAL-only occurrence is settled" 1 outcome.settled_elsewhere;
-  match
-    Schedule_store.execution_for_occurrence
-      (Schedule_store.read_state config)
-      ~schedule_instance_id:execution.schedule_instance_id
-      ~schedule_id:execution.schedule_id
-      ~due_at:execution.due_at
-      ~payload_digest:execution.payload_digest
-  with
-  | Some settled ->
-    check string "WAL-only terminal failure is preserved" "failed"
-      (Schedule_domain.execution_status_to_string settled.status);
-    check (option string) "WAL-only failure detail is preserved"
-      (Some "wal-only terminal failure")
-      settled.error
-  | None -> fail "WAL-only recovery lost the schedule execution"
-;;
-
-let test_keeper_purge_settles_owned_occurrence_before_queue_delete () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "schedule-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  let request = create_keeper_wake_schedule config in
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  (match
-     Server_schedule_consumers.settle_keeper_purge_occurrences
-       config
-       ~keeper_name
-       ~operation_id:"purge-op-1"
-       ~now:202.0
-   with
-   | Ok () -> ()
-   | Error error ->
-     fail (Server_schedule_consumers.keeper_purge_error_to_string error));
-  let queue_path =
-    Filename.concat
-      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-      "event-queue-v15.json"
-  in
-  Sys.remove queue_path;
-  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
-   | Some stored ->
-     check string "purged one-shot is terminal" "failed"
-       (Schedule_domain.schedule_status_to_string stored.status)
-   | None -> fail "purged schedule missing");
-  match latest_execution_exn config request with
-  | { status = Schedule_domain.Execution_failed; error = Some reason; _ } ->
-    check string
-      "purge operation remains in terminal evidence"
-      "scheduled occurrence cancelled by dashboard Keeper purge operation=purge-op-1 keeper=schedule-keeper"
-      reason
-  | execution ->
-    failf
-      "purged occurrence stayed %s"
-      (Schedule_domain.execution_status_to_string execution.status)
+  | Some wake ->
+    check string "recreated wake gets its own successful receipt"
+      "succeeded"
+      (Schedule_domain.wake_status_to_string wake.status)
+  | None -> fail "recreated wake missing"
 ;;
 
 let test_keeper_purge_cancels_future_schedule_intent () =
   with_workspace
   @@ fun config ->
-  let keeper_name = "schedule-keeper" in
-  let create ~schedule_id ?recurrence () =
-    match
-      Schedule_service.create
-        config
-        ~schedule_id
-        ~requested_at:100.0
-        ~requested_by:(human "operator")
-        ~scheduled_by:(automated "scheduler-agent")
-        ~due_at:400.0
-        ~payload:(keeper_wake_payload_for keeper_name)
-        ~source:Schedule_domain.Operator_request
-        ?recurrence
-        ()
-    with
-    | Ok request -> request
-    | Error error ->
-      fail ("create failed: " ^ Schedule_service.service_error_to_string error)
+  let keeper_name = "purged-keeper" in
+  let request =
+    create_named_keeper_wake_schedule
+      config
+      ~schedule_id:"future-purge-schedule"
+      ~keeper_name
   in
-  let one_shot = create ~schedule_id:"purge-future-one-shot" () in
-  let recurring =
-    create
-      ~schedule_id:"purge-future-recurring"
-      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
-      ()
-  in
-  ignore
-    (create_named_keeper_wake_schedule
-       config
-       ~schedule_id:"purge-other-keeper"
-       ~keeper_name:"other-keeper"
-     : Schedule_domain.schedule_request);
-  (match
-     Server_schedule_consumers.settle_keeper_purge_occurrences
-       config
-       ~keeper_name
-       ~operation_id:"purge-future-op"
-       ~now:202.0
-   with
+  (match Server_schedule_consumers.cancel_keeper_schedules config ~keeper_name with
    | Ok () -> ()
-   | Error error ->
-     fail (Server_schedule_consumers.keeper_purge_error_to_string error));
-  List.iter
-    (fun (request : Schedule_domain.schedule_request) ->
-       match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
-       | Some stored ->
-         check string "future target intent is cancelled" "cancelled"
-           (Schedule_domain.schedule_status_to_string stored.status)
-       | None -> fail "future target schedule disappeared")
-    [ one_shot; recurring ];
-  match Schedule_store.get_schedule config ~schedule_id:"purge-other-keeper" with
+   | Error error -> fail (Schedule_store.store_error_to_string error));
+  match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
   | Some stored ->
-    check string "unrelated target remains scheduled" "scheduled"
+    check string "future wake is cancelled" "cancelled"
       (Schedule_domain.schedule_status_to_string stored.status)
-  | None -> fail "unrelated target schedule disappeared"
-;;
-
-let test_keeper_purge_rejects_missing_owned_snapshot () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "schedule-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  let request = create_keeper_wake_schedule config in
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let queue_path =
-    Filename.concat
-      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-      "event-queue-v15.json"
-  in
-  Sys.remove queue_path;
-  (match
-     Server_schedule_consumers.settle_keeper_purge_occurrences
-       config
-       ~keeper_name
-       ~operation_id:"purge-op-missing"
-       ~now:202.0
-   with
-   | Ok () -> fail "purge accepted missing schedule evidence"
-   | Error (Server_schedule_consumers.Missing_schedule_evidence _) -> ()
-   | Error error ->
-     failf
-       "unexpected missing-evidence purge error: %s"
-       (Server_schedule_consumers.keeper_purge_error_to_string error));
-  let execution = latest_execution_exn config request in
-  check string "blocked purge keeps occurrence unsettled" "dispatched"
-    (Schedule_domain.execution_status_to_string execution.status)
-;;
-
-let test_keeper_purge_preflights_whole_batch () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "schedule-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  ignore
-    (create_named_keeper_wake_schedule
-       config
-       ~schedule_id:"purge-batch-a"
-       ~keeper_name
-     : Schedule_domain.schedule_request);
-  ignore
-    (create_named_keeper_wake_schedule
-       config
-       ~schedule_id:"purge-batch-b"
-       ~keeper_name
-     : Schedule_domain.schedule_request);
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let executions =
-    Schedule_store.read_state config
-    |> Schedule_store.unsettled_dispatched_occurrences
-  in
-  let first, second =
-    match executions with
-    | [ first; second ] -> first, second
-    | rows -> failf "expected two dispatched occurrences, got %d" (List.length rows)
-  in
-  let missing_occurrence =
-    Schedule_occurrence_id.make
-      ~schedule_instance_id:second.schedule_instance_id
-      ~schedule_id:second.schedule_id
-      ~due_at:second.due_at
-      ~payload_digest:second.payload_digest
-    |> Schedule_occurrence_id.to_string
-  in
-  (match
-     Keeper_registry_event_queue.drop_by_post_id
-       ~base_path
-       keeper_name
-       ~post_id:missing_occurrence
-   with
-   | Ok [ _ ] -> ()
-   | Ok removed -> failf "expected one removed occurrence, got %d" (List.length removed)
-   | Error detail -> fail detail);
-  (match
-     Server_schedule_consumers.settle_keeper_purge_occurrences
-       config
-       ~keeper_name
-       ~operation_id:"purge-op-batch"
-       ~now:202.0
-   with
-   | Ok () -> fail "purge accepted a partially invalid evidence batch"
-   | Error (Server_schedule_consumers.Missing_schedule_evidence _) -> ()
-   | Error error ->
-     failf
-       "unexpected batch purge error: %s"
-       (Server_schedule_consumers.keeper_purge_error_to_string error));
-  let state = Schedule_store.read_state config in
-  List.iter
-    (fun (execution : Schedule_domain.execution_record) ->
-       match
-         Schedule_store.execution_for_occurrence
-           state
-           ~schedule_instance_id:execution.schedule_instance_id
-           ~schedule_id:execution.schedule_id
-           ~due_at:execution.due_at
-           ~payload_digest:execution.payload_digest
-       with
-       | Some retained ->
-         check string "preflight failure leaves every occurrence dispatched"
-           "dispatched"
-           (Schedule_domain.execution_status_to_string retained.status)
-       | None -> fail "preflight failure removed an execution")
-    [ first; second ]
-;;
-
-let test_keeper_purge_rejects_unsettled_transfer_redirect () =
-  with_workspace
-  @@ fun config ->
-  let base_path = config.Workspace_utils.base_path in
-  let source_keeper = "purge-transfer-source" in
-  let target_keeper = "purge-transfer-target" in
-  let request =
-    create_named_keeper_wake_schedule
-      config
-      ~schedule_id:"purge-transfer-schedule"
-      ~keeper_name:source_keeper
-  in
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
-  let target_meta = persist_keeper_meta config target_keeper in
-  let transfer : Keeper_registry_event_queue.accepted_transfer =
-    { source = selection.source
-    ; source_incarnation = selection.admitted_revision
-    ; owner_nonce = 41
-    ; operator_operation_id = "purge-transfer-op"
-    ; from_keeper = source_keeper
-    ; to_keeper = target_keeper
-    ; target_generation = target_meta.runtime.nonce
-    ; target_trace_id = target_meta.runtime.trace_id
-    }
-  in
-  (match
-     Keeper_registry_event_queue.transfer_pending_accepted_result
-       ~base_path
-       source_keeper
-       ~current_owner_nonce:41
-       ~applied_at:202.0
-       ~transfer
-   with
-   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
-   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
-     fail "first purge transfer was already applied"
-   | Ok
-       (Keeper_registry_event_queue.Transition_committed_followup_failed
-          { detail; _ }) ->
-     fail detail
-   | Error detail ->
-     fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
-  (match
-     Keeper_event_queue_recovery.project_owner_result
-       ~base_path
-       ~keeper_name:source_keeper
-   with
-   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-   | Ok _ -> fail "purge transfer projection did not converge"
-   | Error error ->
-     fail (Keeper_event_queue_recovery.projection_error_to_string error));
-  (match
-     Server_schedule_consumers.settle_keeper_purge_occurrences
-       config
-       ~keeper_name:source_keeper
-       ~operation_id:"purge-source"
-       ~now:203.0
-   with
-   | Ok () -> fail "purge discarded an unsettled transfer redirect"
-   | Error (Server_schedule_consumers.Pending_transferred_occurrence _) -> ()
-   | Error error ->
-     failf
-       "unexpected transfer purge error: %s"
-       (Server_schedule_consumers.keeper_purge_error_to_string error));
-  let execution = latest_execution_exn config request in
-  check string "blocked source purge preserves dispatched execution" "dispatched"
-    (Schedule_domain.execution_status_to_string execution.status)
-;;
-
-let test_keeper_purge_follows_terminal_transfer_redirect () =
-  with_workspace
-  @@ fun config ->
-  let base_path = config.Workspace_utils.base_path in
-  let source_keeper = "purge-terminal-source" in
-  let target_keeper = "purge-terminal-target" in
-  let request =
-    create_named_keeper_wake_schedule
-      config
-      ~schedule_id:"purge-terminal-transfer-schedule"
-      ~keeper_name:source_keeper
-  in
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
-  let target_meta = persist_keeper_meta config target_keeper in
-  let transfer : Keeper_registry_event_queue.accepted_transfer =
-    { source = selection.source
-    ; source_incarnation = selection.admitted_revision
-    ; owner_nonce = 43
-    ; operator_operation_id = "purge-terminal-transfer-op"
-    ; from_keeper = source_keeper
-    ; to_keeper = target_keeper
-    ; target_generation = target_meta.runtime.nonce
-    ; target_trace_id = target_meta.runtime.trace_id
-    }
-  in
-  (match
-     Keeper_registry_event_queue.transfer_pending_accepted_result
-       ~base_path
-       source_keeper
-       ~current_owner_nonce:43
-       ~applied_at:202.0
-       ~transfer
-   with
-   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
-   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
-     fail "terminal purge transfer was already applied"
-   | Ok
-       (Keeper_registry_event_queue.Transition_committed_followup_failed
-          { detail; _ }) ->
-     fail detail
-   | Error detail ->
-     fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
-  (match
-     Keeper_event_queue_recovery.project_owner_result
-       ~base_path
-       ~keeper_name:source_keeper
-   with
-   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-   | Ok _ -> fail "terminal purge transfer projection did not converge"
-   | Error error ->
-     fail (Keeper_event_queue_recovery.projection_error_to_string error));
-  let target_selection =
-    pending_selection_exn ~base_path ~keeper_name:target_keeper
-  in
-  (match
-     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
-       ~base_path
-       target_keeper
-       ~current_owner_nonce:47
-       ~applied_at:203.0
-       ~selection:target_selection
-       ~detail:"scheduled occurrence failed at target"
-   with
-   | Ok (Keeper_registry_event_queue.Acked _)
-   | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
-   | Ok
-       (Keeper_registry_event_queue.Ack_committed_followup_failed
-          { detail; _ }) ->
-     fail detail
-   | Error detail -> fail detail);
-  (match
-     Keeper_event_queue_recovery.project_owner_result
-       ~base_path
-       ~keeper_name:target_keeper
-   with
-   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-   | Ok _ -> fail "terminal target projection did not converge"
-   | Error error ->
-     fail (Keeper_event_queue_recovery.projection_error_to_string error));
-  (match
-     Server_schedule_consumers.settle_keeper_purge_occurrences
-       config
-       ~keeper_name:source_keeper
-       ~operation_id:"purge-terminal-source"
-       ~now:204.0
-   with
-   | Ok () -> ()
-   | Error error ->
-     fail (Server_schedule_consumers.keeper_purge_error_to_string error));
-  match latest_execution_exn config request with
-  | { status = Schedule_domain.Execution_failed
-    ; error = Some detail
-    ; _ } ->
-    check string "purge follows terminal transfer failure"
-      "scheduled occurrence failed at target"
-      detail
-  | execution ->
-    failf
-      "terminal transferred occurrence stayed %s"
-      (Schedule_domain.execution_status_to_string execution.status)
-;;
-
-let test_keeper_purge_blocks_projected_target_with_source_outbox () =
-  with_workspace
-  @@ fun config ->
-  let base_path = config.Workspace_utils.base_path in
-  let source_keeper = "purge-source-outbox-source" in
-  let target_keeper = "purge-source-outbox-target" in
-  let request =
-    create_named_keeper_wake_schedule
-      config
-      ~schedule_id:"purge-source-outbox-schedule"
-      ~keeper_name:source_keeper
-  in
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
-  let target_meta = persist_keeper_meta config target_keeper in
-  let transfer : Keeper_registry_event_queue.accepted_transfer =
-    { source = selection.source
-    ; source_incarnation = selection.admitted_revision
-    ; owner_nonce = 49
-    ; operator_operation_id = "purge-source-outbox-transfer"
-    ; from_keeper = source_keeper
-    ; to_keeper = target_keeper
-    ; target_generation = target_meta.runtime.nonce
-    ; target_trace_id = target_meta.runtime.trace_id
-    }
-  in
-  (match
-     Keeper_registry_event_queue.transfer_pending_accepted_result
-       ~base_path
-       source_keeper
-       ~current_owner_nonce:49
-       ~applied_at:202.0
-       ~transfer
-   with
-   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
-   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
-     fail "first source-outbox transfer was already applied"
-   | Ok
-       (Keeper_registry_event_queue.Transition_committed_followup_failed
-          { detail; _ }) ->
-     fail detail
-   | Error error ->
-     fail (Keeper_registry_event_queue.transfer_pending_error_to_string error));
-  (match
-     Keeper_registry_event_queue.project_accepted_transfer_durable_result
-       ~base_path
-       target_keeper
-       ~transfer
-   with
-   | Keeper_registry_event_queue.Transfer_projection_committed -> ()
-   | Keeper_registry_event_queue.Transfer_projection_already_committed ->
-     fail "first target projection was already committed"
-   | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
-     fail detail
-   | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
-     fail (Keeper_registry_event_queue.transfer_target_error_to_string error)
-   | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
-     fail
-       (Keeper_shutdown_types.Operation_id.to_string operation_id));
-  (match
-     Server_schedule_consumers.settle_keeper_purge_occurrences
-       config
-       ~keeper_name:target_keeper
-       ~operation_id:"purge-target"
-       ~now:203.0
-   with
-   | Error
-       (Server_schedule_consumers.Projected_transfer_source_outbox_pending
-          { source_keeper = actual_source
-          ; target_keeper = actual_target
-          ; operation_id
-          }) ->
-     check string "blocked purge reports source" source_keeper actual_source;
-     check string "blocked purge reports target" target_keeper actual_target;
-     check string "blocked purge reports operation"
-       transfer.operator_operation_id
-       operation_id
-   | Error error ->
-     fail
-       (Server_schedule_consumers.keeper_purge_error_to_string error)
-   | Ok () -> fail "target purge discarded a live source transfer outbox");
-  check int "blocked target purge preserves projected work" 1
-    (Keeper_registry_event_queue.snapshot ~base_path target_keeper
-     |> Keeper_event_queue.length);
-  let execution = latest_execution_exn config request in
-  check string "blocked target purge preserves dispatched execution" "dispatched"
-    (Schedule_domain.execution_status_to_string execution.status)
+  | None -> fail "cancelled future schedule missing"
 ;;
 
 let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
@@ -2220,7 +1135,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
        with
        | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
        | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
-         fail "first schedule cancellation was already settled"
+         fail "first schedule cancellation was already recorded"
        | Ok (Keeper_registry_event_queue.Transition_committed_followup_failed _) ->
          fail "schedule cancellation follow-up failed"
        | Error detail -> fail detail);
@@ -2282,38 +1197,35 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
       Atomic.set entry.fiber_wakeup false;
       let retried = tick_ok config ~now:205.0 in
       (match List.hd retried.dispatches with
-       | { status = Schedule_runner.Dispatch_failed
+       | { status = Schedule_runner.Dispatch_succeeded
          ; detail = Some detail
-         ; error = Some error
          ; _
          } ->
          check string "retry observes terminal cancellation" "already_cancelled"
            Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
          check string "terminal cancellation needs no activation" "not_required"
-           Yojson.Safe.Util.(detail |> member "activation_status" |> to_string);
-         check bool "terminal cancellation failure is explicit" true
-           (String_util.contains_substring error "already cancelled")
+           Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
        | _ -> fail "cancelled retry terminal receipt missing");
       check int "cancelled retry enqueues no second occurrence" 0
         (Keeper_registry_event_queue.snapshot ~base_path keeper_name
          |> Keeper_event_queue.length);
       (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
        | Some stored ->
-         check string "cancelled one-shot is terminal" "failed"
+         check string "cancelled wake was already delivered" "succeeded"
            (Schedule_domain.schedule_status_to_string stored.status)
        | None -> fail "cancelled schedule missing");
       (match
-         Schedule_store.execution_for_occurrence
+         find_wake
            (Schedule_store.read_state config)
            ~schedule_instance_id:request.schedule_instance_id
            ~schedule_id:request.schedule_id
            ~due_at:request.due_at
            ~payload_digest:(Schedule_domain.payload_digest request.payload)
        with
-       | Some execution ->
-         check string "cancelled occurrence execution is terminal" "failed"
-           (Schedule_domain.execution_status_to_string execution.status)
-       | None -> fail "cancelled occurrence execution missing");
+       | Some wake ->
+         check string "cancelled occurrence wake receipt succeeded" "succeeded"
+           (Schedule_domain.wake_status_to_string wake.status)
+       | None -> fail "cancelled occurrence wake missing");
       let stimulus_id =
         Schedule_occurrence_id.to_string signal.occurrence_id
       in
@@ -2332,56 +1244,6 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
         fail
           (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
              error))
-;;
-
-let test_terminal_reconciliation_before_retry_recreates_wake () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "schedule-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
-  mkdir_p ledger_dir;
-  Unix.chmod ledger_dir 0o500;
-  let request = create_keeper_wake_schedule config in
-  let first = tick_ok config ~now:201.0 in
-  Unix.chmod ledger_dir 0o755;
-  check string "first dispatch is retryable failure" "failed"
-    (Schedule_runner.dispatch_status_to_string (List.hd first.dispatches).status);
-  let selection = pending_selection_exn ~base_path ~keeper_name in
-  (match
-     Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
-       ~config
-       ~keeper_name
-       selection
-   with
-   | Ok Keeper_heartbeat_stimulus_intake.Spent_schedule_acknowledged -> ()
-   | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
-     fail "failed occurrence was not reconciled as terminal"
-   | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
-     fail "schedule selection was reconciled as a spent grant replay"
-   | Error detail -> fail detail);
-  check int "terminal wake removed before retry" 0
-    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
-     |> Keeper_event_queue.length);
-  rm_rf ledger_dir;
-  let retried = tick_ok config ~now:202.0 in
-  check string "retry dispatch succeeds" "succeeded"
-    (Schedule_runner.dispatch_status_to_string (List.hd retried.dispatches).status);
-  check int "retry recreates wake after terminal ACK" 1
-    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
-     |> Keeper_event_queue.length);
-  match
-    Schedule_store.execution_for_occurrence
-      (Schedule_store.read_state config)
-      ~schedule_instance_id:request.schedule_instance_id
-      ~schedule_id:request.schedule_id
-      ~due_at:request.due_at
-      ~payload_digest:(Schedule_domain.payload_digest request.payload)
-  with
-  | Some execution ->
-    check string "retry remains live" "dispatched"
-      (Schedule_domain.execution_status_to_string execution.status)
-  | None -> fail "retried execution missing"
 ;;
 
 let test_terminal_retry_repairs_missing_stimulus_ledger () =
@@ -2424,19 +1286,14 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
    | Error detail -> fail detail);
   let retried = tick_ok config ~now:202.0 in
   (match List.hd retried.dispatches with
-   | { status = Schedule_runner.Dispatch_failed
+   | { status = Schedule_runner.Dispatch_succeeded
      ; detail = Some detail
-     ; error = Some error
      ; _
      } ->
      check string "retry observes terminal failure" "already_failed"
        Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
      check string "terminal retry needs no activation" "not_required"
-       Yojson.Safe.Util.(detail |> member "activation_status" |> to_string);
-     check string
-       "terminal failure reason is preserved"
-       "terminal before schedule retry"
-       error
+       Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
    | _ -> fail "terminal retry did not preserve the failed disposition");
   check int "terminal retry enqueues no second occurrence" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -2564,8 +1421,6 @@ let test_retry_before_terminal_reconciliation_retains_wake () =
        selection
    with
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
-   | Ok Keeper_heartbeat_stimulus_intake.Spent_schedule_acknowledged ->
-     fail "non-terminal retry wake was acknowledged"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "schedule selection was reconciled as a spent grant replay"
    | Error detail -> fail detail);
@@ -2592,7 +1447,7 @@ let test_due_schedule_wakes_live_keeper_with_proactive_disabled () =
        check bool "due schedule signals the live owner" true
          (Atomic.get entry.fiber_wakeup);
        match
-         Schedule_store.last_execution_for_schedule_instance
+         Schedule_store.last_wake_for_schedule_instance
            (Schedule_store.read_state config)
            ~schedule_instance_id:request.schedule_instance_id
            ~schedule_id:request.schedule_id
@@ -2608,8 +1463,8 @@ let test_due_schedule_wakes_live_keeper_with_proactive_disabled () =
             | json -> Yojson.Safe.to_string json);
          check int "one schedule dispatch completed" 1
            (List.length result.dispatches)
-       | Some _ -> fail "schedule execution detail missing"
-       | None -> fail "schedule execution missing")
+       | Some _ -> fail "schedule wake detail missing"
+       | None -> fail "schedule wake missing")
 ;;
 
 let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
@@ -2681,11 +1536,11 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
     let queue_evidence = row |> member "keeper_queue_evidence" in
     check string "stale occurrence does not match" "not_found"
       (queue_evidence |> member "projection_status" |> to_string);
-    check (float 0.001) "queue evidence execution due_at" request.due_at
-      (queue_evidence |> member "execution_due_at" |> to_float);
-    check string "queue evidence execution digest"
+    check (float 0.001) "queue evidence wake due_at" request.due_at
+      (queue_evidence |> member "wake_due_at" |> to_float);
+    check string "queue evidence wake digest"
       (Schedule_domain.payload_digest request.payload)
-      (queue_evidence |> member "execution_payload_digest" |> to_string);
+      (queue_evidence |> member "wake_payload_digest" |> to_string);
     check int "stale occurrence still visible as pending" 1
       (queue_evidence |> member "pending_count" |> to_int)
 ;;
@@ -2943,20 +1798,20 @@ let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
      check string "schedule failed" "failed"
        (Schedule_domain.schedule_status_to_string stored.status));
   (match
-     Schedule_store.last_execution_for_schedule_instance
+     Schedule_store.last_wake_for_schedule_instance
        (Schedule_store.read_state config)
        ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
-   | None -> fail "missing unsupported execution"
-   | Some execution ->
-     check string "execution failed" "failed"
-       (Schedule_domain.execution_status_to_string execution.status);
-     check (option string) "execution error"
+   | None -> fail "missing unsupported wake"
+   | Some wake ->
+     check string "wake failed" "failed"
+       (Schedule_domain.wake_status_to_string wake.status);
+     check (option string) "wake error"
        (Some
           (Schedule_supported_kinds.keeper_wake_target_name_error
              ~field:"masc.keeper_wake payload body.keeper_name"))
-       execution.error);
+       wake.error);
   let queue_discovery =
     Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
       ~base_path:config.Workspace_utils.base_path
@@ -3049,8 +1904,6 @@ let test_consumed_grant_without_outcome_stays_actionable () =
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "consumed replay was discarded before its outcome became durable"
-   | Ok Keeper_heartbeat_stimulus_intake.Spent_schedule_acknowledged ->
-     fail "grant replay was reconciled as a schedule occurrence"
    | Error detail -> fail detail);
   check int "repairable replay stays queued" 1
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -3099,8 +1952,6 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
      fail "durable replay outcome was left at the queue head"
-   | Ok Keeper_heartbeat_stimulus_intake.Spent_schedule_acknowledged ->
-     fail "grant replay was reconciled as a schedule occurrence"
    | Error detail -> fail detail);
   check int "spent grant replay left the queue" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -3125,8 +1976,6 @@ let test_unconsumed_grant_replay_stays_actionable () =
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "an unconsumed grant was discarded before its Keeper could use it"
-   | Ok Keeper_heartbeat_stimulus_intake.Spent_schedule_acknowledged ->
-     fail "grant replay was reconciled as a schedule occurrence"
    | Error detail -> fail detail);
   check int "unconsumed grant replay stays queued" 1
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -3138,43 +1987,15 @@ let () =
     [ ( "keeper_wake"
       , [ test_case "board post schedule is rejected without mutation" `Quick
             test_board_post_schedule_is_rejected_without_mutation
-        ; test_case "keeper wake records dispatch without work success" `Quick
-            test_keeper_wake_consumer_records_dispatch_without_work_success
+        ; test_case "keeper wake records wake receipt" `Quick
+            test_keeper_wake_consumer_records_wake_receipt
         ; test_case "recurring wakes keep distinct occurrence ids" `Quick
             test_recurring_wakes_keep_distinct_occurrence_ids
         ; test_case "reused schedule id does not match pruned terminal receipt"
             `Quick
             test_reused_schedule_id_does_not_match_pruned_terminal_receipt
-        ; test_case "reclaim keeps occurrence owner after recurring request update"
-            `Quick
-            test_reclaim_uses_occurrence_keeper_after_recurring_request_update
-        ; test_case "reclaim follows durable transfer state" `Quick
-            test_reclaim_follows_transfer_durable_state
-        ; test_case "reclaim follows current incarnation after transfer back"
-            `Quick
-            test_reclaim_resolves_current_incarnation_after_transfer_back
-        ; test_case "reclaim revalidates cached transfer target absence"
-            `Quick
-            test_reclaim_revalidates_cached_transfer_target_absence
-        ; test_case "reclaim keeps occurrence when queue snapshot is missing" `Quick
-            test_reclaim_keeps_occurrence_when_queue_snapshot_is_missing
-        ; test_case "WAL-only owner is recovered and settled" `Quick
-            test_wal_only_owner_is_recovered_and_settled
-        ; test_case "keeper purge settles owned occurrence before queue deletion"
-            `Quick
-            test_keeper_purge_settles_owned_occurrence_before_queue_delete
         ; test_case "keeper purge cancels future schedule intent" `Quick
             test_keeper_purge_cancels_future_schedule_intent
-        ; test_case "keeper purge rejects missing owned snapshot" `Quick
-            test_keeper_purge_rejects_missing_owned_snapshot
-        ; test_case "keeper purge preflights the whole batch" `Quick
-            test_keeper_purge_preflights_whole_batch
-        ; test_case "keeper purge rejects unsettled transfer redirects" `Quick
-            test_keeper_purge_rejects_unsettled_transfer_redirect
-        ; test_case "keeper purge follows terminal transfer redirects" `Quick
-            test_keeper_purge_follows_terminal_transfer_redirect
-        ; test_case "keeper purge blocks projected target with source outbox" `Quick
-            test_keeper_purge_blocks_projected_target_with_source_outbox
         ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick
             test_shutdown_fence_rejects_schedule_intake_before_enqueue
         ; test_case "shutdown fence covers direct durable queue producers" `Quick
@@ -3188,9 +2009,6 @@ let () =
         ; test_case "cancelled occurrence recovery does not enqueue again"
             `Quick
             test_cancelled_occurrence_recovery_does_not_enqueue_again
-        ; test_case "terminal reconciliation before retry recreates wake"
-            `Quick
-            test_terminal_reconciliation_before_retry_recreates_wake
         ; test_case "terminal retry repairs missing stimulus ledger"
             `Quick
             test_terminal_retry_repairs_missing_stimulus_ledger

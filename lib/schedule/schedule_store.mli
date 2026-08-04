@@ -1,13 +1,13 @@
 (** Durable store for scheduled internal automation requests.
 
-    This layer records schedule intent and generic execution attempts. It
+    This layer records schedule intent and generic wake attempts. It
     deliberately does not authorize or execute payload effects. *)
 
 type state =
   { version : int
   ; updated_at : float
   ; schedules : Schedule_domain.schedule_request list
-  ; executions : Schedule_domain.execution_record list
+  ; wakes : Schedule_domain.wake_record list
   }
 
 type store_error =
@@ -15,11 +15,6 @@ type store_error =
   | Schedule_not_found
   | Invalid_initial_status of string
   | Invalid_status_transition of string
-  | Schedule_occurrence_already_used of
-      { schedule_instance_id : string
-      ; due_at : float
-      ; payload_digest : string
-      }
   | Schedule_not_due_candidate
   | Schedule_not_running
   | Persistence_failed of string
@@ -35,19 +30,6 @@ type running_recovery_reason =
   | Retryable_dispatch_failure of string
   | Interrupted_by_process_restart
 
-type dispatched_occurrence_outcome =
-  | Dispatched_occurrence_succeeded
-  | Dispatched_occurrence_failed of string
-
-type dispatched_occurrence_settlement =
-  { execution_id : string
-  ; schedule_instance_id : string
-  ; schedule_id : string
-  ; due_at : float
-  ; payload_digest : string
-  ; outcome : dispatched_occurrence_outcome
-  }
-
 val running_recovery_reason_to_string : running_recovery_reason -> string
 
 val store_error_to_string : store_error -> string
@@ -61,18 +43,7 @@ type read_error =
 
 val read_error_to_string : read_error -> string
 
-(** Outcome of loading the durable ledger. [Fresh] is a legitimately absent file
-    (empty store); [Corrupt] is a present-but-unparseable file that must not be
-    silently defaulted or overwritten. *)
-type load_outcome =
-  | Loaded of state
-  | Fresh
-  | Corrupt of
-      { primary_err : string
-      ; recovery_err : string option
-      }
-
-(** Raised by [read_state]/[list_schedules]/[get_schedule] on a corrupt ledger.
+(** Raised by [read_state]/[get_schedule] on a corrupt ledger.
     Read paths have no [result] channel, so they fail loud instead of returning
     an empty list. Mutating paths report [Corrupt_ledger] instead. *)
 exception
@@ -81,46 +52,24 @@ exception
     ; recovery_err : string option
     }
 
-val schedules_path : Workspace_utils.config -> string
-
-(** Total load that distinguishes a fresh (absent) ledger from a corrupt
-    (present-but-unparseable) one. Performs no writes. *)
-val load : Workspace_utils.config -> load_outcome
-
-(** Read-only snapshot. Returns the empty [default_state] for a [Fresh] store and
+(** Read-only snapshot. Returns an empty state for an absent store and
     raises {!Corrupt_ledger_exn} for a corrupt one. Never writes to disk. *)
 val read_state : Workspace_utils.config -> state
 
-(** Result-returning read-only snapshot. Returns the empty [default_state] for a
-    [Fresh] store and [Error (Corrupt_read_ledger _)] for a corrupt one. Never
+(** Result-returning read-only snapshot. Returns an empty state for an absent
+    store and [Error (Corrupt_read_ledger _)] for a corrupt one. Never
     writes to disk. *)
 val read_state_result : Workspace_utils.config -> (state, read_error) result
 
-val default_state : unit -> state
-val state_to_yojson : state -> Yojson.Safe.t
 val state_of_yojson : Yojson.Safe.t -> (state, string) result
 
-val list_schedules : Workspace_utils.config -> Schedule_domain.schedule_request list
 val get_schedule :
   Workspace_utils.config -> schedule_id:string -> Schedule_domain.schedule_request option
-val executions_for_schedule :
-  state -> schedule_id:string -> Schedule_domain.execution_record list
-val last_execution_for_schedule_instance :
+val last_wake_for_schedule_instance :
   state ->
   schedule_instance_id:string ->
   schedule_id:string ->
-  Schedule_domain.execution_record option
-
-val execution_for_occurrence :
-  state ->
-  schedule_instance_id:string ->
-  schedule_id:string ->
-  due_at:float ->
-  payload_digest:string ->
-  Schedule_domain.execution_record option
-(** Exact occurrence lookup. This is the correlation boundary used by
-    asynchronous consumers; the durable schedule instance, public schedule id,
-    due time, and payload digest together identify one persisted occurrence. *)
+  Schedule_domain.wake_record option
 
 val insert_request :
   Workspace_utils.config ->
@@ -131,18 +80,6 @@ val cancel_request :
   Workspace_utils.config ->
   schedule_id:string ->
   (Schedule_domain.schedule_request, store_error) result
-
-val update_request :
-  Workspace_utils.config ->
-  schedule_id:string ->
-  due_at:float ->
-  expires_at:float option ->
-  payload:Schedule_domain.payload ->
-  (Schedule_domain.schedule_request, store_error) result
-(** Replaces [due_at], [expires_at], and [payload] of a scheduled request.
-    Returns [Invalid_status_transition] for due, terminal, or [Running]
-    requests. Returns [Schedule_occurrence_already_used] rather than reusing
-    an occurrence identity already present in execution history. *)
 
 val refresh_due :
   Workspace_utils.config ->
@@ -166,18 +103,7 @@ val start_due_candidate :
   schedule_id:string ->
   (Schedule_domain.schedule_request, store_error) result
 (** Atomically transitions a due candidate to [Running] and records a
-    generic execution attempt. *)
-
-val complete_running :
-  Workspace_utils.config ->
-  now:float ->
-  schedule_id:string ->
-  ?detail:Yojson.Safe.t ->
-  unit ->
-  (Schedule_domain.schedule_request, store_error) result
-(** Completes a [Running] request. One-shot requests become [Succeeded];
-    recurring requests advance to the next [Scheduled] occurrence. The matching
-    execution attempt is marked [succeeded]. *)
+    generic wake attempt. *)
 
 val accept_running :
   Workspace_utils.config ->
@@ -188,56 +114,8 @@ val accept_running :
   (Schedule_domain.schedule_request, store_error) result
 (** Records that a consumer durably accepted asynchronous work. Recurring
     requests advance to their next [Scheduled] occurrence; one-shot requests
-    remain [Running]. The matching execution remains unfinished with status
-    [Execution_dispatched] until a correlated work-completion path settles it. *)
-
-val complete_dispatched_occurrence :
-  Workspace_utils.config ->
-  now:float ->
-  schedule_instance_id:string ->
-  schedule_id:string ->
-  due_at:float ->
-  payload_digest:string ->
-  unit ->
-  (Schedule_domain.schedule_request, store_error) result
-(** Marks every execution for one exact running/dispatched occurrence
-    succeeded. Idempotent when that occurrence is already succeeded. A one-shot
-    request becomes [Succeeded]; an already-advanced recurring request keeps
-    its next due row. The original dispatch receipt in the execution detail is
-    preserved. *)
-
-val fail_dispatched_occurrence :
-  Workspace_utils.config ->
-  now:float ->
-  schedule_instance_id:string ->
-  schedule_id:string ->
-  due_at:float ->
-  payload_digest:string ->
-  error:string ->
-  (Schedule_domain.schedule_request, store_error) result
-(** Marks every execution for one exact running/dispatched occurrence failed.
-    Idempotent when that occurrence is already failed. A recurring schedule
-    continues at its already-computed next occurrence. *)
-
-val settle_dispatched_occurrences :
-  Workspace_utils.config ->
-  now:float ->
-  dispatched_occurrence_settlement list ->
-  (unit, store_error) result
-(** Validate and settle an exact execution batch under one schedule-ledger lock
-    and one durable write. Every execution id must agree with the supplied
-    occurrence identity. Any invalid settlement leaves the entire batch
-    unchanged. *)
-
-val settle_dispatched_occurrences_collect_errors :
-  Workspace_utils.config ->
-  now:float ->
-  dispatched_occurrence_settlement list ->
-  ((unit, store_error) result list, store_error) result
-(** Apply independent settlements under one ledger lock, one parse, and at most
-    one durable write. The ordered inner results preserve per-occurrence
-    failures without making healthy settlements wait for another occurrence;
-    an outer error means the ledger could not be loaded or written. *)
+    become [Succeeded]. The matching wake completes immediately as a
+    wake-delivery receipt; Keeper turn results live in the Keeper ledger. *)
 
 val fail_running :
   Workspace_utils.config ->
@@ -245,7 +123,7 @@ val fail_running :
   schedule_id:string ->
   error:string ->
   (Schedule_domain.schedule_request, store_error) result
-(** Marks a [Running] request and its matching execution attempt [Failed]. *)
+(** Marks a [Running] request and its matching wake attempt [Failed]. *)
 
 val retry_running :
   Workspace_utils.config ->
@@ -253,7 +131,7 @@ val retry_running :
   schedule_id:string ->
   reason:running_recovery_reason ->
   (Schedule_domain.schedule_request, store_error) result
-(** Finishes the current execution attempt as [Failed] while returning only the
+(** Finishes the current wake attempt as [Failed] while returning only the
     matching schedule to [Due]. Its due time and payload remain unchanged, so
     the next runner tick retries the same occurrence identity. *)
 
@@ -262,11 +140,10 @@ val recover_running_on_startup :
   now:float ->
   (state * int, store_error) result
 (** Atomically returns every persisted [Running] schedule to [Due] and finishes
-    each exact current occurrence's execution attempt as [Failed]. Exact
-    occurrence identity, rather than wall-clock ordering, distinguishes a newly
-    interrupted retry from an older dispatched recurrence. Intended for a
-    one-time runner startup recovery before any new dispatch can be active. The
-    recovery reason is fixed to [Interrupted_by_process_restart]. *)
+    each exact current occurrence's wake attempt as [Failed]. Exact
+    occurrence identity distinguishes an interrupted dispatch attempt. Intended
+    for one-time runner startup recovery before any new dispatch can be active.
+    The recovery reason is fixed to [Interrupted_by_process_restart]. *)
 
 val fail_due_candidate :
   Workspace_utils.config ->
@@ -275,48 +152,22 @@ val fail_due_candidate :
   error:string ->
   (Schedule_domain.schedule_request, store_error) result
 (** Atomically marks a [Due] request [Failed] and records the failed
-    execution attempt. This is used when a runner-side consumer rejects the
+    wake attempt. This is used when a runner-side consumer rejects the
     payload before work starts, so the schedule does not remain due forever. *)
 
-val due_execution_candidates :
+val due_wake_candidates :
   state -> Schedule_domain.schedule_request list
-(** Returns all due requests. Authorization of dispatched effects belongs to
+(** Returns all due requests. Authorization of downstream effects belongs to
     the payload consumer. *)
 
-val unsettled_dispatched_occurrences :
-  state -> Schedule_domain.execution_record list
-(** Every [Execution_dispatched] execution.
-
-    These are occurrences a consumer durably accepted and has not settled. The
-    store cannot decide whether the consumer still owns one: that requires
-    decoding the consumer-owned dispatch detail to learn where it went, which
-    is consumer territory. Orphan executions are returned rather than silently
-    omitted; an exact batch settlement can finish their execution evidence even
-    after the schedule request row is absent. *)
-
-val settle_dispatched_occurrences_and_cancel_matching :
+val cancel_matching :
   Workspace_utils.config ->
-  now:float ->
-  settlements:dispatched_occurrence_settlement list ->
   should_cancel:(Schedule_domain.schedule_request -> bool) ->
   (unit, store_error) result
-(** Atomically settles the supplied accepted occurrences and cancels every
-    currently [Scheduled] or [Due] request selected by [should_cancel]. A
-    settlement still finishes that exact execution when its schedule request
-    does not exist; cancellation only applies to present rows.
-    A selected [Running] request fails closed because cancelling it could orphan
-    a consumer effect that has not committed its acceptance yet. *)
+(** Atomically cancels every matching [Scheduled] or [Due] request. A matching
+    [Running] request is rejected because wake delivery is still in progress. *)
 
 val prune_completed :
   Workspace_utils.config ->
   (state * int, store_error) result
-(** Deletes terminal (succeeded, failed, cancelled, expired) schedule requests
-    and their associated execution records.
-
-    A terminal request is retained while any of its executions is still
-    unsettled ([Execution_running] or [Execution_dispatched]). Terminal here
-    describes the request's intent, not the work: a recurring request advances
-    past an occurrence at [accept_running] and can be cancelled afterwards while
-    that occurrence is still outstanding. The execution row is then the only
-    durable record of work a consumer accepted. Pruning the pair would erase
-    the evidence required by exact batch settlement. *)
+(** Deletes terminal schedule requests and their wake-delivery records. *)

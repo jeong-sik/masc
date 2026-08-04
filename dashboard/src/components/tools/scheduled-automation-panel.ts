@@ -6,7 +6,7 @@ import {
   type DashboardScheduledAutomationDispatchReceipt,
   type DashboardScheduledAutomationKeeperReactionEvidence,
   type DashboardScheduledAutomationKeeperQueueEvidence,
-  type DashboardScheduledAutomationExecution,
+  type DashboardScheduledAutomationWakeReceipt,
   type DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,
   type DashboardScheduledAutomationRequest,
   type DashboardScheduledAutomationSignal,
@@ -309,11 +309,11 @@ function WakeSignalFeed({ signals }: { signals: WakeSignal[] }) {
   `
 }
 
-function lastExecutionLabel(request: DashboardScheduledAutomationRequest): string {
-  const execution = request.last_execution
-  if (!execution) return '-'
-  const status = enumLabel(execution.status)
-  const finishedAt = formatDateTimeKo(execution.finished_at_iso ?? execution.started_at_iso ?? null)
+function lastWakeLabel(request: DashboardScheduledAutomationRequest): string {
+  const wake = request.last_wake
+  if (!wake) return '-'
+  const status = enumLabel(wake.status)
+  const finishedAt = formatDateTimeKo(wake.finished_at_iso ?? wake.started_at_iso ?? null)
   return finishedAt === '-' ? status : `${status} ${finishedAt}`
 }
 
@@ -341,7 +341,7 @@ function compactDetailValue(value: unknown): string | null {
   return null
 }
 
-function executionDetailRows(detail: unknown): Array<{ label: string; value: string }> {
+function wakeDetailRows(detail: unknown): Array<{ label: string; value: string }> {
   if (detail == null) return []
   if (!isRecord(detail)) {
     const value = compactDetailValue(detail)
@@ -775,7 +775,7 @@ function ScheduleCard({
 
       <div class="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <${InfoBlock} label="반복" value=${recurrenceLabel(request)} />
-        <${InfoBlock} label="마지막 실행" value=${lastExecutionLabel(request)} />
+        <${InfoBlock} label="마지막 깨우기" value=${lastWakeLabel(request)} />
         <${InfoBlock} label="예정 시각" value=${formatDateTimeKo(dueIso)} mono=${true} />
         <${InfoBlock} label="출처" value=${enumLabel(request.source)} />
       </div>
@@ -796,40 +796,36 @@ function ScheduleCard({
   `
 }
 
-function LastExecutionBlock({
-  execution,
+function LastWakeBlock({
+  wake,
   dispatchReceipt,
   queueEvidence,
   reactionEvidence,
 }: {
-  execution: DashboardScheduledAutomationExecution | null | undefined
+  wake: DashboardScheduledAutomationWakeReceipt | null | undefined
   dispatchReceipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
   queueEvidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
   reactionEvidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined
 }) {
-  if (!execution) {
+  if (!wake) {
     return html`<div class="mt-1 text-xs text-[var(--color-fg-muted)]">-</div>`
   }
 
-  const detailRows = executionDetailRows(execution.detail)
+  const detailRows = wakeDetailRows(wake.detail)
   return html`
     <div class="mt-1 grid gap-2 text-xs text-[var(--color-fg-muted)]">
       <div class="flex flex-wrap items-center gap-2">
-        <${StatusChip} tone=${automationTone(execution.status)} uppercase=${false}>${enumLabel(execution.status)}<//>
-        ${execution.error ? html`<span>${execution.error}</span>` : null}
+        <${StatusChip} tone=${automationTone(wake.status)} uppercase=${false}>${enumLabel(wake.status)}<//>
+        ${wake.error ? html`<span>${wake.error}</span>` : null}
       </div>
       <div class="grid gap-1 text-3xs text-[var(--color-fg-disabled)]">
         <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2">
-          <span>실행</span>
-          <span class="truncate font-mono" title=${execution.execution_id}>${execution.execution_id}</span>
-        </div>
-        <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2">
           <span>시작</span>
-          <span class="font-mono">${formatDateTimeKo(execution.started_at_iso ?? null)}</span>
+          <span class="font-mono">${formatDateTimeKo(wake.started_at_iso ?? null)}</span>
         </div>
         <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2">
           <span>종료</span>
-          <span class="font-mono">${formatDateTimeKo(execution.finished_at_iso ?? null)}</span>
+          <span class="font-mono">${formatDateTimeKo(wake.finished_at_iso ?? null)}</span>
         </div>
       </div>
       ${detailRows.length > 0
@@ -837,7 +833,7 @@ function LastExecutionBlock({
             <div class="grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2">
               <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">상세</div>
               ${detailRows.map(row => html`
-                <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2" data-execution-detail-row=${row.label}>
+                <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2" data-wake-detail-row=${row.label}>
                   <span class="truncate text-[var(--color-fg-disabled)]" title=${row.label}>${row.label}</span>
                   <span class="truncate font-mono text-[var(--color-fg-secondary)]" title=${row.value}>${row.value}</span>
                 </div>
@@ -869,7 +865,7 @@ function ScheduleDetailPanel({
   const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
   const requestedAtIso = request.requested_at_iso ?? null
   const expiresAtIso = request.expires_at_iso ?? null
-  const execution = request.last_execution
+  const wake = request.last_wake
   return html`
     <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-3" data-schedule-detail-panel=${request.schedule_id}>
       <div class="flex flex-wrap items-start justify-between gap-2">
@@ -914,8 +910,8 @@ function ScheduleDetailPanel({
         </div>
         <div>
           <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">최근 실행</div>
-          <${LastExecutionBlock}
-            execution=${execution}
+          <${LastWakeBlock}
+            wake=${wake}
             dispatchReceipt=${request.dispatch_receipt ?? null}
             queueEvidence=${request.keeper_queue_evidence ?? null}
             reactionEvidence=${request.keeper_reaction_evidence ?? null}
@@ -1694,7 +1690,7 @@ export function SchDetail({
   const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
   const requestedAtIso = request.requested_at_iso ?? null
   const expiresAtIso = request.expires_at_iso ?? null
-  const execution = request.last_execution
+  const wake = request.last_wake
   const summary = request.payload_summary?.trim() || null
   // Live payload has no `body` — only kind/digest/target/summary. Render what is
   // available in the envelope and mark the absent body honestly (audit #12).
@@ -1775,8 +1771,8 @@ export function SchDetail({
 
           <div class="turn-sec">
             <h4>최근 실행 기록</h4>
-            <${SchExecution}
-              execution=${execution}
+            <${SchWakeReceipt}
+              wake=${wake}
               dispatchReceipt=${request.dispatch_receipt ?? null}
               queueEvidence=${request.keeper_queue_evidence ?? null}
               reactionEvidence=${request.keeper_reaction_evidence ?? null}
@@ -1789,34 +1785,34 @@ export function SchDetail({
   `
 }
 
-function SchExecution({
-  execution,
+function SchWakeReceipt({
+  wake,
   dispatchReceipt,
   queueEvidence,
   reactionEvidence,
 }: {
-  execution: DashboardScheduledAutomationExecution | null | undefined
+  wake: DashboardScheduledAutomationWakeReceipt | null | undefined
   dispatchReceipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
   queueEvidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
   reactionEvidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined
 }) {
-  if (!execution) {
-    return html`<div class="sch-kvs"><div class="sch-kv"><span class="k">status</span><span class="v mono" data-stub="no last_execution">실행 기록 없음</span></div></div>`
+  if (!wake) {
+    return html`<div class="sch-kvs"><div class="sch-kv"><span class="k">status</span><span class="v mono" data-stub="no last_wake">깨우기 기록 없음</span></div></div>`
   }
-  const detailRows = executionDetailRows(execution.detail)
+  const detailRows = wakeDetailRows(wake.detail)
   return html`
     <div class="sch-kvs">
-      <div class="sch-kv"><span class="k">status</span><span class="v mono">${enumLabel(execution.status)}</span></div>
-      <div class="sch-kv"><span class="k">시작</span><span class="v mono">${formatDateTimeKo(execution.started_at_iso ?? null)}</span></div>
-      <div class="sch-kv"><span class="k">종료</span><span class="v mono">${formatDateTimeKo(execution.finished_at_iso ?? null)}</span></div>
+      <div class="sch-kv"><span class="k">status</span><span class="v mono">${enumLabel(wake.status)}</span></div>
+      <div class="sch-kv"><span class="k">시작</span><span class="v mono">${formatDateTimeKo(wake.started_at_iso ?? null)}</span></div>
+      <div class="sch-kv"><span class="k">종료</span><span class="v mono">${formatDateTimeKo(wake.finished_at_iso ?? null)}</span></div>
       ${detailRows.map(row => html`
-        <div class="sch-kv" data-execution-detail-row=${row.label}><span class="k">${row.label}</span><span class="v mono">${row.value}</span></div>
+        <div class="sch-kv" data-wake-detail-row=${row.label}><span class="k">${row.label}</span><span class="v mono">${row.value}</span></div>
       `)}
     </div>
     <${DispatchReceiptBlock} receipt=${dispatchReceipt} compact=${true} />
     <${QueueEvidenceBlock} evidence=${queueEvidence} compact=${true} />
     <${ReactionEvidenceBlock} evidence=${reactionEvidence} compact=${true} />
-    ${execution.error ? html`<div class="sch-exec bad">${execution.error}</div>` : null}
+    ${wake.error ? html`<div class="sch-exec bad">${wake.error}</div>` : null}
   `
 }
 
@@ -1956,7 +1952,7 @@ function SchedulePrototypeSurface({
 }
 
 // Aside triage buckets. Due schedules surface under '해야 할 일'; terminal
-// schedules feed the recent-execution list. Derived only from the projection.
+// schedules feed the recent-wake list. Derived only from the projection.
 const SCHEDULE_ASIDE_DUE: ReadonlySet<string> = new Set(['due'])
 const SCHEDULE_ASIDE_RECENT_MAX = 6
 
@@ -2025,8 +2021,8 @@ export function ScheduleAside({
                   >
                     <span class="wka-flag-tag bad">실패</span>
                     <span class="wka-flag-title">${scheduleAsideSummary(request)}</span>
-                    ${request.last_execution?.error
-                      ? html`<span class="wka-flag-reason">${request.last_execution.error}</span>`
+                    ${request.last_wake?.error
+                      ? html`<span class="wka-flag-reason">${request.last_wake.error}</span>`
                       : null}
                   </button>
                 `)}

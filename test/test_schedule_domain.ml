@@ -94,7 +94,6 @@ let test_interval_recurrence_next_due () =
       ~recurrence:(Interval { interval_sec = 60 })
       ()
   in
-  check bool "is recurring" true (is_recurring req.recurrence);
   match next_due_after ~now:201.0 req with
   | None -> fail "expected next interval due"
   | Some due_at -> check (float 0.001) "next due" 260.0 due_at
@@ -146,7 +145,6 @@ let test_cron_recurrence_next_due_weekdays () =
       ~recurrence:(Cron { expression = "0 9 * * 1-5"; timezone = "UTC" })
       ()
   in
-  check bool "is recurring" true (is_recurring req.recurrence);
   match next_due_after ~now:32400.0 req with
   | None -> fail "expected next cron due"
   | Some due_at -> check (float 0.001) "next weekday 09:00" 118800.0 due_at
@@ -251,7 +249,7 @@ let test_recurrence_summary () =
     (recurrence_summary (Cron { expression = "0 9 * * 1-5"; timezone = "UTC" }))
 ;;
 
-let test_missing_recurrence_defaults_one_shot () =
+let test_missing_recurrence_is_rejected () =
   let req = request () in
   let json =
     match schedule_request_to_yojson req with
@@ -259,61 +257,33 @@ let test_missing_recurrence_defaults_one_shot () =
     | other -> other
   in
   match schedule_request_of_yojson json with
-  | Error msg -> fail msg
-  | Ok decoded ->
-    check string "recurrence" "one_shot"
-      (recurrence_kind_to_string decoded.recurrence)
+  | Error _ -> ()
+  | Ok _ -> fail "missing recurrence must be rejected"
 ;;
 
-let test_execution_record_roundtrip () =
+let test_wake_record_roundtrip () =
   let req = request () in
-  let execution =
-    { execution_id = "exec-1"
-    ; schedule_instance_id = req.schedule_instance_id
+  let wake =
+    { schedule_instance_id = req.schedule_instance_id
     ; schedule_id = req.schedule_id
     ; started_at = 201.0
     ; finished_at = Some 202.0
     ; due_at = req.due_at
     ; payload_digest = payload_digest req.payload
-    ; status = Execution_succeeded
+    ; status = Wake_succeeded
     ; detail = Some (`Assoc [ "kind", `String "test.done" ])
     ; error = None
     }
   in
-  match execution_record_to_yojson execution |> execution_record_of_yojson with
+  match wake_record_to_yojson wake |> wake_record_of_yojson with
   | Error msg -> fail msg
   | Ok decoded ->
-    check string "execution_id" execution.execution_id decoded.execution_id;
     check string "status" "succeeded"
-      (execution_status_to_string decoded.status);
-    check (option (float 0.001)) "finished_at" execution.finished_at
+      (wake_status_to_string decoded.status);
+    check (option (float 0.001)) "finished_at" wake.finished_at
       decoded.finished_at;
-    check string "payload digest" execution.payload_digest
+    check string "payload digest" wake.payload_digest
       decoded.payload_digest
-;;
-
-let test_dispatched_execution_record_roundtrip () =
-  let req = request () in
-  let execution =
-    { execution_id = "exec-dispatched"
-    ; schedule_instance_id = req.schedule_instance_id
-    ; schedule_id = req.schedule_id
-    ; started_at = 201.0
-    ; finished_at = None
-    ; due_at = req.due_at
-    ; payload_digest = payload_digest req.payload
-    ; status = Execution_dispatched
-    ; detail = Some (`Assoc [ "kind", `String "consumer.accepted" ])
-    ; error = None
-    }
-  in
-  match execution_record_to_yojson execution |> execution_record_of_yojson with
-  | Error msg -> fail msg
-  | Ok decoded ->
-    check string "dispatched status" "dispatched"
-      (execution_status_to_string decoded.status);
-    check (option (float 0.001)) "dispatched remains unfinished" None
-      decoded.finished_at
 ;;
 
 let () =
@@ -355,12 +325,10 @@ let () =
           test_case "schedule roundtrip" `Quick test_schedule_roundtrip;
           test_case "cron schedule roundtrip" `Quick test_cron_schedule_roundtrip;
           test_case "recurrence summary" `Quick test_recurrence_summary;
-          test_case "missing recurrence defaults one-shot" `Quick
-            test_missing_recurrence_defaults_one_shot;
-          test_case "execution record roundtrip" `Quick
-            test_execution_record_roundtrip;
-          test_case "dispatched execution record roundtrip" `Quick
-            test_dispatched_execution_record_roundtrip;
+          test_case "missing recurrence is rejected" `Quick
+            test_missing_recurrence_is_rejected;
+          test_case "wake record roundtrip" `Quick
+            test_wake_record_roundtrip;
         ] );
     ]
 ;;

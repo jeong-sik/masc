@@ -110,34 +110,34 @@ let validate_schedule_ledger path =
     in
     let* () =
       List.fold_left
-        (fun result (execution : Schedule_domain.execution_record) ->
+        (fun result (wake : Schedule_domain.wake_record) ->
            let* () = result in
-           nonempty "execution.schedule_instance_id" execution.schedule_instance_id)
+           nonempty "wake.schedule_instance_id" wake.schedule_instance_id)
         (Ok ())
-        state.executions
+        state.wakes
     in
-    let unsettled =
+    let in_progress =
       List.filter
-        (fun (execution : Schedule_domain.execution_record) ->
-           match execution.status with
-           | Schedule_domain.Execution_running
-           | Schedule_domain.Execution_dispatched -> true
-           | Schedule_domain.Execution_succeeded
-           | Schedule_domain.Execution_failed -> false)
-        state.executions
+        (fun (wake : Schedule_domain.wake_record) ->
+           match wake.status with
+           | Schedule_domain.Wake_running -> true
+           | Schedule_domain.Wake_succeeded
+           | Schedule_domain.Wake_failed -> false)
+        state.wakes
     in
-    let execution_json (execution : Schedule_domain.execution_record) =
+    let wake_json (wake : Schedule_domain.wake_record) =
       `Assoc
-        [ "execution_id", `String execution.execution_id
-        ; "schedule_id", `String execution.schedule_id
-        ; "status", `String (Schedule_domain.execution_status_to_string execution.status)
+        [ "schedule_instance_id", `String wake.schedule_instance_id
+        ; "schedule_id", `String wake.schedule_id
+        ; "due_at", `Float wake.due_at
+        ; "status", `String (Schedule_domain.wake_status_to_string wake.status)
         ]
     in
     Yojson.Safe.to_channel
       stdout
       (`Assoc
-         [ "unsettled_count", `Int (List.length unsettled)
-         ; "unsettled", `List (List.map execution_json unsettled)
+         [ "in_progress_count", `Int (List.length in_progress)
+         ; "in_progress", `List (List.map wake_json in_progress)
          ]);
     output_char stdout '\n';
     flush stdout;

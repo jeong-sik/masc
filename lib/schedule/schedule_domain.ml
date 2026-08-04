@@ -68,21 +68,19 @@ type schedule_request =
   ; recurrence : recurrence
   }
 
-type execution_status =
-  | Execution_running
-  | Execution_dispatched
-  | Execution_succeeded
-  | Execution_failed
+type wake_status =
+  | Wake_running
+  | Wake_succeeded
+  | Wake_failed
 
-type execution_record =
-  { execution_id : string
-  ; schedule_instance_id : string
+type wake_record =
+  { schedule_instance_id : string
   ; schedule_id : string
   ; started_at : float
   ; finished_at : float option
   ; due_at : float
   ; payload_digest : string
-  ; status : execution_status
+  ; status : wake_status
   ; detail : Yojson.Safe.t option
   ; error : string option
   }
@@ -155,29 +153,22 @@ let recurrence_summary = function
   | Cron { expression; timezone } -> Printf.sprintf "cron %s %s" expression timezone
 ;;
 
-let execution_status_to_string = function
-  | Execution_running -> "running"
-  | Execution_dispatched -> "dispatched"
-  | Execution_succeeded -> "succeeded"
-  | Execution_failed -> "failed"
+let wake_status_to_string = function
+  | Wake_running -> "running"
+  | Wake_succeeded -> "succeeded"
+  | Wake_failed -> "failed"
 ;;
 
-let execution_status_of_string = function
-  | "running" -> Ok Execution_running
-  | "dispatched" -> Ok Execution_dispatched
-  | "succeeded" -> Ok Execution_succeeded
-  | "failed" -> Ok Execution_failed
-  | other -> Error ("unknown execution_status: " ^ other)
+let wake_status_of_string = function
+  | "running" -> Ok Wake_running
+  | "succeeded" -> Ok Wake_succeeded
+  | "failed" -> Ok Wake_failed
+  | other -> Error ("unknown wake_status: " ^ other)
 ;;
 
 let is_terminal = function
   | Succeeded | Failed | Cancelled | Expired -> true
   | Scheduled | Due | Running -> false
-;;
-
-let is_recurring = function
-  | One_shot -> false
-  | Interval _ | Daily _ | Cron _ -> true
 ;;
 
 let rec canonical_json = function
@@ -690,24 +681,22 @@ let reschedule_after_due_signal ~now (request : schedule_request) =
     None
 ;;
 
-let execution_record_to_yojson (execution : execution_record) =
+let wake_record_to_yojson (wake : wake_record) =
   `Assoc
-    [ "execution_id", `String execution.execution_id
-    ; "schedule_instance_id", `String execution.schedule_instance_id
-    ; "schedule_id", `String execution.schedule_id
-    ; "started_at", float_to_yojson execution.started_at
-    ; "finished_at", option_to_yojson float_to_yojson execution.finished_at
-    ; "due_at", float_to_yojson execution.due_at
-    ; "payload_digest", `String execution.payload_digest
-    ; "status", `String (execution_status_to_string execution.status)
-    ; "detail", option_to_yojson (fun value -> value) execution.detail
-    ; "error", option_to_yojson (fun value -> `String value) execution.error
+    [ "schedule_instance_id", `String wake.schedule_instance_id
+    ; "schedule_id", `String wake.schedule_id
+    ; "started_at", float_to_yojson wake.started_at
+    ; "finished_at", option_to_yojson float_to_yojson wake.finished_at
+    ; "due_at", float_to_yojson wake.due_at
+    ; "payload_digest", `String wake.payload_digest
+    ; "status", `String (wake_status_to_string wake.status)
+    ; "detail", option_to_yojson (fun value -> value) wake.detail
+    ; "error", option_to_yojson (fun value -> `String value) wake.error
     ]
 ;;
 
-let execution_record_of_yojson = function
+let wake_record_of_yojson = function
   | `Assoc fields ->
-    let* execution_id = string_field "execution_id" fields in
     let* schedule_instance_id = string_field "schedule_instance_id" fields in
     let* schedule_id = string_field "schedule_id" fields in
     let* started_at = float_field "started_at" fields in
@@ -721,7 +710,7 @@ let execution_record_of_yojson = function
     let* due_at = float_field "due_at" fields in
     let* payload_digest = string_field "payload_digest" fields in
     let* status_name = string_field "status" fields in
-    let* status = execution_status_of_string status_name in
+    let* status = wake_status_of_string status_name in
     let detail =
       match List.assoc_opt "detail" fields with
       | None | Some `Null -> None
@@ -733,8 +722,7 @@ let execution_record_of_yojson = function
       | Some value -> string_option_of_yojson value
     in
     Ok
-      { execution_id
-      ; schedule_instance_id
+      { schedule_instance_id
       ; schedule_id
       ; started_at
       ; finished_at
@@ -744,7 +732,7 @@ let execution_record_of_yojson = function
       ; detail
       ; error
       }
-  | _ -> Error "expected execution_record object"
+  | _ -> Error "expected wake_record object"
 ;;
 
 let schedule_request_to_yojson (request : schedule_request) =
@@ -786,11 +774,8 @@ let schedule_request_of_yojson = function
     let* status = schedule_status_of_string status_name in
     let* source_name = string_field "source" fields in
     let* source = schedule_source_of_string source_name in
-    let* recurrence =
-      match List.assoc_opt "recurrence" fields with
-      | None -> Ok One_shot
-      | Some value -> recurrence_of_yojson value
-    in
+    let* recurrence_json = assoc_field "recurrence" fields in
+    let* recurrence = recurrence_of_yojson recurrence_json in
     Ok
       { schedule_instance_id
       ; schedule_id

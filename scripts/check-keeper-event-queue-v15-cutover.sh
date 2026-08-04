@@ -104,7 +104,7 @@ run_gate() {
   local pending_count
   local outbox_count
   local accepted_count
-  local unsettled_count_total=0
+  local in_progress_count_total=0
 
   [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
     || fail "base path is not an exact directory: $BASE_PATH"
@@ -198,16 +198,16 @@ run_gate() {
       || fail "schedule ledger is not an exact regular file: $schedules_path"
     schedule_report="$("$CUTOVER_HELPER" validate-schedule-ledger "$schedules_path")" \
       || fail "schedule ledger contract is invalid: $schedules_path"
-    local unsettled_count
-    unsettled_count="$(jq -er '.unsettled_count' <<<"$schedule_report")" \
+    local in_progress_count
+    in_progress_count="$(jq -er '.in_progress_count' <<<"$schedule_report")" \
       || fail "typed schedule validator returned an invalid result: $schedules_path"
-    unsettled_count_total=$((unsettled_count_total + unsettled_count))
-    if [[ "$cutover_required" -eq 1 && "$unsettled_count" -ne 0 ]]; then
+    in_progress_count_total=$((in_progress_count_total + in_progress_count))
+    if [[ "$cutover_required" -eq 1 && "$in_progress_count" -ne 0 ]]; then
       jq -r '
-        .unsettled[]
-        | "  execution_id=\(.execution_id) schedule_id=\(.schedule_id) status=\(.status)"
+        .in_progress[]
+        | "  schedule_instance_id=\(.schedule_instance_id) schedule_id=\(.schedule_id) due_at=\(.due_at) status=\(.status)"
       ' <<<"$schedule_report" >&2
-      fail "schedule ledger still has $unsettled_count unsettled execution(s)"
+      fail "schedule ledger still has $in_progress_count wake delivery attempt(s) in progress"
     fi
   done
 
@@ -257,10 +257,10 @@ run_gate() {
     done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v14.json' -print0)
   fi
 
-  printf '[event-queue-v15-cutover] OK: base_path=%s cutover_required=%d schedule_ledgers=%d signal_files=%d signal_rows=%d v14_owners=%d current_owners=%d legacy_wals=%d unsettled=%d\n' \
+  printf '[event-queue-v15-cutover] OK: base_path=%s cutover_required=%d schedule_ledgers=%d signal_files=%d signal_rows=%d v14_owners=%d current_owners=%d legacy_wals=%d in_progress=%d\n' \
     "$BASE_PATH" "$cutover_required" "$schedule_ledger_count" \
     "$signal_file_count" "$signal_row_count" "$queue_count" \
-    "$current_owner_count" "$legacy_wal_count" "$unsettled_count_total"
+    "$current_owner_count" "$legacy_wal_count" "$in_progress_count_total"
 }
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
@@ -272,9 +272,9 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     local status="$2"
     mkdir -p "$target_root/.masc"
     jq -n --arg status "$status" '
-      {version: 1, updated_at: 1, schedules: [], executions:
+      {version: 1, updated_at: 1, schedules: [], wakes:
         (if $status == "none" then []
-         else [{execution_id: "exec-fixture", schedule_instance_id: "instance-fixture",
+         else [{schedule_instance_id: "instance-fixture",
                 schedule_id: "schedule-fixture", started_at: 1, finished_at: null,
                 due_at: 1, payload_digest: "digest-fixture", status: $status,
                 detail: null, error: null}]
@@ -374,15 +374,10 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     fail "self-test expected an active BasePath writer lease to block cutover"
   fi
 
-  dispatched_root="$fixture_root/dispatched"
-  write_schedules "$dispatched_root" dispatched
-  write_queue "$dispatched_root" 0 0 0
-  expect_failure dispatched_execution "$dispatched_root"
-
   running_root="$fixture_root/running"
   write_schedules "$running_root" running
   write_queue "$running_root" 0 0 0
-  expect_failure running_execution "$running_root"
+  expect_failure running_wake "$running_root"
 
   pending_root="$fixture_root/pending"
   write_schedules "$pending_root" none
@@ -454,7 +449,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
 
   incomplete_contract_root="$fixture_root/incomplete-contract"
   mkdir -p "$incomplete_contract_root/.masc"
-  jq -n '{version: 1, schedules: [], executions: []}' \
+  jq -n '{version: 1, schedules: [], wakes: []}' \
     >"$incomplete_contract_root/.masc/schedules.json"
   expect_failure incomplete_schedule_contract "$incomplete_contract_root"
 
@@ -478,7 +473,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   jq -n '
     {version: 1, updated_at: 1,
      schedules: [{schedule_id: "legacy-schedule"}],
-     executions: []}
+     wakes: []}
   ' >"$pre_cut_root/.masc/schedules.json"
   expect_failure pre_cut_schedule "$pre_cut_root"
 
@@ -487,7 +482,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   jq -n '
     {version: 1, updated_at: 1,
      schedules: [{schedule_id: "pre-cut-schedule"}],
-     executions: []}
+     wakes: []}
   ' >"$pre_cut_recovery_root/.masc/schedules.json.last-good"
   expect_failure pre_cut_recovery "$pre_cut_recovery_root"
 

@@ -62,8 +62,7 @@ export interface DashboardScheduledAutomationFsm {
   next_due_at?: string | null
 }
 
-export interface DashboardScheduledAutomationExecution {
-  execution_id: string
+export interface DashboardScheduledAutomationWakeReceipt {
   schedule_id: string
   started_at?: number
   started_at_iso?: string | null
@@ -236,7 +235,7 @@ export interface DashboardScheduledAutomationRequest {
   payload_target?: string | null
   payload_summary?: string | null
   recurrence_summary?: string | null
-  last_execution?: DashboardScheduledAutomationExecution | null
+  last_wake?: DashboardScheduledAutomationWakeReceipt | null
   dispatch_receipt?: DashboardScheduledAutomationDispatchReceipt | null
   keeper_queue_evidence?: DashboardScheduledAutomationKeeperQueueEvidence | null
   keeper_reaction_evidence?: DashboardScheduledAutomationKeeperReactionEvidence | null
@@ -819,7 +818,7 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
     category: t.category ?? 'uncategorized',
     tier: t.tier ?? '(unknown tier)',
     // Tool-layer decoupling groundwork: surface membership is consumer-owned
-    // metadata, not an execution constraint. Totalize here so the field is
+    // metadata, not an wake constraint. Totalize here so the field is
     // never absent downstream; consumers keep working with [] and the surface
     // filter simply degrades to zero counts. Mirrors category/tier above.
     surfaces: t.surfaces ?? [],

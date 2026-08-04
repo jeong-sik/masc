@@ -193,88 +193,6 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
     stimuli
 ;;
 
-let complete_schedule_due ~ctx ~keeper_name:_ stimuli =
-  let now = Time_compat.now () in
-  let rec loop = function
-    | [] -> Ok ()
-    | (stimulus : Keeper_event_queue.stimulus) :: rest ->
-      (match stimulus.payload with
-       | Keeper_event_queue.Schedule_due wake ->
-         (match
-            Schedule_store.complete_dispatched_occurrence
-              ctx.config
-              ~now
-              ~schedule_instance_id:wake.schedule_instance_id
-              ~schedule_id:wake.schedule_id
-              ~due_at:wake.due_at
-              ~payload_digest:wake.payload_digest
-              ()
-          with
-          | Ok _ -> loop rest
-          | Error err ->
-            Error
-              (Printf.sprintf
-                 "schedule completion write failed schedule_id=%s occurrence_id=%s: %s"
-                 wake.schedule_id
-                 stimulus.post_id
-                 (Schedule_store.store_error_to_string err)))
-       | Keeper_event_queue.Board_signal _
-       | Keeper_event_queue.Board_attention _
-       | Keeper_event_queue.Fusion_completed _
-       | Keeper_event_queue.Bg_completed _
-       | Keeper_event_queue.Bootstrap
-       | Keeper_event_queue.Connector_attention _
-       | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Manual_compaction_requested
-       | Keeper_event_queue.Goal_assigned _
-       | Keeper_event_queue.Goal_reconciliation_ready _
-       | Keeper_event_queue.Completion_authority_rejected _ ->
-         loop rest)
-  in
-  loop stimuli
-;;
-
-let fail_schedule_due ~ctx ~error stimuli =
-  let now = Time_compat.now () in
-  let rec loop = function
-    | [] -> Ok ()
-    | (stimulus : Keeper_event_queue.stimulus) :: rest ->
-      (match stimulus.payload with
-       | Keeper_event_queue.Schedule_due wake ->
-         (match
-            Schedule_store.fail_dispatched_occurrence
-              ctx.config
-              ~now
-              ~schedule_instance_id:wake.schedule_instance_id
-              ~schedule_id:wake.schedule_id
-              ~due_at:wake.due_at
-              ~payload_digest:wake.payload_digest
-              ~error
-          with
-          | Ok _ -> loop rest
-          | Error err ->
-            Error
-              (Printf.sprintf
-                 "schedule failure write failed schedule_id=%s occurrence_id=%s: %s"
-                 wake.schedule_id
-                 stimulus.post_id
-                 (Schedule_store.store_error_to_string err)))
-       | Keeper_event_queue.Board_signal _
-       | Keeper_event_queue.Board_attention _
-       | Keeper_event_queue.Fusion_completed _
-       | Keeper_event_queue.Bg_completed _
-       | Keeper_event_queue.Bootstrap
-       | Keeper_event_queue.Connector_attention _
-       | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Manual_compaction_requested
-       | Keeper_event_queue.Goal_assigned _
-       | Keeper_event_queue.Goal_reconciliation_ready _
-       | Keeper_event_queue.Completion_authority_rejected _ ->
-         loop rest)
-  in
-  loop stimuli
-;;
-
 let mark_connector_attention_ignored_after_turn ~base_path ~keeper_name event_ids =
   match event_ids with
   | [] -> ()
@@ -783,15 +701,7 @@ let run_keepalive_unified_turn
         | Ok
             ( Keeper_registry_event_queue.Acked _
             | Keeper_registry_event_queue.Already_acked _ ) ->
-          selection_acked := true;
-          (match
-             fail_schedule_due
-               ~ctx
-               ~error:detail
-               !consumed_stimuli
-           with
-           | Ok () -> ()
-           | Error message -> record_event_queue_failure message)
+          selection_acked := true
         | Ok
             (Keeper_registry_event_queue.Ack_committed_followup_failed
                { stage; detail = followup_detail; _ }) ->
@@ -898,14 +808,7 @@ let run_keepalive_unified_turn
            | Some
                ( Cycle.Completed _
                | Cycle.Manual_compaction_applied _ ) ->
-             (match
-                complete_schedule_due
-                  ~ctx
-                  ~keeper_name:meta_after_triage.name
-                  !consumed_stimuli
-              with
-              | Ok () -> remove_completed_selection ()
-              | Error message -> record_event_queue_failure message)
+             remove_completed_selection ()
            | Some (Cycle.Failed { failure; _ }) ->
              (match failed_selection_terminal_detail failure with
               | Some detail -> terminalize_failed_selection ~selection ~detail

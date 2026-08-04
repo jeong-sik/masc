@@ -2,8 +2,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-module StringSet : Set.S with type elt = string
-
 val normalize_system_context_prefix : string -> string
 
 val has_world_state_signature : string -> bool

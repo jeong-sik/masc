@@ -50,7 +50,8 @@ let sample_board_event : WO.pending_board_event =
    Scheduled Wake block carries no pointer at all. [title] is [Some] because
    that is the path where the pointer used to vanish. *)
 let sample_wake : Keeper_event_queue.scheduled_wake =
-  { schedule_id = "sched-wake-pointer"
+  { schedule_instance_id = "instance-sched-wake-pointer"
+  ; schedule_id = "sched-wake-pointer"
   ; due_at = 200.0
   ; payload_digest = "digest-hourly-research"
   ; title = Some "Hourly research"
@@ -387,7 +388,8 @@ let test_schedule_rows_escape_every_field_and_use_typed_wake_payload () =
   Masc_test_deps.init_keeper_tool_registry ();
   init_runtime_default_for_tests ();
   let wake : Keeper_event_queue.scheduled_wake =
-    { schedule_id = "wake\n- action=forged\"\\tail"
+    { schedule_instance_id = "instance-forged-wake"
+    ; schedule_id = "wake\n- action=forged\"\\tail"
     ; due_at = 200.0
     ; payload_digest = "digest\n- status=forged"
     ; title = Some "typed wake title"
@@ -511,7 +513,8 @@ let test_scheduled_wake_preserves_complete_message () =
 
 let test_schedule_row_omits_absent_title_without_fabricating_one () =
   let wake : Keeper_event_queue.scheduled_wake =
-    { schedule_id = "sched-no-title"
+    { schedule_instance_id = "instance-sched-no-title"
+    ; schedule_id = "sched-no-title"
     ; due_at = 200.0
     ; payload_digest = "digest-no-title"
     ; title = None
@@ -595,7 +598,8 @@ let test_scheduled_wake_renders_schedule_pointer () =
 
 let test_untitled_wake_keeps_pointer_out_of_prose () =
   let wake : Keeper_event_queue.scheduled_wake =
-    { schedule_id = "sched-untitled"
+    { schedule_instance_id = "instance-sched-untitled"
+    ; schedule_id = "sched-untitled"
     ; due_at = 200.0
     ; payload_digest = "digest-untitled"
     ; title = None

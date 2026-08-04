@@ -277,7 +277,6 @@
   test_tool_output_washing_e2e
   test_keeper_compaction_unit
   test_keeper_context_core_dedup
-  test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
@@ -579,7 +578,6 @@
   test_tool_output_washing_e2e
   test_keeper_compaction_unit
   test_keeper_context_core_dedup
-  test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
@@ -2564,3 +2562,18 @@
 (include stanzas/test_keeper_chat_admission_contention.inc)
 
 (include stanzas/test_dashboard_continuity_briefs.inc)
+
+; The tool-call quality benchmark reads its case set and evidence fixture from
+; repo-root JSON (benchmarks/data, test/fixtures) rather than from sandbox
+; deps, so under the shared group stanza dune had no reason to re-run it when
+; those files changed — an edit that broke a case definition kept a cached
+; pass. Declaring the two files as deps puts them in the action hash, which is
+; what makes the registry coherence checks in this suite fire on case-set
+; edits (#26811).
+(test
+ (name test_tool_call_quality_benchmark)
+ (modules test_tool_call_quality_benchmark)
+ (deps
+  %{workspace_root}/benchmarks/data/tool_call_quality_cases.json
+  %{workspace_root}/test/fixtures/tool_call_quality_benchmark/evidence_runs.json)
+ (libraries alcotest masc_test_deps))

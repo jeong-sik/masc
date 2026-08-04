@@ -937,6 +937,26 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_verification"
 
+      # The tool-call quality benchmark scores keeper runs against selectors
+      # declared in benchmarks/data/tool_call_quality_cases.json. Those
+      # selectors name descriptors in the live keeper registry, so deleting or
+      # re-tagging a descriptor turns a stale case definition into a keeper
+      # quality score instead of an error (#26811). The suite existed in
+      # test/dune but was never listed here, so nothing it asserts has been
+      # running; the registry coherence gate it now carries only counts once
+      # this step does.
+      - name: Run tool-call quality benchmark suite
+        id: tool_call_quality_benchmark_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_tool_call_quality_benchmark"
+
       # MCP identity is session-bound behavior: compile-only coverage cannot
       # prove that the complete handshake -> start -> status -> transition
       # path preserves one identity through the durable Task lifecycle. The

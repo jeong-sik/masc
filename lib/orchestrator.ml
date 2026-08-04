@@ -59,44 +59,6 @@ let should_orchestrate ~min_priority workspace_config =
       needs_orchestration
   end  (* end of else begin for pause check *)
 
-(** The orchestrator prompt - MCP tools are now available via --allowedTools! *)
-let orchestrator_prompt_key = "system.orchestrator"
-let orchestrator_prompt_asset = "prompts/" ^ orchestrator_prompt_key ^ ".md"
-
-type embedded_prompt_error =
-  | Embedded_prompt_missing of string
-  | Embedded_prompt_empty of string
-
-let embedded_orchestrator_prompt () : (string, embedded_prompt_error) result =
-  match Embedded_config.read orchestrator_prompt_asset with
-  | None -> Error (Embedded_prompt_missing orchestrator_prompt_asset)
-  | Some markdown ->
-    let prompt = Prompt_registry.markdown_body markdown in
-    if String.trim prompt = "" then
-      Error (Embedded_prompt_empty orchestrator_prompt_asset)
-    else Ok prompt
-
-let embedded_prompt_error_message = function
-  | Embedded_prompt_missing asset ->
-    Printf.sprintf "orchestrator prompt asset %S is not embedded" asset
-  | Embedded_prompt_empty asset ->
-    Printf.sprintf "orchestrator prompt asset %S has an empty body" asset
-
-let make_orchestrator_prompt ~port:_ =
-  let prompt = Prompt_registry.get_prompt orchestrator_prompt_key in
-  if String.trim prompt <> "" then prompt
-  else begin
-    Log.Orchestrator.warn
-      "%s prompt missing or empty, using embedded asset %s"
-      orchestrator_prompt_key orchestrator_prompt_asset;
-    match embedded_orchestrator_prompt () with
-    | Ok embedded -> embedded
-    | Error error ->
-      let message = embedded_prompt_error_message error in
-      Log.Orchestrator.error "%s" message;
-      invalid_arg message
-  end
-
 (* ── Pulse helpers ─────────────────────────────────────────── *)
 
 (** Fixed-interval rhythm with no quiet hours.

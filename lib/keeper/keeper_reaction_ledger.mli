@@ -1,16 +1,15 @@
 (** Durable keeper stimulus -> reaction ledger.
 
     This is the runtime mirror for the KeeperReactionLiveness L1/L5
-    contract: queue-visible stimuli, queue transition reactions, and board
-    cursor acknowledgements are written to a replayable JSONL store under
+    contract: queue-visible stimuli and queue transition reactions are
+    written to a replayable JSONL store under
     [.masc/keepers/<keeper>/reaction-ledger/v5/YYYY-MM/DD.jsonl].  The
     generation namespace is a hard boundary: older stores are neither read nor
-    written by this module. *)
+    written by this module.
 
-type cursor =
-  { cursor_ts : float
-  ; post_id : string option
-  }
+    Legacy [record_kind = "cursor_ack"] rows (written by a since-removed
+    durable board-cursor-ack path) may still exist in historical stores; they
+    are quarantined as [Unknown_record_kind] on read rather than decoded. *)
 
 type stimulus_kind =
   | Board_signal
@@ -33,7 +32,6 @@ type reaction_kind =
   | Turn_started
   | Event_queue_ack
   | Event_queue_cancelled
-  | Cursor_ack
 
 type reaction_decode_error = Unknown_reaction_kind of string
 type row_quarantine_reason
@@ -136,18 +134,6 @@ val event_queue_turn_started_seen_for_source_result :
     reaction exists for the exact durable source identity. Invalid matching
     rows do not become positive evidence; read failures remain explicit so
     callers can conservatively replay. *)
-
-val record_board_cursor_ack :
-  base_path:string ->
-  keeper_name:string ->
-  ?stimulus_id:string ->
-  cursor_ts:float ->
-  post_id:string option ->
-  unit ->
-  unit
-(** Append a durable cursor acknowledgement. Callers should write this before
-    advancing the in-memory board cursor so every cursor advance has a replayable
-    ack row. *)
 
 val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t

@@ -326,7 +326,6 @@ function reactionLedgerHealthChip(
   const cursorSwept = ledgerCount(ledger.cursor_swept_stimulus_count)
   const quarantined = ledgerCount(ledger.quarantined_row_count)
   const readErrors = ledgerCount(ledger.read_error_count)
-  const cursorAck = ledgerCount(ledger.cursor_ack_count)
   const status = ledger.status ?? 'unknown'
   const requiresAction = ledger.operator_action_required === true
   if (!requiresAction && pending === 0 && quarantined === 0 && readErrors === 0 && cursorSwept === 0 && status !== 'degraded') {
@@ -352,7 +351,6 @@ function reactionLedgerHealthChip(
       `pending=${pending}`,
       `cursor_swept=${cursorSwept}`,
       `quarantined=${quarantined}`,
-      `cursor_ack=${cursorAck}`,
       `read_errors=${readErrors}`,
     ].join(', '),
     tone,

@@ -141,7 +141,8 @@ let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
              |> List.rev
              |> List.find_opt (fun (row : Agent_sdk.Raw_trace.record) ->
                row.record_type = Agent_sdk.Raw_trace.Run_finished)
-             |> Option.bind (fun row -> row.final_text)
+             |> Option.map (fun row -> row.final_text)
+             |> Option.join
            in
            let trace =
              Agent_sdk.Trajectory.of_raw_trace_records records

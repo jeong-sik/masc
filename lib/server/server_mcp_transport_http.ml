@@ -86,8 +86,6 @@ let sse_ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
 
 let post_sse_keepalive_interval_s = Float.max 0.1 sse_ping_interval_s
 
-let get_last_event_id = Server_mcp_transport_http_headers.get_last_event_id
-
 let body_jsonrpc_id body_str =
   try
     match Yojson.Safe.from_string body_str with
@@ -577,7 +575,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in
-  let last_event_id = get_last_event_id request in
+  let last_event_id = Server_mcp_transport_http_headers.get_last_event_id request in
   match validate_mcp_session_profile ~profile session_id with
   | Error msg ->
       let headers =
@@ -606,6 +604,13 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps ~request_authority
             request reqd ~session_id ~protocol_version msg
       | Ok () ->
+          (match last_event_id with
+          | Error error ->
+              respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
+                ~request_authority request reqd ~session_id ~protocol_version
+                (Server_mcp_transport_http_headers.last_event_id_error_to_string
+                   error)
+          | Ok last_event_id ->
       let otel_transport_context =
         Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
       in
@@ -663,15 +668,21 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           register_sse_conn ~session_id ~info;
           if not (send_raw info (sse_prime_event ())) then
             Log.Server.debug "SSE prime send failed for session %s" info.session_id;
-          (match last_event_id with
-          | Some last_id ->
-              let missed = Sse.get_events_after_for_kind sse_kind last_id in
-              List.iter (fun ev ->
-                if not (send_raw info ev) then
-                  Log.Server.debug "SSE replay send failed for session %s"
-                    info.session_id
-              ) missed
-          | None -> ());
+          let replayed =
+            match last_event_id with
+            | Some last_id ->
+              Sse.get_events_after_for_session ~session_id ~kind:sse_kind last_id
+              |> List.filter (fun delivery ->
+                if send_raw info delivery.Sse.frame
+                then true
+                else (
+                  Log.Server.debug
+                    "SSE replay send failed for session %s"
+                    info.session_id;
+                  false))
+            | None -> []
+          in
+          let replay_handoff = Sse.create_replay_handoff replayed in
           (match deps.get_runtime_result () with
           | Ok runtime ->
               let sw = runtime.sw in
@@ -679,10 +690,12 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               run_sse_pumps ~sw ~stop_promise:info.stop_promise
                 ~drain:(fun () ->
                   let rec drain () =
-                    let event = Eio.Stream.take event_stream in
+                    let delivery = Eio.Stream.take event_stream in
                     (try
                       if not (Atomic.get info.closed || (Atomic.get info.stop)) then
-                        if not (send_raw info event) then
+                        if Sse.accept_live_delivery replay_handoff delivery
+                           && not (send_raw info delivery.Sse.frame)
+                        then
                           Log.Server.debug "SSE drain send failed for session %s"
                             info.session_id
                     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -733,8 +746,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                 session_id msg);
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
-            Log.Server.info "SSE connected: %s (active: %d/%d)"
-              session_id client_count Sse.max_clients))))
+              Log.Server.info "SSE connected: %s (active: %d/%d)"
+              session_id client_count Sse.max_clients)))))
 
 
 let handle_get_operator_mcp ~deps request reqd =

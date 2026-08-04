@@ -142,32 +142,6 @@ let header_value result name =
   |> List.find_map (fun (key, value) ->
     if String.equal (String.lowercase_ascii key) name then Some value else None)
 
-let find_main_eio_exe () =
-  let env_override = Sys.getenv_opt "MASC_MAIN_EIO_EXE" in
-  let candidates =
-    match env_override with
-    | Some p -> [p]
-    | None ->
-        let build_roots = [ "."; ".."; "../.."; "../../.."; "../../../.." ] in
-        let build_candidates =
-          List.map
-            (fun root -> Filename.concat root "_build/default/bin/main_eio.exe")
-            build_roots
-        in
-        [
-          "./bin/main_eio.exe";
-          "../bin/main_eio.exe";
-          "../../bin/main_eio.exe";
-          "../../../bin/main_eio.exe";
-          "../../../../bin/main_eio.exe";
-        ] @ build_candidates
-  in
-  match List.find_opt Sys.file_exists candidates with
-  | Some path -> path
-  | None ->
-      fail
-        "main_eio executable not found. Set MASC_MAIN_EIO_EXE or build with `dune build bin/main_eio.exe`."
-
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -396,16 +370,14 @@ let seed_server_config ~base_path =
       (fun () -> output_string oc catalog_overlay_seed)
 
 let with_server f =
-  let exe = find_main_eio_exe () in
+  let exe = Masc_test_runtime.find_main_eio_exe () in
   let port =
     match find_free_port () with
     | Some p -> p
     | None -> Alcotest.skip ()
   in
   let log_file = Filename.temp_file "sse-storm-e2e-" ".log" in
-  let base_path = Filename.temp_file "sse-storm-base-" "" in
-  (try Sys.remove base_path with _ -> ());
-  Unix.mkdir base_path 0o755;
+  let base_path = Filename.temp_dir "sse-storm-base-" "" in
   seed_server_config ~base_path;
   let log_fd =
     Unix.openfile log_file [Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC] 0o644
@@ -459,6 +431,84 @@ let check_status label expected result =
            result.curl_exit
            result.stderr)
 
+let publish_masc_broadcast ~port ~auth_token ~session_id =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "jsonrpc", `String "2.0"
+        ; "id", `Int 2
+        ; "method", `String "tools/call"
+        ; ( "params"
+          , `Assoc
+              [ "name", `String "masc_broadcast"
+              ; ( "arguments"
+                , `Assoc
+                    [ "agent_name", `String "dashboard"
+                    ; "message", `String "sse-ag-ui-wire-encoding"
+                    ] )
+              ] )
+        ])
+  in
+  let result =
+    run_curl
+      ~headers:
+        [ ("Content-Type", "application/json")
+        ; ("Accept", "application/json, text/event-stream")
+        ; ("X-MASC-Force-JSON", "true")
+        ; ("Authorization", "Bearer " ^ auth_token)
+        ; ("Mcp-Session-Id", session_id)
+        ]
+      ~method_:"POST"
+      ~body
+      ~max_time:2.0
+      ~port
+      ~path:"/mcp"
+      ()
+  in
+  check_status "observer source broadcast accepted" 200 result;
+  match Yojson.Safe.from_string result.body with
+  | `Assoc fields ->
+      (match List.assoc_opt "result" fields with
+       | Some (`Assoc result_fields) ->
+           (match List.assoc_opt "isError" result_fields with
+            | Some (`Bool false) -> ()
+            | Some (`Bool true) ->
+                fail
+                  (Printf.sprintf
+                     "observer source broadcast returned a tool error: %s"
+                     result.body)
+            | Some _ | None ->
+                fail
+                  (Printf.sprintf
+                     "observer source broadcast result omitted boolean isError: %s"
+                     result.body))
+       | Some _ ->
+           fail
+             (Printf.sprintf
+                "observer source broadcast returned a non-object result: %s"
+                result.body)
+       | None when List.mem_assoc "error" fields ->
+           fail
+             (Printf.sprintf
+                "observer source broadcast returned an MCP error: %s"
+                result.body)
+       | None ->
+           fail
+             (Printf.sprintf
+                "observer source broadcast returned an invalid MCP response: %s"
+                result.body))
+  | _ ->
+      fail
+        (Printf.sprintf
+           "observer source broadcast returned an invalid MCP response: %s"
+           result.body)
+  | exception Yojson.Json_error message ->
+      fail
+        (Printf.sprintf
+           "observer source broadcast returned invalid JSON: %s body=%s"
+           message
+           result.body)
+
 let test_mcp_reconnect_stays_accepted () =
   with_server @@ fun ~port ~auth_token ->
   let sid = initialize_mcp_session ~port ~auth_token in
@@ -476,6 +526,131 @@ let test_mcp_reconnect_stays_accepted () =
   let second = run_curl ~headers ~max_time:2.0 ~port ~path:"/mcp" () in
   check_status "follow-up /mcp reconnect accepted" 200 second
 
+let body_contains needle body =
+  let nl = String.length needle and bl = String.length body in
+  let rec scan i = i + nl <= bl && (String.sub body i nl = needle || scan (i + 1)) in
+  nl > 0 && scan 0
+
+let sse_data_jsons body =
+  String.split_on_char '\n' body
+  |> List.filter_map (fun line ->
+    let prefix = "data:" in
+    if String.starts_with ~prefix line then
+      let payload =
+        String.sub line (String.length prefix) (String.length line - String.length prefix)
+        |> String.trim
+      in
+      try Some (Yojson.Safe.from_string payload) with Yojson.Json_error _ -> None
+    else None)
+
+let sse_id_data_jsons body =
+  let rec collect current_id acc = function
+    | [] -> List.rev acc
+    | line :: rest when String.starts_with ~prefix:"id:" line ->
+      let raw =
+        String.sub line 3 (String.length line - 3) |> String.trim
+      in
+      collect (int_of_string_opt raw) acc rest
+    | line :: rest when String.starts_with ~prefix:"data:" line ->
+      let payload =
+        String.sub line 5 (String.length line - 5) |> String.trim
+      in
+      let acc =
+        match current_id with
+        | None -> acc
+        | Some event_id ->
+          (match Yojson.Safe.from_string payload with
+           | json -> (event_id, json) :: acc
+           | exception Yojson.Json_error _ -> acc)
+      in
+      collect None acc rest
+    | _ :: rest -> collect current_id acc rest
+  in
+  collect None [] (String.split_on_char '\n' body)
+
+let has_numeric_sse_id body =
+  String.split_on_char '\n' body
+  |> List.exists (fun line ->
+    let prefix = "id:" in
+    if String.starts_with ~prefix line then
+      let raw =
+        String.sub line (String.length prefix) (String.length line - String.length prefix)
+        |> String.trim
+      in
+      Option.is_some (int_of_string_opt raw)
+    else false)
+
+let is_masc_event = function
+  | `Assoc fields ->
+    List.assoc_opt "name" fields = Some (`String "MASC_EVENT")
+    && List.assoc_opt "value" fields <> None
+  | _ -> false
+
+(* Guards that /ag-ui/events applies the MASC -> AG-UI encoder to a deterministic
+   observer replay frame rather than forwarding a raw MASC SSE frame.  The
+   source event is produced through the public MCP dispatch path before the
+   reconnect, so this test does not depend on unrelated startup telemetry or
+   timing.  The exact MASC_EVENT envelope check prevents an encoding-error
+   response from becoming a substring false positive; the numeric [id:] check
+   pins the resumability cursor carried by the transformed frame. *)
+let test_ag_ui_frames_are_wire_encoded () =
+  with_server @@ fun ~port ~auth_token ->
+  let sid = initialize_mcp_session ~port ~auth_token in
+  publish_masc_broadcast ~port ~auth_token ~session_id:sid;
+  let headers =
+    [
+      ("Accept", "text/event-stream");
+      ("Authorization", "Bearer " ^ auth_token);
+      ("Mcp-Session-Id", sid);
+      ("Last-Event-ID", "0");
+    ]
+  in
+  let res = run_curl ~headers ~max_time:1.0 ~port ~path:"/ag-ui/events" () in
+  check_status "/ag-ui/events connect accepted" 200 res;
+  let events = sse_data_jsons res.body in
+  if not (List.exists is_masc_event events) then
+    fail
+      (Printf.sprintf
+         "/ag-ui/events frames are not AG-UI encoded (no exact MASC_EVENT envelope): %S"
+         res.body);
+  if not (has_numeric_sse_id res.body) then
+    fail
+      (Printf.sprintf "/ag-ui/events discarded every SSE cursor: %S" res.body);
+  let first_masc_events =
+    sse_id_data_jsons res.body
+    |> List.filter (fun (_event_id, json) -> is_masc_event json)
+  in
+  let second_sid = initialize_mcp_session ~port ~auth_token in
+  let second_headers =
+    [ ("Accept", "text/event-stream")
+    ; ("Authorization", "Bearer " ^ auth_token)
+    ; ("Mcp-Session-Id", second_sid)
+    ; ("Last-Event-ID", "0")
+    ]
+  in
+  let second =
+    run_curl ~headers:second_headers ~max_time:1.0 ~port ~path:"/ag-ui/events" ()
+  in
+  check_status "second /ag-ui/events replay accepted" 200 second;
+  let second_by_id = sse_id_data_jsons second.body in
+  List.iter
+    (fun (event_id, expected_json) ->
+       match List.assoc_opt event_id second_by_id with
+       | Some actual_json ->
+         if actual_json <> expected_json then
+           fail
+             (Printf.sprintf
+                "AG-UI replay changed payload for SSE id %d\nfirst=%s\nsecond=%s"
+                event_id
+                (Yojson.Safe.to_string expected_json)
+                (Yojson.Safe.to_string actual_json))
+       | None ->
+         fail
+           (Printf.sprintf
+              "second AG-UI replay omitted prior SSE id %d"
+              event_id))
+    first_masc_events
+
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ~auth_token ->
   let sid = initialize_mcp_session ~port ~auth_token in
@@ -492,6 +667,13 @@ let test_ag_ui_rejects_reconnect_then_recovers () =
   (* Stay well inside the 1s reconnect guard so the next request is truly immediate. *)
   let first = run_curl ~headers ~max_time:0.2 ~port ~path:"/ag-ui/events?workspace=default" () in
   check_status "first /ag-ui/events connect accepted" 200 first;
+  (* Asserting the status alone let the bridge ship unconverted frames unnoticed.
+     This checks the synthetic prime only — it does NOT cover the drain or replay
+     conversion, which [test_ag_ui_frames_are_wire_encoded] below exercises. *)
+  if not (body_contains "RUN_STARTED" first.body) then
+    fail
+      (Printf.sprintf "/ag-ui/events body is not AG-UI framed (no RUN_STARTED): %S"
+         first.body);
 
   let second = run_curl ~headers ~max_time:0.5 ~port ~path:"/ag-ui/events?workspace=default" () in
   check_status "immediate /ag-ui/events reconnect rejected" 429 second;
@@ -500,10 +682,60 @@ let test_ag_ui_rejects_reconnect_then_recovers () =
   let third = run_curl ~headers ~max_time:1.5 ~port ~path:"/ag-ui/events?workspace=default" () in
   check_status "cooldown /ag-ui/events reconnect recovers" 200 third
 
+let check_invalid_request_response label result =
+  check_status label 400 result;
+  match Yojson.Safe.from_string result.body with
+  | `Assoc fields ->
+      (match List.assoc_opt "error" fields with
+       | Some (`Assoc error_fields) ->
+           (match List.assoc_opt "code" error_fields with
+            | Some (`Int (-32600)) -> ()
+            | _ ->
+                fail
+                  (Printf.sprintf
+                     "%s returned wrong error code: %s" label result.body))
+       | _ ->
+           fail
+             (Printf.sprintf "%s returned no JSON-RPC error: %s" label result.body))
+  | exception Yojson.Json_error message ->
+      fail
+        (Printf.sprintf "%s returned invalid JSON: %s body=%s" label message
+           result.body)
+  | _ ->
+      fail
+        (Printf.sprintf "%s returned a non-object body: %s" label result.body)
+
+let test_sse_endpoints_reject_malformed_last_event_id () =
+  with_server @@ fun ~port ~auth_token ->
+  let sid = initialize_mcp_session ~port ~auth_token in
+  let headers cursor =
+    [ ("Accept", "text/event-stream")
+    ; ("Authorization", "Bearer " ^ auth_token)
+    ; ("Mcp-Session-Id", sid)
+    ; ("Last-Event-ID", cursor)
+    ]
+  in
+  check_invalid_request_response "malformed /mcp cursor rejected"
+    (run_curl ~headers:(headers "not-an-integer") ~max_time:2.0 ~port ~path:"/mcp" ());
+  check_invalid_request_response "malformed /ag-ui/events cursor rejected"
+    (run_curl ~headers:(headers "not-an-integer") ~max_time:2.0 ~port
+       ~path:"/ag-ui/events" ());
+  check_invalid_request_response "negative /mcp cursor rejected"
+    (run_curl ~headers:(headers "-1") ~max_time:2.0 ~port ~path:"/mcp" ());
+  check_invalid_request_response "negative /ag-ui/events cursor rejected"
+    (run_curl ~headers:(headers "-1") ~max_time:2.0 ~port
+       ~path:"/ag-ui/events" ())
+
 let () =
   Random.self_init ();
   run "sse_storm_e2e"
     [
       ("mcp", [test_case "follow-up reconnect accepted" `Slow test_mcp_reconnect_stays_accepted]);
-      ("ag_ui", [test_case "reconnect cooldown + recovery" `Slow test_ag_ui_rejects_reconnect_then_recovers]);
+      ("ag_ui",
+       [
+         test_case "reconnect cooldown + recovery" `Slow test_ag_ui_rejects_reconnect_then_recovers;
+         test_case "malformed Last-Event-ID is rejected" `Slow
+           test_sse_endpoints_reject_malformed_last_event_id;
+         test_case "frames are AG-UI wire encoded" `Slow test_ag_ui_frames_are_wire_encoded;
+       ]);
     ]

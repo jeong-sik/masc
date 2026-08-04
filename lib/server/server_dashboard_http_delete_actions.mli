@@ -26,6 +26,7 @@ val add_delete_action_routes :
     repeat-safely; non-dashboard actions delegate to the supervisor cleanup
     handler. *)
 val handle_keeper_lifecycle_completion :
+  now:float ->
   Workspace.config ->
   Keeper_shutdown_types.t ->
   Keeper_shutdown_types.completion_action ->

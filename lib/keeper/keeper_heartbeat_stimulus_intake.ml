@@ -410,6 +410,7 @@ let reconcile_spent_selection
        (match
           Schedule_store.execution_for_occurrence
             state
+            ~schedule_instance_id:wake.schedule_instance_id
             ~schedule_id:wake.schedule_id
             ~due_at:wake.due_at
             ~payload_digest:wake.payload_digest
@@ -603,9 +604,11 @@ let heartbeat_event_intake
          then acc
          else (
            (match event.Keeper_world_observation.event_kind with
-            | Keeper_world_observation.Schedule_due ->
+            | Keeper_world_observation.Schedule_due wake ->
               Log.Keeper.info
-                "turn entry: promoted scheduled work occurrence_id=%s keeper=%s"
+                "turn entry: promoted scheduled work schedule_id=%s \
+                 occurrence_id=%s keeper=%s"
+                wake.Keeper_event_queue.schedule_id
                 event.Keeper_world_observation.post_id
                 meta_after_triage.name
             | Keeper_world_observation.Board_post_created

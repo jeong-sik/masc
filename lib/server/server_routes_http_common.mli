@@ -143,8 +143,6 @@ val classify_mcp_accept :
   Httpun.Request.t ->
   Mcp_transport_protocol.Http_negotiation.accept_mode
 val force_json_response : bool
-val get_last_event_id : Httpun.Request.t -> int option
-
 (** {1 Header builders} *)
 
 val mcp_headers : string -> string -> (string * string) list

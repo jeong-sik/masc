@@ -16,6 +16,11 @@ let test_frame_derives_from_ssot () =
     (Printf.sprintf ": presence-stream\nretry: %d\n\n" H.sse_retry_ms)
     (H.sse_comment_with_retry ~comment:"presence-stream")
 
+let test_prime_does_not_advance_replay_cursor () =
+  check string "transport-only prime has no durable event id"
+    (Printf.sprintf "retry: %d\n\n" H.sse_retry_ms)
+    (H.sse_prime_event ())
+
 let test_comment_interpolated_retry_constant () =
   let a = H.sse_comment_with_retry ~comment:"activity-stream after=7" in
   let b = H.sse_comment_with_retry ~comment:"presence-stream" in
@@ -33,6 +38,8 @@ let () =
         [
           test_case "frame derives from sse_retry_ms" `Quick
             test_frame_derives_from_ssot;
+          test_case "prime omits replay cursor id" `Quick
+            test_prime_does_not_advance_replay_cursor;
           test_case "comment interpolated, retry constant" `Quick
             test_comment_interpolated_retry_constant;
         ] );

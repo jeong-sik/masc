@@ -492,35 +492,6 @@ let main_eio_env_overrides overrides =
      :: ("MASC_INTERNAL_MCP_TOKEN", "")
      :: overrides)
 
-let find_main_eio_exe () =
-  let root = project_root () in
-  let shared_root =
-    root |> Filename.dirname |> Filename.dirname |> Filename.dirname
-  in
-  let build_roots = [ root; Filename.dirname root; shared_root ] in
-  let candidates =
-    [
-      Filename.concat root "bin/main_eio.exe";
-      Filename.concat root "_build/default/bin/main_eio.exe";
-      Filename.concat root "_build/default/masc/bin/main_eio.exe";
-    ]
-    @ List.concat_map
-        (fun base ->
-          [
-            Filename.concat base "bin/main_eio.exe";
-            Filename.concat base "_build/default/bin/main_eio.exe";
-            Filename.concat base "_build/default/masc/bin/main_eio.exe";
-          ])
-        build_roots
-    @ [
-      Filename.concat shared_root "_build/default/bin/main_eio.exe";
-      Filename.concat shared_root "_build/default/masc/bin/main_eio.exe";
-    ]
-  in
-  match List.find_opt Sys.file_exists candidates with
-  | Some path -> path
-  | None -> Alcotest.fail "main_eio executable not found"
-
 let curl_health_status ~port =
   let url = Printf.sprintf "http://127.0.0.1:%d/health" port in
   let args =
@@ -4396,7 +4367,7 @@ let test_prompt_markdown_dir_prefers_resolved_config_dir_over_cwd () =
 
 let test_main_eio_serves_health_before_lazy_startup () =
   with_temp_dir "startup-health" (fun dir ->
-      let exe = find_main_eio_exe () in
+      let exe = Masc_test_runtime.find_main_eio_exe () in
       let port = find_free_port () in
       let log_file = Filename.concat dir "server.log" in
       let log_fd =
@@ -4441,7 +4412,7 @@ let test_main_eio_serves_health_before_lazy_startup () =
 
 let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
   with_temp_dir "startup-fresh-boot-e2e" (fun dir ->
-      let exe = find_main_eio_exe () in
+      let exe = Masc_test_runtime.find_main_eio_exe () in
       let port = find_free_port () in
       let log_file = Filename.concat dir "server.log" in
       let log_fd =
@@ -4593,7 +4564,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
 
 let test_main_eio_preserves_cli_agent_mcp_token_file () =
   with_temp_dir "startup-codex-token-preserve" (fun dir ->
-      let exe = find_main_eio_exe () in
+      let exe = Masc_test_runtime.find_main_eio_exe () in
       let port = find_free_port () in
       let log_file = Filename.concat dir "server.log" in
       let log_fd =
@@ -4803,7 +4774,7 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
 
 let test_main_eio_rejects_same_base_path_on_second_server () =
   with_temp_dir "startup-base-path-owner-lock" (fun dir ->
-      let exe = find_main_eio_exe () in
+      let exe = Masc_test_runtime.find_main_eio_exe () in
       let primary_port = find_free_port () in
       let secondary_port = find_free_port_from (primary_port + 1) in
       let primary_log = Filename.concat dir "primary.log" in
@@ -4889,7 +4860,7 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
 
 let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
   with_temp_dir "startup-invalid-runtime" (fun dir ->
-      let exe = find_main_eio_exe () in
+      let exe = Masc_test_runtime.find_main_eio_exe () in
       let port = find_free_port () in
       let log_file = Filename.concat dir "server.log" in
       let log_fd =
@@ -4956,7 +4927,7 @@ let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
 
 let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
   with_temp_dir "startup-partial-runtime" (fun dir ->
-      let exe = find_main_eio_exe () in
+      let exe = Masc_test_runtime.find_main_eio_exe () in
       let port = find_free_port () in
       let mock_port = find_free_port_from (port + 1) in
       let mock_pid =
@@ -5028,7 +4999,7 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
 
 let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
   with_temp_dir "startup-default-invalid-partial-runtime" (fun dir ->
-      let exe = find_main_eio_exe () in
+      let exe = Masc_test_runtime.find_main_eio_exe () in
       let port = find_free_port () in
       let mock_port = find_free_port_from (port + 1) in
       let mock_pid =

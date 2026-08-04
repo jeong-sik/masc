@@ -7,6 +7,7 @@ type keeper_wake_reaction_ledger_status =
 type keeper_wake_occurrence_status =
   | Keeper_wake_awaiting_ack
   | Keeper_wake_already_acked
+  | Keeper_wake_already_failed
   | Keeper_wake_already_cancelled
 
 type keeper_wake_activation_deferred_reason =
@@ -26,6 +27,7 @@ type keeper_wake_activation_outcome =
 type dispatch_receipt =
   | Keeper_wake_enqueued of
       { keeper_name : string
+      ; schedule_instance_id : string
       ; schedule_id : string
       ; urgency : string
       ; post_id : string
@@ -47,3 +49,80 @@ val consumer : Schedule_runner.consumer
 
     The schedule core remains opaque; this adapter is the MASC server layer that
     interprets explicitly supported payload envelopes. *)
+
+type keeper_purge_error =
+  | Schedule_ledger_read_error of Schedule_store.read_error
+  | Durable_queue_read_error of { keeper_name : string; detail : string }
+  | Durable_queue_index_error of { keeper_name : string; detail : string }
+  | Invalid_execution_detail of { occurrence_id : string; detail : string }
+  | Pending_transferred_occurrence of
+      { source_keeper : string
+      ; owner : string
+      ; occurrence_id : string
+      }
+  | Projecting_transferred_occurrence of
+      { source_keeper : string
+      ; owner : string
+      ; target : string
+      ; occurrence_id : string
+      }
+  | Missing_transferred_evidence of
+      { source_keeper : string
+      ; owner : string
+      ; occurrence_id : string
+      }
+  | Unprojected_schedule_transfer of
+      { keeper_name : string; target : string; occurrence_id : string }
+  | Transfer_resolution_error of
+      { source_keeper : string
+      ; target : string
+      ; occurrence_id : string
+      ; detail : string
+      }
+  | Projected_transfer_source_read_error of
+      { source_keeper : string
+      ; target_keeper : string
+      ; operation_id : string
+      ; detail : string
+      }
+  | Projected_transfer_source_outbox_pending of
+      { source_keeper : string
+      ; target_keeper : string
+      ; operation_id : string
+      }
+  | Projected_transfer_source_conflict of
+      { source_keeper : string
+      ; target_keeper : string
+      ; operation_id : string
+      }
+  | Mismatched_schedule_evidence of
+      { keeper_name : string; occurrence_id : string }
+  | Non_schedule_evidence of
+      { keeper_name : string; occurrence_id : string }
+  | Missing_schedule_evidence of
+      { keeper_name : string; occurrence_id : string }
+  | Schedule_ledger_write_error of Schedule_store.store_error
+
+val keeper_purge_error_to_string : keeper_purge_error -> string
+
+val settle_keeper_purge_occurrences :
+  Workspace_utils.config ->
+  keeper_name:string ->
+  operation_id:string ->
+  now:float ->
+  (unit, keeper_purge_error) result
+(** Project every exact unsettled occurrence owned by [keeper_name] into the
+    schedule ledger before its durable queue is deleted. Pending work becomes
+    an explicit purge cancellation; existing terminal evidence keeps its exact
+    outcome. Missing evidence and in-flight transfers fail closed. *)
+
+module For_testing : sig
+  val settlements_with_read_state :
+    read_state:
+      (base_path:string ->
+       string ->
+       (Keeper_event_queue_state.t, string) result) ->
+    Workspace_utils.config ->
+    Schedule_domain.execution_record list ->
+    (Schedule_runner.settlement_evidence, string) result list
+end

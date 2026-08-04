@@ -131,17 +131,20 @@ let keeper_wake_reaction_ledger_status_json_fields = function
 type keeper_wake_occurrence_status =
   | Keeper_wake_awaiting_ack
   | Keeper_wake_already_acked
+  | Keeper_wake_already_failed
   | Keeper_wake_already_cancelled
 
 let keeper_wake_occurrence_status_to_string = function
   | Keeper_wake_awaiting_ack -> "awaiting_ack"
   | Keeper_wake_already_acked -> "already_acked"
+  | Keeper_wake_already_failed -> "already_failed"
   | Keeper_wake_already_cancelled -> "already_cancelled"
 ;;
 
 let keeper_wake_occurrence_status_of_string = function
   | "awaiting_ack" -> Ok Keeper_wake_awaiting_ack
   | "already_acked" -> Ok Keeper_wake_already_acked
+  | "already_failed" -> Ok Keeper_wake_already_failed
   | "already_cancelled" -> Ok Keeper_wake_already_cancelled
   | value -> Error ("unsupported occurrence_status: " ^ value)
 ;;
@@ -249,6 +252,7 @@ let keeper_wake_activation_outcome_json_fields = function
 type dispatch_receipt =
   | Keeper_wake_enqueued of
       { keeper_name : string
+      ; schedule_instance_id : string
       ; schedule_id : string
       ; urgency : string
       ; post_id : string
@@ -266,6 +270,7 @@ let dispatch_receipt_of_detail = function
     if String.equal kind keeper_wake_enqueued_kind
     then
       let* keeper_name = keeper_name_field "keeper_name" fields in
+      let* schedule_instance_id = string_field "schedule_instance_id" fields in
       let* schedule_id = string_field "schedule_id" fields in
       let* urgency = string_field "urgency" fields in
       let* post_id = string_field "post_id" fields in
@@ -290,15 +295,21 @@ let dispatch_receipt_of_detail = function
           Ok ()
         | Keeper_wake_awaiting_ack, Keeper_wake_activation_not_required ->
           Error "awaiting_ack occurrence requires an activation outcome"
-        | (Keeper_wake_already_acked | Keeper_wake_already_cancelled),
+        | ( Keeper_wake_already_acked
+          | Keeper_wake_already_failed
+          | Keeper_wake_already_cancelled ),
           Keeper_wake_activation_not_required ->
           Ok ()
-        | (Keeper_wake_already_acked | Keeper_wake_already_cancelled), _ ->
+        | ( Keeper_wake_already_acked
+          | Keeper_wake_already_failed
+          | Keeper_wake_already_cancelled ),
+          _ ->
           Error "terminal occurrence requires activation_status=not_required"
       in
       Ok
         (Keeper_wake_enqueued
            { keeper_name
+           ; schedule_instance_id
            ; schedule_id
            ; urgency
            ; post_id
@@ -316,6 +327,7 @@ let dispatch_receipt_of_detail = function
 let dispatch_receipt_to_yojson = function
   | Keeper_wake_enqueued
       { keeper_name
+      ; schedule_instance_id
       ; schedule_id
       ; urgency
       ; post_id
@@ -335,6 +347,7 @@ let dispatch_receipt_to_yojson = function
            | None -> `Null
            | Some value -> `String value )
        ; "keeper_name", `String keeper_name
+       ; "schedule_instance_id", `String schedule_instance_id
        ; "schedule_id", `String schedule_id
        ; "urgency", `String urgency
        ; "post_id", `String post_id
@@ -386,9 +399,40 @@ let record_keeper_wake_stimulus ~base_path ~keeper_name stimulus =
          (Printexc.to_string exn))
 ;;
 
+let ensure_keeper_wake_stimulus_recorded
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+      stimulus
+  =
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  with
+  | Ok (Keeper_reaction_ledger.Evidence_complete { stimulus_seen = true; _ }) ->
+    Keeper_wake_reaction_ledger_recorded
+  | Ok (Keeper_reaction_ledger.Evidence_complete { stimulus_seen = false; _ }) ->
+    record_keeper_wake_stimulus ~base_path ~keeper_name stimulus
+  | Ok (Keeper_reaction_ledger.Evidence_quarantined { first_reason; _ }) ->
+    Keeper_wake_reaction_ledger_record_failed
+      (Printf.sprintf
+         "scheduled keeper reaction ledger evidence is quarantined: %s"
+         (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason))
+  | Error error ->
+    Keeper_wake_reaction_ledger_record_failed
+      (Printf.sprintf
+         "failed to read scheduled keeper reaction ledger evidence: %s"
+         (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+            error))
+;;
+
 type keeper_wake_acceptance =
   | Wake_required
+  | Already_pending of string
   | Already_acked
+  | Already_failed of string
   | Already_cancelled
 
 let activation_deferred_of_paused_dead = function
@@ -501,62 +545,361 @@ let retryable_dispatch_failure detail =
   Error (Schedule_runner.Retryable_dispatch_failure detail)
 ;;
 
-let reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
-  try
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id
-    |> Result.map_error (fun error ->
-      "failed to read keeper reaction ledger stimulus: "
-      ^ Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
-          error)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Error
-      (Printf.sprintf
-         "failed to read keeper reaction ledger stimulus: %s"
-         (Printexc.to_string exn))
-;;
-
-let accept_keeper_wake_occurrence
+let accept_with_recorded_stimulus
       ~base_path
       ~keeper_name
       ~stimulus_id
       stimulus
+      acceptance
   =
-  match reaction_evidence_result ~base_path ~keeper_name ~stimulus_id with
+  match
+    ensure_keeper_wake_stimulus_recorded
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+      stimulus
+  with
+  | Keeper_wake_reaction_ledger_recorded -> Ok acceptance
+  | Keeper_wake_reaction_ledger_record_failed detail ->
+    retryable_dispatch_failure detail
+;;
+
+type durable_occurrence_state =
+  | Pending
+  | Transfer_projecting_to of string
+  | Transferred_to of string
+  | Terminally_completed of terminal_evidence_status
+  | Terminally_failed of string * terminal_evidence_status
+  | Cancelled of string * terminal_evidence_status
+
+and terminal_evidence_status =
+  | Terminal_evidence_pending of string
+  | Terminal_evidence_recorded
+
+type durable_occurrence_disposition =
+  { source : Keeper_event_queue.stimulus
+  ; source_incarnation : int64
+  ; state : durable_occurrence_state
+  }
+
+type resolved_occurrence_disposition =
+  | Pending_at of string * Keeper_event_queue.stimulus
+  | Transfer_projecting_at of string * string
+  | Terminal_completed_at of
+      string * Keeper_event_queue.stimulus * terminal_evidence_status
+  | Terminal_failed_at of
+      string * Keeper_event_queue.stimulus * string * terminal_evidence_status
+  | Terminal_cancelled_at of
+      string * Keeper_event_queue.stimulus * string * terminal_evidence_status
+  | Absent_at of string
+
+let terminal_evidence_status_equal left right =
+  match left, right with
+  | Terminal_evidence_recorded, Terminal_evidence_recorded -> true
+  | Terminal_evidence_pending left, Terminal_evidence_pending right ->
+    String.equal left right
+  | Terminal_evidence_recorded, Terminal_evidence_pending _
+  | Terminal_evidence_pending _, Terminal_evidence_recorded -> false
+;;
+
+let occurrence_state_equal left right =
+  match left, right with
+  | Pending, Pending -> true
+  | Terminally_completed left, Terminally_completed right ->
+    terminal_evidence_status_equal left right
+  | Terminally_failed (left_reason, left_evidence),
+    Terminally_failed (right_reason, right_evidence)
+  | Cancelled (left_reason, left_evidence),
+    Cancelled (right_reason, right_evidence) ->
+    String.equal left_reason right_reason
+    && terminal_evidence_status_equal left_evidence right_evidence
+  | Transfer_projecting_to left, Transfer_projecting_to right
+  | Transferred_to left, Transferred_to right -> String.equal left right
+  | ( Pending
+    | Transfer_projecting_to _
+    | Transferred_to _
+    | Terminally_completed _
+    | Terminally_failed _
+    | Cancelled _ )
+    , _ -> false
+;;
+
+let occurrence_source_and_disposition
+      ~projecting
+      (receipt : Keeper_event_queue_state.transition_receipt)
+  =
+  let terminal_evidence =
+    if projecting
+    then Terminal_evidence_pending receipt.transition_id
+    else Terminal_evidence_recorded
+  in
+  match receipt.transition with
+  | Keeper_event_queue_state.Cancel_accepted cancellation ->
+    ( cancellation.source
+    , { source = cancellation.source
+      ; source_incarnation = cancellation.source_incarnation
+      ; state = Cancelled (cancellation.reason, terminal_evidence)
+      } )
+  | Keeper_event_queue_state.Transfer_accepted transfer ->
+    ( transfer.source
+    , { source = transfer.source
+      ; source_incarnation = transfer.source_incarnation
+      ; state =
+          (if projecting
+           then Transfer_projecting_to transfer.to_keeper
+           else Transferred_to transfer.to_keeper)
+      } )
+  | Keeper_event_queue_state.Ack_source_terminal terminal ->
+    let state =
+      match terminal.source_receipt with
+      | Keeper_event_queue_state.Turn_attempt_terminal { detail } ->
+        Terminally_failed (detail, terminal_evidence)
+      | Keeper_event_queue_state.Fusion_terminal _
+      | Keeper_event_queue_state.Background_job_terminal _
+      | Keeper_event_queue_state.Hitl_terminal _ ->
+        Terminally_completed terminal_evidence
+    in
+    ( terminal.source
+    , { source = terminal.source
+      ; source_incarnation = terminal.source_incarnation
+      ; state
+      } )
+;;
+
+let durable_occurrence_index state =
+  let index = Hashtbl.create 16 in
+  let add occurrence_id disposition =
+    match Hashtbl.find_opt index occurrence_id with
+    | None ->
+      Hashtbl.add index occurrence_id disposition;
+      Ok ()
+    | Some existing ->
+      let incarnation_order =
+        Int64.compare disposition.source_incarnation existing.source_incarnation
+      in
+      if incarnation_order > 0
+      then (
+        Hashtbl.replace index occurrence_id disposition;
+        Ok ())
+      else if incarnation_order < 0
+      then Ok ()
+      else if existing.source = disposition.source
+              && occurrence_state_equal existing.state disposition.state
+      then Ok ()
+      else
+      Error
+        (Printf.sprintf
+           "conflicting durable queue dispositions for occurrence %s incarnation %Ld"
+           occurrence_id
+           disposition.source_incarnation)
+  in
+  let rec add_pending = function
+    | [] -> Ok ()
+    | (selection : Keeper_event_queue_state.pending_selection) :: rest ->
+      let* () =
+        add
+          selection.source.post_id
+          { source = selection.source
+          ; source_incarnation = selection.admitted_revision
+          ; state = Pending
+          }
+      in
+      add_pending rest
+  in
+  let rec add_receipts ~projecting = function
+    | [] -> Ok ()
+    | receipt :: rest ->
+      let source, disposition =
+        occurrence_source_and_disposition ~projecting receipt
+      in
+      let* () = add source.post_id disposition in
+      add_receipts ~projecting rest
+  in
+  let* () =
+    Keeper_event_queue_state.pending_selections state
+    |> add_pending
+  in
+  let* () =
+    Keeper_event_queue_state.transition_outbox state
+    |> List.map (fun (entry : Keeper_event_queue_state.outbox_entry) -> entry.receipt)
+    |> add_receipts ~projecting:true
+  in
+  let* () =
+    Keeper_event_queue_state.projected_transition_receipts state
+    |> add_receipts ~projecting:false
+  in
+  Ok index
+;;
+
+let owner_index_result cache ~read_state ~base_path keeper_name =
+  match Hashtbl.find_opt cache keeper_name with
+  | Some result -> result
+  | None ->
+    let result =
+      let* state =
+        read_state ~base_path keeper_name
+        |> Result.map_error (fun detail ->
+          Printf.sprintf
+            "scheduled keeper wake durable state read failed keeper=%s: %s"
+            keeper_name
+            detail)
+      in
+      durable_occurrence_index state
+    in
+    Hashtbl.add cache keeper_name result;
+    result
+;;
+
+let rec resolve_durable_occurrence
+          cache
+          ~read_state
+          ~base_path
+          ~occurrence_id
+          ~visited
+          keeper_name
+  =
+  if List.exists (String.equal keeper_name) visited
+  then Error ("durable queue transfer cycle at keeper " ^ keeper_name)
+  else
+    let* index = owner_index_result cache ~read_state ~base_path keeper_name in
+    match Hashtbl.find_opt index occurrence_id with
+    | None -> Ok (Absent_at keeper_name)
+    | Some { source; state = Pending; _ } -> Ok (Pending_at (keeper_name, source))
+    | Some { source; state = Terminally_completed evidence; _ } ->
+      Ok (Terminal_completed_at (keeper_name, source, evidence))
+    | Some { source; state = Terminally_failed (reason, evidence); _ } ->
+      Ok (Terminal_failed_at (keeper_name, source, reason, evidence))
+    | Some { source; state = Cancelled (reason, evidence); _ } ->
+      Ok (Terminal_cancelled_at (keeper_name, source, reason, evidence))
+    | Some { state = Transfer_projecting_to target; _ } ->
+      (* The source outbox is the sole durable authority until projection
+         retires it. Reading or activating the target here would turn a valid
+         pre-commit absence into either false loss or a speculative wake. *)
+      Ok (Transfer_projecting_at (keeper_name, target))
+    | Some { state = Transferred_to target; _ } ->
+      let target_was_cached = Hashtbl.mem cache target in
+      let resolve_target () =
+        resolve_durable_occurrence
+          cache
+          ~read_state
+          ~base_path
+          ~occurrence_id
+          ~visited:(keeper_name :: visited)
+          target
+      in
+      let* target_disposition = resolve_target () in
+      (match target_disposition with
+       | Absent_at _ when target_was_cached ->
+         (* A transfer is marked projected only after the target commit. A
+            cached target snapshot may predate that commit when the same batch
+            resolved another occurrence first, so absence must be revalidated
+            against a fresh target snapshot before it can become loss proof. *)
+         Hashtbl.remove cache target;
+         resolve_target ()
+       | disposition -> Ok disposition)
+;;
+
+let resolved_occurrence_owner = function
+  | Pending_at (owner, _)
+  | Terminal_completed_at (owner, _, _)
+  | Terminal_failed_at (owner, _, _, _)
+  | Terminal_cancelled_at (owner, _, _, _)
+  | Absent_at owner -> owner
+  | Transfer_projecting_at (source, _) -> source
+;;
+
+let resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id =
+  resolve_durable_occurrence
+    (Hashtbl.create 4)
+    ~read_state:Keeper_registry_event_queue.durable_state_result
+    ~base_path
+    ~occurrence_id:stimulus_id
+    ~visited:[]
+    keeper_name
+;;
+
+let accept_keeper_wake_occurrence
+      ?intake_token
+      ~base_path
+      ~keeper_name
+      ~expected_owner
+      ~stimulus_id
+      stimulus
+  =
+  let accept_terminal
+        ~owner
+        ~durable_stimulus
+        ~evidence
+        acceptance
+    =
+    let* () =
+      match evidence with
+      | Terminal_evidence_recorded -> Ok ()
+      | Terminal_evidence_pending transition_id ->
+        Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+          ~base_path
+          ~keeper_name:owner
+          ~expected_transition_id:transition_id
+        |> Result.map_error (fun detail ->
+          Schedule_runner.Retryable_dispatch_failure detail)
+    in
+    accept_with_recorded_stimulus
+      ~base_path
+      ~keeper_name:owner
+      ~stimulus_id
+      durable_stimulus
+      acceptance
+  in
+  match
+    resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id
+  with
   | Error detail -> retryable_dispatch_failure detail
-  | Ok
-      (Keeper_reaction_ledger.Evidence_quarantined
-        { first_reason; _ }) ->
+  | Ok disposition
+    when not
+           (String.equal
+              expected_owner
+              (resolved_occurrence_owner disposition)) ->
     retryable_dispatch_failure
       (Printf.sprintf
-         "keeper reaction ledger evidence quarantined for occurrence %s: %s"
-         stimulus_id
-         (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason))
-  | Ok (Keeper_reaction_ledger.Evidence_complete evidence)
-    when evidence.event_queue_ack_seen && evidence.event_queue_cancelled_seen ->
+         "scheduled keeper wake owner changed while acquiring intake fence expected=%s actual=%s"
+         expected_owner
+         (resolved_occurrence_owner disposition))
+  | Ok (Transfer_projecting_at (source, target)) ->
     retryable_dispatch_failure
       (Printf.sprintf
-         "keeper reaction ledger has conflicting terminal settlements for occurrence %s"
+         "scheduled keeper wake transfer projection pending source=%s target=%s"
+         source
+         target)
+  | Ok (Pending_at (owner, durable_stimulus)) ->
+    (* A prior attempt may have committed the queue entry and then failed the
+       independent reaction-ledger append. Verify the exact stimulus identity
+       and repair only an absent row before reporting durable acceptance. *)
+    accept_with_recorded_stimulus
+      ~base_path
+      ~keeper_name:owner
+      ~stimulus_id
+      durable_stimulus
+      (Already_pending owner)
+  | Ok (Terminal_completed_at (owner, durable_stimulus, evidence)) ->
+    accept_terminal ~owner ~durable_stimulus ~evidence Already_acked
+  | Ok (Terminal_failed_at (owner, durable_stimulus, reason, evidence)) ->
+    accept_terminal
+      ~owner
+      ~durable_stimulus
+      ~evidence
+      (Already_failed reason)
+  | Ok (Terminal_cancelled_at (owner, durable_stimulus, _, evidence)) ->
+    accept_terminal ~owner ~durable_stimulus ~evidence Already_cancelled
+  | Ok (Absent_at owner) when not (String.equal owner keeper_name) ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "scheduled keeper wake transferred owner is missing occurrence owner=%s occurrence=%s"
+         owner
          stimulus_id)
-  | Ok (Keeper_reaction_ledger.Evidence_complete evidence)
-    when evidence.event_queue_cancelled_seen ->
-    (* The transition projector appends this exact-id cancellation before
-       retiring its outbox entry. Producer recovery must therefore preserve
-       the terminal operator disposition instead of recreating the wake. *)
-    Ok Already_cancelled
-  | Ok (Keeper_reaction_ledger.Evidence_complete evidence)
-    when evidence.event_queue_ack_seen ->
-    (* The transition projector appends this exact-id ACK before retiring its
-       outbox entry. It is therefore the durable terminal occurrence fence,
-       independent of pending/lease/outbox retention. *)
-    Ok Already_acked
-  | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+  | Ok (Absent_at _) ->
     (match
        Keeper_registry_event_queue.enqueue_stimulus_durable_result
+         ?intake_token
          ~base_path
          keeper_name
          stimulus
@@ -566,12 +909,10 @@ let accept_keeper_wake_occurrence
          ("scheduled keeper wake durable enqueue failed: " ^ detail)
      | Keeper_registry_event_queue.Stimulus_enqueued
      | Keeper_registry_event_queue.Stimulus_already_present ->
-       if evidence.stimulus_seen then Ok Wake_required
-       else
-         (match record_keeper_wake_stimulus ~base_path ~keeper_name stimulus with
-          | Keeper_wake_reaction_ledger_recorded -> Ok Wake_required
-          | Keeper_wake_reaction_ledger_record_failed detail ->
-            retryable_dispatch_failure detail))
+       (match record_keeper_wake_stimulus ~base_path ~keeper_name stimulus with
+        | Keeper_wake_reaction_ledger_recorded -> Ok Wake_required
+        | Keeper_wake_reaction_ledger_record_failed detail ->
+          retryable_dispatch_failure detail))
 ;;
 
 let dispatch_keeper_wake
@@ -579,6 +920,7 @@ let dispatch_keeper_wake
       ~now
       (signal : Schedule_runner.wake_signal)
       (request : Schedule_domain.schedule_request)
+      ~commit_acceptance
       payload
   =
   let* keeper_name = terminal_dispatch_result (body_keeper_name payload) in
@@ -599,7 +941,8 @@ let dispatch_keeper_wake
     |> keeper_queue_urgency_of_schedule_urgency
   in
   let wake : Keeper_event_queue.scheduled_wake =
-    { schedule_id = request.Schedule_domain.schedule_id
+    { schedule_instance_id = request.Schedule_domain.schedule_instance_id
+    ; schedule_id = request.Schedule_domain.schedule_id
     ; due_at = request.due_at
     ; payload_digest = Schedule_domain.payload_digest request.payload
     ; title
@@ -615,61 +958,114 @@ let dispatch_keeper_wake
   in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
   let base_path = config.Workspace_utils.base_path in
-  let* acceptance =
-    accept_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id stimulus
+  let* initial_disposition =
+    match resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id with
+    | Ok disposition -> Ok disposition
+    | Error detail -> retryable_dispatch_failure detail
   in
-  let occurrence_status =
-    match acceptance with
-    | Wake_required -> Keeper_wake_awaiting_ack
-    | Already_acked -> Keeper_wake_already_acked
-    | Already_cancelled -> Keeper_wake_already_cancelled
-  in
-  let activation_outcome =
-    match acceptance with
-    | Already_acked | Already_cancelled ->
-      Keeper_wake_activation_not_required
-    | Wake_required ->
-      activation_outcome_for_required_wake
-        config
+  let intake_owner = resolved_occurrence_owner initial_disposition in
+  let dispatch_while_fenced intake_token =
+    let* acceptance =
+      accept_keeper_wake_occurrence
+        ~intake_token
         ~base_path
         ~keeper_name
+        ~expected_owner:intake_owner
+        ~stimulus_id
+        stimulus
+    in
+    let occurrence_status =
+      match acceptance with
+      | Wake_required | Already_pending _ -> Keeper_wake_awaiting_ack
+      | Already_acked -> Keeper_wake_already_acked
+      | Already_failed _ -> Keeper_wake_already_failed
+      | Already_cancelled -> Keeper_wake_already_cancelled
+    in
+    let activation_outcome =
+      match acceptance with
+      | Already_acked | Already_failed _ | Already_cancelled ->
+        Keeper_wake_activation_not_required
+      | Wake_required ->
+        activation_outcome_for_required_wake
+          config
+          ~base_path
+          ~keeper_name
+      | Already_pending owner ->
+        activation_outcome_for_required_wake
+          config
+          ~base_path
+          ~keeper_name:owner
+    in
+    let activation_keeper_name =
+      match acceptance with
+      | Already_pending owner -> owner
+      | Wake_required | Already_acked | Already_failed _ | Already_cancelled ->
+        keeper_name
+    in
+    log_activation_outcome
+      ~schedule_id:request.schedule_id
+      ~keeper_name:activation_keeper_name
+      activation_outcome;
+    let detail =
+      `Assoc
+        ([ "kind", `String keeper_wake_enqueued_kind
+         ; "queue", `String keeper_event_queue_label
+         ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+         ; "stimulus_id", `String stimulus_id
+         ; "keeper_name", `String keeper_name
+         ; "schedule_instance_id", `String request.schedule_instance_id
+         ; "schedule_id", `String request.schedule_id
+         ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
+         ; "post_id", `String stimulus.post_id
+         ; ( "occurrence_status"
+           , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
+         ]
+         @ keeper_wake_activation_outcome_json_fields activation_outcome
+         @ keeper_wake_reaction_ledger_status_json_fields
+             (Some Keeper_wake_reaction_ledger_recorded))
+    in
+    match acceptance with
+    | Wake_required | Already_pending _ ->
+      let* acceptance_commit = commit_acceptance detail in
+      Ok (Schedule_runner.Work_accepted { detail; acceptance_commit })
+    | Already_acked ->
+      let* acceptance_commit = commit_acceptance detail in
+      Ok
+        (Schedule_runner.Work_completed_after_acceptance
+           { detail; acceptance_commit })
+    | Already_failed reason ->
+      let* acceptance_commit = commit_acceptance detail in
+      Ok
+        (Schedule_runner.Work_failed_after_acceptance
+           { error = reason; detail; acceptance_commit })
+    | Already_cancelled ->
+      let* acceptance_commit = commit_acceptance detail in
+      Ok
+        (Schedule_runner.Work_failed_after_acceptance
+           { error =
+               Printf.sprintf
+                 "scheduled keeper occurrence %s was already cancelled"
+                 stimulus_id
+           ; detail
+           ; acceptance_commit
+           })
   in
-  log_activation_outcome
-    ~schedule_id:request.schedule_id
-    ~keeper_name
-    activation_outcome;
-  let detail =
-    `Assoc
-      ([ "kind", `String keeper_wake_enqueued_kind
-       ; "queue", `String keeper_event_queue_label
-       ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
-       ; "stimulus_id", `String stimulus_id
-       ; "keeper_name", `String keeper_name
-       ; "schedule_id", `String request.schedule_id
-       ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
-       ; "post_id", `String stimulus.post_id
-       ; ( "occurrence_status"
-         , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
-       ]
-       @ keeper_wake_activation_outcome_json_fields activation_outcome
-       @ keeper_wake_reaction_ledger_status_json_fields
-           (Some Keeper_wake_reaction_ledger_recorded))
-  in
-  match acceptance with
-  | Wake_required -> Ok (Schedule_runner.Work_accepted detail)
-  | Already_acked -> Ok (Schedule_runner.Work_completed detail)
-  | Already_cancelled ->
-    Ok
-      (Schedule_runner.Work_failed
-         { error =
-             Printf.sprintf
-               "scheduled keeper occurrence %s was already cancelled"
-               stimulus_id
-         ; detail
-         })
+  match
+    Keeper_turn_admission.run_durable_intake_if_open
+      ~base_path
+      ~keeper_name:intake_owner
+      dispatch_while_fenced
+  with
+  | Keeper_turn_admission.Intake_committed result -> result
+  | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
+         intake_owner
+         (Keeper_shutdown_types.Operation_id.to_string operation_id))
 ;;
 
-let dispatch config ~now signal request =
+let dispatch config ~now signal request ~commit_acceptance =
   match Schedule_payload_projection.dispatch_view_detailed request with
   | Error rejection ->
     Error
@@ -678,7 +1074,427 @@ let dispatch config ~now signal request =
   | Ok (kind, payload) ->
     (match kind with
      | Schedule_payload_projection.Keeper_wake ->
-       dispatch_keeper_wake config ~now signal request payload)
+       dispatch_keeper_wake config ~now signal request ~commit_acceptance payload)
 ;;
 
-let consumer : Schedule_runner.consumer = { accepts; dispatch }
+let occurrence_stimulus_id (execution : Schedule_domain.execution_record) =
+  Schedule_occurrence_id.make
+    ~schedule_instance_id:execution.schedule_instance_id
+    ~schedule_id:execution.schedule_id
+    ~due_at:execution.due_at
+    ~payload_digest:execution.payload_digest
+  |> Schedule_occurrence_id.to_string
+;;
+
+let execution_keeper_name (execution : Schedule_domain.execution_record) =
+  match execution.detail with
+  | Some (`Assoc fields) -> keeper_name_field "keeper_name" fields
+  | Some _ -> Error "schedule dispatch detail must be an object"
+  | None -> Error "schedule dispatch detail is missing keeper_name"
+;;
+
+(* Exact producer snapshot -> durable owner chain. The mutable schedule request
+   is deliberately absent: recurring requests may be edited after this
+   occurrence was dispatched. Queue transition receipts retain every transfer
+   and terminal disposition, so there is no reaction-ledger retention fallback
+   and no elapsed-time guess. *)
+let settlements_with_read_state ~read_state config executions =
+  let base_path = config.Workspace_utils.base_path in
+  let cache = Hashtbl.create 8 in
+  List.map
+    (fun (execution : Schedule_domain.execution_record) ->
+       let occurrence_id = occurrence_stimulus_id execution in
+       let* keeper_name = execution_keeper_name execution in
+       let* disposition =
+         resolve_durable_occurrence
+           cache
+           ~read_state
+           ~base_path
+           ~occurrence_id
+           ~visited:[]
+           keeper_name
+       in
+       match disposition with
+       | Pending_at _ | Transfer_projecting_at _ ->
+         Ok Schedule_runner.Consumer_holds_occurrence
+       | Terminal_completed_at _ ->
+         Ok Schedule_runner.Consumer_completed_occurrence
+       | Terminal_failed_at (_, _, reason, _) ->
+         Ok (Schedule_runner.Consumer_failed_occurrence reason)
+       | Terminal_cancelled_at (_, _, reason, _) ->
+         Ok (Schedule_runner.Consumer_cancelled_occurrence reason)
+       | Absent_at owner ->
+         Ok
+           (Schedule_runner.Consumer_lost_occurrence
+              (Printf.sprintf
+                 "keeper %s has no pending or terminal durable disposition for scheduled wake %s"
+                 owner
+                 occurrence_id)))
+    executions
+;;
+
+let settlements =
+  settlements_with_read_state
+    ~read_state:Keeper_registry_event_queue.existing_durable_state_result
+;;
+
+type keeper_purge_error =
+  | Schedule_ledger_read_error of Schedule_store.read_error
+  | Durable_queue_read_error of { keeper_name : string; detail : string }
+  | Durable_queue_index_error of { keeper_name : string; detail : string }
+  | Invalid_execution_detail of { occurrence_id : string; detail : string }
+  | Pending_transferred_occurrence of
+      { source_keeper : string
+      ; owner : string
+      ; occurrence_id : string
+      }
+  | Projecting_transferred_occurrence of
+      { source_keeper : string
+      ; owner : string
+      ; target : string
+      ; occurrence_id : string
+      }
+  | Missing_transferred_evidence of
+      { source_keeper : string
+      ; owner : string
+      ; occurrence_id : string
+      }
+  | Unprojected_schedule_transfer of
+      { keeper_name : string; target : string; occurrence_id : string }
+  | Transfer_resolution_error of
+      { source_keeper : string
+      ; target : string
+      ; occurrence_id : string
+      ; detail : string
+      }
+  | Projected_transfer_source_read_error of
+      { source_keeper : string
+      ; target_keeper : string
+      ; operation_id : string
+      ; detail : string
+      }
+  | Projected_transfer_source_outbox_pending of
+      { source_keeper : string
+      ; target_keeper : string
+      ; operation_id : string
+      }
+  | Projected_transfer_source_conflict of
+      { source_keeper : string
+      ; target_keeper : string
+      ; operation_id : string
+      }
+  | Mismatched_schedule_evidence of
+      { keeper_name : string; occurrence_id : string }
+  | Non_schedule_evidence of
+      { keeper_name : string; occurrence_id : string }
+  | Missing_schedule_evidence of
+      { keeper_name : string; occurrence_id : string }
+  | Schedule_ledger_write_error of Schedule_store.store_error
+
+let keeper_purge_error_to_string = function
+  | Schedule_ledger_read_error error ->
+    "dashboard Keeper purge cannot read schedule ledger: "
+    ^ Schedule_store.read_error_to_string error
+  | Durable_queue_read_error { keeper_name; detail } ->
+    Printf.sprintf
+      "dashboard Keeper purge cannot read durable queue keeper=%s: %s"
+      keeper_name
+      detail
+  | Durable_queue_index_error { keeper_name; detail } ->
+    Printf.sprintf
+      "dashboard Keeper purge cannot index durable queue keeper=%s: %s"
+      keeper_name
+      detail
+  | Invalid_execution_detail { occurrence_id; detail } ->
+    Printf.sprintf
+      "dashboard Keeper purge cannot decode execution detail occurrence=%s: %s"
+      occurrence_id
+      detail
+  | Pending_transferred_occurrence
+      { source_keeper; owner; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge blocked by pending transferred schedule occurrence source=%s owner=%s occurrence=%s"
+      source_keeper
+      owner
+      occurrence_id
+  | Projecting_transferred_occurrence
+      { source_keeper; owner; target; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge blocked by projecting transferred schedule occurrence source=%s owner=%s target=%s occurrence=%s"
+      source_keeper
+      owner
+      target
+      occurrence_id
+  | Missing_transferred_evidence
+      { source_keeper; owner; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge missing transferred schedule evidence source=%s owner=%s occurrence=%s"
+      source_keeper
+      owner
+      occurrence_id
+  | Unprojected_schedule_transfer { keeper_name; target; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge blocked by unprojected schedule transfer keeper=%s target=%s occurrence=%s"
+      keeper_name
+      target
+      occurrence_id
+  | Transfer_resolution_error
+      { source_keeper; target; occurrence_id; detail } ->
+    Printf.sprintf
+      "dashboard Keeper purge cannot resolve transferred schedule occurrence source=%s target=%s occurrence=%s: %s"
+      source_keeper
+      target
+      occurrence_id
+      detail
+  | Projected_transfer_source_read_error
+      { source_keeper; target_keeper; operation_id; detail } ->
+    Printf.sprintf
+      "dashboard Keeper purge cannot inspect projected transfer source source=%s target=%s operation=%s: %s"
+      source_keeper
+      target_keeper
+      operation_id
+      detail
+  | Projected_transfer_source_outbox_pending
+      { source_keeper; target_keeper; operation_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge blocked by projected transfer source outbox source=%s target=%s operation=%s"
+      source_keeper
+      target_keeper
+      operation_id
+  | Projected_transfer_source_conflict
+      { source_keeper; target_keeper; operation_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge found conflicting projected transfer source outbox source=%s target=%s operation=%s"
+      source_keeper
+      target_keeper
+      operation_id
+  | Mismatched_schedule_evidence { keeper_name; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge found mismatched schedule evidence keeper=%s occurrence=%s"
+      keeper_name
+      occurrence_id
+  | Non_schedule_evidence { keeper_name; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge found non-schedule evidence for occurrence=%s keeper=%s"
+      occurrence_id
+      keeper_name
+  | Missing_schedule_evidence { keeper_name; occurrence_id } ->
+    Printf.sprintf
+      "dashboard Keeper purge missing durable schedule evidence keeper=%s occurrence=%s"
+      keeper_name
+      occurrence_id
+  | Schedule_ledger_write_error error ->
+    Schedule_store.store_error_to_string error
+;;
+
+let settle_keeper_purge_occurrences config ~keeper_name ~operation_id ~now =
+  let base_path = config.Workspace_utils.base_path in
+  let* schedule_state =
+    Schedule_store.read_state_result config
+    |> Result.map_error (fun error -> Schedule_ledger_read_error error)
+  in
+  let executions = Schedule_store.unsettled_dispatched_occurrences schedule_state in
+  let* queue_state =
+    Keeper_registry_event_queue.durable_state_result ~base_path keeper_name
+    |> Result.map_error (fun detail -> Durable_queue_read_error { keeper_name; detail })
+  in
+  let* occurrence_index =
+    durable_occurrence_index queue_state
+    |> Result.map_error (fun detail ->
+      Durable_queue_index_error { keeper_name; detail })
+  in
+  let source_outbox_status
+        (transfer : Keeper_registry_event_queue.accepted_transfer)
+    =
+    let operation_id = transfer.operator_operation_id in
+    let* source_state =
+      Keeper_registry_event_queue.durable_state_result
+        ~base_path
+        transfer.from_keeper
+      |> Result.map_error (fun detail ->
+        Projected_transfer_source_read_error
+          { source_keeper = transfer.from_keeper
+          ; target_keeper = keeper_name
+          ; operation_id
+          ; detail
+          })
+    in
+    let matching_transfer =
+      Keeper_event_queue_state.transition_outbox source_state
+      |> List.find_map (fun (entry : Keeper_event_queue_state.outbox_entry) ->
+        match entry.receipt.transition with
+        | Keeper_event_queue_state.Transfer_accepted candidate
+          when String.equal candidate.operator_operation_id operation_id ->
+          Some candidate
+        | Keeper_event_queue_state.Cancel_accepted _
+        | Keeper_event_queue_state.Ack_source_terminal _
+        | Keeper_event_queue_state.Transfer_accepted _ -> None)
+    in
+    match matching_transfer with
+    | None -> Ok ()
+    | Some candidate when candidate = transfer ->
+      Error
+        (Projected_transfer_source_outbox_pending
+           { source_keeper = transfer.from_keeper
+           ; target_keeper = keeper_name
+           ; operation_id
+           })
+    | Some _ ->
+      Error
+        (Projected_transfer_source_conflict
+           { source_keeper = transfer.from_keeper
+           ; target_keeper = keeper_name
+           ; operation_id
+           })
+  in
+  let rec preflight_projected_transfer_sources = function
+    | [] -> Ok ()
+    | transfer :: rest ->
+      let* () = source_outbox_status transfer in
+      preflight_projected_transfer_sources rest
+  in
+  let* () =
+    Keeper_event_queue_state.accepted_transfer_projections queue_state
+    |> preflight_projected_transfer_sources
+  in
+  let purge_reason =
+    Printf.sprintf
+      "scheduled occurrence cancelled by dashboard Keeper purge operation=%s keeper=%s"
+      operation_id
+      keeper_name
+  in
+  let transfer_state_cache = Hashtbl.create 8 in
+  let settlement_of_resolved_disposition
+        (execution : Schedule_domain.execution_record)
+        occurrence_id
+        =
+    let settlement outcome : Schedule_store.dispatched_occurrence_settlement =
+      { execution_id = execution.execution_id
+      ; schedule_instance_id = execution.schedule_instance_id
+      ; schedule_id = execution.schedule_id
+      ; due_at = execution.due_at
+      ; payload_digest = execution.payload_digest
+      ; outcome
+      }
+    in
+    function
+    | Terminal_completed_at _ ->
+      Ok (settlement Schedule_store.Dispatched_occurrence_succeeded)
+    | Terminal_failed_at (_, _, reason, _)
+    | Terminal_cancelled_at (_, _, reason, _) ->
+      Ok (settlement (Schedule_store.Dispatched_occurrence_failed reason))
+    | Pending_at (owner, _) ->
+      Error
+        (Pending_transferred_occurrence
+           { source_keeper = keeper_name; owner; occurrence_id })
+    | Transfer_projecting_at (owner, target) ->
+      Error
+        (Projecting_transferred_occurrence
+           { source_keeper = keeper_name; owner; target; occurrence_id })
+    | Absent_at owner ->
+      Error
+        (Missing_transferred_evidence
+           { source_keeper = keeper_name; owner; occurrence_id })
+  in
+  let settlement_of_execution
+        (execution : Schedule_domain.execution_record)
+        disposition
+    =
+    let settlement outcome : Schedule_store.dispatched_occurrence_settlement =
+      { execution_id = execution.execution_id
+      ; schedule_instance_id = execution.schedule_instance_id
+      ; schedule_id = execution.schedule_id
+      ; due_at = execution.due_at
+      ; payload_digest = execution.payload_digest
+      ; outcome
+      }
+    in
+    match disposition.state with
+    | Pending ->
+      Ok
+        (settlement
+           (Schedule_store.Dispatched_occurrence_failed purge_reason))
+    | Terminally_completed _ ->
+      Ok (settlement Schedule_store.Dispatched_occurrence_succeeded)
+    | Terminally_failed (reason, _) | Cancelled (reason, _) ->
+      Ok
+        (settlement
+           (Schedule_store.Dispatched_occurrence_failed reason))
+    | Transfer_projecting_to target ->
+      Error
+        (Unprojected_schedule_transfer
+           { keeper_name; target; occurrence_id = occurrence_stimulus_id execution })
+    | Transferred_to target ->
+      let occurrence_id = occurrence_stimulus_id execution in
+      let* resolved =
+        resolve_durable_occurrence
+          transfer_state_cache
+          ~read_state:Keeper_registry_event_queue.existing_durable_state_result
+          ~base_path
+          ~occurrence_id
+          ~visited:[ keeper_name ]
+          target
+        |> Result.map_error (fun detail ->
+          Transfer_resolution_error
+            { source_keeper = keeper_name; target; occurrence_id; detail })
+      in
+      settlement_of_resolved_disposition execution occurrence_id resolved
+  in
+  let rec preflight settlements = function
+    | [] -> Ok (List.rev settlements)
+    | (execution : Schedule_domain.execution_record) :: rest ->
+      let occurrence_id = occurrence_stimulus_id execution in
+      (match Hashtbl.find_opt occurrence_index occurrence_id with
+       | Some disposition ->
+         let* settlement =
+           match disposition.source.payload with
+           | Keeper_event_queue.Schedule_due wake
+             when String.equal
+                    wake.schedule_instance_id
+                    execution.schedule_instance_id
+                  && String.equal wake.schedule_id execution.schedule_id
+                  && Float.equal wake.due_at execution.due_at
+                  && String.equal wake.payload_digest execution.payload_digest ->
+             settlement_of_execution execution disposition
+           | Keeper_event_queue.Schedule_due _ ->
+             Error
+               (Mismatched_schedule_evidence { keeper_name; occurrence_id })
+           | _ ->
+             Error
+               (Non_schedule_evidence { keeper_name; occurrence_id })
+         in
+         preflight (settlement :: settlements) rest
+       | None ->
+         let* original_keeper =
+           execution_keeper_name execution
+           |> Result.map_error (fun detail ->
+             Invalid_execution_detail { occurrence_id; detail })
+         in
+         if String.equal original_keeper keeper_name
+         then
+           Error
+             (Missing_schedule_evidence { keeper_name; occurrence_id })
+         else preflight settlements rest)
+  in
+  let* settlements = preflight [] executions in
+  let should_cancel (request : Schedule_domain.schedule_request) =
+    match Schedule_payload_projection.dispatch_view_detailed request with
+    | Ok (Schedule_payload_projection.Keeper_wake, payload) ->
+      (match body_keeper_name payload with
+       | Ok target -> String.equal target keeper_name
+       | Error _ -> false)
+    | Error _ -> false
+  in
+  Schedule_store.settle_dispatched_occurrences_and_cancel_matching
+    config
+    ~now
+    ~settlements
+    ~should_cancel
+  |> Result.map_error (fun error -> Schedule_ledger_write_error error)
+;;
+
+let consumer : Schedule_runner.consumer = { accepts; dispatch; settlements }
+
+module For_testing = struct
+  let settlements_with_read_state = settlements_with_read_state
+end

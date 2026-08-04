@@ -13,6 +13,8 @@ type accepted_transfer =
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
+  ; target_generation : int
+  ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt =
@@ -68,7 +70,7 @@ type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-let schema = "keeper.event_queue.state.v14"
+let schema = "keeper.event_queue.state.v15"
 
 let empty =
   { revision = 0L
@@ -392,6 +394,8 @@ let validate_accepted_transfer (transfer : accepted_transfer) =
   then Error "accepted transfer source Keeper must not be empty"
   else if String.equal (String.trim transfer.to_keeper) ""
   then Error "accepted transfer target Keeper must not be empty"
+  else if transfer.target_generation < 0
+  then Error "accepted transfer target generation must not be negative"
   else if String.equal transfer.from_keeper transfer.to_keeper
   then Error "accepted transfer source and target Keepers must differ"
   else Ok ()
@@ -975,6 +979,8 @@ let transition_to_yojson = function
       ; "operator_operation_id", `String transfer.operator_operation_id
       ; "from_keeper", `String transfer.from_keeper
       ; "to_keeper", `String transfer.to_keeper
+      ; "target_generation", `Int transfer.target_generation
+      ; "target_trace_id", `String (Keeper_id.Trace_id.to_string transfer.target_trace_id)
       ]
   | Ack_source_terminal source_terminal ->
     let fields =
@@ -1045,6 +1051,8 @@ let transition_of_yojson json =
           ; "operator_operation_id"
           ; "from_keeper"
           ; "to_keeper"
+          ; "target_generation"
+          ; "target_trace_id"
           ]
         fields
     in
@@ -1057,6 +1065,13 @@ let transition_of_yojson json =
     in
     let* from_keeper = string_field ~context "from_keeper" fields in
     let* to_keeper = string_field ~context "to_keeper" fields in
+    let* target_generation = int_field ~context "target_generation" fields in
+    let* target_trace_id_wire = string_field ~context "target_trace_id" fields in
+    let* target_trace_id =
+      Keeper_id.Trace_id.of_string target_trace_id_wire
+      |> Result.map_error (fun detail ->
+        Printf.sprintf "%s.target_trace_id is invalid: %s" context detail)
+    in
     let transfer =
       { source
       ; source_incarnation
@@ -1064,6 +1079,8 @@ let transition_of_yojson json =
       ; operator_operation_id
       ; from_keeper
       ; to_keeper
+      ; target_generation
+      ; target_trace_id
       }
     in
     let* () = validate_accepted_transfer transfer in

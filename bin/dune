@@ -168,6 +168,23 @@
  (package masc)
  (libraries masc masc.dashboard masc_core fs_compat unix yojson eio eio_main))
 
+;; Event-queue v15 cutover helper.  The shell gate delegates runtime lease
+;; ownership and schedule signal decoding to the same OCaml authorities used
+;; by the server instead of reimplementing either contract in shell.
+(executable
+ (name keeper_event_queue_v15_cutover_helper)
+ (modules keeper_event_queue_v15_cutover_helper)
+ (public_name masc-keeper-event-queue-v15-cutover-helper)
+ (package masc)
+ (libraries
+  masc.server
+  masc.host_config
+  masc.keeper_runtime
+  masc.masc_schedule
+  cmdliner
+  unix
+  yojson))
+
 ;; Per-turn timeline tool: masc-trace <base-path> <keeper> <turn_id>
 ;; Reads execution-receipts JSONL and prints rows matching the turn_id.
 ;; Foundation for the Step 10 turn-tracing CLI; widens to tool_calls

@@ -122,6 +122,9 @@ type slot =
        fiber-cooperative, hence Eio.Mutex. Manipulated with raw
        lock/try_lock/unlock — [use_rw] would poison the slot when a turn
        raises, deadlocking the keeper forever. *)
+  ; intake_mu : Eio.Mutex.t
+    (* Serializes durable external intake with shutdown join. Unlike
+       [state_mu], callers may suspend while holding this cooperative mutex. *)
   ; state_mu : Stdlib.Mutex.t
     (* Guards [info]/[waiting]. Critical sections never yield, so the
        non-cooperative mutex is the right choice here. *)
@@ -130,6 +133,11 @@ type slot =
   ; mutable waiting_entries : (int * float) list
   ; mutable next_waiter_id : int
   ; mutable shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
+  }
+
+type intake_token =
+  { intake_slot : slot
+  ; mutable intake_active : bool
   }
 
 type token =
@@ -199,6 +207,7 @@ let slot_for ~base_path ~keeper_name =
         { base_path
         ; keeper_name
         ; turn_mu = Eio.Mutex.create ()
+        ; intake_mu = Eio.Mutex.create ()
         ; state_mu = Stdlib.Mutex.create ()
         ; info = None
         ; waiting = 0
@@ -444,10 +453,107 @@ let commit_registration_if_open ~base_path ~keeper_name commit =
     | None -> Registration_committed (commit ()))
 ;;
 
+type 'a durable_intake_result =
+  | Intake_committed of 'a
+  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
+type 'a transfer_intake_result =
+  | Transfer_intake_committed of 'a
+  | Transfer_intake_source_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Transfer_intake_target_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
+let run_durable_intake_if_open ~base_path ~keeper_name intake =
+  let slot = slot_for ~base_path ~keeper_name in
+  Eio.Mutex.lock slot.intake_mu;
+  let release () = Eio.Mutex.unlock slot.intake_mu in
+  match peek_shutdown slot with
+  | Some operation_id ->
+    release ();
+    Intake_shutdown_reserved operation_id
+  | None ->
+    let intake_token = { intake_slot = slot; intake_active = true } in
+    (match intake intake_token with
+     | value ->
+       intake_token.intake_active <- false;
+       release ();
+       Intake_committed value
+     | exception exn ->
+       intake_token.intake_active <- false;
+       release ();
+       raise exn)
+;;
+
+let run_transfer_intake_if_open
+      ~base_path
+      ~from_keeper
+      ~to_keeper
+      operation
+  =
+  let acquire_source_then_target () =
+    match
+      run_durable_intake_if_open
+        ~base_path
+        ~keeper_name:from_keeper
+        (fun source_intake_token ->
+           if String.equal from_keeper to_keeper
+           then
+             Transfer_intake_committed
+               (operation
+                  ~source_intake_token
+                  ~target_intake_token:source_intake_token)
+           else
+             match
+               run_durable_intake_if_open
+                 ~base_path
+                 ~keeper_name:to_keeper
+                 (fun target_intake_token ->
+                    operation ~source_intake_token ~target_intake_token)
+             with
+             | Intake_committed result -> Transfer_intake_committed result
+             | Intake_shutdown_reserved operation_id ->
+               Transfer_intake_target_shutdown_reserved operation_id)
+    with
+    | Intake_committed result -> result
+    | Intake_shutdown_reserved operation_id ->
+      Transfer_intake_source_shutdown_reserved operation_id
+  in
+  let acquire_target_then_source () =
+    match
+      run_durable_intake_if_open
+        ~base_path
+        ~keeper_name:to_keeper
+        (fun target_intake_token ->
+           match
+             run_durable_intake_if_open
+               ~base_path
+               ~keeper_name:from_keeper
+               (fun source_intake_token ->
+                  operation ~source_intake_token ~target_intake_token)
+           with
+           | Intake_committed result -> Transfer_intake_committed result
+           | Intake_shutdown_reserved operation_id ->
+             Transfer_intake_source_shutdown_reserved operation_id)
+    with
+    | Intake_committed result -> result
+    | Intake_shutdown_reserved operation_id ->
+      Transfer_intake_target_shutdown_reserved operation_id
+  in
+  if String.compare from_keeper to_keeper <= 0
+  then acquire_source_then_target ()
+  else acquire_target_then_source ()
+;;
+
+let intake_token_matches token ~base_path ~keeper_name =
+  token.intake_active
+  && token.intake_slot == slot_for ~base_path ~keeper_name
+;;
+
 let await_idle_after_shutdown ~base_path ~keeper_name =
   let slot = slot_for ~base_path ~keeper_name in
   Eio.Mutex.lock slot.turn_mu;
-  Eio.Mutex.unlock slot.turn_mu
+  Eio.Mutex.unlock slot.turn_mu;
+  Eio.Mutex.lock slot.intake_mu;
+  Eio.Mutex.unlock slot.intake_mu
 ;;
 
 let chat_waiting ~base_path ~keeper_name =

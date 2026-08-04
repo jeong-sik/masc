@@ -173,6 +173,18 @@ val acquire_base_path_lock :
 
 val release_base_path_lease : base_path_lease -> unit
 
+(** Preserve an active lease across the caller's next [exec]. POSIX record
+    locks survive [exec] in the same process, but the lease descriptor is
+    normally opened close-on-exec. The replacement runtime must immediately
+    acquire the same BasePath lease through [acquire_base_path_lock]; that
+    same-process acquisition registers its ordinary process-lifetime handle.
+
+    This capability is intentionally narrow: it does not transfer ownership to
+    a child process and rejects stale or foreign handles. *)
+val prepare_base_path_lease_exec_handoff :
+  base_path_lease ->
+  (unit, base_path_lock_rejection) result
+
 module For_testing : sig
   (** Immutable synchronization boundaries around the external lease open and
       the final identity checks. Production acquisition closes over no-op

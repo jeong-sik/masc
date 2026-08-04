@@ -14,6 +14,24 @@ let _dummy_push _s = ()
 let jsonrpc_notification method_name =
   `Assoc [ ("jsonrpc", `String "2.0"); ("method", `String method_name) ]
 
+let test_data_payload_of_frame () =
+  Alcotest.(check (result string reject))
+    "optional space and CRLF"
+    (Ok "first\nsecond")
+    (Sse.data_payload_of_frame "id: 7\r\ndata:first\r\ndata: second\r\n\r\n");
+  Alcotest.(check bool)
+    "bare JSON rejected"
+    true
+    (match Sse.data_payload_of_frame "{\"type\":\"event\"}" with
+     | Error Sse.Missing_data_payload -> true
+     | Ok _ -> false)
+
+let test_format_event_preserves_multiline_data () =
+  match Sse.data_payload_of_frame (Sse.format_event ~id:7 "first\nsecond") with
+  | Ok payload -> Alcotest.(check string) "multiline data payload" "first\nsecond" payload
+  | Error Sse.Missing_data_payload ->
+      Alcotest.fail "format_event emitted a frame without a data field"
+
 let register_exn ~auth ?kind session_id ~last_event_id =
   (* Pre-create the MCP session so registration validates an existing
      session rather than auto-bootstrapping one (security/sse-auth-validation). *)
@@ -72,15 +90,34 @@ let test_broadcast_multiple_clients_streams ~auth () =
 
 let test_send_to_popable ~auth () =
   reset ();
-  ignore (register_exn ~auth "s-st-1" ~last_event_id:0);
-  ignore (register_exn ~auth "s-st-2" ~last_event_id:0);
-  Sse.send_to "s-st-1" (jsonrpc_notification "notifications/test");
-  let got1 = Sse.try_pop "s-st-1" in
-  let got2 = Sse.try_pop "s-st-2" in
-  Alcotest.(check bool) "target got event" true (got1 <> None);
-  Alcotest.(check bool) "other did not" true (got2 = None);
-  Sse.unregister "s-st-1";
-  Sse.unregister "s-st-2"
+  let original_buffer = Sse.event_buffer_events_for_test () in
+  Fun.protect
+    ~finally:(fun () ->
+      Sse.unregister "s-st-1";
+      Sse.unregister "s-st-2";
+      Sse.set_event_buffer_for_test original_buffer)
+    (fun () ->
+      Sse.set_event_buffer_for_test [];
+      ignore (register_exn ~auth "s-st-1" ~last_event_id:0);
+      ignore (register_exn ~auth "s-st-2" ~last_event_id:0);
+      let before_id = Sse.current_id () in
+      Sse.send_to "s-st-1" (jsonrpc_notification "notifications/test");
+      let got1 = Sse.try_pop "s-st-1" in
+      let got2 = Sse.try_pop "s-st-2" in
+      Alcotest.(check bool) "target got event" true (got1 <> None);
+      Alcotest.(check bool) "other did not" true (got2 = None);
+      Alcotest.(check int) "target replays targeted event" 1
+        (List.length
+           (Sse.get_events_after_for_session ~session_id:"s-st-1"
+              ~kind:Agent_stream before_id));
+      Alcotest.(check int) "other session cannot replay targeted event" 0
+        (List.length
+           (Sse.get_events_after_for_session ~session_id:"s-st-2"
+              ~kind:Agent_stream before_id));
+      Alcotest.(check int) "observer cannot replay targeted event" 0
+        (List.length
+           (Sse.get_events_after_for_session ~session_id:"s-st-1"
+              ~kind:Observer before_id)))
 
 let test_pop_blocks_then_receives ~auth () =
   reset ();
@@ -215,8 +252,8 @@ let test_broadcast_presence_is_live_only ~auth () =
                 (String.equal "event: presence")
                 (String.split_on_char '\n' event))
        | None -> Alcotest.fail "expected presence event");
-      Alcotest.(check (list string)) "presence not replay buffered" []
-        (Sse.get_events_after before_id))
+      Alcotest.(check int) "presence not replay buffered" 0
+        (List.length (Sse.get_events_after_for_test before_id)))
 
 let test_non_jsonrpc_broadcast_does_not_reach_agent_streams ~auth () =
   reset ();
@@ -230,11 +267,15 @@ let test_non_jsonrpc_broadcast_does_not_reach_agent_streams ~auth () =
   Alcotest.(check bool) "agent_stream skipped non-JSON-RPC" true
     (got_workspace = None);
   Alcotest.(check int) "observer replay keeps dashboard event" 1
-    (List.length (Sse.get_events_after_for_kind Observer before_id));
-  Alcotest.(check (list string))
+    (List.length
+       (Sse.get_events_after_for_session ~session_id:"s-nonjson-obs"
+          ~kind:Observer before_id));
+  Alcotest.(check int)
     "agent_stream replay skips non-JSON-RPC"
-    []
-    (Sse.get_events_after_for_kind Agent_stream before_id);
+    0
+    (List.length
+       (Sse.get_events_after_for_session ~session_id:"s-nonjson-workspace"
+          ~kind:Agent_stream before_id));
   Sse.unregister "s-nonjson-obs";
   Sse.unregister "s-nonjson-workspace"
 
@@ -262,6 +303,13 @@ let () =
     (fun () ->
       Alcotest.run "sse-stream"
         [
+          ( "frame_parser",
+            [
+              Alcotest.test_case "data payload" `Quick
+                test_data_payload_of_frame;
+              Alcotest.test_case "multiline data framing" `Quick
+                test_format_event_preserves_multiline_data;
+            ] );
           ( "try_pop",
             [
               Alcotest.test_case "nonexistent session" `Quick test_try_pop_empty;

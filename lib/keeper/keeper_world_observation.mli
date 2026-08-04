@@ -23,7 +23,14 @@ type pending_board_event_kind =
   | Board_reaction_changed of board_reaction_event
   | Fusion_completed
   | Bg_completed
-  | Schedule_due
+  | Schedule_due of Keeper_event_queue.scheduled_wake
+      (** The consumed wake, kept typed. The exact occurrence key is
+          [(schedule_id, due_at, payload_digest)]; [schedule_id] alone can point
+          at a later recurring or updated request. The flat [title] and
+          [preview] fields of {!pending_board_event} are a rendering of the
+          wake, not its only copy. Carrying the record mirrors
+          {!Keeper_event_queue.Connector_attention}'s pointer discipline and
+          {!Completion_authority_rejected}'s payload-carrying shape below. *)
   | External_attention
   | Goal_assigned
       (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];

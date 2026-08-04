@@ -81,16 +81,6 @@ let get_store base_path =
   in
   ensure ()
 
-(* ── ID synthesis ──────────────────────────────────────────────── *)
-
-(* compaction_id = ulid-ish: ts_micros-hex ++ keeper ++ counter *)
-let counter = Atomic.make 0
-
-let synth_compaction_id ~ts_unix ~keeper_name =
-  let ts_us = Int64.of_float (ts_unix *. 1_000_000.0) in
-  let n = Atomic.fetch_and_add counter 1 in
-  Printf.sprintf "%Lx-%s-%x" ts_us keeper_name n
-
 (* ── JSON codecs ───────────────────────────────────────────────── *)
 
 let start_to_json (r : start_record) : Yojson.Safe.t =

@@ -1,9 +1,9 @@
 (** Pure durable state machine for one Keeper event queue owner.
 
-    [event-queue-v14.json] is the sole authority for pending stimuli and
-    source-bearing transition projection work. This module performs no I/O;
-    persistence supplies the atomic file boundary and publishes [pending] into
-    the live registry only after a durable commit. *)
+    The current snapshot and source-bearing transition WAL jointly form the
+    durable authority. This module performs no I/O; persistence supplies the
+    atomic file boundary and publishes [pending] into the live registry only
+    after a durable commit. *)
 
 type accepted_cancellation =
   { source : Keeper_event_queue.stimulus
@@ -23,11 +23,12 @@ type accepted_transfer =
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
+  ; target_generation : int
+  ; target_trace_id : Keeper_id.Trace_id.t
   }
 (** Exact causal authority for terminally transferring one accepted event.
-    The durable disposition receipt retains the target continuation binding;
-    this ACK links the source queue terminal effect to that receipt by
-    stable operator operation ID. *)
+    [target_generation] and [target_trace_id] prevent delayed outbox replay
+    from projecting into a purged or same-name replacement Keeper. *)
 
 type source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
@@ -250,4 +251,4 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v14"] is the only accepted schema. *)
+(** ["keeper.event_queue.state.v15"] is the only accepted schema. *)

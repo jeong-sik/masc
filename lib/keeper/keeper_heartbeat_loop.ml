@@ -204,6 +204,7 @@ let complete_schedule_due ~ctx ~keeper_name:_ stimuli =
             Schedule_store.complete_dispatched_occurrence
               ctx.config
               ~now
+              ~schedule_instance_id:wake.schedule_instance_id
               ~schedule_id:wake.schedule_id
               ~due_at:wake.due_at
               ~payload_digest:wake.payload_digest
@@ -244,6 +245,7 @@ let fail_schedule_due ~ctx ~error stimuli =
             Schedule_store.fail_dispatched_occurrence
               ctx.config
               ~now
+              ~schedule_instance_id:wake.schedule_instance_id
               ~schedule_id:wake.schedule_id
               ~due_at:wake.due_at
               ~payload_digest:wake.payload_digest

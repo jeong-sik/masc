@@ -109,108 +109,21 @@ let test_run_error_rejects_custom_envelope () =
 
 let test_event_to_sse_format () =
   let e = make_event ~thread_id:"workspace-1" Run_started in
-  let sse = event_to_sse e in
+  let sse = event_to_sse ~id:17 e in
+  let transport_only_sse = event_to_sse e in
   assert (String.length sse > 0);
-  assert (String.sub sse 0 6 = "data: ");
+  assert (String.starts_with ~prefix:"id: 17\ndata: " sse);
+  assert (String.starts_with ~prefix:"data: " transport_only_sse);
+  assert (not (String.starts_with ~prefix:"id:" transport_only_sse));
   (* SSE ends with double newline *)
   let len = String.length sse in
   assert (String.sub sse (len - 2) 2 = "\n\n")
-
-(* ---------- MASC → AG-UI Mapping Tests ---------- *)
-
-let test_of_agent_session_bound () =
-  let e = of_agent_session_bound ~agent_name:"claude" in
-  assert (e.event_type = Run_started);
-  assert (e.thread_id = "default");
-  assert (e.run_id = Some "claude");
-  assert (e.custom_name = Some "AGENT_SESSION_BOUND")
-
-let test_of_agent_unbound () =
-  let e = of_agent_unbound ~agent_name:"claude" in
-  assert (e.event_type = Run_finished);
-  assert (e.thread_id = "default");
-  assert (e.run_id = Some "claude")
-
-let test_of_broadcast () =
-  let events = of_broadcast
-    ~agent_name:"claude" ~message:"Hello" ~message_id:"msg-001" in
-  assert (List.length events = 3);
-  let e0 = List.nth events 0 in
-  let e1 = List.nth events 1 in
-  let e2 = List.nth events 2 in
-  assert (e0.event_type = Text_message_start);
-  assert (e0.role = Some Assistant);
-  assert (e1.event_type = Text_message_content);
-  assert (e1.delta = Some "Hello");
-  assert (e2.event_type = Text_message_end)
-
-let test_of_task_claimed () =
-  let e = of_task_claimed
-    ~agent_name:"claude" ~task_id:"task-001" in
-  assert (e.event_type = Step_started);
-  assert (e.step_name = Some "task-001")
-
-let test_of_task_done () =
-  let e = of_task_done
-    ~agent_name:"claude" ~task_id:"task-001" in
-  assert (e.event_type = Step_finished);
-  assert (e.step_name = Some "task-001")
-
-let test_of_tool_call () =
-  let events = of_tool_call
-    ~agent_name:"claude" ~tool_name:"search"
-    ~call_id:"call-001" ~args_json:"{\"q\": \"test\"}" in
-  assert (List.length events = 3);
-  let e0 = List.nth events 0 in
-  assert (e0.event_type = Tool_call_start);
-  assert (e0.tool_call_name = Some "search");
-  let e1 = List.nth events 1 in
-  assert (e1.event_type = Tool_call_args);
-  assert (e1.delta = Some "{\"q\": \"test\"}");
-  let e2 = List.nth events 2 in
-  assert (e2.event_type = Tool_call_end)
-
-let test_of_workspace_state () =
-  let state = `Assoc [("agents", `Int 3); ("tasks", `Int 5)] in
-  let e = of_workspace_state state in
-  assert (e.event_type = State_snapshot);
-  assert (e.snapshot = Some state)
 
 let test_of_custom () =
   let value = `Assoc [("key", `String "value")] in
   let e = of_custom ~name:"MY_EVENT" value in
   assert (e.event_type = Custom);
   assert (e.custom_name = Some "MY_EVENT")
-
-(* ---------- Task Update Mapping ---------- *)
-
-let test_of_task_update_claimed () =
-  let json = `Assoc [
-    ("id", `String "task-001");
-    ("status", `String "claimed");
-    ("agent", `String "claude");
-  ] in
-  let e = of_task_update json in
-  assert (e.event_type = Step_started)
-
-let test_of_task_update_done () =
-  let json = `Assoc [
-    ("id", `String "task-001");
-    ("status", `String "done");
-    ("agent", `String "claude");
-  ] in
-  let e = of_task_update json in
-  assert (e.event_type = Step_finished)
-
-let test_of_task_update_other () =
-  let json = `Assoc [
-    ("id", `String "task-001");
-    ("status", `String "in_progress");
-    ("agent", `String "claude");
-  ] in
-  let e = of_task_update json in
-  assert (e.event_type = Custom);
-  assert (e.custom_name = Some "TASK_UPDATE")
 
 (* ---------- Protocol Version ---------- *)
 
@@ -231,17 +144,7 @@ let () =
     ("run_error_requires_message", test_run_error_requires_message);
     ("run_error_rejects_custom_envelope", test_run_error_rejects_custom_envelope);
     ("event_to_sse_format", test_event_to_sse_format);
-    ("of_agent_session_bound", test_of_agent_session_bound);
-    ("of_agent_unbound", test_of_agent_unbound);
-    ("of_broadcast", test_of_broadcast);
-    ("of_task_claimed", test_of_task_claimed);
-    ("of_task_done", test_of_task_done);
-    ("of_tool_call", test_of_tool_call);
-    ("of_workspace_state", test_of_workspace_state);
     ("of_custom", test_of_custom);
-    ("of_task_update_claimed", test_of_task_update_claimed);
-    ("of_task_update_done", test_of_task_update_done);
-    ("of_task_update_other", test_of_task_update_other);
     ("protocol_version", test_protocol_version);
   ] in
   let passed = ref 0 in

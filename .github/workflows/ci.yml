@@ -738,6 +738,12 @@ jobs:
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
 
+      - name: Run event queue v15 cutover gate self-test
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          MASC_EVENT_QUEUE_V15_CUTOVER_HELPER: ${{ github.workspace }}/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe
+        run: scripts/check-keeper-event-queue-v15-cutover.sh --self-test
+
       - name: Check keeper event queue projection boundary
         # This parser uses compiler-libs directly, so keep it beside the sole
         # OCaml toolchain instead of bootstrapping another toolchain in Lint.
@@ -906,6 +912,23 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_verification"
 
+      # MCP identity is session-bound behavior: compile-only coverage cannot
+      # prove that the complete handshake -> start -> status -> transition
+      # path preserves one identity through the durable Task lifecycle. The
+      # Keeper prompt target separately proves caller-owned config projection.
+      - name: Run MCP session Task lifecycle and Keeper prompt config suites
+        id: mcp_session_task_lifecycle_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          identity_targets="@test/runtest-test_client_identity @test/runtest-test_mcp_session_task_lifecycle @test/runtest-test_keeper_sandbox_docker_cwd_response"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${identity_targets}"
+
       # Goal store durability: the suite drives a real workspace and asserts
       # on-disk bytes, not source text — the read path stays lenient while a
       # write over an undecodable store must be refused and must leave both
@@ -922,6 +945,26 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_goal_store"
+
+      # Schedule occurrence reclaim: an occurrence the consumer durably accepted
+      # is [Execution_dispatched] until a correlated completion path settles it,
+      # so nothing in the scheduler finishes it on its own. The suite drives a
+      # real workspace to that state and asserts the reclaim sweep settles it
+      # only on positive consumer evidence — a held occurrence and an unreadable
+      # consumer must both leave it untouched. Compile-only under @check leaves
+      # every one of those branches ungated, and no schedule suite ran here
+      # before (issue #26685).
+      - name: Run schedule runner suite
+        id: schedule_runner_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_schedule_runner @test/runtest-test_schedule_store @test/runtest-test_schedule_consumer_dispatch"
 
       # Keeper registry hardening: identity resolution and goal-reconciliation
       # routing are executable behavior — the suite drives a real workspace and
@@ -940,6 +983,26 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_registry_hardening"
+
+      # Keeper unified prompt surface: asserts what a Keeper is actually handed
+      # on a turn. The schedule wake row carries two ids with different
+      # meanings — occurrence_id is a one-way SHA-256 that no tool accepts, and
+      # schedule_id is the durable pointer resolved with masc_schedule_get — so
+      # a projection that drops the pointer is a silent capability loss with no
+      # compile-time signal. @check cannot see it: the wake type still compiles
+      # either way.
+      - name: Run keeper unified prompt surface suite
+        id: keeper_unified_prompt_surface_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_unified_verification_surface @test/runtest-test_schedule_tool_wiring"
+
       - name: Run tool blob retention suite
         id: tool_blob_retention_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
@@ -1009,7 +1072,7 @@ jobs:
           operator_targets="@test/runtest-test_operator_control_snapshot_state @test/runtest-test_operator_control_snapshot @test/runtest-test_operator_control_snapshot_cache @test/runtest-test_model_map_of_keeper_rows"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${operator_targets}"
 
-      - name: Run SSE reconnect e2e
+      - name: Run SSE unit and reconnect suites
         id: sse_reconnect_e2e
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
@@ -1020,7 +1083,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune exec --root . ./test/test_sse_storm_e2e.exe"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_sse_coverage @test/runtest-test_ag_ui_coverage @test/runtest-test_sse_storm_e2e"
 
       - name: Run transport harness suite
         id: transport_harness_suite

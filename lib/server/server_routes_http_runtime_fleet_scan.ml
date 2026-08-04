@@ -578,7 +578,7 @@ let keeper_execution_snapshot config =
     |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
   in
   let queue_names =
-    Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+    Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
       ~base_path
     |> fun discovery -> discovery.keeper_names
   in

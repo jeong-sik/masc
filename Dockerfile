@@ -34,6 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libffi8 \
     libgmp10 \
+    jq \
     libpq5 \
     libsqlite3-0 \
     libssl3t64 \
@@ -44,12 +45,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Binary path configurable via build arg for local dev vs CI.
-# Local:  dune build --release bin/main_eio.exe && \
-#         docker build --build-arg BINARY_PATH=_build/default/bin/main_eio.exe .
+# The deployment context supplies both release executables. The runtime never
+# starts directly: the entrypoint validates the mounted BasePath under the
+# canonical writer lease and then exec-hands that lease to this binary.
 ARG BINARY_PATH=masc-linux-x64
 COPY ${BINARY_PATH} /app/masc
-RUN chmod +x /app/masc
+COPY masc-keeper-event-queue-v15-cutover-helper \
+  /app/masc-keeper-event-queue-v15-cutover-helper
+COPY scripts/check-keeper-event-queue-v15-cutover.sh \
+  /app/masc-check-keeper-event-queue-v15-cutover
+COPY scripts/container-cutover-entrypoint.sh /app/masc-cutover-entrypoint
+RUN chmod +x \
+  /app/masc \
+  /app/masc-keeper-event-queue-v15-cutover-helper \
+  /app/masc-check-keeper-event-queue-v15-cutover \
+  /app/masc-cutover-entrypoint
 
 # Create non-root user for runtime
 RUN groupadd --system appgroup && useradd --system --gid appgroup appuser
@@ -92,7 +102,7 @@ USER appuser
 # child (preserving STOPSIGNAL contract) and reaps zombies. Compose's
 # `init: true` would do the same via docker-init, but baking tini in
 # guarantees zombie reaping for plain `docker run` without --init too.
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/masc-cutover-entrypoint"]
 
 # --base-path is already set via MASC_BASE_PATH; avoid duplication.
-CMD ["/app/masc", "--port", "8080"]
+CMD ["/app/masc"]

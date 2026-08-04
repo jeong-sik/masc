@@ -159,7 +159,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Board_reaction_changed _ -> "reaction_changed"
   | Keeper_world_observation.Fusion_completed -> "fusion_completed"
   | Keeper_world_observation.Bg_completed -> "bg_completed"
-  | Keeper_world_observation.Schedule_due -> "schedule_due"
+  | Keeper_world_observation.Schedule_due _ -> "schedule_due"
   | Keeper_world_observation.External_attention -> "external_attention"
   | Keeper_world_observation.Goal_assigned -> "goal_assigned"
   | Keeper_world_observation.Goal_reconciliation_ready ->
@@ -210,70 +210,87 @@ let format_current_task_observation = function
          (Keeper_id.Task_id.to_string task_id))
 ;;
 
-let board_reaction_note (reaction : Keeper_world_observation.board_reaction_event) =
-  Printf.sprintf
-    " reaction=%s target=%s:%s user=%s emoji=%s"
-    (if reaction.reacted then "added" else "removed")
-    (Board.reaction_target_type_to_string reaction.target_type)
-    reaction.target_id
-    reaction.user_id
-    (quote_prompt_field reaction.emoji)
+let format_prompt_row fields =
+  fields
+  |> List.map (fun (name, value) -> name ^ "=" ^ quote_prompt_field value)
+  |> String.concat " "
+  |> ( ^ ) "- "
 ;;
 
-let board_event_note = function
+let board_reaction_fields
+    (reaction : Keeper_world_observation.board_reaction_event) =
+  [ "reaction", if reaction.reacted then "added" else "removed"
+  ; ( "target"
+    , Board.reaction_target_type_to_string reaction.target_type
+      ^ ":"
+      ^ reaction.target_id )
+  ; "user", reaction.user_id
+  ; "emoji", reaction.emoji
+  ]
+;;
+
+let board_event_note_fields = function
   | Keeper_world_observation.Board_reaction_changed reaction ->
-    board_reaction_note reaction
+    board_reaction_fields reaction
   | Keeper_world_observation.External_attention
   | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_comment_added
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Bg_completed
-  | Keeper_world_observation.Schedule_due
+  | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Goal_assigned
   | Keeper_world_observation.Goal_reconciliation_ready
-  | Keeper_world_observation.Completion_authority_rejected _ -> ""
+  | Keeper_world_observation.Completion_authority_rejected _ -> []
+;;
+
+let board_event_fields
+    (event : Keeper_world_observation.pending_board_event) =
+  let event_label = board_event_kind_label event.event_kind in
+  let fields =
+    [ "event", event_label
+    ; "post_id", event.post_id
+    ; "post_kind", Board.post_kind_to_string event.post_kind
+    ; "title", Keeper_types_profile.short_preview ~max_len:80 event.title
+    ; "author", event.author
+    ]
+  in
+  let fields =
+    match event.hearth with
+    | Some hearth when String.trim hearth <> "" -> fields @ [ "hearth", hearth ]
+    | _ -> fields
+  in
+  let fields =
+    if event.explicit_mention then
+      let mention_fields =
+        match event.matched_targets with
+        | [] -> []
+        | xs -> [ "mention_targets", String.concat ", " xs ]
+      in
+      fields @ (("mention", "explicit") :: mention_fields)
+    else fields
+  in
+  let fields = fields @ board_event_note_fields event.event_kind in
+  let fields =
+    if event.self_commented && event.new_external_since > 0 then
+      let fields =
+        fields
+        @ [ "new_replies_since_own", string_of_int event.new_external_since ]
+      in
+      match event.latest_external_author, event.latest_external_preview with
+      | Some author, Some preview ->
+        fields
+        @ [ "latest_external_author", author
+          ; "latest_external_preview", preview
+          ]
+      | _ -> fields
+    else fields
+  in
+  fields @ [ "preview", event.preview ]
 ;;
 
 let format_board_event_text
     (event : Keeper_world_observation.pending_board_event) : string =
-  let event_label = board_event_kind_label event.event_kind in
-  let event_note = board_event_note event.event_kind in
-  let mention_note =
-    if event.explicit_mention then
-      let targets =
-        match event.matched_targets with
-        | [] -> "explicit mention"
-        | xs -> "mentions " ^ String.concat ", " xs
-      in
-      " [" ^ targets ^ "]"
-    else ""
-  in
-  let hearth_note =
-    match event.hearth with
-    | Some hearth when String.trim hearth <> "" -> " {" ^ hearth ^ "}"
-    | _ -> ""
-  in
-  let self_note =
-    if event.self_commented && event.new_external_since > 0 then
-      Printf.sprintf " [%d new reply since yours%s]"
-        event.new_external_since
-        (match event.latest_external_author, event.latest_external_preview with
-         | Some a, Some p -> Printf.sprintf ", latest by %s: %s" a p
-         | _ -> "")
-    else ""
-  in
-  Printf.sprintf
-    "- event=%s post_id=%s post_kind=%s title=%S author=%s%s%s%s%s preview: %s"
-    event_label
-    event.post_id
-    (Board.post_kind_to_string event.post_kind)
-    (Keeper_types_profile.short_preview ~max_len:80 event.title)
-    event.author
-    hearth_note
-    mention_note
-    event_note
-    self_note
-    event.preview
+  format_prompt_row (board_event_fields event)
 ;;
 
 let format_scheduled_automation_item
@@ -283,15 +300,36 @@ let format_scheduled_automation_item
     | None -> "unknown"
     | Some kind -> kind
   in
-  Printf.sprintf
-    "- schedule_id=%s action=%s status=%s payload=%s recurrence=%S due_at=%s"
-    item.schedule_id
-    item.action
-    item.status
-    payload_kind
-    item.recurrence_summary
-    (Masc_domain.iso8601_of_unix_seconds item.due_at)
+  format_prompt_row
+    [ "schedule_id", item.schedule_id
+    ; "action", item.action
+    ; "status", item.status
+    ; "payload", payload_kind
+    ; "recurrence", item.recurrence_summary
+    ; "due_at", Masc_domain.iso8601_of_unix_seconds item.due_at
+    ]
 ;;
+
+let scheduled_wake_fields ~occurrence_id
+    (wake : Keeper_event_queue.scheduled_wake) =
+  let title_field =
+    match wake.title with
+    | None -> []
+    | Some title -> [ "title", title ]
+  in
+  [ "schedule_id", wake.schedule_id
+  ; "due_at_unix", Printf.sprintf "%.17g" wake.due_at
+  ; "payload_digest", wake.payload_digest
+  ; "occurrence_id", occurrence_id
+  ]
+  @ title_field
+  @ [ "message", wake.message ]
+;;
+
+module For_testing = struct
+  let board_event_fields = board_event_fields
+  let scheduled_wake_fields = scheduled_wake_fields
+end
 
 let format_scheduled_automation_summary
     (summary : Keeper_world_observation.scheduled_automation_observation)
@@ -341,15 +379,31 @@ let format_scheduled_wake_observations
     Buffer.add_string ubuf
       "Rows below are scheduled work requests, not Board posts. The \
        occurrence_id is correlation metadata only: never pass it to a Board \
-       tool. External effects still cross the Gate.\n";
+       tool. Pass schedule_id to masc_schedule_get. The tool returns the current \
+       durable request; a recurring schedule may already point at its next \
+       occurrence. The row's message is the exact wake message. External effects \
+       still cross the Gate.\n";
     List.iter
       (fun (event : Keeper_world_observation.pending_board_event) ->
-         Buffer.add_string ubuf
-           (Printf.sprintf
-              "- occurrence_id=%s title=%s message=%s\n"
-              event.post_id
-              (quote_prompt_field event.title)
-              (quote_prompt_field event.preview)))
+         match event.event_kind with
+         | Keeper_world_observation.Schedule_due wake ->
+           Buffer.add_string ubuf
+             (format_prompt_row
+                (scheduled_wake_fields ~occurrence_id:event.post_id wake));
+           Buffer.add_char ubuf '\n'
+         (* [events] is pre-filtered by [is_scheduled_automation_event], so the
+            arms below are unreachable. They are enumerated rather than folded
+            into a catch-all so that an eleventh constructor fails to compile
+            here instead of being silently dropped from the block. *)
+         | Keeper_world_observation.Board_post_created
+         | Keeper_world_observation.Board_comment_added
+         | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Fusion_completed
+         | Keeper_world_observation.Bg_completed
+         | Keeper_world_observation.External_attention
+         | Keeper_world_observation.Goal_assigned
+         | Keeper_world_observation.Goal_reconciliation_ready
+         | Keeper_world_observation.Completion_authority_rejected _ -> ())
       events;
     Buffer.add_char ubuf '\n';
     Some (Buffer.contents ubuf))
@@ -363,20 +417,23 @@ let format_completion_authority_rejection_observations
          match event.event_kind with
          | Keeper_world_observation.Completion_authority_rejected rejection ->
            Some
-             (Printf.sprintf
-                "- post_id=%s task_id=%s verification_id=%s authority_kind=%s authority_actor=%s reason=%s\n"
-                event.post_id
-                rejection.Keeper_event_queue.car_task_id
-                rejection.car_verification_id
-                (Masc_domain.completion_authority_kind rejection.car_authority)
-                (Masc_domain.completion_authority_actor rejection.car_authority)
-                (quote_prompt_field rejection.car_reason))
+             (format_prompt_row
+                [ "post_id", event.post_id
+                ; "task_id", rejection.Keeper_event_queue.car_task_id
+                ; "verification_id", rejection.car_verification_id
+                ; ( "authority_kind"
+                  , Masc_domain.completion_authority_kind rejection.car_authority )
+                ; ( "authority_actor"
+                  , Masc_domain.completion_authority_actor rejection.car_authority )
+                ; "reason", rejection.car_reason
+                ]
+              ^ "\n")
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Bg_completed
-         | Keeper_world_observation.Schedule_due
+         | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention
          | Keeper_world_observation.Goal_assigned
          | Keeper_world_observation.Goal_reconciliation_ready -> None)
@@ -424,11 +481,12 @@ let render_board_observations
    judge for itself whether a new post would repeat earlier content. No
    advisory wording: the rows are data, not instructions. *)
 let format_own_board_post_text (post : Board.post) : string =
-  Printf.sprintf "- post_id=%s updated_at=%s title=%S preview: %s"
-    (Board.Post_id.to_string post.id)
-    (Masc_domain.iso8601_of_unix_seconds post.updated_at)
-    (Keeper_types_profile.short_preview ~max_len:80 post.title)
-    (Keeper_types_profile.short_preview ~max_len:80 post.content)
+  format_prompt_row
+    [ "post_id", Board.Post_id.to_string post.id
+    ; "updated_at", Masc_domain.iso8601_of_unix_seconds post.updated_at
+    ; "title", Keeper_types_profile.short_preview ~max_len:80 post.title
+    ; "preview", Keeper_types_profile.short_preview ~max_len:80 post.content
+    ]
 ;;
 
 let line_block label value =
@@ -580,7 +638,8 @@ let active_goal_summaries
     meta.active_goal_ids
 ;;
 
-let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
+let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
+    ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ?(active_goal_summaries : (string * string) list option)
     ()
@@ -597,7 +656,6 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path :
       ~default:(List.map (fun goal_id -> (goal_id, "")) meta.active_goal_ids)
       active_goal_summaries
   in
-  let config = Workspace.default_config base_path in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
       ~instructions
@@ -614,7 +672,8 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path :
   system_prompt
 ;;
 
-let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
+let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
+    ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
@@ -625,7 +684,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path
   let system_prompt =
     build_system_prompt
       ~meta
-      ~base_path
+      ~config
       ?profile_defaults
       ?active_goal_summaries
       ()
@@ -884,7 +943,7 @@ let emit_prompt_metrics
 
 let build_prompt
       ~meta
-      ~base_path
+      ~config
       ?profile_defaults
       ~turn_decision
       ~current_task
@@ -895,7 +954,7 @@ let build_prompt
   let prompt =
     build_prompt_internal
       ~meta
-      ~base_path
+      ~config
       ?profile_defaults
       ~turn_decision:(Some turn_decision)
       ~current_task
@@ -909,7 +968,7 @@ let build_prompt
 
 let build_prompt_preview
       ~meta
-      ~base_path
+      ~config
       ?profile_defaults
       ~current_task
       ?active_goal_summaries
@@ -918,7 +977,7 @@ let build_prompt_preview
   =
   build_prompt_internal
     ~meta
-    ~base_path
+    ~config
     ?profile_defaults
     ~turn_decision:None
     ~current_task

@@ -346,7 +346,11 @@ let execute_tool_eio
                      ~args:coerced_args
                  | Mod_schedule ->
                    Tool_schedule.dispatch
-                     { Tool_schedule.config; agent_name }
+                     { Tool_schedule.config
+                     ; agent_name
+                     ; admit_keeper_wake_creation =
+                         Keeper_schedule_creation_admission.run
+                     }
                      ~name
                      ~args:coerced_args
                  | Mod_misc ->

@@ -39,6 +39,8 @@ type failure =
   | Target_owner_identity_changed
   | Continuation_binding_mismatch
   | Source_queue_validation_failed of string
+  | Source_transfer_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Target_transfer_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Committed_projection_failed of
       { stage : projection_stage
       ; detail : string
@@ -119,6 +121,14 @@ let failure_to_string = function
     "Transfer_owner continuation binding does not match the exact source event"
   | Source_queue_validation_failed detail ->
     "Transfer_owner source queue validation failed: " ^ detail
+  | Source_transfer_shutdown_reserved operation_id ->
+    Printf.sprintf
+      "Transfer_owner source durable intake is shutdown-reserved: operation=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+  | Target_transfer_shutdown_reserved operation_id ->
+    Printf.sprintf
+      "Transfer_owner target durable intake is shutdown-reserved: operation=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
   | Committed_projection_failed { stage; detail } ->
     Printf.sprintf
       "Transfer_owner committed receipt but %s projection failed: %s"
@@ -285,10 +295,12 @@ let accepted_transfer receipt
   ; operator_operation_id = receipt.operator_operation_id
   ; from_keeper = transfer.from_keeper
   ; to_keeper = transfer.to_keeper
+  ; target_generation = transfer.target_generation
+  ; target_trace_id = transfer.target_trace_id
   }
 ;;
 
-let ack_source config receipt transfer =
+let ack_source ?intake_token config receipt transfer =
   let causal = accepted_transfer receipt transfer in
   let base_path = config.Workspace.base_path in
   let* source_state =
@@ -323,13 +335,17 @@ let ack_source config receipt transfer =
        request time is the sole timestamp for the source ACK. *)
     let* outcome =
       Keeper_registry_event_queue.transfer_pending_accepted_result
+        ?intake_token
         ~base_path
         transfer.from_keeper
         ~current_owner_nonce:current.runtime.nonce
         ~applied_at:receipt.requested_at
         ~transfer:causal
-      |> Result.map_error (fun detail ->
-        Committed_projection_failed { stage = Source_ack; detail })
+      |> Result.map_error (function
+        | Keeper_registry_event_queue.Transfer_pending_storage_error detail ->
+          Committed_projection_failed { stage = Source_ack; detail }
+        | Keeper_registry_event_queue.Transfer_pending_shutdown_reserved operation_id ->
+          Source_transfer_shutdown_reserved operation_id)
     in
     (match outcome with
      | Keeper_registry_event_queue.Transition_applied _
@@ -353,31 +369,42 @@ let ack_source config receipt transfer =
             }))
 ;;
 
-let validate_committed_target config transfer =
-  let* meta = read_meta config transfer.Keeper_paused_work_disposition_receipt.to_keeper in
-  if not (Int.equal meta.runtime.nonce transfer.target_generation)
-  then
-    Error
-      (Target_owner_nonce_changed
-         { expected = transfer.target_generation; actual = meta.runtime.nonce })
-  else if not (Keeper_id.Trace_id.equal meta.runtime.trace_id transfer.target_trace_id)
-  then Error Target_owner_identity_changed
-  else Ok ()
-;;
-
-let target_enqueue config receipt transfer =
-  let* () = validate_committed_target config transfer in
+let target_enqueue ?intake_token config receipt transfer =
   let causal = accepted_transfer receipt transfer in
   match
     Keeper_registry_event_queue.project_accepted_transfer_durable_result
+      ?intake_token
       ~base_path:config.Workspace.base_path
       transfer.Keeper_paused_work_disposition_receipt.to_keeper
       ~transfer:causal
   with
-  | Keeper_registry_event_queue.Stimulus_enqueued -> Ok Enqueued
-  | Keeper_registry_event_queue.Stimulus_already_present -> Ok Already_present
-  | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+  | Keeper_registry_event_queue.Transfer_projection_committed -> Ok Enqueued
+  | Keeper_registry_event_queue.Transfer_projection_already_committed ->
+    Ok Already_present
+  | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
     Error (Committed_projection_failed { stage = Target_enqueue; detail })
+  | Keeper_registry_event_queue.Transfer_projection_target_unavailable
+      (Keeper_registry_event_queue.Transfer_target_generation_changed
+         { expected; actual }) ->
+    Error (Target_owner_nonce_changed { expected; actual })
+  | Keeper_registry_event_queue.Transfer_projection_target_unavailable
+      Keeper_registry_event_queue.Transfer_target_trace_changed ->
+    Error Target_owner_identity_changed
+  | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
+    Error
+      (Committed_projection_failed
+         { stage = Target_enqueue
+         ; detail = Keeper_registry_event_queue.transfer_target_error_to_string error
+         })
+  | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
+    Error
+      (Committed_projection_failed
+         { stage = Target_enqueue
+         ; detail =
+             Printf.sprintf
+               "target Keeper shutdown owns durable intake operation=%s"
+               (Keeper_shutdown_types.Operation_id.to_string operation_id)
+         })
 ;;
 
 let receipt_matches_accepted_transfer
@@ -390,11 +417,14 @@ let receipt_matches_accepted_transfer
   && String.equal receipt.operator_operation_id accepted.operator_operation_id
   && String.equal receipt_transfer.from_keeper accepted.from_keeper
   && String.equal receipt_transfer.to_keeper accepted.to_keeper
+  && Int.equal receipt_transfer.target_generation accepted.target_generation
+  && Keeper_id.Trace_id.equal receipt_transfer.target_trace_id accepted.target_trace_id
   && receipt_transfer.source = accepted.source
   && Int64.equal receipt_transfer.source_incarnation accepted.source_incarnation
 ;;
 
 let project_committed_target_if_receipted
+      ?intake_token
       config
       ~(transfer : Keeper_registry_event_queue.accepted_transfer)
   =
@@ -410,18 +440,37 @@ let project_committed_target_if_receipted
   | Some receipt ->
     let* receipt_transfer = transfer_of_receipt receipt in
     if receipt_matches_accepted_transfer receipt receipt_transfer transfer
-    then target_enqueue config receipt receipt_transfer |> Result.map Option.some
+    then
+      target_enqueue ?intake_token config receipt receipt_transfer
+      |> Result.map Option.some
     else Error (Receipt_conflict receipt)
 ;;
 
-let project_receipt config receipt =
+let project_receipt
+      ~source_intake_token
+      ~target_intake_token
+      config
+      receipt
+  =
   let* transfer = transfer_of_receipt receipt in
-  let* () = ack_source config receipt transfer in
-  let* target_projection = target_enqueue config receipt transfer in
+  let* () =
+    ack_source ~intake_token:source_intake_token config receipt transfer
+  in
+  let* target_projection =
+    target_enqueue ~intake_token:target_intake_token config receipt transfer
+  in
   Ok (Applied target_projection)
 ;;
 
-let run_owned receipt_lock config ~from_keeper ~to_keeper request =
+let run_owned
+      receipt_lock
+      config
+      ~source_intake_token
+      ~target_intake_token
+      ~from_keeper
+      ~to_keeper
+      request
+  =
   let* existing =
     Keeper_paused_work_disposition_receipt.load
       config
@@ -453,67 +502,113 @@ let run_owned receipt_lock config ~from_keeper ~to_keeper request =
          Error (Receipt_conflict existing))
   in
   let projection =
-    match project_receipt config receipt with
+    match
+      project_receipt
+        ~source_intake_token
+        ~target_intake_token
+        config
+        receipt
+    with
     | Ok projection -> projection
     | Error failure -> Committed_followup_failed failure
   in
   Ok (receipt, commit_status, projection)
 ;;
 
-let transfer_pending_under_admission config ~from_keeper ~to_keeper request =
+let transfer_pending_under_reservation
+      config
+      ~source_intake_token
+      ~target_intake_token
+      ~from_keeper
+      ~to_keeper
+      request
+  =
+  match
+    Keeper_paused_work_disposition_receipt.with_keeper_lock
+      config
+      ~keeper_name:from_keeper
+      (fun receipt_lock ->
+         run_owned
+           receipt_lock
+           config
+           ~source_intake_token
+           ~target_intake_token
+           ~from_keeper
+           ~to_keeper
+           request)
+  with
+  | Error detail -> Error (Receipt_lock_failed detail)
+  | Ok outcome -> outcome
+;;
+
+let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
+  match
+    Keeper_lifecycle_reservation.acquire
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:from_keeper
+      ~expected_generation:request.owner_nonce
+      ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
+  with
+  | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+    Error
+      { cause = Reservation_conflict owner; reservation_release = None }
+  | Ok token ->
+    (try
+       let outcome =
+         Keeper_turn_admission.run_transfer_intake_if_open
+           ~base_path:config.Workspace.base_path
+           ~from_keeper
+           ~to_keeper
+           (fun ~source_intake_token ~target_intake_token ->
+              transfer_pending_under_reservation
+                config
+                ~source_intake_token
+                ~target_intake_token
+                ~from_keeper
+                ~to_keeper
+                request)
+       in
+       let reservation_release = Keeper_lifecycle_reservation.release token in
+       (match outcome with
+        | Keeper_turn_admission.Transfer_intake_committed
+            (Ok (receipt, commit_status, projection)) ->
+          Ok { receipt; commit_status; projection; reservation_release }
+        | Keeper_turn_admission.Transfer_intake_committed (Error cause) ->
+          Error { cause; reservation_release = Some reservation_release }
+        | Keeper_turn_admission.Transfer_intake_source_shutdown_reserved operation_id ->
+          Error
+            { cause = Source_transfer_shutdown_reserved operation_id
+            ; reservation_release = Some reservation_release
+            }
+        | Keeper_turn_admission.Transfer_intake_target_shutdown_reserved operation_id ->
+          Error
+            { cause = Target_transfer_shutdown_reserved operation_id
+            ; reservation_release = Some reservation_release
+            })
+     with
+     | exn ->
+       (* fire-and-forget: best-effort release; [exn] is re-raised immediately so a release failure must not mask it. *)
+       ignore (Keeper_lifecycle_reservation.release token : _);
+       raise exn)
+;;
+
+let transfer_pending config ~from_keeper ~to_keeper request =
   match validate_request ~from_keeper ~to_keeper request with
   | Error detail ->
     Error { cause = Invalid_request detail; reservation_release = None }
   | Ok () ->
     (match
-       Keeper_lifecycle_reservation.acquire
+       Keeper_turn_admission.run_if_free
          ~base_path:config.Workspace.base_path
          ~keeper_name:from_keeper
-         ~expected_generation:request.owner_nonce
-         ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
+         (fun () ->
+            transfer_pending_with_reservation
+              config
+              ~from_keeper
+              ~to_keeper
+              request)
      with
-     | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
-       Error
-         { cause = Reservation_conflict owner; reservation_release = None }
-     | Ok token ->
-       (try
-          let outcome =
-            match
-              Keeper_paused_work_disposition_receipt.with_keeper_lock
-                config
-                ~keeper_name:from_keeper
-                (fun receipt_lock ->
-                   run_owned receipt_lock config ~from_keeper ~to_keeper request)
-            with
-            | Error detail -> Error (Receipt_lock_failed detail)
-            | Ok outcome -> outcome
-          in
-          let reservation_release = Keeper_lifecycle_reservation.release token in
-          (match outcome with
-           | Ok (receipt, commit_status, projection) ->
-             Ok { receipt; commit_status; projection; reservation_release }
-           | Error cause ->
-             Error { cause; reservation_release = Some reservation_release })
-        with
-        | exn ->
-          (* fire-and-forget: best-effort release; [exn] is re-raised immediately so a release failure must not mask it. *)
-          ignore (Keeper_lifecycle_reservation.release token : _);
-          raise exn))
-;;
-
-let transfer_pending config ~from_keeper ~to_keeper request =
-  match
-    Keeper_turn_admission.run_if_free
-      ~base_path:config.Workspace.base_path
-      ~keeper_name:from_keeper
-      (fun () ->
-         transfer_pending_under_admission
-           config
-           ~from_keeper
-           ~to_keeper
-           request)
-  with
-  | `Ran outcome -> outcome
-  | `Busy block ->
-    Error { cause = Admission_busy block; reservation_release = None }
+     | `Busy block ->
+       Error { cause = Admission_busy block; reservation_release = None }
+     | `Ran outcome -> outcome)
 ;;

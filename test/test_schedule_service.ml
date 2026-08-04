@@ -93,9 +93,12 @@ let check_service_error label expected = function
 let test_create_mints_schedule_id () =
   with_workspace
   @@ fun config ->
-  let request = create_ok config in
-  check bool "schedule id prefix" true (has_prefix "sched-" request.schedule_id);
-  check_status "starts scheduled" Scheduled request.status
+  let first = create_ok config in
+  let second = create_ok config in
+  check bool "schedule id prefix" true (has_prefix "sched-" first.schedule_id);
+  check bool "schedule ids are unique" true
+    (not (String.equal first.schedule_id second.schedule_id));
+  check_status "starts scheduled" Scheduled first.status
 ;;
 
 let test_list_and_get_by_status () =

@@ -1610,7 +1610,8 @@ let unavailable_fleet_summary_json () =
 
 let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   let durable_event_queue_discovery =
-    Keeper_event_queue_persistence.discover_keeper_names_with_snapshots ~base_path
+    Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
+      ~base_path
   in
   let keeper_names =
     List.sort_uniq

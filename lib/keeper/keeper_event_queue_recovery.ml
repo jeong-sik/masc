@@ -16,6 +16,7 @@ type projection_outcome =
 
 type projection_error =
   | Owner_unavailable of Persistence.owner_identity_error
+  | Owner_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Executor_unavailable of Executor_pool_ref.strict_submit_error
   | Outbox_unavailable of string
   | Target_transfer_projection_failed of
@@ -30,7 +31,7 @@ type projection_error =
   | Unexpected_projection_failure of Eio.Exn.with_bt
 
 type discovery_error =
-  | Snapshot_discovery_failed of string
+  | Durable_state_discovery_failed of string
   | Sweep_execution_failed of Eio.Exn.with_bt
   | Sweep_executor_unavailable of Executor_pool_ref.strict_submit_error
 
@@ -68,6 +69,10 @@ type sweep_page =
 let projection_error_to_string = function
   | Owner_unavailable error ->
     Persistence.owner_identity_error_to_string error
+  | Owner_shutdown_reserved operation_id ->
+    Printf.sprintf
+      "event queue transition owner shutdown reserved operation=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
   | Executor_unavailable error ->
     "event queue transition executor unavailable: "
     ^ Executor_pool_ref.strict_submit_error_to_string error
@@ -94,15 +99,15 @@ let projection_error_to_string = function
 ;;
 
 let discovery_error_to_string = function
-  | Snapshot_discovery_failed detail ->
-    "event queue snapshot discovery failed: " ^ detail
+  | Durable_state_discovery_failed detail ->
+    "durable event queue state discovery failed: " ^ detail
   | Sweep_execution_failed (exn, backtrace) ->
     Printf.sprintf
-      "event queue snapshot sweep raised: %s\n%s"
+      "durable event queue state sweep raised: %s\n%s"
       (Printexc.to_string exn)
       (Printexc.raw_backtrace_to_string backtrace)
   | Sweep_executor_unavailable error ->
-    "event queue snapshot sweep executor unavailable: "
+    "durable event queue state sweep executor unavailable: "
     ^ Executor_pool_ref.strict_submit_error_to_string error
 ;;
 
@@ -164,26 +169,47 @@ let wake_transfer_target ~base_path target_keeper =
 ;;
 
 let project_generic_transfer_target_result
+      ~target_intake_token
       ~base_path
       (transfer : Keeper_registry_event_queue.accepted_transfer)
   =
   match
     Keeper_registry_event_queue.project_accepted_transfer_durable_result
+      ~intake_token:target_intake_token
       ~base_path
       transfer.to_keeper
       ~transfer
   with
-  | Keeper_registry_event_queue.Stimulus_enqueued
-  | Keeper_registry_event_queue.Stimulus_already_present ->
+  | Keeper_registry_event_queue.Transfer_projection_committed
+  | Keeper_registry_event_queue.Transfer_projection_already_committed ->
     wake_transfer_target ~base_path transfer.to_keeper;
     Ok ()
-  | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+  | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
     Error
       (Target_transfer_projection_failed
          { target_keeper = transfer.to_keeper; detail })
+  | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
+    Error
+      (Target_transfer_projection_failed
+         { target_keeper = transfer.to_keeper
+         ; detail = Keeper_registry_event_queue.transfer_target_error_to_string error
+         })
+  | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
+    Error
+      (Target_transfer_projection_failed
+         { target_keeper = transfer.to_keeper
+         ; detail =
+             Printf.sprintf
+               "target Keeper shutdown owns durable intake operation=%s"
+               (Keeper_shutdown_types.Operation_id.to_string operation_id)
+         })
 ;;
 
-let project_transfer_target_result ~base_path (entry : Persistence.outbox_entry) =
+let project_transfer_target_result
+      ~target_intake_token
+      ~base_path
+      (entry : Persistence.outbox_entry)
+  =
   match entry.receipt.transition with
   | Persistence.Cancel_accepted _
   | Persistence.Ack_source_terminal _ ->
@@ -191,10 +217,15 @@ let project_transfer_target_result ~base_path (entry : Persistence.outbox_entry)
   | Persistence.Transfer_accepted transfer ->
     (match
        Keeper_paused_work_transfer_transaction.project_committed_target_if_receipted
+         ~intake_token:target_intake_token
          (Workspace.default_config base_path)
          ~transfer
      with
-     | Ok None -> project_generic_transfer_target_result ~base_path transfer
+     | Ok None ->
+       project_generic_transfer_target_result
+         ~target_intake_token
+         ~base_path
+         transfer
      | Ok (Some _) ->
        wake_transfer_target ~base_path transfer.to_keeper;
        Ok ()
@@ -207,27 +238,75 @@ let project_transfer_target_result ~base_path (entry : Persistence.outbox_entry)
 let project_claimed_owner owner =
   let base_path = Persistence.owner_identity_base_path owner in
   let keeper_name = Persistence.owner_identity_keeper_name owner in
-  match
-    Persistence.load_state_result
-      ~base_path
-      ~keeper_name
-  with
+  let project_open_owner ?target_intake_token () =
+    match Persistence.load_state_result ~base_path ~keeper_name with
+    | Error detail -> Error (Outbox_unavailable detail)
+    | Ok state ->
+      (match Keeper_event_queue_state.transition_outbox state with
+       | [] -> Ok No_pending_transition
+       | entry :: _ ->
+         let project_target =
+           match entry.receipt.transition, target_intake_token with
+           | Persistence.Transfer_accepted _, Some target_intake_token ->
+             project_transfer_target_result
+               ~target_intake_token
+               ~base_path
+               entry
+           | Persistence.Transfer_accepted _, None ->
+             Error
+               (Outbox_unavailable
+                  "transfer recovery entered without its ordered target intake fence")
+           | (Persistence.Cancel_accepted _ | Persistence.Ack_source_terminal _), _ ->
+             Ok ()
+         in
+         (match project_target with
+          | Error _ as error -> error
+          | Ok () ->
+            (match
+               Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+                 ~base_path
+                 ~keeper_name
+                 ~expected_transition_id:entry.receipt.transition_id
+             with
+             | Ok () -> Ok Transition_converged
+             | Error detail -> Error (Ledger_projection_failed detail))))
+  in
+  match Persistence.load_state_result ~base_path ~keeper_name with
   | Error detail -> Error (Outbox_unavailable detail)
   | Ok state ->
     (match Keeper_event_queue_state.transition_outbox state with
-     | [] -> Ok No_pending_transition
-     | entry :: _ ->
-       (match project_transfer_target_result ~base_path entry with
-        | Error _ as error -> error
-        | Ok () ->
-          (match
-             Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-               ~base_path
-               ~keeper_name
-               ~expected_transition_id:entry.receipt.transition_id
-           with
-           | Ok () -> Ok Transition_converged
-           | Error detail -> Error (Ledger_projection_failed detail))))
+     | { receipt = { transition = Persistence.Transfer_accepted transfer; _ }; _ }
+       :: _ ->
+       (match
+          Keeper_turn_admission.run_transfer_intake_if_open
+            ~base_path
+            ~from_keeper:keeper_name
+            ~to_keeper:transfer.to_keeper
+            (fun ~source_intake_token:_ ~target_intake_token ->
+               project_open_owner ~target_intake_token ())
+        with
+        | Keeper_turn_admission.Transfer_intake_committed result -> result
+        | Keeper_turn_admission.Transfer_intake_source_shutdown_reserved operation_id
+        | Keeper_turn_admission.Transfer_intake_target_shutdown_reserved operation_id ->
+          Error (Owner_shutdown_reserved operation_id))
+     | []
+     | { receipt =
+           { transition =
+               (Persistence.Cancel_accepted _ | Persistence.Ack_source_terminal _)
+           ; _
+           }
+       ; _
+       }
+       :: _ ->
+       (match
+          Keeper_turn_admission.run_durable_intake_if_open
+            ~base_path
+            ~keeper_name
+            (fun _source_intake_token -> project_open_owner ())
+        with
+        | Keeper_turn_admission.Intake_committed result -> result
+        | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+          Error (Owner_shutdown_reserved operation_id)))
 ;;
 
 let project_resolved_owner owner =
@@ -295,7 +374,7 @@ let project_discovery_inline
     ~base_path
     ~budget
     ~cursor
-    (discovery : Persistence.snapshot_discovery) =
+    (discovery : Persistence.durable_state_discovery) =
   let names, selected, deferred, next_cursor =
     ordered_owner_page ~budget ~cursor discovery.keeper_names
   in
@@ -310,7 +389,7 @@ let project_discovery_inline
     ; failures = []
     ; discovery_error =
         Option.map
-          (fun detail -> Snapshot_discovery_failed detail)
+          (fun detail -> Durable_state_discovery_failed detail)
           discovery.read_error
     }
   in
@@ -350,7 +429,7 @@ let project_discovered_bounded ~base_path ~budget ~cursor =
   match
     Executor_pool_ref.submit_strict (fun () ->
       let discovery =
-        Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+        Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
           ~base_path
       in
       project_discovery_inline ~base_path ~budget ~cursor discovery)

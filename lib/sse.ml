@@ -58,9 +58,40 @@ let registration_error_to_string = function
         "SSE registration failed: session belongs to %s but token belongs to %s"
         session_agent token_agent
 
+type data_payload_error = Missing_data_payload
+
+let data_payload_line line =
+  let line_len = String.length line in
+  let line_len =
+    if line_len > 0 && Char.equal line.[line_len - 1] '\r'
+    then line_len - 1
+    else line_len
+  in
+  let prefix = "data:" in
+  let prefix_len = String.length prefix in
+  if line_len >= prefix_len
+     && String.equal (String.sub line 0 prefix_len) prefix
+  then
+    let payload_start =
+      if line_len > prefix_len && Char.equal line.[prefix_len] ' '
+      then prefix_len + 1
+      else prefix_len
+    in
+    Some (String.sub line payload_start (line_len - payload_start))
+  else None
+
+let data_payload_of_frame frame =
+  match
+    String.split_on_char '\n' frame
+    |> List.filter_map data_payload_line
+  with
+  | [] -> Error Missing_data_payload
+  | payload_lines -> Ok (String.concat "\n" payload_lines)
+
 (** Classification of an SSE session's traffic role. *)
 module SMap = Set_util.StringMap
 module IntMap = Map.Make (Int)
+module IntSet = Set.Make (Int)
 
 (* Test-only hooks for forcing a CAS retry in white-box unit tests. *)
 let register_commit_test_hook : (unit -> unit) option Atomic.t = Atomic.make None
@@ -83,6 +114,18 @@ type broadcast_target =
   | Observers    (** Only [Observer] sessions *)
   | Agent_streams (** Only [Agent_stream] sessions *)
   | Presence_only (** Only [Presence] sessions; never replay-buffered *)
+
+type delivery_audience =
+  | Broadcast_audience of broadcast_target
+  | Session_audience of string
+
+type delivery =
+  { event_id : int
+  ; frame : string
+  ; payload : Yojson.Safe.t
+  ; emitted_at : float
+  ; audience : delivery_audience
+  }
 
 (** Maximum concurrent SSE clients -- prevents connection storm on restart.
     Increased from 50 to 200 to handle Claude.ai MCP client reconnections. *)
@@ -116,7 +159,7 @@ let stream_capacity =
 type client = {
   id: int;
   kind: session_kind;
-  event_stream: string Eio.Stream.t;
+  event_stream: delivery Eio.Stream.t;
   last_event_id: int Atomic.t;
   created_at: float;
   last_seen_at: float Atomic.t;
@@ -251,7 +294,12 @@ let client_id_counter = Atomic.make 0
 (** Global event counter for resumability *)
 let event_counter = Atomic.make 0
 
-(** Event buffer for resumability - stores (event_id, event_string, timestamp)
+(* Event id allocation, replay-buffer commit, and per-client enqueue are one
+   ordered publication boundary. Producers may run on different domains, so
+   the short non-yielding critical section uses a standard-library mutex. *)
+let delivery_fanout_mutex = Stdlib.Mutex.create ()
+
+(** Event buffer for resumability stores canonical deliveries.
 
     [event_buffer] is written by every [broadcast_impl] / [send_to] and
     drained by the periodic [cleanup_expired_events] background fiber.
@@ -273,10 +321,8 @@ let max_buffer_size =
     (Env_config_core.get_int ~default "MASC_SSE_REPLAY_BUFFER_SIZE")
 let buffer_ttl_seconds = Env_config.InternalTimers.sse_buffer_ttl_sec
 
-type buffered_event = int * string * float
-
 type event_buffer_state = {
-  events_by_id : buffered_event IntMap.t;
+  events_by_id : delivery IntMap.t;
   count : int;
 }
 
@@ -288,8 +334,8 @@ let event_buffer : event_buffer_state Atomic.t =
 let event_buffer_state_of_events events =
   let events_by_id =
     List.fold_left
-      (fun acc (((event_id, _, _) as event) : buffered_event) ->
-         IntMap.add event_id event acc)
+      (fun acc (delivery : delivery) ->
+         IntMap.add delivery.event_id delivery acc)
       IntMap.empty events
   in
   { events_by_id; count = IntMap.cardinal events_by_id }
@@ -307,14 +353,14 @@ let rewrite_event_buffer_for_test () =
   Lockfree_atomic.update event_buffer (fun state ->
     { state with count = state.count })
 
-(** Add event to buffer, maintaining max size *)
-let buffer_event event_id event_str =
+(** Add one canonical delivery to the replay buffer, maintaining max size. *)
+let buffer_event delivery =
   Lockfree_atomic.update_with_commit event_buffer (fun state ->
     run_test_hook buffer_commit_test_hook;
-    let timestamp = Time_compat.now () in
-    let event = (event_id, event_str, timestamp) in
-    let replacing = IntMap.mem event_id state.events_by_id in
-    let events_by_id = IntMap.add event_id event state.events_by_id in
+    let replacing = IntMap.mem delivery.event_id state.events_by_id in
+    let events_by_id =
+      IntMap.add delivery.event_id delivery state.events_by_id
+    in
     let count = if replacing then state.count else state.count + 1 in
     let events_by_id, count =
       if count <= max_buffer_size then events_by_id, count
@@ -324,21 +370,56 @@ let buffer_event event_id event_str =
     in
     { next_state = { events_by_id; count }; result = () })
 
-let event_matches_session_kind kind event =
-  match kind with
-  | Observer -> true
-  | Agent_stream -> Sse_jsonrpc_filter.event_string_jsonrpc_message_for_agent_stream event
-  | Presence -> false
+let session_kind_matches_target target ~jsonrpc_payload kind =
+  match target with
+  | All -> (
+      match kind with
+      | Observer -> true
+      | Agent_stream -> jsonrpc_payload
+      | Presence -> false)
+  | Observers -> kind = Observer
+  | Agent_streams -> kind = Agent_stream && jsonrpc_payload
+  | Presence_only -> kind = Presence
+
+let event_matches_session ~session_id ~kind event =
+  match event.audience with
+  | Session_audience target_session_id ->
+    kind = Agent_stream && String.equal target_session_id session_id
+  | Broadcast_audience target ->
+    let jsonrpc_payload =
+      Sse_jsonrpc_filter.event_string_jsonrpc_message_for_agent_stream event.frame
+    in
+    session_kind_matches_target target ~jsonrpc_payload kind
 
 (** Get events after given ID for replay (MCP spec MUST) *)
-let get_events_after last_id =
+let get_events_after_raw last_id =
   let state = Atomic.get event_buffer in
   let _older_or_equal, _at_last_id, newer = IntMap.split last_id state.events_by_id in
-  newer |> IntMap.bindings |> List.map (fun (_id, (_event_id, ev, _ts)) -> ev)
+  newer |> IntMap.bindings |> List.map snd
 
-let get_events_after_for_kind kind last_id =
-  get_events_after last_id
-  |> List.filter (event_matches_session_kind kind)
+let get_events_after_for_test = get_events_after_raw
+
+let get_events_after_for_session ~session_id ~kind last_id =
+  get_events_after_raw last_id
+  |> List.filter (event_matches_session ~session_id ~kind)
+
+type replay_handoff = IntSet.t ref
+
+let create_replay_handoff deliveries =
+  ref
+    (List.fold_left
+       (fun ids (delivery : delivery) -> IntSet.add delivery.event_id ids)
+       IntSet.empty
+       deliveries)
+;;
+
+let accept_live_delivery handoff (delivery : delivery) =
+  if IntSet.mem delivery.event_id !handoff
+  then (
+    handoff := IntSet.remove delivery.event_id !handoff;
+    false)
+  else true
+;;
 
 (** Remove events older than [buffer_ttl_seconds] from the front of the buffer.
     Returns count of evicted events. *)
@@ -347,11 +428,11 @@ let cleanup_expired_events () =
   Lockfree_atomic.update_with_commit event_buffer (fun state ->
     let events_by_id, evicted =
       IntMap.fold
-        (fun id (((_event_id, _ev, ts) as item) : buffered_event) (kept, evicted) ->
-          if now -. ts > buffer_ttl_seconds then
+        (fun id (delivery : delivery) (kept, evicted) ->
+          if now -. delivery.emitted_at > buffer_ttl_seconds then
             (kept, evicted + 1)
           else
-            (IntMap.add id item kept, evicted))
+            (IntMap.add id delivery kept, evicted))
         state.events_by_id
         (IntMap.empty, 0)
     in
@@ -371,70 +452,21 @@ let cleanup_expired_events () =
     that both peek the counter, both get the same value, and then
     both pass it as [~id] would emit events with the **same** id,
     breaking MCP SSE resumability (the [last_event_id] filter in
-    [get_events_after] skips by id, so a duplicate would be
+    replay lookup skips by id, so a duplicate would be
     dropped).
 
-    When [~id] is omitted (external callers in
-    [server_mcp_transport_http] / [server_mcp_transport_http_agui])
-    this function still allocates a fresh id atomically, preserving
-    their contract. *)
+    When [~id] is omitted the frame is transport-only: it does not advance the
+    replay cursor. Only callers inside the ordered delivery publication
+    boundary may attach an id. *)
 let format_event ?id ?event_type data =
-  let effective_id =
-    match id with
-    | Some i -> i
-    | None ->
-        (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
-        Atomic.fetch_and_add event_counter 1 + 1
-  in
-  (* Hot path: every broadcast goes through here once.  The previous
-     three [Printf.sprintf] calls each ran the format interpreter and
-     allocated an intermediate string ([id_line], [event_line], the
-     concat), so a single broadcast paid for three string allocations
-     plus the [%d]/[%s] dispatch overhead before the result string was
-     produced.  A single [Buffer] accumulator with primitive
-     [string_of_int] sidesteps the format interpreter entirely and
-     emits exactly the bytes the SSE wire format requires (id-line +
-     optional event-line + data-line + blank).  The output string is
-     byte-for-byte identical to what [Printf.sprintf] produced. *)
-  let buf = Buffer.create 64 in
-  Buffer.add_string buf "id: ";
-  Buffer.add_string buf (string_of_int effective_id);
-  Buffer.add_char buf '\n';
-  (match event_type with
-   | Some e ->
-       Buffer.add_string buf "event: ";
-       Buffer.add_string buf e;
-       Buffer.add_char buf '\n'
-   | None -> ());
-  Buffer.add_string buf "data: ";
-  Buffer.add_string buf data;
-  Buffer.add_string buf "\n\n";
-  Buffer.contents buf
+  Sse_wire.format_event ?id ?event_type data
 
 (** Format SSE event from a [Yojson.Safe.t] value without the intermediate
     [to_string] allocation.  Writes JSON bytes directly into the SSE event
     buffer via [Yojson.Safe.to_buffer], cutting one string allocation per
     broadcast (~9/sec → ~9 fewer short-lived strings/sec for GC to collect). *)
 let format_event_yojson ?id ?event_type json =
-  let effective_id =
-    match id with
-    | Some i -> i
-    | None -> Atomic.fetch_and_add event_counter 1 + 1
-  in
-  let buf = Buffer.create 128 in
-  Buffer.add_string buf "id: ";
-  Buffer.add_string buf (string_of_int effective_id);
-  Buffer.add_char buf '\n';
-  (match event_type with
-   | Some e ->
-       Buffer.add_string buf "event: ";
-       Buffer.add_string buf e;
-       Buffer.add_char buf '\n'
-   | None -> ());
-  Buffer.add_string buf "data: ";
-  Yojson.Safe.to_buffer buf json;
-  Buffer.add_string buf "\n\n";
-  Buffer.contents buf
+  Sse_wire.format_event_yojson ?id ?event_type json
 
 (** Get current event ID *)
 let current_id () = Atomic.get event_counter
@@ -703,15 +735,7 @@ let update_last_event_id session_id event_id =
   | None -> ()
 
 let client_matches_target target ~jsonrpc_payload (client : client) =
-  match target with
-  | All -> (
-      match client.kind with
-      | Observer -> true
-      | Agent_stream -> jsonrpc_payload
-      | Presence -> false)
-  | Observers -> client.kind = Observer
-  | Agent_streams -> client.kind = Agent_stream && jsonrpc_payload
-  | Presence_only -> client.kind = Presence
+  session_kind_matches_target target ~jsonrpc_payload client.kind
 
 (** {1 External Subscriber Hook}
 
@@ -912,9 +936,11 @@ let reap_dead_external_subscribers () =
   List.length removed_ids
 
 (** Internal broadcast implementation shared by [broadcast] and [broadcast_to].
-    Pushes the formatted event string into each matching client's
-    [event_stream].  The registry snapshot is immutable; the per-stream
-    [Eio.Stream.add] calls happen outside any global lock.
+    Pushes the canonical delivery into each matching client's
+    [event_stream].  Event-id allocation, replay-buffer commit, and live
+    enqueue are serialized so every client observes the same cursor order.
+    Logging, disconnect hooks, snapshots, and external callbacks stay outside
+    that short publication boundary.
 
     [Eio.Stream.add] on a bounded (capacity 64) stream returns
     immediately as long as the stream is not full.  The per-client drain
@@ -922,43 +948,51 @@ let reap_dead_external_subscribers () =
     independently, so broadcast is decoupled from per-connection I/O.
 
     After SSE fan-out, external subscribers (gRPC streams, etc.) are
-    also notified with the same formatted event string. *)
+    notified with the delivery's formatted frame. *)
 let broadcast_impl ?(buffer = true) ?(notify_external = true)
     ?(event_type = "message") target json =
   let t0 = Time_compat.now () in
   let jsonrpc_payload =
     Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream json
   in
-  (* Atomically allocate the event id so two concurrent broadcasts
-     cannot observe the same peeked counter value and emit duplicates. *)
-  let current_event_id = next_id () in
-  (* Write JSON directly into the SSE event buffer, avoiding the
-     intermediate [Yojson.Safe.to_string] allocation.  The output
-     is byte-for-byte identical to the previous two-step approach. *)
-  let event = format_event_yojson ~id:current_event_id ~event_type json in
-  if buffer then
-    buffer_event current_event_id event;
-  (* The [SMap.t] returned by [Atomic.get] is immutable
-     (Lockfree_atomic.update_with_commit replaces it wholesale on
-     subscribe/unsubscribe), so we iterate it directly with [SMap.iter].
-     Skipping the [(k, v) :: acc] fold trims one tuple + cons cell per
-     client per broadcast on this hot fan-out path. *)
   let target_label = match target with
     | All -> "all"
     | Observers -> "observers"
     | Agent_streams -> "agent_streams"
     | Presence_only -> "presence"
   in
+  let delivery, failed =
+    Stdlib.Mutex.protect delivery_fanout_mutex (fun () ->
+  (* Atomically allocate the event id so two concurrent broadcasts
+     cannot observe the same peeked counter value and emit duplicates. *)
+  let current_event_id = next_id () in
+  (* Write JSON directly into the SSE event buffer, avoiding the
+     intermediate [Yojson.Safe.to_string] allocation.  The output
+     is byte-for-byte identical to the previous two-step approach. *)
+  let delivery =
+    { event_id = current_event_id
+    ; frame = format_event_yojson ~id:current_event_id ~event_type json
+    ; payload = json
+    ; emitted_at = t0
+    ; audience = Broadcast_audience target
+    }
+  in
+  if buffer then
+    buffer_event delivery;
+  (* The [SMap.t] returned by [Atomic.get] is immutable
+     (Lockfree_atomic.update_with_commit replaces it wholesale on
+     subscribe/unsubscribe), so we iterate it directly with [SMap.iter].
+     Skipping the [(k, v) :: acc] fold trims one tuple + cons cell per
+     client per broadcast on this hot fan-out path. *)
   let clients_entries = (Atomic.get clients).entries in
   let failed = ref [] in
   SMap.iter (fun session_id client ->
     if client_matches_target target ~jsonrpc_payload client
        && current_event_id > Atomic.get client.last_event_id then begin
       (* Pre-check stream capacity to avoid blocking broadcast.
-         No TOCTOU risk: single-domain Eio cooperative scheduling has no
-         yield point between Stream.length and Stream.add, so no other
-         fiber can modify the stream in between.  try/catch kept as
-         defense-in-depth for unexpected failures.
+         No producer can fill the stream between [length] and [add] because
+         all producers share [delivery_fanout_mutex]; consumers only reduce
+         its length.  try/catch is retained as defense-in-depth.
          See TLA+ SSEBroadcastBlock spec. *)
       (let queue_len = Eio.Stream.length client.event_stream in
        if queue_len >= stream_capacity then begin
@@ -976,28 +1010,34 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
             saw "WS events stop arriving" with no error indication and
             had to manually refresh.  See plan
             [planning/claude-plans/me-workspace-yousleepwhen-masc-radiant-piglet.md]. *)
-         Transport_metrics.inc_broadcast_failure ~target:target_label ();
-         Log.Server.warn
-           "Broadcast skip: session %s stream full (%d/%d) — disconnecting"
-           session_id queue_len stream_capacity;
-         failed := session_id :: !failed
+         failed := (session_id, `Full queue_len) :: !failed
        end else
          try
-           Eio.Stream.add client.event_stream event;
+           Eio.Stream.add client.event_stream delivery;
            Atomic.set client.last_event_id current_event_id;
            mark_seen client
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | e ->
-             (* Same P1 fix on the unexpected-exception defense path. *)
-             Transport_metrics.inc_broadcast_failure ~target:target_label ();
-             Log.Server.error "Broadcast enqueue failed for session %s: %s"
-               session_id (Printexc.to_string e);
-             failed := session_id :: !failed)
+             failed := (session_id, `Raised e) :: !failed)
     end
   ) clients_entries;
+  delivery, !failed)
+  in
+  List.iter
+    (fun (session_id, failure) ->
+       Transport_metrics.inc_broadcast_failure ~target:target_label ();
+       match failure with
+       | `Full queue_len ->
+         Log.Server.warn
+           "Broadcast skip: session %s stream full (%d/%d) — disconnecting"
+           session_id queue_len stream_capacity
+       | `Raised e ->
+         Log.Server.error "Broadcast enqueue failed for session %s: %s"
+           session_id (Printexc.to_string e))
+    failed;
   (* Remove failed connections *)
-  List.iter (fun sid -> unregister sid) !failed;
+  List.iter (fun (session_id, _) -> unregister session_id) failed;
   (* Record broadcast duration for transport observability *)
   let elapsed = Time_compat.now () -. t0 in
   Transport_metrics.observe_broadcast_duration ~target:target_label elapsed;
@@ -1005,7 +1045,7 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
   (* Notify external subscribers (gRPC streams, etc.) for durable broadcast
      traffic only. Presence is intentionally live-only and bufferless. *)
   if notify_external then
-    notify_external_subscribers event
+    notify_external_subscribers delivery.frame
 
 (** Broadcast event to all connected clients (backward-compatible). *)
 let broadcast json = broadcast_impl All json
@@ -1032,23 +1072,58 @@ let send_to session_id json =
       "Dropping non-JSON-RPC payload sent via Sse.send_to for session %s"
       session_id
   else
-  let current_event_id = next_id () in
-  let event = format_event_yojson ~id:current_event_id ~event_type:"message" json in
-  buffer_event current_event_id event;
-  let client_opt = SMap.find_opt session_id (Atomic.get clients).entries in
-  match client_opt with
-  | None -> ()
-  | Some client ->
-      (try
-        Eio.Stream.add client.event_stream event;
-        Atomic.set client.last_event_id current_event_id;
-        mark_seen client;
-        sync_transport_snapshot ()
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e ->
-          Log.Server.error "Enqueue to %s failed: %s"
-            session_id (Printexc.to_string e))
+  let outcome =
+    Stdlib.Mutex.protect delivery_fanout_mutex (fun () ->
+      let current_event_id = next_id () in
+      let delivery =
+        { event_id = current_event_id
+        ; frame = format_event_yojson ~id:current_event_id ~event_type:"message" json
+        ; payload = json
+        ; emitted_at = Time_compat.now ()
+        ; audience = Session_audience session_id
+        }
+      in
+      buffer_event delivery;
+      match SMap.find_opt session_id (Atomic.get clients).entries with
+      | None -> `Absent
+      | Some client when client.kind <> Agent_stream -> `Wrong_kind client.kind
+      | Some client ->
+          let queue_len = Eio.Stream.length client.event_stream in
+          if queue_len >= stream_capacity then
+            `Full queue_len
+          else
+            try
+              Eio.Stream.add client.event_stream delivery;
+              Atomic.set client.last_event_id current_event_id;
+              mark_seen client;
+              `Enqueued
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | e -> `Raised e)
+  in
+  match outcome with
+  | `Absent -> ()
+  | `Wrong_kind kind ->
+      let kind_label = match kind with
+        | Observer -> "observer"
+        | Agent_stream -> "agent_stream"
+        | Presence -> "presence"
+      in
+      Log.Server.error
+        "Targeted JSON-RPC delivery rejected for non-agent session %s (%s)"
+        session_id kind_label
+  | `Enqueued -> sync_transport_snapshot ()
+  | `Full queue_len ->
+      Transport_metrics.inc_broadcast_failure ~target:"send_to" ();
+      Log.Server.warn
+        "Targeted enqueue skip: session %s stream full (%d/%d) — disconnecting"
+        session_id queue_len stream_capacity;
+      unregister session_id
+  | `Raised e ->
+      Transport_metrics.inc_broadcast_failure ~target:"send_to" ();
+      Log.Server.error "Enqueue to %s failed: %s — disconnecting"
+        session_id (Printexc.to_string e);
+      unregister session_id
 
 (** Pop the next event from a client's stream.
     Blocks the calling fiber until an event is available.
@@ -1069,14 +1144,16 @@ let pop session_id =
   let client_opt = SMap.find_opt session_id (Atomic.get clients).entries in
   match client_opt with
   | None -> None
-  | Some client -> Some (Eio.Stream.take client.event_stream)
+  | Some client -> Some (Eio.Stream.take client.event_stream).frame
 
 (** Non-blocking pop. Returns [Some event] if one is queued, [None] otherwise. *)
 let try_pop session_id =
   let client_opt = SMap.find_opt session_id (Atomic.get clients).entries in
   match client_opt with
   | None -> None
-  | Some client -> Eio.Stream.take_nonblocking client.event_stream
+  | Some client ->
+    Eio.Stream.take_nonblocking client.event_stream
+    |> Option.map (fun delivery -> delivery.frame)
 
 (** Get client count.
     Uses [Atomic.get] so it is safe to call from signal handlers. *)

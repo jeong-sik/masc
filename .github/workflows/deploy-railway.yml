@@ -40,19 +40,27 @@ jobs:
           done
 
       - name: Build release binary
-        run: opam exec -- dune build --release bin/main_eio.exe
+        run: |
+          opam exec -- dune build --release \
+            bin/main_eio.exe \
+            bin/keeper_event_queue_v15_cutover_helper.exe
 
       - name: Prepare binary for Docker
         run: |
           cp _build/default/bin/main_eio.exe masc-linux-x64
+          cp _build/default/bin/keeper_event_queue_v15_cutover_helper.exe \
+            masc-keeper-event-queue-v15-cutover-helper
           chmod +x masc-linux-x64
-          ls -la masc-linux-x64
+          chmod +x masc-keeper-event-queue-v15-cutover-helper
+          ls -la masc-linux-x64 masc-keeper-event-queue-v15-cutover-helper
 
       - name: Verify Linux binary format
         run: |
           set -euo pipefail
           file masc-linux-x64
           file masc-linux-x64 | grep -q 'ELF 64-bit'
+          file masc-keeper-event-queue-v15-cutover-helper
+          file masc-keeper-event-queue-v15-cutover-helper | grep -q 'ELF 64-bit'
 
       - name: Build deployment image
         run: docker build -t masc-railway-smoke .
@@ -61,10 +69,35 @@ jobs:
         run: |
           docker run --rm -i masc-railway-smoke sh -s <<'SH'
             set -e
-            out="$(ldd /app/masc)"
-            printf "%s\n" "$out"
-            ! printf "%s\n" "$out" | grep -q "not found"
+          out="$(ldd /app/masc)"
+          printf "%s\n" "$out"
+          ! printf "%s\n" "$out" | grep -q "not found"
+          helper_out="$(ldd /app/masc-keeper-event-queue-v15-cutover-helper)"
+          printf "%s\n" "$helper_out"
+          ! printf "%s\n" "$helper_out" | grep -q "not found"
           SH
+
+      - name: Reject unsafe cutover image
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/masc-railway-cutover"
+          mkdir -p "$fixture/keepers/fixture"
+          jq -n '
+            {schema: "keeper.event_queue.state.v14", revision: 1,
+             pending: [{}], last_transition: null,
+             projected_dispositions: [], transition_outbox: [],
+             accepted_transfer_projections: []}
+          ' > "$fixture/keepers/fixture/event-queue-v14.json"
+          chmod -R a+rX "$fixture"
+          if docker run --rm \
+              -v "$fixture:/app/.masc" \
+              -e PORT=18080 \
+              masc-railway-smoke \
+              /app/masc --port 18080 --base-path /app
+          then
+            echo "unsafe v14 queue bypassed the container cutover gate"
+            exit 1
+          fi
 
       - name: Smoke deployment image
         run: |
@@ -89,7 +122,9 @@ jobs:
           # Railway CLI respects .gitignore. Instead of mutating .gitignore
           # (which could affect later steps), force-add the binary to git's
           # index so Railway includes it in the upload.
-          git add -f masc-linux-x64
+          git add -f \
+            masc-linux-x64 \
+            masc-keeper-event-queue-v15-cutover-helper
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli

@@ -159,7 +159,7 @@ let list_schema =
 
 let get_schema =
   object_schema ~required:[ "schedule_id" ]
-    [ string_prop ~description:"Schedule id to read." "schedule_id" ]
+    [ string_prop ~description:"Durable schedule id." "schedule_id" ]
 ;;
 
 let cancel_schema =
@@ -197,7 +197,8 @@ let definitions : definition list =
       ~description:"List durable scheduled internal automation requests."
       ~input_schema:list_schema ~read_only:true
   ; definition ~action:Get_request ~id:"get" ~name:"masc_schedule_get"
-      ~description:"Read one durable scheduled internal automation request."
+      ~description:
+        "Read the current durable scheduled request by schedule_id. A recurring request may already point at its next occurrence."
       ~input_schema:get_schema ~read_only:true
   ; definition ~action:Cancel_request ~id:"cancel" ~name:"masc_schedule_cancel"
       ~description:

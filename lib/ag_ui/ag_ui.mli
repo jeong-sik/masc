@@ -62,6 +62,7 @@ type event = private {
 }
 
 val make_event :
+  ?timestamp:float ->
   ?run_id:string option ->
   ?message_id:string option ->
   ?role:role option ->
@@ -77,7 +78,7 @@ val make_event :
   thread_id:string ->
   event_type ->
   event
-(** Construct an [event] with sensible defaults. [timestamp] is set to
+(** Construct an [event] with sensible defaults. [timestamp] defaults to
     [Time_compat.now ()] at call time.
 
     [Run_error] requires a non-empty [message]. [message] and [code] are
@@ -100,7 +101,7 @@ val run_error :
 val event_to_json : event -> Yojson.Safe.t
 (** Spec-compliant JSON with camelCase field names. *)
 
-val event_to_sse : event -> string
+val event_to_sse : ?id:int -> event -> string
 (** Format an event as a single SSE [data:] line followed by [\n\n]. *)
 
 (** {1 MASC → AG-UI Mapping} *)
@@ -108,41 +109,8 @@ val event_to_sse : event -> string
 val default_thread_id : string
 (** Thread ID used by the single-namespace MASC bridge (["default"]). *)
 
-val of_agent_session_bound : agent_name:string -> event
-(** [agent_session_bound] → [Run_started] with [custom_name="AGENT_SESSION_BOUND"]. *)
-
-val of_agent_unbound : agent_name:string -> event
-(** [agent_unbound] → [Run_finished] with [custom_name="AGENT_UNBOUND"]. *)
-
-val of_broadcast :
-  agent_name:string -> message:string -> message_id:string -> event list
-(** Broadcast → 3 events: [Text_message_start], [Text_message_content]
-    (with [delta=message]), [Text_message_end]. *)
-
-val of_task_claimed : agent_name:string -> task_id:string -> event
-(** Task claim → [Step_started] with [step_name=task_id]. *)
-
-val of_task_done : agent_name:string -> task_id:string -> event
-(** Task done → [Step_finished] with [step_name=task_id]. *)
-
-val of_tool_call :
-  agent_name:string ->
-  tool_name:string ->
-  call_id:string ->
-  args_json:string ->
-  event list
-(** Tool call → 3 events: [Tool_call_start], [Tool_call_args]
-    (with [delta=args_json]), [Tool_call_end]. *)
-
-val of_workspace_state : Yojson.Safe.t -> event
-(** Workspace snapshot → [State_snapshot]. *)
-
-val of_custom : name:string -> Yojson.Safe.t -> event
+val of_custom : ?timestamp:float -> name:string -> Yojson.Safe.t -> event
 (** Wrap any MASC event in [Custom] with the given [name]/[value]. *)
-
-val of_task_update : Yojson.Safe.t -> event
-(** Inspect [status] in the task JSON: ["claimed"] → {!of_task_claimed},
-    ["done"] → {!of_task_done}, else [Custom] with [name="TASK_UPDATE"]. *)
 
 (** {1 Protocol Metadata} *)
 

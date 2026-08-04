@@ -11,6 +11,7 @@ type signal_kind =
 type wake_signal =
   { occurrence_id : Schedule_occurrence_id.t
   ; kind : signal_kind
+  ; schedule_instance_id : string
   ; schedule_id : string
   ; emitted_at : float
   ; due_at : float
@@ -43,13 +44,59 @@ type consumer_dispatch_error =
   | Retryable_dispatch_failure of string
   | Terminal_dispatch_rejection of string
 
+type acceptance_commit
+(** Opaque proof that the schedule ledger accepted the durable consumer work.
+    A consumer obtains it only from the runner-provided commit callback. *)
+
 type consumer_dispatch_result =
   | Work_completed of Yojson.Safe.t
-  | Work_accepted of Yojson.Safe.t
+  | Work_completed_after_acceptance of
+      { detail : Yojson.Safe.t
+      ; acceptance_commit : acceptance_commit
+      }
+      (** The consumer found terminal success evidence and committed the
+          schedule acceptance while still holding its producer fence. *)
+  | Work_accepted of
+      { detail : Yojson.Safe.t
+      ; acceptance_commit : acceptance_commit
+      }
   | Work_failed of
       { error : string
       ; detail : Yojson.Safe.t
       }
+  | Work_failed_after_acceptance of
+      { error : string
+      ; detail : Yojson.Safe.t
+      ; acceptance_commit : acceptance_commit
+      }
+      (** The consumer found terminal failure evidence and committed the
+          schedule acceptance while still holding its producer fence. *)
+
+(** A consumer's answer about one occurrence it durably accepted.
+
+    [Work_accepted] proves that the runner's schedule-ledger commit ran inside
+    the consumer's producer fence. The store keeps it [Execution_dispatched]
+    until a correlated completion path settles it. That contract assumes the
+    consumer can still find the work. When
+    it cannot — its queue entry is gone and it holds no terminal evidence for
+    the occurrence — nothing will ever settle it, because the settlement reader
+    only runs while the occurrence is a dispatch candidate. This type lets the
+    consumer say so. *)
+type settlement_evidence =
+  | Consumer_holds_occurrence
+      (** The accepted work is still pending with the consumer. *)
+  | Consumer_completed_occurrence
+      (** The consumer has durable terminal ACK evidence. The runner projects
+          that fact to the exact schedule execution as succeeded. *)
+  | Consumer_failed_occurrence of string
+      (** The consumer has durable evidence that its admitted execution failed.
+          The runner projects the exact reason as a failed execution. *)
+  | Consumer_cancelled_occurrence of string
+      (** The consumer has a durable cancellation with its recorded reason. The
+          runner projects it to the exact schedule execution as failed. *)
+  | Consumer_lost_occurrence of string
+      (** Neither pending work nor terminal evidence exists for this occurrence.
+          The payload is the durable reason, recorded as the failure. *)
 
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
@@ -58,8 +105,32 @@ type consumer =
       now:float ->
       wake_signal ->
       Schedule_domain.schedule_request ->
+      commit_acceptance:
+        (Yojson.Safe.t ->
+         (acceptance_commit, consumer_dispatch_error) result) ->
       (consumer_dispatch_result, consumer_dispatch_error) result
+  ; settlements :
+      Workspace_utils.config ->
+      Schedule_domain.execution_record list ->
+      (settlement_evidence, string) result list
+        (** Batch answers in input order. The consumer reads and indexes each
+            durable owner state once. Evidence is never derived from elapsed
+            time or the mutable schedule request. *)
   }
+
+type reclaim_failure =
+  | Occurrence_reclaim_failure of
+      { occurrence_id : string
+      ; error : string
+      }
+  | Settlement_batch_cardinality_mismatch of
+      { expected : int
+      ; actual : int
+      }
+  | Settlement_batch_consumer_failure of string
+      (** The consumer raised before returning per-occurrence answers. This is
+          retained even for an empty input batch, where mapping the exception
+          over occurrences would otherwise hide it as a successful no-op. *)
 
 type runner_error =
   | Service_error of Schedule_service.service_error
@@ -97,3 +168,35 @@ val tick :
     advances while a one-shot request becomes [Failed]. A typed retryable
     dispatch failure finishes only its current execution attempt and leaves the
     schedule [Due] for the next tick. *)
+
+type reclaim_outcome =
+  { examined : int
+  ; reclaimed : int
+  ; held : int
+  ; settled_elsewhere : int
+  ; failures : reclaim_failure list
+        (** Typed occurrence or batch failures that stopped reconciliation.
+            These failures are transient and are expected to clear on their
+            own. *)
+  }
+
+val reclaim_lost_occurrences :
+  consumer:consumer ->
+  Workspace_utils.config ->
+  now:float ->
+  (reclaim_outcome, runner_error) result
+(** Ask the consumer about every execution still [Execution_dispatched], and
+    settle the exact execution ids it reports as lost.
+
+    This is the reverse direction of the consumer-side reconciliation that
+    already exists: that one removes a consumer's queue entry once the
+    occurrence is terminal, this one terminalizes an occurrence once the
+    consumer no longer has it. Both are needed because the two stores are
+    written under separate locks and either side can outlive the other.
+
+    Durable completed, failed, and cancelled verdicts project their exact
+    terminal outcome. [Consumer_holds_occurrence] and consumer errors leave the
+    occurrence untouched; [Consumer_lost_occurrence] fails it only on positive
+    evidence that nothing else can settle it. Per-occurrence errors are
+    collected rather than aborting the sweep, so one unreadable consumer cannot
+    strand every other occurrence. *)

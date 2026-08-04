@@ -37,6 +37,7 @@ let with_config f =
   Eio.Switch.on_release sw (fun () -> rm_rf path);
   let config = Workspace.default_config path in
   ignore (Workspace.init config ~agent_name:(Some "schedule-test"));
+  Workspace_metric_hooks.install ();
   Atomic.set Workspace_hooks.schedule_wake_target_registered_fn (fun config keeper_name ->
     match Keeper_meta_store.read_effective_meta config keeper_name with
     | Ok (Some _) -> Ok true
@@ -83,7 +84,10 @@ let schedule_tool_name action =
 ;;
 
 let schedule_ctx config : Tool_schedule.context =
-  { config; agent_name = "scheduler-agent" }
+  { config
+  ; agent_name = "scheduler-agent"
+  ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+  }
 ;;
 
 let dispatch_exn config action args =
@@ -93,7 +97,12 @@ let dispatch_exn config action args =
   | None -> fail ("schedule dispatch returned None: " ^ name)
 ;;
 
-let create_args ?schedule_id ?(message = "scheduled keeper wake") () =
+let create_args
+      ?schedule_id
+      ?(allow_unregistered_keeper = false)
+      ?(message = "scheduled keeper wake")
+      ()
+  =
   `Assoc
     ([ "due_at_unix", `Float 200.0
      ; "payload_kind", `String Schedule_supported_kinds.keeper_wake
@@ -106,17 +115,21 @@ let create_args ?schedule_id ?(message = "scheduled keeper wake") () =
      ; "scheduled_by_id", `String "scheduler-agent"
      ]
      @
+     if allow_unregistered_keeper
+     then [ "allow_unregistered_keeper", `Bool true ]
+     else []
+     @
      match schedule_id with
      | None -> []
      | Some value -> [ "schedule_id", `String value ])
 ;;
 
-let create_service_exn config ~schedule_id ~due_at ~payload =
+let create_service_exn config ~schedule_id ~due_at ~payload ?recurrence () =
   match
     Schedule_service.create config ~schedule_id ~requested_at:100.0
       ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent")
-      ~due_at ~payload ~source:Schedule_domain.Operator_request ()
+      ~due_at ~payload ~source:Schedule_domain.Operator_request ?recurrence ()
   with
   | Ok request -> request
   | Error err -> fail (Schedule_service.service_error_to_string err)
@@ -160,7 +173,16 @@ let test_flat_tool_surface () =
   check bool "create schema is closed" false
     (create_schema.input_schema |> member "additionalProperties" |> to_bool);
   check int "create schema has no mandatory policy field" 0
-    (create_schema.input_schema |> member "required" |> to_list |> List.length)
+    (create_schema.input_schema |> member "required" |> to_list |> List.length);
+  let get_schema : Masc_domain.tool_schema =
+    (schedule_definition Tool_schemas_schedule.Get_request).schema
+  in
+  check (list string) "get requires the durable schedule pointer"
+    [ "schedule_id" ]
+    (get_schema.input_schema
+     |> member "required"
+     |> to_list
+     |> List.map to_string)
 ;;
 
 let test_create_list_get_cancel () =
@@ -204,6 +226,43 @@ let test_create_list_get_cancel () =
      |> member "schedule"
      |> member "status"
      |> to_string)
+;;
+
+let test_get_recurring_schedule_after_accept_advance () =
+  with_config
+  @@ fun config ->
+  let schedule_id = "sched-recurring-get-after-accept" in
+  let request : Schedule_domain.schedule_request =
+    create_service_exn
+      config
+      ~schedule_id
+      ~due_at:200.0
+      ~payload:(keeper_wake_payload "run every minute")
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      ()
+  in
+  (match Schedule_store.refresh_due config ~now:200.0 with
+   | Ok _ -> ()
+   | Error err -> fail (Schedule_store.store_error_to_string err));
+  (match Schedule_store.start_due_candidate config ~now:201.0 ~schedule_id with
+   | Ok _ -> ()
+   | Error err -> fail (Schedule_store.store_error_to_string err));
+  let advanced : Schedule_domain.schedule_request =
+    match Schedule_store.accept_running config ~now:202.0 ~schedule_id () with
+    | Ok stored -> stored
+    | Error err -> fail (Schedule_store.store_error_to_string err)
+  in
+  check bool "recurring request advanced past the fired occurrence" true
+    (advanced.due_at > request.due_at);
+  let get_result =
+    dispatch_exn config Tool_schemas_schedule.Get_request
+      (`Assoc [ "schedule_id", `String schedule_id ])
+  in
+  check bool "advanced recurring request remains readable" true
+    (Tool_result.is_success get_result);
+  let open Yojson.Safe.Util in
+  check (float 0.001) "get returns the current next occurrence" advanced.due_at
+    (Tool_result.data get_result |> member "due_at" |> to_float)
 ;;
 
 let test_create_accepts_explicit_iso8601_offset () =
@@ -426,7 +485,7 @@ let test_due_signal_and_dashboard_projection () =
   @@ fun config ->
   let request =
     create_service_exn config ~schedule_id:"sched-signal" ~due_at:200.0
-      ~payload:(keeper_wake_payload "signal me")
+      ~payload:(keeper_wake_payload "signal me") ()
   in
   let tick =
     match Schedule_runner.tick config ~now:201.0 with
@@ -438,8 +497,10 @@ let test_due_signal_and_dashboard_projection () =
   check string "signal kind" "schedule.due_candidate"
     (Schedule_runner.signal_kind_to_string signal.kind);
   check string "signal request" request.schedule_id signal.schedule_id;
+  check string "signal schedule instance" request.schedule_instance_id
+    signal.schedule_instance_id;
   let signal_json = Schedule_runner.wake_signal_to_yojson signal in
-  check int "signal field count" 7
+  check int "signal field count" 8
     (Yojson.Safe.Util.to_assoc signal_json |> List.length);
   let dashboard =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
@@ -473,11 +534,100 @@ let test_schedule_store_error_is_explicit () =
        "schedule store read failed")
 ;;
 
+let test_keeper_wake_target_validation_is_inside_creation_fence () =
+  with_config
+  @@ fun config ->
+  let fence_active = ref false in
+  let validation_saw_fence = ref false in
+  let registered_target_check =
+    Atomic.get Workspace_hooks.schedule_wake_target_registered_fn
+  in
+  Atomic.set Workspace_hooks.schedule_wake_target_registered_fn
+    (fun config keeper_name ->
+       if !fence_active then validation_saw_fence := true;
+       registered_target_check config keeper_name);
+  let admit_keeper_wake_creation config ~keeper_name create =
+    Keeper_schedule_creation_admission.run config ~keeper_name (fun () ->
+      fence_active := true;
+      Fun.protect ~finally:(fun () -> fence_active := false) create)
+  in
+  let ctx : Tool_schedule.context =
+    { config
+    ; agent_name = "scheduler-agent"
+    ; admit_keeper_wake_creation
+    }
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.schedule_wake_target_registered_fn
+        registered_target_check)
+    (fun () ->
+       let result =
+         match
+           Tool_schedule.dispatch
+             ctx
+             ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+             ~args:(create_args ~schedule_id:"sched-fenced-validation" ())
+         with
+         | Some result -> result
+         | None -> fail "schedule dispatch returned None"
+       in
+       check bool "fenced schedule creation succeeds" true
+         (Tool_result.is_success result);
+       check bool "target validation ran inside creation fence" true
+         !validation_saw_fence)
+;;
+
+let test_keeper_wake_creation_respects_shutdown_fence () =
+  with_config
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace.base_path in
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match
+     Keeper_turn_admission.begin_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_reserved _ -> ()
+   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+     fail "fresh shutdown fence was already reserved");
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Keeper_turn_admission.rollback_shutdown
+           ~base_path
+           ~keeper_name
+           ~operation_id
+         : Keeper_turn_admission.rollback_shutdown_result))
+    (fun () ->
+       let result =
+         dispatch_exn config Tool_schemas_schedule.Create_request
+           (create_args
+              ~schedule_id:"sched-shutdown-fenced"
+              ~allow_unregistered_keeper:true
+              ())
+       in
+       check bool "shutdown-fenced schedule creation fails" false
+         (Tool_result.is_success result);
+       check string "shutdown fence failure is explicit"
+         (Printf.sprintf
+            "schedule creation rejected by Keeper shutdown fence keeper=%s operation=%s"
+            keeper_name
+            (Keeper_shutdown_types.Operation_id.to_string operation_id))
+         (Tool_result.message result);
+       check int "shutdown-fenced schedule is not persisted" 0
+         (List.length (Schedule_store.read_state config).schedules))
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
       , [ test_case "flat tool surface" `Quick test_flat_tool_surface
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
+        ; test_case "get recurring schedule after accept advance" `Quick
+            test_get_recurring_schedule_after_accept_advance
         ; test_case "create accepts explicit ISO-8601 offset" `Quick
             test_create_accepts_explicit_iso8601_offset
         ; test_case "removed convenience input does not synthesize payload" `Quick
@@ -494,6 +644,10 @@ let () =
             test_due_signal_and_dashboard_projection
         ; test_case "schedule store error is explicit" `Quick
             test_schedule_store_error_is_explicit
+        ; test_case "Keeper wake target validation is fenced" `Quick
+            test_keeper_wake_target_validation_is_inside_creation_fence
+        ; test_case "Keeper wake creation respects shutdown fence" `Quick
+            test_keeper_wake_creation_respects_shutdown_fence
         ] )
     ]
 ;;

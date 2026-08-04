@@ -28,6 +28,8 @@ type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
+  ; target_generation : int
+  ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
@@ -60,6 +62,18 @@ type transition_result = Keeper_event_queue_persistence.transition_result =
       ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
       ; detail : string
       }
+
+type transfer_pending_error =
+  | Transfer_pending_storage_error of string
+  | Transfer_pending_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
+let transfer_pending_error_to_string = function
+  | Transfer_pending_storage_error detail -> detail
+  | Transfer_pending_shutdown_reserved operation_id ->
+    Printf.sprintf
+      "source Keeper shutdown owns durable transfer intake operation=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+;;
 
 type source_ack_result =
   | Acked of transition_receipt
@@ -105,7 +119,109 @@ let enqueue_external_decision queue stimulus =
          stimulus.post_id)
 ;;
 
-let enqueue ~base_path name stimulus =
+type durable_intake_error =
+  | Durable_intake_token_not_live
+  | Durable_intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Durable_intake_keeper_retired of Keeper_shutdown_types.Operation_id.t
+  | Durable_intake_keeper_metadata_read_failed of string
+  | Durable_intake_retirement_read_failed of string
+
+let durable_intake_error_to_string = function
+  | Durable_intake_token_not_live ->
+    "durable intake token is not live for this Keeper"
+  | Durable_intake_shutdown_reserved operation_id ->
+    Printf.sprintf
+      "keeper durable intake rejected by shutdown operation=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+  | Durable_intake_keeper_retired operation_id ->
+    Printf.sprintf
+      "keeper durable intake rejected because Keeper was removed by shutdown operation=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+  | Durable_intake_keeper_metadata_read_failed detail ->
+    "keeper durable intake rejected because Keeper metadata could not be read: "
+    ^ detail
+  | Durable_intake_retirement_read_failed detail ->
+    "keeper durable intake rejected because Keeper retirement state could not be read: "
+    ^ detail
+;;
+
+let authorize_durable_intake_owner ~base_path ~keeper_name =
+  let config = Workspace.default_config base_path in
+  let is_retired_for_identity
+      (current_meta : Keeper_meta_contract.keeper_meta option)
+      (operation : Keeper_shutdown_types.t)
+    =
+    match operation.phase with
+    | Keeper_shutdown_types.Finalized { meta_removed = true; _ } ->
+      (match
+         Keeper_shutdown_types.meta_disposition_of_cleanup_reason
+           operation.cleanup_intent.reason
+       with
+       | Keeper_shutdown_types.Remove_meta ->
+         (match current_meta with
+          | None -> true
+          | Some meta ->
+            Int.equal meta.runtime.nonce operation.generation
+            && Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id)
+       | Keeper_shutdown_types.Retain_operator_pause
+       | Keeper_shutdown_types.Retain_dead_tombstone -> false)
+    | Keeper_shutdown_types.Finalized { meta_removed = false; _ }
+    | Keeper_shutdown_types.Prepared
+    | Keeper_shutdown_types.Joined_idle
+    | Keeper_shutdown_types.Finalizing_tasks _
+    | Keeper_shutdown_types.Cleanup_ready _
+    | Keeper_shutdown_types.Reconciliation_required _
+    | Keeper_shutdown_types.Blocked _
+    | Keeper_shutdown_types.Superseded _ -> false
+  in
+  match Keeper_shutdown_store.list_for_keeper ~config ~keeper_name with
+  | Error error ->
+    Error
+      (Durable_intake_retirement_read_failed
+         (Keeper_shutdown_store.error_to_string error))
+  | Ok operations ->
+    (match Keeper_meta_store.read_meta config keeper_name with
+     | Error detail -> Error (Durable_intake_keeper_metadata_read_failed detail)
+     | Ok current_meta ->
+       (match List.find_opt (is_retired_for_identity current_meta) operations with
+        | None -> Ok ()
+        | Some operation -> Error (Durable_intake_keeper_retired operation.operation_id)))
+;;
+
+let with_durable_intake
+      ?intake_token
+      ~base_path
+      ~keeper_name
+      operation
+  =
+  match intake_token with
+  | Some token ->
+    if
+      Keeper_turn_admission.intake_token_matches
+        token
+        ~base_path
+        ~keeper_name
+    then (
+      match authorize_durable_intake_owner ~base_path ~keeper_name with
+      | Ok () -> Ok (operation ())
+      | Error _ as error -> error)
+    else Error Durable_intake_token_not_live
+  | None ->
+    (match
+       Keeper_turn_admission.run_durable_intake_if_open
+         ~base_path
+         ~keeper_name
+         (fun _intake_token ->
+            match authorize_durable_intake_owner ~base_path ~keeper_name with
+            | Ok () -> Ok (operation ())
+            | Error _ as error -> error)
+     with
+     | Keeper_turn_admission.Intake_committed result -> result
+     | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+       Error (Durable_intake_shutdown_reserved operation_id))
+;;
+
+let enqueue_unfenced ~base_path name stimulus =
   if Option.is_none (Keeper_registry.get ~base_path name)
   then
     Log.Keeper.warn
@@ -126,17 +242,36 @@ let enqueue ~base_path name stimulus =
          committed_pending := Some pending;
          Ok pending)
   with
-  | Ok () -> ()
-  | Error message ->
+  | Ok () -> Ok ()
+  | Error message -> Error message
+;;
+
+let enqueue ?intake_token ~base_path name stimulus =
+  match
+    with_durable_intake
+      ?intake_token
+      ~base_path
+      ~keeper_name:name
+      (fun () -> enqueue_unfenced ~base_path name stimulus)
+  with
+  | Ok (Ok ()) -> ()
+  | Ok (Error message) ->
     Log.Keeper.error
       "registry: durable enqueue failed name=%s base_path=%s post_id=%s: %s"
       name
       base_path
       stimulus.Keeper_event_queue.post_id
       message
+  | Error error ->
+    Log.Keeper.error
+      "registry: durable enqueue failed name=%s base_path=%s post_id=%s: %s"
+      name
+      base_path
+      stimulus.Keeper_event_queue.post_id
+      (durable_intake_error_to_string error)
 ;;
 
-let enqueue_durable_result ~base_path name stimulus =
+let enqueue_durable_result_unfenced ~base_path name stimulus =
   (* Commit the identity-deduplicated durable row before exposing a successful
      delivery result. This path is intentionally separate from [enqueue]: most
      stimuli already have an upstream replay source, while HITL resolution is
@@ -155,6 +290,18 @@ let enqueue_durable_result ~base_path name stimulus =
        | Ok pending ->
          committed_pending := Some pending;
          Ok pending)
+;;
+
+let enqueue_durable_result ?intake_token ~base_path name stimulus =
+  match
+    with_durable_intake
+      ?intake_token
+      ~base_path
+      ~keeper_name:name
+      (fun () -> enqueue_durable_result_unfenced ~base_path name stimulus)
+  with
+  | Ok result -> result
+  | Error error -> Error (durable_intake_error_to_string error)
 ;;
 
 type enqueue_if_missing_durable_result =
@@ -191,7 +338,7 @@ let stimulus_with_board_attention_event_id queue event_id =
   loop (Keeper_event_queue.to_list queue)
 ;;
 
-let enqueue_if_missing_durable_result ~base_path ~event_id name stimulus =
+let enqueue_if_missing_durable_result_unfenced ~base_path ~event_id name stimulus =
   match board_attention_event_id stimulus with
   | None ->
     Identity_conflict
@@ -244,12 +391,72 @@ let enqueue_if_missing_durable_result ~base_path ~event_id name stimulus =
         | None -> Storage_error detail))
 ;;
 
+let enqueue_if_missing_durable_result
+      ?intake_token
+      ~base_path
+      ~event_id
+      name
+      stimulus
+  =
+  match
+    with_durable_intake
+      ?intake_token
+      ~base_path
+      ~keeper_name:name
+      (fun () ->
+         enqueue_if_missing_durable_result_unfenced
+           ~base_path
+           ~event_id
+           name
+           stimulus)
+  with
+  | Ok result -> result
+  | Error error -> Storage_error (durable_intake_error_to_string error)
+;;
+
 type enqueue_stimulus_durable_result =
   | Stimulus_enqueued
   | Stimulus_already_present
   | Stimulus_storage_error of string
 
-let enqueue_stimulus_durable_result ~base_path name stimulus =
+type transfer_target_error =
+  | Transfer_target_name_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Transfer_target_metadata_read_failed of string
+  | Transfer_target_metadata_absent
+  | Transfer_target_generation_changed of
+      { expected : int
+      ; actual : int
+      }
+  | Transfer_target_trace_changed
+
+let transfer_target_error_to_string = function
+  | Transfer_target_name_mismatch { expected; actual } ->
+    Printf.sprintf
+      "transfer target Keeper mismatch: expected=%s actual=%s"
+      expected
+      actual
+  | Transfer_target_metadata_read_failed detail ->
+    "target Keeper metadata read failed: " ^ detail
+  | Transfer_target_metadata_absent -> "target Keeper metadata is absent"
+  | Transfer_target_generation_changed { expected; actual } ->
+    Printf.sprintf
+      "target Keeper generation changed: expected=%d actual=%d"
+      expected
+      actual
+  | Transfer_target_trace_changed -> "target Keeper trace identity changed"
+;;
+
+type transfer_projection_result =
+  | Transfer_projection_committed
+  | Transfer_projection_already_committed
+  | Transfer_projection_storage_error of string
+  | Transfer_projection_target_unavailable of transfer_target_error
+  | Transfer_projection_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
+let enqueue_stimulus_durable_result_unfenced ~base_path name stimulus =
   match
     Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
       ~base_path
@@ -262,18 +469,91 @@ let enqueue_stimulus_durable_result ~base_path name stimulus =
   | Error detail -> Stimulus_storage_error detail
 ;;
 
-let project_accepted_transfer_durable_result ~base_path name ~transfer =
+let enqueue_stimulus_durable_result
+      ?intake_token
+      ~base_path
+      name
+      stimulus
+  =
   match
-    Keeper_event_queue_persistence.project_accepted_transfer_result
+    with_durable_intake
+      ?intake_token
+      ~base_path
+      ~keeper_name:name
+      (fun () -> enqueue_stimulus_durable_result_unfenced ~base_path name stimulus)
+  with
+  | Ok result -> result
+  | Error error -> Stimulus_storage_error (durable_intake_error_to_string error)
+;;
+
+let project_accepted_transfer_durable_result
+      ?intake_token
+      ~base_path
+      name
+      ~transfer
+  =
+  let validate_target_identity () =
+    let config = Workspace.default_config base_path in
+    if not (String.equal name transfer.to_keeper)
+    then
+      Error
+        (Transfer_target_name_mismatch
+           { expected = transfer.to_keeper; actual = name })
+    else
+      match Keeper_meta_store.read_meta config name with
+    | Error detail -> Error (Transfer_target_metadata_read_failed detail)
+    | Ok None -> Error Transfer_target_metadata_absent
+    | Ok (Some meta)
+      when not (Int.equal meta.runtime.nonce transfer.target_generation) ->
+      Error
+        (Transfer_target_generation_changed
+           { expected = transfer.target_generation; actual = meta.runtime.nonce })
+    | Ok (Some meta)
+      when not (Keeper_id.Trace_id.equal meta.runtime.trace_id transfer.target_trace_id) ->
+      Error Transfer_target_trace_changed
+    | Ok (Some _) -> Ok ()
+  in
+  let project () =
+    Keeper_event_queue_persistence.project_accepted_transfer_guarded_result
+      ~authorize_first_projection:validate_target_identity
       ~base_path
       ~keeper_name:name
       ~after_commit:(publish_pending ~base_path name)
       ~transfer
-  with
-  | Ok Keeper_event_queue_persistence.Transfer_projected -> Stimulus_enqueued
-  | Ok Keeper_event_queue_persistence.Transfer_already_projected ->
-    Stimulus_already_present
-  | Error detail -> Stimulus_storage_error detail
+  in
+  let interpret = function
+  | Ok (Keeper_event_queue_persistence.First_projection_rejected detail) ->
+    Transfer_projection_target_unavailable detail
+  | Ok (Keeper_event_queue_persistence.Transfer_projection_result result) ->
+    (match result with
+     | Keeper_event_queue_persistence.Transfer_projected ->
+       Transfer_projection_committed
+     | Keeper_event_queue_persistence.Transfer_already_projected ->
+       Transfer_projection_already_committed)
+  | Error detail ->
+    Transfer_projection_storage_error detail
+  in
+  match intake_token with
+  | Some token ->
+    if
+      Keeper_turn_admission.intake_token_matches
+        token
+        ~base_path
+        ~keeper_name:name
+    then interpret (project ())
+    else
+      Transfer_projection_storage_error
+        "target transfer durable intake token is not live for this Keeper"
+  | None ->
+    (match
+       Keeper_turn_admission.run_durable_intake_if_open
+         ~base_path
+         ~keeper_name:name
+         (fun _intake_token -> project ())
+     with
+     | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+       Transfer_projection_shutdown_reserved operation_id
+     | Keeper_turn_admission.Intake_committed result -> interpret result)
 ;;
 
 let enqueue_hitl_resolution_durable_result
@@ -319,6 +599,18 @@ let snapshot_result ~base_path name =
   match Keeper_registry.get ~base_path name with
   | None -> Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:name
   | Some entry -> Ok (Atomic.get entry.event_queue)
+;;
+
+let durable_state_result ~base_path name =
+  Keeper_event_queue_persistence.load_state_result
+    ~base_path
+    ~keeper_name:name
+;;
+
+let existing_durable_state_result ~base_path name =
+  Keeper_event_queue_persistence.load_existing_state_result
+    ~base_path
+    ~keeper_name:name
 ;;
 
 let reprioritize_pending_result
@@ -390,20 +682,46 @@ let cancel_pending_accepted_result
 ;;
 
 let transfer_pending_accepted_result
+      ?intake_token
       ~base_path
       name
       ~current_owner_nonce
       ~applied_at
       ~transfer
   =
-  Keeper_event_queue_persistence.transfer_pending_accepted_result
-    ~base_path
-    ~keeper_name:name
-    ~current_owner_nonce
-    ~applied_at
-    ~transfer
-    ~after_commit:(publish_pending ~base_path name)
-    ()
+  let commit () =
+    Keeper_event_queue_persistence.transfer_pending_accepted_result
+      ~base_path
+      ~keeper_name:name
+      ~current_owner_nonce
+      ~applied_at
+      ~transfer
+      ~after_commit:(publish_pending ~base_path name)
+      ()
+    |> Result.map_error (fun detail -> Transfer_pending_storage_error detail)
+  in
+  match intake_token with
+  | Some token ->
+    if
+      Keeper_turn_admission.intake_token_matches
+        token
+        ~base_path
+        ~keeper_name:name
+    then commit ()
+    else
+      Error
+        (Transfer_pending_storage_error
+           "source transfer durable intake token is not live for this Keeper")
+  | None ->
+    (match
+       Keeper_turn_admission.run_durable_intake_if_open
+         ~base_path
+         ~keeper_name:name
+         (fun _intake_token -> commit ())
+     with
+     | Keeper_turn_admission.Intake_committed result -> result
+     | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+       Error (Transfer_pending_shutdown_reserved operation_id))
 ;;
 
 let ack_pending_source_terminal_result

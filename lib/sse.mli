@@ -21,10 +21,26 @@ type broadcast_target =
   | Agent_streams
   | Presence_only
 
+type delivery_audience =
+  | Broadcast_audience of broadcast_target
+  | Session_audience of string
+
+type delivery =
+  { event_id : int
+  ; frame : string
+  ; payload : Yojson.Safe.t
+  ; emitted_at : float
+  ; audience : delivery_audience
+  }
+(** Canonical occurrence shared by the replay store and live queues.
+    Its id, typed payload, wire frame, producer timestamp, and exact audience
+    are allocated once. Transport adapters consume [payload] rather than
+    reparsing [frame]. *)
+
 type client = {
   id : int;
   kind : session_kind;
-  event_stream : string Eio.Stream.t;
+  event_stream : delivery Eio.Stream.t;
   last_event_id : int Atomic.t;
   created_at : float;
   last_seen_at : float Atomic.t;
@@ -78,7 +94,7 @@ val registration_error_to_string : registration_error -> string
 val register :
   ?kind:session_kind -> ?on_disconnect:(unit -> unit) ->
   auth:registration_auth -> string -> last_event_id:int ->
-  (int * string Eio.Stream.t * string option, registration_error) result
+  (int * delivery Eio.Stream.t * string option, registration_error) result
 (** [register ~auth session_id ~last_event_id] validates the supplied
     bearer token and MCP session pair before admitting the client.
 
@@ -123,8 +139,29 @@ val cleanup_stale : ?max_age_s:float -> unit -> string list
 
 (** {1 Events} *)
 
+type data_payload_error = Missing_data_payload
+
+val data_payload_of_frame : string -> (string, data_payload_error) result
+(** Extracts and joins the payloads of every [data:] field in one SSE frame.
+    The parser accepts the optional single space after the colon and the
+    LF/CRLF line endings emitted on the wire.  A frame without a [data:]
+    field is rejected; bare JSON is not an SSE frame. *)
+
 val format_event : ?id:int -> ?event_type:string -> string -> string
-val next_id : unit -> int
+(** [format_event] prefixes every logical line of [data] with [data:] so
+    embedded newlines cannot escape the SSE field framing. An omitted [id]
+    produces a transport-only frame and does not advance the replay cursor;
+    only deliveries inside the ordered publication boundary may supply an
+    [id]. *)
+
+val format_event_yojson
+  :  ?id:int
+  -> ?event_type:string
+  -> Yojson.Safe.t
+  -> string
+(** JSON counterpart of [format_event]. It writes the JSON value directly to
+    the canonical SSE buffer without an intermediate string allocation. *)
+
 val current_id : unit -> int
 
 (** {1 Broadcast} *)
@@ -149,17 +186,25 @@ val remove_external_subscribers : string list -> string list * int
 (** {1 Event Buffer} *)
 
 val clients : client_registry_state Atomic.t
-type buffered_event = int * string * float
+val buffer_event : delivery -> unit
+val get_events_after_for_session :
+  session_id:string -> kind:session_kind -> int -> delivery list
+(** Replay-buffer lookup for one exact session. Targeted deliveries are visible
+    only to their named agent-stream session; broadcasts use the same target
+    and JSON-RPC filtering rules as live fan-out. *)
 
-val buffer_event : int -> string -> unit
-val get_events_after : int -> string list
-val get_events_after_for_kind : session_kind -> int -> string list
-(** Replay-buffer lookup filtered for the target session kind. Agent_stream
-    replay only returns JSON-RPC messages; observer replay keeps all durable
-    events; presence replay is empty. *)
+type replay_handoff
+
+val create_replay_handoff : delivery list -> replay_handoff
+val accept_live_delivery : replay_handoff -> delivery -> bool
+(** [accept_live_delivery handoff delivery] returns [false] exactly once for
+    each delivery already sent from the replay snapshot. This closes the
+    register/replay/live overlap without assuming event ids commit in order. *)
+
 val cleanup_expired_events : unit -> int
-val event_buffer_events_for_test : unit -> buffered_event list
-val set_event_buffer_for_test : buffered_event list -> unit
+val get_events_after_for_test : int -> delivery list
+val event_buffer_events_for_test : unit -> delivery list
+val set_event_buffer_for_test : delivery list -> unit
 val rewrite_event_buffer_for_test : unit -> unit
 
 (** {1 Snapshots} *)

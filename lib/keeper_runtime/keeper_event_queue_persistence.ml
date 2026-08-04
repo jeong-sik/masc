@@ -39,6 +39,8 @@ type accepted_transfer = State.accepted_transfer =
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
+  ; target_generation : int
+  ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt = State.source_terminal_receipt =
@@ -77,8 +79,8 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-let snapshot_filename = "event-queue-v14.json"
-let transition_wal_filename = "event-queue-transitions-v4.jsonl"
+let snapshot_filename = "event-queue-v15.json"
+let transition_wal_filename = "event-queue-transitions-v5.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -104,6 +106,11 @@ let snapshot_path_of_owner owner =
 
 let transition_wal_path_of_owner owner =
   Filename.concat (keeper_runtime_dir_of_owner owner) transition_wal_filename
+;;
+
+let durable_state_exists_unlocked owner =
+  Sys.file_exists (snapshot_path_of_owner owner)
+  || Sys.file_exists (transition_wal_path_of_owner owner)
 ;;
 
 let compact_wal_unlocked ~surface ~path owner =
@@ -300,7 +307,7 @@ let bump_revision state =
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let transition_wal_schema = "masc.keeper_event_queue.transition.v4"
+let transition_wal_schema = "masc.keeper_event_queue.transition.v5"
 
 let transition_wal_entry_to_line owner entry =
   `Assoc
@@ -338,7 +345,23 @@ let transition_wal_entry_of_json owner = function
   | _ -> Error "transition WAL row must be a JSON object"
 ;;
 
-let replay_transition_wal_bytes owner state bytes =
+let wal_only_seed (entry : State.outbox_entry) =
+  let source_incarnation =
+    match entry.receipt.transition with
+    | State.Cancel_accepted cancellation -> cancellation.source_incarnation
+    | State.Transfer_accepted transfer -> transfer.source_incarnation
+    | State.Ack_source_terminal source_terminal ->
+      source_terminal.source_incarnation
+  in
+  let pending =
+    List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty entry.stimuli
+  in
+  State.empty
+  |> State.with_revision source_incarnation
+  |> State.with_pending pending
+;;
+
+let replay_transition_wal_bytes ~wal_only owner state bytes =
   let row_is_already_projected (entry : State.outbox_entry) state =
     State.transition_outbox state = []
     && List.exists
@@ -359,6 +382,7 @@ let replay_transition_wal_bytes owner state bytes =
          (match transition_wal_entry_of_json owner json with
           | Error _ as error -> error
           | Ok entry ->
+            let state = if wal_only && not saw_row then wal_only_seed entry else state in
             let already_projected = row_is_already_projected entry state in
             (match State.replay_transition_outbox_entry entry state with
              | Error _ as error -> error
@@ -376,30 +400,19 @@ let replay_transition_wal_bytes owner state bytes =
     (String.split_on_char '\n' bytes)
 ;;
 
-let replay_wal_unlocked ~path ~surface owner state =
+let read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state =
   let replay_slice slice =
     match slice.Fs_compat.Private_jsonl_slice.bytes with
-    | "" -> Ok state
+    | "" -> Ok (state, false)
     | bytes ->
-       (match replay_transition_wal_bytes owner state bytes with
+       (match replay_transition_wal_bytes ~wal_only owner state bytes with
         | Error detail ->
           Error
             (reset_required_message
                ~path
                ~surface
                detail)
-        | Ok (replayed, all_rows_already_projected) ->
-          if all_rows_already_projected
-          then
-            (* A projection checkpoint was durable before its WAL retirement.
-               The exact row now proves only the same already-projected
-               transition, so leaving it in place would block the next append
-               (which rightly requires an empty WAL). This is the sole safe
-               read-time compaction: any replay that reconstructs an outbox is
-               still authoritative until [project_transition_outbox_result]
-               records the reaction and retires it. *)
-            compact_wal_unlocked ~surface ~path owner |> Result.map (fun () -> replayed)
-          else Ok replayed)
+        | Ok replayed -> Ok replayed)
   in
   match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
   | Private_file_failed error ->
@@ -431,8 +444,39 @@ let replay_wal_unlocked ~path ~surface owner state =
     replay_slice slice
 ;;
 
-let replay_transition_wal_unlocked owner state =
+let replay_wal_unlocked ~wal_only ~path ~surface owner state =
+  match read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state with
+  | Error _ as error -> error
+  | Ok (replayed, all_rows_already_projected) ->
+    if all_rows_already_projected
+    then
+      (* A projection checkpoint was durable before its WAL retirement.
+         The exact row now proves only the same already-projected transition,
+         so leaving it in place would block the next append (which rightly
+         requires an empty WAL). This is the sole safe read-time compaction:
+         any replay that reconstructs an outbox is still authoritative until
+         [project_transition_outbox_result] records the reaction and retires
+         it. *)
+      compact_wal_unlocked ~surface ~path owner |> Result.map (fun () -> replayed)
+    else Ok replayed
+;;
+
+let replay_wal_read_only_unlocked ~wal_only ~path ~surface owner state =
+  read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state |> Result.map fst
+;;
+
+let replay_transition_wal_unlocked ?(wal_only = false) owner state =
   replay_wal_unlocked
+    ~wal_only
+    ~path:(transition_wal_path_of_owner owner)
+    ~surface:"transition WAL"
+    owner
+    state
+;;
+
+let replay_transition_wal_read_only_unlocked ?(wal_only = false) owner state =
+  replay_wal_read_only_unlocked
+    ~wal_only
     ~path:(transition_wal_path_of_owner owner)
     ~surface:"transition WAL"
     owner
@@ -444,7 +488,8 @@ let load_state_unlocked owner =
   | Error _ as error -> error
   | Ok (Primary_current state) ->
     replay_transition_wal_unlocked owner state
-  | Ok Primary_missing -> replay_transition_wal_unlocked owner State.empty
+  | Ok Primary_missing ->
+    replay_transition_wal_unlocked ~wal_only:true owner State.empty
 ;;
 
 let load_state_result ~base_path ~keeper_name =
@@ -460,6 +505,83 @@ let load_state_result ~base_path ~keeper_name =
             (keeper_name_of_owner owner)
             (snapshot_path_of_owner owner)
             (Printexc.to_string exn)))
+;;
+
+let load_existing_state_result ~base_path ~keeper_name =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match read_primary_unlocked owner with
+         | Error _ as error -> error
+         | Ok (Primary_current state) -> replay_transition_wal_unlocked owner state
+         | Ok Primary_missing when durable_state_exists_unlocked owner ->
+           replay_transition_wal_unlocked ~wal_only:true owner State.empty
+         | Ok Primary_missing ->
+           Error
+             (Printf.sprintf
+                "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
+                (keeper_name_of_owner owner)
+                (snapshot_path_of_owner owner)
+                (transition_wal_path_of_owner owner)))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue existing-state load raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let validate_state_read_only_result_with ~require_existing ~base_path ~keeper_name =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match read_primary_unlocked owner with
+         | Error _ as error -> error
+         | Ok (Primary_current state) ->
+           replay_transition_wal_read_only_unlocked owner state
+         | Ok Primary_missing
+           when require_existing && not (durable_state_exists_unlocked owner) ->
+           Error
+             (Printf.sprintf
+                "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
+                (keeper_name_of_owner owner)
+                (snapshot_path_of_owner owner)
+                (transition_wal_path_of_owner owner))
+         | Ok Primary_missing ->
+           replay_transition_wal_read_only_unlocked
+             ~wal_only:true
+             owner
+             State.empty)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue read-only validation raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let validate_state_read_only_result ~base_path ~keeper_name =
+  validate_state_read_only_result_with
+    ~require_existing:false
+    ~base_path
+    ~keeper_name
+;;
+
+let validate_existing_state_read_only_result ~base_path ~keeper_name =
+  validate_state_read_only_result_with
+    ~require_existing:true
+    ~base_path
+    ~keeper_name
 ;;
 
 
@@ -521,12 +643,12 @@ let load_snapshot_with_errors ~base_path ~keeper_name =
     }
 ;;
 
-type snapshot_discovery =
+type durable_state_discovery =
   { keeper_names : string list
   ; read_error : string option
   }
 
-let discover_keeper_names_with_snapshots ~base_path =
+let discover_keeper_names_with_durable_state ~base_path =
   match Owner_lock.canonical_base_path base_path with
   | Error error ->
     { keeper_names = []; read_error = Some (owner_error_to_string error) }
@@ -547,9 +669,10 @@ let discover_keeper_names_with_snapshots ~base_path =
                 (fun (names, errors) name ->
                    let keeper_dir = Filename.concat keepers_dir name in
                    let primary = Filename.concat keeper_dir snapshot_filename in
+                   let wal = Filename.concat keeper_dir transition_wal_filename in
                    if
                      not (Sys.file_exists keeper_dir && Sys.is_directory keeper_dir)
-                     || not (Sys.file_exists primary)
+                     || not (Sys.file_exists primary || Sys.file_exists wal)
                    then names, errors
                    else
                      match Keeper_id.Keeper_name.of_string name with
@@ -558,7 +681,7 @@ let discover_keeper_names_with_snapshots ~base_path =
                      | Error reason ->
                        names,
                        Printf.sprintf
-                         "invalid keeper name with durable event queue snapshot: %s"
+                         "invalid keeper name with durable event queue state: %s"
                          reason
                        :: errors)
                 ([], [])
@@ -576,7 +699,7 @@ let discover_keeper_names_with_snapshots ~base_path =
        ; read_error =
            Some
              (Printf.sprintf
-                "failed to discover event queue snapshots under %s: %s"
+                "failed to discover durable event queue state under %s: %s"
                 keepers_dir
                 (Printexc.to_string exn))
        })
@@ -609,7 +732,7 @@ let commit_transform_unlocked
              (* [load_state_unlocked] above replayed the transition WAL, so
                 [next] already carries that transition's pending mutation and
                 its transition outbox, and the snapshot just written persists
-                both (schema v12). Retire the WAL here, paired with the revision
+                both (schema v15). Retire the WAL here, paired with the revision
                 bump that absorbed it. Leaving it behind is what latches the
                 owner: the next load replays an already-absorbed row against
                 the advanced revision, [commit_transition] rejects it on
@@ -750,7 +873,12 @@ let enqueue_stimulus_if_absent_result
       Ok (State.with_pending pending state, Enqueued))
 ;;
 
-let project_accepted_transfer_result
+type 'authorization_error guarded_transfer_projection_result =
+  | Transfer_projection_result of transfer_projection_result
+  | First_projection_rejected of 'authorization_error
+
+let project_accepted_transfer_guarded_result
+      ~authorize_first_projection
       ~after_commit
       ~base_path
       ~keeper_name
@@ -762,9 +890,33 @@ let project_accepted_transfer_result
     commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
       match State.project_accepted_transfer transfer state with
       | Error _ as error -> error
+      | Ok (next, result) when next == state ->
+        after_commit (State.pending state);
+        Ok (state, Transfer_projection_result result)
       | Ok (next, result) ->
-        if next == state then after_commit (State.pending next);
-        Ok (next, result))
+        (match authorize_first_projection () with
+         | Error error -> Ok (state, First_projection_rejected error)
+         | Ok () -> Ok (next, Transfer_projection_result result)))
+;;
+
+let project_accepted_transfer_result
+      ~after_commit
+      ~base_path
+      ~keeper_name
+      ~transfer
+  =
+  let projection =
+    project_accepted_transfer_guarded_result
+      ~authorize_first_projection:(fun () -> (Ok () : (unit, string) result))
+      ~after_commit
+      ~base_path
+      ~keeper_name
+      ~transfer
+  in
+  Result.bind projection (function
+    | Transfer_projection_result result -> Ok result
+    | First_projection_rejected _ ->
+      Error "unguarded transfer projection rejected its unconditional authority")
 ;;
 
 let update_result ?after_commit ~base_path ~keeper_name f =
@@ -1292,7 +1444,7 @@ let backlog_summary ~matches summaries =
 ;;
 
 let fleet_summary_json ~now ~base_path ~owner_lifecycle =
-  let discovery = discover_keeper_names_with_snapshots ~base_path in
+  let discovery = discover_keeper_names_with_durable_state ~base_path in
   let summaries =
     List.map (keeper_summary ~base_path ~owner_lifecycle) discovery.keeper_names
   in

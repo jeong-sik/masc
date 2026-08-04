@@ -646,8 +646,54 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
            [ ( "operator_operation_id"
              , `String "event-source-ref-transfer-operation" )
            ; "target_keeper", `String target_keeper
-           ]
+         ]
        in
+       let target_shutdown_operation_id =
+         Masc.Keeper_shutdown_types.Operation_id.generate ()
+       in
+       (match
+          Masc.Keeper_turn_admission.begin_shutdown
+            ~base_path
+            ~keeper_name:target_keeper
+            ~operation_id:target_shutdown_operation_id
+        with
+        | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+        | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+          fail "fresh target shutdown reservation was already owned");
+       let fenced_raw, _fenced_response =
+         Fun.protect
+           ~finally:(fun () ->
+             match
+               Masc.Keeper_turn_admission.rollback_shutdown
+                 ~base_path
+                 ~keeper_name:target_keeper
+                 ~operation_id:target_shutdown_operation_id
+             with
+             | Masc.Keeper_turn_admission.Shutdown_rolled_back -> ()
+             | Masc.Keeper_turn_admission.Shutdown_not_reserved
+             | Masc.Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+               fail "target shutdown reservation was not released")
+           (fun () ->
+              post_event_operator
+                ~keeper_name:transfer_keeper
+                transfer_request)
+       in
+       check bool "target-fenced transfer request is rejected" true
+         (String.starts_with ~prefix:"HTTP/1.1 409" fenced_raw);
+       let fenced_source = load_state transfer_keeper in
+       check bool "target fence retains the exact source" true
+         (Keeper_event_queue_state.pending fenced_source
+          |> Keeper_event_queue.to_list
+          |> List.exists (fun source ->
+            Keeper_event_queue.stimulus_identity_equal
+              transfer_selection.source
+              source));
+       check int "target fence creates no source outbox" 0
+         (Keeper_event_queue_state.transition_outbox fenced_source
+          |> List.length);
+       check int "target fence creates no target projection" 0
+         (Keeper_event_queue_state.pending (load_state target_keeper)
+          |> Keeper_event_queue.length);
        let transfer_raw, transfer_response =
          post_event_operator ~keeper_name:transfer_keeper transfer_request
        in

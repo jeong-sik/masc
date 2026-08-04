@@ -86,6 +86,8 @@ let meta : Masc.Keeper_meta_contract.keeper_meta =
         ("trace_id", `String "test-trace-wake-context");
       ])
 
+let prompt_config = lazy (Masc.Workspace.default_config "/tmp/unused")
+
 (* Same throwaway runtime default as test_keeper_surface_presence_prompt:
    the Autonomous Trigger section consults the default runtime (RFC-0206). *)
 let runtime_toml =
@@ -188,7 +190,7 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries observation
     | None -> Inputs.No_current_task
   in
   let { Prompt.world_state = user; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision
+    Prompt.build_prompt ~meta ~config:(Lazy.force prompt_config) ~turn_decision
       ~current_task ?active_goal_summaries ~observation ()
   in
   user
@@ -243,7 +245,8 @@ let test_current_task_unavailable_is_explicit () =
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision:decision
+    Prompt.build_prompt ~meta ~config:(Lazy.force prompt_config)
+      ~turn_decision:decision
       ~current_task:
         (Inputs.Current_task_unavailable
            { task_id; error = "primary and recovery backlog decode failed" })
@@ -260,7 +263,8 @@ let test_current_task_missing_is_explicit () =
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision:decision
+    Prompt.build_prompt ~meta ~config:(Lazy.force prompt_config)
+      ~turn_decision:decision
       ~current_task:(Inputs.Current_task_missing { task_id; recovery = None })
       ~observation:base_observation ()
   in
@@ -278,7 +282,8 @@ let test_recovered_current_task_is_non_authoritative () =
     { recovery_path = "/tmp/backlog.last-good"; primary_error = "decode failed" }
   in
   let { Prompt.world_state; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision:decision
+    Prompt.build_prompt ~meta ~config:(Lazy.force prompt_config)
+      ~turn_decision:decision
       ~current_task:
         (Inputs.Recovered_current_task { task = recovered_task; recovery })
       ~observation:base_observation ()
@@ -352,7 +357,7 @@ let test_direct_and_autonomous_share_system_prompt () =
   let { Prompt.system_prompt = autonomous_system_prompt; _ } =
     Prompt.build_prompt
       ~meta
-      ~base_path:"/tmp/unused"
+      ~config:(Lazy.force prompt_config)
       ~turn_decision:decision
       ~current_task:Inputs.No_current_task
       ~observation:base_observation
@@ -398,7 +403,7 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
   let { Prompt.system_prompt = autonomous_system_prompt; _ } =
     Prompt.build_prompt
       ~meta:meta_with_goal
-      ~base_path:"/tmp/unused"
+      ~config:(Lazy.force prompt_config)
       ~active_goal_summaries
       ~turn_decision:decision
       ~current_task:Inputs.No_current_task
@@ -488,7 +493,7 @@ let test_preview_does_not_invent_wake_reason () =
   let { Prompt.world_state; _ } =
     Prompt.build_prompt_preview
       ~meta:preview_meta
-      ~base_path:"/tmp/unused"
+      ~config:(Lazy.force prompt_config)
       ~current_task:Inputs.No_current_task
       ~observation:base_observation
       ()
@@ -555,7 +560,7 @@ let test_goal_holder_gets_self_direction_directive () =
     WO.keeper_cycle_decision ~meta:meta_with_goal base_observation
   in
   let { Prompt.system_prompt = system; _ } =
-    Prompt.build_prompt ~meta:meta_with_goal ~base_path:"/tmp/unused"
+    Prompt.build_prompt ~meta:meta_with_goal ~config:(Lazy.force prompt_config)
       ~turn_decision:goal_turn_decision ~current_task:Inputs.No_current_task
       ~observation:base_observation ()
   in
@@ -567,7 +572,7 @@ let test_goal_holder_gets_self_direction_directive () =
     WO.keeper_cycle_decision ~meta base_observation
   in
   let { Prompt.system_prompt = no_goal_system; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused"
+    Prompt.build_prompt ~meta ~config:(Lazy.force prompt_config)
       ~turn_decision:no_goal_turn_decision ~current_task:Inputs.No_current_task
       ~observation:base_observation ()
   in

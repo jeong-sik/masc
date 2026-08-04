@@ -267,12 +267,7 @@ let claim_next_r
             working_tasks
         in
         (* Eligibility and the claim outcome are one decision
-           ([Workspace_task_lifecycle.resolve_claim]). Every
-           [AwaitingVerification] obligation resolves to [Held_pending_verdict]
-           and is excluded here: it awaits a completion authority's verdict,
-           which is not an agent's work. Previously a cross-agent obligation
-           resolved to [Verifier_claim] and stayed eligible, which is exactly how
-           a keeper became its verifier by winning the claim.
+           ([Workspace_task_lifecycle.resolve_claim]).
            [task_claim_next_action_is_claimable] still owns the Todo reclaim
            gate. *)
         let same_actor a = Workspace_task_classify.same_task_actor config a agent_name in
@@ -285,9 +280,6 @@ let claim_next_r
           | Workspace_task_lifecycle.Self_owned
           | Workspace_task_lifecycle.Held_by_other _
           | Workspace_task_lifecycle.Held_terminal _
-          (* An obligation awaiting a completion authority's verdict is not
-             claimable work for any keeper — this arm is what previously put
-             AwaitingVerification tasks into the keeper claim pool. *)
           | Workspace_task_lifecycle.Held_pending_verdict _ -> false
         in
         let unclaimed =

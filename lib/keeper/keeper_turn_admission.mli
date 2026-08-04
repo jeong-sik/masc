@@ -80,6 +80,19 @@ type 'a registration_commit_result =
   | Registration_committed of 'a
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
+type 'a durable_intake_result =
+  | Intake_committed of 'a
+  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
+type 'a transfer_intake_result =
+  | Transfer_intake_committed of 'a
+  | Transfer_intake_source_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Transfer_intake_target_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
+type intake_token
+(** Opaque authority for one currently admitted durable intake. The token is
+    valid only inside the callback passed to [run_durable_intake_if_open]. *)
+
 type slot_snapshot =
   { snapshot_keeper_name : string
   ; snapshot_slot_created : bool
@@ -260,9 +273,41 @@ val commit_registration_if_open :
   (unit -> 'a) ->
   'a registration_commit_result
 
-(** Join the current turn holder after admission has been closed. This waits
-    without an invented timeout, then immediately releases the slot. Never
-    call from the same admitted turn. *)
+(** Serialize one suspending durable intake effect with shutdown join. The
+    shutdown fence is checked after the intake mutex is acquired: intake that
+    wins commits before [await_idle_after_shutdown] returns, while a shutdown
+    that wins prevents the effect from starting. *)
+val run_durable_intake_if_open :
+  base_path:string ->
+  keeper_name:string ->
+  (intake_token -> 'a) ->
+  'a durable_intake_result
+
+(** Hold both source and target durable-intake fences in canonical Keeper-name
+    order for one transfer effect. Opposing A-to-B and B-to-A operations
+    therefore cannot form an ABBA wait cycle. The callback receives live
+    owner-specific tokens and must complete every source and target durable
+    mutation before returning. *)
+val run_transfer_intake_if_open :
+  base_path:string ->
+  from_keeper:string ->
+  to_keeper:string ->
+  (source_intake_token:intake_token ->
+   target_intake_token:intake_token ->
+   'a) ->
+  'a transfer_intake_result
+
+val intake_token_matches :
+  intake_token ->
+  base_path:string ->
+  keeper_name:string ->
+  bool
+(** [true] only for a live token belonging to the requested Keeper. *)
+
+(** Join the current turn holder and any durable external intake after
+    admission has been closed. This waits without an invented timeout, then
+    immediately releases both slots. Never call from the same admitted turn
+    or intake. *)
 val await_idle_after_shutdown : base_path:string -> keeper_name:string -> unit
 
 val snapshot_for : base_path:string -> keeper_name:string -> slot_snapshot

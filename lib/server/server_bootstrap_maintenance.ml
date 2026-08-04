@@ -57,8 +57,9 @@ let wake_enqueue_counts_of_dispatches dispatches =
           | Error _ -> counts
           | Ok
               (Consumers.Keeper_wake_enqueued
-                { occurrence_status =
+                  { occurrence_status =
                     ( Consumers.Keeper_wake_already_acked
+                    | Consumers.Keeper_wake_already_failed
                     | Consumers.Keeper_wake_already_cancelled )
                 ; _
                 }) ->
@@ -438,6 +439,58 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            Schedule_runner_status.record_tick_crash ~started_at ~finished_at error;
            record_schedule_runner_tick_outcome "crash";
            Log.Server.warn "schedule_runner: tick crashed: %s" error);
+        (* Reverse-direction reconciliation. The keeper side already drops its
+           queue entry once an occurrence is terminal; this asks the consumer
+           whether an occurrence it accepted is still findable, and settles the
+           ones that are not. Runs after dispatch so an occurrence accepted this
+           tick is already durable before it can be examined. *)
+        (try
+           match
+             Schedule_runner.reclaim_lost_occurrences
+               ~consumer:Server_schedule_consumers.consumer
+               (Mcp_server.workspace_config state)
+               ~now:(Time_compat.now ())
+           with
+           | Ok outcome ->
+             if outcome.Schedule_runner.reclaimed > 0
+             then
+               Log.Server.warn
+                 "schedule_runner: reclaimed %d lost occurrence(s) of %d examined \
+                  (held=%d settled_elsewhere=%d)"
+                 outcome.Schedule_runner.reclaimed
+                 outcome.Schedule_runner.examined
+                 outcome.Schedule_runner.held
+                 outcome.Schedule_runner.settled_elsewhere;
+             (* A transient failure is worth a line each time it happens. *)
+             List.iter
+               (function
+                 | Schedule_runner.Occurrence_reclaim_failure
+                     { occurrence_id; error } ->
+                   Log.Server.warn
+                     "schedule_runner: occurrence reclaim failed occurrence=%s error=%s"
+                     occurrence_id
+                     error
+                 | Schedule_runner.Settlement_batch_cardinality_mismatch
+                     { expected; actual } ->
+                   Log.Server.warn
+                     "schedule_runner: consumer settlement batch cardinality mismatch expected=%d actual=%d"
+                     expected
+                     actual
+                 | Schedule_runner.Settlement_batch_consumer_failure error ->
+                   Log.Server.warn
+                     "schedule_runner: consumer settlement batch failed: %s"
+                     error)
+               outcome.Schedule_runner.failures;
+           | Error err ->
+             Log.Server.warn
+               "schedule_runner: occurrence reclaim sweep failed: %s"
+               (Schedule_runner.runner_error_to_string err)
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Server.warn
+             "schedule_runner: occurrence reclaim sweep crashed: %s"
+             (Printexc.to_string exn));
         Eio.Time.sleep clock schedule_runner_interval_sec;
         loop ()
       in

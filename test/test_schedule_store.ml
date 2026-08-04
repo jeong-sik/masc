@@ -4,34 +4,14 @@ open Schedule_store
 
 let json = testable Yojson.Safe.pp Yojson.Safe.equal
 
-let temp_dir () =
-  let path = Filename.temp_file "schedule_store_test" "" in
-  Sys.remove path;
-  Unix.mkdir path 0o755;
-  path
-;;
-
-let rm_rf dir =
-  let rec rm path =
-    if Sys.file_exists path then
-      if Sys.is_directory path then begin
-        Sys.readdir path |> Array.iter (fun entry -> rm (Filename.concat path entry));
-        Unix.rmdir path
-      end else
-        Sys.remove path
-  in
-  try rm dir with
-  | _ -> ()
-;;
-
 let with_workspace f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = temp_dir () in
+  let dir = Filename.temp_dir "schedule_store_test" "" in
   Eio.Switch.run
   @@ fun sw ->
-  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
   f config
@@ -84,6 +64,11 @@ let insert_ok config request =
   match insert_request config request with
   | Ok stored -> stored
   | Error err -> fail (store_error_to_string err)
+;;
+
+let store_ok label = function
+  | Ok value -> value
+  | Error err -> fail (label ^ ": " ^ store_error_to_string err)
 ;;
 
 let check_error label expected = function
@@ -386,7 +371,8 @@ let test_startup_recovery_returns_only_running_schedule_to_due () =
      check_status "interrupted returned to due" Due recovered.status;
      check_status "other due schedule untouched" Due untouched.status
    | _ -> fail "startup recovery schedules missing");
-  (match last_execution_for_schedule (read_state config)
+  (match last_execution_for_schedule_instance (read_state config)
+           ~schedule_instance_id:interrupted.schedule_instance_id
            ~schedule_id:interrupted.schedule_id with
    | Some execution ->
      check string "interrupted attempt failed" "failed"
@@ -441,6 +427,7 @@ let test_startup_recovery_uses_exact_occurrence_across_clock_rollback () =
   (match
      execution_for_occurrence
        state
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:advanced.due_at
        ~payload_digest:digest
@@ -452,6 +439,7 @@ let test_startup_recovery_uses_exact_occurrence_across_clock_rollback () =
   match
     execution_for_occurrence
       state
+      ~schedule_instance_id:request.schedule_instance_id
       ~schedule_id:request.schedule_id
       ~due_at:request.due_at
       ~payload_digest:digest
@@ -525,7 +513,9 @@ let test_start_and_complete_persist_execution_record () =
    | Error err -> fail (store_error_to_string err));
   let completed_state = read_state config in
   match
-    last_execution_for_schedule completed_state ~schedule_id:req.schedule_id
+    last_execution_for_schedule_instance completed_state
+      ~schedule_instance_id:req.schedule_instance_id
+      ~schedule_id:req.schedule_id
   with
   | None -> fail "missing completed execution"
   | Some completed ->
@@ -560,8 +550,9 @@ let test_accept_running_persists_unfinished_dispatched_execution () =
    | Ok stored -> check_status "one-shot remains running" Running stored.status
    | Error err -> fail (store_error_to_string err));
   (match
-     last_execution_for_schedule
+     last_execution_for_schedule_instance
        (read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "accepted execution missing"
@@ -601,6 +592,7 @@ let test_dispatched_one_shot_completes_by_exact_occurrence () =
      complete_dispatched_occurrence
        config
        ~now:204.0
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -611,6 +603,7 @@ let test_dispatched_one_shot_completes_by_exact_occurrence () =
   (match
      execution_for_occurrence
        (read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -628,6 +621,7 @@ let test_dispatched_one_shot_completes_by_exact_occurrence () =
      complete_dispatched_occurrence
        config
        ~now:205.0
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -662,6 +656,7 @@ let test_recurring_dispatched_completion_preserves_next_occurrence () =
      complete_dispatched_occurrence
        config
        ~now:204.0
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -672,8 +667,9 @@ let test_recurring_dispatched_completion_preserves_next_occurrence () =
      check (float 0.001) "next occurrence retained" next_due_at stored.due_at
    | Error err -> fail (store_error_to_string err));
   match
-    execution_for_occurrence
-      (read_state config)
+   execution_for_occurrence
+     (read_state config)
+      ~schedule_instance_id:request.schedule_instance_id
       ~schedule_id:request.schedule_id
       ~due_at:request.due_at
       ~payload_digest:digest
@@ -682,6 +678,198 @@ let test_recurring_dispatched_completion_preserves_next_occurrence () =
     check string "prior recurring occurrence succeeded" "succeeded"
       (execution_status_to_string execution.status)
   | None -> fail "recurring execution missing"
+;;
+
+let check_reused_occurrence_rejected label (request : schedule_request) = function
+  | Error
+      (Schedule_occurrence_already_used
+         { schedule_instance_id; due_at; payload_digest = actual_digest }) ->
+    check string (label ^ " instance") request.schedule_instance_id schedule_instance_id;
+    check (float 0.0) (label ^ " due_at") request.due_at due_at;
+    check string (label ^ " payload digest")
+      (payload_digest request.payload)
+      actual_digest
+  | Error err -> fail (label ^ ": wrong error: " ^ store_error_to_string err)
+  | Ok _ -> fail (label ^ ": reused occurrence identity was accepted")
+;;
+
+let test_update_rejects_dispatched_occurrence_reuse () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    make_request
+      ~schedule_id:"reject-dispatched-occurrence-reuse"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config request);
+  ignore (refresh_due config ~now:201.0);
+  ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
+  ignore (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ());
+  update_request
+    config
+    ~schedule_id:request.schedule_id
+    ~due_at:request.due_at
+    ~expires_at:request.expires_at
+    ~payload:request.payload
+  |> check_reused_occurrence_rejected "dispatched occurrence" request;
+  match get_schedule config ~schedule_id:request.schedule_id with
+  | Some stored -> check (float 0.0) "rejected update keeps next due" 260.0 stored.due_at
+  | None -> fail "rejected update removed the recurring schedule"
+;;
+
+let test_update_rejects_failed_occurrence_reuse () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    make_request
+      ~schedule_id:"reject-failed-occurrence-reuse"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config request);
+  ignore (refresh_due config ~now:201.0);
+  ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
+  ignore (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ());
+  let digest = payload_digest request.payload in
+  ignore
+    (store_ok
+       "fail first occurrence attempt"
+       (fail_dispatched_occurrence
+          config
+          ~now:204.0
+          ~schedule_instance_id:request.schedule_instance_id
+          ~schedule_id:request.schedule_id
+          ~due_at:request.due_at
+          ~payload_digest:digest
+          ~error:"acceptance follow-up failed"));
+  update_request
+    config
+    ~schedule_id:request.schedule_id
+    ~due_at:request.due_at
+    ~expires_at:request.expires_at
+    ~payload:request.payload
+  |> check_reused_occurrence_rejected "failed occurrence" request;
+  match get_schedule config ~schedule_id:request.schedule_id with
+  | Some stored -> check (float 0.0) "failed reuse keeps next due" 260.0 stored.due_at
+  | None -> fail "failed reuse rejection removed the recurring schedule"
+;;
+
+let test_batch_settlement_finishes_orphan_execution () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    make_request
+      ~schedule_id:"orphan-dispatched-execution"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config request);
+  ignore (store_ok "refresh_due" (refresh_due config ~now:201.0));
+  ignore
+    (store_ok "start_due_candidate"
+       (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id));
+  ignore
+    (store_ok "accept_running"
+       (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ()));
+  let state = read_state config in
+  let execution =
+    match
+      last_execution_for_schedule_instance
+        state
+        ~schedule_instance_id:request.schedule_instance_id
+        ~schedule_id:request.schedule_id
+    with
+    | Some execution -> execution
+    | None -> fail "orphan settlement precondition has no execution"
+  in
+  let orphan_state = { state with schedules = [] } in
+  Workspace_core.write_text
+    config
+    (schedules_path config)
+    (Yojson.Safe.to_string (state_to_yojson orphan_state));
+  let settlement =
+    { execution_id = execution.execution_id
+    ; schedule_instance_id = execution.schedule_instance_id
+    ; schedule_id = execution.schedule_id
+    ; due_at = execution.due_at
+    ; payload_digest = execution.payload_digest
+    ; outcome = Dispatched_occurrence_failed "consumer no longer owns work"
+    }
+  in
+  ignore
+    (store_ok "settle orphan execution"
+       (settle_dispatched_occurrences config ~now:300.0 [ settlement ]));
+  let settled = read_state config in
+  check int "orphan settlement does not recreate schedule" 0
+    (List.length settled.schedules);
+  match
+    last_execution_for_schedule_instance
+      settled
+      ~schedule_instance_id:request.schedule_instance_id
+      ~schedule_id:request.schedule_id
+  with
+  | Some execution ->
+    check string "orphan execution becomes terminal" "failed"
+      (execution_status_to_string execution.status);
+    check (option string) "orphan failure reason is durable"
+      (Some "consumer no longer owns work") execution.error
+  | None -> fail "orphan execution evidence disappeared"
+;;
+
+let test_batch_settlement_collects_error_and_persists_valid_execution () =
+  with_workspace
+  @@ fun config ->
+  let request = make_request ~schedule_id:"mixed-batch-settlement" () in
+  ignore (insert_ok config request);
+  ignore (store_ok "refresh_due" (refresh_due config ~now:201.0));
+  ignore
+    (store_ok "start_due_candidate"
+       (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id));
+  ignore
+    (store_ok "accept_running"
+       (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ()));
+  let before = read_state config in
+  let execution =
+    match
+      last_execution_for_schedule_instance
+        before
+        ~schedule_instance_id:request.schedule_instance_id
+        ~schedule_id:request.schedule_id
+    with
+    | Some execution -> execution
+    | None -> fail "mixed settlement precondition has no execution"
+  in
+  let settlement execution_id =
+    { execution_id
+    ; schedule_instance_id = execution.schedule_instance_id
+    ; schedule_id = execution.schedule_id
+    ; due_at = execution.due_at
+    ; payload_digest = execution.payload_digest
+    ; outcome = Dispatched_occurrence_succeeded
+    }
+  in
+  (match
+     settle_dispatched_occurrences_collect_errors
+       config
+       ~now:300.0
+       [ settlement execution.execution_id; settlement "missing-execution" ]
+   with
+   | Ok [ Ok (); Error (Invalid_status_transition _) ] -> ()
+   | Ok _ -> fail "mixed settlement returned the wrong ordered results"
+   | Error error -> fail (store_error_to_string error));
+  let after = read_state config in
+  check int "mixed batch writes once" (before.version + 1) after.version;
+  match
+    last_execution_for_schedule_instance
+      after
+      ~schedule_instance_id:request.schedule_instance_id
+      ~schedule_id:request.schedule_id
+  with
+  | Some execution ->
+    check string "valid settlement persists" "succeeded"
+      (execution_status_to_string execution.status)
+  | None -> fail "valid mixed-batch execution disappeared"
 ;;
 
 let test_completion_before_acceptance_is_idempotent () =
@@ -696,6 +884,7 @@ let test_completion_before_acceptance_is_idempotent () =
     (complete_dispatched_occurrence
        config
        ~now:202.5
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -719,6 +908,7 @@ let test_dispatched_one_shot_failure_is_terminal () =
      fail_dispatched_occurrence
        config
        ~now:204.0
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
        ~due_at:request.due_at
        ~payload_digest:digest
@@ -729,6 +919,7 @@ let test_dispatched_one_shot_failure_is_terminal () =
   match
     execution_for_occurrence
       (read_state config)
+      ~schedule_instance_id:request.schedule_instance_id
       ~schedule_id:request.schedule_id
       ~due_at:request.due_at
       ~payload_digest:digest
@@ -759,7 +950,10 @@ let test_fail_due_candidate_records_failed_execution () =
    | Some stored -> check_status "stored failed" Failed stored.status
    | None -> fail "schedule missing");
   (match
-     last_execution_for_schedule (read_state config) ~schedule_id:req.schedule_id
+     last_execution_for_schedule_instance
+       (read_state config)
+       ~schedule_instance_id:req.schedule_instance_id
+       ~schedule_id:req.schedule_id
    with
    | None -> fail "missing failed execution"
    | Some execution ->
@@ -914,6 +1108,125 @@ let test_last_good_is_parseable_after_good_write () =
   | Error msg -> fail (".last-good is not parseable: " ^ msg)
 ;;
 
+(* Reproduces the live shape: a recurring request advances past an occurrence at
+   accept_running, the occurrence stays Execution_dispatched, and the request is
+   then cancelled from Scheduled. The request is terminal; the work is not. *)
+let cancelled_request_with_outstanding_occurrence config ~schedule_id =
+  let request =
+    make_request ~schedule_id ~recurrence:(Interval { interval_sec = 3600 }) ()
+  in
+  let stored = insert_ok config request in
+  ignore (store_ok "refresh_due" (refresh_due config ~now:201.0));
+  ignore
+    (store_ok "start_due_candidate"
+       (start_due_candidate config ~now:202.0 ~schedule_id:stored.schedule_id));
+  let advanced =
+    store_ok "accept_running" (accept_running config ~now:203.0 ~schedule_id:stored.schedule_id ())
+  in
+  check string "recurring request advanced past the occurrence" "scheduled"
+    (schedule_status_to_string advanced.status);
+  let cancelled =
+    store_ok "cancel_request" (cancel_request config ~schedule_id:stored.schedule_id)
+  in
+  check string "request is terminal" "cancelled"
+    (schedule_status_to_string cancelled.status);
+  stored
+;;
+
+let test_prune_keeps_terminal_request_with_unsettled_occurrence () =
+  with_workspace
+  @@ fun config ->
+  let stored =
+    cancelled_request_with_outstanding_occurrence config ~schedule_id:"prune-outstanding"
+  in
+  let state, pruned = store_ok "prune_completed" (prune_completed config) in
+  check int "outstanding occurrence keeps its request" 0 pruned;
+  check int "request row retained" 1 (List.length state.schedules);
+  check int "execution evidence retained" 1 (List.length state.executions);
+  (* The settlement path still resolves, which is the point of retaining it. *)
+  match
+    complete_dispatched_occurrence config ~now:400.0
+      ~schedule_instance_id:stored.schedule_instance_id
+      ~schedule_id:stored.schedule_id
+      ~due_at:stored.due_at
+      ~payload_digest:(Schedule_domain.payload_digest stored.payload) ()
+  with
+  | Ok _ -> ()
+  | Error err -> fail ("settlement after prune failed: " ^ store_error_to_string err)
+;;
+
+let test_prune_deletes_terminal_request_once_settled () =
+  with_workspace
+  @@ fun config ->
+  let stored =
+    cancelled_request_with_outstanding_occurrence config ~schedule_id:"prune-settled"
+  in
+  ignore
+    (store_ok "fail_dispatched_occurrence"
+       (fail_dispatched_occurrence config ~now:300.0
+          ~schedule_instance_id:stored.schedule_instance_id
+          ~schedule_id:stored.schedule_id
+          ~due_at:stored.due_at
+          ~payload_digest:(Schedule_domain.payload_digest stored.payload)
+          ~error:"consumer lost it"));
+  let state, pruned = store_ok "prune_completed" (prune_completed config) in
+  check int "settled terminal request is pruned" 1 pruned;
+  check int "request row removed" 0 (List.length state.schedules);
+  check int "execution rows removed with it" 0 (List.length state.executions)
+;;
+
+let test_prune_does_not_bind_orphan_work_to_reused_public_id () =
+  with_workspace
+  @@ fun config ->
+  let old_request =
+    make_request
+      ~schedule_id:"prune-reused-public-id"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config old_request);
+  ignore (store_ok "refresh old request" (refresh_due config ~now:201.0));
+  ignore
+    (store_ok
+       "start old occurrence"
+       (start_due_candidate
+          config
+          ~now:202.0
+          ~schedule_id:old_request.schedule_id));
+  ignore
+    (store_ok
+       "dispatch old occurrence"
+       (accept_running config ~now:203.0 ~schedule_id:old_request.schedule_id ()));
+  let old_state = read_state config in
+  Workspace_core.write_text
+    config
+    (schedules_path config)
+    (Yojson.Safe.to_string (state_to_yojson { old_state with schedules = [] }));
+  let new_request = make_request ~schedule_id:old_request.schedule_id () in
+  check bool "public ID reuse mints a new instance" false
+    (String.equal
+       old_request.schedule_instance_id
+       new_request.schedule_instance_id);
+  ignore (insert_ok config new_request);
+  (match
+     last_execution_for_schedule_instance
+       (read_state config)
+       ~schedule_instance_id:new_request.schedule_instance_id
+       ~schedule_id:new_request.schedule_id
+   with
+   | None -> ()
+   | Some _ -> fail "reused public ID inherited the prior instance execution");
+  ignore
+    (store_ok
+       "cancel replacement request"
+       (cancel_request config ~schedule_id:new_request.schedule_id));
+  let state, pruned = store_ok "prune replacement request" (prune_completed config) in
+  check int "old orphan does not retain replacement request" 1 pruned;
+  check int "replacement request is removed" 0 (List.length state.schedules);
+  check int "orphan execution is removed with its absent owner" 0
+    (List.length state.executions)
+;;
+
 let () =
   run "Schedule_store"
     [
@@ -980,6 +1293,14 @@ let () =
             test_dispatched_one_shot_completes_by_exact_occurrence;
           test_case "recurring completion preserves next occurrence" `Quick
             test_recurring_dispatched_completion_preserves_next_occurrence;
+          test_case "update rejects dispatched occurrence reuse" `Quick
+            test_update_rejects_dispatched_occurrence_reuse;
+          test_case "update rejects failed occurrence reuse" `Quick
+            test_update_rejects_failed_occurrence_reuse;
+          test_case "batch settlement finishes an orphan execution" `Quick
+            test_batch_settlement_finishes_orphan_execution;
+          test_case "batch settlement preserves valid work beside an error" `Quick
+            test_batch_settlement_collects_error_and_persists_valid_execution;
           test_case "completion before acceptance is idempotent" `Quick
             test_completion_before_acceptance_is_idempotent;
           test_case "accepted one-shot failure is terminal" `Quick
@@ -992,6 +1313,14 @@ let () =
             test_fail_due_candidate_records_failed_execution;
           test_case "recurring occurrences remain dispatchable" `Quick
             test_recurring_occurrences_remain_dispatchable;
+          test_case "prune keeps a terminal request with an unsettled occurrence"
+            `Quick test_prune_keeps_terminal_request_with_unsettled_occurrence;
+          test_case "prune deletes a terminal request once settled" `Quick
+            test_prune_deletes_terminal_request_once_settled;
+          test_case
+            "prune scopes unsettled ownership by schedule instance"
+            `Quick
+            test_prune_does_not_bind_orphan_work_to_reused_public_id;
         ] );
     ]
 ;;

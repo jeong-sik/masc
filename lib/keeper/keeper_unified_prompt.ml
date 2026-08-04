@@ -462,8 +462,9 @@ let format_completion_authority_rejection_observations
 (* Cancellations of Tasks this Keeper authored. Rendered in their own section
    rather than under Board Activity: no Board post exists to point at, and the
    canceller's reason is the only account of why work the Keeper asked for
-   stopped. [reason] is rendered as the empty field when the canceller gave
-   none, so "no reason was given" is not confused with a reason. *)
+   stopped. The [reason] field is emitted only when the canceller gave one:
+   collapsing [None] to the empty string would render "no reason was given"
+   and "the reason given was empty" as the same row. *)
 let format_task_cancellation_observations
     (events : Keeper_world_observation.pending_board_event list) =
   let rows =
@@ -471,14 +472,18 @@ let format_task_cancellation_observations
       (fun (event : Keeper_world_observation.pending_board_event) ->
          match event.event_kind with
          | Keeper_world_observation.Task_cancelled cancellation ->
-           Some
-             (format_prompt_row
-                [ "post_id", event.post_id
-                ; "task_id", cancellation.Keeper_event_queue.tc_task_id
-                ; "cancelled_by", cancellation.tc_cancelled_by
-                ; "reason", Option.value ~default:"" cancellation.tc_reason
-                ]
-              ^ "\n")
+           let identity =
+             [ "post_id", event.post_id
+             ; "task_id", cancellation.Keeper_event_queue.tc_task_id
+             ; "cancelled_by", cancellation.tc_cancelled_by
+             ]
+           in
+           let fields =
+             match cancellation.tc_reason with
+             | None -> identity
+             | Some reason -> identity @ [ "reason", reason ]
+           in
+           Some (format_prompt_row fields ^ "\n")
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _

@@ -688,30 +688,44 @@ let test_task_cancellation_has_own_prompt_layer () =
         | None -> ""))
 ;;
 
-(* An absent reason must render as an empty field, not as "None" or the string
-   "null": the author has to be able to tell "no reason given" from a reason. *)
-let test_task_cancellation_without_reason_renders_empty_field () =
+(* An absent reason omits the field rather than rendering it empty: an empty
+   [reason=""] is what a canceller who typed nothing produces, so collapsing
+   [None] into it would tell the author two different things in one row. The
+   row must also never leak an OCaml option or a JSON "null". *)
+let test_task_cancellation_without_reason_omits_the_field () =
   Masc_test_deps.init_keeper_tool_registry ();
   init_runtime_default_for_tests ();
-  let cancellation : Keeper_event_queue.task_cancellation =
-    { tc_task_id = "task-162"; tc_cancelled_by = "keeper-rondo-agent"; tc_reason = None }
+  let render tc_reason =
+    let cancellation : Keeper_event_queue.task_cancellation =
+      { tc_task_id = "task-162"; tc_cancelled_by = "keeper-rondo-agent"; tc_reason }
+    in
+    let obs =
+      { base_observation with
+        pending_board_events =
+          [ { sample_task_cancellation with
+              event_kind = WO.Task_cancelled cancellation
+            ; post_id = "task-cancelled:task-162"
+            }
+          ]
+      }
+    in
+    let { Masc.Keeper_unified_prompt.world_state; _ } =
+      build_prompt ~meta:minimal_meta obs
+    in
+    world_state
   in
-  let obs =
-    { base_observation with
-      pending_board_events =
-        [ { sample_task_cancellation with
-            event_kind = WO.Task_cancelled cancellation
-          ; post_id = "task-cancelled:task-162"
-          }
-        ]
-    }
-  in
-  let { Masc.Keeper_unified_prompt.world_state; _ } =
-    build_prompt ~meta:minimal_meta obs
-  in
-  check bool "empty reason field" true (contains_sub "reason=\"\"" world_state);
+  let absent = render None in
+  let empty = render (Some "") in
+  check bool "an absent reason carries no reason field" false
+    (contains_sub "reason=" absent);
+  check bool "a reason given as empty still carries the field" true
+    (contains_sub "reason=\"\"" empty);
+  check bool "the identity fields survive the omission" true
+    (contains_sub "task_id=\"task-162\"" absent
+     && contains_sub "cancelled_by=\"keeper-rondo-agent\"" absent);
   check bool "no OCaml option leaks into the prompt" false
-    (contains_sub "None" world_state)
+    (contains_sub "None" absent);
+  check bool "no JSON null leaks into the prompt" false (contains_sub "null" absent)
 ;;
 
 let test_completion_authority_rejection_has_own_prompt_layer () =
@@ -1006,8 +1020,8 @@ let () =
             `Quick test_completion_authority_rejection_has_own_prompt_layer;
           test_case "prompt: task cancellation has its own layer" `Quick
             test_task_cancellation_has_own_prompt_layer;
-          test_case "prompt: task cancellation without reason renders empty" `Quick
-            test_task_cancellation_without_reason_renders_empty_field;
+          test_case "prompt: task cancellation without reason omits the field" `Quick
+            test_task_cancellation_without_reason_omits_the_field;
           test_case
             "prompt: completion authority rejection preserves human provenance"
             `Quick test_completion_authority_rejection_preserves_human_provenance;

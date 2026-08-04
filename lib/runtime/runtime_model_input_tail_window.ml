@@ -1,5 +1,5 @@
 (** Bounded transmission view over provider-bound history — see the
-    interface for the contract (RFC #26534 PR-C, #26544, #26535). *)
+    interface for the contract (RFC-0351 §3 L5, #26534 PR-C, #26535, #26551). *)
 
 let atoms_per_window = 60
 let preamble_marker_key = "masc.model_input_tail_window.v1"
@@ -16,6 +16,34 @@ let preamble_message : Agent_sdk.Types.message =
   ; tool_call_id = None
   ; metadata = [ (preamble_marker_key, `Bool true) ]
   }
+;;
+
+type budget_error =
+  | Reservation_exceeds_capacity of
+      { capacity_bytes : int
+      ; reserved_bytes : int
+      ; undroppable_bytes : int
+      }
+  | Newest_atom_exceeds_available of
+      { available_bytes : int
+      ; newest_atom_bytes : int
+      }
+
+let budget_error_to_string = function
+  | Reservation_exceeds_capacity
+      { capacity_bytes; reserved_bytes; undroppable_bytes } ->
+    Printf.sprintf
+      "model input budget leaves no room for history: capacity_bytes=%d \
+       reserved_bytes=%d undroppable_bytes=%d"
+      capacity_bytes
+      reserved_bytes
+      undroppable_bytes
+  | Newest_atom_exceeds_available { available_bytes; newest_atom_bytes } ->
+    Printf.sprintf
+      "newest conversation atom does not fit the model input budget: \
+       available_bytes=%d newest_atom_bytes=%d"
+      available_bytes
+      newest_atom_bytes
 ;;
 
 (* A message is pinned when it must survive every cut: [System] entries
@@ -67,21 +95,56 @@ let annotate (messages : Agent_sdk.Types.message list) :
   (List.rev labelled_rev, atom_count)
 ;;
 
-(* Largest multiple of [atoms_per_window] that still leaves at least
-   [atoms_per_window] atoms. Quantizing the drop count keeps the cut point
-   stationary while up to [atoms_per_window] new atoms accumulate, so the
-   transmitted prefix only changes when the window jumps. *)
-let dropped_atoms ~atom_count =
-  if atom_count < 2 * atoms_per_window
-  then 0
-  else (atom_count - atoms_per_window) / atoms_per_window * atoms_per_window
+(* [suffix.(i)] is the measured size of atoms [i .. atom_count - 1];
+   [suffix.(atom_count)] is 0. Suffix sums make every candidate cut a single
+   array read, so the quantized scan below stays linear in the atom count. *)
+let atom_suffix_bytes ~measure_message_bytes ~atom_count labelled =
+  let per_atom = Array.make (max atom_count 1) 0 in
+  List.iter
+    (fun (msg, label) ->
+       match label with
+       | Pinned -> ()
+       | Atom index -> per_atom.(index) <- per_atom.(index) + measure_message_bytes msg)
+    labelled;
+  let suffix = Array.make (atom_count + 1) 0 in
+  for index = atom_count - 1 downto 0 do
+    suffix.(index) <- suffix.(index + 1) + per_atom.(index)
+  done;
+  (per_atom, suffix)
 ;;
 
-let project (messages : Agent_sdk.Types.message list) :
-  Agent_sdk.Types.message list
-  =
-  let labelled, atom_count = annotate messages in
-  let drop = dropped_atoms ~atom_count in
+(* Smallest multiple of [atoms_per_window] whose remaining suffix fits
+   [available_bytes]. Quantizing keeps the transmitted prefix byte-identical
+   while the conversation grows inside one window, which is what preserves
+   provider prompt-cache reuse between jumps (#26535 measured the
+   alternative: a per-turn sliding cut changes the prefix on every request).
+   [None] means no quantized cut is small enough and the caller must fall
+   back to an exact cut — correctness outranks cache reuse. *)
+let quantized_drop ~available_bytes ~atom_count suffix =
+  let rec scan drop =
+    if drop >= atom_count
+    then None
+    else if suffix.(drop) <= available_bytes
+    then Some drop
+    else scan (drop + atoms_per_window)
+  in
+  scan 0
+;;
+
+(* Smallest cut of any size whose remaining suffix fits. Returns [atom_count]
+   when even the newest atom alone exceeds [available_bytes]. *)
+let exact_drop ~available_bytes ~atom_count suffix =
+  let rec scan drop =
+    if drop >= atom_count
+    then atom_count
+    else if suffix.(drop) <= available_bytes
+    then drop
+    else scan (drop + 1)
+  in
+  scan 0
+;;
+
+let assemble ~drop ~messages labelled =
   if drop = 0
   then messages
   else (
@@ -107,4 +170,52 @@ let project (messages : Agent_sdk.Types.message list) :
     | Some Agent_sdk.Types.Assistant
     | Some Agent_sdk.Types.Tool
     | Some Agent_sdk.Types.System -> preamble_message :: kept)
+;;
+
+let project
+    ~measure_message_bytes
+    ~capacity_bytes
+    ~reserved_bytes
+    (messages : Agent_sdk.Types.message list)
+  : (Agent_sdk.Types.message list, budget_error) result
+  =
+  let labelled, atom_count = annotate messages in
+  (* Everything the cut cannot remove is charged before any atom is
+     considered. Pinned messages are re-assembled fresh each turn by the
+     keeper hooks, and the preamble is prepended whenever a cut lands on a
+     non-[User] head; charging both up front is what makes an over-capacity
+     request a typed refusal instead of a cut that can never converge. *)
+  let pinned_bytes =
+    List.fold_left
+      (fun acc (msg, label) ->
+         match label with
+         | Pinned -> acc + measure_message_bytes msg
+         | Atom _ -> acc)
+      0
+      labelled
+  in
+  let preamble_bytes = measure_message_bytes preamble_message in
+  let undroppable_bytes = pinned_bytes + preamble_bytes in
+  let available_bytes = capacity_bytes - reserved_bytes - undroppable_bytes in
+  if available_bytes <= 0
+  then
+    Error
+      (Reservation_exceeds_capacity
+         { capacity_bytes; reserved_bytes; undroppable_bytes })
+  else if atom_count = 0
+  then Ok messages
+  else (
+    let per_atom, suffix =
+      atom_suffix_bytes ~measure_message_bytes ~atom_count labelled
+    in
+    match quantized_drop ~available_bytes ~atom_count suffix with
+    | Some drop -> Ok (assemble ~drop ~messages labelled)
+    | None ->
+      let drop = exact_drop ~available_bytes ~atom_count suffix in
+      if drop >= atom_count
+      then
+        Error
+          (Newest_atom_exceeds_available
+             { available_bytes; newest_atom_bytes = per_atom.(atom_count - 1) })
+      else Ok (assemble ~drop ~messages labelled))
 ;;

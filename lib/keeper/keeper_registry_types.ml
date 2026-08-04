@@ -76,10 +76,12 @@ type turn_attempt_state =
 type wake_reason =
   | Proactive_tick
   | Woken of Keeper_event_queue.stimulus_payload list
+  | Chat_request
 
 let wake_reason_label = function
   | Proactive_tick -> "proactive_tick"
   | Woken _ -> "woken"
+  | Chat_request -> "chat_request"
 ;;
 
 type turn_measurement =

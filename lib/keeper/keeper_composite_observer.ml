@@ -393,6 +393,10 @@ let wake_reason_kind_and_stimuli (wake : Keeper_registry.wake_reason) : string *
   | Keeper_registry.Proactive_tick -> "proactive_tick", []
   | Keeper_registry.Woken stimuli ->
     "woken", List.map Keeper_event_queue.payload_kind_label stimuli
+  (* A chat turn is admitted from the chat queue, not selected from the event
+     queue, so it carries no stimuli. The empty list is the accurate answer,
+     not a placeholder. *)
+  | Keeper_registry.Chat_request -> "chat_request", []
 
 let run_state_to_json (rs : run_state) : Yojson.Safe.t =
   match rs with

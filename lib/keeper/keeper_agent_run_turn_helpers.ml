@@ -111,6 +111,8 @@ let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
   | Agent_sdk.Types.SSEParseFailed _ -> Some "sse_parse_failed"
   | Agent_sdk.Types.NDJSONParseFailed _ -> Some "ndjson_parse_failed"
   | Agent_sdk.Types.SSEUnknownEventType _ -> Some "sse_unknown_event_type"
+  | Agent_sdk.Types.SSEUnsupportedPart _ -> Some "sse_unsupported_part"
+  | Agent_sdk.Types.SSEUnsupportedResponse _ -> Some "sse_unsupported_response"
   | Agent_sdk.Types.StreamIncomplete _ -> Some "sse_stream_incomplete"
   | Agent_sdk.Types.Connected -> Some "sse_connected"
   | Agent_sdk.Types.Timeout _ -> Some "sse_timeout"

@@ -512,6 +512,26 @@ let translate ~redact_text ~base_dir bridge_state
           [ protocol_error ~event_type ~raw_bytes:(String.length raw)
               Sse_unknown_event_type ]
       }
+  | SSEUnsupportedPart { provider_kind; part; raw } ->
+      let provider = Agent_sdk.Llm_provider.Provider_kind.to_string provider_kind in
+      let reason = redact_text (Printf.sprintf "%s.part.%s" provider part) in
+      { bridge_state;
+        chat_events =
+          [ protocol_error ~event_type:part ~reason
+              ~raw_bytes:(String.length raw) Sse_unsupported_part;
+            Event_error
+              { message = "Provider stream capability unsupported: " ^ reason } ]
+      }
+  | SSEUnsupportedResponse { provider_kind; response; raw } ->
+      let provider = Agent_sdk.Llm_provider.Provider_kind.to_string provider_kind in
+      let reason = redact_text (Printf.sprintf "%s.response.%s" provider response) in
+      { bridge_state;
+        chat_events =
+          [ protocol_error ~event_type:response ~reason
+              ~raw_bytes:(String.length raw) Sse_unsupported_response;
+            Event_error
+              { message = "Provider stream capability unsupported: " ^ reason } ]
+      }
   | StreamIncomplete { reason } ->
       { bridge_state;
         chat_events =

@@ -80,6 +80,11 @@ val dispatch_status_to_string : dispatch_status -> string
 
 val signals_dir : Workspace_utils.config -> string
 
+val wake_signal_to_yojson : wake_signal -> Yojson.Safe.t
+(** The exact persisted shape of a durable wake signal. [tick] writes rows
+    through this function, so it is also the contract a reader has to satisfy;
+    [test_schedule_tool_wiring] pins the field count against it. *)
+
 val wake_signal_of_yojson : Yojson.Safe.t -> (wake_signal, string) result
 
 val tick :

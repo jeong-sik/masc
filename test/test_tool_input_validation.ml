@@ -644,6 +644,132 @@ let test_validate_args_keeper_board_list_rejects_unknown_field () =
       (Yojson.Safe.to_string forwarded)
   | Error _ -> ()
 
+(* The keeper/persona tool schemas in [Keeper_schema] hand-roll their
+   [`Assoc] input_schema. Eleven of them omitted [additionalProperties],
+   so [Tool_input_validation.unsupported_arg_names] returned [] for them and
+   an undeclared field reached the handler, which then dropped it with no
+   error. Only the fourteen names hand-listed in
+   [Keeper_config_text.removed_keeper_msg_inputs] produced a rejection;
+   a typo did not. *)
+let keeper_schema_input name =
+  find_schema_exn name Masc.Keeper_schema.schemas
+
+let assert_rejects_undeclared_field ~tool ~field =
+  match
+    Tool_input_validation.validate_args
+      ~schema:(keeper_schema_input tool)
+      ~name:tool
+      ~args:(`Assoc [ "name", `String "k"; field, `String "x" ])
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected %s to reject undeclared field %s, but it passed: %s"
+      tool field
+      (Yojson.Safe.to_string forwarded)
+  | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      (Printf.sprintf "%s error names %s" tool field)
+      true
+      (string_contains msg ("unsupported field(s): " ^ field))
+
+let test_keeper_up_rejects_undeclared_field () =
+  assert_rejects_undeclared_field ~tool:"masc_keeper_up" ~field:"shrt_goal"
+
+(* The retired goal inputs were rejected only because they were hand-listed.
+   Closing the schema rejects them through the same path as any other
+   undeclared name, which is what makes the hand-list redundant. *)
+let test_keeper_up_rejects_retired_goal_inputs () =
+  List.iter
+    (fun field -> assert_rejects_undeclared_field ~tool:"masc_keeper_up" ~field)
+    [ "goal"; "short_goal"; "mid_goal"; "long_goal"; "new_goal" ]
+
+let test_keeper_down_rejects_undeclared_field () =
+  assert_rejects_undeclared_field ~tool:"masc_keeper_down" ~field:"remove_metaa"
+
+(* Regression guard for the closure itself: every field observed in live
+   ~/me/.masc tool-call logs must still be accepted. Closing a schema turns
+   a silent drop into a hard rejection, so an under-declared property breaks
+   a working call — the same failure the keeper_board_list [compact] omission
+   produced above. [persona_name] is in this list because
+   [Keeper_turn_up_args.parse] reads it and
+   [Keeper_turn_up_config_persistence] writes it to the keeper TOML, while
+   the schema did not declare it. *)
+let test_keeper_up_accepts_live_traffic_fields () =
+  let args =
+    `Assoc
+      [ "name", `String "sangsu"
+      ; "persona_name", `String "sangsu"
+      ; "instructions", `String "do the thing"
+      ; "active_goal_ids", `List [ `String "g1" ]
+      ; "sandbox_profile", `String "local"
+      ; "allowed_paths", `List [ `String "/tmp" ]
+      ; "mention_targets", `List [ `String "sangsu" ]
+      ; "autoboot_enabled", `Bool true
+      ; "proactive_enabled", `Bool true
+      ; "runtime_id", `String "rt"
+      ; "max_context_override", `Int 0
+      ]
+  in
+  match
+    Tool_input_validation.validate_args
+      ~schema:(keeper_schema_input "masc_keeper_up")
+      ~name:"masc_keeper_up"
+      ~args
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected masc_keeper_up to accept its live-traffic fields, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
+let test_keeper_clear_accepts_live_traffic_fields () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:(keeper_schema_input "masc_keeper_clear")
+      ~name:"masc_keeper_clear"
+      ~args:
+        (`Assoc
+          [ "name", `String "sangsu"
+          ; "preserve_system_prompt", `Bool true
+          ; "reason", `String "context overflow"
+          ])
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected masc_keeper_clear to accept its live-traffic fields, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
+(* [network_mode] stays undeclared on purpose: it is accepted only on the
+   dashboard HTTP path, which calls [Keeper_turn_up_args.parse] with
+   [~allow_sandbox_fields:true] and never validates against this schema. *)
+let test_keeper_up_rejects_network_mode () =
+  assert_rejects_undeclared_field ~tool:"masc_keeper_up" ~field:"network_mode"
+
+(* Every schema in the keeper surface forbids undeclared fields. A new tool
+   added without [additionalProperties] reopens the silent-drop path, so the
+   invariant is asserted over the whole list rather than per tool. *)
+let test_every_keeper_schema_forbids_additional_properties () =
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+      let forbids =
+        match schema.input_schema with
+        | `Assoc fields ->
+          (match List.assoc_opt "additionalProperties" fields with
+           | Some (`Bool false) -> true
+           | _ -> false)
+        | _ -> false
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "%s forbids additional properties" schema.name)
+        true
+        forbids)
+    Masc.Keeper_schema.schemas
+
 let test_validate_args_keeper_memory_search_rejects_removed_kind () =
   match
     Tool_input_validation.validate_args
@@ -2128,6 +2254,22 @@ let () =
         test_typed_tool_contract_rejection_corpus;
       Alcotest.test_case "keeper schemas pin required fields" `Quick
         test_keeper_tool_schemas_pin_required_fields;
+    ]);
+    ("keeper_schema_closure", [
+      Alcotest.test_case "keeper_up rejects an undeclared field" `Quick
+        test_keeper_up_rejects_undeclared_field;
+      Alcotest.test_case "keeper_up rejects retired goal inputs" `Quick
+        test_keeper_up_rejects_retired_goal_inputs;
+      Alcotest.test_case "keeper_down rejects an undeclared field" `Quick
+        test_keeper_down_rejects_undeclared_field;
+      Alcotest.test_case "keeper_up accepts live-traffic fields" `Quick
+        test_keeper_up_accepts_live_traffic_fields;
+      Alcotest.test_case "keeper_clear accepts live-traffic fields" `Quick
+        test_keeper_clear_accepts_live_traffic_fields;
+      Alcotest.test_case "keeper_up rejects dashboard-only network_mode" `Quick
+        test_keeper_up_rejects_network_mode;
+      Alcotest.test_case "every keeper schema forbids additional properties" `Quick
+        test_every_keeper_schema_forbids_additional_properties;
     ]);
     ("oneof_const_discriminator", [
       Alcotest.test_case "alpha branch matches via const" `Quick

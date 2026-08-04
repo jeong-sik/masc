@@ -134,6 +134,7 @@ let keeper_schemas : tool_schema list = [
           ("description", `String "If true, return full persona summaries. If false, return names only.");
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -209,6 +210,7 @@ let keeper_schemas : tool_schema list = [
           ("description", `String "If false, return only keepers with audit issues while keeping summary counts over all audited keepers.");
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -221,6 +223,10 @@ let keeper_schemas : tool_schema list = [
         ("name", `Assoc [
           ("type", `String "string");
           ("description", `String "Keeper handle (stable). Example: 'keeper-helper'");
+        ]);
+        ("persona_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional persona handle recorded in the keeper TOML. Falls back to the resolved profile defaults when omitted.");
         ]);
         ("instructions", `Assoc [
           ("type", `String "string");
@@ -265,6 +271,11 @@ let keeper_schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "name"]);
+      (* [network_mode] is deliberately absent: it is accepted only on the
+         dashboard HTTP path, which calls [Keeper_turn_up_args.parse] with
+         [~allow_sandbox_fields:true] and does not validate against this
+         schema. The MCP contract rejects it. *)
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -374,6 +385,7 @@ let keeper_schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -392,6 +404,7 @@ let keeper_schemas : tool_schema list = [
           ("description", `String "Return keeper summaries (model/context/handoff/compaction) instead of names only.");
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -408,6 +421,7 @@ Clears stale data from previous sessions. Does not affect configuration, goals, 
         ]);
       ]);
       ("required", `List [`String "name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -423,6 +437,7 @@ Clears stale data from previous sessions. Does not affect configuration, goals, 
         ]);
       ]);
       ("required", `List [`String "name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -452,6 +467,7 @@ Requires a reason for the audit trail.";
         ]);
       ]);
       ("required", `List [`String "name"; `String "reason"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -483,6 +499,7 @@ keeper spawned from this persona inherits. Required fields: persona_name, displa
         ("proactive_enabled", `Assoc [("type", `String "boolean")]);
       ]);
       ("required", `List [`String "persona_name"; `String "display_name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -510,6 +527,7 @@ persona does not exist.";
         ("proactive_enabled", `Assoc [("type", `String "boolean")]);
       ]);
       ("required", `List [`String "persona_name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -529,6 +547,7 @@ future spawns from the persona.";
         ]);
       ]);
       ("required", `List [`String "persona_name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 

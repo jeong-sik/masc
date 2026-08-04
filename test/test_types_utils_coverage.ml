@@ -1,4 +1,4 @@
-(** Comprehensive coverage tests for Types, Workspace_utils, and Workspace_eio modules *)
+(** Comprehensive coverage tests for Types and Workspace_utils modules *)
 
 (* Initialize RNG for crypto operations *)
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -589,125 +589,6 @@ let test_contains_substring_empty () =
   check bool "empty needle" true (String_util.contains_substring "hello" "")
 
 (* ============================================================ *)
-(* Workspace_eio.event_type Tests                                     *)
-(* ============================================================ *)
-
-let test_workspace_eio_event_type_to_string () =
-  check string "AgentSessionBound" "agent_session_bound" (Workspace_eio.event_type_to_string Workspace_eio.AgentSessionBound);
-  check string "AgentSessionEnded" "agent_session_ended" (Workspace_eio.event_type_to_string Workspace_eio.AgentSessionEnded);
-  check string "Broadcast" "broadcast" (Workspace_eio.event_type_to_string Workspace_eio.Broadcast);
-  check string "LockAcquire" "lock_acquire" (Workspace_eio.event_type_to_string Workspace_eio.LockAcquire);
-  check string "LockRelease" "lock_release" (Workspace_eio.event_type_to_string Workspace_eio.LockRelease)
-
-(* ============================================================ *)
-(* Workspace_eio.now_iso Tests                                        *)
-(* ============================================================ *)
-
-let test_workspace_eio_now_iso () =
-  let ts = Workspace_eio.now_iso () in
-  check bool "contains T" true (String.contains ts 'T');
-  check bool "ends with Z" true (ts.[String.length ts - 1] = 'Z');
-  (* Has milliseconds: YYYY-MM-DDTHH:MM:SS.mmmZ *)
-  check bool "has ms" true (String.contains ts '.')
-
-(* ============================================================ *)
-(* Workspace_eio.workspace_state JSON Tests                                *)
-(* ============================================================ *)
-
-let test_workspace_eio_default_workspace_state () =
-  let state = Workspace_eio.default_workspace_state () in
-  check string "protocol_version" "1.0.0" state.protocol_version;
-  check bool "not paused" false state.paused;
-  check (list string) "no active agents" [] state.active_agents
-
-let test_workspace_eio_workspace_state_roundtrip () =
-  let state = Workspace_eio.{
-    protocol_version = "1.0.0";
-    started_at = 1704067200.0;
-    last_updated = 1704070800.0;
-    active_agents = ["claude"; "gemini"];
-    message_seq = 42;
-    event_seq = 10;
-    mode = "collaborative";
-    paused = true;
-    paused_by = Some "admin";
-    paused_at = Some 1704070000.0;
-    pause_reason = Some "Maintenance";
-  } in
-  let json = Workspace_eio.workspace_state_to_json state in
-  let result = Workspace_eio.workspace_state_of_json json in
-  check bool "roundtrip ok" true (is_ok result)
-
-(* ============================================================ *)
-(* Workspace_eio.agent_state JSON Tests                               *)
-(* ============================================================ *)
-
-let test_workspace_eio_agent_state_roundtrip () =
-  let agent = Workspace_eio.{
-    name = "test-agent";
-    last_seen = 1704067200.0;
-    capabilities = ["code"; "review"; "test"];
-    status = "active";
-  } in
-  let json = Workspace_eio.agent_state_to_json agent in
-  let result = Workspace_eio.agent_state_of_json json in
-  check bool "roundtrip ok" true (is_ok result)
-
-(* ============================================================ *)
-(* Workspace_eio.lock_info JSON Tests                                 *)
-(* ============================================================ *)
-
-let test_workspace_eio_lock_info_roundtrip () =
-  let lock = Workspace_eio.{
-    resource = "src/main.ml";
-    owner = "claude";
-    acquired_at = 1704067200.0;
-    expires_at = 1704070800.0;
-  } in
-  let json = Workspace_eio.lock_info_to_json lock in
-  let result = Workspace_eio.lock_info_of_json json in
-  check bool "roundtrip ok" true (is_ok result)
-
-let test_workspace_eio_lock_info_int_floats () =
-  (* Test parsing when floats are encoded as ints *)
-  let json = `Assoc [
-    ("resource", `String "file.ml");
-    ("owner", `String "agent");
-    ("acquired_at", `Int 1704067200);
-    ("expires_at", `Intlit "1704070800");
-  ] in
-  let result = Workspace_eio.lock_info_of_json json in
-  check bool "parses int as float" true (is_ok result)
-
-(* ============================================================ *)
-(* Workspace_eio.message JSON Tests                                   *)
-(* ============================================================ *)
-
-let test_workspace_eio_message_roundtrip () =
-  let msg = Workspace_eio.{
-    seq = 42;
-    from_agent = "claude";
-    content = "Hello @gemini, please review this";
-    mention = Some "gemini";
-    timestamp = 1704067200.0;
-  } in
-  let json = Workspace_eio.message_to_json msg in
-  let result = Workspace_eio.message_of_json json in
-  check bool "roundtrip ok" true (is_ok result)
-
-let test_workspace_eio_message_no_mention () =
-  let msg = Workspace_eio.{
-    seq = 1;
-    from_agent = "gemini";
-    content = "General broadcast";
-    mention = None;
-    timestamp = 1704067200.0;
-  } in
-  let json = Workspace_eio.message_to_json msg in
-  let result = Workspace_eio.message_of_json json in
-  check bool "roundtrip ok" true (is_ok result)
-
-(* ============================================================ *)
 (* Test Suite                                                    *)
 (* ============================================================ *)
 
@@ -834,32 +715,11 @@ let substring_tests = [
   "empty needle", `Quick, test_contains_substring_empty;
 ]
 
-let workspace_eio_event_tests = [
-  "event_type_to_string", `Quick, test_workspace_eio_event_type_to_string;
-]
 
-let workspace_eio_time_tests = [
-  "now_iso", `Quick, test_workspace_eio_now_iso;
-]
 
-let workspace_eio_state_tests = [
-  "default_workspace_state", `Quick, test_workspace_eio_default_workspace_state;
-  "workspace_state roundtrip", `Quick, test_workspace_eio_workspace_state_roundtrip;
-]
 
-let workspace_eio_agent_tests = [
-  "agent_state roundtrip", `Quick, test_workspace_eio_agent_state_roundtrip;
-]
 
-let workspace_eio_lock_tests = [
-  "lock_info roundtrip", `Quick, test_workspace_eio_lock_info_roundtrip;
-  "lock_info int floats", `Quick, test_workspace_eio_lock_info_int_floats;
-]
 
-let workspace_eio_message_tests = [
-  "message roundtrip", `Quick, test_workspace_eio_message_roundtrip;
-  "message no mention", `Quick, test_workspace_eio_message_no_mention;
-]
 
 let () =
   run "Types & Utils Coverage" [
@@ -881,10 +741,4 @@ let () =
     "sanitize", sanitize_tests;
     "validation", validation_tests;
     "contains_substring", substring_tests;
-    "Workspace_eio.event", workspace_eio_event_tests;
-    "Workspace_eio.time", workspace_eio_time_tests;
-    "Workspace_eio.state", workspace_eio_state_tests;
-    "Workspace_eio.agent", workspace_eio_agent_tests;
-    "Workspace_eio.lock", workspace_eio_lock_tests;
-    "Workspace_eio.message", workspace_eio_message_tests;
   ]

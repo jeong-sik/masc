@@ -53,7 +53,10 @@ let with_eio_backend f =
           let backend = Backend.FileSystem.create ~fs config in
           f backend clock))
 
-let lock_key namespace = Workspace_eio.lock_key namespace
+(* Mirrors the key construction in backend.ml ("locks:" ^ key), which is where
+   acquire/release/read actually build it. The cases below hit the backend
+   through this helper, so a drift here fails them rather than passing quietly. *)
+let lock_key namespace = "locks:" ^ namespace
 
 let test_backlog_lock_key () =
   check string "backlog key uses lock namespace"

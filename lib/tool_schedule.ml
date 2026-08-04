@@ -1,6 +1,12 @@
 type context =
   { config : Workspace.config
   ; agent_name : string
+  ; admit_keeper_wake_creation :
+      Workspace.config ->
+      keeper_name:string ->
+      (unit ->
+       (Schedule_domain.schedule_request, Schedule_service.service_error) result) ->
+      (Schedule_domain.schedule_request, Schedule_service.service_error) result
   }
 
 let ( let* ) = Result.bind
@@ -190,11 +196,10 @@ let allow_unregistered_keeper_of_args args =
   | Some _ -> Error "allow_unregistered_keeper must be a boolean"
 ;;
 
-let validate_keeper_wake_target ctx ~payload args =
-  match Schedule_payload_projection.creation_keeper_wake_target ~payload with
-  | Error msg -> Error msg
-  | Ok None -> Ok ()
-  | Ok (Some keeper_name) ->
+let validate_keeper_wake_target ctx ~keeper_wake_target args =
+  match keeper_wake_target with
+  | None -> Ok ()
+  | Some keeper_name ->
     let* allow_unregistered = allow_unregistered_keeper_of_args args in
     if allow_unregistered
     then Ok ()
@@ -330,7 +335,9 @@ let handle_create ~tool_name ~start_time ctx args =
   let result =
     let* payload = payload_from_args args in
     let* () = validate_known_payload_request ~payload in
-    let* () = validate_keeper_wake_target ctx ~payload args in
+    let* keeper_wake_target =
+      Schedule_payload_projection.creation_keeper_wake_target ~payload
+    in
     let* source = source_of_arg args in
     let* recurrence = recurrence_of_arg args in
     let requested_at =
@@ -349,8 +356,32 @@ let handle_create ~tool_name ~start_time ctx args =
     in
     let schedule_id = string_opt args "schedule_id" in
     let expires_at = optional_float args "expires_at_unix" in
-    Schedule_service.create ctx.config ?schedule_id ~requested_at ?expires_at
-      ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
+    let create_request () =
+      let* () =
+        validate_keeper_wake_target ctx ~keeper_wake_target args
+        |> Result.map_error (fun detail ->
+          Schedule_service.Creation_rejected detail)
+      in
+      Schedule_service.create
+          ctx.config
+          ?schedule_id
+          ~requested_at
+          ?expires_at
+          ~requested_by
+          ~scheduled_by
+          ~due_at
+          ~payload
+          ~source
+          ~recurrence
+          ()
+    in
+    (match keeper_wake_target with
+     | None -> create_request ()
+     | Some keeper_name ->
+       ctx.admit_keeper_wake_creation
+         ctx.config
+         ~keeper_name
+         create_request)
     |> Result.map_error Schedule_service.service_error_to_string
   in
   match result with
@@ -394,8 +425,9 @@ let handle_list ~tool_name ~start_time ctx args =
          request_rows
          |> List.map (fun (request : Schedule_domain.schedule_request) ->
            let last_execution =
-             Schedule_store.last_execution_for_schedule
+             Schedule_store.last_execution_for_schedule_instance
                state
+               ~schedule_instance_id:request.Schedule_domain.schedule_instance_id
                ~schedule_id:request.Schedule_domain.schedule_id
            in
            schedule_request_json ?last_execution request)
@@ -426,7 +458,8 @@ let handle_get ~tool_name ~start_time ctx args =
      | None -> workflow_error ~tool_name ~start_time "schedule not found"
      | Some request ->
        let last_execution =
-         Schedule_store.last_execution_for_schedule state
+         Schedule_store.last_execution_for_schedule_instance state
+           ~schedule_instance_id:request.Schedule_domain.schedule_instance_id
            ~schedule_id:request.Schedule_domain.schedule_id
        in
        ok ~tool_name ~start_time (schedule_request_json ?last_execution request))

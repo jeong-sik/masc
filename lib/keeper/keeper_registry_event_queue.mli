@@ -21,6 +21,8 @@ type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
+  ; target_generation : int
+  ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
@@ -53,6 +55,12 @@ type transition_result = Keeper_event_queue_persistence.transition_result =
       ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
       ; detail : string
       }
+
+type transfer_pending_error =
+  | Transfer_pending_storage_error of string
+  | Transfer_pending_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
+val transfer_pending_error_to_string : transfer_pending_error -> string
 
 type source_ack_result =
   | Acked of transition_receipt
@@ -99,14 +107,19 @@ val cancel_pending_accepted_result :
     pending projection when the owner currently has a live registry lane. *)
 
 val transfer_pending_accepted_result :
+  ?intake_token:Keeper_turn_admission.intake_token ->
   base_path:string ->
   string ->
   current_owner_nonce:int ->
   applied_at:float ->
   transfer:accepted_transfer ->
-  (transition_result, string) result
+  (transition_result, transfer_pending_error) result
 (** Commit an exact pending accepted transfer transition and publish the
-    post-commit source pending projection when the owner is registered. *)
+    post-commit source pending projection when the owner is registered. The
+    source mutation owns the same durable-intake authority as schedule retry
+    repair, so the resolved owner cannot change between retry validation and
+    its acceptance commit. A live [intake_token] lets a transaction preserve
+    a wider source-and-target intake fence without reacquiring this mutex. *)
 
 val ack_pending_source_terminal_result :
   base_path:string ->
@@ -129,14 +142,21 @@ val terminalize_pending_turn_attempt_result :
 (** Commit a source-bearing terminal receipt for one failed admitted turn and
     publish the post-commit pending projection. *)
 
-(** Enqueue a stimulus on the keeper's event queue. When the keeper is not
-    registered yet, persist the stimulus to the durable snapshot so later
-    registration can replay it instead of dropping the wake at the
-    restart/register boundary. *)
-val enqueue : base_path:string -> string -> Keeper_event_queue.stimulus -> unit
+(** Enqueue a stimulus on the keeper's event queue. An owner not registered yet
+    may receive durable work so a later lane can replay it. A finalized
+    remove-meta shutdown record rejects intake while metadata is absent,
+    preventing a removed Keeper's runtime directory from being recreated. The
+    same record also rejects metadata that still carries the retired
+    trace/generation identity; a genuinely new identity supersedes the
+    retirement. A surrounding durable-intake fence supplies [intake_token];
+    otherwise this function acquires the Keeper fence itself. *)
+val enqueue :
+  ?intake_token:Keeper_turn_admission.intake_token ->
+  base_path:string -> string -> Keeper_event_queue.stimulus -> unit
 
 val enqueue_durable_result :
-  base_path:string
+  ?intake_token:Keeper_turn_admission.intake_token
+  -> base_path:string
   -> string
   -> Keeper_event_queue.stimulus
   -> (unit, string) result
@@ -154,7 +174,8 @@ type enqueue_if_missing_durable_result =
   | Storage_error of string
 
 val enqueue_if_missing_durable_result :
-  base_path:string
+  ?intake_token:Keeper_turn_admission.intake_token
+  -> base_path:string
   -> event_id:string
   -> string
   -> Keeper_event_queue.stimulus
@@ -169,8 +190,31 @@ type enqueue_stimulus_durable_result =
   | Stimulus_already_present
   | Stimulus_storage_error of string
 
+type transfer_target_error =
+  | Transfer_target_name_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Transfer_target_metadata_read_failed of string
+  | Transfer_target_metadata_absent
+  | Transfer_target_generation_changed of
+      { expected : int
+      ; actual : int
+      }
+  | Transfer_target_trace_changed
+
+val transfer_target_error_to_string : transfer_target_error -> string
+
+type transfer_projection_result =
+  | Transfer_projection_committed
+  | Transfer_projection_already_committed
+  | Transfer_projection_storage_error of string
+  | Transfer_projection_target_unavailable of transfer_target_error
+  | Transfer_projection_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
 val enqueue_stimulus_durable_result :
-  base_path:string
+  ?intake_token:Keeper_turn_admission.intake_token
+  -> base_path:string
   -> string
   -> Keeper_event_queue.stimulus
   -> enqueue_stimulus_durable_result
@@ -182,13 +226,20 @@ val enqueue_stimulus_durable_result :
     opaque-event-id API above. *)
 
 val project_accepted_transfer_durable_result :
-  base_path:string
+  ?intake_token:Keeper_turn_admission.intake_token
+  -> base_path:string
   -> string
   -> transfer:accepted_transfer
-  -> enqueue_stimulus_durable_result
+  -> transfer_projection_result
 (** Strict target transfer projection. The exact source and operation identity
     are durably accounted in the target queue state before the pending
-    projection becomes visible. Accounting survives consumption. *)
+    projection becomes visible. Accounting survives consumption, and an exact
+    durable replay converges even after the target identity rotates. A first
+    target effect is authorized against the recorded generation/trace; a target
+    shutdown reservation or identity mismatch rejects the
+    projection before any durable mutation. A live [intake_token] lets the
+    caller hold that target fence before committing a corresponding source
+    ACK. *)
 
 val enqueue_hitl_resolution_durable_result :
   base_path:string
@@ -207,6 +258,21 @@ val enqueue_hitl_resolution_durable_result :
     Durable read failures remain explicit. *)
 val snapshot_result :
   base_path:string -> string -> (Keeper_event_queue.t, string) result
+
+val durable_state_result :
+  base_path:string -> string -> (Keeper_event_queue_state.t, string) result
+(** Read the authoritative durable queue state, including pending entries,
+    transition outbox, and projected typed dispositions. Unlike
+    {!snapshot_result}, this never returns a process-local Atomic projection.
+    Absence of both the current snapshot and transition WAL is the valid empty
+    state used before the first durable enqueue. *)
+
+val existing_durable_state_result :
+  base_path:string -> string -> (Keeper_event_queue_state.t, string) result
+(** Read the same durable state when the caller is interpreting the absence of
+    prior work. A snapshot or transition WAL proves the owner exists; absence
+    of both is an explicit error and therefore cannot become evidence that an
+    occurrence was lost. *)
 
 val reprioritize_pending_result :
   base_path:string ->

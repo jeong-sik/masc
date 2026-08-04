@@ -472,18 +472,28 @@ let purge_dashboard_keeper_artifacts config operation =
     Error "dashboard Keeper purge artifacts require a dashboard purge operation"
 ;;
 
-let handle_dashboard_keeper_purge_completion config operation =
+let handle_dashboard_keeper_purge_completion ~now config operation =
   match Event_bus_slots.get_masc () with
   | None -> Error "MASC lifecycle event bus is not installed"
   | Some _ ->
     (match operation.Keeper_shutdown_types.cleanup_intent.reason with
      | Keeper_shutdown_types.Dashboard_keeper_purge context ->
-       (match purge_dashboard_keeper_artifacts config operation with
-        | Error _ as error -> error
+       let operation_id =
+         Keeper_shutdown_types.Operation_id.to_string operation.operation_id
+       in
+       (match
+          Server_schedule_consumers.settle_keeper_purge_occurrences
+            config
+            ~keeper_name:operation.keeper_name
+            ~operation_id
+            ~now
+        with
+        | Error error ->
+          Error (Server_schedule_consumers.keeper_purge_error_to_string error)
         | Ok () ->
-          let operation_id =
-            Keeper_shutdown_types.Operation_id.to_string operation.operation_id
-          in
+          (match purge_dashboard_keeper_artifacts config operation with
+           | Error _ as error -> error
+           | Ok () ->
           Keeper_supervisor_publish_lifecycle.publish_lifecycle
             ~event:
               (Keeper_lifecycle_events.Custom_event
@@ -499,16 +509,16 @@ let handle_dashboard_keeper_purge_completion config operation =
             "dashboard Keeper purge completion delivered: keeper=%s operation=%s"
             operation.keeper_name
             operation_id;
-          Ok ())
+          Ok ()))
      | Operator_stop_retain_meta
      | Operator_stop_remove_meta
      | Dead_tombstone_cleanup ->
        Error "dashboard purge completion does not belong to a dashboard purge operation")
 ;;
 
-let handle_keeper_lifecycle_completion config operation = function
+let handle_keeper_lifecycle_completion ~now config operation = function
   | Keeper_shutdown_types.Dashboard_keeper_purged ->
-    handle_dashboard_keeper_purge_completion config operation
+    handle_dashboard_keeper_purge_completion ~now config operation
   | Dead_tombstone_reaped as action ->
     Keeper_supervisor_cleanup_tombstone.handle_completion config operation action
 ;;

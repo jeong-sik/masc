@@ -1129,7 +1129,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
              ~config
              ~keeper_name:meta.name
              operation_id
-             (fun () ->
+             (fun _intake_token ->
                 Eio.Promise.resolve holder_locked_r ();
                 Eio.Promise.await release_holder_p)
          with
@@ -2666,6 +2666,85 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
           "failed shutdown prepare left the keeper admission fence closed: \
            Turn_busy owns the slot")
 
+let test_keeper_dormant_shutdown_join_cancel_rolls_back_fence () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-dormant-cancel-rollback" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_chat_queue.For_testing.reset ();
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let name = "shutdown-dormant-cancel-rollback" in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let intake_started, intake_started_u = Eio.Promise.create () in
+      let release_intake, release_intake_u = Eio.Promise.create () in
+      let intake_finished, intake_finished_u = Eio.Promise.create () in
+      Eio.Switch.run @@ fun outer_sw ->
+      Eio.Fiber.fork ~sw:outer_sw (fun () ->
+        (match
+           Masc.Keeper_turn_admission.run_durable_intake_if_open
+             ~base_path:config.base_path
+             ~keeper_name:name
+             (fun _intake_token ->
+                Eio.Promise.resolve intake_started_u ();
+                Eio.Promise.await release_intake)
+         with
+         | Masc.Keeper_turn_admission.Intake_committed () -> ()
+         | Masc.Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+           fail
+             ("test intake unexpectedly saw shutdown reservation "
+              ^ Shutdown_types.Operation_id.to_string operation_id));
+        Eio.Promise.resolve intake_finished_u ());
+      Eio.Promise.await intake_started;
+      let exception Cancel_dormant_prepare in
+      (try
+         Eio.Switch.run @@ fun prepare_sw ->
+         Eio.Fiber.fork ~sw:prepare_sw (fun () ->
+           ignore
+             (Shutdown_prepare_join.prepare_dormant
+                ~config
+                ~meta
+                ~request:
+                  { actor = "operator"
+                  ; cleanup_intent = retain_operator_cleanup
+                  }
+              : (Shutdown_types.t, Shutdown_prepare_join.error) result));
+         Eio.Fiber.yield ();
+         check bool "dormant prepare reserved shutdown before joining intake" true
+           (Option.is_some
+              (Masc.Keeper_turn_admission.snapshot_for
+                 ~base_path:config.base_path
+                 ~keeper_name:name)
+                .snapshot_shutdown_operation_id);
+         Eio.Switch.fail prepare_sw Cancel_dormant_prepare
+       with
+       | Cancel_dormant_prepare -> ());
+      Eio.Promise.resolve release_intake_u ();
+      Eio.Promise.await intake_finished;
+      match
+        Masc.Keeper_turn_admission.run_if_free
+          ~base_path:config.base_path
+          ~keeper_name:name
+          (fun () -> ())
+      with
+      | `Ran () -> ()
+      | `Busy (Masc.Keeper_turn_admission.Shutdown_requested operation_id) ->
+        fail
+          ("cancelled dormant prepare left shutdown reservation "
+           ^ Shutdown_types.Operation_id.to_string operation_id)
+      | `Busy (Masc.Keeper_turn_admission.Turn_busy _) ->
+        fail "cancelled dormant prepare left the keeper turn busy")
+
 let install_pending_summary ~base_path ~keeper_name ~bind_exact =
   Approval_queue.For_testing.reset_runtime_state ();
   (match Approval_queue.install_persistence ~base_path with
@@ -3404,7 +3483,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
        | Ok None -> fail "pending dashboard operation was not discoverable"
        | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
       Shutdown_finalize.register_completion_handler
-        Dashboard_delete.handle_keeper_lifecycle_completion;
+        (Dashboard_delete.handle_keeper_lifecycle_completion ~now:0.0);
       let finalized =
         match Shutdown_finalize.run ~config ~entry:None pending with
         | Ok finalized -> finalized
@@ -3485,7 +3564,71 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       check bool
         "delivered dashboard purge released admission fence"
         true
-        (Option.is_none admission.snapshot_shutdown_operation_id))
+        (Option.is_none admission.snapshot_shutdown_operation_id);
+      let late_stimulus : Keeper_event_queue.stimulus =
+        { post_id = "dashboard-purge-late-stimulus"
+        ; urgency = Keeper_event_queue.Normal
+        ; arrived_at = 1.0
+        ; payload = Keeper_event_queue.Bootstrap
+        }
+      in
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path:config.base_path
+           meta.name
+           late_stimulus
+       with
+       | Error detail ->
+         check string "post-purge durable intake reports exact retirement"
+           (Printf.sprintf
+              "keeper durable intake rejected because Keeper was removed by shutdown operation=%s"
+              (Shutdown_types.Operation_id.to_string operation_id))
+           detail
+       | Ok () -> fail "post-purge durable intake recreated the Keeper queue");
+      check bool
+        "post-purge durable intake leaves runtime directory absent"
+        false
+        (Sys.file_exists runtime_dir);
+      let retired_identity = make_meta meta.name in
+      (match Keeper_meta_store.write_meta config retired_identity with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path:config.base_path
+           meta.name
+           late_stimulus
+       with
+       | Error detail ->
+         check string "same identity remains retired"
+           (Printf.sprintf
+              "keeper durable intake rejected because Keeper was removed by shutdown operation=%s"
+              (Shutdown_types.Operation_id.to_string operation_id))
+           detail
+       | Ok () -> fail "retired Keeper identity reopened durable intake");
+      let replacement =
+        make_meta meta.name
+        |> Keeper_meta_contract.map_runtime (fun runtime ->
+          { runtime with nonce = runtime.nonce + 1 })
+      in
+      (match Keeper_meta_store.write_meta config replacement with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path:config.base_path
+           meta.name
+           late_stimulus
+       with
+       | Ok () -> ()
+       | Error detail ->
+         fail
+           ("replacement Keeper metadata did not supersede retirement: "
+            ^ detail));
+      check bool
+        "replacement Keeper accepts durable intake"
+        true
+        (Sys.file_exists runtime_dir))
 ;;
 
 let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
@@ -4121,6 +4264,8 @@ let () =
         test_keeper_shutdown_prepare_joins_not_started_lane;
       test_case "shutdown prepare failure rolls back admission fence" `Quick
         test_keeper_shutdown_prepare_failure_rolls_back_fence;
+      test_case "cancelled dormant shutdown join rolls back admission fence" `Quick
+        test_keeper_dormant_shutdown_join_cancel_rolls_back_fence;
       test_case "shutdown finalizes idle operation" `Quick
         test_keeper_shutdown_finalizes_idle_operation;
       test_case "destructive shutdown blocks on bound summary" `Quick

@@ -549,6 +549,8 @@ let test_replay_after_source_ack_projects_target () =
       ; operator_operation_id = request.operator_operation_id
       ; from_keeper
       ; to_keeper
+      ; target_generation = request.target_generation
+      ; target_trace_id = target_meta.runtime.trace_id
       }
     in
     (* The source ACK is only a fixture precondition here. *)
@@ -559,6 +561,7 @@ let test_replay_after_source_ack_projects_target () =
          ~current_owner_nonce:request.owner_nonce
          ~applied_at:receipt.requested_at
          ~transfer:causal
+       |> Result.map_error Keeper_registry_event_queue.transfer_pending_error_to_string
        |> require_ok "simulate committed source ACK");
     let replay =
       Transaction.transfer_pending config ~from_keeper ~to_keeper request
@@ -608,6 +611,8 @@ let test_generic_recovery_preserves_receipted_target_identity () =
     ; operator_operation_id = request.operator_operation_id
     ; from_keeper
     ; to_keeper
+    ; target_generation = request.target_generation
+    ; target_trace_id = target_meta.runtime.trace_id
     }
   in
   ignore
@@ -617,6 +622,7 @@ let test_generic_recovery_preserves_receipted_target_identity () =
        ~current_owner_nonce:request.owner_nonce
        ~applied_at:receipt.requested_at
        ~transfer:causal
+     |> Result.map_error Keeper_registry_event_queue.transfer_pending_error_to_string
      |> require_ok "simulate committed source ACK");
   ignore
     (write_meta
@@ -734,6 +740,68 @@ let test_unrelated_enqueue_preserves_source_incarnation () =
        |> List.exists (Queue.stimulus_identity_equal unrelated)))
 ;;
 
+let test_exact_projected_replay_survives_target_identity_rotation () =
+  with_transfer_lane
+  @@ fun config from_keeper to_keeper _source_meta target_meta request ->
+  let transfer : Keeper_registry_event_queue.accepted_transfer =
+    { source = request.source
+    ; source_incarnation = request.source_incarnation
+    ; owner_nonce = request.owner_nonce
+    ; operator_operation_id = request.operator_operation_id
+    ; from_keeper
+    ; to_keeper
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
+    }
+  in
+  let project () =
+    Keeper_registry_event_queue.project_accepted_transfer_durable_result
+      ~base_path:config.Workspace.base_path
+      to_keeper
+      ~transfer
+  in
+  (match project () with
+   | Keeper_registry_event_queue.Transfer_projection_committed -> ()
+   | Keeper_registry_event_queue.Transfer_projection_already_committed ->
+     Alcotest.fail "first target projection was already committed"
+   | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
+     Alcotest.fail detail
+   | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
+     Alcotest.fail (Keeper_registry_event_queue.transfer_target_error_to_string error)
+   | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
+     Alcotest.fail
+       (Keeper_shutdown_types.Operation_id.to_string operation_id));
+  ignore
+    (write_meta
+       config
+       ~keeper_name:to_keeper
+       ~trace_id:"rotated-target-trace"
+       ~generation:(target_meta.runtime.nonce + 1)
+       ~paused:false :
+      Keeper_meta_contract.keeper_meta);
+  (match project () with
+   | Keeper_registry_event_queue.Transfer_projection_already_committed -> ()
+   | Keeper_registry_event_queue.Transfer_projection_committed ->
+     Alcotest.fail "exact replay committed a second target projection"
+   | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
+     Alcotest.fail detail
+   | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
+     Alcotest.fail (Keeper_registry_event_queue.transfer_target_error_to_string error)
+   | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
+     Alcotest.fail
+       (Keeper_shutdown_types.Operation_id.to_string operation_id));
+  let target =
+    Persistence.load_state_result
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:to_keeper
+    |> require_ok "load rotated target queue"
+  in
+  Alcotest.(check int)
+    "exact replay keeps one target stimulus"
+    1
+    (Queue.length (State.pending target))
+;;
+
 let test_stale_source_incarnation_has_no_receipt_or_target_effect () =
   with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
     let base_path = config.Workspace.base_path in
@@ -773,6 +841,102 @@ let test_stale_source_incarnation_has_no_receipt_or_target_effect () =
     Alcotest.(check int) "stale transfer target effect" 0 (Queue.length (State.pending target)))
 ;;
 
+let with_shutdown_reservation ~base_path ~keeper_name f =
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match
+     Keeper_turn_admission.begin_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_reserved _ -> ()
+   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+     Alcotest.fail "fresh transfer fixture already had a shutdown reservation");
+  Fun.protect
+    ~finally:(fun () ->
+      match
+        Keeper_turn_admission.rollback_shutdown
+          ~base_path
+          ~keeper_name
+          ~operation_id
+      with
+      | Keeper_turn_admission.Shutdown_rolled_back -> ()
+      | Keeper_turn_admission.Shutdown_not_reserved
+      | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+        Alcotest.fail "transfer fixture did not own its shutdown reservation")
+    (fun () -> f operation_id)
+;;
+
+let assert_uncommitted_transfer config ~from_keeper ~to_keeper request =
+  (match
+     Receipt.load
+       config
+       ~keeper_name:from_keeper
+       ~operator_operation_id:request.Transaction.operator_operation_id
+   with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "shutdown-fenced transfer persisted a receipt"
+   | Error detail -> Alcotest.fail detail);
+  let source =
+    Persistence.load_state_result
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:from_keeper
+    |> require_ok "load shutdown-fenced source"
+  in
+  let target =
+    Persistence.load_state_result
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:to_keeper
+    |> require_ok "load shutdown-fenced target"
+  in
+  Alcotest.(check int)
+    "shutdown fence retains source"
+    1
+    (Queue.length (State.pending source));
+  Alcotest.(check int)
+    "shutdown fence leaves target empty"
+    0
+    (Queue.length (State.pending target))
+;;
+
+let test_source_shutdown_fences_transfer_before_receipt () =
+  with_transfer_lane
+  @@ fun config from_keeper to_keeper _source_meta _target_meta request ->
+  with_shutdown_reservation
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:from_keeper
+  @@ fun operation_id ->
+  (match Transaction.transfer_pending config ~from_keeper ~to_keeper request with
+   | Error
+       { cause =
+           Transaction.Admission_busy
+             (Keeper_turn_admission.Shutdown_requested actual)
+       ; reservation_release = None
+       }
+     when Keeper_shutdown_types.Operation_id.equal actual operation_id -> ()
+   | Error error -> Alcotest.fail (Transaction.error_to_string error)
+   | Ok _ -> Alcotest.fail "source shutdown fence admitted a transfer");
+  assert_uncommitted_transfer config ~from_keeper ~to_keeper request
+;;
+
+let test_target_shutdown_fences_transfer_before_source_ack () =
+  with_transfer_lane
+  @@ fun config from_keeper to_keeper _source_meta _target_meta request ->
+  with_shutdown_reservation
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:to_keeper
+  @@ fun operation_id ->
+  (match Transaction.transfer_pending config ~from_keeper ~to_keeper request with
+   | Error
+       { cause = Transaction.Target_transfer_shutdown_reserved actual
+       ; reservation_release = Some Keeper_lifecycle_reservation.Released
+       }
+     when Keeper_shutdown_types.Operation_id.equal actual operation_id -> ()
+   | Error error -> Alcotest.fail (Transaction.error_to_string error)
+   | Ok _ -> Alcotest.fail "target shutdown fence admitted a transfer");
+  assert_uncommitted_transfer config ~from_keeper ~to_keeper request
+;;
+
 let () =
   Alcotest.run
     "keeper paused-work transfer transaction"
@@ -802,6 +966,14 @@ let () =
             `Quick
             test_stale_source_incarnation_has_no_receipt_or_target_effect
         ; Alcotest.test_case
+            "source shutdown fences transfer before turn admission"
+            `Quick
+            test_source_shutdown_fences_transfer_before_receipt
+        ; Alcotest.test_case
+            "target shutdown fences transfer before source ACK"
+            `Quick
+            test_target_shutdown_fences_transfer_before_source_ack
+        ; Alcotest.test_case
             "same transfer replay after target consumption has no effect"
             `Quick
             test_replay_after_target_consumption_has_no_second_effect
@@ -817,6 +989,10 @@ let () =
             "generic recovery preserves receipted target identity"
             `Quick
             test_generic_recovery_preserves_receipted_target_identity
+        ; Alcotest.test_case
+            "exact projected replay survives target identity rotation"
+            `Quick
+            test_exact_projected_replay_survives_target_identity_rotation
         ] )
     ]
 ;;

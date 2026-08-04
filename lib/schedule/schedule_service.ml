@@ -1,12 +1,14 @@
 type service_error =
   | Invalid_request of string
   | Store_error of Schedule_store.store_error
+  | Creation_rejected of string
 
 let ( let* ) = Result.bind
 
 let service_error_to_string = function
   | Invalid_request msg -> "invalid request: " ^ msg
   | Store_error err -> Schedule_store.store_error_to_string err
+  | Creation_rejected detail -> detail
 ;;
 
 let map_store = function
@@ -17,19 +19,9 @@ let map_store = function
 (* NDT-OK: service boundary clock; callers can pass explicit timestamps for replay/tests. *)
 let now () = Unix.gettimeofday ()
 
-let id_counter = Atomic.make 0
-
-let mint_id prefix =
-  let micros = int_of_float (now () *. 1_000_000.0) in
-  let serial = Atomic.fetch_and_add id_counter 1 in
-  (* NDT-OK: ID entropy only; schedule ordering and eligibility never branch on it. *)
-  let entropy = Hashtbl.hash (Unix.getpid (), micros, serial) land 0xFFFFFF in
-  Printf.sprintf "%s-%d-%06x-%d" prefix micros entropy serial
-;;
-
 let schedule_id = function
   | Some id -> id
-  | None -> mint_id "sched"
+  | None -> Random_id.prefixed ~prefix:"sched-" ~bytes:16
 ;;
 
 let create

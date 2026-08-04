@@ -664,6 +664,30 @@ let release_base_path_lease lease =
       if closed then Hashtbl.remove base_path_leases lease.path))
 ;;
 
+let prepare_base_path_lease_exec_handoff lease =
+  Mutex.protect base_path_lease_mu (fun () ->
+    match Hashtbl.find_opt base_path_leases lease.path with
+    | Some (Active_lease current) when current == lease ->
+      (try
+         Unix.clear_close_on_exec lease.fd;
+         Ok ()
+       with
+       | exn ->
+         Error
+           (Lease_io_failed
+              { operation = "prepare_exec_handoff"
+              ; path = lease.path
+              ; reason = Printexc.to_string exn
+              }))
+    | Some (Active_lease _) | Some (Failed_close _) | None ->
+      Error
+        (Lease_io_failed
+           { operation = "prepare_exec_handoff"
+           ; path = lease.path
+           ; reason = "lease handle is not the active process owner"
+           }))
+;;
+
 type prepared_base_path_lock =
   { canonical_base_path : string
   ; base_path_stat : Unix.stats

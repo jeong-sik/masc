@@ -77,6 +77,7 @@ let check_dispatch_status label expected actual =
 
 let test_occurrence_id schedule_id =
   Schedule_occurrence_id.make
+    ~schedule_instance_id:("instance-" ^ schedule_id)
     ~schedule_id
     ~due_at:200.0
     ~payload_digest:"test-payload"
@@ -120,18 +121,74 @@ let replace_json_field key value = function
   | json -> json
 ;;
 
-let accepting_consumer ?(accept = Ok ()) ?dispatch_result calls =
+let accepting_consumer
+      ?(accept = Ok ())
+      ?dispatch_result
+      ?accepted_detail
+      ?settlement
+      calls
+  =
   let dispatch_result =
     Option.value
       ~default:(Ok (Work_completed (`Assoc [ "ok", `Bool true ])))
       dispatch_result
   in
+  let settlement =
+    Option.value
+      ~default:(fun _config _execution -> Ok Consumer_holds_occurrence)
+      settlement
+  in
   { accepts = (fun _request -> accept)
   ; dispatch =
-      (fun _config ~now:_ _signal request ->
+      (fun _config ~now:_ _signal request ~commit_acceptance ->
         calls := request.schedule_id :: !calls;
-        dispatch_result)
+        match accepted_detail with
+        | None -> dispatch_result
+        | Some detail ->
+          Result.map
+            (fun acceptance_commit ->
+               Work_accepted { detail; acceptance_commit })
+            (commit_acceptance detail))
+  ; settlements =
+      (fun config executions ->
+         List.map (settlement config) executions)
   }
+;;
+
+let accepted_detail = `Assoc [ "queued", `Bool true ]
+
+let reclaim_ok ~consumer config ~now =
+  match reclaim_lost_occurrences ~consumer config ~now with
+  | Ok outcome -> outcome
+  | Error err -> fail (runner_error_to_string err)
+;;
+
+let latest_execution config (request : Schedule_domain.schedule_request) =
+  let state = Schedule_store.read_state config in
+  match
+    Schedule_store.last_execution_for_schedule_instance
+      state
+      ~schedule_instance_id:request.schedule_instance_id
+      ~schedule_id:request.schedule_id
+  with
+  | Some execution -> execution
+  | None -> failf "no execution recorded for %s" request.schedule_id
+;;
+
+(* Drives a schedule to the state this whole feature exists for: the consumer
+   durably accepted the work, so the execution is [Execution_dispatched] and
+   nothing in the scheduler will ever finish it on its own. *)
+let accepted_recurring_occurrence config ~schedule_id =
+  let calls = ref [] in
+  let request =
+    create_ok ~schedule_id ~recurrence:(Interval { interval_sec = 3600 }) config
+  in
+  let consumer = accepting_consumer ~accepted_detail calls in
+  let _ = tick_ok config ~now:201.0 ~consumer in
+  let accepted = latest_execution config request in
+  check bool "precondition: work accepted but unsettled" true
+    (accepted.status = Execution_dispatched);
+  request
 ;;
 
 let test_tick_emits_due_candidate_once () =
@@ -179,7 +236,9 @@ let test_tick_dispatches_due_candidate_to_success () =
      check string "stored succeeded" "succeeded"
        (schedule_status_to_string stored.status));
   (match
-     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+     Schedule_store.last_execution_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "missing execution record"
@@ -204,7 +263,7 @@ let test_tick_records_async_acceptance_without_claiming_work_success () =
     tick_ok config ~now:201.0
       ~consumer:
         (accepting_consumer
-           ~dispatch_result:(Ok (Work_accepted detail))
+           ~accepted_detail:detail
            calls)
   in
   check_dispatch_status "dispatch itself succeeded" Dispatch_succeeded
@@ -215,8 +274,9 @@ let test_tick_records_async_acceptance_without_claiming_work_success () =
      check string "one-shot remains running" "running"
        (schedule_status_to_string stored.status));
   (match
-     Schedule_store.last_execution_for_schedule
+     Schedule_store.last_execution_for_schedule_instance
        (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "accepted execution missing"
@@ -267,6 +327,7 @@ let test_tick_records_terminal_work_failure_for_exact_recurrence () =
   match
     Schedule_store.execution_for_occurrence
       (Schedule_store.read_state config)
+      ~schedule_instance_id:request.schedule_instance_id
       ~schedule_id:request.schedule_id
       ~due_at:request.due_at
       ~payload_digest:(Schedule_domain.payload_digest request.payload)
@@ -274,6 +335,47 @@ let test_tick_records_terminal_work_failure_for_exact_recurrence () =
   | None -> fail "failed occurrence execution missing"
   | Some execution ->
     check string "exact occurrence failed" "failed"
+      (Schedule_domain.execution_status_to_string execution.status)
+;;
+
+let test_tick_completes_terminal_work_after_acceptance () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let request =
+    create_ok
+      ~schedule_id:"dispatch-terminal-after-acceptance"
+      ~recurrence:(Interval { interval_sec = 60 })
+      config
+  in
+  let detail = `Assoc [ "kind", `String "consumer.already_completed" ] in
+  let consumer =
+    { (accepting_consumer calls) with
+      dispatch =
+        (fun _config ~now:_ _signal running ~commit_acceptance ->
+           calls := running.schedule_id :: !calls;
+           Result.map
+             (fun acceptance_commit ->
+                Work_completed_after_acceptance { detail; acceptance_commit })
+             (commit_acceptance detail))
+    }
+  in
+  let result = tick_ok config ~now:201.0 ~consumer in
+  let dispatch = List.hd result.dispatches in
+  check_dispatch_status "accepted terminal success is visible" Dispatch_succeeded
+    dispatch.status;
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "completed recurring schedule missing"
+   | Some stored ->
+     check string "completed recurring intent advances" "scheduled"
+       (schedule_status_to_string stored.status);
+     check (float 0.001) "completed next occurrence remains scheduled" 260.0
+       stored.due_at);
+  match latest_execution config request with
+  | { status = Execution_succeeded; finished_at = Some _; _ } -> ()
+  | execution ->
+    failf
+      "accepted terminal success stayed %s"
       (Schedule_domain.execution_status_to_string execution.status)
 ;;
 
@@ -295,7 +397,9 @@ let test_tick_marks_unsupported_candidate_failed () =
    | Some stored ->
      check string "stored failed" "failed" (schedule_status_to_string stored.status));
   (match
-     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+     Schedule_store.last_execution_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "missing unsupported execution"
@@ -361,7 +465,9 @@ let test_tick_dispatches_recurring_candidate_to_next_due () =
        (schedule_status_to_string stored.status);
      check (float 0.001) "next due" 260.0 stored.due_at);
   (match
-     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+     Schedule_store.last_execution_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "missing recurring execution"
@@ -419,7 +525,9 @@ let test_tick_marks_terminal_dispatch_rejection_failed () =
    | Some stored ->
      check string "stored failed" "failed" (schedule_status_to_string stored.status));
   (match
-     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+     Schedule_store.last_execution_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
    with
    | None -> fail "missing failed execution"
@@ -441,7 +549,7 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
   let consumer : Schedule_runner.consumer =
     { accepts = (fun _request -> Ok ())
     ; dispatch =
-        (fun _config ~now:_ signal request ->
+        (fun _config ~now:_ signal request ~commit_acceptance:_ ->
            if String.equal request.schedule_id retry_request.schedule_id then (
              retry_signal_ids :=
                Schedule_occurrence_id.to_string signal.occurrence_id
@@ -453,6 +561,9 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
            else (
              incr healthy_calls;
              Ok (Work_completed (`Assoc [ "healthy", `Bool true ]))))
+    ; settlements =
+        (fun _config executions ->
+           List.map (fun _ -> Ok Consumer_holds_occurrence) executions)
     }
   in
   let first = tick_ok config ~now:201.0 ~consumer in
@@ -663,6 +774,282 @@ let test_runner_status_snapshot_tracks_liveness () =
   check int "crash count" 1 (json_int "crash_count" stale)
 ;;
 
+
+let test_reclaim_settles_lost_occurrence () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-lost" in
+  let calls = ref [] in
+  let lost_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution ->
+        Ok (Consumer_lost_occurrence "queue entry vanished"))
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:lost_consumer config ~now:400.0 in
+  check int "one occurrence examined" 1 outcome.examined;
+  check int "one occurrence reclaimed" 1 outcome.reclaimed;
+  check int "no reclaim failure" 0 (List.length outcome.failures);
+  let settled = latest_execution config request in
+  check bool "occurrence is terminal" true (settled.status = Execution_failed);
+  check (option string) "consumer reason is the recorded failure"
+    (Some "queue entry vanished") settled.error;
+  match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+  | None -> fail "schedule row disappeared"
+  | Some stored ->
+    check bool "recurring intent survives the reclaim" false (is_terminal stored.status)
+;;
+
+let test_reclaim_leaves_held_occurrence_alone () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-held" in
+  let calls = ref [] in
+  let holding_consumer = accepting_consumer calls in
+  let outcome = reclaim_ok ~consumer:holding_consumer config ~now:400.0 in
+  check int "occurrence examined" 1 outcome.examined;
+  check int "nothing reclaimed" 0 outcome.reclaimed;
+  check int "occurrence counted as held" 1 outcome.held;
+  let untouched = latest_execution config request in
+  check bool "occurrence stays dispatched" true
+    (untouched.status = Execution_dispatched)
+;;
+
+let test_reclaim_projects_consumer_completion () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-completed" in
+  let calls = ref [] in
+  let completed_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution -> Ok Consumer_completed_occurrence)
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:completed_consumer config ~now:400.0 in
+  check int "completed occurrence examined" 1 outcome.examined;
+  check int "completed occurrence settled" 1 outcome.settled_elsewhere;
+  check int "completion projection has no failure" 0 (List.length outcome.failures);
+  let settled = latest_execution config request in
+  check bool "consumer completion leaves dispatched" false
+    (settled.status = Execution_dispatched);
+  check bool "consumer completion succeeds execution" true
+    (settled.status = Execution_succeeded)
+;;
+
+let test_reclaim_then_prune_removes_settled_terminal_request () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-prune" in
+  (match cancel config ~schedule_id:request.schedule_id with
+   | Ok _ -> ()
+   | Error error -> fail (service_error_to_string error));
+  let calls = ref [] in
+  let completed_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution -> Ok Consumer_completed_occurrence)
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:completed_consumer config ~now:400.0 in
+  check int "terminal request occurrence settled" 1 outcome.settled_elsewhere;
+  let state, pruned =
+    match Schedule_store.prune_completed config with
+    | Ok result -> result
+    | Error error -> fail (Schedule_store.store_error_to_string error)
+  in
+  check int "settled terminal request pruned" 1 pruned;
+  check int "request removed after exact settlement" 0 (List.length state.schedules);
+  check int "execution removed with request" 0 (List.length state.executions)
+;;
+
+let test_reclaim_projects_consumer_cancellation () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-cancelled" in
+  let calls = ref [] in
+  let cancelled_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution ->
+        Ok (Consumer_cancelled_occurrence "operator cancelled durable work"))
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:cancelled_consumer config ~now:400.0 in
+  check int "cancelled occurrence examined" 1 outcome.examined;
+  check int "cancelled occurrence settled" 1 outcome.settled_elsewhere;
+  check int "cancellation projection has no failure" 0 (List.length outcome.failures);
+  let settled = latest_execution config request in
+  check bool "consumer cancellation leaves dispatched" false
+    (settled.status = Execution_dispatched);
+  check bool "consumer cancellation fails execution" true
+    (settled.status = Execution_failed);
+  check (option string) "durable cancellation reason is preserved"
+    (Some "operator cancelled durable work") settled.error
+;;
+
+let test_reclaim_projects_consumer_failure () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-failed" in
+  let calls = ref [] in
+  let failed_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution ->
+        Ok (Consumer_failed_occurrence "keeper turn failed before schedule settlement"))
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:failed_consumer config ~now:400.0 in
+  check int "failed occurrence examined" 1 outcome.examined;
+  check int "failed occurrence settled" 1 outcome.settled_elsewhere;
+  check int "failure projection has no reclaim error" 0 (List.length outcome.failures);
+  let settled = latest_execution config request in
+  check bool "consumer failure fails execution" true
+    (settled.status = Execution_failed);
+  check (option string) "consumer failure reason is preserved"
+    (Some "keeper turn failed before schedule settlement")
+    settled.error
+;;
+
+let test_reclaim_settles_duplicate_occurrence_executions_by_id () =
+  with_workspace
+  @@ fun config ->
+  let schedule_id = "reclaim-duplicate-executions" in
+  let request = accepted_recurring_occurrence config ~schedule_id in
+  (match
+     Schedule_store.update_request
+       config
+       ~schedule_id
+       ~due_at:request.due_at
+       ~expires_at:request.expires_at
+       ~payload:request.payload
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Schedule_store.store_error_to_string error));
+  let calls = ref [] in
+  let _ =
+    tick_ok
+      config
+      ~now:201.0
+      ~consumer:(accepting_consumer ~accepted_detail calls)
+  in
+  let before =
+    Schedule_store.executions_for_schedule
+      (Schedule_store.read_state config)
+      ~schedule_id
+  in
+  check int "duplicate occurrence has two executions" 2 (List.length before);
+  check int "duplicate occurrence has two execution ids" 2
+    (before
+     |> List.map (fun (execution : execution_record) -> execution.execution_id)
+     |> List.sort_uniq String.compare
+     |> List.length);
+  List.iter
+    (fun (execution : execution_record) ->
+       check bool "both duplicate executions are dispatched" true
+         (execution.status = Execution_dispatched))
+    before;
+  let version_before_reclaim = (Schedule_store.read_state config).version in
+  let lost_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution ->
+        Ok (Consumer_lost_occurrence "consumer no longer owns duplicate"))
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:lost_consumer config ~now:400.0 in
+  check int "both execution ids examined" 2 outcome.examined;
+  check int "both execution ids reclaimed" 2 outcome.reclaimed;
+  check int "exact execution settlement has no failures" 0
+    (List.length outcome.failures);
+  let after_reclaim = Schedule_store.read_state config in
+  check int "reclaim batch persists once" (version_before_reclaim + 1)
+    after_reclaim.version;
+  Schedule_store.executions_for_schedule after_reclaim ~schedule_id
+  |> List.iter (fun (execution : execution_record) ->
+    check bool "every duplicate execution becomes terminal" true
+      (execution.status = Execution_failed))
+;;
+
+let test_reclaim_reports_empty_batch_cardinality_mismatch () =
+  with_workspace
+  @@ fun config ->
+  let consumer =
+    { (accepting_consumer (ref [])) with
+      settlements =
+        (fun _config _executions -> [ Ok Consumer_holds_occurrence ])
+    }
+  in
+  let outcome = reclaim_ok ~consumer config ~now:400.0 in
+  check int "empty batch examines no occurrences" 0 outcome.examined;
+  match outcome.failures with
+  | [ Settlement_batch_cardinality_mismatch { expected; actual } ] ->
+    check int "batch failure reports expected cardinality" 0 expected;
+    check int "batch failure reports actual cardinality" 1 actual
+  | _ -> fail "empty batch cardinality mismatch was hidden"
+;;
+
+let test_reclaim_reports_empty_batch_consumer_exception () =
+  with_workspace
+  @@ fun config ->
+  let consumer =
+    { (accepting_consumer (ref [])) with
+      settlements =
+        (fun _config _executions -> failwith "empty settlement batch exploded")
+    }
+  in
+  let outcome = reclaim_ok ~consumer config ~now:400.0 in
+  check int "empty batch examines no occurrences" 0 outcome.examined;
+  match outcome.failures with
+  | [ Settlement_batch_consumer_failure error ] ->
+    check string
+      "batch exception remains visible"
+      "consumer settlement raised: Failure(\"empty settlement batch exploded\")"
+      error
+  | _ -> fail "empty batch consumer exception was hidden"
+;;
+
+let test_reclaim_counts_nonempty_batch_cardinality_mismatch () =
+  with_workspace
+  @@ fun config ->
+  ignore
+    (accepted_recurring_occurrence config ~schedule_id:"reclaim-cardinality"
+      : Schedule_domain.schedule_request);
+  let consumer =
+    { (accepting_consumer (ref [])) with
+      settlements = (fun _config _executions -> [])
+    }
+  in
+  let outcome = reclaim_ok ~consumer config ~now:400.0 in
+  check int "mismatched occurrence is examined" 1 outcome.examined;
+  match outcome.failures with
+  | [ Occurrence_reclaim_failure { occurrence_id; error } ] ->
+    check bool "mismatch keeps an occurrence identity" true
+      (String.trim occurrence_id <> "");
+    check string
+      "mismatch reports exact cardinality"
+      "consumer settlement batch cardinality mismatch: expected=1 actual=0"
+      error
+  | _ -> fail "nonempty batch cardinality mismatch was not occurrence-scoped"
+;;
+
+let test_reclaim_leaves_occurrence_alone_when_consumer_errors () =
+  with_workspace
+  @@ fun config ->
+  let request = accepted_recurring_occurrence config ~schedule_id:"reclaim-error" in
+  let calls = ref [] in
+  let failing_consumer =
+    accepting_consumer
+      ~settlement:(fun _config _execution ->
+        Error "keeper event queue snapshot read failed: disk gone")
+      calls
+  in
+  let outcome = reclaim_ok ~consumer:failing_consumer config ~now:400.0 in
+  check int "occurrence examined" 1 outcome.examined;
+  check int "nothing reclaimed on an unreadable consumer" 0 outcome.reclaimed;
+  check int "the error is reported" 1 (List.length outcome.failures);
+  let untouched = latest_execution config request in
+  check bool "occurrence stays dispatched" true
+    (untouched.status = Execution_dispatched)
+;;
+
+
 let () =
   run "Schedule_runner"
     [ ( "tick",
@@ -674,6 +1061,8 @@ let () =
             test_tick_records_async_acceptance_without_claiming_work_success
         ; test_case "records exact recurring terminal work failure" `Quick
             test_tick_records_terminal_work_failure_for_exact_recurrence
+        ; test_case "completes terminal work after acceptance" `Quick
+            test_tick_completes_terminal_work_after_acceptance
         ; test_case "marks unsupported candidate failed" `Quick
             test_tick_marks_unsupported_candidate_failed
         ; test_case "reschedules recurring candidate after signal" `Quick
@@ -690,6 +1079,30 @@ let () =
             test_recent_signal_decode_error_is_explicit
         ; test_case "occurrence decode rejects tampered facts" `Quick
             test_occurrence_decode_rejects_tampered_facts
+        ] )
+    ; ( "reclaim",
+        [ test_case "settles an occurrence the consumer lost" `Quick
+            test_reclaim_settles_lost_occurrence
+        ; test_case "leaves an occurrence the consumer still holds" `Quick
+            test_reclaim_leaves_held_occurrence_alone
+        ; test_case "projects consumer completion to schedule execution" `Quick
+            test_reclaim_projects_consumer_completion
+        ; test_case "reclaim then prune removes settled terminal request" `Quick
+            test_reclaim_then_prune_removes_settled_terminal_request
+        ; test_case "projects consumer cancellation to schedule execution" `Quick
+            test_reclaim_projects_consumer_cancellation
+        ; test_case "projects consumer failure to schedule execution" `Quick
+            test_reclaim_projects_consumer_failure
+        ; test_case "settles duplicate occurrence executions by exact id" `Quick
+            test_reclaim_settles_duplicate_occurrence_executions_by_id
+        ; test_case "reports empty settlement batch mismatch" `Quick
+            test_reclaim_reports_empty_batch_cardinality_mismatch
+        ; test_case "reports empty settlement batch consumer exception" `Quick
+            test_reclaim_reports_empty_batch_consumer_exception
+        ; test_case "counts nonempty settlement batch mismatch" `Quick
+            test_reclaim_counts_nonempty_batch_cardinality_mismatch
+        ; test_case "leaves an occurrence when the consumer cannot answer" `Quick
+            test_reclaim_leaves_occurrence_alone_when_consumer_errors
         ] )
     ; ( "status",
         [ test_case "tracks liveness snapshot" `Quick

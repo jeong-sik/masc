@@ -792,7 +792,7 @@ let test_goal_reconciliation_prefers_authoritative_assignment
          check int "assignment scan error is classified as failed" 1 summary.failed_count;
          check int "assignment scan error is not unresolved" 0 summary.unresolved_count);
        let discovery =
-         Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+         Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
            ~base_path:config.base_path
        in
        match discovery.read_error with
@@ -890,7 +890,7 @@ let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
            (Filename.concat
               (Common.keepers_runtime_dir_of_base ~base_path:config.base_path)
               meta.name)
-           "event-queue-v14.json"
+           "event-queue-v15.json"
        in
        Fs_compat.mkdir_p queue_path;
        let failed =

@@ -333,6 +333,8 @@ let error_class = function
           | Transfer.Receipt_read_failed _
           | Transfer.Receipt_write_failed _
           | Transfer.Durable_meta_read_failed _
+          | Transfer.Source_transfer_shutdown_reserved _
+          | Transfer.Target_transfer_shutdown_reserved _
           | Transfer.Committed_projection_failed _ )
       ; _
       }

@@ -283,6 +283,8 @@ let test_projected_disposition_ledger_replays_older_operation () =
     ; operator_operation_id = "transfer-operation"
     ; from_keeper = "source-keeper"
     ; to_keeper = "target-keeper"
+    ; target_generation = 8
+    ; target_trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "target-trace"
     }
   in
   let staged_transfer, transfer_receipt =

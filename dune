@@ -15,6 +15,13 @@
   (flags
    (:standard -warn-error +a))))
 
+(install
+ (package masc)
+ (section bin)
+ (files
+  (scripts/check-keeper-event-queue-v15-cutover.sh as
+   masc-check-keeper-event-queue-v15-cutover)))
+
 ; Build-time check: reject OPERATOR_TODO placeholders in source code.
 ; This prevents deployment of code with unresolved placeholders.
 (rule

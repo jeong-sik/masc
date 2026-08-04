@@ -6,6 +6,7 @@
 type service_error =
   | Invalid_request of string
   | Store_error of Schedule_store.store_error
+  | Creation_rejected of string
 
 val service_error_to_string : service_error -> string
 

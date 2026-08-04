@@ -37,6 +37,7 @@ let with_config f =
   Eio.Switch.on_release sw (fun () -> rm_rf path);
   let config = Workspace.default_config path in
   ignore (Workspace.init config ~agent_name:(Some "schedule-test"));
+  Workspace_metric_hooks.install ();
   Atomic.set Workspace_hooks.schedule_wake_target_registered_fn (fun config keeper_name ->
     match Keeper_meta_store.read_effective_meta config keeper_name with
     | Ok (Some _) -> Ok true
@@ -83,7 +84,10 @@ let schedule_tool_name action =
 ;;
 
 let schedule_ctx config : Tool_schedule.context =
-  { config; agent_name = "scheduler-agent" }
+  { config
+  ; agent_name = "scheduler-agent"
+  ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+  }
 ;;
 
 let dispatch_exn config action args =
@@ -93,7 +97,12 @@ let dispatch_exn config action args =
   | None -> fail ("schedule dispatch returned None: " ^ name)
 ;;
 
-let create_args ?schedule_id ?(message = "scheduled keeper wake") () =
+let create_args
+      ?schedule_id
+      ?(allow_unregistered_keeper = false)
+      ?(message = "scheduled keeper wake")
+      ()
+  =
   `Assoc
     ([ "due_at_unix", `Float 200.0
      ; "payload_kind", `String Schedule_supported_kinds.keeper_wake
@@ -105,6 +114,10 @@ let create_args ?schedule_id ?(message = "scheduled keeper wake") () =
      ; "requested_by_id", `String "operator"
      ; "scheduled_by_id", `String "scheduler-agent"
      ]
+     @
+     if allow_unregistered_keeper
+     then [ "allow_unregistered_keeper", `Bool true ]
+     else []
      @
      match schedule_id with
      | None -> []
@@ -438,8 +451,10 @@ let test_due_signal_and_dashboard_projection () =
   check string "signal kind" "schedule.due_candidate"
     (Schedule_runner.signal_kind_to_string signal.kind);
   check string "signal request" request.schedule_id signal.schedule_id;
+  check string "signal schedule instance" request.schedule_instance_id
+    signal.schedule_instance_id;
   let signal_json = Schedule_runner.wake_signal_to_yojson signal in
-  check int "signal field count" 7
+  check int "signal field count" 8
     (Yojson.Safe.Util.to_assoc signal_json |> List.length);
   let dashboard =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
@@ -473,6 +488,93 @@ let test_schedule_store_error_is_explicit () =
        "schedule store read failed")
 ;;
 
+let test_keeper_wake_target_validation_is_inside_creation_fence () =
+  with_config
+  @@ fun config ->
+  let fence_active = ref false in
+  let validation_saw_fence = ref false in
+  let registered_target_check =
+    Atomic.get Workspace_hooks.schedule_wake_target_registered_fn
+  in
+  Atomic.set Workspace_hooks.schedule_wake_target_registered_fn
+    (fun config keeper_name ->
+       if !fence_active then validation_saw_fence := true;
+       registered_target_check config keeper_name);
+  let admit_keeper_wake_creation config ~keeper_name create =
+    Keeper_schedule_creation_admission.run config ~keeper_name (fun () ->
+      fence_active := true;
+      Fun.protect ~finally:(fun () -> fence_active := false) create)
+  in
+  let ctx : Tool_schedule.context =
+    { config
+    ; agent_name = "scheduler-agent"
+    ; admit_keeper_wake_creation
+    }
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.schedule_wake_target_registered_fn
+        registered_target_check)
+    (fun () ->
+       let result =
+         match
+           Tool_schedule.dispatch
+             ctx
+             ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+             ~args:(create_args ~schedule_id:"sched-fenced-validation" ())
+         with
+         | Some result -> result
+         | None -> fail "schedule dispatch returned None"
+       in
+       check bool "fenced schedule creation succeeds" true
+         (Tool_result.is_success result);
+       check bool "target validation ran inside creation fence" true
+         !validation_saw_fence)
+;;
+
+let test_keeper_wake_creation_respects_shutdown_fence () =
+  with_config
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace.base_path in
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match
+     Keeper_turn_admission.begin_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_reserved _ -> ()
+   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+     fail "fresh shutdown fence was already reserved");
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Keeper_turn_admission.rollback_shutdown
+           ~base_path
+           ~keeper_name
+           ~operation_id
+         : Keeper_turn_admission.rollback_shutdown_result))
+    (fun () ->
+       let result =
+         dispatch_exn config Tool_schemas_schedule.Create_request
+           (create_args
+              ~schedule_id:"sched-shutdown-fenced"
+              ~allow_unregistered_keeper:true
+              ())
+       in
+       check bool "shutdown-fenced schedule creation fails" false
+         (Tool_result.is_success result);
+       check string "shutdown fence failure is explicit"
+         (Printf.sprintf
+            "schedule creation rejected by Keeper shutdown fence keeper=%s operation=%s"
+            keeper_name
+            (Keeper_shutdown_types.Operation_id.to_string operation_id))
+         (Tool_result.message result);
+       check int "shutdown-fenced schedule is not persisted" 0
+         (List.length (Schedule_store.read_state config).schedules))
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
@@ -494,6 +596,10 @@ let () =
             test_due_signal_and_dashboard_projection
         ; test_case "schedule store error is explicit" `Quick
             test_schedule_store_error_is_explicit
+        ; test_case "Keeper wake target validation is fenced" `Quick
+            test_keeper_wake_target_validation_is_inside_creation_fence
+        ; test_case "Keeper wake creation respects shutdown fence" `Quick
+            test_keeper_wake_creation_respects_shutdown_fence
         ] )
     ]
 ;;

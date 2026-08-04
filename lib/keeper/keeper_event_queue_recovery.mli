@@ -13,6 +13,7 @@ type projection_outcome =
 
 type projection_error =
   | Owner_unavailable of Keeper_event_queue_persistence.owner_identity_error
+  | Owner_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Executor_unavailable of Executor_pool_ref.strict_submit_error
   | Outbox_unavailable of string
   | Target_transfer_projection_failed of
@@ -27,7 +28,7 @@ type projection_error =
   | Unexpected_projection_failure of Eio.Exn.with_bt
 
 type discovery_error =
-  | Snapshot_discovery_failed of string
+  | Durable_state_discovery_failed of string
   | Sweep_execution_failed of Eio.Exn.with_bt
   | Sweep_executor_unavailable of Executor_pool_ref.strict_submit_error
 
@@ -72,7 +73,11 @@ val project_owner_result :
   base_path:string ->
   keeper_name:string ->
   (projection_outcome, projection_error) result
-(** Acquire the process-local owner claim and inspect the durable outbox.
+(** Acquire the process-local owner claim and the owner's durable-intake fence,
+    then inspect the durable outbox. A shutdown that linearizes first returns
+    [Owner_shutdown_reserved]; an in-flight projection finishes before the
+    shutdown join returns, so it cannot recreate artifacts after purge.
+
     Accepted transfers first converge the exact target projection; only then
     does the canonical reaction-ledger projector retire the source outbox.
     Durable I/O runs outside the claim-table mutex and without cancellation

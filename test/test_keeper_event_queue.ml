@@ -29,7 +29,7 @@ let rec rm_rf path =
 let snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue-v14.json"
+    "event-queue-v15.json"
 
 let json_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -130,6 +130,15 @@ let event_queue_test_meta keeper_name trace_id =
   | Ok meta -> meta
   | Error detail -> Alcotest.fail detail
 
+let persist_event_queue_test_meta ~base_path keeper_name =
+  let meta = event_queue_test_meta keeper_name ("trace-" ^ keeper_name) in
+  (match
+     Masc.Keeper_meta_store.write_meta (Masc.Workspace.default_config base_path) meta
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  meta
+
 let with_strict_executor f =
   Eio_main.run
   @@ fun env ->
@@ -165,6 +174,7 @@ let load_queue_state ~base_path ~keeper_name =
   | Error detail -> Alcotest.fail detail
 
 let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~operation_id =
+  let target_meta = persist_event_queue_test_meta ~base_path to_keeper in
   (match
      Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
        ~base_path
@@ -188,6 +198,8 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~oper
     ; operator_operation_id = operation_id
     ; from_keeper
     ; to_keeper
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
     }
   in
   (match
@@ -205,7 +217,9 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~oper
        (Masc.Keeper_registry_event_queue.Transition_committed_followup_failed
           { detail; _ }) ->
      Alcotest.fail detail
-   | Error detail -> Alcotest.fail detail)
+   | Error detail ->
+     Alcotest.fail
+       (Masc.Keeper_registry_event_queue.transfer_pending_error_to_string detail))
 
 let () =
   let open Keeper_event_queue in
@@ -459,7 +473,8 @@ let () =
   (* Scheduled wake is a non-board stimulus whose enclosing occurrence id and
      payload both survive restart replay. *)
   let scheduled_wake =
-    { schedule_id = "sched-1"
+    { schedule_instance_id = "instance-sched-1"
+    ; schedule_id = "sched-1"
     ; due_at = 200.0
     ; payload_digest = "digest-1"
     ; title = Some "Scheduled lane wake"
@@ -1040,6 +1055,391 @@ let () =
         (Keeper_event_queue_state.accepted_transfer_projections recovered_target
          |> List.length));
 
+  (* A target shutdown reservation owns the same durable-intake fence as every
+     transfer producer, so no caller can recreate the purged target queue. *)
+  let base_path = temp_dir "keeper-event-queue-transfer-shutdown-fence" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-transfer-shutdown-source" in
+      let to_keeper = "keeper-transfer-shutdown-target" in
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:board_stim
+        ~owner_nonce:27
+        ~operation_id:"transfer-during-target-shutdown";
+      let transfer =
+        match
+          load_queue_state ~base_path ~keeper_name:from_keeper
+          |> Keeper_event_queue_state.transition_outbox
+        with
+        | [ { receipt = { transition = Transfer_accepted transfer; _ }; _ } ] ->
+          transfer
+        | _ -> Alcotest.fail "staged transfer authority was not recoverable"
+      in
+      let shutdown_operation_id =
+        Masc.Keeper_shutdown_types.Operation_id.generate ()
+      in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path
+           ~keeper_name:to_keeper
+           ~operation_id:shutdown_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         Alcotest.fail "fresh target shutdown was already reserved");
+      Fun.protect
+        ~finally:(fun () ->
+          ignore
+            (Masc.Keeper_turn_admission.rollback_shutdown
+               ~base_path
+               ~keeper_name:to_keeper
+               ~operation_id:shutdown_operation_id
+              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+        (fun () ->
+           (match
+              Masc.Keeper_registry_event_queue
+              .project_accepted_transfer_durable_result
+                ~base_path
+                to_keeper
+                ~transfer
+            with
+            | Masc.Keeper_registry_event_queue
+              .Transfer_projection_shutdown_reserved actual_operation_id ->
+              Alcotest.(check bool)
+                "transfer reports exact shutdown owner"
+                true
+                (Masc.Keeper_shutdown_types.Operation_id.equal
+                   shutdown_operation_id
+                   actual_operation_id)
+            | _ -> Alcotest.fail "target transfer bypassed shutdown fence");
+           let target_state = load_queue_state ~base_path ~keeper_name:to_keeper in
+           Alcotest.(check int)
+             "shutdown-fenced transfer writes no target stimulus"
+             0
+             (Keeper_event_queue_state.pending target_state
+              |> Keeper_event_queue.length);
+           Alcotest.(check int)
+             "shutdown-fenced transfer writes no target receipt"
+             0
+             (Keeper_event_queue_state.accepted_transfer_projections target_state
+              |> List.length)));
+
+  (* A committed source outbox must not recreate a target after purge releases
+     its in-memory fence. The persisted transfer authority is bound to the
+     exact target generation/trace, so absent metadata fails before enqueue. *)
+  let base_path = temp_dir "keeper-event-queue-post-purge-transfer-recovery" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-post-purge-transfer-source" in
+      let to_keeper = "keeper-post-purge-transfer-target" in
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:board_stim
+        ~owner_nonce:29
+        ~operation_id:"post-purge-transfer-recovery";
+      let config = Masc.Workspace.default_config base_path in
+      let target_meta =
+        match Masc.Keeper_meta_store.read_meta config to_keeper with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "target metadata fixture disappeared"
+        | Error detail -> Alcotest.fail detail
+      in
+      let shutdown_operation_id =
+        Masc.Keeper_shutdown_types.Operation_id.generate ()
+      in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path
+           ~keeper_name:to_keeper
+           ~operation_id:shutdown_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         Alcotest.fail "fresh post-purge target was already reserved");
+      (match
+         Masc.Keeper_meta_store.remove_meta_if_identity
+           config
+           ~name:to_keeper
+           ~trace_id:target_meta.runtime.trace_id
+           ~generation:target_meta.runtime.nonce
+       with
+       | Ok () -> ()
+       | Error error ->
+         Alcotest.fail
+           (Masc.Keeper_meta_store.identity_remove_error_to_string error));
+      (match
+         Masc.Keeper_turn_admission.rollback_shutdown
+           ~base_path
+           ~keeper_name:to_keeper
+           ~operation_id:shutdown_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_rolled_back -> ()
+       | Masc.Keeper_turn_admission.Shutdown_not_reserved
+       | Masc.Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+         Alcotest.fail "post-purge target fence was not released");
+      (match
+         with_strict_executor
+         @@ fun () ->
+         Masc.Keeper_event_queue_recovery.project_owner_result
+           ~base_path
+           ~keeper_name:from_keeper
+       with
+       | Error
+           (Masc.Keeper_event_queue_recovery.Target_transfer_projection_failed
+              { target_keeper; detail }) ->
+         Alcotest.(check string) "post-purge failure target" to_keeper target_keeper;
+         Alcotest.(check string)
+           "post-purge failure names missing metadata"
+           "target Keeper metadata is absent"
+           detail
+       | Error error ->
+         Alcotest.fail
+           (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
+       | Ok _ -> Alcotest.fail "post-purge recovery recreated the target queue");
+      Alcotest.(check bool)
+        "post-purge recovery writes no target snapshot"
+        false
+        (Sys.file_exists (snapshot_path ~base_path ~keeper_name:to_keeper)));
+
+  (* Source ownership changes use the same durable-intake authority as schedule
+     retry repair. A shutdown reservation is the observable proof that a source
+     transfer cannot bypass that authority. *)
+  let base_path = temp_dir "keeper-event-queue-source-transfer-shutdown-fence" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-source-transfer-shutdown-source" in
+      let to_keeper = "keeper-source-transfer-shutdown-target" in
+      let source = board_stim in
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path
+           from_keeper
+           source
+       with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      let selection =
+        match
+          load_queue_state ~base_path ~keeper_name:from_keeper
+          |> Keeper_event_queue_state.pending_selections
+        with
+        | [ selection ] -> selection
+        | _ -> Alcotest.fail "source transfer fixture did not contain one pending item"
+      in
+      let transfer : Masc.Keeper_registry_event_queue.accepted_transfer =
+        let target_meta = event_queue_test_meta to_keeper ("trace-" ^ to_keeper) in
+        { source = selection.source
+        ; source_incarnation = selection.admitted_revision
+        ; owner_nonce = 31
+        ; operator_operation_id = "source-transfer-during-shutdown"
+        ; from_keeper
+        ; to_keeper
+        ; target_generation = target_meta.runtime.nonce
+        ; target_trace_id = target_meta.runtime.trace_id
+        }
+      in
+      let shutdown_operation_id =
+        Masc.Keeper_shutdown_types.Operation_id.generate ()
+      in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path
+           ~keeper_name:from_keeper
+           ~operation_id:shutdown_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         Alcotest.fail "fresh source shutdown was already reserved");
+      Fun.protect
+        ~finally:(fun () ->
+          ignore
+            (Masc.Keeper_turn_admission.rollback_shutdown
+               ~base_path
+               ~keeper_name:from_keeper
+               ~operation_id:shutdown_operation_id
+              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+        (fun () ->
+           (match
+              Masc.Keeper_registry_event_queue.transfer_pending_accepted_result
+                ~base_path
+                from_keeper
+                ~current_owner_nonce:31
+                ~applied_at:31.0
+                ~transfer
+            with
+            | Error
+                (Masc.Keeper_registry_event_queue.Transfer_pending_shutdown_reserved
+                   actual_operation_id) ->
+              Alcotest.(check bool)
+                "source transfer reports exact shutdown owner"
+                true
+                (Masc.Keeper_shutdown_types.Operation_id.equal
+                   shutdown_operation_id
+                   actual_operation_id)
+            | Error
+                (Masc.Keeper_registry_event_queue.Transfer_pending_storage_error detail) ->
+              Alcotest.fail detail
+            | Ok _ -> Alcotest.fail "source transfer bypassed shutdown fence");
+           Alcotest.(check int)
+             "shutdown-fenced source transfer retains pending work"
+             1
+             (registry_snapshot ~base_path from_keeper |> Keeper_event_queue.length)));
+
+  (* A source shutdown reservation fences the whole recovery transaction. The
+     worker cannot load an outbox and later recreate source or target artifacts
+     after the shutdown join has allowed purge to continue. *)
+  let base_path = temp_dir "keeper-event-queue-source-shutdown-fence" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-source-shutdown-source" in
+      let to_keeper = "keeper-source-shutdown-target" in
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:board_stim
+        ~owner_nonce:28
+        ~operation_id:"recovery-during-source-shutdown";
+      let target_dir =
+        Filename.concat
+          (Common.keepers_runtime_dir_of_base ~base_path)
+          to_keeper
+      in
+      Alcotest.(check bool)
+        "target artifacts are absent before source recovery"
+        false
+        (Sys.file_exists target_dir);
+      let shutdown_operation_id =
+        Masc.Keeper_shutdown_types.Operation_id.generate ()
+      in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path
+           ~keeper_name:from_keeper
+           ~operation_id:shutdown_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         Alcotest.fail "fresh source shutdown was already reserved");
+      Fun.protect
+        ~finally:(fun () ->
+          ignore
+            (Masc.Keeper_turn_admission.rollback_shutdown
+               ~base_path
+               ~keeper_name:from_keeper
+               ~operation_id:shutdown_operation_id
+              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+        (fun () ->
+           (match
+              with_strict_executor
+              @@ fun () ->
+              Masc.Keeper_event_queue_recovery.project_owner_result
+                ~base_path
+                ~keeper_name:from_keeper
+            with
+            | Error
+                (Masc.Keeper_event_queue_recovery.Owner_shutdown_reserved
+                   actual_operation_id) ->
+              Alcotest.(check bool)
+                "recovery reports exact source shutdown owner"
+                true
+                (Masc.Keeper_shutdown_types.Operation_id.equal
+                   shutdown_operation_id
+                   actual_operation_id)
+            | Error error ->
+              Alcotest.fail
+                (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
+            | Ok _ -> Alcotest.fail "source recovery bypassed shutdown fence");
+           Alcotest.(check bool)
+             "shutdown-fenced recovery creates no target artifacts"
+             false
+             (Sys.file_exists target_dir);
+           Alcotest.(check int)
+             "shutdown-fenced recovery retains source outbox"
+             1
+             (load_queue_state ~base_path ~keeper_name:from_keeper
+              |> Keeper_event_queue_state.transition_outbox
+              |> List.length)));
+
+  (* Recovery acquires the source and target intake fences as one ordered
+     transaction. A target reservation therefore rejects recovery before the
+     source outbox can be retired. *)
+  let base_path = temp_dir "keeper-event-queue-recovery-target-shutdown-fence" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let from_keeper = "keeper-recovery-target-shutdown-source" in
+      let to_keeper = "keeper-recovery-target-shutdown-target" in
+      stage_transfer
+        ~base_path
+        ~from_keeper
+        ~to_keeper
+        ~source:board_stim
+        ~owner_nonce:28
+        ~operation_id:"recovery-during-target-shutdown";
+      let shutdown_operation_id =
+        Masc.Keeper_shutdown_types.Operation_id.generate ()
+      in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path
+           ~keeper_name:to_keeper
+           ~operation_id:shutdown_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         Alcotest.fail "fresh recovery target shutdown was already reserved");
+      Fun.protect
+        ~finally:(fun () ->
+          ignore
+            (Masc.Keeper_turn_admission.rollback_shutdown
+               ~base_path
+               ~keeper_name:to_keeper
+               ~operation_id:shutdown_operation_id
+              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+        (fun () ->
+           (match
+              with_strict_executor
+              @@ fun () ->
+              Masc.Keeper_event_queue_recovery.project_owner_result
+                ~base_path
+                ~keeper_name:from_keeper
+            with
+            | Error
+                (Masc.Keeper_event_queue_recovery.Owner_shutdown_reserved
+                   actual_operation_id) ->
+              Alcotest.(check bool)
+                "recovery reports exact target shutdown owner"
+                true
+                (Masc.Keeper_shutdown_types.Operation_id.equal
+                   shutdown_operation_id
+                   actual_operation_id)
+            | Error error ->
+              Alcotest.fail
+                (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
+            | Ok _ -> Alcotest.fail "recovery bypassed the target shutdown fence");
+           Alcotest.(check int)
+             "target-fenced recovery retains source outbox"
+             1
+             (load_queue_state ~base_path ~keeper_name:from_keeper
+              |> Keeper_event_queue_state.transition_outbox
+              |> List.length);
+           Alcotest.(check int)
+             "target-fenced recovery writes no target stimulus"
+             0
+             (load_queue_state ~base_path ~keeper_name:to_keeper
+              |> Keeper_event_queue_state.pending
+              |> Keeper_event_queue.length)));
+
   (* --- transfer recovery failure: target storage failure is typed and keeps
          the source outbox authoritative for a later retry. --- *)
   let base_path = temp_dir "keeper-event-queue-transfer-recovery-failure" in
@@ -1157,25 +1557,25 @@ let () =
         second_transition_id
         retained_transition_id);
 
-  (* --- current-only hard cut: the retired v12 filename is not a read,
-         migration, or overwrite source for the v14 queue. --- *)
-  let base_path = temp_dir "keeper-event-queue-v14-hard-cut" in
+  (* --- current-only hard cut: the retired v14 filename is not a read,
+         migration, or overwrite source for the v15 queue. --- *)
+  let base_path = temp_dir "keeper-event-queue-v15-hard-cut" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-      let keeper_name = "keeper-event-queue-v14-hard-cut-test" in
+      let keeper_name = "keeper-event-queue-v15-hard-cut-test" in
       let keeper_dir =
         Filename.concat
           (Common.keepers_runtime_dir_of_base ~base_path)
           keeper_name
       in
-      let retired_path = Filename.concat keeper_dir "event-queue-v12.json" in
+      let retired_path = Filename.concat keeper_dir "event-queue-v14.json" in
       let retired_wal_path =
-        Filename.concat keeper_dir "event-queue-transitions-v2.jsonl"
+        Filename.concat keeper_dir "event-queue-transitions-v4.jsonl"
       in
       Fs_compat.mkdir_p keeper_dir;
-      write_file retired_path "{retired-v12-evidence";
-      write_file retired_wal_path "{retired-v2-wal-evidence\n";
+      write_file retired_path "{retired-v14-evidence";
+      write_file retired_wal_path "{retired-v4-wal-evidence\n";
       assert (
         is_empty
           (Keeper_event_queue_persistence.load ~base_path ~keeper_name));
@@ -1184,11 +1584,11 @@ let () =
         ~keeper_name
         (enqueue empty board_stim);
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      assert (String.equal (read_file retired_path) "{retired-v12-evidence");
+      assert (String.equal (read_file retired_path) "{retired-v14-evidence");
       assert (
         String.equal
           (read_file retired_wal_path)
-          "{retired-v2-wal-evidence\n"));
+          "{retired-v4-wal-evidence\n"));
 
   (* --- strict persisted load rejects malformed current payloads and
          preserves the operator-reset evidence. --- *)
@@ -1352,7 +1752,7 @@ let () =
 
   (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
          is drained from the current queue state on the genuine-ack path. Here
-         the stimulus lives in event-queue-v14.json, mirroring a bootstrap enqueued
+         the stimulus lives in event-queue-v15.json, mirroring a bootstrap enqueued
          by supervisor launch; after ack, [load] must be empty. Without the
          A-fix this returns length 1 and accumulates across restarts. --- *)
   let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in

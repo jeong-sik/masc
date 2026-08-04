@@ -1,11 +1,11 @@
 (** Durable per-Keeper Event Layer state.
 
-    Current writes use the [keeper.event_queue.state.v14]
-    [event-queue-v14.json] envelope: revision, pending stimuli, the latest
+    Current writes use the [keeper.event_queue.state.v15]
+    [event-queue-v15.json] envelope: revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v4.jsonl] WAL are queue authority. *)
+    [event-queue-transitions-v5.jsonl] WAL are queue authority. *)
 
 type owner_identity
 type owner_identity_error
@@ -48,6 +48,8 @@ type accepted_transfer = Keeper_event_queue_state.accepted_transfer =
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
+  ; target_generation : int
+  ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt = Keeper_event_queue_state.source_terminal_receipt =
@@ -136,13 +138,14 @@ type snapshot_with_errors =
   ; read_errors : snapshot_read_error list
   }
 
-type snapshot_discovery =
+type durable_state_discovery =
   { keeper_names : string list
   ; read_error : string option
   }
 
 val snapshot_read_error_kind_to_string : snapshot_read_error_kind -> string
-val discover_keeper_names_with_snapshots : base_path:string -> snapshot_discovery
+val discover_keeper_names_with_durable_state :
+  base_path:string -> durable_state_discovery
 val load_snapshot_with_errors :
   base_path:string -> keeper_name:string -> snapshot_with_errors
 
@@ -154,6 +157,27 @@ val load_state_result :
     already represented by the durable projected witness is compacted; an
     unprojected source-bearing row remains authoritative until the reaction
     projector records and retires it. *)
+
+val load_existing_state_result :
+  base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
+(** Read already-created durable queue state. A current snapshot or v5 WAL is
+    durable owner evidence; a WAL-only owner is replayed from the empty state.
+    Unlike {!load_state_result}, absence of both artifacts is an explicit
+    [Error]. Use this when absence would be interpreted as evidence about prior
+    durable work. *)
+
+val validate_state_read_only_result :
+  base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
+(** Decode a current snapshot when present and replay its v5 WAL without
+    checkpointing or WAL compaction. A missing snapshot starts from the empty
+    state, matching {!load_state_result}. *)
+
+val validate_existing_state_read_only_result :
+  base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
+(** Decode existing durable state and replay its v5 WAL without checkpointing
+    or WAL compaction. A WAL-only owner is replayed from the empty state;
+    absence of both artifacts is an explicit error, matching
+    {!load_existing_state_result}. *)
 
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -259,6 +283,23 @@ val enqueue_stimulus_if_absent_result :
   (enqueue_stimulus_result, string) result
 (** Atomically enqueue only when the same typed stimulus is absent from the
     full durable state: pending and transition outbox. *)
+
+type 'authorization_error guarded_transfer_projection_result =
+  | Transfer_projection_result of transfer_projection_result
+  | First_projection_rejected of 'authorization_error
+
+val project_accepted_transfer_guarded_result :
+  authorize_first_projection:(unit -> (unit, 'authorization_error) result) ->
+  after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  transfer:accepted_transfer ->
+  ('authorization_error guarded_transfer_projection_result, string) result
+(** Atomically distinguish an exact durable replay from a first target effect.
+    [authorize_first_projection] runs under the target queue lock only when the
+    exact accepted transfer is not already durable. A replay therefore
+    converges after target identity rotation, while a first projection cannot
+    create state for an absent or replaced Keeper. *)
 
 val project_accepted_transfer_result :
   after_commit:(Keeper_event_queue.t -> unit) ->

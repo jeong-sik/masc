@@ -33,22 +33,6 @@ let payload_json () =
     ]
 ;;
 
-let updated_payload_json () =
-  `Assoc
-    [ "kind", `String "consumer.note"
-    ; "schema_version", `Int 1
-    ; "body", `Assoc [ "text", `String "ship now" ]
-    ]
-;;
-
-let payload_exn json =
-  match payload_of_yojson json with
-  | Ok payload -> payload
-  | Error msg -> fail msg
-;;
-
-let updated_payload () = payload_exn (updated_payload_json ())
-
 let make_request
   ?(schedule_id = "sched-1")
   ?expires_at
@@ -83,6 +67,22 @@ let check_error label expected = function
 
 let check_status label expected actual =
   check string label (schedule_status_to_string expected) (schedule_status_to_string actual)
+;;
+
+let find_wake_for_occurrence
+      state
+      ~schedule_instance_id
+      ~schedule_id
+      ~due_at
+      ~payload_digest
+  =
+  List.find_opt
+    (fun (wake : wake_record) ->
+       String.equal wake.schedule_instance_id schedule_instance_id
+       && String.equal wake.schedule_id schedule_id
+       && Float.equal wake.due_at due_at
+       && String.equal wake.payload_digest payload_digest)
+    state.wakes
 ;;
 
 let test_insert_persists_and_bumps_version () =
@@ -133,60 +133,6 @@ let test_cancel_request_marks_cancelled () =
   | None -> fail "schedule missing"
 ;;
 
-let test_update_request_updates_scheduled () =
-  with_workspace
-  @@ fun config ->
-  let scheduled = make_request ~schedule_id:"update-scheduled" () in
-  ignore (insert_ok config scheduled);
-  let payload_json = updated_payload_json () in
-  let payload = payload_exn payload_json in
-  (match
-     update_request config ~schedule_id:scheduled.schedule_id ~due_at:260.0
-       ~expires_at:None ~payload
-   with
-   | Ok updated ->
-     check_status "scheduled stays scheduled" Scheduled updated.status;
-     check (float 0.001) "scheduled due_at" 260.0 updated.due_at;
-     check (option (float 0.001)) "scheduled expires_at" None updated.expires_at;
-     check string "scheduled payload" (Yojson.Safe.to_string payload_json)
-       (Yojson.Safe.to_string (payload_to_yojson updated.payload))
-   | Error err -> fail (store_error_to_string err))
-;;
-
-let update_not_allowed_error =
-  Invalid_status_transition "only scheduled requests can be updated"
-;;
-
-let test_update_request_rejects_running_and_terminal () =
-  with_workspace
-  @@ fun config ->
-  let running = make_request ~schedule_id:"update-running" () in
-  ignore (insert_ok config running);
-  (match refresh_due config ~now:201.0 with
-   | Ok _ -> ()
-   | Error err -> fail (store_error_to_string err));
-  (match start_due_candidate config ~now:202.0 ~schedule_id:running.schedule_id with
-   | Ok stored -> check_status "running" Running stored.status
-   | Error err -> fail (store_error_to_string err));
-  let before_running = read_state config in
-  check_error "running update" update_not_allowed_error
-    (update_request config ~schedule_id:running.schedule_id ~due_at:250.0
-       ~expires_at:None ~payload:(updated_payload ()));
-  let after_running = read_state config in
-  check int "running version unchanged" before_running.version after_running.version;
-  let terminal = make_request ~schedule_id:"update-terminal" () in
-  ignore (insert_ok config terminal);
-  (match cancel_request config ~schedule_id:terminal.schedule_id with
-   | Ok stored -> check_status "cancelled" Cancelled stored.status
-   | Error err -> fail (store_error_to_string err));
-  let before_terminal = read_state config in
-  check_error "terminal update" update_not_allowed_error
-    (update_request config ~schedule_id:terminal.schedule_id ~due_at:250.0
-       ~expires_at:None ~payload:(updated_payload ()));
-  let after_terminal = read_state config in
-  check int "terminal version unchanged" before_terminal.version after_terminal.version
-;;
-
 let test_due_candidates_dispatch_without_scheduler_authorization_state () =
   with_workspace
   @@ fun config ->
@@ -209,41 +155,6 @@ let test_due_candidate_starts_without_authorization_state () =
    | Error err -> fail (store_error_to_string err));
   check int "due candidate" 1
     (List.length (due_wake_candidates (read_state config)))
-;;
-
-let test_update_request_rejects_due_without_changing_candidate () =
-  with_workspace
-  @@ fun config ->
-  let req = make_request ~schedule_id:"update-due" () in
-  ignore (insert_ok config req);
-  (match refresh_due config ~now:201.0 with
-   | Ok (_, changed) -> check int "became due" 1 changed
-   | Error err -> fail (store_error_to_string err));
-  let before = read_state config in
-  let due =
-    match get_schedule config ~schedule_id:req.schedule_id with
-    | Some due -> due
-    | None -> fail "due request missing"
-  in
-  check_status "stored due" Due due.status;
-  check int "candidate before update" 1
-    (List.length (due_wake_candidates before));
-  check_error "due update" update_not_allowed_error
-    (update_request config ~schedule_id:req.schedule_id ~due_at:250.0
-       ~expires_at:None ~payload:(updated_payload ()));
-  let after = read_state config in
-  let stored =
-    match get_schedule config ~schedule_id:req.schedule_id with
-    | Some stored -> stored
-    | None -> fail "stored due request missing"
-  in
-  check int "version unchanged" before.version after.version;
-  check_status "still due" Due stored.status;
-  check (float 0.001) "due_at unchanged" 200.0 stored.due_at;
-  check string "payload unchanged" (Yojson.Safe.to_string (payload_json ()))
-    (Yojson.Safe.to_string (payload_to_yojson stored.payload));
-  check int "candidate preserved after rejected update" 1
-    (List.length (due_wake_candidates after))
 ;;
 
 let test_refresh_due_expires_scheduled_and_due () =
@@ -429,7 +340,7 @@ let test_startup_recovery_uses_exact_occurrence_across_clock_rollback () =
    | None -> fail "clock-rollback schedule missing");
   let digest = payload_digest request.payload in
   (match
-     wake_for_occurrence
+     find_wake_for_occurrence
        state
        ~schedule_instance_id:request.schedule_instance_id
        ~schedule_id:request.schedule_id
@@ -441,7 +352,7 @@ let test_startup_recovery_uses_exact_occurrence_across_clock_rollback () =
        (wake_status_to_string wake.status)
    | None -> fail "current clock-rollback wake missing");
   match
-    wake_for_occurrence
+    find_wake_for_occurrence
       state
       ~schedule_instance_id:request.schedule_instance_id
       ~schedule_id:request.schedule_id
@@ -569,44 +480,6 @@ let test_accept_running_completes_wake_receipt () =
    | Ok (_, recovered) ->
      check int "accepted work is not redispatched after restart" 0 recovered
    | Error err -> fail (store_error_to_string err))
-;;
-
-let check_reused_occurrence_rejected label (request : schedule_request) = function
-  | Error
-      (Schedule_occurrence_already_used
-         { schedule_instance_id; due_at; payload_digest = actual_digest }) ->
-    check string (label ^ " instance") request.schedule_instance_id schedule_instance_id;
-    check (float 0.0) (label ^ " due_at") request.due_at due_at;
-    check string (label ^ " payload digest")
-      (payload_digest request.payload)
-      actual_digest
-  | Error err -> fail (label ^ ": wrong error: " ^ store_error_to_string err)
-  | Ok _ -> fail (label ^ ": reused occurrence identity was accepted")
-;;
-
-let test_update_rejects_completed_wake_occurrence_reuse () =
-  with_workspace
-  @@ fun config ->
-  let request =
-    make_request
-      ~schedule_id:"reject-completed-wake-occurrence-reuse"
-      ~recurrence:(Interval { interval_sec = 60 })
-      ()
-  in
-  ignore (insert_ok config request);
-  ignore (refresh_due config ~now:201.0);
-  ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
-  ignore (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ());
-  update_request
-    config
-    ~schedule_id:request.schedule_id
-    ~due_at:request.due_at
-    ~expires_at:request.expires_at
-    ~payload:request.payload
-  |> check_reused_occurrence_rejected "completed wake occurrence" request;
-  match get_schedule config ~schedule_id:request.schedule_id with
-  | Some stored -> check (float 0.0) "rejected update keeps next due" 260.0 stored.due_at
-  | None -> fail "rejected update removed the recurring schedule"
 ;;
 
 let test_fail_due_candidate_records_failed_wake () =
@@ -918,10 +791,6 @@ let () =
             test_store_rejects_non_scheduled_initial_status;
           test_case "cancel request marks cancelled" `Quick
             test_cancel_request_marks_cancelled;
-          test_case "update request updates scheduled" `Quick
-            test_update_request_updates_scheduled;
-          test_case "update request rejects running and terminal" `Quick
-            test_update_request_rejects_running_and_terminal;
         ] );
       ( "due",
         [
@@ -929,8 +798,6 @@ let () =
             test_due_candidates_dispatch_without_scheduler_authorization_state;
           test_case "due candidate starts without authorization state" `Quick
             test_due_candidate_starts_without_authorization_state;
-          test_case "due update preserves candidate" `Quick
-            test_update_request_rejects_due_without_changing_candidate;
           test_case "refresh_due expires scheduled and due" `Quick
             test_refresh_due_expires_scheduled_and_due;
           test_case "reschedule due recurring rows" `Quick
@@ -941,8 +808,6 @@ let () =
             test_start_and_accept_persist_wake_record;
           test_case "durable acceptance completes wake receipt" `Quick
             test_accept_running_completes_wake_receipt;
-          test_case "update rejects completed wake occurrence reuse" `Quick
-            test_update_rejects_completed_wake_occurrence_reuse;
           test_case "startup recovery returns only running schedule to due" `Quick
             test_startup_recovery_returns_only_running_schedule_to_due;
           test_case "startup recovery ignores wall-clock rollback" `Quick

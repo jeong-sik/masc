@@ -13,5 +13,4 @@ val make :
   due_at:float ->
   payload_digest:string ->
   t
-val equal : t -> t -> bool
 val to_string : t -> string

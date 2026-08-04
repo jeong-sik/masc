@@ -374,18 +374,6 @@ let dispatch_candidates config ~now consumer candidates =
     candidates
 ;;
 
-let read_recent_signals config n =
-  let rec decode ordinal acc = function
-    | [] -> Ok (List.rev acc)
-    | json :: rest ->
-      (match wake_signal_of_yojson json with
-       | Ok signal -> decode (ordinal + 1) (signal :: acc) rest
-       | Error error ->
-         Error (Printf.sprintf "schedule signal row %d: %s" ordinal error))
-  in
-  Dated_jsonl.read_recent (signal_store config) n |> decode 0 []
-;;
-
 let tick ?consumer config ~now =
   match Schedule_store.refresh_due config ~now with
   | Error err -> Error (Service_error (Schedule_service.Store_error err))

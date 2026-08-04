@@ -171,11 +171,6 @@ let is_terminal = function
   | Scheduled | Due | Running -> false
 ;;
 
-let is_recurring = function
-  | One_shot -> false
-  | Interval _ | Daily _ | Cron _ -> true
-;;
-
 let rec canonical_json = function
   | `Assoc fields ->
     fields

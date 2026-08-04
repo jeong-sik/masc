@@ -76,19 +76,11 @@ type runner_error =
 val runner_error_to_string : runner_error -> string
 
 val signal_kind_to_string : signal_kind -> string
-val signal_kind_of_string : string -> (signal_kind, string) result
 val dispatch_status_to_string : dispatch_status -> string
 
 val signals_dir : Workspace_utils.config -> string
-val signal_seen_path : Workspace_utils.config -> string
 
-val wake_signal_to_yojson : wake_signal -> Yojson.Safe.t
 val wake_signal_of_yojson : Yojson.Safe.t -> (wake_signal, string) result
-
-val read_recent_signals :
-  Workspace_utils.config -> int -> (wake_signal list, string) result
-(** Read at most [n] recent durable wake signals in chronological order.
-    Malformed persisted rows are returned as an explicit decode error. *)
 
 val tick :
   ?consumer:consumer ->

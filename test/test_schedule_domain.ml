@@ -94,7 +94,6 @@ let test_interval_recurrence_next_due () =
       ~recurrence:(Interval { interval_sec = 60 })
       ()
   in
-  check bool "is recurring" true (is_recurring req.recurrence);
   match next_due_after ~now:201.0 req with
   | None -> fail "expected next interval due"
   | Some due_at -> check (float 0.001) "next due" 260.0 due_at
@@ -146,7 +145,6 @@ let test_cron_recurrence_next_due_weekdays () =
       ~recurrence:(Cron { expression = "0 9 * * 1-5"; timezone = "UTC" })
       ()
   in
-  check bool "is recurring" true (is_recurring req.recurrence);
   match next_due_after ~now:32400.0 req with
   | None -> fail "expected next cron due"
   | Some due_at -> check (float 0.001) "next weekday 09:00" 118800.0 due_at

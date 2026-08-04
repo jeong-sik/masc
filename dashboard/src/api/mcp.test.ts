@@ -61,6 +61,14 @@ function callsByMethod(method: string) {
   })
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 beforeEach(() => {
   currentDashboardActor.mockReturnValue('dashboard')
   currentStoredTokenRevision.mockReturnValue(0)
@@ -173,6 +181,21 @@ describe('MCP 2026-07-28 dashboard client', () => {
     expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
   })
 
+  it('rejects a response completed under an older auth revision', async () => {
+    let revision = 0
+    currentStoredTokenRevision.mockImplementation(() => revision)
+    const response = deferred<Response>()
+    fetchWithTimeout.mockImplementationOnce(() => response.promise)
+
+    const { callMcpTool } = await import('./mcp')
+    const request = callMcpTool('masc_status', {})
+    await vi.waitFor(() => expect(fetchWithTimeout).toHaveBeenCalledTimes(1))
+
+    revision = 1
+    response.resolve(okToolResponse())
+    await expect(request).rejects.toThrow('MCP authentication changed during request')
+  })
+
   it('reports transport failures without legacy session telemetry', async () => {
     fetchWithTimeout.mockRejectedValueOnce(new Error('POST /mcp: timeout after 30000ms'))
 
@@ -201,6 +224,19 @@ describe('MCP 2026-07-28 dashboard client', () => {
     resetMcpClientState()
     fetchWithTimeout.mockResolvedValueOnce(okToolResponse())
     await expect(callMcpTool('masc_status', {})).resolves.toBe('ok')
+  })
+
+  it('does not carry a 403 block into a newer auth revision', async () => {
+    let revision = 0
+    currentStoredTokenRevision.mockImplementation(() => revision)
+    fetchWithTimeout.mockResolvedValueOnce(new Response('forbidden', { status: 403 }))
+    const { callMcpTool } = await import('./mcp')
+
+    await expect(callMcpTool('masc_status', {})).rejects.toThrow('MCP 연결이 차단')
+    revision = 1
+    fetchWithTimeout.mockResolvedValueOnce(okToolResponse())
+    await expect(callMcpTool('masc_status', {})).resolves.toBe('ok')
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(2)
   })
 
   it('bootstraps a loopback dev token before the single MCP request', async () => {

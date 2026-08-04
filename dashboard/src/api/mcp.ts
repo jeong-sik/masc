@@ -25,6 +25,7 @@ interface McpRequestBinding {
 
 let blockedAuthRevision: number | null = null
 let observedTokenRevision = currentStoredTokenRevision()
+let blockedToastShown = false
 
 async function bestEffortReportToolHostFailure(payload: {
   toolName: string
@@ -118,6 +119,7 @@ function synchronizeMcpAuthRevision(): void {
   const currentRevision = currentStoredTokenRevision()
   if (observedTokenRevision !== currentRevision) {
     blockedAuthRevision = null
+    blockedToastShown = false
     resetDevTokenBootstrap()
     observedTokenRevision = currentRevision
   }
@@ -187,8 +189,6 @@ async function mcpPost(
   assertBinding(binding)
   return text
 }
-
-let blockedToastShown = false
 
 async function ensureBinding(): Promise<McpRequestBinding> {
   synchronizeMcpAuthRevision()

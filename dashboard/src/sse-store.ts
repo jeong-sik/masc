@@ -381,7 +381,9 @@ function handleKeeperLifecycle(event: { type: string; name?: string }): void {
     scheduleRefresh('operator', () => _refreshOperatorFn?.(), SSE_KEEPER_OPERATOR_DEBOUNCE_MS)
   }
 
-  // keeper_turn_complete: re-hydrate active keeper's conversation + trajectory
+  // keeper_turn_complete is an SDK-hook event that can precede the durable
+  // TurnRecord commit, so it refreshes status only. Transcript freshness is
+  // driven by the post-commit keeper_chat_appended invalidation.
   if (normalizeMascEventType(event.type) === 'keeper_turn_complete') {
     const keeperName = event.name ?? ''
     if (!keeperName) return

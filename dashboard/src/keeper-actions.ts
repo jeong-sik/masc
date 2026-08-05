@@ -1335,7 +1335,8 @@ export async function moveKeeperChatPendingEntryToEnd(
 
 /** React to a server `keeper_chat_appended` push: re-merge the
  *  persisted transcript so messages arriving through other connectors
- *  (Discord, Slack, agent MCP) appear without a page reload.
+ *  (Discord, Slack, agent MCP), plus committed autonomous turns, appear
+ *  without a page reload.
  *
  *  A keeper that is not in `hydratedChatKeepers` reaches the guard below
  *  for one of two reasons: (a) its panel was never opened — mount

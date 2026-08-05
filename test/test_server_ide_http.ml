@@ -575,9 +575,9 @@ let test_hook_cursors_broadcast_ws_invalidation () =
   with_ide_server (fun ~base_path ~state:_ ~router:_ ->
     let subscriber_id = "test-hook-cursor-ws-invalidation" in
     let received = ref [] in
-    Sse.subscribe_external ~id:subscriber_id (fun frame ->
-      received := frame :: !received;
-      true);
+    Sse.subscribe_external ~id:subscriber_id
+      ~callback:(fun frame -> received := frame :: !received)
+      ();
     Fun.protect
       ~finally:(fun () -> Sse.unsubscribe_external subscriber_id)
       (fun () ->

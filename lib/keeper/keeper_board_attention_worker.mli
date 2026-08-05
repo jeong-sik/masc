@@ -99,6 +99,10 @@ module For_testing : sig
       so a worker stuck on a moved generation is distinguishable from one
       losing a claim race. *)
 
+  val drain_outcome_log_level : drain_outcome -> Log.level
+  (** The level the drain line is emitted at, derived from the outcome.
+      [Retry_later] leaves the partition undrained, so it is not routine. *)
+
   val process_next_exact
     :  clock:_ Eio.Time.clock
     -> net:Eio_context.eio_net option

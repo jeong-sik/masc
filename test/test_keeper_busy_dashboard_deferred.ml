@@ -388,14 +388,14 @@ let test_stream_surface_preserves_typed_shutdown_rejection () =
     }
   in
   let observed = ref None in
+  let message =
+    (payload ~content:"must remain pending" ()).direct_message
+  in
   let result =
     Keeper_tool_surface_ops.handle_keeper_msg_stream
       ~on_admission_rejected:(fun rejection -> observed := Some rejection)
       ctx
-      (`Assoc
-         [ ("name", `String keeper_name)
-         ; ("message", `String "must remain pending")
-         ])
+      message
   in
   check "shutdown-fenced stream dispatch does not report success"
     (not (Tool_result.is_success result));

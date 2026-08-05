@@ -1,8 +1,8 @@
 // Autonomous keeper turns in the chat transcript.
 //
 // These rows have no chat-store row; the backend projects final text and work
-// trace from the exact recorded autonomous run. A keeper wakes far more often
-// than anyone talks to it, so consecutive turns remain collapsed.
+// trace from the exact recorded autonomous run. Each exact turn is its own
+// collapsed group, so adjacent wakes remain distinguishable in the transcript.
 import { describe, expect, it } from 'vitest'
 import type { KeeperConversationEntry } from '../../types'
 import { buildChatRenderUnits } from './primitives'
@@ -32,15 +32,23 @@ const tool = (id: string): KeeperConversationEntry =>
   entry(id, { role: 'tool', source: 'tool_result' })
 
 describe('buildChatRenderUnits — autonomous turns', () => {
-  it('folds a run of consecutive autonomous turns into one unit', () => {
+  it('keeps each consecutive autonomous turn in its own collapsed unit', () => {
     const units = buildChatRenderUnits(
       [user('u1'), autonomous('a1'), autonomous('a2'), autonomous('a3'), user('u2')],
       true,
     )
-    expect(units.map((unit) => unit.kind)).toEqual(['entry', 'autonomousGroup', 'entry'])
-    const group = units[1]
-    if (group?.kind !== 'autonomousGroup') throw new Error('expected an autonomousGroup')
-    expect(group.entries.map((e) => e.id)).toEqual(['a1', 'a2', 'a3'])
+    expect(units.map((unit) => unit.kind)).toEqual([
+      'entry',
+      'autonomousGroup',
+      'autonomousGroup',
+      'autonomousGroup',
+      'entry',
+    ])
+    expect(
+      units
+        .filter((unit) => unit.kind === 'autonomousGroup')
+        .map((group) => group.entry.id),
+    ).toEqual(['a1', 'a2', 'a3'])
   })
 
   it('keeps separate runs separate so conversation between them stays in place', () => {
@@ -52,10 +60,10 @@ describe('buildChatRenderUnits — autonomous turns', () => {
   })
 
   it('folds autonomous turns even when tool grouping is off', () => {
-    // Collapsing them guards against their volume; it is not a preference
-    // about how tool calls render.
+    // Collapsing each exact turn guards against its detail volume; it is not a
+    // preference about how tool calls render.
     const units = buildChatRenderUnits([autonomous('a1'), autonomous('a2')], false)
-    expect(units.map((unit) => unit.kind)).toEqual(['autonomousGroup'])
+    expect(units.map((unit) => unit.kind)).toEqual(['autonomousGroup', 'autonomousGroup'])
   })
 
   it('closes an open tool run before starting an autonomous group', () => {

@@ -43,6 +43,10 @@ type keeper_chat_event =
   | Text_message_start of { message_id : string; role : role }
   | Text_delta of string
   | Text_message_end
+  | External_effect_completed
+      (** A terminal tool already delivered the reply outside this adapter.
+          Connector adapters settle the receipt without emitting another
+          text message. *)
   | Run_finished of { run_id : string }
   | Event_error of { message : string }
   | Custom of { name : string; value : Yojson.Safe.t }

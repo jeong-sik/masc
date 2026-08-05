@@ -304,6 +304,7 @@ let finalize
     ~receipt_response_text_present_ref
     ~history_assistant_source
     ~raw_response_text
+    ~turn_outcome
     ~capture_replay_response
     ?continuation_delivery_channel
     () =
@@ -476,6 +477,7 @@ let finalize
       ();
     Ok
       { response_text
+      ; turn_outcome
       ; model_used = model
       ; prompt_metrics
       ; ctx_composition

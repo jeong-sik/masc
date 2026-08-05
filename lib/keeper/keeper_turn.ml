@@ -898,9 +898,7 @@ let run_keeper_invocation_turn_admitted_inner
                   ( Keeper_turn_outcome.wire_key,
                     `String
                       (Keeper_turn_outcome.to_label
-                         (Keeper_turn_outcome.of_result_surface
-                            ~response_text:result.response_text
-                            result.stop_reason)) );
+                         result.turn_outcome) );
                   ("model", `String surface_model_used);
                   ("model_used_raw", `String surface_model_used);
                   ("turns", `Int result.turn_count);

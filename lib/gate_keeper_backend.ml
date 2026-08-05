@@ -145,11 +145,11 @@ let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
     | None -> ""
     | Some { Keeper_turn_admission.lane; started_at = _ } ->
         Printf.sprintf
-          " Current turn: %s."
+          " (현재 턴: %s)"
           (Keeper_turn_admission.lane_to_string lane)
   in
   Printf.sprintf
-    "%s is busy; your message is %s (request_id=%s).%s"
+    "⏳ [%s] 님이 작업을 처리 중입니다 (status=%s, request_id=%s).%s"
     request.destination_id
     status
     request.request_id
@@ -168,31 +168,33 @@ let busy_ack_reply_text_queued
     | None -> ""
     | Some { Keeper_turn_admission.lane; started_at = _ } ->
         Printf.sprintf
-          " Current turn: %s."
+          " (현재 턴: %s)"
           (Keeper_turn_admission.lane_to_string lane)
   in
   match admission_rejection.shutdown_operation_id, recovery_required_count with
   | Some operation_id, 0 ->
       Printf.sprintf
-        "%s is stopping under shutdown operation %s; your message is durably \
-         queued and will wait for the next active lane (receipt_id=%s).%s"
+        "⏳ [%s] 님이 종료 절차 진행 중입니다 (%s). 메시지는 안전하게 대기 \
+         중입니다 (receipt_id=%s).%s"
         keeper_name
         (Keeper_shutdown_types.Operation_id.to_string operation_id)
         receipt_id in_flight_text
   | Some operation_id, recovery_required_count ->
       Printf.sprintf
-        "%s is stopping under shutdown operation %s; your message is durably queued, but this Keeper lane also has %d receipt(s) awaiting explicit delivery recovery and cannot dispatch automatically (receipt_id=%s).%s"
+        "⏳ [%s] 님이 종료 절차 진행 중입니다 (%s). 대기 메시지 %d건이 \
+         존재합니다 (receipt_id=%s).%s"
         keeper_name
         (Keeper_shutdown_types.Operation_id.to_string operation_id)
         recovery_required_count receipt_id in_flight_text
   | None, 0 ->
       Printf.sprintf
-        "%s is busy; your message is queued and will be answered once the current \
-        turn finishes (receipt_id=%s).%s"
+        "⏳ [%s] 님이 현재 답변을 작성 중입니다. 턴이 마무리되면 \
+         답변드리겠습니다 (receipt_id=%s).%s"
         keeper_name receipt_id in_flight_text
   | None, recovery_required_count ->
       Printf.sprintf
-        "%s accepted your message durably, but this Keeper lane has %d receipt(s) awaiting explicit delivery recovery and cannot dispatch automatically (receipt_id=%s).%s"
+        "⏳ [%s] 님이 메시지를 접수했습니다. 복구 대기 턴 %d건 처리 후 \
+         응대됩니다 (receipt_id=%s).%s"
         keeper_name recovery_required_count receipt_id in_flight_text
 
 let chat_queue_message_request ~channel ~channel_user_id ~keeper_name

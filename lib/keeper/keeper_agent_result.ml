@@ -71,6 +71,7 @@ let tool_names_of_calls (tool_calls : tool_call_detail list) : string list =
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
+  ; turn_outcome : Keeper_turn_outcome.t
   ; model_used : string
   ; prompt_metrics : prompt_metrics
   ; ctx_composition : ctx_composition_metrics

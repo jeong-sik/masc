@@ -35,8 +35,7 @@ let append_decision_record
     | Some r
       when String.trim r.response_text <> ""
            && Keeper_turn_outcome.equal
-                (Keeper_turn_outcome.of_result_surface
-                   ~response_text:r.response_text r.stop_reason)
+                r.turn_outcome
                 Keeper_turn_outcome.Visible_reply ->
         Some (short_preview r.response_text)
     | _ -> None

@@ -9,9 +9,31 @@ let dashboard_label = "dashboard"
 let discord_label = "discord"
 let slack_label = "slack"
 
-let resolve_target ~surface ~channel_id ?(bound_discord_channels = [])
+let resolve_target ~surface ~channel_id ?continuation_channel
+    ?(bound_discord_channels = [])
     ?(bound_slack_channels = []) () : (post_target, string) result =
   let surface = String.trim surface in
+  let continuation_channel_id =
+    match continuation_channel with
+    | Some (Keeper_continuation_channel.Discord { channel_id; _ })
+      when String.equal surface discord_label ->
+      Some channel_id
+    | Some (Keeper_continuation_channel.Slack { channel_id; _ })
+      when String.equal surface slack_label ->
+      Some channel_id
+    | Some
+        ( Keeper_continuation_channel.Dashboard _
+        | Keeper_continuation_channel.Discord _
+        | Keeper_continuation_channel.Slack _
+        | Keeper_continuation_channel.Unrouted _ )
+    | None ->
+      None
+  in
+  let channel_id =
+    match channel_id with
+    | Some _ as explicit -> explicit
+    | None -> continuation_channel_id
+  in
   if String.equal surface dashboard_label then Ok To_dashboard
   else if String.equal surface discord_label then
     let bound = List.map String.trim bound_discord_channels in

@@ -5,6 +5,7 @@
 type t =
   | Visible_reply
   | Continuation_checkpoint
+  | External_effect_completed
   | External_effect_pending
   | No_visible_reply
 
@@ -12,22 +13,28 @@ let equal a b =
   match (a, b) with
   | Visible_reply, Visible_reply
   | No_visible_reply, No_visible_reply
+  | External_effect_completed, External_effect_completed
   | External_effect_pending, External_effect_pending
   | Continuation_checkpoint, Continuation_checkpoint ->
       true
-  | (Visible_reply | Continuation_checkpoint | External_effect_pending
-    | No_visible_reply), _ ->
+  | ( Visible_reply
+    | Continuation_checkpoint
+    | External_effect_completed
+    | External_effect_pending
+    | No_visible_reply ), _ ->
     false
 
 let to_label = function
   | Visible_reply -> "visible_reply"
   | Continuation_checkpoint -> "continuation_checkpoint"
+  | External_effect_completed -> "external_effect_completed"
   | External_effect_pending -> "external_effect_pending"
   | No_visible_reply -> "no_visible_reply"
 
 let of_label = function
   | "visible_reply" -> Some Visible_reply
   | "continuation_checkpoint" -> Some Continuation_checkpoint
+  | "external_effect_completed" -> Some External_effect_completed
   | "external_effect_pending" -> Some External_effect_pending
   | "no_visible_reply" -> Some No_visible_reply
   | _ -> None

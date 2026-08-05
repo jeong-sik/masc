@@ -1016,13 +1016,31 @@ let run_turn
                       with
                       | Error e -> Error e
                       | Ok response_text ->
-                        (match !final_oas_turn_ordinal_ref with
-                         | None ->
+                        let turn_outcome =
+                          match s.terminal_effect_state () with
+                          | Keeper_tools_oas.Terminal_effect_completed ->
+                            Ok Keeper_turn_outcome.External_effect_completed
+                          | Keeper_tools_oas.Terminal_effect_failed failure ->
+                            Error
+                              (Agent_sdk.Error.Internal
+                                 ("successful Keeper run retained a failed terminal effect: "
+                                  ^ failure.diagnostic))
+                          | Keeper_tools_oas.Terminal_effect_open
+                          | Keeper_tools_oas.Deferred_tool_result
+                          | Keeper_tools_oas.External_effect_deferred ->
+                            Ok
+                              (Keeper_turn_outcome.of_result_surface
+                                 ~response_text
+                                 result.stop_reason)
+                        in
+                        (match turn_outcome, !final_oas_turn_ordinal_ref with
+                         | Error e, _ -> Error e
+                         | Ok _, None ->
                            Error
                              (Agent_sdk.Error.Internal
                                 "successful Agent.run returned without an \
                                  AfterTurn ordinal")
-                         | Some final_oas_turn_ordinal ->
+                         | Ok turn_outcome, Some final_oas_turn_ordinal ->
                            Keeper_agent_run_finalize_response.finalize
                              ~config ~meta ~generation ~profile_defaults
                              ~manifest_keeper_turn_id
@@ -1038,6 +1056,7 @@ let run_turn
                              ~receipt_response_text_present_ref
                              ~history_assistant_source
                              ~raw_response_text:response_text
+                             ~turn_outcome
                              ?continuation_delivery_channel
                              ~capture_replay_response:
                                (fun ~response_text ->

@@ -312,7 +312,7 @@ let validated_evidence_preview
 
 (* RFC-0232: the scheduled-autonomous "what is this keeper doing" preview, by
    precedence. [is_visible_reply] is the typed reply-surface outcome
-   ([Keeper_turn_outcome.of_result_surface]) — an OAS turn-limit observation
+   carried by [Keeper_agent_result.turn_outcome] — an OAS turn-limit observation
    may have no visible reply text, and a
    completed runtime turn may still have no visible reply. Neither case may be
    sniffed as model output, so visible model text only wins when the outcome is

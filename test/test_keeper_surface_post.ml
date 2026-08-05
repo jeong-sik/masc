@@ -58,6 +58,43 @@ let test_discord_multiple_bindings_require_channel_id () =
     (resolve ~surface:"discord" ~channel_id:(Some "222")
        ~bound_discord_channels:[ "111"; "222" ] ())
 
+let test_discord_continuation_selects_exact_bound_channel () =
+  let continuation_channel =
+    match
+      Keeper_continuation_channel.discord
+        ~guild_id:(Some "guild")
+        ~channel_id:"222"
+        ~parent_channel_id:None
+        ~thread_id:None
+        ~user_id:"user"
+    with
+    | Ok channel -> channel
+    | Error message -> fail message
+  in
+  check (result target string) "typed continuation channel"
+    (Ok (SP.To_discord { channel_id = "222" }))
+    (resolve ~surface:"discord" ~channel_id:None ~continuation_channel
+       ~bound_discord_channels:[ "111"; "222" ] ())
+
+let test_mismatched_continuation_does_not_select_channel () =
+  let continuation_channel =
+    match
+      Keeper_continuation_channel.slack
+        ~team_id:(Some "team")
+        ~channel_id:"222"
+        ~thread_ts:None
+        ~user_id:"user"
+    with
+    | Ok channel -> channel
+    | Error message -> fail message
+  in
+  match
+    resolve ~surface:"discord" ~channel_id:None ~continuation_channel
+      ~bound_discord_channels:[ "111"; "222" ] ()
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "a Slack continuation selected a Discord channel"
+
 let test_discord_foreign_channel_id_is_error () =
   match
     resolve ~surface:"discord" ~channel_id:(Some "999")
@@ -96,6 +133,23 @@ let test_slack_multiple_bindings_require_channel_id () =
   check (result target string) "explicit channel_id picks one"
     (Ok (SP.To_slack { channel_id = "BBB"; blocks = None }))
     (resolve ~surface:"slack" ~channel_id:(Some "BBB")
+       ~bound_discord_channels:[] ~bound_slack_channels:[ "AAA"; "BBB" ] ())
+
+let test_slack_continuation_selects_exact_bound_channel () =
+  let continuation_channel =
+    match
+      Keeper_continuation_channel.slack
+        ~team_id:(Some "team")
+        ~channel_id:"BBB"
+        ~thread_ts:(Some "thread")
+        ~user_id:"user"
+    with
+    | Ok channel -> channel
+    | Error message -> fail message
+  in
+  check (result target string) "typed Slack continuation channel"
+    (Ok (SP.To_slack { channel_id = "BBB"; blocks = None }))
+    (resolve ~surface:"slack" ~channel_id:None ~continuation_channel
        ~bound_discord_channels:[] ~bound_slack_channels:[ "AAA"; "BBB" ] ())
 
 let test_slack_foreign_channel_id_is_error () =
@@ -193,6 +247,10 @@ let () =
             test_discord_single_binding_resolves_implicitly;
           test_case "multiple bindings require channel_id" `Quick
             test_discord_multiple_bindings_require_channel_id;
+          test_case "Discord continuation selects exact bound channel" `Quick
+            test_discord_continuation_selects_exact_bound_channel;
+          test_case "mismatched continuation stays ambiguous" `Quick
+            test_mismatched_continuation_does_not_select_channel;
           test_case "foreign channel_id is an error" `Quick
             test_discord_foreign_channel_id_is_error;
           test_case "slack unbound is an error" `Quick
@@ -201,6 +259,8 @@ let () =
             test_slack_single_binding_resolves_implicitly;
           test_case "slack multiple bindings require channel_id" `Quick
             test_slack_multiple_bindings_require_channel_id;
+          test_case "Slack continuation selects exact bound channel" `Quick
+            test_slack_continuation_selects_exact_bound_channel;
           test_case "slack foreign channel_id is an error" `Quick
             test_slack_foreign_channel_id_is_error;
           test_case "unsupported surfaces are errors" `Quick

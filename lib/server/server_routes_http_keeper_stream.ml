@@ -1055,6 +1055,7 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
        turn_outcome, String_util.trim_to_option visible_reply, has_visible_blocks
      with
      | Keeper_turn_outcome.Continuation_checkpoint, _, _ -> None
+     | Keeper_turn_outcome.External_effect_completed, _, _ -> None
      | Keeper_turn_outcome.External_effect_pending, _, _ -> None
      | Keeper_turn_outcome.No_visible_reply, _, true -> None
      | Keeper_turn_outcome.Visible_reply, None, true -> None
@@ -1086,7 +1087,9 @@ let persisted_reply_blocks ~turn_outcome media_blocks =
       [ Keeper_chat_blocks.Status
           { kind = Keeper_chat_blocks.External_effect_pending }
       ]
-  | (Keeper_turn_outcome.Visible_reply | Keeper_turn_outcome.No_visible_reply),
+  | ( Keeper_turn_outcome.Visible_reply
+    | Keeper_turn_outcome.External_effect_completed
+    | Keeper_turn_outcome.No_visible_reply ),
     media_blocks ->
     media_blocks
 
@@ -2295,6 +2298,20 @@ let process_single_turn ~user_row_origin ~submission
                    | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                        persist_assistant_reply ~assistant_content:visible_reply
                        |> delivered_after_persist ~content:visible_reply
+                   | Keeper_turn_outcome.External_effect_completed, _ ->
+                       Result.bind
+                         (persist_tool_calls_only ())
+                         (fun () ->
+                            Keeper_chat_broadcast.chat_appended
+                              ~keeper_name:payload.name
+                              ~source:chat_source
+                              ();
+                            if queued_turn
+                            then
+                              Ok
+                                (Some
+                                   (queued_delivery_outcome_of_turn_ref turn_ref))
+                            else Ok None)
                    | Keeper_turn_outcome.External_effect_pending, _ ->
                        persist_assistant_reply ~assistant_content:""
                        |> delivered_after_persist
@@ -2766,6 +2783,7 @@ let process_single_turn ~user_row_origin ~submission
           let suppress_terminal_reply =
             match turn_outcome with
             | Keeper_turn_outcome.Continuation_checkpoint
+            | Keeper_turn_outcome.External_effect_completed
             | Keeper_turn_outcome.External_effect_pending
             | Keeper_turn_outcome.No_visible_reply ->
                 true
@@ -2787,6 +2805,11 @@ let process_single_turn ~user_row_origin ~submission
                     { name = "KEEPER_REPLY_DETAILS";
                       value = redact_json payload_json })
            | None -> ());
+          if
+            Keeper_turn_outcome.equal turn_outcome
+              Keeper_turn_outcome.External_effect_completed
+          then
+            Keeper_chat_events.publish events External_effect_completed;
           if
             Keeper_turn_outcome.equal turn_outcome
               Keeper_turn_outcome.External_effect_pending
@@ -2979,6 +3002,8 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~message_id:!current_message_id Text_message_end)
             then loop ()
+        | External_effect_completed ->
+            if send_custom "KEEPER_EXTERNAL_EFFECT_COMPLETED" `Null then loop ()
         | Oas_stream_connected ->
             if send_custom "KEEPER_CONNECTED" `Null then loop ()
         | Oas_stream_message_start { provider_message_id; model; usage } ->

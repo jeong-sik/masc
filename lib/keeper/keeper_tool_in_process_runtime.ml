@@ -697,6 +697,7 @@ let handle_surface_post_with_outcome
        | Ok bound_slack_channels ->
        match
          Keeper_surface_post.resolve_target ~surface ~channel_id
+           ?continuation_channel
            ~bound_slack_channels ~bound_discord_channels ()
        with
       | Error message ->

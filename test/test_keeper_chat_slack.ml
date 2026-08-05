@@ -285,6 +285,24 @@ let test_adapter_empty_terminal_is_error () =
       (contains message "no text or blocks")
   | _ -> fail "empty terminal must settle exactly once with an error"
 
+let test_completed_external_effect_settles_without_duplicate_send () =
+  let sends = ref 0 in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.External_effect_completed
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-effect" }
+      ]
+      ~send_plain:(fun ~content:_ ->
+        incr sends;
+        Ok ())
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        incr sends;
+        Ok ())
+  in
+  check int "completed effect makes no Slack call" 0 !sends;
+  check bool "completed effect settles the receipt" true
+    (outcomes = [ Ok () ])
+
 let test_adapter_external_effect_status_is_terminal_success () =
   let sends = ref [] in
   let outcomes =
@@ -377,6 +395,8 @@ let () =
             test_protocol_diagnostic_cannot_mask_final_failure
         ; test_case "empty terminal is explicit failure" `Quick
             test_adapter_empty_terminal_is_error
+        ; test_case "completed effect sends no duplicate reply" `Quick
+            test_completed_external_effect_settles_without_duplicate_send
         ; test_case "typed external-effect status settles successfully" `Quick
             test_adapter_external_effect_status_is_terminal_success
         ] )

@@ -1296,6 +1296,21 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_assertion_kind_mirror @test/runtest-test_workspace_heartbeat_outcome"
 
+      # Four more suites landed on main without a runtest target (persona name
+      # via #26962, tool-result demotion via #27013, verification authority
+      # tools via #26994, tool type label). Same ratchet class as above.
+      - name: Run persona, demotion, verification, and tool-label suites
+        id: recent_unwired_suites
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_persona_name @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_verification_authority_tools"
+
       - name: Run transport harness suite
         id: transport_harness_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

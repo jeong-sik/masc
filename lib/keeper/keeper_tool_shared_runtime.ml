@@ -188,7 +188,21 @@ let resolve_projected_keeper_read_path
       ~(raw_for_error : string)
       ~(projected_path : string)
   =
-  ignore raw_for_error;
+  (* Both path-carrying rejections format their payload straight into the
+     message the keeper reads, and the resolver only ever sees the projected
+     path. Restate them with [raw_for_error] so the diagnostic names the path
+     the model asked for instead of the host-side projection — which is the
+     contract this function's .mli already declares. *)
+  let in_visible_namespace = function
+    | Keeper_alerting_path.Outside_sandbox _ ->
+      Keeper_alerting_path.Outside_sandbox { raw = raw_for_error }
+    | Keeper_alerting_path.Invalid_normalized_path_projection _ ->
+      Keeper_alerting_path.Invalid_normalized_path_projection { path = raw_for_error }
+    | ( Keeper_alerting_path.Path_required
+      | Keeper_alerting_path.Invalid_lexical_endpoint
+      | Keeper_alerting_path.Allowed_paths_normalized_empty _ ) as carries_no_path ->
+      carries_no_path
+  in
   match
     Keeper_alerting_path.resolve_keeper_read_path
       ~config
@@ -196,7 +210,7 @@ let resolve_projected_keeper_read_path
       ~raw_path:projected_path
   with
   | Ok path -> Ok path
-  | Error rejection -> user_message_error rejection
+  | Error rejection -> user_message_error (in_visible_namespace rejection)
 ;;
 
 let resolve_keeper_confined_write_path

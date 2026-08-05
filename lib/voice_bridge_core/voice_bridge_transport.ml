@@ -58,13 +58,8 @@ let resolve_api_key endpoint =
   | None -> Ok ""
 ;;
 
-let exec_gate_raw_source argv = String.concat " " (List.map Filename.quote argv)
-
 let run_voice_status ?(timeout_sec = 35.0) ?(stdin_content = "") argv =
-  Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-    ~actor:(Masc_exec.Agent_id.of_string "voice/bridge")
-    ~raw_source:(exec_gate_raw_source argv)
-    ~summary:"voice bridge exec"
+  Process_eio.run_argv_with_stdin_and_status
     ~timeout_sec
     ~stdin_content
     argv

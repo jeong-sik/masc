@@ -183,10 +183,7 @@ let cleanup_oneshot_container ~container_name =
   let argv = Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ] in
   let run_rm () =
     Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
-        ~raw_source:(String.concat " " argv)
-        ~summary:"keeper docker oneshot cleanup"
+      Process_eio.run_argv_with_status
         ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
         ~cwd:(Config_dir_resolver.current_working_dir ())
         ~timeout_sec:(docker_cleanup_rm_timeout_sec ())

@@ -20,12 +20,7 @@ type focus_payload = {
 (** Run argv and get single line (Eio-native, no shell) *)
 let run_argv_line argv =
   let output =
-    Masc_exec.Exec_gate.run_argv
-      ~actor:(Masc_exec.Agent_id.of_string "system/notify")
-      ~raw_source:(Masc_exec.Exec_gate.raw_source_of_argv argv)
-      ~summary:"notify argv"
-
-      argv
+    Process_eio.run_argv argv
   in
   match String.split_on_char '\n' output with
   | [] -> ""
@@ -39,12 +34,7 @@ let string_of_process_status = function
 let run_argv_ignore argv =
   (try
      let status, _output =
-       Masc_exec.Exec_gate.run_argv_with_status
-         ~actor:(Masc_exec.Agent_id.of_string "system/notify")
-         ~raw_source:(Masc_exec.Exec_gate.raw_source_of_argv argv)
-         ~summary:"notify argv"
-
-         argv
+       Process_eio.run_argv_with_status argv
      in
      match status with
      | Unix.WEXITED 0 -> ()

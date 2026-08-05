@@ -94,10 +94,7 @@ let request_curl ~timeout_sec body =
         then (
           try
             let process_result =
-              Masc_exec.Exec_gate.run_argv_with_status
-                ~actor:(Masc_exec.Agent_id.of_string "system/graphql_client_eio")
-                ~raw_source:(String.concat " " (List.map Filename.quote argv))
-                ~summary:"graphql curl fallback"
+              Process_eio.run_argv_with_status
                 ~timeout_sec
                 argv
             in
@@ -109,10 +106,7 @@ let request_curl ~timeout_sec body =
           (* Unix fallback when Eio loop not started *)
           try
             let process_result =
-              Masc_exec.Exec_gate.run_argv_with_status
-                ~actor:(Masc_exec.Agent_id.of_string "system/graphql_client_eio")
-                ~raw_source:(String.concat " " (List.map Filename.quote argv))
-                ~summary:"graphql curl fallback"
+              Process_eio.run_argv_with_status
                 ~timeout_sec
                 argv
             in

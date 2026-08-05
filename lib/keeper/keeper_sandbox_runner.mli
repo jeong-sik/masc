@@ -17,10 +17,7 @@ type command_trust =
   | Trusted_tool
 
 type host_command =
-  { actor : Masc_exec.Agent_id.t
-  ; raw_source : string
-  ; summary : string
-  ; env : string array option
+  { env : string array option
   ; cwd : string option
   ; argv : string list
   }

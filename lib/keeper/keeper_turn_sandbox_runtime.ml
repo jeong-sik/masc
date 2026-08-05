@@ -185,11 +185,8 @@ let sandbox_environment () =
 
 let run_argv_with_status ?timeout_sec argv =
   Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
-    Masc_exec.Exec_gate.run_argv_with_status
+    Process_eio.run_argv_with_status
       ?timeout_sec
-      ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
-      ~raw_source:(String.concat " " argv)
-      ~summary:"keeper turn sandbox command"
       ~env:(sandbox_environment ())
       ~cwd:(Config_dir_resolver.current_working_dir ())
       argv)
@@ -209,16 +206,12 @@ let run_argv_with_status_split
       argv
   =
   Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
-    let raw_source = String.concat " " argv in
     let env = sandbox_environment () in
     let cwd = Config_dir_resolver.current_working_dir () in
     match on_stdout_chunk, on_stderr_chunk with
     | None, None ->
-      Masc_exec.Exec_gate.run_argv_with_status_split
+      Process_eio.run_argv_with_status_split
         ?timeout_sec
-        ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
-        ~raw_source
-        ~summary:"keeper turn sandbox command"
         ~env
         ~cwd
         argv
@@ -227,11 +220,8 @@ let run_argv_with_status_split
       let on_stdout_chunk = Option.value on_stdout_chunk ~default:(fun _ -> ()) in
       (* DET-OK: stderr callback absence has the same capture-only meaning. *)
       let on_stderr_chunk = Option.value on_stderr_chunk ~default:(fun _ -> ()) in
-      Masc_exec.Exec_gate.run_argv_with_status_split_streaming
+      Process_eio.run_argv_with_status_split_streaming
         ?timeout_sec
-        ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
-        ~raw_source
-        ~summary:"keeper turn sandbox command streaming"
         ~env
         ~cwd
         ~on_stdout_chunk
@@ -241,11 +231,8 @@ let run_argv_with_status_split
 
 let run_argv_with_stdin_and_status ?timeout_sec ~stdin_content argv =
   Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
-    Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+    Process_eio.run_argv_with_stdin_and_status
       ?timeout_sec
-      ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
-      ~raw_source:(String.concat " " argv)
-      ~summary:"keeper turn sandbox stdin command"
       ~env:(sandbox_environment ())
       ~cwd:(Config_dir_resolver.current_working_dir ())
       ~stdin_content
@@ -260,11 +247,8 @@ let run_argv_with_stdin_and_status_split
       argv
   =
   Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
-    Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
+    Process_eio.run_argv_with_stdin_and_status_split
       ?timeout_sec
-      ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
-      ~raw_source:(String.concat " " argv)
-      ~summary:"keeper turn sandbox stdin command"
       ~env:(sandbox_environment ())
       ~cwd:(Config_dir_resolver.current_working_dir ())
       ?on_stdout_chunk
@@ -280,16 +264,8 @@ let run_argv_pipeline_with_status_split
       stages
   =
   Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
-    let raw_source =
-      stages
-      |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
-      |> String.concat " | "
-    in
-    Masc_exec.Exec_gate.run_argv_pipeline_with_status_split
+    Process_eio.run_argv_pipeline_with_status_split
       ?timeout_sec
-      ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
-      ~raw_source
-      ~summary:"keeper turn sandbox pipeline command"
       ?on_stdout_chunk
       ?on_stderr_chunk
       stages)

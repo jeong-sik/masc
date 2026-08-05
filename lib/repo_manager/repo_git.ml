@@ -122,10 +122,8 @@ let status_summary_of_porcelain_lines lines =
 let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
   let argv = "git" :: "-C" :: cwd :: args in
   let envp = merge_env env in
-  let raw_source = String.concat " " (List.map Filename.quote argv) in
   let status, stdout, stderr =
-    Masc_exec.Exec_gate.run_argv_with_status_split
-      ~actor:(Masc_exec.Agent_id.of_string "repo-manager/git") ~raw_source ~summary:"repo manager git"
+    Process_eio.run_argv_with_status_split
       ~env:envp ?timeout_sec argv
   in
   match status with

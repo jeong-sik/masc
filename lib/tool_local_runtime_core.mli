@@ -94,7 +94,7 @@ val process_matches_runtime_ports :
 val discover_processes :
   unit -> (llama_process list, string) Result.t
 (** [discover_processes ()] runs [ps -ax -o pid=,command=]
-    through {!Masc_exec.Exec_gate.run_argv_with_status} and
+    through [Process_eio.run_argv_with_status] and
     parses the output into typed records.
 
     {2 Filter}

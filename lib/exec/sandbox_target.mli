@@ -7,8 +7,7 @@
 
     [t] is a variant rather than a record so that the [Host] case needs
     no runner.  The dispatch path in [Exec_dispatch] routes [Host]
-    directly to [Exec_gate], avoiding a circular dependency between
-    [Sandbox_target] and [Exec_gate]. *)
+    directly to [Process_eio]. *)
 
 (** A runner closure executes an argv with the given env / cwd and returns
     the raw process status plus stdout/stderr buffers. Exceptions are
@@ -40,7 +39,7 @@ type t =
   | Docker of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
 
 (** Default host target.  The dispatch path routes this directly to
-    [Exec_gate]; no runner is carried. *)
+    [Process_eio]; no runner is carried. *)
 val host : unit -> t
 
 (** Build a Docker target.  The caller (typically [lib/keeper]) supplies

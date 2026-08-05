@@ -11,10 +11,7 @@ type command_trust =
   | Trusted_tool
 
 type host_command =
-  { actor : Masc_exec.Agent_id.t
-  ; raw_source : string
-  ; summary : string
-  ; env : string array option
+  { env : string array option
   ; cwd : string option
   ; argv : string list
   }
@@ -155,10 +152,7 @@ let route_via ~config ~meta ~cwd =
 
 let run_host_command ~timeout_sec (host : host_command) =
   let status, output =
-    Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:host.actor
-      ~raw_source:host.raw_source
-      ~summary:host.summary
+    Process_eio.run_argv_with_status
       ~timeout_sec
       ?env:host.env
       ?cwd:host.cwd

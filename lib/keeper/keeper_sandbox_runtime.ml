@@ -237,7 +237,6 @@ let probe_cleanup_container_presence ~container_id ~timeout_sec =
   in
   let st, out =
     run_docker_argv_with_status
-      ~summary:"keeper sandbox docker container presence probe"
       ~timeout_sec
       argv
   in
@@ -282,7 +281,6 @@ let probe_container_name_presence ~container_name ?timeout_sec () =
   in
   let st, out =
     run_docker_argv_with_status
-      ~summary:"keeper sandbox docker container-name presence probe"
       ?timeout_sec
       argv
   in
@@ -312,7 +310,6 @@ let probe_container_state_optional ~container_name ?timeout_sec () =
   in
   let st, out =
     run_docker_argv_with_status
-      ~summary:"keeper sandbox docker container state probe"
       ?timeout_sec
       argv
   in
@@ -384,7 +381,6 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
   let argv = docker_command_argv () @ [ "inspect"; "--format"; format; container_id ] in
   let st, out =
     run_docker_argv_with_status
-      ~summary:"keeper sandbox docker inspect cleanup"
       ~timeout_sec
       argv
   in
@@ -419,7 +415,6 @@ let remove_cleanup_container ~container_id ~timeout_sec =
   let argv = docker_command_argv () @ [ "rm"; "-f"; "-v"; container_id ] in
   let st, out =
     run_docker_argv_with_status
-      ~summary:"keeper sandbox docker rm -v cleanup"
       ~timeout_sec
       argv
   in
@@ -457,7 +452,6 @@ let cleanup_stale_containers
     in
     let st, out =
       run_docker_argv_with_status
-        ~summary:"keeper sandbox docker ps cleanup"
         ~timeout_sec
         argv
     in
@@ -530,7 +524,6 @@ let list_container_ids ?keeper_name ?container_kind ~base_path ~timeout_sec () =
     in
     let st, out =
       run_docker_argv_with_status
-        ~summary:"keeper sandbox docker ps list"
         ~timeout_sec
         argv
     in
@@ -577,7 +570,6 @@ let list_containers ?keeper_name ?container_kind ~base_path ~timeout_sec () =
     in
     let st, out =
       run_docker_argv_with_status
-        ~summary:"keeper sandbox docker inspect live"
         ~timeout_sec
         argv
     in
@@ -696,7 +688,6 @@ let docker_image_present_with_class_optional ~image ?timeout_sec () =
     let argv = docker_command_argv () @ [ "image"; "inspect"; image ] in
     let st, out =
       run_docker_argv_with_status
-        ~summary:"keeper sandbox docker image inspect"
         ?timeout_sec
         argv
     in

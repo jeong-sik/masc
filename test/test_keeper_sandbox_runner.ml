@@ -189,10 +189,7 @@ let test_local_route_does_not_force_backend_cwd () =
          Keeper_sandbox_runner.run_command_with_status
            ~config ~meta ~timeout_sec:5.0
            ~host:
-             { actor = Masc_exec.Agent_id.of_string "tool/execute"
-             ; raw_source = "true"
-             ; summary = "runner lazy cwd host smoke"
-             ; env = None
+             { env = None
              ; cwd = Some cwd
              ; argv = [ "true" ]
              }

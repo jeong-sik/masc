@@ -1,12 +1,6 @@
 (** Tone ADT — must precede record types that use it. *)
 type tone = Dashboard_utils.tone = Tone_ok | Tone_warn | Tone_bad
 
-type queue_context = {
-  severity_rank : int;
-  last_seen_ts : float;
-  json : Yojson.Safe.t;
-}
-
 type operation_context = {
   operation_id : string;
   severity : tone;

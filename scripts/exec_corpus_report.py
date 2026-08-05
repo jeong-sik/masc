@@ -108,10 +108,7 @@ def build_report(entries):
     bin_top = Counter()
     git_sub = Counter()
     for e in entries:
-        kind = e.get("kind", "?")
-        kinds[kind] += 1
-        if kind == "Exec_gate.decision":
-            continue
+        kinds[e.get("kind", "?")] += 1
         argv = e.get("argv") or []
         buckets[classify(argv)] += 1
         if argv:

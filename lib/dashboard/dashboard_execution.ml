@@ -437,17 +437,14 @@ let keeper_queue_summary keeper trust =
 
 let keeper_queue_last_seen keeper trust =
   let latest_causal = member_assoc "latest_causal_event" trust in
-  let last_seen_at =
-    latest_iso_timestamp
-      [ Json_util.assoc_string_opt "ts" latest_causal
-      ; Json_util.assoc_string_opt "observed_at" latest_causal
-      ; Json_util.assoc_string_opt "last_autonomous_action_at" keeper
-      ; Json_util.assoc_string_opt "last_heartbeat" keeper
-      ; Json_util.assoc_string_opt "updated_at" keeper
-      ; Json_util.assoc_string_opt "created_at" keeper
-      ]
-  in
-  last_seen_at, Dashboard_utils.parse_iso_opt last_seen_at |> Option.value ~default:0.0
+  latest_iso_timestamp
+    [ Json_util.assoc_string_opt "ts" latest_causal
+    ; Json_util.assoc_string_opt "observed_at" latest_causal
+    ; Json_util.assoc_string_opt "last_autonomous_action_at" keeper
+    ; Json_util.assoc_string_opt "last_heartbeat" keeper
+    ; Json_util.assoc_string_opt "updated_at" keeper
+    ; Json_util.assoc_string_opt "created_at" keeper
+    ]
 ;;
 
 let build_keeper_execution_queue keepers =
@@ -470,7 +467,7 @@ let build_keeper_execution_queue keepers =
       else (
         let severity = keeper_queue_severity keeper trust in
         let summary = keeper_queue_summary keeper trust in
-        let last_seen_at, last_seen_ts = keeper_queue_last_seen keeper trust in
+        let last_seen_at = keeper_queue_last_seen keeper trust in
         let terminal_code = terminal_reason_code trust in
         let next_human_action =
           match Json_util.assoc_string_opt "next_human_action" trust with
@@ -500,28 +497,24 @@ let build_keeper_execution_queue keepers =
             ()
         in
         Some
-          { severity_rank = severity_rank severity
-          ; last_seen_ts
-          ; json =
-              `Assoc
-                [ "id", `String ("keeper-" ^ keeper_name)
-                ; "kind", `String "keeper"
-                ; "severity", `String severity
-                ; "status", member_assoc "status" keeper
-                ; "summary", `String summary
-                ; "target_type", `String "keeper"
-                ; "target_id", `String keeper_name
-                ; "linked_operation_id", `Null
-                ; "last_seen_at", Json_util.string_opt_to_json last_seen_at
-                ; "attention_reason", member_assoc "attention_reason" trust
-                ; "next_human_action", Json_util.string_opt_to_json next_human_action
-                ; "terminal_reason_code", Json_util.string_opt_to_json terminal_code
-                ; "runtime_trust", trust
-                ; "top_handoff", command_handoff
-                ; "intervene_handoff", intervene_handoff
-                ; "command_handoff", command_handoff
-                ]
-          }))
+          (`Assoc
+            [ "id", `String ("keeper-" ^ keeper_name)
+            ; "kind", `String "keeper"
+            ; "severity", `String severity
+            ; "status", member_assoc "status" keeper
+            ; "summary", `String summary
+            ; "target_type", `String "keeper"
+            ; "target_id", `String keeper_name
+            ; "linked_operation_id", `Null
+            ; "last_seen_at", Json_util.string_opt_to_json last_seen_at
+            ; "attention_reason", member_assoc "attention_reason" trust
+            ; "next_human_action", Json_util.string_opt_to_json next_human_action
+            ; "terminal_reason_code", Json_util.string_opt_to_json terminal_code
+            ; "runtime_trust", trust
+            ; "top_handoff", command_handoff
+            ; "intervene_handoff", intervene_handoff
+            ; "command_handoff", command_handoff
+            ])))
 ;;
 
 let model_map_of_keeper_rows keepers =
@@ -807,7 +800,8 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         operation_contexts
     in
     let limited_ops = take 20 active_ops in
-    (* Execution queue: top 10 priority items *)
+    (* Execution queue: first 10 attention-needing keepers in snapshot order.
+       Not ranked — the cut is positional, not by severity or recency. *)
     let limited_queue = take 10 execution_queue in
     let base_fields =
       let utf8_repair = Safe_ops.persistence_utf8_repair_stats () in
@@ -823,8 +817,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
             ; ( "persistence_sanitized_paths_sample"
               , `List (List.map (fun path -> `String path) utf8_repair.path_samples) )
             ] )
-      ; ( "execution_queue"
-        , `List (List.map (fun (row : queue_context) -> row.json) limited_queue) )
+      ; "execution_queue", `List limited_queue
       ; ( "operation_briefs"
         , `List (List.map (fun (row : operation_context) -> row.json) limited_ops) )
       ; ( "worker_support_briefs"

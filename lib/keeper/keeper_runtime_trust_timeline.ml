@@ -80,7 +80,15 @@ let severity_of_decision = function
   | "skip" -> "warn"
   | _ -> "warn"
 
-let severity_of_tool_call success = if success then "ok" else "bad"
+let severity_of_tool_call = function
+  | Some true -> "ok"
+  | Some false -> "bad"
+  | None -> "warn"
+
+let outcome_word_of_tool_call = function
+  | Some true -> "succeeded"
+  | Some false -> "failed"
+  | None -> "outcome unknown"
 
 let severity_of_approval_event event decision =
   match event with
@@ -96,21 +104,14 @@ let severity_of_approval_event event decision =
 let tool_call_timeline_event json =
   match json_float_opt_member "ts" json, json_string_opt_member "tool" json with
   | Some ts_unix, Some tool_name ->
-      let success =
-        json_bool_opt_member "success" json |> Option.value ~default:true
-      in
+      let success = json_bool_opt_member "success" json in
+      let outcome_word = outcome_word_of_tool_call success in
       let duration_ms = json_float_opt_member "duration_ms" json in
       let summary =
         match duration_ms with
         | Some ms ->
-            Printf.sprintf "%s %s in %.0fms"
-              tool_name
-              (if success then "succeeded" else "failed")
-              ms
-        | None ->
-            Printf.sprintf "%s %s"
-              tool_name
-              (if success then "succeeded" else "failed")
+            Printf.sprintf "%s %s in %.0fms" tool_name outcome_word ms
+        | None -> Printf.sprintf "%s %s" tool_name outcome_word
       in
       Some
         (timeline_event_json

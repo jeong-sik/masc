@@ -18,12 +18,7 @@ let get_tty () =
         try
           if Unix.isatty Unix.stdin then
             let output =
-              Masc_exec.Exec_gate.run_argv
-                ~actor:(Masc_exec.Agent_id.of_string "workspace/identity")
-                ~raw_source:"tty"
-                ~summary:"workspace tty probe"
-
-                [ "tty" ]
+              Process_eio.run_argv [ "tty" ]
             in
             let trimmed = String.trim output in
             if String.length trimmed > 0 then Some trimmed else None

@@ -304,6 +304,23 @@ let test_merged_system_block_keeps_turn_intent_rules () =
     (has_in prompt "A Task claim coordinates ownership; it grants no additional authority");
   check bool "no-work report is a valid outcome" true
     (has_in prompt "give a concise no-work report");
+  (* The rule said to report and never said where, so the report went to the
+     shared surface. Measured on the live workspace 2026-08-05: every one of
+     the 26 board posts of the preceding 4.7 hours was taskmaster's
+     "[TASKMASTER] Hourly status -- 0 unclaimed", none of them answered, the
+     gap between them shrinking from 85 minutes to 4; the newest comment by
+     then was 9.2 hours old. That keeper's own config already carries the same
+     defect from 2026-07-20, when an unrouted "report" instruction flowed into
+     keeper_task_create and left 272 identical meta-tasks -- naming
+     keeper_broadcast fixed the channel but not the unconditional report, so
+     the flood moved to the Board. [Own_board_posts] is a context layer, so
+     the copies also accumulate in the poster's own history. *)
+  check bool "a no-work report is answered, not posted" true
+    (has_in prompt "A no-work report is not a Board post");
+  check bool "the cost of republishing an unchanged status is stated" true
+    (has_in prompt "an unchanged status republished every cycle crowds that view");
+  check bool "posting is tied to newness" true
+    (has_in prompt "Post when what you found is new");
   check bool "completion claims name their evidence" true
     (has_in prompt "give the exact Task ID, artifact, operation ID, commit, trace, or pull request");
   check bool "no second state protocol in prose" true

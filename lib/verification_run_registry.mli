@@ -11,12 +11,22 @@ type outcome =
   | Commit_failed of { detail : string }
   | Raised of { detail : string }
 
+type tool_observation =
+  { tool_name : string
+  ; input : Yojson.Safe.t
+  ; disposition : (unit, unit, unit) Tool_result.disposition
+  ; output_excerpt : string
+  ; output_truncated : bool
+  ; duration_ms : float
+  }
+
 type run_status =
   | Running
   | Completed of
       { outcome : outcome
       ; evaluator_runtime : string option
       ; elapsed_s : float
+      ; tools : tool_observation list
       }
 
 type run =
@@ -48,6 +58,7 @@ val mark_completed
   :  t
   -> verification_id:string
   -> outcome:outcome
+  -> tools:tool_observation list
   -> ?evaluator_runtime:string
   -> elapsed_s:float
   -> unit
@@ -60,6 +71,11 @@ val get : t -> verification_id:string -> run option
 val outcome_label : outcome -> string
 val status_label : run_status -> string
 val run_to_yojson : run -> Yojson.Safe.t
+val observe_tool_result : input:Yojson.Safe.t -> Tool_result.result -> tool_observation
+
+(** Called after a registry mutation is visible. The server installs a WS
+    invalidation broadcaster; library-only users keep the no-op default. *)
+val change_observer_fn : (unit -> unit) Atomic.t
 type global_install_error = Already_installed
 
 val global : unit -> t

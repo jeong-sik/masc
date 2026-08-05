@@ -9,12 +9,22 @@ type outcome =
   | Commit_failed of { detail : string }
   | Raised of { detail : string }
 
+type tool_observation =
+  { tool_name : string
+  ; input : Yojson.Safe.t
+  ; disposition : (unit, unit, unit) Tool_result.disposition
+  ; output_excerpt : string
+  ; output_truncated : bool
+  ; duration_ms : float
+  }
+
 type run_status =
   | Running
   | Completed of
       { outcome : outcome
       ; evaluator_runtime : string option
       ; elapsed_s : float
+      ; tools : tool_observation list
       }
 
 type run =
@@ -48,6 +58,7 @@ module Payload = struct
     { outcome : outcome
     ; evaluator_runtime : string option
     ; elapsed_s : float
+    ; tools : tool_observation list
     }
 
   let name = "verification_run_registry"
@@ -92,9 +103,20 @@ module Payload = struct
   ;;
 
   let completion_to_yojson completion =
+    let tool_to_yojson tool =
+      `Assoc
+        [ "tool_name", `String tool.tool_name
+        ; "input", tool.input
+        ; "disposition", `String (Tool_result.string_of_disposition tool.disposition)
+        ; "output_excerpt", `String tool.output_excerpt
+        ; "output_truncated", `Bool tool.output_truncated
+        ; "duration_ms", `Float tool.duration_ms
+        ]
+    in
     let fields =
       [ "outcome", `String (outcome_label completion.outcome)
       ; "elapsed_s", `Float completion.elapsed_s
+      ; "tools", `List (List.map tool_to_yojson completion.tools)
       ]
       @ outcome_fields completion.outcome
       @
@@ -120,7 +142,7 @@ module Payload = struct
     let* required_detail_fields = required_detail_fields in
     let* () =
       Run_registry_core.Json.exact_fields
-        ~required:([ "outcome"; "elapsed_s" ] @ required_detail_fields)
+        ~required:([ "outcome"; "elapsed_s"; "tools" ] @ required_detail_fields)
         ~optional:[ "evaluator_runtime" ]
         fields
     in
@@ -128,6 +150,62 @@ module Payload = struct
     let* evaluator_runtime =
       Run_registry_core.Json.optional_string_field "evaluator_runtime" fields
     in
+    let* tools_json =
+      match List.assoc_opt "tools" fields with
+      | Some (`List tools) -> Ok tools
+      | Some _ -> Error "field tools must be an array"
+      | None -> Error "missing field tools"
+    in
+    let tool_of_yojson json =
+      let* fields = Run_registry_core.Json.object_fields json in
+      let* () =
+        Run_registry_core.Json.exact_fields
+          ~required:
+            [ "tool_name"
+            ; "input"
+            ; "disposition"
+            ; "output_excerpt"
+            ; "output_truncated"
+            ; "duration_ms"
+            ]
+          fields
+      in
+      let* tool_name = Run_registry_core.Json.string_field "tool_name" fields in
+      let* input =
+        match List.assoc_opt "input" fields with
+        | Some value -> Ok value
+        | None -> Error "missing field input"
+      in
+      let* disposition_wire =
+        Run_registry_core.Json.string_field "disposition" fields
+      in
+      let* disposition = Tool_result.unit_disposition_of_string disposition_wire in
+      let* output_excerpt =
+        Run_registry_core.Json.string_field "output_excerpt" fields
+      in
+      let* output_truncated =
+        match List.assoc_opt "output_truncated" fields with
+        | Some (`Bool value) -> Ok value
+        | Some _ -> Error "field output_truncated must be a boolean"
+        | None -> Error "missing field output_truncated"
+      in
+      let* duration_ms = Run_registry_core.Json.float_field "duration_ms" fields in
+      Ok
+        { tool_name
+        ; input
+        ; disposition
+        ; output_excerpt
+        ; output_truncated
+        ; duration_ms
+        }
+    in
+    let rec parse_tools acc = function
+      | [] -> Ok (List.rev acc)
+      | tool :: rest ->
+        let* tool = tool_of_yojson tool in
+        parse_tools (tool :: acc) rest
+    in
+    let* tools = parse_tools [] tools_json in
     let* outcome =
       match label with
       | "approved" -> Ok Approved
@@ -149,7 +227,7 @@ module Payload = struct
         Ok (Raised { detail })
       | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
     in
-    Ok { outcome; evaluator_runtime; elapsed_s }
+    Ok { outcome; evaluator_runtime; elapsed_s; tools }
   ;;
 end
 
@@ -160,6 +238,17 @@ type t = Store.t
 let create = Store.create
 let replay = Store.replay
 let max_completed_retained = Store.max_completed_retained
+
+let change_observer_fn : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
+
+let notify_changed () =
+  try (Atomic.get change_observer_fn) () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Task.warn
+      "verification_run_registry change observer failed: %s"
+      (Printexc.to_string exn)
+;;
 
 let register_running
       t
@@ -174,14 +263,40 @@ let register_running
     t
     ~id:verification_id
     ~started_at
-    ~registration:{ Payload.task_id; producer; authority_kind; authority_actor }
+    ~registration:{ Payload.task_id; producer; authority_kind; authority_actor };
+  notify_changed ()
 ;;
 
-let mark_completed t ~verification_id ~outcome ?evaluator_runtime ~elapsed_s () =
-  let completion = { Payload.outcome; evaluator_runtime; elapsed_s } in
+let mark_completed t ~verification_id ~outcome ~tools ?evaluator_runtime ~elapsed_s () =
+  let completion = { Payload.outcome; evaluator_runtime; elapsed_s; tools } in
   match Store.complete t ~id:verification_id ~completion with
-  | `Completed -> ()
+  | `Completed -> notify_changed ()
   | `Unknown -> ()
+;;
+
+let observe_tool_result ~input (result : Tool_result.result) =
+  let disposition =
+    match result with
+    | Tool_result.Completed _ -> Tool_result.Completed ()
+    | Tool_result.Deferred _ -> Tool_result.Deferred ()
+    | Tool_result.Failed _ -> Tool_result.Failed ()
+  in
+  let output_excerpt, output_truncated =
+    let redacted = Tool_result.message result |> Observability_redact.redact_text in
+    Keeper_text_processing.truncate_utf8_prefix
+      ~max_bytes:1024
+      redacted
+  in
+  { tool_name = Tool_result.tool_name result
+  ; input =
+      (input
+       |> Observability_redact.redact_json_value
+       |> Observability_redact.preview_json_strings ~max_len:512)
+  ; disposition
+  ; output_excerpt
+  ; output_truncated
+  ; duration_ms = Tool_result.duration_ms result
+  }
 ;;
 
 let run_of_entry (entry : Store.entry) =
@@ -193,6 +308,7 @@ let run_of_entry (entry : Store.entry) =
         { outcome = completion.outcome
         ; evaluator_runtime = completion.evaluator_runtime
         ; elapsed_s = completion.elapsed_s
+        ; tools = completion.tools
         }
   in
   { verification_id = entry.id
@@ -236,8 +352,20 @@ let run_to_yojson run =
   let completion_fields =
     match run.status with
     | Running -> []
-    | Completed { outcome; evaluator_runtime; elapsed_s } ->
-      [ "elapsed_s", `Float elapsed_s ]
+    | Completed { outcome; evaluator_runtime; elapsed_s; tools } ->
+      let tool_to_yojson tool =
+        `Assoc
+          [ "tool_name", `String tool.tool_name
+          ; "input", tool.input
+          ; "disposition", `String (Tool_result.string_of_disposition tool.disposition)
+          ; "output_excerpt", `String tool.output_excerpt
+          ; "output_truncated", `Bool tool.output_truncated
+          ; "duration_ms", `Float tool.duration_ms
+          ]
+      in
+      [ "elapsed_s", `Float elapsed_s
+      ; "tools", `List (List.map tool_to_yojson tools)
+      ]
       @ outcome_detail_fields outcome
       @
       (match evaluator_runtime with

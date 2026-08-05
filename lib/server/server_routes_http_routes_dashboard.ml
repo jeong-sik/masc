@@ -687,6 +687,20 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/exact-lane-runs" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let runs =
+           Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
+         in
+         let json =
+           `Assoc
+             [ ("generated_at", `String (Masc_domain.now_iso ()))
+             ; ("count", `Int (List.length runs))
+             ; ("runs", `List (List.map Exact_lane_run_registry.run_to_yojson runs))
+             ]
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/workspace" (fun request reqd ->
        with_public_read handle_dashboard_workspace request reqd)
   (* Dev-only Worker bearer for the dashboard UI. Served exclusively when the

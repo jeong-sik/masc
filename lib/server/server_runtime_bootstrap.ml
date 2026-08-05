@@ -634,7 +634,7 @@ let startup_failure_disposition ~state_ready =
 
 type owner_initialization_error =
   | Runtime_config_path_unavailable
-  | Run_registry_already_installed of [ `Fusion | `Verification ]
+  | Run_registry_already_installed of [ `Exact_lane | `Fusion | `Verification ]
   | Runtime_default_initialization_failed of Runtime.strict_init_error
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error
@@ -671,6 +671,8 @@ let owner_initialization_error_to_string = function
     "Fusion run registry already has a process owner"
   | Run_registry_already_installed `Verification ->
     "Verification run registry already has a process owner"
+  | Run_registry_already_installed `Exact_lane ->
+    "Exact lane run registry already has a process owner"
   | Runtime_default_initialization_failed error ->
     "Runtime.init_default_degraded failed: "
     ^ Runtime.strict_init_error_to_string error
@@ -767,6 +769,25 @@ let initialize_owner_state_blocking
      raise
        (Owner_initialization_failed
           (Run_registry_already_installed `Verification)));
+  let exact_lane_registry =
+    Filename.concat masc_dir "exact-lane-runs.jsonl"
+    |> Exact_lane_run_registry.replay
+  in
+  (match Exact_lane_run_registry.install_global exact_lane_registry with
+   | Ok () -> ()
+   | Error Exact_lane_run_registry.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          (Run_registry_already_installed `Exact_lane)));
+  let broadcast_internal_agent_runs_changed () =
+    Sse.broadcast (`Assoc [ "type", `String "internal_agent_runs_changed" ])
+  in
+  Atomic.set
+    Verification_run_registry.change_observer_fn
+    broadcast_internal_agent_runs_changed;
+  Atomic.set
+    Exact_lane_run_registry.change_observer_fn
+    broadcast_internal_agent_runs_changed;
   (* [main_eio] caches the normalized operator input before entering Eio.
      Replace that preflight value with the canonical owner identity before
      [Workspace.default_config_uncached] constructs its backend, otherwise the

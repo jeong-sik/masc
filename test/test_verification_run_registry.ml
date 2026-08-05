@@ -119,6 +119,7 @@ let test_outcome_detail_reaches_the_surface () =
          t
          ~verification_id:"vrf-detail"
          ~outcome
+         ~tools:[]
          ~evaluator_runtime:"cross-verifier"
          ~elapsed_s:2.5
          ();
@@ -152,7 +153,7 @@ let test_outcomes_survive_replay () =
        let path = fresh_path (".{" ^ label ^ "}.jsonl") in
        let t = R.create ~path () in
        register t ~verification_id:"vrf-replay" ~started_at:50.0;
-       R.mark_completed t ~verification_id:"vrf-replay" ~outcome ~elapsed_s:1.0 ();
+       R.mark_completed t ~verification_id:"vrf-replay" ~outcome ~tools:[] ~elapsed_s:1.0 ();
        let replayed = R.replay path in
        (match R.get replayed ~verification_id:"vrf-replay" with
         | None -> fail ("completed review lost on replay: " ^ label)
@@ -172,7 +173,7 @@ let test_replay_drops_running_reviews () =
   let path = fresh_path ".running.jsonl" in
   let t = R.create ~path () in
   register t ~verification_id:"vrf-done" ~started_at:10.0;
-  R.mark_completed t ~verification_id:"vrf-done" ~outcome:E.Approved ~elapsed_s:1.0 ();
+  R.mark_completed t ~verification_id:"vrf-done" ~outcome:E.Approved ~tools:[] ~elapsed_s:1.0 ();
   register t ~verification_id:"vrf-stale" ~started_at:20.0;
   let replayed = R.replay path in
   (* The review fiber dies with the process and the authority rescans
@@ -198,6 +199,7 @@ let test_retry_replaces_the_prior_attempt () =
     t
     ~verification_id:"vrf-retry"
     ~outcome:(E.Not_reviewed { gate = "invalid_verdict"; detail = "no tool call" })
+    ~tools:[]
     ~elapsed_s:1.0
     ();
   (* A deferred review is retried under a fresh authority actor; the table must
@@ -225,6 +227,7 @@ let test_unknown_completion_is_not_persisted () =
     t
     ~verification_id:"vrf-unknown"
     ~outcome:E.Approved
+    ~tools:[]
     ~elapsed_s:1.0
     ();
   check int "unknown completion creates no row" 0 (List.length (R.list_runs t));
@@ -275,7 +278,7 @@ let test_completed_runs_are_pruned () =
   for i = 1 to total do
     let verification_id = Printf.sprintf "vrf-%03d" i in
     register t ~verification_id ~started_at:(float_of_int i);
-    R.mark_completed t ~verification_id ~outcome:E.Approved ~elapsed_s:0.5 ()
+    R.mark_completed t ~verification_id ~outcome:E.Approved ~tools:[] ~elapsed_s:0.5 ()
   done;
   check
     int
@@ -304,6 +307,47 @@ let test_global_lifecycle_rejects_reinstallation () =
    | Ok () -> fail "second installation replaced the owner"
    | Error Lifecycle.Already_installed -> ());
   check int "first owner remains active" 1 (Lifecycle.current ())
+;;
+
+let test_tool_result_keeps_typed_disposition_and_input () =
+  let result =
+    Tool_result.ok
+      ~tool_name:"report_review_verdict"
+      ~start_time:(Time_compat.now ())
+      "Completion verdict recorded: APPROVE"
+  in
+  let tool =
+    R.observe_tool_result
+      ~input:(`Assoc [ "verdict", `String "APPROVE" ])
+      result
+  in
+  let t = R.create () in
+  register t ~verification_id:"vrf-tools" ~started_at:10.0;
+  R.mark_completed
+    t
+    ~verification_id:"vrf-tools"
+    ~outcome:E.Approved
+    ~tools:[ tool ]
+    ~elapsed_s:0.1
+    ();
+  let json = R.get t ~verification_id:"vrf-tools" |> Option.get |> R.run_to_yojson in
+  match field json "tools" with
+  | Some (`List [ `Assoc fields ]) ->
+    check
+      (option string)
+      "tool name"
+      (Some "report_review_verdict")
+      (match List.assoc_opt "tool_name" fields with
+       | Some (`String value) -> Some value
+       | _ -> None);
+    check
+      (option string)
+      "typed disposition"
+      (Some "completed")
+      (match List.assoc_opt "disposition" fields with
+       | Some (`String value) -> Some value
+       | _ -> None)
+  | _ -> fail "completed review must serialize one tool observation"
 ;;
 
 let () =
@@ -341,6 +385,10 @@ let () =
             `Quick
             test_missing_outcome_payload_is_an_error
         ; test_case "completed runs are pruned" `Quick test_completed_runs_are_pruned
+        ; test_case
+            "tool evidence keeps input and typed disposition"
+            `Quick
+            test_tool_result_keeps_typed_disposition_and_input
         ; test_case
             "global registry has one installation owner"
             `Quick

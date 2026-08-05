@@ -1182,6 +1182,38 @@ let spawn_with
   | Error detail -> Error detail
   | Ok prepared ->
     let clock = Eio_context.get_clock_opt () in
+    let registry = Exact_lane_run_registry.global () in
+    let run_id = Random_id.prefixed ~prefix:"exact-hitl-judge-" ~bytes:16 in
+    let started_at = Time_compat.now () in
+    let observed_summary = ref None in
+    let on_summary summary =
+      observed_summary := Some summary;
+      on_summary summary
+    in
+    Exact_lane_run_registry.register_running
+      registry
+      ~run_id
+      ~lane:Exact_lane_run_registry.Hitl_auto_judge
+      ~subject_id:entry.id
+      ~actor:entry.keeper_name
+      ~started_at
+      ~input:
+        (`Assoc
+           [ "tool_name", `String entry.tool_name
+           ; "turn_id", Json_util.int_opt_to_json entry.turn_id
+           ; "task_id", Json_util.string_opt_to_json entry.task_id
+           ; "goal_id", Json_util.string_opt_to_json entry.goal_id
+           ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
+           ; "partial_context", `Bool (Option.is_none entry.request_context)
+           ]);
+    let complete outcome output =
+      Exact_lane_run_registry.mark_completed
+        registry
+        ~run_id
+        ~outcome
+        ~elapsed_s:(Time_compat.now () -. started_at)
+        ~output
+    in
     Eio.Fiber.fork ~sw (fun () ->
     let execution_outcome =
       try
@@ -1217,26 +1249,58 @@ let spawn_with
       | exn -> `Uncertain exn
     in
     match execution_outcome with
-    | `Completed -> on_finish Conclusive_terminalization
+    | `Completed ->
+      let output =
+        match !observed_summary with
+        | Some summary -> hitl_context_summary_to_yojson summary
+        | None -> `Assoc [ "terminal", `String "conclusive_terminalization" ]
+      in
+      complete Exact_lane_run_registry.Succeeded output;
+      on_finish Conclusive_terminalization
     | `Cancelled (cancellation, cancellation_backtrace) ->
+      complete Exact_lane_run_registry.Cancelled `Null;
       on_finish Terminalization_persistence_uncertain;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Cancelled_uncertain
         (cancellation, cancellation_backtrace, _detail) ->
+      complete Exact_lane_run_registry.Cancelled `Null;
       on_finish Terminalization_persistence_uncertain;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Cancelled_identity_unbound
         (cancellation, cancellation_backtrace) ->
+      complete Exact_lane_run_registry.Cancelled `Null;
       on_finish Terminalization_identity_unbound;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Cancelled_rejected
         (cancellation, cancellation_backtrace, _rejection) ->
+      complete Exact_lane_run_registry.Cancelled `Null;
       on_finish Terminalization_rejected;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Identity_unbound ->
+      complete
+        (Exact_lane_run_registry.Failed
+           { code = "terminalization_identity_unbound"
+           ; detail = "exact attempt identity was not durably bound"
+           })
+        `Null;
       on_finish Terminalization_identity_unbound
-    | `Rejected _ -> on_finish Terminalization_rejected
+    | `Rejected rejection ->
+      let detail =
+        Keeper_approval_queue.exact_attempt_error_to_string
+          (Exact_attempt_rejected rejection)
+      in
+      complete
+        (Exact_lane_run_registry.Failed
+           { code = "terminalization_rejected"; detail })
+        `Null;
+      on_finish Terminalization_rejected
     | `Uncertain uncertainty ->
+      complete
+        (Exact_lane_run_registry.Failed
+           { code = "terminalization_persistence_uncertain"
+           ; detail = Printexc.to_string uncertainty
+           })
+        `Null;
       on_finish Terminalization_persistence_uncertain;
       raise uncertainty);
     Ok Worker_forked

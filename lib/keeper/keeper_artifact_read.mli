@@ -68,6 +68,10 @@ val handle :
   base_path:string ->
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
+(** Total request boundary for every caller, including direct in-process uses
+    that do not traverse [Tool_input_validation]. The dispatch pre-hook rejects
+    the same declared bounds earlier, but never replaces this parser's ownership
+    of the handler input contract. *)
 
 module For_testing : sig
   val request_of_json : Yojson.Safe.t -> (request, invalid_request) result

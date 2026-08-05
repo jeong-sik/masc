@@ -1225,6 +1225,10 @@ let start_keepalive
           (fun () ->
              run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup)
           ~finally:(fun () ->
+            (* fire-and-forget: the bool says whether this call was the one that
+               resolved it. Either way the worker is told to stop, so there is
+               nothing for the caller to decide. Mirrors the supervisor's
+               [stop_board_worker]. *)
             ignore (Eio.Promise.try_resolve resolve_board_stop () : bool)))
              ~cleanup:cleanup_tracking
          with

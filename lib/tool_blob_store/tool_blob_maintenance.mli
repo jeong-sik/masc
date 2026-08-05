@@ -14,8 +14,9 @@
     hashes that were candidates in the previous durable snapshot and remain
     unreferenced in the new complete scan. Production calls it only at the
     quiescent startup boundary, so two complete startup scans are required.
-    A malformed reference, scan failure, candidate-store failure, or unlink
-    failure aborts visibly. Because the blob store is shared across clusters
+    A malformed reference, scan failure, exhausted scan budget, candidate-store
+    failure, or unlink failure aborts visibly. Because the blob store is shared
+    across clusters
     while several consumers are cluster-aware, any non-empty
     [<base>/.masc/clusters] tree currently disables maintenance fail-closed
     until cross-cluster writer quiescence has one coordination owner. *)
@@ -23,6 +24,17 @@
 type mode =
   | Observe_only
   | Delete_previous_candidates
+
+(** Wall-clock ceiling for one durable scan. [Bounded_by] aborts the traversal
+    with {!Scan_budget_exhausted} once [deadline_epoch_seconds] passes, which
+    short-circuits {!run} before the candidate snapshot is written: a partial
+    scan can never record a still-referenced blob as a deletion candidate.
+    Callers on a deadline (server startup, bounded by the startup watchdog)
+    must bound the scan; offline callers with no competing deadline pass
+    [Unbounded]. *)
+type scan_budget =
+  | Unbounded
+  | Bounded_by of { deadline_epoch_seconds : float }
 
 type error =
   | Clustered_durable_roots_uncoordinated of
@@ -60,6 +72,11 @@ type error =
       { path : string
       ; detail : string
       }
+  | Scan_budget_exhausted of
+      { elapsed_seconds : float
+      ; files_scanned : int
+      ; last_path : string
+      }
   | Blob_listing_failed of Tool_blob_store.list_error
   | Blob_delete_failed of Tool_blob_store.delete_error
 
@@ -72,4 +89,8 @@ type report =
 
 val error_to_string : error -> string
 val candidate_snapshot_path : base_path:string -> string
-val run : base_path:string -> mode:mode -> (report, error) result
+val run
+  :  base_path:string
+  -> mode:mode
+  -> budget:scan_budget
+  -> (report, error) result

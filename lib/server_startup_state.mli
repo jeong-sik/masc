@@ -58,6 +58,14 @@ val default_watchdog_timeout_sec : float
 (** Effective watchdog timeout from env, clamped to [[30, 600]]. *)
 val watchdog_timeout_sec : unit -> float
 
+(** Seconds a blocking init step may spend before the startup watchdog would
+    exit the process, with [reserve_sec] set aside for the boot stages that
+    run after that step. Clamped at [0.] so a caller that is already over
+    budget is told to skip rather than handed a negative deadline. Deriving a
+    sub-budget here keeps it tied to {!watchdog_timeout_sec} instead of
+    drifting as an independent constant. *)
+val remaining_watchdog_budget_sec : reserve_sec:float -> float
+
 (** Current snapshot as JSON:
     [{phase, state_ready, pending_lazy_tasks,
       last_error, path_diagnostics,

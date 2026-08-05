@@ -628,9 +628,39 @@ let test_compaction_snapshots_read_rotated_manifest_beyond_old_tail () =
   check int "after token count" 400 (item |> member "after_tokens" |> to_int)
 ;;
 
+let test_compaction_snapshots_cache_returns_warming_then_ready () =
+  with_temp_dir (fun dir ->
+    let config = Workspace.default_config dir in
+    let keeper_id = "cache-hydration-keeper" in
+    let hydration_status json =
+      Yojson.Safe.Util.(json |> member "hydration_status" |> to_string)
+    in
+    let cold =
+      Keeper_api.cached_compaction_snapshots_json ~config ~keeper_id ~limit:25
+        ~force_refresh:true
+    in
+    check string "cold miss is explicit" "warming" (hydration_status cold);
+    let rec await_ready remaining =
+      let current =
+        Keeper_api.cached_compaction_snapshots_json ~config ~keeper_id ~limit:25
+          ~force_refresh:false
+      in
+      match hydration_status current with
+      | "ready" -> current
+      | "warming" when remaining > 0 ->
+        Time_compat.sleep 0.005;
+        await_ready (remaining - 1)
+      | status -> failf "unexpected hydration status: %s" status
+    in
+    let ready = await_ready 200 in
+    check int "ready empty inventory" 0
+      Yojson.Safe.Util.(ready |> member "count" |> to_int))
+;;
+
 let () =
   Eio_main.run @@ fun env ->
-  Masc_test_deps.init_eio_clock env;
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   run
     "Server_dashboard_http_keeper_api_trace"
@@ -693,6 +723,10 @@ let () =
             "reads rotated compaction beyond the old tail window"
             `Quick
             test_compaction_snapshots_read_rotated_manifest_beyond_old_tail
+        ; test_case
+            "returns warming before background hydration completes"
+            `Quick
+            test_compaction_snapshots_cache_returns_warming_then_ready
         ] )
     ]
 ;;

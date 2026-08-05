@@ -39,6 +39,7 @@ const BACKEND_EMITTED: Record<string, string> = {
   runtime_param_changed: '../lib/server/server_routes_http_routes_activity.ml',
   keeper_chat_appended: '../lib/keeper/keeper_chat_broadcast.ml',
   keeper_waiting_inventory_changed: '../lib/keeper/keeper_waiting_inventory_broadcast.ml',
+  keeper_compaction_snapshots_changed: '../lib/server/server_dashboard_http_keeper_api.ml',
   ide_cursor_changed: '../lib/server/server_ide_http.ml',
   keeper_composite_changed: '../lib/server/server_mcp_transport_ws.ml',
   keeper_heartbeat: '../lib/keeper/keeper_heartbeat_snapshot.ml',
@@ -55,6 +56,8 @@ const BACKEND_EMITTED: Record<string, string> = {
 // justified; every entry is an event the FE routes but masc lib/ does not emit.
 const FE_ONLY_OR_EXTERNAL: Record<string, string> = {
   'oas:agent_failed':
+    'OAS-subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (oas: prefix).',
+  'oas:context_compacted':
     'OAS-subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (oas: prefix).',
 }
 

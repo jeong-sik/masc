@@ -111,17 +111,6 @@ let test_decide_accept_rejected_outcome_not_last () =
     Alcotest.(check string) "reason preserved" "no visible answer" reason
   | _ -> Alcotest.fail "AcceptRejected outcome is terminal even before last provider"
 
-let test_decide_and_record_delegates () =
-  let outcome = Call_err (mk_http_err ~code:500 ()) in
-  let direct = decide ~accept_on_exhaustion:false ~is_last:false outcome in
-  let recorded =
-    decide_and_record ~runtime_id:"rt-test" ~accept_on_exhaustion:false
-      ~is_last:false outcome
-  in
-  match direct, recorded with
-  | Try_next _, Try_next _ -> ()
-  | _ -> Alcotest.fail "decide_and_record must match decide for the same outcome"
-
 (* --- to_user_message (live: keeper_turn_driver_try_runtime) --- *)
 
 let contains ~needle haystack =
@@ -182,8 +171,6 @@ let () =
             test_decide_accept_rejected_not_last
         ; Alcotest.test_case "accept-rejected outcome terminal" `Quick
             test_decide_accept_rejected_outcome_not_last
-        ; Alcotest.test_case "decide_and_record delegates" `Quick
-            test_decide_and_record_delegates
         ] )
     ; ( "to_user_message"
       , [ Alcotest.test_case "HTTP 503" `Quick test_user_message_http

@@ -34,6 +34,8 @@ export type SSEEventType =
   | 'keeper_composite_changed'
   | 'keeper_chat_appended'
   | 'keeper_waiting_inventory_changed'
+  | 'keeper_compaction_snapshots_changed'
+  | 'oas_telemetry_sample'
   | 'ide_cursor_changed'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
@@ -187,6 +189,8 @@ export interface SSEEvent {
   queue_kind?: 'chat_queue' | 'event_queue'
   trigger?: string
   runtime?: string
+  provider_id?: string
+  model_id?: string
   reason?: string
   // Keeper phase transition fields
   prev_phase?: string

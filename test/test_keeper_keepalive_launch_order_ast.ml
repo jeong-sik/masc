@@ -37,7 +37,40 @@ let test_launch_gate_dominates_launch_side_effects () =
     ; "publish_keeper_started"
     ; "Keeper_lane.fork"
     ; "start_keeper_grpc_heartbeat"
+    ; (* A lane reached through recovery used to carry the gRPC sidecar and no
+         Board-attention worker, so its Board candidates were recorded and
+         never judged. Measured 2026-08-05: 532 pending candidates on four
+         live keepers, the oldest 5 days old, with no failure logged anywhere
+         -- there is no worker to fail. *)
+      "fork_board_attention_worker"
     ]
+;;
+
+(* The lane's sidecar set must have one definition. Two lane-start paths fork
+   the same registry entry's lane ([Keeper_lane.fork] rejects the second with
+   [Already_started]), so whichever path wins decides what the lane contains.
+   Pinning the single fork site is what keeps the two paths from drifting into
+   different lanes again. *)
+let test_board_worker_has_one_fork_site () =
+  check int
+    "keeper_keepalive owns the only Keeper_board_attention_worker.run call"
+    1
+    (Ast_grep.count_calls
+       ~module_path:"lib/keeper/keeper_keepalive.ml"
+       ~callee:"Keeper_board_attention_worker.run");
+  check int
+    "the supervisor does not fork its own worker"
+    0
+    (Ast_grep.count_calls
+       ~module_path:"lib/keeper/keeper_supervisor_launch.ml"
+       ~callee:"Keeper_board_attention_worker.run");
+  check int
+    "the supervisor lane body calls the shared fork"
+    1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"lib/keeper/keeper_supervisor_launch.ml"
+       ~binding_name:"launch_supervised_fiber_body"
+       ~callee:"Keeper_keepalive.fork_board_attention_worker")
 ;;
 
 let cleanup_protect_count ~module_path ~binding_name =
@@ -61,9 +94,14 @@ let test_cleanup_protect_checker_rejects_omitted_helper () =
 let test_supervisor_finally_calls_cleanup_best_effort () =
   let module_path = "lib/keeper/keeper_supervisor_launch.ml" in
   let binding_name = "launch_supervised_fiber_body" in
+  (* Two nested guards: the outer one runs lane cleanup, the inner one stops
+     the Board-attention worker when the heartbeat loop returns. The count was
+     pinned at 1 and has been wrong since the inner guard appeared -- this
+     suite is in no CI target list and declares no [deps] on the sources it
+     reads, so it neither ran nor re-ran. *)
   check int
-    "supervisor has one Eio_guard.protect"
-    1
+    "supervisor has two nested Eio_guard.protect"
+    2
     (Ast_grep.count_calls_in_value_binding
        ~module_path
        ~binding_name
@@ -94,6 +132,10 @@ let () =
             "supervisor finally calls cleanup best effort"
             `Quick
             test_supervisor_finally_calls_cleanup_best_effort
+        ; test_case
+            "board attention worker has one fork site"
+            `Quick
+            test_board_worker_has_one_fork_site
         ] )
     ]
 ;;

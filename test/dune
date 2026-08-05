@@ -691,9 +691,16 @@
   (source_tree ../scripts/fixtures))
  (libraries masc_test_deps compaction_exact_output_fixture))
 
+; Reads lib/keeper sources through Ast_grep, so those sources are deps: without
+; them dune keeps a cached pass and the suite never re-runs when the code it
+; asserts on changes.
 (test
  (name test_keeper_keepalive_launch_order_ast)
  (modules test_keeper_keepalive_launch_order_ast)
+ (deps
+  %{workspace_root}/lib/keeper/keeper_keepalive.ml
+  %{workspace_root}/lib/keeper/keeper_supervisor_launch.ml
+  %{workspace_root}/test/fixtures/keeper_keepalive_launch_order_ast_fixture.ml)
  (libraries alcotest ast_grep))
 
 (test

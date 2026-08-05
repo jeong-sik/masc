@@ -52,15 +52,7 @@ let mtime_of path =
   try Some (Unix.stat path).Unix.st_mtime with
   | Unix.Unix_error _ -> None
 
-(* Same "%04d-%02d-%02dT%02d:%02d:%02dZ" idiom as
-   Types_core.iso8601_of_unix_seconds / Log.timestamp_iso — duplicated here
-   rather than depended on to keep this module's dependency footprint
-   unchanged. *)
-let iso8601_of_unix_seconds ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+let iso8601_of_unix_seconds = Time_codec.rfc3339_of_unix
 
 type bundle_freshness =
   | Fresh

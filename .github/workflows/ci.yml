@@ -971,6 +971,15 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_repos_relative_path
 
+      - name: Run RFC 3339 writer suite
+        # @check compiles this one but never runs it, and its whole job is to
+        # catch a silent divergence: a delegate drifting from the owner, or the
+        # writer emitting something Time_codec.parse_rfc3339 cannot read back.
+        # Neither shows up as a compile error.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_rfc3339_format_owner
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was

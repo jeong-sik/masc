@@ -22,6 +22,17 @@ export type VerificationRunStatusLabel =
   | 'commit_failed'
   | 'raised'
 
+export type VerificationToolDisposition = 'completed' | 'deferred' | 'failed'
+
+export interface VerificationToolObservation {
+  toolName: string
+  input: unknown
+  disposition: VerificationToolDisposition
+  outputExcerpt: string
+  outputTruncated: boolean
+  durationMs: number
+}
+
 const BACKEND_STATUSES: readonly string[] = [
   'running',
   'approved',
@@ -51,6 +62,7 @@ export interface VerificationRunRecord {
   cause?: string
   /** Which gate declined to produce a verdict; `not_reviewed` rows only. */
   gate?: string
+  tools?: VerificationToolObservation[]
 }
 
 export interface DashboardVerificationRunsResponse {
@@ -102,6 +114,36 @@ function verificationStatus(value: unknown, context: string): VerificationRunSta
   return value as VerificationRunStatusLabel
 }
 
+function parseTool(raw: unknown, context: string): VerificationToolObservation {
+  if (!isRecord(raw)) protocolError(`${context} must be an object`)
+  exactFields(raw, [
+    'tool_name',
+    'input',
+    'disposition',
+    'output_excerpt',
+    'output_truncated',
+    'duration_ms',
+  ], [], context)
+  if (raw.disposition !== 'completed' && raw.disposition !== 'deferred' && raw.disposition !== 'failed') {
+    protocolError(`${context}.disposition has unknown value ${JSON.stringify(raw.disposition)}`)
+  }
+  if (typeof raw.output_truncated !== 'boolean') {
+    protocolError(`${context}.output_truncated must be a boolean`)
+  }
+  const durationMs = finiteNumber(raw.duration_ms, `${context}.duration_ms`)
+  if (durationMs < 0) protocolError(`${context}.duration_ms must be non-negative`)
+  return {
+    toolName: nonEmptyString(raw.tool_name, `${context}.tool_name`),
+    input: raw.input,
+    disposition: raw.disposition,
+    outputExcerpt: typeof raw.output_excerpt === 'string'
+      ? raw.output_excerpt
+      : protocolError(`${context}.output_excerpt must be a string`),
+    outputTruncated: raw.output_truncated,
+    durationMs,
+  }
+}
+
 const RUN_BASE_FIELDS = [
   'verification_id',
   'task_id',
@@ -122,21 +164,21 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
     case 'running':
       break
     case 'approved':
-      requiredOutcomeFields = ['elapsed_s']
+      requiredOutcomeFields = ['elapsed_s', 'tools']
       optionalFields = ['evaluator_runtime']
       break
     case 'rejected':
-      requiredOutcomeFields = ['elapsed_s', 'reason']
+      requiredOutcomeFields = ['elapsed_s', 'reason', 'tools']
       optionalFields = ['evaluator_runtime']
       break
     case 'not_reviewed':
-      requiredOutcomeFields = ['elapsed_s', 'gate', 'detail']
+      requiredOutcomeFields = ['elapsed_s', 'gate', 'detail', 'tools']
       optionalFields = ['evaluator_runtime']
       break
     case 'contract_rejected':
     case 'commit_failed':
     case 'raised':
-      requiredOutcomeFields = ['elapsed_s', 'detail']
+      requiredOutcomeFields = ['elapsed_s', 'detail', 'tools']
       optionalFields = ['evaluator_runtime']
       break
   }
@@ -149,6 +191,11 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
   if (elapsedSeconds != null && elapsedSeconds < 0) {
     protocolError(`${context}.elapsed_s must be non-negative`)
   }
+  const tools = status === 'running'
+    ? undefined
+    : Array.isArray(raw.tools)
+      ? raw.tools.map((tool, toolIndex) => parseTool(tool, `${context}.tools[${toolIndex}]`))
+      : protocolError(`${context}.tools must be an array`)
   return {
     verificationId: nonEmptyString(raw.verification_id, `${context}.verification_id`),
     taskId: nonEmptyString(raw.task_id, `${context}.task_id`),
@@ -168,6 +215,7 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
     gate: status === 'not_reviewed'
       ? nonEmptyString(raw.gate, `${context}.gate`)
       : undefined,
+    tools,
   }
 }
 

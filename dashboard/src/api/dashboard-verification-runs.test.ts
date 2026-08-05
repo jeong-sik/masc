@@ -44,6 +44,7 @@ function row(overrides: Record<string, unknown> = {}) {
     started_at: 1_754_000_000,
     status: 'approved',
     elapsed_s: 2.5,
+    tools: [],
     evaluator_runtime: 'cross-verifier',
     ...overrides,
   }
@@ -67,6 +68,31 @@ describe('parseVerificationRunsResponse', () => {
       elapsedSeconds: 2.5,
       evaluatorRuntime: 'cross-verifier',
     })
+  })
+
+  it('preserves ordered typed tool evidence', () => {
+    const parsed = parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 1,
+      runs: [row({
+        tools: [{
+          tool_name: 'report_review_verdict',
+          input: { verdict: 'APPROVE' },
+          disposition: 'completed',
+          output_excerpt: 'Completion verdict recorded: APPROVE',
+          output_truncated: false,
+          duration_ms: 1.25,
+        }],
+      })],
+    })
+    expect(onlyRun(parsed).tools).toEqual([{
+      toolName: 'report_review_verdict',
+      input: { verdict: 'APPROVE' },
+      disposition: 'completed',
+      outputExcerpt: 'Completion verdict recorded: APPROVE',
+      outputTruncated: false,
+      durationMs: 1.25,
+    }])
   })
 
   it('reads a rejection cause from `reason`', () => {

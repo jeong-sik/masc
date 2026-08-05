@@ -672,7 +672,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some Masc.Task.Anti_rationalization.Approve));
           Atomic.set Workspace_hooks.verification_notify_verdict_fn
@@ -829,7 +829,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
           let captured_prompt = ref None in
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ ~lookup:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
                captured_prompt := Some prompt;
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some Masc.Task.Anti_rationalization.Approve));

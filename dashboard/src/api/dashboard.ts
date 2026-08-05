@@ -60,6 +60,14 @@ export {
   parseVerificationRunsResponse,
   fetchVerificationRuns,
 } from './dashboard-verification-runs'
+export {
+  fetchExactLaneRuns,
+  parseExactLaneRunsResponse,
+  type DashboardExactLaneRunsResponse,
+  type ExactLane,
+  type ExactLaneRunRecord,
+  type ExactLaneRunStatus,
+} from './dashboard-exact-lane-runs'
 
 // --- Dashboard projections ---
 

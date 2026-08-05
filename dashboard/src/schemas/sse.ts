@@ -72,6 +72,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // parse boundary, before the live WS router (sse-store.ts routeServerPushEvent
   // -> SIMPLE_ROUTES['fusion_run_status'] -> refreshFusionRuns) can dispatch it.
   'fusion_run_status',
+  'internal_agent_runs_changed',
   'client_input_approved',
   'client_input_rejected',
   'client_input_updated',

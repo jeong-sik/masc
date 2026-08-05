@@ -472,6 +472,35 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshFusionRuns).not.toHaveBeenCalled()
   })
 
+  it('refreshes the mounted internal-agent registry immediately from websocket invalidation', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'internal-agents' }, postId: null }
+    const refresh = vi.fn()
+    const unregister = sseStore.registerInternalAgentRefresh(refresh)
+
+    sseStore.routeServerPushEvent({ type: 'internal_agent_runs_changed' })
+    vi.advanceTimersByTime(1)
+    await flushAsyncWork()
+
+    expect(refresh).toHaveBeenCalledTimes(1)
+    unregister()
+  })
+
+  it('refreshes Fusion rows inside Internal Agents from the existing Fusion websocket event', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'internal-agents' }, postId: null }
+    const refresh = vi.fn()
+    const unregister = sseStore.registerInternalAgentRefresh(refresh)
+
+    sseStore.routeServerPushEvent({ type: 'fusion_run_status' })
+    vi.advanceTimersByTime(1)
+    await flushAsyncWork()
+
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(refreshFusionRuns).not.toHaveBeenCalled()
+    unregister()
+  })
+
   it('routes keeper_tool_call to the IDE workspace refresh while on the code surface', async () => {
     const { sseStore } = await loadSseStore()
     route.value = { tab: 'code', params: {}, postId: null }

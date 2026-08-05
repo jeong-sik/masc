@@ -455,6 +455,10 @@ let process_task_once
      a committed verdict emitted a durable event. *)
   let registry = Verification_run_registry.global () in
   let started_at = Eio.Time.now runtime.clock in
+  let tools = ref [] in
+  let on_tool_result ~input result =
+    tools := Verification_run_registry.observe_tool_result ~input result :: !tools
+  in
   Verification_run_registry.register_running
     registry
     ~verification_id
@@ -468,6 +472,7 @@ let process_task_once
       registry
       ~verification_id
       ~outcome
+      ~tools:(List.rev !tools)
       ?evaluator_runtime
       ~elapsed_s:(Eio.Time.now runtime.clock -. started_at)
       ();
@@ -522,6 +527,7 @@ let process_task_once
           ?completion_contract:prepared.completion_contract
           ~required_evidence:prepared.required_artifacts
           ~verify_gate_evidence:[]
+          ~on_tool_result
           prepared.review_request
       in
       let evaluator_runtime = result.evaluator_runtime in

@@ -28,8 +28,7 @@ import { relativeTime } from '../lib/format-time'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { truncate } from '../lib/truncate'
-
-const AUTO_REFRESH_MS = 15_000
+import { registerInternalAgentRefresh } from '../sse-store'
 
 /** Outcome → badge tone.
  *
@@ -134,9 +133,9 @@ export function VerificationRunsPanel() {
 
   useEffect(() => {
     void loadData(resource)
-    const id = setInterval(() => void loadData(resource), AUTO_REFRESH_MS)
+    const unregister = registerInternalAgentRefresh(() => { void loadData(resource) })
     return () => {
-      clearInterval(id)
+      unregister()
       resource.cancel()
     }
   }, [resource])

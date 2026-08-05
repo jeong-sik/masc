@@ -136,7 +136,7 @@ val startup_failure_disposition : state_ready:bool -> startup_failure_dispositio
 
 type owner_initialization_error =
   | Runtime_config_path_unavailable
-  | Run_registry_already_installed of [ `Fusion | `Verification ]
+  | Run_registry_already_installed of [ `Exact_lane | `Fusion | `Verification ]
   | Runtime_default_initialization_failed of Runtime.strict_init_error
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error

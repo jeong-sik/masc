@@ -71,7 +71,6 @@ val invalid_name_error : string -> string
 val removed_keeper_input_key_names : string list
 
 (** Field names that are no longer accepted in keeper message input. *)
-val removed_keeper_msg_input_key_names : string list
 
 (** Return which [keys] are present as top-level keys in the JSON object. *)
 val present_json_keys : string list -> Yojson.Safe.t -> string list
@@ -84,8 +83,6 @@ val reject_removed_keeper_input_keys :
   (unit, string) result
 
 (** Reject removed keeper message input keys. *)
-val reject_removed_keeper_msg_input_keys :
-  tool_name:string -> Yojson.Safe.t -> (unit, string) result
 
 (** {1 UTF-8 Safety} *)
 

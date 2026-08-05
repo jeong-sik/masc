@@ -291,6 +291,21 @@ let test_queued_server_turn_has_no_second_durable_request () =
            | Ok channel -> channel
            | Error detail -> failwith detail
          in
+         let direct_message =
+           match
+             Keeper_invocation_contract.direct_message
+               ~keeper_name
+               ~prompt:"queued inline boundary"
+               ~direct_reply:true
+               ~channel:""
+               ~user_blocks:[]
+               ~attachments:[]
+               ()
+           with
+           | Ok message -> message
+           | Error error ->
+             failwith (Keeper_invocation_contract.request_error_to_string error)
+         in
          let payload :
              Server_routes_http_keeper_stream.keeper_chat_stream_request =
            { name = keeper_name
@@ -303,6 +318,7 @@ let test_queued_server_turn_has_no_second_durable_request () =
            ; channel_user_name = ""
            ; channel_workspace_id = ""
            ; attachments = []
+           ; direct_message
            }
          in
          let receipt_id =

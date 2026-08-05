@@ -37,8 +37,7 @@
     (~10 internal lets — [contains_casefold],
     [get_origin] / [cors_headers] adapter helpers,
     [keeper_chat_stream_*] sub-renderers + per-event
-    framing, connector-context and legacy model-argument
-    payload guards). *)
+    framing and connector-context helpers). *)
 
 (** {1 Stream tunables} *)
 
@@ -81,6 +80,7 @@ type keeper_chat_stream_request = {
   channel_user_name : string;
   channel_workspace_id : string;
   attachments : Keeper_chat_store.attachment list;
+  direct_message : Keeper_invocation_contract.direct_message;
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
     [message] is the text fallback used by the existing direct keeper
@@ -89,7 +89,8 @@ type keeper_chat_stream_request = {
     are optional copilot context fields; when
     [turn_instructions] is absent but [surface_context]
     is present, the surface context is formatted and
-    injected as turn instructions.  [channel] and
+    injected as turn instructions. [direct_message] is the validated,
+    turn-owned projection carried after this boundary. [channel] and
     [channel_workspace_id] are required together when any
     connector context is supplied; [channel_user_id] and
     [channel_user_name] are optional. *)
@@ -101,9 +102,8 @@ val parse_keeper_chat_stream_request :
 (** Parses the HTTP body string into a
     {!keeper_chat_stream_request}.  Returns
     [Error reason] on JSON shape mismatches, missing
-    [name] / content, malformed [user_blocks], partial connector context, or a
-    removed Keeper argument (including the retired request-level
-    [timeout_sec]). *)
+    [name] / content, unknown or duplicate fields, wrong field types,
+    malformed [user_blocks] / [attachments], or partial connector context. *)
 
 (** {1 Error envelope} *)
 
@@ -284,7 +284,8 @@ module For_testing : sig
   val chat_surface_of_request : keeper_chat_stream_request -> Surface_ref.t
   val chat_speaker_of_request : keeper_chat_stream_request -> Keeper_chat_store.speaker
   val turn_instructions_for_request : keeper_chat_stream_request -> string option
-  val args_of_request : keeper_chat_stream_request -> Yojson.Safe.t
+  val direct_message_of_request :
+    keeper_chat_stream_request -> Keeper_invocation_contract.direct_message
   val keeper_chat_stream_headers : string -> Httpun.Headers.t
   val defer_dashboard_payload_if_busy :
     base_path:string ->

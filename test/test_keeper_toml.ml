@@ -1422,9 +1422,7 @@ let test_persona_defaults_reject_unsupported_keeper_fields () =
     {|{
   "name": "Probe",
   "keeper": {
-    "short_goal": "dead horizon",
-    "will": "dead self-model",
-    "model": "dead runtime assignment"
+    "unknown_prompt_field": "not accepted"
   }
 }|};
   match KTP.load_keeper_profile_defaults_result "probe" with
@@ -1433,12 +1431,8 @@ let test_persona_defaults_reject_unsupported_keeper_fields () =
     let detail = KTP.keeper_toml_load_error_to_string error in
     check bool "persona error identifies unsupported contract" true
       (contains_substring detail "unsupported persona keeper fields");
-    check bool "persona error names short_goal" true
-      (contains_substring detail "short_goal");
-    check bool "persona error names will" true
-      (contains_substring detail "will");
-    check bool "persona error names model" true
-      (contains_substring detail "model")
+    check bool "persona error names unknown field" true
+      (contains_substring detail "unknown_prompt_field")
 
 let test_persona_defaults_reject_removed_shards () =
   with_personas_dir @@ fun personas_dir ->

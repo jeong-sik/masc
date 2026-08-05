@@ -95,7 +95,8 @@ require_not_contains docs/TUI-GUIDE.md './start-masc.sh --tui'
 
 require_contains docs/QUICK-START.md '"method":"server/discover"'
 require_contains docs/QUICK-START.md 'Mcp-Protocol-Version: 2026-07-28'
-require_contains docs/QUICK-START.md '수동 제어가 필요해도 기본 온보딩은 `masc_start(path=...)` 를 유지한다.'
+require_contains docs/QUICK-START.md '수동 제어가 필요해도 온보딩은 `masc_start(path=...)` 하나로 처리한다.'
+require_not_contains docs/QUICK-START.md 'masc_bind'
 require_contains docs/QUICK-START.md '운영 기준은 항상 `<base-path>/.masc`다.'
 require_contains docs/QUICK-START.md 'scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/local-release-evidence.md'
 
@@ -109,6 +110,8 @@ require_not_contains README.md 'dashboard#monitoring/sessions'
 require_not_contains README.md 'dashboard#command/intervene'
 
 require_contains docs/PRODUCT-OPERATING-PLAN.md 'Release evidence and local proof'
+
+require_not_contains docs/TRANSPORT-PRACTICAL-PLAYBOOK.md 'masc_transport_status'
 
 require_contains docs/DASHBOARD-INTEGRATION.md '- `monitoring`'
 require_contains docs/DASHBOARD-INTEGRATION.md '- `connectors`'

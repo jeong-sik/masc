@@ -38,7 +38,6 @@ echo ""
 
 # ── Core tool pass rate ──
 TOOLS=(
-  "masc_bind"
   "masc_add_task"
   "masc_status"
   "masc_heartbeat"
@@ -51,9 +50,6 @@ TOOLS=(
 
 AGENT_NAME="eval-ratchet-${ITERATION}"
 
-# Join first
-call_tool 9000 "masc_bind" "{\"agent_name\":\"${AGENT_NAME}\"}" >/dev/null 2>&1 || true
-
 PASS=0
 FAIL=0
 P0=0
@@ -62,10 +58,9 @@ SIZES=()
 for tool in "${TOOLS[@]}"; do
   args="{}"
   case "$tool" in
-    masc_bind) args="{\"agent_name\":\"${AGENT_NAME}\"}" ;;
     masc_add_task) args="{\"title\":\"eval task ${ITERATION}\",\"priority\":3}" ;;
     masc_heartbeat) args="{\"agent_name\":\"${AGENT_NAME}\",\"status\":\"evaluating\"}" ;;
-    masc_broadcast) args="{\"message\":\"eval iteration ${ITERATION}\"}" ;;
+    masc_broadcast) args="{\"agent_name\":\"${AGENT_NAME}\",\"message\":\"eval iteration ${ITERATION}\"}" ;;
   esac
 
   response="$(call_tool $((9100 + PASS + FAIL)) "$tool" "$args" 2>/dev/null || echo '{"error":"timeout"}')"
@@ -78,7 +73,7 @@ for tool in "${TOOLS[@]}"; do
     FAIL=$((FAIL + 1))
     # P0: core workspace collaboration tools failing is critical
     case "$tool" in
-      masc_bind|masc_add_task|masc_status|masc_heartbeat)
+      masc_add_task|masc_status|masc_heartbeat)
         P0=$((P0 + 1))
         echo "  P0: ${tool} FAILED"
         ;;

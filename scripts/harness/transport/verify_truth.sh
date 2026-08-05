@@ -2,8 +2,8 @@
 # E2E: Compare transport read-model truth with actual reachability probes.
 #
 # The transport dashboard can drift from the real listener state. This harness
-# keeps `/health`, `/api/v1/dashboard/transport-health`, `masc_transport_status`,
-# and live probes in one report so task-050 style fixes have a regression target.
+# keeps `/health`, `/api/v1/dashboard/transport-health`, and live probes in one
+# report so task-050 style fixes have a regression target.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/harness/transport/common.sh
@@ -47,68 +47,6 @@ fetch_transport_health_json() {
     printf '{}\n'
   fi
   return 1
-}
-
-mcp_response_text() {
-  local payload
-  payload="$(cat)"
-  MCP_RESPONSE_PAYLOAD="$payload" python3 - <<'PY'
-import json
-import os
-import sys
-
-payload = os.environ.get("MCP_RESPONSE_PAYLOAD", "")
-candidates = []
-for raw in payload.splitlines():
-    line = raw.strip()
-    if line.startswith("data:"):
-        line = line[len("data:"):].strip()
-    elif not line.startswith("{"):
-        continue
-    try:
-        obj = json.loads(line)
-    except json.JSONDecodeError:
-        continue
-    result = obj.get("result") or {}
-    envelopes = [result]
-    if isinstance(result.get("resultEnvelope"), dict):
-        envelopes.append(result["resultEnvelope"])
-    for envelope in envelopes:
-        for item in envelope.get("content") or []:
-            if item.get("type") == "text":
-                candidates.append(item.get("text", ""))
-
-if not candidates:
-    sys.exit(1)
-print(candidates[-1])
-PY
-}
-
-mcp_error_message() {
-  local payload
-  payload="$(cat)"
-  MCP_RESPONSE_PAYLOAD="$payload" python3 - <<'PY'
-import json
-import os
-import sys
-
-payload = os.environ.get("MCP_RESPONSE_PAYLOAD", "")
-for raw in payload.splitlines():
-    line = raw.strip()
-    if line.startswith("data:"):
-        line = line[len("data:"):].strip()
-    elif not line.startswith("{"):
-        continue
-    try:
-        obj = json.loads(line)
-    except json.JSONDecodeError:
-        continue
-    error = obj.get("error")
-    if isinstance(error, dict):
-        print(error.get("message", "unknown MCP error"))
-        sys.exit(0)
-sys.exit(1)
-PY
 }
 
 probe_tcp() {
@@ -245,9 +183,8 @@ probe_mcp_post() {
 compare_truth() {
   local name="$1"
   local dashboard="$2"
-  local tool="$3"
-  local actual="$4"
-  local detail="$5"
+  local actual="$3"
+  local detail="$4"
   local mismatches=()
 
   if [[ "$actual" = "skip" ]]; then
@@ -255,14 +192,11 @@ compare_truth() {
     return
   fi
   if [[ "$actual" = "auth_blocked" ]]; then
-    auth_blocked "${name} truth" "dashboard=${dashboard} tool=${tool} ${detail}"
+    auth_blocked "${name} truth" "dashboard=${dashboard} ${detail}"
     return
   fi
   if [[ "$dashboard" != "missing" && "$dashboard" != "$actual" ]]; then
     mismatches+=("dashboard=${dashboard}")
-  fi
-  if [[ "$tool" != "missing" && "$tool" != "$actual" ]]; then
-    mismatches+=("tool=${tool}")
   fi
   if [[ "${#mismatches[@]}" -gt 0 ]]; then
     fail "${name} truth mismatch" "${mismatches[*]} actual=${actual} ${detail}"
@@ -284,23 +218,6 @@ else
   fail "dashboard transport-health" "missing one of streamable_http/grpc/websocket/http2"
 fi
 
-transport_status_json='{}'
-if transport_mcp_ready 2>/dev/null; then
-  transport_status_response="$(transport_call_tool 21 "masc_transport_status" '{}' 2>/dev/null || true)"
-  transport_status_text="$(printf '%s' "$transport_status_response" | mcp_response_text || true)"
-  if jq -e '.http and .grpc and .websocket and .enabled_protocols' \
-    <<<"$transport_status_text" >/dev/null 2>&1; then
-    transport_status_json="$transport_status_text"
-    pass "masc_transport_status returns transport read model"
-  elif tool_error="$(printf '%s' "$transport_status_response" | mcp_error_message)"; then
-    skip "masc_transport_status" "$tool_error"
-  else
-    fail "masc_transport_status" "could not decode JSON tool content"
-  fi
-else
-  auth_blocked "masc_transport_status" "MCP discovery blocked; likely auth-required endpoint"
-fi
-
 if probe_mcp_post; then
   actual_http="true"
 else
@@ -310,8 +227,7 @@ else
   esac
 fi
 dashboard_http="$(json_bool "$transport_health_json" '.streamable_http.supports_post')"
-tool_http="$(json_bool "$transport_status_json" '.streamable_http_default // .http.enabled')"
-compare_truth "streamable-http" "$dashboard_http" "$tool_http" "$actual_http" \
+compare_truth "streamable-http" "$dashboard_http" "$actual_http" \
   "path=/mcp"
 
 if probe_sse; then
@@ -323,9 +239,7 @@ else
   esac
 fi
 dashboard_sse="$(json_bool "$transport_health_json" '.streamable_http.supports_sse_upgrade')"
-tool_sse="$(jq -r 'if (.http.sse_url // "") != "" then "true" else "missing" end' \
-  <<<"$transport_status_json" 2>/dev/null || printf 'missing\n')"
-compare_truth "observer-sse" "$dashboard_sse" "$tool_sse" "$actual_sse" \
+compare_truth "observer-sse" "$dashboard_sse" "$actual_sse" \
   "path=/events"
 
 grpc_port="$(json_bool "$transport_health_json" '.grpc.port')"
@@ -338,8 +252,7 @@ if refreshed_transport_health_json="$(fetch_transport_health_json)"; then
   transport_health_json="$refreshed_transport_health_json"
 fi
 dashboard_grpc="$(json_bool "$transport_health_json" '.grpc as $grpc | if ($grpc | has("reachable")) then $grpc.reachable else $grpc.listening end')"
-tool_grpc="$(json_bool "$transport_status_json" '.grpc as $grpc | if ($grpc | has("reachable")) then $grpc.reachable else $grpc.listening end')"
-compare_truth "grpc" "$dashboard_grpc" "$tool_grpc" "$actual_grpc" \
+compare_truth "grpc" "$dashboard_grpc" "$actual_grpc" \
   "tcp=127.0.0.1:${grpc_port}"
 
 ws_discovery="$(curl -fsS --max-time 5 "${MASC_HTTP_BASE_URL}/ws" 2>/dev/null || printf '{}')"
@@ -353,24 +266,11 @@ if refreshed_transport_health_json="$(fetch_transport_health_json)"; then
   transport_health_json="$refreshed_transport_health_json"
 fi
 dashboard_ws="$(json_bool "$transport_health_json" '.websocket as $ws | if ($ws | has("reachable")) then $ws.reachable else $ws.listening end')"
-tool_ws="$(json_bool "$transport_status_json" '.websocket as $ws | if ($ws | has("reachable")) then $ws.reachable else $ws.listening end')"
-compare_truth "websocket" "$dashboard_ws" "$tool_ws" "$actual_ws" \
+compare_truth "websocket" "$dashboard_ws" "$actual_ws" \
   "port=${ws_port:-missing}"
 
 dashboard_h2="$(json_bool "$transport_health_json" '.http2.multiplex_ready')"
-tool_h2="$(
-  jq -r '
-    if has("http2") then
-      (.http2.multiplex_ready // "missing")
-    elif ((.enabled_protocols // []) | index("h2c") != null) then
-      "true"
-    else
-      "missing"
-    end
-  ' \
-    <<<"$transport_status_json" 2>/dev/null || printf 'missing\n'
-)"
-if [[ "$dashboard_h2" = "true" || "$tool_h2" = "true" ]]; then
+if [[ "$dashboard_h2" = "true" ]]; then
   if probe_h2c; then
     actual_h2="true"
   else
@@ -383,7 +283,7 @@ if [[ "$dashboard_h2" = "true" || "$tool_h2" = "true" ]]; then
 else
   actual_h2="skip"
 fi
-compare_truth "http2-h2c" "$dashboard_h2" "$tool_h2" "$actual_h2" \
+compare_truth "http2-h2c" "$dashboard_h2" "$actual_h2" \
   "listener_mode=$(json_bool "$transport_health_json" '.http2.listener_mode')"
 
 summary

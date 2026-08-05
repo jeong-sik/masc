@@ -198,7 +198,7 @@ masc_claim_next()
 # masc_plan_set_task(task_id="task-001")  # only if current_task is still missing
 ```
 
-수동 제어가 필요해도 기본 온보딩은 `masc_start(path=...)` 를 유지한다. 이 호출이 project scope 설정과 default namespace join까지 처리하므로, 같은 흐름에서 `masc_bind(...)` 를 바로 이어 호출하지 않는다.
+수동 제어가 필요해도 온보딩은 `masc_start(path=...)` 하나로 처리한다. 이 호출이 project scope 설정과 default namespace join까지 담당한다.
 
 ## 5. 현재 front door
 
@@ -295,7 +295,7 @@ Failed tool calls include recovery hints automatically. Common patterns:
 | Error | Recovery |
 |-------|----------|
 | "not initialized" | `masc_init` or `masc_start(path=...)` |
-| "not joined" | `masc_bind` or `masc_start(...)` |
+| "not joined" | `masc_start(path=...)` |
 | "no unclaimed tasks" | `masc_add_task(title="...")` |
 | "task not found" | `masc_status` to see available tasks |
 
@@ -347,9 +347,6 @@ active root 기준: `MASC_CONFIG_DIR`가 있으면 그 값, 없으면 `/srv/masc
 상세: `docs/KEEPER-USER-MANUAL.md`
 
 Environment and path contract: `docs/ENV-CONTRACT.md`
-
-호환성 참고:
-- 전체 부트스트랩 단축 경로 없이 에이전트만 연결하려는 경우에도 명시적 join 흐름을 계속 지원한다: `masc_bind(agent_name="codex")`
 
 ## References
 

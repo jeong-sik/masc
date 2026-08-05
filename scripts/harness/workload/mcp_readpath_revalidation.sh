@@ -30,7 +30,6 @@ MASC_STATUS_FIRST_MAX_SEC="${MASC_STATUS_FIRST_MAX_SEC:-5}"
 MASC_STATUS_SECOND_MAX_SEC="${MASC_STATUS_SECOND_MAX_SEC:-1.5}"
 MASC_KEEPER_LIST_FIRST_MAX_SEC="${MASC_KEEPER_LIST_FIRST_MAX_SEC:-5}"
 MASC_KEEPER_LIST_SECOND_MAX_SEC="${MASC_KEEPER_LIST_SECOND_MAX_SEC:-1.5}"
-MASC_TRANSPORT_STATUS_MAX_SEC="${MASC_TRANSPORT_STATUS_MAX_SEC:-2}"
 DASHBOARD_EXECUTION_MAX_SEC="${DASHBOARD_EXECUTION_MAX_SEC:-2}"
 TRANSPORT_HEALTH_MAX_SEC="${TRANSPORT_HEALTH_MAX_SEC:-2}"
 
@@ -220,11 +219,11 @@ run_mode() {
   local mode="$1"
   local port grpc_port ws_port server_log server_pid
   local base_url mcp_url health_json health_file
-  local status_first_time status_second_time keeper_first_time keeper_second_time keeper_status_time transport_time
+  local status_first_time status_second_time keeper_first_time keeper_second_time keeper_status_time
   local execution_time transport_health_time
-  local status_first_ok status_second_ok keeper_first_ok keeper_second_ok keeper_status_ok transport_ok
+  local status_first_ok status_second_ok keeper_first_ok keeper_second_ok keeper_status_ok
   local execution_cache_state transport_cache_state
-  local keeper_json keeper_status_json keeper_name transport_json execution_json
+  local keeper_json keeper_status_json keeper_name execution_json
   local payload_contract_ok quiet_reason_contract_ok pending_lazy_ok health_mode_ok keeper_fiber_ok
   local health_mode_check_enabled keeper_status_attempted_json keeper_status_sample_limit
   local keeper_candidate request_id
@@ -353,14 +352,6 @@ run_mode() {
     keeper_status_json='{}'
   fi
 
-  if call_tool "$mcp_url" 16 "masc_transport_status" '{}'; then
-    transport_ok="0"
-  else
-    transport_ok="1"
-  fi
-  transport_time="$LAST_TIME_TOTAL"
-  transport_json="$(json_from_response_text "$LAST_TEXT")"
-
   call_json_endpoint "${base_url}/api/v1/dashboard/execution"
   execution_time="$LAST_TIME_TOTAL"
   execution_json="$LAST_RESPONSE"
@@ -428,14 +419,13 @@ run_mode() {
     health_mode_ok="true"
   fi
 
-  if [[ "$status_first_ok" != "0" || "$status_second_ok" != "0" || "$keeper_first_ok" != "0" || "$keeper_second_ok" != "0" || "$keeper_status_ok" != "0" || "$transport_ok" != "0" ]]; then
+  if [[ "$status_first_ok" != "0" || "$status_second_ok" != "0" || "$keeper_first_ok" != "0" || "$keeper_second_ok" != "0" || "$keeper_status_ok" != "0" ]]; then
     result_pass="false"
   fi
   check_tool_time "masc_status(first)" "$status_first_time" "$MASC_STATUS_FIRST_MAX_SEC" || result_pass="false"
   check_tool_time "masc_status(second)" "$status_second_time" "$MASC_STATUS_SECOND_MAX_SEC" || result_pass="false"
   check_tool_time "masc_keeper_list(first)" "$keeper_first_time" "$MASC_KEEPER_LIST_FIRST_MAX_SEC" || result_pass="false"
   check_tool_time "masc_keeper_list(second)" "$keeper_second_time" "$MASC_KEEPER_LIST_SECOND_MAX_SEC" || result_pass="false"
-  check_tool_time "masc_transport_status" "$transport_time" "$MASC_TRANSPORT_STATUS_MAX_SEC" || result_pass="false"
   check_tool_time "dashboard/execution" "$execution_time" "$DASHBOARD_EXECUTION_MAX_SEC" || result_pass="false"
   check_tool_time "dashboard/transport-health" "$transport_health_time" "$TRANSPORT_HEALTH_MAX_SEC" || result_pass="false"
 
@@ -459,7 +449,6 @@ run_mode() {
       --arg keeper_name "$keeper_name" \
       --arg keeper_status_attempted_json "$keeper_status_attempted_json" \
       --arg keeper_status_sample_limit "$keeper_status_sample_limit" \
-      --arg transport_status_json "$transport_json" \
       --arg execution_payload_json "$execution_json" \
       --arg execution_json_sample "$(printf '%s' "$execution_json" | jq -c '{projection_diagnostics, generated_at}')" \
       --arg status_first_time "$status_first_time" \
@@ -467,7 +456,6 @@ run_mode() {
       --arg keeper_first_time "$keeper_first_time" \
       --arg keeper_second_time "$keeper_second_time" \
       --arg keeper_status_time "$keeper_status_time" \
-      --arg transport_time "$transport_time" \
       --arg execution_time "$execution_time" \
       --arg transport_health_time "$transport_health_time" \
       --arg payload_contract_ok "$payload_contract_ok" \
@@ -484,7 +472,6 @@ run_mode() {
       | ($keeper_list_json | try fromjson catch {}) as $keeper_list
       | ($keeper_status_json | try fromjson catch {}) as $keeper_status
       | ($keeper_status_attempted_json | try fromjson catch []) as $keeper_status_attempted
-      | ($transport_status_json | try fromjson catch $transport_status_json) as $transport_status
       | ($execution_payload_json | try fromjson catch {}) as $execution_payload
       | ($execution_json_sample | try fromjson catch {}) as $execution
       | {
@@ -497,7 +484,6 @@ run_mode() {
           masc_status_second_max_sec: ($ENV.MASC_STATUS_SECOND_MAX_SEC // "1.5" | tonumber),
           masc_keeper_list_first_max_sec: ($ENV.MASC_KEEPER_LIST_FIRST_MAX_SEC // "5" | tonumber),
           masc_keeper_list_second_max_sec: ($ENV.MASC_KEEPER_LIST_SECOND_MAX_SEC // "1.5" | tonumber),
-          masc_transport_status_max_sec: ($ENV.MASC_TRANSPORT_STATUS_MAX_SEC // "2" | tonumber),
           dashboard_execution_max_sec: ($ENV.DASHBOARD_EXECUTION_MAX_SEC // "2" | tonumber),
           transport_health_max_sec: ($ENV.TRANSPORT_HEALTH_MAX_SEC // "2" | tonumber)
         },
@@ -507,7 +493,6 @@ run_mode() {
           masc_keeper_list_first: ($keeper_first_time | num_or_zero),
           masc_keeper_list_second: ($keeper_second_time | num_or_zero),
           masc_keeper_status: ($keeper_status_time | num_or_zero),
-          masc_transport_status: ($transport_time | num_or_zero),
           dashboard_execution: ($execution_time | num_or_zero),
           dashboard_transport_health: ($transport_health_time | num_or_zero)
         },
@@ -532,7 +517,6 @@ run_mode() {
         keeper_status_attempted_names: $keeper_status_attempted,
         keeper_status_sample: $keeper_status,
         execution_keeper_sample: (($execution_payload.keepers // [])[:2]),
-        transport_status: $transport_status,
         execution: $execution,
         health: {
           startup: $health.startup,

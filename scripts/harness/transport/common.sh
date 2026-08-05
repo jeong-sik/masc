@@ -171,14 +171,6 @@ transport_call_tool() {
   printf '%s' "$payload"
 }
 
-mcp_join_agent() {
-  local agent_name="$1"
-  transport_call_tool \
-    2 \
-    "masc_bind" \
-    "$(printf '{"agent_name":"%s","capabilities":[]}' "$agent_name")"
-}
-
 mcp_broadcast() {
   local agent_name="$1"
   local message="$2"

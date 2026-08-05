@@ -337,7 +337,6 @@ module Rest = struct
     [
       ( "transport",
         [
-          "masc_transport_status";
           "masc_websocket_discovery";
           "webrtc_offer";
           "webrtc_answer";

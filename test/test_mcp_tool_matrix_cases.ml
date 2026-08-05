@@ -77,7 +77,6 @@ let strict_success_names =
     "masc_status";
     "masc_tool_help";
     "masc_transition";
-    "masc_transport_status";
     "masc_websocket_discovery";
     "masc_workflow_guide";
     (* Removed post-pruning:

@@ -193,7 +193,6 @@ else
 fi
 
 transport_mcp_ready >/dev/null
-mcp_join_agent "transport-harness" >/dev/null
 
 # The server-side WS callback registers the session as an external broadcast
 # recipient asynchronously after the 101 handshake. Use a bounded broadcast

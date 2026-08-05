@@ -97,7 +97,6 @@ subscribe_pid=$!
 sleep 1
 
 transport_mcp_ready >/dev/null
-mcp_join_agent "transport-harness" >/dev/null
 mcp_broadcast "transport-harness" "grpc-e2e-test-event" >/dev/null
 sleep 2
 

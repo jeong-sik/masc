@@ -45,11 +45,10 @@ It bootstraps an isolated server when needed and compares:
 
 - `/health`
 - dashboard read model: `/api/v1/dashboard/transport-health`
-- MCP read model: `masc_transport_status`
 - live reachability probes for Streamable HTTP, observer SSE, gRPC TCP, WebSocket handshake, and h2c when advertised
 
 Mismatch output names the transport and the disagreeing surfaces, for example:
-`grpc truth mismatch: dashboard=true tool=true actual=false tcp=127.0.0.1:8936`.
+`grpc truth mismatch: dashboard=true actual=false tcp=127.0.0.1:8936`.
 Use that output as the regression proof before and after transport truth fixes.
 
 ## Recipes

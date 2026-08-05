@@ -702,8 +702,7 @@ let delete_comment store ~comment_id : (unit, board_error) Result.t =
         let post_key = Post_id.to_string comment.post_id in
         (* Remove from comments_by_post index *)
         let remaining =
-          (* DET-OK: absent index entry is sound-partial "nothing to
-             remove"; the primary store removal below is authoritative. *)
+          (* DET-OK: absent index entry = "nothing to remove" (sound-partial). *)
           Hashtbl.find_opt store.comments_by_post post_key
           |> Option.value ~default:[]
           |> List.filter (fun k -> not (String.equal k comment_key))

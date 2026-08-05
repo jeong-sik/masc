@@ -20,7 +20,7 @@ type reviewer_response =
 
 let reviewer_response = ref (Reviewer_verdict AR.Approve)
 
-let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () =
+let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () =
   match !reviewer_response with
   | Reviewer_verdict verdict -> Ok (Some verdict)
   | Reviewer_unavailable ->

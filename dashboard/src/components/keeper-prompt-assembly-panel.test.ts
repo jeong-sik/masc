@@ -233,3 +233,55 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(affectedPrompts?.textContent).toContain('Affected prompts')
   })
 })
+
+// The "Total size" metric is what an operator sizes a keeper's context budget
+// against. Two stages carry messageSlot 'not sent' — 'registry-bootstrap'
+// re-lists keeper.system as source preparation, and 'manifest-edge' is the
+// post-assembly audit record. Summing every row counted keeper.system twice:
+// the live fleet panel read 15.3 KiB / 3,920 tok against a real model input of
+// 1,985 tok.
+describe('buildKeeperPromptAssemblyReport sent totals', () => {
+  it('excludes not-sent stages from the model-input totals', () => {
+    const body = 'x'.repeat(4096)
+    const report = buildKeeperPromptAssemblyReport([
+      prompt({
+        key: 'keeper.system',
+        effective: body,
+        file_path: '/tmp/.masc/config/prompts/keeper.system.md',
+        char_count: body.length,
+      }),
+    ])
+
+    const notSent = report.stages.filter(stage => stage.messageSlot === 'not sent')
+    expect(notSent.length).toBeGreaterThan(0)
+
+    const allBytes = report.rows.reduce((sum, row) => sum + row.bytes, 0)
+    const notSentBytes = notSent.reduce((sum, stage) => sum + stage.bytes, 0)
+
+    // The not-sent stages carry real bytes here, so the two totals must differ.
+    expect(notSentBytes).toBeGreaterThan(0)
+    expect(report.stats.sentPromptBytes).toBe(allBytes - notSentBytes)
+    expect(report.stats.sentPromptBytes).toBeLessThan(allBytes)
+  })
+
+  it('counts a prompt reused by a not-sent stage only once', () => {
+    const body = 'y'.repeat(2048)
+    const report = buildKeeperPromptAssemblyReport([
+      prompt({
+        key: 'keeper.system',
+        effective: body,
+        file_path: '/tmp/.masc/config/prompts/keeper.system.md',
+        char_count: body.length,
+      }),
+    ])
+
+    const systemStage = report.stages.find(stage => stage.id === 'base-system')
+    const sourceStage = report.stages.find(stage => stage.id === 'registry-bootstrap')
+    expect(sourceStage?.messageSlot).toBe('not sent')
+    // Both stages render keeper.system, so the naive all-rows sum is ~2x.
+    expect(sourceStage?.bytes).toBe(systemStage?.bytes)
+    expect(report.stats.sentEstimatedTokens).toBeLessThan(
+      report.rows.reduce((sum, row) => sum + row.estimatedTokens, 0),
+    )
+  })
+})

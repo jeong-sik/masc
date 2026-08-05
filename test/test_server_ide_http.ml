@@ -11,6 +11,7 @@ open Alcotest
 module Auth = Masc.Auth
 module Http = Masc.Http_server_eio
 module Json = Yojson.Safe.Util
+module Sse = Masc.Sse
 module Workspace = Masc.Workspace
 
 let has_route meth path router =
@@ -535,6 +536,41 @@ let test_post_cursors_persists_valid_focus_mode () =
     | [] -> fail "expected persisted cursor")
 ;;
 
+let test_post_cursors_broadcasts_ws_invalidation () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "alice" in
+    let subscriber_id = "test-ide-cursor-ws-invalidation" in
+    let received = ref [] in
+    Sse.subscribe_external ~id:subscriber_id (fun frame ->
+      received := frame :: !received;
+      true);
+    Fun.protect
+      ~finally:(fun () -> Sse.unsubscribe_external subscriber_id)
+      (fun () ->
+        let body = {|{"file_path":"lib/a.ml","line":7,"focus_mode":"reviewing"}|} in
+        let request =
+          http_request
+            ~meth:`POST
+            ~path:(scoped_ide_path "/api/v1/ide/cursors")
+            ~body
+            ~token:(Some token)
+            ()
+        in
+        let response = dispatch router request in
+        check_status "POST cursor returns 201" 201 response;
+        match !received with
+        | frame :: _ ->
+          (match Sse.data_payload_of_frame frame with
+           | Error Sse.Missing_data_payload -> fail "cursor invalidation frame has no data"
+           | Ok payload ->
+             let json = Yojson.Safe.from_string payload in
+             check string "cursor invalidation type" "ide_cursor_changed"
+               (json_string_member "cursor invalidation" "type" json);
+             check string "cursor invalidation keeper" "alice"
+               (json_string_member "cursor invalidation" "keeper_id" json))
+        | [] -> fail "POST cursor did not broadcast a websocket invalidation"))
+;;
+
 let test_post_cursors_honors_canonical_url_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let token = create_worker_token base_path "alice" in
@@ -744,20 +780,6 @@ let test_post_annotations_rejects_missing_scope () =
       "POST annotation missing scope code"
       "missing_ide_scope"
       (error_code_of_response response))
-;;
-
-let test_cursor_stream_accepts_query_token_under_strict_auth () =
-  with_env "MASC_HTTP_BASE_URL" (Some "https://masc.example.test") (fun () ->
-    with_ide_server (fun ~base_path ~state:_ ~router ->
-      let token = create_worker_token base_path "alice" in
-      let path =
-        scoped_ide_path "/api/v1/ide/cursors/stream"
-        ^ "&token="
-        ^ Uri.pct_encode token
-      in
-      let request = http_request ~meth:`GET ~path () in
-      let response = dispatch router request in
-      check_status "GET cursor stream with query token succeeds" 200 response))
 ;;
 
 let test_memory_response_declares_annotation_source_contract () =
@@ -1090,10 +1112,6 @@ let () =
             `Quick
             test_post_annotations_rejects_missing_scope
         ; test_case
-            "GET cursor stream accepts query token under strict auth"
-            `Quick
-            test_cursor_stream_accepts_query_token_under_strict_auth
-        ; test_case
             "GET memory declares annotation source contract"
             `Quick
             test_memory_response_declares_annotation_source_contract
@@ -1137,6 +1155,8 @@ let () =
             test_post_cursors_rejects_negative_column
         ; test_case "POST cursor persists valid focus_mode" `Quick
             test_post_cursors_persists_valid_focus_mode
+        ; test_case "POST cursor broadcasts WS invalidation" `Quick
+            test_post_cursors_broadcasts_ws_invalidation
         ; test_case "POST cursor honors canonical_url scope" `Quick
             test_post_cursors_honors_canonical_url_scope
         ; test_case "POST annotation accepts matching repo scope" `Quick

@@ -3,10 +3,17 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 import type { Keeper, Task } from '../types'
-import { dashboardWsConnected, dashboardWsEventCount60s, dashboardWsLastError, dashboardWsLastEventAt, dashboardWsReady, _resetDashboardWsCounterForTests } from '../dashboard-ws-state'
+import {
+  _resetDashboardWsCounterForTests,
+  dashboardWsConnected,
+  dashboardWsEventCount60s,
+  dashboardWsLastError,
+  dashboardWsLastEventAt,
+  dashboardWsReady,
+} from '../dashboard-ws-state'
 import { route } from '../router'
 import { keepers, keeperHeartbeats, tasks } from '../store'
-import { connected, journal, lastDisconnectedAt, reconnectCount } from '../sse'
+import { journal } from '../sse'
 import { errors } from './common/error-notification-state'
 import { DashboardStatusTray, summarizeStatusTray } from './status-tray'
 
@@ -35,8 +42,6 @@ function task(id: string, status: Task['status']): Task {
 describe('summarizeStatusTray', () => {
   it('marks the client transport red when the socket is not ready', () => {
     const summary = summarizeStatusTray({
-      wsOnly: true,
-      sseConnected: false,
       wsConnected: false,
       wsReady: false,
       wsLastEventAt: 0,
@@ -59,38 +64,8 @@ describe('summarizeStatusTray', () => {
     expect(summary.items.transport.detail).toContain('socket closed')
   })
 
-  it('marks WS-only transport as degraded but live when SSE fallback is carrying events', () => {
+  it('marks transport as handshaking when the socket is open but hello is not ready', () => {
     const summary = summarizeStatusTray({
-      wsOnly: true,
-      sseConnected: true,
-      wsConnected: false,
-      wsReady: false,
-      wsLastEventAt: 0,
-      wsEventCount60s: 0,
-      wsLastPongAt: 0,
-      wsLastPongLatencyMs: null,
-      wsSseFallbackActive: true,
-      wsSseFallbackReason: 'dashboard websocket rpc timed out: dashboard/ping',
-      wsLastError: 'dashboard websocket rpc timed out: dashboard/ping',
-      reconnectCount: 0,
-      lastDisconnectedAt: 0,
-      keepers: [],
-      staleKeeperNames: new Set(),
-      tasks: [],
-      journalEntries: [],
-      unacknowledgedErrors: 0,
-      now: NOW,
-    })
-
-    expect(summary.items.transport.tone).toBe('warn')
-    expect(summary.items.transport.value).toBe('SSE fallback')
-    expect(summary.items.transport.detail).toContain('dashboard/ping')
-  })
-
-  it('marks WS-only transport as handshaking when the socket is open but hello is not ready', () => {
-    const summary = summarizeStatusTray({
-      wsOnly: true,
-      sseConnected: false,
       wsConnected: true,
       wsReady: false,
       wsLastEventAt: 0,
@@ -115,8 +90,6 @@ describe('summarizeStatusTray', () => {
 
   it('rolls stale keeper, verification, and error counts into tray items', () => {
     const summary = summarizeStatusTray({
-      wsOnly: false,
-      sseConnected: true,
       wsConnected: true,
       wsReady: true,
       wsLastEventAt: NOW - 1000,
@@ -159,8 +132,6 @@ describe('summarizeStatusTray', () => {
 
   it('counts execution receipt evidence even without the top-level attention flag', () => {
     const summary = summarizeStatusTray({
-      wsOnly: false,
-      sseConnected: true,
       wsConnected: true,
       wsReady: true,
       wsLastEventAt: NOW - 1000,
@@ -197,8 +168,6 @@ describe('summarizeStatusTray', () => {
 
   it('keeps the client transport green when route events are idle but heartbeat is fresh', () => {
     const summary = summarizeStatusTray({
-      wsOnly: true,
-      sseConnected: false,
       wsConnected: true,
       wsReady: true,
       wsLastEventAt: 0,
@@ -223,8 +192,6 @@ describe('summarizeStatusTray', () => {
 
   it('uses the first journal entry for activity state from newest-first snapshots', () => {
     const summary = summarizeStatusTray({
-      wsOnly: false,
-      sseConnected: true,
       wsConnected: false,
       wsReady: false,
       wsLastEventAt: 0,
@@ -252,8 +219,6 @@ describe('summarizeStatusTray', () => {
 
   it('preserves journal snapshot order instead of resorting by timestamp', () => {
     const summary = summarizeStatusTray({
-      wsOnly: false,
-      sseConnected: true,
       wsConnected: false,
       wsReady: false,
       wsLastEventAt: 0,
@@ -282,9 +247,6 @@ describe('summarizeStatusTray', () => {
 describe('DashboardStatusTray', () => {
   beforeEach(() => {
     route.value = { tab: 'overview', params: {}, postId: null }
-    connected.value = true
-    reconnectCount.value = 0
-    lastDisconnectedAt.value = 0
     dashboardWsConnected.value = false
     dashboardWsReady.value = false
     dashboardWsLastError.value = null
@@ -305,7 +267,6 @@ describe('DashboardStatusTray', () => {
     tasks.value = []
     journal.value = []
     errors.value = []
-    connected.value = false
     dashboardWsConnected.value = false
     dashboardWsReady.value = false
     dashboardWsLastEventAt.value = 0

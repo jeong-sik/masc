@@ -4,8 +4,7 @@ import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
 import { ConnectionStatus, DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, shouldRenderSurfaceLead, SideRail, summarizeAttentionPreview } from './dashboard-shell'
 import { route } from '../router'
-import { connected } from '../sse'
-import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
+import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady } from '../dashboard-ws-state'
 import { dashboardLoading } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 
@@ -16,7 +15,8 @@ describe('DashboardMain solo mode', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     dashboardLoading.value = false
-    connected.value = true
+    dashboardWsConnected.value = true
+    dashboardWsReady.value = true
     namespaceTruthInitializing.value = false
     document.title = 'MASC Dashboard'
   })
@@ -54,7 +54,8 @@ describe('DashboardMain primary heading', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     dashboardLoading.value = false
-    connected.value = true
+    dashboardWsConnected.value = true
+    dashboardWsReady.value = true
     namespaceTruthInitializing.value = false
     document.title = 'MASC Dashboard'
   })
@@ -83,24 +84,20 @@ describe('ConnectionStatus', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    connected.value = false
     dashboardWsConnected.value = false
     dashboardWsReady.value = false
-    dashboardWsSseFallbackActive.value = false
     dashboardWsLastError.value = null
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
-    connected.value = false
     dashboardWsConnected.value = false
     dashboardWsReady.value = false
-    dashboardWsSseFallbackActive.value = false
     dashboardWsLastError.value = null
   })
 
-  it('uses WS readiness instead of the legacy SSE connected signal in WS-only mode', () => {
+  it('uses WS readiness as the connection signal', () => {
     dashboardWsConnected.value = true
     dashboardWsReady.value = true
 

@@ -5,9 +5,8 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { dashboardBearerToken } from '../../api/core'
-import { appendIdeScopeParams, type IdeScope, type IdeScopeOptions } from '../../api/ide'
-import { createSseTransport } from '../../transports/sse-transport'
+import { fetchIdeCursors, type IdeScope } from '../../api/ide'
+import { registerIdeCursorRefresh } from '../../sse-store'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -308,7 +307,7 @@ export function ActiveFileIndicator({ activeFile, keeperCount }: ActiveFileIndic
   `
 }
 
-// ── SSE Stream Integration ───────────────────────────────────────
+// ── WebSocket Push Integration ──────────────────────────────────
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -405,76 +404,61 @@ export function normalizeKeeperCursorSnapshot(snapshot: unknown): KeeperCursorOv
   }
 }
 
-export function connectKeeperCursorStream(
-  baseUrl: string,
+export function connectKeeperCursorPush(
   onUpdate: (overlay: KeeperCursorOverlay) => void,
   options: KeeperCursorStreamOptions = {},
 ): () => void {
   let failedCount = 0
+  let closed = false
+  let inFlight = false
+  let refreshAgain = false
   options.onStatus?.({ status: 'connecting', failedCount })
-  if (typeof EventSource === 'undefined') {
-    failedCount = 1
-    options.onStatus?.({
-      status: 'degraded',
-      failedCount,
-      lastErrorMs: Date.now(),
-      error: 'EventSource unavailable',
-    })
-    return () => {
-      options.onStatus?.({ status: 'closed', failedCount })
-    }
-  }
 
-  const transport = createSseTransport(buildKeeperCursorStreamUrl(baseUrl, options))
-  const unsubscribe = transport.subscribe((event) => {
-    if (event.type === 'open') {
+  const refresh = async (): Promise<void> => {
+    if (closed) return
+    if (inFlight) {
+      refreshAgain = true
+      return
+    }
+    inFlight = true
+    try {
+      const snapshot = await fetchIdeCursors({
+        scope: options.scope,
+        repoId: options.repoId,
+        canonicalUrl: options.canonicalUrl,
+      })
+      if (closed) return
+      onUpdate(normalizeKeeperCursorSnapshot(snapshot))
       failedCount = 0
       options.onStatus?.({ status: 'live', failedCount, lastOpenMs: Date.now() })
-      return
-    }
-    if (event.type === 'message') {
-      onUpdate(normalizeKeeperCursorSnapshot(event.data))
-      return
-    }
-    if (event.type === 'error') {
+    } catch (error) {
+      if (closed) return
       failedCount += 1
+      const message = error instanceof Error ? error.message : String(error)
       options.onStatus?.({
         status: 'degraded',
         failedCount,
         lastErrorMs: Date.now(),
-        error: event.error.message,
+        error: message,
       })
-      console.error('Keeper cursor stream error:', event.error)
-      return
+      console.error('Keeper cursor refresh error:', error)
+    } finally {
+      inFlight = false
+      if (refreshAgain && !closed) {
+        refreshAgain = false
+        void refresh()
+      }
     }
-    if (event.type === 'close') {
-      options.onStatus?.({ status: 'closed', failedCount })
-    }
-  })
-  transport.connect()
+  }
+
+  const unregister = registerIdeCursorRefresh(() => { void refresh() })
+  void refresh()
 
   return () => {
-    transport.disconnect()
-    unsubscribe()
+    closed = true
+    unregister()
+    options.onStatus?.({ status: 'closed', failedCount })
   }
-}
-
-export function buildKeeperCursorStreamUrl(
-  baseUrl: string,
-  scopeOptions: IdeScopeOptions | string | null = null,
-): string {
-  const base = baseUrl.trim().replace(/\/+$/, '')
-  const endpoint = `${base}/api/v1/ide/cursors/stream`
-  const params = new URLSearchParams()
-  const token = dashboardBearerToken()
-  if (typeof scopeOptions === 'string' || scopeOptions === null) {
-    appendIdeScopeParams(params, { repoId: scopeOptions })
-  } else {
-    appendIdeScopeParams(params, scopeOptions)
-  }
-  if (token) params.set('token', token)
-  const query = params.toString()
-  return query ? `${endpoint}?${query}` : endpoint
 }
 
 // ── Helper to update cursor from tool call ───────────────────────

@@ -1,5 +1,5 @@
 // notifications.ts — browser Notification delivery for a closed subset of
-// typed dashboard SSE events (masc issue #54).
+// typed dashboard server-push events (masc issue #54).
 //
 // This module is the SSOT for "should a browser notification fire": it owns
 // both halves of that decision — the per-event-kind opt-in rules (persisted
@@ -11,7 +11,7 @@
 // Deliberately NOT a heuristic: there is no score, no keyword weighting, no
 // threshold. A notification fires iff (a) the browser granted permission,
 // (b) the user opted into that specific typed event kind, and (c) a
-// matching SSE event arrived. The previous keeper alert fanout scored
+// matching server-push event arrived. The previous keeper alert fanout scored
 // interestingness with keyword weights (removed in #23929) — that pattern
 // is deliberately not resurrected here.
 
@@ -234,7 +234,7 @@ function deliverBrowserNotification(kind: NotifyEventKind, event: SSEEvent): voi
   }
 }
 
-/** Wire this once at app boot (mirrors setupSSEReaction / handleHarnessSSE)
+/** Wire this once at app boot alongside the other server-push reactions
  *  so delivery keeps working regardless of which settings section, tab, or
  *  panel is currently mounted. Returns the unsubscribe function. */
 export function initNotificationDelivery(): () => void {

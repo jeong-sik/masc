@@ -1,7 +1,8 @@
-// MASC Dashboard — SSE (Server-Sent Events) hook
-// Auto-reconnect with exponential backoff, signal-based event dispatch
+// MASC Dashboard server-push event projection.
+// Transport ownership lives in dashboard-ws.ts; this module only applies the
+// typed events that arrive through that single WebSocket connection.
 
-import { batch, signal, type ReadonlySignal } from '@preact/signals'
+import { signal, type ReadonlySignal } from '@preact/signals'
 import type { JournalEntry, JournalEventType, SSEEvent } from './types'
 import { SYSTEM_ACTOR_NAME } from './types/core'
 import { formatCost } from './lib/format-number'
@@ -20,26 +21,19 @@ import { scheduleSessionTraceReload } from './components/session-trace/session-t
 import { recordSseCompaction } from './components/keeper-workspace/compaction-snapshots'
 import { appendAuditEntry } from './live-store'
 import { isCrashedPhase } from './lib/keeper-predicates'
-import { dashboardBearerToken } from './api/core'
-import { parseSSEMessage } from './schemas/sse'
 import {
   parseOasPayload,
   type TypedOasPayload,
 } from './schemas/sse-event-payload'
 import { asNumber } from './components/common/normalize'
 import { RingBuffer } from './lib/ring-buffer'
-import { createSseTransport } from './transports/sse-transport'
-import type { Transport } from './transports/transport'
 import type * as OasRuntimeStore from './oas-runtime-store'
 
 import {
-  RECONNECT_BASE_MS,
-  RECONNECT_MAX_MS,
   MAX_JOURNAL_ENTRIES,
   OAS_EVENT_PREFIX,
 } from './config/constants'
 
-const SSE_SESSION_KEY = 'masc_dashboard_sse_session_id'
 let oasRuntimeStorePromise: Promise<typeof OasRuntimeStore> | null = null
 
 function loadOasRuntimeStore(): Promise<typeof OasRuntimeStore> {
@@ -82,28 +76,9 @@ function keeperTraceNameFromEvent(event: SSEEvent, fallback: string): string {
 
 // --- Signals ---
 
-export const connected = signal(false)
 const eventCount = signal(0)
 export const lastEvent = signal<SSEEvent | null>(null)
 export const journal = signal<JournalEntry[]>([])
-
-/** Increments each time SSE reconnects after a disconnect. */
-export const reconnectCount = signal(0)
-/** Timestamp of last disconnect (0 = never disconnected). */
-export const lastDisconnectedAt = signal(0)
-
-// --- Session ID ---
-
-function getOrCreateSessionId(): string {
-  let sid = sessionStorage.getItem(SSE_SESSION_KEY)
-  if (!sid) {
-    sid = typeof crypto.randomUUID === 'function'
-      ? `dash_${crypto.randomUUID()}`
-      : `dash_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
-    sessionStorage.setItem(SSE_SESSION_KEY, sid)
-  }
-  return sid
-}
 
 // --- Journal ---
 
@@ -222,18 +197,15 @@ function parseOasPayloadOrWarn(
 ): TypedOasPayload | null {
   const result = parseOasPayload(eventType, payload)
   if (result.success) return result.data
-  console.warn('[SSE] dropping malformed OAS payload', {
+  console.warn('[server-push] dropping malformed OAS payload', {
     issues: result.error.issues,
     payload,
   })
   return null
 }
 
-// --- SSE Manager ---
+// --- WebSocket event ingress ---
 
-let transport: Transport | null = null
-let unsubscribe: (() => void) | null = null
-let wasDisconnected = false
 let pauseOasRuntimeIngress = false
 let queuedOasEvents: SSEEvent[] = []
 
@@ -251,21 +223,6 @@ export function resumeQueuedOasRuntimeIngress(): void {
   }
 }
 
-export function buildDashboardSseUrl(sessionId: string, locationSearch = window.location.search): string {
-  const urlParams = new URLSearchParams(locationSearch)
-  const sseParams = new URLSearchParams()
-  const agent = urlParams.get('agent') ?? urlParams.get('agent_name')
-  // Token from sessionStorage (moved from URL on init) — EventSource does not
-  // support custom headers, so query param is the only option.  The token is
-  // no longer visible in the browser address bar or shareable links.
-  const token = dashboardBearerToken()
-  if (agent) sseParams.set('agent', agent)
-  if (token) sseParams.set('token', token)
-  sseParams.set('session_id', sessionId)
-  sseParams.set('sse_kind', 'observer')
-  return `/mcp?${sseParams.toString()}`
-}
-
 export function normalizeSSEDispatchType(rawType: string): string {
   if (
     rawType === 'oas:masc:audit_event'
@@ -281,112 +238,11 @@ export function normalizeSSEDispatchType(rawType: string): string {
     : rawType
 }
 
-
-
-// rAF-coalesced ingress: buffer SSE events and flush once per animation
-// frame inside batch(), collapsing a high-frequency burst (keeper streaming
-// emits per-token events) to <=1 signal notification / render per frame.
-// Mirrors dashboard-ws.ts's pendingInbound + scheduleFlush + batch() pattern;
-// the two flush bodies differ (WS: processInboundMessage, here: handleEvent),
-// so this is a local copy rather than a shared util — extract if a third
-// consumer appears.
-const pendingEvents: SSEEvent[] = []
-let flushHandle = 0
-
-function scheduleFlush(): void {
-  if (flushHandle) return
-  if (typeof requestAnimationFrame === 'undefined') {
-    flushHandle = setTimeout(() => {
-      flushHandle = 0
-      flushPending()
-    }, 0) as unknown as number
-    return
-  }
-  flushHandle = requestAnimationFrame(() => {
-    flushHandle = 0
-    flushPending()
-  })
-}
-
-function flushPending(): void {
-  if (pendingEvents.length === 0) return
-  const events = pendingEvents.splice(0, pendingEvents.length)
-  // lastEvent is used as an event bus by several consumers
-  // (setupSSEReaction, reaction bars, connector/status panels, tool telemetry).
-  // Emit every event so intermediate messages are not dropped when multiple
-  // SSE messages arrive in one animation frame.
-  for (const ev of events) {
-    lastEvent.value = ev
-  }
-  // Order preserved (splice + for-loop); batch() coalesces the remaining
-  // signal writes across the whole burst into one notification.
-  batch(() => {
-    for (const ev of events) {
-      eventCount.value++
-      handleEvent(ev)
-    }
-  })
-}
-
-/** Test-only: synchronously drain pending SSE events. Production code never
- *  calls this — the rAF loop owns timing. Mirrors dashboard-ws.flushPendingInbound. */
-export function flushPendingSseEvents(): void {
-  if (flushHandle) {
-    if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(flushHandle)
-    else clearTimeout(flushHandle)
-    flushHandle = 0
-  }
-  flushPending()
-}
-
-export function connectSSE(): void {
-  disconnectSSE()
-
-  const sseUrl = buildDashboardSseUrl(getOrCreateSessionId())
-  console.debug('[SSE] connecting', sseUrl)
-  transport = createSseTransport(sseUrl, {
-    retryBaseMs: RECONNECT_BASE_MS,
-    retryMaxMs: RECONNECT_MAX_MS,
-  })
-
-  unsubscribe = transport.subscribe((event) => {
-    if (event.type === 'open') {
-      if (wasDisconnected) {
-        pauseOasRuntimeIngress = true
-        reconnectCount.value++
-        console.debug(`[SSE] reconnected (count=${reconnectCount.value})`)
-      } else {
-        console.debug('[SSE] connected')
-      }
-      wasDisconnected = false
-      connected.value = true
-    } else if (event.type === 'error' || event.type === 'close') {
-      if (connected.value) {
-        lastDisconnectedAt.value = Date.now()
-      }
-      console.warn('[SSE] connection error, scheduling reconnect')
-      wasDisconnected = true
-      connected.value = false
-    } else if (event.type === 'message') {
-      const raw = event.data
-      if (typeof raw !== 'object') {
-        // Non-JSON SSE data (e.g., heartbeat text) — transports layer already
-        // parsed JSON when possible; fall back to ignoring plain strings.
-        return
-      }
-      const candidate: unknown =
-        raw && (raw as { jsonrpc?: unknown }).jsonrpc && (raw as { params?: { type?: unknown } }).params?.type
-          ? (raw as { params?: unknown }).params
-          : raw
-      const parsed = parseSSEMessage(candidate)
-      if (!parsed) return
-      const ev = parsed as unknown as SSEEvent
-      pendingEvents.push(ev)
-      scheduleFlush()
-    }
-  })
-
-  transport.connect()
+/** Apply one typed event delivered by the dashboard WebSocket. */
+export function recordServerPushEvent(event: SSEEvent): void {
+  lastEvent.value = event
+  eventCount.value++
+  handleEvent(event)
 }
 
 function handleEvent(event: SSEEvent): void {
@@ -406,7 +262,7 @@ function handleEvent(event: SSEEvent): void {
         applyOasRuntimeEvent(event, { includeLiveTrace: true })
       })
       .catch(err => {
-        console.warn('[SSE] OAS runtime handler unavailable', err instanceof Error ? err.message : err)
+        console.warn('[server-push] OAS runtime handler unavailable', err instanceof Error ? err.message : err)
       })
   }
 
@@ -1100,7 +956,7 @@ function handleEvent(event: SSEEvent): void {
       break
     }
     case 'audit_event': {
-      // Global audit ledger event pushed via SSE (O2 Phase 2).
+      // Global audit ledger event pushed by the server event bus (O2 Phase 2).
       // Payload fields mirror the /api/v1/audit entry shape.
       const p = (event.payload ?? {}) as Record<string, unknown>
       const auditId = (event.audit_id ?? (p.id as string)) ?? ''
@@ -1146,16 +1002,6 @@ function handleEvent(event: SSEEvent): void {
         narrativeText: `${actorLabel(agent)} 이벤트: ${type}`,
       })
   }
-}
-
-export function disconnectSSE(): void {
-  unsubscribe?.()
-  unsubscribe = null
-  transport?.disconnect()
-  transport = null
-  pauseOasRuntimeIngress = false
-  queuedOasEvents = []
-  connected.value = false
 }
 
 // Re-export as readable signal for components

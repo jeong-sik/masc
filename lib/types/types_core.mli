@@ -152,7 +152,7 @@ type task_execution_links =
   { operation_id : string option [@default None]
   ; session_id : string option [@default None]
   }
-[@@deriving show, yojson { strict = false }]
+[@@deriving show, yojson { strict = true }]
 
 (** No producer has been linked yet. A task starts here and stays here until a
     runtime records the operation or session that carried it out. *)
@@ -165,7 +165,7 @@ type task_contract =
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]
   }
-[@@deriving show, yojson { strict = false }]
+[@@deriving show, yojson { strict = true }]
 
 type task_reclaim_policy =
   | Allow_reclaim

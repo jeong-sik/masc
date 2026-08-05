@@ -91,7 +91,7 @@ let format_current_task_with_heading ~heading (task : Masc_domain.task) : string
        task.Masc_domain.title status_line);
   (match task.Masc_domain.handoff_context with
    | Some h when h.Masc_domain.summary <> "" ->
-       (* RFC-0364: a handoff can now come from a previous owner, so the note
+       (* RFC-0365: a handoff can now come from a previous owner, so the note
           must say whose it is. Without this the model reads another agent's
           first-person account ("I already verified the spec") as its own
           recollection, which is worse than not showing the note at all. The

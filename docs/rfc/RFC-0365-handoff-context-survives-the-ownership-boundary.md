@@ -9,7 +9,7 @@ relates_to:
   - RFC-0351 (memory-first context management) — §2 principle 2 constrains the fix
 ---
 
-# RFC-0364 — `handoff_context` must survive the ownership boundary
+# RFC-0365 — `handoff_context` must survive the ownership boundary
 
 ## 0. 한 줄 요약
 

@@ -29,6 +29,6 @@ val build_backlog_update
     caller never supplies one — {!Tool_task_args} returns [None] for an absent
     field and calls that the expected shape — so applying the argument would
     erase the previous owner's note at the one boundary it exists to cross
-    (RFC-0364). The stored note carries [updated_by] and [updated_at], so a note
+    (RFC-0365). The stored note carries [updated_by] and [updated_at], so a note
     from an earlier owner stays attributable rather than being deleted for
     being stale. *)

@@ -12,7 +12,7 @@ type transition_backlog_update =
   ; persisted_handoff_context : Masc_domain.task_handoff_context option
   }
 
-(* RFC-0364. A handoff note is authored on the way out and read on the way in,
+(* RFC-0365. A handoff note is authored on the way out and read on the way in,
    so the two classes of transition must treat the field differently.
 
    Exit-class takes the argument: the closing owner is stating what it leaves

@@ -13,7 +13,6 @@ setupVisibleAutoRefresh.mockReturnValue(stopRefresh)
 
 vi.mock('../../api', () => ({ fetchDashboardTools }))
 vi.mock('../../lib/auto-refresh', () => ({ setupVisibleAutoRefresh }))
-vi.mock('../../sse-store', () => ({ registerKeeperChatQueueRefresh: vi.fn() }))
 
 import { subscribeToolsAutoRefresh } from './tool-state'
 

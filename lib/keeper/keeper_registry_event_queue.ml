@@ -8,9 +8,12 @@
     registry Atomic state primitive. *)
 
 let publish_pending ~base_path name pending =
-  match Keeper_registry.get ~base_path name with
-  | None -> ()
-  | Some entry -> Atomic.set entry.event_queue pending
+  (match Keeper_registry.get ~base_path name with
+   | None -> ()
+   | Some entry -> Atomic.set entry.event_queue pending);
+  Keeper_waiting_inventory_broadcast.changed
+    ~keeper_name:name
+    ~source:Event_queue
 ;;
 
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =

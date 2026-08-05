@@ -58,8 +58,7 @@ let test_underused_tool_metrics_record_aggregate_count () =
   in
   check int "summary underused count" 1
     (List.length summary.underused_tools);
-  Masc.Keeper_tool_diversity.record_underused_tool_metrics
-    ~keeper_name ~available_tools summary;
+  Masc.Keeper_tool_diversity.record_underused_tool_metrics ~keeper_name summary;
   check (float 0.001) "one underused allowed tool" 1.0
     (Masc.Otel_metric_store.metric_value_or_zero
        Keeper_metrics.(to_string ToolUnderusedAllowedCount)

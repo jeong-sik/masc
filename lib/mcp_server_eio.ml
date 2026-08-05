@@ -67,13 +67,9 @@ let validate_initialize_params = Mcp_transport_protocol.validate_initialize_para
 let has_field = Mcp_transport_protocol.has_field
 let get_field = Mcp_transport_protocol.get_field
 
-(* Tag registry initialization.
-   Most modules register via Tool_spec.register at module load time.
-   Inline schemas and domain adapters that need composition-root wiring
-   remain here. *)
+(* Tag registry initialization. *)
 let () =
   let open Tool_dispatch in
-  register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
   Board_tool.register ();
   (* P0-1 unified tool registry ratchet: fill any gaps left by module-load
      [Tool_spec] registrations and ensure every LLM-visible schema has a tag.
@@ -81,10 +77,6 @@ let () =
   Unified_tool_registry.register_all ();
   Unified_tool_registry.enforce_visible_tag_coverage ();
   mark_tag_registry_initialized ();
-  (* Inject masc_* schemas into keeper bridge for surface/policy filtering.
-     Uses Config.raw_all_tool_schemas, including domain-adapter schemas not
-     present in Tools.all_schemas_extended. *)
-  Keeper_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   (* Report exact visible schema-component bytes. Provider tokenization is not
      inferred before dispatch; authoritative token usage arrives in responses. *)
   (let schemas = Config.visible_tool_schemas () in

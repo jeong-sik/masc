@@ -96,7 +96,6 @@ module KeeperCompactionSnapshots : sig
   val max_limit : int
   val manifest_scan_min_files : int
   val manifest_scan_limit_multiplier : int
-  val manifest_tail_max_lines : int
 end
 
 (** {1 Keeper vision tool} *)

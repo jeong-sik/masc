@@ -475,19 +475,6 @@ module Registry : sig
 end
 ```
 
-### 5.4 Archetype (MAGI system)
-
-```ocaml
-type archetype =
-  | Melchior    (* Scientist *)
-  | Balthasar   (* Mirror/Ethics *)
-  | Casper      (* Strategist *)
-  | Athena      (* Reasoner *)
-  | Generalist  (* No specialization *)
-```
-
-MAGI 3인 체제(Melchior/Balthasar/Casper)에 Athena와 Generalist를 추가한 확장. 각 archetype은 가중치 계산(`archetype_weight`)을 지원한다.
-
 ---
 
 ## 6. Agent Ecosystem Types (RETIRED)

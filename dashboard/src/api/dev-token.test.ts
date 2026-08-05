@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   devTokenBootstrapStatus,
   ensureDevToken,
@@ -55,6 +55,57 @@ describe('ensureDevToken', () => {
     getStoredTokenMeta.mockReturnValue(null)
     currentDashboardActor.mockReturnValue('dashboard')
     isRemoteAccess.mockReturnValue(false)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('waits through the exact server warm-up payload and continues bootstrap', async () => {
+    vi.useFakeTimers()
+    fetchWithTimeout
+      .mockResolvedValueOnce(jsonResponse({
+        status: 'initializing',
+        message: 'Server is warming up',
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        token: 'ready-dev-token',
+        actor: 'dashboard',
+        role: 'worker',
+      }))
+
+    const bootstrap = ensureDevToken()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await bootstrap
+
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(2)
+    expect(setStoredToken).toHaveBeenCalledWith('ready-dev-token', {
+      source: 'dev',
+      actor: 'dashboard',
+      role: 'worker',
+    })
+    expect(devTokenBootstrapStatus.value).toBe('ok')
+  })
+
+  it('does not overwrite a manual token entered while the server is warming', async () => {
+    vi.useFakeTimers()
+    let token: string | null = null
+    let meta: { source: 'manual' } | null = null
+    getStoredToken.mockImplementation(() => token)
+    getStoredTokenMeta.mockImplementation(() => meta)
+    fetchWithTimeout
+      .mockResolvedValueOnce(jsonResponse({ status: 'initializing' }))
+
+    const bootstrap = ensureDevToken()
+    await Promise.resolve()
+    token = 'operator-token'
+    meta = { source: 'manual' }
+    await vi.advanceTimersByTimeAsync(1_000)
+    await bootstrap
+
+    expect(setStoredToken).not.toHaveBeenCalled()
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+    expect(token).toBe('operator-token')
   })
 
   it('retries after a transient network bootstrap failure in the same page load', async () => {

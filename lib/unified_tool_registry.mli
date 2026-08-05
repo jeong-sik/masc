@@ -7,10 +7,10 @@
     idempotent and preserves tags already registered via [Tool_spec]. *)
 
 val tag_of_name : string -> Tool_dispatch.module_tag option
-(** Derive the canonical dispatch tag for a tool name from naming heuristics
-    and schema-owned closed clusters. Returns [None] for names that have no
-    clear ratchet fallback; those must be covered by an explicit [Tool_spec]
-    registration. *)
+(** Exact lookup from canonical schema membership or a typed descriptor. *)
+
+val tag_of_runtime_handler :
+  Keeper_tool_descriptor.runtime_handler -> Tool_dispatch.module_tag
 
 val register_all : unit -> unit
 (** Register tags and their owning schemas for all names in the unified name

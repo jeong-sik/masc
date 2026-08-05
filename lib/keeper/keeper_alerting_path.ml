@@ -780,7 +780,6 @@ let resolve_keeper_target_path = resolve_keeper_path_within_allowed_roots
    if it ever changes. *)
 let sanitize_keeper_name = Playground_paths.sanitize_keeper_name
 let playground_path_of_keeper = Playground_paths.bundle_root
-let playground_bundle_paths = Playground_paths.bundle_paths
 
 let sandbox_path_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   Keeper_sandbox.allowed_root_rel_of_meta ~meta
@@ -789,13 +788,6 @@ let sandbox_path_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
 let sandbox_bundle_paths_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   let root = sandbox_path_of_meta ~meta |> strip_trailing_slashes in
   [ root ^ "/"; root ^ "/repos/" ]
-;;
-
-let ensure_playground_bundle ~(config : Workspace.config) ~(name : string) : string list =
-  let root = project_root_of_config config in
-  playground_bundle_paths name
-  |> List.map (Filename.concat root)
-  |> List.map Keeper_fs.ensure_dir
 ;;
 
 let ensure_sandbox_bundle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta)

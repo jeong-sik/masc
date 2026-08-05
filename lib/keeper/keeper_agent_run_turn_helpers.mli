@@ -16,8 +16,6 @@ val registry_progress_on_event :
   unit
 
 val emit_turn_end_safely : keeper_name:string -> unit -> unit
-val digest_text : string -> string
-val digest_message_texts_as_joined : Agent_sdk.Types.message list -> string
 
 val runtime_manifest_context :
   keeper_name:string ->

@@ -44,15 +44,8 @@ val keeper_turn_record_store : Workspace.config -> string -> Dated_jsonl.t
     effects. *)
 val keeper_raw_trace_dir : Workspace.config -> string -> string
 
-(** Retention bound for the per-turn raw-trace diagnostic store. The oldest
-    turn files beyond this count are removed by
-    {!prune_keeper_raw_trace_turn_files}. This also bounds public final-text
-    availability for {!Keeper_autonomous_turn_source}; dashboard display
-    requirements do not control this policy. *)
-val raw_trace_retained_turn_files : int
-
 (** File extension of a per-turn raw-trace file, including the dot. The
-    writer's retention scan and {!Keeper_autonomous_turn_source}'s read
+    retention scan and {!Keeper_autonomous_turn_source}'s read
     both select directory entries by this suffix. *)
 val raw_trace_file_extension : string
 
@@ -63,13 +56,6 @@ val raw_trace_file_extension : string
     created — callers on the dispatch path must degrade, not fail the
     turn (see [Keeper_agent_run.raw_trace_sink_outcome]). *)
 val keeper_raw_trace_turn_path : Workspace.config -> string -> string
-
-(** Remove the oldest per-turn raw-trace files beyond
-    {!raw_trace_retained_turn_files}, ordered by file name ascending
-    (chronological via the zero-padded timestamp prefix). Total: missing
-    dir or failed unlinks are logged and skipped. Returns the number of
-    files removed. *)
-val prune_keeper_raw_trace_turn_files : Workspace.config -> string -> int
 
 val keeper_generation_index_path : Workspace.config -> string -> string
 

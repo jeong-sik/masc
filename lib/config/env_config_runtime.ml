@@ -16,15 +16,7 @@ end
 (** {1 Tempo (Polling Interval) Configuration} *)
 
 module Tempo = struct
-  (** Minimum polling interval (seconds) - for urgent tempo *)
-  let min_interval_seconds =
-    get_float ~default:60.0 "MASC_TEMPO_MIN_INTERVAL_SEC"
-
-  (** Maximum polling interval (seconds) - for idle tempo *)
-  let max_interval_seconds =
-    get_float ~default:600.0 "MASC_TEMPO_MAX_INTERVAL_SEC"
-
-  (** Default polling interval (seconds) *)
+  (** Polling interval (seconds) published to operator surfaces *)
   let default_interval_seconds =
     get_float ~default:300.0 "MASC_TEMPO_DEFAULT_INTERVAL_SEC"
 end
@@ -136,13 +128,6 @@ module Voice = struct
 end
 
 (** {1 Message GC Configuration} *)
-
-module Message = struct
-  (** Maximum number of message files to retain per workspace (default 200).
-      Oldest messages (by filename sort) are deleted when count exceeds this. *)
-  let max_count =
-    get_int ~default:200 "MASC_MESSAGE_MAX_COUNT"
-end
 
 (** {1 Transport Configuration} *)
 
@@ -496,7 +481,10 @@ module Dashboard = struct
       WORKAROUND: This is a cap raise (§4 anti-pattern signature) accepted
       as bridge until structural RFC lands (per-component health cache so
       make_health_json no longer fans 17 sync calls per refresh).
-      Removal target: per-component health cache RFC (TBD). *)
+      Removal target: issue #26875 — the replacement RFC does not exist yet,
+      so the issue is what carries the obligation. A cap raise whose removal
+      target is unnamed does not expire, and the next one cites it as
+      precedent. *)
   let full_health_refresh_timeout_sec =
     Float.max 1.0
       (get_float ~default:20.0 "MASC_FULL_HEALTH_REFRESH_TIMEOUT_SEC")

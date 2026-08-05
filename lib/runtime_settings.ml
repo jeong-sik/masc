@@ -106,38 +106,6 @@ let register_bool ~key ~default ?meta () =
     ?meta
     ()
 
-(** Register a string parameter with a maximum length. *)
-let register_string ~key ~default ~max_len ?meta () =
-  Runtime_params.register
-    ~key
-    ~default
-    ~validate:(fun v ->
-      if String.length v > 0 && String.length v <= max_len then Ok ()
-      else Error (Printf.sprintf "%s must be 1-%d chars" key max_len))
-    ~serialize:(fun v -> `String v)
-    ~deserialize:deserialize_string
-    ?meta
-    ()
-
-
-(* ── board_policy surface ────────────────────────────────────── *)
-
-let message_max_count =
-  register_int
-    ~key:"message.max_count"
-    ~default:(fun () -> Env_config_runtime.Message.max_count)
-    ~min:10 ~max:10000
-    ()
-
-(* ── inference_config surface ──────────────────────────────────────── *)
-
-let inference_default_model =
-  register_string
-    ~key:"inference.default_model"
-    ~default:(fun () -> "auto")
-    ~max_len:100
-    ()
-
 (* ── dashboard surface (display-only) ────────────────────────── *)
 
 (** Maximum path length before truncation in dashboard output. *)
@@ -224,17 +192,6 @@ let dashboard_agent_stuck_threshold_sec =
     ()
 
 (* ── cost_policy surface ──────────────────────────────────────── *)
-
-(** Per-session advisory cost threshold in USD.
-    Default 0.50: based on observed keeper sessions averaging $0.02-0.15
-    (local llama + GLM fallback). 0.50 is ~3x worst-case observed session cost.
-    Used for reporting/warnings only; it must not gate execution. *)
-let _cost_max_session_usd =
-  register_float
-    ~key:"cost.max_session_usd"
-    ~default:(fun () -> 0.50)
-    ~min:0.01 ~max:50.0
-    ()
 
 (* ── keeper_lifecycle surface ────────────────────────────────── *)
 
@@ -329,21 +286,6 @@ type surface = {
 let surfaces =
   [
     {
-      id = "board_policy";
-      description = "Message retention cap";
-      param_keys = [ "message.max_count" ];
-    };
-    {
-      id = "inference_config";
-      description = "Default MODEL model";
-      param_keys = [ "inference.default_model" ];
-    };
-    {
-      id = "cost_policy";
-      description = "Per-session cost limits for keeper execution";
-      param_keys = [ "cost.max_session_usd" ];
-    };
-    {
       id = "keeper_lifecycle";
       description = "Keeper heartbeat and supervisor timing";
       param_keys = [
@@ -368,7 +310,6 @@ let surfaces =
       param_keys = [
         "keeper.turn.temperature";
         "keeper.turn.max_output_tokens";
-        "keeper.turn.llama_slots";
         "keeper.turn.batch_limit";
       ];
     };
@@ -400,7 +341,6 @@ let surfaces =
 (** Force module initialization to guarantee all params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_init () =
-  let (_ : _) = Runtime_params.get message_max_count in
   let (_ : _) = Runtime_params.get dashboard_max_path_length in
   let (_ : _) = Runtime_params.get dashboard_max_message_length in
   let (_ : _) = Runtime_params.get dashboard_max_pending_tasks in

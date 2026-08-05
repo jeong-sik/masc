@@ -4,6 +4,11 @@ val dashboard_json : Workspace.config -> Yojson.Safe.t
     join MASC stores, but it does not add a dashboard dependency to lower
     keeper/runtime libraries. *)
 
+val dashboard_json_for_keeper :
+  Workspace.config -> keeper_name:string -> Yojson.Safe.t
+(** The same typed projection narrowed to one keeper for latency-sensitive
+    detail surfaces. It does not overwrite fleet-wide waiting metrics. *)
+
 module For_testing : sig
   val dashboard_json_with_pending_reader :
     read_pending:

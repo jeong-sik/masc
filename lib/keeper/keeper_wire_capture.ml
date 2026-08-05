@@ -157,16 +157,17 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
       let redacted_tools =
         List.map (redact_json_strings redaction) raw_tools
       in
-      let history =
-        List.map
-          (fun (m : Agent_sdk.Types.message) ->
-             `Assoc
-               [ ("role", `String (Agent_sdk.Types.role_to_string m.role))
-               ; ( "text"
-                 , `String
-                     (redact redaction (Agent_sdk.Types.text_of_message m)) )
-               ])
-          history_messages
+      (* The replayed conversation is not copied into this record. It is
+         already durable in the OAS checkpoint and its [oas-snapshot-*]
+         history, and [capture_request] fires once per SDK turn, so
+         embedding it made one record as large as the checkpoint itself
+         (measured 2026-08-05: 14,465 messages = 9.8MB per record, which
+         exhausts the 64MiB day-file budget after 7 records and skips every
+         request after that). [history_messages_digest] is the same MD5 the
+         [context_injected] runtime manifest records, so a capture row joins
+         to the manifest row and to the checkpoint that holds the text. *)
+      let history_messages_digest =
+        Keeper_context_digest.message_texts_as_joined history_messages
       in
       let payload : Yojson.Safe.t =
         `Assoc
@@ -193,7 +194,7 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
           ; ("tools", `List redacted_tools)
           ; ("user_message", `String (redact redaction user_message))
           ; ("history_message_count", `Int (List.length history_messages))
-          ; ("history", `List history)
+          ; ("history_messages_digest", `String history_messages_digest)
           ]
       in
       write_payload ~masc_root ~keeper_name ~turn_id payload)

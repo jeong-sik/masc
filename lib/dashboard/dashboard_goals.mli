@@ -12,10 +12,9 @@
       the per-keeper goal projection.
     - {b dashboard envelope} ({!dashboard_goals_tree_json})
       consumed by [server_dashboard_http] +
-      [test/test_dashboard_goals].
+      [test/test_goal_metric_unevaluated].
     - {b per-goal detail} ({!goal_detail_json}) consumed
-      by [server_dashboard_http] +
-      [test/test_dashboard_goals].
+      by [server_dashboard_http].
 
     Internal helpers stay private at this boundary
     ([goal_status_color], [build_goal_events_projection],

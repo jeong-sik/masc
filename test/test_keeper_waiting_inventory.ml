@@ -249,6 +249,38 @@ let test_event_queue_pending_is_visible () =
      | rows -> failf "expected one queue row, got %d" (List.length rows))
 ;;
 
+let test_keeper_scoped_projection_excludes_other_keepers () =
+  with_workspace
+  @@ fun config ->
+  let requested_keeper = "waiting-inventory-requested" in
+  let other_keeper = "waiting-inventory-other" in
+  ensure_keeper config requested_keeper;
+  ensure_keeper config other_keeper;
+  List.iter
+    (fun keeper_name ->
+       Keeper_event_queue_persistence.persist
+         ~base_path:config.Workspace_utils_backend_setup.base_path
+         ~keeper_name
+         (queue_of_list
+            [ stimulus
+                ~post_id:("pending-" ^ keeper_name)
+                ~arrived_at:100.0
+                Keeper_event_queue.Bootstrap
+            ]))
+    [ requested_keeper; other_keeper ];
+  let json =
+    Server_keeper_waiting_inventory.dashboard_json_for_keeper
+      config
+      ~keeper_name:requested_keeper
+  in
+  check int "one scoped keeper" 1 (json_int_member "keeper_count" json);
+  check int "one scoped row" 1 (json_int_member "row_count" json);
+  check bool "requested keeper present" true
+    (Option.is_some (find_keeper json requested_keeper));
+  check bool "other keeper absent" true
+    (Option.is_none (find_keeper json other_keeper))
+;;
+
 let test_manual_compaction_waiting_row_has_typed_producer () =
   with_workspace
   @@ fun config ->
@@ -1015,6 +1047,8 @@ let () =
             test_event_queue_pending_is_visible
         ; test_case "manual compaction producer is typed" `Quick
             test_manual_compaction_waiting_row_has_typed_producer
+        ; test_case "keeper-scoped projection excludes other keepers" `Quick
+            test_keeper_scoped_projection_excludes_other_keepers
         ; test_case "chat queue pending rows are visible" `Quick
             test_chat_queue_pending_rows_are_visible
         ; test_case "chat queue recovery-required row is visible" `Quick

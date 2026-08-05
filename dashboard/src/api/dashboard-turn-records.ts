@@ -3,6 +3,7 @@
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { get, type AbortableRequestOptions } from './core'
+import { ensureDevToken } from './dev-token'
 import { isRecord, asBoolean, asNumber, asNullableString, asString, asRecordArray } from '../components/common/normalize'
 import { type TelemetryFreshnessMetadata } from './dashboard-shared'
 
@@ -1136,12 +1137,13 @@ function limitQueryString(limit?: number): string {
   return query ? `?${query}` : ''
 }
 
-export function fetchKeeperTurnRecords(
+export async function fetchKeeperTurnRecords(
   name: string,
   limit?: number,
   opts?: AbortableRequestOptions,
 ): Promise<TurnRecordsResponse> {
   const params = limitQueryString(limit)
+  await ensureDevToken()
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/turn-records${params}`,
     { signal: opts?.signal },
@@ -1152,12 +1154,13 @@ export function fetchKeeperTurnRecords(
   })
 }
 
-export function fetchKeeperCompactionSnapshots(
+export async function fetchKeeperCompactionSnapshots(
   name: string,
   limit?: number,
   opts?: AbortableRequestOptions,
 ): Promise<KeeperCompactionSnapshotsResponse> {
   const params = limitQueryString(limit)
+  await ensureDevToken()
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/compaction-snapshots${params}`,
     { signal: opts?.signal },

@@ -19,44 +19,13 @@ type turn_prompt_context =
 
 type user_turn_record =
   | Record_user_turn
-  | Skip_uninformative_wake
+  | Skip_already_checkpointed_user_turn
 (** Whether this turn's user message belongs in the durable transcript.
 
-    [Skip_uninformative_wake] is the autonomous wake marker on its own: a
-    constant whose observation frame rides [dynamic_context], rebuilt fresh
-    every turn. Recording it appends a byte-identical message per wake and
-    becomes pure duplication — one keeper accumulated the same 147B message
-    x359 (RFC-0351 section 5, #25462). The distinction is typed, not inferred
-    from message text. *)
-
-val user_turn_record_of_hitl_resolution : _ option -> user_turn_record
-(** Map the unified lane's HITL resolution slot to a transcript decision.
-    Absent resolution means the user turn is the bare wake marker. *)
-
-type turn_effect_record =
-  | Meaningful_turn
-  | Inert_autonomous_turn
-(** Whether the completed turn produced anything that belongs in durable
-    replay or post-turn memory extraction.
-
-    [Inert_autonomous_turn] means the input was only the autonomous wake
-    marker, no Keeper tool ran, and no external continuation route exists.
-    Model-authored prose alone is not a durable effect: persisting it makes an
-    idle fleet grow its transcript and then teaches the librarian about that
-    idleness.
-
-    The decision uses existing execution facts only. It does not inspect
-    response text, compare rendered messages, or introduce another completion
-    proof contract. *)
-
-val turn_effect_record_of_turn
-  :  user_turn_record:user_turn_record
-  -> tool_calls_made:bool
-  -> external_delivery_routed:bool
-  -> turn_effect_record
-(** [Inert_autonomous_turn] only when the wake was bare, no tool ran, and no
-    external continuation delivery is routed. Operator/HITL input, any tool
-    execution, or a routed continuation makes the turn meaningful. *)
+    [Record_user_turn] is the ordinary path, including autonomous [Continue.]
+    turns. [Skip_already_checkpointed_user_turn] is reserved for a resumed
+    checkpoint that already contains the exact current input, so replay does
+    not append a duplicate. The distinction is typed, not inferred from text. *)
 
 type extra_system_context_assembly =
   { extra_system_context : string option

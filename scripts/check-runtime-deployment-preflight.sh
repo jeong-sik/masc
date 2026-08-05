@@ -290,6 +290,10 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
 
   malformed_current_root="$fixture_root/malformed-current"
   write_schedules "$malformed_current_root" running
+  # This case writes a corrupt snapshot with no valid one, so it cannot borrow
+  # the directory from write_current_queue the way malformed-current-wal does.
+  # The two malformed-wal cases below prepare it the same way.
+  mkdir -p "$malformed_current_root/.masc/keepers/fixture"
   printf '{not-json\n' \
     >"$malformed_current_root/.masc/keepers/fixture/event-queue-v15.json"
   expect_failure malformed_current_queue "$malformed_current_root"

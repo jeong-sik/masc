@@ -312,22 +312,38 @@ let audit_entry_id ~timestamp ~agent_id ~action =
 (** Map outcome + action to O2 severity string. *)
 let audit_severity ~action ~outcome =
   match outcome with
-  | Failure _ -> (match action with
-    | AuthFailure | CircuitOpen -> "error"
-    | _ -> "warn")
-  | Success -> (match action with
-    | AuthSuccess -> "info"
-    | GateDecision d -> (match d with
-      | Gate_deny | Gate_unauthorized -> "warn"
-      | _ -> "info")
-    | CircuitClose -> "warn"
-    (* A successful runtime.toml write rewrites global keeper routing
-       (RFC-0273 §3.2: the highest-risk surface). Surface it above
-       routine info events so a severity-filtered audit scan catches it,
-       consistent with [CircuitClose] elevating a significant successful
-       transition to "warn". *)
-    | RuntimeConfigWrite -> "warn"
-    | _ -> "info")
+  | Failure _ ->
+    (match action with
+     | AuthFailure | CircuitOpen -> "error"
+     | ClaimTask | StartTask | DoneTask | CancelTask | ReleaseTask | Broadcast
+     | Suspend | ToolCall _ | AuthSuccess | CircuitClose | SearchRefinement
+     | GateDecision _ | RuntimeConfigWrite | Custom _ | Unknown _ ->
+       "warn")
+  | Success ->
+    (match action with
+     | AuthSuccess -> "info"
+     | GateDecision d ->
+       (match d with
+        | Gate_deny | Gate_unauthorized -> "warn"
+        | Gate_allow | Gate_require_confirmation | Gate_confirm | Gate_expired
+        | Gate_other _ ->
+          "info")
+     | CircuitClose -> "warn"
+     (* A successful runtime.toml write rewrites global keeper routing
+        (RFC-0273 §3.2: the highest-risk surface). Surface it above
+        routine info events so a severity-filtered audit scan catches it,
+        consistent with [CircuitClose] elevating a significant successful
+        transition to "warn". *)
+     | RuntimeConfigWrite -> "warn"
+     (* Enumerated rather than swept into a default: severity is the key a
+        filtered audit scan reads, and RuntimeConfigWrite above is the record
+        of what a default costs -- it sat at "info" until someone noticed the
+        highest-risk surface was hidden among routine events. A new action now
+        has to be placed here. *)
+     | ClaimTask | StartTask | DoneTask | CancelTask | ReleaseTask | Broadcast
+     | Suspend | ToolCall _ | AuthFailure | CircuitOpen | SearchRefinement
+     | Custom _ | Unknown _ ->
+       "info")
 
 (** Build a human-readable one-line summary from action + details. *)
 let audit_summary ~action ~details =
@@ -444,7 +460,10 @@ let audit_target ~action ~details =
   | Suspend -> extract_str "target_agent"
   | RuntimeConfigWrite -> extract_str "path"
   | Custom _ -> extract_str "tool_name"
-  | _ -> None
+  (* These carry no single subject worth putting in the one-line summary. *)
+  | Broadcast | AuthSuccess | AuthFailure | CircuitOpen | CircuitClose
+  | SearchRefinement | Unknown _ ->
+    None
 
 let audit_event_severity (entry : audit_entry) =
   audit_severity ~action:entry.action ~outcome:entry.outcome

@@ -4,6 +4,7 @@
     one redacted dated jsonl with the expected fields. *)
 
 module Wire = Masc.Keeper_wire_capture
+module Context_digest = Masc.Keeper_context_digest
 module Keeper_metrics = Keeper_metrics
 module Metrics = Masc.Otel_metric_store
 module Secret_projection = Masc.Keeper_secret_projection
@@ -263,16 +264,45 @@ let enabled_writes_redacted () =
     check_json_string "user message recorded" "user_message" "hello world" json;
     check_json_int "history_message_count recorded" "history_message_count" 2
       json;
-    check_json_list_length "history length" "history" 2 json;
-    let history_json = json_list "history" json in
-    (match history_json with
-     | [ assistant; user ] ->
-       check_json_string "assistant role recorded" "role" "assistant" assistant;
-       check_json_string "assistant text recorded" "text"
-         "좋아, 연구 시작한다" assistant;
-       check_json_string "user role recorded" "role" "user" user;
-       check_json_string "user text recorded" "text" "continue" user
-     | _ -> Alcotest.fail "history shape should have been checked above"))
+    check_json_string "history digest matches the manifest projection"
+      "history_messages_digest"
+      (Context_digest.message_texts_as_joined history)
+      json;
+    Alcotest.(check bool) "replayed message text is not written" false
+      (contains ~needle:"좋아, 연구 시작한다" content))
+
+(* The record must not scale with the replayed conversation: [capture_request]
+   runs once per SDK turn, so a per-message payload made a single record as
+   large as the checkpoint and exhausted the day-file byte budget within a few
+   turns. Growing the history by three orders of magnitude must leave the
+   record the same size apart from the message count. *)
+let record_size_is_independent_of_history_length () =
+  with_flag "1" (fun () ->
+    let capture ~history_messages =
+      let base = Filename.temp_dir "wirecap_size" "" in
+      Wire.capture_request ~base_path:base ~masc_root:base
+        ~keeper_name:"sangsu" ~turn_id:1 ~sdk_turn:1 ~system_prompt:"sys"
+        ~extra_system_context:None ~user_message:"u" ~history_messages
+        ~tools:[] ();
+      match find_jsonl base with
+      | [ path ] -> String.length (read_file path)
+      | files ->
+        Alcotest.failf "expected one jsonl, got %d" (List.length files)
+    in
+    let long_history =
+      List.init 2000 (fun i ->
+        Agent_sdk.Types.assistant_msg
+          (Printf.sprintf "replayed turn %d: %s" i (String.make 200 'x')))
+    in
+    let short = capture ~history_messages:[] in
+    let long = capture ~history_messages:long_history in
+    (* The only length difference is the decimal width of the message count. *)
+    Alcotest.(check bool)
+      (Printf.sprintf
+         "2000-message history must not inflate the record (short=%d long=%d)"
+         short long)
+      true
+      (abs (long - short) < 32))
 
 let request_captures_exact_redacted_tool_schemas () =
   with_flag "1" (fun () ->
@@ -613,6 +643,8 @@ let () =
             request_capture_failure_is_best_effort;
           Alcotest.test_case "trace_id is emitted when provided" `Quick
             request_trace_id_emitted;
+          Alcotest.test_case "record size is independent of history length"
+            `Quick record_size_is_independent_of_history_length;
         ] );
       ( "capture_response",
         [

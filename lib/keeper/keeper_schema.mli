@@ -16,8 +16,5 @@ val tail_order_enum_strings : string list
 val string_array_schema : Yojson.Safe.t
 (** JSON schema fragment for a free-form [string list] field. *)
 
-val keeper_schemas : Masc_domain.tool_schema list
-(** Per-tool schemas for the keeper authoring surface. *)
-
 val schemas : Masc_domain.tool_schema list
-(** Alias for [keeper_schemas] used by the catalogue registry. *)
+(** Per-tool schemas for the keeper authoring surface. *)

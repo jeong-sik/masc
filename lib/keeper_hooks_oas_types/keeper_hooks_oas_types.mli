@@ -24,18 +24,14 @@ val label_stop_reason : string
 val label_keeper_name : string
 
 (** JSON field-key string constants used across keeper_hooks_oas.ml. *)
-val key_agent : string
 val key_input_tokens : string
 val key_output_tokens : string
 val key_cost_usd : string
 val key_cost_status : string
 val key_cost_status_reason : string
 val key_cost_usd_source : string
-val key_usage_missing : string
-val key_timestamp : string
 val key_reason : string
 val key_provider : string
-val key_model : string
 val key_source : string
 val key_type : string
 val key_turn : string
@@ -48,9 +44,7 @@ val key_ts_unix : string
 val key_name : string
 val key_generation : string
 val key_active : string
-val key_via : string
 val key_tool_call_count : string
-val key_ts : string
 
 (** Callback name labels used as Otel_metric_store + log identifiers. *)
 val callback_label_after_turn_sse_broadcast : string

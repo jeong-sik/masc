@@ -1,20 +1,17 @@
 (** Keeper_tool_alias — flat routing table for two-surface tool naming.
 
-    RFC-0064: replaces the 3-tier classification with a single [route]
-    type. Each LLM-native tool name maps to one route record containing
+    Each LLM-native tool name maps to one route record containing
     the internal handler name, an input translator, and an optional
     public schema.
 
     Two descriptor-backed surfaces:
-    - LLM native-style tools (Execute, Grep/Search, Read, Edit, Write,
+    - LLM native-style tools (Execute, Grep, Read, Edit, Write,
       WebSearch, WebFetch)
     - MCP tools (names with the masc_ prefix)
 
     Internal [keeper_*] names are implementation details of the routing
     layer, not a public surface. A tool call for a name not in the routing
-    table is a routing miss — outcome-based telemetry captures this.
-
-    @since 2.187.0 — RFC-0064 two-surface model *)
+    table is a routing miss — outcome-based telemetry captures this. *)
 
 (** {1 Route type} *)
 
@@ -65,20 +62,19 @@ val record_route_outcome : tool:string -> routed_to:string -> result:string -> u
     present. *)
 val strip_mcp_masc_prefix : string -> string
 
-(** Pure canonical routing result for set-logic and routing callers that need
-    the same alias interpretation without emitting telemetry. *)
+(** Pure canonical routing result for set-logic and routing callers. *)
 type canonical_resolution =
-  | Public_alias of { internal : string }
+  | Public_name of { internal : string }
   | Internal of { canonical : string }
   | Unknown
 
 (** [canonical_resolution name] applies MCP-prefix stripping, descriptor-backed
-    public alias routing, and known-internal detection. *)
+    public-name routing, and known-internal detection. *)
 val canonical_resolution : string -> canonical_resolution
 
 (** [canonical_internal_name name] returns the internal keeper/MASC tool name
     used for pure set-logic comparisons after applying the same descriptor
-    public alias and MCP-prefix routing rules used by runtime dispatch. [None]
+    public-name and MCP-prefix routing rules used by runtime dispatch. [None]
     means the name is not a recognised public or internal tool. *)
 val canonical_internal_name : string -> string option
 

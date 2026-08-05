@@ -5,32 +5,34 @@ type trace_id = string
 
 let tool_type_of_name name =
   let name = String.lowercase_ascii (String.trim name) in
-  if String.starts_with ~prefix:"masc_" name
-  then "mcp"
-  else if String.starts_with ~prefix:"mcp__masc__" name
-  then "mcp"
-  else if String.starts_with ~prefix:"keeper_board_" name
-       || String.starts_with ~prefix:"board_" name
-  then "board"
-  else if String.starts_with ~prefix:"memory_" name
-  then "memory"
-  else if String.starts_with ~prefix:"library_" name
-       || String.starts_with ~prefix:"surface_" name
-  then "read"
-  else if name = "grep"
-       || name = "search"
-       || name = "search_files"
-       || String.starts_with ~prefix:"search_files" name
-  then "read"
-  else if String.starts_with ~prefix:"read" name
-  then "read"
-  else if String.starts_with ~prefix:"write" name
-  then "write"
-  else if String.starts_with ~prefix:"edit" name
-  then "write"
-  else if String.starts_with ~prefix:"execute" name
-  then "execute"
-  else "other"
+  match Tool_name.Board_name.of_string name with
+  | Some _ -> "board"
+  | None ->
+    if String.starts_with ~prefix:"masc_" name
+    then "mcp"
+    else if String.starts_with ~prefix:"mcp__masc__" name
+    then "mcp"
+    else if String.starts_with ~prefix:"board_" name
+    then "board"
+    else if String.starts_with ~prefix:"memory_" name
+    then "memory"
+    else if String.starts_with ~prefix:"library_" name
+            || String.starts_with ~prefix:"surface_" name
+    then "read"
+    else if name = "grep"
+            || name = "search"
+            || name = "search_files"
+            || String.starts_with ~prefix:"search_files" name
+    then "read"
+    else if String.starts_with ~prefix:"read" name
+    then "read"
+    else if String.starts_with ~prefix:"write" name
+    then "write"
+    else if String.starts_with ~prefix:"edit" name
+    then "write"
+    else if String.starts_with ~prefix:"execute" name
+    then "execute"
+    else "other"
 ;;
 
 let counter_name = "tool_dispatch_total"

@@ -55,7 +55,7 @@ describe('keeper chat pending request storage', () => {
           { kind: 'think', text: '상태 확인 중' },
           {
             kind: 'tool',
-            name: 'keeper_board_list',
+            name: 'masc_board_list',
             toolCallId: 'tc-1',
             status: 'pending',
             args: '{"limit":5}',
@@ -76,7 +76,7 @@ describe('keeper chat pending request storage', () => {
             { kind: 'think', text: '상태 확인 중' },
             {
               kind: 'tool',
-              name: 'keeper_board_list',
+              name: 'masc_board_list',
               toolCallId: 'tc-1',
               status: 'pending',
               args: '{"limit":5}',

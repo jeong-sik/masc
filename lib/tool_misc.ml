@@ -31,6 +31,7 @@ type tool_result = Tool_result.result
 type context = {
   config: Workspace.config;
   agent_name: string;
+  help_schemas: Masc_domain.tool_schema list;
 }
 
 
@@ -116,13 +117,15 @@ let strip_mcp_prefix name =
   then String.sub name plen (String.length name - plen)
   else name
 
-let handle_tool_help ~tool_name ~start_time _ctx args : Tool_result.result =
+(* TEL-OK: help schema selection and formatting are read-only; the outer tool
+   execution boundary owns invocation telemetry for every caller projection. *)
+let handle_tool_help ~schemas ~tool_name ~start_time _ctx args : Tool_result.result =
   let raw_name = String.trim (get_string args "tool_name" "") in
   if String.equal raw_name "" then
     workflow_err ~tool_name ~start_time "tool_name is required"
   else
     let tool_name = strip_mcp_prefix raw_name in
-    match Tool_help_registry.find_entry Config.raw_all_tool_schemas tool_name with
+    match Tool_help_registry.find_entry schemas tool_name with
     | None ->
         workflow_err ~tool_name ~start_time
           (Printf.sprintf "unknown tool: %s" raw_name)
@@ -169,7 +172,7 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (handle_keeper_waiting_inventory ~tool_name:name ~start_time:start ctx args)
   | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
   | "masc_tool_help" ->
-      Some (handle_tool_help ~tool_name:name ~start_time:start ctx args)
+      Some (handle_tool_help ~schemas:ctx.help_schemas ~tool_name:name ~start_time:start ctx args)
   | "masc_web_search" ->
       Some (handle_web_search ~tool_name:name ~start_time:start ctx args)
   | "masc_web_fetch" ->

@@ -856,7 +856,7 @@ let test_post_create_sources_footer_and_meta () =
   Alcotest.(check bool) "external source flag" true
     Yojson.Safe.Util.(json |> member "meta" |> member "has_external_sources" |> to_bool)
 
-let test_keeper_board_post_preserves_meta_reason () =
+let test_masc_board_post_preserves_meta_reason () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
@@ -865,9 +865,9 @@ let test_keeper_board_post_preserves_meta_reason () =
     "LLM judged this as automation because it broadcasts a keeper-owned status update."
   in
   let body =
-    Keeper_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
-      ~name:"keeper_board_post"
+      ~name:"masc_board_post"
       ~args:
         (make_args
            [
@@ -883,7 +883,7 @@ let test_keeper_board_post_preserves_meta_reason () =
   let json = parse_create_response_json body in
   Alcotest.(check string) "classification reason kept" reason
     Yojson.Safe.Util.(json |> member "meta" |> member "classification_reason" |> to_string);
-  Alcotest.(check string) "keeper source injected" "keeper_board_post"
+  Alcotest.(check string) "keeper source injected" "masc_board_post"
     Yojson.Safe.Util.(json |> member "meta" |> member "source" |> to_string);
   Alcotest.(check string) "existing meta preserved" "probe-1"
     Yojson.Safe.Util.(json |> member "meta" |> member "trace" |> to_string);
@@ -899,9 +899,9 @@ let test_keeper_board_sub_board_owner_is_runtime_bound () =
   let keeper_meta = make_keeper_meta ~name:"sub-board-keeper" () in
   let slug = "typed-owner-boundary" in
   let created =
-    Keeper_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
-      ~name:"keeper_board_sub_board_create"
+      ~name:"masc_board_sub_board_create"
       ~args:
         (make_args
            [ "slug", `String slug
@@ -913,9 +913,9 @@ let test_keeper_board_sub_board_owner_is_runtime_bound () =
   Alcotest.(check bool) "sub-board create succeeds" false
     (contains_substring created "error");
   let fetched =
-    Keeper_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
-      ~name:"keeper_board_sub_board_get"
+      ~name:"masc_board_sub_board_get"
       ~args:(make_args [ "sub_board_id", `String slug ])
   in
   Alcotest.(check bool) "owner is keeper identity" true
@@ -941,7 +941,7 @@ let test_direct_board_reaction_binds_keeper_identity () =
   in
   let keeper_meta = make_keeper_meta ~name:"reaction-keeper" () in
   let reacted =
-    Masc.Keeper_tool_in_process_runtime.handle_masc_board
+    Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
       ~name:"masc_board_reaction"
       ~args:
@@ -967,7 +967,7 @@ let test_model_visible_board_maintenance_dispatches_in_process () =
     (List.mem "masc_board_delete" model_names);
   let keeper_meta = make_keeper_meta ~name:"maintenance-keeper" () in
   let cleanup_result =
-    Masc.Keeper_tool_in_process_runtime.handle_masc_board
+    Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
       ~name:"masc_board_cleanup"
       ~args:(make_args [ "dry_run", `Bool true ])
@@ -988,7 +988,7 @@ let test_model_visible_board_maintenance_dispatches_in_process () =
     Yojson.Safe.Util.(parse_create_response_json created |> member "id" |> to_string)
   in
   let delete_result =
-    Masc.Keeper_tool_in_process_runtime.handle_masc_board
+    Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
       ~name:"masc_board_delete"
       ~args:
@@ -1007,17 +1007,17 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"typed-keeper" () in
   let fake =
-    Keeper_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
-      ~name:"keeper_board_fake"
+      ~name:"masc_board_fake"
       ~args:(make_args [])
   in
   Alcotest.(check bool) "fake board name rejected" true
     (contains_substring fake "unknown_board_tool");
   let comment_vote =
-    Keeper_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
-      ~name:"keeper_board_comment_vote"
+      ~name:"masc_board_comment_vote"
       ~args:(make_args [ ("comment_id", `String "") ])
   in
   Alcotest.(check bool) "typed comment vote reaches board handler" true
@@ -1025,18 +1025,18 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   Alcotest.(check bool) "typed comment vote is not unknown" false
     (contains_substring comment_vote "unknown_board_tool");
   let curation =
-    Keeper_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
-      ~name:"keeper_board_curation_read"
+      ~name:"masc_board_curation_read"
       ~args:(make_args [])
   in
   Alcotest.(check string) "typed curation read reaches board handler" "null" curation;
   Alcotest.(check bool) "typed curation read is not unknown" false
     (contains_substring curation "unknown_board_tool");
   let curation_submit =
-    Keeper_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
-      ~name:"keeper_board_curation_submit"
+      ~name:"masc_board_curation_submit"
       ~args:
         (make_args
            [
@@ -1384,7 +1384,7 @@ let test_post_list_filter_combinations () =
             ~hearth:"dashboard-harness" ~post_kind:Board.Automation_post ());
   ignore (Board_dispatch.create_post ~author:"dm-keeper" ~content:"keeper"
             ~post_kind:Board.Automation_post
-            ~meta_json:(`Assoc [ ("source", `String "keeper_board_post") ]) ());
+            ~meta_json:(`Assoc [ ("source", `String "masc_board_post") ]) ());
   ignore (Board_dispatch.create_post ~author:"keeper-alert-bot" ~content:"system"
             ~post_kind:Board.System_post ());
   let ok1, body1 = dispatch "masc_board_list"
@@ -1935,8 +1935,15 @@ let test_curation_schema_omits_health_score () =
   in
   check_absent "raw curation submit"
     (find_tool "masc_board_curation_submit" Board_tool.tools);
-  check_absent "keeper curation submit"
-    (find_tool "keeper_board_curation_submit" Tool_shard.board_tools)
+  let keeper_projection =
+    match
+      Tool_shard_types.keeper_board_schema
+        Tool_name.Board_name.Board_curation_submit
+    with
+    | Some schema -> schema
+    | None -> Alcotest.fail "missing Keeper curation projection"
+  in
+  check_absent "keeper curation submit" keeper_projection
 
 let test_post_update_schema_exposes_new_author () =
   let update_properties =
@@ -2012,7 +2019,7 @@ let () =
           Alcotest.test_case "create sources footer and meta" `Quick
             test_post_create_sources_footer_and_meta;
           Alcotest.test_case "keeper board post preserves meta reason" `Quick
-            test_keeper_board_post_preserves_meta_reason;
+            test_masc_board_post_preserves_meta_reason;
           Alcotest.test_case "keeper sub-board owner is runtime-bound" `Quick
             test_keeper_board_sub_board_owner_is_runtime_bound;
           Alcotest.test_case "direct Board reaction binds keeper identity" `Quick

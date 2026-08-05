@@ -44,7 +44,7 @@ let string_arg key = function
   | _ -> None
 ;;
 
-let ensure_keeper_board_post_args ~author ~source args =
+let ensure_masc_board_post_args ~author ~source args =
   match args with
   | `Assoc fields ->
     let raw_meta =
@@ -95,13 +95,14 @@ let bind_board_identity ~keeper_name board_name args =
     (Board_tool_registry.identity_fields_for_board_name board_name)
 ;;
 
-let handle_keeper_board_tool_with_outcome
+let handle_board_name_with_outcome
       ~(meta : keeper_meta)
-      ~(name : string)
+      ~(board_name : Tool_name.Board_name.t)
       ~(args : Yojson.Safe.t)
   =
   let dispatch tool_name tool_args =
-    Keeper_tool_execution.of_tool_result (Board_tool.handle_tool tool_name tool_args)
+    Keeper_tool_execution.of_tool_result
+      (Board_tool_dispatch.handle_tool tool_name tool_args)
   in
   (* PR-S1: the board runtime speaks the domain name type [Board_name.t]
      directly rather than routing through the MASC god-enum. *)
@@ -137,17 +138,17 @@ let handle_keeper_board_tool_with_outcome
          in
          snapshot_execution_of_response result response)
   in
-  match Keeper_tool_name.of_string name with
-  | Some Keeper_tool_name.Board_post ->
+  match board_name with
+  | Tool_name.Board_name.Board_post ->
     let author = meta.name in
-    let keeper_source = name in
+    let keeper_source = Tool_name.Board_name.to_string board_name in
     Log.Keeper.debug
       "%s called by %s, raw args: %s"
       keeper_source
       author
       (Yojson.Safe.pretty_to_string args);
     let board_args =
-      ensure_keeper_board_post_args
+      ensure_masc_board_post_args
         ~author
         ~source:keeper_source
         (bind_board_identity
@@ -157,7 +158,7 @@ let handle_keeper_board_tool_with_outcome
     in
     Log.Keeper.debug "board_args: %s" (Yojson.Safe.pretty_to_string board_args);
     let result =
-      Board_tool.handle_tool
+      Board_tool_dispatch.handle_tool
         (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
         board_args
     in
@@ -168,7 +169,7 @@ let handle_keeper_board_tool_with_outcome
       disposition
       (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." msg |> String_util.to_string);
     Keeper_tool_execution.of_tool_result result
-  | Some Keeper_tool_name.Board_post_get ->
+  | Tool_name.Board_name.Board_post_get ->
     (match string_arg "post_id" args with
      | Some pid when String.trim pid <> "" ->
        dispatch_board Tool_name.Board_name.Board_post_get args
@@ -177,27 +178,28 @@ let handle_keeper_board_tool_with_outcome
          ~class_:Tool_result.Policy_rejection
          (error_json
             ~fields:[ "reason", `String "missing_post_id" ]
-            "keeper_board_post_get requires post_id (format: p-xxxx). \
+            "masc_board_post_get requires post_id (format: p-xxxx). \
              You sent empty or missing post_id."))
-  | Some keeper_tool ->
-    (match keeper_tool with
-     | Keeper_tool_name.Board_list -> dispatch_board_list args
-     | _ ->
-       match Keeper_tool_name.masc_board_name_of_keeper_tool keeper_tool with
-     | Some board_name ->
-       dispatch_board
-         board_name
-         (bind_board_identity ~keeper_name:meta.name board_name args)
-     | None ->
-       Keeper_tool_execution.failure
-         ~class_:Tool_result.Policy_rejection
-         (error_json ~fields:[ "tool", `String name ] "unknown_board_tool"))
+  | Tool_name.Board_name.Board_list -> dispatch_board_list args
+  | board_name ->
+    dispatch_board
+      board_name
+      (bind_board_identity ~keeper_name:meta.name board_name args)
+;;
+
+let handle_board_tool_with_outcome
+      ~(meta : keeper_meta)
+      ~(name : string)
+      ~(args : Yojson.Safe.t)
+  =
+  match Tool_name.Board_name.of_string name with
+  | Some board_name -> handle_board_name_with_outcome ~meta ~board_name ~args
   | None ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
       (error_json ~fields:[ "tool", `String name ] "unknown_board_tool")
 ;;
 
-let handle_keeper_board_tool ~meta ~name ~args =
-  (handle_keeper_board_tool_with_outcome ~meta ~name ~args).raw_output
+let handle_board_tool ~meta ~name ~args =
+  (handle_board_tool_with_outcome ~meta ~name ~args).raw_output
 ;;

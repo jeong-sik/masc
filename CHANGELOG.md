@@ -1873,7 +1873,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 - OAS: API fingerprint metadata drift detection (#10156), oas-bridge timeout SSOT (#10108), oas-bridge typed contract (#10153), `codex_cli` MCP omission WARN dedup (#10100), suppress repeated omission warnings (#10109).
 - Runtime: declarative `fallback_runtime` for single-provider profiles (life-support escalation) (#10157).
 - Telemetry: dedupe websocket delivery schema (#10151), legacy degenerate row scrub at init (#10095), heuristic-theatre retired scrape backend migration follow-up (#10044).
-- Governance: auto-approve `masc_transition` + `keeper_board_post` for autonomous flow (#10148), default judge timeout raised to 180s (#10132), anti-rationalization gate-2 demoted to LLM advisory (#10116).
+- Governance: auto-approve `masc_transition` + `masc_board_post` for autonomous flow (#10148), default judge timeout raised to 180s (#10132), anti-rationalization gate-2 demoted to LLM advisory (#10116).
 - Filesystem: `save_file_atomic` orphan boot sweep (#10131), test-executable HOME guard (#10085).
 - Board/workspace: keeper actor identity unified (#10133), original vote timestamp persisted across flush (#10093), fixture-vote quarantine (#10079).
 - A11y: ARIA on vis-timeline/vis-network/filter chips (#10138), keeper-phase ARIA (#10142), GraphQL Playground viewport zoom (#10134).

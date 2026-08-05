@@ -84,11 +84,11 @@ Retired behavior observed in `system_log seq 52304` (2026-05-14):
 ```
 INFO  oas:agent  turn completed turn=16
   stop=error:Completion contract [require_tool_use] violated:
-  model called [keeper_board_list], but no call satisfied
-  (keeper_board_list: read-only/passive cannot satisfy)
+  model called [masc_board_list], but no call satisfied
+  (masc_board_list: read-only/passive cannot satisfy)
 ```
 
-Model 이 `keeper_board_list` 로 *상황 파악* 후 다음 turn 에 mutating
+Model 이 `masc_board_list` 로 *상황 파악* 후 다음 turn 에 mutating
 action 을 호출하려는 자연스러운 reasoning 이 turn-level enforcement
 에 의해 *그 turn 자체* 가 contract violation 으로 변환됐던 현상.
 현재 정책에서는 provider-level tool-use 와 Keeper progress/liveness
@@ -140,7 +140,7 @@ legacy 시뮬레이터 / 백테스트 용도로만 노출.
 - intent window max_turns 의 적정값 (2 / 3 / N) — 측정 필요. 본 RFC
   는 default=2 로 시작하고 telemetry (#11083 operator_broadcast_required
   감소율) 로 조정.
-- `keeper_board_list` 같은 read-only tool 을 "intent fulfillment 의
+- `masc_board_list` 같은 read-only tool 을 "intent fulfillment 의
   prerequisite" 으로 인정할지 vs "intent 미시작" 으로 볼지 — 전자가
   더 안전 (default).
 

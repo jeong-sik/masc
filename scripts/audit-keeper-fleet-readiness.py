@@ -24,13 +24,14 @@ from typing import Any
 import tomllib
 
 
+# Runtime-emitted Board tool names.
 BOARD_TOOLS = {
-    "keeper_board_post",
-    "keeper_board_comment",
-    "keeper_board_vote",
-    "keeper_board_get",
-    "keeper_board_list",
-    "keeper_board_search",
+    "masc_board_post",
+    "masc_board_post_get",
+    "masc_board_comment",
+    "masc_board_vote",
+    "masc_board_list",
+    "masc_board_search",
 }
 WEB_SEARCH_TOOLS = {
     "masc_web_search",
@@ -112,6 +113,7 @@ class PrCreationEvidence:
     @property
     def created(self) -> bool:
         return bool(self.refs)
+
 
 @dataclass
 class PersistentWorkEvidence:
@@ -669,7 +671,7 @@ def board_post_evidence_item(kind: str, row: dict[str, Any], source: str) -> str
     return f"{kind}:board_post:{post_id}:{source_slug}"
 
 
-def scan_keeper_board_posts(
+def scan_masc_board_posts(
     base_path: Path,
     name: str,
     *,
@@ -1036,7 +1038,7 @@ def audit_keeper(
         board_post_evidence,
         product_evidence,
         design_evidence,
-    ) = scan_keeper_board_posts(base_path, name, max_silence_hours=max_silence_hours)
+    ) = scan_masc_board_posts(base_path, name, max_silence_hours=max_silence_hours)
     runtime_turn_ts = numeric_field(runtime, "last_turn_ts")
     updated_ts = iso_to_unix(string_field(runtime, "updated_at"))
     last_turn_ts = max(

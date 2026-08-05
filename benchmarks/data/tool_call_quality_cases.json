@@ -89,7 +89,7 @@
     },
     {
       "id": "multi_step_board_update",
-      "prompt": "Search for `tool_call_quality_benchmark_cli`, run a short validation command with bash, and then call `masc_board_post` with a body that contains the word `verified`.",
+      "prompt": "Search for `tool_call_quality_benchmark_cli`, run a short validation command with bash, and then call `masc_board_post` with content that contains the word `verified`.",
       "category": "multi_step",
       "keeper_profiles": ["bench-executor", "bench-verifier"],
       "forbidden_tools": [],
@@ -106,7 +106,7 @@
       "arg_checks": [
         {
           "selector": { "type": "descriptor_id", "value": "masc.board.post" },
-          "path": "$.body",
+          "path": "$.content",
           "contains": "verified"
         }
       ],

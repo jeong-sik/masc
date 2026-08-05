@@ -302,7 +302,7 @@ window.MASC_P2 = (function () {
   const episodes = [
     { id:"ep-tm-t5",  ts:"16:14:28Z", participants:["taskmaster"], summary:"goal-merge-blockers dispatch · task-038 cancel · nick0cave release request · sangsu/qa-king claim invitation",
       learnings:["task-038는 task-031과 중복이 명백해 cancel","task-036은 unclaimed 유지, claim 시 plan 작성 요구","taskmaster는 타인 task force-release 권한 없음","같은 goal 아래 open task 3개 제한"], outcome:"success" },
-    { id:"ep-jn-t2",  ts:"16:15:06Z", participants:["janitor"],    summary:"keeper_board_list, keeper_tasks_audit",
+    { id:"ep-jn-t2",  ts:"16:15:06Z", participants:["janitor"],    summary:"masc_board_list, keeper_tasks_audit",
       learnings:["[SYNTHETIC] turn budget exhausted: 2/2 turns used"], outcome:"success" },
     { id:"ep-sc-t8",  ts:"15:58:11Z", participants:["scholar"],    summary:"backlog 정리 후 runtime/keeper 상태 업데이트",
       learnings:["sangsu runtime primary 미반영","verifier keeper cross_verifier flag로 등록 거부","qa-king.json 미존재"], outcome:"success" },

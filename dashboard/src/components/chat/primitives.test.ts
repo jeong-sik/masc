@@ -750,7 +750,7 @@ describe('ChatTranscript', () => {
           id: 'tool-2',
           role: 'tool',
           source: 'tool_result',
-          label: 'keeper_board_post',
+          label: 'masc_board_post',
           text: '{"title":"hi"}',
         })]}
         emptyText="empty"
@@ -758,7 +758,7 @@ describe('ChatTranscript', () => {
       container,
     )
     expect(container.textContent).toContain('입력')
-    expect(container.textContent).toContain('keeper_board_post')
+    expect(container.textContent).toContain('masc_board_post')
     expect(container.textContent).toContain('"title"')
   })
 
@@ -2510,7 +2510,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
-          toolEntry({ id: 'tool-t1', label: 'keeper_board_list' }),
+          toolEntry({ id: 'tool-t1', label: 'masc_board_list' }),
           toolEntry({ id: 'tool-t2', label: 'keeper_tasks_list' }),
           entry({ id: 'a', text: '답변', role: 'assistant', source: 'direct_assistant' }),
         ]}
@@ -2525,7 +2525,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(cards[0]?.textContent).toContain('3단계')
     expect(cards[0]?.textContent).toContain('도구 2')
     expect(cards[0]?.textContent).toContain('Chat 1')
-    expect(cards[0]?.textContent).toContain('keeper_board_list')
+    expect(cards[0]?.textContent).toContain('masc_board_list')
     expect(cards[0]?.textContent).toContain('keeper_tasks_list')
     expect(cards[0]?.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('답변')
     // Grouped surface keeps no standalone per-row tool bubbles.
@@ -2536,7 +2536,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
-          toolEntry({ id: 'tool-t1', label: 'keeper_board_list', turnRef: 'trace-a#1' }),
+          toolEntry({ id: 'tool-t1', label: 'masc_board_list', turnRef: 'trace-a#1' }),
           entry({
             id: 'a',
             text: '도구 결과로 답합니다',
@@ -2559,7 +2559,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(bundle?.querySelector('[data-chat-variant="messenger"]')).not.toBeNull()
     expect(bundle?.textContent).toContain('Thinking')
     expect(bundle?.textContent).toContain('reading tool output')
-    expect(bundle?.textContent).toContain('keeper_board_list')
+    expect(bundle?.textContent).toContain('masc_board_list')
     expect(bundle?.textContent).toContain('도구 결과로 답합니다')
   })
 
@@ -2567,7 +2567,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
-          toolEntry({ id: 'tool-t1', label: 'keeper_board_list', turnRef: 'trace-a#1' }),
+          toolEntry({ id: 'tool-t1', label: 'masc_board_list', turnRef: 'trace-a#1' }),
           entry({
             id: 'a',
             text: '다른 턴 답변',
@@ -2585,7 +2585,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
     const trace = container.querySelector('[data-chat-tool-trace]')
     expect(container.querySelector('[data-chat-turn-bundle]')).toBeNull()
-    expect(trace?.textContent).toContain('keeper_board_list')
+    expect(trace?.textContent).toContain('masc_board_list')
     expect(trace?.textContent).not.toContain('다른 턴 답변')
   })
 
@@ -2676,7 +2676,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
               { kind: 'think', text: 'checking context', oasBlockIndex: 3 },
               {
                 kind: 'tool',
-                name: 'keeper_board_list',
+                name: 'masc_board_list',
                 toolCallId: 'tc-prov',
                 status: 'ok',
                 args: '{"limit":1}',
@@ -2979,7 +2979,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
-          toolEntry({ id: 'tool-t1', label: 'keeper_board_list' }),
+          toolEntry({ id: 'tool-t1', label: 'masc_board_list' }),
           toolEntry({ id: 'tool-t2', label: 'keeper_tasks_list' }),
         ]}
         emptyText="empty"
@@ -2996,7 +2996,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     ])
     render(
       html`<${ChatTranscript}
-        entries=${[toolEntry({ id: 'tool-t1', label: 'keeper_board_post', text: '{"k":"v"}' })]}
+        entries=${[toolEntry({ id: 'tool-t1', label: 'masc_board_post', text: '{"k":"v"}' })]}
         emptyText="empty"
         groupToolCalls=${true}
       />`,
@@ -3066,7 +3066,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
-          toolEntry({ id: 'tool-unjoined-settled', label: 'keeper_board_comment', turnRef: 'trace-s#1' }),
+          toolEntry({ id: 'tool-unjoined-settled', label: 'masc_board_comment', turnRef: 'trace-s#1' }),
           entry({
             id: 'a-settled',
             text: '답합니다',
@@ -3103,7 +3103,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
-          toolEntry({ id: 'tool-unjoined-before-hydration', label: 'keeper_board_comment', turnRef: 'trace-h#1' }),
+          toolEntry({ id: 'tool-unjoined-before-hydration', label: 'masc_board_comment', turnRef: 'trace-h#1' }),
           entry({
             id: 'a-before-hydration',
             text: '답합니다',
@@ -3188,7 +3188,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
         entries=${[
           toolEntry({
             id: 'tool-unjoined-after-old-hydration',
-            label: 'keeper_board_comment',
+            label: 'masc_board_comment',
             timestamp: '2026-03-24T00:00:10.000Z',
             turnRef: 'trace-old#1',
           }),
@@ -3225,7 +3225,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
         entries=${[
           toolEntry({
             id: 'tool-unjoined-before-covered-tail',
-            label: 'keeper_board_comment',
+            label: 'masc_board_comment',
             timestamp: '2026-03-24T00:00:05.000Z',
             turnRef: 'trace-tail#1',
           }),
@@ -3261,7 +3261,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
-          toolEntry({ id: 'tool-unjoined-live', label: 'keeper_board_comment', turnRef: 'trace-l#1' }),
+          toolEntry({ id: 'tool-unjoined-live', label: 'masc_board_comment', turnRef: 'trace-l#1' }),
           entry({
             id: 'a-live',
             text: '응답 작성 중',

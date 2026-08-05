@@ -38,6 +38,7 @@ type keeper_tool_group =
 type input_schema_source =
   | Descriptor_owned
   | Canonical_registry
+  | Keeper_projection
   | Missing_canonical_registry
 
 type readonly_of_input = Yojson.Safe.t -> bool option
@@ -77,8 +78,7 @@ type runtime_handler =
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
-  | Board_tool_dispatch
-  | Tool_masc_board_dispatch
+  | Tool_board_dispatch
   | Tool_masc_task_dispatch
   | Tool_masc_plan_dispatch
   | Tool_masc_run_dispatch
@@ -174,6 +174,7 @@ let keeper_tool_group_to_string = function
 let input_schema_source_to_string = function
   | Descriptor_owned -> "descriptor_owned"
   | Canonical_registry -> "canonical_registry"
+  | Keeper_projection -> "keeper_projection"
   | Missing_canonical_registry -> "missing_canonical_registry"
 ;;
 
@@ -197,8 +198,7 @@ let runtime_handler_to_string = function
   | Tool_ide_annotate -> "tool_ide_annotate"
   | Tool_voice_dispatch -> "tool_voice_dispatch"
   | Tool_task_dispatch -> "tool_task_dispatch"
-  | Board_tool_dispatch -> "board_tool_dispatch"
-  | Tool_masc_board_dispatch -> "tool_masc_board_dispatch"
+  | Tool_board_dispatch -> "tool_board_dispatch"
   | Tool_masc_task_dispatch -> "tool_masc_task_dispatch"
   | Tool_masc_plan_dispatch -> "tool_masc_plan_dispatch"
   | Tool_masc_run_dispatch -> "tool_masc_run_dispatch"
@@ -222,7 +222,7 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_execute -> Execute_group
   | Tool_search_files -> Search_files_group
   | Tool_read_file | Tool_edit_file | Tool_write_file -> Filesystem_group
-  | Board_tool_dispatch | Tool_masc_board_dispatch -> Board_group
+  | Tool_board_dispatch -> Board_group
   | Tool_voice_dispatch -> Voice_group
   | Tool_task_dispatch | Tool_masc_task_dispatch | Tool_masc_plan_dispatch ->
     Workspace_group
@@ -958,16 +958,6 @@ let remove_schema_fields removed schema =
       `Assoc fields
   | _ -> schema
 
-let find_board_schema_opt name =
-  match Keeper_tool_name.masc_board_name_of_keeper_name name with
-  | None -> None
-  | Some board_name ->
-    let schema = Board_tool_registry.schema_for_board_name board_name in
-    Some
-      (remove_schema_fields
-         (Board_tool_registry.identity_fields_for_board_name board_name)
-         schema.input_schema)
-
 let find_masc_schema_opt name =
   match Tools.find_tool name with
   | Some schema -> Some schema.input_schema
@@ -980,24 +970,20 @@ let find_masc_schema_opt name =
      | None -> find_schema_input_opt Keeper_schema.schemas name)
 
 let find_cluster_schema_opt name =
-  (* Priority preserves the historical hidden keeper namespace ownership:
-     keeper taskboard wrappers first, then typed board wrappers, voice,
-     the generated misc registry, then public masc_* aggregates.
+  (* Keeper taskboard tools are checked before voice, misc, and public
+     aggregates. Board descriptors use their typed registry directly.
      The namespaces are expected to be disjoint; this order is not a conflict
      resolver. Control descriptors use their dedicated typed schema projection
      and do not enter this name-based lookup. *)
   match find_taskboard_schema_opt name with
   | Some _ as schema -> schema
   | None ->
-    (match find_board_schema_opt name with
+    (match find_voice_schema_opt name with
      | Some _ as schema -> schema
      | None ->
-       (match find_voice_schema_opt name with
+       (match find_misc_schema_opt name with
         | Some _ as schema -> schema
-        | None ->
-          (match find_misc_schema_opt name with
-           | Some _ as schema -> schema
-           | None -> find_masc_schema_opt name)))
+        | None -> find_masc_schema_opt name))
 ;;
 
 let base_schema_input name =
@@ -1328,58 +1314,34 @@ let cluster_descriptor ?(polling_read = false) ~capability_identity
     ()
 ;;
 
-let board_descriptor board_name description ~readonly =
-  let operation = Tool_name.Board_name.operation_name board_name in
-  let capability_id = Tool_name.Board_name.to_string board_name in
-  let name =
-    match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-    | Keeper_tool_name.Keeper_wrapper keeper_name ->
-      Keeper_tool_name.to_string keeper_name
-    | Keeper_tool_name.Direct_masc ->
-      invalid_arg
-        (Printf.sprintf
-           "Board capability %s has no Keeper wrapper"
-           capability_id)
-  in
-  cluster_descriptor
-    ~capability_identity:(Named_capability capability_id)
-    ~keeper_model_projection:Internal_name
-    ~id:("keeper.board." ^ operation)
-    ~name
-    ~description
-    ~handler:Board_tool_dispatch
-    ~readonly
-    ~inline_safe:false
-    ()
-;;
-
 let masc_board_descriptor board_name =
-  let schema = Board_tool_registry.schema_for_board_name board_name in
+  let canonical_schema = Board_tool_registry.schema_for_board_name board_name in
   let name = Tool_name.Board_name.to_string board_name in
   let operation_policy = Board_tool_registry.operation_policy board_name in
   let readonly = operation_policy.readonly in
-  let keeper_model_projection =
-    match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-    | Keeper_tool_name.Keeper_wrapper keeper_tool ->
-      Transport_alias { projected_by = Keeper_tool_name.to_string keeper_tool }
-    | Keeper_tool_name.Direct_masc -> Internal_name
-  in
   let policy = policy ~readonly ~retryable:readonly () in
-  let input_schema =
+  let canonical_keeper_input_schema =
     remove_schema_fields
       (Board_tool_registry.identity_fields_for_board_name board_name)
-      schema.input_schema
+      canonical_schema.input_schema
+  in
+  let input_schema_source, description, input_schema =
+    match Tool_shard_types.keeper_board_schema board_name with
+    | Some projection ->
+      Keeper_projection, projection.description, projection.input_schema
+    | None ->
+      Canonical_registry, canonical_schema.description, canonical_keeper_input_schema
   in
   in_process_descriptor_with_schema_source
        ~capability_identity:Internal_name_identity
-       ~keeper_model_projection
-       ~input_schema_source:Canonical_registry
+       ~keeper_model_projection:Internal_name
+       ~input_schema_source
        ~id:("masc.board." ^ Tool_name.Board_name.operation_name board_name)
        ~name
-       ~description:schema.description
+       ~description
        ~input_schema
        ~policy
-       ~handler:Tool_masc_board_dispatch
+       ~handler:Tool_board_dispatch
        ()
 ;;
 
@@ -1905,67 +1867,6 @@ let internal_descriptors : t list =
       "keeper_task_done"
       "Mark the claimed MASC task as done."
       ~readonly:false
-    (* ── board cluster (RFC-0179 PR-3, 15 tools) ──────────────── *)
-  ; board_descriptor
-      Tool_name.Board_name.Board_comment
-      "Comment on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_post_get."
-      ~readonly:false
-  ; board_descriptor
-      Tool_name.Board_name.Board_comment_vote
-      "Vote on a board comment."
-      ~readonly:false
-  ; board_descriptor
-      Tool_name.Board_name.Board_curation_read
-      "Read curated board entries."
-      ~readonly:true
-  ; board_descriptor
-      Tool_name.Board_name.Board_curation_submit
-      "Submit a board entry for curation."
-      ~readonly:false
-  ; board_descriptor
-      Tool_name.Board_name.Board_post_get
-      "Read one board post by exact post_id. Use keeper_board_list or keeper_board_search first when no post_id is visible; do not call with empty arguments."
-      ~readonly:true
-  ; board_descriptor
-      Tool_name.Board_name.Board_list
-      "List recent board posts and return post_id values for follow-up board get/comment/vote calls."
-      ~readonly:true
-  ; board_descriptor
-      Tool_name.Board_name.Board_post
-      "Post a new board entry with the content and metadata supplied by the keeper."
-      ~readonly:false
-  ; board_descriptor
-      Tool_name.Board_name.Board_search
-      "Search board posts by keyword and return post_id values for follow-up board get/comment/vote calls."
-      ~readonly:true
-  ; board_descriptor
-      Tool_name.Board_name.Board_stats
-      "Board statistics."
-      ~readonly:true
-  ; board_descriptor
-      Tool_name.Board_name.Board_sub_board_create
-      "Create a sub-board."
-      ~readonly:false
-  ; board_descriptor
-      Tool_name.Board_name.Board_sub_board_delete
-      "Delete a sub-board."
-      ~readonly:false
-  ; board_descriptor
-      Tool_name.Board_name.Board_sub_board_get
-      "Fetch a sub-board."
-      ~readonly:true
-  ; board_descriptor
-      Tool_name.Board_name.Board_sub_board_list
-      "List sub-boards."
-      ~readonly:true
-  ; board_descriptor
-      Tool_name.Board_name.Board_sub_board_update
-      "Update a sub-board."
-      ~readonly:false
-  ; board_descriptor
-      Tool_name.Board_name.Board_vote
-      "Vote on one board post. Requires an exact post_id from board activity, keeper_board_list, keeper_board_search, or keeper_board_post_get."
-      ~readonly:false
   (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)
   ; masc_task_descriptor "add" "masc_add_task"
       "Add a task to the workspace plan." ~readonly:false
@@ -2111,9 +2012,9 @@ let model_schema_errors descriptor =
   match descriptor.input_schema_source, descriptor.input_schema with
   | Missing_canonical_registry, _ ->
     [ "missing canonical input schema for " ^ descriptor.internal_name ]
-  | (Descriptor_owned | Canonical_registry), `Assoc _ ->
+  | (Descriptor_owned | Canonical_registry | Keeper_projection), `Assoc _ ->
     (Tool_input_validation.schema_shape descriptor.input_schema).errors
-  | (Descriptor_owned | Canonical_registry), other ->
+  | (Descriptor_owned | Canonical_registry | Keeper_projection), other ->
     [ Printf.sprintf
         "input schema for %s must be an object, got %s"
         descriptor.internal_name
@@ -2153,6 +2054,17 @@ let model_visible_descriptors () =
     match model_schema_errors descriptor, keeper_model_names descriptor with
     | _ :: _, _ | [], [] -> false
     | [], _ :: _ -> true)
+;;
+
+let model_visible_schemas () =
+  model_visible_descriptors ()
+  |> List.concat_map (fun descriptor ->
+    keeper_model_names descriptor
+    |> List.map (fun name ->
+      { Masc_domain.name
+      ; description = descriptor.description
+      ; input_schema = descriptor.input_schema
+      }))
 ;;
 
 let public_names_of_descriptor d = d.public_name :: d.public_aliases

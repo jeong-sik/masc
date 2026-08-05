@@ -475,17 +475,25 @@ let masc_goal_list_schema =
 let tool_edit_file_schema =
   find_schema_exn "tool_edit_file" Config.raw_all_tool_schemas
 
-let keeper_board_post_schema =
-  find_schema_exn "keeper_board_post" Config.raw_all_tool_schemas
+let keeper_model_board_post_schema =
+  find_schema_exn
+    "masc_board_post"
+    (Keeper_tool_descriptor.model_visible_schemas ())
 
-let keeper_board_list_schema =
-  find_schema_exn "keeper_board_list" Config.raw_all_tool_schemas
+let keeper_model_board_list_schema =
+  find_schema_exn
+    "masc_board_list"
+    (Keeper_tool_descriptor.model_visible_schemas ())
 
-let keeper_board_search_schema =
-  find_schema_exn "keeper_board_search" Config.raw_all_tool_schemas
+let keeper_model_board_search_schema =
+  find_schema_exn
+    "masc_board_search"
+    (Keeper_tool_descriptor.model_visible_schemas ())
 
-let keeper_board_post_get_schema =
-  find_schema_exn "keeper_board_post_get" Config.raw_all_tool_schemas
+let keeper_model_board_post_get_schema =
+  find_schema_exn
+    "masc_board_post_get"
+    (Keeper_tool_descriptor.model_visible_schemas ())
 
 let keeper_memory_search_schema =
   find_schema_exn "keeper_memory_search" Config.raw_all_tool_schemas
@@ -541,7 +549,7 @@ let test_registered_hook_tool_edit_file_patch_args () =
   Alcotest.(check bool) "args unchanged" true
     (Yojson.Safe.equal forwarded args)
 
-let keeper_board_post_sources_args =
+let masc_board_post_sources_args =
   `Assoc
     [ "content", `String "Keeper board post validation regression"
     ; "hearth", `String "ops"
@@ -555,7 +563,7 @@ let keeper_board_post_sources_args =
     ; "judgment", `Assoc [ "summary", `String "sources array should pass" ]
     ]
 
-let check_keeper_board_post_sources_preserved forwarded =
+let check_masc_board_post_sources_preserved forwarded =
   match Yojson.Safe.Util.member "sources" forwarded with
   | `List [ `Assoc source_fields ] ->
     Alcotest.(check (option string))
@@ -569,72 +577,91 @@ let check_keeper_board_post_sources_preserved forwarded =
       "expected sources array to be preserved, got %s"
       (Yojson.Safe.to_string other)
 
-let test_validate_args_keeper_board_post_accepts_sources_array () =
+let test_validate_args_masc_board_post_accepts_sources_array () =
   match
     Tool_input_validation.validate_args
-      ~schema:keeper_board_post_schema
-      ~name:"keeper_board_post"
-      ~args:keeper_board_post_sources_args
+      ~schema:keeper_model_board_post_schema
+      ~name:"masc_board_post"
+      ~args:masc_board_post_sources_args
       ()
   with
-  | Ok forwarded -> check_keeper_board_post_sources_preserved forwarded
+  | Ok forwarded -> check_masc_board_post_sources_preserved forwarded
   | Error result ->
     Alcotest.failf
-      "expected keeper_board_post sources array to pass validation, got %s"
+      "expected masc_board_post sources array to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
-let test_registered_hook_keeper_board_post_accepts_sources_array () =
+let test_registered_hook_masc_board_post_accepts_sources_array () =
   let blocked, forwarded =
     run_registered_hook
-      ~schema:keeper_board_post_schema
-      ~tool_name:"keeper_board_post"
-      ~args:keeper_board_post_sources_args
+      ~schema:keeper_model_board_post_schema
+      ~tool_name:"masc_board_post"
+      ~args:masc_board_post_sources_args
       ()
   in
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  check_keeper_board_post_sources_preserved forwarded
+  check_masc_board_post_sources_preserved forwarded
 
 (* Regression: the board_list/search backends already read [compact]
    (board_tool_post.ml handle_post_list, board_tool_handlers.ml
-   handle_search), but the keeper_board_* schemas omitted it, so
-   qa-king's keeper_board_list compact=true was rejected as an
+   handle_search), but the Keeper Board projection omitted it, so
+   qa-king's masc_board_list compact=true was rejected as an
    unsupported field. Assert the keeper surface now accepts compact while
    additionalProperties stays false (unknown fields still rejected). *)
-let test_validate_args_keeper_board_list_accepts_compact () =
+let test_validate_args_masc_board_list_accepts_compact () =
   match
     Tool_input_validation.validate_args
-      ~schema:keeper_board_list_schema
-      ~name:"keeper_board_list"
+      ~schema:keeper_model_board_list_schema
+      ~name:"masc_board_list"
       ~args:(`Assoc [ "limit", `Int 5; "compact", `Bool false ])
       ()
   with
   | Ok _ -> ()
   | Error result ->
     Alcotest.failf
-      "expected keeper_board_list compact arg to pass validation, got %s"
+      "expected masc_board_list compact arg to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
-let test_validate_args_keeper_board_search_accepts_compact () =
+let test_validate_args_masc_board_search_accepts_compact () =
   match
     Tool_input_validation.validate_args
-      ~schema:keeper_board_search_schema
-      ~name:"keeper_board_search"
+      ~schema:keeper_model_board_search_schema
+      ~name:"masc_board_search"
       ~args:(`Assoc [ "query", `String "x"; "compact", `Bool false ])
       ()
   with
   | Ok _ -> ()
   | Error result ->
     Alcotest.failf
-      "expected keeper_board_search compact arg to pass validation, got %s"
+      "expected masc_board_search compact arg to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
+let test_validate_args_masc_board_post_get_accepts_comment_page () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_model_board_post_get_schema
+      ~name:"masc_board_post_get"
+      ~args:
+        (`Assoc
+          [ "post_id", `String "p-1234"
+          ; "comment_offset", `Int 50
+          ; "comment_limit", `Int 25
+          ])
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected masc_board_post_get comment page to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
 (* Guard the other direction: a genuinely unknown field must still be
    rejected (additionalProperties:false not loosened). *)
-let test_validate_args_keeper_board_list_rejects_unknown_field () =
+let test_validate_args_masc_board_list_rejects_unknown_field () =
   match
     Tool_input_validation.validate_args
-      ~schema:keeper_board_list_schema
-      ~name:"keeper_board_list"
+      ~schema:keeper_model_board_list_schema
+      ~name:"masc_board_list"
       ~args:(`Assoc [ "limit", `Int 5; "definitely_not_a_field", `Bool true ])
       ()
   with
@@ -678,7 +705,7 @@ let test_keeper_down_rejects_undeclared_field () =
 (* Regression guard for the closure itself: every field observed in live
    ~/me/.masc tool-call logs must still be accepted. Closing a schema turns
    a silent drop into a hard rejection, so an under-declared property breaks
-   a working call — the same failure the keeper_board_list [compact] omission
+   a working call — the same failure the missing [compact] declaration
    produced above. [persona_name] is in this list because
    [Keeper_turn_up_args.parse] reads it and
    [Keeper_turn_up_config_persistence] writes it to the keeper TOML, while
@@ -1734,9 +1761,9 @@ let test_typed_tool_contract_rejection_corpus () =
           ; "result", `String "implemented and opened PR#123"
           ]
       , [ "evidence_refs" ] )
-    ; ( "keeper_board_post_get missing post_id"
-      , "keeper_board_post_get"
-      , keeper_board_post_get_schema
+    ; ( "masc_board_post_get missing post_id"
+      , "masc_board_post_get"
+      , keeper_model_board_post_get_schema
       , `Assoc []
       , [ "post_id" ] )
     ; ( "masc_transition retired alias fields"
@@ -1777,14 +1804,17 @@ let test_keeper_tool_schemas_pin_required_fields () =
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "result";
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "evidence_refs";
   assert_schema_requires
-    "keeper_board_post_get schema"
-    keeper_board_post_get_schema
+    "masc_board_post_get schema"
+    keeper_model_board_post_get_schema
     "post_id";
-  assert_schema_requires "keeper_board_post schema" keeper_board_post_schema "content";
+  assert_schema_requires
+    "Keeper-model masc_board_post schema"
+    keeper_model_board_post_schema
+    "content";
   Alcotest.(check bool)
-    "keeper_board_post schema does not require hearth"
+    "masc_board_post schema does not require hearth"
     false
-    (List.mem "hearth" (schema_required_fields keeper_board_post_schema))
+    (List.mem "hearth" (schema_required_fields keeper_model_board_post_schema))
 
 (* ================================================================ *)
 (* Test: oneOf with empty/null values (regression guard)             *)
@@ -2157,14 +2187,16 @@ let () =
         test_registered_hook_allows_empty_schema_without_arguments;
       Alcotest.test_case "tool_edit_file accepts patch args" `Quick
         test_registered_hook_tool_edit_file_patch_args;
-      Alcotest.test_case "keeper_board_post accepts sources array" `Quick
-        test_registered_hook_keeper_board_post_accepts_sources_array;
-      Alcotest.test_case "keeper_board_list accepts compact" `Quick
-        test_validate_args_keeper_board_list_accepts_compact;
-      Alcotest.test_case "keeper_board_search accepts compact" `Quick
-        test_validate_args_keeper_board_search_accepts_compact;
-      Alcotest.test_case "keeper_board_list still rejects unknown field" `Quick
-        test_validate_args_keeper_board_list_rejects_unknown_field;
+      Alcotest.test_case "masc_board_post accepts sources array" `Quick
+        test_registered_hook_masc_board_post_accepts_sources_array;
+      Alcotest.test_case "masc_board_list accepts compact" `Quick
+        test_validate_args_masc_board_list_accepts_compact;
+      Alcotest.test_case "masc_board_search accepts compact" `Quick
+        test_validate_args_masc_board_search_accepts_compact;
+      Alcotest.test_case "masc_board_post_get accepts comment page" `Quick
+        test_validate_args_masc_board_post_get_accepts_comment_page;
+      Alcotest.test_case "masc_board_list still rejects unknown field" `Quick
+        test_validate_args_masc_board_list_rejects_unknown_field;
       Alcotest.test_case "keeper_memory_search rejects removed kind" `Quick
         test_validate_args_keeper_memory_search_rejects_removed_kind;
       Alcotest.test_case "tool_execute exposes typed boundary" `Quick
@@ -2219,8 +2251,8 @@ let () =
         test_validate_args_tool_execute_pipeline_rejects_null_argv;
       Alcotest.test_case "direct validation uses explicit schema" `Quick
         test_validate_args_uses_explicit_schema_without_registry;
-      Alcotest.test_case "direct keeper_board_post accepts sources array" `Quick
-        test_validate_args_keeper_board_post_accepts_sources_array;
+      Alcotest.test_case "direct masc_board_post accepts sources array" `Quick
+        test_validate_args_masc_board_post_accepts_sources_array;
       Alcotest.test_case "masc_transition rejects to/note aliases" `Quick
         test_registered_hook_transition_rejects_to_and_note;
       Alcotest.test_case "masc_transition canonical action value" `Quick

@@ -184,8 +184,8 @@ mutating=$(( mutating + $(count_pattern_in '"tool":"keeper_git"'     "${kp_logs[
 
 passive=$(count_pattern_in '"tool":"masc_status"'       "${kp_logs[@]}")
 passive=$(( passive + $(count_pattern_in '"tool":"keeper_tasks_list"' "${kp_logs[@]}") ))
-passive=$(( passive + $(count_pattern_in '"tool":"keeper_board_get"'  "${kp_logs[@]}") ))
-passive=$(( passive + $(count_pattern_in '"tool":"keeper_board_list"' "${kp_logs[@]}") ))
+passive=$(( passive + $(count_pattern_in '"tool":"masc_board_list"' "${kp_logs[@]}") ))
+passive=$(( passive + $(count_pattern_in '"tool":"masc_board_post_get"' "${kp_logs[@]}") ))
 
 echo "=== Composite KPI ==="
 echo "mutating tool calls (bash/shell/fs_edit/git): $mutating"

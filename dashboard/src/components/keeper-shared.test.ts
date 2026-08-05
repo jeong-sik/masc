@@ -235,7 +235,7 @@ describe('filterConversationEntries', () => {
 
   it('matches tool rows by visible tool label', () => {
     const entries = [
-      entry({ id: 'tool-a', role: 'tool', source: 'tool_result', label: 'keeper_board_list', text: '{}' }),
+      entry({ id: 'tool-a', role: 'tool', source: 'tool_result', label: 'masc_board_list', text: '{}' }),
       entry({ id: 'b', text: 'plain' }),
     ]
     expect(filterConversationEntries(entries, 'board_list').map(e => e.id)).toEqual(['tool-a'])
@@ -1134,7 +1134,7 @@ describe('KeeperConversationPanel', () => {
             turn_phase: 'executing_tools',
             decision: { stage: 'tool_loop' },
             runtime: { state: 'running' },
-            latest_tool: { name: 'keeper_board_list', used_at: 1_785_000_010 },
+            latest_tool: { name: 'masc_board_list', used_at: 1_785_000_010 },
             run_state: {
               kind: 'running',
               wake_kind: 'interactive',
@@ -1208,7 +1208,7 @@ describe('KeeperConversationPanel', () => {
       expect(node?.textContent).toContain('executing_tools')
       expect(node?.textContent).toContain('tool_loop')
       expect(node?.textContent).toContain('operator-model')
-      expect(node?.textContent).toContain('keeper_board_list')
+      expect(node?.textContent).toContain('masc_board_list')
       expect(node?.querySelector(
         `[data-operator-chat-inflight="${inflightReceiptId}"]`,
       )).not.toBeNull()

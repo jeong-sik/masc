@@ -43,7 +43,6 @@ let get_json_assoc key = function
 
 let family_catalog =
   [ Tool_shard_types.base_tools
-  ; Tool_shard_types.board_tools
   ; Tool_shard_types.filesystem_tools
   ; Tool_shard_types.search_files_tools
   ; Tool_shard_types.typed_execute_tools
@@ -145,16 +144,24 @@ let test_context_status_description_matches_current_output () =
     [ "context_ratio"; "context_tokens"; "context_max"; "last_model_used" ]
 ;;
 
-let test_board_tools () =
-  let names = schema_names Tool_shard.board_tools in
-  List.iter
-    (fun name ->
-       Alcotest.(check bool) (name ^ " present") true (List.mem name names))
-    [ "keeper_board_post"
-    ; "keeper_board_list"
-    ; "keeper_board_comment"
-    ; "keeper_board_vote"
-    ]
+let required_keeper_board_schema board_name =
+  match Tool_shard_types.keeper_board_schema board_name with
+  | Some schema -> schema
+  | None ->
+    Alcotest.failf
+      "missing Keeper Board projection: %s"
+      (Tool_name.Board_name.to_string board_name)
+;;
+
+let test_board_projections_are_not_in_flat_keeper_catalog () =
+  let flat_names = schema_names Tool_shard.all_keeper_tool_schemas in
+  Tool_name.Board_name.all
+  |> List.filter_map Tool_shard_types.keeper_board_schema
+  |> List.iter (fun (schema : Types.tool_schema) ->
+    Alcotest.(check bool)
+      (schema.name ^ " is not a global first-wins schema")
+      false
+      (List.mem schema.name flat_names))
 ;;
 
 let test_taskboard_verification_claim_contract () =
@@ -183,10 +190,12 @@ let test_taskboard_verification_claim_contract () =
     (contains descriptions "unclaimed todo or awaiting_verification task")
 ;;
 
-let test_keeper_board_post_schema_supports_judgment () =
-  let schema = schema_by_name "keeper_board_post" Tool_shard.board_tools in
+let test_masc_board_post_schema_supports_judgment () =
+  let schema =
+    required_keeper_board_schema Tool_name.Board_name.Board_post
+  in
   match get_json_assoc "properties" schema.input_schema with
-  | None -> Alcotest.fail "keeper_board_post missing properties"
+  | None -> Alcotest.fail "masc_board_post missing properties"
   | Some properties ->
     List.iter
       (fun field ->
@@ -265,7 +274,10 @@ let () =
             "context status current output"
             `Quick
             test_context_status_description_matches_current_output
-        ; Alcotest.test_case "board tools" `Quick test_board_tools
+        ; Alcotest.test_case
+            "Board projections stay surface-local"
+            `Quick
+            test_board_projections_are_not_in_flat_keeper_catalog
         ; Alcotest.test_case
             "taskboard verification claim contract"
             `Quick
@@ -273,7 +285,7 @@ let () =
         ; Alcotest.test_case
             "board post judgment"
             `Quick
-            test_keeper_board_post_schema_supports_judgment
+            test_masc_board_post_schema_supports_judgment
         ; Alcotest.test_case
             "IDE opaque references"
             `Quick

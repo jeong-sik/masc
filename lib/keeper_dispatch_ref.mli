@@ -18,7 +18,7 @@
     RFC-0182 Phase 5 PR-A.2 extension: optional Eio resource params
     [?sw] / [?clock] / [?proc_mgr] / [?net] / [?mcp_session_id] for
     Eio-bound tools (masc_keeper_msg, masc_keeper_up,
-    masc_keeper_sandbox_status, masc_keeper_create_from_persona).
+    masc_keeper_create_from_persona).
     [publication_recovery_provider] is a read-only projection of the runtime's
     live publication-recovery SSOT. Nested Keeper turns re-read it rather than
     inheriting the caller turn's capability snapshot. Existing registrations

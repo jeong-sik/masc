@@ -97,7 +97,7 @@ def write_ready_keeper(root: Path, name: str) -> None:
             {
                 "ts_unix": time.time(),
                 "event": "tool_exec",
-                "tool": "keeper_board_post",
+                "tool": "masc_board_post",
                 "ok": True,
             }
         )
@@ -427,6 +427,31 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(latest_ts, 20.0)
         self.assertEqual(tools, {"tool_execute"})
 
+    def test_exact_post_read_counts_as_current_board_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            decisions_path = root / ".masc" / "keepers" / "alpha.decisions.jsonl"
+            decisions_path.write_text(
+                json.dumps(
+                    {
+                        "ts_unix": time.time(),
+                        "event": "tool_exec",
+                        "tool": "masc_board_post_get",
+                        "ok": True,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = audit.build_report(audit_args(root, expected_keepers=1))
+
+        self.assertTrue(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertTrue(keeper["board_action"])
+        self.assertNotIn("board_action_evidence_missing", keeper["failures"])
+
     def test_product_and_design_evidence_use_explicit_board_domains(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -436,7 +461,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 root,
                 "alpha",
                 "p-design",
-                meta={"tags": ["design"], "source": "keeper_board_post"},
+                meta={"tags": ["design"], "source": "masc_board_post"},
             )
             args = audit_args(root, expected_keepers=1)
             args.require_product_evidence = True
@@ -533,7 +558,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_ready_keeper(root, "alpha")
-            write_persistent_work_evidence(root, "alpha", tool="keeper_board_get")
+            write_persistent_work_evidence(root, "alpha", tool="masc_board_list")
             args = audit_args(root, expected_keepers=1)
             args.require_persistent_work_evidence = True
 

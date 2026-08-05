@@ -51,7 +51,7 @@ let is_known_public name = Hashtbl.mem routing_table name
 
 let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   match d.runtime_handler with
-  | Tool_masc_board_dispatch
+  | Tool_board_dispatch
   | Tool_masc_task_dispatch
   | Tool_masc_plan_dispatch
   | Tool_masc_run_dispatch
@@ -83,7 +83,6 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
-  | Board_tool_dispatch
   (* masc_fusion / masc_fusion_status are keeper-native in-process tools (own
      orchestrator / registry read), not masc-MCP coordination proxies — routed
      via descriptors, not this alias path. *)

@@ -881,7 +881,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
       toolCallId: 'tc-snapshot',
-      toolCallName: 'keeper_board_list',
+      toolCallName: 'masc_board_list',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_ARGS',
@@ -901,7 +901,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(reply?.traceSteps).toEqual([
       {
         kind: 'tool',
-        name: 'keeper_board_list',
+        name: 'masc_board_list',
         toolCallId: 'tc-snapshot',
         status: 'pending',
         args: '{"limit":2}',
@@ -920,7 +920,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
       toolCallId: 'tc-ordered',
-      toolCallName: 'keeper_board_list',
+      toolCallName: 'masc_board_list',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_ARGS',
@@ -943,7 +943,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
       { kind: 'think', text: 'think A', ts: expect.any(String) },
       {
         kind: 'tool',
-        name: 'keeper_board_list',
+        name: 'masc_board_list',
         toolCallId: 'tc-ordered',
         status: 'ok',
         args: '{"limit":1}',
@@ -1056,7 +1056,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
         index: 7,
         content_type: 'tool_use',
         tool_call_id: 'tc-oas',
-        tool_call_name: 'keeper_board_list',
+        tool_call_name: 'masc_board_list',
       },
     })
     let reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
@@ -1065,7 +1065,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
       toolCallId: 'tc-oas',
-      toolCallName: 'keeper_board_list',
+      toolCallName: 'masc_board_list',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_ARGS',
@@ -1086,7 +1086,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(reply?.traceSteps).toEqual([
       {
         kind: 'tool',
-        name: 'keeper_board_list',
+        name: 'masc_board_list',
         toolCallId: 'tc-oas',
         status: 'ok',
         args: '{"limit":1}',
@@ -1120,7 +1120,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
         index: 2,
         content_type: 'tool_use',
         tool_call_id: 'tc-second',
-        tool_call_name: 'keeper_board_list',
+        tool_call_name: 'masc_board_list',
       },
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
@@ -1161,7 +1161,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
       toolCallId: 'tc-no-fallback',
-      toolCallName: 'keeper_board_post',
+      toolCallName: 'masc_board_post',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS', delta: '{"post_id":"p-1"}' })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END' })
@@ -1199,14 +1199,14 @@ describe('applyKeeperStreamEvent tool calls', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
       toolCallId: 'tc-repeat',
-      toolCallName: 'keeper_board_post',
+      toolCallName: 'masc_board_post',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS', toolCallId: 'tc-repeat', delta: '{"post_id":"p-1"}' })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END', toolCallId: 'tc-repeat' })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
       toolCallId: 'tc-repeat',
-      toolCallName: 'keeper_board_post',
+      toolCallName: 'masc_board_post',
     })
 
     const thread = keeperThreads.value.sangsu ?? []
@@ -1215,7 +1215,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(reply?.traceSteps).toEqual([
       {
         kind: 'tool',
-        name: 'keeper_board_post',
+        name: 'masc_board_post',
         toolCallId: 'tc-repeat',
         status: 'ok',
         args: '{"post_id":"p-1"}',

@@ -125,7 +125,7 @@ let keeper_strict_auth_regression_tools =
     "tool_execute";
     "keeper_task_claim";
     "tool_read_file";
-    "keeper_board_search";
+    "masc_board_search";
     "keeper_tools_list";
   ]
 

@@ -22,7 +22,6 @@ module Descriptor = Masc.Keeper_tool_descriptor
 module Policy = Masc.Keeper_tool_policy
 module Resolution = Masc.Keeper_tool_descriptor_resolution
 module Surface = Masc.Keeper_agent_tool_surface
-module Board = Tool_shard_types
 module Board_tool_registry = Board_tool_registry
 module Keeper_dispatch_ref = Masc.Keeper_dispatch_ref
 module Workspace = Masc.Workspace
@@ -253,7 +252,9 @@ let test_model_visible_descriptors_have_canonical_input_schemas () =
          descriptor.id
          (String.concat "; " errors));
     match descriptor.input_schema_source with
-    | Descriptor.Descriptor_owned | Descriptor.Canonical_registry -> ()
+    | Descriptor.Descriptor_owned
+    | Descriptor.Canonical_registry
+    | Descriptor.Keeper_projection -> ()
     | Descriptor.Missing_canonical_registry ->
       Alcotest.failf
         "model-visible descriptor %S is missing its canonical input schema"
@@ -264,7 +265,9 @@ let test_cluster_descriptors_have_no_missing_canonical_schemas () =
   all_descriptors ()
   |> List.iter (fun (descriptor : Descriptor.t) ->
     match descriptor.input_schema_source with
-    | Descriptor.Descriptor_owned | Descriptor.Canonical_registry -> ()
+    | Descriptor.Descriptor_owned
+    | Descriptor.Canonical_registry
+    | Descriptor.Keeper_projection -> ()
     | Descriptor.Missing_canonical_registry ->
       Alcotest.failf
         "descriptor %S (%s) is missing its canonical input schema"
@@ -709,9 +712,18 @@ let test_sandbox_control_descriptors_use_exact_canonical_schemas () =
 ;;
 
 let required_board_schema name =
-  match List.find_opt (fun (s : Masc_domain.tool_schema) -> s.name = name) Board.board_tools with
-  | Some schema -> schema
-  | None -> Alcotest.failf "missing board schema: %s" name
+  let descriptor = required_internal_descriptor name in
+  { Masc_domain.name = name
+  ; description = descriptor.description
+  ; input_schema = descriptor.input_schema
+  }
+;;
+
+let keeper_board_schemas =
+  List.map
+    (fun board_name ->
+       required_board_schema (Tool_name.Board_name.to_string board_name))
+    Tool_name.Board_name.all
 ;;
 
 let required_masc_board_schema name =
@@ -975,19 +987,19 @@ let test_edit_descriptor_requires_read_first () =
 ;;
 
 let test_board_descriptions_disambiguate_post_id_flow () =
-  let get_descriptor = required_internal_descriptor "keeper_board_post_get" in
-  let get_schema = required_board_schema "keeper_board_post_get" in
-  let list_schema = required_board_schema "keeper_board_list" in
-  let search_schema = required_board_schema "keeper_board_search" in
-  let comment_schema = required_board_schema "keeper_board_comment" in
-  let vote_schema = required_board_schema "keeper_board_vote" in
+  let get_descriptor = required_internal_descriptor "masc_board_post_get" in
+  let get_schema = required_board_schema "masc_board_post_get" in
+  let list_schema = required_board_schema "masc_board_list" in
+  let search_schema = required_board_schema "masc_board_search" in
+  let comment_schema = required_board_schema "masc_board_comment" in
+  let vote_schema = required_board_schema "masc_board_vote" in
   let get_post_id_description =
     schema_property_description get_schema.input_schema "post_id"
     |> Option.value ~default:""
   in
   check_contains
     "board_post_get descriptor points to list/search first"
-    ~sub:"Use keeper_board_list or keeper_board_search first"
+    ~sub:"masc_board_list or masc_board_search first"
     get_descriptor.description;
   check_contains
     "board_post_get schema forbids empty args"
@@ -1023,7 +1035,7 @@ let test_board_descriptions_disambiguate_post_id_flow () =
          Alcotest.failf
            "%s description references non-canonical BoardList"
            schema.name)
-    Board.board_tools
+    keeper_board_schemas
 ;;
 
 let test_masc_board_descriptions_disambiguate_post_id_flow () =
@@ -1125,19 +1137,6 @@ let test_masc_board_registry_has_descriptor_projection () =
     "generated Board wire names are unique"
     (List.length wire_names)
     (List.length (List.sort_uniq String.compare wire_names));
-  let keeper_model_names =
-    Tool_name.Board_name.all
-    |> List.filter_map (fun board_name ->
-      match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-      | Keeper_tool_name.Keeper_wrapper keeper_tool ->
-        Some (Keeper_tool_name.to_string keeper_tool)
-      | Keeper_tool_name.Direct_masc ->
-        Some (Tool_name.Board_name.to_string board_name))
-  in
-  Alcotest.(check int)
-    "Board Keeper projections are injective"
-    (List.length keeper_model_names)
-    (List.length (List.sort_uniq String.compare keeper_model_names));
   List.iter
     (fun board_name ->
        let schema = Board_tool_registry.schema_for_board_name board_name in
@@ -1149,24 +1148,6 @@ let test_masc_board_registry_has_descriptor_projection () =
          (schema.name ^ " typed round-trip")
          true
          (Tool_name.Board_name.of_string schema.name = Some board_name);
-       (match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-        | Keeper_tool_name.Keeper_wrapper keeper_tool ->
-          let keeper_name = Keeper_tool_name.to_string keeper_tool in
-          Alcotest.(check bool)
-            (keeper_name ^ " reverse projection is exact")
-            true
-            (Keeper_tool_name.masc_board_name_of_keeper_tool keeper_tool
-             = Some board_name);
-          Alcotest.(check int)
-            (keeper_name ^ " has exactly one descriptor")
-            1
-            (List.length (Descriptor.descriptors_for_internal keeper_name));
-          let wrapper_descriptor = required_internal_descriptor keeper_name in
-          Alcotest.(check bool)
-            (keeper_name ^ " is the model projection")
-            true
-            (wrapper_descriptor.keeper_model_projection = Descriptor.Internal_name)
-        | Keeper_tool_name.Direct_masc -> ());
        match Descriptor.descriptors_for_internal schema.name with
        | [ descriptor ] ->
          Alcotest.(check string)
@@ -1175,7 +1156,7 @@ let test_masc_board_registry_has_descriptor_projection () =
            descriptor.Descriptor.id;
          Alcotest.(check string)
            (schema.name ^ " runtime handler")
-           "tool_masc_board_dispatch"
+           "tool_board_dispatch"
            (Descriptor.runtime_handler_to_string descriptor.runtime_handler);
          let descriptor_properties = schema_property_names descriptor.input_schema in
          Board_tool_registry.identity_fields_for_board_name board_name
@@ -1195,18 +1176,19 @@ let test_masc_board_registry_has_descriptor_projection () =
            (schema.name ^ " descriptor readonly follows typed resource projection")
            (Some expected_readonly)
            descriptor.policy.readonly_hint;
-         let expected_model_projection =
-           match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-           | Keeper_tool_name.Keeper_wrapper keeper_tool ->
-             Descriptor.Transport_alias
-               { projected_by = Keeper_tool_name.to_string keeper_tool }
-           | Keeper_tool_name.Direct_masc ->
-             Descriptor.Internal_name
+         Alcotest.(check bool)
+           (schema.name ^ " is the single Keeper model projection")
+           true
+           (descriptor.keeper_model_projection = Descriptor.Internal_name);
+         let expected_schema_source =
+           match Tool_shard_types.keeper_board_schema board_name with
+           | Some _ -> Descriptor.Keeper_projection
+           | None -> Descriptor.Canonical_registry
          in
          Alcotest.(check bool)
-           (schema.name ^ " descriptor model projection follows typed projection")
+           (schema.name ^ " schema source is truthful")
            true
-           (descriptor.keeper_model_projection = expected_model_projection)
+           (descriptor.input_schema_source = expected_schema_source)
        | [] -> Alcotest.failf "missing descriptor for %s" schema.name
        | _ :: _ :: _ -> Alcotest.failf "duplicate descriptor for %s" schema.name)
     Tool_name.Board_name.all

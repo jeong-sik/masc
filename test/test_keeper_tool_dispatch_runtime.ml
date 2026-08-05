@@ -329,32 +329,10 @@ let test_public_read_rejects_offset_without_enrichment () =
       check bool "validation names exact field" true
         (contains_substring result.raw_output "offset"))
 
-let test_raw_board_runtime_respects_projection () =
+let test_board_runtime_rejects_unknown_route () =
   let meta = make_meta ~name:"keeper-board-runtime-guard" () in
-  let check_rejection board_name expected_kind expected_class =
-    let name = Tool_name.Board_name.to_string board_name in
-    let raw =
-      Masc.Keeper_tool_in_process_runtime.handle_masc_board
-        ~meta
-        ~name
-        ~args:(`Assoc [])
-    in
-    let json = Yojson.Safe.from_string raw in
-    check string
-      (name ^ " rejection kind")
-      expected_kind
-      Yojson.Safe.Util.(member "error_kind" json |> to_string);
-    check string
-      (name ^ " failure class")
-      expected_class
-      Yojson.Safe.Util.(member "failure_class" json |> to_string);
-  in
-  check_rejection
-    Tool_name.Board_name.Board_post
-    "keeper_wrapper_required"
-    "policy_rejection";
   let raw =
-    Masc.Keeper_tool_in_process_runtime.handle_masc_board
+    Masc.Keeper_tool_board_runtime.handle_board_tool
       ~meta
       ~name:"masc_board_not_registered"
       ~args:(`Assoc [])
@@ -362,12 +340,8 @@ let test_raw_board_runtime_respects_projection () =
   let json = Yojson.Safe.from_string raw in
   check string
     "unknown Board route is explicit"
-    "unknown_board_route"
-    Yojson.Safe.Util.(member "error_kind" json |> to_string);
-  check string
-    "unknown Board route is a runtime invariant failure"
-    "runtime_failure"
-    Yojson.Safe.Util.(member "failure_class" json |> to_string)
+    "unknown_board_tool"
+    Yojson.Safe.Util.(member "error" json |> to_string)
 ;;
 
 let test_keeper_tools_list_json_uses_typed_groups () =
@@ -377,9 +351,9 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     json_list_contains name Yojson.Safe.Util.(member group json)
   in
   check bool "board canonical tool grouped" true
-    (member "board" "keeper_board_post");
+    (member "board" "masc_board_post");
   check bool "fake board-looking tool excluded" false
-    (json_contains_tool "keeper_board_fake" json);
+    (json_contains_tool "masc_board_fake" json);
   check bool "voice tool grouped" true
     (member "voice" "keeper_voice_speak");
   check bool "task tool grouped as workspace" true
@@ -4130,7 +4104,7 @@ let () =
     ]);
     ("exact_registered_dispatch", [
       test_case "raw Board runtime respects typed projection" `Quick
-        test_raw_board_runtime_respects_projection;
+        test_board_runtime_rejects_unknown_route;
     ]);
     ("keeper_tools_list_json", [
       test_case "uses typed groups" `Quick

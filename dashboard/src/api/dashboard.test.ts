@@ -447,7 +447,7 @@ describe('keeper tool telemetry fetchers', () => {
           {
             ts: 2,
             keeper: 'keeper-alpha',
-            tool: 'keeper_board_post_get',
+            tool: 'masc_board_post_get',
             input: {},
             output: 'ok',
             success: true,

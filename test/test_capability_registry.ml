@@ -4,11 +4,6 @@ module Lib = Masc
 
 open Alcotest
 
-let projection_names (capability : Lib.Capability_registry.capability_def) =
-  capability.Lib.Capability_registry.projections
-  |> List.map (fun (projection : Lib.Capability_registry.projection) ->
-         projection.tool_name)
-
 let test_public_visible_surface_exposes_masc_transition () =
   let names =
     Lib.Capability_registry.visible_public_tool_schemas_from
@@ -26,9 +21,44 @@ let test_board_post_capability_merges_public_and_keeper_projections () =
            String.equal capability.Lib.Capability_registry.capability_id
              "masc_board_post")
   in
-  let names = projection_names capability in
-  check bool "public projection" true (List.mem "masc_board_post" names);
-  check bool "keeper projection" true (List.mem "keeper_board_post" names)
+  let projections_for surface =
+    capability.projections
+    |> List.filter (fun (projection : Lib.Capability_registry.projection) ->
+      projection.surface = surface)
+  in
+  let public = projections_for Lib.Capability_registry.Public_mcp in
+  let keeper = projections_for Lib.Capability_registry.Keeper in
+  check int "one public projection" 1 (List.length public);
+  check int "one Keeper projection" 1 (List.length keeper);
+  let public = List.hd public in
+  let keeper = List.hd keeper in
+  List.iter
+    (fun (projection : Lib.Capability_registry.projection) ->
+       check string "canonical surface name" "masc_board_post" projection.tool_name;
+       check string
+         "canonical backend name"
+         "masc_board_post"
+         projection.backend_tool_name)
+    [ public; keeper ];
+  let canonical =
+    Board_tool_registry.schema_for_board_name Tool_name.Board_name.Board_post
+  in
+  let descriptor =
+    Lib.Keeper_tool_descriptor.descriptors_for_internal "masc_board_post"
+    |> List.hd
+  in
+  check bool
+    "public schema is canonical"
+    true
+    (Yojson.Safe.equal public.input_schema canonical.input_schema);
+  check bool
+    "Keeper schema is its narrowed projection"
+    true
+    (Yojson.Safe.equal keeper.input_schema descriptor.input_schema);
+  check bool
+    "surface-specific schemas are distinct"
+    false
+    (Yojson.Safe.equal public.input_schema keeper.input_schema)
 
 
 let test_local_worker_projection_exposes_internal_and_auditable_tools () =

@@ -344,7 +344,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0353 | 실패 분류가 모듈 경계에서 소실되는 결함 (결정 요청) | Draft | - |
 | 0356 | Approval owns the effect (replay the approved payload, do not require byte-id... | Draft | - |
 | 0358 | 자율턴 신원과 exact raw-trace run을 turn record가 소유한다 | Implemented | - |
-| 0359 | 도구 표면 단일화: 단일 레지스트리 SSOT 와 표면 투영 | Draft | - |
 | 0360 | Task actor provenance | Draft | - |
 | RFC-0034d-stale-agent-sync | d — release_stale_claims agent-side sync | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |

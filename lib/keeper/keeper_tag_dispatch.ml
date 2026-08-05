@@ -141,7 +141,14 @@ let dispatch
         }
         ~name
         ~args
-    | Mod_misc -> Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args
+    | Mod_misc ->
+      Tool_misc.dispatch
+        { Tool_misc.config
+        ; agent_name
+        ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
+        }
+        ~name
+        ~args
     | Mod_library -> Tool_library.dispatch { Tool_library.agent_name } ~name ~args
     (* ── Tier B: Eio-dependent ─────────────────────────────────── *)
     | Mod_task ->

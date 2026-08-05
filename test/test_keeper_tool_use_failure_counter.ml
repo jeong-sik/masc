@@ -39,7 +39,7 @@ let test_labels_isolate_keeper_tool_pairs () =
      the other. *)
   let a_keeper = "test-keeper-9919-a" in
   let b_keeper = "test-keeper-9919-b" in
-  let tool = "keeper_board_comment" in
+  let tool = "masc_board_comment" in
   let a_before = counter_for ~keeper:a_keeper ~tool in
   let b_before = counter_for ~keeper:b_keeper ~tool in
   H.record_tool_use_failure ~keeper_name:a_keeper ~tool_name:tool;

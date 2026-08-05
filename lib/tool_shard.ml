@@ -21,7 +21,6 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
 
 let all_keeper_tool_schemas : Masc_domain.tool_schema list =
   [ base_tools
-  ; board_tools
   ; filesystem_tools
   ; search_files_tools
   ; typed_execute_tools

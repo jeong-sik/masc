@@ -133,7 +133,7 @@ let test_request_context_span_records_mcp_server_attrs () =
 let test_failure_span_records_typed_error_status () =
   let result =
     Tool_result.make_err
-      ~tool_name:"keeper_board_post"
+      ~tool_name:"masc_board_post"
       ~class_:Tool_result.Policy_rejection
       ~start_time:(Unix.gettimeofday ())
       "blocked by policy"
@@ -144,7 +144,7 @@ let test_failure_span_records_typed_error_status () =
   in
   Alcotest.(check string)
     "span name"
-    "tools/call keeper_board_post"
+    "tools/call masc_board_post"
     span.name;
   Alcotest.(check string)
     "error.type"

@@ -734,7 +734,7 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
           { index = 1;
             content_type = "tool_use";
             tool_id = Some "tc-1";
-            tool_name = Some "keeper_board_list" };
+            tool_name = Some "masc_board_list" };
         ContentBlockDelta { index = 1; delta = InputJsonDelta "{\"limit\":" };
         ContentBlockDelta { index = 1; delta = InputJsonSnapshot "{\"limit\":1}" };
         ContentBlockStop { index = 1 };
@@ -760,9 +760,9 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
       check int "tool block index" 1 tool_index;
       check string "content type" "tool_use" content_type;
       check string "block tool id" "tc-1" block_tool_id;
-      check string "block tool name" "keeper_board_list" block_tool_name;
+      check string "block tool name" "masc_board_list" block_tool_name;
       check string "tool id" "tc-1" tool_call_id;
-      check string "tool name" "keeper_board_list" tool_call_name;
+      check string "tool name" "masc_board_list" tool_call_name;
       check string "args id a" "tc-1" args_id_a;
       check string "snapshot id" "tc-1" snapshot_id;
       check string "args a" "{\"limit\":" args_a;
@@ -834,7 +834,7 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
           { index = 1;
             content_type = "tool_use";
             tool_id = Some "tc-snapshot";
-            tool_name = Some "keeper_board_list" };
+            tool_name = Some "masc_board_list" };
         ContentBlockDelta
           { index = 1; delta = InputJsonSnapshot "{\"limit\":1}" };
         ContentBlockDelta
@@ -863,9 +863,9 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
       check int "tool block index" 1 tool_index;
       check string "content type" "tool_use" content_type;
       check string "block tool id" "tc-snapshot" block_tool_id;
-      check string "block tool name" "keeper_board_list" block_tool_name;
+      check string "block tool name" "masc_board_list" block_tool_name;
       check string "tool id" "tc-snapshot" tool_call_id;
-      check string "tool name" "keeper_board_list" tool_call_name;
+      check string "tool name" "masc_board_list" tool_call_name;
       check string "snapshot id a" "tc-snapshot" snapshot_id_a;
       check string "snapshot id b" "tc-snapshot" snapshot_id_b;
       check string "snapshot a" "{\"limit\":1}" snapshot_a;
@@ -988,7 +988,7 @@ let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
           ToolUse
             {
               id = "tc-1";
-              name = "keeper_board_list";
+              name = "masc_board_list";
               input = `Assoc [ ("query", `String "alpha") ];
             };
           Text "visible answer breaks adjacency";
@@ -997,7 +997,7 @@ let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
           ToolUse
             {
               id = "tc-2";
-              name = "keeper_board_read";
+              name = "masc_board_fake";
               input = `Assoc [ ("id", `String "post-2") ];
             };
           Thinking { content = "think 2.1"; signature = Some "sig-2.1" };
@@ -1021,7 +1021,7 @@ let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
   match calls with
   | [ first; second; third ] ->
       check string "first call id" "tc-1" first.call_id;
-      check string "first name" "keeper_board_list" first.name;
+      check string "first name" "masc_board_list" first.name;
       check string "first input" {|{"query":"alpha"}|}
         (Yojson.Safe.to_string first.input);
       check int "first order" 0 first.order_index;
@@ -1055,7 +1055,7 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
   let read_tool =
     ToolUse
       { id = "tc-read"
-      ; name = "keeper_board_list"
+      ; name = "masc_board_list"
       ; input = `Assoc [ "limit", `Int 1 ]
       }
   in
@@ -1093,7 +1093,7 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
           { index = 1
           ; content_type = "tool_use"
           ; tool_id = Some "tc-read"
-          ; tool_name = Some "keeper_board_list"
+          ; tool_name = Some "masc_board_list"
           }
       ; ContentBlockDelta
           { index = 1; delta = InputJsonSnapshot {|{"limit":1}|} }
@@ -1117,8 +1117,8 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
   in
   check (list string) "stream bridge keeps Thinking -> ToolUse order"
     [ "thinking:inspect board first"
-    ; "block_start:keeper_board_list"
-    ; "tool_start:keeper_board_list"
+    ; "block_start:masc_board_list"
+    ; "tool_start:masc_board_list"
     ; "tool_snapshot:tc-read"
     ; "block_stop:1"
     ; "tool_end:tc-read"
@@ -1133,7 +1133,7 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
   let calls = Agent_sdk.Canonical_tool.tool_calls_of_response response in
   match calls with
   | [ first; second ] ->
-      check string "first canonical call" "keeper_board_list" first.name;
+      check string "first canonical call" "masc_board_list" first.name;
       check int "first canonical order" 0 first.order_index;
       (match first.adjacent_reasoning with
        | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r ] ->
@@ -1149,7 +1149,7 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
        | _ -> fail "second call should carry preceding thinking");
       let receipt_details = List.map receipt_detail_of_provider_call calls in
       check (list string) "MASC receipt detail order matches OAS canonical order"
-        [ "keeper_board_list"; "keeper_task_done" ]
+        [ "masc_board_list"; "keeper_task_done" ]
         (Keeper_agent_result.tool_names_of_calls receipt_details);
       check (list string) "typed receipt outcome survives JSON projection"
         [ "Progress"; "Progress" ]
@@ -1186,7 +1186,7 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
            Trajectory.flush_pending acc;
            check (list string) "MASC trajectory JSONL keeps interleaved facts"
              [ "thinking:inspect board first"
-             ; "tool:keeper_board_list"
+             ; "tool:masc_board_list"
              ; "thinking:complete after evidence"
              ; "tool:keeper_task_done"
              ]
@@ -1253,7 +1253,7 @@ let test_keeper_stream_bridge_rejects_replayed_tool_name_drift () =
           { index = 2;
             content_type = "tool_use";
             tool_id = Some "tc-repeat";
-            tool_name = Some "keeper_board_list" };
+            tool_name = Some "masc_board_list" };
       ]
   in
   match events with
@@ -1278,7 +1278,7 @@ let test_keeper_stream_bridge_rejects_replayed_tool_name_drift () =
       check string "first start id" "tc-repeat" first_start_id;
       check string "first start name" "keeper_memory_search" first_start_name;
       check string "replay block id" "tc-repeat" replay_block_id;
-      check string "replay block name" "keeper_board_list" replay_block_name;
+      check string "replay block name" "masc_board_list" replay_block_name;
       check string "kind" "tool_start_duplicate_index"
         (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
       check int "index" 2 index;
@@ -1286,7 +1286,7 @@ let test_keeper_stream_bridge_rejects_replayed_tool_name_drift () =
       check bool "reason names original tool" true
         (string_contains reason "existing tool tc-repeat/keeper_memory_search");
       check bool "reason names incoming tool" true
-        (string_contains reason "incoming tool tc-repeat/keeper_board_list")
+        (string_contains reason "incoming tool tc-repeat/masc_board_list")
   | _ ->
       fail
         "expected same-id different-name tool start replay to fail closed"

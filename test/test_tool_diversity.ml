@@ -43,11 +43,11 @@ let test_stats_of_registry () =
 
 let test_underused_tool_metrics_record_aggregate_count () =
   let keeper_name = "test-underused-tool-metrics" in
-  let available_tools = [ "keeper_board_post"; "masc_web_search" ] in
+  let available_tools = [ "masc_board_post"; "masc_web_search" ] in
   let stats =
     [
       {
-        Masc.Keeper_tool_diversity.name = "keeper_board_post";
+        Masc.Keeper_tool_diversity.name = "masc_board_post";
         count = 100;
       };
     ]

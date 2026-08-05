@@ -1729,7 +1729,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       opts.onEvent({
         type: 'TOOL_CALL_START',
         toolCallId: 'tc-draft',
-        toolCallName: 'keeper_board_list',
+        toolCallName: 'masc_board_list',
       })
       return new Promise<{ terminal: boolean }>(resolve => {
         resolveStream = resolve
@@ -1751,7 +1751,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       }),
       expect.objectContaining({
         kind: 'tool',
-        name: 'keeper_board_list',
+        name: 'masc_board_list',
         toolCallId: 'tc-draft',
         status: 'pending',
       }),
@@ -1828,7 +1828,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
   it('keeps a checkpoint with tool calls free of tool-only placeholder text', async () => {
     streamKeeperMessage.mockImplementation(emitting([
       { type: 'RUN_STARTED' },
-      { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'keeper_board_list' },
+      { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'masc_board_list' },
       { type: 'TOOL_CALL_END', toolCallId: 'tc-1' },
       {
         type: 'CUSTOM',
@@ -1988,7 +1988,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
   it('hydrates tool outputs when a live stream finishes a tool call', async () => {
     streamKeeperMessage.mockImplementation(emitting([
       { type: 'RUN_STARTED' },
-      { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'keeper_board_list' },
+      { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'masc_board_list' },
       { type: 'TOOL_CALL_END', toolCallId: 'tc-1' },
       { type: 'TEXT_MESSAGE_START' },
       { type: 'TEXT_MESSAGE_CONTENT', delta: '완료' },
@@ -2003,7 +2003,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
   it('does not render generic empty-reply text after a tool-only terminal turn', async () => {
     streamKeeperMessage.mockImplementation(emitting([
       { type: 'RUN_STARTED' },
-      { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'keeper_board_list' },
+      { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'masc_board_list' },
       { type: 'TOOL_CALL_END', toolCallId: 'tc-1' },
       { type: 'RUN_FINISHED' },
     ], true))
@@ -2585,7 +2585,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
             { kind: 'think', text: '상태 확인 중' },
             {
               kind: 'tool',
-              name: 'keeper_board_list',
+              name: 'masc_board_list',
               toolCallId: 'tc-draft',
               status: 'pending',
               args: '{"limit":5}',
@@ -2623,7 +2623,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
         { kind: 'think', text: '상태 확인 중' },
         {
           kind: 'tool',
-          name: 'keeper_board_list',
+          name: 'masc_board_list',
           toolCallId: 'tc-draft',
           status: 'pending',
           args: '{"limit":5}',

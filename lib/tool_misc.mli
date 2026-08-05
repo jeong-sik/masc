@@ -12,6 +12,7 @@ type tool_result = Tool_result.result
 type context = {
   config : Workspace.config;
   agent_name : string;
+  help_schemas : Masc_domain.tool_schema list;
 }
 
 val schemas : Masc_domain.tool_schema list
@@ -57,6 +58,7 @@ val with_web_fetch_http_get_for_test :
   (unit -> 'a) ->
   'a
 
+(** The context carries the exact schema projection visible to the caller. *)
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
 val tool_inventory_json :

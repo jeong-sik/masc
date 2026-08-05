@@ -44,7 +44,7 @@ val enforce_caller_identity :
     records the spoof attempt and rewrites the field.  Pinned for
     behaviour-tests under
     {!test/test_board_author_identity_10297} which cover all four
-    board entries ([keeper_board_post] / [_comment] / [_vote] /
+    board entries ([masc_board_post] / [_comment] / [_vote] /
     [_comment_vote]).  Prefer {!ensure_board_post_author} for the
     [masc_board_post]/[author] specialisation. *)
 

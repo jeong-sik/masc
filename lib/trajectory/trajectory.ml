@@ -105,8 +105,8 @@ type trajectory_line =
 let tool_cost_estimate (tool_name : string) : float =
   match tool_name with
   (* MODEL-intensive tools *)
-  | "keeper_board_post" -> 0.002
-  | "keeper_board_comment" -> 0.001
+  | "masc_board_post" -> 0.002
+  | "masc_board_comment" -> 0.001
   | "tool_execute" -> 0.0001
   | "tool_edit_file" | "tool_write_file" -> 0.0001
   (* Read-only tools are essentially free *)

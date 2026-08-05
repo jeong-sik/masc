@@ -769,6 +769,7 @@ let commit_verdict_r
       ~task_id
       ~verification_id
       ?(notes = "")
+      ?evaluator_runtime
       ()
   : transition_outcome Masc_domain.masc_result
   =
@@ -941,6 +942,18 @@ let commit_verdict_r
              | Masc_domain.Verdict_approved -> Event_kind.Task.Approved
              | Masc_domain.Verdict_rejected _ -> Event_kind.Task.Rejected
            in
+           (* [authority_actor] is a fresh id per review, so it identifies the
+              run and nothing else — grouping 74 verdicts by it yields 74 groups.
+              [evaluator_runtime] is the config key that bound the provider and
+              model which judged, so it is the axis a verdict history can
+              actually be aggregated on. It was already computed and carried in
+              the review notes blob; every structured projection dropped it.
+              [None] for a human operator verdict, where no evaluator ran. *)
+           let evaluator_runtime_field =
+             match evaluator_runtime with
+             | None -> []
+             | Some runtime -> [ "evaluator_runtime", `String runtime ]
+           in
            let authority_fields =
              [ "task_id", `String task_id
              ; "authority_kind", `String authority_kind
@@ -948,6 +961,7 @@ let commit_verdict_r
              ; "producer", `String producer
              ; "verification_id", `String verification_id
              ]
+             @ evaluator_runtime_field
            in
            (* The task status deliberately stays a small lifecycle sum: a
               rejection returns the producer to [InProgress]. Keep the

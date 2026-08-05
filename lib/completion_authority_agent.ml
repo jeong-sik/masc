@@ -404,6 +404,7 @@ let commit_verdict
       ~notes
       ~verdict_label
       ~on_commit
+      ~(evaluator_runtime : string option)
   =
   match
     Workspace.commit_verdict_r
@@ -413,6 +414,7 @@ let commit_verdict
       ~task_id:task.id
       ~verification_id
       ~notes
+      ?evaluator_runtime
       ()
   with
   | Ok _ ->
@@ -493,7 +495,10 @@ let process_task_once
            ~notes:rejection_reason
            ~verdict_label:"rejected_contract"
            ~on_commit:
-             (Verification_run_registry.Contract_rejected { detail = reason }))
+             (Verification_run_registry.Contract_rejected { detail = reason })
+             (* The evidence contract was rejected before any evaluator ran, so
+                this verdict has no judging runtime to name. *)
+           ~evaluator_runtime:None)
     | Ok prepared ->
       let result =
         Task.Anti_rationalization.review
@@ -548,7 +553,8 @@ let process_task_once
               ~notes
               ~verdict_label:
                 (Task.Anti_rationalization.verdict_constructor_name review_verdict)
-              ~on_commit))
+              ~on_commit
+              ~evaluator_runtime:(Some evaluator_runtime)))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

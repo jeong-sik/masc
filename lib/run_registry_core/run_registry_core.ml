@@ -388,3 +388,33 @@ module Make (Payload : Payload) = struct
     { entries = Atomic.make entries; path = Some path }
   ;;
 end
+
+module Global (Registry : sig
+    type t
+
+    val initial : t
+  end) = struct
+  type t = Registry.t
+  type install_error = Already_installed
+
+  type state =
+    | Awaiting_install of t
+    | Installed of t
+
+  let state = Atomic.make (Awaiting_install Registry.initial)
+
+  let current () =
+    match Atomic.get state with
+    | Awaiting_install registry | Installed registry -> registry
+  ;;
+
+  let rec install registry =
+    let observed = Atomic.get state in
+    match observed with
+    | Installed _ -> Error Already_installed
+    | Awaiting_install _ ->
+      if Atomic.compare_and_set state observed (Installed registry)
+      then Ok ()
+      else install registry
+  ;;
+end

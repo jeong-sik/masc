@@ -14,6 +14,12 @@ open Alcotest
 module R = Masc.Verification_run_registry
 module E = Masc.Verification_run_registry
 
+module Lifecycle = Masc.Run_registry_core.Global (struct
+    type t = int
+
+    let initial = 0
+  end)
+
 let remove_if_exists path =
   try Sys.remove path with
   | Sys_error _ -> ()
@@ -288,6 +294,18 @@ let test_completed_runs_are_pruned () =
     (Option.is_none (R.get t ~verification_id:"vrf-001"))
 ;;
 
+let test_global_lifecycle_rejects_reinstallation () =
+  check int "pre-boot registry" 0 (Lifecycle.current ());
+  (match Lifecycle.install 1 with
+   | Ok () -> ()
+   | Error Lifecycle.Already_installed -> fail "first installation was rejected");
+  check int "installed registry" 1 (Lifecycle.current ());
+  (match Lifecycle.install 2 with
+   | Ok () -> fail "second installation replaced the owner"
+   | Error Lifecycle.Already_installed -> ());
+  check int "first owner remains active" 1 (Lifecycle.current ())
+;;
+
 let () =
   run
     "verification_run_registry"
@@ -323,6 +341,10 @@ let () =
             `Quick
             test_missing_outcome_payload_is_an_error
         ; test_case "completed runs are pruned" `Quick test_completed_runs_are_pruned
+        ; test_case
+            "global registry has one installation owner"
+            `Quick
+            test_global_lifecycle_rejects_reinstallation
         ] )
     ]
 ;;

@@ -111,10 +111,9 @@ let with_isolated_eio_base_path prefix f =
   Unix.mkdir base_dir 0o700;
   let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  let old_registry = Fusion_run_registry.global () in
+  let registry = Fusion_run_registry.create () in
   Fun.protect
     ~finally:(fun () ->
-      Fusion_run_registry.set_global old_registry;
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       restore_env "MASC_BASE_PATH" old_base;
@@ -123,16 +122,16 @@ let with_isolated_eio_base_path prefix f =
     (fun () ->
       Unix.putenv "MASC_BASE_PATH" base_dir;
       Unix.putenv "MASC_BASE_PATH_INPUT" base_dir;
-      Fusion_run_registry.set_global (Fusion_run_registry.create ());
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      Eio.Switch.run @@ fun sw -> f env sw base_dir)
+      Eio.Switch.run @@ fun sw -> f env sw base_dir registry)
 ;;
 
 let with_isolated_base_path prefix f =
-  with_isolated_eio_base_path prefix (fun _env _sw base_dir -> f base_dir)
+  with_isolated_eio_base_path prefix (fun _env _sw base_dir registry ->
+    f base_dir registry)
 ;;
 
 let make_meta ?(name = "fusion-keeper") () : Keeper_meta_contract.keeper_meta =
@@ -399,7 +398,7 @@ let discord_channel =
 ;;
 
 let test_emit_success_projects_board_chat_and_registry () =
-  with_isolated_base_path "fusion-success-sink" (fun base_dir ->
+  with_isolated_base_path "fusion-success-sink" (fun base_dir registry ->
     let keeper = "fusion-keeper" in
     let run_id = Printf.sprintf "fus-success-%d" (Random.bits ()) in
     let question = "Which implementation should ship?" in
@@ -420,11 +419,11 @@ let test_emit_success_projects_board_chat_and_registry () =
           { role = Fusion_types.Single; synthesis; usage = judge_usage }
       ]
     in
-    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
-      ~preset:"unit-test" ~started_at:2.0;
+    Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"unit-test"
+      ~started_at:2.0;
     let result =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id ~channel:discord_channel ~question ~panel
-        ~judge:(Ok synthesis) ~judges ~judge_usage
+      Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id ~channel:discord_channel
+        ~question ~panel ~judge:(Ok synthesis) ~judges ~judge_usage
     in
     check bool "emit succeeds" true (Result.is_ok result);
     let post =
@@ -518,8 +517,9 @@ let test_emit_success_projects_board_chat_and_registry () =
        check string "chat fusion block run id" run_id block_run_id
      | None -> fail "chat lane should carry a Fusion block for the board evidence");
     let replay =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id ~channel:discord_channel ~question ~panel
-        ~judge:(Ok synthesis) ~judges ~judge_usage
+      Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id
+        ~channel:discord_channel ~question ~panel ~judge:(Ok synthesis) ~judges
+        ~judge_usage
     in
     check bool "same completion replay succeeds" true (Result.is_ok replay);
     let posts_for_run =
@@ -545,9 +545,9 @@ let test_emit_success_projects_board_chat_and_registry () =
             ~base_path:base_dir
             ~keeper_name:keeper));
     let conflicting_replay =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id ~channel:discord_channel
-        ~question:(question ^ " changed") ~panel ~judge:(Ok synthesis) ~judges
-        ~judge_usage
+      Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id
+        ~channel:discord_channel ~question:(question ^ " changed") ~panel
+        ~judge:(Ok synthesis) ~judges ~judge_usage
     in
     check bool "changed completion replay is rejected" true
       (Result.is_error conflicting_replay);
@@ -569,7 +569,7 @@ let test_emit_success_projects_board_chat_and_registry () =
          (Keeper_event_queue_persistence.load
             ~base_path:base_dir
             ~keeper_name:keeper));
-    match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+    match Fusion_run_registry.get registry ~run_id with
     | Some
         { Fusion_run_registry.status =
             Fusion_run_registry.Completed Fusion_run_registry.Succeeded
@@ -587,7 +587,7 @@ let test_emit_success_projects_board_chat_and_registry () =
 ;;
 
 let test_wake_durable_commit_carries_channel () =
-  with_isolated_base_path "fusion-wake-durable" (fun base_dir ->
+  with_isolated_base_path "fusion-wake-durable" (fun base_dir _registry ->
     let keeper = Printf.sprintf "fusion-wake-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-wake-%d" (Random.bits ()) in
     let result =
@@ -638,7 +638,7 @@ let test_wake_durable_commit_carries_channel () =
 ;;
 
 let test_wake_fail_closed_rejects_conflicting_delivery () =
-  with_isolated_base_path "fusion-wake-failclosed" (fun base_dir ->
+  with_isolated_base_path "fusion-wake-failclosed" (fun base_dir _registry ->
     let keeper = Printf.sprintf "fusion-wake-fc-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-wake-fc-%d" (Random.bits ()) in
     let board_post_id = "post-wake-fc-1" in
@@ -671,7 +671,7 @@ let test_wake_fail_closed_rejects_conflicting_delivery () =
    the explicit obligation channel, so two Keepers sharing a [run_id] keep
    isolated completions with their own channels. *)
 let test_wake_isolates_keeper_run_identity () =
-  with_isolated_base_path "fusion-wake-isolation" (fun base_dir ->
+  with_isolated_base_path "fusion-wake-isolation" (fun base_dir _registry ->
     let run_id = Printf.sprintf "fus-iso-%d" (Random.bits ()) in
     let keeper_a = Printf.sprintf "fusion-iso-a-%d" (Random.bits ()) in
     let keeper_b = Printf.sprintf "fusion-iso-b-%d" (Random.bits ()) in
@@ -736,7 +736,7 @@ let test_wake_isolates_keeper_run_identity () =
    Keeper name, so the currently registered lane legitimately owns pending
    completions of that Keeper. *)
 let test_completion_wake_commits_durably_across_lane_replacement () =
-  with_isolated_base_path "fusion-wake-lane-replacement" (fun base_dir ->
+  with_isolated_base_path "fusion-wake-lane-replacement" (fun base_dir _registry ->
     Keeper_registry.For_testing.clear ();
     Fun.protect
       ~finally:Keeper_registry.For_testing.clear
@@ -784,7 +784,7 @@ let test_completion_wake_commits_durably_across_lane_replacement () =
    a replay carrying a *different* Board identity for the same run is an
    identity conflict that fails closed and leaves the committed row intact. *)
 let test_wake_board_recovery_keeps_canonical_identity () =
-  with_isolated_base_path "fusion-wake-board-recovery" (fun base_dir ->
+  with_isolated_base_path "fusion-wake-board-recovery" (fun base_dir _registry ->
     let keeper = Printf.sprintf "fusion-board-recovery-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-board-recovery-%d" (Random.bits ()) in
     let first =
@@ -824,7 +824,7 @@ let test_wake_board_recovery_keeps_canonical_identity () =
 ;;
 
 let test_completion_stimulus_persists_without_live_registry () =
-  with_isolated_base_path "fusion-wake-offline" (fun base_dir ->
+  with_isolated_base_path "fusion-wake-offline" (fun base_dir _registry ->
     let keeper = Printf.sprintf "fusion-offline-%d" (Random.bits ()) in
     let stimulus = fusion_stimulus ~run_id:"fus-offline" () in
     Keeper_keepalive_signal.wakeup_keeper
@@ -845,7 +845,8 @@ let test_completion_stimulus_persists_without_live_registry () =
 ;;
 
 let test_tool_handle_async_success_projects_running_then_completed () =
-  with_isolated_eio_base_path "fusion-tool-async-success" (fun env sw base_dir ->
+  with_isolated_eio_base_path "fusion-tool-async-success"
+    (fun env sw base_dir registry ->
     let keeper = "fusion-tool-keeper" in
     let question = "Which async fusion path should ship?" in
     let resolved_answer = "Ship the async handler path with typed sink evidence." in
@@ -883,7 +884,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
     let response =
       Fusion_tool.For_test.handle_with_compute ~compute ~sw
         ~net:(Eio.Stdenv.net env) ~base_dir ~keeper ~now_unix:4.0
-        ~policy:(fusion_tool_policy ())
+        ~policy:(fusion_tool_policy ()) ~registry
         ~args:(`Assoc [ ("prompt", `String question) ])
         ()
     in
@@ -899,7 +900,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
       (contains
          ~needle:"No need to poll masc_fusion_status"
          (string_field "fusion_tool.response" response_fields "delivery"));
-    (match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+    (match Fusion_run_registry.get registry ~run_id with
      | Some { keeper = observed_keeper; preset; status = Fusion_run_registry.Running; _ } ->
        check string "running keeper" keeper observed_keeper;
        check string "running preset" "unit" preset
@@ -910,7 +911,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 (fun () ->
       Eio.Promise.await computed_promise;
       let rec await_projection () =
-        match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+        match Fusion_run_registry.get registry ~run_id with
         | Some { Fusion_run_registry.status = Completed _; _ } -> ()
         | Some { Fusion_run_registry.status = Running; _ } | None ->
           Eio.Fiber.yield ();
@@ -960,7 +961,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
        check string "chat fusion block post id" post_id block_post_id;
        check string "chat fusion block run id" run_id block_run_id
      | None -> fail "chat lane should carry a Fusion block after async completion");
-    match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+    match Fusion_run_registry.get registry ~run_id with
     | Some
         { Fusion_run_registry.status =
             Fusion_run_registry.Completed Fusion_run_registry.Succeeded

@@ -77,6 +77,38 @@ let test_pgid_equals_pid () =
       ignore (Unix.waitpid [] h.pid);
       Unix.close h.stdout_fd; Unix.close h.stderr_fd
 
+(* Regression: with posix_spawn + POSIX_SPAWN_SETPGROUP the child's
+   process group is established atomically at spawn — before the child
+   runs any user code.  The child reports its own pgid via ps and it
+   must equal its pid (i.e. it is a group leader in its own group,
+   never a member of the parent's group).  Under the old fork()+setsid()
+   implementation there was a window where the child was still in the
+   parent's group, so a signal to the parent group could reach it. *)
+let test_child_pgid_established_at_spawn () =
+  match
+    P.spawn_detached
+      ~argv:[ "/bin/sh"; "-c"; "ps -o pgid= -p $$" ]
+      ~env:(env_of_current ()) ~cwd:""
+  with
+  | Error e -> failf "spawn failed: %s" e
+  | Ok h ->
+      let exited =
+        wait_until ~timeout_s:2.0 (fun () ->
+          match waitpid_nohang h.pid with Some _ -> true | None -> false)
+      in
+      check bool "child exited" true exited;
+      let stdout = read_all_fd h.stdout_fd in
+      let stderr = read_all_fd h.stderr_fd in
+      Unix.close h.stdout_fd; Unix.close h.stderr_fd;
+      check string "stderr empty" "" stderr;
+      (* The child's own pgid (reported by ps) must equal the pid we
+         got back from spawn.  This proves the group was set at spawn
+         time, not lazily by the child. *)
+      let child_pgid =
+        try int_of_string (String.trim stdout) with _ -> -1
+      in
+      check int "child pgid equals spawn pid" h.pid child_pgid
+
 let test_tree_kill_sigterm () =
   match
     P.spawn_detached ~argv:[ "/bin/sleep"; "30" ]
@@ -208,6 +240,8 @@ let () =
         [
           test_case "echo roundtrip" `Quick test_echo_roundtrip;
           test_case "pgid equals pid" `Quick test_pgid_equals_pid;
+          test_case "child pgid established at spawn" `Quick
+            test_child_pgid_established_at_spawn;
           test_case "empty argv rejected" `Quick test_empty_argv_rejected;
           test_case "devnull spawn exits" `Quick
             test_devnull_spawn_exits_without_pipe_handles;

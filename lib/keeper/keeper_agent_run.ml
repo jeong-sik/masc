@@ -531,9 +531,9 @@ let run_turn
       ~turn_start
       ~seq_ref
   in
-  let digest_text = Turn_helpers.digest_text in
+  let digest_text = Keeper_context_digest.text in
   let digest_message_texts_as_joined =
-    Turn_helpers.digest_message_texts_as_joined
+    Keeper_context_digest.message_texts_as_joined
   in
   append_manifest ~site:"checkpoint_loaded"
     ~keeper_turn_id:manifest_keeper_turn_id

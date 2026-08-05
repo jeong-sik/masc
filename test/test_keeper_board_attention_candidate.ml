@@ -588,9 +588,15 @@ let test_non_finite_complete_request_evidence_is_rejected () =
     }
   in
   let locations =
-    [ ( "signal.updated_at"
+    [ (* signal.updated_at is a typed field, so the record's own finiteness
+         check answers before the JSON canonicalizer walks the request, and it
+         names the field rather than the enclosing object. The untyped
+         locations below keep the canonicalizer's generic message, which is why
+         they pin no detail. *)
+      ( "signal.updated_at"
       , Some
-          "invalid Board attention candidate: candidate.signal contains a non-finite number"
+          "invalid Board attention candidate: candidate.signal.updated_at must \
+           be finite"
       , at_signal )
     ; "post.created_at", None, at_post
     ; "comment.created_at", None, at_comment

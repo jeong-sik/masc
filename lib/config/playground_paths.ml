@@ -75,14 +75,6 @@ let sanitize_keeper_name (name : string) : string =
 let bundle_root (name : string) : string =
   Printf.sprintf "%s/%s/" all_playgrounds_prefix (sanitize_keeper_name name)
 
-(** Relative path [".masc/playground/<safe_name>/repos/"]. *)
-let repos_path (name : string) : string =
-  Printf.sprintf "%s/%s/repos/" all_playgrounds_prefix (sanitize_keeper_name name)
-
-(** Bundle directories in canonical order. *)
-let bundle_paths (name : string) : string list =
-  [ bundle_root name; repos_path name ]
-
 type playground_file_path =
   { keeper_name : string
   ; relative_path : string

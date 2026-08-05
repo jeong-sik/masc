@@ -470,7 +470,6 @@ async function requestRuntimeAssistViaOperator(
     target_type: 'keeper',
     target_id: request.keeperName,
     payload: {
-      direct_reply: true,
       message: request.message,
     },
   })

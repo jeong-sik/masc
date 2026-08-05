@@ -671,12 +671,20 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
+          let committed_verification_id = ref None in
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result () ->
+               on_tool_result
+                 ~input:(`Assoc [ "path", `String "evidence.md" ])
+                 (Tool_result.ok
+                    ~tool_name:"verification_read_file"
+                    ~start_time:0.0
+                    "verified evidence");
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some Masc.Task.Anti_rationalization.Approve));
           Atomic.set Workspace_hooks.verification_notify_verdict_fn
             (fun ~task_id ~authority ~verification_id ~decision ->
+               committed_verification_id := Some verification_id;
                previous_notification
                  ~task_id
                  ~authority
@@ -710,6 +718,32 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
           Eio.Promise.await reviewer_called;
           Eio.Promise.await verdict_committed;
+          let verification_id =
+            match !committed_verification_id with
+            | Some verification_id -> verification_id
+            | None -> Alcotest.fail "completion notification omitted verification id"
+          in
+          (match
+             Masc.Verification_run_registry.get
+               (Masc.Verification_run_registry.global ())
+               ~verification_id
+           with
+           | Some
+               { status = Masc.Verification_run_registry.Completed { tools = [ tool ]; _ }
+               ; _
+               } ->
+             Alcotest.(check string)
+               "lookup evidence tool"
+               "verification_read_file"
+               tool.tool_name
+           | Some
+               { status = Masc.Verification_run_registry.Completed { tools; _ }
+               ; _
+               } ->
+             Alcotest.failf "expected one lookup observation, got %d" (List.length tools)
+           | Some { status = Masc.Verification_run_registry.Running; _ } ->
+             Alcotest.fail "verification run stayed running after verdict commit"
+           | None -> Alcotest.fail "verification run record was not persisted");
           match W.get_tasks_raw config with
           | [ { task_status = Masc_domain.Done _; _ } ] -> ()
           | [ task ] ->

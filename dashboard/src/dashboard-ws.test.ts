@@ -1,3 +1,4 @@
+import { effect } from '@preact/signals'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const sseStoreMocks = vi.hoisted(() => ({
@@ -37,6 +38,7 @@ import {
   dashboardWsLastPongLatencyMs,
   dashboardWsLastSeq,
   dashboardWsReady,
+  dashboardWsReconnectCount,
 } from './dashboard-ws-state'
 
 interface JsonRpcRequest {
@@ -584,6 +586,22 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets).toHaveLength(2)
     expect(mockSockets[1]!.url).toBe('ws://localhost:3000/ws')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    let readyWhenReconnectAdvanced: boolean | null = null
+    const dispose = effect(() => {
+      if (dashboardWsReconnectCount.value > 0) {
+        readyWhenReconnectAdvanced = dashboardWsReady.value
+      }
+    })
+    const secondSocket = mockSockets[1]!
+    secondSocket.open()
+    const secondHello = parseRpc(secondSocket, 0)
+    secondSocket.receive({ jsonrpc: '2.0', id: secondHello.id, result: {} })
+    await flushPromises()
+
+    expect(dashboardWsReconnectCount.value).toBe(1)
+    expect(readyWhenReconnectAdvanced).toBe(true)
+    dispose()
   })
 
   it('clears lastError on a clean close while reconnect remains active', async () => {

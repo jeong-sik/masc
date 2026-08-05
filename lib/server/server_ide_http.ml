@@ -582,6 +582,12 @@ let build_cursor_snapshot state uri ~partition ~keeper_id ~limit ~offset =
 ;;
 
 let add_routes router =
+  Ide_bridge.register_cursor_changed_sink (fun ~keeper_id ->
+    Sse.broadcast
+      (`Assoc
+         [ "type", `String "ide_cursor_changed"
+         ; "keeper_id", `String keeper_id
+         ]));
   Ide_bridge.install_agent_observation_sinks ();
   router
   |> Http.Router.get "/api/v1/ide/observations/snapshot" observation_snapshot_handler
@@ -1152,11 +1158,6 @@ let add_routes router =
                               ()
                           with
                           | Ok () ->
-                            Sse.broadcast
-                              (`Assoc
-                                 [ "type", `String "ide_cursor_changed"
-                                 ; "keeper_id", `String keeper_id
-                                 ]);
                             Http.Response.json_value
                               ~status:`Created
                               ~request

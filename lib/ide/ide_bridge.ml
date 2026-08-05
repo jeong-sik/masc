@@ -524,6 +524,20 @@ let turn_number_of_id turn_id =
   if raw = "" then None else int_of_string_opt raw
 ;;
 
+let noop_cursor_changed_sink ~keeper_id:_ = ()
+let cursor_changed_sink = Atomic.make noop_cursor_changed_sink
+let register_cursor_changed_sink sink = Atomic.set cursor_changed_sink sink
+
+let notify_cursor_changed ~keeper_id =
+  try Atomic.get cursor_changed_sink ~keeper_id with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Printf.eprintf
+      "Ide_bridge.cursor_changed_sink error: keeper=%s error=%s\n%!"
+      keeper_id
+      (Printexc.to_string exn)
+;;
+
 let cursor_event_json
     ~keeper_id
     ~file_path
@@ -600,7 +614,9 @@ let ingest_cursor_event_from_hook
         ~turn_id
         ()
     in
-    (try append_cursor ~base_dir:base_path ~partition json
+    (try
+       append_cursor ~base_dir:base_path ~partition json;
+       notify_cursor_changed ~keeper_id
      with exn ->
        Printf.eprintf
          "Ide_bridge.ingest_cursor_event_from_hook error: %s\n%!"
@@ -659,6 +675,7 @@ let ingest_cursor_event
     in
     (try
        append_cursor ~base_dir:base_path ~partition json;
+       notify_cursor_changed ~keeper_id;
        Ok ()
      with exn ->
        Printf.eprintf

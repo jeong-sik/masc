@@ -914,9 +914,8 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
         if (socket !== ws) return
         if (!discovery.fromCache) writeCachedWsUrl(wsUrl)
         resetDiscoveryCacheFailures()
-        noteDashboardWsReady()
         batch(() => {
-          dashboardWsReady.value = true
+          noteDashboardWsReady()
           dashboardWsLastError.value = null
         })
         if (desiredRouteState) {

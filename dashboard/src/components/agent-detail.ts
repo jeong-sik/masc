@@ -371,12 +371,11 @@ export function AgentDetailOverlay() {
           <${AgentWorkerBrief} agentName=${agentName} />
           ${agentFitness.value ? html`
             <${CollapsibleSection} title="적합도 (7일)" mountWhenOpen=${true}>
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div class="grid grid-cols-3 gap-3">
                 ${([
-                  ['완료율', agentFitness.value.completion_rate],
-                  ['신뢰도', agentFitness.value.reliability_score],
-                  ['속도', agentFitness.value.speed_score],
-                  ['종합', agentFitness.value.overall_fitness],
+                  ['완료율', agentFitness.value.completion],
+                  ['신뢰도', agentFitness.value.reliability],
+                  ['핸드오프', agentFitness.value.handoff],
                 ] as [string, number][]).map(([label, val]) => html`
                   <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3 text-center">
                     <div class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)] mb-1">${label}</div>

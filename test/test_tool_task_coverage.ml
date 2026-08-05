@@ -2640,13 +2640,10 @@ let () =
          expect_still_awaiting ())
       [ "approve"; "reject" ];
     let previous_metric = Atomic.get Workspace_hooks.record_task_metric_fn in
-    let previous_thompson = Atomic.get Workspace_hooks.record_thompson_result_fn in
     let metric_events = ref [] in
-    let thompson_events = ref [] in
     Fun.protect
       ~finally:(fun () ->
-        Atomic.set Workspace_hooks.record_task_metric_fn previous_metric;
-        Atomic.set Workspace_hooks.record_thompson_result_fn previous_thompson)
+        Atomic.set Workspace_hooks.record_task_metric_fn previous_metric)
       (fun () ->
         Atomic.set Workspace_hooks.record_task_metric_fn
           (fun _config
@@ -2660,9 +2657,6 @@ let () =
                ~handoff_from:_
                ~handoff_to:_ ->
              metric_events := (agent_id, success, collaborators) :: !metric_events);
-        Atomic.set Workspace_hooks.record_thompson_result_fn
-          (fun ~agent_name ~success ~reason:_ ->
-             thompson_events := (agent_name, success) :: !thompson_events);
         let approved =
           Workspace.commit_verdict_r
             ctx.config
@@ -2678,8 +2672,7 @@ let () =
         | Error error -> failwith (Masc_domain.masc_error_to_string error));
     (* Credited to the producer with no collaborators: the authority is not an
        agent, so it never enters the collaborator set. *)
-    assert (List.mem ("producer", true, []) !metric_events);
-    assert (List.mem ("producer", true) !thompson_events))
+    assert (List.mem ("producer", true, []) !metric_events))
 ;;
 
 let () =

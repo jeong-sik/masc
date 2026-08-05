@@ -146,7 +146,6 @@ export interface BoardContributorQuality {
   response_rate?: number
   board_posts?: number
   board_comments?: number
-  thompson_confidence?: number
   evidence_state?: 'default' | 'measured'
 }
 

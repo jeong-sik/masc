@@ -85,14 +85,6 @@ module Autonomy = struct
     get_int ~default:7 "MASC_AUTONOMY_QUIET_END"
 end
 
-(** {1 Thompson Sampling / Agent Selection Configuration}
-    Primary env vars: MASC_AUTONOMY_*. *)
-
-module AgentSelection = struct
-  let vote_decay_factor =
-    get_float ~default:0.95 "MASC_AUTONOMY_VOTE_DECAY_FACTOR"
-end
-
 (** {1 Timeouts & Buffer Sizes} *)
 
 module Timeouts = struct

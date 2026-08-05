@@ -38,15 +38,16 @@ export const agentTimeline = signal<AgentTimelineResponse | null>(null)
 export const mentionText = signal('')
 export const sendingMention = signal(false)
 
-// Agent fitness
-type AgentFitness = {
-  completion_rate?: number
-  reliability_score?: number
-  speed_score?: number
-  overall_fitness?: number
-  [key: string]: unknown
+// Agent fitness components, as emitted by masc_agent_fitness:
+//   { count, agents: [{ agent_id, components: {...}, metrics }] }
+// `speed` is omitted here on purpose: it is `min_avg / avg_completion_time_s`
+// over the queried pool, and this view queries one agent, so it is always 1.0.
+type AgentFitnessComponents = {
+  completion: number
+  reliability: number
+  handoff: number
 }
-export const agentFitness = signal<AgentFitness | null>(null)
+export const agentFitness = signal<AgentFitnessComponents | null>(null)
 
 // --- Selectors ---
 
@@ -181,7 +182,18 @@ export async function refreshAgentDetail(): Promise<void> {
         return null
       }),
       callMcpTool('masc_agent_fitness', { agent_name: agentName, days: 7 })
-        .then(raw => JSON.parse(raw) as AgentFitness)
+        .then(raw => {
+          const parsed = JSON.parse(raw) as {
+            agents?: { components?: Partial<AgentFitnessComponents> }[]
+          }
+          const c = parsed.agents?.[0]?.components
+          if (!c) return null
+          return {
+            completion: c.completion ?? 0,
+            reliability: c.reliability ?? 0,
+            handoff: c.handoff ?? 0,
+          }
+        })
         .catch((err: unknown) => {
           console.warn('[agent-detail-state] masc_agent_fitness fetch/parse failed', { agentName, err })
           return null

@@ -243,7 +243,6 @@ module Misc : LOGGER
 module Identity : LOGGER
 module Institution : LOGGER
 module Pages : LOGGER
-module Thompson : LOGGER
 module Config : LOGGER
 module Task : LOGGER
 module Http : LOGGER

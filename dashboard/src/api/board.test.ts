@@ -575,7 +575,6 @@ describe('fetchBoard', () => {
             response_rate: 0.6,
             board_posts: 3,
             board_comments: 5,
-            thompson_confidence: 0.7,
           },
           reactions: [
             {
@@ -619,7 +618,6 @@ describe('fetchBoard', () => {
         response_rate: 0.6,
         board_posts: 3,
         board_comments: 5,
-        thompson_confidence: 0.7,
       },
       reactions: [
         {

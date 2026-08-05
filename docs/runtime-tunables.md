@@ -129,7 +129,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_GRPC_ENABLED` | feature_flag | n/a | n/a | 187 | Whether gRPC transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at boot. |
 | `MASC_GRPC_PORT` | string_literal | n/a | n/a | 183 | gRPC server port. Default: 8936. |
 | `MASC_GRPC_TARGET` | string_literal | n/a | n/a | 191 | gRPC client target address. Derived from grpc_port when unset. |
-| `MASC_HTTP_AUTH_STRICT` | feature_flag | n/a | n/a | 217 |  |
+| `MASC_HTTP_AUTH_STRICT` | feature_flag | n/a | n/a | 217 | Force strict auth for all HTTP endpoints. Default: false. Read through the flag registry, which is what the operator-... |
 | `MASC_JANITOR_INTERVAL_SEC` | typed:float | unclassified | unclassified | 538 | Bootstrap janitor tick interval (seconds). Drives the SSE/session/ rate-limit/webrtc reaper loop in [server_bootstrap... |
 | `MASC_LABEL_QUIET_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 514 | Dashboard label "quiet" threshold (seconds). Default: 300 (5 min). |
 | `MASC_LABEL_STUCK_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 518 | Dashboard label "stuck" threshold (seconds). Default: 900 (15 min). |

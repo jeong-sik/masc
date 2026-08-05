@@ -213,14 +213,14 @@ module Transport = struct
     |> trim_opt
     |> Option.map agent_transport_of_string
 
-  let _http_auth_strict_registry =
-    Feature_flag_registry.get_bool "MASC_HTTP_AUTH_STRICT"
+  (** Force strict auth for all HTTP endpoints. Default: false.
 
-  (** Force strict auth for all HTTP endpoints. Default: false. *)
+      Read through the flag registry, which is what the operator-facing flag
+      listing reports. A second reader here used Sys.getenv_opt directly with
+      its own case-sensitive spelling set, so MASC_HTTP_AUTH_STRICT=TRUE and any
+      boot override made the listing and the enforcement disagree. *)
   let http_auth_strict_env_enabled () =
-    match Sys.getenv_opt "MASC_HTTP_AUTH_STRICT" |> trim_opt with
-    | Some ("1" | "true" | "yes" | "y" | "on") -> true
-    | _ -> false
+    Feature_flag_registry.get_bool "MASC_HTTP_AUTH_STRICT"
 
   (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
       Re-readable within the process, but operationally a boot-time input. *)

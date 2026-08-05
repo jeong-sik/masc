@@ -37,19 +37,3 @@ let of_string = function
 
 let pp fmt t = Format.pp_print_string fmt (to_string t)
 ;;
-
-
-let public_mcp_non_descriptor_names =
-  [ "masc_start"
-  ; "masc_broadcast"
-  ; "masc_messages"
-  ; "masc_keeper_create_from_persona"
-  ; "masc_persona_list"
-  (* Persona CRUD (#23664) lives with masc_persona_list outside the keeper
-     descriptor spine (operator-plane handlers in mcp_server); #23664 added
-     the surface entries without this allowlist edit while main was red. *)
-  ; "masc_persona_create"
-  ; "masc_persona_update"
-  ; "masc_persona_delete"
-  ]
-;;

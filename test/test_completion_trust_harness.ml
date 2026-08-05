@@ -475,7 +475,7 @@ let test_legitimate_claim_succeeds () =
     | None -> fail "task-001 must be Claimed/InProgress after a legitimate claim")
 
 let () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test-evaluator-runtime");
   Atomic.set AR.run_llm_reviewer_fn reviewer;
   run "Completion_trust_harness"

@@ -37,13 +37,13 @@ let valid_fixture_cases =
       file_name = "dashscope_tool_call.jsonl";
       expected_id = "dashscope-tool-call-001";
       expected_provider = "dashscope";
-      expected_tool = "search_files";
+      expected_tool = "Grep";
     };
     {
       file_name = "gemini_tool_call.jsonl";
       expected_id = "gemini-tool-call-001";
       expected_provider = "gemini";
-      expected_tool = "search_files";
+      expected_tool = "Grep";
     };
     {
       file_name = "kimi_tool_call.jsonl";

@@ -98,20 +98,37 @@ type transition_outcome =
   | Move_to of t
   | Complete
 
+(* Every (phase, action) pair is stated. The catch-all this replaces absorbed
+   22 of the 35 pairs, so adding a phase or an action compiled cleanly and the
+   new combinations silently became "invalid" — the same FSM sparse-match class
+   that produced a runtime Assert_failure in keeper_registry. The compiler now
+   refuses a matrix with a hole in it. *)
 let decide_transition ~phase ~(action : action) =
+  let invalid =
+    Error
+      (Printf.sprintf "invalid goal transition: %s -> %s"
+         (to_string phase) (action_to_string action))
+  in
   match phase, action with
+  (* Executing: the only phase that can request completion. *)
   | Executing, Request_complete -> Ok Complete
   | Executing, Pause -> Ok (Move_to Paused)
   | Executing, Block -> Ok (Move_to Blocked)
   | Executing, Drop -> Ok (Move_to Dropped)
+  | Executing, (Resume | Unblock | Reopen) -> invalid
+  (* Paused: resumes or drops; it is not blocked and not finished. *)
   | Paused, Resume -> Ok (Move_to Executing)
   | Paused, Drop -> Ok (Move_to Dropped)
+  | Paused, (Request_complete | Pause | Block | Unblock | Reopen) -> invalid
+  (* Blocked: unblocks or drops. Completing while blocked would skip the
+     impediment rather than resolve it. *)
   | Blocked, Unblock -> Ok (Move_to Executing)
   | Blocked, Drop -> Ok (Move_to Dropped)
+  | Blocked, (Request_complete | Pause | Resume | Block | Reopen) -> invalid
+  (* Completed and Dropped are terminal: only reopening leaves them. *)
   | Completed, Reopen -> Ok (Move_to Executing)
   | Completed, Drop -> Ok (Move_to Dropped)
+  | Completed, (Request_complete | Pause | Resume | Block | Unblock) -> invalid
   | Dropped, Reopen -> Ok (Move_to Executing)
-  | _ ->
-      Error
-        (Printf.sprintf "invalid goal transition: %s -> %s"
-           (to_string phase) (action_to_string action))
+  | Dropped, (Request_complete | Pause | Resume | Block | Unblock | Drop) ->
+    invalid

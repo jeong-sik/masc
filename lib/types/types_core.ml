@@ -319,22 +319,63 @@ let task_status_icon = function
   | Done _ -> "✅"
   | Cancelled _ -> "🚫"
 
-(** Display assignee for task status.
-    Cancelled surfaces [cancelled_by]; Todo yields "unclaimed".
-    For ownership checks returning [option], use [task_assignee_of_status]. *)
-let task_display_assignee = function
-  | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ }
-  | AwaitingVerification { assignee; _ } -> assignee
-  | Cancelled { cancelled_by; _ } -> cancelled_by
-  | Todo -> "unclaimed"
+(** Who acted on a Task, and in what relationship.
 
-(** Extract assignee as [Some string], or [None] for Todo/Cancelled.
-    Canonical ownership-check helper — used by task_state, gRPC, etc. *)
-let task_assignee_of_status = function
-  | Claimed { assignee; _ } -> Some assignee
-  | InProgress { assignee; _ } -> Some assignee
-  | AwaitingVerification { assignee; _ } -> Some assignee
-  | Todo | Done _ | Cancelled _ -> None
+    Every status carries an actor and a role, but a bare [string option]
+    records only the name and drops the role. Callers then disagreed about
+    what the name meant: three separate [task_assignee] implementations
+    existed, differing on [Done] (assignee or nobody) and on [Cancelled]
+    (nobody or the canceller). A completed Task therefore showed an owner on
+    one surface and none on another, and a cancelled Task named its canceller
+    as its assignee.
+
+    Naming the role makes the disagreement impossible to write: a [Canceller]
+    cannot be passed where a [Holder] is expected, and a new status has to
+    state which role it carries. The three questions callers actually ask are
+    derived below, each total over this sum. *)
+type task_actor =
+  | Unassigned
+  | Holder of string  (** Claimed or InProgress: currently doing the work. *)
+  | Submitter of string  (** AwaitingVerification: submitted, awaiting a verdict. *)
+  | Completer of string  (** Done: finished the work. *)
+  | Canceller of string  (** Cancelled: ended the work. Never its assignee. *)
+
+let task_actor_of_status = function
+  | Todo -> Unassigned
+  | Claimed { assignee; _ } -> Holder assignee
+  | InProgress { assignee; _ } -> Holder assignee
+  | AwaitingVerification { assignee; _ } -> Submitter assignee
+  | Done { assignee; _ } -> Completer assignee
+  | Cancelled { cancelled_by; _ } -> Canceller cancelled_by
+
+let task_actor_name = function
+  | Unassigned -> None
+  | Holder name | Submitter name | Completer name | Canceller name -> Some name
+
+(** Who owes work on this Task now. [Done] and [Cancelled] owe nothing, so
+    they answer [None] even though both carry a name. Canonical
+    ownership-check helper — used by task_state, gRPC, etc. *)
+let task_assignee_of_status status =
+  match task_actor_of_status status with
+  | Holder name | Submitter name -> Some name
+  | Unassigned | Completer _ | Canceller _ -> None
+
+(** Who did or is doing the work, including after completion. Distinct from
+    ownership: a finished Task has no one responsible but does have someone
+    who finished it. [Cancelled] answers [None] — the canceller ended the work
+    rather than performing it, and travels as [cancelled_by] instead. *)
+let task_performer_of_status status =
+  match task_actor_of_status status with
+  | Holder name | Submitter name | Completer name -> Some name
+  | Unassigned | Canceller _ -> None
+
+(** Total rendering of the actor for a surface that must print something.
+    [Cancelled] surfaces its canceller and [Todo] yields "unclaimed"; neither
+    is an ownership claim. *)
+let task_display_assignee status =
+  match task_actor_of_status status with
+  | Unassigned -> "unclaimed"
+  | Holder name | Submitter name | Completer name | Canceller name -> name
 
 (** Terminal states: [Done] or [Cancelled]. No further transitions possible.
     Exhaustive match — adding a constructor forces an update here. *)
@@ -668,6 +709,19 @@ let task_claim_next_action_is_claimable task =
   | Claim_now -> true
   | Skip_claim _ -> false
 ;;
+
+(** When the Task last changed state, read from the timestamp its own status
+    carries. [Todo] has no transition of its own and falls back to creation.
+    Defined once: two byte-identical copies lived in the execution and goals
+    projections, one per surface. *)
+let task_last_transition_at (task : task) =
+  match task.task_status with
+  | Done { completed_at; _ } -> completed_at
+  | Cancelled { cancelled_at; _ } -> cancelled_at
+  | InProgress { started_at; _ } -> started_at
+  | AwaitingVerification { submitted_at; _ } -> submitted_at
+  | Claimed { claimed_at; _ } -> claimed_at
+  | Todo -> task.created_at
 
 (* Manual yojson for task *)
 let task_to_yojson t =

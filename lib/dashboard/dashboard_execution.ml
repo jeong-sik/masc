@@ -541,15 +541,7 @@ let model_map_of_keeper_rows keepers =
     keepers
 ;;
 
-let task_updated_at (task : Masc_domain.task) =
-  match task.task_status with
-  | Masc_domain.Done { completed_at; _ } -> completed_at
-  | Masc_domain.Cancelled { cancelled_at; _ } -> cancelled_at
-  | Masc_domain.InProgress { started_at; _ } -> started_at
-  | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
-  | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
-  | Masc_domain.Todo -> task.created_at
-;;
+let task_updated_at = Masc_domain.task_last_transition_at
 
 let task_completed_at (task : Masc_domain.task) =
   match task.task_status with

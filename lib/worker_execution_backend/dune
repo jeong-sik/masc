@@ -5,4 +5,6 @@
  (public_name masc.worker_execution_backend)
  (wrapped false)
  (modules worker_execution_backend)
+ (flags
+  (:standard -w +4 -w +32))
  (libraries yojson masc_core))

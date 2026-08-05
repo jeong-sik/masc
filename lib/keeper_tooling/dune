@@ -8,6 +8,8 @@
   keeper_tool_execute_shell_ir
   keeper_tool_name
   keeper_tool_response)
+ (flags
+  (:standard -w +4 -w +32))
  (libraries
   agent_sdk
   masc.bounded_event_dedupe

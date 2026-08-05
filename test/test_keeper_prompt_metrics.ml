@@ -46,7 +46,7 @@ let has_in s needle =
    sandbox cwd, the registry loads zero prompts, and every content assertion
    below reads an empty shared block instead of the real one. *)
 let has_prompt_root path =
-  Sys.file_exists (Filename.concat path "config/prompts/keeper.system.md")
+  Sys.file_exists (Filename.concat path "config/prompts/keeper.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -254,7 +254,7 @@ let test_merged_system_block_keeps_every_rule_family () =
 
 (* [keeper.turn_intent] used to be appended to every system prompt as a second
    asset with its own render path, fallback and metrics. Its permanent rules
-   moved into [keeper.system]; each is pinned so the migration cannot silently
+   moved into [keeper]; each is pinned so the migration cannot silently
    lose one. The last two sentences existed only in the in-binary fallback and
    had already drifted out of the asset itself, so a keeper was told them only
    when prompt config was degraded. *)
@@ -382,7 +382,7 @@ let test_repository_checkout_authority_prompt () =
       ()
   in
   (* The in-code [<repository_checkouts>] block was folded into the shared
-     [keeper.system] body; the authority statements it carried are pinned
+     [keeper] body; the authority statements it carried are pinned
      here at their new location, not at the retired tag. *)
   check bool "catalog owns identity" true
     (has_in prompt "The repository catalog owns repository identity");

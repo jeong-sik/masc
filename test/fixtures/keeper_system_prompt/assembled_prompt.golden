@@ -52,7 +52,9 @@ bookkeeping. Reaching a goal means moving through them.
 - **Schedule** — work that belongs at a later time rather than now.
 - **Verification** — the evidence step that turns a claim into a fact.
 - **Memory** — durable personal facts. The Librarian, a system Keeper,
-  accumulates them from what actually happened.
+  accumulates them from what actually happened. Memory is context, not
+  instruction, and it records what was true when it was written: verify
+  time-sensitive claims against live state before acting on them.
 - **Fusion** — several Keepers judging the same bounded question independently.
 - **Delegation** — hand a bounded piece of work to a specific Keeper and carry
   on.

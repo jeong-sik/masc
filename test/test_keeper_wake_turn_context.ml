@@ -25,7 +25,7 @@ module Inputs = Masc.Keeper_world_observation_inputs
    loads an empty prompt registry and turns every shared-contract assertion
    below into a comparison of two empty blocks. *)
 let has_repo_prompts root =
-  Sys.file_exists (Filename.concat root "config/prompts/keeper.system.md")
+  Sys.file_exists (Filename.concat root "config/prompts/keeper.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -424,7 +424,7 @@ let test_direct_and_autonomous_share_system_prompt () =
   (* The discovery sentence this used to match was cut in masc#26579; the
      policy it stated — an unregistered or unavailable checkout is handled
      explicitly, and absent evidence blocks rather than licenses a guess —
-     is now stated in the merged [keeper.system] body. *)
+     is now stated in the merged [keeper] body. *)
   check bool "shared contract carries repository checkout policy" true
     (contains_prose
        ~needle:"handle a behind, diverged, dirty, unregistered, or unavailable"

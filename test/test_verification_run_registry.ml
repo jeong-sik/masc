@@ -12,7 +12,7 @@
 
 open Alcotest
 module R = Masc.Verification_run_registry
-module E = Masc.Verification_run_registry_event
+module E = Masc.Verification_run_registry
 
 let remove_if_exists path =
   try Sys.remove path with
@@ -35,6 +35,21 @@ let str json key =
   match field json key with
   | Some (`String value) -> Some value
   | _ -> None
+;;
+
+let contains_substring value needle =
+  let value_length = String.length value in
+  let needle_length = String.length needle in
+  let rec loop index =
+    if needle_length = 0
+    then true
+    else if index + needle_length > value_length
+    then false
+    else if String.sub value index needle_length = needle
+    then true
+    else loop (index + 1)
+  in
+  loop 0
 ;;
 
 let register t ~verification_id ~started_at =
@@ -197,36 +212,55 @@ let test_retry_replaces_the_prior_attempt () =
     check string "newest actor" "system-llm-agent-second" run.authority_actor
 ;;
 
+let test_unknown_completion_is_not_persisted () =
+  let path = fresh_path ".unknown-id.jsonl" in
+  let t = R.create ~path () in
+  R.mark_completed
+    t
+    ~verification_id:"vrf-unknown"
+    ~outcome:E.Approved
+    ~elapsed_s:1.0
+    ();
+  check int "unknown completion creates no row" 0 (List.length (R.list_runs t));
+  check bool "unknown completion writes no event" false (Sys.file_exists path)
+;;
+
 let test_unknown_outcome_label_is_an_error () =
-  let json =
-    `Assoc
-      [ "event", `String "complete"
-      ; "verification_id", `String "vrf-unknown"
-      ; "outcome", `String "probably_fine"
-      ; "elapsed_s", `Float 1.0
+  let path = fresh_path ".unknown-outcome.jsonl" in
+  let content =
+    String.concat
+      "\n"
+      [ {|{"event":"register","id":"vrf-unknown","started_at":1.0,"registration":{"task_id":"task-136","producer":"keeper","authority_kind":"system_llm_agent","authority_actor":"reviewer"}}|}
+      ; {|{"event":"complete","id":"vrf-unknown","completion":{"outcome":"probably_fine","elapsed_s":1.0}}|}
+      ; ""
       ]
   in
-  (* An outcome this module did not write must not decode as something it did.
-     A permissive default here would replay an unknown shape as a real verdict. *)
-  match E.of_yojson json with
-  | Ok _ -> fail "unknown outcome label must not decode"
-  | Error _ -> ()
+  Fs_compat.save_file path content;
+  let replayed = R.replay path in
+  check bool "unknown outcome is not replayed" true
+    (Option.is_none (R.get replayed ~verification_id:"vrf-unknown"));
+  check bool "unknown outcome evidence is preserved" true
+    (contains_substring (Fs_compat.load_file path) "probably_fine");
+  remove_if_exists path
 ;;
 
 let test_missing_outcome_payload_is_an_error () =
-  let json =
-    `Assoc
-      [ "event", `String "complete"
-      ; "verification_id", `String "vrf-bare"
-      ; "outcome", `String "rejected"
-      ; "elapsed_s", `Float 1.0
+  let path = fresh_path ".missing-outcome-detail.jsonl" in
+  let content =
+    String.concat
+      "\n"
+      [ {|{"event":"register","id":"vrf-bare","started_at":1.0,"registration":{"task_id":"task-136","producer":"keeper","authority_kind":"system_llm_agent","authority_actor":"reviewer"}}|}
+      ; {|{"event":"complete","id":"vrf-bare","completion":{"outcome":"rejected","elapsed_s":1.0}}|}
+      ; ""
       ]
   in
-  (* "rejected" without its reason is the opaque-failure shape this record
-     exists to prevent; it must not decode into a reasonless rejection. *)
-  match E.of_yojson json with
-  | Ok _ -> fail "rejected without a reason must not decode"
-  | Error _ -> ()
+  Fs_compat.save_file path content;
+  let replayed = R.replay path in
+  check bool "reasonless rejection is not replayed" true
+    (Option.is_none (R.get replayed ~verification_id:"vrf-bare"));
+  check string "malformed completion is not compacted away" content
+    (Fs_compat.load_file path);
+  remove_if_exists path
 ;;
 
 let test_completed_runs_are_pruned () =
@@ -276,6 +310,10 @@ let () =
             "a retry replaces its prior attempt"
             `Quick
             test_retry_replaces_the_prior_attempt
+        ; test_case
+            "unknown completion is logged without a disk-only event"
+            `Quick
+            test_unknown_completion_is_not_persisted
         ; test_case
             "unknown outcome label is an error"
             `Quick

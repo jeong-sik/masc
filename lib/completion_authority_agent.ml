@@ -436,7 +436,7 @@ let commit_verdict
   | Error error ->
     let detail = Masc_domain.masc_error_to_string error in
     ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail
-    , Verification_run_registry_event.Commit_failed { detail } )
+    , Verification_run_registry.Commit_failed { detail } )
 ;;
 
 let process_task_once
@@ -493,7 +493,7 @@ let process_task_once
            ~notes:rejection_reason
            ~verdict_label:"rejected_contract"
            ~on_commit:
-             (Verification_run_registry_event.Contract_rejected { detail = reason }))
+             (Verification_run_registry.Contract_rejected { detail = reason }))
     | Ok prepared ->
       let result =
         Task.Anti_rationalization.review
@@ -520,7 +520,7 @@ let process_task_once
          complete
            ~evaluator_runtime
            ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail
-           , Verification_run_registry_event.Not_reviewed { gate; detail } )
+           , Verification_run_registry.Not_reviewed { gate; detail } )
        | Some review_verdict ->
          let verdict = completion_verdict_of_review review_verdict in
          let notes =
@@ -532,9 +532,9 @@ let process_task_once
          in
          let on_commit =
            match verdict with
-           | Masc_domain.Verdict_approved -> Verification_run_registry_event.Approved
+           | Masc_domain.Verdict_approved -> Verification_run_registry.Approved
            | Masc_domain.Verdict_rejected { reason } ->
-             Verification_run_registry_event.Rejected { reason }
+             Verification_run_registry.Rejected { reason }
          in
          complete
            ~evaluator_runtime
@@ -555,7 +555,7 @@ let process_task_once
     let detail = Printexc.to_string exn in
     complete
       ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail
-      , Verification_run_registry_event.Raised { detail } )
+      , Verification_run_registry.Raised { detail } )
 ;;
 
 let request_scan (runtime : runtime) =

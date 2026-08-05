@@ -28,44 +28,17 @@ type turn_phase = Keeper_registry.turn_phase =
   | Turn_finalizing
   | Turn_exhausted
 
-val all_turn_phases : Keeper_registry.packed_turn_phase list
-
 type decision_stage = Keeper_registry.decision_stage =
   | Decision_undecided
   | Decision_guard_ok
   | Decision_tool_policy_selected
 
-val all_decision_stages : Keeper_registry.packed_decision_stage list
-
 type runtime_state = string
-
-val all_runtime_states : runtime_state list
 
 type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_accumulating
   | Compaction_compacting
   | Compaction_done
-
-val all_compaction_stages : Keeper_registry.packed_compaction_stage list
-
-(** Named TLA actions mirrored as OCaml variants so the observer contract
-    can stay 1:1 with [KeeperCompositeLifecycle.tla]. *)
-type tla_action =
-  | Action_start_turn
-  | Action_measurement_broadcast
-  | Action_decide_guard
-  | Action_select_tool_policy
-  | Action_start_runtime_selection
-  | Action_select_runtime
-  | Action_runtime_done
-  | Action_runtime_exhausted
-  | Action_finish_turn
-  | Action_start_compaction
-  | Action_finish_compaction
-  | Action_enter_failing
-  | Action_clear_failing
-
-val all_tla_actions : tla_action list
 
 (** Named TLA invariants mirrored as OCaml variants. *)
 type invariant_key =
@@ -74,8 +47,6 @@ type invariant_key =
   | Invariant_compaction_atomicity
   | Invariant_event_priority_monotone
   | Invariant_phase_derivation_agreement
-
-val all_invariant_keys : invariant_key list
 
 (** Safety invariants from KeeperCompositeLifecycle.tla.
     Each field is [true] when the invariant holds for the observed
@@ -372,31 +343,18 @@ val observe :
   Keeper_registry.registry_entry ->
   snapshot
 
-(** Observe every registered keeper under [base_path] once. Used by
-    [GET /api/v1/keepers/composite] to render fleet-level matrices
-    (LT-16a). Preserves registry iteration order. *)
-val all_snapshots : base_path:string -> unit -> snapshot list
-
 val turn_phase_to_string : Keeper_registry.packed_turn_phase -> string
-val turn_phase_of_string : string -> turn_phase option
 
 (** Stringify [decision_stage]. Mirrors KeeperDecisionPipeline.tla. *)
 val decision_stage_to_string : Keeper_registry.packed_decision_stage -> string
-val decision_stage_of_string : string -> decision_stage option
 
 (** Stringify the runtime-state compatibility field. *)
 val runtime_state_to_string : runtime_state -> string
-val runtime_state_of_string : string -> runtime_state option
 
 (** Stringify [compaction_stage]. Mirrors KeeperCompactionLifecycle.tla. *)
 val compaction_stage_to_string : Keeper_registry.packed_compaction_stage -> string
-val compaction_stage_of_string : string -> compaction_stage option
-
-val tla_action_to_string : tla_action -> string
-val tla_action_of_string : string -> tla_action option
 
 val invariant_key_to_string : invariant_key -> string
-val invariant_key_of_string : string -> invariant_key option
 
 (** Serialise a snapshot as the [/api/keepers/:name/composite] payload
     documented in RFC-0003 §7. *)

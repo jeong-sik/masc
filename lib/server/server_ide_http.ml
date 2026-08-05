@@ -1157,7 +1157,11 @@ let add_routes router =
                         (json_error msg)
                         reqd
                     | Ok keeper_id ->
-                      (match resolve_partition_for_mutation ~state ~uri with
+                      (* task-1733: resolve the write partition from the posted
+                         [file_path] (validated against the scoped repo) rather
+                         than from URI query params alone, so cursor writes are
+                         attributed to the repo the file actually belongs to. *)
+                      (match resolve_partition_for_annotation_post ~state ~uri ~file_path with
                        | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
                        | Ok partition ->
                          (match

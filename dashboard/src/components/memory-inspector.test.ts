@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   MemoryInspector,
   factCategoryMeta,
@@ -17,6 +17,7 @@ import {
   type MemoryKeeper,
 } from './memory-inspector'
 import { type MemoryOsFact, type TurnRecordRow } from '../api/dashboard'
+import { clearStoredToken, setStoredToken } from '../api/core'
 
 const keeper: MemoryKeeper = {
   id: 'masc-improver',
@@ -132,8 +133,13 @@ function stubFetch(payload: unknown = turnRecordsPayload()) {
   return fetchMock
 }
 
+beforeEach(() => {
+  setStoredToken('memory-inspector-test-token', { source: 'manual' })
+})
+
 afterEach(() => {
   cleanup()
+  clearStoredToken()
   vi.unstubAllGlobals()
 })
 

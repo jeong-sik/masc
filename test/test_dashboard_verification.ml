@@ -463,8 +463,26 @@ let test_requests_json_snapshot_projection_edges () =
   Alcotest.(check (option string)) "unknown kind fails the whole array"
     (Some
        ("malformed current-schema field \"submitted_evidence\": "
-        ^ "unknown submitted evidence item kind \"hologram\""))
-    (error unknown)
+        ^ "unknown submitted evidence snapshot kind \"hologram\""))
+    (error unknown);
+  (* The identity surface and the authority-scoped payload route read the same
+     persisted bytes. An artifact item carrying a reference but no payload
+     metadata is rejected by the payload decoder, so naming it here would tell
+     an operator that evidence exists which that route cannot serve. *)
+  let artifact_without_payload =
+    row_for ~task_id:"task-artifact-missing-payload"
+      [ `Assoc [
+          ("kind", `String "artifact");
+          ("reference", `String "artifact:repos/demo/main.ml");
+        ] ]
+  in
+  Alcotest.(check (list string))
+    "artifact missing payload metadata is not named"
+    [] (evidence artifact_without_payload);
+  Alcotest.(check bool)
+    "artifact missing payload metadata fails the array"
+    true
+    (error artifact_without_payload <> None)
 
 let test_requests_json_surfaces_evidence_projection_error () =
   with_temp_base_path (fun base_path ->
@@ -493,10 +511,14 @@ let test_requests_json_surfaces_evidence_projection_error () =
     Alcotest.(check (list string)) "malformed submitted evidence projects empty"
       [] (member "submitted_evidence" row |> Yojson.Safe.Util.to_list
           |> List.map Yojson.Safe.Util.to_string);
+    (* The detail comes from this module's snapshot decoder, which the identity
+       projection now runs, so it names the offending value rather than only
+       its expected shape. *)
     Alcotest.(check string) "missing and malformed fields are distinguished"
       ("missing current-schema field \"required_artifacts\"; "
        ^ "malformed current-schema field \"submitted_evidence\": "
-       ^ "submitted evidence item must be an object")
+       ^ "submitted evidence snapshot item must be an object, got "
+       ^ "\"trace://must-not-be-partially-projected\"")
       (member "evidence_projection_error" row |> Yojson.Safe.Util.to_string))
 
 (* The live store holds 47 artifact, 231 note and 6 unreadable items written by

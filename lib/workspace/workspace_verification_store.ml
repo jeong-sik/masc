@@ -48,6 +48,11 @@ type submitted_evidence_access =
       ; reason : evidence_access_failure
       }
 
+(* Reason code for a reference this module refused to materialize. Unlike the
+   [evidence_read_failure] codes it sits beside on the wire, it has no variant:
+   the rejected reference is never persisted, so there is nothing to carry. *)
+let invalid_reference_code = "invalid_reference"
+
 let evidence_read_failure_code = function
   | Evidence_missing -> "missing"
   | Evidence_not_regular_file -> "not_regular_file"
@@ -98,7 +103,7 @@ let submitted_evidence_item_to_yojson = function
   | Evidence_invalid_reference ->
     `Assoc
       [ "kind", `String "artifact_unreadable"
-      ; "reason", `Assoc [ "code", `String "invalid_reference" ]
+      ; "reason", `Assoc [ "code", `String invalid_reference_code ]
       ]
   | Evidence_artifact_unreadable { reference; reason } ->
     `Assoc
@@ -174,7 +179,7 @@ let submitted_evidence_item_metadata_to_yojson = function
   | Evidence_invalid_reference ->
     `Assoc
       [ "kind", `String "artifact_unreadable"
-      ; "reason", `String "invalid_reference"
+      ; "reason", `String invalid_reference_code
       ]
   | Evidence_artifact_unreadable { reference; reason } ->
     `Assoc
@@ -569,39 +574,27 @@ let snapshot_submitted_evidence_json ~base_path ~worker references =
          |> submitted_evidence_item_to_yojson)
        references)
 
+(* Decode through this module's own snapshot decoder instead of re-reading the
+   JSON fields. Both surfaces read the same persisted bytes, so they have to
+   agree on which snapshots are well-formed: re-deriving the shape here let an
+   artifact item with a [reference] but missing or invalid [content]/[bytes]/
+   [truncated] render as an ordinary identity line while the authority-scoped
+   payload route rejected the very same item. Matching on the typed value makes
+   that divergence unrepresentable, and a new variant becomes a compile error
+   here rather than an [unknown kind] string at runtime. *)
 let submitted_evidence_identity_line (item : Yojson.Safe.t) =
-  match item with
-  | `Assoc fields ->
-    (match List.assoc_opt "kind" fields with
-     | Some (`String "note") ->
-       (match List.assoc_opt "content" fields with
-        | Some (`String content) -> Ok (note_reference_prefix ^ content)
-        | _ -> Error "note item is missing content")
-     | Some (`String "artifact") ->
-       (match List.assoc_opt "reference" fields with
-        | Some (`String reference) -> Ok reference
-        | _ -> Error "artifact item is missing reference")
-     | Some (`String "artifact_unreadable") ->
-       let code =
-         match List.assoc_opt "reason" fields with
-         | Some (`Assoc reason_fields) ->
-           (match List.assoc_opt "code" reason_fields with
-            | Some (`String code) -> Some code
-            | _ -> None)
-         | _ -> None
-       in
-       (match code with
-        | None -> Error "unreadable item is missing a reason code"
-        | Some code ->
-          (match List.assoc_opt "reference" fields with
-           | Some (`String reference) ->
-             Ok (Printf.sprintf "%s (unreadable: %s)" reference code)
-           | None -> Ok (Printf.sprintf "(unreadable: %s)" code)
-           | Some _ -> Error "unreadable item reference must be a string"))
-     | Some (`String kind) ->
-       Error (Printf.sprintf "unknown submitted evidence item kind %S" kind)
-     | _ -> Error "submitted evidence item is missing kind")
-  | _ -> Error "submitted evidence item must be an object"
+  match submitted_evidence_item_of_yojson item with
+  | Error detail -> Error detail
+  | Ok (Evidence_note note) -> Ok (note_reference_prefix ^ note)
+  | Ok (Evidence_artifact { reference; _ }) -> Ok reference
+  | Ok Evidence_invalid_reference ->
+    Ok (Printf.sprintf "(unreadable: %s)" invalid_reference_code)
+  | Ok (Evidence_artifact_unreadable { reference; reason }) ->
+    Ok
+      (Printf.sprintf
+         "%s (unreadable: %s)"
+         reference
+         (evidence_read_failure_code reason))
 ;;
 
 let submitted_evidence_identity_lines (json : Yojson.Safe.t) =

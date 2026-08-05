@@ -237,7 +237,9 @@ let execute_tool_eio
             if workspace_init_cached
             then (
               try
-                let (_ : string) = Workspace.heartbeat config ~agent_name in
+                let (_ : Workspace.heartbeat_outcome) =
+                  Workspace.heartbeat config ~agent_name
+                in
                 ()
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn

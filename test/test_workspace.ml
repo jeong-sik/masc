@@ -756,8 +756,11 @@ let test_heartbeat_updates_lastseen () =
     let _ = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:[] () in
 
     (* Send heartbeat *)
-    let result = Workspace.heartbeat config ~agent_name:"gemini" in
-    Alcotest.(check bool) "heartbeat success" true (contains_heartbeat result)
+    match Workspace.heartbeat config ~agent_name:"gemini" with
+    | Workspace.Heartbeat_updated _ -> ()
+    | outcome ->
+      Alcotest.failf "expected an update, got %S"
+        (Workspace.heartbeat_message outcome)
   )
 
 let test_is_agent_session_bound_after_default_join () =
@@ -943,8 +946,11 @@ let test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid () =
 let test_heartbeat_nonexistent_agent () =
   with_test_env (fun config ->
     (* Heartbeat for non-bound agent *)
-    let result = Workspace.heartbeat config ~agent_name:"nonexistent" in
-    Alcotest.(check bool) "heartbeat for nonexistent" true (contains_warning result)
+    match Workspace.heartbeat config ~agent_name:"nonexistent" with
+    | Workspace.Agent_not_found _ -> ()
+    | outcome ->
+      Alcotest.failf "expected the agent to be missing, got %S"
+        (Workspace.heartbeat_message outcome)
   )
 
 (* test_get_agents_status removed (2026-06-09): get_agents_status deleted with

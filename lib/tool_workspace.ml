@@ -568,18 +568,11 @@ let state_to_json st =
     [assertion_kind_to_string] / [assertion_kind_of_string_lenient]
     aren't updated. Same shape as #8546 / #8601 / #8592. *)
 let handle_heartbeat ~tool_name ~start_time ctx _args =
-  let message = Workspace.heartbeat ctx.config ~agent_name:ctx.agent_name in
-  (* Workspace.heartbeat returns "..." on failure (agent not found, invalid file) *)
-  let success =
-    not
-      (String.length message >= 3
-       && Char.code message.[0] = 0xe2
-       && Char.code message.[1] = 0x9a
-       && Char.code message.[2] = 0xa0)
-  in
-  if success
-  then Tool_result.ok ~tool_name ~start_time message
-  else
+  let outcome = Workspace.heartbeat ctx.config ~agent_name:ctx.agent_name in
+  let message = Workspace.heartbeat_message outcome in
+  match outcome with
+  | Workspace.Heartbeat_updated _ -> Tool_result.ok ~tool_name ~start_time message
+  | Workspace.Agent_not_found _ | Workspace.Agent_file_invalid _ ->
     (* RFC-0189: heartbeat failure stems from agent-state issues
        ("agent not found", "invalid file") that the caller can
        resolve (bind the session, refresh credentials).

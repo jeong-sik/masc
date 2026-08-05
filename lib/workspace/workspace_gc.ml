@@ -218,23 +218,12 @@ let gc config ~days () =
    | Error e ->
        results := Printf.sprintf "Backend pubsub cleanup failed: %s" (Backend_types.show_error e) :: !results);
 
-  (* 4. Hard-delete board artifacts (via hooks) *)
-  let board_artifact_count = (Atomic.get Workspace_hooks.cleanup_board_artifacts_fn) () in
-  if board_artifact_count > 0 then
-    results :=
-      Printf.sprintf "Removed %d board artifact post(s)"
-        board_artifact_count
-      :: !results
-  else
-    results := "No board artifacts" :: !results;
-
   log_event config (`Assoc [
     ("type", `String "gc");
     ("stale_tasks", `Int stale_count);
     ("old_messages", `Int !old_msg_count);
     ("preserved", `Int !preserved_count);
     ("pubsub_cleaned", `Int !pubsub_cleanup_count);
-    ("board_artifacts", `Int board_artifact_count);
     ("days", `Int days);
     ("ts", `String (now_iso ()));
   ]);

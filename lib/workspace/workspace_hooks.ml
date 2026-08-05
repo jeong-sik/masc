@@ -130,12 +130,6 @@ let observe_task_transition_fn
       (fun _config ~agent_name:_ ~task_id:_ ~transition:_
            ~details:_ -> ())
 
-(** Board artifact cleanup — wraps Board_dispatch.list_posts + delete_post.
-    Returns number of deleted posts. *)
-let cleanup_board_artifacts_fn
-  : (unit -> int) Atomic.t
-  = Atomic.make (fun () -> 0)
-
 (** Invalidate dashboard execution cache on task mutation (add, transition).
     Wired by server bootstrap to avoid circular dependency between
     Workspace sub-modules and server dashboard surfaces. *)

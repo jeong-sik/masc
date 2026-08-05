@@ -316,7 +316,8 @@
   test_keeper_wire_capture
   test_board_rest_routes
   test_board_context_inference_resolution
-  test_runtime_model_input_tail_window)
+  test_runtime_model_input_tail_window
+  test_keeper_model_input_demotion)
  (modules
   test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
@@ -611,7 +612,8 @@
   test_keeper_wire_capture
   test_board_rest_routes
   test_board_context_inference_resolution
-  test_runtime_model_input_tail_window)
+  test_runtime_model_input_tail_window
+  test_keeper_model_input_demotion)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref))
 
@@ -913,6 +915,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_persona_name
   test_dashboard_briefing_sections
   test_dashboard_cache
   test_dashboard_http_core
@@ -1066,6 +1069,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_persona_name
   test_dashboard_briefing_sections
   test_dashboard_cache
   test_dashboard_http_core
@@ -1634,6 +1638,7 @@
 ; sorted alphabetically.
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
+(include stanzas/test_verification_authority_tools.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 (include stanzas/test_keeper_compaction_persist_gate.inc)
 
@@ -1947,6 +1952,8 @@
 (include stanzas/test_keeper_approval_queue_rules.inc)
 
 (include stanzas/test_keeper_approval_queue.inc)
+
+(include stanzas/test_tool_type_label.inc)
 
 (include stanzas/test_assertion_kind_mirror.inc)
 

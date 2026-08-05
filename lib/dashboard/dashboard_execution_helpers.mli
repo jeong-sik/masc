@@ -29,6 +29,13 @@
     [cap_string_list] / [execution_tool_preview_limit] /
     [string_list_of_field]). *)
 
+val extract_persona_name : string -> string
+(** Strip a keeper-agent alias down to the keeper name, or return the input
+    unchanged when it is not one. Delegates to
+    [Keeper_identity.keeper_name_of_agent_alias], which owns the four accepted
+    spellings; exported so a test can pin all four rather than only the pair
+    this module used to hand-roll. *)
+
 (** {1 Tone} *)
 
 type tone = Dashboard_utils.tone =

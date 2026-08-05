@@ -81,13 +81,11 @@ import {
   toolCallOutputsCoveredThroughMs,
 } from '../tool-call-output-store'
 import {
-  KEEPER_WAITING_INVENTORY_REFRESH_MS,
-  loadTools,
-  subscribeToolsAutoRefresh,
-  toolsData,
-  toolsError,
-} from './tools/tool-state'
-import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+  keeperWaitingInventoryState,
+  refreshKeeperWaitingInventory,
+  subscribeKeeperWaitingInventory,
+} from '../keeper-waiting-inventory-store'
+import { registerKeeperWaitingInventoryRefresh } from '../sse-store'
 import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
 import {
   cancelKeeperChatPendingReceipt,
@@ -107,11 +105,6 @@ import {
   type KeeperEventQueuePendingSnapshot,
   type KeeperEventQueueReplayableAction,
 } from '../api'
-
-// Mirrors `LANE_REFRESH_MS` in keeper-workspace/keeper-lane-strip.ts. That
-// const is module-local there, so we keep the same 15 s cadence here rather
-// than exporting it cross-file for a single consumer.
-const BUSY_REFRESH_MS = KEEPER_WAITING_INVENTORY_REFRESH_MS
 
 
 function GhostButton({
@@ -784,14 +777,9 @@ function KeeperQueueControlPanel({
   }
   useEffect(() => {
     void load()
-    // Without this the queue rows are fetched once and never again, while the
-    // parent's 15s tools poll keeps re-rendering the panel — so formatTimeAgo
-    // ticks '도착 N분 전' upward on rows that may already have been consumed.
-    // Same cadence and visibility gating the receipt strip below already uses;
-    // load(false) keeps a surfaced error visible across polls.
-    return setupVisibleAutoRefresh(() => {
-      void load(false)
-    }, BUSY_REFRESH_MS)
+    return registerKeeperWaitingInventoryRefresh(changedKeeper => {
+      if (changedKeeper === keeperName) void load(false)
+    })
   }, [keeperName])
   const eventRows = eventSnapshot?.pending ?? []
   const activeChatRows = (keeper?.waiting_on ?? [])
@@ -810,14 +798,14 @@ function KeeperQueueControlPanel({
       await Promise.all([
         reconcileKeeperChatReceipts(keeperName),
         load(),
-        loadTools(),
+        refreshKeeperWaitingInventory(keeperName),
       ])
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
       await Promise.allSettled([
         reconcileKeeperChatReceipts(keeperName),
         load(false),
-        loadTools(),
+        refreshKeeperWaitingInventory(keeperName),
       ])
       setError(message)
       showToast(message, 'error')
@@ -837,7 +825,7 @@ function KeeperQueueControlPanel({
           recovery => recovery.operation.operationId !== operation.operationId,
         ))
       }
-      await Promise.all([load(), loadTools()])
+      await Promise.all([load(), refreshKeeperWaitingInventory(keeperName)])
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
       if (cause instanceof KeeperEventQueueOperationError) {
@@ -853,7 +841,7 @@ function KeeperQueueControlPanel({
           recovery,
         ])
       }
-      await Promise.allSettled([load(false), loadTools()])
+      await Promise.allSettled([load(false), refreshKeeperWaitingInventory(keeperName)])
       setError(message)
       showToast(message, 'error')
     } finally {
@@ -1114,10 +1102,9 @@ function KeeperQueueControlPanel({
           : null}
       </div>
       <div class="grid gap-2 border-t border-[var(--color-border-subtle)] pt-3">
-        <!-- eventSnapshot is fetched once per keeperName and after operator actions; it
-             does not poll. Falling back to the 15s-refreshed waiting inventory (the same
-             source 채팅 대기/배송 복구 already use) keeps the count from reading 0 before
-             the one-shot fetch resolves or after it throws. -->
+        <!-- eventSnapshot is fetched on mount, typed queue invalidation, and operator
+             actions. The shared keeper-scoped inventory keeps the count from reading 0
+             before that read resolves or after it throws. -->
         <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">자율 이벤트 대기 ${eventSnapshot?.totalPending ?? keeper?.sources?.event_queue_pending ?? 0}</div>
         ${eventRecoveries.map(recovery => {
           const operationId = recovery.operation.operationId
@@ -1266,25 +1253,22 @@ export function KeeperConversationPanel({
   const bumpQueue = () => setQueueVersion(v => v + 1)
   const isDrainingRef = useRef(false)
 
-  // Keep the shared tools projection live for the conversation's busy chip and
-  // interrupt button. The right-side Lane has its own keeper-scoped read path.
+  // The conversation and Lane share one keeper-scoped projection. Typed queue
+  // invalidations, focus recovery, and WS reconnects refresh it without a timer.
   useEffect(() => {
-    const unsubscribeToolsRefresh = subscribeToolsAutoRefresh()
+    const unsubscribeInventory = subscribeKeeperWaitingInventory(keeperName)
     void reconcileKeeperChatReceipts(keeperName)
-    const stopReceiptRefresh = setupVisibleAutoRefresh(() => {
-      void reconcileKeeperChatReceipts(keeperName)
-    }, BUSY_REFRESH_MS)
     return () => {
-      stopReceiptRefresh()
-      unsubscribeToolsRefresh()
+      unsubscribeInventory()
     }
   }, [keeperName])
 
+  const inventoryState = keeperWaitingInventoryState(keeperName)
   const inventoryEntry = useMemo(() => {
-    const inv = toolsData.value?.keeper_waiting_inventory
+    const inv = inventoryState.inventory
     if (!inv) return null
     return inv.keepers.find(k => k.keeper_name === keeperName) ?? null
-  }, [keeperName, toolsData.value])
+  }, [keeperName, inventoryState.inventory])
 
   // External-system sync: merge the server-persisted transcript
   // (.masc/keeper_chat/<name>.jsonl) on mount so the conversation
@@ -1332,11 +1316,9 @@ export function KeeperConversationPanel({
     inventoryEntry?.sources?.chat_queue_persistence_blocked ?? 0,
   )
   const serverQueueReadErrorCount = Math.max(0, inventoryEntry?.sources?.read_error ?? 0)
-  const toolsProjectionError = toolsError.value
-  const toolsProjectionReady = toolsData.value !== null
-  const toolsProjectionPresent = Boolean(
-    toolsData.value?.keeper_waiting_inventory && inventoryEntry,
-  )
+  const inventoryProjectionError = inventoryState.error
+  const inventoryProjectionReady = inventoryState.ready
+  const inventoryProjectionPresent = Boolean(inventoryState.inventory && inventoryEntry)
   const visibleThread = useMemo(
     () =>
       sending && !thread.some(isActiveAssistantEntry)
@@ -1604,9 +1586,9 @@ export function KeeperConversationPanel({
       recoveryRequiredCount=${serverRecoveryRequiredCount}
       persistenceBlockedCount=${serverPersistenceBlockedCount}
       readErrorCount=${serverQueueReadErrorCount}
-      projectionError=${toolsProjectionError}
-      projectionReady=${toolsProjectionReady}
-      projectionPresent=${toolsProjectionPresent}
+      projectionError=${inventoryProjectionError}
+      projectionReady=${inventoryProjectionReady}
+      projectionPresent=${inventoryProjectionPresent}
       currentExecution=${inventoryEntry?.current_execution}
       readErrorAction=${serverQueueReadErrorCount > 0
         ? inventoryEntry?.source_next_actions?.read_error?.[0] ?? inventoryEntry?.next_action

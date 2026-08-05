@@ -549,7 +549,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined, undefined)
   })
 
-  it('invalidates the authoritative Keeper waiting inventory once per burst', async () => {
+  it('delivers every Keeper inventory invalidation immediately while coalescing receipt reads', async () => {
     const { sseStore } = await loadSseStore()
     const refreshQueue = vi.fn()
     sseStore.registerKeeperWaitingInventoryRefresh(refreshQueue)
@@ -564,11 +564,13 @@ describe('setupServerPushReaction reconnect hydration', () => {
       keeper_name: 'echo',
       queue_kind: 'chat_queue',
     })
+    expect(refreshQueue).toHaveBeenCalledTimes(2)
+    expect(refreshQueue).toHaveBeenNthCalledWith(1, 'echo')
+    expect(refreshQueue).toHaveBeenNthCalledWith(2, 'echo')
+    expect(reconcileKeeperChatReceipts).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshQueue).toHaveBeenCalledTimes(1)
-    expect(refreshQueue).toHaveBeenCalledWith('echo')
     expect(reconcileKeeperChatReceipts).toHaveBeenCalledTimes(1)
     expect(reconcileKeeperChatReceipts).toHaveBeenCalledWith('echo')
   })
@@ -583,12 +585,33 @@ describe('setupServerPushReaction reconnect hydration', () => {
       keeper_name: 'echo',
       queue_kind: 'event_queue',
     })
+    expect(refreshQueue).toHaveBeenCalledTimes(1)
+    expect(refreshQueue).toHaveBeenCalledWith('echo')
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshQueue).toHaveBeenCalledTimes(1)
-    expect(refreshQueue).toHaveBeenCalledWith('echo')
     expect(reconcileKeeperChatReceipts).not.toHaveBeenCalled()
+  })
+
+  it('forces compaction hydration from the typed source event, then re-reads on cache completion', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshCompaction = vi.fn()
+    sseStore.registerKeeperCompactionRefresh(refreshCompaction)
+
+    sseStore.routeServerPushEvent({
+      type: 'oas:context_compacted',
+      agent_name: 'echo',
+      before_tokens: 100,
+      after_tokens: 40,
+    })
+    sseStore.routeServerPushEvent({
+      type: 'keeper_compaction_snapshots_changed',
+      keeper_name: 'echo',
+      status: 'ready',
+    })
+
+    expect(refreshCompaction).toHaveBeenNthCalledWith(1, 'echo', 'source_changed')
+    expect(refreshCompaction).toHaveBeenNthCalledWith(2, 'echo', 'ready')
   })
 
   it('forwards RFC-0235 audio clips on keeper_chat_appended to the chat handler', async () => {

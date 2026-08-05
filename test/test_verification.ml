@@ -999,6 +999,82 @@ let test_rejected_verdict_audit_preserves_reason () =
         "system_llm_agent"
         (json |> member "authority_kind" |> to_string))
 
+(* The judging runtime is the only axis a verdict history can be grouped on:
+   [authority_actor] is minted fresh per review, so 74 verdicts carry 74 distinct
+   actors. The runtime was already computed and carried inside the review notes
+   blob, but every structured projection dropped it. *)
+let test_verdict_audit_names_the_judging_runtime () =
+  with_eio_temp_dir (fun base_path ->
+    let config = W.default_config base_path in
+    ignore (W.init config ~agent_name:(Some "runtime-producer"));
+    ignore
+      (W.add_task
+         config
+         ~title:"name the judging runtime"
+         ~priority:1
+         ~description:"the durable audit must say which runtime judged");
+    let backlog = W.read_backlog config in
+    let tasks =
+      List.map
+        (fun (task : Masc_domain.task) ->
+           if String.equal task.id "task-001"
+           then
+             { task with
+               task_status =
+                 Masc_domain.AwaitingVerification
+                   { assignee = "runtime-producer"
+                   ; started_at = "2026-08-05T00:00:00Z"
+                   ; submitted_at = Masc_domain.now_iso ()
+                   ; verification_id = "vrf-runtime-named"
+                   }
+             }
+           else task)
+        backlog.tasks
+    in
+    W.write_backlog config { backlog with tasks };
+    (match
+       W.commit_verdict_r
+         config
+         ~authority:
+           (Masc_domain.System_llm_agent { agent_run_id = "system-runtime-agent" })
+         ~verdict:Masc_domain.Verdict_approved
+         ~task_id:"task-001"
+         ~verification_id:"vrf-runtime-named"
+         ~evaluator_runtime:"cross-verifier-model"
+         ()
+     with
+     | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+     | Ok _ -> ());
+    let open Unix in
+    let tm = gmtime (gettimeofday ()) in
+    let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
+    let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
+    let events_dir = Filename.concat (CU.masc_dir_from_base_path ~base_path) "events" in
+    let event_path = Filename.concat (Filename.concat events_dir month) day in
+    let event =
+      Fs_compat.load_jsonl event_path
+      |> List.find_opt (fun json ->
+        match json with
+        | `Assoc fields ->
+          (match List.assoc_opt "type" fields with
+           | Some (`String value) -> String.equal value "task_completion_verdict"
+           | _ -> false)
+        | _ -> false)
+    in
+    match event with
+    | None -> Alcotest.fail "verdict audit event was not persisted"
+    | Some json ->
+      let open Yojson.Safe.Util in
+      Alcotest.(check string)
+        "audit names the runtime that judged"
+        "cross-verifier-model"
+        (json |> member "evaluator_runtime" |> to_string);
+      Alcotest.(check string)
+        "audit still carries the run-scoped actor"
+        "system-runtime-agent"
+        (json |> member "authority_actor" |> to_string))
+;;
+
 let test_raw_workspace_submission_notifies_once () =
   with_eio_temp_dir (fun base_path ->
     Masc.Workspace_metric_hooks.install ();
@@ -1985,6 +2061,8 @@ let () =
         test_system_llm_agent_uses_persisted_request_contract_snapshot;
       Alcotest.test_case "rejected verdict audit keeps reason" `Quick
         test_rejected_verdict_audit_preserves_reason;
+      Alcotest.test_case "verdict audit names the judging runtime" `Quick
+        test_verdict_audit_names_the_judging_runtime;
     ];
     "workspace_boundary", [
       Alcotest.test_case "raw submit notifies once" `Quick

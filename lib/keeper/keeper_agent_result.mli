@@ -3,13 +3,14 @@
 type tool_call_detail =
   { tool_name : string
   ; provider : string
-  ; outcome : string
-      (** Progress-classification label retained for receipt compatibility. *)
   ; execution_outcome : Tool_result.tool_call_outcome
       (** Typed [Tool_result.Ok]/[Error] truth captured at the OAS hook boundary.
-          This turn-local delivery signal is intentionally not part of
-          [tool_call_detail_to_json]; durable tool-call audit uses
-          [Keeper_tool_call_log]. *)
+          Durable tool-call audit uses [Keeper_tool_call_log].
+
+          [tool_call_detail_to_json] renders this into the receipt's ["outcome"]
+          string via [Tool_result.string_of_tool_call_outcome]. That string used
+          to be a second field derived from the same success bool, and it was
+          the one every reader consulted. *)
   ; typed_outcome : Keeper_tool_outcome.t option
   ; latency_ms : float
   ; task_id : string option

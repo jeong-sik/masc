@@ -547,7 +547,7 @@ let run_turn
      and user message append — Keeper_run_prompt. *)
   let prompt_user_turn_record =
     match hitl_resolution with
-    | Some _ -> Keeper_run_prompt.Skip_uninformative_wake
+    | Some _ -> Keeper_run_prompt.Skip_already_checkpointed_user_turn
     | None -> user_turn_record
   in
   let prompt_ctx =
@@ -1047,7 +1047,6 @@ let run_turn
                              ~session ~append_manifest ~model
                              ~acc
                              ~actual_keeper_tool_names
-                             ~user_turn_record
                              ~result ~final_oas_turn_ordinal
                              ~checkpoint_persistence_error
                              ~post_turn_t0 ~runtime_id_string

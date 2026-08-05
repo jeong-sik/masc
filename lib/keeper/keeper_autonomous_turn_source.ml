@@ -1,6 +1,8 @@
 (* Dashboard read model for autonomous keeper turns. Turn identity is
-   producer-owned in Turn_record; the exact raw trace supplies the final
-   response and a content-free activity projection for that recorded OAS run. *)
+   producer-owned in Turn_record and is used only to address/dedupe this
+   projection; durable semantic continuity comes from the Keeper checkpoint.
+   The exact raw trace supplies the final response and a content-free activity
+   projection for that recorded OAS run. *)
 
 type turn =
   { turn_id : string

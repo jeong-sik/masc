@@ -23,13 +23,10 @@ type turn_prompt_parts = {
   user_message : string;
 }
 
-(* Persisted user-turn content for autonomous wake turns. The observation
-   frame is carried in [world_state] (per-turn dynamic context) — persisting
-   it re-feeds the model its own observations and starves compaction
-   (#25193: 943/945 user messages were identical frames). *)
-let autonomous_wake_marker =
-  "(autonomous wake — the current observation frame is provided per-turn in \
-   system context)"
+(* Ordinary user input for an autonomous continuation. The durable checkpoint
+   carries this cue and the assistant/tool suffix in normal conversation order;
+   the fresh observation frame alone rides [world_state] and stays ephemeral. *)
+let autonomous_wake_marker = "Continue."
 
 let format_pending_messages
       (messages : Keeper_world_observation_message_scope.pending_message list)

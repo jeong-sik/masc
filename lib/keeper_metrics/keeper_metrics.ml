@@ -182,7 +182,6 @@ type t =
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsExplicitFactWrite
-  | MemoryOsInertTurnExtractionSkipped
   | RuntimeRequestWireBytes
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
@@ -393,8 +392,6 @@ let to_string = function
       "masc_keeper_memory_os_recall_unavailable_total"
   | MemoryOsExplicitFactWrite ->
       "masc_keeper_memory_os_explicit_fact_write_total"
-  | MemoryOsInertTurnExtractionSkipped ->
-      "masc_keeper_memory_os_inert_turn_extraction_skipped_total"
   | RuntimeRequestWireBytes -> "masc_keeper_runtime_request_wire_bytes"
   | RuntimeHttpProbeJsonParseFailures ->
       "masc_runtime_http_probe_json_parse_failures_total"

@@ -122,9 +122,13 @@ let parse_playground_file_path ~base_path ~abs_path =
             }
       in
       match String.split_on_char '/' rel with
-      | ".masc" :: "playground" :: "docker" :: keeper_name :: segments ->
+      (* Pattern position cannot call a function, so the segment is bound and
+         compared against the SSOT in a guard rather than written inline. *)
+      | dir :: "playground" :: "docker" :: keeper_name :: segments
+        when String.equal dir Common.masc_dirname ->
         safe_relative keeper_name segments
-      | ".masc" :: "playground" :: keeper_name :: segments ->
+      | dir :: "playground" :: keeper_name :: segments
+        when String.equal dir Common.masc_dirname ->
         safe_relative keeper_name segments
       | _ -> None
 ;;

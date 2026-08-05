@@ -66,9 +66,9 @@ echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, al
 # assert deleted text for months. Three were found this way in one day
 # (#26811 benchmark, the prompt suites, test_keeper_wake_turn_context).
 #
-# Frozen as a ratchet rather than a hard zero: 771 is where it stands, and a
+# Frozen as a ratchet rather than a hard zero: 765 is where it stands, and a
 # PR that adds a suite without wiring it makes that number grow.
-UNWIRED_BASELINE=771
+UNWIRED_BASELINE=765
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

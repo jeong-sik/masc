@@ -444,6 +444,26 @@ jobs:
       - name: Check CI test targets
         run: bash scripts/audit-ci-test-targets.sh
 
+      # SSOT and distribution-contract guards that existed but never ran.
+      # test_prompt_asset_sync is the merge-time half of the managed-assets
+      # manifest contract: a mismatch between the manifest and the embedded
+      # prompt set fails the whole boot-time prompt sync, so until now the
+      # first place anyone learned about it was a server that would not
+      # converge its prompt directory. The dirname ratchet had already been
+      # violated in lib/config/playground_paths.ml.
+      - name: Run SSOT and asset contract suites
+        id: ssot_contract_suites
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          ssot_targets="@test/runtest-test_prompt_asset_sync @test/runtest-test_prompt_registry_defaults @test/runtest-test_tool_contract_truth @test/runtest-test_masc_dirname_ssot @test/runtest-test_otel_port_ssot @test/runtest-test_nickname_words_ssot"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${ssot_targets}"
+
       - name: Check doc truth
         if: needs.changes.outputs.doc_truth == 'true'
         run: |

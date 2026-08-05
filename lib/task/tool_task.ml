@@ -72,57 +72,6 @@ let rec handle_done ~tool_name ~start_time ctx args =
             ]);
        ])
 
-and handle_cancel_task ~tool_name ~start_time ctx args =
-  let task_id = get_string args "task_id" "" in
-  match validate_task_id task_id with
-  | Error e -> result_to_response ~tool_name ~start_time (Error e)
-  | Ok task_id ->
-  let reason = get_string args "reason" "" in
-  let tasks = Workspace.get_tasks_raw ctx.config in
-  let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
-  let timestamp_or ~default value =
-    match Masc_domain.parse_iso8601_opt value with
-    | Some timestamp -> timestamp
-    | None -> default
-  in
-  let started_at_actual = match task_opt with
-    | Some t -> (match t.task_status with
-        | Masc_domain.InProgress { started_at; _ } ->
-            timestamp_or ~default:(Time_compat.now () -. 60.0) started_at
-        | Masc_domain.Claimed { claimed_at; _ } ->
-            timestamp_or ~default:(Time_compat.now () -. 60.0) claimed_at
-        | _ -> Time_compat.now () -. 60.0)
-    | None -> Time_compat.now () -. 60.0
-  in
-  let result = Workspace.cancel_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~reason in
-  (* Record failed metric on cancellation *)
-  (match result with
-   | Ok _ ->
-       sync_owner_current_task_binding ctx;
-       sync_planning_current_task_with_owned_task ctx;
-       (Atomic.get Workspace_hooks.record_task_metric_fn)
-         ctx.config
-         ~agent_id:ctx.agent_name
-         ~task_id
-         ~started_at:started_at_actual
-         ~completed_at:(Some (Time_compat.now ()))
-         ~success:false
-         ~error_message:(Some (if String.equal reason "" then "Cancelled" else reason))
-         ~collaborators:[]
-         ~handoff_from:None
-         ~handoff_to:None;
-       (* Notification harness: push cancel event to all active sessions *)
-       (Atomic.get Workspace_hooks.push_task_event_fn)
-         ~event_type:"masc/task_cancelled"
-         ~details:[
-           ("task_id", `String task_id);
-           ("agent_name", `String ctx.agent_name);
-           ("reason", `String reason);
-         ]
-   | Error err ->
-       task_log_error ~task_id "metrics record failed: %s" (Masc_domain.masc_error_to_string err));
-  result_to_response ~tool_name ~start_time result
-
 and handle_transition ~tool_name ~start_time ctx args =
   (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
      injected by the HTTP transport and dashboard client for identity

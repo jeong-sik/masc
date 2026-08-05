@@ -368,11 +368,13 @@ let test_claim_next_skips_done_and_cancelled () =
       transition_done config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done"
     in
     (match
-       Workspace.cancel_task_r
-         config
-         ~agent_name:"alice"
-         ~task_id:"task-002"
-         ~reason:"cancelled"
+       Workspace.transition_task_r
+config
+~agent_name:"alice"
+~task_id:"task-002"
+~action:Masc_domain.Cancel
+~reason:"cancelled"
+()
      with
     | Ok _ -> ()
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
@@ -403,11 +405,13 @@ let test_claim_next_terminal_only_backlog () =
       transition_done config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done"
     in
     (match
-       Workspace.cancel_task_r
-         config
-         ~agent_name:"alice"
-         ~task_id:"task-002"
-         ~reason:"cancelled"
+       Workspace.transition_task_r
+config
+~agent_name:"alice"
+~task_id:"task-002"
+~action:Masc_domain.Cancel
+~reason:"cancelled"
+()
      with
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
@@ -443,11 +447,13 @@ let test_claim_next_reconciles_stale_agent_current_task () =
     let _ = Workspace.add_task config ~title:"Cancelled already" ~priority:1 ~description:"" in
     let _ = Workspace.claim_task config ~agent_name ~task_id:"task-001" in
     (match
-       Workspace.cancel_task_r
+       Workspace.transition_task_r
          config
          ~agent_name
          ~task_id:"task-001"
+         ~action:Masc_domain.Cancel
          ~reason:"terminal stale-cache fixture"
+         ()
      with
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
@@ -1127,11 +1133,13 @@ let test_cancel_task_todo () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let result =
-      Workspace.cancel_task_r
-        config
-        ~agent_name:"claude"
-        ~task_id:"task-001"
-        ~reason:"Not needed"
+      Workspace.transition_task_r
+config
+~agent_name:"claude"
+~task_id:"task-001"
+~action:Masc_domain.Cancel
+~reason:"Not needed"
+()
     in
     match result with
     | Ok msg -> Alcotest.(check bool) "cancel success" true (str_contains msg "cancelled")
@@ -1150,16 +1158,18 @@ let test_cancel_task_clears_reclaim_policy () =
       (Some "block_reclaim")
       (Option.map Masc_domain.task_reclaim_policy_to_string seeded.reclaim_policy);
     (match
-       Workspace.cancel_task_r
-         config
-         ~agent_name:"claude"
-         ~task_id:"task-001"
-         ~reason:"operator cancel"
+       Workspace.transition_task_r
+config
+~agent_name:"claude"
+~task_id:"task-001"
+~action:Masc_domain.Cancel
+~reason:"operator cancel"
+()
      with
      | Ok _ -> ()
      | Error e ->
        Alcotest.failf
-         "cancel_task_r failed: %s"
+         "cancel transition failed: %s"
          (Masc_domain.masc_error_to_string e));
     let cancelled = task_by_id config "task-001" in
     Alcotest.(check (option string))
@@ -1177,11 +1187,13 @@ let test_cancel_task_claimed_by_self () =
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
     let result =
-      Workspace.cancel_task_r
-        config
-        ~agent_name:"claude"
-        ~task_id:"task-001"
-        ~reason:"Changed plans"
+      Workspace.transition_task_r
+config
+~agent_name:"claude"
+~task_id:"task-001"
+~action:Masc_domain.Cancel
+~reason:"Changed plans"
+()
     in
     match result with
     | Ok msg ->
@@ -1194,7 +1206,13 @@ let test_cancel_task_claimed_by_other () =
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let _ = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
     let result =
-      Workspace.cancel_task_r config ~agent_name:"claude" ~task_id:"task-001" ~reason:""
+      Workspace.transition_task_r
+config
+~agent_name:"claude"
+~task_id:"task-001"
+~action:Masc_domain.Cancel
+~reason:""
+()
     in
     match result with
     | Error _ -> ()
@@ -1204,7 +1222,13 @@ let test_cancel_task_claimed_by_other () =
 let test_cancel_task_nonexistent () =
   with_test_env (fun config ->
     let result =
-      Workspace.cancel_task_r config ~agent_name:"claude" ~task_id:"task-999" ~reason:""
+      Workspace.transition_task_r
+config
+~agent_name:"claude"
+~task_id:"task-999"
+~action:Masc_domain.Cancel
+~reason:""
+()
     in
     match result with
     | Error (Masc_domain.Task (Masc_domain.Task_error.NotFound _)) -> ()
@@ -1217,7 +1241,13 @@ let test_cancel_done_task () =
     let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
     let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
     let result =
-      Workspace.cancel_task_r config ~agent_name:"claude" ~task_id:"task-001" ~reason:""
+      Workspace.transition_task_r
+config
+~agent_name:"claude"
+~task_id:"task-001"
+~action:Masc_domain.Cancel
+~reason:""
+()
     in
     match result with
     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()

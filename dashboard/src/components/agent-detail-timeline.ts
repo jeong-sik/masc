@@ -98,7 +98,11 @@ const timelineSearchQuery = signal('')
 export function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }) {
   const d = evt.detail as Record<string, unknown>
   const toolName = (d.tool_name as string) ?? 'unknown'
-  const success = d.success !== false
+  // null means the emitter's success field was missing or unreadable. It used
+  // to render as ok here (`!== false`) while the server filled the same gap
+  // with true, so a damaged row looked like a successful call from both
+  // ends. Keep the three states apart.
+  const success = typeof d.success === 'boolean' ? d.success : null
   const durationMs = d.duration_ms as number | undefined
   const errorMsg = d.error as string | null
   const args = d.args as Record<string, unknown> | string | undefined
@@ -120,9 +124,11 @@ export function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: n
         ${durationMs != null
           ? html`<span class="text-2xs font-mono ${durationColor(durationMs)}">${formatMsCompact(durationMs)}</span>`
           : null}
-        ${success
+        ${success === true
           ? html`<span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]">ok</span>`
-          : html`<span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-10)] text-[var(--color-status-err)]">err</span>`}
+          : success === false
+            ? html`<span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-10)] text-[var(--color-status-err)]">err</span>`
+            : html`<span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)]" title="이 행에 success 필드가 없거나 읽을 수 없습니다">미상</span>`}
         ${isKeeperInTurn
           ? html`<span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)]" data-tool-source="keeper_in_turn" title="keeper가 자기 턴 안에서 실행한 도구">턴 내</span>`
           : null}

@@ -607,7 +607,21 @@ let add_delete_action_routes router =
              | None ->
                  respond_error ~request:req reqd (invalid_request "post_id")
              | Some post_id ->
-             let pinned = Safe_ops.json_bool ~default:true "pinned" json in
+             (* [json_bool] folds "key absent" and "value unparseable" onto the
+                same default, and this default pins. {"pinned":"nope"} therefore
+                pinned the post while plainly meaning something else. Absence
+                still pins — that is the route's name — but a value the parser
+                cannot read is a client error. *)
+             match
+               (match Yojson.Safe.Util.member "pinned" json with
+                | `Null -> Ok true
+                | _ ->
+                  (match Safe_ops.json_bool_opt "pinned" json with
+                   | Some b -> Ok b
+                   | None -> Error ()))
+             with
+             | Error () -> respond_error ~request:req reqd (invalid_request "pinned")
+             | Ok pinned ->
              match Board_dispatch.set_pinned ~post_id ~pinned with
              | Ok () -> respond_ok ~request:req reqd
              | Error err ->

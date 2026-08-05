@@ -8,16 +8,13 @@ open Server_auth
 open Server_routes_http_common
 open Server_routes_http_runtime_fleet_scan
 
-let take = List.take
-;;
-
 let keeper_reaction_ledger_health_json () =
   match current_server_state_opt () with
   | None -> Keeper_reaction_ledger.unavailable_fleet_summary_json ()
   | Some state ->
     let config = (Mcp_server.workspace_config state) in
     let keeper_names =
-      try Keeper_meta_store.keeper_names config |> sorted_unique_strings |> take 64 with
+      try Keeper_meta_store.keeper_names config |> sorted_unique_strings with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Keeper.warn

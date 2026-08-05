@@ -8,9 +8,10 @@
 
     Phase 1A of Tool Gate architecture (#4381). *)
 
-type t = private { name : string; minted_at : float }
-(** Immutable token. [name] is the validated tool name.
-    [minted_at] is [Unix.gettimeofday ()] at mint time (diagnostic). *)
+type t = private { name : string }
+(** Immutable token carrying the validated tool name. The [private] type is the
+    whole point: a value of this type cannot be fabricated, so holding one is
+    the proof that [mint_with]'s predicate accepted the name. *)
 
 val mint_with : validate:(string -> bool) -> name:string -> (t, string) Result.t
 (** [mint_with ~validate ~name] returns [Ok token] when [validate name] is

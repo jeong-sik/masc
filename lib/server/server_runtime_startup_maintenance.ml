@@ -112,7 +112,11 @@ let prune_keeper_scoped_flat_stores ~days ~masc_root =
    resilience_audit. recall_injections keeps its typed ledger pruner and
    data/tool-metrics stays startup-only (it lives under base_path, not the
    masc root); both remain at the callers.
-   oas-events joined 2026-07-31: 434 MB accumulated with no retention. *)
+   oas-events joined 2026-07-31: 434 MB accumulated with no retention.
+   costs and audit-approvals joined 2026-08-05: both write the same
+   [YYYY-MM/DD.jsonl] shape through [Dated_jsonl.create]
+   ([cost_ledger.ml:250], [keeper_approval_queue.ml:1732]) yet were on no
+   prune list since introduction — 74 MB and 22 MB measured. *)
 let top_level_dated_stores =
   [ "audit"
   ; "telemetry"
@@ -123,6 +127,8 @@ let top_level_dated_stores =
   ; "tool_calls"
   ; "transition-audit"
   ; "oas-events"
+  ; "costs"
+  ; "audit-approvals"
   ]
 
 (* Single shared fold over every retention-covered JSONL store. Both the
@@ -144,6 +150,12 @@ let prune_shared_jsonl_stores ~prune_dir ~days ~masc_root =
       ~prune_dir:(prune_flat_jsonl_older_than ~days)
       (Filename.concat masc_root "trajectories")
   + prune_children_dirs ~prune_dir (Filename.concat masc_root "resilience_audit")
+  (* decision_audit: [<keeper>/YYYY-MM/DD.jsonl] written via
+     [Keeper_decision_audit.append] ([keeper_decision_audit.ml:185]). Same
+     keeper-scoped dated shape as resilience_audit, so it folds the same way;
+     it lives at the masc root rather than under keepers/, which is why it is
+     not in [keeper_scoped_dated_stores]. 23 MB measured with no retention. *)
+  + prune_children_dirs ~prune_dir (Filename.concat masc_root "decision_audit")
   + prune_keeper_scoped_stores ~prune_dir ~masc_root
   + prune_keeper_scoped_flat_stores ~days ~masc_root
 

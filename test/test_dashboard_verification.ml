@@ -89,12 +89,25 @@ let test_config_input_override_restores_boot_override () =
     Alcotest.(check (option string)) "boot override restored"
       (Some "before") (Config_boot_overrides.get_opt name))
 
+(* The submit boundary replaces [submitted_evidence] with the materialized
+   snapshot, so fixtures must carry snapshot items rather than the producer's
+   raw reference strings. An artifact item projects back to its reference, which
+   keeps every caller's expected list unchanged. *)
+let evidence_snapshot_item reference =
+  `Assoc [
+    ("kind", `String "artifact");
+    ("reference", `String reference);
+    ("content", `String "");
+    ("bytes", `Int 0);
+    ("truncated", `Bool false);
+  ]
+
 let create_pending_request_with_artifacts ~required_artifacts ~base_path ~task_id
     ~worker ~criteria ~evidence =
   let output = `Assoc [
     ("required_artifacts",
      `List (List.map (fun s -> `String s) required_artifacts));
-    ("submitted_evidence", `List (List.map (fun s -> `String s) evidence));
+    ("submitted_evidence", `List (List.map evidence_snapshot_item evidence));
     ("task_title", `String (Printf.sprintf "title for %s" task_id));
   ] in
   match V.create_request ~base_path ~task_id ~output ~criteria ~worker () with
@@ -430,8 +443,60 @@ let test_requests_json_surfaces_evidence_projection_error () =
     Alcotest.(check string) "missing and malformed fields are distinguished"
       ("missing current-schema field \"required_artifacts\"; "
        ^ "malformed current-schema field \"submitted_evidence\": "
-       ^ "expected an array of strings")
+       ^ "submitted evidence item must be an object")
       (member "evidence_projection_error" row |> Yojson.Safe.Util.to_string))
+
+(* The live store holds 47 artifact, 231 note and 6 unreadable items written by
+   the current serializer. Each kind must reach the operator as an identity
+   line; an unreadable item must name its failure instead of vanishing. *)
+let test_requests_json_projects_every_snapshot_item_kind () =
+  with_temp_base_path (fun base_path ->
+    let output =
+      `Assoc [
+        ("required_artifacts", `List []);
+        ("submitted_evidence", `List [
+          `Assoc [
+            ("kind", `String "artifact");
+            ("reference", `String "artifact:repos/demo/main.ml");
+            ("content", `String "let () = ()");
+            ("bytes", `Int 11);
+            ("truncated", `Bool false);
+          ];
+          `Assoc [
+            ("kind", `String "note");
+            ("content", `String "executor summary");
+          ];
+          `Assoc [
+            ("kind", `String "artifact_unreadable");
+            ("reference", `String "artifact:repos/demo/gone.ml");
+            ("reason", `Assoc [("code", `String "missing")]);
+          ];
+        ]);
+      ]
+    in
+    let _req =
+      match V.create_request ~base_path ~task_id:"task-snapshot-kinds"
+              ~output ~criteria:[] ~worker:"keeper-alpha" () with
+      | Ok req -> req
+      | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e)
+    in
+    let row =
+      match member "requests" (D.requests_json ~base_path ()) with
+      | `List [row] -> row
+      | _ -> Alcotest.fail "expected one snapshot request"
+    in
+    Alcotest.(check (option string)) "snapshot projects without error"
+      None
+      (match member "evidence_projection_error" row with
+       | `String s -> Some s
+       | _ -> None);
+    Alcotest.(check (list string)) "every item kind reaches the operator"
+      [ "artifact:repos/demo/main.ml"
+      ; "note:executor summary"
+      ; "artifact:repos/demo/gone.ml (unreadable: missing)"
+      ]
+      (member "submitted_evidence" row |> Yojson.Safe.Util.to_list
+       |> List.map Yojson.Safe.Util.to_string))
 
 (* ── summary_json ───────────────────────────────────── *)
 
@@ -509,6 +574,8 @@ let () =
         test_requests_json_surfaces_conflict_triage_fields;
       Alcotest.test_case "evidence projection errors" `Quick
         test_requests_json_surfaces_evidence_projection_error;
+      Alcotest.test_case "projects every snapshot item kind" `Quick
+        test_requests_json_projects_every_snapshot_item_kind;
       Alcotest.test_case "fd pressure remains observation-only" `Quick
         test_requests_and_summary_remain_available_after_fd_observation;
     ];

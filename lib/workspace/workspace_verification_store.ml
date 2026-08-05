@@ -569,6 +569,56 @@ let snapshot_submitted_evidence_json ~base_path ~worker references =
          |> submitted_evidence_item_to_yojson)
        references)
 
+let submitted_evidence_identity_line (item : Yojson.Safe.t) =
+  match item with
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String "note") ->
+       (match List.assoc_opt "content" fields with
+        | Some (`String content) -> Ok (note_reference_prefix ^ content)
+        | _ -> Error "note item is missing content")
+     | Some (`String "artifact") ->
+       (match List.assoc_opt "reference" fields with
+        | Some (`String reference) -> Ok reference
+        | _ -> Error "artifact item is missing reference")
+     | Some (`String "artifact_unreadable") ->
+       let code =
+         match List.assoc_opt "reason" fields with
+         | Some (`Assoc reason_fields) ->
+           (match List.assoc_opt "code" reason_fields with
+            | Some (`String code) -> Some code
+            | _ -> None)
+         | _ -> None
+       in
+       (match code with
+        | None -> Error "unreadable item is missing a reason code"
+        | Some code ->
+          (match List.assoc_opt "reference" fields with
+           | Some (`String reference) ->
+             Ok (Printf.sprintf "%s (unreadable: %s)" reference code)
+           | None -> Ok (Printf.sprintf "(unreadable: %s)" code)
+           | Some _ -> Error "unreadable item reference must be a string"))
+     | Some (`String kind) ->
+       Error (Printf.sprintf "unknown submitted evidence item kind %S" kind)
+     | _ -> Error "submitted evidence item is missing kind")
+  | _ -> Error "submitted evidence item must be an object"
+;;
+
+let submitted_evidence_identity_lines (json : Yojson.Safe.t) =
+  match json with
+  | `List items ->
+    List.fold_left
+      (fun acc item ->
+        match acc, submitted_evidence_identity_line item with
+        | Error _, _ -> acc
+        | Ok lines, Ok line -> Ok (line :: lines)
+        | Ok _, Error detail -> Error detail)
+      (Ok [])
+      items
+    |> Result.map List.rev
+  | _ -> Error "submitted evidence must be an array"
+;;
+
 let inspect_submitted_evidence_for_authority ~base_path ~request_id ~task_id
     ~task_worker ~(authority : Masc_domain.completion_authority) =
   if not (Masc_domain.completion_authority_has_identity authority)

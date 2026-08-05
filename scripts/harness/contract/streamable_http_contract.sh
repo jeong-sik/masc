@@ -130,6 +130,10 @@ grep -qi 'Unsupported protocol version' "$body" || { echo "FAIL: missing unsuppo
 echo "[7/7] current stateless tools/list succeeds"
 IFS=$'\t' read -r headers body < <(post_request tools-list 'application/json, text/event-stream' tools/list "$tools_params" default)
 require_status 200 "$headers" "$body"
-jq -e '.result.resultType == "complete" and (.result.tools | length > 0)' "$body" >/dev/null
+# The server SSE-frames the response when the client accepts
+# text/event-stream; unwrap it before jq. resultType exists only on
+# server/discover — tools/list answers {tools, nextCursor?, _meta}.
+jsonrpc_normalize_response "$(cat "$body")" 1 \
+  | jq -e '(.result.tools | length) > 0' >/dev/null
 
 echo "PASS: current streamable_http contract harness"

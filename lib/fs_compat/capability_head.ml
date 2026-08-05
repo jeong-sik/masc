@@ -50,9 +50,6 @@ type snapshot =
 
 let snapshot_row snapshot = snapshot.row
 let snapshot_cursor snapshot = snapshot.cursor
-let snapshot_settlement_warnings (snapshot : snapshot) =
-  snapshot.settlement_warnings
-
 type error =
   | Invalid_leaf of string
   | Invalid_row of string

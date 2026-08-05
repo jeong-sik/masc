@@ -454,6 +454,8 @@ jobs:
         run: |
           set -e
           for s in \
+            audit-unwired-audits.sh \
+            verify-test-registration.py \
             audit-catchall.sh \
             audit-cross-module-exhaustive-match.sh \
             audit-path-ssot.sh \
@@ -467,7 +469,10 @@ jobs:
             check-variants.sh
           do
             echo "::group::$s"
-            bash "scripts/$s"
+            case "$s" in
+              *.py) python3 "scripts/$s" ;;
+              *)    bash "scripts/$s" ;;
+            esac
             echo "::endgroup::"
           done
 

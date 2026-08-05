@@ -969,7 +969,7 @@ let test_status_schema_tracks_argument_contract () =
     List.find_opt
       (fun (schema : Masc_domain.tool_schema) ->
         String.equal schema.name "masc_keeper_status")
-      Keeper_schema.keeper_schemas
+      Keeper_schema.schemas
     |> Option.get
   in
   let properties =

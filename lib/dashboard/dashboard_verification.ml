@@ -23,14 +23,9 @@ let clamp_limit limit =
   else if l > max_limit then max_limit
   else l
 
-(** Criteria carry the "completion_contract" in their Custom text.
-    Non-Custom criteria (Contains, Schema_match, ...) are automated checks,
-    not contract text, so we skip them here. *)
+(** Criteria carry the "completion_contract" in their Custom text. *)
 let completion_contract_of_criteria (criteria : V.criterion list) : string list =
-  List.filter_map (function
-    | V.Custom text -> Some text
-    | V.Contains _ | V.Not_contains _ | V.Schema_match _ -> None
-  ) criteria
+  List.map (fun (V.Custom text) -> text) criteria
 
 (** Read one required current-schema evidence list. Empty arrays are valid;
     missing or malformed fields carry a public projection error. No legacy

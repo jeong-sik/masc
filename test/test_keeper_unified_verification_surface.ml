@@ -201,7 +201,7 @@ let contains_sub sub s =
 ;;
 
 let test_board_authors_share_one_neutral_observation_boundary () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   let peer_event =
     {
       sample_board_event with
@@ -257,7 +257,7 @@ let test_board_authors_share_one_neutral_observation_boundary () =
 ;;
 
 let test_board_reaction_event_renders_reaction_context () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   let reaction_event =
     {
       sample_board_event with
@@ -287,7 +287,7 @@ let test_board_reaction_event_renders_reaction_context () =
    diagnostic token must survive prompt assembly verbatim; the instruction
    token scanner is intentionally not allowed to rewrite this surface. *)
 let test_observation_tool_names_are_preserved () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   let event =
     {
       sample_board_event with
@@ -362,7 +362,7 @@ let test_scheduled_automation_triggers_and_affordances () =
     (List.mem "schedule_dispatch_monitor" affordances)
 
 let test_scheduled_automation_prompt_section () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let obs =
     { base_observation with scheduled_automation = scheduled_automation_observation }
@@ -376,7 +376,7 @@ let test_scheduled_automation_prompt_section () =
     (contains_sub "schedule_id=\"sched-ready\"" user_msg)
 
 let test_schedule_rows_escape_every_field_and_use_typed_wake_payload () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let wake : Keeper_event_queue.scheduled_wake =
     { schedule_instance_id = "instance-forged-wake"
@@ -436,7 +436,7 @@ let test_schedule_rows_escape_every_field_and_use_typed_wake_payload () =
     fields
 
 let test_scheduled_wake_is_not_rendered_as_board_activity () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let obs =
     { base_observation with
@@ -538,7 +538,7 @@ let test_schedule_row_omits_absent_title_without_fabricating_one () =
     (List.assoc_opt "title" fields)
 
 let test_scheduled_wake_renders_schedule_pointer () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let obs =
     { base_observation with pending_board_events = [ sample_scheduled_wake ] }
@@ -650,7 +650,7 @@ let sample_task_cancellation : WO.pending_board_event =
 ;;
 
 let test_task_cancellation_has_own_prompt_layer () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let obs =
     { base_observation with
@@ -684,7 +684,7 @@ let test_task_cancellation_has_own_prompt_layer () =
    [None] into it would tell the author two different things in one row. The
    row must also never leak an OCaml option or a JSON "null". *)
 let test_task_cancellation_without_reason_omits_the_field () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let render tc_reason =
     let cancellation : Keeper_event_queue.task_cancellation =
@@ -720,7 +720,7 @@ let test_task_cancellation_without_reason_omits_the_field () =
 ;;
 
 let test_completion_authority_rejection_has_own_prompt_layer () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let obs =
     { base_observation with
@@ -759,7 +759,7 @@ let test_completion_authority_rejection_has_own_prompt_layer () =
 ;;
 
 let test_completion_authority_rejection_preserves_human_provenance () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let rejection : Keeper_event_queue.completion_authority_rejection =
     { car_task_id = "task-human-rejected"
@@ -832,58 +832,15 @@ let test_world_state_never_in_persisted_user_message () =
   check bool "persisted user message carries no board observation" false
     (contains_sub "### Board Activity" user_message)
 
-(* RFC-0351 section 5 / #25462: splitting the frame out of the user message
-   (above) left the marker itself still being recorded once per wake, so the
-   duplication moved from bytes to message count — one keeper accumulated 359
-   copies of the same 147B constant, part of a 25.7% exact-dup transcript
-   share. A bare wake now skips the transcript entirely; only a turn carrying a
-   HITL resolution is recorded. *)
-let test_bare_autonomous_wake_is_not_recorded () =
-  check bool "bare autonomous wake skips the transcript" true
-    (Masc.Keeper_run_prompt.user_turn_record_of_hitl_resolution None
-     = Masc.Keeper_run_prompt.Skip_uninformative_wake);
-  check bool "a turn carrying a HITL resolution is recorded" true
-    (Masc.Keeper_run_prompt.user_turn_record_of_hitl_resolution (Some ())
-     = Masc.Keeper_run_prompt.Record_user_turn)
-
-(* One execution-fact decision now owns both replay persistence and librarian
-   extraction. A routed continuation is meaningful without a tool call; idle
-   model prose on a scheduled bare wake is not. *)
-let test_turn_effect_record () =
-  let decide ~user_turn_record ~tool_calls_made ~external_delivery_routed =
-    Masc.Keeper_run_prompt.turn_effect_record_of_turn
-      ~user_turn_record ~tool_calls_made ~external_delivery_routed
+(* An autonomous cycle is an ordinary next user turn in the same durable
+   conversation. Only the observation frame is kept out of history. *)
+let test_autonomous_continuation_is_an_ordinary_user_turn () =
+  let { Masc.Keeper_unified_prompt.user_message; _ } =
+    build_prompt ~meta:minimal_meta base_observation
   in
-  check bool "bare wake with no effect is inert" true
-    (decide
-       ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
-       ~tool_calls_made:false
-       ~external_delivery_routed:false
-     = Masc.Keeper_run_prompt.Inert_autonomous_turn);
-  check bool "bare wake that ran a tool is meaningful" true
-    (decide
-       ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
-       ~tool_calls_made:true
-       ~external_delivery_routed:false
-     = Masc.Keeper_run_prompt.Meaningful_turn);
-  check bool "routed continuation is meaningful without a tool" true
-    (decide
-       ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
-       ~tool_calls_made:false
-       ~external_delivery_routed:true
-     = Masc.Keeper_run_prompt.Meaningful_turn);
-  check bool "operator/HITL input is meaningful without a tool" true
-    (decide
-       ~user_turn_record:Masc.Keeper_run_prompt.Record_user_turn
-       ~tool_calls_made:false
-       ~external_delivery_routed:false
-     = Masc.Keeper_run_prompt.Meaningful_turn);
-  check bool "operator/HITL input with a tool call is meaningful" true
-    (decide
-       ~user_turn_record:Masc.Keeper_run_prompt.Record_user_turn
-       ~tool_calls_made:true
-       ~external_delivery_routed:true
-     = Masc.Keeper_run_prompt.Meaningful_turn)
+  check string "autonomous continuation uses a compact ordinary cue"
+    "Continue."
+    user_message
 
 let post_id_exn s =
   match Masc.Board.Post_id.of_string s with
@@ -1051,10 +1008,7 @@ let () =
             "invariant: world-state frame never enters the persisted user message"
             `Quick test_world_state_never_in_persisted_user_message;
           test_case
-            "invariant: a bare autonomous wake is not recorded in the transcript"
-            `Quick test_bare_autonomous_wake_is_not_recorded;
-          test_case
-            "invariant: one turn-effect record owns replay and librarian"
-            `Quick test_turn_effect_record;
+            "invariant: autonomous continuation is an ordinary user turn"
+            `Quick test_autonomous_continuation_is_an_ordinary_user_turn;
         ] );
     ]

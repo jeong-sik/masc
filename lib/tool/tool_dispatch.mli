@@ -27,8 +27,12 @@ val register_module : schemas:Masc_domain.tool_schema list -> handler:handler ->
    result transformation, and dispatch observer fan-out. *)
 
 val mint_token : name:string -> (Tool_token.t, string) Result.t
-(** Mint a [Tool_token.t] validated against static routes or the tag registry.
-    Thread-safe (protected by dispatch_mu). *)
+(** Mint a [Tool_token.t] whose name is present in the tag registry.
+    Thread-safe (protected by dispatch_mu).
+
+    Note the asymmetry: this checks [tag_registry] while [guarded_dispatch]
+    looks the handler up in [registry]. A name registered in one and not the
+    other mints a token that then dispatches to nothing. *)
 
 (** {2 Dispatch Hooks And Observers}
 

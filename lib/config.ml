@@ -20,8 +20,8 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
    WebSearch / WebFetch public_names.
 
    Do NOT trim "keeper-only" tools out of this projection to keep them off the
-   operator MCP surface.  [raw_all_tool_schemas] feeds BOTH the keeper universe
-   AND the public MCP surface (RFC-0218 §1.1), and the operator-surface
+   operator MCP surface.  [raw_all_tool_schemas] feeds both the keeper universe
+   and the public MCP surface, and the operator-surface
    exclusion is enforced separately and downstream by [Tool_catalog.is_public_mcp]
    / [public_mcp_surface_tools] (contract stated in tool_schemas_misc.mli).
    The Keeper model surface itself comes directly from descriptors. *)
@@ -54,7 +54,7 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
      (* Board MCP adapter schemas live outside neutral Tool substrate and
         outside Board domain. *)
      @ Board_tool.tools
-     @ Keeper_types_profile.schemas
+     @ Keeper_schema.schemas
      @ Tool_local_runtime.schemas
      @ Tool_agent_timeline.schemas)
 

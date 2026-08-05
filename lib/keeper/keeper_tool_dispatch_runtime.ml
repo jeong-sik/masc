@@ -1,16 +1,9 @@
-(** Keeper_tool_dispatch_runtime — exact keeper tool execution dispatch.
-
-    Split into multiple layers:
-    - [Keeper_tool_registry]: declarative tool name lists (data)
-    - [Keeper_tool_policy]: exact descriptor/registry schema join
-    - [Keeper_tool_*_runtime]: dedicated runtime modules for tool categories
-    - This module: execution dispatch + shared bookkeeping *)
+(** Keeper_tool_dispatch_runtime — exact keeper tool execution dispatch. *)
 
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
-include Keeper_tool_registry
 include Keeper_tool_policy
 
 type executed_tool_result = Keeper_tool_execution.t

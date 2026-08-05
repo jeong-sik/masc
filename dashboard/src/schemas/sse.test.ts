@@ -231,27 +231,21 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
-  it('accepts a typed Keeper chat-queue projection invalidation', () => {
+  it('accepts a typed Keeper waiting-inventory invalidation', () => {
     const r = SSEMessageSchema.safeParse({
-      type: 'keeper_chat_queue_changed',
+      type: 'keeper_waiting_inventory_changed',
       keeper_name: 'keeper-1',
-      revision: 7,
+      queue_kind: 'chat_queue',
       ts_unix: 1_712_000_000,
     })
     expect(r.success).toBe(true)
   })
 
   it.each([
-    { type: 'keeper_chat_queue_changed', revision: 7 },
-    { type: 'keeper_chat_queue_changed', keeper_name: 'keeper-1' },
-    { type: 'keeper_chat_queue_changed', keeper_name: 'keeper-1', revision: -1 },
-    { type: 'keeper_chat_queue_changed', keeper_name: 'keeper-1', revision: 1.5 },
-    {
-      type: 'keeper_chat_queue_changed',
-      keeper_name: 'keeper-1',
-      revision: Number.MAX_SAFE_INTEGER + 1,
-    },
-  ])('rejects an incomplete Keeper chat-queue invalidation: %o', value => {
+    { type: 'keeper_waiting_inventory_changed', queue_kind: 'chat_queue' },
+    { type: 'keeper_waiting_inventory_changed', keeper_name: 'keeper-1' },
+    { type: 'keeper_waiting_inventory_changed', keeper_name: 'keeper-1', queue_kind: 'unknown' },
+  ])('rejects an incomplete Keeper waiting-inventory invalidation: %o', value => {
     expect(SSEMessageSchema.safeParse(value).success).toBe(false)
   })
 

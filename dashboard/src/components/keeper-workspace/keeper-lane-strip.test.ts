@@ -139,8 +139,8 @@ describe('KeeperLaneStrip', () => {
       />
     `)
     const text = el.textContent ?? ''
-    expect(text).toContain('레인')
-    expect(text).toContain('deferred')
+    expect(text).toContain('작업 대기열')
+    expect(text).toContain('외부 완료 대기 중')
     expect(text).toContain('dashboard_chat')
     expect(text).toContain('chat_lane')
     expect(text).toContain('keeper finish in flight turn')
@@ -160,7 +160,7 @@ describe('KeeperLaneStrip', () => {
     const text = el.textContent ?? ''
     expect(text).toContain('≥69')
     // the bare integer would assert a total the server never computed
-    expect(text).not.toMatch(/레인\s*69(?!\d)/)
+    expect(text).not.toMatch(/작업 대기열\s*69(?!\d)/)
     expect(el.querySelectorAll('[data-testid="keeper-lane-waiting-row"]').length).toBe(69)
   })
 
@@ -175,7 +175,7 @@ describe('KeeperLaneStrip', () => {
       />
     `)
     const note = el.querySelector('[data-testid="keeper-lane-truncation"]')?.textContent ?? ''
-    expect(note).toContain('external attention')
+    expect(note).toContain('외부 알림')
     expect(note).toContain('64')
     expect(note).toContain('실제 대기 건수는 더 많습니다')
   })
@@ -191,10 +191,10 @@ describe('KeeperLaneStrip', () => {
       />
     `)
     const sources = el.querySelector('[data-testid="keeper-lane-sources"]')?.textContent ?? ''
-    expect(sources).toContain('external attention ≥64')
+    expect(sources).toContain('외부 알림 ≥64')
     // chat_queue_pending was not capped, so it is an exact count
-    expect(sources).toContain('chat queue pending 5')
-    expect(sources).not.toContain('chat queue pending ≥5')
+    expect(sources).toContain('채팅 대기 5')
+    expect(sources).not.toContain('채팅 대기 ≥5')
   })
 
   it('renders an exact count and no truncation note when nothing was capped', () => {
@@ -220,11 +220,12 @@ describe('KeeperLaneStrip', () => {
         loading=${false}
         error=${null}
         autoRefreshMs=${15_000}
+        pushReady=${true}
       />
     `)
     const text = el.textContent ?? ''
-    expect(text).toContain('최근 서버 샘플')
-    expect(text).toContain('15초마다 재조회 · 숨김 탭에서는 중지')
+    expect(text).toContain('서버 기준')
+    expect(text).toContain('WS 즉시 반영 · 15초마다 상태 검산')
   })
 
   it('omits the auto-refresh label when the panel is not polling', () => {
@@ -238,6 +239,22 @@ describe('KeeperLaneStrip', () => {
       />
     `)
     expect(el.textContent ?? '').not.toContain('재조회')
+  })
+
+  it('shows polling as fallback instead of claiming live push while WS is unavailable', () => {
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${inventoryFixture()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+        autoRefreshMs=${15_000}
+        pushReady=${false}
+      />
+    `)
+    expect(el.textContent ?? '').toContain('WS 연결 대기 · 15초마다 재조회')
+    expect(el.textContent ?? '').not.toContain('WS 즉시 반영')
   })
 
   it('renders an explicit gap when the keeper is absent from the inventory', () => {

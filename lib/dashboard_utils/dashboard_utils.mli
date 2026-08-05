@@ -1,7 +1,6 @@
 (** Dashboard utility primitives — small string/JSON helpers, severity
-    ranking, and three ADTs (health level, session lifecycle, tone) that
-    replace ad-hoc string matching across the dashboard, briefing, and
-    operator modules. *)
+    ranking, and two ADTs (health level, tone) that replace ad-hoc string
+    matching across the dashboard, briefing, and operator modules. *)
 
 (** {1 Time} *)
 
@@ -16,11 +15,6 @@ val first_some : 'a option -> 'a option -> 'a option
 
 val string_contains : needle:string -> string -> bool
 (** Case-sensitive substring test. *)
-
-val string_contains_ci : needle:string -> string -> bool
-(** Case-insensitive substring test (lowercases both sides). *)
-
-(** [Some s] for non-empty trimmed text, [None] otherwise. *)
 
 val dedup_strings : string list -> string list
 (** Order-preserving deduplication via local [String_set]. *)
@@ -50,8 +44,6 @@ val string_field : ?default:string -> string -> Yojson.Safe.t -> string
 val list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list
 (** Read [key] as a [`List]. Default [[]]. *)
 
-(** Wrap as [`List of `String]. *)
-
 (** {1 Ranking} *)
 
 val severity_rank : string -> int
@@ -75,26 +67,6 @@ val health_level_of_string : string -> health_level
 val string_of_health_level : health_level -> string
 val severity_rank_of_health_level : health_level -> int
 
-(** {1 Session lifecycle} *)
-
-(** Session lifecycle. ADT makes the different terminal sets visible:
-    {!is_session_terminal} = {[ Completed | Cancelled | Failed | Stopped ]};
-    {!is_session_blocked} = {[ Failed | Cancelled | Interrupted ]}. *)
-type session_lifecycle =
-  | SL_active
-  | SL_running
-  | SL_paused
-  | SL_completed
-  | SL_cancelled
-  | SL_failed
-  | SL_stopped
-  | SL_interrupted
-  | SL_expired
-  | SL_unknown
-
-val session_lifecycle_of_string : string -> session_lifecycle
-val string_of_session_lifecycle : session_lifecycle -> string
-
 (** {1 Status/health predicates} *)
 
 val is_keeper_offline : string -> bool
@@ -103,9 +75,6 @@ val is_keeper_offline : string -> bool
 val is_health_critical : health_level -> bool
 val is_health_warning : health_level -> bool
 val is_health_at_risk : health_level -> bool
-
-val is_session_terminal : session_lifecycle -> bool
-val is_session_blocked : session_lifecycle -> bool
 
 (** {1 Tone} *)
 

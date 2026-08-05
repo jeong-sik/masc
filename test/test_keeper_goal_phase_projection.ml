@@ -51,6 +51,7 @@ let goal_in phase id title =
   ; parent_goal_id = None
   ; last_review_note = None
   ; last_review_at = None
+  ; owner = None
   ; created_at = ts
   ; updated_at = ts
   }
@@ -146,6 +147,84 @@ let test_no_goals_surface_when_all_are_terminal () =
     observation.Keeper_world_observation.active_goals
 ;;
 
+
+(* RFC-0362 §4.3 — the owner consumer. The Goal carries the owner; the keeper's
+   [active_goal_ids] is empty here on purpose, because it is empty for every
+   keeper on the live workspace and the fact must surface without it.
+
+   Three cases in one predicate: owned + executing + no linked Task surfaces;
+   owned but terminal does not; owned, executing, but already carrying a Task
+   does not (the owner has nothing to decide there). *)
+let owner_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [ "name", `String "owner-keeper"
+         ; "trace_id", `String "test-trace-owner"
+         ; "active_goal_ids", `List []
+         ])
+  with
+  | Ok m -> m
+  | Error e -> failwith ("meta_of_json failed: " ^ e)
+;;
+
+let goal_owned_by owner phase id title =
+  { (goal_in phase id title) with Goal_store.owner = Some owner }
+;;
+
+let test_owned_executing_goal_without_task_surfaces () =
+  with_workspace (fun config ->
+    Goal_store.write_state config
+      { version = 1
+      ; updated_at = Masc_domain.now_iso ()
+      ; goals =
+          [ goal_owned_by "owner-keeper" Goal_phase.Executing "goal-mine" "mine to split"
+          ; goal_owned_by "owner-keeper" Goal_phase.Completed "goal-done" "already achieved"
+          ; goal_in Goal_phase.Executing "goal-unowned" "nobody holds this"
+          ]
+      };
+    let found =
+      Keeper_unified_prompt.owned_executing_goals_without_tasks
+        ~config
+        ~keeper_name:"owner-keeper"
+    in
+    check (list string) "only the owned, executing, task-less goal"
+      [ "goal-mine" ]
+      (List.map fst found))
+;;
+
+let test_owner_of_a_terminal_goal_is_told_nothing () =
+  with_workspace (fun config ->
+    Goal_store.write_state config
+      { version = 1
+      ; updated_at = Masc_domain.now_iso ()
+      ; goals =
+          [ goal_owned_by "owner-keeper" Goal_phase.Completed "goal-done" "achieved" ]
+      };
+    check (list string) "terminal goals are not the owner's open work"
+      []
+      (List.map fst
+         (Keeper_unified_prompt.owned_executing_goals_without_tasks
+            ~config
+            ~keeper_name:"owner-keeper")))
+;;
+
+let test_another_keepers_goal_is_not_surfaced () =
+  with_workspace (fun config ->
+    Goal_store.write_state config
+      { version = 1
+      ; updated_at = Masc_domain.now_iso ()
+      ; goals =
+          [ goal_owned_by "someone-else" Goal_phase.Executing "goal-theirs" "not mine" ]
+      };
+    check (list string) "ownership is not shared"
+      []
+      (List.map fst
+         (Keeper_unified_prompt.owned_executing_goals_without_tasks
+            ~config
+            ~keeper_name:"owner-keeper")))
+;;
+
 let () =
   run "keeper_goal_phase_projection"
     [ ( "prompt surfaces"
@@ -157,6 +236,14 @@ let () =
             test_unresolved_goal_id_stays_visible
         ; test_case "all-terminal yields no goals at either surface" `Quick
             test_no_goals_surface_when_all_are_terminal
+        ] )
+    ; ( "rfc-0362 owner consumer"
+      , [ test_case "owned executing goal without a task surfaces" `Quick
+            test_owned_executing_goal_without_task_surfaces
+        ; test_case "terminal owned goal is not open work" `Quick
+            test_owner_of_a_terminal_goal_is_told_nothing
+        ; test_case "another keeper's goal is not surfaced" `Quick
+            test_another_keepers_goal_is_not_surfaced
         ] )
     ]
 ;;

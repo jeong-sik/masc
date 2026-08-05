@@ -5,7 +5,7 @@ module D = Masc.Keeper_chat_discord.For_testing
 let contains haystack needle =
   String_util.contains_substring haystack needle
 
-let run_adapter events ~post_message ~edit_message ~send_message =
+let run_adapter ?show_activity events ~post_message ~edit_message ~send_message =
   Eio_main.run
   @@ fun _env ->
   let stream = Masc.Keeper_chat_events.create () in
@@ -13,6 +13,7 @@ let run_adapter events ~post_message ~edit_message ~send_message =
   let outcomes = ref [] in
   D.adapter_loop ~token:"test-token" ~channel_id:"test-channel"
     ~events:stream ~post_message ~edit_message ~send_message
+    ?show_activity
     ~on_send_result:(fun result -> outcomes := result :: !outcomes) ();
   List.rev !outcomes
 
@@ -306,6 +307,42 @@ let test_external_effect_status_replaces_assistant_preface () =
     [ "승인 대기: 외부 작업을 실행하기 전에 확인이 필요합니다." ]
     (List.rev !edits)
 
+let test_tool_activity_uses_native_surface_without_messages () =
+  let activity_refreshes = ref 0 in
+  let final_sends = ref [] in
+  let outcomes =
+    run_adapter
+      ~show_activity:(fun () ->
+        incr activity_refreshes;
+        Error (Discord_rest_client.Network "typing unavailable"))
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-tool"; thread_id = "thread-tool" }
+      ; Masc.Keeper_chat_events.Tool_call_start
+          { tool_call_id = "call-1"; tool_call_name = "keeper_surface_read" }
+      ; Masc.Keeper_chat_events.Tool_context_block
+          { tool_call_id = "call-1"
+          ; name = "keeper_surface_read"
+          ; args_summary = "surface=discord"
+          ; result_summary = Some "private tool result"
+          }
+      ; Masc.Keeper_chat_events.Tool_call_end { tool_call_id = "call-1" }
+      ; Masc.Keeper_chat_events.Text_delta "done"
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-tool" }
+      ]
+      ~post_message:(fun ~content:_ ->
+        fail "tool activity and one-word final reply must not stream POST")
+      ~edit_message:(fun ~message_id:_ ~content:_ ->
+        fail "tool activity must not create a message to edit")
+      ~send_message:(fun ~content ->
+        final_sends := content :: !final_sends;
+        Ok ())
+  in
+  check int "run start and tool start refresh native activity" 2
+    !activity_refreshes;
+  check (list string) "only the final reply is sent" [ "done" ]
+    (List.rev !final_sends);
+  check_single_ok "activity failure does not affect delivery" outcomes
+
 let () =
   run "keeper_chat_discord"
     [ ( "streaming-redaction"
@@ -335,6 +372,8 @@ let () =
             test_error_reply_callback_once
         ; test_case "typed status replaces assistant preface" `Quick
             test_external_effect_status_replaces_assistant_preface
+        ; test_case "tool activity uses native surface" `Quick
+            test_tool_activity_uses_native_surface_without_messages
         ] )
     ; ( "rich-blocks"
       , [ test_case "audio URL uses base URL" `Quick

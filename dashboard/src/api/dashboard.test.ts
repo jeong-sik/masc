@@ -18,6 +18,7 @@ import {
   fetchDashboardGoalsTree,
   fetchDashboardBriefing,
   fetchDashboardTools,
+  fetchKeeperWaitingInventory,
   parseDashboardKeeperWaitingSource,
   fetchDashboardFullHealth,
   fetchKeeperToolCalls,
@@ -1014,6 +1015,38 @@ describe('fetchDashboardTools', () => {
     expect(parseDashboardKeeperWaitingSource(null)).toBeNull()
   })
 
+  it('reads the keeper-scoped waiting inventory after auth bootstrap', async () => {
+    const rawResponse = {
+      keeper_count: 1,
+      waiting_keeper_count: 1,
+      row_count: 1,
+      keepers: [{
+        keeper_name: 'kidsnote',
+        state: 'waiting',
+        waiting_count: 1,
+        waiting_on: [{
+          keeper_name: 'kidsnote',
+          source: 'event_queue_pending',
+          waiting_on: 'schedule_due',
+          next_action: 'keeper_consume_event',
+        }],
+      }],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperWaitingInventory('kidsnote')
+
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/kidsnote/waiting-inventory')
+    expect(result.keepers[0]?.waiting_on[0]?.source).toBe('event_queue_pending')
+  })
+
   it('fills missing category and tier with defaults', async () => {
     const rawResponse = {
       tool_inventory: {
@@ -1036,6 +1069,10 @@ describe('fetchDashboardTools', () => {
 
     const result = await fetchDashboardTools()
 
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[0]!,
+    )
     const tools = result.tool_inventory.tools
     expect(tools[0]).toMatchObject({ name: 'tool_a', category: 'uncategorized', tier: '(unknown tier)' })
     expect(tools[1]).toMatchObject({ name: 'tool_b', category: 'keeper', tier: '(unknown tier)' })

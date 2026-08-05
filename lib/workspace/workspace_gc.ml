@@ -17,6 +17,16 @@ open Workspace_task_id
 
 (* heartbeat_in_workspace removed — workspaces are flattened (#4638). Use heartbeat. *)
 
+type heartbeat_outcome =
+  | Heartbeat_updated of string
+  | Agent_file_invalid of string
+  | Agent_not_found of string
+
+let heartbeat_message = function
+  | Heartbeat_updated actual_name -> Printf.sprintf "%s heartbeat updated" actual_name
+  | Agent_file_invalid actual_name -> Printf.sprintf "Invalid agent file for %s" actual_name
+  | Agent_not_found agent_name -> Printf.sprintf "Agent %s not found" agent_name
+
 let heartbeat config ~agent_name =
   ensure_initialized config;
   let actual_name = resolve_agent_name config agent_name in
@@ -28,13 +38,13 @@ let heartbeat config ~agent_name =
       | Ok agent ->
           let updated = { agent with last_seen = now_iso () } in
           write_json config agent_file (agent_to_yojson updated);
-          Printf.sprintf "%s heartbeat updated" actual_name
+          Heartbeat_updated actual_name
       | Error e ->
           Log.Workspace.debug "heartbeat: invalid agent JSON for %s: %s" actual_name e;
-          Printf.sprintf "Invalid agent file for %s" actual_name
+          Agent_file_invalid actual_name
     )
   end else
-    Printf.sprintf "Agent %s not found" agent_name
+    Agent_not_found agent_name
 
 (** Explicit age-based garbage collection. The caller must choose the retention
     horizon; this layer has no default retention policy. Agent lifecycle is not

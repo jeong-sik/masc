@@ -24,15 +24,18 @@ type turn_prompt_parts = {
           every turn. Inject as per-turn [dynamic_context]; never append
           to the persisted message history. *)
   user_message : string;
-      (** Persisted user-turn content: genuine utterances only. For
-          autonomous wake turns this is {!autonomous_wake_marker}; HITL
-          resolutions are appended by the turn driver. *)
+      (** Current user-turn input. Operator utterances are durable. For an
+          autonomous continuation this is {!autonomous_wake_marker}, which is
+          also durable: each cycle is an ordinary next user turn followed by
+          its assistant/tool suffix. HITL resolutions are appended by the turn
+          driver. *)
 }
 
 val autonomous_wake_marker : string
-(** Persisted user-turn content for autonomous wake turns. Constant and
-    tiny by design: the observation frame lives in
-    {!turn_prompt_parts.world_state}, not in the message history. *)
+(** Durable input for an autonomous continuation. It is appended to the same
+    checkpoint as the following assistant/tool suffix. The fresh observation
+    frame lives separately in {!turn_prompt_parts.world_state} and is never
+    persisted. *)
 
 val format_current_task : Masc_domain.task -> string
 
@@ -51,6 +54,19 @@ val effective_instructions :
   string
 (** Resolve the single instructions value used by every system-prompt
     entrypoint and its dashboard projection. *)
+
+val owned_executing_goals_without_tasks :
+  config:Workspace.config ->
+  keeper_name:string ->
+  (string * string) list
+(** RFC-0362 §4.3 — the Goals this keeper owns that are still executing and
+    carry no linked Task. Read from [goal.owner], not from
+    [meta.active_goal_ids]: ownership lives on the Goal, and that keeper-side
+    pointer is empty for every keeper on the live workspace.
+
+    The RFC's acceptance criterion (§4.3) reads off this list: the measured
+    0-of-10 executing goals with a Task must move, or the owner field is
+    decoration and should be removed. *)
 
 val active_goal_summaries :
   config:Workspace.config ->

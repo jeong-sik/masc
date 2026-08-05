@@ -270,6 +270,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
 
   it('bootstraps a loopback dev token before the single MCP request', async () => {
     getStoredToken.mockReturnValue(null)
+    getStoredTokenMeta.mockReturnValue(null)
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
         token: 'loopback-dev-token', actor: 'dashboard', role: 'worker',

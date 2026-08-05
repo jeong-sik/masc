@@ -14,9 +14,7 @@
       keeper task-operation cluster. Real execution still flows through the
       keeper internal runtime, but the tag makes the cluster first-class in
       the unified registry.
-    - Descriptors and other keeper-internal handlers are classified as
-      [Mod_external] for registry-completeness; they are not dispatched
-      through the neutral Tool substrate. *)
+    - Descriptor handlers derive their tag from the typed runtime handler. *)
 
 module TD = Tool_dispatch
 
@@ -40,50 +38,75 @@ let is_keeper_task_tool_name name = List.mem name keeper_task_tool_names
 
 (** Workspace state tools are handled by [Tool_workspace.dispatch] and share
     [Mod_state] even when the module-load [Tool_spec] side effect has not run
-    yet. The schema facade is the owned source for this dispatch cluster. *)
+    yet. The workspace schema inventory owns this dispatch cluster. *)
 let workspace_state_tool_names =
   List.map (fun (s : Masc_domain.tool_schema) -> s.name) Tool_schemas_workspace.schemas
 
 let is_workspace_state_tool_name name = List.mem name workspace_state_tool_names
 
-(** Derive a dispatch tag from a tool name. This is the ratchet fallback used
-    for naming-rule clusters and schema-owned closed clusters; any name it
-    returns [None] for must either be invisible or be handled by an explicit
-    [Tool_spec] registration that already populated the tag registry. *)
-let tag_of_name name : TD.module_tag option =
+let inline_runtime_tool_names =
+  List.map (fun (s : Masc_domain.tool_schema) -> s.name) Tool_schemas_inline.schemas
+;;
+
+let is_inline_runtime_tool_name name = List.mem name inline_runtime_tool_names
+
+(** Exact dispatch tag for one typed descriptor handler. *)
+let tag_of_runtime_handler
+      (handler : Keeper_tool_descriptor.runtime_handler)
+  : TD.module_tag
+  =
   let open TD in
-  let prefix p = String.starts_with ~prefix:p name in
-  if is_workspace_state_tool_name name then Some Mod_state
-  else if prefix "masc_plan_" then Some Mod_plan
-  else if prefix "masc_run_" then Some Mod_run
-  else if prefix "masc_agent_" then Some Mod_agent
-  else if prefix "masc_task_" then Some Mod_task
-  else if prefix "masc_workspace_" then Some Mod_state
-  else if prefix "masc_control_" then Some Mod_control
-  else if prefix "masc_agent_timeline_" then Some Mod_agent_timeline
-  else if prefix "masc_schedule_" then Some Mod_schedule
-  else if prefix "masc_misc_" then Some Mod_misc
-  else if prefix "masc_local_runtime_" then Some Mod_local_runtime
-  else if prefix "masc_library_" then Some Mod_library
-  else if prefix "masc_operator_" then Some Mod_operator
-  else if prefix "masc_external_" then Some Mod_external
-  else if prefix "masc_inline_" then Some Mod_inline
-  else if prefix "masc_compact_" then Some Mod_compact
-  else if prefix "masc_board_" then Some Mod_inline
-  else if prefix "masc_keeper_" then Some Mod_external
-  else if is_keeper_task_tool_name name then Some Mod_keeper_task
-  else if prefix "keeper_" then Some Mod_external
-  else if
-    List.mem
-      name
-      [ "tool_execute"
-      ; "tool_read_file"
-      ; "tool_edit_file"
-      ; "tool_write_file"
-      ; "tool_search_files"
-      ]
-  then Some Mod_external
-  else None
+  let open Keeper_tool_descriptor in
+  match handler with
+  | Tool_masc_plan_dispatch -> Mod_plan
+  | Tool_masc_run_dispatch -> Mod_run
+  | Tool_masc_agent_dispatch -> Mod_agent
+  | Tool_masc_task_dispatch -> Mod_task
+  | Tool_masc_workspace_dispatch -> Mod_state
+  | Tool_masc_control_dispatch -> Mod_control
+  | Tool_masc_agent_timeline_dispatch -> Mod_agent_timeline
+  | Tool_masc_schedule_dispatch -> Mod_schedule
+  | Tool_masc_misc_dispatch | Tool_web_search | Tool_web_fetch -> Mod_misc
+  | Tool_masc_local_runtime_dispatch -> Mod_local_runtime
+  | Tool_masc_library_dispatch -> Mod_library
+  | Tool_board_dispatch -> Mod_inline
+  | Tool_task_dispatch -> Mod_keeper_task
+  | Tool_execute
+  | Tool_search_files
+  | Tool_read_file
+  | Tool_edit_file
+  | Tool_write_file
+  | Tool_time_now
+  | Tool_tools_list
+  | Tool_context_status
+  | Tool_artifact_read
+  | Tool_memory_search
+  | Tool_memory_write
+  | Tool_library_search
+  | Tool_library_read
+  | Tool_surface_read
+  | Tool_surface_post
+  | Tool_person_note_set
+  | Tool_ide_annotate
+  | Tool_voice_dispatch
+  | Tool_masc_keeper_dispatch
+  | Tool_masc_fusion_dispatch
+  | Tool_masc_fusion_status
+  | Tool_analyze_image -> Mod_external
+
+(** Resolve only exact schema or descriptor membership. *)
+let tag_of_name name : TD.module_tag option =
+  if is_workspace_state_tool_name name then Some TD.Mod_state
+  else if is_keeper_task_tool_name name then Some TD.Mod_keeper_task
+  else if is_inline_runtime_tool_name name then Some TD.Mod_inline
+  else
+    match Keeper_tool_descriptor.descriptors_for_internal name with
+    | [ descriptor ] -> Some (tag_of_runtime_handler descriptor.runtime_handler)
+    | [] ->
+      (match Keeper_tool_descriptor.find_public name with
+       | Some descriptor -> Some (tag_of_runtime_handler descriptor.runtime_handler)
+       | None -> None)
+    | _ :: _ :: _ -> invalid_arg ("duplicate tool descriptors for " ^ name)
 
 (** Register a tag + schema only if the name is not already in the tag
     registry. Existing [Tool_spec] registrations are preserved. *)
@@ -100,7 +123,9 @@ let register_visible_raw_schemas () =
        then
          match tag_of_name schema.name with
          | Some tag -> register_schema_if_missing schema tag
-         | None -> register_schema_if_missing schema TD.Mod_external)
+         | None ->
+           invalid_arg
+             ("visible tool schema has no exact dispatch owner: " ^ schema.name))
 
 (** 2. Register each descriptor's internal handler name with the schema owned
     by that descriptor. Model aliases are canonicalised before dispatch and
@@ -114,9 +139,9 @@ let register_descriptor_handlers () =
            ; input_schema = descriptor.input_schema
            }
          in
-         match tag_of_name schema.name with
-         | Some tag -> register_schema_if_missing schema tag
-         | None -> register_schema_if_missing schema TD.Mod_external)
+         register_schema_if_missing
+           schema
+           (tag_of_runtime_handler descriptor.runtime_handler))
 
 (** Run the complete unified registration flow. Safe to call multiple times
     (subsequent calls are no-ops for already-registered names). *)

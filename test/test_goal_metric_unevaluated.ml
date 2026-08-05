@@ -27,6 +27,7 @@ let make_goal ?metric ?target_value id title =
     parent_goal_id = None;
     last_review_note = None;
     last_review_at = None;
+    owner = None;
     created_at = iso_now ();
     updated_at = iso_now ();
   }
@@ -79,7 +80,7 @@ let make_keeper_meta name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ ("name", `String name)
-        ; ("agent_name", `String ("agent-" ^ name))
+        ; ("agent_name", `String (Masc.Keeper_identity.keeper_agent_name name))
         ; ("trace_id", `String ("trace-" ^ name))
         ])
   with

@@ -26,7 +26,6 @@ val safe_filename : string -> string
 
 val validate_agent_name_r : string -> (string, masc_error) result
 val validate_task_id_r : string -> (string, masc_error) result
-val validate_file_path_r : string -> (string, masc_error) result
 
 (** {1 Initialization gates} *)
 
@@ -39,7 +38,6 @@ val validate_file_path_r : string -> (string, masc_error) result
 exception Not_initialized
 
 val ensure_initialized : config -> unit
-val ensure_initialized_r : config -> (unit, masc_error) result
 
 (** {1 Filesystem helpers} *)
 
@@ -63,7 +61,6 @@ val write_json_local :
 
 val read_json_root : config -> string -> Yojson.Safe.t
 val write_json_root : config -> string -> Yojson.Safe.t -> unit
-val delete_path_root : config -> string -> unit
 val path_exists_root : config -> string -> bool
 
 (** {1 JSON I/O — backend-routed} *)
@@ -103,7 +100,6 @@ val write_text_local : string -> string -> (unit, string) result
 val write_text : config -> string -> string -> unit
 val delete_path : config -> string -> unit
 val path_exists : config -> string -> bool
-val append_text : config -> string -> string -> unit
 
 (** Read JSON if present; [None] for absent files (no WARN log). *)
 val read_json_opt : config -> string -> Yojson.Safe.t option
@@ -167,20 +163,11 @@ val with_file_lock_impl :
   config -> string -> (unit -> 'a) -> 'a
 
 (** Cooperative file lock (Eio mutex for in-process, distributed
-    lock for FileSystem backend); explicit clock argument. *)
-val with_file_lock_eio :
-  clock:_ Eio.Time.clock ->
-  config -> string -> (unit -> 'a) -> 'a
-
-(** Cooperative file lock; uses [Eio_context.get_clock_opt]. *)
+    lock for FileSystem backend); uses [Eio_context.get_clock_opt]. *)
 val with_file_lock : config -> string -> (unit -> 'a) -> 'a
 
 val with_file_lock_r_impl :
   ?clock:_ Eio.Time.clock ->
-  config -> string -> (unit -> 'a) -> ('a, masc_error) result
-
-val with_file_lock_r_eio :
-  clock:_ Eio.Time.clock ->
   config -> string -> (unit -> 'a) -> ('a, masc_error) result
 
 val with_file_lock_r :

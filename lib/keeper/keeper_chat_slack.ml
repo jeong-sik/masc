@@ -123,23 +123,6 @@ let audio_block_json ~base_url ~token ~message_text =
     ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String text) ])
     ]
 
-let tool_context_block_json ~name ~args_summary ~result_summary =
-  let name = redact name |> escape_mrkdwn_text in
-  let args_summary = redact args_summary |> escape_mrkdwn_text in
-  let result =
-    match result_summary with
-    | None -> ""
-    | Some r -> Printf.sprintf "\nresult: %s" (redact r |> escape_mrkdwn_text)
-  in
-  let text =
-    Printf.sprintf "*Tool:* %s\nargs: %s%s" name args_summary result
-    |> truncate_block_text
-  in
-  `Assoc
-    [ ("type", `String "section")
-    ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String text) ])
-    ]
-
 let code_block_json ~source ~caption =
   let language = Option.value caption ~default:"code" in
   let body =
@@ -252,6 +235,44 @@ let build_message_body ~channel ~content ~blocks ?thread_ts () =
   in
   `Assoc fields |> Yojson.Safe.to_string
 
+let build_thread_status_body ~channel ~thread_ts ~status =
+  `Assoc
+    [ "channel_id", `String channel
+    ; "thread_ts", `String thread_ts
+    ; "status", `String status
+    ]
+  |> Yojson.Safe.to_string
+
+let set_thread_status ?clock
+    ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ~token ~channel ~thread_ts ~status () =
+  let body = build_thread_status_body ~channel ~thread_ts ~status in
+  match
+    Masc_http_client.post_sync ?clock ~timeout_sec
+      ~url:"https://slack.com/api/assistant.threads.setStatus"
+      ~headers:
+        [ "Authorization", "Bearer " ^ token
+        ; "Content-Type", "application/json"
+        ]
+      ~body ()
+  with
+  | Error err -> Error (Network err)
+  | Ok (code, response_body) when code < 200 || code >= 300 ->
+      Error (Http_status { code; body = response_body })
+  | Ok (_, response_body) ->
+      (try
+         let json = Yojson.Safe.from_string response_body in
+         match Json_util.get_bool json "ok" with
+         | Some true -> Ok ()
+         | Some false ->
+             (match Json_util.get_string json "error" with
+              | Some error -> Error (Slack_api { error })
+              | None -> Error (Other "Slack setStatus returned ok=false"))
+         | None -> Error (Other "Slack setStatus response is missing ok")
+       with
+       | Yojson.Json_error msg ->
+           Error (Other ("Slack setStatus JSON parse error: " ^ msg)))
+
 let send_message_with_blocks ?clock
     ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
     ?thread_ts ~token ~channel ~content ~blocks () =
@@ -311,9 +332,29 @@ let adapter_loop_with_transport
     ~(send_plain : content:string -> (unit, error) result)
     ~(send_blocks :
        content:string -> blocks:Yojson.Safe.t list -> (unit, error) result)
+    ?set_activity_status
     ?base_url
     ?(on_send_result = fun _ -> ()) () =
   let external_effect_completed = ref false in
+  let activity_error_logged = ref false in
+  let last_activity_status = ref None in
+  let update_activity status =
+    if !last_activity_status <> Some status then begin
+      last_activity_status := Some status;
+      match set_activity_status with
+      | None -> ()
+      | Some set_status ->
+          (match set_status ~status with
+           | Ok () -> ()
+           | Error error when not !activity_error_logged ->
+               activity_error_logged := true;
+               Log.Keeper.warn
+                 "keeper_chat_slack: native activity update failed: %s"
+                 (Format.asprintf "%a" pp_error error)
+           | Error _ -> ())
+    end
+  in
+  let clear_activity () = update_activity "" in
   let rec loop ~acc_text ~acc_blocks ~run_id_opt =
     match Keeper_chat_events.subscribe events with
     | Text_delta text ->
@@ -334,14 +375,17 @@ let adapter_loop_with_transport
             on_send_result
               (Error (Other "Slack terminal reply contained no text or blocks"))
         end;
+        clear_activity ();
         ()
     | External_effect_completed ->
         external_effect_completed := true;
         loop ~acc_text ~acc_blocks ~run_id_opt
     | Event_error { message } ->
         on_send_result (send_plain ~content:("Keeper error: " ^ message));
+        clear_activity ();
         ()
     | Run_started { run_id; thread_id = _ } ->
+        update_activity "답변을 준비하고 있어요…";
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)
     | Text_message_start { message_id = _; role = _ } ->
         loop ~acc_text ~acc_blocks ~run_id_opt
@@ -375,7 +419,10 @@ let adapter_loop_with_transport
              "keeper_chat_slack: protocol diagnostic delivery failed: %s"
              (Format.asprintf "%a" pp_error error));
         loop ~acc_text ~acc_blocks ~run_id_opt
-    | Tool_call_start _ | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _ ->
+    | Tool_call_start _ ->
+        update_activity "필요한 작업을 진행하고 있어요…";
+        loop ~acc_text ~acc_blocks ~run_id_opt
+    | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _ ->
         loop ~acc_text ~acc_blocks ~run_id_opt
     | Link_block { url; title; description; image = _ } ->
         let block = link_block_json ~url ~title ~description in
@@ -389,23 +436,30 @@ let adapter_loop_with_transport
     | Audio_block { token; mime = _; message_text; duration_sec = _ } ->
         let block = audio_block_json ~base_url ~token ~message_text in
         loop ~acc_text ~acc_blocks:(add_block acc_blocks block) ~run_id_opt
-    | Tool_context_block { tool_call_id = _; name; args_summary; result_summary }
-      ->
-        let block =
-          tool_context_block_json ~name ~args_summary ~result_summary
-        in
-        loop ~acc_text ~acc_blocks:(add_block acc_blocks block) ~run_id_opt
+    | Tool_context_block _ ->
+        loop ~acc_text ~acc_blocks ~run_id_opt
   in
   loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:None
 
 let adapter_loop ~clock ~token ~channel ?thread_ts ~events ?base_url
     ?on_send_result () =
+  let set_activity_status =
+    match thread_ts with
+    | Some thread_ts ->
+        Some
+          (fun ~status ->
+             set_thread_status ~clock ~token ~channel ~thread_ts ~status ())
+    | None ->
+        Log.Keeper.debug
+          "keeper_chat_slack: native activity unavailable without thread_ts";
+        None
+  in
   adapter_loop_with_transport
     ~send_plain:(fun ~content ->
       send_message ~clock ?thread_ts ~token ~channel ~content ())
     ~send_blocks:(fun ~content ~blocks ->
       send_message_with_blocks ~clock ?thread_ts ~token ~channel ~content ~blocks ())
-    ~events ?base_url ?on_send_result ()
+    ~events ?set_activity_status ?base_url ?on_send_result ()
 
 module For_testing = struct
   let escape_mrkdwn_text = escape_mrkdwn_text
@@ -415,10 +469,10 @@ module For_testing = struct
   let link_block_json = link_block_json
   let image_block_json = image_block_json
   let audio_block_json = audio_block_json
-  let tool_context_block_json = tool_context_block_json
   let content_blocks_of_text = content_blocks_of_text
   let final_message_blocks = final_message_blocks
   let build_message_body = build_message_body
+  let build_thread_status_body = build_thread_status_body
 
   let adapter_loop = adapter_loop_with_transport
 end

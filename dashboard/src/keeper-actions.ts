@@ -26,8 +26,9 @@ import {
 } from './tool-call-output-store'
 import { asString, isRecord } from './components/common/normalize'
 import { keeperTurnOutcomeSuppressesReply } from './keeper-message'
-import { invalidateDashboardCache, refreshDashboard } from './store'
+import { invalidateDashboardCache, refreshDashboard, shellAuthSummary } from './store'
 import { isAbortError } from './lib/async-state'
+import { dashboardAuthAccess } from './lib/dashboard-auth-access'
 import { compareKeeperQueueRevisions } from './lib/keeper-chat-receipt'
 import type {
   ChatBlock,
@@ -835,6 +836,7 @@ async function handoffCancelledStreamToRequestPoll(
 export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
   const keeperName = name.trim()
   if (!keeperName) return
+  if (!dashboardAuthAccess(shellAuthSummary.value, 'admin').allowed) return
   const generation = (keeperReceiptReconciliationGeneration.get(keeperName) ?? 0) + 1
   keeperReceiptReconciliationGeneration.set(keeperName, generation)
   const failures: string[] = []

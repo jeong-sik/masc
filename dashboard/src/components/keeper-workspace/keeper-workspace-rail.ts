@@ -44,10 +44,7 @@ import type { MemoryKeeper } from '../memory-inspector'
 import { keepers } from '../../store'
 import { KeeperLaneSection } from './keeper-lane-strip'
 import { openTaskDetail } from '../goals/task-detail-state'
-
-const LazyCompactionInspectorOverlay = lazy(async () => ({
-  default: (await import('./compaction-inspector-overlay')).CompactionInspectorOverlay,
-}))
+import { CompactionInspectorOverlay } from './compaction-inspector-overlay'
 
 const LazyMemoryInspector = lazy(async () => ({
   default: (await import('../memory-inspector')).MemoryInspector,
@@ -598,11 +595,7 @@ export function KeeperWorkspaceRail({
     </aside>
 
     ${overlay === 'compaction'
-      ? html`
-          <${Suspense} fallback=${html`<div class="turn-overlay" role="dialog" aria-modal="true">컴팩션 스냅샷 로딩…</div>`}>
-            <${LazyCompactionInspectorOverlay} keeper=${keeper} onClose=${() => setOverlay(null)} />
-          <//>
-        `
+      ? html`<${CompactionInspectorOverlay} keeper=${keeper} onClose=${() => setOverlay(null)} />`
       : null}
     ${overlay === 'memory'
       ? html`

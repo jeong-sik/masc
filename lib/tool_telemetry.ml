@@ -20,9 +20,6 @@ let tool_type_of_name name =
             || String.starts_with ~prefix:"surface_" name
     then "read"
     else if name = "grep"
-            || name = "search"
-            || name = "search_files"
-            || String.starts_with ~prefix:"search_files" name
     then "read"
     else if String.starts_with ~prefix:"read" name
     then "read"

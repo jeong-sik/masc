@@ -37,11 +37,16 @@ let make_keepalive_meta ~name ~agent_name =
         ("name", `String name);
         ("agent_name", `String agent_name);
         ("trace_id", `String ("trace-" ^ name));
-        ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
+        (* sandbox_profile and network_mode left the JSON wire schema — they
+           arrive from keeper.toml now. This fixture only ever set them to the
+           record defaults ("local" / "inherit"), so dropping them changes
+           nothing this suite asserts. *)
       ]
   in
-  match Keeper_meta_json_parse.meta_of_json json with
+  (* The strict parser demands every persisted field; this suite only cares
+     about identity and task ownership, so it uses the fixture helper that
+     fills record defaults — the same seam the other keeper suites use. *)
+  match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> fail ("meta_of_json failed: " ^ err)
   | Ok meta -> meta
 
@@ -187,13 +192,11 @@ let make_board_resume_meta name =
   let json =
     `Assoc
       [ ("name", `String name)
-      ; ("agent_name", `String ("keeper-" ^ name))
+      ; ("agent_name", `String (Masc.Keeper_identity.keeper_agent_name name))
       ; ("trace_id", `String ("trace-" ^ name))
-      ; ("sandbox_profile", `String "local")
-      ; ("network_mode", `String "inherit")
       ]
   in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> fail ("meta_of_json failed: " ^ err)
   | Ok meta -> meta
 ;;

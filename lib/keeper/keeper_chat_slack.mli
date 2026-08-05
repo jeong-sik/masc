@@ -2,7 +2,9 @@
 
     Subscribes to a [Keeper_chat_events] stream, accumulates assistant
     text deltas and rich Block Kit blocks, and sends the final reply to
-    a Slack channel via the Web API when the run finishes.
+    a Slack channel via the Web API when the run finishes. When the reply
+    belongs to a thread, the production adapter projects active work through
+    Slack's native assistant thread status.
 
     @since 2.145.0 *)
 
@@ -71,11 +73,12 @@ val adapter_loop :
     blocks on the event stream until [Run_finished] or [Error], then sends
     the accumulated text (or error message) to the given Slack channel.
 
-    Rich events ([Link_block], [Image_block], [Status_block], [Audio_block],
-    [Tool_context_block]) are rendered as Slack Block Kit sections and
-    included alongside the final message. [Tool_call_start],
+    Rich events ([Link_block], [Image_block], [Status_block], [Audio_block])
+    are rendered as Slack Block Kit sections and included alongside the final
+    message. [Tool_call_start],
     [Tool_call_args], [Tool_call_args_snapshot], and [Tool_call_end] are
-    ignored for live streaming.
+    projected only as native activity; [Tool_context_block] is not exposed in
+    the conversation.
 
     [base_url] is used to build public voice-audio URLs; when omitted the
     configured {!Env_config_core.masc_http_base_url} is used.
@@ -107,9 +110,6 @@ module For_testing : sig
   val audio_block_json :
     base_url:string option -> token:string -> message_text:string -> Yojson.Safe.t
 
-  val tool_context_block_json :
-    name:string -> args_summary:string -> result_summary:string option -> Yojson.Safe.t
-
   val content_blocks_of_text : string -> Yojson.Safe.t list
   (** Same as {!content_blocks_of_text}; exposed for unit testing. *)
 
@@ -128,14 +128,20 @@ module For_testing : sig
   (** Pure chat.postMessage JSON builder used to prove deferred replies retain
       the originating Slack thread. *)
 
+  val build_thread_status_body :
+    channel:string -> thread_ts:string -> status:string -> string
+  (** Pure [assistant.threads.setStatus] JSON builder. *)
+
   val adapter_loop :
     events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
     send_plain:(content:string -> (unit, error) result) ->
     send_blocks:(content:string -> blocks:Yojson.Safe.t list -> (unit, error) result) ->
+    ?set_activity_status:(status:string -> (unit, error) result) ->
     ?base_url:string ->
     ?on_send_result:((unit, error) result -> unit) ->
     unit ->
     unit
   (** Test seam for the outbound transport. It runs the production terminal
-      settlement state machine with injected Slack sends. *)
+      settlement state machine with injected Slack sends and native activity
+      status updates. Activity failures never settle terminal delivery. *)
 end

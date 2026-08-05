@@ -5,11 +5,10 @@
 
 (** {1 Types} *)
 
-type criterion =
-  | Schema_match of Yojson.Safe.t
-  | Contains of string
-  | Not_contains of string
-  | Custom of string
+(** One constructor, because one is what is produced: request criteria are
+    built as [Custom] over the task's completion contract, and the completion
+    authority accepts only [Custom]. The wire tag stays ["custom"]. *)
+type criterion = Custom of string
 
 val show_criterion : criterion -> string
 val equal_criterion : criterion -> criterion -> bool

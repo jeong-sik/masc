@@ -136,6 +136,10 @@ export function normalizeTask(raw: unknown): Task | null {
     completed_at: asString(raw.completed_at),
     cancelled_by: asString(raw.cancelled_by) ?? null,
     reason: asString(raw.reason) ?? null,
+    // The backend has emitted this since RFC-0323 G-8 and PredecessorSection
+    // reads it, but it was never copied here, so every task reached the store
+    // with it undefined and the section returned null on its first guard.
+    predecessor_task_id: asString(raw.predecessor_task_id) ?? null,
     contract,
     handoff_context: handoffContext,
     execution_links: executionLinks,
@@ -166,8 +170,6 @@ export function normalizeExecutionTone(value: unknown): DashboardExecutionQueueI
 export function normalizeExecutionSummary(raw: unknown): DashboardExecutionSummary | null {
   if (!isRecord(raw)) return null
   return {
-    active_sessions: asNumber(raw.active_sessions),
-    blocked_sessions: asNumber(raw.blocked_sessions),
     active_operations: asNumber(raw.active_operations),
     blocked_operations: asNumber(raw.blocked_operations),
     runtime_pressure: asNumber(raw.runtime_pressure),

@@ -65,7 +65,7 @@ let keeper_invocation_run_ref_schema =
     ]
 ;;
 
-let keeper_schemas : tool_schema list = [
+let schemas : tool_schema list = [
   {
     name = "masc_keeper_sandbox_start";
     description = "Start the managed sandbox container for a keeper.";
@@ -552,6 +552,3 @@ future spawns from the persona.";
   };
 
 ]
-
-let schemas : tool_schema list =
-  keeper_schemas

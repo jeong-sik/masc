@@ -36,9 +36,18 @@ let refresh_work_as_heartbeat
   then (
     let hb_ok =
       try
-        (* fire-and-forget: heartbeat persistence is enough; loop records only success/failure. *)
-        ignore (Workspace.heartbeat ctx.config ~agent_name:meta_after_proactive.agent_name);
-        true
+        (* Only a written last_seen is evidence the workspace took the write.
+           A missing or unreadable agent file returns without raising, and
+           counting that as a live workspace is what let the freshness clock
+           advance while nothing was being persisted. *)
+        match Workspace.heartbeat ctx.config ~agent_name:meta_after_proactive.agent_name with
+        | Workspace.Heartbeat_updated _ -> true
+        | Workspace.Agent_not_found _ | Workspace.Agent_file_invalid _ as outcome ->
+          Log.Keeper.debug
+            "heartbeat did not persist for %s: %s"
+            meta_after_proactive.name
+            (Workspace.heartbeat_message outcome);
+          false
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

@@ -1043,6 +1043,7 @@
   test_goal_tools
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
+  test_keeper_goal_phase_projection
   test_goal_metric_unevaluated
   test_string_util
   test_prompt_asset_sync
@@ -1194,6 +1195,7 @@
   test_goal_tools
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
+  test_keeper_goal_phase_projection
   test_goal_metric_unevaluated
   test_string_util
   test_prompt_asset_sync

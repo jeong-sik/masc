@@ -1000,6 +1000,23 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_goal_store"
 
+      # Goal phase projection: active_goal_ids records assignment and is never
+      # cleared when a goal reaches a terminal phase, so both prompt surfaces
+      # have to consult the store's phase. The suite seeds one goal per phase in
+      # a real workspace and asserts the rendered sets, which compile-only under
+      # @check does not exercise.
+      - name: Run keeper goal phase projection suite
+        id: keeper_goal_phase_projection_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_goal_phase_projection"
+
       # Schedule occurrence reclaim: an occurrence the consumer durably accepted
       # is [Execution_dispatched] until a correlated completion path settles it,
       # so nothing in the scheduler finishes it on its own. The suite drives a

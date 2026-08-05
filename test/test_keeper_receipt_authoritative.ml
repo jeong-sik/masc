@@ -16,6 +16,30 @@
 
 module R = Masc.Keeper_execution_receipt
 
+let test_current_outcome_projections () =
+  [ `Ok, "ok", "receipt_done"
+  ; `Skipped, "skipped", "receipt_skipped"
+  ; `Error, "error", "receipt_failed"
+  ; `Cancelled, "cancelled", "receipt_cancelled"
+  ]
+  |> List.iter (fun (outcome, expected_json, expected_tla) ->
+    let actual_json = R.outcome_kind_to_string outcome in
+    if not (String.equal actual_json expected_json)
+    then
+      failwith
+        (Printf.sprintf
+           "expected JSON receipt outcome %s, got %s"
+           expected_json
+           actual_json);
+    let actual_tla = R.outcome_kind_to_tla_receipt outcome in
+    if not (String.equal actual_tla expected_tla)
+    then
+      failwith
+        (Printf.sprintf
+           "expected TLA receipt outcome %s, got %s"
+           expected_tla
+           actual_tla))
+
 let must_ok ~outcome ~turn_state =
   match R.assert_receipt_authoritative ~outcome ~turn_state with
   | Ok () -> ()
@@ -96,6 +120,7 @@ let test_cancelled_done_passes () =
   must_ok ~outcome:`Cancelled ~turn_state:"done"
 
 let () =
+  test_current_outcome_projections ();
   test_ok_done ();
   test_skipped_done ();
   test_ok_failed_violation ();

@@ -345,6 +345,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0356 | Approval owns the effect (replay the approved payload, do not require byte-id... | Draft | - |
 | 0358 | 자율턴 신원과 exact raw-trace run을 turn record가 소유한다 | Implemented | - |
 | 0359 | 도구 표면 단일화: 단일 레지스트리 SSOT 와 표면 투영 | Draft | - |
+| 0360 | Task actor provenance | Draft | - |
 | RFC-0034d-stale-agent-sync | d — release_stale_claims agent-side sync | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |

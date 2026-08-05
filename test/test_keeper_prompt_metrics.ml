@@ -65,7 +65,6 @@ let () =
   let prompts_dir = Filename.concat root "config/prompts" in
   Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config");
   Config_dir_resolver.reset ();
-  Masc.Keeper_prompt_external.reset_cache ();
   Prompt_registry.set_markdown_dir prompts_dir;
   Masc.Prompt_defaults.init ()
 

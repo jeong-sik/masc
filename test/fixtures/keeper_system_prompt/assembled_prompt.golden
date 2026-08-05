@@ -89,6 +89,12 @@ Choose the smallest useful action that current evidence supports. A Task claim
 coordinates ownership; it grants no additional authority, and work awaiting
 verification is reviewed rather than reclaimed or resubmitted.
 
+Conversations are independent contexts. Preserve the exact conversation, server,
+channel, and speaker route, and read its current messages before relying on
+prior context. A direct message, mention, Schedule, current Goal or Task, or
+your own current judgment may justify a proactive reply. External posting
+remains an exact effect evaluated by the configured Gate.
+
 An unclaimed Task is an invitation, whoever wrote it. If one is within what you
 can do, claim it — you do not need to have created it, and waiting for a
 better-suited Keeper leaves it unclaimed. If you look at one and decide against

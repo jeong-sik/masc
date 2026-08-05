@@ -358,7 +358,7 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
 
 (** Keeper tools are scoped to the caller's current base_path.
     Do not retarget requests across other base_path registries. *)
-let resolve_ctx ctx ~name:_ _args = ctx
+let resolve_ctx ctx ~name:_ = ctx
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_reset_body ~(config : Workspace.config) args : tool_result =
@@ -619,7 +619,7 @@ let handle_keeper_clear ctx args : tool_result =
   keeper_clear_body ~config:ctx.config args
 
 let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
-  let ctx = resolve_ctx ctx ~name args in
+  let ctx = resolve_ctx ctx ~name in
   match name with
   | "masc_persona_list" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_list ctx args))
   | "masc_persona_create" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_create ctx args))
@@ -668,12 +668,12 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
   | "masc_keeper_clear" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_clear ctx args))
   | _ -> None
 
-let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~args : tool_result =
+let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~message : tool_result =
   let name = "masc_keeper_msg" in
-  let ctx = resolve_ctx ctx ~name args in
+  let ctx = resolve_ctx ctx ~name in
   tool_result_with_tool_name
     ~tool_name:name
-    (handle_keeper_msg ?continuation_channel ~submitted_by ctx args)
+    (handle_keeper_msg ?continuation_channel ~submitted_by ctx message)
 ;;
 
 (** Private direct-delivery stream used by connector and dashboard adapters. *)
@@ -684,11 +684,11 @@ let dispatch_keeper_msg_stream
       ?on_admission_rejected
       ?on_admitted
       ctx
-      ~args
+      ~message
   : tool_result option
   =
   let name = "masc_keeper_msg" in
-  let ctx = resolve_ctx ctx ~name args in
+  let ctx = resolve_ctx ctx ~name in
   Some
     (tool_result_with_tool_name
        ~tool_name:name
@@ -699,24 +699,24 @@ let dispatch_keeper_msg_stream
           ?on_admission_rejected
           ?on_admitted
           ctx
-          args))
+          message))
 
 let dispatch_keeper_msg_stream_if_free
       ?on_text_delta
       ?on_event
       ?continuation_channel
       ctx
-      ~args
+      ~message
   =
   let name = "masc_keeper_msg" in
-  let ctx = resolve_ctx ctx ~name args in
+  let ctx = resolve_ctx ctx ~name in
   match
     handle_keeper_msg_stream_if_free
       ?on_text_delta
       ?on_event
       ?continuation_channel
       ctx
-      args
+      message
   with
   | `Busy rejection -> `Busy rejection
   | `Ran result ->

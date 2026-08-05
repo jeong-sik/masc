@@ -90,13 +90,12 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS` | typed:int | Policies | operator | 94 | Maximum age for [<masc_root>/wire-capture] day files retained by the diagnostic MASC->OAS wire-capture harness. Defau... |
 | `MASC_KEEPER_WORK_AS_HEARTBEAT` | feature_flag | n/a | n/a | 419 | Master switch. When true, successful Workspace.heartbeat after a unified turn counts as presence proof, allowing the ... |
 
-## Env_config_keeper_supervisor (3 knobs; typed classification 2/2)
+## Env_config_keeper_supervisor (2 knobs; typed classification 2/2)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_KEEPER_DEAD_TTL_SEC` | typed:float | Timeouts | operator | 21 | Dead tombstone TTL: seconds before Dead entries are cleaned up. @category Timeouts @ops_class operator |
-| `MASC_KEEPER_DOMAIN_POOL_ENABLED` | feature_flag | n/a | n/a | 12 | Historical keeper Domain_pool pilot flag. The supervisor still reads this for observability, but keepalive fibers rem... |
-| `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | typed:float | Timeouts | operator | 17 | Interval between supervisor sweep runs (seconds). @category Timeouts @ops_class operator |
+| `MASC_KEEPER_DEAD_TTL_SEC` | typed:float | Timeouts | operator | 11 | Dead tombstone TTL: seconds before Dead entries are cleaned up. @category Timeouts @ops_class operator |
+| `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | typed:float | Timeouts | operator | 7 | Interval between supervisor sweep runs (seconds). @category Timeouts @ops_class operator |
 
 ## Env_config_runtime (70 knobs; typed classification 4/55)
 

@@ -113,46 +113,53 @@ let run_ref ~path ~worker_run_id ~start_seq =
 ;;
 
 let write_turn_record config ~absolute_turn ~generation ~turn_kind ~raw_trace_run_ref =
-  let record : Turn_record.t =
-    { execution_ids = []
-    ; keeper = keeper_name
-    ; agent_name
-    ; generation
-    ; turn_kind
-    ; trace_id
-    ; absolute_turn
-    ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn
-    ; blocks = []
-    ; input_components = None
-    ; runtime_profile = "test-runtime"
-    ; model = Some "public-model"
-    ; finish_reason = Some "completed"
-    ; context_window = None
-    ; price_input_per_million = None
-    ; price_output_per_million = None
-    ; request_latency_ms = None
-    ; ttfrc_ms = None
-    ; request_wire_observation = None
-    ; raw_trace_run_ref
-    ; sampling =
-        { temperature = None
-        ; top_p = None
-        ; max_tokens = None
-        ; thinking_budget = None
-        ; enable_thinking = None
-        }
-    ; usage =
-        { input_tokens = None
-        ; output_tokens = None
-        ; cache_creation_input_tokens = None
-        ; cache_read_input_tokens = None
-        }
-    ; ts = 1000. +. float_of_int absolute_turn
-    }
-  in
-  Dated_jsonl.append
-    (Keeper_types_support.keeper_turn_record_store config keeper_name)
-    (Turn_record.to_json record)
+  Keeper_turn_record_writer.write
+    ~config
+    ~keeper_name
+    ~agent_name
+    ~generation
+    ~turn_kind
+    ~trace_id
+    ~absolute_turn
+    ~runtime_profile:"test-runtime"
+    ~model:(Some "public-model")
+    ~finish_reason:(Some "completed")
+    ~context_window:None
+    ~price_input_per_million:None
+    ~price_output_per_million:None
+    ~request_latency_ms:None
+    ~ttfrc_ms:None
+    ~request_wire_observation:None
+    ~raw_trace_run_ref
+    ~sampling:
+      { temperature = None
+      ; top_p = None
+      ; max_tokens = None
+      ; thinking_budget = None
+      ; enable_thinking = None
+      }
+    ~usage:
+      { input_tokens = None
+      ; output_tokens = None
+      ; cache_creation_input_tokens = None
+      ; cache_read_input_tokens = None
+      }
+    ~execution_ids:[]
+    ~blocks:[]
+    ~input_components:None
+    ()
+;;
+
+let keeper_chat_appended_for expected_name frame =
+  match Sse.data_payload_of_frame frame with
+  | Error Sse.Missing_data_payload -> false
+  | Ok payload ->
+    (match Yojson.Safe.from_string payload with
+     | `Assoc fields ->
+       List.assoc_opt "type" fields = Some (`String "keeper_chat_appended")
+       && List.assoc_opt "name" fields = Some (`String expected_name)
+     | _ -> false
+     | exception Yojson.Json_error _ -> false)
 ;;
 
 let trace_path config suffix =
@@ -180,8 +187,9 @@ let test_projects_exact_run_outcome_and_activity () =
      | [ Keeper_chat_blocks.Trace_think thinking
        ; Keeper_chat_blocks.Trace_tool tool
        ] ->
-       Alcotest.(check string) "thinking content is not public"
-         "내부 판단 단계 (내용 비공개)" thinking.text;
+       Alcotest.(check bool) "thinking step declares withheld content" true
+         thinking.content_withheld;
+       Alcotest.(check string) "thinking content is not public" "" thinking.text;
        Alcotest.(check string) "tool name" "Read" tool.name;
        Alcotest.(check (option string)) "tool id is not public" None tool.tool_call_id;
        Alcotest.(check (option string)) "tool duration" (Some "1000ms") tool.dur;
@@ -288,6 +296,62 @@ let test_since_and_limit_use_current_records () =
     (List.map (fun (turn : Keeper_autonomous_turn_source.turn) -> turn.final_text) turns)
 ;;
 
+let test_committed_autonomous_turn_invalidates_live_chat () =
+  with_workspace @@ fun config ->
+  let path = trace_path config "live-chat" in
+  let worker_run_id = "run-live-chat" in
+  write_lines path
+    (run_lines ~worker_run_id ~start_seq:1 ~base_ts:6000.
+       ~prompt:Keeper_unified_prompt.autonomous_wake_marker
+       ~final_text:"visible without reload");
+  let visible_turns_at_broadcast = ref None in
+  let subscriber_id =
+    Printf.sprintf "autonomous-chat-live-%d-%d" (Unix.getpid ())
+      (Random.int 1_000_000)
+  in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external subscriber_id);
+  Sse.subscribe_external ~id:subscriber_id
+    ~callback:(fun frame ->
+      if keeper_chat_appended_for keeper_name frame
+      then
+        visible_turns_at_broadcast :=
+          Some
+            (Keeper_autonomous_turn_source.load_recent
+               ~config ~keeper_name ()))
+    ();
+  write_turn_record config ~absolute_turn:46 ~generation:9
+    ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:
+      (Some (run_ref ~path ~worker_run_id ~start_seq:1));
+  match !visible_turns_at_broadcast with
+  | Some [ turn ] ->
+    Alcotest.(check (option string)) "committed outcome is readable at broadcast"
+      (Some "visible without reload") turn.final_text
+  | Some turns ->
+    Alcotest.failf "expected one committed turn at broadcast, got %d"
+      (List.length turns)
+  | None -> Alcotest.fail "committed autonomous turn emitted no chat invalidation"
+;;
+
+let test_direct_turn_does_not_duplicate_chat_invalidation () =
+  with_workspace @@ fun config ->
+  let invalidations = ref 0 in
+  let subscriber_id =
+    Printf.sprintf "direct-chat-live-%d-%d" (Unix.getpid ())
+      (Random.int 1_000_000)
+  in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external subscriber_id);
+  Sse.subscribe_external ~id:subscriber_id
+    ~callback:(fun frame ->
+      if keeper_chat_appended_for keeper_name frame then incr invalidations)
+    ();
+  write_turn_record config ~absolute_turn:47 ~generation:9
+    ~turn_kind:Turn_record.Direct ~raw_trace_run_ref:None;
+  Alcotest.(check int) "direct chat path owns its invalidation" 0 !invalidations
+;;
+
 (* The OAS runtime identity is opaque here. The reader validates it against
    the selected raw rows without comparing it to the Keeper identity. *)
 let sdk_run_ref ~agent_name ~session_id : Agent_sdk.Raw_trace.run_ref =
@@ -361,6 +425,10 @@ let () =
             test_mismatched_raw_trace_session_identity_is_skipped
         ; Alcotest.test_case "since and limit use current records" `Quick
             test_since_and_limit_use_current_records
+        ; Alcotest.test_case "committed autonomous turn invalidates live chat" `Quick
+            test_committed_autonomous_turn_invalidates_live_chat
+        ; Alcotest.test_case "direct turn does not duplicate chat invalidation" `Quick
+            test_direct_turn_does_not_duplicate_chat_invalidation
         ] )
     ; ( "exact_run_reference"
       , [ Alcotest.test_case "records the OAS runtime identity" `Quick

@@ -25,7 +25,6 @@ type t =
   | TurnQueueDepth
   | SupervisorSweepStarts
   | SupervisorLastSweepUnixtime
-  | DomainPoolFork
   | TurnHolderBookkeepingFailures
   | Compactions
   | CompactionRatioChange

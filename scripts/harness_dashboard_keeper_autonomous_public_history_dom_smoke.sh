@@ -71,6 +71,11 @@ with sync_playwright() as playwright:
         page.get_by_text("Observed one healthy follow-up.", exact=True).last.wait_for()
         page.get_by_text("내부 판단 단계 (내용 비공개)", exact=True).wait_for()
         activity = page.locator('[data-chat-work-trace]')
+        # The label is the dashboard's; what crossed the wire is the flag. Assert
+        # the flag reached the DOM so a server that went back to shipping prose
+        # in `text` fails here instead of passing on the rendered string alone.
+        think = activity.locator('[data-chat-trace-step="think"]')
+        assert think.get_attribute("data-chat-trace-content-withheld") == "true"
         tool = activity.locator('[data-chat-trace-step="tool"]')
         assert "keeper_tasks_list" in tool.inner_text()
         assert tool.get_attribute("data-chat-trace-link-state") == "structural"

@@ -79,7 +79,7 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
     blocks: [{
       t: 'trace',
       trace: [
-        { kind: 'think', text: '내부 판단 단계 (내용 비공개)' },
+        { kind: 'think', text: '', content_withheld: true },
         {
           kind: 'tool',
           name: 'keeper_tasks_list',
@@ -98,7 +98,7 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
     expect(entryOut?.text).toBe('no work this cycle')
     expect(entryOut?.blocks).toBeUndefined()
     expect(entryOut?.traceSteps).toEqual([
-      { kind: 'think', text: '내부 판단 단계 (내용 비공개)' },
+      { kind: 'think', text: '', contentWithheld: true },
       {
         kind: 'tool',
         name: 'keeper_tasks_list',
@@ -106,6 +106,20 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
       },
     ])
     expect(entryOut?.turnRef).toBe('trace-test#41')
+  })
+
+  it('drops a think step whose text is empty without the withheld flag', () => {
+    // Negative control for the branch order in normalizeTraceStep. `asString`
+    // reports '' as absent, so an empty think step is only legitimate when the
+    // flag says the content was withheld. Without the flag it is malformed, and
+    // one malformed step nulls the entire trace array.
+    const [entryOut] = chatHistoryEntriesFromRest('lane-smith', [
+      {
+        ...autonomousRow,
+        blocks: [{ t: 'trace', trace: [{ kind: 'think', text: '' }] }],
+      },
+    ])
+    expect(entryOut?.traceSteps).toBeUndefined()
   })
 
   it('is visible without the internal-message toggle', () => {

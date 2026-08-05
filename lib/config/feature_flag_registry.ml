@@ -6,10 +6,9 @@
 
     1. Runtime enumeration: operators can query all flags and their values
     2. Consistency verification: CI lint compares registry defaults against actual get_bool calls
-    3. Lifecycle tracking for supported public flags
+    3. Current lifecycle classification for supported public flags
     4. Documentation: machine-readable flag catalog
 
-    @since 2.162.0
     @see <docs/design/inventory-gap-analysis-rfc.md> H5 Feature Flags *)
 
 open Env_config_core
@@ -19,7 +18,6 @@ open Env_config_core
     registry entry, and operator documentation in one change. *)
 type lifecycle =
   | Active
-  | Deprecated of string  (** reason for deprecation *)
   | Experimental          (** not yet stable, may change without notice *)
 
 type flag = {
@@ -28,7 +26,6 @@ type flag = {
   default : bool;            (** Canonical default value *)
   category : string;         (** Grouping: transport, keeper, dashboard, tool, inference, runtime *)
   lifecycle : lifecycle;     (** Current state in the lifecycle *)
-  since : string;            (** Version when flag was introduced *)
 }
 
 (** The canonical registry. Alphabetically ordered within each category.
@@ -40,27 +37,27 @@ let all_flags : flag list = [
   { env_name = "MASC_GRPC_ENABLED";
     description = "gRPC transport server";
     default = true; category = "transport";
-    lifecycle = Active; since = "2.0.0" };
+    lifecycle = Active };
 
   { env_name = "MASC_WS_ENABLED";
     description = "WebSocket transport server";
     default = true; category = "transport";
-    lifecycle = Active; since = "2.0.0" };
+    lifecycle = Active };
 
   { env_name = "MASC_WEBRTC_ENABLED";
     description = "WebRTC DataChannel transport (opt-out via =0)";
     default = true; category = "transport";
-    lifecycle = Active; since = "2.120.0" };
+    lifecycle = Active };
 
   { env_name = "MASC_HTTP_AUTH_STRICT";
     description = "Require auth for all HTTP endpoints (not just /mcp)";
     default = false; category = "transport";
-    lifecycle = Active; since = "2.140.0" };
+    lifecycle = Active };
 
   { env_name = Env_config_core.telemetry_enabled_env_key;
     description = "Telemetry/span collection";
     default = true; category = "transport";
-    lifecycle = Active; since = "2.50.0" };
+    lifecycle = Active };
 
   (* ── Tool Surface ─────────────────────────────────────────── *)
   (* RFC-0084 host-config-cleanup-J — MASC_DISPATCH_V2 entry removed.
@@ -69,18 +66,13 @@ let all_flags : flag list = [
   { env_name = Env_config_core.parse_warn_env_key;
     description = "Escalate malformed env parses to Config_error";
     default = false; category = "tool";
-    lifecycle = Active; since = "2.60.0" };
+    lifecycle = Active };
 
   (* ── Keeper ───────────────────────────────────────────────── *)
-  { env_name = "MASC_KEEPER_DOMAIN_POOL_ENABLED";
-    description = "Historical keeper DomainPool pilot flag. Supervisor keepalive fibers now stay on the owning Eio domain because they use switches, clocks, and provider streams.";
-    default = false; category = "keeper";
-    lifecycle = Experimental; since = "2.170.0" };
-
   { env_name = "MASC_KEEPER_BOOTSTRAP_ENABLED";
     description = "Startup keeper auto-bootstrap scan";
     default = true; category = "keeper";
-    lifecycle = Active; since = "2.130.0" };
+    lifecycle = Active };
 
   (* RFC-0297 P0-1: global lifecycle kill-switches. Before these existed,
      [reactive]/[proactive]/[autonomous] enabled in runtime.toml were
@@ -90,59 +82,59 @@ let all_flags : flag list = [
   { env_name = "MASC_KEEPER_REACTIVE_ENABLED";
     description = "Global kill-switch for keeper reactive turns (mention/board/scope/event-queue triggers)";
     default = true; category = "keeper";
-    lifecycle = Active; since = "2.253.0" };
+    lifecycle = Active };
 
   { env_name = "MASC_KEEPER_PROACTIVE_ENABLED";
     description = "Global kill-switch for keeper proactive (scheduled) turns";
     default = true; category = "keeper";
-    lifecycle = Active; since = "2.253.0" };
+    lifecycle = Active };
 
   { env_name = "MASC_KEEPER_AUTONOMOUS_ENABLED";
     description = "Global kill-switch for keeper autonomous keepalive/PR fan-out";
     default = true; category = "keeper";
-    lifecycle = Active; since = "2.253.0" };
+    lifecycle = Active };
 
   { env_name = "MASC_KEEPER_WORK_AS_HEARTBEAT";
     description = "Count successful workspace heartbeat after a turn as presence proof";
     default = true; category = "keeper";
-    lifecycle = Active; since = "2.162.0" };
+    lifecycle = Active };
 
   { env_name = "MASC_KEEPER_WIRE_CAPTURE";
     description = "Default-off diagnostic MASC-to-OAS request/response wire capture";
     default = false; category = "keeper";
-    lifecycle = Experimental; since = "2.254.0" };
+    lifecycle = Experimental };
 
   { env_name = "MASC_KEEPER_DEBUG";
     description = "Keeper debug logging";
     default = false; category = "keeper";
-    lifecycle = Active; since = "2.50.0" };
+    lifecycle = Active };
 
   { env_name = "MASC_KEEPER_DOCKER_PLAYGROUND";
     description = "Route Execute commands through Docker container";
     default = false; category = "keeper";
-    lifecycle = Active; since = "2.233.0" };
+    lifecycle = Active };
 
   (* ── Dashboard ────────────────────────────────────────────── *)
   { env_name = "MASC_DASHBOARD_FIXTURES_ENABLED";
     description = "Load dashboard fixture data for testing";
     default = false; category = "dashboard";
-    lifecycle = Active; since = "2.140.0" };
+    lifecycle = Active };
 
   { env_name = "MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE";
     description = "Serve stale operator snapshots while recomputing in the background";
     default = true; category = "dashboard";
-    lifecycle = Active; since = "2.150.0" };
+    lifecycle = Active };
 
   (* ── Runtime ──────────────────────────────────────────────── *)
   { env_name = Env_config_core.orchestrator_enabled_env_key;
     description = "Enable the orchestrator task-availability check loop";
     default = false; category = "runtime";
-    lifecycle = Active; since = "2.0.0" };
+    lifecycle = Active };
 
   { env_name = "MASC_LOCAL_RUNTIME_DEBUG";
     description = "Local LLM runtime debug output";
     default = false; category = "runtime";
-    lifecycle = Active; since = "2.200.0" };
+    lifecycle = Active };
 
   (* ── Contract verification ───────────────────────────────── *)
 ]
@@ -165,12 +157,12 @@ let get_bool env_name =
   match find_opt env_name with
   | Some flag -> runtime_value flag
   | None ->
-      Log.Misc.warn "feature flag %s not found in registry" env_name;
-      Env_config_core.get_bool ~default:false env_name
+      raise
+        (Config_error
+           (Printf.sprintf "feature flag %s is not registered" env_name))
 
 let lifecycle_to_string = function
   | Active -> "active"
-  | Deprecated reason -> "deprecated: " ^ reason
   | Experimental -> "experimental"
 
 (** Serialize a single flag to JSON with its runtime value. *)
@@ -183,7 +175,6 @@ let flag_to_json flag =
     ("source", `String (runtime_source flag));
     ("category", `String flag.category);
     ("lifecycle", `String (lifecycle_to_string flag.lifecycle));
-    ("since", `String flag.since);
   ]
 
 (** Serialize all flags grouped by category. *)
@@ -200,7 +191,3 @@ let to_json () =
 (** Flags where runtime value differs from canonical default. *)
 let overridden_flags () =
   List.filter (fun f -> runtime_value f <> f.default) all_flags
-
-(** Flags in deprecated lifecycle state. *)
-let deprecated_flags () =
-  List.filter (fun f -> match f.lifecycle with Deprecated _ -> true | Active | Experimental -> false) all_flags

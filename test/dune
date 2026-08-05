@@ -691,9 +691,16 @@
   (source_tree ../scripts/fixtures))
  (libraries masc_test_deps compaction_exact_output_fixture))
 
+; Reads lib/keeper sources through Ast_grep, so those sources are deps: without
+; them dune keeps a cached pass and the suite never re-runs when the code it
+; asserts on changes.
 (test
  (name test_keeper_keepalive_launch_order_ast)
  (modules test_keeper_keepalive_launch_order_ast)
+ (deps
+  %{workspace_root}/lib/keeper/keeper_keepalive.ml
+  %{workspace_root}/lib/keeper/keeper_supervisor_launch.ml
+  %{workspace_root}/test/fixtures/keeper_keepalive_launch_order_ast_fixture.ml)
  (libraries alcotest ast_grep))
 
 (test
@@ -2549,4 +2556,17 @@
  (deps
   %{workspace_root}/benchmarks/data/tool_call_quality_cases.json
   %{workspace_root}/test/fixtures/tool_call_quality_benchmark/evidence_runs.json)
+ (libraries alcotest masc_test_deps))
+
+; The assembled keeper system prompt is built from registry text plus in-code
+; XML structure; substring assertions cannot see block order, separator bytes,
+; or a block that resolved to the empty string. This golden pins the whole
+; string, and declaring the prompt sources as deps is what makes an edit under
+; config/prompts re-run it instead of returning a cached pass.
+(test
+ (name test_keeper_system_prompt_bytes)
+ (modules test_keeper_system_prompt_bytes)
+ (deps
+  (source_tree %{workspace_root}/config/prompts)
+  %{workspace_root}/test/fixtures/keeper_system_prompt/assembled_prompt.golden)
  (libraries alcotest masc_test_deps))

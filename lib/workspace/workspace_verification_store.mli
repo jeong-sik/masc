@@ -21,7 +21,6 @@ type submitted_evidence_item =
       ; content : string
       ; bytes : int
       ; truncated : bool
-      ; content_sha256 : string
       }
   | Evidence_invalid_reference
   | Evidence_artifact_unreadable of
@@ -70,10 +69,24 @@ val snapshot_submitted_evidence_json :
   Yojson.Safe.t
 (** Materialize submitted evidence once at the producer's submit boundary.
     ["artifact:<relative-path>"] is rooted at the producer's declared sandbox;
-    ["note:<text>"] preserves non-file evidence explicitly.
-    [content_sha256] covers the bounded UTF-8 content persisted in the
-    snapshot, not bytes omitted beyond the projection cap. Bare and absolute
-    references are persisted as a payload-free typed invalid-reference item. *)
+    ["note:<text>"] preserves non-file evidence explicitly. [bytes] reports the
+    source size, which exceeds the persisted [content] length when [truncated]
+    is set by the projection cap. Bare and absolute references are persisted as
+    a payload-free typed invalid-reference item. *)
+
+val submitted_evidence_identity_lines :
+  Yojson.Safe.t -> (string list, string) result
+(** Project a persisted [submitted_evidence] snapshot into one identity line
+    per item, for surfaces that name evidence without reading its payload —
+    artifacts project to their reference, notes to their prefixed text, and
+    unreadable items carry the typed reason code so an operator sees the
+    failure rather than a silent gap. Payloads are served separately by the
+    authority-scoped evidence route.
+
+    This module writes the snapshot, so it owns the shape: a caller must not
+    re-derive it. Returns [Error] on any item this module did not write and
+    never partially projects a malformed array. *)
+
 val inspect_submitted_evidence_for_authority :
   base_path:string ->
   request_id:string ->

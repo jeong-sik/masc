@@ -34,10 +34,12 @@ type drain_outcome =
       { contention : contention
       ; reason : retry_reason
       }
-(** [Owner_generation_deferred] terminates only the stale worker generation.
-    It neither marks the durable partition drained nor schedules a retry; the
-    unchanged pending partition remains discoverable when the lifecycle-owned
-    registration starts the next owner generation. *)
+(** [Drained] clears the contention re-arms; [Retry_later] keeps the durable
+    partition undrained and re-arms the contention timer, so the same worker
+    re-inspects it (see [apply_drain_rearm]). A generation that moved under the
+    worker arrives here as [Retry_later { reason = Selected_generation_changed }]
+    and is retried, not abandoned. The ledger stays the work authority in both
+    cases. *)
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }

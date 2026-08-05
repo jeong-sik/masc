@@ -317,15 +317,15 @@ let test_profile_defaults_feed_identity_prompt () =
   check bool "profile instructions in system prompt" true
     (contains ~needle:"Custom instructions:\nsoul instructions" system)
 
-let test_no_goal_prompt_blocks_repo_creation_question () =
-  with_repo_prompt_config @@ fun () ->
-  let system = system_prompt base_observation in
-  check bool "no active goal guidance present" true
-    (contains ~needle:"You have no active goal" system);
-  check bool "no repo creation question guard present" true
-    (contains
-       ~needle:"Do not ask the operator what repo, goal, or task to create"
-       system)
+(* The no-goal guidance this used to assert ("You have no active goal", "Do not
+   ask the operator what repo, goal, or task to create") was removed on purpose
+   by #26123, which stopped the runtime from prescribing the agent's next tool.
+   The assertion outlived the text by asserting bytes no prompt emits any more,
+   and stayed invisible because no prompt suite ran in CI. The surviving,
+   non-prescriptive statement of the same concern lives in keeper.system.md
+   ("When the board is genuinely empty, that is a fact about supply, not a
+   conclusion that there is nothing to do") and is covered by the assembled
+   prompt golden. *)
 
 (* The section is rendered from Keeper_sandbox, so the assertion compares
    against that SSOT rather than a sentence. Rewording the prompt keeps this
@@ -437,8 +437,6 @@ let () =
             test_namespace_state_names_running_keeper_fibers;
           test_case "profile defaults feed identity prompt" `Quick
             test_profile_defaults_feed_identity_prompt;
-          test_case "no-goal prompt blocks repo creation question" `Quick
-            test_no_goal_prompt_blocks_repo_creation_question;
         ] );
       ( "namespace state backlog statement",
         [

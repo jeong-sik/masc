@@ -4,6 +4,49 @@ open Masc
 module K = Keeper_chat_store
 module KT = Keeper_turn
 
+let stream_payload_exn
+      ?(user_blocks = [])
+      ?(attachments = [])
+      ?turn_instructions
+      ?surface_context
+      ?(channel = "")
+      ?(channel_user_id = "")
+      ?(channel_user_name = "")
+      ?(channel_workspace_id = "")
+      ~name
+      ~message
+      ()
+  =
+  let direct_message =
+    match
+      Keeper_invocation_contract.direct_message
+        ~keeper_name:name
+        ~prompt:message
+        ~direct_reply:true
+        ?turn_instructions
+        ?surface_context
+        ~channel
+        ~user_blocks
+        ~attachments
+        ()
+    with
+    | Ok message -> message
+    | Error error ->
+      fail (Keeper_invocation_contract.request_error_to_string error)
+  in
+  { Server_routes_http_keeper_stream.name = name
+  ; message
+  ; user_blocks
+  ; turn_instructions
+  ; surface_context
+  ; channel
+  ; channel_user_id
+  ; channel_user_name
+  ; channel_workspace_id
+  ; attachments
+  ; direct_message
+  }
+
 let rec remove_tree path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -274,17 +317,28 @@ let test_parse_keeper_chat_stream_request_accepts_connector_context () =
       check string "workspace id" "workspace-9" payload.channel_workspace_id
   | Error err -> fail ("expected connector context to parse: " ^ err)
 
-let test_parse_keeper_chat_stream_request_rejects_removed_timeout () =
-  let body = {|{"name":"luna","message":"hello","timeout_sec":1200.5}|} in
+let test_parse_keeper_chat_stream_request_rejects_unknown_field () =
+  let body = {|{"name":"luna","message":"hello","unexpected":true}|} in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
-  | Ok _ -> fail "expected the retired request timeout to be rejected"
+  | Ok _ -> fail "expected an undeclared field to be rejected"
   | Error err ->
-    check string
-      "removed field is named explicitly"
-      "removed keeper message args for masc_keeper_msg: timeout_sec \
-       (request-level whole-turn deadline is retired; use explicit operator \
-       cancellation, provider progress deadlines, or tool-local deadlines)."
-      err
+    check bool "unknown field is named" true (string_contains err "unexpected")
+;;
+
+let test_parse_keeper_chat_stream_request_rejects_duplicate_field () =
+  let body = {|{"name":"luna","name":"other","message":"hello"}|} in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected duplicate fields to be rejected"
+  | Error err ->
+    check string "duplicate field error"
+      "request body must contain unique fields" err
+;;
+
+let test_parse_keeper_chat_stream_request_rejects_wrong_field_type () =
+  let body = {|{"name":"luna","message":"hello","channel":42}|} in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected wrong field type to be rejected"
+  | Error err -> check string "wrong type error" "channel must be a string" err
 ;;
 
 let test_parse_keeper_chat_stream_request_rejects_partial_connector_context () =
@@ -637,52 +691,38 @@ let test_keeper_stream_args_preserve_user_blocks () =
       size = Some 1024;
     }
   in
-  let payload =
-    { Server_routes_http_keeper_stream.name = "luna";
-      message = "describe this";
-      user_blocks =
-        [
-          Keeper_multimodal_input.User_text "describe this";
-          Keeper_multimodal_input.User_image media;
-        ];
-      turn_instructions = None;
-      surface_context = None;
-      channel = "";
-      channel_user_id = "";
-      channel_user_name = "";
-      channel_workspace_id = "";
-      attachments =
-        [
-          {
-            K.id = "att-img";
-            att_type = "image";
-            name = "screen.png";
-            size = 1024;
-            mime_type = "image/png";
-            data = "abc123";
-          };
-        ];
-    }
+  let user_blocks =
+    [ Keeper_multimodal_input.User_text "describe this"
+    ; Keeper_multimodal_input.User_image media
+    ]
   in
-  match Server_routes_http_keeper_stream.For_testing.args_of_request payload with
-  | `Assoc fields -> (
-      match List.assoc_opt "user_blocks" fields, List.assoc_opt "attachments" fields with
-      | Some (`List [ `Assoc text_fields; `Assoc image_fields ]),
-        Some (`List [ `Assoc attachment_fields ]) ->
-          check (option string) "text block type" (Some "text")
-            (match List.assoc_opt "type" text_fields with
-             | Some (`String value) -> Some value
-             | _ -> None);
-          check (option string) "image block ref" (Some "att-img")
-            (match List.assoc_opt "attachment_id" image_fields with
-             | Some (`String value) -> Some value
-             | _ -> None);
-          check (option string) "attachment payload" (Some "abc123")
-            (match List.assoc_opt "data" attachment_fields with
-             | Some (`String value) -> Some value
-             | _ -> None)
-      | _ -> fail "expected user_blocks and attachment payload in keeper args")
-  | _ -> fail "expected keeper args object"
+  let attachments =
+    [ { K.id = "att-img"
+      ; att_type = "image"
+      ; name = "screen.png"
+      ; size = 1024
+      ; mime_type = "image/png"
+      ; data = "data:image/png;base64,abc123"
+      }
+    ]
+  in
+  let payload =
+    stream_payload_exn ~name:"luna" ~message:"describe this" ~user_blocks
+      ~attachments ()
+  in
+  let direct_message =
+    Server_routes_http_keeper_stream.For_testing.direct_message_of_request payload
+  in
+  check int "user blocks" 2
+    (List.length
+       (Keeper_invocation_contract.direct_message_user_blocks direct_message));
+  check int "attachments" 1
+    (List.length
+       (Keeper_invocation_contract.direct_message_attachments direct_message));
+  check int "OAS blocks validated at boundary" 2
+    (Keeper_invocation_contract.direct_message_user_oas_blocks direct_message
+     |> Option.map List.length
+     |> Option.value ~default:0)
 
 let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
   let open Agent_sdk.Types in
@@ -2612,16 +2652,8 @@ let test_surface_context_mcp_path_renders_list_fields () =
 
 let test_chat_surface_of_request_labels_copilot_gate () =
   let payload =
-    { Server_routes_http_keeper_stream.name = "luna";
-      message = "hello";
-      turn_instructions = None;
-      surface_context = None;
-      user_blocks = [];
-      channel = "copilot";
-      channel_user_id = "";
-      channel_user_name = "";
-      channel_workspace_id = "session-7";
-      attachments = [] }
+    stream_payload_exn ~name:"luna" ~message:"hello" ~channel:"copilot"
+      ~channel_workspace_id:"session-7" ()
   in
   let surface = Server_routes_http_keeper_stream.For_testing.chat_surface_of_request payload in
   check string "copilot surface label" "copilot" (Surface_ref.lane_label surface);
@@ -2635,16 +2667,8 @@ let test_chat_surface_of_request_labels_copilot_gate () =
 
 let test_chat_speaker_of_request_copilot_is_owner () =
   let payload =
-    { Server_routes_http_keeper_stream.name = "luna";
-      message = "hello";
-      turn_instructions = None;
-      surface_context = None;
-      user_blocks = [];
-      channel = "copilot";
-      channel_user_id = "";
-      channel_user_name = "";
-      channel_workspace_id = "session-7";
-      attachments = [] }
+    stream_payload_exn ~name:"luna" ~message:"hello" ~channel:"copilot"
+      ~channel_workspace_id:"session-7" ()
   in
   let speaker = Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload in
   check (option string) "copilot speaker id" None speaker.speaker_id;
@@ -2654,45 +2678,15 @@ let test_chat_speaker_of_request_copilot_is_owner () =
 
 let test_chat_speaker_of_request_connector_is_external () =
   let payload =
-    { Server_routes_http_keeper_stream.name = "luna";
-      message = "hello";
-      turn_instructions = None;
-      surface_context = None;
-      user_blocks = [];
-      channel = "discord";
-      channel_user_id = "user-42";
-      channel_user_name = "Alice";
-      channel_workspace_id = "workspace-9";
-      attachments = [] }
+    stream_payload_exn ~name:"luna" ~message:"hello" ~channel:"discord"
+      ~channel_user_id:"user-42" ~channel_user_name:"Alice"
+      ~channel_workspace_id:"workspace-9" ()
   in
   let speaker = Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload in
   check (option string) "connector speaker id" (Some "user-42") speaker.speaker_id;
   check (option string) "connector speaker name" (Some "Alice") speaker.speaker_name;
   check bool "connector speaker authority is external" true
     (speaker.speaker_authority = Keeper_chat_store.External)
-
-let test_parse_keeper_chat_stream_request_rejects_legacy_model_args () =
-  let cases =
-    [
-      ( "models",
-        {|{"name":"luna","message":"hello","models":["glm:legacy"]}|} );
-      ( "allowed_models",
-        {|{"name":"luna","message":"hello","allowed_models":["glm:legacy"]}|} );
-      ( "active_model",
-        {|{"name":"luna","message":"hello","active_model":"glm:legacy"}|} );
-    ]
-  in
-  List.iter
-    (fun (field, body) ->
-      match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
-      | Ok _ -> fail ("expected legacy field to be rejected: " ^ field)
-      | Error err ->
-          check string ("legacy field rejected: " ^ field)
-            (Printf.sprintf
-               "removed keeper model args for masc_keeper_msg: %s. Use runtime_id; concrete provider/model identity is resolved from the default runtime."
-               field)
-            err)
-    cases
 
 (* ── Filesystem-safe sanitizer ──────────────────────────────────────── *)
 
@@ -2929,8 +2923,12 @@ let () =
             test_contextualize_message_includes_channel_metadata;
           test_case "stream request accepts connector context" `Quick
             test_parse_keeper_chat_stream_request_accepts_connector_context;
-          test_case "stream request rejects removed request timeout" `Quick
-            test_parse_keeper_chat_stream_request_rejects_removed_timeout;
+          test_case "stream request rejects unknown fields" `Quick
+            test_parse_keeper_chat_stream_request_rejects_unknown_field;
+          test_case "stream request rejects duplicate fields" `Quick
+            test_parse_keeper_chat_stream_request_rejects_duplicate_field;
+          test_case "stream request rejects wrong field types" `Quick
+            test_parse_keeper_chat_stream_request_rejects_wrong_field_type;
           test_case "stream request rejects partial connector context" `Quick
             test_parse_keeper_chat_stream_request_rejects_partial_connector_context;
           test_case "stream request accepts copilot context" `Quick
@@ -3059,8 +3057,6 @@ let () =
             test_chat_speaker_of_request_copilot_is_owner;
           test_case "connector request speaker is external" `Quick
             test_chat_speaker_of_request_connector_is_external;
-          test_case "stream request rejects legacy model args" `Quick
-            test_parse_keeper_chat_stream_request_rejects_legacy_model_args;
         ] );
       ( "filesystem_safe",
         [

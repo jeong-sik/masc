@@ -23,7 +23,6 @@ type submitted_evidence_item =
       ; content : string
       ; bytes : int
       ; truncated : bool
-      ; content_sha256 : string
       }
   | Evidence_invalid_reference
   | Evidence_artifact_unreadable of
@@ -48,6 +47,11 @@ type submitted_evidence_access =
       { request_id : string
       ; reason : evidence_access_failure
       }
+
+(* Reason code for a reference this module refused to materialize. Unlike the
+   [evidence_read_failure] codes it sits beside on the wire, it has no variant:
+   the rejected reference is never persisted, so there is nothing to carry. *)
+let invalid_reference_code = "invalid_reference"
 
 let evidence_read_failure_code = function
   | Evidence_missing -> "missing"
@@ -85,26 +89,21 @@ let evidence_read_failure_of_yojson = function
      | _ -> Error "submitted evidence snapshot has an invalid unreadable reason")
   | _ -> Error "submitted evidence snapshot unreadable reason must be an object"
 
-let content_sha256 content =
-  Digestif.SHA256.(digest_string content |> to_hex)
-
 let submitted_evidence_item_to_yojson = function
   | Evidence_note note ->
     `Assoc [ "kind", `String "note"; "content", `String note ]
-  | Evidence_artifact
-      { reference; content; bytes; truncated; content_sha256 } ->
+  | Evidence_artifact { reference; content; bytes; truncated } ->
     `Assoc
       [ "kind", `String "artifact"
       ; "reference", `String reference
       ; "content", `String content
       ; "bytes", `Int bytes
       ; "truncated", `Bool truncated
-      ; "content_sha256", `String content_sha256
       ]
   | Evidence_invalid_reference ->
     `Assoc
       [ "kind", `String "artifact_unreadable"
-      ; "reason", `Assoc [ "code", `String "invalid_reference" ]
+      ; "reason", `Assoc [ "code", `String invalid_reference_code ]
       ]
   | Evidence_artifact_unreadable { reference; reason } ->
     `Assoc
@@ -169,23 +168,18 @@ let submitted_evidence_access_to_yojson = function
 
 let submitted_evidence_item_metadata_to_yojson = function
   | Evidence_note note ->
-    `Assoc
-      [ "kind", `String "note"
-      ; "bytes", `Int (String.length note)
-      ; "content_sha256", `String (content_sha256 note)
-      ]
-  | Evidence_artifact { reference; bytes; truncated; content_sha256; _ } ->
+    `Assoc [ "kind", `String "note"; "bytes", `Int (String.length note) ]
+  | Evidence_artifact { reference; bytes; truncated; _ } ->
     `Assoc
       [ "kind", `String "artifact"
       ; "reference", `String reference
       ; "bytes", `Int bytes
       ; "truncated", `Bool truncated
-      ; "content_sha256", `String content_sha256
       ]
   | Evidence_invalid_reference ->
     `Assoc
       [ "kind", `String "artifact_unreadable"
-      ; "reason", `String "invalid_reference"
+      ; "reason", `String invalid_reference_code
       ]
   | Evidence_artifact_unreadable { reference; reason } ->
     `Assoc
@@ -239,7 +233,6 @@ let submitted_evidence_item_of_yojson = function
        let open Result.Syntax in
        let* reference = string_field "reference" in
        let* content = string_field "content" in
-       let* expected_content_sha256 = string_field "content_sha256" in
        let* bytes =
          match List.assoc_opt "bytes" fields with
          | Some (`Int value) when value >= 0 -> Ok value
@@ -261,15 +254,7 @@ let submitted_evidence_item_of_yojson = function
          | None -> Error "submitted evidence snapshot is missing truncated"
        in
        let content_bytes = String.length content in
-       if
-         not
-           (String.equal
-              expected_content_sha256
-              (content_sha256 content))
-       then
-         Error
-           "submitted evidence snapshot content_sha256 does not match persisted content"
-       else if truncated && bytes <= content_bytes
+       if truncated && bytes <= content_bytes
        then
          Error
            "truncated submitted evidence snapshot must report more source bytes than persisted content"
@@ -277,15 +262,7 @@ let submitted_evidence_item_of_yojson = function
        then
          Error
            "non-truncated submitted evidence snapshot bytes must equal persisted content length"
-       else
-         Ok
-           (Evidence_artifact
-              { reference
-              ; content
-              ; bytes
-              ; truncated
-              ; content_sha256 = expected_content_sha256
-              })
+       else Ok (Evidence_artifact { reference; content; bytes; truncated })
      | Some (`String "artifact_unreadable") ->
        let open Result.Syntax in
        let field_names =
@@ -573,13 +550,7 @@ let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_pa
     | Error reason ->
       Evidence_artifact_unreadable { reference; reason }
     | Ok (content, bytes, truncated) ->
-      Evidence_artifact
-        { reference
-        ; content
-        ; bytes
-        ; truncated
-        ; content_sha256 = content_sha256 content
-        }
+      Evidence_artifact { reference; content; bytes; truncated }
 
 let snapshot_submitted_evidence_item ~base_path ~worker reference =
   match strip_prefix ~prefix:artifact_reference_prefix reference with
@@ -602,6 +573,44 @@ let snapshot_submitted_evidence_json ~base_path ~worker references =
          snapshot_submitted_evidence_item ~base_path ~worker reference
          |> submitted_evidence_item_to_yojson)
        references)
+
+(* Decode through this module's own snapshot decoder instead of re-reading the
+   JSON fields. Both surfaces read the same persisted bytes, so they have to
+   agree on which snapshots are well-formed: re-deriving the shape here let an
+   artifact item with a [reference] but missing or invalid [content]/[bytes]/
+   [truncated] render as an ordinary identity line while the authority-scoped
+   payload route rejected the very same item. Matching on the typed value makes
+   that divergence unrepresentable, and a new variant becomes a compile error
+   here rather than an [unknown kind] string at runtime. *)
+let submitted_evidence_identity_line (item : Yojson.Safe.t) =
+  match submitted_evidence_item_of_yojson item with
+  | Error detail -> Error detail
+  | Ok (Evidence_note note) -> Ok (note_reference_prefix ^ note)
+  | Ok (Evidence_artifact { reference; _ }) -> Ok reference
+  | Ok Evidence_invalid_reference ->
+    Ok (Printf.sprintf "(unreadable: %s)" invalid_reference_code)
+  | Ok (Evidence_artifact_unreadable { reference; reason }) ->
+    Ok
+      (Printf.sprintf
+         "%s (unreadable: %s)"
+         reference
+         (evidence_read_failure_code reason))
+;;
+
+let submitted_evidence_identity_lines (json : Yojson.Safe.t) =
+  match json with
+  | `List items ->
+    List.fold_left
+      (fun acc item ->
+        match acc, submitted_evidence_identity_line item with
+        | Error _, _ -> acc
+        | Ok lines, Ok line -> Ok (line :: lines)
+        | Ok _, Error detail -> Error detail)
+      (Ok [])
+      items
+    |> Result.map List.rev
+  | _ -> Error "submitted evidence must be an array"
+;;
 
 let inspect_submitted_evidence_for_authority ~base_path ~request_id ~task_id
     ~task_worker ~(authority : Masc_domain.completion_authority) =

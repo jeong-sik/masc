@@ -11,10 +11,12 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 
-(* Pre-compiled patterns for keeper name substitution in prompt templates.
-   Top-level to avoid re-compilation on every build_keeper_system_prompt call. *)
-let re_keeper_name_curly = Re.(compile (str "{your-name}"))
-let re_keeper_name_upper = Re.(compile (str "YOUR_KEEPER_NAME"))
+(* The keeper name reaches the prompt through [identity_anchor] and
+   [<identity>], both built from [keeper_name] directly. The former
+   [{your-name}] / [YOUR_KEEPER_NAME] substitution pass is gone: no prompt asset
+   declares either placeholder, so it rewrote nothing while scanning the whole
+   shared prompt body on every build. Reintroducing name interpolation belongs
+   in declared template variables, not a second substitution mechanism. *)
 
 let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
@@ -98,13 +100,6 @@ let build_keeper_system_prompt
     if s = "" then ""
     else Printf.sprintf "\nCustom instructions:\n%s\n" s
   in
-  let substitute_keeper_name s =
-    if keeper_name = "" then s
-    else
-      s
-      |> Re.replace_string re_keeper_name_curly ~by:keeper_name
-      |> Re.replace_string re_keeper_name_upper ~by:keeper_name
-  in
   let active_goals_block =
     match active_goals with
     | [] -> ""
@@ -164,7 +159,7 @@ let build_keeper_system_prompt
     [
       (* ── Shared prefix (identical across all keepers) ────────── *)
       "<system>\n";
-      substitute_keeper_name (system_prompt_body ());
+      system_prompt_body ();
       "\n</system>\n\n";
       (* ── Identity anchor (compaction-safe, ~50 tokens) ──────── *)
       identity_anchor;

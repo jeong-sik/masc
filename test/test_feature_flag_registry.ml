@@ -1,23 +1,18 @@
 (** Pure-function unit tests for [Feature_flag_registry].
 
-    Audit P2 follow-up (2026-04-29 §3.1.2) — the registry was
-    listed as "테스트 완전 부재" with the recommendation
-    "exhaustive variant match test".  This suite pins:
+    This suite pins:
 
-    1. [lifecycle_to_string] covers all 3 variants
-       ([Active], [Deprecated _], [Experimental]) without
-       partial-match silent regression.
+    1. [lifecycle_to_string] covers the current variants
+       ([Active], [Experimental]) without partial-match regression.
     2. Registry invariants: non-empty, env-var name uniqueness,
-       no [Deprecated reason=""], every entry's category is one
-       of the documented six.
+       and every entry's category is one of the documented six.
     3. [find_opt] returns [Some] for registered flags and
        [None] for unknown names.
-    4. [flag_to_json] emits the documented 8-field shape.
+    4. [flag_to_json] emits the documented current field shape.
     5. [to_json] groups all flags into the 6 documented
        categories and the [total_flags] field equals
        [List.length all_flags].
-    6. [deprecated_flags] / [overridden_flags] partition
-       behaviour. *)
+    6. [overridden_flags] returns only actual overrides. *)
 
 module R = Feature_flag_registry
 
@@ -29,18 +24,6 @@ let test_lifecycle_active () =
 let test_lifecycle_experimental () =
   assert (R.lifecycle_to_string R.Experimental = "experimental")
 
-let test_lifecycle_deprecated_with_reason () =
-  let s =
-    R.lifecycle_to_string (R.Deprecated "replaced by MASC_X")
-  in
-  assert (s = "deprecated: replaced by MASC_X")
-
-let test_lifecycle_deprecated_empty_reason () =
-  (* Documents the trailing-space + empty reason behaviour.
-     Not a great UX but pinning current shape. *)
-  let s = R.lifecycle_to_string (R.Deprecated "") in
-  assert (s = "deprecated: ")
-
 (* ─── (2) registry invariants ─────────────────────────────────── *)
 
 let test_registry_nonempty () =
@@ -50,17 +33,6 @@ let test_env_names_unique () =
   let names = List.map (fun f -> f.R.env_name) R.all_flags in
   let unique = List.sort_uniq String.compare names in
   assert (List.length names = List.length unique)
-
-let test_no_blank_deprecation_reason () =
-  let bad =
-    List.filter
-      (fun f ->
-        match f.R.lifecycle with
-        | R.Deprecated "" -> true
-        | _ -> false)
-      R.all_flags
-  in
-  assert (List.length bad = 0)
 
 let test_every_env_name_has_masc_prefix () =
   List.iter
@@ -92,6 +64,11 @@ let test_find_opt_unknown () =
   | None -> ()
   | Some _ -> assert false
 
+let test_get_bool_unknown_rejected () =
+  match R.get_bool "MASC_THIS_FLAG_DOES_NOT_EXIST_XYZ123" with
+  | _ -> assert false
+  | exception Env_config_core.Config_error _ -> ()
+
 let test_find_opt_first_registered () =
   match R.all_flags with
   | [] -> assert false  (* covered by test_registry_nonempty *)
@@ -107,15 +84,14 @@ let test_path_jail_kill_switch_removed () =
 
 (* ─── (4) flag_to_json shape ──────────────────────────────────── *)
 
-let test_flag_to_json_eight_fields () =
+let test_flag_to_json_current_fields () =
   match R.all_flags with
   | [] -> assert false
   | first :: _ ->
       let j = R.flag_to_json first in
       let expected_keys =
         [ "env_name"; "description"; "canonical_default";
-          "runtime_value"; "source"; "category"; "lifecycle";
-          "since" ]
+          "runtime_value"; "source"; "category"; "lifecycle" ]
       in
       List.iter
         (fun k ->
@@ -176,16 +152,7 @@ let test_to_json_categories_partition_all_flags () =
   in
   assert (summed = List.length R.all_flags)
 
-(* ─── (6) deprecated_flags / overridden_flags ─────────────────── *)
-
-let test_deprecated_flags_only_deprecated () =
-  let dep = R.deprecated_flags () in
-  List.iter
-    (fun f ->
-      match f.R.lifecycle with
-      | R.Deprecated _ -> ()
-      | _ -> assert false)
-    dep
+(* ─── (6) overridden_flags ────────────────────────────────────── *)
 
 let test_overridden_flags_subset_of_all () =
   (* Without setting env vars, [overridden_flags] should be a
@@ -202,21 +169,18 @@ let test_overridden_flags_subset_of_all () =
 let () =
   test_lifecycle_active ();
   test_lifecycle_experimental ();
-  test_lifecycle_deprecated_with_reason ();
-  test_lifecycle_deprecated_empty_reason ();
   test_registry_nonempty ();
   test_env_names_unique ();
-  test_no_blank_deprecation_reason ();
   test_every_env_name_has_masc_prefix ();
   test_every_category_in_documented_set ();
   test_find_opt_unknown ();
+  test_get_bool_unknown_rejected ();
   test_find_opt_first_registered ();
   test_path_jail_kill_switch_removed ();
-  test_flag_to_json_eight_fields ();
+  test_flag_to_json_current_fields ();
   test_flag_to_json_canonical_default_is_bool ();
   test_to_json_total_matches_all_flags ();
   test_to_json_six_categories ();
   test_to_json_categories_partition_all_flags ();
-  test_deprecated_flags_only_deprecated ();
   test_overridden_flags_subset_of_all ();
   print_endline "test_feature_flag_registry: all assertions passed"

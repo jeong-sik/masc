@@ -15,7 +15,7 @@ const rawHistory = [
     blocks: [{
       t: 'trace',
       trace: [
-        { kind: 'think', text: '내부 판단 단계 (내용 비공개)' },
+        { kind: 'think', text: '', content_withheld: true },
         {
           kind: 'tool',
           name: 'keeper_tasks_list',

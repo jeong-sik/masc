@@ -22,6 +22,21 @@ let thread_id = "busy-dashboard-thread"
 
 let payload ?(name = keeper_name) ?(content = "are you there?") ()
     : Server_routes_http_keeper_stream.keeper_chat_stream_request =
+  let direct_message =
+    match
+      Keeper_invocation_contract.direct_message
+        ~keeper_name:name
+        ~prompt:content
+        ~direct_reply:true
+        ~channel:""
+        ~user_blocks:[]
+        ~attachments:[]
+        ()
+    with
+    | Ok message -> message
+    | Error error ->
+      failwith (Keeper_invocation_contract.request_error_to_string error)
+  in
   { name
   ; message = content
   ; user_blocks = []
@@ -32,6 +47,7 @@ let payload ?(name = keeper_name) ?(content = "are you there?") ()
   ; channel_user_name = ""
   ; channel_workspace_id = ""
   ; attachments = []
+  ; direct_message
   }
 ;;
 
@@ -372,14 +388,14 @@ let test_stream_surface_preserves_typed_shutdown_rejection () =
     }
   in
   let observed = ref None in
+  let message =
+    (payload ~content:"must remain pending" ()).direct_message
+  in
   let result =
     Keeper_tool_surface_ops.handle_keeper_msg_stream
       ~on_admission_rejected:(fun rejection -> observed := Some rejection)
       ctx
-      (`Assoc
-         [ ("name", `String keeper_name)
-         ; ("message", `String "must remain pending")
-         ])
+      message
   in
   check "shutdown-fenced stream dispatch does not report success"
     (not (Tool_result.is_success result));

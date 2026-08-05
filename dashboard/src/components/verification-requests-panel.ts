@@ -173,7 +173,7 @@ function VerificationRow({ row }: { row: VerificationRequest }) {
                     ? html`
                         <div>
                           <${DetailLabel}>Required Artifacts</${DetailLabel}>
-                          <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--color-fg-primary)]">
+                          <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--color-fg-primary)] break-words">
                             ${row.required_artifacts.map((artifact) => html`<li><code>${artifact}</code></li>`)}
                           </ul>
                         </div>
@@ -183,7 +183,11 @@ function VerificationRow({ row }: { row: VerificationRequest }) {
                     ? html`
                         <div>
                           <${DetailLabel}>Submitted Evidence</${DetailLabel}>
-                          <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--color-fg-primary)]">
+                          <!-- Identity lines are producer-supplied: the live store holds a
+                               1083-char reference and 77 notes over 200 chars, and a path has
+                               no spaces to break at. Without break-words these overflow the
+                               row horizontally instead of wrapping. -->
+                          <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--color-fg-primary)] break-words">
                             ${row.submitted_evidence.map((evidence) => html`<li><code>${evidence}</code></li>`)}
                           </ul>
                         </div>

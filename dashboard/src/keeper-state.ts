@@ -448,6 +448,20 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
   if (!isRecord(raw)) return null
   const kind = asString(raw.kind)
   if (kind === 'think') {
+    // The withheld flag is the discriminator, and it has to be read before
+    // `text`: a withheld step carries "" by contract, and `asString` reports an
+    // empty string as absent, which would drop the step — and with it the whole
+    // trace, since `normalizeTraceSteps` nulls the array if any step is null.
+    const contentWithheld = raw.content_withheld === true || raw.contentWithheld === true
+    if (contentWithheld) {
+      return withoutUndefined({
+        kind,
+        text: '',
+        contentWithheld: true,
+        ts: asString(raw.ts),
+        oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
+      })
+    }
     const text = asString(raw.text)
     return text !== undefined
       ? withoutUndefined({

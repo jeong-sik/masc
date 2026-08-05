@@ -207,6 +207,35 @@ let payload_of_queued_message ~keeper_name
     (queued_message : Keeper_chat_queue.queued_message) :
     Server_routes_http_keeper_stream.keeper_chat_stream_request =
   let projection = queued_chat_projection queued_message in
+  let prompt =
+    if projection.payload_channel <> ""
+       && projection.payload_channel_workspace_id <> ""
+       && projection.payload_channel_user_id <> ""
+    then
+      Gate_keeper_backend.contextualize_message
+        ~channel:projection.payload_channel
+        ~channel_user_id:projection.payload_channel_user_id
+        ~channel_user_name:projection.payload_channel_user_name
+        ~channel_workspace_id:projection.payload_channel_workspace_id
+        ~metadata:[]
+        ~content:queued_message.content
+    else queued_message.content
+  in
+  let direct_message =
+    match
+      Keeper_invocation_contract.direct_message
+        ~keeper_name
+        ~prompt
+        ~direct_reply:true
+        ~channel:projection.payload_channel
+        ~user_blocks:queued_message.user_blocks
+        ~attachments:queued_message.attachments
+        ()
+    with
+    | Ok message -> message
+    | Error error ->
+      invalid_arg (Keeper_invocation_contract.request_error_to_string error)
+  in
   { Server_routes_http_keeper_stream.name = keeper_name
   ; message = queued_message.content
   ; turn_instructions = None
@@ -217,6 +246,7 @@ let payload_of_queued_message ~keeper_name
   ; channel_workspace_id = projection.payload_channel_workspace_id
   ; user_blocks = queued_message.user_blocks
   ; attachments = queued_message.attachments
+  ; direct_message
   }
 
 let trimmed_env_opt name =

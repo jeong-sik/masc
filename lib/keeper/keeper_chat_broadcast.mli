@@ -16,11 +16,10 @@ type audio_clip = {
   expired : bool;
 }
 
-(** Broadcast a [keeper_chat_appended] SSE event after a completed turn
-    is persisted to the keeper's chat JSONL. The dashboard uses it to
-    re-merge the server transcript live, so messages arriving through
-    other connectors (Discord, Slack, agent MCP) appear without a page
-    reload.
+(** Broadcast a [keeper_chat_appended] SSE event after a transcript-visible
+    row is committed to its authoritative store: the chat JSONL for direct
+    messages, or the TurnRecord store for autonomous turns. The dashboard uses
+    it to re-merge the server transcript live without a page reload.
 
     The event has no dashboard slice mapping on purpose: slice-less
     events take the WS raw-forward catch-all to every authenticated

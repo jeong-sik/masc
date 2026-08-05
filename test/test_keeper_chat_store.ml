@@ -1302,6 +1302,7 @@ let test_append_turn_redacts_all_supplied_block_strings () =
               { trace =
                   [ B.Trace_think
                       { text = "thinking " ^ secret
+                      ; content_withheld = false
                       ; ts = Some ("ts-" ^ secret)
                       ; oas_block_index = None
                       }
@@ -1585,6 +1586,7 @@ let test_to_json_array_appends_trace_block_to_assistant_turn () =
                      B.Trace_think
                        {
                          text = "checking tasks";
+                         content_withheld = false;
                          ts = Some "2026-07-01T00:00:00Z";
                          oas_block_index = None;
                        };
@@ -1685,6 +1687,7 @@ let test_to_json_array_stream_contract_trace_join () =
                { trace =
                    [ B.Trace_think
                        { text = "thinking";
+                         content_withheld = false;
                          ts = Some "2026-07-05T00:00:00Z";
                          oas_block_index = None;
                        };
@@ -1804,6 +1807,7 @@ let test_to_json_array_stream_contract_lifecycle_replay () =
                { trace =
                    [ B.Trace_think
                        { text = "retained trace";
+                         content_withheld = false;
                          ts = Some "2026-07-05T00:00:00Z";
                          oas_block_index = None;
                        };

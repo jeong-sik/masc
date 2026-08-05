@@ -97,43 +97,6 @@ let removed_keeper_sandbox_input_key_names =
     "network_mode";
   ]
 
-type removed_keeper_msg_input_owner =
-  | Request_lifecycle
-  | Keeper_definition_field of string
-      (* the input moved to [masc_keeper_up] under this exact field name *)
-  | Keeper_definition_deleted
-      (* the concept itself was removed; no tool accepts a replacement *)
-  | Tool_selection
-
-type removed_keeper_msg_input =
-  { name : string
-  ; owner : removed_keeper_msg_input_owner
-  }
-
-(* Each entry names the input a caller may still send and the truthful way to
-   express the same intent. A [Keeper_definition_field] claim is only made when
-   [masc_keeper_up] declares that exact property (Keeper_schema), so following
-   the remediation cannot produce a second rejection. *)
-let removed_keeper_msg_inputs =
-  [ { name = "timeout_sec"; owner = Request_lifecycle }
-  ; { name = "goal"; owner = Keeper_definition_deleted }
-  ; { name = "short_goal"; owner = Keeper_definition_deleted }
-  ; { name = "mid_goal"; owner = Keeper_definition_deleted }
-  ; { name = "long_goal"; owner = Keeper_definition_deleted }
-  ; { name = "instructions"; owner = Keeper_definition_field "instructions" }
-  ; { name = "require_existing"; owner = Keeper_definition_deleted }
-  ; { name = "new_goal"; owner = Keeper_definition_deleted }
-  ; { name = "new_short_goal"; owner = Keeper_definition_deleted }
-  ; { name = "new_mid_goal"; owner = Keeper_definition_deleted }
-  ; { name = "new_long_goal"; owner = Keeper_definition_deleted }
-  ; { name = "new_instructions"; owner = Keeper_definition_field "instructions" }
-  ; { name = "required_tools"; owner = Tool_selection }
-  ; { name = "required_tool_names"; owner = Tool_selection }
-  ]
-
-let removed_keeper_msg_input_key_names =
-  List.map (fun input -> input.name) removed_keeper_msg_inputs
-
 let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list =
   match json with
   | `Assoc fields ->
@@ -167,39 +130,6 @@ let reject_removed_keeper_input_keys ?(allow_sandbox_fields = false) ~tool_name
               carry backend details."
              tool_name
              (String.concat ", " sandbox_fields))
-
-let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
-  let present =
-    match args with
-    | `Assoc fields ->
-      List.filter
-        (fun input -> List.mem_assoc input.name fields)
-        removed_keeper_msg_inputs
-    | _ -> []
-  in
-  let remediation input =
-    match input.owner with
-    | Request_lifecycle ->
-      "request-level whole-turn deadline is retired; use explicit operator \
-       cancellation, provider progress deadlines, or tool-local deadlines"
-    | Keeper_definition_field field ->
-      Printf.sprintf "set %s on masc_keeper_up instead" field
-    | Keeper_definition_deleted ->
-      "this input was removed and has no replacement field on any keeper tool"
-    | Tool_selection ->
-      "Keeper runtime selects tools from its declared capability surface"
-  in
-  let describe input =
-    Printf.sprintf "%s (%s)" input.name (remediation input)
-  in
-  match present with
-  | [] -> Ok ()
-  | inputs ->
-      Error
-        (Printf.sprintf
-           "removed keeper message args for %s: %s."
-           tool_name
-           (String.concat "; " (List.map describe inputs)))
 
 (* ── UTF-8 string processing ────────────────────────────────── *)
 

@@ -56,7 +56,16 @@ let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
     @ (match task.task_status with
        | Masc_domain.Cancelled { cancelled_by; reason; _ } ->
          [ ("cancelled_by", `String cancelled_by) ]
-         @ (match reason with
+         (* [stated_reason], not the bare status field: a cancellation whose
+            explanation arrived on the handoff context committed with one, and
+            this payload carries no handoff_context for the reader to fall back
+            through. Serializing only [Cancelled.reason] left the card blank for
+            exactly the cancellations the broadcast and the author wake explain. *)
+         @ (match
+              Masc_domain.stated_reason
+                ~reason
+                ~handoff_context:task.handoff_context
+            with
             | None -> []
             | Some reason -> [ ("reason", `String reason) ])
        | Masc_domain.Todo

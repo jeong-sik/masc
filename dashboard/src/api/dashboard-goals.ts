@@ -52,6 +52,12 @@ function decodeGoalTreeTask(raw: unknown): GoalTreeTask | null {
     is_terminal: asBoolean(raw.is_terminal, false),
     created_at: asString(raw.created_at, ''),
     updated_at: asString(raw.updated_at, ''),
+    // Aged-out cancellations reach Work only through this tree, and only
+    // through this decoder. Dropping them here left the card as a bare
+    // cancelled in production while tests that assign goalTreeData directly
+    // still passed.
+    cancelled_by: asNullableString(raw.cancelled_by),
+    reason: asNullableString(raw.reason),
   }
 }
 

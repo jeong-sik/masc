@@ -98,13 +98,24 @@ function jobStateForTask(task: Task): JobState {
   }
 }
 
+function nonBlank(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : undefined
+}
+
 function blockerNoteForTask(task: Task): string | null {
   if (task.status === 'cancelled') {
     // The canceller's stated reason arrives on the task itself; handoff_context
     // is a note the assignee left and is usually absent on a plain cancel, so
     // reading it first would show the older note instead of why this stopped.
+    // Mirrors Masc_domain.stated_reason: reason, then the handoff reason, then
+    // the handoff summary — which a strict transition is rejected without while
+    // reason stays optional, so it is often the only explanation there is. The
+    // backend already publishes it as the stated reason; skipping it here made
+    // the surface disagree with the broadcast and the author wake.
     return task.reason
       ?? task.handoff_context?.reason
+      ?? nonBlank(task.handoff_context?.summary)
       ?? task.handoff_context?.failure_mode
       ?? 'cancelled'
   }

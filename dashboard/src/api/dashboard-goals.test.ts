@@ -76,6 +76,52 @@ describe('fetchDashboardGoalsTree decoding', () => {
     expect(result.tree[0]!.title).toBe('Valid goal')
   })
 
+  // Aged-out linked cancellations reach Work only through this decoder. It
+  // dropped the actor and the reason, so the card rendered a bare cancelled in
+  // production while component tests that assign goalTreeData directly passed.
+  it('decodes cancellation actor and reason on tree tasks', async () => {
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      tree: [
+        validNode('goal-1', 'Goal one', {
+          tasks: [
+            {
+              ...validTask('task-cancelled', 'Aged out cancellation'),
+              status: 'cancelled',
+              cancelled_by: 'keeper-rondo-agent',
+              reason: 'superseded by G-2',
+            },
+          ],
+        }),
+      ],
+      summary: { ...emptySummary(), total_goals: 1, total_tasks: 1 },
+    })
+
+    const result = await fetchDashboardGoalsTree()
+    const task = result.tree[0]!.tasks[0]!
+
+    expect(task.cancelled_by).toBe('keeper-rondo-agent')
+    expect(task.reason).toBe('superseded by G-2')
+  })
+
+  it('leaves cancellation fields null when the payload omits them', async () => {
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      tree: [
+        validNode('goal-1', 'Goal one', {
+          tasks: [validTask('task-plain', 'Plain task')],
+        }),
+      ],
+      summary: { ...emptySummary(), total_goals: 1, total_tasks: 1 },
+    })
+
+    const result = await fetchDashboardGoalsTree()
+    const task = result.tree[0]!.tasks[0]!
+
+    expect(task.cancelled_by).toBeNull()
+    expect(task.reason).toBeNull()
+  })
+
   it('drops tasks missing required id, title, or status', async () => {
     getMock.mockResolvedValue({
       ...readyApprovalQueue,

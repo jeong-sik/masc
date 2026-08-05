@@ -854,6 +854,34 @@ describe('Work', () => {
         expect(item?.textContent).toContain('superseded by G-2')
       })
 
+      it('shows a summary-only handoff as the cancellation explanation', () => {
+        // A strict transition is rejected without handoff_context.summary while
+        // reason stays optional, and the backend publishes that summary as the
+        // stated reason. Skipping it here made this surface disagree with the
+        // broadcast and the author wake.
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          {
+            id: 'J-summary',
+            title: 'Ended Task',
+            goal_id: 'G-1',
+            status: 'cancelled',
+            cancelled_by: 'keeper-rondo-agent',
+            handoff_context: { summary: 'returning to backlog until the sandbox ships it' },
+          },
+        ]
+
+        render(html`<${Work} />`)
+
+        const item = screen
+          .getByTestId('work-aside')
+          .querySelector('[data-testid="wka-blocker-item"]')
+        expect(item?.textContent).toContain('returning to backlog until the sandbox ships it')
+        expect(item?.textContent).not.toContain('cancelled')
+      })
+
       it('prefers the task reason over an older handoff note on a cancellation', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },

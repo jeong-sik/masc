@@ -286,6 +286,49 @@ let tree_field name json =
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
 
+(* The explanation may have arrived on the handoff context rather than the
+   status field, and this payload carries no handoff_context for the reader to
+   fall back through. Serializing only [Cancelled.reason] left the card blank
+   for exactly the cancellations the broadcast and the author wake explain. *)
+let cancelled_with_handoff id ~handoff_reason ~summary : MD.task =
+  { (make_done_task id) with
+    task_status =
+      MD.Cancelled
+        { cancelled_by = "keeper-rondo-agent"; cancelled_at = iso_now (); reason = None }
+  ; handoff_context =
+      Some
+        { MD.summary
+        ; MD.reason = handoff_reason
+        ; next_step = None
+        ; failure_mode = None
+        ; reclaim_policy = None
+        ; evidence_refs = []
+        ; updated_at = None
+        ; updated_by = None
+        }
+  }
+
+let test_tree_task_falls_through_to_the_handoff_reason () =
+  let json =
+    Timeline.task_to_tree_json
+      ( cancelled_with_handoff "task-handoff" ~handoff_reason:(Some "sandbox lacks the service")
+          ~summary:"returning to backlog"
+      , "explicit" )
+  in
+  check (option string) "the handoff reason is projected" (Some "sandbox lacks the service")
+    (match tree_field "reason" json with Some (`String v) -> Some v | _ -> None)
+
+let test_tree_task_falls_through_to_the_handoff_summary () =
+  let json =
+    Timeline.task_to_tree_json
+      ( cancelled_with_handoff "task-summary" ~handoff_reason:None
+          ~summary:"returning to backlog until the sandbox ships it"
+      , "explicit" )
+  in
+  check (option string) "the handoff summary is projected"
+    (Some "returning to backlog until the sandbox ships it")
+    (match tree_field "reason" json with Some (`String v) -> Some v | _ -> None)
+
 let test_tree_task_carries_the_cancellation_actor_and_reason () =
   let json = Timeline.task_to_tree_json (cancelled_task "task-aged" ~reason:(Some "superseded by G-2"), "explicit") in
   check (option string) "the canceller is projected" (Some "keeper-rondo-agent")
@@ -332,6 +375,10 @@ let () =
             test_goals_tree_preserves_approval_queue_unavailable;
           test_case "tree task carries the cancellation actor and reason" `Quick
             test_tree_task_carries_the_cancellation_actor_and_reason;
+          test_case "tree task falls through to the handoff reason" `Quick
+            test_tree_task_falls_through_to_the_handoff_reason;
+          test_case "tree task falls through to the handoff summary" `Quick
+            test_tree_task_falls_through_to_the_handoff_summary;
           test_case "tree task omits an absent cancellation reason" `Quick
             test_tree_task_omits_an_absent_cancellation_reason;
           test_case "non-cancelled tree task carries no cancellation fields" `Quick

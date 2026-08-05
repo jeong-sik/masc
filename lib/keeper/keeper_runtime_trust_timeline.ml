@@ -90,16 +90,30 @@ let outcome_word_of_tool_call = function
   | Some false -> "failed"
   | None -> "outcome unknown"
 
-let severity_of_approval_event event decision =
+(* Severities follow how the writer already treats each event: [Log.Keeper.error]
+   at the site becomes "bad", [Log.Keeper.warn] becomes "warn", and the paths
+   that log nothing because they are the success path become "ok". *)
+let severity_of_approval_event (event : Keeper_approval_queue.audit_event)
+    decision_kind =
   match event with
-  | "pending" -> "warn"
-  | "expired" | "approval_timeout" | "cancelled" -> "bad"
-  | "resolved" -> (
-      match decision with
-      | Some raw when String_util.contains_substring_ci raw "reject" -> "bad"
-      | _ -> "ok")
-  | "auto_approved_rule_match" | "auto_approved_always" | "rule_created" -> "ok"
-  | _ -> "warn"
+  | Gate_allowed | Grant_consumed | Rule_created | Rule_deleted
+  | Auto_judge_operator_retry_started | Summary_updated ->
+      "ok"
+  | Pending | Gate_exact_rule_expired | Gate_grant_unavailable
+  | Auto_judge_block_observation_superseded
+  | Auto_judge_restart_worker_recovered | Auto_judge_restart_judgment_recovered
+    ->
+      "warn"
+  | Gate_exact_rule_store_degraded -> "bad"
+  | Resolved -> (
+      (* The writer records the decision on its own axis; reading that is what
+         the old substring scan for "reject" over the rendered decision text was
+         approximating. An approval whose text merely mentioned the word came
+         out as a rejection. *)
+      match decision_kind with
+      | Some Keeper_approval_queue.Decision_reject -> "bad"
+      | Some (Keeper_approval_queue.Decision_approve | Decision_edit) | None ->
+          "ok")
 
 let tool_call_timeline_event json =
   match json_float_opt_member "ts" json, json_string_opt_member "tool" json with
@@ -165,64 +179,102 @@ let approval_event_timeline_event json =
         | _ -> text
       in
       let decision = json_string_opt_member "decision" json in
-      let kind, title, summary, next_human_action =
-        match event with
-        | "pending" ->
+      let decision_kind =
+        Option.bind
+          (json_string_opt_member "decision_kind" json)
+          Keeper_approval_queue.decision_kind_of_string
+      in
+      let approval_title = Printf.sprintf "Approval · %s" tool_name in
+      let rule_title = Printf.sprintf "Approval Rule · %s" tool_name in
+      let gate_title = Printf.sprintf "Approval Gate · %s" tool_name in
+      let judge_title = Printf.sprintf "Approval Judge · %s" tool_name in
+      let render (parsed : Keeper_approval_queue.audit_event) =
+        match parsed with
+        | Pending ->
             ( "approval_requested",
-              Printf.sprintf "Approval · %s" tool_name,
-              approval_summary
-                "approval requested and waiting for operator decision",
+              approval_title,
+              "approval requested and waiting for operator decision",
               Some "resolve_approval" )
-        | "resolved" ->
-            let decision_label =
-              Option.value ~default:"resolved" decision
-            in
+        | Resolved ->
+            let decision_label = Option.value ~default:"resolved" decision in
             ( "approval_resolved",
-              Printf.sprintf "Approval · %s" tool_name,
-              approval_summary (Printf.sprintf "approval %s" decision_label),
+              approval_title,
+              Printf.sprintf "approval %s" decision_label,
               None )
-        | "expired" ->
-            let blocker_note = "" in
-            let next_action = "retry_or_rerun" in
-            let decision_label =
-              match decision with
-              | Some value -> value
-              | None -> "approval expired"
-            in
-            ( "approval_expired",
-              Printf.sprintf "Approval · %s" tool_name,
-              approval_summary (decision_label ^ blocker_note),
-              Some next_action )
-        | "approval_timeout" | "cancelled" ->
-            let summary =
-              match decision with
-              | Some value -> value
-              | None -> "approval await cancelled"
-            in
-            ( "approval_expired",
-              Printf.sprintf "Approval · %s" tool_name,
-              approval_summary summary,
-              Some "retry_or_rerun" )
-        | "auto_approved_rule_match" ->
-            ( "approval_rule_match",
-              Printf.sprintf "Approval Rule · %s" tool_name,
-              approval_summary "allowed by an exact Always Allowed rule",
-              None )
-        | "auto_approved_always" ->
-            ( "approval_always_flag",
-              Printf.sprintf "Approval Always · %s" tool_name,
-              approval_summary "allowed by keeper always_allow flag",
-              None )
-        | "rule_created" ->
+        | Summary_updated ->
+            ("approval_summary", approval_title, "approval summary updated", None)
+        | Rule_created ->
             ( "approval_rule_created",
-              Printf.sprintf "Approval Rule · %s" tool_name,
-              approval_summary "persistent approval rule recorded",
+              rule_title,
+              "persistent approval rule recorded",
               None )
-        | other ->
-            ( "approval_event",
-              Printf.sprintf "Approval · %s" tool_name,
-              approval_summary other,
+        | Rule_deleted ->
+            ( "approval_rule_deleted",
+              rule_title,
+              "persistent approval rule removed",
               None )
+        | Gate_allowed ->
+            ("approval_gate_allowed", gate_title, "gate allowed the call", None)
+        | Grant_consumed ->
+            ( "approval_grant_consumed",
+              gate_title,
+              "one-shot approval grant consumed",
+              None )
+        | Gate_exact_rule_expired ->
+            ( "approval_gate_rule_expired",
+              gate_title,
+              "exact Always Allowed rule had expired, so the call needs a \
+               decision again",
+              Some "resolve_approval" )
+        | Gate_exact_rule_store_degraded ->
+            ( "approval_gate_store_degraded",
+              gate_title,
+              "exact rule store is unreadable, so no rule can be honoured",
+              Some "inspect_approval_store" )
+        | Gate_grant_unavailable ->
+            ( "approval_gate_grant_unavailable",
+              gate_title,
+              "approved grant could not be read back",
+              Some "retry_or_rerun" )
+        | Auto_judge_operator_retry_started ->
+            ( "approval_judge_retry",
+              judge_title,
+              "operator restarted the auto judge",
+              None )
+        | Auto_judge_block_observation_superseded ->
+            ( "approval_judge_observation_superseded",
+              judge_title,
+              "auto judge block observation was superseded by a later write",
+              None )
+        | Auto_judge_restart_worker_recovered ->
+            ( "approval_judge_recovered",
+              judge_title,
+              "auto judge worker recovered durable work after a restart",
+              None )
+        | Auto_judge_restart_judgment_recovered ->
+            ( "approval_judge_recovered",
+              judge_title,
+              "auto judge recovered a durable judgment after a restart",
+              None )
+      in
+      let kind, title, summary, next_human_action, severity =
+        match Keeper_approval_queue.audit_event_of_string event with
+        | Some parsed ->
+            let kind, title, summary, next_human_action = render parsed in
+            ( kind,
+              title,
+              approval_summary summary,
+              next_human_action,
+              severity_of_approval_event parsed decision_kind )
+        | None ->
+            (* Written by a build that knew a spelling this one does not. Say so
+               rather than dressing it as a warning about the tool. *)
+            ( "approval_event_unrecognized",
+              approval_title,
+              approval_summary
+                (Printf.sprintf "unrecognized approval audit event %S" event),
+              None,
+              "warn" )
       in
       Some
         (timeline_event_json
@@ -230,8 +282,7 @@ let approval_event_timeline_event json =
            ?task_id:(json_string_opt_member "task_id" json)
            ~goal_ids:(goal_ids_of_json json)
            ?next_human_action
-           ~ts_unix ~kind ~title ~summary
-           ~severity:(severity_of_approval_event event decision) ())
+           ~ts_unix ~kind ~title ~summary ~severity ())
   | _ -> None
 
 let decision_timeline_event json =

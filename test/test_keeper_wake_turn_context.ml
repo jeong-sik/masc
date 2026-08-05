@@ -254,10 +254,19 @@ let test_current_task_section_renders () =
     (contains ~needle:"- task-42 — Wire the wake-turn context" user);
   check bool "status line" true
     (contains ~needle:"in progress (wake-context-keeper) since 2026-07-07T01:00:00Z" user);
-  check bool "handoff summary" true
-    (contains ~needle:"- Prior handoff: lexer done, parser half-wired" user);
+  (* RFC-0365: the line carries the note's author, because a handoff can now
+     survive an ownership change and an unattributed first-person account
+     reads as the holder's own recollection. This fixture records neither
+     [updated_by] nor [updated_at], so the absence is stated rather than
+     omitted. *)
+  check bool "handoff summary with attribution" true
+    (contains
+       ~needle:"- Prior handoff (unattributed): lexer done, parser half-wired"
+       user);
   check bool "handoff next step" true
     (contains ~needle:"- Suggested next step: wire parser to store" user);
+  check bool "no evidence line when the note records no refs" false
+    (contains ~needle:"- Handoff evidence:" user);
   (* masc#24651 cut the "continue it or release it with a handoff summary"
      directive from this section; masc#26123 then made not choosing the agent's
      next action the standing policy. The section states what is held and what

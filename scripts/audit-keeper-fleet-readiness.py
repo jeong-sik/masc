@@ -24,8 +24,13 @@ from typing import Any
 import tomllib
 
 
+# The tool names the current runtime emits for a Board action. This set is the
+# whole vocabulary: rows written before the Board surface was unified are not
+# current evidence and are not decoded here.
 BOARD_TOOLS = {
     "masc_board_post",
+    # Reading one post by id is a Board read, the same as list and search.
+    "masc_board_post_get",
     "masc_board_comment",
     "masc_board_vote",
     "masc_board_list",

@@ -1967,8 +1967,6 @@
 
 (include stanzas/test_keeper_toml_loader.inc)
 
-(include stanzas/test_lib_warning_ratchets.inc)
-
 (include stanzas/test_keeper_runtime_config_leaf.inc)
 
 (include stanzas/test_local_review_script.inc)

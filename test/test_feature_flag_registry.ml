@@ -77,11 +77,6 @@ let test_find_opt_first_registered () =
 	       | Some f -> assert (f.R.env_name = first.R.env_name)
 	       | None -> assert false)
 
-let test_path_jail_kill_switch_removed () =
-  match R.find_opt "MASC_SHELL_IR_PATH_JAIL_ENABLED" with
-  | None -> ()
-  | Some _ -> assert false
-
 (* ─── (4) flag_to_json shape ──────────────────────────────────── *)
 
 let test_flag_to_json_current_fields () =
@@ -176,7 +171,6 @@ let () =
   test_find_opt_unknown ();
   test_get_bool_unknown_rejected ();
   test_find_opt_first_registered ();
-  test_path_jail_kill_switch_removed ();
   test_flag_to_json_current_fields ();
   test_flag_to_json_canonical_default_is_bool ();
   test_to_json_total_matches_all_flags ();

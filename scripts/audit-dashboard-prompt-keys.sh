@@ -41,7 +41,11 @@ SINKS='normalizePromptBlock|promptKeys?|system_prompt_blocks'
 # like prompt.system_prompt_blocks is not mistaken for a prompt key.
 ns="$(sed 's/\..*//' "$existing" | sort -u | paste -sd'|' -)"
 
-grep -rn --include='*.ts' --exclude='*.test.ts' -E "$SINKS" dashboard/src 2>/dev/null \
+# -A5 so a key inside a multi-line promptKeys array is seen. Without it the
+# sink line holds only "promptKeys: [" and every key on a following line goes
+# unchecked, which is how keeper.memory_os_recall.context survived its own
+# asset being deleted.
+grep -rn -A5 --include='*.ts' --exclude='*.test.ts' -E "$SINKS" dashboard/src 2>/dev/null \
   | grep -oE "'(${ns})(\.[a-z_.]+)?'" \
   | tr -d "'" \
   | sort -u > "$referenced"

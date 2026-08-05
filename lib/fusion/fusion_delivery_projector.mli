@@ -21,7 +21,7 @@ val projection_error_failure_code : projection_error -> string
     [Evidence_unavailable]); any other error raises [Invalid_argument]. *)
 
 val on_worker_settled :
-  base_path:string -> Keeper_msg_async.worker_settlement -> unit
+  ?registry:Fusion_run_registry.t -> base_path:string -> Keeper_msg_async.worker_settlement -> unit
 (** Project an exact durable settlement. Any ambiguity or delivery failure is
     logged and leaves the obligation available for startup reconciliation. *)
 
@@ -39,7 +39,9 @@ type recovery_report =
   }
 
 val recover_startup :
-  base_path:string -> (recovery_report, Fusion_delivery_obligation.error) result
+  ?registry:Fusion_run_registry.t
+  -> base_path:string
+  -> (recovery_report, Fusion_delivery_obligation.error) result
 (** With producer writes quiesced by startup ownership, reconcile atomic
     staging orphans and all producer obligations against canonical durable
     terminal request truth. Successful projections remove their exact

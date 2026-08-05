@@ -139,6 +139,18 @@ let run_to_yojson run =
   `Assoc (base @ failure_fields)
 ;;
 
-let global_atomic : t Atomic.t = Atomic.make (create ())
-let global () = Atomic.get global_atomic
-let set_global registry = Atomic.set global_atomic registry
+type global_install_error = Already_installed
+
+module Global = Run_registry_core.Global (struct
+    type nonrec t = t
+
+    let initial = create ()
+  end)
+
+let global = Global.current
+
+let install_global registry =
+  match Global.install registry with
+  | Ok () -> Ok ()
+  | Error Global.Already_installed -> Error Already_installed
+;;

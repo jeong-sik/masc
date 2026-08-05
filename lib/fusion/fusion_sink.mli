@@ -58,7 +58,8 @@ val judge_node_meta : Fusion_types.judge_outcome -> Yojson.Safe.t
     non-cancel 예외는 counter+warn으로 흡수하는 best-effort 알림이며, chat/board
     영속 성공을 실패로 되돌리지 않는다. [Eio.Cancel.Cancelled]는 재전파한다. *)
 val emit
-  :  base_dir:string
+  :  registry:Fusion_run_registry.t
+  -> base_dir:string
   -> keeper:string
   -> run_id:string
   -> channel:Keeper_continuation_channel.t
@@ -96,7 +97,8 @@ val wake_keeper_on_fusion_completion :
 (** Idempotently project a terminal Fusion lifecycle failure to the Keeper chat
     lane and its exact continuation channel. *)
 val emit_failure :
-     base_dir:string
+     registry:Fusion_run_registry.t
+  -> base_dir:string
   -> keeper:string
   -> run_id:string
   -> channel:Keeper_continuation_channel.t

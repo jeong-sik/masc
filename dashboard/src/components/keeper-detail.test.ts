@@ -333,7 +333,6 @@ describe('KeeperDetailPage', () => {
         last_reply_preview: null,
         last_error: null,
         keepalive_running: true,
-        next_eligible_at_s: null,
       },
       trust: {
         disposition: 'Blocked',

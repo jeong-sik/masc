@@ -162,7 +162,6 @@ val append_metrics_snapshot :
   checkpoint_bytes:int ->
   message_count:int ->
   handoff_json:Yojson.Safe.t option ->
-  ?count_completed_turn:bool ->
   unit ->
   unit
 

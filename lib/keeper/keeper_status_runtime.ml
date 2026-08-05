@@ -117,23 +117,29 @@ let parse_agent_status (config : Workspace.config) ~(agent_name : string) : Yojs
               Workspace_resilience.Time.parse_iso8601_opt agent.last_seen
               |> Option.value ~default:0.0
             in
-            let age_s = if session_bound_ts <= 0.0 then 0.0 else now_ts -. session_bound_ts in
-            let last_seen_ago_s =
-              if last_seen_ts <= 0.0 then 0.0 else now_ts -. last_seen_ts
+            (* An unparseable timestamp is absence of evidence, so omit the
+               derived age instead of emitting 0.0. Consumers already read
+               these through [Option.value ~default:max_float] (see
+               [agent_last_seen_ago_s] and [keeper_health_state]), i.e. a
+               missing field means "infinitely stale". Emitting 0.0 read as
+               "seen just now" and made that fail-closed default
+               unreachable, because the field was always present. *)
+            let derived_age key ts =
+              if ts <= 0.0 then [] else [ (key, `Float (now_ts -. ts)) ]
             in
             `Assoc
-              [
-                ("name", `String agent.name);
-                ("agent_type", `String agent.agent_type);
-                ("status", `String (Masc_domain.string_of_agent_status agent.status));
-                ( "capabilities",
-                  `List (List.map (fun s -> `String s) agent.capabilities) );
-                ( "current_task", Json_util.string_opt_to_json agent.current_task );
-                ("session_bound_at", `String agent.session_bound_at);
-                ("last_seen", `String agent.last_seen);
-                ("age_s", `Float age_s);
-                ("last_seen_ago_s", `Float last_seen_ago_s);
-              ]))
+              ([
+                 ("name", `String agent.name);
+                 ("agent_type", `String agent.agent_type);
+                 ("status", `String (Masc_domain.string_of_agent_status agent.status));
+                 ( "capabilities",
+                   `List (List.map (fun s -> `String s) agent.capabilities) );
+                 ( "current_task", Json_util.string_opt_to_json agent.current_task );
+                 ("session_bound_at", `String agent.session_bound_at);
+                 ("last_seen", `String agent.last_seen);
+               ]
+               @ derived_age "age_s" session_bound_ts
+               @ derived_age "last_seen_ago_s" last_seen_ts)))
 
 let json_string_opt key json = Json_util.get_string_nonempty json key
 
@@ -333,7 +339,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
 
 let keeper_health_state ?(fiber_health = Fiber_unknown)
     ?(keepalive_interval_s = 300.0)
-    ~meta ~keepalive_running ~agent_status ~quiet_reason ~now_ts () : keeper_health =
+    ~meta ~keepalive_running ~agent_status ~quiet_reason () : keeper_health =
   (* Supervisor-level health takes priority *)
   match fiber_health with
   | Fiber_zombie -> KH_zombie
@@ -345,7 +351,6 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
   in
   let stale_threshold_s = agent_staleness_threshold_s in
-  let _ = now_ts in
   if
     (not keepalive_running)
     &&
@@ -377,8 +382,6 @@ let keeper_next_action_path ~(health_state : keeper_health) ~quiet_reason =
           "probe"
       | Some "disabled" -> "recover"
       | _ -> "direct_message")
-
-let keeper_next_eligible_at_s ~meta:_ ~quiet_reason:_ ~now_ts:_ = `Null
 
 let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
@@ -549,7 +552,7 @@ let keeper_diagnostic_json
     classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts
   in
   let health_state =
-    keeper_health_state ~meta ~keepalive_running ~agent_status ~quiet_reason ~now_ts ()
+    keeper_health_state ~meta ~keepalive_running ~agent_status ~quiet_reason ()
   in
   let next_action_path = keeper_next_action_path ~health_state ~quiet_reason in
   let last_reply_status, last_reply_at, last_reply_preview =
@@ -576,7 +579,6 @@ let keeper_diagnostic_json
       ("last_reply_preview", last_reply_preview);
       ("last_error", last_error);
       ("keepalive_running", `Bool keepalive_running);
-      ("next_eligible_at_s", keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts);
     ]
 
 (** Derive pipeline stage directly from the Keeper lifecycle phase. *)

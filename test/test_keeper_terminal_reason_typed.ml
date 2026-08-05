@@ -796,12 +796,6 @@ let () =
 ;;
 
 let () =
-  check
-    "runtime checkpoint remains a completed Keeper activity turn"
-    (UTS.terminal_outcome_is_completed_turn UTS.Terminal_checkpoint)
-;;
-
-let () =
   with_temp_dir "keeper-checkpoint-turn-persist" @@ fun workspace_dir ->
   let keeper_name = "checkpoint-turn-persist" in
   let config = Masc.Workspace.default_config workspace_dir in

@@ -54,7 +54,13 @@ let prune_stale_dumps ~dir =
   | exception Sys_error msg ->
     Log.warn ~ctx:"runtime_events" "cannot scan %s for stale dumps: %s" dir msg
   | entries ->
+    (* DET-OK: [getpid] identifies this process so we never unlink the buffer we
+       are about to write. It is a safety predicate on our own identity, not an
+       input to a computed result — no output depends on its value. *)
     let self = Unix.getpid () in
+    (* [readdir] order is unspecified; sort so the emitted log lines are
+       reproducible across runs on the same directory. *)
+    Array.sort String.compare entries;
     Array.iter
       (fun name ->
         match dump_pid_of_filename name with

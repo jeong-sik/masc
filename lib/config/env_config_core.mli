@@ -36,6 +36,10 @@ val get_string : default:string -> string -> string
 val get_int : default:int -> string -> int
 val get_float : default:float -> string -> float
 val get_bool : default:bool -> string -> bool
+val get_bool_strict : default:bool -> string -> bool
+(** Like {!get_bool}, but a present non-empty malformed value always raises
+    {!Config_error}. Missing and empty values still use [default]. Use at
+    security-sensitive boundaries where warn-and-default would fail open. *)
 
 val get_int_nonneg : default:int -> string -> int
 (** Like {!get_int} but floors negative parses at [default].  Use

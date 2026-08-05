@@ -147,6 +147,9 @@ let find_opt env_name =
 let runtime_value flag =
   get_bool ~default:flag.default flag.env_name
 
+let runtime_value_strict flag =
+  get_bool_strict ~default:flag.default flag.env_name
+
 (** Source: "env", "boot_override", or "default". *)
 let runtime_source flag =
   Config_boot_overrides.source flag.env_name
@@ -156,6 +159,14 @@ let runtime_source flag =
 let get_bool env_name =
   match find_opt env_name with
   | Some flag -> runtime_value flag
+  | None ->
+      raise
+        (Config_error
+           (Printf.sprintf "feature flag %s is not registered" env_name))
+
+let get_bool_strict env_name =
+  match find_opt env_name with
+  | Some flag -> runtime_value_strict flag
   | None ->
       raise
         (Config_error

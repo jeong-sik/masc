@@ -218,9 +218,11 @@ module Transport = struct
       Read through the flag registry, which is what the operator-facing flag
       listing reports. A second reader here used Sys.getenv_opt directly with
       its own case-sensitive spelling set, so MASC_HTTP_AUTH_STRICT=TRUE and any
-      boot override made the listing and the enforcement disagree. *)
+      boot override made the listing and the enforcement disagree. A malformed
+      explicit value is rejected because falling back to [false] would disable
+      the requested security policy. *)
   let http_auth_strict_env_enabled () =
-    Feature_flag_registry.get_bool "MASC_HTTP_AUTH_STRICT"
+    Feature_flag_registry.get_bool_strict "MASC_HTTP_AUTH_STRICT"
 
   (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
       Re-readable within the process, but operationally a boot-time input. *)

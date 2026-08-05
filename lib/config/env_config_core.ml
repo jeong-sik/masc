@@ -138,17 +138,36 @@ let get_ratio ~default name =
   let parsed = get_float_nonneg ~default:safe_default name in
   if parsed > 1.0 then safe_default else parsed
 
+let bool_of_raw_value raw =
+  match String.trim raw |> String.lowercase_ascii with
+  | "true" | "1" | "yes" | "on" -> Some true
+  | "false" | "0" | "no" | "off" -> Some false
+  | _ -> None
+
 let get_bool ~default name =
   match raw_value_opt name with
   | None -> default
-  | Some v ->
-      (match String.trim v |> String.lowercase_ascii with
-       | "true" | "1" | "yes" | "on" -> true
-       | "false" | "0" | "no" | "off" -> false
-       | "" -> default
-       | _ ->
-           reject_malformed_env ~name ~raw:v ~type_name:"bool";
-           default)
+  | Some raw ->
+      if String.trim raw = "" then default
+      else (
+        match bool_of_raw_value raw with
+        | Some value -> value
+        | None ->
+            reject_malformed_env ~name ~raw ~type_name:"bool";
+            default)
+
+let get_bool_strict ~default name =
+  match raw_value_opt name with
+  | None -> default
+  | Some raw ->
+      if String.trim raw = "" then default
+      else (
+        match bool_of_raw_value raw with
+        | Some value -> value
+        | None ->
+            raise
+              (Config_error
+                 (Printf.sprintf "malformed env %s=%S (expected bool)" name raw)))
 
 let trim_opt = function
   | Some raw ->

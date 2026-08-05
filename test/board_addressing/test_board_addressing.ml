@@ -78,7 +78,7 @@ let test_parse_broadcast () =
     "@@analyst and @alpha"
 
 (* Code spans are not address text. Every one of these strings appeared in a
-   live keeper_board_comment that was rejected whole: @internals/libs/datadogRum
+   live Board comment that was rejected whole: @internals/libs/datadogRum
    is an npm scope, @/lib/constants is a path alias, @@ is an OCaml operator.
    Board validates candidates fail-closed, which is right for a mistyped
    address and wrong for an @ that was never an address. *)

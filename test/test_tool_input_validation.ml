@@ -686,7 +686,7 @@ let test_keeper_down_rejects_undeclared_field () =
 (* Regression guard for the closure itself: every field observed in live
    ~/me/.masc tool-call logs must still be accepted. Closing a schema turns
    a silent drop into a hard rejection, so an under-declared property breaks
-   a working call — the same failure the keeper_board_list [compact] omission
+   a working call — the same failure the missing [compact] declaration
    produced above. [persona_name] is in this list because
    [Keeper_turn_up_args.parse] reads it and
    [Keeper_turn_up_config_persistence] writes it to the keeper TOML, while

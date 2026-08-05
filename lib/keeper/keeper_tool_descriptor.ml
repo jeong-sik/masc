@@ -1959,6 +1959,8 @@ let internal_descriptors : t list =
       "List workspace goals." ~readonly:true
   ; masc_workspace_descriptor "goal_upsert" "masc_goal_upsert"
       "Create or update a workspace goal." ~readonly:false
+  ; masc_workspace_descriptor "goal_assign" "masc_goal_assign"
+      "Assign a goal to the keeper responsible for it." ~readonly:false
   ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
       "Transition a goal status." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)

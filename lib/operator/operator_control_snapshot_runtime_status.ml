@@ -29,9 +29,10 @@ let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
 (* [keeper_diagnostic_json] always emits "health_state", so a missing or
    unparseable field means the blob did not come from that producer. Deny the
    override in that case: this gate exists to stop a non-healthy keeper from
-   being displayed as live, and the previous two-step defaulting
-   (~default:"offline" then ~default:KH_offline) landed on KH_offline, which is
-   in the allow set — so an absent or corrupt field granted the override. *)
+   being displayed as live, and the previous code defaulted twice — first to
+   the string "offline", then to [KH_offline] — both landing on a constructor
+   that is in the allow set, so an absent or corrupt field granted the
+   override. *)
 let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
   match
     Json_util.get_string diagnostic "health_state"

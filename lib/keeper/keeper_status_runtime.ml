@@ -118,12 +118,12 @@ let parse_agent_status (config : Workspace.config) ~(agent_name : string) : Yojs
               |> Option.value ~default:0.0
             in
             (* An unparseable timestamp is absence of evidence, so omit the
-               derived age instead of emitting 0.0. Consumers already read
-               these through [Option.value ~default:max_float] (see
-               [agent_last_seen_ago_s] and [keeper_health_state]), i.e. a
-               missing field means "infinitely stale". Emitting 0.0 read as
-               "seen just now" and made that fail-closed default
-               unreachable, because the field was always present. *)
+               derived age instead of emitting 0.0. Both readers —
+               [agent_last_seen_ago_s] and [keeper_health_state] — already fall
+               back to [max_float] when the field is missing, i.e. treat it as
+               infinitely stale. Emitting 0.0 read as "seen just now" and made
+               that fail-closed fallback unreachable, because the field was
+               always present. *)
             let derived_age key ts =
               if ts <= 0.0 then [] else [ (key, `Float (now_ts -. ts)) ]
             in

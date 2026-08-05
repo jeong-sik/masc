@@ -30,22 +30,21 @@
 #error "posix_spawn detached requires POSIX_SPAWN_SETPGROUP"
 #endif
 
-#if !defined(POSIX_SPAWN_SETSID)
-#error "posix_spawn detached requires POSIX_SPAWN_SETSID (GNU/BSD extension)"
-#endif
-
 /* Spawn a detached child via posix_spawn with POSIX_SPAWN_SETPGROUP so the
    process group is established atomically during spawn — before the child
    runs any user code.  This removes the fork/setpgrp signal-race window that
    the previous fork()+setsid() implementation left open.
 
-   POSIX_SPAWN_SETSID is also set so the child becomes a new session leader,
-   preserving the "detach from the parent's controlling terminal" semantics
-   that the old setsid() call provided.
+   Note: POSIX_SPAWN_SETSID is deliberately NOT used.  macOS's posix_spawn
+   does not support it and returns EPERM when it is set; the task's core
+   requirement is a signal-race-free process group, which POSIX_SPAWN_SETPGROUP
+   alone provides.  The child becomes a process-group leader in its own group
+   (pgroup 0 => pgid = pid), which is sufficient for tree-kill semantics.
 
    argv and env are OCaml string arrays; cwd is a string (empty means "do not
-   chdir").  stdin_fd/stdout_fd/stderr_fd are the parent-side descriptors that
-   are dup2'd onto 0/1/2 in the child via file actions.
+   chdir").  fds is a 3-element array of parent-side descriptors
+   [stdin; stdout; stderr] that are dup2'd onto 0/1/2 in the child via file
+   actions.
 
    Returns the child pid, or raises Unix_error on failure (no child is left
    running on failure). */
@@ -109,7 +108,7 @@ caml_masc_process_posix_spawn_detached(
 #endif
   }
   if (err == 0) {
-    short flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSID;
+    short flags = POSIX_SPAWN_SETPGROUP;
     err = posix_spawnattr_setflags(&attr, flags);
   }
   if (err == 0) {

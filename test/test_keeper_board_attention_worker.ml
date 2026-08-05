@@ -28,8 +28,32 @@ let rec remove_tree path =
     else Sys.remove path
 ;;
 
+(* Completing a partition projects it onto the keeper's registry entry
+   (keeper_board_attention_worker.ml:637); without one the projection fails
+   with "exact completion lost its registered owner" before any assertion in
+   the test body is reached. The registry is process-local, so a fresh temp
+   base_path starts with no owner. test_keeper_board_attention_exact_flow.ml:75
+   carries the same helper for the same reason. *)
+let register_owner ~base_path keeper_name =
+  match Masc.Keeper_registry.get ~base_path keeper_name with
+  | Some _ -> ()
+  | None ->
+    let meta =
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String ("trace-" ^ keeper_name)
+          ])
+      |> Result.get_ok
+    in
+    ignore
+      (Masc.Keeper_registry.register_offline ~base_path keeper_name meta
+       : Masc.Keeper_registry.registry_entry)
+;;
+
 let with_temp_base name f =
   let base_path = Filename.temp_dir name "" in
+  register_owner ~base_path "sangsu";
   Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
 ;;
 

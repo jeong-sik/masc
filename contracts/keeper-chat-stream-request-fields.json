@@ -1,0 +1,12 @@
+[
+  "name",
+  "message",
+  "user_blocks",
+  "turn_instructions",
+  "surface_context",
+  "channel",
+  "channel_user_id",
+  "channel_user_name",
+  "channel_workspace_id",
+  "attachments"
+]

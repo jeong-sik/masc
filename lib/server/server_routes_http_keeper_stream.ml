@@ -498,6 +498,24 @@ let keeper_stream_success = function
   | Tool_result.Completed () | Tool_result.Deferred () -> true
   | Tool_result.Failed _ -> false
 
+(* The dashboard builds its request body from this same list, so both sides are
+   pinned to contracts/keeper-chat-stream-request-fields.json:
+   test_keeper_chat_stream_request_contract asserts this list equals the file,
+   and dashboard/src/api/keeper.test.ts asserts the body it sends is a subset of
+   it. #26886 was a field the client sent that this list did not accept. *)
+let chat_stream_request_fields =
+  [ "name"
+  ; "message"
+  ; "user_blocks"
+  ; "turn_instructions"
+  ; "surface_context"
+  ; "channel"
+  ; "channel_user_id"
+  ; "channel_user_name"
+  ; "channel_workspace_id"
+  ; "attachments"
+  ]
+
 let parse_keeper_chat_stream_request body_str =
   try
     let ( let* ) = Result.bind in
@@ -505,19 +523,7 @@ let parse_keeper_chat_stream_request body_str =
     let* fields =
       match json with
       | `Assoc fields ->
-        let allowed =
-          [ "name"
-          ; "message"
-          ; "user_blocks"
-          ; "turn_instructions"
-          ; "surface_context"
-          ; "channel"
-          ; "channel_user_id"
-          ; "channel_user_name"
-          ; "channel_workspace_id"
-          ; "attachments"
-          ]
-        in
+        let allowed = chat_stream_request_fields in
         let keys = List.map fst fields in
         if List.length keys <> List.length (List.sort_uniq String.compare keys)
         then Error "request body must contain unique fields"

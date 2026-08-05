@@ -706,6 +706,15 @@
  (modules test_oas_canonical_delegation)
  (libraries alcotest ast_grep masc_test_deps))
 
+; Reads the contract file the dashboard test also reads, so it is a dep:
+; without it dune keeps a cached pass and the suite never re-runs when the
+; contract changes.
+(test
+ (name test_keeper_chat_stream_request_contract)
+ (modules test_keeper_chat_stream_request_contract)
+ (deps %{workspace_root}/contracts/keeper-chat-stream-request-fields.json)
+ (libraries alcotest masc_test_deps))
+
 (test
  (name test_keeper_structured_output_schema)
  (modules test_keeper_structured_output_schema)

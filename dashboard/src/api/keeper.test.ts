@@ -1,4 +1,29 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+// parse_keeper_chat_stream_request rejects any body key outside this list with
+// 400. test_keeper_chat_stream_request_contract pins the file to that parser,
+// so reading it here ties the body we send to the parser that accepts it —
+// #26866 removed a key the dashboard kept sending and nothing caught it until
+// production.
+const readServerAcceptedFields = (): readonly string[] => {
+  const path = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    '../../../contracts/keeper-chat-stream-request-fields.json',
+  )
+  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+  if (
+    !Array.isArray(parsed)
+    || !parsed.every((field): field is string => typeof field === 'string')
+  ) {
+    throw new Error(`${path} must be an array of strings`)
+  }
+  return parsed
+}
+
+const SERVER_ACCEPTED_FIELDS = readServerAcceptedFields()
 
 const { runOperatorAction, currentDashboardActor } = vi.hoisted(() => ({
   runOperatorAction: vi.fn(),
@@ -1222,6 +1247,52 @@ describe('streamKeeperMessage', () => {
         { type: 'text', text: 'describe this' },
       ],
     })
+  })
+
+  it('sends no field the server rejects as undeclared', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    // Every option that can add a key, so the assertion covers the widest body
+    // this function produces rather than whichever subset one call happens to
+    // hit.
+    await streamKeeperMessage('sangsu', 'describe this', {
+      onEvent: () => {},
+      channel: 'copilot',
+      channelWorkspaceId: 'session-7',
+      turnInstructions: 'focus on overview',
+      surfaceContext: {
+        label: 'Overview',
+        route: '/overview',
+        scene: 'fleet view',
+        fields: [{ k: 'run', v: '2/5' }],
+      },
+      attachments: [
+        {
+          id: 'att-img',
+          type: 'image',
+          name: 'screen.png',
+          size: 1024,
+          mimeType: 'image/png',
+          data: 'data:image/png;base64,abc123',
+        },
+      ],
+      userBlocks: [{ type: 'text', text: 'describe this' }],
+    })
+
+    // The exact body shape is asserted by the tests above; this one only asks
+    // whether the server would accept the keys, so it stays a check against the
+    // contract file rather than a third copy of the field list.
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const sent = Object.keys(JSON.parse(String(init.body)) as object)
+    expect(
+      sent.filter(field => !SERVER_ACCEPTED_FIELDS.includes(field)),
+    ).toEqual([])
   })
 
   const stubStaleToken = () => {

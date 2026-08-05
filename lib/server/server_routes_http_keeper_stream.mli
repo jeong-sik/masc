@@ -97,6 +97,12 @@ type keeper_chat_stream_request = {
 
 (** {1 Parsing} *)
 
+val chat_stream_request_fields : string list
+(** Every field {!parse_keeper_chat_stream_request} accepts; any other key is
+    rejected. Exposed so the contract test can pin it to
+    [contracts/keeper-chat-stream-request-fields.json], which the dashboard
+    test reads to check the body it sends stays within this set. *)
+
 val parse_keeper_chat_stream_request :
   string -> (keeper_chat_stream_request, string) result
 (** Parses the HTTP body string into a

@@ -47,13 +47,10 @@ let task_status_badge = function
   | Masc_domain.Done _ -> ("✅", "done")
   | Masc_domain.Cancelled _ -> ("🚫", "cancelled")
 
-let task_assignee = function
-  | Masc_domain.Claimed { assignee; _ }
-  | Masc_domain.InProgress { assignee; _ }
-  | Masc_domain.AwaitingVerification { assignee; _ }
-  | Masc_domain.Done { assignee; _ } -> assignee
-  | Masc_domain.Cancelled { cancelled_by; _ } -> cancelled_by
-  | Masc_domain.Todo -> "unclaimed"
+(* Total render of the actor, not an assignee accessor: the old name claimed
+   a cancelled Task's canceller was its assignee. [task_display_assignee] is
+   the shared definition this duplicated verbatim. *)
+let task_assignee = Masc_domain.task_display_assignee
 
 let active_task_assignee = function
   | Masc_domain.Claimed { assignee; _ }

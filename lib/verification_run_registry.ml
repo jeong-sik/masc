@@ -1,23 +1,18 @@
-(* Completion-authority review registry (RFC-0361 D4).
-
-   [Completion_authority_agent] registers a review [Running] when it claims a
-   submitted verification and marks it [Completed] on every exit path, so an
-   operator surface can show which reviews are running and how the finished ones
-   ended. Before this, a review that deferred or rejected on the evidence
-   contract left no durable trace at all: only the paths that committed a
-   verdict emitted a [task_completion_verdict] event.
-
-   Lock-free Atomic + CAS; optional append-only JSONL backing under
-   [<base-path>/.masc/verification-runs.jsonl] so history survives restart.
-
-   Observation record, not execution abstraction (RFC-0284 §2): nothing here
-   drives, retries, or gates a review. Recording never fails a review — append
-   errors are logged and swallowed, matching [Fusion_run_registry]. *)
+type outcome =
+  | Approved
+  | Rejected of { reason : string }
+  | Contract_rejected of { detail : string }
+  | Not_reviewed of
+      { gate : string
+      ; detail : string
+      }
+  | Commit_failed of { detail : string }
+  | Raised of { detail : string }
 
 type run_status =
   | Running
   | Completed of
-      { outcome : Verification_run_registry_event.outcome
+      { outcome : outcome
       ; evaluator_runtime : string option
       ; elapsed_s : float
       }
@@ -32,52 +27,139 @@ type run =
   ; status : run_status
   }
 
-type t =
-  { runs : run list Atomic.t
-  ; path : string option
-  }
-
-(* Retention bound for [Completed] reviews. [Running] reviews are never evicted
-   — active state must stay accurate, and their count is bounded by the number
-   of tasks in [AwaitingVerification]. This is a log-retention bound, not a
-   symptom cap. *)
-let max_completed_retained = 64
-
-let create ?path () : t = { runs = Atomic.make []; path }
-
-let is_running (r : run) =
-  match r.status with
-  | Running -> true
-  | Completed _ -> false
+let outcome_label = function
+  | Approved -> "approved"
+  | Rejected _ -> "rejected"
+  | Contract_rejected _ -> "contract_rejected"
+  | Not_reviewed _ -> "not_reviewed"
+  | Commit_failed _ -> "commit_failed"
+  | Raised _ -> "raised"
 ;;
 
-let prune (runs : run list) : run list =
-  let running, completed = List.partition is_running runs in
-  let recent_completed =
-    completed
-    |> List.sort (fun a b -> Float.compare b.started_at a.started_at)
-    |> List.filteri (fun i _ -> i < max_completed_retained)
-  in
-  running @ recent_completed
-;;
+module Payload = struct
+  type registration =
+    { task_id : string
+    ; producer : string
+    ; authority_kind : string
+    ; authority_actor : string
+    }
 
-let rec update (t : t) (f : run list -> run list) =
-  let cur = Atomic.get t.runs in
-  let next = f cur in
-  if not (Atomic.compare_and_set t.runs cur next) then update t f
-;;
+  type completion =
+    { outcome : outcome
+    ; evaluator_runtime : string option
+    ; elapsed_s : float
+    }
 
-let append_event t event =
-  match t.path with
-  | None -> ()
-  | Some path ->
-    (try Fs_compat.append_jsonl path (Verification_run_registry_event.to_yojson event) with
-     | exn ->
-       Log.Misc.warn
-         "verification_run_registry: append failed for %s: %s"
-         path
-         (Printexc.to_string exn))
-;;
+  let name = "verification_run_registry"
+  let running_noun = "review(s)"
+  let restart_reason = "review fibers do not survive server restart"
+
+  let registration_to_yojson registration =
+    `Assoc
+      [ "task_id", `String registration.task_id
+      ; "producer", `String registration.producer
+      ; "authority_kind", `String registration.authority_kind
+      ; "authority_actor", `String registration.authority_actor
+      ]
+  ;;
+
+  let registration_of_yojson json =
+    let ( let* ) = Result.bind in
+    let* fields = Run_registry_core.Json.object_fields json in
+    let* () =
+      Run_registry_core.Json.exact_fields
+        ~required:[ "task_id"; "producer"; "authority_kind"; "authority_actor" ]
+        fields
+    in
+    let* task_id = Run_registry_core.Json.string_field "task_id" fields in
+    let* producer = Run_registry_core.Json.string_field "producer" fields in
+    let* authority_kind =
+      Run_registry_core.Json.string_field "authority_kind" fields
+    in
+    let* authority_actor =
+      Run_registry_core.Json.string_field "authority_actor" fields
+    in
+    Ok { task_id; producer; authority_kind; authority_actor }
+  ;;
+
+  let outcome_fields = function
+    | Approved -> []
+    | Rejected { reason } -> [ "reason", `String reason ]
+    | Contract_rejected { detail } | Commit_failed { detail } | Raised { detail } ->
+      [ "detail", `String detail ]
+    | Not_reviewed { gate; detail } ->
+      [ "gate", `String gate; "detail", `String detail ]
+  ;;
+
+  let completion_to_yojson completion =
+    let fields =
+      [ "outcome", `String (outcome_label completion.outcome)
+      ; "elapsed_s", `Float completion.elapsed_s
+      ]
+      @ outcome_fields completion.outcome
+      @
+      match completion.evaluator_runtime with
+      | None -> []
+      | Some runtime -> [ "evaluator_runtime", `String runtime ]
+    in
+    `Assoc fields
+  ;;
+
+  let completion_of_yojson json =
+    let ( let* ) = Result.bind in
+    let* fields = Run_registry_core.Json.object_fields json in
+    let* label = Run_registry_core.Json.string_field "outcome" fields in
+    let required_detail_fields =
+      match label with
+      | "approved" -> Ok []
+      | "rejected" -> Ok [ "reason" ]
+      | "contract_rejected" | "commit_failed" | "raised" -> Ok [ "detail" ]
+      | "not_reviewed" -> Ok [ "gate"; "detail" ]
+      | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
+    in
+    let* required_detail_fields = required_detail_fields in
+    let* () =
+      Run_registry_core.Json.exact_fields
+        ~required:([ "outcome"; "elapsed_s" ] @ required_detail_fields)
+        ~optional:[ "evaluator_runtime" ]
+        fields
+    in
+    let* elapsed_s = Run_registry_core.Json.float_field "elapsed_s" fields in
+    let* evaluator_runtime =
+      Run_registry_core.Json.optional_string_field "evaluator_runtime" fields
+    in
+    let* outcome =
+      match label with
+      | "approved" -> Ok Approved
+      | "rejected" ->
+        let* reason = Run_registry_core.Json.string_field "reason" fields in
+        Ok (Rejected { reason })
+      | "contract_rejected" ->
+        let* detail = Run_registry_core.Json.string_field "detail" fields in
+        Ok (Contract_rejected { detail })
+      | "not_reviewed" ->
+        let* gate = Run_registry_core.Json.string_field "gate" fields in
+        let* detail = Run_registry_core.Json.string_field "detail" fields in
+        Ok (Not_reviewed { gate; detail })
+      | "commit_failed" ->
+        let* detail = Run_registry_core.Json.string_field "detail" fields in
+        Ok (Commit_failed { detail })
+      | "raised" ->
+        let* detail = Run_registry_core.Json.string_field "detail" fields in
+        Ok (Raised { detail })
+      | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
+    in
+    Ok { outcome; evaluator_runtime; elapsed_s }
+  ;;
+end
+
+module Store = Run_registry_core.Make (Payload)
+
+type t = Store.t
+
+let create = Store.create
+let replay = Store.replay
+let max_completed_retained = Store.max_completed_retained
 
 let register_running
       t
@@ -88,267 +170,83 @@ let register_running
       ~authority_actor
       ~started_at
   =
-  append_event
+  Store.register
     t
-    (Verification_run_registry_event.Register
-       { verification_id; task_id; producer; authority_kind; authority_actor; started_at });
-  update t (fun runs ->
-    let run =
-      { verification_id
-      ; task_id
-      ; producer
-      ; authority_kind
-      ; authority_actor
-      ; started_at
-      ; status = Running
-      }
-    in
-    (* A deferred review is retried under a fresh authority actor; the newest
-       attempt replaces the prior entry so the table names the live one. *)
-    let without_dup =
-      List.filter (fun r -> not (String.equal r.verification_id verification_id)) runs
-    in
-    prune (run :: without_dup))
+    ~id:verification_id
+    ~started_at
+    ~registration:{ Payload.task_id; producer; authority_kind; authority_actor }
 ;;
 
-let mark_completed (t : t) ~verification_id ~outcome ?evaluator_runtime ~elapsed_s () =
-  append_event
-    t
-    (Verification_run_registry_event.Complete
-       { verification_id; outcome; evaluator_runtime; elapsed_s });
-  update t (fun runs ->
-    runs
-    |> List.map (fun r ->
-      if String.equal r.verification_id verification_id
-      then { r with status = Completed { outcome; evaluator_runtime; elapsed_s } }
-      else r)
-    |> prune)
+let mark_completed t ~verification_id ~outcome ?evaluator_runtime ~elapsed_s () =
+  let completion = { Payload.outcome; evaluator_runtime; elapsed_s } in
+  ignore
+    (Store.complete t ~id:verification_id ~completion
+      : [ `Completed | `Unknown ])
 ;;
 
-let list_runs (t : t) : run list =
-  Atomic.get t.runs |> List.sort (fun a b -> Float.compare b.started_at a.started_at)
+let run_of_entry (entry : Store.entry) =
+  let status =
+    match entry.status with
+    | Store.Running -> Running
+    | Store.Completed completion ->
+      Completed
+        { outcome = completion.outcome
+        ; evaluator_runtime = completion.evaluator_runtime
+        ; elapsed_s = completion.elapsed_s
+        }
+  in
+  { verification_id = entry.id
+  ; task_id = entry.registration.task_id
+  ; producer = entry.registration.producer
+  ; authority_kind = entry.registration.authority_kind
+  ; authority_actor = entry.registration.authority_actor
+  ; started_at = entry.started_at
+  ; status
+  }
 ;;
 
-let get (t : t) ~verification_id : run option =
-  List.find_opt
-    (fun r -> String.equal r.verification_id verification_id)
-    (Atomic.get t.runs)
-;;
+let list_runs t = List.map run_of_entry (Store.list_entries t)
+let get t ~verification_id = Option.map run_of_entry (Store.get t ~id:verification_id)
 
-(* One status vocabulary for every surface. A completed review reports its
-   outcome label directly rather than collapsing to "completed"/"failed": the
-   distinction between a rejection, a deferral and a raise is the thing an
-   operator opens this surface to see. *)
 let status_label = function
   | Running -> "running"
-  | Completed { outcome; _ } -> Verification_run_registry_event.outcome_label outcome
+  | Completed { outcome; _ } -> outcome_label outcome
 ;;
 
-(* Outcome detail travels as additive fields so a consumer reading only the
-   base set keeps working when a new outcome constructor lands. *)
-let outcome_detail_fields (outcome : Verification_run_registry_event.outcome) =
-  match outcome with
+let outcome_detail_fields = function
   | Approved -> []
-  | Rejected { reason } -> [ ("reason", `String reason) ]
+  | Rejected { reason } -> [ "reason", `String reason ]
   | Contract_rejected { detail } | Commit_failed { detail } | Raised { detail } ->
-    [ ("detail", `String detail) ]
+    [ "detail", `String detail ]
   | Not_reviewed { gate; detail } ->
-    [ ("gate", `String gate); ("detail", `String detail) ]
+    [ "gate", `String gate; "detail", `String detail ]
 ;;
 
-let run_to_yojson (r : run) : Yojson.Safe.t =
+let run_to_yojson run =
   let base =
-    [ ("verification_id", `String r.verification_id)
-    ; ("task_id", `String r.task_id)
-    ; ("producer", `String r.producer)
-    ; ("authority_kind", `String r.authority_kind)
-    ; ("authority_actor", `String r.authority_actor)
-    ; ("started_at", `Float r.started_at)
-    ; ("status", `String (status_label r.status))
+    [ "verification_id", `String run.verification_id
+    ; "task_id", `String run.task_id
+    ; "producer", `String run.producer
+    ; "authority_kind", `String run.authority_kind
+    ; "authority_actor", `String run.authority_actor
+    ; "started_at", `Float run.started_at
+    ; "status", `String (status_label run.status)
     ]
   in
   let completion_fields =
-    match r.status with
+    match run.status with
     | Running -> []
     | Completed { outcome; evaluator_runtime; elapsed_s } ->
-      [ ("elapsed_s", `Float elapsed_s) ]
+      [ "elapsed_s", `Float elapsed_s ]
       @ outcome_detail_fields outcome
       @
       (match evaluator_runtime with
        | None -> []
-       | Some runtime -> [ ("evaluator_runtime", `String runtime) ])
+       | Some runtime -> [ "evaluator_runtime", `String runtime ])
   in
   `Assoc (base @ completion_fields)
 ;;
 
-(* Replay helpers — hydrate the in-memory table from disk at boot. *)
-let apply_event runs = function
-  | Verification_run_registry_event.Register
-      { verification_id; task_id; producer; authority_kind; authority_actor; started_at }
-    ->
-    let run =
-      { verification_id
-      ; task_id
-      ; producer
-      ; authority_kind
-      ; authority_actor
-      ; started_at
-      ; status = Running
-      }
-    in
-    let without_dup =
-      List.filter (fun r -> not (String.equal r.verification_id verification_id)) runs
-    in
-    run :: without_dup
-  | Verification_run_registry_event.Complete
-      { verification_id; outcome; evaluator_runtime; elapsed_s } ->
-    List.map
-      (fun r ->
-         if String.equal r.verification_id verification_id
-         then { r with status = Completed { outcome; evaluator_runtime; elapsed_s } }
-         else r)
-      runs
-;;
-
-(* A [Running] entry cannot survive a restart: the review fiber dies with the
-   process, and [Completion_authority_agent] rescans every [AwaitingVerification]
-   task at boot, so the work is re-registered under a fresh authority actor.
-   Keeping the replayed entry would name a review that is not happening. *)
-let drop_replayed_running runs =
-  let running, completed = List.partition is_running runs in
-  (match running with
-   | [] -> ()
-   | stale ->
-     Log.Misc.warn
-       "verification_run_registry: dropped %d replayed running review(s); review fibers \
-        do not survive server restart"
-       (List.length stale));
-  completed
-;;
-
-let parse_event_line ~path ~line_no line =
-  match String.trim line with
-  | "" -> Ok None
-  | line ->
-    (match
-       try Ok (Yojson.Safe.from_string line) with
-       | Yojson.Json_error msg -> Error ("invalid JSON: " ^ msg)
-     with
-     | Error msg -> Error msg
-     | Ok json ->
-       (match Verification_run_registry_event.of_yojson json with
-        | Ok event -> Ok (Some event)
-        | Error msg -> Error msg))
-    |> Result.map_error (fun msg -> Printf.sprintf "%s:%d: %s" path line_no msg)
-;;
-
-let events_of_run (run : run) =
-  let register =
-    Verification_run_registry_event.Register
-      { verification_id = run.verification_id
-      ; task_id = run.task_id
-      ; producer = run.producer
-      ; authority_kind = run.authority_kind
-      ; authority_actor = run.authority_actor
-      ; started_at = run.started_at
-      }
-  in
-  match run.status with
-  | Running -> [ register ]
-  | Completed { outcome; evaluator_runtime; elapsed_s } ->
-    [ register
-    ; Verification_run_registry_event.Complete
-        { verification_id = run.verification_id; outcome; evaluator_runtime; elapsed_s }
-    ]
-;;
-
-let compact_replay_log path runs =
-  let events =
-    runs
-    |> List.sort (fun a b -> Float.compare a.started_at b.started_at)
-    |> List.concat_map events_of_run
-  in
-  let content =
-    events |> List.map Verification_run_registry_event.to_jsonl |> String.concat ""
-  in
-  try
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg ->
-      Log.Misc.warn
-        "verification_run_registry: replay compaction failed for %s: %s"
-        path
-        msg
-  with
-  | exn ->
-    Log.Misc.warn
-      "verification_run_registry: replay compaction raised for %s: %s"
-      path
-      (Printexc.to_string exn)
-;;
-
-let fold_replay_events path =
-  if not (Fs_compat.file_exists path)
-  then [], [], false
-  else (
-    try
-      let (events, malformed, _line_no), boundary =
-        Fs_compat.fold_appended_lines
-          ~path
-          ~from:0
-          ~init:([], [], 1)
-          ~f:(fun (events, malformed, line_no) line ->
-            match parse_event_line ~path ~line_no line with
-            | Ok None -> events, malformed, line_no + 1
-            | Ok (Some event) -> event :: events, malformed, line_no + 1
-            | Error msg -> events, msg :: malformed, line_no + 1)
-      in
-      (* Compaction rewrites the file, so it must not run when the stream stopped
-         short of the end — an unterminated tail would be truncated away. *)
-      let should_compact =
-        match Fs_compat.file_size path with
-        | Some size when boundary < size ->
-          Log.Misc.warn
-            "verification_run_registry: replay left unterminated tail in %s (%d/%d bytes \
-             consumed)"
-            path
-            boundary
-            size;
-          false
-        | Some _ -> true
-        | None ->
-          Log.Misc.warn
-            "verification_run_registry: replay stat failed after streaming %s"
-            path;
-          false
-      in
-      List.rev events, List.rev malformed, should_compact
-    with
-    | exn ->
-      Log.Misc.warn
-        "verification_run_registry: replay stream failed for %s: %s"
-        path
-        (Printexc.to_string exn);
-      [], [], false)
-;;
-
-let replay path : t =
-  let events, malformed, should_compact = fold_replay_events path in
-  (match malformed with
-   | [] -> ()
-   | first :: _ as errors ->
-     Log.Misc.warn
-       "verification_run_registry: skipped %d malformed replay line(s); first=%s"
-       (List.length errors)
-       first);
-  let runs = List.fold_left apply_event [] events |> drop_replayed_running |> prune in
-  if should_compact then compact_replay_log path runs;
-  { runs = Atomic.make runs; path = Some path }
-;;
-
-(* Process-wide registry the completion authority writes to (server-lifetime).
-   Tests use a fresh [create ()] for state isolation, avoiding a reset backdoor.
-   The backing path is set at server boot via [set_global] after replay. *)
 let global_atomic : t Atomic.t = Atomic.make (create ())
-let global () : t = Atomic.get global_atomic
-let set_global (t : t) = Atomic.set global_atomic t
+let global () = Atomic.get global_atomic
+let set_global registry = Atomic.set global_atomic registry

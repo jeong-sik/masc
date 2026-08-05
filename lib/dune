@@ -285,8 +285,6 @@
   masc.masc_tool_surface
   ;; OTel metric bridge leaf (Otel_metric_store_core snapshot -> OTLP observable).
   masc.otel_metrics
-  ;; Thompson Sampling leaf; health/Otel_metric_store edges are callbacks.
-  masc_thompson
   ;; Environment configuration (extracted sub-library)
   masc.config
   ;; Neutral agent observation bus. Keeper emits here; IDE registers sinks.

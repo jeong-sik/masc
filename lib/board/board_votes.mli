@@ -90,9 +90,8 @@ val vote :
 
     Vote flips swap up↔down without re-counting (and
     {b without} earning credits, to prevent down/up
-    alternation abuse).  Fresh peer upvotes and vote-feedback
-    observations are emitted through {!Board_effect_hooks}
-    outside the state lock. *)
+    alternation abuse).  The vote log is appended outside the
+    state lock. *)
 
 val current_vote_for_comment :
   store ->

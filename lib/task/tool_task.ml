@@ -121,11 +121,6 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
          ~collaborators:[]
          ~handoff_from:None
          ~handoff_to:None;
-       (* Feed failure into Thompson Sampling quality signal *)
-       (Atomic.get Workspace_hooks.record_thompson_result_fn)
-         ~agent_name:ctx.agent_name
-         ~success:false
-         ~reason:(Some "task_cancelled");
        (* Notification harness: push cancel event to all active sessions *)
        (Atomic.get Workspace_hooks.push_task_event_fn)
          ~event_type:"masc/task_cancelled"
@@ -440,12 +435,7 @@ and handle_transition ~tool_name ~start_time ctx args =
          ~error_message:None
          ~collaborators:completion_collaborators
          ~handoff_from:None
-         ~handoff_to:None;
-        (Atomic.get Workspace_hooks.record_thompson_result_fn)
-          ~agent_name:completion_owner
-          ~success:true
-          ~reason:None;
-        ()
+         ~handoff_to:None
    | Ok _, Masc_domain.Cancel ->
        (Atomic.get Workspace_hooks.record_task_metric_fn)
          ctx.config
@@ -457,12 +447,7 @@ and handle_transition ~tool_name ~start_time ctx args =
          ~error_message:(Some (if String.equal reason "" then "Cancelled" else reason))
          ~collaborators:collaborators_from_task
          ~handoff_from:None
-         ~handoff_to:None;
-        (Atomic.get Workspace_hooks.record_thompson_result_fn)
-          ~agent_name:ctx.agent_name
-          ~success:false
-          ~reason:(Some "task_cancelled");
-        ()
+         ~handoff_to:None
   | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
             | Masc_domain.Release)
   | Error _, _ -> ());

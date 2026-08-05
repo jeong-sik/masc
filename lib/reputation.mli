@@ -52,11 +52,9 @@ type agent_reputation = {
   safety_compliance: float;
   (** Penalty-adjusted safety score; decreases with sandbox violations. 0.0–1.0.
       Defaults to 1.0 when no v2 ledger events exist. *)
-  thompson_confidence: float;
-  (** Thompson Sampling Beta expected value (alpha/(alpha+beta)).
-      0.5 is the neutral prior (alpha=1.0, beta=1.0). *)
   evidence_state: string;
-  (** "measured" if there is any backlog, mention, board, ledger or TS activity; otherwise "default". *)
+  (** "measured" if there is any backlog, mention, board or v2-ledger activity;
+      otherwise "default". *)
 }
 
 val agent_reputation_to_yojson : agent_reputation -> Yojson.Safe.t

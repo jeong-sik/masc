@@ -240,7 +240,6 @@ let board_contributor_quality_json
       ("response_rate", `Float rep.response_rate);
       ("board_posts", `Int rep.board_posts);
       ("board_comments", `Int rep.board_comments);
-      ("thompson_confidence", `Float rep.thompson_confidence);
       ("evidence_state", `String rep.evidence_state);
     ]
 

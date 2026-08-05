@@ -10,12 +10,11 @@
 type tree_node = {
   goal : Goal_store.goal;
   children : tree_node list;
-  tasks : (Masc_domain.task * string) list;
+  tasks : Masc_domain.task list;
   last_activity_at : string;
   stagnation_seconds : int option;
   linked_keeper_names : string list;
   pending_approval_count : int;
-  linkage_source : string;
   latest_keeper_ref : string option;
   latest_turn_ref : int option;
   activity_observation : string;
@@ -35,10 +34,15 @@ type attainment_unit =
 
 (** {1 Pure task-status helpers} *)
 
+(** [Some ()] when the link table places this Task under this Goal. Replaces
+    [task_linkage_source_opt], which returned a constant "explicit" and made
+    three unreachable linkage kinds look like real cases. *)
+val task_is_linked_opt :
+  ?goal_task_index:(string, string list) Hashtbl.t ->
+  Masc_domain.task -> string -> unit option
+
 val task_is_linked_to_goal :
   ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> bool
-val task_linkage_source_opt :
-  ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> string option
 val task_assignee : Masc_domain.task -> string option
 val task_is_terminal : Masc_domain.task -> bool
 val task_is_done : Masc_domain.task -> bool
@@ -47,7 +51,6 @@ val task_updated_at : Masc_domain.task -> string
 (** {1 Pure list utilities} *)
 
 val dedupe_sort : string list -> string list
-val link_source_of_values : string list -> string
 
 (** {1 Receipt / trust JSON inspectors + duration helpers} *)
 
@@ -147,8 +150,8 @@ val goal_fsm_to_json :
 val goal_phase_color : Goal_phase.t -> string
 val task_status_color : Masc_domain.task_status -> string
 
-val task_to_tree_json : Masc_domain.task * string -> Yojson.Safe.t
-val task_summary_to_json : (Masc_domain.task * string) list -> Yojson.Safe.t
+val task_to_tree_json : Masc_domain.task -> Yojson.Safe.t
+val task_summary_to_json : Masc_domain.task list -> Yojson.Safe.t
 
 (** {1 Tree flatten + goal-detail JSON + timeline projection (pure)} *)
 

@@ -149,7 +149,7 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
        `Int
          (List.length
             (List.filter
-               (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
+               (fun (task : Masc_domain.task) -> task_is_done task)
                node.tasks)));
       ("task_summary", task_summary);
       ("completion_summary", completion_summary);
@@ -168,7 +168,6 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
           (List.map (fun keeper_name -> `String keeper_name) node.linked_keeper_names)
       );
       ("pending_approval_count", `Int node.pending_approval_count);
-      ("linkage_source", `String node.linkage_source);
       ("latest_keeper_ref", Json_util.string_opt_to_json node.latest_keeper_ref);
       ("latest_turn_ref", Json_util.int_opt_to_json node.latest_turn_ref);
       ("created_at", `String goal.created_at);
@@ -283,7 +282,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
         acc
         + List.length
             (List.filter
-               (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
+               (fun (task : Masc_domain.task) -> task_is_done task)
                node.tasks))
       0 all_nodes
   in

@@ -32,12 +32,11 @@
 type tree_node = {
   goal : Goal_store.goal;
   children : tree_node list;
-  tasks : (Masc_domain.task * string) list;
+  tasks : Masc_domain.task list;
   last_activity_at : string;
   stagnation_seconds : int option;
   linked_keeper_names : string list;
   pending_approval_count : int;
-  linkage_source : string;
   latest_keeper_ref : string option;
   latest_turn_ref : int option;
   activity_observation : string;

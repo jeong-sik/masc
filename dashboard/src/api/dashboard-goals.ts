@@ -48,7 +48,6 @@ function decodeGoalTreeTask(raw: unknown): GoalTreeTask | null {
     priority: asInt(raw.priority) ?? 0,
     assignee: asNullableString(raw.assignee),
     goal_id: asNullableString(raw.goal_id),
-    linkage_source: asString(raw.linkage_source, 'none'),
     is_terminal: asBoolean(raw.is_terminal, false),
     created_at: asString(raw.created_at, ''),
     updated_at: asString(raw.updated_at, ''),
@@ -244,7 +243,6 @@ function decodeGoalTaskSummary(
     unassigned: asInt(raw.unassigned) ?? 0,
     completion_pct: asInt(raw.completion_pct) ?? null,
     by_status: decodeNumberRecord(raw.by_status),
-    by_linkage_source: decodeNumberRecord(raw.by_linkage_source),
   }
 }
 
@@ -317,7 +315,6 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     activity_observation: asString(raw.activity_observation, 'goal_metadata'),
     linked_keeper_names: asStringArray(raw.linked_keeper_names),
     pending_approval_count: asInt(raw.pending_approval_count) ?? 0,
-    linkage_source: asString(raw.linkage_source, 'none'),
     latest_keeper_ref: asNullableString(raw.latest_keeper_ref),
     latest_turn_ref: asInt(raw.latest_turn_ref) ?? null,
     created_at: asString(raw.created_at, ''),

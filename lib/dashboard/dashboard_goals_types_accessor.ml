@@ -12,12 +12,11 @@
 type tree_node = {
   goal : Goal_store.goal;
   children : tree_node list;
-  tasks : (Masc_domain.task * string) list;
+  tasks : Masc_domain.task list;
   last_activity_at : string;
   stagnation_seconds : int option;
   linked_keeper_names : string list;
   pending_approval_count : int;
-  linkage_source : string;
   latest_keeper_ref : string option;
   latest_turn_ref : int option;
   activity_observation : string;
@@ -51,10 +50,15 @@ let task_is_linked_to_goal ?(goal_task_index = Hashtbl.create 0) (task : Masc_do
   in
   List.mem goal_id task_goal_ids
 
-let task_linkage_source_opt ?(goal_task_index = Hashtbl.create 0) (task : Masc_domain.task) goal_id =
-  if task_is_linked_to_goal ~goal_task_index task goal_id
-  then Some "explicit"
-  else None
+(* A Task appears under a Goal only when the link table says so, so every row
+   carried the same constant "explicit". The other three documented values —
+   "title_tag", "mixed", "none" — had no producer at all: [link_source_of_values]
+   could only ever see one distinct value, and no code ever emitted a title-tag
+   linkage. The field conveyed nothing and the frontend still branched on it,
+   printing "title tag" for a case that could not occur. Linkage is now the
+   membership itself. *)
+let task_is_linked_opt ?(goal_task_index = Hashtbl.create 0) (task : Masc_domain.task) goal_id =
+  if task_is_linked_to_goal ~goal_task_index task goal_id then Some () else None
 
 let task_assignee (task : Masc_domain.task) : string option =
   Masc_domain.task_assignee_of_status task.task_status
@@ -78,16 +82,6 @@ let task_updated_at (task : Masc_domain.task) : string =
 let dedupe_sort values =
   values |> List.sort_uniq String.compare
 
-let link_source_of_values values =
-  let normalized =
-    values
-    |> List.filter (fun value -> value <> "" && not (String.equal value "none"))
-    |> dedupe_sort
-  in
-  match normalized with
-  | [] -> "none"
-  | [ source ] -> source
-  | _ -> "mixed"
 let receipt_error_kind json =
   match Json_util.assoc_member_opt "error" json with
   | Some (`Assoc _ as error) -> Json_util.get_string error "kind"

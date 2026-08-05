@@ -3,12 +3,11 @@
 type tree_node = {
   goal : Goal_store.goal;
   children : tree_node list;
-  tasks : (Masc_domain.task * string) list;
+  tasks : Masc_domain.task list;
   last_activity_at : string;
   stagnation_seconds : int option;
   linked_keeper_names : string list;
   pending_approval_count : int;
-  linkage_source : string;
   latest_keeper_ref : string option;
   latest_turn_ref : int option;
   activity_observation : string;
@@ -35,17 +34,21 @@ type metric_evaluation =
   | Metric_unevaluated
   | Metric_absent
 
+(** [Some ()] when the link table places this Task under this Goal. Replaces
+    [task_linkage_source_opt], which returned a constant "explicit" and made
+    three unreachable linkage kinds look like real cases. *)
+val task_is_linked_opt :
+  ?goal_task_index:(string, string list) Hashtbl.t ->
+  Masc_domain.task -> string -> unit option
+
 val task_is_linked_to_goal :
   ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> bool
-val task_linkage_source_opt :
-  ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> string option
 val task_assignee : Masc_domain.task -> string option
 val task_is_terminal : Masc_domain.task -> bool
 val task_is_done : Masc_domain.task -> bool
 val task_updated_at : Masc_domain.task -> string
 
 val dedupe_sort : string list -> string list
-val link_source_of_values : string list -> string
 
 val receipt_error_kind : Yojson.Safe.t -> string option
 val receipt_error_message : Yojson.Safe.t -> string option

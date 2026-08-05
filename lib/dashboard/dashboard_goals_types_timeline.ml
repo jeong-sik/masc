@@ -37,7 +37,7 @@ let task_status_color (status : Masc_domain.task_status) =
   | Masc_domain.Done _ -> "#4ade80"
   | Masc_domain.Cancelled _ -> "#ef4444"
 
-let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
+let task_to_tree_json (task : Masc_domain.task) =
   `Assoc
     ([
       ("id", `String task.id);
@@ -46,7 +46,6 @@ let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
       ("status_color", `String (task_status_color task.task_status));
       ("priority", `Int task.priority);
       ("assignee", Json_util.string_opt_to_json (task_assignee task));
-      ("linkage_source", `String linkage_source);
       ("is_terminal", `Bool (task_is_terminal task));
       ("created_at", `String task.created_at);
       ("updated_at", `String (task_updated_at task));
@@ -93,7 +92,6 @@ let count_assoc_json preferred_keys table =
 
 let task_summary_to_json tasks =
   let by_status = Hashtbl.create 8 in
-  let by_linkage_source = Hashtbl.create 4 in
   let bump table key =
     let current = Option.value ~default:0 (Hashtbl.find_opt table key) in
     Hashtbl.replace table key (current + 1)
@@ -105,9 +103,8 @@ let task_summary_to_json tasks =
   let cancelled_count = ref 0 in
   let unassigned_count = ref 0 in
   List.iter
-    (fun ((task, linkage_source) : Masc_domain.task * string) ->
+    (fun (task : Masc_domain.task) ->
       bump by_status (Masc_domain.task_status_to_string task.task_status);
-      bump by_linkage_source linkage_source;
       if task_is_done task then incr done_count;
       if task_is_terminal task then incr terminal_count else incr open_count;
       (* One exhaustive match over the variant instead of two string equalities
@@ -140,20 +137,29 @@ let task_summary_to_json tasks =
       ("cancelled", `Int !cancelled_count);
       ("unassigned", `Int !unassigned_count);
       ("completion_pct", completion_pct);
+      (* Preferred keys are the Variant SSOT spelling. They read "pending" and
+         "completed" until the emitter moved to [task_status_to_string]; the
+         list was not updated with it, so two of the six keys named states the
+         counter could no longer contain. Derived from the variant so the two
+         cannot drift again. *)
       ( "by_status",
         count_assoc_json
-          [
-            "pending";
-            "claimed";
-            "in_progress";
-            "awaiting_verification";
-            "completed";
-            "cancelled";
-          ]
+          (List.map
+             Masc_domain.task_status_to_string
+             [ Masc_domain.Todo
+             ; Masc_domain.Claimed { assignee = ""; claimed_at = "" }
+             ; Masc_domain.InProgress { assignee = ""; started_at = "" }
+             ; Masc_domain.AwaitingVerification
+                 { assignee = ""
+                 ; started_at = ""
+                 ; submitted_at = ""
+                 ; verification_id = ""
+                 }
+             ; Masc_domain.Done { assignee = ""; completed_at = ""; notes = None }
+             ; Masc_domain.Cancelled
+                 { cancelled_by = ""; cancelled_at = ""; reason = None }
+             ])
           by_status );
-      ( "by_linkage_source",
-        count_assoc_json [ "explicit"; "title_tag"; "mixed"; "none" ]
-          by_linkage_source );
     ]
 
 let rec flatten_tree acc = function
@@ -262,13 +268,13 @@ let goal_event_timeline_json event =
 let build_goal_timeline node linked_keepers approvals goal_events =
   let task_events =
     node.tasks
-    |> List.map (fun ((task, linkage_source) : Masc_domain.task * string) ->
+    |> List.map (fun (task : Masc_domain.task) ->
            let status = Masc_domain.task_status_to_string task.task_status in
            timeline_event_json ~ts:(task_updated_at task) ~kind:"task"
              ~lane:("task:" ^ task.id)
              ~title:task.title
              ~summary:
-               (Printf.sprintf "%s · linkage=%s" status linkage_source)
+               status
              ~severity:
                (match status with
                 | "cancelled" -> "bad"

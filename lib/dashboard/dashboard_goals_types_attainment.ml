@@ -229,7 +229,7 @@ let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
   let task_done_count =
     List.length
       (List.filter
-         (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
+         (fun (task : Masc_domain.task) -> task_is_done task)
          node.tasks)
   in
   let task_completion_pct =
@@ -336,13 +336,13 @@ let goal_completion_to_json (goal : Goal_store.goal) (node : tree_node) ~attainm
   let task_done_count =
     List.length
       (List.filter
-         (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
+         (fun (task : Masc_domain.task) -> task_is_done task)
          node.tasks)
   in
   let task_terminal_count =
     List.length
       (List.filter
-         (fun ((task, _) : Masc_domain.task * string) -> task_is_terminal task)
+         (fun (task : Masc_domain.task) -> task_is_terminal task)
          node.tasks)
   in
   let task_open_count = task_count - task_terminal_count in

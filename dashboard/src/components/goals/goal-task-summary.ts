@@ -28,7 +28,6 @@ export function goalTaskSummaryForNode(node: GoalTaskSummaryNode): GoalTaskSumma
     unassigned,
     completion_pct: total > 0 ? Math.floor(done / total * 100) : null,
     by_status: countBy(node.tasks.map(task => task.status)),
-    by_linkage_source: countBy(node.tasks.map(task => task.linkage_source)),
   }
 }
 
@@ -38,9 +37,4 @@ export function goalTaskCompletionLabel(summary: GoalTaskSummary): string {
   return `${summary.done}/${summary.total} done · ${pct}`
 }
 
-export function goalTaskLinkageLabel(summary: GoalTaskSummary): string {
-  const explicit = summary.by_linkage_source.explicit ?? 0
-  if (summary.total === 0) return 'no task links'
-  if (explicit === summary.total) return 'explicit goal_id'
-  return `${explicit}/${summary.total} explicit`
-}
+

@@ -211,7 +211,7 @@ describe('KeeperLaneStrip', () => {
     expect(el.querySelector('[data-testid="keeper-lane-truncation"]')).toBeNull()
   })
 
-  it('shows the auto-refresh cadence beside the snapshot time when polling', () => {
+  it('shows push delivery beside the snapshot time when WS is ready', () => {
     const el = mount(html`
       <${KeeperLaneStrip}
         keeper=${keeperFixture()}
@@ -219,16 +219,16 @@ describe('KeeperLaneStrip', () => {
         ready=${true}
         loading=${false}
         error=${null}
-        autoRefreshMs=${15_000}
         pushReady=${true}
       />
     `)
     const text = el.textContent ?? ''
     expect(text).toContain('서버 기준')
-    expect(text).toContain('WS 즉시 반영 · 15초마다 상태 검산')
+    expect(text).toContain('WS 즉시 반영')
+    expect(text).not.toContain('초마다')
   })
 
-  it('omits the auto-refresh label when the panel is not polling', () => {
+  it('omits the push label while WS is unavailable', () => {
     const el = mount(html`
       <${KeeperLaneStrip}
         keeper=${keeperFixture()}
@@ -238,23 +238,8 @@ describe('KeeperLaneStrip', () => {
         error=${null}
       />
     `)
-    expect(el.textContent ?? '').not.toContain('재조회')
-  })
-
-  it('shows polling as fallback instead of claiming live push while WS is unavailable', () => {
-    const el = mount(html`
-      <${KeeperLaneStrip}
-        keeper=${keeperFixture()}
-        inventory=${inventoryFixture()}
-        ready=${true}
-        loading=${false}
-        error=${null}
-        autoRefreshMs=${15_000}
-        pushReady=${false}
-      />
-    `)
-    expect(el.textContent ?? '').toContain('WS 연결 대기 · 15초마다 재조회')
     expect(el.textContent ?? '').not.toContain('WS 즉시 반영')
+    expect(el.textContent ?? '').not.toContain('재조회')
   })
 
   it('renders an explicit gap when the keeper is absent from the inventory', () => {

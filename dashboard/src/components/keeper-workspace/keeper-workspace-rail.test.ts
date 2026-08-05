@@ -108,6 +108,7 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
       read_error_count: 0,
       read_errors: [],
       scan_truncated: false,
+      hydration_status: 'ready',
       items: [
         {
           id: 'manifest:trace-cmp:event_bus_correlated:2026-06-26T03:03:00Z',
@@ -1006,6 +1007,7 @@ describe('KeeperWorkspaceRail', () => {
       read_error_count: 0,
       read_errors: [],
       scan_truncated: false,
+      hydration_status: 'ready',
       items: [
         {
           id: 'manifest:trace-failed:context_compacted:2026-06-03T11:02:00Z',
@@ -1064,6 +1066,7 @@ describe('KeeperWorkspaceRail', () => {
         { scope: 'runtime_manifest_row:trace-cmp.jsonl:1', error: 'unknown event: "old_event"' },
       ],
       scan_truncated: true,
+      hydration_status: 'ready',
       items: [
         {
           id: 'manifest:trace-live:context_compacted:2026-06-03T11:01:24Z',
@@ -1130,6 +1133,7 @@ describe('KeeperWorkspaceRail', () => {
         { scope: 'runtime_manifest_row:trace-a.jsonl:2', error: 'unknown event: "memory_flushed"' },
       ],
       scan_truncated: true,
+      hydration_status: 'ready',
       items: [],
     })
 
@@ -1161,6 +1165,7 @@ describe('KeeperWorkspaceRail', () => {
       read_error_count: 0,
       read_errors: [],
       scan_truncated: false,
+      hydration_status: 'ready',
       items: [],
     })
 

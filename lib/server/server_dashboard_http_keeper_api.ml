@@ -958,6 +958,223 @@ let compaction_snapshots_json ~config ~keeper_id ~limit =
     ]
 ;;
 
+type compaction_snapshot_cache_entry =
+  { body : Yojson.Safe.t
+  ; refreshed_at : float
+  }
+
+let compaction_snapshot_cache :
+    (string, compaction_snapshot_cache_entry) Hashtbl.t =
+  Hashtbl.create 16
+;;
+
+(* [true] means a force-refresh arrived while the current scan was running, so
+   completion must schedule exactly one trailing scan. *)
+let compaction_snapshot_refreshes : (string, bool) Hashtbl.t = Hashtbl.create 16
+let compaction_snapshot_cache_mu = Stdlib.Mutex.create ()
+let compaction_snapshot_cache_max_entries = 128
+
+let with_compaction_snapshot_cache_lock f =
+  Stdlib.Mutex.lock compaction_snapshot_cache_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock compaction_snapshot_cache_mu)
+    f
+;;
+
+let compaction_snapshot_cache_key config keeper_id limit =
+  String.concat "\x00" [ config.Workspace.base_path; keeper_id; string_of_int limit ]
+;;
+
+let compaction_snapshot_with_hydration_status status = function
+  | `Assoc fields ->
+    `Assoc
+      (("hydration_status", `String status)
+       :: List.remove_assoc "hydration_status" fields)
+  | body -> body
+;;
+
+let compaction_snapshot_empty_json ~keeper_id ~limit ~status ~read_errors =
+  `Assoc
+    [ "schema", `String "keeper.compaction_snapshots.v1"
+    ; "keeper", `String keeper_id
+    ; "source", `String "runtime_manifest|keeper_meta"
+    ; "producer", `String "keeper_runtime_manifest|keeper_meta_store"
+    ; "limit", `Int limit
+    ; "count", `Int 0
+    ; "read_error_count", `Int (List.length read_errors)
+    ; ( "read_errors"
+      , `List
+          (List.map
+             (fun error ->
+               `Assoc
+                 [ "scope", `String "background_hydration"
+                 ; "error", `String error
+                 ])
+             read_errors) )
+    ; "scan_truncated", `Bool false
+    ; "items", `List []
+    ; "hydration_status", `String status
+    ]
+;;
+
+let broadcast_compaction_snapshot_refresh ~keeper_id ~status =
+  match
+    Sse.broadcast
+      (`Assoc
+         [ "type", `String "keeper_compaction_snapshots_changed"
+         ; "keeper_name", `String keeper_id
+         ; "status", `String status
+         ; "ts_unix", `Float (Time_compat.now ())
+         ])
+  with
+  | () -> ()
+  | exception Eio.Cancel.Cancelled _ -> ()
+  | exception exn ->
+    Log.Dashboard.warn
+      "keeper compaction snapshot completion broadcast failed: keeper=%s status=%s error=%s"
+      keeper_id status (Printexc.to_string exn)
+;;
+
+let finish_compaction_snapshot_refresh key ~keeper_id body =
+  let refresh_again =
+    with_compaction_snapshot_cache_lock (fun () ->
+      let refresh_again =
+        match Hashtbl.find_opt compaction_snapshot_refreshes key with
+        | Some pending -> pending
+        | None ->
+          Log.Dashboard.warn
+            "keeper compaction snapshot refresh completed without an in-flight marker: keeper=%s"
+            keeper_id;
+          false
+      in
+      if not (Hashtbl.mem compaction_snapshot_cache key)
+      then
+        Server_utils.evict_oldest_if_full
+          ~max_entries:compaction_snapshot_cache_max_entries
+          ~age_of:(fun entry -> entry.refreshed_at)
+          compaction_snapshot_cache;
+      Hashtbl.replace compaction_snapshot_cache key
+        { body; refreshed_at = Time_compat.now () };
+      Hashtbl.remove compaction_snapshot_refreshes key;
+      refresh_again)
+  in
+  let status =
+    match body with
+    | `Assoc fields ->
+      (match List.assoc_opt "hydration_status" fields with
+       | Some (`String value) -> value
+       | _ -> "failed")
+    | _ -> "failed"
+  in
+  broadcast_compaction_snapshot_refresh ~keeper_id ~status;
+  refresh_again
+;;
+
+let rec start_compaction_snapshot_refresh
+    ~config
+    ~keeper_id
+    ~limit
+    ~force_refresh
+    key
+  =
+  let admitted =
+    with_compaction_snapshot_cache_lock (fun () ->
+      if Hashtbl.mem compaction_snapshot_refreshes key
+      then begin
+        if force_refresh
+        then Hashtbl.replace compaction_snapshot_refreshes key true;
+        false
+      end
+      else begin
+        Hashtbl.add compaction_snapshot_refreshes key false;
+        true
+      end)
+  in
+  if not admitted
+  then true
+  else
+    match Eio_context.get_switch_opt () with
+    | None ->
+      with_compaction_snapshot_cache_lock (fun () ->
+        Hashtbl.remove compaction_snapshot_refreshes key);
+      false
+    | Some sw ->
+      let run () =
+        let finish body =
+          let refresh_again =
+            finish_compaction_snapshot_refresh key ~keeper_id body
+          in
+          if refresh_again
+          then
+            ignore
+              (start_compaction_snapshot_refresh ~config ~keeper_id ~limit
+                 ~force_refresh:false key)
+        in
+        match
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            compaction_snapshots_json ~config ~keeper_id ~limit)
+        with
+        | body ->
+          finish
+            (compaction_snapshot_with_hydration_status "ready" body)
+        | exception Eio.Cancel.Cancelled _ ->
+          with_compaction_snapshot_cache_lock (fun () ->
+            Hashtbl.remove compaction_snapshot_refreshes key)
+        | exception exn ->
+          let error = Printexc.to_string exn in
+          Log.Dashboard.warn
+            "keeper compaction snapshot hydration failed: keeper=%s error=%s"
+            keeper_id error;
+          finish
+            (compaction_snapshot_empty_json ~keeper_id ~limit ~status:"failed"
+               ~read_errors:[ error ])
+      in
+      (match Eio.Fiber.fork ~sw run with
+       | () -> true
+       | exception exn ->
+         with_compaction_snapshot_cache_lock (fun () ->
+           Hashtbl.remove compaction_snapshot_refreshes key);
+         Log.Dashboard.warn
+           "keeper compaction snapshot background fork failed: keeper=%s error=%s"
+           keeper_id (Printexc.to_string exn);
+         false)
+;;
+
+let cached_compaction_snapshots_json
+    ~config
+    ~keeper_id
+    ~limit
+    ~force_refresh
+  =
+  let limit = limit |> max 1 |> min compaction_snapshot_max_limit in
+  let key = compaction_snapshot_cache_key config keeper_id limit in
+  let now = Time_compat.now () in
+  let cached =
+    with_compaction_snapshot_cache_lock (fun () ->
+      Hashtbl.find_opt compaction_snapshot_cache key)
+  in
+  let stale =
+    match cached with
+    | None -> true
+    | Some entry -> now -. entry.refreshed_at >= keeper_hot_path_cache_ttl_s
+  in
+  let scheduled =
+    if force_refresh || stale
+    then
+      start_compaction_snapshot_refresh ~config ~keeper_id ~limit ~force_refresh
+        key
+    else true
+  in
+  match cached with
+  | Some entry -> entry.body
+  | None when scheduled ->
+    compaction_snapshot_empty_json ~keeper_id ~limit ~status:"warming"
+      ~read_errors:[]
+  | None ->
+    compaction_snapshot_empty_json ~keeper_id ~limit ~status:"failed"
+      ~read_errors:[ "background refresh context unavailable" ]
+;;
+
 let cached_keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit () =
   let cache_key =
     keeper_runtime_trace_cache_key config name ?trace_id ?turn_id ~limit ()
@@ -1743,9 +1960,12 @@ let handle_keeper_get_subroutes state req request reqd =
         |> max 1 |> min compaction_snapshot_max_limit
       in
       let config = Mcp_server.workspace_config state in
+      let force_refresh =
+        Server_utils.bool_query_param req "refresh" ~default:false
+      in
       let json =
-        Domain_pool_ref.submit_io_or_inline (fun () ->
-          compaction_snapshots_json ~config ~keeper_id:name ~limit)
+        cached_compaction_snapshots_json ~config ~keeper_id:name ~limit
+          ~force_refresh
       in
       Http.Response.json_value ~compress:true ~request:req
         json reqd

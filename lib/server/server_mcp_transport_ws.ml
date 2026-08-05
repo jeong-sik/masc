@@ -439,12 +439,6 @@ let dashboard_session_result session =
 let find_session session_id =
   with_sessions_rw (fun () -> Hashtbl.find_opt sessions session_id)
 
-let dashboard_snapshot_provider : (string -> Yojson.Safe.t option) ref =
-  ref (fun _slice -> None)
-
-let set_dashboard_snapshot_provider provider =
-  dashboard_snapshot_provider := provider
-
 let dashboard_auth_success_payload session =
   `Assoc
     [
@@ -453,7 +447,6 @@ let dashboard_auth_success_payload session =
       ( "capabilities",
         `Assoc
           [
-            ("snapshot", `Bool true);
             ("delta", `Bool true);
             ("mode_snapshot", `Bool true);
           ] );
@@ -503,23 +496,6 @@ let dashboard_hello ~base_path ~session_id ?token () =
     (Unix.gettimeofday () -. start_time);
   result
 
-let dashboard_snapshot session =
-  let slices =
-    Atomic.get session.dashboard_slices
-    |> List.filter_map (fun slice ->
-           match !dashboard_snapshot_provider slice with
-           | Some json -> Some (slice, json)
-           | None -> None)
-    |> List.sort (fun (a, _) (b, _) -> String.compare a b)
-  in
-  `Assoc
-    [
-      ("protocol", `String "dashboard-ws.v1");
-      ("seq", `Int (next_dashboard_seq session));
-      ( "route", Json_util.string_opt_to_json (Atomic.get session.dashboard_route) );
-      ("slices", `Assoc slices);
-    ]
-
 let dashboard_subscribe ~session_id ?route ~slices () =
   match find_session session_id with
   | None -> Error "WebSocket session not found"
@@ -546,7 +522,6 @@ let dashboard_subscribe ~session_id ?route ~slices () =
               (`Assoc
                 [
                   ("session", dashboard_session_result session);
-                  ("snapshot", dashboard_snapshot session);
                 ])
       end
 

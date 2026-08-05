@@ -1,18 +1,5 @@
 open Env_config_core
 
-(** {1 Session Configuration} *)
-
-module Session = struct
-  (** Maximum session age before cleanup (seconds) *)
-  let max_age_seconds =
-    get_float ~default:3600.0 "MASC_SESSION_MAX_AGE_SEC"
-
-  (** Grace period after SSE disconnect before reaping transport session (seconds).
-      Prevents "Unknown Mcp-Session-Id" errors on brief SSE interruptions. *)
-  let sse_grace_period_seconds =
-    get_float ~default:300.0 "MASC_SESSION_SSE_GRACE_PERIOD_SEC"
-end
-
 (** {1 Tempo (Polling Interval) Configuration} *)
 
 module Tempo = struct

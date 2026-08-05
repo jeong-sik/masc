@@ -4,6 +4,7 @@ module U = Yojson.Safe.Util
 
 type http_result = {
   status : int option;
+  response_headers : string;
   body : string;
   curl_exit : int;
   stderr : string;
@@ -44,8 +45,8 @@ let parse_status header_raw =
   in
   find_http lines
 
-let run_curl_post ?(max_time_sec = 8) ?(extra_headers = []) ~port ~path
-    ~session_id ~payload () =
+let run_curl_post ?(max_time_sec = 8) ?(extra_headers = [])
+    ?(protocol_version = "2026-07-28") ~port ~path ~session_id:_ ~payload () =
   let header_file = Filename.temp_file "mcp-post-sse-header-" ".txt" in
   let body_file = Filename.temp_file "mcp-post-sse-body-" ".txt" in
   let data_file = Filename.temp_file "mcp-post-sse-request-" ".json" in
@@ -73,9 +74,7 @@ let run_curl_post ?(max_time_sec = 8) ?(extra_headers = []) ~port ~path
          "-H";
          "Accept: application/json, text/event-stream";
          "-H";
-         Printf.sprintf "Mcp-Session-Id: %s" session_id;
-         "-H";
-         "Mcp-Protocol-Version: 2025-11-25";
+         "Mcp-Protocol-Version: " ^ protocol_version;
        ]
       @ extra_header_args
       @ [
@@ -100,14 +99,15 @@ let run_curl_post ?(max_time_sec = 8) ?(extra_headers = []) ~port ~path
     | Unix.WSIGNALED code -> 128 + code
     | Unix.WSTOPPED code -> 256 + code
   in
-  let status = parse_status (read_file header_file) in
+  let response_headers = read_file header_file in
+  let status = parse_status response_headers in
   let body = read_file body_file in
   (try Sys.remove header_file with _ -> ());
   (try Sys.remove body_file with _ -> ());
   (try Sys.remove data_file with _ -> ());
-  { status; body; curl_exit; stderr }
+  { status; response_headers; body; curl_exit; stderr }
 
-let run_curl_get ?(max_time_sec = 1) ~port ~path () =
+let run_curl_get ?(max_time_sec = 1) ?(meth = "GET") ~port ~path () =
   let header_file = Filename.temp_file "mcp-post-sse-get-header-" ".txt" in
   let body_file = Filename.temp_file "mcp-post-sse-get-body-" ".txt" in
   let url = Printf.sprintf "http://127.0.0.1:%d%s" port path in
@@ -119,7 +119,7 @@ let run_curl_get ?(max_time_sec = 1) ~port ~path () =
       "--max-time";
       string_of_int max_time_sec;
       "-X";
-      "GET";
+      meth;
       "-o";
       body_file;
       "-D";
@@ -139,11 +139,12 @@ let run_curl_get ?(max_time_sec = 1) ~port ~path () =
     | Unix.WSIGNALED code -> 128 + code
     | Unix.WSTOPPED code -> 256 + code
   in
-  let status = parse_status (read_file header_file) in
+  let response_headers = read_file header_file in
+  let status = parse_status response_headers in
   let body = read_file body_file in
   (try Sys.remove header_file with _ -> ());
   (try Sys.remove body_file with _ -> ());
-  { status; body; curl_exit; stderr }
+  { status; response_headers; body; curl_exit; stderr }
 
 let contains_substr needle haystack =
   let n = String.length needle in
@@ -243,12 +244,18 @@ let with_server f =
   in
   let log_file = Filename.temp_file "mcp-post-sse-e2e-" ".log" in
   let base_path = Filename.temp_dir "mcp-post-sse-base-" "" in
+  Masc.Auth.save_auth_config base_path
+    { Masc_domain.default_auth_config with
+      enabled = false
+    ; require_token = false
+    };
   let log_fd =
     Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
   in
   let env =
     merge_env_overrides
       [
+        ("MASC_BASE_PATH", base_path);
         ("MASC_AUTONOMY_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
@@ -294,7 +301,7 @@ let parse_json_body label result =
       (Printf.sprintf "%s invalid JSON: %s\nbody=%s\nnormalized=%s" label err
          result.body normalized)
 
-let tool_payload ~id ~name ~arguments =
+let tool_payload ?(protocol_version = "2026-07-28") ~id ~name ~arguments () =
   Yojson.Safe.to_string
     (`Assoc
       [
@@ -303,15 +310,28 @@ let tool_payload ~id ~name ~arguments =
         ("method", `String "tools/call");
         ( "params",
           `Assoc
-            [ ("name", `String name); ("arguments", arguments) ] );
+            [ ( "_meta"
+              , `Assoc
+                  [ ( "io.modelcontextprotocol/protocolVersion"
+                    , `String protocol_version )
+                  ; ("io.modelcontextprotocol/clientCapabilities", `Assoc [])
+                  ] )
+            ; ("name", `String name)
+            ; ("arguments", arguments)
+            ] );
       ])
 
 let rec call_status_until_ready ~port ~retries_left =
   let result =
     run_curl_post ~max_time_sec:8 ~port ~path:"/mcp"
       ~session_id:"post-sse-keepalive"
+      ~extra_headers:
+        [ "Mcp-Method: tools/call"
+        ; "Mcp-Name: masc_status"
+        ; "Last-Event-ID: 999999"
+        ]
       ~payload:
-        (tool_payload ~id:201 ~name:"masc_status" ~arguments:(`Assoc []))
+        (tool_payload ~id:201 ~name:"masc_status" ~arguments:(`Assoc []) ())
       ()
   in
   match (result.status, retries_left) with
@@ -336,7 +356,8 @@ let test_post_tools_call_streams_sse_framing () =
   let result = call_status_until_ready ~port ~retries_left:40 in
   require_http_ok "streaming tools/call" result;
   check int "curl exits cleanly" 0 result.curl_exit;
-  check bool "prime event sent" true (contains_substr "retry: 3000" result.body);
+  check bool "legacy replay prime omitted" false
+    (contains_substr "retry: 3000" result.body);
   check bool "message event sent" true
     (contains_substr "event: message" result.body);
   let json = parse_json_body "streaming tools/call" result in
@@ -353,10 +374,14 @@ let rec join_until_ready ~port ~retries_left =
   let result =
     run_curl_post ~max_time_sec:8 ~port ~path:"/mcp"
       ~session_id:"legacy-agent-name-preservation"
-      ~extra_headers:[ "X-MASC-Agent: dashboard-header-actor" ]
+      ~extra_headers:
+        [ "Mcp-Method: tools/call"
+        ; "Mcp-Name: masc_bind"
+        ; "X-MASC-Agent: dashboard-header-actor"
+        ]
       ~payload:
         (tool_payload ~id:202 ~name:"masc_bind"
-           ~arguments:(`Assoc [ ("agent_name", `String "gemini") ]))
+           ~arguments:(`Assoc [ ("agent_name", `String "gemini") ]) ())
       ()
   in
   match (result.status, retries_left) with
@@ -372,23 +397,51 @@ let rec join_until_ready ~port ~retries_left =
       join_until_ready ~port ~retries_left:(retries - 1)
   | _ -> result
 
-let test_post_tools_call_preserves_explicit_tool_agent_name () =
+let test_post_rejects_retired_masc_bind_with_http_404 () =
   with_server @@ fun ~port ->
   let result = join_until_ready ~port ~retries_left:40 in
-  require_http_ok "tool agent_name preservation tools/call" result;
+  check (option int) "retired tool returns HTTP 404" (Some 404) result.status;
   check int "curl exits cleanly" 0 result.curl_exit;
-  let json = parse_json_body "tool agent_name preservation tools/call" result in
-  check bool "json-rpc error absent" true (json |> U.member "error" = `Null);
-  check bool "tool succeeded" false
-    (json |> U.member "result" |> U.member "isError" |> U.to_bool);
-  let text =
-    json |> U.member "result" |> U.member "content" |> U.index 0
-    |> U.member "text" |> U.to_string
+  let json = Yojson.Safe.from_string result.body in
+  check int "method-not-found JSON-RPC code" (-32601)
+    (json |> U.member "error" |> U.member "code" |> U.to_int)
+
+let test_mcp_endpoint_rejects_legacy_methods () =
+  with_server @@ fun ~port ->
+  let get_result = run_curl_get ~port ~path:"/mcp" () in
+  let delete_result = run_curl_get ~meth:"DELETE" ~port ~path:"/mcp" () in
+  check (option int) "GET /mcp is method-not-allowed" (Some 405)
+    get_result.status;
+  check (option int) "DELETE /mcp is method-not-allowed" (Some 405)
+    delete_result.status
+
+let test_mcp_endpoint_rejects_previous_version () =
+  with_server @@ fun ~port ->
+  let result =
+    run_curl_post ~protocol_version:"unsupported-version" ~port ~path:"/mcp"
+      ~session_id:"ignored"
+      ~extra_headers:
+        [ "Mcp-Method: tools/call"
+        ; "Mcp-Name: masc_status"
+        ]
+      ~payload:
+        (tool_payload ~protocol_version:"unsupported-version" ~id:203
+           ~name:"masc_status" ~arguments:(`Assoc []) ())
+      ()
   in
-  check bool "explicit tool agent_name preserved" true
-    (contains_substr "Type: gemini" text);
-  check bool "header actor not used as tool target agent_name" false
-    (contains_substr "Type: dashboard-header-actor" text)
+  check (option int) "previous version returns HTTP 400" (Some 400)
+    result.status;
+  let json = Yojson.Safe.from_string result.body in
+  let error = json |> U.member "error" in
+  let code = error |> U.member "code" |> U.to_int in
+  if code <> -32022 then
+    failf "expected UnsupportedProtocolVersion -32022, got body=%s curl=%s"
+      result.body result.stderr;
+  check string "requested version is reported" "unsupported-version"
+    (error |> U.member "data" |> U.member "requested" |> U.to_string);
+  check (list string) "only current is advertised" [ "2026-07-28" ]
+    (error |> U.member "data" |> U.member "supported" |> U.to_list
+     |> List.map U.to_string)
 
 let () =
   run "mcp_post_sse_e2e"
@@ -397,7 +450,11 @@ let () =
         [
           test_case "post tools/call streams sse framing" `Slow
             test_post_tools_call_streams_sse_framing;
-          test_case "post tools/call preserves explicit tool agent_name"
-            `Slow test_post_tools_call_preserves_explicit_tool_agent_name;
+          test_case "post rejects retired masc_bind with HTTP 404"
+            `Slow test_post_rejects_retired_masc_bind_with_http_404;
+          test_case "mcp endpoint rejects legacy GET and DELETE"
+            `Slow test_mcp_endpoint_rejects_legacy_methods;
+          test_case "mcp endpoint rejects previous protocol version"
+            `Slow test_mcp_endpoint_rejects_previous_version;
         ] );
     ]

@@ -1,4 +1,4 @@
-(** Isolated MCP session-bound Task lifecycle smoke.
+(** Isolated MCP Task lifecycle smoke.
 
     This exercises protocol admission, session identity, typed tool dispatch,
     workspace persistence, and Task verification submission once inside an
@@ -32,26 +32,6 @@ let request ~id ~method_ params =
       ; ("params", params)
       ])
 
-let initialize_request =
-  request ~id:1 ~method_:"initialize"
-    (`Assoc
-      [ ("protocolVersion", `String "2025-11-25")
-      ; ("capabilities", `Assoc [])
-      ; ( "clientInfo"
-        , `Assoc
-            [ ("name", `String "masc-session-task-smoke")
-            ; ("version", `String "1")
-            ] )
-      ])
-
-let initialized_notification =
-  Yojson.Safe.to_string
-    (`Assoc
-      [ ("jsonrpc", `String "2.0")
-      ; ("method", `String "notifications/initialized")
-      ; ("params", `Assoc [])
-      ])
-
 let tool_request ~id ~name arguments =
   request ~id ~method_:"tools/call"
     (`Assoc
@@ -62,7 +42,10 @@ let tool_request ~id ~name arguments =
 let result_fields_exn label = function
   | `Assoc response_fields ->
     (match List.assoc_opt "result" response_fields with
-     | Some (`Assoc result_fields) -> result_fields
+     | Some (`Assoc result_fields) ->
+       (match List.assoc_opt "resultType" result_fields with
+        | Some (`String "complete") -> result_fields
+        | _ -> failf "%s omitted result.resultType=complete" label)
      | Some _ -> failf "%s returned a non-object result" label
      | None ->
        failf "%s returned no result: %s" label
@@ -134,14 +117,6 @@ let test_session_task_lifecycle () =
       let call request =
         Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id state request
       in
-
-      call initialize_request |> check_protocol_success "initialize";
-      (match call initialized_notification with
-       | `Null -> ()
-       | response ->
-         failf
-           "notifications/initialized was not accepted as a notification: %s"
-           (Yojson.Safe.to_string response));
 
       call
         (tool_request ~id:2 ~name:"masc_start"
@@ -228,13 +203,6 @@ let test_task_creation_failure_remains_typed_error () =
           state
           request
       in
-      call initialize_request |> check_protocol_success "initialize";
-      (match call initialized_notification with
-       | `Null -> ()
-       | response ->
-         failf
-           "notifications/initialized was not accepted as a notification: %s"
-           (Yojson.Safe.to_string response));
       call
         (tool_request ~id:2 ~name:"masc_start"
            (`Assoc
@@ -266,9 +234,9 @@ let test_task_creation_failure_remains_typed_error () =
         Yojson.Safe.Util.(structured |> member "agent_name" |> to_string))
 
 let () =
-  run "MCP session-bound Task lifecycle smoke"
+  run "MCP Task lifecycle smoke"
     [ ( "protocol to durable outcome"
-      , [ test_case "handshake, start, observe, complete" `Quick
+      , [ test_case "start, observe, complete" `Quick
             test_session_task_lifecycle
         ; test_case "task creation failure stays an error" `Quick
             test_task_creation_failure_remains_typed_error

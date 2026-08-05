@@ -90,7 +90,6 @@
   test_http_negotiation
   test_mcp_h1_h2_admission_parity
   test_streamable_http_upgrade
-  test_mcp_session_id_header
   test_keeper_sdk_error_typed_bridge
   test_keeper_status_bridge
   test_keeper_diagnostic_stale_last_error
@@ -116,7 +115,6 @@
   test_graphql_api
   test_graphql_endpoint
   test_subscriptions
-  test_session
   test_progress
   test_validation
   test_response
@@ -384,7 +382,6 @@
   test_http_negotiation
   test_mcp_h1_h2_admission_parity
   test_streamable_http_upgrade
-  test_mcp_session_id_header
   test_keeper_sdk_error_typed_bridge
   test_keeper_status_bridge
   test_keeper_diagnostic_stale_last_error
@@ -410,7 +407,6 @@
   test_graphql_api
   test_graphql_endpoint
   test_subscriptions
-  test_session
   test_progress
   test_validation
   test_response
@@ -1241,14 +1237,6 @@
  (modules test_voice_config)
  (libraries alcotest yojson masc.voice_config unix))
 
-; MCP HTTP session persistence: save/forget/load round-trip through the
-; fd-safe write path (close_out_noerr finally guard).
-
-(test
- (name test_server_mcp_session_persist)
- (modules test_server_mcp_session_persist)
- (libraries alcotest masc_server unix))
-
 ; Bounded-cache eviction guard for client-keyed dashboard metrics caches.
 
 (test
@@ -1483,7 +1471,7 @@
   test_progress_coverage
   test_mcp_protocol_coverage
   test_notify_coverage
-  test_mcp_session_coverage
+  test_transport_correlation_id
   test_sse_coverage
   test_workspace_utils_coverage
   test_orchestrator_coverage
@@ -1525,7 +1513,7 @@
   test_progress_coverage
   test_mcp_protocol_coverage
   test_notify_coverage
-  test_mcp_session_coverage
+  test_transport_correlation_id
   test_sse_coverage
   test_workspace_utils_coverage
   test_orchestrator_coverage
@@ -1556,20 +1544,10 @@
   test_tool_args_envelope)
  (libraries masc_test_deps))
 
-; PR-MASC-3: SSE registration token+session validation.
-; Runs with a tiny session max age so the expired-session regression case
-; can age out a session deterministically without waiting for the default
-; one-hour window.
-
 (test
  (name test_sse_registration_auth)
  (modules test_sse_registration_auth)
- (libraries masc_test_deps)
- (action
-  (setenv
-   MASC_SESSION_MAX_AGE_SEC
-   "0.5"
-   (run %{test}))))
+ (libraries masc_test_deps))
 
 ; Special: Multi-module test suites
 

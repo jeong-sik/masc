@@ -18,7 +18,7 @@ type deps = {
   get_switch : unit -> Eio.Switch.t option;
   get_clock :
     unit -> float Eio.Time.clock_ty Eio.Resource.t option;
-  get_session_id_any : Httpun.Request.t -> string option;
+  observer_session_id : Httpun.Request.t -> string option;
 }
 (** Dependency record for the activity HTTP handlers.  Concrete
     record because {!Server_routes_http_routes_activity}

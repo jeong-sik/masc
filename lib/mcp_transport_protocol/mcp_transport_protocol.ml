@@ -111,29 +111,6 @@ let get_id req = match req.id with Some id -> id | None -> `Null
 
 let is_valid_request_id value = Result.is_ok (request_id_of_yojson value)
 
-let validate_initialize_params params =
-  let ( let* ) = Result.bind in
-  let require_string label = function
-    | Some (`String _) -> Ok ()
-    | None | Some `Null -> Error ("Missing " ^ label)
-    | Some _ -> Error ("Invalid " ^ label)
-  in
-  let require_assoc label = function
-    | Some (`Assoc _ as v) -> Ok v
-    | None | Some `Null -> Error ("Missing " ^ label)
-    | Some _ -> Error ("Invalid " ^ label)
-  in
-  match params with
-  | None -> Error "Missing params"
-  | Some (`Assoc _ as p) ->
-      let* () = require_string "protocolVersion" (get_field "protocolVersion" p) in
-      let* client_info = require_assoc "clientInfo" (get_field "clientInfo" p) in
-      let* () = require_string "clientInfo.name" (get_field "name" client_info) in
-      let* () = require_string "clientInfo.version" (get_field "version" client_info) in
-      let* _ = require_assoc "capabilities" (get_field "capabilities" p) in
-      Ok ()
-  | Some _ -> Error "Invalid params: expected object"
-
 (* ── JSON-RPC response builders ──────────────────────────── *)
 
 let make_response ~id result =
@@ -142,6 +119,16 @@ let make_response ~id result =
     ("id", id);
     ("result", result);
   ]
+
+let make_complete_response ~id = function
+  | `Assoc fields as result ->
+      let result =
+        if List.mem_assoc "resultType" fields
+        then result
+        else `Assoc (("resultType", `String "complete") :: fields)
+      in
+      make_response ~id result
+  | _ -> invalid_arg "MCP 2026-07-28 results must be JSON objects"
 
 let make_error ?data ~id code message =
   let error_fields =
@@ -306,25 +293,16 @@ module Http_negotiation = struct
 end
 
 let protocol_version_2026_07_28 = "2026-07-28"
-let protocol_version_draft_2026_v1 = "DRAFT-2026-v1"
 
-let supported_protocol_versions =
-  let rec add acc version =
-    if List.mem version acc then acc else acc @ [ version ]
-  in
-  List.fold_left add []
-    (protocol_version_2026_07_28
-     :: protocol_version_draft_2026_v1
-     :: Mcp_protocol.Version.supported_versions)
+let supported_protocol_versions = [ protocol_version_2026_07_28 ]
 
-let default_protocol_version = Mcp_protocol.Version.latest
+let default_protocol_version = protocol_version_2026_07_28
 
 let is_supported_protocol_version version =
   List.mem version supported_protocol_versions
 
 let is_stateless_protocol_version version =
   String.equal version protocol_version_2026_07_28
-  || String.equal version protocol_version_draft_2026_v1
 
 let validate_protocol_version version =
   if is_supported_protocol_version version then
@@ -334,17 +312,6 @@ let validate_protocol_version version =
       (Printf.sprintf
          "Unsupported protocolVersion '%s' (supported: %s)" version
          (String.concat ", " supported_protocol_versions))
-
-let normalize_protocol_version version =
-  if is_supported_protocol_version version then version
-  else default_protocol_version
-
-let protocol_version_from_params = function
-  | Some (`Assoc fields) -> (
-      match List.assoc_opt "protocolVersion" fields with
-      | Some (`String version) -> version
-      | _ -> default_protocol_version)
-  | _ -> default_protocol_version
 
 let protocol_version_meta_key = "io.modelcontextprotocol/protocolVersion"
 
@@ -363,27 +330,4 @@ let protocol_version_from_request_meta_json = function
 
 let protocol_version_from_request_meta_body body_str =
   try Yojson.Safe.from_string body_str |> protocol_version_from_request_meta_json
-  with Yojson.Json_error _ -> None
-
-let body_uses_stateless_protocol body_str =
-  match protocol_version_from_request_meta_body body_str with
-  | Some version -> is_stateless_protocol_version version
-  | None -> false
-
-let protocol_version_from_initialize_request_json = function
-  | `Assoc fields -> (
-      match
-        (List.assoc_opt "jsonrpc" fields, List.assoc_opt "method" fields)
-      with
-      | Some (`String "2.0"), Some (`String "initialize") ->
-          let params = List.assoc_opt "params" fields in
-          Some
-            (protocol_version_from_params params |> normalize_protocol_version)
-      | _ -> None)
-  | _ -> None
-
-let protocol_version_from_body body_str =
-  try
-    Yojson.Safe.from_string body_str
-    |> protocol_version_from_initialize_request_json
   with Yojson.Json_error _ -> None

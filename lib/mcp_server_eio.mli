@@ -34,8 +34,6 @@ type tool_profile =
 val is_jsonrpc_response : Yojson.Safe.t -> bool
 val get_id : jsonrpc_request -> Yojson.Safe.t
 val is_valid_request_id : Yojson.Safe.t -> bool
-val validate_initialize_params : Yojson.Safe.t option -> (unit, string) result
-
 (** JSON helper: field existence check (re-exported) *)
 val has_field : string -> Yojson.Safe.t -> bool
 
@@ -135,10 +133,6 @@ val execute_tool_eio :
   name:string ->
   arguments:Yojson.Safe.t ->
   Tool_result.result
-
-(** Clear MCP resource subscriptions associated with a session.
-    Called by streamable HTTP transport when a session is deleted. *)
-val clear_resource_subscriptions_for_session : string -> unit
 
 (** {1 Stdio Transport - Eio Native} *)
 

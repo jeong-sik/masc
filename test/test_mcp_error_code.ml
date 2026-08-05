@@ -181,7 +181,7 @@ let test_sse_get_registers_before_streaming_response () =
     | None -> fail (label ^ ": missing Sse.register")
     | Some register_at ->
         (match
-           ( index_of_after source "respond_sse_register_error" register_at,
+           ( index_of_after source "respond_observer_stream_register_error" register_at,
              index_of_after
                source
                "Httpun.Reqd.respond_with_streaming"

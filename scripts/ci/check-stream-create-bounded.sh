@@ -15,7 +15,6 @@
 #     - #10777: Session.start_loop never called → restore_sessions
 #       enqueued forever into the unbounded registry mailbox, OOM
 #       blocked the keeper autoboot.
-#     - #11022: bounded Session.{registry, mcp_session_store} mailboxes
 #       (10_000 each, see lib/session.ml). Without this lint, a future
 #       refactor could revert to max_int unnoticed.
 #

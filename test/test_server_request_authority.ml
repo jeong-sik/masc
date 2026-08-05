@@ -576,8 +576,8 @@ let test_mcp_origin_validation_uses_admitted_authority () =
        (http1_request "/mcp"));
   check
     bool
-    "POST root is MCP transport"
-    true
+    "POST root has no MCP compatibility route"
+    false
     (Server_routes_http_common.is_mcp_transport_request
        (Httpun.Request.create `POST "/"));
   check
@@ -586,6 +586,13 @@ let test_mcp_origin_validation_uses_admitted_authority () =
     false
     (Server_routes_http_common.is_mcp_transport_request
        (http1_request "/"))
+  ;
+  check
+    bool
+    "observer events use transport authority"
+    true
+    (Server_routes_http_common.is_mcp_transport_request
+       (http1_request "/events"))
 ;;
 
 let test_fiber_binding_has_no_fallback () =

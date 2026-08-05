@@ -4354,7 +4354,7 @@ let test_main_eio_serves_health_before_lazy_startup () =
             Alcotest.skip ()
           end))
 
-let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
+let test_main_eio_fresh_bootstrap_and_current_mcp_request () =
   with_temp_dir "startup-fresh-boot-e2e" (fun dir ->
       let exe = Masc_test_runtime.find_main_eio_exe () in
       let port = find_free_port () in
@@ -4433,48 +4433,6 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
             (canonical_path dir) (canonical_path effective_base_path);
           Alcotest.(check string) "config root matches fresh dir"
             (canonical_path expected_config) (canonical_path config_root_path);
-          let init_headers, init_body =
-            curl_request_capture
-              ~output_dir:dir ~name:"initialize" ~method_:"POST"
-              ~url:(Printf.sprintf "http://127.0.0.1:%d/mcp" port)
-              ~headers:[ "Content-Type: application/json"; main_eio_auth_header ]
-              ~payload:
-                {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"fresh-boot-test","version":"1.0"}}}|}
-              ()
-          in
-          Alcotest.(check (option int)) "initialize http 200" (Some 200)
-            (http_status_from_headers init_headers);
-          let init_json = parse_json_response_file init_body in
-          Alcotest.(check string) "initialize protocol" "2025-11-25"
-            Yojson.Safe.Util.(
-              init_json |> member "result" |> member "protocolVersion" |> to_string);
-          let session_id =
-            require_header_value init_headers "Mcp-Session-Id"
-          in
-          let protocol_version =
-            require_header_value init_headers "Mcp-Protocol-Version"
-          in
-          let notify_headers, _notify_body =
-            curl_request_capture
-              ~output_dir:dir ~name:"initialized" ~method_:"POST"
-              ~url:(Printf.sprintf "http://127.0.0.1:%d/mcp" port)
-              ~headers:
-                [
-                  "Content-Type: application/json";
-                  "Accept: application/json, text/event-stream";
-                  main_eio_auth_header;
-                  "Mcp-Session-Id: " ^ session_id;
-                  "Mcp-Protocol-Version: " ^ protocol_version;
-                ]
-              ~payload:
-                {|{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}|}
-              ()
-          in
-          let notify_code =
-            require_http_status_from_headers notify_headers
-          in
-          Alcotest.(check bool) "notifications/initialized accepted" true
-            (List.mem notify_code [ 200; 202; 204 ]);
           let tools_headers, tools_body =
             curl_request_capture
               ~output_dir:dir ~name:"tools-list" ~method_:"POST"
@@ -4484,16 +4442,19 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
                   "Content-Type: application/json";
                   "Accept: application/json, text/event-stream";
                   main_eio_auth_header;
-                  "Mcp-Session-Id: " ^ session_id;
-                  "Mcp-Protocol-Version: " ^ protocol_version;
+                  "Mcp-Protocol-Version: 2026-07-28";
+                  "Mcp-Method: tools/list";
                 ]
               ~payload:
-                {|{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}|}
+                {|{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}|}
               ()
           in
           Alcotest.(check (option int)) "tools/list http 200" (Some 200)
             (http_status_from_headers tools_headers);
           let tools_json = parse_json_response_file tools_body in
+          Alcotest.(check string) "current result type" "complete"
+            Yojson.Safe.Util.(
+              tools_json |> member "result" |> member "resultType" |> to_string);
           let tool_names =
             Yojson.Safe.Util.(
               tools_json |> member "result" |> member "tools" |> to_list
@@ -5314,8 +5275,8 @@ let () =
           Alcotest.test_case "main_eio serves health before lazy startup"
             `Slow test_main_eio_serves_health_before_lazy_startup;
           Alcotest.test_case
-            "main_eio fresh bootstrap and MCP handshake"
-            `Slow test_main_eio_fresh_bootstrap_and_mcp_handshake;
+            "main_eio fresh bootstrap and current MCP request"
+            `Slow test_main_eio_fresh_bootstrap_and_current_mcp_request;
           Alcotest.test_case
             "main_eio preserves unmanaged mcp client token file"
             `Slow test_main_eio_preserves_cli_agent_mcp_token_file;

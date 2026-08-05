@@ -32,7 +32,6 @@ let test_list_masc_tools_exposes_board_and_keeper_schemas () =
     Eio.Switch.run (fun sw ->
         match
           Lib.Worker_runtime.list_masc_tools ~sw ~auth_token:None
-            ~session_id:"worker-test"
             ~names:
               (Some
                  [

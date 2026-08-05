@@ -63,7 +63,6 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
 let is_jsonrpc_response = Mcp_transport_protocol.is_jsonrpc_response
 let get_id = Mcp_transport_protocol.get_id
 let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
-let validate_initialize_params = Mcp_transport_protocol.validate_initialize_params
 let has_field = Mcp_transport_protocol.has_field
 let get_field = Mcp_transport_protocol.get_field
 
@@ -108,12 +107,6 @@ let () =
 
 include Mcp_server_eio_execute
 
-(** {1 Resource Subscription Re-exports} *)
-
-let clear_resource_subscriptions_for_session =
-  Mcp_server_eio_protocol.clear_resource_subscriptions_for_session
-;;
-
 (** {1 Public API} *)
 
 let handle_request
@@ -142,9 +135,6 @@ let handle_request
         params ->
       Mcp_server_eio_call_tool.handle_call_tool_eio
         ~execute_tool_eio
-        ~maybe_emit_resource_notifications:
-          Mcp_server_eio_protocol.maybe_emit_resource_notifications
-        ~broadcast_tools_list_changed:Mcp_server_eio_protocol.broadcast_tools_list_changed
         ~sw
         ~clock
         ~profile

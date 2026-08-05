@@ -81,32 +81,18 @@ graceful_stop() {
 
 run_mcp_smoke() {
   local port="$1"
-  local headers_file init_body tools_body mcp_session_id
-  headers_file="$(harness_mktemp_file masc-memory-leak-init .headers)"
-  init_body="$(harness_mktemp_file masc-memory-leak-init-body .json)"
+  local tools_body
   tools_body="$(harness_mktemp_file masc-memory-leak-tools-body .json)"
-
-  curl -fsS -D "${headers_file}" "http://127.0.0.1:${port}/mcp" \
-    -H "Accept: application/json, text/event-stream" \
-    -H "Content-Type: application/json" \
-    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"memory-leak-check","version":"0.1"}}}' \
-    > "${init_body}"
-
-  mcp_session_id="$(awk -F': ' 'tolower($1)=="mcp-session-id"{gsub("\r", "", $2); print $2}' "${headers_file}" | tail -n 1)"
-  if [[ -z "${mcp_session_id}" ]]; then
-    echo "failed to capture Mcp-Session-Id from initialize response" >&2
-    rm -f "${headers_file}" "${init_body}" "${tools_body}"
-    return 1
-  fi
 
   curl -fsS "http://127.0.0.1:${port}/mcp" \
     -H "Accept: application/json, text/event-stream" \
     -H "Content-Type: application/json" \
-    -H "Mcp-Session-Id: ${mcp_session_id}" \
-    -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+    -H "Mcp-Protocol-Version: 2026-07-28" \
+    -H "Mcp-Method: tools/list" \
+    -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
     > "${tools_body}"
 
-  rm -f "${headers_file}" "${init_body}" "${tools_body}"
+  rm -f "${tools_body}"
 }
 
 BUILD_FIRST=1
@@ -206,12 +192,12 @@ echo "[memory-leak] base_path=${BASE_PATH}" >&2
   # Force any optional GraphQL path to fail fast locally instead of drifting
   # to a real service during the leak-check smoke run.
   export GRAPHQL_URL="http://127.0.0.1:9/graphql"
+  # Keep "possible" in the failure set so startup/MCP smoke regressions do
+  # not get hidden behind a narrower default leak threshold.
   exec "${VALGRIND_BIN}" \
     --tool=memcheck \
     --leak-check=full \
     --show-leak-kinds=definite,indirect,possible \
-    # Keep "possible" in the failure set so startup/MCP smoke regressions do
-    # not get hidden behind a narrower default leak threshold.
     --errors-for-leak-kinds=definite,indirect,possible \
     --error-exitcode=101 \
     --log-file="${VALGRIND_LOG_FILE}" \
@@ -224,7 +210,7 @@ if ! harness_wait_for_health "${PORT}" "${TIMEOUT_SEC}"; then
   exit 1
 fi
 
-echo "[memory-leak] health check passed; exercising MCP initialize/tools/list" >&2
+echo "[memory-leak] health check passed; exercising current MCP tools/list" >&2
 run_mcp_smoke "${PORT}"
 
 graceful_stop "${SERVER_PID}" "${TIMEOUT_SEC}"

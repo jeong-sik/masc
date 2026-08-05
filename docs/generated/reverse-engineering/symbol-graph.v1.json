@@ -47,7 +47,7 @@
       ],
       "guard_tests": [
         "test/test_mcp_h1_h2_admission_parity.ml",
-        "test/test_mcp_session_id_header.ml",
+        "test/test_transport_correlation_id.ml",
         "test/test_mcp_server_eio.ml",
         "dashboard/src/api/mcp.test.ts"
       ]
@@ -170,20 +170,12 @@
           "kind": "function",
           "display_range": {"start_line": 203, "end_line": 525},
           "wbs": {"issue": 16080, "task": "task-365"},
-          "tests": ["test/test_mcp_session_id_header.ml", "dashboard/src/api/mcp.test.ts"]
-        },
-        {
-          "id": "sym:server_mcp_transport_http:handle_delete_mcp",
-          "name": "handle_delete_mcp",
-          "kind": "function",
-          "display_range": {"start_line": 784, "end_line": 870},
-          "wbs": {"issue": 16080, "task": "task-364"},
-          "tests": ["test/test_mcp_session_id_header.ml"]
+          "tests": ["test/test_mcp_post_sse_e2e.ml", "dashboard/src/api/mcp.test.ts"]
         }
       ],
       "test_owners": [
         {"test_path": "test/test_mcp_h1_h2_admission_parity.ml", "contract": "H1/H2 admission parity"},
-        {"test_path": "test/test_mcp_session_id_header.ml", "contract": "session id and protocol continuity"}
+        {"test_path": "test/test_transport_correlation_id.ml", "contract": "stateless request correlation identity"}
       ]
     },
     {

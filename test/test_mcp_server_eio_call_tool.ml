@@ -120,8 +120,6 @@ let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =
         ~arguments:_ ->
         Option.iter (fun observe -> observe invocation_ref) observe_invocation;
         result)
-    ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
-    ~broadcast_tools_list_changed:(fun () -> ())
     ~sw
     ~clock:(Eio.Stdenv.clock env)
     ?mcp_session_id
@@ -307,8 +305,6 @@ let test_handle_call_executes_transient_failure_once () =
                 ~class_:Tool_result.Transient_error
                 ~start_time:0.0
                 "transient failure")
-          ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
-          ~broadcast_tools_list_changed:(fun () -> ())
           ~sw
           ~clock:(Eio.Stdenv.clock env)
           state
@@ -384,8 +380,6 @@ let test_call_captures_admission_scope_across_workspace_switch () =
                 ~start_time:0.0
                 ~data:(`String "workspace switched")
                 ())
-          ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
-          ~broadcast_tools_list_changed:(fun () -> ())
           ~sw
           ~clock:(Eio.Stdenv.clock env)
           state

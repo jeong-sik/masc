@@ -133,7 +133,7 @@ call_mcp_tool() {
   local saved_timeout="${HTTP_TIMEOUT_SEC:-}"
   HTTP_TIMEOUT_SEC="$timeout_sec"
   set +e
-  LAST_TOOL_RAW="$(mcp_call_tool "$req_id" "$tool_name" "$args_json" "${MCP_SESSION_ID:-}" "$MCP_TOKEN" "$MCP_URL")"
+  LAST_TOOL_RAW="$(mcp_call_tool "$req_id" "$tool_name" "$args_json" "$MCP_TOKEN" "$MCP_URL")"
   local call_status=$?
   set -e
   HTTP_TIMEOUT_SEC="$saved_timeout"
@@ -182,85 +182,6 @@ load_mcp_token() {
   if [[ -f "$token_file" ]]; then
     MCP_TOKEN="$(tr -d '\n' <"$token_file")"
   fi
-}
-
-init_mcp_session() {
-  if [[ -n "${MCP_SESSION_ID:-}" ]]; then
-    return 0
-  fi
-
-  local headers_file body_file auth_header_file init_body session_id protocol_version
-  headers_file="$(mcp_mktemp_file "keeper-continuity-init" ".headers")"
-  body_file="$(mcp_mktemp_file "keeper-continuity-init" ".body")"
-  auth_header_file=""
-  if [[ -n "${MCP_TOKEN:-}" ]]; then
-    auth_header_file="$(_mcp_auth_header_file)" || auth_header_file=""
-  fi
-  init_body="$(
-    jq -cn '{
-      jsonrpc:"2.0",
-      id:1,
-      method:"initialize",
-      params:{
-        protocolVersion:"2025-11-25",
-        clientInfo:{name:"keeper-continuity-validation", version:"1.0"},
-        capabilities:{}
-      }
-    }'
-  )"
-
-  local -a cmd=(
-    curl -sS --max-time 20
-    -D "$headers_file"
-    -o "$body_file"
-    -X POST "$MCP_URL"
-    -H "Content-Type: application/json"
-    -H "Accept: application/json, text/event-stream"
-  )
-  if [[ -n "$auth_header_file" ]]; then
-    cmd+=( -H "@$auth_header_file" )
-  fi
-  cmd+=( --data-binary "$init_body" )
-
-  if ! "${cmd[@]}" >/dev/null 2>"$RAW_DIR/mcp-initialize.stderr"; then
-    LAST_TOOL_ERROR="MCP initialize transport failed"
-    rm -f "$headers_file" "$body_file" "$auth_header_file"
-    return 1
-  fi
-
-  session_id="$(
-    awk '
-      tolower($0) ~ /^mcp-session-id:/ {
-        sub(/^[^:]+:[[:space:]]*/, "", $0)
-        sub(/\r$/, "", $0)
-        print $0
-        exit
-      }' "$headers_file"
-  )"
-  protocol_version="$(
-    awk '
-      tolower($0) ~ /^mcp-protocol-version:/ {
-        sub(/^[^:]+:[[:space:]]*/, "", $0)
-        sub(/\r$/, "", $0)
-        print $0
-        exit
-      }' "$headers_file"
-  )"
-
-  if [[ -z "$session_id" ]]; then
-    LAST_TOOL_ERROR="MCP initialize did not return Mcp-Session-Id"
-    cp "$body_file" "$RAW_DIR/mcp-initialize.body" 2>/dev/null || true
-    rm -f "$headers_file" "$body_file" "$auth_header_file"
-    return 1
-  fi
-
-  MCP_SESSION_ID="$session_id"
-  export MCP_SESSION_ID
-  if [[ -n "$protocol_version" ]]; then
-    MCP_PROTOCOL_VERSION="$protocol_version"
-    export MCP_PROTOCOL_VERSION
-  fi
-  rm -f "$headers_file" "$body_file" "$auth_header_file"
 }
 
 tool_text() {
@@ -832,11 +753,6 @@ real_run() {
   else
     load_mcp_token 0
   fi
-  if ! init_mcp_session; then
-    append_phase "bootstrap" "fail" "MCP initialize failed: $LAST_TOOL_ERROR" "" ""
-    return 1
-  fi
-
   if ! create_keeper; then
     append_phase "bootstrap" "fail" "keeper creation failed: $LAST_TOOL_ERROR" "" ""
     return 1

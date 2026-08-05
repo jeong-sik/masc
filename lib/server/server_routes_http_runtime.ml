@@ -17,7 +17,7 @@ let cors_preflight_headers origin =
     ("access-control-allow-origin", origin);
     ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
     ("access-control-allow-headers", cors_allow_headers_value);
-    ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
+    ("access-control-expose-headers", "Mcp-Protocol-Version");
   ]
 
 (** JSON-RPC error response helper *)

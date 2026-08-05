@@ -6,7 +6,7 @@ type deps = {
   cors_headers : string -> (string * string) list;
   get_switch : unit -> Eio.Switch.t option;
   get_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t option;
-  get_session_id_any : Httpun.Request.t -> string option;
+  observer_session_id : Httpun.Request.t -> string option;
 }
 
 let split_csv raw =
@@ -280,10 +280,21 @@ let run_keepalive_loop ~sleep ~stop ~send =
 
 let handle_stream ~deps ~state request reqd =
   let origin = deps.get_origin request in
-  let session_id =
-    Mcp_session.get_or_generate (deps.get_session_id_any request)
-  in
-
+  match
+    Transport_correlation_id.resolve (deps.observer_session_id request)
+  with
+  | Error error ->
+      let body = Transport_correlation_id.error_to_string error in
+      let headers =
+        Httpun.Headers.of_list
+          (("content-type", "text/plain; charset=utf-8")
+           :: ("content-length", string_of_int (String.length body))
+           :: deps.cors_headers origin)
+      in
+      Httpun.Reqd.respond_with_string reqd
+        (Httpun.Response.create ~headers `Bad_request)
+        body
+  | Ok session_id ->
   let kinds = kind_filters deps request in
   let replay_limit =
     deps.int_query_param request "limit" ~default:500

@@ -237,39 +237,7 @@ let dashboard_dev_token ~port =
            "dashboard dev-token missing HTTP status (curl_exit=%d stderr=%s body=%s)"
            result.curl_exit result.stderr result.body)
 
-let initialize_mcp_session ~port ~auth_token =
-  let body =
-    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"sse-storm-e2e","version":"1.0"},"capabilities":{}}}|}
-  in
-  let result =
-    run_curl
-      ~headers:
-        [
-          ("Content-Type", "application/json");
-          ("Accept", "application/json, text/event-stream");
-          ("Authorization", "Bearer " ^ auth_token);
-        ]
-      ~method_:"POST" ~body ~max_time:2.0 ~port ~path:"/mcp" ()
-  in
-  (match result.status with
-  | Some 200 -> ()
-  | Some code ->
-      fail
-        (Printf.sprintf
-           "initialize returned HTTP %d (curl_exit=%d stderr=%s body=%s)"
-           code result.curl_exit result.stderr result.body)
-  | None ->
-      fail
-        (Printf.sprintf
-           "initialize missing HTTP status (curl_exit=%d stderr=%s body=%s)"
-           result.curl_exit result.stderr result.body));
-  match header_value result "mcp-session-id" with
-  | Some sid when String.trim sid <> "" -> sid
-  | _ ->
-      fail
-        (Printf.sprintf
-           "initialize response missing Mcp-Session-Id (curl_exit=%d stderr=%s body=%s)"
-           result.curl_exit result.stderr result.body)
+let fresh_stream_id () = Transport_correlation_id.generate ()
 
 let merge_env_overrides ?(remove = []) overrides =
   let override_keys =
@@ -440,7 +408,7 @@ let check_status label expected result =
            result.curl_exit
            result.stderr)
 
-let publish_masc_broadcast ~port ~auth_token ~session_id =
+let publish_masc_broadcast ~port ~auth_token =
   let body =
     Yojson.Safe.to_string
       (`Assoc
@@ -455,6 +423,12 @@ let publish_masc_broadcast ~port ~auth_token ~session_id =
                     [ "agent_name", `String "dashboard"
                     ; "message", `String "sse-ag-ui-wire-encoding"
                     ] )
+              ; ( "_meta"
+                , `Assoc
+                    [ ( "io.modelcontextprotocol/protocolVersion"
+                      , `String "2026-07-28" )
+                    ; ("io.modelcontextprotocol/clientCapabilities", `Assoc [])
+                    ] )
               ] )
         ])
   in
@@ -465,7 +439,9 @@ let publish_masc_broadcast ~port ~auth_token ~session_id =
         ; ("Accept", "application/json, text/event-stream")
         ; ("X-MASC-Force-JSON", "true")
         ; ("Authorization", "Bearer " ^ auth_token)
-        ; ("Mcp-Session-Id", session_id)
+        ; ("Mcp-Protocol-Version", "2026-07-28")
+        ; ("Mcp-Method", "tools/call")
+        ; ("Mcp-Name", "masc_broadcast")
         ]
       ~method_:"POST"
       ~body
@@ -520,20 +496,20 @@ let publish_masc_broadcast ~port ~auth_token ~session_id =
 
 let test_mcp_reconnect_stays_accepted () =
   with_server @@ fun ~port ~auth_token ~base_path:_ ->
-  let sid = initialize_mcp_session ~port ~auth_token in
+  let sid = fresh_stream_id () in
   let headers =
     [
       ("Accept", "text/event-stream");
       ("Authorization", "Bearer " ^ auth_token);
-      ("Mcp-Session-Id", sid);
     ]
   in
 
-  let first = run_curl ~headers ~max_time:2.0 ~port ~path:"/mcp" () in
-  check_status "first /mcp connect accepted" 200 first;
+  let path = "/events?session_id=" ^ sid in
+  let first = run_curl ~headers ~max_time:2.0 ~port ~path () in
+  check_status "first /events connect accepted" 200 first;
 
-  let second = run_curl ~headers ~max_time:2.0 ~port ~path:"/mcp" () in
-  check_status "follow-up /mcp reconnect accepted" 200 second
+  let second = run_curl ~headers ~max_time:2.0 ~port ~path () in
+  check_status "follow-up /events reconnect accepted" 200 second
 
 let body_contains needle body =
   let nl = String.length needle and bl = String.length body in
@@ -604,17 +580,19 @@ let is_masc_event = function
    pins the resumability cursor carried by the transformed frame. *)
 let test_ag_ui_frames_are_wire_encoded () =
   with_server @@ fun ~port ~auth_token ~base_path:_ ->
-  let sid = initialize_mcp_session ~port ~auth_token in
-  publish_masc_broadcast ~port ~auth_token ~session_id:sid;
+  let sid = fresh_stream_id () in
+  publish_masc_broadcast ~port ~auth_token;
   let headers =
     [
       ("Accept", "text/event-stream");
       ("Authorization", "Bearer " ^ auth_token);
-      ("Mcp-Session-Id", sid);
       ("Last-Event-ID", "0");
     ]
   in
-  let res = run_curl ~headers ~max_time:1.0 ~port ~path:"/ag-ui/events" () in
+  let res =
+    run_curl ~headers ~max_time:1.0 ~port
+      ~path:("/ag-ui/events?session_id=" ^ sid) ()
+  in
   check_status "/ag-ui/events connect accepted" 200 res;
   let events = sse_data_jsons res.body in
   if not (List.exists is_masc_event events) then
@@ -629,16 +607,16 @@ let test_ag_ui_frames_are_wire_encoded () =
     sse_id_data_jsons res.body
     |> List.filter (fun (_event_id, json) -> is_masc_event json)
   in
-  let second_sid = initialize_mcp_session ~port ~auth_token in
+  let second_sid = fresh_stream_id () in
   let second_headers =
     [ ("Accept", "text/event-stream")
     ; ("Authorization", "Bearer " ^ auth_token)
-    ; ("Mcp-Session-Id", second_sid)
     ; ("Last-Event-ID", "0")
     ]
   in
   let second =
-    run_curl ~headers:second_headers ~max_time:1.0 ~port ~path:"/ag-ui/events" ()
+    run_curl ~headers:second_headers ~max_time:1.0 ~port
+      ~path:("/ag-ui/events?session_id=" ^ second_sid) ()
   in
   check_status "second /ag-ui/events replay accepted" 200 second;
   let second_by_id = sse_id_data_jsons second.body in
@@ -679,19 +657,19 @@ let test_dashboard_dev_token_cannot_call_admin_route () =
   check_status "dashboard Worker token denied CanAdmin route" 403 result
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ~auth_token ~base_path:_ ->
-  let sid = initialize_mcp_session ~port ~auth_token in
+  let sid = fresh_stream_id () in
   (* /ag-ui/events uses the observer SSE auth path; mirror /mcp by passing the
      dashboard dev token explicitly. *)
   let headers =
     [
       ("Accept", "text/event-stream");
       ("Authorization", "Bearer " ^ auth_token);
-      ("Mcp-Session-Id", sid);
     ]
   in
+  let path = "/ag-ui/events?workspace=default&session_id=" ^ sid in
 
   (* Stay well inside the 1s reconnect guard so the next request is truly immediate. *)
-  let first = run_curl ~headers ~max_time:0.2 ~port ~path:"/ag-ui/events?workspace=default" () in
+  let first = run_curl ~headers ~max_time:0.2 ~port ~path () in
   check_status "first /ag-ui/events connect accepted" 200 first;
   (* Asserting the status alone let the bridge ship unconverted frames unnoticed.
      This checks the synthetic prime only — it does NOT cover the drain or replay
@@ -701,11 +679,11 @@ let test_ag_ui_rejects_reconnect_then_recovers () =
       (Printf.sprintf "/ag-ui/events body is not AG-UI framed (no RUN_STARTED): %S"
          first.body);
 
-  let second = run_curl ~headers ~max_time:0.5 ~port ~path:"/ag-ui/events?workspace=default" () in
+  let second = run_curl ~headers ~max_time:0.5 ~port ~path () in
   check_status "immediate /ag-ui/events reconnect rejected" 429 second;
 
   Unix.sleepf 2.0;
-  let third = run_curl ~headers ~max_time:1.5 ~port ~path:"/ag-ui/events?workspace=default" () in
+  let third = run_curl ~headers ~max_time:1.5 ~port ~path () in
   check_status "cooldown /ag-ui/events reconnect recovers" 200 third
 
 let check_invalid_request_response label result =
@@ -733,24 +711,51 @@ let check_invalid_request_response label result =
 
 let test_sse_endpoints_reject_malformed_last_event_id () =
   with_server @@ fun ~port ~auth_token ~base_path:_ ->
-  let sid = initialize_mcp_session ~port ~auth_token in
+  let sid = fresh_stream_id () in
   let headers cursor =
     [ ("Accept", "text/event-stream")
     ; ("Authorization", "Bearer " ^ auth_token)
-    ; ("Mcp-Session-Id", sid)
     ; ("Last-Event-ID", cursor)
     ]
   in
-  check_invalid_request_response "malformed /mcp cursor rejected"
-    (run_curl ~headers:(headers "not-an-integer") ~max_time:2.0 ~port ~path:"/mcp" ());
+  check_invalid_request_response "malformed /events cursor rejected"
+    (run_curl ~headers:(headers "not-an-integer") ~max_time:2.0 ~port
+       ~path:("/events?session_id=" ^ sid) ());
   check_invalid_request_response "malformed /ag-ui/events cursor rejected"
     (run_curl ~headers:(headers "not-an-integer") ~max_time:2.0 ~port
-       ~path:"/ag-ui/events" ());
-  check_invalid_request_response "negative /mcp cursor rejected"
-    (run_curl ~headers:(headers "-1") ~max_time:2.0 ~port ~path:"/mcp" ());
+       ~path:("/ag-ui/events?session_id=" ^ sid) ());
+  check_invalid_request_response "negative /events cursor rejected"
+    (run_curl ~headers:(headers "-1") ~max_time:2.0 ~port
+       ~path:("/events?session_id=" ^ sid) ());
   check_invalid_request_response "negative /ag-ui/events cursor rejected"
     (run_curl ~headers:(headers "-1") ~max_time:2.0 ~port
-       ~path:"/ag-ui/events" ())
+       ~path:("/ag-ui/events?session_id=" ^ sid) ())
+
+let test_sse_endpoints_reject_invalid_correlation_id () =
+  with_server @@ fun ~port ~auth_token ~base_path:_ ->
+  let headers =
+    [ ("Accept", "text/event-stream")
+    ; ("Authorization", "Bearer " ^ auth_token)
+    ]
+  in
+  check_invalid_request_response "invalid /events correlation id rejected"
+    (run_curl ~headers ~max_time:2.0 ~port
+       ~path:"/events?session_id=invalid%20id" ());
+  check_invalid_request_response "invalid /ag-ui/events correlation id rejected"
+    (run_curl ~headers ~max_time:2.0 ~port
+       ~path:"/ag-ui/events?session_id=invalid%20id" ())
+
+let test_sse_endpoints_require_correlation_id () =
+  with_server @@ fun ~port ~auth_token ~base_path:_ ->
+  let headers =
+    [ ("Accept", "text/event-stream")
+    ; ("Authorization", "Bearer " ^ auth_token)
+    ]
+  in
+  check_invalid_request_response "/events requires correlation id"
+    (run_curl ~headers ~max_time:2.0 ~port ~path:"/events" ());
+  check_invalid_request_response "/ag-ui/events requires correlation id"
+    (run_curl ~headers ~max_time:2.0 ~port ~path:"/ag-ui/events" ())
 
 let () =
   Random.self_init ();
@@ -772,6 +777,14 @@ let () =
              "malformed Last-Event-ID is rejected"
              `Slow
              test_sse_endpoints_reject_malformed_last_event_id
+         ; test_case
+             "invalid correlation id is rejected"
+             `Slow
+             test_sse_endpoints_reject_invalid_correlation_id
+         ; test_case
+             "missing correlation id is rejected"
+             `Slow
+             test_sse_endpoints_require_correlation_id
          ; test_case
              "frames are AG-UI wire encoded"
              `Slow

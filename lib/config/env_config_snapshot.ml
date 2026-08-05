@@ -419,14 +419,6 @@ let path_entries =
       "Personas directory override; None when unset";
   ]
 
-let session_entries =
-  [
-    entry ~default:"3600.0" "MASC_SESSION_MAX_AGE_SEC"
-      "Maximum session age before cleanup (seconds, 1 hour)";
-    entry ~default:"300.0" "MASC_SESSION_SSE_GRACE_PERIOD_SEC"
-      "Grace period after SSE disconnect before reaping transport session (seconds, 5 min)";
-  ]
-
 let shutdown_entries =
   [
     entry ~default:"(none)" "MASC_SHUTDOWN_CLEANUP_TIMEOUT"
@@ -543,7 +535,7 @@ let all_categories () =
       shutdown_entries;
     category "worker" worker_entries;
     category "web_search" web_search_entries;
-    category "session" (session_entries @ tempo_entries);
+    category "tempo" tempo_entries;
   ]
 
 let valid_config_category_strings =

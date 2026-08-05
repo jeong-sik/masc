@@ -29,7 +29,7 @@ val cors_preflight_headers : string -> (string * string) list
     CORS preflight response for [OPTIONS] requests:
     [access-control-allow-origin] / [-allow-methods]
     ([GET, POST, DELETE, OPTIONS]) / [-allow-headers] /
-    [-expose-headers] ([Mcp-Session-Id, Mcp-Protocol-Version]).
+    [-expose-headers] ([Mcp-Protocol-Version]).
     Pinned method set + exposed headers are the operator-visible
     contract — runbook integrations key off these literals. *)
 

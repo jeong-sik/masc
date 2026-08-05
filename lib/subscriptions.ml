@@ -1,10 +1,8 @@
-(** Resource Subscriptions - MCP 2025-11-25 Spec Compliance
+(** Internal resource-change subscriptions.
 
     Implements resource change notifications and subscriptions.
     Clients can subscribe to resources (tasks, agents, etc.) and
     receive updates via SSE.
-
-    MCP Spec MAY: Resource subscriptions for change notifications
 *)
 
 (** Subscription types *)

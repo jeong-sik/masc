@@ -4,9 +4,7 @@
     Legacy handlers have been removed.
 *)
 
-(* JSON-RPC core — canonical definitions live in Mcp_transport_protocol.
-   Aliases here preserve backward compatibility for callers using Mcp_server.*.
-   These are zero-cost: OCaml native compilation inlines module aliases. *)
+(* JSON-RPC core — canonical definitions live in Mcp_transport_protocol. *)
 
 type jsonrpc_request = Mcp_transport_protocol.jsonrpc_request = {
   jsonrpc : string;
@@ -24,7 +22,6 @@ let is_jsonrpc_response = Mcp_transport_protocol.is_jsonrpc_response
 let is_notification = Mcp_transport_protocol.is_notification
 let get_id = Mcp_transport_protocol.get_id
 let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
-let validate_initialize_params = Mcp_transport_protocol.validate_initialize_params
 let make_response = Mcp_transport_protocol.make_response
 let make_error = Mcp_transport_protocol.make_error
 let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
@@ -33,9 +30,6 @@ let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
 let supported_protocol_versions = Mcp_transport_protocol.supported_protocol_versions
 let default_protocol_version = Mcp_transport_protocol.default_protocol_version
 let is_supported_protocol_version = Mcp_transport_protocol.is_supported_protocol_version
-let normalize_protocol_version = Mcp_transport_protocol.normalize_protocol_version
-let protocol_version_from_params = Mcp_transport_protocol.protocol_version_from_params
-
 let validate_protocol_version = Mcp_transport_protocol.validate_protocol_version
 
 (** Server info *)
@@ -107,9 +101,9 @@ let server_info =
 let capabilities =
   `Assoc
     [
-      ("tools", `Assoc [ ("listChanged", `Bool true) ]);
-      ("resources", `Assoc [ ("subscribe", `Bool true); ("listChanged", `Bool false) ]);
-      ("prompts", `Assoc [ ("listChanged", `Bool false) ]);
+      ("tools", `Assoc []);
+      ("resources", `Assoc []);
+      ("prompts", `Assoc []);
     ]
 
 (** MCP Resources (read-only context) *)

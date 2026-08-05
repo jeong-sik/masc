@@ -57,7 +57,7 @@ let activity_http_deps ~sw ~clock : Server_activity_http.deps =
     cors_headers;
     get_switch = (fun () -> Some sw);
     get_clock = (fun () -> Some clock);
-    get_session_id_any = Server_mcp_transport_http.get_session_id_any;
+    observer_session_id = Server_mcp_transport_http.observer_session_id;
   }
 
 let activity_events_http_json ~sw ~clock ~state request =

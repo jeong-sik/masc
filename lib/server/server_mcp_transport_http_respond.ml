@@ -68,7 +68,7 @@ let error_body ?(id = `Null) ?data ~(code : Mcp_error_code.t) msg :
 
 let respond_mcp_error ?(extra_headers = []) ?data ?id
     ~(deps : Server_mcp_transport_http_types.deps) ~request_authority request reqd
-    ~session_id ~protocol_version ~(code : Mcp_error_code.t) msg =
+    ~protocol_version ~(code : Mcp_error_code.t) msg =
   let origin = deps.get_origin request in
   let id_for_body = Option.value ~default:`Null id in
   let body =
@@ -92,7 +92,7 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
       ((("content-length", string_of_int (String.length body))
        :: per_code_headers)
       @ extra_headers
-      @ json_headers ~deps session_id protocol_version origin)
+      @ json_headers ~deps protocol_version origin)
   in
   let response =
     Httpun.Response.create ~headers (Mcp_error_code.to_http_status code)
@@ -100,9 +100,8 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
   safe_respond_with_string reqd response body
 
 (* [respond_not_ready] is intentionally retained outside
-   [respond_mcp_error]: it runs before [json_headers] / [session_id]
-   are available. Widening [respond_mcp_error] to the pre-runtime case
-   is a separate concern. *)
+   [respond_mcp_error]: it runs before the negotiated protocol version
+   is available. *)
 
 let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request reqd =
   let origin = deps.get_origin request in
@@ -132,26 +131,21 @@ let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request req
   let response = Httpun.Response.create ~headers `Service_unavailable in
   safe_respond_with_string reqd response body
 
-(** [respond_sse_register_error] — SSE GET register 검증(unknown/expired session) 실패 시,
-    200 스트림을 열기 전에 404 + 새 [Mcp-Session-Id] 로 응답한다. 기존엔 200 송출 후
-    [Writer.close] 만 해 "200 OK + 즉시 닫힌 빈 스트림"이 되어 MCP 클라이언트가 정상
-    종료와 구분 못 하고 같은 stale [Mcp-Session-Id] 로 무한 재시도했다(2026-06-28
-    진단). POST JSON-RPC 경로([server_mcp_transport_http.ml] 의 [Unknown_session] 분기)와
-    동일 패턴 — 404 + 새 session 헤더로 클라이언트가 [initialize] 를 재수행하게 한다. *)
-let respond_sse_register_error ~(deps : Server_mcp_transport_http_types.deps)
+(** Reject an observer-stream registration before opening a 200 stream. *)
+let respond_observer_stream_register_error
+    ~(deps : Server_mcp_transport_http_types.deps)
     ~origin ~protocol_version reqd msg =
-  let new_session_id = Mcp_session.generate () in
   let body =
     Yojson.Safe.to_string (error_body ~code:Mcp_error_code.Invalid_request msg)
   in
   let headers =
     Httpun.Headers.of_list
       ( ("content-length", string_of_int (String.length body))
-      :: json_headers ~deps new_session_id protocol_version origin )
+      :: json_headers ~deps protocol_version origin )
   in
   safe_respond_with_string reqd (Httpun.Response.create ~headers `Not_found) body
 
-let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~origin ~session_id ~protocol_version
+let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~origin ~protocol_version
     ~reason ~retry_after_s reqd =
   let reason_label = Sse_reject_reason.to_label reason in
   Transport_metrics.inc_sse_reject ~reason:reason_label;
@@ -172,7 +166,7 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
     Httpun.Headers.of_list
       (("content-length", string_of_int (String.length body))
       :: ("retry-after", retry_after_header)
-      :: json_headers ~deps session_id protocol_version origin)
+      :: json_headers ~deps protocol_version origin)
   in
   let response = Httpun.Response.create ~headers `Too_many_requests in
   safe_respond_with_string reqd response body

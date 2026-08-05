@@ -25,7 +25,6 @@ STEP_INDEX=0
 TOTAL_STEPS=4
 LOG_DIR="${TMPDIR:-/tmp}/masc-viewer-local-e2e-$$"
 HARNESS_HELPERS_LOADED=0
-VIEWER_MCP_SESSION_ID=""
 
 STEP_LABELS=()
 STEP_RESULTS=()
@@ -150,45 +149,9 @@ ensure_mcp_harness() {
   if [ "$HARNESS_HELPERS_LOADED" -eq 1 ]; then
     return 0
   fi
-  export MCP_SESSION_ID="${MCP_SESSION_ID:-viewer-local-e2e-$$}"
   # shellcheck disable=SC1091
   source "$REPO_ROOT/scripts/harness/lib/test_framework.sh"
   HARNESS_HELPERS_LOADED=1
-}
-
-ensure_viewer_mcp_session() {
-  ensure_mcp_harness
-  if [ -n "$VIEWER_MCP_SESSION_ID" ]; then
-    return 0
-  fi
-
-  local headers_file body_file
-  headers_file="$(mcp_mktemp_file "viewer-mcp-init-headers")"
-  body_file="$(mcp_mktemp_file "viewer-mcp-init-body")"
-
-  if ! curl -sS -m 30 -D "$headers_file" -o "$body_file" -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"viewer-local-e2e","version":"1.0"},"capabilities":{}}}' \
-    >/dev/null; then
-    rm -f "$headers_file" "$body_file"
-    echo "failed to initialize MCP session" >&2
-    return 1
-  fi
-
-  VIEWER_MCP_SESSION_ID="$(
-    awk '
-      tolower($0) ~ /^mcp-session-id:/ {
-        sub(/^[^:]+:[[:space:]]*/, "", $0)
-        sub(/\r$/, "", $0)
-        print $0
-        exit
-      }
-    ' "$headers_file"
-  )"
-
-  rm -f "$headers_file" "$body_file"
-  [ -n "$VIEWER_MCP_SESSION_ID" ]
 }
 
 viewer_call_tool() {
@@ -197,12 +160,8 @@ viewer_call_tool() {
   local args_json="$3"
   local raw
 
-  ensure_viewer_mcp_session
-  raw="$(curl -sS -m 60 -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -H "mcp-session-id: $VIEWER_MCP_SESSION_ID" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}")"
+  ensure_mcp_harness
+  raw="$(mcp_call_tool "$id" "$name" "$args_json" "" "$MCP_URL")"
 
   if printf '%s' "$raw" | rg -q '^data:'; then
     printf '%s' "$raw" | sed -n 's/^data: //p' | tail -n1

@@ -714,7 +714,11 @@ let get_bindings ~host ~port : binding list =
   let base_url = Printf.sprintf "http://%s:%d" host port in
   let bindings =
     [
-      { protocol = Sse; url = Printf.sprintf "%s/sse" base_url; options = [] };
+      {
+        protocol = Sse;
+        url = Printf.sprintf "%s/events" base_url;
+        options = [ "required_query", "session_id" ];
+      };
       { protocol = JsonRpc; url = Printf.sprintf "%s/mcp" base_url; options = [] };
       { protocol = Rest; url = Printf.sprintf "%s/api/v1" base_url; options = [] };
     ]

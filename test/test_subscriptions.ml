@@ -1,4 +1,4 @@
-(** Tests for Resource Subscriptions - MCP 2025-11-25 Spec *)
+(** Tests for internal resource-change subscriptions. *)
 
 open Alcotest
 

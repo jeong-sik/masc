@@ -744,18 +744,18 @@ let transport_health_json ~config =
     ; ( "streamable_http"
       , `Assoc
           [ "endpoint", `String "/mcp"
-          ; "observer_stream", `String "/mcp?sse_kind=observer"
+          ; "observer_stream", `String "/events"
           ; "presence_stream", `String "/events/presence"
           ; "managed_endpoint", `String "/mcp/managed"
           ; "operator_endpoint", `String "/mcp/operator"
-          ; "delete_endpoint", `String "/mcp"
+          ; "delete_endpoint", `String ""
           ; "default_transport", `String "streamable_http"
           ; "configured", `Bool true
           ; "protocol_capable", `Bool true
           ; "auth_policy_present", `Bool streamable_auth_policy_present
           ; "supports_post", `Bool true
           ; "supports_sse_upgrade", `Bool true
-          ; "supports_delete", `Bool true
+          ; "supports_delete", `Bool false
           ; "listener", http_listener_json ()
           ] )
     ; ( "http2"

@@ -1,0 +1,10 @@
+(include_subdirs no)
+
+(library
+ (name masc_transport_correlation_id)
+ (public_name masc.transport_correlation_id)
+ (wrapped false)
+ (modules transport_correlation_id)
+ (flags
+  (:standard -w +4 -w +32))
+ (libraries masc.masc_random_id))

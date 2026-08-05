@@ -1,4 +1,4 @@
-(** Progress Notifications — MCP 2025-11-25 MAY requirement.
+(** Internal progress notifications.
 
     Send real-time progress updates for long-running tasks.
     Uses JSON-RPC 2.0 notifications/progress method. *)

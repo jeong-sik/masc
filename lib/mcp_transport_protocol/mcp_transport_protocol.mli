@@ -65,16 +65,14 @@ val is_valid_request_id : Yojson.Safe.t -> bool
 (** MCP requests admit string or integer ids. Null and floating-point ids are
     rejected, as required by the MCP request contract. *)
 
-val validate_initialize_params : Yojson.Safe.t option -> (unit, string) result
-(** Checks that [params] for the MCP [initialize] method contain
-    [protocolVersion : string], [clientInfo : { name; version }], and
-    [capabilities] objects. Returns a human-readable error string on
-    missing or wrong-typed fields. *)
-
 (** {1 JSON-RPC Response Builders} *)
 
 val make_response : id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
 (** [make_response ~id result] builds [{jsonrpc:"2.0", id, result}]. *)
+
+val make_complete_response : id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
+(** Builds a successful current-protocol response and injects
+    [resultType = "complete"]. The result must be a JSON object. *)
 
 val make_error :
   ?data:Yojson.Safe.t ->
@@ -139,30 +137,19 @@ end
 (** {1 Protocol Version} *)
 
 val supported_protocol_versions : string list
-(** Versions accepted by this server (delegates to
-    {!Mcp_protocol.Version.supported_versions}, with the 2026-07-28
-    stateless revision overlaid while the vendored SDK catches up). *)
+(** The single current protocol revision accepted by this server. *)
 
 val default_protocol_version : string
-(** Latest version (delegates to {!Mcp_protocol.Version.latest}). *)
+(** The current protocol revision, ["2026-07-28"]. *)
 
 val is_supported_protocol_version : string -> bool
 (** Membership test against {!supported_protocol_versions}. *)
 
 val is_stateless_protocol_version : string -> bool
-(** [true] for protocol revisions that do not use the initialize
-    handshake or [Mcp-Session-Id] as protocol state. Accepts both
-    the release-candidate date label and the current draft alias. *)
+(** [true] exactly for the supported current revision. *)
 
 val validate_protocol_version : string -> (string, string) result
 (** [Ok v] if supported, otherwise [Error msg] listing the supported set. *)
-
-val normalize_protocol_version : string -> string
-(** Returns the input if supported, else {!default_protocol_version}. *)
-
-val protocol_version_from_params : Yojson.Safe.t option -> string
-(** Extract [protocolVersion] from a JSON-RPC [params] object,
-    falling back to {!default_protocol_version}. *)
 
 val protocol_version_meta_key : string
 (** Fully qualified per-request [_meta] key used by the 2026-07-28
@@ -171,24 +158,9 @@ val protocol_version_meta_key : string
 val protocol_version_from_request_meta_json : Yojson.Safe.t -> string option
 (** Extract the per-request protocol version from
     [params._meta.io.modelcontextprotocol/protocolVersion]. Returns
-    [None] for legacy initialize-only messages or malformed shapes. *)
+    [None] for malformed shapes. *)
 
 val protocol_version_from_request_meta_body : string -> string option
 (** Parses a JSON-RPC body and delegates to
     {!protocol_version_from_request_meta_json}. Returns [None] on
-    malformed JSON. *)
-
-val body_uses_stateless_protocol : string -> bool
-(** [true] iff the JSON-RPC body declares a stateless protocol version
-    in per-request [_meta]. *)
-
-val protocol_version_from_initialize_request_json :
-  Yojson.Safe.t -> string option
-(** Returns [Some v] if [json] is a well-formed [initialize] request,
-    where [v] is normalized to a supported version. Returns [None] for
-    any other shape. *)
-
-val protocol_version_from_body : string -> string option
-(** Convenience: parses [body_str] as JSON then delegates to
-    {!protocol_version_from_initialize_request_json}. Returns [None] on
     malformed JSON. *)

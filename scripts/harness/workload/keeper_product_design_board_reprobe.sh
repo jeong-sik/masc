@@ -38,12 +38,10 @@ MUTATE="${MUTATE:-0}"
 RUN_AUDIT="${RUN_AUDIT:-1}"
 EXIT_ON_AUDIT_FAIL="${EXIT_ON_AUDIT_FAIL:-}"
 MSG_TIMEOUT_SEC="${MSG_TIMEOUT_SEC:-120}"
-INIT_TIMEOUT_SEC="${INIT_TIMEOUT_SEC:-60}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-900}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_TOKEN:-}"
-MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-product-design-board-reprobe}"
 BOARD_POST_ID="${BOARD_POST_ID:-}"
 
 usage() {
@@ -178,83 +176,9 @@ load_mcp_token() {
   fi
 }
 
-init_mcp_session() {
-  if [[ -n "${MCP_SESSION_ID:-}" ]]; then
-    return 0
-  fi
-
-  local headers_file body_file auth_header_file init_body session_id protocol_version deadline
-  headers_file="$(mcp_mktemp_file "keeper-product-design-init" ".headers")"
-  body_file="$(mcp_mktemp_file "keeper-product-design-init" ".body")"
-  auth_header_file=""
-  if [[ -n "${MCP_TOKEN:-}" ]]; then
-    auth_header_file="$(_mcp_auth_header_file)" || auth_header_file=""
-  fi
-  init_body="$(
-    jq -cn --arg client_name "$MCP_CLIENT_NAME" \
-      '{jsonrpc:"2.0", id:1, method:"initialize", params:{protocolVersion:"2025-11-25", clientInfo:{name:$client_name, version:"1.0"}, capabilities:{}}}'
-  )"
-
-  deadline=$(( $(date +%s) + INIT_TIMEOUT_SEC ))
-  while :; do
-    : >"$headers_file"
-    : >"$body_file"
-    local remaining_sec init_attempt_timeout
-    remaining_sec=$((deadline - $(date +%s)))
-    if [[ "$remaining_sec" -le 0 ]]; then
-      break
-    fi
-    init_attempt_timeout="$remaining_sec"
-    if [[ "$MSG_TIMEOUT_SEC" -gt 0 && "$MSG_TIMEOUT_SEC" -lt "$init_attempt_timeout" ]]; then
-      init_attempt_timeout="$MSG_TIMEOUT_SEC"
-    fi
-
-    local -a cmd=(
-      curl -sS --max-time "$init_attempt_timeout"
-      -D "$headers_file"
-      -o "$body_file"
-      -X POST "$MCP_URL"
-      -H "Content-Type: application/json"
-      -H "Accept: application/json, text/event-stream"
-    )
-    if [[ -n "$auth_header_file" ]]; then
-      cmd+=( -H "@$auth_header_file" )
-    fi
-    cmd+=( --data-binary "$init_body" )
-
-    if "${cmd[@]}" >/dev/null; then
-      session_id="$(awk 'tolower($0) ~ /^mcp-session-id:/ { sub(/^[^:]+:[[:space:]]*/, "", $0); sub(/\r$/, "", $0); print $0; exit }' "$headers_file")"
-      protocol_version="$(awk 'tolower($0) ~ /^mcp-protocol-version:/ { sub(/^[^:]+:[[:space:]]*/, "", $0); sub(/\r$/, "", $0); print $0; exit }' "$headers_file")"
-      if [[ -n "$session_id" ]]; then
-        break
-      fi
-      if ! jq -e '.error.code == -32002' "$body_file" >/dev/null 2>&1; then
-        break
-      fi
-    fi
-    sleep 2
-  done
-
-  if [[ -z "${session_id:-}" ]]; then
-    echo "MCP initialize did not return Mcp-Session-Id before ${INIT_TIMEOUT_SEC}s deadline" >&2
-    cat "$body_file" >&2 || true
-    rm -f "$headers_file" "$body_file" "$auth_header_file"
-    exit 1
-  fi
-
-  MCP_SESSION_ID="$session_id"
-  export MCP_SESSION_ID
-  if [[ -n "${protocol_version:-}" ]]; then
-    MCP_PROTOCOL_VERSION="$protocol_version"
-    export MCP_PROTOCOL_VERSION
-  fi
-  rm -f "$headers_file" "$body_file" "$auth_header_file"
-}
-
-ensure_mcp_session_if_needed() {
+ensure_mcp_auth_if_needed() {
   if [[ "$MUTATE" == "1" || -n "$BOARD_POST_ID" ]]; then
     load_mcp_token
-    init_mcp_session
   fi
 }
 
@@ -267,7 +191,7 @@ tool_call() {
   HTTP_TIMEOUT_SEC="$timeout_sec"
   local json_id payload
   json_id="$(jq -cn --arg value "$id" '$value')"
-  payload="$(mcp_call_tool "$json_id" "$tool_name" "$args_json" "${MCP_SESSION_ID:-}" "$MCP_TOKEN" "$MCP_URL")"
+  payload="$(mcp_call_tool "$json_id" "$tool_name" "$args_json" "$MCP_TOKEN" "$MCP_URL")"
   HTTP_TIMEOUT_SEC="$saved_timeout"
   printf '%s' "$payload"
 }
@@ -515,7 +439,7 @@ require_cmd jq
 require_cmd python3
 require_cmd curl
 
-ensure_mcp_session_if_needed
+ensure_mcp_auth_if_needed
 discover_keepers
 render_prompts
 

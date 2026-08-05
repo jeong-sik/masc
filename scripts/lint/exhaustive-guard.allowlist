@@ -380,14 +380,10 @@ lib/masc_log/log.ml:323
 lib/masc_log/log.ml:327
 lib/masc_log/log.ml:336
 lib/mcp_prompt_surface.ml:63
-lib/mcp_sdk_adapter_masc.ml:67
-lib/mcp_sdk_adapter_masc.ml:77
-lib/mcp_sdk_adapter_masc.ml:299
 lib/mcp_server_eio_call_tool.ml:549
 lib/mcp_server_eio_call_tool.ml:880
 lib/mcp_server_eio_protocol.ml:499
 lib/mcp_server_eio_protocol.ml:587
-lib/mcp_session/mcp_session.ml:33
 lib/mcp_transport_protocol/mcp_transport_protocol.ml:22
 lib/mcp_transport_protocol/mcp_transport_protocol.ml:26
 lib/mcp_transport_protocol/mcp_transport_protocol.ml:31

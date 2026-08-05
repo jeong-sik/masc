@@ -312,38 +312,10 @@ let add_routes ?sw ?clock ~port router =
        (serve_graphiql_asset "react.production.min.js")
   |> Http.Router.get "/graphiql/react-dom.production.min.js"
        (serve_graphiql_asset "react-dom.production.min.js")
-  |> Http.Router.get "/mcp" (fun request reqd ->
-       (* Observer/presence SSE streams authenticate via the `token` query
-          param — an EventSource cannot set an Authorization header. Parse
-          sse_kind and let handle_get_mcp route it: Observer/Presence go to
-          verify_mcp_observer_stream_auth (accepts header OR `token` query),
-          the default (Agent_stream) still requires a bearer header via
-          verify_mcp_auth. Do NOT wrap in with_read_auth — that gate is
-          header-only and 401s ("Token required") the query-token SSE
-          handshake before the sse_kind-aware auth runs, which is why the
-          dashboard observer stream failed and the client fell back/looped.
-          Mirrors POST /mcp, which already self-auths via handle_post_mcp. *)
-       let sse_kind =
-         match Server_utils.query_param request "sse_kind" with
-         | Some raw
-           when String.equal "observer"
-                  (String.lowercase_ascii (String.trim raw)) ->
-             Some Sse.Observer
-         | Some raw
-           when String.equal "presence"
-                  (String.lowercase_ascii (String.trim raw)) ->
-             Some Sse.Presence
-         | _ -> None
-       in
-       handle_get_mcp ?sse_kind request reqd)
-  |> Http.Router.post "/" handle_post_mcp
+  |> Http.Router.get "/events" handle_get_events
   |> Http.Router.post "/mcp" handle_post_mcp
   |> Http.Router.post "/mcp/managed"
        (handle_post_mcp ~profile:Server_mcp_transport_http.Managed_agent)
-  |> Http.Router.add ~path:"/mcp" ~methods:[`DELETE]
-       ~handler:handle_delete_mcp
-  |> Http.Router.add ~path:"/mcp/managed" ~methods:[`DELETE]
-       ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Managed_agent)
   |> Http.Router.post "/webrtc/offer"
        (webrtc_signaling_handler Server_webrtc_transport.handle_offer_request)
   |> Http.Router.post "/webrtc/answer"

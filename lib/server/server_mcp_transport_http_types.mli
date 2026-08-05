@@ -26,7 +26,6 @@ type runtime = {
     ?internal_keeper_runtime:bool ->
     string ->
     Yojson.Safe.t;
-  clear_resource_subscriptions_for_session : string -> unit;
 }
 
 type deps = {

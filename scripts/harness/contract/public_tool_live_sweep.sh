@@ -4,8 +4,6 @@ set -euo pipefail
 : "${MCP_URL:=http://127.0.0.1:8935/mcp}"
 : "${BASE_PATH:?BASE_PATH must be set by run_all.sh}"
 : "${AGENT_NAME:=${MCP_AGENT_NAME:-public-tool-sweep-harness}}"
-: "${MCP_SESSION_ID:=}"
-export MCP_SESSION_ID
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -74,9 +72,7 @@ call_method() {
   local id="$1"
   local method="$2"
   local params_json="$3"
-  local raw
-  raw="$(curl_post_mcp "$(jq -cn --argjson id "$id" --arg method "$method" --argjson params "$params_json" '{jsonrpc:"2.0",id:$id,method:$method,params:$params}')")"
-  jsonrpc_normalize_response "$raw" "$id"
+  mcp_jsonrpc_call "$id" "$method" "$params_json"
 }
 
 CLEANUP_TASK_FINALIZED=0
@@ -103,15 +99,11 @@ manifest_json="$(
 )"
 expected_public_tools="$(printf '%s\n' "$manifest_json" | jq -c '.public_tool_names | sort')"
 
-next_step "initialize MCP session"
-initialize_mcp_session || {
-  echo "FAIL: failed to initialize MCP session" >&2
+next_step "verify current MCP discovery"
+require_mcp_ready || {
+  echo "FAIL: MCP server/discover failed" >&2
   exit 1
 }
-if [[ -z "${MCP_SESSION_ID:-}" ]]; then
-  echo "FAIL: empty MCP_SESSION_ID after initialize" >&2
-  exit 1
-fi
 
 next_step "tools/list matches expected public surface"
 tools_list_payload="$(call_method 5001 "tools/list" '{}')"

@@ -4,7 +4,6 @@ module Transport = Server_mcp_transport_http
 module Request_context = Server_mcp_request_context
 module Headers = Server_mcp_transport_http_headers
 module Negotiation = Mcp_transport_protocol.Http_negotiation
-module Mcp_store = Masc.Session.McpSessionStore
 module Auth = Masc.Auth
 
 let request_trust_policy =
@@ -56,13 +55,14 @@ let request ?(headers = []) ?(meth = `POST) target =
 let body method_ =
   Printf.sprintf {|{"jsonrpc":"2.0","id":1,"method":"%s","params":{}}|} method_
 
-let stateless_body ?(method_ = "tools/list") ?name () =
+let stateless_body ?(method_ = "tools/list") ?name
+    ?(protocol_version = "2026-07-28") () =
   let params_fields =
     [ ("_meta",
        `Assoc
          [
            ( Mcp_transport_protocol.protocol_version_meta_key,
-             `String "2026-07-28" );
+             `String protocol_version );
            ( "io.modelcontextprotocol/clientInfo",
              `Assoc
                [ ("name", `String "parity-test"); ("version", `String "0.1") ]
@@ -84,17 +84,6 @@ let stateless_body ?(method_ = "tools/list") ?name () =
     ]
   |> Yojson.Safe.to_string
 
-let initialize_body =
-  {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"parity-test","version":"0.1"}}}|}
-
-let assert_result_ok label = function
-  | Ok () -> ()
-  | Error msg -> failf "%s expected Ok, got Error %S" label msg
-
-let assert_result_error label = function
-  | Ok () -> failf "%s expected Error, got Ok" label
-  | Error msg -> check bool (label ^ " message is not empty") true (String.length msg > 0)
-
 let assert_accept_mode label expected actual =
   let same =
     match (expected, actual) with
@@ -104,37 +93,6 @@ let assert_accept_mode label expected actual =
     | _ -> false
   in
   check bool label true same
-
-let metric_value name labels =
-  Masc.Otel_metric_store.get_metric_value name ~labels ()
-  |> Option.value ~default:0.0
-
-let context ?(session_id = "ctx-session") ?(session_was_provided = true) () =
-  Request_context.make
-    ~session_id_opt:(if session_was_provided then Some session_id else None)
-    ~generated_session_id:session_id ~auth_token:None
-    ~protocol_version:"2025-11-25" ~origin:"*" ~base_path:"/tmp/masc-test"
-
-let test_request_context_make_records_session_source () =
-  let supplied =
-    Request_context.make ~session_id_opt:(Some "supplied-session")
-      ~generated_session_id:"generated-session" ~auth_token:(Some "token")
-      ~protocol_version:"2025-11-25" ~origin:"https://example.test"
-      ~base_path:"/tmp/base"
-  in
-  check string "supplied session wins" "supplied-session" supplied.session_id;
-  check bool "supplied flag" true supplied.session_was_provided;
-  check (option string) "auth token" (Some "token") supplied.auth_token;
-  check string "protocol version" "2025-11-25" supplied.protocol_version;
-  check string "origin" "https://example.test" supplied.origin;
-  check string "base path" "/tmp/base" supplied.base_path;
-  let generated =
-    Request_context.make ~session_id_opt:None
-      ~generated_session_id:"generated-session" ~auth_token:None
-      ~protocol_version:"2025-11-25" ~origin:"*" ~base_path:"/tmp/base"
-  in
-  check string "generated fallback" "generated-session" generated.session_id;
-  check bool "generated flag" false generated.session_was_provided
 
 let test_request_context_decides_post_body () =
   let streamable_request =
@@ -161,36 +119,38 @@ let test_request_context_decides_post_body () =
       "/mcp"
   in
   let json_only_request =
-    request ~headers:[ ("accept", "application/json") ] "/mcp"
+    request
+      ~headers:
+        [ ("accept", "application/json")
+        ; ("mcp-protocol-version", "2026-07-28")
+        ; ("mcp-method", "tools/list")
+        ]
+      "/mcp"
   in
   (match
      Request_context.decide_post_body ~request:streamable_request
-       ~context:(context ()) ~session_is_known:true (body "tools/call")
-   with
-  | Ok decision ->
-      assert_accept_mode "streamable decision" Negotiation.Streamable
-        decision.accept_mode
-  | Error _ -> fail "streamable known session should pass");
-  (match
-     Request_context.decide_post_body ~request:streamable_request
-       ~context:(context ~session_was_provided:false ()) ~session_is_known:false
        (body "tools/call")
    with
-  | Error (Request_context.Session_required msg) ->
-      check bool "session required message" true (String.length msg > 0)
-  | Ok _ -> fail "missing session should reject tools/call"
-  | Error _ -> fail "missing session should use Session_required");
+  | Error (Request_context.Header_mismatch _) -> ()
+  | Ok _ -> fail "request without current headers must reject"
+  | Error _ -> fail "missing current headers should use Header_mismatch");
   (match
      Request_context.decide_post_body ~request:streamable_request
-       ~context:(context ()) ~session_is_known:false (body "tools/call")
+       (body "tools/call")
    with
-  | Error (Request_context.Unknown_session msg) ->
-      check bool "unknown session message" true (String.length msg > 0)
-  | Ok _ -> fail "unknown session should reject tools/call"
-  | Error _ -> fail "unknown session should use Unknown_session");
+  | Error (Request_context.Header_mismatch _) -> ()
+  | Ok _ -> fail "legacy sessionless request must reject"
+  | Error _ -> fail "legacy request should use Header_mismatch");
+  (match
+     Request_context.decide_post_body ~request:streamable_request
+       (body "tools/call")
+   with
+  | Error (Request_context.Header_mismatch _) -> ()
+  | Ok _ -> fail "legacy supplied-session request must reject"
+  | Error _ -> fail "legacy supplied-session request should use Header_mismatch");
   (match
      Request_context.decide_post_body ~request:json_only_request
-       ~context:(context ()) ~session_is_known:true (body "tools/call")
+       (stateless_body ())
    with
   | Error (Request_context.Invalid_accept msg) ->
       check string "invalid accept message" Request_context.invalid_accept_message
@@ -198,14 +158,7 @@ let test_request_context_decides_post_body () =
   | Ok _ -> fail "json-only request should reject tools/call"
   | Error _ -> fail "json-only request should use Invalid_accept");
   (match
-     Request_context.decide_post_body ~request:streamable_request
-       ~context:(context ()) ~session_is_known:false initialize_body
-   with
-  | Ok _ -> ()
-  | Error _ -> fail "unknown session should still permit initialize");
-  (match
      Request_context.decide_post_body ~request:stateless_request
-       ~context:(context ~session_was_provided:false ()) ~session_is_known:false
        (stateless_body ())
    with
   | Ok decision ->
@@ -214,211 +167,67 @@ let test_request_context_decides_post_body () =
   | Error _ -> fail "stateless 2026 request should not require a session");
   (match
      Request_context.decide_post_body ~request:stateless_bad_method_request
-       ~context:(context ~session_was_provided:false ()) ~session_is_known:false
        (stateless_body ())
    with
   | Error (Request_context.Header_mismatch msg) ->
       check bool "header mismatch mentions Mcp-Method" true
         (contains ~needle:"Mcp-Method" msg)
   | Ok _ -> fail "mismatched stateless headers should reject"
-  | Error _ -> fail "mismatched stateless headers should use Header_mismatch")
-
-let test_shared_post_admission_matrix () =
-  assert_result_ok "initialize may mint a fresh session"
-    (Transport.validate_session_requirement ~session_was_provided:false
-       initialize_body);
-  assert_result_error "tools/call requires a session id"
-    (Transport.validate_session_requirement ~session_was_provided:false
-       (body "tools/call"));
-  assert_result_ok "2026 stateless request does not require a session id"
-    (Transport.validate_session_requirement ~session_was_provided:false
-       (stateless_body ()));
-  assert_result_ok "known session passes Q3"
-    (Transport.validate_session_known ~session_was_provided:true ~is_known:true
-       (body "tools/call"));
-  assert_result_error "unknown session blocks tools/call"
-    (Transport.validate_session_known ~session_was_provided:true ~is_known:false
-       (body "tools/call"));
-  assert_result_ok "unknown supplied session is ignored for 2026 stateless"
-    (Transport.validate_session_known ~session_was_provided:true ~is_known:false
-       (stateless_body ()));
-  assert_result_ok "unknown session still permits initialize"
-    (Transport.validate_session_known ~session_was_provided:true ~is_known:false
-       initialize_body);
-  let streamable_request =
-    request ~headers:[ ("accept", "application/json, text/event-stream") ] "/mcp"
-  in
-  let json_only_request =
-    request ~headers:[ ("accept", "application/json") ] "/mcp"
-  in
-  assert_accept_mode "streamable Accept remains admitted" Negotiation.Streamable
-    (Headers.classify_mcp_accept streamable_request);
-  assert_accept_mode "json-only Accept is rejected for requests" Negotiation.Rejected
-    (Headers.classify_mcp_accept json_only_request);
-  assert_accept_mode "json-only notifications are rejected"
-    Negotiation.Rejected
-    (Headers.classify_mcp_accept json_only_request)
-
-let test_shared_protocol_and_delete_matrix () =
-  let session_id = "h1-h2-parity-protocol-session" in
-  Fun.protect
-    ~finally:(fun () -> Transport.forget_mcp_session session_id)
-    (fun () ->
-      Transport.remember_protocol_version session_id "2025-11-25";
-      assert_result_ok "missing protocol header preserves continuity"
-        (Transport.validate_protocol_version_continuity ~session_id
-           (request "/mcp"));
-      assert_result_error "mismatched protocol header is rejected"
-        (Transport.validate_protocol_version_continuity ~session_id
-           (request
-              ~headers:[ ("mcp-protocol-version", "2025-03-26") ]
-              "/mcp")));
-  let delete_session = "h1-h2-parity-delete-session" in
-  Fun.protect
-    ~finally:(fun () -> Transport.forget_mcp_session delete_session)
-    (fun () ->
-      Transport.remember_mcp_profile delete_session Transport.Full;
-      assert_result_ok "matching DELETE profile passes"
-        (Transport.validate_mcp_session_delete_profile ~profile:Transport.Full
-           delete_session);
-      assert_result_error "mismatched DELETE profile is rejected"
-        (Transport.validate_mcp_session_delete_profile
-           ~profile:Transport.Managed_agent delete_session));
-  check (option string) "DELETE without session has no admission id" None
-    (Transport.get_session_id_any (request ~meth:`DELETE "/mcp"))
-
-let test_session_id_parsing_uses_uri_and_cookie_contracts () =
-  check (option string) "percent-decoded query value" (Some "a&b=c")
-    (Transport.get_session_id_query "/mcp?session_id=a%26b%3Dc");
-  check (option string) "first duplicate query value" (Some "first")
-    (Transport.get_session_id_query
-       "/mcp?session_id=first&session_id=second");
-  check (option string) "legacy camel-case query key" (Some "legacy")
-    (Transport.get_session_id_query "/mcp?sessionId=legacy");
-  let cookie_request =
-    request ~headers:[ ("cookie", "mcp-session-id=exact=value; Other=x") ]
+  | Error _ -> fail "mismatched stateless headers should use Header_mismatch");
+  let unsupported_request =
+    request
+      ~headers:
+        [ ("accept", "application/json, text/event-stream")
+        ; ("mcp-protocol-version", "unsupported-version")
+        ; ("mcp-method", "tools/list")
+        ]
       "/mcp"
   in
-  check (option string) "cookie parser preserves equals in value"
-    (Some "exact=value")
-    (Transport.get_cookie_value cookie_request "mcp-session-id");
-  check (option string) "cookie name is case-sensitive" None
-    (Transport.get_cookie_value cookie_request "Mcp-Session-Id")
+  (match
+     Request_context.decide_post_body ~request:unsupported_request
+       (stateless_body ~protocol_version:"unsupported-version" ())
+   with
+  | Error (Request_context.Unsupported_protocol_version requested) ->
+      check string "reports rejected version" "unsupported-version" requested
+  | Ok _ -> fail "previous final version must reject"
+  | Error _ -> fail "unsupported version should use its typed rejection");
+  let method_not_found =
+    `Assoc
+      [ ("jsonrpc", `String "2.0")
+      ; ("id", `Int 1)
+      ; ( "error"
+        , `Assoc
+            [ ("code", `Int (-32601)); ("message", `String "Method not found") ] )
+      ]
+  in
+  check bool "method-not-found is an HTTP transport error" true
+    (Headers.is_http_error_response method_not_found);
+  check bool "method-not-found maps to HTTP 404" true
+    (Headers.is_method_not_found_response method_not_found)
 
-let test_sse_backing_session_bridge_requires_known_transport_session () =
-  let transport_session_id = "h1-h2-parity-sse-transport-session" in
-  let sse_session_id = "presence:" ^ transport_session_id in
-  let unknown_transport_session_id =
-    "h1-h2-parity-sse-unknown-transport-session"
+let test_transport_error_id_is_lossless () =
+  let lexeme = "92233720368547758081234567890" in
+  let body =
+    Printf.sprintf
+      {|{"jsonrpc":"2.0","id":%s,"method":"tools/list","params":{}}|}
+      lexeme
   in
-  let unknown_sse_session_id = "presence:" ^ unknown_transport_session_id in
-  let cleanup () =
-    Transport.forget_mcp_session transport_session_id;
-    Transport.forget_mcp_session unknown_transport_session_id;
-    ignore (Mcp_store.remove sse_session_id);
-    ignore (Mcp_store.remove unknown_sse_session_id)
-  in
-  Fun.protect ~finally:cleanup (fun () ->
-      cleanup ();
-      Transport.remember_protocol_version transport_session_id "2025-11-25";
-      Transport.ensure_sse_backing_session_for_known_transport_session
-        ~transport_session_id ~sse_session_id;
-      check bool "known transport session creates SSE backing session" true
-        (Option.is_some (Mcp_store.peek sse_session_id));
-      Transport.ensure_sse_backing_session_for_known_transport_session
-        ~transport_session_id:unknown_transport_session_id
-        ~sse_session_id:unknown_sse_session_id;
-      check bool "unknown transport session does not mint SSE backing session"
-        true
-        (Option.is_none (Mcp_store.peek unknown_sse_session_id)))
+  check string "large integer id" lexeme
+    (Headers.jsonrpc_id_or_null body |> Yojson.Safe.to_string)
 
-let test_records_mcp_server_session_duration_metric () =
-  let session_id = "h1-h2-parity-session-duration" in
-  let transport_context =
-    Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+let test_malformed_json_reaches_jsonrpc_parser () =
+  let malformed_request =
+    request
+      ~headers:
+        [ ("accept", "application/json, text/event-stream")
+        ; ("mcp-protocol-version", "2026-07-28")
+        ; ("mcp-method", "tools/list")
+        ]
+      "/mcp"
   in
-  let labels =
-    [
-      (Otel_genai.Mcp_attr_key.mcp_protocol_version, "2025-11-25");
-      (Otel_genai.Mcp_attr_key.network_protocol_name, "http");
-      (Otel_genai.Mcp_attr_key.network_protocol_version, "1.1");
-      (Otel_genai.Mcp_attr_key.network_transport, "tcp");
-    ]
-  in
-  let count_metric =
-    Otel_genai.Mcp_metric_name.server_session_duration ^ "_count"
-  in
-  let before_count = metric_value count_metric labels in
-  Fun.protect
-    ~finally:(fun () -> Transport.forget_mcp_session session_id)
-    (fun () ->
-      Transport.remember_protocol_version
-        ~otel_transport_context:transport_context
-        session_id
-        "2025-11-25";
-      Transport.forget_mcp_session session_id);
-  let after_count = metric_value count_metric labels in
-  check (float 0.0001) "server session duration count increments"
-    (before_count +. 1.0)
-    after_count
-
-let test_uninitialized_profile_does_not_start_session_duration_metric () =
-  let session_id = "h1-h2-parity-profile-only-session" in
-  let transport_context =
-    Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
-  in
-  let count_metric =
-    Otel_genai.Mcp_metric_name.server_session_duration ^ "_count"
-  in
-  let before_count = metric_value count_metric [] in
-  Fun.protect
-    ~finally:(fun () -> Transport.forget_mcp_session session_id)
-    (fun () ->
-      Transport.remember_mcp_profile
-        ~otel_transport_context:transport_context
-        session_id
-        Transport.Full;
-      Transport.forget_mcp_session session_id);
-  let after_count = metric_value count_metric [] in
-  check (float 0.0001)
-    "profile-only uninitialized session does not record duration"
-    before_count
-    after_count
-
-let test_failed_initialize_does_not_start_session_duration_metric () =
-  let session_id = "h1-h2-parity-failed-initialize-session" in
-  let transport_context =
-    Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
-  in
-  let request_body =
-    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{}}}|}
-  in
-  let response_json =
-    Mcp_transport_protocol.make_error
-      ~id:(`Int 1)
-      (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_params)
-      "Missing clientInfo"
-  in
-  let count_metric =
-    Otel_genai.Mcp_metric_name.server_session_duration ^ "_count"
-  in
-  let before_count = metric_value count_metric [] in
-  Fun.protect
-    ~finally:(fun () -> Transport.forget_mcp_session session_id)
-    (fun () ->
-      Transport.remember_protocol_version_if_initialize_succeeded
-        ~otel_transport_context:transport_context
-        session_id
-        ~request_body
-        ~response_json;
-      check bool "failed initialize leaves session unknown" false
-        (Transport.is_known_session session_id);
-      Transport.forget_mcp_session session_id);
-  let after_count = metric_value count_metric [] in
-  check (float 0.0001)
-    "failed initialize does not record session duration"
-    before_count
-    after_count
+  match Headers.validate_2026_request_headers malformed_request "{" with
+  | Ok () -> ()
+  | Error error -> fail ("transport intercepted malformed JSON: " ^ error)
 
 let test_h1_h2_post_route_wiring_parity () =
   let h1 = source_file "lib/server/server_mcp_transport_http.ml" in
@@ -431,45 +240,33 @@ let test_h1_h2_post_route_wiring_parity () =
       ("uses shared POST request context", "Server_mcp_request_context.decide_post_body");
       ("injects canonical HTTP actor", "body_with_canonical_http_actor");
       ("forwards internal keeper runtime", "is_verified_internal_keeper_request");
-      ( "records initialize protocol only after success",
-        "remember_protocol_version_if_initialize_succeeded" );
     ];
-  assert_order "H1 refreshes MCP profile after auth gate"
-    ~before:"match auth_result with"
-    ~after:"remember_mcp_profile ~otel_transport_context session_id profile"
-    h1;
-  assert_order "H2 refreshes MCP profile after auth gate"
-    ~before:"match auth_result with"
-    ~after:"remember_mcp_profile"
-    h2;
-  assert_contains "H1 unknown supplied session returns not found"
-    ~needle:"Httpun.Response.create ~headers `Not_found" h1;
-  assert_contains "H2 unknown supplied session returns not found"
-    ~needle:"~status:`Not_found" h2
+  List.iter
+    (fun (label, code) ->
+      assert_contains ("H1 emits " ^ label) ~needle:code h1;
+      assert_contains ("H2 emits " ^ label) ~needle:code h2)
+    [ ("HeaderMismatch -32020", "-32020")
+    ; ("UnsupportedProtocolVersion -32022", "-32022")
+    ]
 
-let test_h1_h2_delete_route_wiring_parity () =
+let test_current_only_route_wiring () =
   let h1 = source_file "lib/server/server_mcp_transport_http.ml" in
   let h1_routes = source_file "lib/server/server_routes_http_routes_frontend.ml" in
   let h2 = source_file "lib/server/server_h2_gateway.ml" in
-  assert_contains "H1 exposes DELETE /mcp route"
+  assert_not_contains "H1 removes DELETE /mcp route"
     ~needle:{|Http.Router.add ~path:"/mcp" ~methods:[`DELETE]|}
     h1_routes;
-  assert_contains "H1 exposes DELETE /mcp/managed route"
+  assert_not_contains "H1 removes DELETE /mcp/managed route"
     ~needle:{|Http.Router.add ~path:"/mcp/managed" ~methods:[`DELETE]|}
     h1_routes;
-  assert_contains "H2 exposes DELETE /mcp route"
+  assert_not_contains "H2 removes DELETE /mcp route"
     ~needle:{|`DELETE, "/mcp" | `DELETE, "/mcp/managed" ->|}
     h2;
-  List.iter
-    (fun (label, needle) ->
-      assert_contains ("H1 DELETE " ^ label) ~needle h1;
-      assert_contains ("H2 DELETE " ^ label) ~needle h2)
-    [
-      ("verifies MCP auth", "verify_mcp_auth ~base_path");
-      ("checks session profile", "validate_mcp_session_delete_profile");
-      ("checks protocol continuity", "validate_protocol_version_continuity");
-      ("forgets session after termination", "forget_mcp_session session_id");
-    ]
+  assert_contains "H1 dashboard events moved outside MCP"
+    ~needle:{|Http.Router.get "/events" handle_get_events|} h1_routes;
+  assert_not_contains "H1 removes GET /mcp"
+    ~needle:{|Http.Router.get "/mcp"|} h1_routes;
+  ignore h1
 
 let test_h2_oauth_route_and_authority_lifetime () =
   let h2 = source_file "lib/server/server_h2_gateway.ml" in
@@ -610,32 +407,19 @@ let () =
     [
       ( "shared-admission-matrix",
         [
-          test_case "request context records pre-body state" `Quick
-            test_request_context_make_records_session_source;
           test_case "request context decides POST body admission" `Quick
             test_request_context_decides_post_body;
-          test_case "POST shared predicate matrix" `Quick
-            test_shared_post_admission_matrix;
-          test_case "protocol and DELETE predicate matrix" `Quick
-            test_shared_protocol_and_delete_matrix;
-          test_case "session URI and cookie parsing contracts" `Quick
-            test_session_id_parsing_uses_uri_and_cookie_contracts;
-          test_case "SSE backing session bridge requires known transport session"
-            `Quick
-            test_sse_backing_session_bridge_requires_known_transport_session;
-          test_case "server session duration metric" `Quick
-            test_records_mcp_server_session_duration_metric;
-          test_case "profile-only session does not start duration metric" `Quick
-            test_uninitialized_profile_does_not_start_session_duration_metric;
-          test_case "failed initialize does not start duration metric" `Quick
-            test_failed_initialize_does_not_start_session_duration_metric;
+          test_case "transport errors preserve large integer ids" `Quick
+            test_transport_error_id_is_lossless;
+          test_case "malformed JSON reaches JSON-RPC parser" `Quick
+            test_malformed_json_reaches_jsonrpc_parser;
         ] );
       ( "route-wiring",
         [
           test_case "H1/H2 POST route uses the same admission gates" `Quick
             test_h1_h2_post_route_wiring_parity;
-          test_case "H1/H2 DELETE route uses the same admission gates" `Quick
-            test_h1_h2_delete_route_wiring_parity;
+          test_case "H1/H2 expose only current MCP routes" `Quick
+            test_current_only_route_wiring;
           test_case "H2 OAuth routes preserve admitted authority" `Quick
             test_h2_oauth_route_and_authority_lifetime;
         ] );

@@ -126,15 +126,9 @@ let reject_malformed_request_credential = function
 
 let observer_sse_query_credential_from_request request =
   let path = Http_server_eio.Request.path request in
-  let observer_stream_requested =
-    match query_param request "sse_kind" with
-    | Some raw ->
-        String.equal "observer" (String.lowercase_ascii (String.trim raw))
-    | None -> false
-  in
   match request.Httpun.Request.meth with
   | `GET
-    when (observer_stream_requested && String.equal path "/mcp")
+    when String.equal path "/events"
          || String.equal path "/events/presence" ->
       (match query_param request "token" with
        | None -> Absent_credential
@@ -813,11 +807,12 @@ let public_read_cors_origin_opt ~request_authority (request : Httpun.Request.t) 
 
 (** CORS headers *)
 let cors_allow_headers_value =
-  "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, \
-   Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name"
+  "Content-Type, Accept, Origin, Authorization, Idempotency-Key, \
+   Mcp-Protocol-Version, Mcp-Method, Mcp-Name, Last-Event-Id, X-Gate-Agent, \
+   X-MASC-Agent, X-MASC-Agent-Name"
 
 let cors_expose_headers_value =
-  "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining"
+  "Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining"
 
 let cors_headers origin =
   let base = [

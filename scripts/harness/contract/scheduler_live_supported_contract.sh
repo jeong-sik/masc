@@ -4,9 +4,6 @@ set -euo pipefail
 : "${MCP_URL:=http://127.0.0.1:8935/mcp}"
 : "${BASE_PATH:?BASE_PATH must be set by run_all.sh}"
 : "${AGENT_NAME:=${MCP_AGENT_NAME:-scheduler-live-supported-harness}}"
-: "${MCP_SESSION_ID:=}"
-export MCP_SESSION_ID
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/harness/lib/test_framework.sh
 source "${SCRIPT_DIR}/../lib/test_framework.sh"
@@ -115,15 +112,11 @@ assert_dashboard_matched_supported_non_terminal() {
   ' "$DASHBOARD_JSON" >/dev/null
 }
 
-echo "[1/3] initialize MCP session"
-initialize_mcp_session || {
-  echo "FAIL: failed to initialize MCP session" >&2
+echo "[1/3] verify current MCP discovery"
+require_mcp_ready || {
+  echo "FAIL: MCP server/discover failed" >&2
   exit 1
 }
-if [[ -z "${MCP_SESSION_ID:-}" ]]; then
-  echo "FAIL: empty MCP_SESSION_ID after initialize" >&2
-  exit 1
-fi
 echo "  PASS"
 
 echo "[2/3] create supported masc.keeper_wake schedule through MCP tool"

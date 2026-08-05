@@ -182,7 +182,7 @@ Each PR-3+ cites both RFC-0098 (envelope code) and the relevant upstream RFC (00
 
 ## 4. Stable behavior guarantee
 
-PR-1 is **byte-equal** at the wire. Same 4 codes (`-32001`, `-32002`, `-32603`, `-32603`), same message strings, same `mcp-session-id` + `mcp-protocol-version` headers, same `retry-after` for `Not_ready`.
+PR-1 is **byte-equal** at the wire. Same 4 codes (`-32001`, `-32002`, `-32603`, `-32603`), same message strings, same protocol-version header, and same `retry-after` for `Not_ready`.
 
 `respond_sse_rate_limited` is **out of scope for PR-1**: its 429 response shape is contractually different (literal error code string `sse_connection_rate_limited` in body, asymmetric float/int retry-after). PR-2 considers whether `Backpressure_shed` subsumes it; if not, it stays as a sibling.
 
@@ -238,6 +238,6 @@ PR-3 onward introduces *new* wire codes (`-32003`, `-32004`, …). Clients that 
 ## 10. References (evidence, external)
 
 - [JSON-RPC 2.0 §5.1 — Error Object](https://www.jsonrpc.org/specification#error_object) — defines server-defined code range `-32000` to `-32099`.
-- [MCP Transports (2025-03-26)](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports) — Streamable HTTP envelope conventions.
+- [[RFC-0100]] — Current MCP HTTP request and response contract.
 - [Real World OCaml — Error Handling](https://dev.realworldocaml.org/error-handling.html) — Option vs Result discipline; underpins §1.2 baseline.
 - `instructions/software-development.md §워크어라운드 거부 기준 #1` (telemetry-as-fix) and `#2` (string classifier) — internal SSOT this RFC enforces at the transport boundary.

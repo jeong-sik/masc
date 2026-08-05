@@ -96,9 +96,9 @@ grpcurl -plaintext \
 subscribe_pid=$!
 sleep 1
 
-session_id="$(mcp_initialize_session)"
-mcp_join_agent "$session_id" "transport-harness" >/dev/null
-mcp_broadcast "$session_id" "transport-harness" "grpc-e2e-test-event" >/dev/null
+transport_mcp_ready >/dev/null
+mcp_join_agent "transport-harness" >/dev/null
+mcp_broadcast "transport-harness" "grpc-e2e-test-event" >/dev/null
 sleep 2
 
 kill "$subscribe_pid" >/dev/null 2>&1 || true

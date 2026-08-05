@@ -2,8 +2,8 @@
 
     Wraps the process-wide [Crypto_rng] boundary + hex encoding — the same
     5-line pattern that had been copy-pasted across 6 call-sites
-    (verification, board post/comment, workspace
-    task, streamable HTTP session, ...). Centralising removes the
+    (verification, board post/comment, workspace task, and transport
+    correlation identifiers). Centralising removes the
     drift risk and lets lower-layer libraries (e.g. [masc_workspace])
     use the same generator without depending on [masc].
 

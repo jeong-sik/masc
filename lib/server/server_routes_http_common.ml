@@ -3,7 +3,6 @@ open Server_auth
 
 module Http = Http_server_eio
 module Http_h2 = Http_server_h2
-module Mcp_session = Mcp_session
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 module Workspace = Workspace
@@ -44,38 +43,6 @@ let default_base_path = Server_mcp_transport_http.default_base_path
 let is_valid_protocol_version =
   Server_mcp_transport_http.is_valid_protocol_version
 
-let remember_protocol_version =
-  Server_mcp_transport_http.remember_protocol_version
-
-let remember_protocol_version_if_initialize_succeeded =
-  Server_mcp_transport_http.remember_protocol_version_if_initialize_succeeded
-
-let remember_mcp_profile = Server_mcp_transport_http.remember_mcp_profile
-
-let forget_mcp_session = Server_mcp_transport_http.forget_mcp_session
-
-let validate_mcp_session_profile =
-  Server_mcp_transport_http.validate_mcp_session_profile
-
-let validate_mcp_session_delete_profile =
-  Server_mcp_transport_http.validate_mcp_session_delete_profile
-
-let protocol_version_from_body =
-  Server_mcp_transport_http.protocol_version_from_body
-
-let get_session_id_query = Server_mcp_transport_http.get_session_id_query
-
-let get_header_any_case = Server_mcp_transport_http.get_header_any_case
-
-let get_cookie_value = Server_mcp_transport_http.get_cookie_value
-
-let get_session_id_any = Server_mcp_transport_http.get_session_id_any
-
-let get_protocol_version = Server_mcp_transport_http.get_protocol_version
-
-let get_protocol_version_for_session =
-  Server_mcp_transport_http.get_protocol_version_for_session
-
 (** Prefer runtime capabilities captured in [server_state] and only fall back to
     the legacy global Eio context for compatibility with older test helpers. *)
 let current_server_state_opt () = !server_state
@@ -102,13 +69,16 @@ let state_net_opt = function
   | None -> Eio_context.get_net_opt ()
 
 
-(** Requests that enter the MCP transport surface.  [/]'s GET representation
-    is the dashboard, while its POST representation is the legacy MCP endpoint;
-    keep that method distinction explicit instead of using a path prefix. *)
+(** Requests that enter the MCP or authenticated observer transport surface. *)
 let is_mcp_transport_request (request : Httpun.Request.t) =
   match request.meth, Http.Request.path request with
-  | `POST, "/" -> true
-  | _, ("/mcp" | "/mcp/managed" | "/mcp/operator" | "/sse") -> true
+  | _,
+    ( "/mcp"
+    | "/mcp/managed"
+    | "/mcp/operator"
+    | "/events"
+    | "/events/presence"
+    | "/ag-ui/events" ) -> true
   | _ -> false
 ;;
 
@@ -179,8 +149,6 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
                           ?mcp_session_id ?otel_mcp_protocol_version
                           ?otel_transport_context ?auth_token
                           ?internal_keeper_runtime state body_str);
-                    clear_resource_subscriptions_for_session =
-                      Mcp_server_eio.clear_resource_subscriptions_for_session;
                   }
             | None, _ -> Error "Eio switch not available"
             | _, None -> Error "Eio clock not available"));
@@ -209,10 +177,10 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
              Server_mcp_transport_http_types.auth_failure_of_masc_error);
   }
 
-let mcp_transport_json_headers session_id protocol_version origin =
+let mcp_transport_json_headers protocol_version origin =
   Server_mcp_transport_http.json_headers
     ~deps:(mcp_transport_http_deps ())
-    session_id protocol_version origin
+    protocol_version origin
 
 let mcp_headers = Server_mcp_transport_http.mcp_headers
 
@@ -225,21 +193,14 @@ let stop_sse_session = Server_mcp_transport_http.stop_sse_session
 let close_all_sse_connections =
   Server_mcp_transport_http.close_all_sse_connections
 
-let handle_get_mcp ?(profile = Server_mcp_transport_http.Full) ?sse_kind
-    request reqd =
-  Server_mcp_transport_http.handle_get_mcp ~deps:(mcp_transport_http_deps ())
-    ~profile ?sse_kind request reqd
-
-let handle_get_operator_mcp request reqd =
-  Server_mcp_transport_http.handle_get_operator_mcp
+(* TEL-OK: thin dependency adapter; the transport handler records admission,
+   reconnect, rejection, and connection lifecycle telemetry. *)
+let handle_get_events request reqd =
+  Server_mcp_transport_http.handle_get_events
     ~deps:(mcp_transport_http_deps ()) request reqd
 
 let handle_post_mcp ?(profile = Server_mcp_transport_http.Full) request reqd =
   Server_mcp_transport_http.handle_post_mcp ~deps:(mcp_transport_http_deps ())
-    ~profile request reqd
-
-let handle_delete_mcp ?(profile = Server_mcp_transport_http.Full) request reqd =
-  Server_mcp_transport_http.handle_delete_mcp ~deps:(mcp_transport_http_deps ())
     ~profile request reqd
 
 let handle_ag_ui_events request reqd =

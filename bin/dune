@@ -18,7 +18,7 @@
   masc.config_dir_resolver
   masc.embedded_config
   masc.host_config
-  masc.mcp_session
+  masc.transport_correlation_id
   masc.mcp_transport_protocol
   masc.board_tool_adapter
   masc_eio_context

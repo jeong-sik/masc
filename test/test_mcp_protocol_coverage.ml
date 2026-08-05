@@ -19,61 +19,22 @@ let test_json_content_type () =
   check string "json content type" "application/json" Http_negotiation.json_content_type
 
 let test_default_protocol_version () =
-  check string "default protocol version" "2025-11-25"
+  check string "default protocol version" "2026-07-28"
     Mcp_transport_protocol.default_protocol_version
 
 let test_supported_protocol_versions () =
-  check bool "current version included" true
-    (List.mem "2025-11-25" Mcp_transport_protocol.supported_protocol_versions)
-
-let test_supported_protocol_versions_includes_2026_stateless () =
-  check bool "2026 stateless version included" true
-    (List.mem "2026-07-28"
-       Mcp_transport_protocol.supported_protocol_versions);
-  check bool "draft alias included" true
-    (List.mem "DRAFT-2026-v1"
-       Mcp_transport_protocol.supported_protocol_versions);
+  check (list string) "current version only" [ "2026-07-28" ]
+    Mcp_transport_protocol.supported_protocol_versions;
   check bool "2026 is stateless" true
     (Mcp_transport_protocol.is_stateless_protocol_version "2026-07-28");
-  check bool "draft alias is stateless" true
-    (Mcp_transport_protocol.is_stateless_protocol_version "DRAFT-2026-v1")
-
-let test_protocol_version_from_params_none () =
-  check string "none falls back to default" "2025-11-25"
-    (Mcp_transport_protocol.protocol_version_from_params None)
-
-let test_protocol_version_from_params_present () =
-  check string "params version" "2025-03-26"
-    (Mcp_transport_protocol.protocol_version_from_params
-       (Some (`Assoc [ ("protocolVersion", `String "2025-03-26") ])))
-
-let test_protocol_version_from_body_initialize () =
-  check (option string) "initialize body version" (Some "2025-06-18")
-    (Mcp_transport_protocol.protocol_version_from_body
-       {|{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-06-18"}}|})
-
-let test_protocol_version_from_body_invalid_normalizes () =
-  check (option string) "invalid initialize version normalizes"
-    (Some "2025-11-25")
-    (Mcp_transport_protocol.protocol_version_from_body
-       {|{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2099-01-01"}}|})
-
-let test_protocol_version_from_body_non_initialize () =
-  check (option string) "non-initialize ignored" None
-    (Mcp_transport_protocol.protocol_version_from_body
-       {|{"jsonrpc":"2.0","method":"tools/list"}|})
-
-let test_protocol_version_from_body_missing_jsonrpc () =
-  check (option string) "missing jsonrpc rejected" None
-    (Mcp_transport_protocol.protocol_version_from_body
-       {|{"method":"initialize","params":{"protocolVersion":"2025-06-18"}}|})
+  check bool "draft alias rejected" false
+    (Mcp_transport_protocol.is_supported_protocol_version "DRAFT-2026-v1");
+  check bool "unknown revision rejected" false
+    (Mcp_transport_protocol.is_supported_protocol_version "unsupported-version")
 
 let test_protocol_version_from_request_meta_body () =
   check (option string) "request meta version" (Some "2026-07-28")
     (Mcp_transport_protocol.protocol_version_from_request_meta_body
-       {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}|});
-  check bool "body uses stateless protocol" true
-    (Mcp_transport_protocol.body_uses_stateless_protocol
        {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}|})
 
 (* ============================================================
@@ -249,19 +210,8 @@ let () =
       test_case "json_content_type" `Quick test_json_content_type;
       test_case "default_protocol_version" `Quick test_default_protocol_version;
       test_case "supported_protocol_versions" `Quick test_supported_protocol_versions;
-      test_case "supported_protocol_versions includes 2026 stateless" `Quick
-        test_supported_protocol_versions_includes_2026_stateless;
     ];
     "protocol_versions", [
-      test_case "from_params none" `Quick test_protocol_version_from_params_none;
-      test_case "from_params present" `Quick test_protocol_version_from_params_present;
-      test_case "from_body initialize" `Quick test_protocol_version_from_body_initialize;
-      test_case "from_body invalid normalizes" `Quick
-        test_protocol_version_from_body_invalid_normalizes;
-      test_case "from_body non_initialize" `Quick
-        test_protocol_version_from_body_non_initialize;
-      test_case "from_body missing jsonrpc" `Quick
-        test_protocol_version_from_body_missing_jsonrpc;
       test_case "from_request_meta_body" `Quick
         test_protocol_version_from_request_meta_body;
     ];

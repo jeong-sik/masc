@@ -20,9 +20,8 @@ val handle_ag_ui_events :
 
     {1 Lifecycle}
 
-    1. Resolve session id from cookie / headers (generates a fresh id
-       when none present — {!Mcp_session.get_or_generate}).
-    2. Resolve protocol version from the per-session table.
+    1. Require and validate the observer correlation id.
+    2. Use the current protocol version.
     3. Read [last-event-id] header (replay anchor).
     4. Run {!check_sse_connect_guard} — on rate-limit reject with
        {!respond_sse_rate_limited} (HTTP 429) and stop.

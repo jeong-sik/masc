@@ -50,10 +50,9 @@ let print_startup_banner
   List.iter
     (fun line -> Printf.printf "%s\n%!" line)
     (Server_base_path_diagnostics.startup_lines path_diagnostics);
-  Printf.printf "   GET  /mcp → SSE stream (notifications)\n%!";
   Printf.printf
     "   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)\n%!";
-  Printf.printf "   DELETE /mcp → Session termination\n%!";
+  Printf.printf "   GET  /events → Dashboard observer stream\n%!";
   Printf.printf "   POST /graphql → GraphQL (read-only)\n%!";
   Printf.printf "   GET  /api/v1/activity/events → Activity replay API\n%!";
   Printf.printf "   GET  /api/v1/activity/graph → Activity graph snapshot\n%!";

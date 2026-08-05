@@ -15,17 +15,15 @@ let ag_ui_event_of_masc_event (delivery : Sse.delivery) =
 
 let sse_ping_interval_s = 30.0
 
-let presence_stream_headers ~deps raw_session_id protocol_version origin =
+let presence_stream_headers ~deps protocol_version origin =
   Httpun.Headers.of_list
     ([
        ("content-type", Http_negotiation.sse_content_type);
        ("cache-control", "no-cache");
        ("connection", "keep-alive");
        ("x-accel-buffering", "no");
-       Server_mcp_transport_http_headers.session_cookie_header raw_session_id;
      ]
-    @ Server_mcp_transport_http_headers.mcp_headers raw_session_id
-        protocol_version
+    @ Server_mcp_transport_http_headers.mcp_headers protocol_version
     @ deps.cors_headers origin)
 
 let presence_session_id raw_session_id = "presence:" ^ raw_session_id
@@ -33,8 +31,7 @@ let presence_session_id raw_session_id = "presence:" ^ raw_session_id
 let handle_ag_ui_events ~deps request reqd =
   let request_authority = Server_request_authority.current_exn () in
   let origin = deps.get_origin request in
-  let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
-  let protocol_version = get_protocol_version_for_session ~session_id request in
+  let protocol_version = mcp_protocol_version_default in
   let base_path = deps.get_base_path () in
   (* workspace query param ignored — namespace retired *)
   let last_event_id = Server_mcp_transport_http_headers.get_last_event_id request in
@@ -47,28 +44,31 @@ let handle_ag_ui_events ~deps request reqd =
         ~request_authority
         request
         reqd
-        ~session_id
         ~protocol_version
         failure.message
   | Ok () ->
-      (match last_event_id with
+      (match Transport_correlation_id.resolve (observer_session_id request) with
       | Error error ->
           respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
-            ~request_authority request reqd ~session_id ~protocol_version
+            ~request_authority request reqd ~protocol_version
+            (Transport_correlation_id.error_to_string error)
+      | Ok session_id ->
+      match last_event_id with
+      | Error error ->
+          respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
+            ~request_authority request reqd ~protocol_version
             (Server_mcp_transport_http_headers.last_event_id_error_to_string error)
       | Ok last_event_id ->
           let token = Server_auth.observer_sse_auth_token_from_request request in
           let auth = { Sse.config = base_path; token } in
           (match check_sse_connect_guard session_id with
           | Error (reason, retry_after_s) ->
-              respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
+              respond_sse_rate_limited ~deps ~origin ~protocol_version
                 ~reason ~retry_after_s reqd
           | Ok () ->
               stop_sse_session_preserve_guard session_id;
               if Option.is_some last_event_id then
                 Transport_metrics.inc_sse_reconnect ();
-              ensure_sse_backing_session_for_known_transport_session
-                ~transport_session_id:session_id ~sse_session_id:session_id;
               let expected_resource = Server_oauth_metadata.resource request_authority in
               (match
                  Auth_oauth.with_expected_resource expected_resource (fun () ->
@@ -80,11 +80,12 @@ let handle_ag_ui_events ~deps request reqd =
                | Error reg_err ->
                    let msg = Sse.registration_error_to_string reg_err in
                    Log.Server.warn "%s" msg;
-                   respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
+                   respond_observer_stream_register_error ~deps ~origin
+                     ~protocol_version reqd msg
                | Ok (client_id, event_stream, evicted) ->
                   let headers =
                     Httpun.Headers.of_list
-                      (sse_stream_headers ~deps session_id protocol_version origin)
+                      (sse_stream_headers ~deps protocol_version origin)
                   in
                   let response = Httpun.Response.create ~headers `OK in
                   let writer = Httpun.Reqd.respond_with_streaming reqd response in
@@ -182,11 +183,7 @@ let handle_ag_ui_events ~deps request reqd =
 let handle_presence_events ~deps request reqd =
   let request_authority = Server_request_authority.current_exn () in
   let origin = deps.get_origin request in
-  let raw_session_id = Mcp_session.get_or_generate (get_session_id_any request) in
-  let session_id = presence_session_id raw_session_id in
-  let protocol_version =
-    get_protocol_version_for_session ~session_id:raw_session_id request
-  in
+  let protocol_version = mcp_protocol_version_default in
   let base_path = deps.get_base_path () in
   match deps.verify_mcp_observer_stream_auth ~base_path request with
   | Error failure ->
@@ -197,20 +194,24 @@ let handle_presence_events ~deps request reqd =
         ~request_authority
         request
         reqd
-        ~session_id:raw_session_id
         ~protocol_version
         failure.message
   | Ok () ->
+      (match Transport_correlation_id.resolve (observer_session_id request) with
+      | Error error ->
+          respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
+            ~request_authority request reqd ~protocol_version
+            (Transport_correlation_id.error_to_string error)
+      | Ok raw_session_id ->
+      let session_id = presence_session_id raw_session_id in
       let token = Server_auth.observer_sse_auth_token_from_request request in
       let auth = { Sse.config = base_path; token } in
       (match check_sse_connect_guard session_id with
       | Error (reason, retry_after_s) ->
-          respond_sse_rate_limited ~deps ~origin ~session_id
-            ~protocol_version ~reason ~retry_after_s reqd
+          respond_sse_rate_limited ~deps ~origin ~protocol_version ~reason
+            ~retry_after_s reqd
       | Ok () ->
           stop_sse_session_preserve_guard session_id;
-          ensure_sse_backing_session_for_known_transport_session
-            ~transport_session_id:raw_session_id ~sse_session_id:session_id;
           let expected_resource = Server_oauth_metadata.resource request_authority in
           (match
              Auth_oauth.with_expected_resource expected_resource (fun () ->
@@ -221,10 +222,11 @@ let handle_presence_events ~deps request reqd =
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in
                Log.Server.warn "%s" msg;
-               respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
+               respond_observer_stream_register_error ~deps ~origin
+                 ~protocol_version reqd msg
            | Ok (client_id, event_stream, evicted) ->
               let headers =
-                presence_stream_headers ~deps raw_session_id protocol_version origin
+                presence_stream_headers ~deps protocol_version origin
               in
               let response = Httpun.Response.create ~headers `OK in
               let writer = Httpun.Reqd.respond_with_streaming reqd response in
@@ -311,4 +313,4 @@ let handle_presence_events ~deps request reqd =
           | Error msg ->
               Log.Server.debug
                 "presence SSE runtime unavailable for session %s: %s"
-                session_id msg))
+                session_id msg)))

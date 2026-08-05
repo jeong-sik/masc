@@ -26,31 +26,6 @@ let test_is_jsonrpc_v2_missing () =
   check bool "missing field" false (Mcp_server.is_jsonrpc_v2 json)
 
 (* ============================================================
-   normalize_protocol_version Tests
-   ============================================================ *)
-
-let test_normalize_protocol_version () =
-  check string "2025-06-18" "2025-06-18"
-    (Mcp_server.normalize_protocol_version "2025-06-18")
-
-let test_normalize_protocol_version_unknown () =
-  let result = Mcp_server.normalize_protocol_version "unknown" in
-  check bool "returns string" true (String.length result > 0)
-
-(* ============================================================
-   protocol_version_from_params Tests
-   ============================================================ *)
-
-let test_protocol_version_from_params_none () =
-  let result = Mcp_server.protocol_version_from_params None in
-  check bool "returns default" true (String.length result > 0)
-
-let test_protocol_version_from_params_some () =
-  let params = `Assoc [("protocolVersion", `String "2025-06-18")] in
-  let result = Mcp_server.protocol_version_from_params (Some params) in
-  check string "extracts version" "2025-06-18" result
-
-(* ============================================================
    make_response Tests
    ============================================================ *)
 
@@ -276,40 +251,6 @@ let test_is_valid_request_id_object () =
   check bool "object invalid" false (Mcp_server.is_valid_request_id (`Assoc []))
 
 (* ============================================================
-   validate_initialize_params Tests
-   ============================================================ *)
-
-let test_validate_initialize_params_valid () =
-  let params = `Assoc [
-    ("protocolVersion", `String "2024-11-05");
-    ("clientInfo", `Assoc [
-      ("name", `String "test-client");
-      ("version", `String "1.0.0");
-    ]);
-    ("capabilities", `Assoc []);
-  ] in
-  match Mcp_server.validate_initialize_params (Some params) with
-  | Ok () -> ()
-  | Error e -> fail ("unexpected error: " ^ e)
-
-let test_validate_initialize_params_none () =
-  match Mcp_server.validate_initialize_params None with
-  | Error "Missing params" -> ()
-  | _ -> fail "expected Missing params"
-
-let test_validate_initialize_params_missing_version () =
-  let params = `Assoc [
-    ("clientInfo", `Assoc [
-      ("name", `String "test");
-      ("version", `String "1.0");
-    ]);
-    ("capabilities", `Assoc []);
-  ] in
-  match Mcp_server.validate_initialize_params (Some params) with
-  | Error msg -> check bool "error contains Missing" true (String.length msg > 0)
-  | Ok () -> fail "expected error"
-
-(* ============================================================
    jsonrpc_request_of_yojson Tests
    ============================================================ *)
 
@@ -383,16 +324,8 @@ let () =
       test_case "invalid" `Quick test_is_jsonrpc_v2_invalid;
       test_case "missing" `Quick test_is_jsonrpc_v2_missing;
     ];
-    "normalize_protocol_version", [
-      test_case "basic" `Quick test_normalize_protocol_version;
-      test_case "unknown" `Quick test_normalize_protocol_version_unknown;
-    ];
     "tool_schema_component_bytes", [
       test_case "exact UTF-8 bytes" `Quick test_tool_schema_component_bytes;
-    ];
-    "protocol_version_from_params", [
-      test_case "none" `Quick test_protocol_version_from_params_none;
-      test_case "some" `Quick test_protocol_version_from_params_some;
     ];
     "make_response", [
       test_case "basic" `Quick test_make_response;
@@ -442,11 +375,6 @@ let () =
         test_tool_invocation_identity_distinguishes_string_and_integer;
       test_case "invalid session rejected" `Quick
         test_tool_invocation_identity_rejects_invalid_session;
-    ];
-    "validate_initialize_params", [
-      test_case "valid" `Quick test_validate_initialize_params_valid;
-      test_case "none" `Quick test_validate_initialize_params_none;
-      test_case "missing version" `Quick test_validate_initialize_params_missing_version;
     ];
     "jsonrpc_request_of_yojson", [
       test_case "valid" `Quick test_jsonrpc_request_of_yojson_valid;

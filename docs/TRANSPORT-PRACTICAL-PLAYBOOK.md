@@ -6,7 +6,7 @@
 
 | 시나리오 | 권장 transport | 이유 | 대시보드에서 볼 것 |
 | --- | --- | --- | --- |
-| 현황판, wallboard, read-mostly viewer | `observer SSE` (`GET /mcp?sse_kind=observer`) | 브라우저 친화적이고 단방향 freshness에 충분함 | `SSE observer`, `queue max`, `broadcast avg` |
+| 현황판, wallboard, read-mostly viewer | `observer SSE` (`GET /events`) | 브라우저 친화적이고 단방향 freshness에 충분함 | `SSE observer`, `queue max`, `broadcast avg` |
 | agent heartbeat, subscribe, fast fanout | `gRPC` (`:8936`) | 양방향 스트림, backlog replay, typed contract | `gRPC subscribers`, `active streams` |
 | browser/operator duplex bridge | `WebSocket` (`/ws`, standalone port `8937`) **Experimental** | request/response를 한 socket에서 처리하기 좋음 | `WebSocket sessions` |
 | peer-to-peer fast lane, edge a2a | `WebRTC` (`/webrtc/offer`, `/webrtc/answer`) **Experimental** | signaling 후 DataChannel로 직접 통신 | `connected channels`, `active peers` |
@@ -74,7 +74,7 @@ curl -sS http://127.0.0.1:8935/mcp \
 ### 2. Observer SSE for dashboard/wallboard
 
 ```bash
-curl -N http://127.0.0.1:8935/mcp?sse_kind=observer\&session_id=playbook-observer \
+curl -N http://127.0.0.1:8935/events?session_id=playbook-observer \
   -H 'Accept: application/json, text/event-stream'
 ```
 
@@ -85,14 +85,18 @@ MASC_USE_H2=1 ./start-masc.sh --http --port 8935
 
 curl --http2-prior-knowledge -sS http://127.0.0.1:8935/mcp \
   -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/list' \
   -d '{
     "jsonrpc":"2.0",
     "id":1,
-    "method":"initialize",
+    "method":"tools/list",
     "params":{
-      "protocolVersion":"2025-03-26",
-      "capabilities":{},
-      "clientInfo":{"name":"h2c-playbook","version":"1.0"}
+      "_meta":{
+        "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities":{}
+      }
     }
   }'
 ```

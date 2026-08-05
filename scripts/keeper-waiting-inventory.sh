@@ -12,8 +12,6 @@ BASE_URL="${BASE_URL%/}"
 : "${HTTP_TIMEOUT_SEC:=${CURL_TIMEOUT_SEC}}"
 : "${CURL_RETRY_COUNT:=4}"
 : "${CURL_RETRY_DELAY_SEC:=1}"
-: "${MCP_CLIENT_NAME:=keeper-waiting-inventory-cli}"
-: "${MCP_SESSION_ID:=}"
 : "${COMPACT:=0}"
 : "${PREFLIGHT_ONLY:=0}"
 : "${REQUIRE_CURRENT_RUNTIME:=0}"
@@ -519,91 +517,6 @@ run_preflight_gate() {
   fi
 }
 
-initialize_mcp_session() {
-  if [[ -n "${MCP_SESSION_ID:-}" ]]; then
-    export MCP_SESSION_ID
-    return 0
-  fi
-
-  local headers_file body_file auth_header_file init_body protocol_version
-  headers_file="$(mcp_mktemp_file "keeper-waiting-inventory-init" ".headers")"
-  body_file="$(mcp_mktemp_file "keeper-waiting-inventory-init" ".body")"
-  auth_header_file=""
-  if [[ -n "${MCP_TOKEN:-}" ]]; then
-    auth_header_file="$(_mcp_auth_header_file "$MCP_TOKEN")" || auth_header_file=""
-  fi
-  init_body="$(
-    jq -cn --arg client_name "$MCP_CLIENT_NAME" \
-      '{jsonrpc:"2.0", id:1, method:"initialize", params:{protocolVersion:"2025-11-25", clientInfo:{name:$client_name, version:"1.0"}, capabilities:{}}}'
-  )"
-
-  local -a init_headers=(
-    -H 'Content-Type: application/json'
-    -H 'Accept: application/json, text/event-stream'
-  )
-  if [[ -n "$auth_header_file" ]]; then
-    init_headers+=( -H "@$auth_header_file" )
-  fi
-
-  if ! curl -sS --max-time "$CURL_TIMEOUT_SEC" -D "$headers_file" -o "$body_file" \
-    -X POST "$MCP_URL" "${init_headers[@]}" --data-binary "$init_body" >/dev/null; then
-    rm -f "$headers_file" "$body_file" "$auth_header_file"
-    fail "MCP initialize failed at ${MCP_URL}"
-  fi
-
-  MCP_SESSION_ID="$(
-    awk '
-      tolower($0) ~ /^mcp-session-id:/ {
-        sub(/^[^:]+:[[:space:]]*/, "", $0)
-        sub(/\r$/, "", $0)
-        print $0
-        exit
-      }
-    ' "$headers_file"
-  )"
-  protocol_version="$(
-    awk '
-      tolower($0) ~ /^mcp-protocol-version:/ {
-        sub(/^[^:]+:[[:space:]]*/, "", $0)
-        sub(/\r$/, "", $0)
-        print $0
-        exit
-      }
-    ' "$headers_file"
-  )"
-
-  if [[ -z "$MCP_SESSION_ID" ]]; then
-    if jq -e . "$body_file" >/dev/null 2>&1; then
-      jq . "$body_file" >&2
-    else
-      cat "$body_file" >&2 || true
-    fi
-    rm -f "$headers_file" "$body_file" "$auth_header_file"
-    fail "MCP initialize did not return Mcp-Session-Id"
-  fi
-
-  export MCP_SESSION_ID
-  if [[ -n "$protocol_version" ]]; then
-    MCP_PROTOCOL_VERSION="$protocol_version"
-    export MCP_PROTOCOL_VERSION
-  fi
-
-  local -a initialized_headers=(
-    -H 'Content-Type: application/json'
-    -H 'Accept: application/json, text/event-stream'
-    -H "mcp-session-id: ${MCP_SESSION_ID}"
-  )
-  if [[ -n "$auth_header_file" ]]; then
-    initialized_headers+=( -H "@$auth_header_file" )
-  fi
-  curl -sS --max-time "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
-    "${initialized_headers[@]}" \
-    --data-binary '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
-    >/dev/null || true
-
-  rm -f "$headers_file" "$body_file" "$auth_header_file"
-}
-
 main() {
   FAILURE_STAGE="startup"
   require_cmd curl
@@ -623,9 +536,6 @@ main() {
       exit 0
     fi
   fi
-  FAILURE_STAGE="mcp_initialize"
-  initialize_mcp_session
-
   local result
   FAILURE_STAGE="mcp_tool_call"
   result="$(
@@ -633,7 +543,6 @@ main() {
       7001 \
       "$WAITING_TOOL_NAME" \
       '{}' \
-      "$MCP_SESSION_ID" \
       "${MCP_TOKEN:-}" \
       "$MCP_URL"
   )" || fail "masc_keeper_waiting_inventory call failed"

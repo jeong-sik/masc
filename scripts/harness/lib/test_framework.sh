@@ -8,9 +8,7 @@
 : "${CURL_RETRY_COUNT:=4}"
 : "${CURL_RETRY_DELAY_SEC:=1}"
 : "${CURL_TIMEOUT_SEC:=25}"
-: "${MCP_SESSION_ID:=}"
 : "${MCP_TOKEN:=}"
-export MCP_SESSION_ID
 
 _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/harness/jsonrpc_sse.sh
@@ -18,104 +16,11 @@ source "${_HARNESS_DIR}/jsonrpc_sse.sh"
 # shellcheck source=scripts/harness/lib/mcp_jsonrpc.sh
 source "${_HARNESS_DIR}/lib/mcp_jsonrpc.sh"
 
-# Contract harness validates MCP semantics, not h2c prior-knowledge support.
-# Use normal HTTP negotiation here so the suite doesn't hang when the server
-# speaks HTTP/1.1 on localhost.
-# POST a JSON body to the MCP endpoint with retry logic.
-# Includes mcp-session-id header when MCP_SESSION_ID is set.
-# Usage: curl_post_mcp '{"jsonrpc":"2.0",...}'
-curl_post_mcp() {
-  local body="$1"
-  local attempt=1
-  local output=""
-  local auth_token
-  auth_token="$(mcp_default_auth_token)"
-  local auth_header_file=""
-  if [ -n "$auth_token" ]; then
-    auth_header_file="$(_mcp_auth_header_file "$auth_token")" || auth_header_file=""
-  fi
-  local -a headers=(
-    -H 'Content-Type: application/json'
-    -H 'Accept: application/json, text/event-stream'
-  )
-  if [ -n "$MCP_SESSION_ID" ]; then
-    headers+=( -H "mcp-session-id: $MCP_SESSION_ID" )
-  fi
-  if [ -n "$auth_header_file" ]; then
-    headers+=( -H "@$auth_header_file" )
-  fi
-  while [ "$attempt" -le "$CURL_RETRY_COUNT" ]; do
-    if output="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
-      "${headers[@]}" \
-      -d "$body" 2>/dev/null)"; then
-      rm -f "$auth_header_file"
-      printf "%s" "$output"
-      return 0
-    fi
-    if [ "$attempt" -lt "$CURL_RETRY_COUNT" ]; then
-      sleep "$CURL_RETRY_DELAY_SEC"
-    fi
-    attempt=$((attempt + 1))
-  done
-  rm -f "$auth_header_file"
-  return 1
-}
-
-initialize_mcp_session() {
-  local headers_file body_file auth_header_file=""
-  headers_file="$(mcp_mktemp_file "masc-init-headers")"
-  body_file="$(mcp_mktemp_file "masc-init-body")"
-  local auth_token
-  auth_token="$(mcp_default_auth_token)"
-  if [ -n "$auth_token" ]; then
-    auth_header_file="$(_mcp_auth_header_file "$auth_token")" || auth_header_file=""
-  fi
-  trap 'rm -f "$headers_file" "$body_file" "$auth_header_file"' RETURN
-  local -a init_headers=(
-    -H 'Content-Type: application/json'
-    -H 'Accept: application/json, text/event-stream'
-  )
-  if [ -n "$auth_header_file" ]; then
-    init_headers+=( -H "@$auth_header_file" )
-  fi
-
-  if curl -sS -m "$CURL_TIMEOUT_SEC" -D "$headers_file" -o "$body_file" -X POST "$MCP_URL" \
-    "${init_headers[@]}" \
-    -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-harness","version":"1.0"},"capabilities":{}}}' \
-    >/dev/null 2>&1; then
-    MCP_SESSION_ID="$(
-      awk '
-        tolower($0) ~ /^mcp-session-id:/ {
-          sub(/^[^:]+:[[:space:]]*/, "", $0)
-          sub(/\r$/, "", $0)
-          print $0
-          exit
-        }
-      ' "$headers_file"
-    )"
-    export MCP_SESSION_ID
-    if [ -n "$MCP_SESSION_ID" ]; then
-      local -a initialized_headers=(
-        -H 'Content-Type: application/json'
-        -H 'Accept: application/json, text/event-stream'
-        -H "mcp-session-id: $MCP_SESSION_ID"
-      )
-      if [ -n "$auth_header_file" ]; then
-        initialized_headers+=( -H "@$auth_header_file" )
-      fi
-      curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
-        "${initialized_headers[@]}" \
-        -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
-        >/dev/null 2>&1 || true
-    fi
-  fi
-
-  rm -f "$headers_file" "$body_file" "$auth_header_file"
-  [ -n "$MCP_SESSION_ID" ]
-}
-
-ensure_mcp_session() {
-  [ -n "$MCP_SESSION_ID" ] || initialize_mcp_session
+require_mcp_ready() {
+  local payload
+  payload="$(mcp_jsonrpc_call 0 "server/discover" '{}')"
+  mcp_require_jsonrpc_ok "$payload" "server/discover" || return 1
+  printf '%s' "$payload" | jq -e '.result.resultType == "complete"' >/dev/null
 }
 
 # Call an MCP tool and normalize SSE/JSON response.
@@ -125,9 +30,8 @@ call_tool() {
   local name="$2"
   local args_json="$3"
   local raw
-  ensure_mcp_session
-  raw="$(curl_post_mcp "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}")"
-  jsonrpc_normalize_response "$raw" "$id"
+  raw="$(mcp_call_tool "$id" "$name" "$args_json")"
+  printf '%s' "$raw"
 }
 
 extract_text() {

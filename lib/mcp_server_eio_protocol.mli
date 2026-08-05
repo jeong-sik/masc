@@ -2,13 +2,6 @@
     + stdio transport for the Eio MCP server.
 
     Owns:
-    - the {b resource subscription registry}
-      ([resource_subscriptions] hashtbl + per-session
-      lock) and the [resources/subscribe] /
-      [resources/unsubscribe] handlers,
-    - the {b tools-list-changed} broadcast plumbing
-      ({!broadcast_tools_list_changed},
-      {!maybe_emit_resource_notifications}),
     - the {b transport mode detector}
       ({!detect_mode}, {!transport_mode}) used by the
       stdio entry point,
@@ -27,23 +20,8 @@
     [is_valid_request_id] / [jsonrpc_request_of_yojson]
     re-exports of {!Mcp_transport_protocol},
     [unavailable_tool_message],
-    [resource_subscription_mutex],
-    [with_resource_subscription_lock],
-    [resource_subscriptions] table, [resource_is_dynamic],
-    [subscribe_resource_for_session],
-    [unsubscribe_resource_for_session],
-    [jsonrpc_notification],
-    [send_resource_updated_notification],
-    [dedup_strings], [core_status_resource_ids] +
-    [task_resource_ids] + [agent_resource_ids] +
-    [message_resource_ids],
-    [resource_id_of_uri],
-    [affected_resource_ids_for_tool],
-    [handle_initialize_eio],
     [handle_list_resource_templates_eio],
     [handle_list_prompts_eio], [handle_get_prompt_eio],
-    [handle_resources_subscribe_eio],
-    [handle_resources_unsubscribe_eio],
     [optional_string_member], [string_list_member],
     [dashboard_response_or_error],
     [handle_dashboard_hello_eio] /
@@ -83,31 +61,6 @@ end
     point; every method routes through it before invoking
     its handler. *)
 
-(** {1 Session-bound resource subscription cleanup} *)
-
-val clear_resource_subscriptions_for_session : string -> unit
-(** Drops every entry the session subscribed to.
-    Called on session teardown so the
-    [resources/updated] broadcaster does not push to a
-    dead session id. *)
-
-(** {1 Notifications} *)
-
-val broadcast_tools_list_changed : unit -> unit
-(** Emits [notifications/tools/list_changed] to every
-    session.  Fired after a tool registry change (e.g.
-    long-running mutation start / stop) so dashboards can
-    refresh their tool inspector without polling. *)
-
-val maybe_emit_resource_notifications :
-  success:bool -> tool_name:string -> unit
-(** Inspects the tool name + outcome and, when the call
-    is known to mutate persisted state (board /
-    activity / workspace / task / agent), emits
-    [resources/updated] notifications for the affected
-    resource ids.  No-op on [success = false] so a
-    failed call does not invalidate caches. *)
-
 (** {1 Top-level dispatcher} *)
 
 val handle_request :
@@ -144,9 +97,8 @@ val handle_request :
     ?auth_token ?internal_keeper_runtime
     state request_str] parses [request_str] as JSON-RPC,
     routes the [method] to the matching internal handler
-    (server/discover / initialize / tools/list / tools/call
-    / resources/list / resources/read / resources/subscribe /
-    unsubscribe / list_resource_templates / prompts/list /
+    (server/discover / tools/list / tools/call /
+    resources/list / resources/read / list_resource_templates / prompts/list /
     prompts/get / dashboard/* family), and returns the response
     envelope.
 

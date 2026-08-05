@@ -71,7 +71,7 @@ let run_bash script =
   Sys.remove err;
   (code, stdout, stderr)
 
-let test_default_token_rejects_ambient_masc_token () =
+let test_default_token_uses_only_mcp_token () =
   let script =
     {|
 set -euo pipefail
@@ -80,6 +80,8 @@ unset MCP_AUTH_TOKEN
 unset MASC_ADMIN_TOKEN
 unset MCP_TOKEN
 MASC_TOKEN=ambient-token
+MCP_AUTH_TOKEN=alias-token
+MASC_ADMIN_TOKEN=admin-token
 token="$(mcp_default_auth_token)"
 if [ -n "$token" ]; then
   printf 'unexpected ambient fallback: %s\n' "$token" >&2
@@ -89,17 +91,6 @@ MCP_TOKEN=canonical-token
 if [ "$(mcp_default_auth_token)" != "canonical-token" ]; then
   printf 'MCP_TOKEN not selected\n' >&2
   exit 11
-fi
-unset MCP_TOKEN
-MASC_ADMIN_TOKEN=admin-token
-if [ "$(mcp_default_auth_token)" != "admin-token" ]; then
-  printf 'MASC_ADMIN_TOKEN not selected\n' >&2
-  exit 12
-fi
-MCP_AUTH_TOKEN=mcp-token
-if [ "$(mcp_default_auth_token)" != "mcp-token" ]; then
-  printf 'MCP_AUTH_TOKEN not selected first\n' >&2
-  exit 13
 fi
 |}
   in
@@ -124,12 +115,12 @@ let test_run_all_mints_workspace_token_before_mcp_probe () =
   require_order "mint assignment before canonical export" source
     "if ! MCP_TOKEN=\"$("
     "export MCP_TOKEN\nunset MCP_AUTH_TOKEN";
-  require_order "export before initialize readiness" source
+  require_order "export before MCP readiness" source
     "export MCP_TOKEN\nunset MCP_AUTH_TOKEN"
-    "if ! wait_for_mcp_initialize_ready \"$MCP_URL\" 25; then";
-  require_order "empty check before initialize readiness" source
+    "if ! wait_for_mcp_ready \"$MCP_URL\" 25; then";
+  require_order "empty check before MCP readiness" source
     "FAIL: contract harness admin token is empty"
-    "if ! wait_for_mcp_initialize_ready \"$MCP_URL\" 25; then"
+    "if ! wait_for_mcp_ready \"$MCP_URL\" 25; then"
 
 let test_bootstrap_mints_admin_token_for_base_path () =
   let source = read_source_file "scripts/harness/lib/server_bootstrap.sh" in
@@ -154,8 +145,9 @@ let test_bootstrap_mints_admin_token_for_base_path () =
 let test_mcp_jsonrpc_does_not_fallback_to_masc_token () =
   let source = read_source_file "scripts/harness/lib/mcp_jsonrpc.sh" in
   require_contains "canonical token selected" source "${MCP_TOKEN:-}";
-  require_contains "mcp auth token selected" source "${MCP_AUTH_TOKEN:-}";
-  require_contains "admin token selected" source "${MASC_ADMIN_TOKEN:-}";
+  require_not_contains "no MCP_AUTH_TOKEN branch" source "${MCP_AUTH_TOKEN:-}";
+  require_not_contains "no MASC_ADMIN_TOKEN branch" source
+    "${MASC_ADMIN_TOKEN:-}";
   require_not_contains "no MASC_TOKEN branch" source
     "elif [[ -n \"${MASC_TOKEN:-}\" ]]";
   require_not_contains "no MASC_TOKEN print" source "printf '%s' \"$MASC_TOKEN\""
@@ -165,8 +157,8 @@ let () =
     [
       ( "auth",
         [
-          test_case "default token rejects ambient MASC_TOKEN" `Quick
-            test_default_token_rejects_ambient_masc_token;
+          test_case "default token uses only MCP_TOKEN" `Quick
+            test_default_token_uses_only_mcp_token;
           test_case "run_all mints token before MCP probe" `Quick
             test_run_all_mints_workspace_token_before_mcp_probe;
           test_case "bootstrap mints admin token for base path" `Quick

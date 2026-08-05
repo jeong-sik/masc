@@ -16,23 +16,13 @@
     module directly.  The pair is documented here as the canonical
     "MCP envelope header" producer. *)
 
-val mcp_headers : string -> string -> (string * string) list
-(** [mcp_headers session_id protocol_version] returns the two MCP
-    envelope headers ([mcp-session-id], [mcp-protocol-version]) used
-    by every response in this module.  Order is fixed for grep
-    stability in operator dumps. *)
+val mcp_headers : string -> (string * string) list
 
 val json_headers :
   deps:Server_mcp_transport_http_types.deps ->
   string ->
   string ->
-  string ->
   (string * string) list
-(** [json_headers ~deps session_id protocol_version origin] returns
-    [content-type: application/json] + the {!mcp_headers} pair +
-    [deps.cors_headers origin].  Used by every JSON-bodied response in
-    this module so a future "rebrand the json content type" change
-    must touch one site. *)
 
 val respond_not_ready :
   deps:Server_mcp_transport_http_types.deps ->
@@ -47,35 +37,29 @@ val respond_not_ready :
 
     Unlike the other factories, this response uses
     [content-type: application/json] directly (not the {!json_headers}
-    builder) because [session_id] / [protocol_version] are not
-    available before the runtime is up.  The asymmetry is intentional —
-    a future "always go through json_headers" refactor would require
-    promoting both to optional and is deferred. *)
+    builder) because [protocol_version] is not available before the
+    runtime is up.  The asymmetry is intentional — a future "always go
+    through json_headers" refactor would require promoting it to
+    optional and is deferred. *)
 
-val respond_sse_register_error :
+val respond_observer_stream_register_error :
   deps:Server_mcp_transport_http_types.deps ->
   origin:string ->
   protocol_version:string ->
   Httpun.Reqd.t ->
   string ->
   unit
-(** [respond_sse_register_error ~deps ~origin ~protocol_version reqd msg]
-    responds 404 + a fresh [Mcp-Session-Id] for an SSE GET register whose
-    session validation failed (unknown/expired). Sent before the 200 stream
-    is opened so MCP clients re-run [initialize] instead of retrying the
-    same stale session forever. Mirrors the POST JSON-RPC unknown-session
-    path ([server_mcp_transport_http.ml]). *)
+(** Rejects an observer-stream registration before opening a 200 stream. *)
 
 val respond_sse_rate_limited :
   deps:Server_mcp_transport_http_types.deps ->
   origin:string ->
-  session_id:string ->
   protocol_version:string ->
   reason:Sse_reject_reason.t ->
   retry_after_s:float ->
   Httpun.Reqd.t ->
   unit
-(** [respond_sse_rate_limited ~deps ~origin ~session_id
+(** [respond_sse_rate_limited ~deps ~origin
     ~protocol_version ~reason ~retry_after_s reqd] writes a JSON
     response with HTTP status [429 Too Many Requests] for SSE
     connection rate-limit decisions.
@@ -123,13 +107,12 @@ val respond_mcp_error :
   request_authority:Server_request_authority.authority ->
   Httpun.Request.t ->
   Httpun.Reqd.t ->
-  session_id:string ->
   protocol_version:string ->
   code:Mcp_error_code.t ->
   string ->
   unit
 (** [respond_mcp_error ?extra_headers ?data ?id ~deps ~request_authority request reqd
-    ~session_id ~protocol_version ~code msg] writes a single JSON-RPC
+    ~protocol_version ~code msg] writes a single JSON-RPC
     2.0 error response derived from a typed {!Mcp_error_code.t}. This
     is the {b RFC-0098 SSOT} for transport-boundary error envelopes;
     new call sites SHOULD use this in preference to the per-code

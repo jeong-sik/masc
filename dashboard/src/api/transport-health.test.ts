@@ -175,15 +175,15 @@ describe('decodeTransportHealthData', () => {
       },
       streamable_http: {
         endpoint: '/mcp',
-        observer_stream: '/mcp?sse_kind=observer',
+        observer_stream: '/events',
         presence_stream: '/events/presence',
         managed_endpoint: '/mcp/managed',
         operator_endpoint: '/mcp/operator',
-        delete_endpoint: '/mcp',
+        delete_endpoint: '',
         default_transport: 'streamable-http',
         supports_post: true,
         supports_sse_upgrade: true,
-        supports_delete: true,
+        supports_delete: false,
       },
       http2: {
         listener_mode: 'h2c',

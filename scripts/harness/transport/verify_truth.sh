@@ -177,7 +177,7 @@ probe_sse() {
   status="$(curl -sS -N --max-time 2 -D "$headers" -o /dev/null \
     -w '%{http_code}' \
     -H "Accept: application/json, text/event-stream" \
-    "${MASC_HTTP_BASE_URL}/mcp?sse_kind=observer&session_id=transport-truth-$$" \
+    "${MASC_HTTP_BASE_URL}/events?session_id=transport-truth-$$" \
     2>/dev/null || printf '000')"
   if grep -qi "content-type:.*text/event-stream" "$headers"; then
     rm -f "$headers"
@@ -200,7 +200,9 @@ probe_h2c() {
     "${MASC_HTTP_BASE_URL}/mcp" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
-    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"transport-truth-h2","version":"1.0"}}}' \
+    -H 'Mcp-Protocol-Version: 2026-07-28' \
+    -H 'Mcp-Method: server/discover' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
     2>/dev/null || true)"
   health_probe="$(curl --http2-prior-knowledge -sS --max-time 3 -o /dev/null \
     -w '%{http_code} %{http_version}' "${MASC_HTTP_BASE_URL}/health" \
@@ -229,7 +231,9 @@ probe_mcp_post() {
     "${MASC_HTTP_BASE_URL}/mcp" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
-    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"transport-truth-http","version":"1.0"}}}' \
+    -H 'Mcp-Protocol-Version: 2026-07-28' \
+    -H 'Mcp-Method: server/discover' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
     2>/dev/null || printf '000')"
   case "$status" in
     200|202) return 0 ;;
@@ -281,8 +285,8 @@ else
 fi
 
 transport_status_json='{}'
-if session_id="$(mcp_initialize_session 2>/dev/null)"; then
-  transport_status_response="$(mcp_call_tool "$session_id" "masc_transport_status" '{}' 21 2>/dev/null || true)"
+if transport_mcp_ready 2>/dev/null; then
+  transport_status_response="$(transport_call_tool 21 "masc_transport_status" '{}' 2>/dev/null || true)"
   transport_status_text="$(printf '%s' "$transport_status_response" | mcp_response_text || true)"
   if jq -e '.http and .grpc and .websocket and .enabled_protocols' \
     <<<"$transport_status_text" >/dev/null 2>&1; then
@@ -294,7 +298,7 @@ if session_id="$(mcp_initialize_session 2>/dev/null)"; then
     fail "masc_transport_status" "could not decode JSON tool content"
   fi
 else
-  auth_blocked "masc_transport_status" "MCP initialize blocked; likely auth-required endpoint"
+  auth_blocked "masc_transport_status" "MCP discovery blocked; likely auth-required endpoint"
 fi
 
 if probe_mcp_post; then
@@ -322,7 +326,7 @@ dashboard_sse="$(json_bool "$transport_health_json" '.streamable_http.supports_s
 tool_sse="$(jq -r 'if (.http.sse_url // "") != "" then "true" else "missing" end' \
   <<<"$transport_status_json" 2>/dev/null || printf 'missing\n')"
 compare_truth "observer-sse" "$dashboard_sse" "$tool_sse" "$actual_sse" \
-  "path=/mcp?sse_kind=observer"
+  "path=/events"
 
 grpc_port="$(json_bool "$transport_health_json" '.grpc.port')"
 if [[ "$grpc_port" =~ ^[0-9]+$ ]] && probe_tcp "127.0.0.1" "$grpc_port"; then

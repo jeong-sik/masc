@@ -4,7 +4,7 @@
     Handles resources/read JSON-RPC method for MASC resources.
 *)
 
-let make_response = Mcp_transport_protocol.make_response
+let make_response = Mcp_transport_protocol.make_complete_response
 let make_error = Mcp_transport_protocol.make_error
 
 (* Typed wrapper.  The bare [-32602] literal at three call sites was a

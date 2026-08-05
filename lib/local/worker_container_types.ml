@@ -302,8 +302,10 @@ module For_testing = struct
   ;;
 end
 
-let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
-    ~(request_body : string) : (string, string) result =
+let current_protocol_version = "2026-07-28"
+
+let post_json_via_eio ~sw:_ ~(auth_token : string option) ~method_name
+    ~request_name ~(request_body : string) : (string, string) result =
   match Eio_context.get_net_opt () with
   | None -> Error "Eio net not initialized"
   | Some net ->
@@ -313,8 +315,12 @@ let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
                ("content-type", "application/json");
                ("accept", "application/json, text/event-stream");
                ("x-masc-force-json", "1");
-               ("mcp-session-id", session_id);
+               ("mcp-protocol-version", current_protocol_version);
+               ("mcp-method", method_name);
              ]
+            @ (match request_name with
+              | Some name -> [ ("mcp-name", name) ]
+              | None -> [])
             @
             (match auth_token with
             | Some token when String.trim token <> "" ->
@@ -329,10 +335,37 @@ let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
             else Error (sprintf "MASC HTTP %d: %s" status raw_body))
       with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
-let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : string)
+let call_jsonrpc ~sw ~(auth_token : string option) ~(method_name : string)
     ~(params : Yojson.Safe.t) : (Yojson.Safe.t, string) result =
   let request_id = next_jsonrpc_id () in
   let url = mcp_endpoint_url () in
+  let request_name =
+    match params with
+    | `Assoc fields ->
+      let key = if String.equal method_name "resources/read" then "uri" else "name" in
+      (match List.assoc_opt key fields with
+       | Some (`String value) -> Some value
+       | _ -> None)
+    | _ -> None
+  in
+  let params =
+    match params with
+    | `Assoc fields ->
+      let meta =
+        match List.assoc_opt "_meta" fields with
+        | Some (`Assoc meta) -> meta
+        | _ -> []
+      in
+      `Assoc
+        (( "_meta"
+         , `Assoc
+             (( "io.modelcontextprotocol/protocolVersion"
+              , `String current_protocol_version )
+             :: ("io.modelcontextprotocol/clientCapabilities", `Assoc [])
+             :: meta) )
+        :: List.remove_assoc "_meta" fields)
+    | value -> value
+  in
   let request_body =
     `Assoc
       [
@@ -361,8 +394,13 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
         "-H";
         "x-masc-force-json: 1";
         "-H";
-        ("mcp-session-id: " ^ session_id);
+        ("mcp-protocol-version: " ^ current_protocol_version);
+        "-H";
+        ("mcp-method: " ^ method_name);
       ]
+      @ (match request_name with
+        | Some name -> [ "-H"; "mcp-name: " ^ name ]
+        | None -> [])
       @
       match auth_token with
       | Some token when String.trim token <> "" ->
@@ -388,7 +426,9 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
   in
   let perform_request () =
     match Eio_context.get_net_opt () with
-    | Some _ -> post_json_via_eio ~sw ~auth_token ~session_id ~request_body
+    | Some _ ->
+        post_json_via_eio ~sw ~auth_token ~method_name ~request_name
+          ~request_body
     | None -> curl_fallback ()
   in
   let rec decode attempts_left =
@@ -418,7 +458,7 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
   record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result;
   Result.map_error (fun error -> error.message) result
 
-let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
+let call_masc_tool ~sw ~(auth_token : string option) ~tool_name
     ~(args : Yojson.Safe.t) :
     (tool_exec_result, string) result =
   let args =
@@ -428,7 +468,7 @@ let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
     | _ -> args
   in
   match
-    call_jsonrpc ~sw ~auth_token ~session_id ~method_name:"tools/call"
+    call_jsonrpc ~sw ~auth_token ~method_name:"tools/call"
       ~params:(`Assoc [ ("name", `String tool_name); ("arguments", args) ])
   with
   | Error e -> Error e
@@ -440,10 +480,8 @@ let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
       in
       Ok { text = extract_tool_text json; is_error }
 
-let list_masc_tools ~sw:_sw ~(auth_token : string option) ~session_id
-    ?(names : string list option = None) () :
+let list_masc_tools ~sw:_ ~auth_token:_ ?(names : string list option = None) () :
     (Masc_domain.tool_schema list, string) result =
-  ignore (_sw, auth_token, session_id);
   Keeper_tool_surfaces.local_worker_tool_schemas ?names ()
 
 let tool_schema_of_name schemas tool_name =

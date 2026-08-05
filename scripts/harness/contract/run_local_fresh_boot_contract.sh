@@ -20,19 +20,6 @@ status_code() {
   awk 'toupper($1) ~ /^HTTP\/[0-9.]+$/ { code=$2 } END { print code }' "$header_file"
 }
 
-header_value() {
-  local header_file="$1"
-  local key="$2"
-  awk -v k="$key" '
-    tolower($0) ~ "^" tolower(k) ":" {
-      sub(/^[^:]+:[[:space:]]*/, "", $0)
-      sub(/\r$/, "", $0)
-      print $0
-      exit
-    }
-  ' "$header_file"
-}
-
 normalize_json() {
   local src="$1"
   local dest="$2"
@@ -118,21 +105,21 @@ if config_root != expected_config:
 PY
 }
 
-assert_initialize_contract() {
-  local initialize_json="$1"
-  python3 - "$initialize_json" <<'PY'
+assert_discover_contract() {
+  local discover_json="$1"
+  python3 - "$discover_json" <<'PY'
 import json
 import sys
 
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
 result = payload.get("result") or {}
-server_info = result.get("serverInfo") or {}
+server_info = (result.get("_meta") or {}).get("io.modelcontextprotocol/serverInfo") or {}
 if server_info.get("name") != "masc":
     raise SystemExit(f"unexpected serverInfo.name: {server_info.get('name')!r}")
-if result.get("protocolVersion") != "2025-11-25":
-    raise SystemExit(
-        f"unexpected protocolVersion: {result.get('protocolVersion')!r}"
-    )
+if result.get("resultType") != "complete":
+    raise SystemExit(f"unexpected resultType: {result.get('resultType')!r}")
+if result.get("supportedVersions") != ["2026-07-28"]:
+    raise SystemExit(f"unexpected supportedVersions: {result.get('supportedVersions')!r}")
 PY
 }
 
@@ -143,7 +130,10 @@ import json
 import sys
 
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
-tools = ((payload.get("result") or {}).get("tools")) or []
+result = payload.get("result") or {}
+if result.get("resultType") != "complete":
+    raise SystemExit(f"unexpected resultType: {result.get('resultType')!r}")
+tools = result.get("tools") or []
 if not tools:
     raise SystemExit("tools/list returned no tools")
 names = {tool.get("name") for tool in tools if isinstance(tool, dict)}
@@ -156,9 +146,9 @@ PY
 
 cleanup() {
   harness_stop_server "$SERVER_PID" "$STOP_WAIT_SEC"
-  rm -f "${READY_JSON:-}" "${HEALTH_JSON:-}" "${INIT_HEADERS:-}" \
-    "${INIT_BODY:-}" "${INIT_JSON:-}" "${NOTIFY_HEADERS:-}" \
-    "${NOTIFY_BODY:-}" "${TOOLS_HEADERS:-}" "${TOOLS_BODY:-}" \
+  rm -f "${READY_JSON:-}" "${HEALTH_JSON:-}" "${DISCOVER_HEADERS:-}" \
+    "${DISCOVER_BODY:-}" "${DISCOVER_JSON:-}" \
+    "${TOOLS_HEADERS:-}" "${TOOLS_BODY:-}" \
     "${TOOLS_JSON:-}"
   if [[ "$KEEP_BASE_PATH" != "1" ]]; then
     rm -rf "$BASE_PATH"
@@ -181,17 +171,15 @@ BASE_URL="http://127.0.0.1:${PORT}"
 MCP_URL="${BASE_URL}/mcp"
 READY_JSON="$(harness_mktemp_file "masc-run-local-ready" ".json")"
 HEALTH_JSON="$(harness_mktemp_file "masc-run-local-health" ".json")"
-INIT_HEADERS="$(harness_mktemp_file "masc-run-local-init" ".headers")"
-INIT_BODY="$(harness_mktemp_file "masc-run-local-init" ".body")"
-INIT_JSON="$(harness_mktemp_file "masc-run-local-init" ".json")"
-NOTIFY_HEADERS="$(harness_mktemp_file "masc-run-local-notify" ".headers")"
-NOTIFY_BODY="$(harness_mktemp_file "masc-run-local-notify" ".body")"
+DISCOVER_HEADERS="$(harness_mktemp_file "masc-run-local-discover" ".headers")"
+DISCOVER_BODY="$(harness_mktemp_file "masc-run-local-discover" ".body")"
+DISCOVER_JSON="$(harness_mktemp_file "masc-run-local-discover" ".json")"
 TOOLS_HEADERS="$(harness_mktemp_file "masc-run-local-tools" ".headers")"
 TOOLS_BODY="$(harness_mktemp_file "masc-run-local-tools" ".body")"
 TOOLS_JSON="$(harness_mktemp_file "masc-run-local-tools" ".json")"
 
-rm -f "$READY_JSON" "$HEALTH_JSON" "$INIT_HEADERS" "$INIT_BODY" "$INIT_JSON" \
-  "$NOTIFY_HEADERS" "$NOTIFY_BODY" "$TOOLS_HEADERS" "$TOOLS_BODY" "$TOOLS_JSON"
+rm -f "$READY_JSON" "$HEALTH_JSON" "$DISCOVER_HEADERS" "$DISCOVER_BODY" \
+  "$DISCOVER_JSON" "$TOOLS_HEADERS" "$TOOLS_BODY" "$TOOLS_JSON"
 
 EXPECTED_BASE="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$BASE_PATH")"
 EXPECTED_CONFIG="${EXPECTED_BASE}/.masc/config"
@@ -237,61 +225,38 @@ if ! assert_health_contract "$HEALTH_JSON" "$EXPECTED_BASE" "$EXPECTED_CONFIG"; 
   exit 1
 fi
 
-curl -sS -D "$INIT_HEADERS" -o "$INIT_BODY" \
+curl -sS -D "$DISCOVER_HEADERS" -o "$DISCOVER_BODY" \
   -X POST "$MCP_URL" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"run-local-fresh-boot","version":"1.0"}}}'
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: server/discover' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 
-init_code="$(status_code "$INIT_HEADERS")"
-if [[ "$init_code" != "200" ]]; then
-  echo "FAIL: initialize returned HTTP ${init_code}" >&2
-  cat "$INIT_HEADERS" >&2 || true
-  cat "$INIT_BODY" >&2 || true
+discover_code="$(status_code "$DISCOVER_HEADERS")"
+if [[ "$discover_code" != "200" ]]; then
+  echo "FAIL: server/discover returned HTTP ${discover_code}" >&2
+  cat "$DISCOVER_HEADERS" >&2 || true
+  cat "$DISCOVER_BODY" >&2 || true
   harness_print_log_tail "$LOG_FILE"
   exit 1
 fi
 
-normalize_json "$INIT_BODY" "$INIT_JSON"
-if ! assert_initialize_contract "$INIT_JSON"; then
-  echo "FAIL: initialize payload contract mismatch" >&2
-  cat "$INIT_JSON" >&2 || true
+normalize_json "$DISCOVER_BODY" "$DISCOVER_JSON"
+if ! assert_discover_contract "$DISCOVER_JSON"; then
+  echo "FAIL: server/discover payload contract mismatch" >&2
+  cat "$DISCOVER_JSON" >&2 || true
   harness_print_log_tail "$LOG_FILE"
   exit 1
 fi
-
-SESSION_ID="$(header_value "$INIT_HEADERS" "Mcp-Session-Id")"
-PROTOCOL_VERSION="$(header_value "$INIT_HEADERS" "Mcp-Protocol-Version")"
-[[ -n "$SESSION_ID" ]] || { echo "FAIL: initialize missing Mcp-Session-Id" >&2; exit 1; }
-[[ -n "$PROTOCOL_VERSION" ]] || { echo "FAIL: initialize missing Mcp-Protocol-Version" >&2; exit 1; }
-
-curl -sS -D "$NOTIFY_HEADERS" -o "$NOTIFY_BODY" \
-  -X POST "$MCP_URL" \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
-  -H "Mcp-Session-Id: ${SESSION_ID}" \
-  -H "Mcp-Protocol-Version: ${PROTOCOL_VERSION}" \
-  -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
-
-notify_code="$(status_code "$NOTIFY_HEADERS")"
-case "$notify_code" in
-  200|202|204) ;;
-  *)
-    echo "FAIL: notifications/initialized returned HTTP ${notify_code}" >&2
-    cat "$NOTIFY_HEADERS" >&2 || true
-    cat "$NOTIFY_BODY" >&2 || true
-    harness_print_log_tail "$LOG_FILE"
-    exit 1
-    ;;
-esac
 
 curl -sS -D "$TOOLS_HEADERS" -o "$TOOLS_BODY" \
   -X POST "$MCP_URL" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
-  -H "Mcp-Session-Id: ${SESSION_ID}" \
-  -H "Mcp-Protocol-Version: ${PROTOCOL_VERSION}" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/list' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 
 tools_code="$(status_code "$TOOLS_HEADERS")"
 if [[ "$tools_code" != "200" ]]; then

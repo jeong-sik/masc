@@ -1,7 +1,13 @@
 (test
  (name test_sse_storm_e2e)
  (modules test_sse_storm_e2e)
- (libraries masc alcotest masc_test_runtime yojson unix)
+ (libraries
+  masc
+  masc.transport_correlation_id
+  alcotest
+  masc_test_runtime
+  yojson
+  unix)
  (deps ../bin/main_eio.exe)
  (enabled_if (= %{env:MASC_E2E_TESTS=false} "true"))
  (action

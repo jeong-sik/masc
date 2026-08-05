@@ -491,8 +491,7 @@ let resolve_managed_agent_call ?mcp_session_id params =
     ~requested_name ~arguments
 
 (** Handle tools/call JSON-RPC method *)
-let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
-    ~broadcast_tools_list_changed ~sw ~clock ?(profile = Full) ?mcp_session_id
+let handle_call_tool_eio ~execute_tool_eio ~sw ~clock ?(profile = Full) ?mcp_session_id
     ?auth_token ?(internal_keeper_runtime = false) state id params =
   (* The active workspace is an admission fact for this call.  In particular,
      [masc_start] may publish a new current scope while executing, but the
@@ -502,7 +501,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     Mcp_server.workspace_scope state
   in
   let config = workspace_scope.config in
-  let make_response = Mcp_transport_protocol.make_response in
+  let make_response = Mcp_transport_protocol.make_complete_response in
   let request_id =
     match Mcp_transport_protocol.request_id_of_yojson id with
     | Ok request_id -> request_id
@@ -841,8 +840,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | None -> []
   in
   let result = make_response ~id (`Assoc result_fields) in
-
-  maybe_emit_resource_notifications ~success ~tool_name:name;
 
   (* Log result *)
   let preview =

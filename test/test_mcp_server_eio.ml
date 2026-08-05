@@ -421,12 +421,12 @@ let test_jsonrpc_request_parsing () =
   let json = `Assoc [
     ("jsonrpc", `String "2.0");
     ("id", `Int 1);
-    ("method", `String "initialize");
+    ("method", `String "tools/list");
     ("params", `Assoc []);
   ] in
   match Masc.Mcp_server.jsonrpc_request_of_yojson json with
   | Ok req ->
-      Alcotest.(check string) "method" "initialize" req.method_;
+      Alcotest.(check string) "method" "tools/list" req.method_;
       Alcotest.(check bool) "has id" true (req.id <> None)
   | Error msg ->
       Alcotest.fail ("Parse failed: " ^ msg)
@@ -439,7 +439,7 @@ let test_is_notification () =
   ] in
   let without_id = `Assoc [
     ("jsonrpc", `String "2.0");
-    ("method", `String "notifications/initialized");
+    ("method", `String "notifications/progress");
   ] in
   (match Masc.Mcp_server.jsonrpc_request_of_yojson with_id with
    | Ok req -> Alcotest.(check bool) "with id" false (Masc.Mcp_server.is_notification req)
@@ -449,17 +449,14 @@ let test_is_notification () =
    | Error _ -> Alcotest.fail "parse error")
 
 let test_protocol_version () =
-  let params = Some (`Assoc [("protocolVersion", `String "2025-06-18")]) in
-  let version = Masc.Mcp_server.protocol_version_from_params params in
-  Alcotest.(check string) "version extracted" "2025-06-18" version;
-
-  (match Mcp.validate_protocol_version "2025-06-18" with
+  (match Mcp.validate_protocol_version "2026-07-28" with
    | Ok version ->
-       Alcotest.(check string) "2025-06-18 is supported" "2025-06-18" version
+       Alcotest.(check string) "current version is supported" "2026-07-28" version
    | Error msg -> Alcotest.fail msg);
 
-  let normalized = Masc.Mcp_server.normalize_protocol_version "unknown" in
-  Alcotest.(check string) "normalized to default" "2025-11-25" normalized;
+  (match Mcp.validate_protocol_version "unsupported-version" with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "previous protocol version must be rejected");
 
   match Mcp.validate_protocol_version "unknown" with
   | Error msg ->
@@ -493,80 +490,6 @@ let test_make_error () =
   | _ -> Alcotest.fail "not an object"
 
 (* ===== Eio Integration Tests ===== *)
-
-let test_handle_request_initialize () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.For_testing.create_state ~base_path () in
-
-  let request = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 1);
-    ("method", `String "initialize");
-    ("params", `Assoc [
-      ("protocolVersion", `String "2025-06-18");
-      ("capabilities", `Assoc []);
-      ("clientInfo", `Assoc [
-        ("name", `String "test");
-        ("version", `String "1.0");
-      ]);
-    ]);
-  ]) in
-
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-
-  (match response with
-   | `Assoc fields ->
-       Alcotest.(check bool) "has result" true (List.mem_assoc "result" fields);
-       (match List.assoc_opt "result" fields with
-        | Some (`Assoc result_fields) ->
-            Alcotest.(check (option string)) "echoes requested protocol version"
-              (Some "2025-06-18")
-              (match List.assoc_opt "protocolVersion" result_fields with
-               | Some (`String version) -> Some version
-               | _ -> None);
-            Alcotest.(check bool) "has serverInfo" true
-              (List.mem_assoc "serverInfo" result_fields);
-            Alcotest.(check bool) "has capabilities" true
-              (List.mem_assoc "capabilities" result_fields)
-        | _ -> Alcotest.fail "result not an object")
-   | _ -> Alcotest.fail "response not an object");
-
-  cleanup_dir base_path
-
-let test_handle_request_initialize_rejects_unsupported_protocol_version () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.For_testing.create_state ~base_path () in
-
-  let request = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 101);
-    ("method", `String "initialize");
-    ("params", `Assoc [
-      ("protocolVersion", `String "2099-01-01");
-      ("capabilities", `Assoc []);
-      ("clientInfo", `Assoc [
-        ("name", `String "test");
-        ("version", `String "1.0");
-      ]);
-    ]);
-  ]) in
-
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
-  Alcotest.(check bool) "unsupported protocol message" true
-    (contains_substring (error_message_exn response) "Unsupported protocolVersion");
-
-  cleanup_dir base_path
 
 let test_handle_request_server_discover_2026 () =
   Eio_main.run @@ fun env ->
@@ -615,15 +538,26 @@ let test_handle_request_server_discover_2026 () =
              | _ -> None)
            versions
        in
-       Alcotest.(check bool) "advertises 2026-07-28" true
-         (List.mem "2026-07-28" versions);
-       Alcotest.(check bool) "keeps 2025-11-25 compatibility" true
-         (List.mem "2025-11-25" versions)
+       Alcotest.(check (list string)) "advertises current only"
+         ["2026-07-28"] versions
    | _ -> Alcotest.fail "supportedVersions not a list");
-  Alcotest.(check bool) "has serverInfo" true
-    (List.mem_assoc "serverInfo" result);
+  let meta =
+    match List.assoc_opt "_meta" result with
+    | Some (`Assoc fields) -> fields
+    | _ -> Alcotest.fail "server/discover _meta missing"
+  in
+  Alcotest.(check bool) "has serverInfo metadata" true
+    (List.mem_assoc "io.modelcontextprotocol/serverInfo" meta);
   Alcotest.(check bool) "has capabilities" true
     (List.mem_assoc "capabilities" result);
+  Alcotest.(check (option int)) "discover ttlMs" (Some 3600000)
+    (match List.assoc_opt "ttlMs" result with
+     | Some (`Int value) -> Some value
+     | _ -> None);
+  Alcotest.(check (option string)) "discover cacheScope" (Some "public")
+    (match List.assoc_opt "cacheScope" result with
+     | Some (`String value) -> Some value
+     | _ -> None);
   cleanup_dir base_path
 
 let test_handle_request_tools_list () =
@@ -709,48 +643,6 @@ let test_handle_request_tools_list () =
     (total_count > page_size)
     (Option.is_some (next_cursor_of_response first_page));
 
-  cleanup_dir base_path
-
-let test_handle_request_initialize_operator_profile () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir () in
-  let state = Mcp_eio.For_testing.create_state ~base_path () in
-  let request = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 11);
-    ("method", `String "initialize");
-    ("params", `Assoc [
-      ("protocolVersion", `String "2025-11-25");
-      ("capabilities", `Assoc []);
-      ("clientInfo", `Assoc [
-        ("name", `String "remote-operator");
-        ("version", `String "1.0");
-      ]);
-    ]);
-  ]) in
-  let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
-  in
-  (match response with
-   | `Assoc fields ->
-       (match List.assoc_opt "result" fields with
-        | Some (`Assoc result_fields) ->
-            let instructions =
-              match List.assoc_opt "instructions" result_fields with
-              | Some (`String value) -> value
-              | _ -> ""
-            in
-            Alcotest.(check bool) "mentions operator profile" true
-              (contains_substring instructions "seven operator tools");
-            Alcotest.(check bool) "does not mention surface audit" false
-              (contains_substring instructions "surface audit");
-            Alcotest.(check bool) "mentions confirm workflow" true
-              (contains_substring instructions "confirm_required=true")
-        | _ -> Alcotest.fail "result not an object")
-   | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
 
 let test_handle_request_tools_list_operator_profile () =
@@ -843,46 +735,6 @@ let test_handle_request_tools_list_operator_profile () =
                    (digest_tool |> Yojson.Safe.Util.member "annotations"
                     |> Yojson.Safe.Util.member "openWorldHint" = `Null)
              | _ -> Alcotest.fail "tools not a list")
-        | _ -> Alcotest.fail "result not an object")
-   | _ -> Alcotest.fail "response not an object");
-  cleanup_dir base_path
-
-let test_handle_request_initialize_managed_profile () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir () in
-  let state = Mcp_eio.For_testing.create_state ~base_path () in
-  let request = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 111);
-    ("method", `String "initialize");
-    ("params", `Assoc [
-      ("protocolVersion", `String "2025-11-25");
-      ("capabilities", `Assoc []);
-      ("clientInfo", `Assoc [
-        ("name", `String "managed-agent");
-        ("version", `String "1.0");
-      ]);
-    ]);
-  ]) in
-  let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Managed_agent state request
-  in
-  (match response with
-   | `Assoc fields ->
-       (match List.assoc_opt "result" fields with
-        | Some (`Assoc result_fields) ->
-            let instructions =
-              match List.assoc_opt "instructions" result_fields with
-              | Some (`String value) -> value
-              | _ -> ""
-            in
-            Alcotest.(check bool) "mentions managed profile" true
-              (contains_substring instructions "managed-agent profile");
-            Alcotest.(check bool) "mentions canonical task control" true
-              (contains_substring instructions "masc_transition")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
@@ -2875,31 +2727,6 @@ Alpha body
     cases;
   cleanup_dir base_path
 
-let test_handle_request_resources_subscribe_requires_session () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir () in
-  let state = Mcp_eio.For_testing.create_state ~base_path () in
-  let request =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ("id", `Int 240);
-          ("method", `String "resources/subscribe");
-          ("params", `Assoc [ ("uri", `String "masc://status") ]);
-        ])
-  in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  (match response with
-   | `Assoc fields ->
-       Alcotest.(check bool) "subscribe requires session" true
-         (List.mem_assoc "error" fields)
-   | _ -> Alcotest.fail "response not an object");
-  cleanup_dir base_path
-
 let test_handle_request_dashboard_ping_requires_session () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2955,53 +2782,6 @@ let test_handle_request_dashboard_ping_reports_unknown_ws_session () =
        "WebSocket session not found");
   cleanup_dir base_path
 
-let test_handle_request_resources_subscribe_roundtrip () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir () in
-  let state = Mcp_eio.For_testing.create_state ~base_path () in
-  let subscribe_request =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ("id", `Int 241);
-          ("method", `String "resources/subscribe");
-          ("params", `Assoc [ ("uri", `String "masc://status") ]);
-        ])
-  in
-  let subscribe_response =
-    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:"session-spec" state
-      subscribe_request
-  in
-  (match subscribe_response with
-   | `Assoc fields ->
-       Alcotest.(check bool) "subscribe ok" true
-         (List.mem_assoc "result" fields)
-   | _ -> Alcotest.fail "subscribe response not an object");
-  let unsubscribe_request =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ("id", `Int 242);
-          ("method", `String "resources/unsubscribe");
-          ("params", `Assoc [ ("uri", `String "masc://status") ]);
-        ])
-  in
-  let unsubscribe_response =
-    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:"session-spec" state
-      unsubscribe_request
-  in
-  (match unsubscribe_response with
-   | `Assoc fields ->
-       Alcotest.(check bool) "unsubscribe ok" true
-         (List.mem_assoc "result" fields)
-   | _ -> Alcotest.fail "unsubscribe response not an object");
-  cleanup_dir base_path
-
 (* ===== Test Suites ===== *)
 
 let state_tests = [
@@ -3024,13 +2804,8 @@ let response_tests = [
 ]
 
 let eio_tests = [
-  "handle initialize", `Quick, test_handle_request_initialize;
-  "handle initialize rejects unsupported protocol version", `Quick,
-    test_handle_request_initialize_rejects_unsupported_protocol_version;
   "handle server/discover advertises 2026", `Quick,
     test_handle_request_server_discover_2026;
-  "handle initialize operator profile", `Quick,
-    test_handle_request_initialize_operator_profile;
   "handle tools/list", `Quick, test_handle_request_tools_list;
   "handle tools/list rejects empty cursor", `Quick,
     test_handle_request_tools_list_rejects_empty_cursor;
@@ -3050,18 +2825,12 @@ let eio_tests = [
   "handle resources/read matrix", `Quick, test_handle_request_resources_read_matrix;
   "handle resources/templates/list rejects invalid cursor", `Quick,
     test_handle_request_resources_templates_rejects_invalid_cursor;
-  "handle resources/subscribe requires session", `Quick,
-    test_handle_request_resources_subscribe_requires_session;
   "handle dashboard/ping requires session", `Quick,
     test_handle_request_dashboard_ping_requires_session;
   "handle dashboard/ping reports unknown ws session", `Quick,
     test_handle_request_dashboard_ping_reports_unknown_ws_session;
-  "handle resources/subscribe roundtrip", `Quick,
-    test_handle_request_resources_subscribe_roundtrip;
   "handle tools/list filters requested names", `Quick,
     test_handle_request_tools_list_rejects_nonstandard_names_filter;
-  "handle initialize managed profile", `Quick,
-    test_handle_request_initialize_managed_profile;
   "handle tools/list managed profile", `Quick,
     test_handle_request_tools_list_managed_profile;
   "handle tools/list operator profile", `Quick,

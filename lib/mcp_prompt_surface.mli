@@ -22,10 +22,8 @@ type prompt_argument = {
   description : string;
   required : bool;
 }
-(** Concrete record because both consumers
-    ({!Mcp_sdk_adapter_masc} and {!Mcp_server_eio_protocol}) destructure
-    it field-by-field when projecting to the SDK / wire JSON shape.
-    Hiding would break those at the type seam. *)
+(** Concrete record because {!Mcp_server_eio_protocol} destructures it
+    field-by-field when projecting to the wire JSON shape. *)
 
 (** {1 Prompt definition} *)
 
@@ -36,8 +34,7 @@ type prompt_def = {
   arguments : prompt_argument list;
   icons : Mcp_server.mcp_icon list;
 }
-(** Concrete record for the same reason as {!prompt_argument} —
-    {!Mcp_sdk_adapter_masc.sdk_prompt_of_local} reads every field.
+(** Concrete record for the same reason as {!prompt_argument}.
 
     The [icons] field is non-optional and currently always populated
     with a single themed icon; the contract permits an empty list,
@@ -52,10 +49,8 @@ val prompt_defs : prompt_def list
     2. extending the [match] in {!get_json} with a new arm,
     3. updating the operator runbook for the new prompt name.
 
-    The list is the SSOT — both {!Mcp_sdk_adapter_masc} and
-    {!Mcp_server_eio_protocol} consume it to build their respective
-    paginated [prompts/list] responses (sorted by name, paginated
-    independently per transport). *)
+    The list is the SSOT consumed by {!Mcp_server_eio_protocol} to build
+    the paginated [prompts/list] response. *)
 
 val prompt_json : prompt_def -> Yojson.Safe.t
 (** [prompt_json def] returns the canonical JSON object for one

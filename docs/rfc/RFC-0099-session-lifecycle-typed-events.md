@@ -199,7 +199,6 @@ PR-2 is **wire-inert** (Event_bus only). PR-3 introduces the first client-visibl
 ## 9. References
 
 - [[RFC-0098]] — Typed JSON-RPC error envelope (sibling, IMPROVE-01)
-- [MCP Transports (2025-03-26)](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)
 - [WebSocket Close Codes — RFC 6455 §7.4.2](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.2)
 - [gRPC Status Codes](https://grpc.io/docs/guides/status-codes/)
 - [Server-Sent Events — MDN](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events)

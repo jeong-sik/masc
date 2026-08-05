@@ -7,7 +7,7 @@ type t =
 type error = Invalid_mcp_session_id
 
 let external_mcp ~request_id ~session_id =
-  if not (Mcp_session.is_valid session_id)
+  if not (Transport_correlation_id.is_valid session_id)
   then Error Invalid_mcp_session_id
   else Ok (External_mcp { request_id; session_id })
 ;;

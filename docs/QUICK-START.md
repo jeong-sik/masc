@@ -135,27 +135,23 @@ flowchart TD
 ```bash
 curl "http://127.0.0.1:${PORT}/health"
 
-INIT_HEADERS="$(mktemp)"
-curl -sS -D "$INIT_HEADERS" "http://127.0.0.1:${PORT}/mcp" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"manual-check","version":"0.1"}}}'
+TOKEN="$(curl -fsS "http://127.0.0.1:${PORT}/api/v1/dashboard/dev-token" | jq -er '.token')"
 
-SESSION_ID="$(awk -F': ' 'tolower($1)=="mcp-session-id"{gsub("\r", "", $2); print $2}' "$INIT_HEADERS")"
-PROTOCOL_VERSION="$(awk -F': ' 'tolower($1)=="mcp-protocol-version"{gsub("\r", "", $2); print $2}' "$INIT_HEADERS")"
 curl -sS "http://127.0.0.1:${PORT}/mcp" \
   -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
-  -H "Mcp-Session-Id: ${SESSION_ID}" \
-  -H "Mcp-Protocol-Version: ${PROTOCOL_VERSION}" \
-  -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' >/dev/null
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Mcp-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: server/discover" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
+
 curl -sS "http://127.0.0.1:${PORT}/mcp" \
   -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
-  -H "Mcp-Session-Id: ${SESSION_ID}" \
-  -H "Mcp-Protocol-Version: ${PROTOCOL_VERSION}" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-rm -f "$INIT_HEADERS"
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Mcp-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: tools/list" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
 
 fresh temp-dir launcher proof:
@@ -245,12 +241,14 @@ takes precedence over the TOML value.
 
 ```bash
 
-# Query all tools via API after initialize
+# Query all tools via the current stateless API
 curl -sS "http://127.0.0.1:${PORT}/mcp" \
   -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
-  -H "Mcp-Session-Id: ${SESSION_ID}" \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{"include_hidden":true}}'
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Mcp-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: tools/list" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{"include_hidden":true,"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
 
 Allowlist SSOT: `lib/tool/tool_catalog.ml` > `public_mcp_tools`

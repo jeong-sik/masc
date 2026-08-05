@@ -9,13 +9,6 @@
     that operators may flip at runtime (feature flags via
     {!Feature_flag_registry}, optional env-vars). *)
 
-(** {1 Session} *)
-
-module Session : sig
-  val max_age_seconds : float
-  val sse_grace_period_seconds : float
-end
-
 (** {1 Tempo (polling interval)} *)
 
 module Tempo : sig

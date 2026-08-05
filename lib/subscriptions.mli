@@ -1,4 +1,4 @@
-(** Resource Subscriptions - MCP 2025-11-25 Spec Compliance *)
+(** Internal resource-change subscriptions. *)
 
 (** {1 Types} *)
 

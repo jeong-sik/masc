@@ -117,28 +117,6 @@ let run_request ?auth_token state request_str =
   Mcp_eio.handle_request ?auth_token ~clock ~sw state request_str
 ;;
 
-let test_initialize_is_public () =
-  let base_path, state, _token = setup_auth_workspace () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       let req =
-         request
-           ~id:(`Int 1)
-           ~method_:"initialize"
-           ~params:
-             (`Assoc
-                 [ ("protocolVersion", `String "2025-06-18")
-                 ; ("capabilities", `Assoc [])
-                 ; ( "clientInfo"
-                   , `Assoc [ ("name", `String "test"); ("version", `String "1.0") ] )
-                 ])
-           ()
-       in
-       let response = run_request state req in
-       check bool "initialize succeeds without token" true (has_result response))
-;;
-
 let test_server_discover_is_public () =
   let base_path, state, _token = setup_auth_workspace () in
   Fun.protect
@@ -231,9 +209,7 @@ let () =
   run
     "MCP protocol auth gate"
     [ ( "public handlers"
-      , [ test_case "initialize without token" `Quick test_initialize_is_public
-        ; test_case "server/discover without token" `Quick test_server_discover_is_public
-        ] )
+      , [ test_case "server/discover without token" `Quick test_server_discover_is_public ] )
     ; ( "authenticated handlers reject unauthenticated calls"
       , [ test_case "tools/list missing token" `Quick test_tools_list_requires_auth_missing_token
         ; test_case "tools/list invalid token" `Quick test_tools_list_requires_auth_invalid_token

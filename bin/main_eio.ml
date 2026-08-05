@@ -70,33 +70,6 @@ let default_base_path = Server_mcp_transport_http.default_base_path
 let is_valid_protocol_version =
   Server_mcp_transport_http.is_valid_protocol_version
 
-let remember_protocol_version =
-  Server_mcp_transport_http.remember_protocol_version
-
-let remember_mcp_profile = Server_mcp_transport_http.remember_mcp_profile
-
-let forget_mcp_session = Server_mcp_transport_http.forget_mcp_session
-
-let validate_mcp_session_profile =
-  Server_mcp_transport_http.validate_mcp_session_profile
-
-let validate_mcp_session_delete_profile =
-  Server_mcp_transport_http.validate_mcp_session_delete_profile
-
-let protocol_version_from_body =
-  Server_mcp_transport_http.protocol_version_from_body
-
-let get_session_id_query = Server_mcp_transport_http.get_session_id_query
-
-let get_cookie_value = Server_mcp_transport_http.get_cookie_value
-
-let get_session_id_any = Server_mcp_transport_http.get_session_id_any
-
-let get_protocol_version = Server_mcp_transport_http.get_protocol_version
-
-let get_protocol_version_for_session =
-  Server_mcp_transport_http.get_protocol_version_for_session
-
 module Server_routes_http = Server_routes_http
 
 open Server_routes_http
@@ -175,14 +148,12 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
                 true
               end
 
-(** Returns true if the request failed origin or protocol-version
-    validation and the corresponding error response was sent on [reqd].
+(** Returns true if the request failed origin validation and the
+    corresponding error response was sent on [reqd].
     Caller should short-circuit further handling in that case. *)
 let try_mcp_validation_block
     ~request_authority
     ~request
-    ~protocol_version
-    ~origin
     reqd
   =
   let is_mcp_transport = is_mcp_transport_request request in
@@ -197,20 +168,9 @@ let try_mcp_validation_block
          ; ("content-type", "application/json")
          ; ("vary", "Origin")
          ]
-         @ mcp_headers "-" protocol_version)
+        @ mcp_headers mcp_protocol_version_default)
     in
     let response = Httpun.Response.create ~headers `Forbidden in
-    safe_reqd_respond reqd response body;
-    true
-  end
-  else if is_mcp_transport && request.Httpun.Request.meth <> `OPTIONS &&
-          not (is_valid_protocol_version protocol_version) then begin
-    let body = json_rpc_error Masc.Mcp_error_code.Invalid_request "Unsupported protocol version" in
-    let headers = Httpun.Headers.of_list (
-      ("content-length", string_of_int (String.length body))
-      :: json_headers "-" protocol_version origin
-    ) in
-    let response = Httpun.Response.create ~headers `Bad_request in
     safe_reqd_respond reqd response body;
     true
   end
@@ -245,13 +205,6 @@ let dispatch_route ~router ~request ~path ~upgrade reqd =
       | Error msg ->
         Http.Response.json ~status:`Bad_request
           (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
-  | `DELETE, "/mcp" -> handle_delete_mcp request reqd
-  | `DELETE, "/mcp/managed" ->
-      handle_delete_mcp
-        ~profile:Server_mcp_transport_http.Managed_agent request reqd
-  | `DELETE, "/mcp/operator" ->
-      handle_delete_mcp
-        ~profile:Server_mcp_transport_http.Operator_remote request reqd
   (* Board reads/reactions are owned by the typed route table: exact routes
      ([/api/v1/board/reactions], [/catalog]) win over the board prefix route,
      and the prefix route resolves the bearer-bound reaction actor itself. *)
@@ -335,19 +288,10 @@ let make_extended_handler ~trust_policy routes =
         then ()
         else
           try
-            let session_id_for_version = get_session_id_any request in
-            let protocol_version =
-              get_protocol_version_for_session
-                ?session_id:session_id_for_version
-                request
-            in
-            let origin = get_origin request in
             if
               try_mcp_validation_block
                 ~request_authority
                 ~request
-                ~protocol_version
-                ~origin
                 reqd
             then ()
             else dispatch_route ~router:routes ~request ~path ~upgrade reqd

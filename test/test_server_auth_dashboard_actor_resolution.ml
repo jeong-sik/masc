@@ -132,8 +132,8 @@ let test_malformed_credential_cannot_become_anonymous () =
 let observer_request ?authorization ?internal_token ?query_token () =
   let target =
     match query_token with
-    | None -> "/mcp?sse_kind=observer"
-    | Some token -> "/mcp?sse_kind=observer&token=" ^ token
+    | None -> "/events"
+    | Some token -> "/events?token=" ^ token
   in
   let headers =
     []

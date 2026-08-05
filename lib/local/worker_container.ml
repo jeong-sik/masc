@@ -303,7 +303,7 @@ let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
               Eio.Time.sleep clock (float_of_int interval);
               if !active then (
                 match
-                  call_masc_tool ~sw ~auth_token ~session_id
+                  call_masc_tool ~sw ~auth_token
                     ~tool_name:"masc_heartbeat" ~args:(`Assoc [])
                 with
                 | Ok _ -> ()
@@ -323,7 +323,7 @@ let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
 let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
   let allowed_names = session_min_tool_names in
   let listed_schemas =
-    list_masc_tools ~sw ~auth_token ~session_id ~names:(Some allowed_names) ()
+    list_masc_tools ~sw ~auth_token ~names:(Some allowed_names) ()
   in
   Result.map
     (fun schemas ->
@@ -338,7 +338,7 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
                       ~schema:(Some schema)
                in
                match
-                 call_masc_tool ~sw ~auth_token ~session_id ~tool_name:schema.name
+                 call_masc_tool ~sw ~auth_token ~tool_name:schema.name
                    ~args
                with
                | Ok result when result.is_error ->

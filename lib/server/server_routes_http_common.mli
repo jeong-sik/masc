@@ -3,7 +3,7 @@
     [open Server_routes_http_common] +
     runtime-include through {!Server_routes_http}.
 
-    External surface: 36 module aliases + 32 helpers.
+    External surface: 35 module aliases + 32 helpers.
 
     Runtime chain (cycle 224 indirect runtime pattern):
     Server_routes_http_common
@@ -31,7 +31,6 @@
 
 module Http = Http_server_eio
 module Http_h2 = Http_server_h2
-module Mcp_session = Mcp_session
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 module Workspace = Workspace
@@ -68,46 +67,6 @@ val mcp_protocol_versions : string list
 val mcp_protocol_version_default : string
 val default_base_path : unit -> string
 val is_valid_protocol_version : string -> bool
-val remember_protocol_version :
-  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
-  string ->
-  string ->
-  unit
-
-val remember_protocol_version_if_initialize_succeeded :
-  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
-  string ->
-  request_body:string ->
-  response_json:Yojson.Safe.t ->
-  unit
-
-val remember_mcp_profile :
-  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
-  string ->
-  Server_mcp_transport_http.tool_profile ->
-  unit
-val forget_mcp_session : string -> unit
-val validate_mcp_session_profile :
-  profile:Server_mcp_transport_http.tool_profile ->
-  string ->
-  (unit, string) result
-val validate_mcp_session_delete_profile :
-  profile:Server_mcp_transport_http.tool_profile ->
-  string ->
-  (unit, string) result
-val protocol_version_from_body : string -> string option
-
-(** {1 Request introspection} *)
-
-val get_session_id_query : string -> string option
-val get_header_any_case :
-  Httpun.Headers.t -> string -> string option
-val get_cookie_value :
-  Httpun.Request.t -> string -> string option
-val get_session_id_any : Httpun.Request.t -> string option
-val get_protocol_version : Httpun.Request.t -> string
-val get_protocol_version_for_session :
-  ?session_id:string -> Httpun.Request.t -> string
 
 (** {1 Server state} *)
 
@@ -142,10 +101,10 @@ val request_force_json_response : Httpun.Request.t -> bool
 val force_json_response : bool
 (** {1 Header builders} *)
 
-val mcp_headers : string -> string -> (string * string) list
+val mcp_headers : string -> (string * string) list
 val mcp_transport_json_headers :
-  string -> string -> string -> (string * string) list
-val json_headers : string -> string -> string -> (string * string) list
+  string -> string -> (string * string) list
+val json_headers : string -> string -> (string * string) list
 
 (** {1 SSE session control} *)
 
@@ -156,23 +115,10 @@ val close_all_sse_connections : unit -> unit
 
 (** {1 MCP HTTP route handlers} *)
 
-val handle_get_mcp :
-  ?profile:Server_mcp_transport_http.tool_profile ->
-  ?sse_kind:Sse.session_kind ->
-  Httpun.Request.t ->
-  Httpun.Reqd.t ->
-  unit
-
-val handle_get_operator_mcp :
+val handle_get_events :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 val handle_post_mcp :
-  ?profile:Server_mcp_transport_http.tool_profile ->
-  Httpun.Request.t ->
-  Httpun.Reqd.t ->
-  unit
-
-val handle_delete_mcp :
   ?profile:Server_mcp_transport_http.tool_profile ->
   Httpun.Request.t ->
   Httpun.Reqd.t ->

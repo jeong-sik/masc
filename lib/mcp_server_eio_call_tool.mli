@@ -127,9 +127,6 @@ val handle_call_tool_eio :
      name:string ->
      arguments:Yojson.Safe.t ->
      Tool_result.result) ->
-  maybe_emit_resource_notifications:
-    (success:bool -> tool_name:string -> 'notify) ->
-  broadcast_tools_list_changed:(unit -> unit) ->
   sw:'sw ->
   clock:'clk Eio.Resource.t ->
   ?profile:Mcp_server_eio_types.tool_profile ->
@@ -144,13 +141,6 @@ val handle_call_tool_eio :
 
     [execute_tool_eio] is the inner dispatcher (passed in
     to break the cyclic dep with {!Tool_dispatch}).
-    [maybe_emit_resource_notifications] is invoked after
-    the call succeeds so the protocol layer can broadcast
-    [resources/updated] for the resource ids the tool
-    invalidated.  [broadcast_tools_list_changed] is fired
-    when the call is known to alter the tool catalogue
-    (long-running mutations, etc).
-
     The handler captures one immutable {!Mcp_server.workspace_scope} at
     admission.  The dispatcher and all post-execution workspace-scoped
     observations use that exact generation even when the tool changes the

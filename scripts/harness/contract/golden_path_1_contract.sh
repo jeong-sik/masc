@@ -14,9 +14,6 @@
 set -euo pipefail
 
 AGENT_NAME="${AGENT_NAME:-${MCP_AGENT_NAME:-golden-path-1-harness}}"
-MCP_SESSION_ID="${MCP_SESSION_ID:-}"
-export MCP_SESSION_ID
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/test_framework.sh"
 
@@ -36,14 +33,10 @@ cleanup_contract_task() {
 }
 trap 'cleanup_contract_task' EXIT
 
-initialize_mcp_session || {
-  echo "FAIL: failed to initialize MCP session" >&2
+require_mcp_ready || {
+  echo "FAIL: MCP server/discover failed" >&2
   exit 1
 }
-if [ -z "${MCP_SESSION_ID:-}" ]; then
-  echo "FAIL: empty MCP_SESSION_ID after initialize" >&2
-  exit 1
-fi
 
 ensure_contract_goal() {
   local goal_payload
@@ -70,11 +63,6 @@ else
   echo "$r1"
   exit 1
 fi
-if [ -z "${MCP_SESSION_ID:-}" ]; then
-  step_fail "empty MCP_SESSION_ID after masc_start"
-  exit 1
-fi
-
 ensure_contract_goal
 
 # ── Step 2/10: add_task ──

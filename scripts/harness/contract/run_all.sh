@@ -23,6 +23,9 @@ export MCP_AGENT_NAME="${MCP_AGENT_NAME:-$HARNESS_ADMIN_AGENT}"
 export CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
 export CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
 export CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-80}"
+# server_bootstrap also assigns this variable inside command-substitution
+# callers; this top-level value is intentionally the suite authority.
+# shellcheck disable=SC2031
 if (( CURL_TIMEOUT_SEC > 5 )); then
   export MASC_TOOL_TIMEOUT_DEFAULT_SEC="${MASC_TOOL_TIMEOUT_DEFAULT_SEC:-$((CURL_TIMEOUT_SEC - 5))}"
 else
@@ -67,57 +70,29 @@ build_server_exe() {
   return 0
 }
 
-wait_for_mcp_initialize_ready() {
+wait_for_mcp_ready() {
   local mcp_url="$1"
   local timeout_sec="${2:-25}"
   local deadline=$(( $(date +%s) + timeout_sec ))
-  local body='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-bootstrap","version":"1.0"},"capabilities":{}}}'
-  local last_status="000"
   local auth_token
   auth_token="$(mcp_default_auth_token)"
   if [[ -z "$auth_token" ]]; then
-    echo "FAIL: MCP initialize readiness requires a workspace-local auth token" >&2
+    echo "FAIL: MCP readiness requires a workspace-local auth token" >&2
     return 1
-  fi
-  local auth_header_file=""
-  if [[ -n "$auth_token" ]]; then
-    auth_header_file="$(_mcp_auth_header_file "$auth_token")" || auth_header_file=""
   fi
 
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
-    local status raw normalized
-    local body_file stderr_file
-    body_file="$(mcp_mktemp_file "masc-contract-init-ready-${RANDOM:-0}-$$" ".json")"
-    stderr_file="$(mcp_mktemp_file "masc-contract-ready-stderr" ".log")"
-    local -a headers=(
-      -H 'Content-Type: application/json'
-      -H 'Accept: application/json, text/event-stream'
-    )
-    if [[ -n "$auth_header_file" ]]; then
-      headers+=( -H "@$auth_header_file" )
+    local payload
+    payload="$(CURL_RETRY_COUNT=1 HTTP_TIMEOUT_SEC=2 \
+      mcp_jsonrpc_call 0 "server/discover" '{}' "$auth_token" "$mcp_url")"
+    if printf '%s' "$payload" | jq -e \
+      '.error == null and .result.resultType == "complete"' >/dev/null 2>&1; then
+      return 0
     fi
-    status="$(
-      curl -sS -o "$body_file" -w '%{http_code}' --max-time 2 \
-        -X POST "$mcp_url" \
-        "${headers[@]}" \
-        -d "$body" 2>"$stderr_file" || true
-    )"
-    last_status="$status"
-    if [[ "$status" == "200" ]]; then
-      raw="$(cat "$body_file" 2>/dev/null || true)"
-      normalized="$(jsonrpc_normalize_response "$raw" 0 2>/dev/null || true)"
-      if printf '%s' "$normalized" | jq -e '.result != null and .error == null' >/dev/null 2>&1; then
-        rm -f "$body_file" "$stderr_file" "$auth_header_file"
-        return 0
-      fi
-      last_status="200-jsonrpc-error"
-    fi
-    rm -f "$body_file" "$stderr_file"
     sleep 1
   done
 
-  rm -f "$auth_header_file"
-  echo "MCP initialize readiness failed; last_http_status=${last_status}" >&2
+  echo "MCP server/discover readiness failed" >&2
   return 1
 }
 
@@ -173,8 +148,8 @@ if ! harness_wait_for_health "$PORT" 25; then
   harness_print_log_tail "$LOG_FILE"
   exit 1
 fi
-if ! wait_for_mcp_initialize_ready "$MCP_URL" 25; then
-  echo "FAIL: MCP endpoint did not become initialize-ready at ${MCP_URL}" >&2
+if ! wait_for_mcp_ready "$MCP_URL" 25; then
+  echo "FAIL: MCP endpoint did not become request-ready at ${MCP_URL}" >&2
   harness_print_log_tail "$LOG_FILE"
   exit 1
 fi

@@ -143,7 +143,6 @@ let make_heartbeat_callbacks
               Worker_container_types.call_masc_tool
                 ~sw
                 ~auth_token
-                ~session_id
                 ~tool_name:"masc_heartbeat"
                 ~args:(`Assoc [])
             with

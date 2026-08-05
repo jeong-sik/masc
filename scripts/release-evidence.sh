@@ -9,7 +9,7 @@ Captures a reproducible release-evidence bundle for a built masc binary.
 The bundle includes:
   - artifact install smoke (`--version` from an installed location)
   - local boot + /health capture
-  - MCP initialize + tools/list + masc_status captures
+  - MCP server/discover + tools/list + masc_status captures
   - dashboard read-path captures for briefing + namespace truth
 
 Raw files are written next to OUTPUT_MARKDOWN.
@@ -53,9 +53,9 @@ prefix_dir="$tmp/prefix"
 installed_bin="$prefix_dir/masc"
 server_log="$out_dir/server.log"
 health_json="$out_dir/health.json"
-initialize_headers="$out_dir/initialize.headers"
-initialize_body="$out_dir/initialize.body"
-initialize_json="$out_dir/initialize.json"
+discover_headers="$out_dir/server-discover.headers"
+discover_body="$out_dir/server-discover.body"
+discover_json="$out_dir/server-discover.json"
 tools_headers="$out_dir/tools-list.headers"
 tools_body="$out_dir/tools-list.body"
 tools_json="$out_dir/tools-list.json"
@@ -166,17 +166,19 @@ wait_for_http() {
   return 1
 }
 
-wait_for_initialize_ready() {
+wait_for_mcp_ready() {
   local payload="$1"
   local deadline=$(( $(date +%s) + BOOT_WAIT_SEC ))
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
-    : >"$initialize_headers"
-    : >"$initialize_body"
-    if post_json "$MCP_URL" "$payload" "$initialize_headers" "$initialize_body" \
+    : >"$discover_headers"
+    : >"$discover_body"
+    if post_json "$MCP_URL" "$payload" "$discover_headers" "$discover_body" \
       -H 'Accept: application/json, text/event-stream' \
-      -H "Authorization: Bearer ${auth_token}"; then
+      -H "Authorization: Bearer ${auth_token}" \
+      -H 'Mcp-Protocol-Version: 2026-07-28' \
+      -H 'Mcp-Method: server/discover'; then
       local code
-      code="$(status_code "$initialize_headers")"
+      code="$(status_code "$discover_headers")"
       if [[ "$code" == "200" ]]; then
         return 0
       fi
@@ -298,35 +300,31 @@ if [[ -z "$auth_token" ]]; then
   fi
 fi
 
-init_payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"release-evidence","version":"1.0"}}}'
-if ! wait_for_initialize_ready "$init_payload"; then
-  echo "release-evidence: initialize did not become ready at ${MCP_URL}" >&2
-  cat "$initialize_headers" >&2 || true
-  cat "$initialize_body" >&2 || true
+discover_payload='{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
+if ! wait_for_mcp_ready "$discover_payload"; then
+  echo "release-evidence: server/discover did not become ready at ${MCP_URL}" >&2
+  cat "$discover_headers" >&2 || true
+  cat "$discover_body" >&2 || true
   tail -n 40 "$server_log" >&2 || true
   exit 1
 fi
-normalize_json "$initialize_body" "$initialize_json"
+normalize_json "$discover_body" "$discover_json"
 
-session_id="$(header_value "$initialize_headers" "Mcp-Session-Id")"
-protocol_version="$(header_value "$initialize_headers" "Mcp-Protocol-Version")"
-[[ -n "$session_id" ]] || { echo "release-evidence: missing Mcp-Session-Id header" >&2; exit 1; }
-[[ -n "$protocol_version" ]] || { echo "release-evidence: missing Mcp-Protocol-Version header" >&2; exit 1; }
-
-tools_payload='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+tools_payload='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 post_json "$MCP_URL" "$tools_payload" "$tools_headers" "$tools_body" \
   -H 'Accept: application/json, text/event-stream' \
   -H "Authorization: Bearer ${auth_token}" \
-  -H "Mcp-Session-Id: ${session_id}" \
-  -H "Mcp-Protocol-Version: ${protocol_version}"
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/list'
 normalize_json "$tools_body" "$tools_json"
 
-status_payload='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"masc_status","arguments":{}}}'
+status_payload='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"masc_status","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 post_json "$MCP_URL" "$status_payload" "$status_headers" "$status_body" \
   -H 'Accept: application/json, text/event-stream' \
   -H "Authorization: Bearer ${auth_token}" \
-  -H "Mcp-Session-Id: ${session_id}" \
-  -H "Mcp-Protocol-Version: ${protocol_version}"
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/call' \
+  -H 'Mcp-Name: masc_status'
 normalize_json "$status_body" "$status_json"
 
 curl -sS -D "$briefing_headers" -o "$briefing_body" \
@@ -347,14 +345,13 @@ python3 - \
   "$BINARY" \
   "$installed_bin" \
   "$BASE_URL" \
-  "$session_id" \
-  "$protocol_version" \
+  "2026-07-28" \
   "$health_json" \
   "$tools_json" \
   "$status_json" \
   "$briefing_json" \
   "$namespace_json" \
-  "$initialize_json" \
+  "$discover_json" \
   "$server_log" <<'PY'
 import json
 import pathlib
@@ -367,14 +364,13 @@ from datetime import datetime, timezone
     binary_path,
     installed_bin,
     base_url,
-    session_id,
     protocol_version,
     health_json,
     tools_json,
     status_json,
     briefing_json,
     namespace_json,
-    initialize_json,
+    discover_json,
     server_log,
 ) = sys.argv[1:]
 
@@ -387,7 +383,7 @@ tools = load(tools_json)
 status = load(status_json)
 briefing = load(briefing_json)
 namespace_truth = load(namespace_json)
-initialize = load(initialize_json)
+discover = load(discover_json)
 
 tool_count = len(tools.get("result", {}).get("tools", []))
 status_text = None
@@ -408,7 +404,6 @@ md = f"""# Release Evidence Bundle
 - Binary under test: `{binary_path}`
 - Installed smoke path: `{installed_bin}`
 - Base URL: `{base_url}`
-- Session ID: `{session_id}`
 - Protocol version: `{protocol_version}`
 
 ## Artifact Install Smoke
@@ -422,15 +417,15 @@ md = f"""# Release Evidence Bundle
 - Health top-level keys: `{", ".join(health_keys)}`
 - Reported version: `{health.get("version", "<missing>")}`
 
-## MCP Handshake + Tool Discovery
+## MCP Discovery + Tool Listing
 
-- `initialize` succeeded and returned a stable session/protocol pair.
+- `server/discover` succeeded with the current stateless protocol contract.
 - `tools/list` returned `{tool_count}` tools on the default surface.
-- Initialize response keys: `{", ".join(sorted(initialize.keys()))}`
+- Discover response keys: `{", ".join(sorted(discover.keys()))}`
 
 ## Repo Workspace Read Path
 
-- `masc_status` completed through MCP after initialization.
+- `masc_status` completed through the stateless MCP request path.
 
 ```text
 {(status_text or "<no text content returned>").strip()}
@@ -446,8 +441,8 @@ md = f"""# Release Evidence Bundle
 - `install-version.stdout`
 - `install-version.stderr`
 - `health.json`
-- `initialize.headers`
-- `initialize.json`
+- `server-discover.headers`
+- `server-discover.json`
 - `tools-list.json`
 - `masc-status.json`
 - `dashboard-briefing.json`

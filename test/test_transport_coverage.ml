@@ -771,8 +771,20 @@ let test_get_bindings_nonempty () =
 
 let test_get_bindings_has_sse () =
   let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has sse" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.Sse) bindings)
+  check bool "has current observer SSE URL" true
+    (List.exists
+       (fun b ->
+         b.Transport.protocol = Transport.Sse
+         && String.equal b.url "http://localhost:8931/events")
+       bindings)
+
+let test_get_bindings_sse_requires_session_id () =
+  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
+  match List.find_opt (fun b -> b.Transport.protocol = Transport.Sse) bindings with
+  | Some binding ->
+      check (list (pair string string)) "required query"
+        [ "required_query", "session_id" ] binding.options
+  | None -> fail "missing SSE binding"
 
 let test_get_bindings_has_jsonrpc () =
   let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
@@ -1030,6 +1042,8 @@ let () =
     "get_bindings", [
       test_case "nonempty" `Quick test_get_bindings_nonempty;
       test_case "has sse" `Quick test_get_bindings_has_sse;
+      test_case "sse requires session id" `Quick
+        test_get_bindings_sse_requires_session_id;
       test_case "has jsonrpc" `Quick test_get_bindings_has_jsonrpc;
       test_case "has rest" `Quick test_get_bindings_has_rest;
       test_case "has grpc" `Quick test_get_bindings_has_grpc;

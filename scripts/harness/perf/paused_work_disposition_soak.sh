@@ -253,9 +253,7 @@ wait_health() {
   local deadline=$(( $(date +%s) + WAIT_TIMEOUT_SEC ))
   while (( $(date +%s) <= deadline )); do
     if curl -fsS --max-time 5 "${BASE_URL%/}/health" >/dev/null 2>&1; then
-      MCP_SESSION_ID=""
-      export MCP_SESSION_ID
-      initialize_mcp_session >/dev/null 2>&1 && return 0
+      require_mcp_ready >/dev/null 2>&1 && return 0
     fi
     sleep 1
   done
@@ -372,7 +370,7 @@ resume_cleanup() {
 for keeper in "${KEEPERS[@]}"; do
   wait_clean_lane "$keeper" false || die "preflight requires active empty lane for $keeper"
 done
-wait_health || die "server or MCP session is unavailable"
+wait_health || die "server or MCP endpoint is unavailable"
 
 printf '[soak] run=%s duration=%ss keepers=10 artifacts=%s\n' "$RUN_ID" "$DURATION_SEC" "$RUN_DIR" >&2
 

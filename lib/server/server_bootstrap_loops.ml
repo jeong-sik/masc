@@ -1440,8 +1440,6 @@ let start_keeper_loops_owned
      Log.Server.error
        "subsystem orchestrator failed to start: %s"
        (Printexc.to_string exn));
-  fork_subsystem "session_cleanup" (fun () ->
-    Session.start_mcp_session_cleanup_loop ~sw ~clock ());
   (* No verification_timeout fork: completion-authority obligations remain
      pending until a typed verdict; a wall-clock sweep must not cancel them. *)
   (* Auto-boot keepers from keeper meta and start keepalive loops.

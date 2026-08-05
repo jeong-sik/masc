@@ -22,6 +22,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 # shellcheck source=/dev/null
 source "$REPO_ROOT/scripts/harness/lib/server_bootstrap.sh"
+# shellcheck source=scripts/harness/lib/mcp_jsonrpc.sh
+source "$REPO_ROOT/scripts/harness/lib/mcp_jsonrpc.sh"
 set +e  # server_bootstrap.sh sets -e on source; we manage failures explicitly
 
 # ---- configuration (env-overridable) ----------------------------------------
@@ -117,58 +119,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Background loop posting board activity that @mentions a rotating keeper, driving
-# the reactive wake path so keepers turn continuously (not just the autoboot burst).
-# MCP Streamable HTTP is stateful: initialize -> capture Mcp-Session-Id from the
-# response headers -> notifications/initialized, then every tools/call carries the
-# session header. Without it the server returns -32600 "Mcp-Session-Id required".
-# Returns the session id on stdout (empty on failure).
-_mcp_open_session() {
-  local mcp="$1" hdr sid
-  hdr="$(mktemp)"
-  curl -sS -m 5 -D "$hdr" -o /dev/null -X POST "$mcp" \
-    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-    -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"perf-harness","version":"1.0"},"capabilities":{}}}' \
-    2>/dev/null || true
-  sid="$(awk 'tolower($0) ~ /^mcp-session-id:/ {sub(/^[^:]+:[[:space:]]*/,"",$0); sub(/\r$/,"",$0); print; exit}' "$hdr")"
-  rm -f "$hdr"
-  [[ -z "$sid" ]] && { printf ''; return 1; }
-  curl -sS -m 5 -X POST "$mcp" \
-    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-    -H "mcp-session-id: $sid" \
-    -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' >/dev/null 2>&1 || true
-  printf '%s' "$sid"
-}
-
 start_board_injector() {
   [[ "$REACTIVE_INJECT" == "1" ]] || { echo "[harness] reactive injection disabled" >&2; return 0; }
   local base_url="$1"
   local mcp="${base_url%/}/mcp"
-  # Self-healing loop: lazily (re)open a session — the server can be too busy
-  # booting the keeper fleet to answer initialize at first, and a session can be
-  # dropped under load — so acquire it inside the loop and re-acquire on any
-  # session error rather than giving up once.
+  # The current transport is stateless. Each injection is independently
+  # retryable while the keeper fleet contends with the serving domain.
   (
-    sid=""; i=0
+    i=0
     while :; do
-      if [[ -z "$sid" ]]; then
-        sid="$(_mcp_open_session "$mcp")"
-        [[ -z "$sid" ]] && { sleep 1; continue; }
-      fi
       i=$((i + 1)); k=$(( (i % KEEPERS) + 1 ))
-      resp="$(curl -sS --max-time 4 -X POST "$mcp" \
-        -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-        -H "mcp-session-id: $sid" \
-        -d "{\"jsonrpc\":\"2.0\",\"id\":$i,\"method\":\"tools/call\",\"params\":{\"name\":\"masc_board_post\",\"arguments\":{\"author\":\"$INJECT_AUTHOR\",\"title\":\"burst-$i\",\"content\":\"@perf_keeper_$k status check $i, please take a turn\",\"visibility\":\"internal\"}}}" \
-        2>/dev/null)"
+      args="$(jq -cn \
+        --arg author "$INJECT_AUTHOR" \
+        --arg title "burst-$i" \
+        --arg content "@perf_keeper_$k status check $i, please take a turn" \
+        '{author:$author,title:$title,content:$content,visibility:"internal"}')"
+      resp="$(HTTP_TIMEOUT_SEC=4 CURL_RETRY_COUNT=1 \
+        mcp_call_tool "$i" "masc_board_post" "$args" "" "$mcp")"
       printf '%s\n' "$resp" >>"$INJECT_LOG"
-      case "$resp" in *Mcp-Session-Id*|*"session"*required*|*-32600*) sid="" ;; esac
       sleep "$INJECT_INTERVAL"
     done
   ) &
   INJECT_PID=$!
   disown 2>/dev/null || true
-  echo "[harness] board injector started (pid=$INJECT_PID, self-healing session, every ${INJECT_INTERVAL}s)" >&2
+  echo "[harness] board injector started (pid=$INJECT_PID, stateless retries every ${INJECT_INTERVAL}s)" >&2
 }
 
 spawn_hogs() { local n="$1" i; HOG_PIDS=(); for ((i=0;i<n;i++)); do yes >/dev/null 2>&1 & HOG_PIDS+=("$!"); done; }

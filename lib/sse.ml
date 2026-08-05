@@ -1,5 +1,4 @@
-(** SSE (Server-Sent Events) module for MCP Streamable HTTP Transport
-    MCP Spec 2025-03-26 compliant
+(** SSE (Server-Sent Events) hub for MASC observer streams.
 
     Concurrency model (per-session stream):
     Each registered client owns an [Eio.Stream.t] mailbox.
@@ -36,9 +35,6 @@ type registration_error =
   | Invalid_token of { reason : string }
   | Token_expired of { agent_name : string }
   | Auth_lookup_error of { reason : Masc_domain.masc_error }
-  | Unknown_session of { session_id : string }
-  | Session_expired of { session_id : string }
-  | Session_owner_mismatch of { session_agent : string; token_agent : string }
 
 let registration_error_to_string = function
   | Missing_token -> "SSE registration failed: bearer token is required"
@@ -49,14 +45,6 @@ let registration_error_to_string = function
   | Auth_lookup_error { reason } ->
       Printf.sprintf "SSE registration failed: auth lookup error (%s)"
         (Masc_domain.masc_error_to_string reason)
-  | Unknown_session { session_id } ->
-      Printf.sprintf "SSE registration failed: unknown session %s" session_id
-  | Session_expired { session_id } ->
-      Printf.sprintf "SSE registration failed: session %s has expired" session_id
-  | Session_owner_mismatch { session_agent; token_agent } ->
-      Printf.sprintf
-        "SSE registration failed: session belongs to %s but token belongs to %s"
-        session_agent token_agent
 
 type data_payload_error = Missing_data_payload
 
@@ -529,15 +517,9 @@ let invoke_disconnect_hook_for session_id =
            Log.Server.error "SSE disconnect hook failed for %s: %s"
              session_id (Printexc.to_string exn))
 
-(** Validate the bearer token and MCP session pair for an SSE registration.
-    Token resolution is delegated to [Auth.find_credential_by_token]; session
-    existence and expiry are checked via [Session.McpSessionStore.peek] so
-    the validation read does not refresh the session's activity window.
-
-    Session creation is intentionally not performed here: an SSE registration
-    must reference a session already issued by the initialize handler
-    (RFC-0099 § session lifecycle; credential surface RFC-0008 / RFC-0019). *)
-let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.agent_credential, registration_error) result =
+(** Validate the bearer token for an observer-stream registration. *)
+let validate_registration ~(auth : registration_auth) :
+    (Masc_domain.agent_credential, registration_error) result =
   let open Masc_domain in
   match auth.token with
   | None ->
@@ -552,20 +534,7 @@ let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.
         Log.Server.warn "SSE registration auth lookup failed: %s"
           (masc_error_to_string e);
         Error (Auth_lookup_error { reason = e })
-    | Ok credential ->
-        match Session.McpSessionStore.peek session_id with
-        | None ->
-            Error (Unknown_session { session_id })
-        | Some session ->
-            let now = Time_compat.now () in
-            if now -. session.last_activity > Env_config.Session.max_age_seconds then
-              Error (Session_expired { session_id })
-            else
-              match session.agent_name with
-              | Some session_agent when not (String.equal session_agent credential.agent_name) ->
-                  Error (Session_owner_mismatch { session_agent; token_agent = credential.agent_name })
-              | _ ->
-                  Ok credential
+    | Ok credential -> Ok credential
 
 (** Register a new SSE client.
     Returns (client_id, event_stream, evicted_session_id option).
@@ -574,7 +543,7 @@ let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.
     [broadcast] could observe the new entry, hit queue overflow, fire
     [unregister], and find no hook to wake the drain fiber. *)
 let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) session_id ~last_event_id =
-  match validate_registration ~auth session_id with
+  match validate_registration ~auth with
   | Error e -> Error e
   | Ok _credential ->
   let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in

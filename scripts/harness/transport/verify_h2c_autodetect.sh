@@ -41,23 +41,17 @@ fi
 h2_mcp_code=$(curl -sf --max-time 5 --http2-prior-knowledge -X POST "${MASC_HTTP_BASE_URL}/mcp" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
-  -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"h2c-harness","version":"1.0"}},"id":1}' \
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: server/discover' \
+  -d '{"jsonrpc":"2.0","method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}},"id":1}' \
   -o /dev/null -w '%{http_code}' 2>&1 || echo "0")
 if [ "$h2_mcp_code" = "200" ]; then
-  pass "MCP initialize over h2c (status: ${h2_mcp_code})"
+  pass "MCP server/discover over h2c (status: ${h2_mcp_code})"
 else
   skip "MCP over h2c" "status=${h2_mcp_code} (h2c may not be enabled)"
 fi
 
-# Test 4: HTTP/1.1 SSE endpoint (most critical path)
-sse_headers=$(curl -sf -I -m 3 --http1.1 "${MASC_HTTP_BASE_URL}/sse" 2>&1 || true)
-if echo "$sse_headers" | grep -qi "200\|text/event-stream"; then
-  pass "HTTP/1.1 SSE endpoint accessible"
-else
-  skip "HTTP/1.1 SSE endpoint" "may need session"
-fi
-
-# Test 5: Concurrent connections (HTTP/1.1 while h2c might be active)
+# Test 4: Concurrent connections (HTTP/1.1 while h2c might be active)
 pids=()
 success=0
 for _ in 1 2 3 4; do

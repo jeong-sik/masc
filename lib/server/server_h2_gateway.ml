@@ -71,7 +71,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
     let httpun_request = Httpun.Request.create ~headers:httpun_headers httpun_meth h2_req.target in
     let handle_admitted_request request_authority =
     let path = Http.Request.path httpun_request in
-    let origin = get_origin httpun_request in
     let reflected_cors_origin =
       public_read_cors_origin_opt ~request_authority httpun_request
     in
@@ -228,7 +227,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
           ~status:(Server_board_reaction_http.error_status error :> H2.Status.t)
           ~extra_headers:cors
     in
-    let session_id_opt = get_session_id_any httpun_request in
     let h2_respond_dashboard_index () =
       let index_path = dashboard_index_path () in
       match read_file index_path with
@@ -503,11 +501,33 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       | `POST, "/mcp/operator" ->
           h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
 
-      | `POST, "/mcp" | `POST, "/" | `POST, "/mcp/managed" ->
-          let session_id = match session_id_opt with
-            | Some id -> id
-            | None -> Mcp_session.generate ()
-          in
+      | `POST, "/mcp" | `POST, "/mcp/managed" ->
+          (match
+             Server_mcp_transport_http_headers.request_protocol_version_header
+               httpun_request
+           with
+           | None ->
+               let body =
+                 json_rpc_error Mcp_error_code.Invalid_request
+                   "missing MCP-Protocol-Version header"
+               in
+               h2_respond_json h2_reqd body ~status:`Bad_request
+                 ~extra_headers:
+                   (cors @ mcp_headers Mcp_transport_protocol.default_protocol_version)
+           | Some protocol_version
+             when not
+                    (Mcp_transport_protocol.is_supported_protocol_version
+                       protocol_version) ->
+               let body =
+                 Server_mcp_transport_http_headers.unsupported_protocol_version_error_body
+                   protocol_version
+               in
+               h2_respond_json h2_reqd body ~status:`Bad_request
+                 ~extra_headers:
+                   (cors
+                   @ mcp_headers
+                       Mcp_transport_protocol.default_protocol_version)
+           | Some protocol_version ->
           let profile =
             if String.equal path "/mcp/managed"
             then Server_mcp_transport_http.Managed_agent
@@ -518,17 +538,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             | Some s -> (Mcp_server.workspace_config s).base_path
             | None -> default_base_path ()
           in
-          let context =
-            Server_mcp_request_context.make ~session_id_opt
-              ~generated_session_id:session_id
-              ~auth_token:(auth_token_from_request httpun_request)
-              ~protocol_version:
-                (get_protocol_version_for_session ~session_id httpun_request)
-              ~origin ~base_path
-          in
-          let session_id = context.session_id in
-          let auth_token = context.auth_token in
-          let protocol_version = context.protocol_version in
+          let auth_token = auth_token_from_request httpun_request in
           let auth_result =
             match profile with
             | Server_mcp_transport_http.Full
@@ -541,19 +551,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                 |> Result.map_error
                      Server_mcp_transport_http_types.auth_failure_of_masc_error
           in
-          (match validate_mcp_session_profile ~profile session_id with
-           | Error msg ->
-               let body = json_rpc_error Mcp_error_code.Invalid_request msg in
-               h2_respond_json h2_reqd body ~status:`Conflict ~extra_headers:cors
-           | Ok () ->
-               (match Server_mcp_transport_http.validate_protocol_version_continuity
-                        ~session_id httpun_request with
-                | Error msg ->
-                    let body = json_rpc_error Mcp_error_code.Invalid_request msg in
-                    h2_respond_json h2_reqd body ~status:`Bad_request
-                      ~extra_headers:(cors @ mcp_headers session_id protocol_version)
-                | Ok () ->
-                    (match auth_result with
+          (match auth_result with
                      | Error failure ->
                          let body = mcp_auth_error_body failure in
                          h2_respond_json h2_reqd body ~status:`Unauthorized
@@ -563,60 +561,64 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                                   request_authority )
                               :: cors)
                      | Ok _cred_opt ->
-                         let otel_transport_context =
-                           Otel_dispatch_hook.http_transport_context
-                             ~protocol_version:"2"
-                         in
-                         remember_mcp_profile
-                           ~otel_transport_context
-                           session_id
-                           profile;
                          h2_read_body h2_reqd (fun body_str ->
                              match
                                Server_mcp_request_context.decide_post_body
-                                 ~request:httpun_request ~context
-                                 ~session_is_known:
-                                   (Server_mcp_transport_http.is_known_session
-                                      session_id)
-                                 body_str
+                                 ~request:httpun_request body_str
                              with
-                             | Error
-                                 (Server_mcp_request_context.Session_required msg)
-                               ->
-                                 let body = json_rpc_error Mcp_error_code.Invalid_request msg in
-                                 h2_respond_json h2_reqd body
-                                   ~status:`Bad_request
-                                   ~extra_headers:
-                                     (cors
-                                     @ mcp_headers session_id
-                                         protocol_version)
-                             | Error
-                                 (Server_mcp_request_context.Unknown_session msg)
-                               ->
-                                  let new_session_id = Mcp_session.generate () in
-                                  let body = json_rpc_error Mcp_error_code.Invalid_request msg in
-                                  h2_respond_json h2_reqd body
-                                    ~status:`Not_found
-                                    ~extra_headers:
-                                      (cors
-                                      @ mcp_headers new_session_id
-                                          protocol_version)
                              | Error
                                  (Server_mcp_request_context.Invalid_accept msg)
                                ->
                                  let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                                  h2_respond_json h2_reqd body ~status:`Bad_request
-                                   ~extra_headers:(cors @ mcp_headers session_id protocol_version)
+                                   ~extra_headers:(cors @ mcp_headers protocol_version)
+                             | Error
+                                 (Server_mcp_request_context.Unsupported_protocol_version requested)
+                               ->
+                                 let body =
+                                   `Assoc
+                                     [ ("jsonrpc", `String "2.0")
+                                     ; ( "id"
+                                       , Server_mcp_transport_http_headers.jsonrpc_id_or_null
+                                           body_str )
+                                     ; ( "error"
+                                       , `Assoc
+                                           [ ("code", `Int (-32022))
+                                           ; ("message", `String "Unsupported protocol version")
+                                           ; ( "data"
+                                             , `Assoc
+                                                 [ ( "supported"
+                                                   , `List
+                                                       (List.map
+                                                          (fun version -> `String version)
+                                                          Mcp_transport_protocol.supported_protocol_versions) )
+                                                 ; ("requested", `String requested)
+                                                 ] )
+                                           ] )
+                                     ]
+                                   |> Yojson.Safe.to_string
+                                 in
+                                 h2_respond_json h2_reqd body ~status:`Bad_request
+                                   ~extra_headers:(cors @ mcp_headers protocol_version)
                              | Error
                                  (Server_mcp_request_context.Header_mismatch msg)
                                ->
                                  let body =
-                                   Printf.sprintf
-                                     {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"},"id":null}|}
-                                     (String.escaped msg)
+                                   `Assoc
+                                     [ ("jsonrpc", `String "2.0")
+                                     ; ( "id"
+                                       , Server_mcp_transport_http_headers.jsonrpc_id_or_null
+                                           body_str )
+                                     ; ( "error"
+                                       , `Assoc
+                                           [ ("code", `Int (-32020))
+                                           ; ("message", `String msg)
+                                           ] )
+                                     ]
+                                   |> Yojson.Safe.to_string
                                  in
                                  h2_respond_json h2_reqd body ~status:`Bad_request
-                                   ~extra_headers:(cors @ mcp_headers session_id protocol_version)
+                                   ~extra_headers:(cors @ mcp_headers protocol_version)
                              | Ok post_context ->
                                  with_server_state h2_reqd (fun state ->
                                    let profile =
@@ -643,110 +645,28 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                                              ~base_path httpun_request
                                          in
                                          Mcp_eio.handle_request ~clock ~sw ~profile
-                                           ~mcp_session_id:session_id ?auth_token
+                                           ?auth_token
                                            ~otel_mcp_protocol_version:protocol_version
                                            ~otel_transport_context
                                            ~internal_keeper_runtime state
                                            body_with_agent)
                                    in
-                                   let otel_transport_context =
-                                     Otel_dispatch_hook.http_transport_context
-                                       ~protocol_version:"2"
-                                   in
-                                   remember_protocol_version_if_initialize_succeeded
-                                     ~otel_transport_context
-                                     session_id
-                                     ~request_body:post_context.body_str
-                                     ~response_json;
-                                   let protocol_version =
-                                     get_protocol_version_for_session ~session_id
-                                       httpun_request
-                                   in
                                    let mcp_hdrs =
-                                     mcp_headers session_id protocol_version @ cors
+                                     mcp_headers protocol_version @ cors
                                    in
                                    match response_json with
                                    | `Null ->
                                        h2_respond_empty h2_reqd ~status:`Accepted
                                          ~extra_headers:mcp_hdrs
                                    | json when is_http_error_response json ->
-                                       h2_respond_json_value h2_reqd json ~status:`Bad_request
+                                       let status : H2.Status.t =
+                                         if Server_mcp_transport_http_headers.is_method_not_found_response json
+                                         then `Not_found else `Bad_request
+                                       in
+                                       h2_respond_json_value h2_reqd json ~status
                                          ~extra_headers:mcp_hdrs
                                    | json ->
-                                       h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs)))))
-
-      | `DELETE, "/mcp/operator" ->
-          h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
-
-      | `DELETE, "/mcp" | `DELETE, "/mcp/managed" ->
-          let profile =
-            if String.equal path "/mcp/managed"
-            then Server_mcp_transport_http.Managed_agent
-            else Server_mcp_transport_http.Full
-          in
-          let base_path = match !server_state with
-            | Some s -> (Mcp_server.workspace_config s).base_path
-            | None -> default_base_path ()
-          in
-          let auth_result =
-            match profile with
-            | Server_mcp_transport_http.Full
-            | Server_mcp_transport_http.Managed_agent ->
-                verify_mcp_auth ~base_path httpun_request
-                |> Result.map_error
-                     Server_mcp_transport_http_types.auth_failure_of_masc_error
-            | Server_mcp_transport_http.Operator_remote ->
-                verify_operator_mcp_auth ~base_path httpun_request
-                |> Result.map_error
-                     Server_mcp_transport_http_types.auth_failure_of_masc_error
-          in
-          (match auth_result with
-           | Error failure ->
-               let body = mcp_auth_error_body failure in
-               h2_respond_json h2_reqd body ~status:`Unauthorized
-                 ~extra_headers:
-                   (( "www-authenticate"
-                    , Server_oauth_metadata.challenge_for_authority
-                        request_authority )
-                    :: cors)
-           | Ok _ ->
-               (match session_id_opt with
-                | Some session_id -> (
-                    match validate_mcp_session_delete_profile ~profile session_id with
-                    | Error msg ->
-                        let body = json_rpc_error Mcp_error_code.Invalid_request msg in
-                        h2_respond_json h2_reqd body ~status:`Conflict
-                          ~extra_headers:cors
-                    | Ok () ->
-                        (match Server_mcp_transport_http.validate_protocol_version_continuity
-                                 ~session_id httpun_request with
-                         | Error msg ->
-                             let body = json_rpc_error Mcp_error_code.Invalid_request msg in
-                             h2_respond_json h2_reqd body ~status:`Bad_request
-                               ~extra_headers:(cors @ mcp_headers session_id (get_protocol_version httpun_request))
-                         | Ok () ->
-                             let protocol_version =
-                               get_protocol_version httpun_request
-                             in
-                             let sse_active_before_stop =
-                               Server_mcp_transport_http.is_active_sse_session
-                                 session_id
-                             in
-                             stop_sse_session session_id;
-                             Sse.unregister session_id;
-                             forget_mcp_session session_id;
-                             Log.H2_gateway.info "Session terminated: %s reason=client_delete \
-                                profile=%s protocol_version=%s \
-                                sse_active_before_stop=%b"
-                               session_id
-                               (Server_mcp_transport_http.profile_label profile)
-                               protocol_version sse_active_before_stop;
-                             let mcp_hdrs =
-                               mcp_headers session_id protocol_version
-                             in
-                             h2_respond_empty h2_reqd ~extra_headers:mcp_hdrs))
-                | None ->
-                    h2_respond_text h2_reqd "Mcp-Session-Id required" ~status:`Bad_request ~extra_headers:cors))
+                                       h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs))))
 
       (* ─────────────────────────────────────────────────────────────────────
          Dashboard

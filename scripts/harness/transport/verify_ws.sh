@@ -192,8 +192,8 @@ else
   exit 1
 fi
 
-session_id="$(mcp_initialize_session)"
-mcp_join_agent "$session_id" "transport-harness" >/dev/null
+transport_mcp_ready >/dev/null
+mcp_join_agent "transport-harness" >/dev/null
 
 # The server-side WS callback registers the session as an external broadcast
 # recipient asynchronously after the 101 handshake. Use a bounded broadcast
@@ -203,7 +203,7 @@ while [[ "$(date +%s)" -lt "$ws_broadcast_deadline" ]]; do
   if ! kill -0 "$ws_client_pid" >/dev/null 2>&1; then
     break
   fi
-  mcp_broadcast "$session_id" "transport-harness" "ws-e2e-test-event" >/dev/null || true
+  mcp_broadcast "transport-harness" "ws-e2e-test-event" >/dev/null || true
   sleep 0.5
 done
 

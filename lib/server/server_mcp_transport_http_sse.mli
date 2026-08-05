@@ -35,7 +35,6 @@ end
 val respond_sse_rate_limited :
   deps:Server_mcp_transport_http_types.deps ->
   origin:string ->
-  session_id:string ->
   protocol_version:string ->
   reason:Sse_reject_reason.t ->
   retry_after_s:float ->
@@ -43,8 +42,4 @@ val respond_sse_rate_limited :
   unit
 (** Pinned alias of
     {!Server_mcp_transport_http_respond.respond_sse_rate_limited}
-    at the SSE wrapper boundary so call-sites that historically
-    reached the helper through this module continue to work
-    without import churn.  Signature mirrors the source mli
-    exactly — labeled args [~deps], [~origin], [~session_id],
-    [~protocol_version], [~reason], [~retry_after_s]. *)
+    at the SSE wrapper boundary. *)

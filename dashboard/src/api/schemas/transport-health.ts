@@ -158,11 +158,11 @@ const WebrtcSchema = object({
 
 const StreamableHttpSchema = object({
   endpoint: fallback(string(), '/mcp'),
-  observer_stream: fallback(string(), '/mcp?sse_kind=observer'),
+  observer_stream: fallback(string(), '/events'),
   presence_stream: fallback(string(), '/events/presence'),
   managed_endpoint: fallback(string(), '/mcp/managed'),
   operator_endpoint: fallback(string(), '/mcp/operator'),
-  delete_endpoint: fallback(string(), '/mcp'),
+  delete_endpoint: fallback(string(), ''),
   default_transport: fallback(string(), 'unknown'),
   supports_post: fallback(boolean(), false),
   supports_sse_upgrade: fallback(boolean(), false),

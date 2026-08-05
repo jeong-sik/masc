@@ -106,7 +106,7 @@ window flag first.
 ## What this PR does NOT change
 
 - **Server-side SSE publisher infra** stays running.  Dashboard observer SSE is
-  served through `GET /mcp?sse_kind=observer`; `Oas_sse_bridge` and the gRPC
+  served through `GET /events`; `Oas_sse_bridge` and the gRPC
   subscriber path remain operational.
   Removing them is a later PR after parallel-mode soak validates the WS
   channel under real workloads.
@@ -116,7 +116,7 @@ window flag first.
 1. Open the dashboard.
 2. Confirm the beacon is green.
 3. DevTools → Network → confirm:
-   - 0 connections to `/mcp?...sse_kind=observer` (EventSource type)
+   - 0 EventSource connections
    - 1 connection to `/ws` (WebSocket type, status 101)
 4. Trigger a server-side event (e.g., a heartbeat, a keeper
    broadcast).  Beacon counter should increment, journal feed should

@@ -2,7 +2,7 @@
 
     See [random_id.mli] for API rationale. Implementation is the
     canonical form of the pattern that was duplicated across
-    verification/board/workspace/streamable_http — every
+    verification/board/workspace/transport correlation sites — every
     site did [Crypto_rng.generate N |> hex encode] with
     slight formatting variance. *)
 

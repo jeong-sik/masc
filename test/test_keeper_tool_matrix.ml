@@ -192,7 +192,6 @@ let isolated_child_env_unset =
   ; "MASC_TOKEN"
   ; "MASC_INTERNAL_MCP_TOKEN"
   ; "MASC_ADMIN_TOKEN"
-  ; "MCP_SESSION_ID"
   ; "OPENAI_API_KEY"
   ; "ANTHROPIC_API_KEY"
   ; "GEMINI_API_KEY"

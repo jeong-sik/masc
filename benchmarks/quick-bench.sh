@@ -1,6 +1,6 @@
 #!/bin/bash
 # MASC Quick Benchmark
-# Session-aware MCP read/write baseline plus local runtime sample.
+# Stateless MCP read/write baseline plus local runtime sample.
 
 set -euo pipefail
 
@@ -17,14 +17,12 @@ CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-25}"
 CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-1}"
 CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
 MCP_URL="$MASC_URL"
-MCP_SESSION_ID="${MCP_SESSION_ID:-}"
 MCP_LAST_TIME_TOTAL=""
 BENCH_LAST_MS=0
 BENCH_LAST_PAYLOAD=""
 BENCH_RPC_ID=100
 
 export MCP_URL
-export MCP_SESSION_ID
 export CURL_TIMEOUT_SEC
 export CURL_RETRY_COUNT
 export CURL_RETRY_DELAY_SEC
@@ -58,91 +56,15 @@ ms_from_seconds() {
   awk -v seconds="${1:-0}" 'BEGIN { printf "%.0f", seconds * 1000 }'
 }
 
-curl_auth_args() {
-  if [[ -n "$MASC_TOKEN" ]]; then
-    printf '%s\n' "-H" "Authorization: Bearer $MASC_TOKEN"
-  fi
-}
-
-bench_initialize_session() {
-  local headers_file body_file init_time notify_time total_time client_name
-  local -a auth_args=()
-  local -a init_cmd=()
-  local -a notify_cmd=()
-
-  while IFS= read -r line; do
-    auth_args+=("$line")
-  done < <(curl_auth_args)
-
-  headers_file="$(mktemp "${TMPDIR:-/tmp}/masc-quick-bench-init-header.XXXXXX")"
-  body_file="$(mktemp "${TMPDIR:-/tmp}/masc-quick-bench-init-body.XXXXXX")"
-  client_name="${MCP_CLIENT_NAME:-$MASC_AGENT}"
-
-  init_cmd=(
-    curl -sS --max-time "$CURL_TIMEOUT_SEC"
-    -D "$headers_file"
-    -o "$body_file"
-    -w '%{time_total}'
-    -X POST "$MCP_URL"
-    -H 'Content-Type: application/json'
-    -H 'Accept: application/json, text/event-stream'
-  )
-  if ((${#auth_args[@]} > 0)); then
-    init_cmd+=("${auth_args[@]}")
-  fi
-  init_cmd+=(
-    -d "$(jq -cn --arg agent "$client_name" '{
-          jsonrpc: "2.0",
-          id: 1,
-          method: "initialize",
-          params: {
-            protocolVersion: "2025-11-25",
-            clientInfo: {name: $agent, version: "1.0"},
-            capabilities: {}
-          }
-        }')"
-  )
-  init_time="$("${init_cmd[@]}")"
-
-  MCP_SESSION_ID="$(
-    awk '
-      tolower($0) ~ /^mcp-session-id:/ {
-        sub(/^[^:]+:[[:space:]]*/, "", $0)
-        sub(/\r$/, "", $0)
-        print $0
-        exit
-      }
-    ' "$headers_file"
-  )"
-  export MCP_SESSION_ID
-
-  if [[ -z "$MCP_SESSION_ID" ]]; then
-    cat "$body_file" >&2 || true
-    rm -f "$headers_file" "$body_file"
-    echo "failed to initialize MCP session" >&2
-    return 1
-  fi
-
-  notify_cmd=(
-    curl -sS --max-time "$CURL_TIMEOUT_SEC"
-    -o /dev/null
-    -w '%{time_total}'
-    -X POST "$MCP_URL"
-    -H 'Content-Type: application/json'
-    -H 'Accept: application/json, text/event-stream'
-    -H "Mcp-Session-Id: $MCP_SESSION_ID"
-  )
-  if ((${#auth_args[@]} > 0)); then
-    notify_cmd+=("${auth_args[@]}")
-  fi
-  notify_cmd+=(-d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}')
-  notify_time="$("${notify_cmd[@]}")"
-
-  total_time="$(awk -v init="${init_time:-0}" -v notify="${notify_time:-0}" 'BEGIN { printf "%.6f", init + notify }')"
-  MCP_LAST_TIME_TOTAL="$total_time"
-  BENCH_LAST_MS="$(ms_from_seconds "$total_time")"
-
-  rm -f "$headers_file" "$body_file"
+bench_discover() {
+  local payload_file
+  payload_file="$(mktemp "${TMPDIR:-/tmp}/masc-quick-bench-discover.XXXXXX")"
+  mcp_jsonrpc_call 1 "server/discover" '{}' "$MASC_TOKEN" "$MCP_URL" >"$payload_file"
+  BENCH_LAST_PAYLOAD="$(cat "$payload_file")"
+  rm -f "$payload_file"
+  mcp_require_jsonrpc_ok "$BENCH_LAST_PAYLOAD" "server/discover"
+  printf '%s' "$BENCH_LAST_PAYLOAD" | jq -e '.result.resultType == "complete"' >/dev/null
+  BENCH_LAST_MS="$(ms_from_seconds "${MCP_LAST_TIME_TOTAL:-0}")"
 }
 
 bench_call_tool() {
@@ -153,7 +75,7 @@ bench_call_tool() {
   BENCH_RPC_ID=$((BENCH_RPC_ID + 1))
   payload_file="$(mktemp "${TMPDIR:-/tmp}/masc-quick-bench-payload.XXXXXX")"
   mcp_call_tool \
-    "$BENCH_RPC_ID" "$tool_name" "$args_json" "$MCP_SESSION_ID" "$MASC_TOKEN" "$MCP_URL" \
+    "$BENCH_RPC_ID" "$tool_name" "$args_json" "$MASC_TOKEN" "$MCP_URL" \
     >"$payload_file"
   BENCH_LAST_PAYLOAD="$(cat "$payload_file")"
   rm -f "$payload_file"
@@ -198,11 +120,11 @@ echo "Iterations: $BENCH_ITERATIONS"
 echo "Warmup iterations: $BENCH_WARMUP_ITERATIONS"
 echo ""
 
-bench_initialize_session
+bench_discover
 
 echo "Operation                     Latency"
 echo "──────────────────────────────────────────────"
-printf "%-28s %5dms\n" "mcp_session_init" "$BENCH_LAST_MS"
+printf "%-28s %5dms\n" "mcp_server_discover" "$BENCH_LAST_MS"
 
 bench_bootstrap_agent
 printf "%-28s %5dms\n" "masc_start" "$BENCH_LAST_MS"

@@ -127,14 +127,11 @@ describe('MCP 2026-07-28 dashboard client', () => {
       'Mcp-Method': 'tools/call',
       'Mcp-Name': 'masc_status',
     })
-    expect(headers['Mcp-Session-Id']).toBeUndefined()
     const body = JSON.parse(init.body as string)
     expect(body.params._meta).toEqual({
       'io.modelcontextprotocol/protocolVersion': '2026-07-28',
       'io.modelcontextprotocol/clientCapabilities': {},
     })
-    expect(callsByMethod('initialize')).toHaveLength(0)
-    expect(callsByMethod('notifications/initialized')).toHaveLength(0)
   })
 
   it('preserves the dashboard actor injection contract', async () => {
@@ -199,10 +196,9 @@ describe('MCP 2026-07-28 dashboard client', () => {
     }
   })
 
-  it('does not retry an HTTP failure as a session recovery', async () => {
+  it('does not retry an HTTP failure', async () => {
     fetchWithTimeout.mockResolvedValueOnce(new Response('missing', {
       status: 404,
-      headers: { 'Mcp-Session-Id': 'legacy-replacement' },
     }))
 
     const { callMcpTool } = await import('./mcp')

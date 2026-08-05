@@ -121,7 +121,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0097 | Keeper sandbox container reuse (long-running sandbox per keeper) | Active | - |
 | 0098 | Typed JSON-RPC error envelope & production-code silent-failure lint | Implemented | - |
 | 0099 | Session lifecycle — typed events, explicit eviction, resume backpressure | Active | - |
-| 0100 | Streamable HTTP as default transport (MCP 2025-03-26) | Active | - |
+| 0100 | Current MCP HTTP transport | Active | - |
 | 0101 | FD accountant — observation across process resource classes | Active | - |
 | 0102 | Pre-turn runtime availability gate — reuse, not new surface | Superseded | - |
 | 0103 | Log retention opt-in + JSONL volume root reduction | Draft | - |

@@ -194,12 +194,9 @@ the gate now reproduces RED on current main:
 1. **Reactive board injection** (`REACTIVE_INJECT=1`, default): a background loop posts
    `masc_board_post` over `/mcp` @-mentioning a rotating keeper, driving the `Board_reactive` wake
    path (`keeper_world_observation_board_signal.ml`) so keepers keep turning instead of quiescing.
-   This needs three things the harness now sets up: MCP auth is disabled for the ephemeral base path
-   (`.masc/auth/config.json` `enabled:false` — `default_auth_config` is enabled+require_token, which
-   otherwise 401s the injector); the `/mcp` transport is stateful, so the injector does the
-   `initialize` → `Mcp-Session-Id` → `notifications/initialized` handshake and carries the session
-   header; the session is acquired lazily and re-acquired on error (the booting fleet can saturate the
-   server so the first `initialize` times out).
+   The harness disables MCP auth for the ephemeral base path (`.masc/auth/config.json`
+   `enabled:false`) and sends each injection through the shared current-protocol request helper.
+   Each request is independently retryable when the booting fleet saturates the server.
 2. **Large mock replies** (`MOCK_REPLY_BYTES`): a keeper turn is I/O-bound (the provider await yields
    the main domain), so the real main-domain cost is *after* the await — parsing the response and
    writing the turn record. A trivial `"ack"` barely loads the domain even mid-turn; a large body

@@ -111,7 +111,7 @@ val tool_allowed_in_profile :
 val tool_annotations_for_profile :
   tool_profile -> string -> Yojson.Safe.t option
 (** [tool_annotations_for_profile profile tool_name] returns the
-    MCP 2025-03-26 [annotations] object. It projects only the explicitly
+    current MCP [annotations] object. It projects only the explicitly
     registered [readOnlyHint] and [idempotentHint] capabilities.
 
     Returns [None] when the field set would be empty.

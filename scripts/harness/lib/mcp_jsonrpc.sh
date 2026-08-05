@@ -5,11 +5,10 @@
 : "${CURL_RETRY_DELAY_SEC:=1}"
 : "${CURL_TIMEOUT_SEC:=25}"
 : "${HTTP_TIMEOUT_SEC:=$CURL_TIMEOUT_SEC}"
-: "${MCP_SESSION_ID:=}"
 : "${HARNESS_LOG_FILE:=}"
 : "${HARNESS_LOG_TAIL_LINES:=120}"
 : "${MCP_CURL_EXTRA_ARGS:=}"
-: "${MCP_PROTOCOL_VERSION:=}"
+: "${MCP_PROTOCOL_VERSION:=2026-07-28}"
 MCP_LAST_TIME_TOTAL=""
 
 _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,17 +16,8 @@ _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${_HARNESS_DIR}/jsonrpc_sse.sh"
 
 mcp_default_auth_token() {
-  # Contract harnesses use MCP_TOKEN as the canonical workspace-local token.
-  # MCP_AUTH_TOKEN and MASC_ADMIN_TOKEN are legacy aliases accepted only for
-  # older callers. Do not fall back to MASC_TOKEN: it can belong to a different
-  # base path and mask a broken bootstrap path.
-  if [[ -n "${MCP_TOKEN:-}" ]]; then
-    printf '%s' "$MCP_TOKEN"
-  elif [[ -n "${MCP_AUTH_TOKEN:-}" ]]; then
-    printf '%s' "$MCP_AUTH_TOKEN"
-  elif [[ -n "${MASC_ADMIN_TOKEN:-}" ]]; then
-    printf '%s' "$MASC_ADMIN_TOKEN"
-  fi
+  # MCP_TOKEN is the workspace-local harness credential SSOT.
+  printf '%s' "${MCP_TOKEN:-}"
 }
 
 mcp_mktemp_file() {
@@ -196,20 +186,37 @@ _mcp_build_request_body() {
   local id="$1"
   local method="$2"
   local params_json="$3"
+  local protocol_version="${MCP_PROTOCOL_VERSION}"
   jq -cn \
     --argjson id "$id" \
     --arg method "$method" \
     --argjson params "$params_json" \
-    '{jsonrpc:"2.0", id:$id, method:$method, params:$params}'
+    --arg protocol_version "$protocol_version" \
+    'if ($params | type) != "object" then
+       error("MCP params must be an object")
+     elif (($params._meta // {}) | type) != "object" then
+       error("MCP params._meta must be an object")
+     else
+       {
+         jsonrpc:"2.0",
+         id:$id,
+         method:$method,
+         params:($params + {
+           _meta:(($params._meta // {}) + {
+             "io.modelcontextprotocol/protocolVersion":$protocol_version,
+             "io.modelcontextprotocol/clientCapabilities":{}
+           })
+         })
+       }
+     end'
 }
 
 mcp_jsonrpc_call() {
   local id="$1"
   local method="$2"
   local params_json="$3"
-  local session_id="${4:-${MCP_SESSION_ID:-}}"
-  local token="${5:-${MCP_TOKEN:-}}"
-  local endpoint="${6:-${MCP_URL:-}}"
+  local token="${4:-${MCP_TOKEN:-}}"
+  local endpoint="${5:-${MCP_URL:-}}"
   local timeout_sec="${HTTP_TIMEOUT_SEC:-${CURL_TIMEOUT_SEC:-25}}"
 
   local request_body
@@ -226,6 +233,24 @@ mcp_jsonrpc_call() {
   if [[ -z "$token" ]]; then
     token="$(mcp_default_auth_token)"
   fi
+
+  local request_name=""
+  case "$method" in
+    tools/call|prompts/get)
+      request_name="$(jq -er '.name | select(type == "string" and length > 0)' <<<"$params_json" 2>/dev/null)" || {
+        _mcp_build_transport_error \
+          "missing required MCP request name" "$endpoint" "local" "$method" "$timeout_sec"
+        return 0
+      }
+      ;;
+    resources/read)
+      request_name="$(jq -er '.uri | select(type == "string" and length > 0)' <<<"$params_json" 2>/dev/null)" || {
+        _mcp_build_transport_error \
+          "missing required MCP resource URI" "$endpoint" "local" "$method" "$timeout_sec"
+        return 0
+      }
+      ;;
+  esac
 
   local attempt=1
   local max_attempts="${CURL_RETRY_COUNT:-1}"
@@ -259,12 +284,11 @@ mcp_jsonrpc_call() {
       -w '%{time_total}'
       -H 'Content-Type: application/json'
       -H 'Accept: application/json, text/event-stream'
+      -H "Mcp-Protocol-Version: $MCP_PROTOCOL_VERSION"
+      -H "Mcp-Method: $method"
     )
-    if [[ -n "$session_id" ]]; then
-      cmd+=( -H "Mcp-Session-Id: $session_id" )
-    fi
-    if [[ -n "${MCP_PROTOCOL_VERSION:-}" ]]; then
-      cmd+=( -H "Mcp-Protocol-Version: $MCP_PROTOCOL_VERSION" )
+    if [[ -n "$request_name" ]]; then
+      cmd+=( -H "Mcp-Name: $request_name" )
     fi
     if [[ -n "$auth_header_file" ]]; then
       cmd+=( -H "@$auth_header_file" )
@@ -311,6 +335,7 @@ mcp_jsonrpc_call() {
         sleep "$retry_delay"
         # Include retry sleep in cumulative time.
         cumulative_time="$(awk -v c="$cumulative_time" -v d="$retry_delay" 'BEGIN{printf "%.6f", c + d}')"
+        # shellcheck disable=SC2034 # consumed by sourced benchmark/workload callers
         MCP_LAST_TIME_TOTAL="$cumulative_time"
         attempt=$((attempt + 1))
         ;;
@@ -332,9 +357,8 @@ mcp_call_tool() {
   local id="$1"
   local tool_name="$2"
   local args_json="$3"
-  local session_id="${4:-${MCP_SESSION_ID:-}}"
-  local token="${5:-${MCP_TOKEN:-}}"
-  local endpoint="${6:-${MCP_URL:-}}"
+  local token="${4:-${MCP_TOKEN:-}}"
+  local endpoint="${5:-${MCP_URL:-}}"
 
   local params_json
   if ! params_json="$(jq -cn --arg name "$tool_name" --argjson arguments "$args_json" '{name:$name, arguments:$arguments}' 2>/dev/null)"; then
@@ -347,11 +371,11 @@ mcp_call_tool() {
     return 0
   fi
 
-  mcp_jsonrpc_call "$id" "tools/call" "$params_json" "$session_id" "$token" "$endpoint"
+  mcp_jsonrpc_call "$id" "tools/call" "$params_json" "$token" "$endpoint"
 }
 
 # Call tool and assert success. Returns the full payload on success.
-# Usage: payload="$(mcp_call_tool_checked <id> <tool> <args_json> [session_id] [token] [endpoint])"
+# Usage: payload="$(mcp_call_tool_checked <id> <tool> <args_json> [token] [endpoint])"
 mcp_call_tool_checked() {
   local payload
   payload="$(mcp_call_tool "$@")"
@@ -360,7 +384,7 @@ mcp_call_tool_checked() {
 }
 
 # Call tool, assert success, extract .result. Returns the parsed result object.
-# Usage: result="$(mcp_call_tool_result <id> <tool> <args_json> [session_id] [token] [endpoint])"
+# Usage: result="$(mcp_call_tool_result <id> <tool> <args_json> [token] [endpoint])"
 mcp_call_tool_result() {
   local payload
   payload="$(mcp_call_tool_checked "$@")"

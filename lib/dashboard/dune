@@ -126,7 +126,7 @@
   masc.activity_graph
   masc.prompt_registry
   masc.mcp_transport_protocol
-  masc.mcp_session
+  masc.transport_correlation_id
   masc.response
   masc.ag_ui
   opentelemetry

@@ -726,7 +726,6 @@
 - Replaced raw `error_kind:string` signatures in keeper memory validation and WebSocket parse metrics with closed typed variants.
 - Kept keeper compaction observe sequencing in the correct branch and closed the snapshot-eviction match-arm regression that broke the main binary build.
 - Parallelized safe lazy startup tasks and added tool/cache flusher outcome counters for clearer startup and dispatch diagnostics.
-- Added the auto-upgrade dispatch and `Mcp-Session-Id` 404 handling path for the RFC-0100 server session lane.
 
 ## [0.19.24] - 2026-05-17
 

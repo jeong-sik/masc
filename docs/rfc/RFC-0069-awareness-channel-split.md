@@ -254,7 +254,7 @@ heartbeat 함수는 `agent_file.last_seen`만 갱신하지 channel publish 없�
 dashboard 클라이언트는 두 개의 SSE 연결을 유지:
 
 ```text
-GET /mcp                     (유지, MCP transport observer/agent stream stream)
+GET /events                  (Observer stream; MCP transport와 분리)
 GET /events/presence         (신설, presence-class events 전담; #12129)
 ```
 

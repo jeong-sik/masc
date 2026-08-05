@@ -18,17 +18,23 @@ let is_http_error_response = function
             | _ -> None)
         | _ -> None
       in
-      let is_parse_or_invalid = function
-        | Mcp_error_code.Parse_error | Invalid_request -> true
-        | _ -> false
-      in
-      id_is_null
-      && (match code with
-          | Some c ->
-              (match Mcp_error_code.of_wire_code c with
-               | Some ec -> is_parse_or_invalid ec
-               | None -> false)
-          | None -> false)
+      (match code with
+       | Some c -> (
+           match Mcp_error_code.of_wire_code c with
+           | Some (Parse_error | Invalid_request) -> id_is_null
+           | Some Method_not_found -> true
+           | Some _ | None -> false)
+       | None -> false)
+  | _ -> false
+
+let is_method_not_found_response = function
+  | `Assoc fields -> (
+      match List.assoc_opt "error" fields with
+      | Some (`Assoc error_fields) -> (
+          match List.assoc_opt "code" error_fields with
+          | Some (`Int (-32601)) -> true
+          | _ -> false)
+      | _ -> false)
   | _ -> false
 
 let request_runtime_result (deps : deps) =
@@ -48,10 +54,7 @@ let header_truthy_value value =
   | _ -> false
 
 let request_force_json_response (request : Httpun.Request.t) =
-  match
-    Server_mcp_transport_http_session.get_header_any_case request.headers
-      "x-masc-force-json"
-  with
+  match Httpun.Headers.get request.headers "x-masc-force-json" with
   | Some value -> header_truthy_value value
   | None -> false
 
@@ -74,25 +77,62 @@ let body_jsonrpc_method_only body_str =
   | Some (method_, _) -> Some method_
   | None -> None
 
-let is_initialize_method method_ = String.equal method_ "initialize"
+let jsonrpc_id_or_null body_str =
+  try
+    match Yojson.Safe.from_string body_str with
+    | `Assoc fields ->
+        (match List.assoc_opt "id" fields with
+         | Some id ->
+             (match Mcp_transport_protocol.request_id_of_yojson id with
+              | Ok request_id ->
+                  Mcp_transport_protocol.request_id_to_yojson request_id
+              | Error _ -> `Null)
+         | None -> `Null)
+    | _ -> `Null
+  with Yojson.Json_error _ -> `Null
+;;
 
 let request_protocol_version_header (request : Httpun.Request.t) =
-  Server_mcp_transport_http_session.get_header_any_case request.headers
-    "mcp-protocol-version"
+  Httpun.Headers.get request.headers "mcp-protocol-version"
+
+let unsupported_protocol_version_header request =
+  match request_protocol_version_header request with
+  | Some version
+    when not (Mcp_transport_protocol.is_supported_protocol_version version) ->
+      Some version
+  | Some _ | None -> None
+
+let unsupported_protocol_version_error_body ?id requested =
+  let response_id =
+    match id with
+    | Some ((`Int _ | `String _) as id) -> id
+    | Some _ | None -> `Null
+  in
+  `Assoc
+    [ ("jsonrpc", `String "2.0")
+    ; ("id", response_id)
+    ; ( "error"
+      , `Assoc
+          [ ("code", `Int (-32022))
+          ; ("message", `String "Unsupported protocol version")
+          ; ( "data"
+            , `Assoc
+                [ ( "supported"
+                  , `List
+                      (List.map
+                         (fun version -> `String version)
+                         Mcp_transport_protocol.supported_protocol_versions) )
+                ; ("requested", `String requested)
+                ] )
+          ] )
+    ]
+  |> Yojson.Safe.to_string
 
 let request_method_header (request : Httpun.Request.t) =
-  Server_mcp_transport_http_session.get_header_any_case request.headers
-    "mcp-method"
+  Httpun.Headers.get request.headers "mcp-method"
 
 let request_name_header (request : Httpun.Request.t) =
-  Server_mcp_transport_http_session.get_header_any_case request.headers
-    "mcp-name"
-
-let request_uses_stateless_protocol request body_str =
-  match request_protocol_version_header request with
-  | Some version when Mcp_transport_protocol.is_stateless_protocol_version version ->
-      true
-  | _ -> Mcp_transport_protocol.body_uses_stateless_protocol body_str
+  Httpun.Headers.get request.headers "mcp-name"
 
 let body_required_name_for_method body_str method_ =
   let field_name =
@@ -119,8 +159,9 @@ let body_required_name_for_method body_str method_ =
 let header_mismatch msg = Error ("HeaderMismatch: " ^ msg)
 
 let validate_2026_request_headers request body_str =
-  if not (request_uses_stateless_protocol request body_str) then Ok ()
-  else
+  match Yojson.Safe.from_string body_str with
+  | exception Yojson.Json_error _ -> Ok ()
+  | _ ->
     match
       ( request_protocol_version_header request,
         Mcp_transport_protocol.protocol_version_from_request_meta_body body_str )
@@ -175,13 +216,10 @@ let validate_2026_request_headers request body_str =
                              header_name body_name)
                     | Some _ -> Ok ()))))
 
-let should_use_sse_for_body (request : Httpun.Request.t) body_str accept_mode =
-  match body_jsonrpc_method body_str with
-  | Some (method_, _) when is_initialize_method method_ -> false
-  | _ ->
-      accept_mode = Http_negotiation.Streamable
-      && Http_negotiation.accepts_sse_header
-           (Httpun.Headers.get request.headers "accept")
+let should_use_sse_for_body (request : Httpun.Request.t) accept_mode =
+  accept_mode = Http_negotiation.Streamable
+  && Http_negotiation.accepts_sse_header
+       (Httpun.Headers.get request.headers "accept")
 
 (* MCP_FORCE_JSON_RESPONSE was retired (masc#25123 Wave 2):
    MASC_FORCE_JSON_RESPONSE is the single spelling, matching the MASC_*
@@ -229,38 +267,24 @@ let get_last_event_id (request : Httpun.Request.t) =
       | None -> Error Malformed_last_event_id)
   | None -> Ok None
 
-let mcp_headers session_id protocol_version =
-  if Mcp_transport_protocol.is_stateless_protocol_version protocol_version then
-    [ ("mcp-protocol-version", protocol_version) ]
-  else
-    [ ("mcp-session-id", session_id); ("mcp-protocol-version", protocol_version) ]
+let mcp_headers protocol_version =
+  [ ("mcp-protocol-version", protocol_version) ]
 
-let session_cookie_header session_id =
-  ( "set-cookie",
-    Printf.sprintf "mcp-session-id=%s; Path=/; Max-Age=%d; SameSite=Lax"
-      session_id Masc_time_constants.day_int )
-
-let session_cookie_headers protocol_version session_id =
-  if Mcp_transport_protocol.is_stateless_protocol_version protocol_version then []
-  else [ session_cookie_header session_id ]
-
-let sse_headers ~(deps : deps) session_id protocol_version origin =
+let sse_headers ~(deps : deps) protocol_version origin =
   [ ("content-type", Http_negotiation.sse_content_type) ]
-  @ session_cookie_headers protocol_version session_id
-  @ mcp_headers session_id protocol_version
+  @ mcp_headers protocol_version
   @ deps.cors_headers origin
 
-let sse_stream_headers ~(deps : deps) session_id protocol_version origin =
+let sse_stream_headers ~(deps : deps) protocol_version origin =
   [
     ("content-type", Http_negotiation.sse_content_type);
     ("cache-control", "no-cache");
     ("connection", "keep-alive");
   ]
-  @ session_cookie_headers protocol_version session_id
-  @ mcp_headers session_id protocol_version
+  @ mcp_headers protocol_version
   @ deps.cors_headers origin
 
-let json_headers ~(deps : deps) session_id protocol_version origin =
+let json_headers ~(deps : deps) protocol_version origin =
   [ ("content-type", "application/json") ]
-  @ mcp_headers session_id protocol_version
+  @ mcp_headers protocol_version
   @ deps.cors_headers origin

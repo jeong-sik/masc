@@ -50,8 +50,6 @@ TOOLS=(
 )
 
 AGENT_NAME="eval-ratchet-${ITERATION}"
-MCP_SESSION_ID="eval-${ITERATION}-$(date +%s)"
-export MCP_SESSION_ID
 
 # Join first
 call_tool 9000 "masc_bind" "{\"agent_name\":\"${AGENT_NAME}\"}" >/dev/null 2>&1 || true

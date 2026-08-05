@@ -140,7 +140,6 @@ val mcp_endpoint_url : unit -> string
 val call_masc_tool :
   sw:Eio.Switch.t ->
   auth_token:string option ->
-  session_id:string ->
   tool_name:string ->
   args:Yojson.Safe.t ->
   (tool_exec_result, string) result
@@ -172,13 +171,11 @@ val default_system_prompt :
 val list_masc_tools :
   sw:Eio.Switch.t ->
   auth_token:string option ->
-  session_id:string ->
   ?names:string list option ->
   unit ->
   (Masc_domain.tool_schema list, string) result
 (** Lists the MASC tool schemas visible to a local worker.
-    [sw], [auth_token], and [session_id] are accepted for
-    parity with {!call_masc_tool} but currently unused — the
+    [sw] and [auth_token] are accepted for the shared worker boundary. The
     schema list is sourced directly from
     [Keeper_tool_surfaces.local_worker_tool_schemas].
     [names] optionally restricts the set returned. *)

@@ -1,7 +1,7 @@
 (test
  (name test_mcp_post_sse_e2e)
  (modules test_mcp_post_sse_e2e)
- (libraries alcotest masc_test_runtime yojson unix)
+ (libraries masc_test_deps masc_test_runtime)
  (deps ../bin/main_eio.exe)
  (enabled_if (= %{env:MASC_E2E_TESTS=false} "true"))
  (action

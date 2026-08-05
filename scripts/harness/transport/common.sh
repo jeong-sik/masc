@@ -18,6 +18,10 @@ MASC_WS_PORT="${MASC_WS_PORT:-$(harness_pick_free_port)}"
 MASC_HTTP_BASE_URL="${MASC_HTTP_BASE_URL:-http://127.0.0.1:${MASC_HTTP_PORT}}"
 MASC_GRPC_ADDR="127.0.0.1:${MASC_GRPC_PORT}"
 MASC_WS_URL="ws://127.0.0.1:${MASC_WS_PORT}"
+MCP_URL="${MASC_HTTP_BASE_URL}/mcp"
+
+# shellcheck source=scripts/harness/lib/mcp_jsonrpc.sh
+source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 
 export ROOT_DIR
 export MASC_HTTP_PORT
@@ -149,76 +153,37 @@ require_tool() {
   return 0
 }
 
-mcp_initialize_session() {
-  local headers body payload session_id token
-  local -a auth_args=()
-  headers="$(harness_mktemp_file "masc-transport-init-header")"
-  body="$(harness_mktemp_file "masc-transport-init-body")"
-  payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"transport-harness","version":"1.0"}}}'
+transport_mcp_ready() {
+  local payload token
   token="$(transport_auth_token)"
-  if [[ -n "$token" ]]; then
-    auth_args=(-H "Authorization: Bearer ${token}")
-  fi
-  if ! curl -fsS -D "$headers" -o "$body" -X POST "${MASC_HTTP_BASE_URL}/mcp" \
-    "${auth_args[@]}" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "$payload" >/dev/null; then
-    echo "ERROR: MCP initialize failed" >&2
-    cat "$body" >&2 || true
-    rm -f "$headers" "$body"
-    return 1
-  fi
-  session_id="$(
-    awk 'tolower($1)=="mcp-session-id:" { gsub("\r", "", $2); print $2; exit }' \
-      "$headers"
-  )"
-  rm -f "$headers" "$body"
-  if [[ -z "$session_id" ]]; then
-    echo "ERROR: MCP initialize did not return Mcp-Session-Id" >&2
-    return 1
-  fi
-  printf '%s\n' "$session_id"
+  payload="$(mcp_jsonrpc_call 1 "server/discover" '{}' "$token" "$MCP_URL")"
+  mcp_require_jsonrpc_ok "$payload" "transport server/discover"
 }
 
-mcp_call_tool() {
-  local session_id="$1"
+transport_call_tool() {
+  local request_id="$1"
   local tool_name="$2"
   local arguments_json="$3"
-  local request_id="${4:-1}"
   local payload token
-  local -a auth_args=()
-  payload="$(printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"%s","arguments":%s}}' \
-    "$request_id" "$tool_name" "$arguments_json")"
   token="$(transport_auth_token)"
-  if [[ -n "$token" ]]; then
-    auth_args=(-H "Authorization: Bearer ${token}")
-  fi
-  curl -fsS -X POST "${MASC_HTTP_BASE_URL}/mcp" \
-    "${auth_args[@]}" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -H "Mcp-Session-Id: ${session_id}" \
-    -d "$payload"
+  payload="$(mcp_call_tool "$request_id" "$tool_name" "$arguments_json" "$token" "$MCP_URL")"
+  mcp_require_tool_ok "$payload" "$tool_name" || return 1
+  printf '%s' "$payload"
 }
 
 mcp_join_agent() {
-  local session_id="$1"
-  local agent_name="$2"
-  mcp_call_tool \
-    "$session_id" \
+  local agent_name="$1"
+  transport_call_tool \
+    2 \
     "masc_bind" \
-    "$(printf '{"agent_name":"%s","capabilities":[]}' "$agent_name")" \
-    2
+    "$(printf '{"agent_name":"%s","capabilities":[]}' "$agent_name")"
 }
 
 mcp_broadcast() {
-  local session_id="$1"
-  local agent_name="$2"
-  local message="$3"
-  mcp_call_tool \
-    "$session_id" \
+  local agent_name="$1"
+  local message="$2"
+  transport_call_tool \
+    3 \
     "masc_broadcast" \
-    "$(printf '{"agent_name":"%s","message":"%s"}' "$agent_name" "$message")" \
-    3
+    "$(printf '{"agent_name":"%s","message":"%s"}' "$agent_name" "$message")"
 }

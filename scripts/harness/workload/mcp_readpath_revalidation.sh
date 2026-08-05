@@ -162,55 +162,17 @@ wait_for_cache_ready() {
   return 1
 }
 
-init_session() {
-  local mcp_url="$1"
-  local headers_file body_file session_id protocol_version
-  headers_file="$(harness_mktemp_file mcp-init .headers)"
-  body_file="$(harness_mktemp_file mcp-init .body)"
-  if ! curl -sS --max-time "$TOOL_TIMEOUT_SEC" -D "$headers_file" -o "$body_file" \
-    -X POST "$mcp_url" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"mcp-readpath-revalidation","version":"1.0"},"capabilities":{}}}' >/dev/null; then
-    rm -f "$headers_file" "$body_file"
-    return 1
-  fi
-  session_id="$(awk '
-    tolower($0) ~ /^mcp-session-id:/ {
-      sub(/^[^:]+:[[:space:]]*/, "", $0)
-      sub(/\r$/, "", $0)
-      print $0
-      exit
-    }' "$headers_file")"
-  protocol_version="$(awk '
-    tolower($0) ~ /^mcp-protocol-version:/ {
-      sub(/^[^:]+:[[:space:]]*/, "", $0)
-      sub(/\r$/, "", $0)
-      print $0
-      exit
-    }' "$headers_file")"
-  rm -f "$headers_file" "$body_file"
-  if [[ -z "$session_id" ]]; then
-    return 1
-  fi
-  printf '%s\t%s\n' "$session_id" "$protocol_version"
-}
-
 call_tool() {
   local mcp_url="$1"
-  local session_id="$2"
-  local protocol_version="$3"
-  local request_id="$4"
-  local tool_name="$5"
-  local args_json="$6"
+  local request_id="$2"
+  local tool_name="$3"
+  local args_json="$4"
 
-  local saved_timeout="${HTTP_TIMEOUT_SEC:-}" saved_proto="${MCP_PROTOCOL_VERSION:-}"
+  local saved_timeout="${HTTP_TIMEOUT_SEC:-}"
   HTTP_TIMEOUT_SEC="$TOOL_TIMEOUT_SEC"
-  MCP_PROTOCOL_VERSION="$protocol_version"
   local response
-  response="$(mcp_call_tool "$request_id" "$tool_name" "$args_json" "$session_id" "" "$mcp_url")"
+  response="$(mcp_call_tool "$request_id" "$tool_name" "$args_json" "" "$mcp_url")"
   HTTP_TIMEOUT_SEC="$saved_timeout"
-  MCP_PROTOCOL_VERSION="$saved_proto"
 
   LAST_TIME_TOTAL="$MCP_LAST_TIME_TOTAL"
   LAST_RESPONSE="$response"
@@ -258,7 +220,6 @@ run_mode() {
   local mode="$1"
   local port grpc_port ws_port server_log server_pid
   local base_url mcp_url health_json health_file
-  local session_line session_id protocol_version
   local status_first_time status_second_time keeper_first_time keeper_second_time keeper_status_time transport_time
   local execution_time transport_health_time
   local status_first_ok status_second_ok keeper_first_ok keeper_second_ok keeper_status_ok transport_ok
@@ -316,28 +277,21 @@ run_mode() {
   health_json="$(cat "$health_file")"
   rm -f "$health_file"
 
-  session_line="$(init_session "$mcp_url")"
-  session_id="${session_line%%$'\t'*}"
-  protocol_version="${session_line#*$'\t'}"
-  if [[ "$protocol_version" = "$session_line" ]]; then
-    protocol_version=""
-  fi
-
-  if call_tool "$mcp_url" "$session_id" "$protocol_version" 11 "masc_status" '{}'; then
+  if call_tool "$mcp_url" 11 "masc_status" '{}'; then
     status_first_ok="0"
   else
     status_first_ok="1"
   fi
   status_first_time="$LAST_TIME_TOTAL"
 
-  if call_tool "$mcp_url" "$session_id" "$protocol_version" 12 "masc_status" '{}'; then
+  if call_tool "$mcp_url" 12 "masc_status" '{}'; then
     status_second_ok="0"
   else
     status_second_ok="1"
   fi
   status_second_time="$LAST_TIME_TOTAL"
 
-  if call_tool "$mcp_url" "$session_id" "$protocol_version" 13 "masc_keeper_list" '{"detailed":false}'; then
+  if call_tool "$mcp_url" 13 "masc_keeper_list" '{"detailed":false}'; then
     keeper_first_ok="0"
   else
     keeper_first_ok="1"
@@ -345,7 +299,7 @@ run_mode() {
   keeper_first_time="$LAST_TIME_TOTAL"
   keeper_json="$(json_from_response_text "$LAST_TEXT")"
 
-  if call_tool "$mcp_url" "$session_id" "$protocol_version" 14 "masc_keeper_list" '{"detailed":false}'; then
+  if call_tool "$mcp_url" 14 "masc_keeper_list" '{"detailed":false}'; then
     keeper_second_ok="0"
   else
     keeper_second_ok="1"
@@ -371,7 +325,7 @@ run_mode() {
           printf '%s' "$keeper_status_attempted_json" \
             | jq -c --arg name "$keeper_candidate" '. + [$name]'
         )"
-        if call_tool "$mcp_url" "$session_id" "$protocol_version" "$request_id" "masc_keeper_status" "$(jq -cn --arg name "$keeper_candidate" '{name:$name}')"; then
+        if call_tool "$mcp_url" "$request_id" "masc_keeper_status" "$(jq -cn --arg name "$keeper_candidate" '{name:$name}')"; then
           keeper_name="$keeper_candidate"
           keeper_status_ok="0"
           keeper_status_time="$LAST_TIME_TOTAL"
@@ -399,7 +353,7 @@ run_mode() {
     keeper_status_json='{}'
   fi
 
-  if call_tool "$mcp_url" "$session_id" "$protocol_version" 16 "masc_transport_status" '{}'; then
+  if call_tool "$mcp_url" 16 "masc_transport_status" '{}'; then
     transport_ok="0"
   else
     transport_ok="1"

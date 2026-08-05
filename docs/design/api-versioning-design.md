@@ -29,7 +29,7 @@ When a breaking change ships:
 
 | Surface | Endpoints | Version Mechanism | Gap |
 |---------|-----------|-------------------|-----|
-| **MCP JSON-RPC** | `/mcp`, `/sse` | `protocolVersion` in initialize (4 versions: 2024-11-05 .. 2025-11-25) | None (well-versioned) |
+| **MCP JSON-RPC** | `/mcp` | Required `Mcp-Protocol-Version` plus mirrored request `_meta` | Current revision only |
 | **gRPC** | 6 RPCs | `masc.workspace collaboration.v1` package | None (proto3 compat rules apply) |
 | **HTTP REST** | 70+ under `/api/v1/` | Hardcoded path prefix | **No v2 path, no negotiation, no deprecation** |
 | **WebSocket** | `/ws` | Shares MCP protocol version | None (inherits MCP) |
@@ -101,15 +101,14 @@ type tool_schema = {
   "description": "...",
   "inputSchema": { ... },
   "annotations": {
-    "version": "1.0.0",
-    "deprecated": true,
-    "successor": "masc_heartbeat_start"
+    "readOnlyHint": false,
+    "idempotentHint": true
   }
 }
 ```
 
-**MCP SDK compliance**: The `annotations` field is supported since MCP protocol version
-`2025-03-26`. For older clients, annotations are silently omitted.
+The current MCP contract emits only explicitly registered annotation fields.
+It does not infer annotations or omit them through protocol-version fallback.
 
 **Versioning rules**:
 - PATCH: description change, optional field added to input

@@ -65,56 +65,6 @@ let test_is_json_content_type () =
   check_json "reject text/plain" false "text/plain";
   ()
 
-let test_protocol_continuity_allows_missing_header () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let module Session = Server_mcp_transport_http in
-  let session_id = "compat-session-missing-header" in
-  let headers = Httpun.Headers.of_list [] in
-  let request = Httpun.Request.create ~headers `POST "/mcp" in
-  Session.remember_protocol_version session_id "2025-11-25";
-  Fun.protect
-    ~finally:(fun () -> Session.forget_mcp_session session_id)
-    (fun () ->
-      match Session.validate_protocol_version_continuity ~session_id request with
-      | Ok () -> ()
-      | Error msg ->
-          failf "expected missing protocol header to use session continuity, got %s" msg)
-
-let test_protocol_version_for_session_falls_back_to_negotiated_version () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let module Session = Server_mcp_transport_http in
-  let session_id = "compat-session-negotiated-version" in
-  let headers = Httpun.Headers.of_list [] in
-  let request = Httpun.Request.create ~headers `POST "/mcp" in
-  Session.remember_protocol_version session_id "2025-03-26";
-  Fun.protect
-    ~finally:(fun () -> Session.forget_mcp_session session_id)
-    (fun () ->
-      check string "falls back to remembered session version" "2025-03-26"
-        (Session.get_protocol_version_for_session ~session_id request))
-
-let test_protocol_continuity_rejects_mismatch () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let module Session = Server_mcp_transport_http in
-  let session_id = "compat-session-mismatch" in
-  let headers =
-    Httpun.Headers.of_list [("mcp-protocol-version", "2025-03-26")]
-  in
-  let request = Httpun.Request.create ~headers `POST "/mcp" in
-  Session.remember_protocol_version session_id "2025-11-25";
-  Fun.protect
-    ~finally:(fun () -> Session.forget_mcp_session session_id)
-    (fun () ->
-      match Session.validate_protocol_version_continuity ~session_id request with
-      | Ok () -> fail "expected mismatched protocol version to be rejected"
-      | Error msg ->
-          check bool "mentions mismatch" true
-            (String.length msg > 0
-            && String.contains msg ':'))
-
 let test_notification_json_only_rejected () =
   let module Transport = Server_mcp_transport_http in
   let headers = Httpun.Headers.of_list [("accept", "application/json")] in
@@ -136,17 +86,6 @@ let test_request_json_only_accepted () =
     | Mcp_transport_protocol.Http_negotiation.Rejected -> true
     | _ -> false)
 
-let test_initialize_json_only_accepted () =
-  (* Initialize with JSON-only Accept is also rejected under the stricter transport rule. *)
-  let module Transport = Server_mcp_transport_http in
-  let headers = Httpun.Headers.of_list [("accept", "application/json")] in
-  let request = Httpun.Request.create ~headers `POST "/mcp" in
-  let mode = Transport.classify_mcp_accept request in
-  check bool "initialize with json-only is rejected" true
-    (match mode with
-    | Mcp_transport_protocol.Http_negotiation.Rejected -> true
-    | _ -> false)
-
 let test_no_accept_header_rejected () =
   (* No Accept header at all should still be Rejected *)
   let module Transport = Server_mcp_transport_http in
@@ -157,20 +96,6 @@ let test_no_accept_header_rejected () =
     (match mode with
     | Mcp_transport_protocol.Http_negotiation.Rejected -> true
     | _ -> false)
-
-let test_initialize_never_uses_sse () =
-  let module Transport = Server_mcp_transport_http in
-  let headers =
-    Httpun.Headers.of_list
-      [("accept", "application/json, text/event-stream")]
-  in
-  let request = Httpun.Request.create ~headers `POST "/mcp" in
-  let body =
-    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}|}
-  in
-  check bool "initialize disables sse" false
-    (Transport.should_use_sse_for_body request body
-       Mcp_transport_protocol.Http_negotiation.Streamable)
 
 let stateless_body ?(method_ = "tools/list") ?name () =
   let params_fields =
@@ -251,12 +176,9 @@ let test_validate_2026_request_headers () =
       check bool "mentions header mismatch" true
         (String_util.contains_substring msg "HeaderMismatch")
 
-let test_stateless_headers_do_not_emit_session_id () =
+let test_current_response_headers () =
   let module Transport = Server_mcp_transport_http in
-  let headers = Transport.mcp_headers "session-x" "2026-07-28" in
-  check (option string) "no mcp-session-id"
-    None
-    (List.assoc_opt "mcp-session-id" headers);
+  let headers = Transport.mcp_headers "2026-07-28" in
   check (option string) "keeps protocol version"
     (Some "2026-07-28")
     (List.assoc_opt "mcp-protocol-version" headers)
@@ -312,22 +234,14 @@ let () =
       ("accepts_streamable_mcp", [test_case "requires json+sse" `Quick test_accepts_streamable_mcp]);
       ("classify_mcp_accept", [test_case "strict classification" `Quick test_classify_mcp_accept]);
       ("is_json_content_type", [test_case "content-type contract" `Quick test_is_json_content_type]);
-      ("protocol_continuity", [
-        test_case "missing header falls back to session" `Quick test_protocol_continuity_allows_missing_header;
-        test_case "remembered session version is reused" `Quick test_protocol_version_for_session_falls_back_to_negotiated_version;
-        test_case "mismatch still rejects" `Quick test_protocol_continuity_rejects_mismatch;
-      ]);
       ("accept_contract", [
         test_case "notification json-only rejected" `Quick
           test_notification_json_only_rejected;
         test_case "json-only accept is rejected" `Quick test_request_json_only_accepted;
-        test_case "initialize json-only is rejected" `Quick test_initialize_json_only_accepted;
         test_case "no accept header rejected" `Quick test_no_accept_header_rejected;
-        test_case "initialize disables sse" `Quick test_initialize_never_uses_sse;
         test_case "2026 headers are validated" `Quick
           test_validate_2026_request_headers;
-        test_case "2026 headers omit session id" `Quick
-          test_stateless_headers_do_not_emit_session_id;
+        test_case "current response headers" `Quick test_current_response_headers;
         test_case "sse guard registry is shared" `Quick
           test_sse_guard_registry_is_shared_with_cleanup_loop;
         test_case "preserve guard keeps cooldown" `Quick

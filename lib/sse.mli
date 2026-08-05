@@ -83,9 +83,6 @@ type registration_error =
   | Invalid_token of { reason : string }
   | Token_expired of { agent_name : string }
   | Auth_lookup_error of { reason : Masc_domain.masc_error }
-  | Unknown_session of { session_id : string }
-  | Session_expired of { session_id : string }
-  | Session_owner_mismatch of { session_agent : string; token_agent : string }
 
 val registration_error_to_string : registration_error -> string
 
@@ -96,7 +93,7 @@ val register :
   auth:registration_auth -> string -> last_event_id:int ->
   (int * delivery Eio.Stream.t * string option, registration_error) result
 (** [register ~auth session_id ~last_event_id] validates the supplied
-    bearer token and MCP session pair before admitting the client.
+    bearer token before admitting the observer stream.
 
     [?on_disconnect] is installed atomically with registration via
     {!set_disconnect_hook} before the client becomes broadcast-visible,

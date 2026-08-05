@@ -84,7 +84,7 @@ let parse_headers raw =
       (status, headers)
   | Some [] -> (None, [])
 
-let run_curl_json ?token ?(max_time_sec = 5) ~port ~path ~session_id ~payload () =
+let run_curl_json ?token ?(max_time_sec = 5) ~port ~path ~payload () =
   let header_file = Filename.temp_file "operator-mcp-header-" ".txt" in
   let body_file = Filename.temp_file "operator-mcp-body-" ".txt" in
   let data_file = Filename.temp_file "operator-mcp-request-" ".json" in
@@ -107,7 +107,9 @@ let run_curl_json ?token ?(max_time_sec = 5) ~port ~path ~session_id ~payload ()
       "-H";
       "Accept: application/json, text/event-stream";
       "-H";
-      Printf.sprintf "Mcp-Session-Id: %s" session_id;
+      "Mcp-Protocol-Version: 2026-07-28";
+      "-H";
+      "Mcp-Method: tools/list";
       "-o";
       body_file;
       "-D";
@@ -258,7 +260,17 @@ let jsonrpc_payload ~id ~method_name ~params =
         ("params", params);
       ])
 
-let tools_list_payload ~id = jsonrpc_payload ~id ~method_name:"tools/list" ~params:(`Assoc [])
+let tools_list_payload ~id =
+  jsonrpc_payload ~id ~method_name:"tools/list"
+    ~params:
+      (`Assoc
+        [ ( "_meta"
+          , `Assoc
+              [ ( "io.modelcontextprotocol/protocolVersion"
+                , `String "2026-07-28" )
+              ; ("io.modelcontextprotocol/clientCapabilities", `Assoc [])
+              ] )
+        ])
 
 let require_http_ok label result =
   match result.status with
@@ -449,7 +461,7 @@ let test_mcp_requires_auth_when_bound_non_loopback () =
             ~implementer_a_nickname:_ ~implementer_b_nickname:_ ->
   let rec call_until_ready retries_left =
     let result =
-      run_curl_json ~port ~path:"/mcp" ~session_id:"strict-remote"
+      run_curl_json ~port ~path:"/mcp"
         ~payload:(tools_list_payload ~id:1) ()
     in
     match (result.status, retries_left) with

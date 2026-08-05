@@ -1,9 +1,4 @@
-(** Mcp_server_eio_protocol — JSON-RPC protocol handlers and SSE transport
-
-    Extracted from mcp_server_eio.ml.
-    Handles initialize, list (tools/resources/prompts), subscribe, request dispatch,
-    resource subscriptions, and stdio transport.
-*)
+(** Current MCP JSON-RPC handlers and stdio transport. *)
 
 module TP = Mcp_server_eio_tool_profile
 
@@ -12,7 +7,7 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Managed_agent
   | Operator_remote
 
-let make_response = Mcp_transport_protocol.make_response
+let make_response = Mcp_transport_protocol.make_complete_response
 let make_error = Mcp_transport_protocol.make_error
 
 let make_error_typed ?data ~id (code : Mcp_error_code.t) message =
@@ -104,149 +99,7 @@ let unavailable_tool_message name =
   Printf.sprintf "Tool '%s' is not available on this MCP endpoint." name
 ;;
 
-(** {1 Resource Subscriptions} *)
-
-let resource_subscription_mutex = Eio.Mutex.create ()
-let with_resource_subscription_lock f = Eio_guard.with_mutex resource_subscription_mutex f
-
-let resource_subscriptions : (string, (string, unit) Hashtbl.t) Hashtbl.t =
-  Hashtbl.create 64
-;;
-
-let resource_is_dynamic uri =
-  let lower = String.lowercase_ascii uri in
-  not
-    (String.contains lower '{'
-     || String.starts_with ~prefix:"masc://tool-help" lower)
-;;
-
-let subscribe_resource_for_session ~session_id ~uri =
-  with_resource_subscription_lock (fun () ->
-    let uris =
-      match Hashtbl.find_opt resource_subscriptions session_id with
-      | Some uris -> uris
-      | None ->
-        let uris = Hashtbl.create 8 in
-        Hashtbl.replace resource_subscriptions session_id uris;
-        uris
-    in
-    Hashtbl.replace uris uri ())
-;;
-
-let unsubscribe_resource_for_session ~session_id ~uri =
-  with_resource_subscription_lock (fun () ->
-    match Hashtbl.find_opt resource_subscriptions session_id with
-    | Some uris ->
-      Hashtbl.remove uris uri;
-      if Hashtbl.length uris = 0 then Hashtbl.remove resource_subscriptions session_id
-    | None -> ())
-;;
-
-let clear_resource_subscriptions_for_session session_id =
-  with_resource_subscription_lock (fun () ->
-    Hashtbl.remove resource_subscriptions session_id)
-;;
-
-let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
-
-let send_resource_updated_notification ~session_id ~uri =
-  Sse.send_to
-    session_id
-    (jsonrpc_notification
-       "notifications/resources/updated"
-       ~params:(`Assoc [ "uri", `String uri ]))
-;;
-
-let broadcast_tools_list_changed () =
-  Sse.broadcast (jsonrpc_notification "notifications/tools/list_changed")
-;;
-
-let dedup_strings items = items |> List.sort_uniq String.compare
-let core_status_resource_ids = [ "status"; "status.json"; "events"; "events.json" ]
-
-let task_resource_ids =
-  dedup_strings (core_status_resource_ids @ [ "tasks"; "tasks.json" ])
-;;
-
-let agent_resource_ids =
-  dedup_strings (core_status_resource_ids @ [ "who"; "who.json"; "agents"; "agents.json" ])
-;;
-
-let message_resource_ids =
-  dedup_strings (core_status_resource_ids @ [ "messages"; "messages.json" ])
-;;
-
-let resource_id_of_uri uri =
-  let resource_id, _uri = Mcp_server.parse_masc_resource_uri uri in
-  resource_id
-;;
-
-let affected_resource_ids_for_tool = function
-  | "masc_add_task"
-  | "masc_transition"
-  | "masc_update_priority"
-  | "masc_plan_set_task"
-  | "masc_plan_clear_task" -> task_resource_ids
-  | "masc_heartbeat" -> agent_resource_ids
-  | "masc_broadcast" ->
-    message_resource_ids
-  | _ -> core_status_resource_ids
-;;
-
-let maybe_emit_resource_notifications ~success ~tool_name =
-  if success
-  then (
-    let affected_ids = affected_resource_ids_for_tool tool_name in
-    with_resource_subscription_lock (fun () ->
-      Hashtbl.iter
-        (fun session_id uris ->
-           Hashtbl.iter
-             (fun uri () ->
-                if
-                  resource_is_dynamic uri
-                  && List.mem (resource_id_of_uri uri) affected_ids
-                then send_resource_updated_notification ~session_id ~uri)
-             uris)
-        resource_subscriptions))
-;;
-
 (** {1 Protocol Handlers} *)
-
-let handle_initialize_eio ?(profile = Full) id params =
-  match Mcp_transport_protocol.validate_initialize_params params with
-  | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-  | Ok () ->
-    let protocol_version =
-      params |> Mcp_transport_protocol.protocol_version_from_params
-    in
-    (match Mcp_transport_protocol.validate_protocol_version protocol_version with
-     | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-     | Ok protocol_version ->
-       make_response
-         ~id
-         (`Assoc
-             [ "protocolVersion", `String protocol_version
-             ; "serverInfo", Mcp_server.server_info
-             ; "capabilities", Mcp_server.capabilities
-             ; ( "instructions"
-               , `String
-                   (match profile with
-                    | Full -> TP.default_instructions ()
-                    | Managed_agent -> TP.managed_agent_instructions
-                    | Operator_remote -> TP.operator_remote_instructions) )
-             ; ( "_meta"
-               , `Assoc
-                   [ "serverStartedAt", `String (Masc_domain.now_iso ())
-                   ; "serverVersion", `String Version.version
-                   ; ( "profile"
-                     , `String
-                         (match profile with
-                          | Full -> "full"
-                          | Managed_agent -> "managed_agent"
-                          | Operator_remote -> "operator_remote") )
-                   ] )
-             ]))
-;;
 
 let profile_instructions = function
   | Full -> TP.default_instructions ()
@@ -265,8 +118,13 @@ let handle_server_discover_eio ?(profile = Full) id =
                  (fun version -> `String version)
                  Mcp_transport_protocol.supported_protocol_versions) )
         ; "capabilities", Mcp_server.capabilities
-        ; "serverInfo", Mcp_server.server_info
         ; "instructions", `String (profile_instructions profile)
+        ; "ttlMs", `Int 3600000
+        ; "cacheScope", `String "public"
+        ; ( "_meta"
+          , `Assoc
+              [ ( "io.modelcontextprotocol/serverInfo"
+                , Mcp_server.server_info ) ] )
         ])
 ;;
 
@@ -456,32 +314,6 @@ let handle_get_prompt_eio state id params =
         | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg)
      | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: name must be a string")
   | Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
-;;
-
-let handle_resources_subscribe_eio id ?mcp_session_id params =
-  match mcp_session_id, params with
-  | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "resources/subscribe requires an MCP session"
-  | Some session_id, Some (`Assoc _ as payload) ->
-    (match Json_util.assoc_member_opt "uri" payload with
-     | Some (`String uri) ->
-       subscribe_resource_for_session ~session_id ~uri;
-       make_response ~id (`Assoc [])
-     | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
-  | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
-  | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
-;;
-
-let handle_resources_unsubscribe_eio id ?mcp_session_id params =
-  match mcp_session_id, params with
-  | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "resources/unsubscribe requires an MCP session"
-  | Some session_id, Some (`Assoc _ as payload) ->
-    (match Json_util.assoc_member_opt "uri" payload with
-     | Some (`String uri) ->
-       unsubscribe_resource_for_session ~session_id ~uri;
-       make_response ~id (`Assoc [])
-     | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
-  | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
-  | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
 
 let optional_string_member key fields =
@@ -778,20 +610,6 @@ let handle_request
                   ~requirement:Auth_requirement.Public
                   ?auth_token
                   (fun _auth_token -> handle_server_discover_eio ~profile id)
-              | "initialize" ->
-                with_required_auth
-                  ~base_path
-                  ~id
-                  ~requirement:Auth_requirement.Public
-                  ?auth_token
-                  (fun _auth_token -> handle_initialize_eio ~profile id req.params)
-              | "initialized" | "notifications/initialized" ->
-                with_required_auth
-                  ~base_path
-                  ~id
-                  ~requirement:Auth_requirement.Public
-                  ?auth_token
-                  (fun _auth_token -> make_response ~id `Null)
               | "resources/list" ->
                 with_required_auth
                   ~base_path
@@ -819,22 +637,6 @@ let handle_request
                      match TP.parse_cursor_only_params req.params with
                      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
                      | Ok { cursor } -> handle_list_resource_templates_eio id cursor)
-              | "resources/subscribe" ->
-                with_required_auth
-                  ~base_path
-                  ~id
-                  ~requirement:Auth_requirement.Requires_auth
-                  ?auth_token
-                  (fun _auth_token ->
-                     handle_resources_subscribe_eio id ?mcp_session_id req.params)
-              | "resources/unsubscribe" ->
-                with_required_auth
-                  ~base_path
-                  ~id
-                  ~requirement:Auth_requirement.Requires_auth
-                  ?auth_token
-                  (fun _auth_token ->
-                     handle_resources_unsubscribe_eio id ?mcp_session_id req.params)
               | "dashboard/hello" ->
                 with_required_auth
                   ~base_path
@@ -1050,26 +852,6 @@ let handle_request
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
                   handle_tools_call
-              | method_ when Mcp_sdk_adapter_masc.handles_method method_ ->
-                with_required_auth
-                  ~base_path
-                  ~id
-                  ~requirement:Auth_requirement.Requires_auth
-                  ?auth_token
-                  (fun auth_token ->
-                     match
-                       Mcp_sdk_adapter_masc.dispatch_request
-                         ~handle_call_tool_eio
-                         ~state
-                         ~profile
-                         ~sw
-                         ~clock
-                         ?mcp_session_id
-                         ?auth_token
-                         json
-                     with
-                     | Some response -> response
-                     | None -> `Null)
               | method_ ->
                 with_required_auth
                   ~base_path
@@ -1140,7 +922,7 @@ let run_stdio ~handle_request ~sw ~env state =
   let stdin = Eio.Stdenv.stdin env in
   let stdout = Eio.Stdenv.stdout env in
   let clock = Eio.Stdenv.clock env in
-  let transport_session_id = Mcp_session.generate () in
+  let transport_session_id = Transport_correlation_id.generate () in
   Log.Mcp.info "MASC MCP Server (Eio stdio mode)";
   Log.Mcp.info "Default workspace: %s" (Mcp_server.workspace_config state).Workspace.base_path;
   let buf = Eio.Buf_read.of_flow stdin ~max_size:(16 * 1024 * 1024) in

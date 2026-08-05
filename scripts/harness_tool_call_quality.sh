@@ -376,9 +376,9 @@ start_live_server() {
 
   MCP_URL="http://127.0.0.1:${PORT}/mcp"
   export MCP_URL
-  if ! initialize_mcp_session; then
+  if ! require_mcp_ready; then
     harness_print_log_tail "${SERVER_LOG}" 120
-    echo "live harness failed: MCP initialize did not return a session id" >&2
+    echo "live harness failed: MCP server/discover failed" >&2
     exit 1
   fi
 }

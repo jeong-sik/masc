@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-06-05
+last_verified: 2026-08-05
 code_refs:
   - lib/server/
   - lib/server/masc_grpc_server.ml
@@ -32,7 +32,7 @@ MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2 h2c, WebS
 핵심 설계 결정:
 
 - **httpun-eio** 기반 HTTP/1.1이 canonical transport. Eio direct-style async.
-- SSE는 per-session `Eio.Stream.t` mailbox 패턴. broadcast 시 global write-lock 없음.
+- 관찰 SSE는 `/events`의 per-connection `Eio.Stream.t` mailbox 패턴. broadcast 시 global write-lock 없음.
 - HTTP/2는 `h2-eio` 기반이며 `MASC_USE_H2=auto|1|0`로 listener mode를 제어한다. 기본값 `auto`는 HTTP/1.1과 h2c를 같은 포트에서 자동 감지한다.
 - gRPC, WebSocket, WebRTC는 보조지만 지원되는 트랜스포트다. 현재 runtime 기본값은 활성이고 `MASC_*_ENABLED=0`으로만 비활성화한다.
 - stdio 모드는 CLI-Tool-A MCP 클라이언트의 표준 연결 방식.
@@ -57,7 +57,7 @@ graph TB
     end
 
     subgraph TransportLayer["Transport Layer"]
-        MCP_HTTP[server_mcp_transport_http<br/>POST /mcp + GET /mcp SSE]
+        MCP_HTTP[server_mcp_transport_http<br/>POST /mcp]
         H2_GW[server_h2_gateway<br/>HTTP/2 h2c]
         WS_T[server_ws_standalone<br/>GET /ws discovery + ws://:8937/]
         GRPC_S[masc_grpc_server<br/>:8936 h2c]
@@ -78,7 +78,7 @@ graph TB
     CC -->|stdio| STDIO
     GC -->|HTTP POST| HTTP
     CX -->|HTTP POST| HTTP
-    DB -->|HTTP GET SSE| HTTP
+    DB -->|HTTP GET /events SSE| HTTP
     EXT -->|gRPC / WS| GRPC_S & WS_T
 
     STDIO --> MCP_EIO
@@ -184,31 +184,19 @@ MCP는 JSON-RPC 2.0 위에 구축된다. 모든 요청은 동일한 구조를 �
 
 ### 4.3 MCP Protocol Version
 
-지원 버전은 `Mcp_server.supported_protocol_versions`에 정의된다. 세션 생성 시 `initialize` 요청의 `params.protocolVersion` 필드로 버전을 협상한다.
+지원 버전은 `Mcp_transport_protocol.supported_protocol_versions`에 정의된다. 각 요청은 `Mcp-Protocol-Version` 헤더와 `params._meta.io.modelcontextprotocol/protocolVersion`에 같은 버전을 전달한다.
 
 - `mcp_protocol_versions`: 지원 버전 목록
 - `mcp_protocol_version_default`: 기본 버전
-- 세션별 버전은 `protocol_version_by_session` Hashtbl에 기록된다.
-- 동일 세션에서 버전 변경 시도는 `validate_protocol_version_continuity`가 거부한다.
+- 헤더와 `_meta` 값이 다르거나 지원 버전이 아니면 요청을 거부한다.
 
-### 4.4 MCP Session Management
+### 4.4 Stateless Requests
 
-HTTP MCP 세션은 `Mcp-Session-Id` 헤더로 식별된다. 세션 ID는 `Mcp_session.generate()`로 UUID-like 문자열을 생성한다.
-
-```
-mcp_session_record = {
-  id: string;
-  agent_name: string option;
-  created_at: float;
-  last_seen: float;
-}
-```
-
-세션 생명주기:
-
-1. **생성**: `initialize` 요청 시 새 session ID 발급. 서버가 `Mcp-Session-Id` 응답 헤더로 반환.
-2. **유지**: 이후 모든 요청에 `Mcp-Session-Id` 헤더 포함 필수 (initialize/ping 제외).
-3. **삭제**: `DELETE /mcp` 요청 시 세션 종료. SSE 연결 해제 + 리소스 구독 정리.
+HTTP MCP 요청은 상태를 공유하지 않는다. `POST /mcp`만 프로토콜 요청을 받고,
+`server/discover`로 서버 정보를 조회한다. MASC 관찰 스트림은 안정적인
+`/events` 관찰 스트림은 안정적인 `session_id` 쿼리를 반드시 받아야 한다. 이
+값은 SSE 연결 correlation 식별자이며 MCP 프로토콜 상태나 `Mcp-Session-Id`
+계약이 아니다.
 
 ### 4.5 Tool Profile (Endpoint 분리)
 
@@ -221,7 +209,7 @@ type tool_profile =
   | Operator_remote   (* /mcp/operator - operator 전용 도구 *)
 ```
 
-동일 session ID로 다른 profile의 엔드포인트에 접근하면 `409 Conflict`를 반환한다 (`validate_mcp_session_profile`).
+Profile은 요청 경로에서 결정되며 요청 사이에 상태를 공유하지 않는다.
 
 ---
 
@@ -231,9 +219,9 @@ type tool_profile =
 
 ### 5.1 동시성 모델
 
-SSE는 per-session `Eio.Stream.t` mailbox 패턴으로 구현된다:
+SSE는 per-connection `Eio.Stream.t` mailbox 패턴으로 구현된다:
 
-1. SSE 연결 시 `Sse.register`가 session당 `Eio.Stream.t`(capacity=1024)를 생성한다.
+1. SSE 연결 시 `Sse.register`가 연결 correlation ID별 `Eio.Stream.t`(capacity=1024)를 생성한다.
 2. `broadcast`는 registry의 읽기 스냅샷을 잡고, 각 client의 stream에 이벤트를 push한다.
 3. 각 SSE connection fiber는 `Sse.pop`으로 자기 stream을 drain하며, transport writer에 write한다.
 4. broadcast 중 global write-lock을 잡지 않으므로, 느린 client가 다른 client의 broadcast를 지연시키지 않는다.
@@ -261,11 +249,11 @@ SSE 세션은 두 종류로 분류된다:
 type broadcast_target = All | Observers | Agent streams
 ```
 
-`broadcast json`은 `broadcast_to All json`과 동일하다 (하위 호환).
+`broadcast json`은 `broadcast_to All json`과 동일하다.
 
 ### 5.3 Event Format
 
-SSE 이벤트는 MCP Spec 2025-03-26을 따른다:
+Observer SSE 이벤트는 MASC의 현재 스트림 계약을 따른다:
 
 ```
 id: 42
@@ -280,7 +268,7 @@ data: {"jsonrpc":"2.0","method":"notifications/message","params":{...}}
 
 ### 5.4 Resumability
 
-MCP Spec에서 MUST인 event replay를 지원한다:
+Observer reconnect를 위한 event replay를 지원한다:
 
 - 최근 100개 이벤트를 ring buffer에 저장 (`event_buffer`, 300초 TTL)
 - 클라이언트가 `Last-Event-Id` 헤더로 마지막 수신 ID를 전달하면, `get_events_after`로 누락분을 replay
@@ -350,15 +338,10 @@ typed authority만 소비한다. downstream에서 raw `Host`/`:authority`를 다
 | Method | Path | Handler | 설명 |
 |--------|------|---------|------|
 | POST | `/mcp` | `handle_post_mcp ~profile:Full` | MCP JSON-RPC (전체 도구) |
-| GET | `/mcp` | `handle_get_mcp` | SSE 스트림 (Agent stream) |
-| DELETE | `/mcp` | `handle_delete_mcp` | MCP 세션 종료 |
 | POST | `/mcp/managed` | `handle_post_mcp ~profile:Managed_agent` | 관리 에이전트 MCP |
-| GET | `/mcp/managed` | `handle_get_mcp` | 관리 에이전트 SSE |
-| DELETE | `/mcp/managed` | `handle_delete_mcp ~profile:Managed_agent` | 관리 에이전트 세션 종료 |
 | POST | `/mcp/operator` | `handle_post_mcp ~profile:Operator_remote` | Operator MCP |
-| GET | `/mcp/operator` | `handle_get_operator_mcp` | Operator SSE |
-| DELETE | `/mcp/operator` | `handle_delete_mcp ~profile:Operator_remote` | Operator 세션 종료 |
-| GET | `/sse` | `sse_simple_handler` | 단순 SSE (Observer) |
+| GET | `/events` | `handle_get_events` | 인증된 Observer SSE |
+| GET | `/events/presence` | `handle_presence_events` | 인증된 Presence SSE |
 | GET | `/ws` | `websocket_discovery_json` | WebSocket discovery JSON (`enabled`, `ws_port`, `ws_url`) |
 | POST | `/webrtc/offer` | `handle_offer_request` | WebRTC offer signaling |
 | POST | `/webrtc/answer` | `handle_answer_request` | WebRTC answer signaling |
@@ -460,14 +443,14 @@ let make_routes ~port ~host:_ ~sw ~clock =
 Access-Control-Allow-Origin: <origin>
 Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS
 Access-Control-Allow-Headers: Content-Type, Accept, Origin, Authorization,
-  Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id,
+  Idempotency-Key, Mcp-Protocol-Version, Mcp-Method, Mcp-Name, Last-Event-Id,
   X-MASC-Agent, X-MASC-Agent-Name
-Access-Control-Expose-Headers: Mcp-Session-Id, Mcp-Protocol-Version
+Access-Control-Expose-Headers: Mcp-Protocol-Version
 Access-Control-Allow-Credentials: true
 ```
 
 HTTP/1.1과 HTTP/2 모두 MCP 경로(`/mcp`, `/mcp/managed`,
-`/mcp/operator`, `/sse`, `POST /`)에서 같은 typed request authority를 기준으로
+`/mcp/operator`, `/events`, `POST /`)에서 같은 typed request authority를 기준으로
 Origin을 비교한다. `Origin`은 `get_multi`로 정확히 한 필드만 허용하고, path,
 query, fragment, trailing bytes 없이 HTTP(S) serialized-origin 문법 전체를
 소비한다. scheme/host/effective-port가 모두 같아야 `Same_origin`이며,
@@ -675,7 +658,7 @@ sequenceDiagram
     H->>H: Origin 검증
     H->>H: Protocol version 검증
     H->>T: handle_post_mcp(request, reqd)
-    T->>T: Session ID 추출/생성
+    T->>T: 요청별 transport correlation ID 생성
     T->>T: Profile 검증 (Full/Managed/Operator)
     T->>A: verify_mcp_auth(request)
     A-->>T: Ok / Error
@@ -699,17 +682,17 @@ sequenceDiagram
     end
 ```
 
-### 13.2 SSE 연결 흐름
+### 13.2 Observer SSE 연결 흐름
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant H as main_eio
-    participant T as server_mcp_transport_http_sse
+    participant T as server_mcp_transport_http
     participant S as Sse
 
-    C->>H: GET /mcp (Accept: text/event-stream)
-    H->>T: handle_get_mcp(request, reqd)
+    C->>H: GET /events?session_id=... (Accept: text/event-stream)
+    H->>T: handle_get_events(request, reqd)
     T->>T: check_sse_connect_guard(session_id)
     alt Rate limited
         T-->>C: 429 Too Many Requests
@@ -823,11 +806,11 @@ sequenceDiagram
 
 **INV-SERVER-001**: HTTP/1.1 서버는 항상 활성. H2는 opt-in이고, WS/gRPC/WebRTC는 default-on이며 `MASC_*_ENABLED=0`일 때만 비활성화된다.
 
-**INV-SERVER-002**: 모든 MCP POST 요청은 `initialize`/`ping` 제외 `Mcp-Session-Id` 헤더 필수. 없으면 `validate_session_requirement`가 거부한다.
+**INV-SERVER-002**: 모든 MCP POST 요청은 헤더와 `_meta`에 동일한 현재 프로토콜 버전을 전달한다.
 
-**INV-SERVER-003**: 동일 session ID로 다른 tool_profile의 엔드포인트 접근 불가 (`validate_mcp_session_profile` -> 409 Conflict).
+**INV-SERVER-003**: MCP HTTP 요청 사이에 프로토콜 상태를 저장하지 않는다.
 
-**INV-SERVER-004**: 동일 세션에서 protocol version 변경 불가 (`validate_protocol_version_continuity`).
+**INV-SERVER-004**: 응답 result 객체는 `resultType`을 포함한다.
 
 **INV-SERVER-005**: SSE broadcast는 registry에 global write-lock을 잡지 않는다. Read snapshot -> per-client stream add -> external subscriber notify 순서.
 
@@ -854,7 +837,7 @@ sequenceDiagram
 | Module | LOC | 역할 |
 |--------|-----|------|
 | `mcp_server_eio.ml` | 220 | JSON-RPC 핸들러 조립 (include 기반) |
-| `mcp_server_eio_protocol.ml` | 637 | initialize/ping/tools 메서드 디스패치 |
+| `mcp_server_eio_protocol.ml` | - | current MCP 메서드 디스패치 |
 | `mcp_server_eio_execute.ml` | 587 | 도구 실행 엔진 |
 | `mcp_server_eio_call_tool.ml` | 361 | 도구 호출 래퍼 |
 | `mcp_server_eio_tool_profile.ml` | 508 | Profile별 도구 필터링 |
@@ -873,12 +856,11 @@ sequenceDiagram
 | Module | LOC | 역할 |
 |--------|-----|------|
 | `server_runtime_bootstrap.ml` | 688 | 서버 부트스트랩 전체 |
-| `server_mcp_transport_http.ml` | 924 | HTTP MCP 트랜스포트 통합 |
-| `server_mcp_transport_http_mcp_handlers.ml` | 451 | POST/GET/DELETE /mcp 핸들러 |
-| `server_mcp_transport_http_session.ml` | 225 | MCP 세션 상태 관리 |
-| `server_mcp_transport_http_sse.ml` | 158 | SSE 연결 관리 + rate limiter |
+| `server_mcp_transport_http.ml` | - | stateless POST `/mcp` 및 GET `/events` 처리 |
+| `server_mcp_transport_http_session.ml` | - | Observer SSE correlation ID 조회 |
+| `server_mcp_transport_http_sse.ml` | - | SSE 연결 registry/guard 재노출 |
 | `server_mcp_transport_http_headers.ml` | 204 | HTTP 헤더 유틸리티 |
-| `server_mcp_transport_http_protocol.ml` | 135 | 프로토콜 버전/세션 유효성 |
+| `server_mcp_transport_http_protocol.ml` | - | 프로토콜 버전 유효성 |
 | `server_h2_gateway.ml` | 740 | HTTP/2 게이트웨이 (전체 라우팅) |
 | `server_h2_gateway_routes_extra.ml` | 171 | H2 추가 라우트 |
 | `server_mcp_transport_ws.ml` | 160 | WebSocket 트랜스포트 |

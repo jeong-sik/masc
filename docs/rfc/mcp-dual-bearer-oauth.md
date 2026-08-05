@@ -52,7 +52,7 @@ the local bootstrap form must never be exposed on a non-loopback authority.
 
 ```text
 Codex                    Browser                    MASC
-  | GET /mcp (no token)     |                        |
+  | POST /mcp (no token)    |                        |
   |<-- 401 + resource_metadata ---------------------|
   | GET protected-resource metadata -------------->|
   | GET authorization-server metadata ------------>|

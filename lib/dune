@@ -305,10 +305,10 @@
   masc.activity_graph
   ;; Prompt registry and override storage (extracted sub-library)
   masc.prompt_registry
-  ;; MCP transport/session leaf primitives (extracted sub-libraries)
+  ;; MCP transport/correlation leaf primitives (extracted sub-libraries)
   masc.mcp_transport_protocol
   masc.tool_invocation_ref
-  masc.mcp_session
+  masc.transport_correlation_id
   ;; Response envelope leaf primitive (extracted sub-library)
   masc.response
   ;; AG-UI event bridge leaf primitive (extracted sub-library)

@@ -13,7 +13,7 @@ val external_mcp :
   (t, error) result
 (** Builds an external MCP identity from the exact typed JSON-RPC request id
     and the stable transport session id. The session must satisfy
-    {!Mcp_session.is_valid}. *)
+    {!Transport_correlation_id.is_valid}. *)
 
 val to_yojson : t -> Yojson.Safe.t
 (** Typed, inspectable projection. *)

@@ -130,15 +130,7 @@ let enabled () =
   Env_config.KeeperMemoryOs.recall_enabled ()
 ;;
 
-let render_if_enabled
-      ~keepers_dir
-      ~keeper_id
-      ~now
-      ~trace_id
-      ~turn
-      ~masc_root
-      ()
-  =
+let render_if_enabled ~keepers_dir ~keeper_id ~now () =
   if not (enabled ())
   then None
   else
@@ -158,19 +150,5 @@ let render_if_enabled
     in
     match String.trim result.block with
     | "" -> None
-    | block ->
-      Keeper_recall_injection_ledger.append
-        ?failure_reason:
-          (Option.map
-             unavailable_reason_to_label
-             result.failure_reason)
-        ~masc_root
-        ~keeper_id
-        ~trace_id
-        ~turn
-        ~injected_fact_keys:result.injected_fact_keys
-        ~n_facts_in_store:result.n_facts_in_store
-        ~now
-        ();
-      Some block
+    | block -> Some block
 ;;

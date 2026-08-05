@@ -382,9 +382,6 @@ let assemble_hooks
                        ~keepers_dir:memory_os_keepers_dir
                        ~keeper_id:meta.name
                        ~now:(Time_compat.now ())
-                       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                       ~turn
-                       ~masc_root:(Workspace.masc_root_dir config)
                        ())
                  with
                  | None -> ()

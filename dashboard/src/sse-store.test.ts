@@ -40,6 +40,7 @@ const requestNamespaceTruthNow = vi.fn<() => void>()
 const requestNamespaceTruth = vi.fn<() => void>()
 const showToast = vi.fn<(message: string, kind?: string, durationMs?: number) => void>()
 const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
+const hydrateOasTelemetrySample = vi.fn<(event: unknown) => void>()
 const compositeTick = signal({ name: '', ts_unix: 0 })
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
@@ -90,6 +91,9 @@ async function loadSseStore() {
     replayOasRuntimeTelemetry,
     applyOasRuntimeEvent: vi.fn(),
   }))
+  vi.doMock('./oas-telemetry-store', () => ({
+    hydrateOasTelemetrySample,
+  }))
   vi.doMock('./composite-signals', () => ({
     compositeTick,
     hydrateFleetCompositeSnapshot,
@@ -131,6 +135,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     showToast.mockClear()
     replayOasRuntimeTelemetry.mockClear()
     replayOasRuntimeTelemetry.mockResolvedValue(undefined)
+    hydrateOasTelemetrySample.mockClear()
     refreshActiveKeeperChatHistory.mockReset()
     reconcileKeeperChatReceipts.mockReset()
     reconcileKeeperChatReceipts.mockResolvedValue(undefined)
@@ -159,6 +164,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     vi.doUnmock('./tab-refresh')
     vi.doUnmock('./components/common/toast')
     vi.doUnmock('./oas-runtime-store')
+    vi.doUnmock('./oas-telemetry-store')
     vi.doUnmock('./composite-signals')
     vi.doUnmock('./goal-tree-state')
     vi.doUnmock('./router')
@@ -664,6 +670,27 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
     expect(compositeTick.value).toEqual({ name: 'qa-king', ts_unix: 1710000000.123 })
     expect(hydrateFleetCompositeSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('routes oas_telemetry_sample to the telemetry read model without an HTTP refresh', async () => {
+    const { sseStore } = await loadSseStore()
+
+    // The push payload carries the sample itself (schemas/sse.ts validates the
+    // envelope), so the read model hydrates directly — nothing to re-fetch.
+    sseStore.routeServerPushEvent({
+      type: 'oas_telemetry_sample',
+      provider_id: 'runtime',
+      model_id: 'runtime',
+      payload: {
+        sample: { ttfb_ms: 120.5, total_duration_ms: 845.2, status: { kind: 'success' } },
+        recorded_at: 1_712_000_000,
+      },
+      ts_unix: 1_712_000_000,
+    })
+    await flushAsyncWork()
+
+    expect(hydrateOasTelemetrySample).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).not.toHaveBeenCalled()
   })
 
   it('routes board reaction changes through the board refresh budget', async () => {

@@ -44,6 +44,7 @@ const BACKEND_EMITTED: Record<string, string> = {
   keeper_composite_changed: '../lib/server/server_mcp_transport_ws.ml',
   keeper_heartbeat: '../lib/keeper/keeper_heartbeat_snapshot.ml',
   keeper_turn_complete: '../lib/keeper/keeper_hooks_oas.ml',
+  oas_telemetry_sample: '../lib/runtime/dashboard_oas_bridge.ml',
   namespace_truth_snapshot: '../lib/server/server_mcp_transport_ws.ml',
   operator_digest: '../lib/server/server_dashboard_http_core_digest_refresh.ml',
   operator_snapshot: '../lib/server/server_mcp_transport_ws.ml',

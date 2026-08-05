@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 210 unique knobs across 8 modules.
+**Total**: 209 unique knobs across 8 modules.
 
-**Typed getter classification**: 38/123 tagged (`operator`: 38, `algorithm`: 0, `unclassified`: 85).
+**Typed getter classification**: 38/122 tagged (`operator`: 38, `algorithm`: 0, `unclassified`: 84).
 
 ## Env_config_core (23 knobs; typed classification 2/5)
 
@@ -196,11 +196,11 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 72 | Max age for rate limit entries before cleanup (seconds) |
 | `MASC_SCHEDULE_RUNNER_INTERVAL_SEC` | typed:float | unclassified | unclassified | 141 |  |
 
-## Env_config_sandbox (15 knobs; typed classification 1/14)
+## Env_config_sandbox (15 knobs; typed classification 1/13)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_KEEPER_DOCKER_PLAYGROUND` | typed:bool | unclassified | unclassified | 79 |  |
+| `MASC_KEEPER_DOCKER_PLAYGROUND` | feature_flag | n/a | n/a | 79 |  |
 | `MASC_KEEPER_DOCKER_PLAYGROUND_ROOT` | typed:string | Sandbox | operator | 85 | @category Sandbox @ops_class operator |
 | `MASC_KEEPER_SANDBOX_CLEANUP_ENABLED` | typed:bool | unclassified | unclassified | 58 |  |
 | `MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC` | typed:int | unclassified | unclassified | 63 |  |

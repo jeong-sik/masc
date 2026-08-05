@@ -90,8 +90,41 @@ done < <(find lib -type f -name '*.ml' \
            -not -path '*/test/*' \
            -print0)
 
+# An allowlist entry that matches no detected site exempts nothing. Line
+# anchors drift whenever a file is edited above them and die outright when a
+# file is split, so a stale entry is not a harmless leftover: it reports the
+# site as known-and-accepted when the lint no longer sees it there at all.
+stale_entries=""
+stale_count=0
+if [[ -f "$ALLOWLIST_FILE" ]]; then
+  # Match against a file rather than `printf ... | grep -q`: under pipefail,
+  # grep -q exits on the first hit and the writer takes SIGPIPE, so the
+  # pipeline status flips to failure depending on who finishes first.
+  detected_file="$(mktemp)"
+  trap 'rm -f "$detected_file"' EXIT
+  printf '%s' "$detected_keys" > "$detected_file"
+  while IFS= read -r entry; do
+    [[ -z "$entry" || "$entry" =~ ^[[:space:]]*# ]] && continue
+    if ! grep -qxF "$entry" "$detected_file"; then
+      stale_entries+="${entry}"$'\n'
+      stale_count=$((stale_count + 1))
+    fi
+  done < "$ALLOWLIST_FILE"
+fi
+
 echo "" >&2
-echo "Scanned $files_scanned .ml files. allowlisted=$allowlisted, new=$new_violations." >&2
+echo "Scanned $files_scanned .ml files. allowlisted=$allowlisted, new=$new_violations, stale=$stale_count." >&2
+
+if [[ "$stale_count" -gt 0 ]]; then
+  {
+    echo ""
+    echo "Allowlist entries matching no detected site ($stale_count):"
+    printf '%s' "$stale_entries" | sed 's/^/  /'
+    echo ""
+    echo "Remove them. Each one claims an exemption the lint cannot see,"
+    echo "so the allowlist size overstates how much debt is actually tracked."
+  } >&2
+fi
 
 if [[ "$new_violations" -gt 0 ]]; then
   cat >&2 <<'EOF'
@@ -119,7 +152,7 @@ EOF
 fi
 
 # Phase 1: always exit 0 (advisory). Phase 5 flips this to honor BLOCKING.
-if [[ "$BLOCKING" == "1" && "$new_violations" -gt 0 ]]; then
+if [[ "$BLOCKING" == "1" && ( "$new_violations" -gt 0 || "$stale_count" -gt 0 ) ]]; then
   exit 1
 fi
 exit 0

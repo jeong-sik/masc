@@ -175,18 +175,41 @@ let list_dir t ~relative =
 (* Dispatch                                                         *)
 (* ================================================================ *)
 
+(* How one lookup ended. A closed sum rather than a string because the log
+   level is derived from it: a rejected lookup reported at the same level as a
+   resolved one is invisible in exactly the case an operator needs to see. *)
+type lookup_outcome =
+  | Resolved
+  | Rejected
+  | Unknown_tool
+  | Invalid_argument
+
+let lookup_outcome_label = function
+  | Resolved -> "resolved"
+  | Rejected -> "rejected"
+  | Unknown_tool -> "unknown_tool"
+  | Invalid_argument -> "invalid_argument"
+;;
+
+let lookup_outcome_level = function
+  | Resolved -> Log.Info
+  | Rejected | Unknown_tool | Invalid_argument -> Log.Warn
+;;
+
 (* What the judge looked at, and whether it got an answer. An operator reading
    the logs otherwise cannot tell a review that inspected the tree from one that
    only read the submitted snapshot, and that difference is the whole point of
    this surface. Content is never logged — only the path asked for, which is
    already the model's own argument. *)
 let log_lookup t ~name ~argument ~outcome =
-  Log.Task.info
-    "[verification-lookup] tool=%s root=%s argument=%s outcome=%s"
-    name
-    t.ownership_root
-    argument
-    outcome
+  Log.Task.emit
+    (lookup_outcome_level outcome)
+    (Printf.sprintf
+       "[verification-lookup] tool=%s root=%s argument=%s outcome=%s"
+       name
+       t.ownership_root
+       argument
+       (lookup_outcome_label outcome))
 ;;
 
 let dispatch t ~name ~args =
@@ -196,7 +219,7 @@ let dispatch t ~name ~args =
       Printf.sprintf "unknown tool %s; this review offers %s" name
         (String.concat ", " (List.map tool_name all_tools))
     in
-    log_lookup t ~name ~argument:"" ~outcome:"unknown_tool";
+    log_lookup t ~name ~argument:"" ~outcome:Unknown_tool;
     Error detail
   | Some tool ->
     (* Both tools address the producer's tree by the same [path] argument. The
@@ -204,7 +227,7 @@ let dispatch t ~name ~args =
        fails to compile here rather than silently reading a missing key. *)
     (match Json_util.require_string args "path" with
      | Error detail ->
-       log_lookup t ~name ~argument:"" ~outcome:"invalid_argument";
+       log_lookup t ~name ~argument:"" ~outcome:Invalid_argument;
        Error detail
      | Ok relative ->
        let result =
@@ -213,6 +236,6 @@ let dispatch t ~name ~args =
          | List_dir -> list_dir t ~relative
        in
        log_lookup t ~name ~argument:relative
-         ~outcome:(match result with Ok _ -> "ok" | Error _ -> "rejected");
+         ~outcome:(match result with Ok _ -> Resolved | Error _ -> Rejected);
        result)
 ;;

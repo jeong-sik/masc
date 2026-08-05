@@ -298,9 +298,10 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
        let tool_name =
          Safe_ops.json_string ~default:"unknown" "tool_name" e.payload
        in
-       let success =
-         Safe_ops.json_bool ~default:true "success" e.payload
-       in
+       (* The emitter always records success, so a missing or unreadable field
+          means the row is damaged. Defaulting to true rendered such a row as a
+          succeeded call. Carry the uncertainty instead. *)
+       let success = Safe_ops.json_bool_opt "success" e.payload in
        let duration_ms =
          Safe_ops.json_int ~default:0 "duration_ms" e.payload
        in
@@ -320,7 +321,7 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
              `Assoc
                [
                  ("tool_name", `String tool_name);
-                 ("success", `Bool success);
+                 ("success", Json_util.bool_opt_to_json success);
                  ("duration_ms", `Int duration_ms);
                  ("error", Json_util.string_opt_to_json error_str);
                  ("source", Json_util.string_opt_to_json source_str);

@@ -87,50 +87,6 @@ let test_record_entry () =
     Alcotest.(check (float 0.0001)) "total cost" 0.0001 acc.Trajectory.total_cost)
 
 (* ================================================================ *)
-(* Test: detect_entropy                                              *)
-(* ================================================================ *)
-
-let test_entropy_not_triggered () =
-  with_tmpdir (fun dir ->
-    let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-003" ~generation:0 () in
-    (* Add 1 consecutive call — with +1 for upcoming, count=2 < threshold 3 *)
-    let mk_entry tool = { Trajectory.
-      ts = 1000.0; ts_iso = ""; turn = 1; round = 0;
-      tool_name = tool; args_json = "{}";
-      gate_decision = Trajectory.Pass;
-      result = Some "ok"; duration_ms = 10;
-      error = None; cost_usd = 0.0001;
-      execution_id = None;
-    } in
-    Trajectory.record_entry acc (mk_entry "tool_execute");
-    let entropy = Trajectory.detect_entropy ~threshold:3 acc "tool_execute" in
-    Alcotest.(check bool) "entropy not triggered" true (entropy = None))
-
-let test_entropy_triggered () =
-  with_tmpdir (fun dir ->
-    let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-004" ~generation:0 () in
-    let mk_entry tool = { Trajectory.
-      ts = 1000.0; ts_iso = ""; turn = 1; round = 0;
-      tool_name = tool; args_json = "{}";
-      gate_decision = Trajectory.Pass;
-      result = Some "ok"; duration_ms = 10;
-      error = None; cost_usd = 0.0001;
-      execution_id = None;
-    } in
-    Trajectory.record_entry acc (mk_entry "tool_execute");
-    Trajectory.record_entry acc (mk_entry "tool_execute");
-    Trajectory.record_entry acc (mk_entry "tool_execute");
-    let entropy = Trajectory.detect_entropy ~threshold:3 acc "tool_execute" in
-    match entropy with
-    | Some (_name, count) ->
-        Alcotest.(check int) "entropy count" 4 count
-    | None -> Alcotest.fail "Expected entropy to be triggered")
-
-(* ================================================================ *)
 (* Test: increment_turn                                              *)
 (* ================================================================ *)
 
@@ -982,10 +938,6 @@ let () =
       Alcotest.test_case "increment_turn" `Quick test_increment_turn;
       Alcotest.test_case "set_turn adopts runtime turn" `Quick test_set_turn_adopts_runtime_turn;
       Alcotest.test_case "calls_in_current_turn" `Quick test_calls_in_current_turn;
-    ]);
-    ("entropy", [
-      Alcotest.test_case "not triggered" `Quick test_entropy_not_triggered;
-      Alcotest.test_case "triggered" `Quick test_entropy_triggered;
     ]);
     ("finalize", [
       Alcotest.test_case "finalize completed" `Quick test_finalize;

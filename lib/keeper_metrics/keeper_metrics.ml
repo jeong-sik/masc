@@ -70,7 +70,6 @@ type t =
   | PersistenceLaneInFlight
   | PersistenceLaneDuration
   | CrashPersistenceFailures
-  | GenerationLineageFailures
   | KeepaliveSignalFailures
   | BoardSignalRoutedTotal
   | BoardSignalDeliveryTotal
@@ -275,7 +274,6 @@ let to_string = function
   | PersistenceLaneInFlight -> "masc_keeper_persistence_lane_in_flight"
   | PersistenceLaneDuration -> "masc_keeper_persistence_lane_duration_seconds"
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
-  | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
   | BoardSignalRoutedTotal -> "masc_keeper_board_signal_routed_total"
   | BoardSignalDeliveryTotal -> "masc_keeper_board_signal_delivery_total"

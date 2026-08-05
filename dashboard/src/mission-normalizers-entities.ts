@@ -79,7 +79,6 @@ export function normalizeAttentionQueueItem(raw: unknown): DashboardMissionAtten
     evidence,
     evidence_preview: asStringArray(raw.evidence_preview),
     grounded_verdict: groundedVerdict,
-    last_seen_at: asString(raw.last_seen_at) ?? null,
   }
 }
 

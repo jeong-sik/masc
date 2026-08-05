@@ -149,7 +149,6 @@ val with_distributed_lock :
   ?clock:_ Eio.Time.clock ->
   config ->
   string ->
-  string ->
   (unit -> 'a) ->
   'a
 
@@ -159,7 +158,6 @@ val with_distributed_lock :
 val with_distributed_lock_r :
   ?clock:_ Eio.Time.clock ->
   config ->
-  string ->
   string ->
   (unit -> 'a) ->
   ('a, masc_error) result

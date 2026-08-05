@@ -61,7 +61,6 @@ type t =
   | PersistenceLaneInFlight
   | PersistenceLaneDuration
   | CrashPersistenceFailures
-  | GenerationLineageFailures
   | KeepaliveSignalFailures
   | BoardSignalRoutedTotal
   | BoardSignalDeliveryTotal

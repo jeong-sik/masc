@@ -551,9 +551,7 @@ let line_block label value =
   else Printf.sprintf "%s: %s\n" label value
 
 let autonomous_trigger_lines
-    ~(decision : Keeper_world_observation.keeper_cycle_decision)
-    ~(observation : Keeper_world_observation.world_observation) : string list =
-  let _ = observation in
+    ~(decision : Keeper_world_observation.keeper_cycle_decision) : string list =
   match decision.channel, decision.should_run with
   | Keeper_world_observation.Scheduled_autonomous, true ->
       let lines =
@@ -716,7 +714,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
   let connector_presence_failures = observation.connected_surface_failures in
   let autonomous_trigger =
     match turn_decision with
-    | Some decision -> autonomous_trigger_lines ~decision ~observation
+    | Some decision -> autonomous_trigger_lines ~decision
     | None -> []
   in
   let content_of : Keeper_context_layers.layer_id -> string option = function

@@ -11,7 +11,7 @@ type history_line_action =
   | Move_internal
   | Drop_line
 
-val classify_history_entry : source:string -> content:string -> history_line_action
+val classify_history_entry : source:string -> history_line_action
 
 val history_path_for_source : session_dir:string -> source:string option -> string
 

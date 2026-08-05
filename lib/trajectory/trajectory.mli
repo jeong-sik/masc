@@ -220,11 +220,6 @@ val flush_all_pending : unit -> unit
     accumulators. Called by the background flush fiber in
     server_runtime_bootstrap. *)
 
-val detect_entropy :
-  ?threshold:int -> ?args_json:string -> accumulator -> string -> (string * int) option
-(** Detect if [tool_name] has been called [threshold]+ times consecutively.
-    If [args_json] is provided, only consecutive IDENTICAL calls (same tool and same args) are counted. *)
-
 val calls_in_current_turn : accumulator -> int
 
 (** {1 Tool stats aggregation}

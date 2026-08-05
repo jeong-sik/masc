@@ -12,7 +12,6 @@
   keeper_crash_persistence_failure_site
   keeper_execution_receipt_failure_site
   keeper_fs_failure_site
-  keeper_generation_lineage_failure_site
   keeper_metric_emit_dropped_site
   keeper_metrics_sse_failure_kind
   keeper_paused_state_persist_phase

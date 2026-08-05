@@ -7,13 +7,11 @@
 
 (** Derive the trigger list from the observation. *)
 val observed_triggers_of_observation :
-  ?meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   string list
 
 (** Derive the affordance list from the observation. *)
 val observed_affordances_of_observation :
-  ?meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   string list
 

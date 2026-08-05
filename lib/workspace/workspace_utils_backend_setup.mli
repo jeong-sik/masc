@@ -39,4 +39,5 @@ val create_backend : Backend_types.config -> (storage_backend, Backend_types.err
 val reset_default_config_cache : unit -> unit
 val build_default_config : string -> config
 val default_config : string -> config
-val default_config_eio : sw:Eio.Switch.t -> ?on_backend_ready:(storage_backend -> unit) -> string -> config
+val default_config_uncached :
+  ?on_backend_ready:(storage_backend -> unit) -> string -> config

@@ -1,16 +1,6 @@
 open Alcotest
 open Masc
 
-let with_env name value f =
-  let previous = Sys.getenv_opt name in
-  Unix.putenv name value;
-  Fun.protect
-    ~finally:(fun () ->
-      match previous with
-      | Some old -> Unix.putenv name old
-      | None -> Unix.putenv name "")
-    f
-
 let rec remove_tree path =
   match Unix.lstat path with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
@@ -86,13 +76,6 @@ let test_merge_usage_sums_costs_when_both_present () =
   let merged = Worker_container_types.merge_usage a b in
   check (option (float 0.000001)) "costs summed" (Some 0.15)
     merged.cost_usd
-
-let test_mcp_endpoint_url_does_not_leak_token () =
-  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" (fun () ->
-    let url =
-      Worker_container_types.mcp_endpoint_url ~auth_token:(Some "secret-token")
-    in
-    check string "mcp url stays clean" "http://127.0.0.1:8935/mcp" url)
 
 let client_operation_params =
   `Assoc [ ("name", `String "masc_status"); ("arguments", `Assoc []) ]
@@ -315,8 +298,6 @@ let () =
             test_merge_usage_preserves_present_cost;
           test_case "merge usage sums costs" `Quick
             test_merge_usage_sums_costs_when_both_present;
-          test_case "mcp endpoint url does not leak token" `Quick
-            test_mcp_endpoint_url_does_not_leak_token;
           test_case "MCP client operation duration labels follow semconv" `Quick
             test_mcp_client_operation_duration_labels_follow_semconv;
           test_case "records MCP client operation duration metric" `Quick

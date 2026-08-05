@@ -42,7 +42,7 @@ keeper는 turn마다 재기동되지 않는다. keeper당 장기 Eio fiber 하�
 3. 깬 뒤 gate의 `pending_signal_present`(`keeper_heartbeat_loop.ml:504-533`)가 큐를 보고 Emit 강제 (RFC-0020 Rule 2).
 4. turn dispatch의 `collect_keepalive_board_events`가 큐를 소비 → 결과가 turn 입력으로 도착.
 
-`reactive_wake`(`last_wake_source=Woken`, `:852-857`)는 broadcast로 깬 turn이 전체 keeper를 스탬피드시키는 것을 억제한다.
+`reactive_wake`는 이 turn의 `wake_reason`을 정한다(`keeper_heartbeat_loop.ml:650-659`). 소비된 stimulus가 있으면 `Woken [payload…]`, 없고 `reactive_wake=true`면 `Woken []`, 둘 다 아니면 `Proactive_tick`.
 
 ### 1.5 별도 wait/wake 추상화: pulse.ml
 

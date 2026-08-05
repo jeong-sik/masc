@@ -28,8 +28,8 @@ let append_decision_record
     ?terminal_reason
     () : unit =
   let now_ts = Time_compat.now () in
-  let trigger_signals = observed_triggers_of_observation ~meta observation in
-  let affordances = observed_affordances_of_observation ~meta observation in
+  let trigger_signals = observed_triggers_of_observation observation in
+  let affordances = observed_affordances_of_observation observation in
   let response_preview =
     match result with
     | Some r

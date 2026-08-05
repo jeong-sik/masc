@@ -47,7 +47,6 @@ let test_backend_non_compressed_passthrough () =
 let test_backend_decompress_failure () =
   let result = BackendCompression.decompress
       ~orig_size:128
-      ~used_dict:false
       "not-a-valid-zstd-payload"
   in
   Alcotest.(check (option string)) "invalid payload returns none" None result
@@ -106,7 +105,6 @@ let test_codec_compress_large () =
 let test_codec_decompress_failure () =
   match Compression_codec.decompress
           ~orig_size:256
-          ~encoding:Compression_codec.Standard
           "not-a-valid-zstd-payload"
   with
   | Ok _ -> Alcotest.fail "expected invalid payload to fail decompression"

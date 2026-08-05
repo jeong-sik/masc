@@ -648,7 +648,6 @@ type owner_initialization_error =
   | Keeper_persistence_start_failed of
       Server_bootstrap_loops.keeper_persistence_start_error
   | Startup_path_guard_rejected of Server_base_path_diagnostics.t
-  | Strict_path_guard_rejected of Server_base_path_diagnostics.t
   | Lazy_startup_barrier_failed of Server_startup_state.lazy_prepare_error
   | Readiness_transition_failed of Server_startup_state.state_ready_error
   | Readiness_publication_failed of
@@ -689,10 +688,6 @@ let owner_initialization_error_to_string = function
     Option.value
       diagnostics.Server_base_path_diagnostics.warning
       ~default:"startup path guard rejected malformed runtime state"
-  | Strict_path_guard_rejected diagnostics ->
-    Option.value
-      diagnostics.Server_base_path_diagnostics.warning
-      ~default:"strict BasePath guard rejected the runtime path configuration"
   | Lazy_startup_barrier_failed error ->
     Server_startup_state.lazy_prepare_error_to_string error
   | Readiness_transition_failed error ->
@@ -752,14 +747,9 @@ let initialize_owner_state_blocking
     raise
       (Owner_initialization_failed
          (Startup_path_guard_rejected path_diagnostics));
-  if Server_base_path_diagnostics.strict_violation path_diagnostics
-  then
-    raise
-      (Owner_initialization_failed
-         (Strict_path_guard_rejected path_diagnostics));
   (* [main_eio] caches the normalized operator input before entering Eio.
      Replace that preflight value with the canonical owner identity before
-     [Workspace.default_config_eio] constructs its backend, otherwise the
+     [Workspace.default_config_uncached] constructs its backend, otherwise the
      config record says canonical while its backend still follows an alias. *)
   Workspace_utils_backend_setup.cache_resolved_base_path base_path;
   Discovery_cache.set_env ~sw ~net;

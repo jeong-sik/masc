@@ -15,7 +15,6 @@ type dashboard_compute_mode =
 
 (* Dashboard runtime helpers extracted to
    [Server_dashboard_http_core_runtime] (godfile decomp). *)
-let dashboard_runtime = Server_dashboard_http_core_runtime.dashboard_runtime
 let run_dashboard_compute = Server_dashboard_http_core_runtime.run_dashboard_compute
 let state_dashboard_runtime_caps = Server_dashboard_http_core_runtime.state_dashboard_runtime_caps
 
@@ -237,7 +236,6 @@ let dashboard_shell_status_json =
   Server_dashboard_http_core_entities.dashboard_shell_status_json
 ;;
 
-let dashboard_task_json = Server_dashboard_http_core_entities.dashboard_task_json
 let dashboard_agent_json = Server_dashboard_http_core_entities.dashboard_agent_json
 let dashboard_message_json = Server_dashboard_http_core_entities.dashboard_message_json
 

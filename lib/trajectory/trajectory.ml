@@ -695,32 +695,6 @@ let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Keeper.error "Failed to persist summary for %s: %s" acc.trace_id (Printexc.to_string exn));
   traj
 
-(* ================================================================ *)
-(* Entropy detection                                                *)
-(* ================================================================ *)
-
-(** Detect whether the current candidate call would make a consecutive streak of
-    calls to [tool_name] reach or exceed [threshold]. The count includes the
-    candidate call being checked, so rejection can occur before executing the
-    threshold-th call.
-    If [args_json] is provided, only consecutive calls with the same tool name
-    and the same raw [args_json] string are counted; this is string equality,
-    not semantic JSON equality. *)
-let detect_entropy ?(threshold = 3) ?args_json (acc : accumulator) (tool_name : string) : (string * int) option =
-  let recent =
-    acc.entries
-    |> List.to_seq
-    |> Seq.take_while (fun e ->
-         e.tool_name = tool_name &&
-         match args_json with
-         | Some args -> e.args_json = args
-         | None -> true)
-    |> List.of_seq
-  in
-  let count = List.length recent + 1 in  (* +1 for the upcoming call *)
-  if count >= threshold then Some (tool_name, count)
-  else None
-
 (** Count tool calls in current turn. *)
 let calls_in_current_turn (acc : accumulator) : int =
   List_util.count_if (fun (e : tool_call_entry) -> e.turn = acc.turn) acc.entries

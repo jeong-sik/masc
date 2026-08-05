@@ -250,9 +250,7 @@ let apply_resilience_wirein
 
    Typed tool emission is a normal Keeper capability, not a rollout gate. *)
 let apply_tool_emission_wirein
-    ~(now : float)
     (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
-  let _ = now in
   match lifecycle.checkpoint with
   | None -> lifecycle
   | Some cp -> (
@@ -461,7 +459,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
       ?strategy_executor:resilience_strategy_executor
       ~now:now_ts body
   in
-  let body = apply_tool_emission_wirein ~now:now_ts body in
+  let body = apply_tool_emission_wirein body in
   apply_multimodal_wirein ~now:now_ts body
 
 type rejection_disposition =

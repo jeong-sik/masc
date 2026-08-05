@@ -50,13 +50,6 @@ val resolve_claim_goal_scope_for_tasks :
     that this keeper cannot claim must not suppress fallback to eligible
     out-of-scope work. *)
 
-val resolve_observation_claim_goal_scope :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  unit ->
-  claim_goal_scope
-(** Signal-only claim scope for world observations. *)
-
 val runtime_contract_json :
   config:Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 (** Keeper-visible runtime contract. Backend implementation details such as

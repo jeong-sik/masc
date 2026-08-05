@@ -28,9 +28,3 @@ let of_string = function
 ;;
 
 let all_arms = [ Handled; No_handler ]
-
-let classify_result_option r =
-  match r with
-  | Some _ -> Handled
-  | None -> No_handler
-;;

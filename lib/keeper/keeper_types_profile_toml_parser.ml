@@ -354,10 +354,8 @@ let merge_string_list ~base overlay =
   match overlay with [] -> base | xs -> xs
 
 let merge_keeper_profile_defaults
-    ~agent_name
     ~(base : keeper_profile_defaults)
     ~(overlay : keeper_profile_defaults) : keeper_profile_defaults =
-  ignore agent_name;
   let prefer overlay_value base_value =
     match overlay_value with Some _ -> overlay_value | None -> base_value
   in

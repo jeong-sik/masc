@@ -12,12 +12,10 @@ type usage_trust = Keeper_usage_trust.t =
   | Usage_untrusted of string list
 
 val observed_triggers_of_observation :
-  ?meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   string list
 
 val observed_affordances_of_observation :
-  ?meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   string list
 

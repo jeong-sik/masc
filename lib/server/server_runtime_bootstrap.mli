@@ -144,7 +144,6 @@ type owner_initialization_error =
   | Keeper_persistence_start_failed of
       Server_bootstrap_loops.keeper_persistence_start_error
   | Startup_path_guard_rejected of Server_base_path_diagnostics.t
-  | Strict_path_guard_rejected of Server_base_path_diagnostics.t
   | Lazy_startup_barrier_failed of Server_startup_state.lazy_prepare_error
   | Readiness_transition_failed of Server_startup_state.state_ready_error
   | Readiness_publication_failed of

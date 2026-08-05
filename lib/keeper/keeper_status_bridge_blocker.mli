@@ -29,4 +29,4 @@ val is_stale_turn_timeout_blocker_class : string -> bool
 val is_fiber_unresolved_blocker_class : string -> bool
 
 val runtime_blocker_surface_class : blocker_class -> blocker_class
-val runtime_blocker_class_label : ?summary:string -> blocker_class -> string
+val runtime_blocker_class_label : blocker_class -> string

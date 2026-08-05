@@ -32,11 +32,7 @@ type history_line_action =
   | Move_internal
   | Drop_line
 
-let classify_history_entry ~(source : string) ~(content : string) :
-    history_line_action =
-  (* World-state headings can appear in user-authored long-term memory.
-     Only explicit prompt/internal sources control history routing. *)
-  ignore content;
+let classify_history_entry ~(source : string) : history_line_action =
   if Keeper_types_support.is_prompt_history_source source
   then Drop_line
   else if Keeper_types_support.is_internal_history_source source
@@ -57,8 +53,7 @@ let persist_message ?source session msg =
     | Some raw -> String.trim raw
     | None -> ""
   in
-  let content_text = Agent_sdk.Types.visible_text_of_message msg in
-  if classify_history_entry ~source:source_text ~content:content_text = Drop_line
+  if classify_history_entry ~source:source_text = Drop_line
   then ()
   else
     let path = history_path_for_source ~session_dir:session.session_dir ~source in

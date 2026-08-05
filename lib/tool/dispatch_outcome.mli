@@ -35,12 +35,3 @@ val of_string : string -> t option
     order.  Used by tests to assert exhaustiveness and by
     [Tool_telemetry] to register the counter label set up front. *)
 val all_arms : t list
-
-(** [classify_result_option r] maps an optional handler result to a
-    typed [t]:
-    {ul
-    {- [r = Some _] → [Handled]}
-    {- [r = None]   → [No_handler]}}
-    Used by dispatch finalization and tests that need to classify optional
-    handler results without reimplementing the outcome mapping. *)
-val classify_result_option : 'a option -> t

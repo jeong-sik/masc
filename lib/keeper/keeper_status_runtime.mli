@@ -4,7 +4,6 @@ open Keeper_types_profile
 
 val active_model_of_meta : keeper_meta -> string
 val active_model_label_of_meta : keeper_meta -> string
-val next_model_hint_of_meta : keeper_meta -> string option
 val string_of_fiber_health : fiber_health -> string
 (** Parse the "status" field of an agent-status snapshot blob (produced by
     {!parse_agent_status}) into the closed [Masc_domain.agent_status] ADT.
@@ -29,7 +28,6 @@ val keeper_diagnostic_json :
   Yojson.Safe.t
 
 val augment_keeper_diagnostic_json :
-  meta:keeper_meta ->
   keepalive_running:bool ->
   keepalive_started_at:float option ->
   now_ts:float ->

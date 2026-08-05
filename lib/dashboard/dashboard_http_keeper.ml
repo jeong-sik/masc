@@ -651,7 +651,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
 	                  ~history_items:conversation_items
 	                  ~now_ts
 	                |> Keeper_status_runtime.augment_keeper_diagnostic_json
-	                     ~meta:m
 	                     ~keepalive_running
 	                     ~keepalive_started_at:(runtime_keepalive_started_at config m)
                      ~now_ts
@@ -801,9 +800,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                      (Keeper_model_labels.configured_model_labels_of_meta m)) );
               ("primary_model", `String (Keeper_meta_contract.runtime_id_of_meta m));
               ("active_model", `String (Keeper_status_runtime.active_model_of_meta m));
-              ( "next_model_hint"
-              , Json_util.string_opt_to_json
-                  (Keeper_status_runtime.next_model_hint_of_meta m) );
+              ("next_model_hint", `Null);
               ("sandbox_profile",
                 `String (Keeper_types_profile_sandbox.sandbox_profile_to_string m.sandbox_profile));
               ("sandbox_target", `String sandbox_target);

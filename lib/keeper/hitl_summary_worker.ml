@@ -894,8 +894,7 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
          prepared.entry
          ~reason:(flow_callback_error_to_string cause)
          ~cause:Exact_terminal_persistence_failure)
-  | Exact_output.Flow_before_dispatch_callback_failed
-      { candidate; cause; _ } ->
+  | Exact_output.Flow_before_dispatch_callback_failed { cause; _ } ->
     record_outcome "exact_bind_failed";
     (match flow_callback_rejection cause with
      | Some rejection -> raise (Exact_terminalization_rejected rejection)
@@ -904,10 +903,8 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
          ~queue_ops
          prepared.entry
          ~reason:(flow_callback_error_to_string cause)
-         ~cause:Exact_terminal_persistence_failure);
-    ignore candidate
-  | Exact_output.Flow_before_advance_callback_failed
-      { failed; cause; _ } ->
+         ~cause:Exact_terminal_persistence_failure)
+  | Exact_output.Flow_before_advance_callback_failed { cause; _ } ->
     record_outcome "exact_release_failed";
     (match flow_callback_rejection cause with
      | Some rejection -> raise (Exact_terminalization_rejected rejection)
@@ -916,8 +913,7 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
          ~queue_ops
          prepared.entry
          ~reason:(flow_callback_error_to_string cause)
-         ~cause:Exact_terminal_persistence_failure);
-    ignore failed
+         ~cause:Exact_terminal_persistence_failure)
   | Exact_output.Flow_exact_execution_failed { candidate; cause; evidence } ->
     record_outcome "exact_execution_failed";
     log_exact_error

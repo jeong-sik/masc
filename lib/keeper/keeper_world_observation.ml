@@ -1267,7 +1267,6 @@ let has_pending_task_cancellation (observation : world_observation) =
 ;;
 
 let keeper_cycle_decision
-      ?(reactive_wake = false)
       ?(event_queue_triggers = [])
       ~(meta : keeper_meta)
       (observation : world_observation)
@@ -1283,7 +1282,6 @@ let keeper_cycle_decision
   let proactive_gate_enabled =
     Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Proactive meta
   in
-  let _ = reactive_wake in
   let event_queue_reactive_triggers =
     List.map turn_reason_of_event_queue_trigger event_queue_triggers
   in

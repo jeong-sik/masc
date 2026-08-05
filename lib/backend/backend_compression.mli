@@ -18,11 +18,10 @@ val default_level : int
     [data] (input was below the compression threshold). *)
 val compress : ?level:int -> string -> string * bool * bool
 
-(** [decompress ~orig_size ~used_dict compressed] returns
+(** [decompress ~orig_size compressed] returns
     [Some plaintext] on success, [None] on decompression error
     (logged via [Log.Misc.error]). *)
-val decompress :
-  orig_size:int -> used_dict:bool -> string -> string option
+val decompress : orig_size:int -> string -> string option
 
 (** {1 Header framing}
 

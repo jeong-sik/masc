@@ -59,9 +59,6 @@ val detect :
   unit ->
   t
 
-(** Reserved for future strict-mode enforcement; currently always [false]. *)
-val strict_violation : t -> bool
-
 (** [true] when startup must stop instead of serving with malformed runtime
     state such as a directory-shaped or inaccessible [current_task] path. *)
 val startup_should_abort : t -> bool
@@ -76,6 +73,6 @@ val startup_lines : t -> string list
     after the first call). No-op when [warning = None]. *)
 val log_startup_warning : t -> unit
 
-(** JSON serialisation including [strict_violation]. Option fields are
-    omitted when [None] (not emitted as [null]). *)
+(** JSON serialisation. Option fields are omitted when [None] (not emitted
+    as [null]). *)
 val to_yojson : t -> Yojson.Safe.t

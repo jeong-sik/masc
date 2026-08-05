@@ -72,7 +72,6 @@ let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
              fix the TOML or expand the allowlist"
             k
             suffix;
-          ignore v;
           None))
       else None)
     doc

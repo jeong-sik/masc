@@ -8,11 +8,9 @@
     the phase-gate boundary. *)
 
 type phase_gate_outcome =
-  | Phase_gate_proceed of Keeper_state_machine.phase option
+  | Phase_gate_proceed
     (** Registry phase is executable (or unknown but recoverable); the
-        caller may proceed to runtime routing. The carried [phase_opt]
-        is the same value the gate observed in the registry, so the
-        caller's runtime routing dispatches on the gate's view. *)
+        caller may proceed to runtime routing. *)
   | Phase_gate_cancelled of Keeper_meta_contract.keeper_meta
     (** Cooperative early-exit after a supervisor stop. The caller must retain
         this cancellation as a typed outcome; it is not completed work. *)

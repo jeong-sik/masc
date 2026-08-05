@@ -127,7 +127,6 @@ Evidence:
 - `lib/keeper/keeper_world_observation.ml:1102-1105` blocks turns when paused or pending HITL approval exists.
 - `lib/keeper/keeper_world_observation.ml:1167-1174` bootstraps a never-started Keeper.
 - `lib/keeper/keeper_world_observation.ml:1175-1186` avoids blind no-signal housekeeping turns.
-- `lib/keeper/keeper_world_observation.ml:1205-1219` prevents a reactive wake from becoming a global task-backlog herd.
 - `lib/keeper/keeper_world_observation.ml:1237-1243` requires bootstrap, due schedule, or real work signal for scheduled autonomous turns.
 - `lib/keeper/keeper_heartbeat_loop.ml:212-249` runs event intake, observes world, then decides scheduling.
 

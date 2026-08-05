@@ -376,7 +376,7 @@ lib/keeper/keeper_registry_types.ml,270,false,unclassified
 lib/keeper/keeper_registry.ml,793,None,unclassified
 lib/keeper/keeper_run_tools_hooks.ml,85,None,unclassified
 lib/keeper/keeper_runtime_attempt.ml,173,false,unclassified
-lib/keeper/keeper_runtime_contract.ml,301,None,unclassified
+lib/keeper/keeper_runtime_contract.ml,292,None,unclassified
 lib/keeper/keeper_runtime_manifest_housekeeping.ml,106,false,unclassified
 lib/keeper/keeper_runtime_manifest.ml,24,None,unclassified
 lib/keeper/keeper_runtime_manifest.ml,46,None,unclassified
@@ -400,8 +400,7 @@ lib/keeper/keeper_runtime_trust_timeline.ml,124,None,unclassified
 lib/keeper/keeper_runtime_trust_timeline.ml,234,None,unclassified
 lib/keeper/keeper_runtime_trust_timeline.ml,323,None,unclassified
 lib/keeper/keeper_sandbox_control.ml,490,None,unclassified
-lib/keeper/keeper_sandbox_repo_path.ml,80,None,unclassified
-lib/keeper/keeper_sandbox_repo_path.ml,126,None,unclassified
+lib/keeper/keeper_sandbox_repo_path.ml,74,None,unclassified
 lib/keeper/keeper_sandbox_runtime_setup.ml,424,false,unclassified
 lib/keeper/keeper_sandbox_runtime.ml,89,None,unclassified
 lib/keeper/keeper_secret_projection.ml,79,None,unclassified
@@ -487,9 +486,9 @@ lib/masc_log/log.ml,525,None,unclassified
 lib/mcp_error_code.ml,41,None,unclassified
 lib/mcp_prompt_surface.ml,63,None,unclassified
 lib/mcp_sdk_adapter_masc.ml,36,None,unclassified
-lib/mcp_server_eio_protocol.ml,610,None,unclassified
-lib/mcp_server_eio_protocol.ml,657,None,unclassified
-lib/mcp_server_eio_protocol.ml,737,false,unclassified
+lib/mcp_server_eio_protocol.ml,609,None,unclassified
+lib/mcp_server_eio_protocol.ml,656,None,unclassified
+lib/mcp_server_eio_protocol.ml,736,false,unclassified
 lib/mcp_tool_runtime_board.ml,95,None,unclassified
 lib/mcp_tool_runtime_board.ml,518,None,unclassified
 lib/mcp_transport_protocol/mcp_transport_protocol.ml,87,false,unclassified

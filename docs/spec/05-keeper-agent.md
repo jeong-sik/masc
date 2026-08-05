@@ -350,7 +350,7 @@ turn, and latency values remain observations.
 
 ### 7.4 Trajectory (`lib/trajectory.ml`)
 
-Tool call을 `.masc/trajectories/{name}/{trace_id}.jsonl`에 JSONL 기록. 용도: replay, cost 추적, entropy 감지, eval 입력.
+Tool call을 `.masc/trajectories/{name}/{trace_id}.jsonl`에 JSONL 기록. 용도: replay, cost 추적, eval 입력.
 
 ---
 

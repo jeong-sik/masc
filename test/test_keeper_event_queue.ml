@@ -1497,39 +1497,6 @@ let () =
         second_transition_id
         retained_transition_id);
 
-  (* --- current-only hard cut: the retired v14 filename is not a read,
-         migration, or overwrite source for the v15 queue. --- *)
-  let base_path = temp_dir "keeper-event-queue-v15-hard-cut" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-event-queue-v15-hard-cut-test" in
-      let keeper_dir =
-        Filename.concat
-          (Common.keepers_runtime_dir_of_base ~base_path)
-          keeper_name
-      in
-      let retired_path = Filename.concat keeper_dir "event-queue-v14.json" in
-      let retired_wal_path =
-        Filename.concat keeper_dir "event-queue-transitions-v4.jsonl"
-      in
-      Fs_compat.mkdir_p keeper_dir;
-      write_file retired_path "{retired-v14-evidence";
-      write_file retired_wal_path "{retired-v4-wal-evidence\n";
-      assert (
-        is_empty
-          (Keeper_event_queue_persistence.load ~base_path ~keeper_name));
-      Keeper_event_queue_persistence.persist
-        ~base_path
-        ~keeper_name
-        (enqueue empty board_stim);
-      assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      assert (String.equal (read_file retired_path) "{retired-v14-evidence");
-      assert (
-        String.equal
-          (read_file retired_wal_path)
-          "{retired-v4-wal-evidence\n"));
-
   (* --- strict persisted load rejects malformed current payloads and
          preserves the operator-reset evidence. --- *)
   (match

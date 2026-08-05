@@ -162,7 +162,6 @@ let agent_runtime_has_live_work agent_status =
       agent_last_seen_ago_s agent_status <= agent_staleness_threshold_s
   | Some Masc_domain.Inactive | None -> false
 
-let string_contains_ci = String_util.contains_substring_ci
 
 let quiet_hours_active ~now_ts =
   let current_hour =
@@ -218,36 +217,14 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
   | None, Some (assistant_ts, preview) ->
       (`String "delivered", `Float assistant_ts, `String preview)
 
-let error_keywords =
-  [ "error"
-  ; "failed"
-  ; "timeout"
-  ; "graphql"
-  ; "model"
-  ; (* RFC-0132-EXEMPT: classification list, not boundary redaction *)
-    "runtime"
-  ; "provider"
-  ]
-
-let looks_error_like text =
-  List.exists (string_contains_ci text) error_keywords
-
-let keeper_error_hint ~agent_status ~meta =
-  let agent_error = json_string_opt "error" agent_status in
-  let proactive_reason =
-    let reason = String.trim meta.runtime.proactive_rt.last_reason in
-    if reason = "" then None else Some reason
-  in
-  let drift_reason = None in
-  match agent_error with
-  | Some _ as error -> error
-  | None -> (
-      match proactive_reason with
-      | Some reason when looks_error_like reason -> Some reason
-      | _ -> (
-          match drift_reason with
-          | Some reason when looks_error_like reason -> Some reason
-          | _ -> None))
+(* The only error evidence here is the one [parse_agent_status] writes:
+   "failed_to_read" or "failed_to_parse" when the agent file cannot be read or
+   decoded. [meta.runtime.proactive_rt.last_reason] used to be searched for
+   error keywords, but its producer documents it as display detail and a
+   successful cycle formats it as "unified:tools=[...]" — so a cycle that
+   called masc_runtime_status matched the "runtime" keyword and reported the
+   keeper as degraded. *)
+let keeper_error_hint ~agent_status = json_string_opt "error" agent_status
 
 (* A live signal newer than the persisted error snapshot means
    [last_proactive_reason] is stale and must not surface as a current error.
@@ -294,7 +271,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
   let error_hint =
     if live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta
     then None
-    else keeper_error_hint ~agent_status ~meta
+    else keeper_error_hint ~agent_status
   in
   if not meta.proactive.enabled then
     Some "disabled"
@@ -311,11 +288,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     Some "quiet_hours"
   else
     match error_hint with
-    | Some reason when string_contains_ci reason "graphql" ->
-        Some "graphql_error"
-    | Some reason when looks_error_like reason ->
-        Some "model_error"
-    | Some _ -> Some "unknown"
+    | Some _ -> Some "agent_status_error"
     | None -> None
 
 let keeper_health_state ?(fiber_health = Fiber_unknown)
@@ -343,7 +316,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     then KH_stale
     else
       (match quiet_reason with
-    | Some "graphql_error" | Some "model_error" -> KH_degraded
+    | Some "agent_status_error" -> KH_degraded
     | _ ->
         if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then KH_idle
         else KH_healthy)
@@ -359,7 +332,7 @@ let keeper_next_action_path ~(health_state : keeper_health) ~quiet_reason =
       match quiet_reason with
       | Some "quiet_hours" -> "manual_social_poke"
       | Some "not_running" | Some "agent_missing" -> "recover"
-      | Some "graphql_error" | Some "model_error" | Some "startup" | Some "unknown" ->
+      | Some "agent_status_error" | Some "startup" ->
           "probe"
       | Some "disabled" -> "recover"
       | _ -> "direct_message")
@@ -543,7 +516,7 @@ let keeper_diagnostic_json
        server restarts because the snapshot is reloaded verbatim. *)
     if live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta
     then `Null
-    else Json_util.string_opt_to_json (keeper_error_hint ~agent_status ~meta)
+    else Json_util.string_opt_to_json (keeper_error_hint ~agent_status)
   in
   `Assoc
     [

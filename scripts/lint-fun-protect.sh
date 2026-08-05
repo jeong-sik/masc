@@ -37,7 +37,6 @@ ALLOWLIST=(
   "lib/workspace/workspace_task_schedule.ml"
   "lib/repo_manager/repo_store.ml"
   "lib/repo_manager/keeper_repo_mapping.ml"
-  "lib/exec/test/test_exec_gate_runtime.ml"
 )
 
 count=0

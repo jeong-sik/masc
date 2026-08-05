@@ -56,9 +56,13 @@ val active_goal_summaries :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   (string * string) list
-(** Resolve every active goal id for the stable prompt contract. Unknown ids
-    remain present with an empty title so every entrypoint renders the same
-    bare-id fallback. *)
+(** Resolve the active goal ids a keeper can still progress, for the stable
+    prompt contract. [meta.active_goal_ids] records assignment and is never
+    cleared when a goal reaches a terminal phase, so ids whose stored phase
+    fails {!Goal_phase.admits_self_directed_progress} are dropped rather than
+    announced as available work. Unknown ids remain present with an empty title
+    so every entrypoint renders the same bare-id fallback: an assigned goal that
+    no longer exists is a different fault and stays visible. *)
 
 val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->

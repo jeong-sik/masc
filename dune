@@ -19,8 +19,8 @@
  (package masc)
  (section bin)
  (files
-  (scripts/check-keeper-event-queue-v15-cutover.sh as
-   masc-check-keeper-event-queue-v15-cutover)))
+  (scripts/check-runtime-deployment-preflight.sh as
+   masc-check-runtime-deployment-preflight)))
 
 ; Build-time check: reject OPERATOR_TODO placeholders in source code.
 ; This prevents deployment of code with unresolved placeholders.

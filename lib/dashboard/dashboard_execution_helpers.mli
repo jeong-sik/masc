@@ -44,12 +44,6 @@ type tone = Dashboard_utils.tone =
 
 (** {1 Per-entity context records} *)
 
-type queue_context = {
-  severity_rank : int;
-  last_seen_ts : float;
-  json : Yojson.Safe.t;
-}
-
 type operation_context = {
   operation_id : string;
   severity : tone;

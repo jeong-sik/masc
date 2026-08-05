@@ -51,12 +51,12 @@ let ctx_compacting       = Env_config.Dashboard.ctx_compacting
     SSOT: [Env_config.Dashboard] module. *)
 let keeper_action_stale_sec = Env_config.Dashboard.keeper_action_stale_sec
 
+(* "who did or is doing it", which includes Done — that is
+   [task_performer_of_status], not the ownership helper. This used to be a
+   local re-implementation, which is how the execution payload and the goal
+   tree came to disagree about a completed Task's assignee. *)
 let task_assignee (task : Masc_domain.task) =
-  match task.task_status with
-  | Claimed { assignee; _ } | InProgress { assignee; _ }
-  | AwaitingVerification { assignee; _ } | Done { assignee; _ } ->
-      Some assignee
-  | Todo | Cancelled _ -> None
+  Masc_domain.task_performer_of_status task.task_status
 
 let last_message_map messages =
   let table = Hashtbl.create 32 in

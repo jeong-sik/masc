@@ -5,7 +5,6 @@ code_refs:
   - lib/exec/exec_buffer.ml
   - lib/exec_core.ml
   - lib/exec/exec_dispatch.ml
-  - lib/exec/exec_gate.ml
   - lib/process/process_eio.ml
   - lib/exec/command_gate/shell_command_gate.ml
   - lib/exec_policy/exec_policy.ml
@@ -82,11 +81,9 @@ concrete host routes are:
 
 ```text
 Exec_dispatch.dispatch_pipeline
-  -> Exec_gate.run_argv_pipeline_with_status_split
   -> Process_eio.run_argv_pipeline_with_status_split
 
 Exec_dispatch.dispatch_simple ~stdin_content
-  -> Exec_gate.run_argv_with_stdin_and_status_split
   -> Process_eio.run_argv_with_stdin_and_status_split
 ```
 

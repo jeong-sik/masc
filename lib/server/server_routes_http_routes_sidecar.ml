@@ -669,10 +669,7 @@ let handle_stop state request reqd =
             (`Assoc [ "ok", `Bool false; "error", `String msg ])
         | Ok desired ->
           let _status, stdout =
-            Masc_exec.Exec_gate.run_argv_with_status
-              ~actor:(Masc_exec.Agent_id.of_string "system/spawn")
-              ~raw_source:(script ^ " stop")
-              ~summary:"sidecar stop script"
+            Process_eio.run_argv_with_status
               ~timeout_sec:Env_config_runtime.Sidecar.control_command_timeout_sec
               [ script; "stop" ]
           in
@@ -733,10 +730,7 @@ let handle_logs state request reqd =
             ])
     else (
       let _status, stdout =
-        Masc_exec.Exec_gate.run_argv_with_status
-          ~actor:(Masc_exec.Agent_id.of_string "system/runtime_info")
-          ~raw_source:("tail -n " ^ string_of_int lines ^ " " ^ path)
-          ~summary:"tail sidecar logs"
+        Process_eio.run_argv_with_status
           ~timeout_sec:Env_config_runtime.Sidecar.control_command_timeout_sec
           [ "tail"; "-n"; string_of_int lines; path ]
       in

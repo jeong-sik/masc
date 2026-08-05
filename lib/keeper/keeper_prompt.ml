@@ -113,20 +113,6 @@ let build_keeper_system_prompt
       "</instructions>";
     ]
 
-(* XML wrapping stays in code — it is structure, not prompt content. *)
-let direct_reply_mode_body () =
-  Prompt_registry.get_prompt Keeper_prompt_names.reply_guidelines
-
-let append_direct_reply_mode_prompt ~(base_prompt : string) : string =
-  String.concat "\n"
-    [
-      base_prompt;
-      "";
-      "<direct_reply_mode>";
-      String.trim (direct_reply_mode_body ());
-      "</direct_reply_mode>";
-    ]
-
 let append_trait_clause ~(base : string) ~(clause : string) : string =
   let b = String.trim base in
   let c = String.trim clause in

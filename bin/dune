@@ -168,13 +168,13 @@
  (package masc)
  (libraries masc masc.dashboard masc_core fs_compat unix yojson eio eio_main))
 
-;; Event-queue v15 cutover helper.  The shell gate delegates runtime lease
+;; Deployment preflight helper.  The shell gate delegates runtime lease
 ;; ownership and schedule signal decoding to the same OCaml authorities used
 ;; by the server instead of reimplementing either contract in shell.
 (executable
- (name keeper_event_queue_v15_cutover_helper)
- (modules keeper_event_queue_v15_cutover_helper)
- (public_name masc-keeper-event-queue-v15-cutover-helper)
+ (name deployment_preflight_helper)
+ (modules deployment_preflight_helper)
+ (public_name masc-deployment-preflight-helper)
  (package masc)
  (libraries
   masc.server

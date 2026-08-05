@@ -56,8 +56,12 @@ let task_linkage_source_opt ?(goal_task_index = Hashtbl.create 0) (task : Masc_d
   then Some "explicit"
   else None
 
+(* The tree feeds the same Work surface as the execution payload, so it must
+   answer the same question: who did or is doing the work. Using the ownership
+   helper here made a completed Task show its performer via execution and
+   nobody via the tree. *)
 let task_assignee (task : Masc_domain.task) : string option =
-  Masc_domain.task_assignee_of_status task.task_status
+  Masc_domain.task_performer_of_status task.task_status
 
 
 let task_is_terminal (task : Masc_domain.task) : bool =
@@ -66,14 +70,7 @@ let task_is_terminal (task : Masc_domain.task) : bool =
 let task_is_done (task : Masc_domain.task) : bool =
   Masc_domain.task_status_is_done task.task_status
 
-let task_updated_at (task : Masc_domain.task) : string =
-  match task.task_status with
-  | Masc_domain.Done { completed_at; _ } -> completed_at
-  | Masc_domain.Cancelled { cancelled_at; _ } -> cancelled_at
-  | Masc_domain.InProgress { started_at; _ } -> started_at
-  | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
-  | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
-  | Masc_domain.Todo -> task.created_at
+let task_updated_at = Masc_domain.task_last_transition_at
 
 let dedupe_sort values =
   values |> List.sort_uniq String.compare

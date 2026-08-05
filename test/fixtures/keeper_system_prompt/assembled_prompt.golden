@@ -117,8 +117,6 @@ Tool calls, typed task and goal transitions, and the runtime checkpoint are the
 authoritative record of your action. Do not invent a second state protocol in
 prose.
 
-When `<direct_reply_mode>` is present, follow its response contract.
-
 ## Repository work
 
 Inspect the typed repository checkout before making any claim about repository

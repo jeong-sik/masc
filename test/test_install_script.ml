@@ -335,19 +335,19 @@ let stage_release_mirror base_path =
   let helper =
     Filename.concat
       dir
-      ("masc-keeper-event-queue-v15-cutover-helper-" ^ suffix)
+      ("masc-deployment-preflight-helper-" ^ suffix)
   in
   unlink_if_exists helper;
   Unix.symlink (Unix.realpath (real_masc_binary ())) helper;
   let gate =
     Filename.concat
       dir
-      ("masc-check-keeper-event-queue-v15-cutover-" ^ suffix)
+      ("masc-check-runtime-deployment-preflight-" ^ suffix)
   in
   unlink_if_exists gate;
   Unix.symlink
     (Unix.realpath
-       (Filename.concat (source_root ()) "scripts/check-keeper-event-queue-v15-cutover.sh"))
+       (Filename.concat (source_root ()) "scripts/check-runtime-deployment-preflight.sh"))
     gate;
   "file://" ^ Filename.concat base_path ".release"
 ;;
@@ -459,17 +459,17 @@ let test_release_requires_advertised_binary_assets () =
     workflow
     "for arch in macos-arm64 linux-x64; do";
   assert_contains
-    "release builds the typed cutover helper"
+    "release builds the typed deployment preflight helper"
     workflow
-    "bin/keeper_event_queue_v15_cutover_helper.exe";
+    "bin/deployment_preflight_helper.exe";
   assert_contains
-    "release requires the typed cutover helper asset"
+    "release requires the typed deployment preflight helper asset"
     workflow
-    "masc-keeper-event-queue-v15-cutover-helper-$arch";
+    "masc-deployment-preflight-helper-$arch";
   assert_contains
-    "release requires the cutover gate asset"
+    "release requires the deployment preflight gate asset"
     workflow
-    "masc-check-keeper-event-queue-v15-cutover-$arch";
+    "masc-check-runtime-deployment-preflight-$arch";
   assert_contains
     "release fails when required asset is absent"
     workflow
@@ -480,59 +480,59 @@ let test_release_requires_advertised_binary_assets () =
     "(cd ../config && sha256sum oas-models-overlay.toml) >> SHA256SUMS"
 ;;
 
-let test_installer_fetches_cutover_companions () =
+let test_installer_fetches_deployment_preflight_companions () =
   let script = install_script () in
   assert_contains
     "installer derives the platform helper asset"
     script
-    {|CUTOVER_HELPER_ASSET="masc-keeper-event-queue-v15-cutover-helper-$PLATFORM_SUFFIX"|};
+    {|PREFLIGHT_HELPER_ASSET="masc-deployment-preflight-helper-$PLATFORM_SUFFIX"|};
   assert_contains
     "installer derives the platform gate asset"
     script
-    {|CUTOVER_GATE_ASSET="masc-check-keeper-event-queue-v15-cutover-$PLATFORM_SUFFIX"|};
+    {|PREFLIGHT_GATE_ASSET="masc-check-runtime-deployment-preflight-$PLATFORM_SUFFIX"|};
   assert_contains
     "installer installs the helper beside the gate"
     script
-    {|CUTOVER_HELPER_DEST="$PREFIX/masc-keeper-event-queue-v15-cutover-helper"|};
+    {|PREFLIGHT_HELPER_DEST="$PREFIX/masc-deployment-preflight-helper"|};
   assert_contains
     "installer installs the gate beside the helper"
     script
-    {|CUTOVER_GATE_DEST="$PREFIX/masc-check-keeper-event-queue-v15-cutover"|}
+    {|PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"|}
 ;;
 
-let test_railway_runtime_enforces_cutover_before_main () =
+let test_railway_runtime_enforces_preflight_before_main () =
   let workflow = railway_workflow () in
   let image = dockerfile () in
   let context = dockerignore () in
   let railway = railway_config () in
   assert_contains
-    "Railway builds the typed cutover helper"
+    "Railway builds the typed deployment preflight helper"
     workflow
-    "bin/keeper_event_queue_v15_cutover_helper.exe";
+    "bin/deployment_preflight_helper.exe";
   assert_contains
-    "Railway uploads the typed cutover helper"
+    "Railway uploads the typed deployment preflight helper"
     workflow
-    "masc-keeper-event-queue-v15-cutover-helper";
+    "masc-deployment-preflight-helper";
   assert_contains
-    "Railway proves an unsafe v14 image is rejected"
+    "Railway proves a malformed current runtime image is rejected"
     workflow
-    "Reject unsafe cutover image";
+    "Reject malformed current runtime image";
   assert_contains
-    "image ships the read-only cutover gate"
+    "image ships the read-only deployment preflight gate"
     image
-    "/app/masc-check-keeper-event-queue-v15-cutover";
+    "/app/masc-check-runtime-deployment-preflight";
   assert_contains
     "image enters through the lease handoff wrapper"
     image
-    {|ENTRYPOINT ["/usr/bin/tini", "--", "/app/masc-cutover-entrypoint"]|};
+    {|ENTRYPOINT ["/usr/bin/tini", "--", "/app/masc-runtime-entrypoint"]|};
   assert_contains
     "Docker context includes the main release executable"
     context
     "!masc-linux-x64";
   assert_contains
-    "Docker context includes the cutover helper"
+    "Docker context includes the deployment preflight helper"
     context
-    "!masc-keeper-event-queue-v15-cutover-helper";
+    "!masc-deployment-preflight-helper";
   assert_not_contains
     "Railway does not bypass the image entrypoint with a direct main command"
     railway
@@ -1343,13 +1343,13 @@ let () =
             `Quick
             test_binary_checks_use_install_environment
         ; test_case
-            "Railway runtime enforces cutover before main"
+            "Railway runtime enforces preflight before main"
             `Quick
-            test_railway_runtime_enforces_cutover_before_main
+            test_railway_runtime_enforces_preflight_before_main
         ; test_case
-            "installer fetches cutover companions"
+            "installer fetches deployment preflight companions"
             `Quick
-            test_installer_fetches_cutover_companions
+            test_installer_fetches_deployment_preflight_companions
         ; test_case
             "--force refreshes same-version existing binary"
             `Quick

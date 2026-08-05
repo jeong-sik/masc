@@ -126,33 +126,6 @@ let format_surface_presence (p : Gate_surface.surface_presence) : string =
   in
   Printf.sprintf "%s (%s)" endpoint (if p.alive then "alive" else "offline")
 
-let conversation_routing_behavior_name = "conversation_routing"
-
-let conversation_routing_prompt () =
-  match
-    Keeper_prompt_external.get conversation_routing_behavior_name
-  with
-  | Some content -> String.trim content
-  | None ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string PromptFailures)
-        ~labels:
-          [
-            ( "prompt",
-              "behavior/" ^ conversation_routing_behavior_name );
-          ]
-        ();
-      Log.Keeper.warn
-        "build_prompt: behavior prompt %s missing; rendering \
-         config-drift marker instead of in-source conversation policy"
-        conversation_routing_behavior_name;
-      Printf.sprintf
-        "Behavior prompt config drift: missing \
-         config/prompts/behavior/%s.md. Do not improvise connector \
-         conversation policy; ask the operator to restore the missing \
-         behavior prompt file before relying on conversation context."
-        conversation_routing_behavior_name
-
 let board_event_kind_label = function
   | Keeper_world_observation.Board_post_created -> "post_created"
   | Keeper_world_observation.Board_comment_added -> "comment_added"
@@ -598,15 +571,23 @@ let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
   | None -> meta.instructions
 ;;
 
+(* Titles for the goals the world observation already narrowed to the ones a
+   keeper can still progress. [meta.active_goal_ids] records assignment and is
+   never cleared when a goal reaches a terminal phase, so this resolves the
+   same phase question the observation does — a keeper must not be handed a
+   Completed goal under a heading that calls it available. *)
 let active_goal_summaries
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
   =
-  List.map
+  List.filter_map
     (fun goal_id ->
        match Goal_store.get_goal config ~goal_id with
-       | Some { Goal_store.title; _ } -> (goal_id, title)
-       | None -> (goal_id, ""))
+       | Some { Goal_store.title; phase; _ } ->
+         if Goal_phase.admits_self_directed_progress phase
+         then Some (goal_id, title)
+         else None
+       | None -> Some (goal_id, ""))
     meta.active_goal_ids
 ;;
 
@@ -759,7 +740,6 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
                  (Channel_gate_binding_store.binding_store_error_to_string
                     failure.error)))
           connector_presence_failures;
-        Buffer.add_string ubuf (conversation_routing_prompt ());
         Buffer.add_char ubuf '\n';
         Buffer.add_char ubuf '\n';
         Some (Buffer.contents ubuf))

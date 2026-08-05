@@ -104,18 +104,12 @@ let build_separated () : KAR.turn_prompt =
       turn_instructions_text ]
   in
   let dynamic_context = String.concat "\n\n" soft_parts in
-  let prompt =
-    KP.append_direct_reply_mode_prompt ~base_prompt:base_system_prompt
-  in
-  { system_prompt = prompt; dynamic_context }
+  { system_prompt = base_system_prompt; dynamic_context }
 
 (* Simulate the pre-split combined prompt (everything in system_prompt) *)
 let build_combined () : string =
-  let prompt =
-    KP.append_direct_reply_mode_prompt ~base_prompt:base_system_prompt
-  in
   let parts = [
-    prompt;
+    base_system_prompt;
     checkpoint_context_text;
     worktree_text;
     turn_instructions_text;
@@ -177,31 +171,13 @@ let test_hard_constraints_in_system_only () =
     try ignore (Str.search_forward (Str.regexp_string s) sys 0); true
     with Not_found -> false
   in
-  (* Hard constraints must be in system_prompt *)
-  check bool "direct_reply in system" true
-    (has_in tp.system_prompt "<direct_reply_mode>");
-  (* Hard constraints must NOT be in dynamic_context *)
-  check bool "no direct_reply in dynamic" true
-    (not (has_in tp.dynamic_context "<direct_reply_mode>"))
-
-(* Pins the three rules, not the sentences that carried them. The direct-reply
-   prompt used to spend seven "Do not ..." lines on this; the rules survive but
-   are stated once each, because the world-state frame now says outright that
-   the runtime assembled it, which is what a keeper was missing when it
-   reported "I checked the board" over an injected block. *)
-let test_direct_reply_prompt_requires_action_evidence () =
-  let tp = build_separated () in
-  check bool "action claims rest on a tool result from this turn" true
-    (has_in tp.system_prompt
-       "rests on a matching tool result\n  in this turn");
-  check bool "the claim verbs are enumerated" true
-    (has_in tp.system_prompt
-       "checked, read, posted,\n  commented, voted, claimed, or changed");
-  check bool "frame content is distinguished from work done" true
-    (has_in tp.system_prompt
-       "describe anything you only saw in the\n  frame as something you were shown");
-  check bool "a failed call is reported as an attempt" true
-    (has_in tp.system_prompt "say you tried and what happened")
+  (* A direct turn and an autonomous turn now receive the same system
+     prompt: the channel-specific block was the last split between them and
+     is gone, so nothing may reintroduce it. *)
+  check bool "no direct-reply block in system" true
+    (not (has_in tp.system_prompt "direct_reply_mode"));
+  check bool "no direct-reply block in dynamic" true
+    (not (has_in tp.dynamic_context "direct_reply_mode"))
 
 let test_soft_context_in_dynamic_only () =
   let tp = build_separated () in
@@ -274,8 +250,6 @@ let test_merged_system_block_keeps_every_rule_family () =
     (has_in prompt "The active typed schema is the sole callable catalog");
   check bool "typed failure evidence (was keeper.core_behavior)" true
     (has_in prompt "A failed call is typed evidence");
-  check bool "direct-reply contract (was behavior/continuity_contract)" true
-    (has_in prompt "is present, follow its response contract");
   check bool "identity continuity (was behavior/continuity_contract)" true
     (has_in prompt "Your identity is stated in")
 
@@ -717,8 +691,6 @@ let () =
         [
           test_case "hard constraints in system only" `Quick
             test_hard_constraints_in_system_only;
-          test_case "direct reply prompt requires action evidence" `Quick
-            test_direct_reply_prompt_requires_action_evidence;
           test_case "soft context in dynamic only" `Quick
             test_soft_context_in_dynamic_only;
           test_case "direct reply prompt uses active schema authority" `Quick

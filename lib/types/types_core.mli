@@ -114,7 +114,28 @@ val task_status_to_string : task_status -> string
 val string_of_task_status : task_status -> string
 val task_status_icon : task_status -> string
 val task_display_assignee : task_status -> string
+(** Who acted on a Task, and in what relationship. A bare [string option]
+    records the name and drops the role, which let three separate local
+    [task_assignee] helpers disagree about [Done] and [Cancelled]. Naming the
+    role makes that disagreement unwritable, and a new status must state which
+    role it carries. *)
+type task_actor =
+  | Unassigned
+  | Holder of string
+  | Submitter of string
+  | Completer of string
+  | Canceller of string
+
+val task_actor_of_status : task_status -> task_actor
+
+val task_actor_name : task_actor -> string option
+
+(** Who owes work now. [Done] and [Cancelled] owe nothing. *)
 val task_assignee_of_status : task_status -> string option
+
+(** Who did or is doing the work, including after completion. [Cancelled]
+    answers [None]: its canceller ended the work rather than performing it. *)
+val task_performer_of_status : task_status -> string option
 val task_status_is_terminal : task_status -> bool
 val task_status_is_done : task_status -> bool
 val all_task_status_names : string list
@@ -196,6 +217,11 @@ type task =
   ; do_not_reclaim_reason : string option [@default None]
   }
 [@@deriving show]
+
+(** When the Task last changed state, from the timestamp its status carries.
+    [Todo] falls back to creation. Defined once: two byte-identical copies
+    lived in the execution and goals projections, one per surface. *)
+val task_last_transition_at : task -> string
 
 val task_to_yojson : task -> Yojson.Safe.t
 val task_of_yojson : Yojson.Safe.t -> (task, string) result

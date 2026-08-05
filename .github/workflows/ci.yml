@@ -741,11 +741,11 @@ jobs:
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
 
-      - name: Run event queue v15 cutover gate self-test
+      - name: Run runtime deployment preflight self-test
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
-          MASC_EVENT_QUEUE_V15_CUTOVER_HELPER: ${{ github.workspace }}/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe
-        run: scripts/check-keeper-event-queue-v15-cutover.sh --self-test
+          MASC_DEPLOYMENT_PREFLIGHT_HELPER: ${{ github.workspace }}/_build/default/bin/deployment_preflight_helper.exe
+        run: scripts/check-runtime-deployment-preflight.sh --self-test
 
       - name: Check keeper event queue projection boundary
         # This parser uses compiler-libs directly, so keep it beside the sole
@@ -999,6 +999,23 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_goal_store"
+
+      # Goal phase projection: active_goal_ids records assignment and is never
+      # cleared when a goal reaches a terminal phase, so both prompt surfaces
+      # have to consult the store's phase. The suite seeds one goal per phase in
+      # a real workspace and asserts the rendered sets, which compile-only under
+      # @check does not exercise.
+      - name: Run keeper goal phase projection suite
+        id: keeper_goal_phase_projection_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_goal_phase_projection"
 
       # Keeper tool descriptor registry: the suite pins each cluster tool's
       # keeper_model_projection and asserts that Operator_only tools are absent

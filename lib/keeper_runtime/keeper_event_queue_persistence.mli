@@ -10,10 +10,7 @@
     recovery. The WAL accepts at most one row and is retired after projection,
     so its retained size is bounded by one complete state. Serializing that
     state on each transition is the intentional cost of recovery that does not
-    infer missing sibling work from a delta. Every load path rejects a
-    nonempty legacy transition WAL (v4/v5) as unmigrated committed evidence,
-    matching the cutover gate, so a launcher that skips the gate cannot load a
-    stale snapshot over an unprojected legacy transition. *)
+    infer missing sibling work from a delta. *)
 
 type owner_identity
 type owner_identity_error

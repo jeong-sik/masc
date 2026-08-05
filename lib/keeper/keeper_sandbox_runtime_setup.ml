@@ -46,12 +46,9 @@ let docker_command_cwd () = Config_dir_resolver.current_working_dir ()
    When set to "api", route through [Sandbox.Docker_api] (UDS HTTP) instead
    of forking a [docker] subprocess; the subprocess path stays as the
    transitional fallback. Default "subprocess" until step 2 lands. *)
-let run_docker_argv_with_status ~summary ?timeout_sec argv =
+let run_docker_argv_with_status ?timeout_sec argv =
   Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
-    Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
-      ~raw_source:(String.concat " " argv)
-      ~summary
+    Process_eio.run_argv_with_status
       ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
       ~cwd:(docker_command_cwd ())
       ?timeout_sec
@@ -73,7 +70,6 @@ let docker_info_security_options_with_class_optional ?timeout_sec () =
   in
   let st, out =
     run_docker_argv_with_status
-      ~summary:"keeper sandbox docker info"
       ?timeout_sec
       argv
   in

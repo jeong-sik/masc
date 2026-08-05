@@ -5,8 +5,8 @@
     All requests:
     - Force HTTP/1.1 ([--http1.1]) — keeps curl off proxies that
       mishandle HTTP/2.
-    - Pass through {!Masc_exec.Exec_gate.run_argv_with_status} so
-      tool exec policy / timeouts / audit logging stay consistent.
+    - Run through [Process_eio.run_argv_with_status] with an explicit
+      [~timeout_sec].
     - Append [\\n%\{http_code\}] to capture the status code as the
       last line of the body (parsed by
       {!split_http_body_and_status}).

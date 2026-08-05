@@ -180,8 +180,25 @@ let keeper_memory_search_with_outcome
   =
   let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
   let limit = max 1 (min 10 (Safe_ops.json_int ~default:5 "limit" args)) in
-  let source_raw = Safe_ops.json_string ~default:"memory" "source" args in
-  match memory_search_source_of_string_opt source_raw with
+  (* [Safe_ops.json_string] returns its default for an absent key and for a key
+     whose value is not a string, so {"source": ["memory"]} used to reach Memory
+     while the merely misspelled {"source": "memry"} was refused below. Read the
+     member so a non-string lands on the same rejection a bad string does; the
+     schema documents "memory" as the default for absence only. *)
+  let source_member = Safe_ops.safe_member "source" args in
+  let source_raw =
+    match source_member with
+    | `Null -> memory_search_source_to_string Memory
+    | `String raw -> raw
+    | other -> Yojson.Safe.to_string other
+  in
+  let parsed_source =
+    match source_member with
+    | `Null -> Some Memory
+    | `String raw -> memory_search_source_of_string_opt raw
+    | _ -> None
+  in
+  match parsed_source with
   | None ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection

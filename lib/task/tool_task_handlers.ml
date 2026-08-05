@@ -558,14 +558,3 @@ let handle_release ~tool_name ~start_time ctx args =
               sync_planning_current_task_with_owned_task ctx)
            result;
          result_to_response ~tool_name ~start_time result)
-
-let transition_known_args =
-  [
-    "task_id";
-    "action";
-    "notes";
-    "reason";
-    "expected_version";
-    "agent_name";
-    "handoff_context";
-  ]

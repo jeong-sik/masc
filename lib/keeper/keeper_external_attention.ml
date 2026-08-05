@@ -332,12 +332,7 @@ let event_of_json json =
   | other -> Error (Printf.sprintf "unknown external attention event %S" other)
 
 let report_read_drop ~reason ~path ~detail =
-  Safe_ops.report_persistence_read_drop
-    ~on_drop:(fun () ->
-      Otel_metric_store.inc_counter
-        Otel_metric_store.metric_persistence_read_drops
-        ~labels:[ ("surface", persistence_surface); ("reason", reason) ]
-        ())
+  Safe_ops.report_persistence_read_drop_counted
     ~surface:persistence_surface ~reason ~path ~detail
 
 let parse_line_result ~file_path ~line_no line =

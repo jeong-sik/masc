@@ -43,24 +43,24 @@ jobs:
         run: |
           opam exec -- dune build --release \
             bin/main_eio.exe \
-            bin/keeper_event_queue_v15_cutover_helper.exe
+            bin/deployment_preflight_helper.exe
 
       - name: Prepare binary for Docker
         run: |
           cp _build/default/bin/main_eio.exe masc-linux-x64
-          cp _build/default/bin/keeper_event_queue_v15_cutover_helper.exe \
-            masc-keeper-event-queue-v15-cutover-helper
+          cp _build/default/bin/deployment_preflight_helper.exe \
+            masc-deployment-preflight-helper
           chmod +x masc-linux-x64
-          chmod +x masc-keeper-event-queue-v15-cutover-helper
-          ls -la masc-linux-x64 masc-keeper-event-queue-v15-cutover-helper
+          chmod +x masc-deployment-preflight-helper
+          ls -la masc-linux-x64 masc-deployment-preflight-helper
 
       - name: Verify Linux binary format
         run: |
           set -euo pipefail
           file masc-linux-x64
           file masc-linux-x64 | grep -q 'ELF 64-bit'
-          file masc-keeper-event-queue-v15-cutover-helper
-          file masc-keeper-event-queue-v15-cutover-helper | grep -q 'ELF 64-bit'
+          file masc-deployment-preflight-helper
+          file masc-deployment-preflight-helper | grep -q 'ELF 64-bit'
 
       - name: Build deployment image
         run: docker build -t masc-railway-smoke .
@@ -72,22 +72,17 @@ jobs:
           out="$(ldd /app/masc)"
           printf "%s\n" "$out"
           ! printf "%s\n" "$out" | grep -q "not found"
-          helper_out="$(ldd /app/masc-keeper-event-queue-v15-cutover-helper)"
+          helper_out="$(ldd /app/masc-deployment-preflight-helper)"
           printf "%s\n" "$helper_out"
           ! printf "%s\n" "$helper_out" | grep -q "not found"
           SH
 
-      - name: Reject unsafe cutover image
+      - name: Reject malformed current runtime image
         run: |
           set -euo pipefail
-          fixture="$RUNNER_TEMP/masc-railway-cutover"
+          fixture="$RUNNER_TEMP/masc-railway-preflight"
           mkdir -p "$fixture/keepers/fixture"
-          jq -n '
-            {schema: "keeper.event_queue.state.v14", revision: 1,
-             pending: [{}], last_transition: null,
-             projected_dispositions: [], transition_outbox: [],
-             accepted_transfer_projections: []}
-          ' > "$fixture/keepers/fixture/event-queue-v14.json"
+          printf '{not-json\n' > "$fixture/keepers/fixture/event-queue-v15.json"
           chmod -R a+rX "$fixture"
           if docker run --rm \
               -v "$fixture:/app/.masc" \
@@ -95,7 +90,7 @@ jobs:
               masc-railway-smoke \
               /app/masc --port 18080 --base-path /app
           then
-            echo "unsafe v14 queue bypassed the container cutover gate"
+            echo "malformed current queue bypassed the container deployment preflight"
             exit 1
           fi
 
@@ -124,7 +119,7 @@ jobs:
           # index so Railway includes it in the upload.
           git add -f \
             masc-linux-x64 \
-            masc-keeper-event-queue-v15-cutover-helper
+            masc-deployment-preflight-helper
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli

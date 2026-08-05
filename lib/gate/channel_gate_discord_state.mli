@@ -9,10 +9,11 @@
     path resolvers, the shared binding-store wrappers, the
     [string_member] / [int_member] / [bool_member] /
     [bool_option_member] yojson lookups, [stale_of_updated_at],
-    [connector_state_label], [list_assoc_field],
-    [find_assoc_by_string_field], and binding transaction helpers) are
+    [list_assoc_field], and binding transaction helpers) are
     hidden — only the {!Channel_gate_connector.S} surface is
-    public. *)
+    public.  The status label comes from
+    {!Channel_gate_connector.connector_state_label} and the observed
+    channel row from {!Json_util.find_assoc_row_by_string_field}. *)
 
 (** {1 Connector identity} *)
 

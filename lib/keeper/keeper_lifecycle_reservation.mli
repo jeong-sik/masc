@@ -26,6 +26,11 @@ type release_outcome =
 val purpose_to_string : purpose -> string
 val snapshot_to_string : snapshot -> string
 
+(** Render a release outcome as ["released"], ["release_missing"], or
+    ["release_not_owner: "] followed by {!snapshot_to_string} of the owner
+    that still holds the reservation. *)
+val release_outcome_to_string : release_outcome -> string
+
 val acquire :
   base_path:string ->
   keeper_name:string ->

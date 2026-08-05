@@ -83,15 +83,6 @@ let string_list_field fields name =
   | other -> invalidf "field %s must be an array, got %s" name (Json_util.kind_name other)
 ;;
 
-let find_duplicate fields =
-  let rec loop seen = function
-    | [] -> None
-    | (key, _) :: rest ->
-      if List.mem key seen then Some key else loop (key :: seen) rest
-  in
-  loop [] fields
-;;
-
 let require_exact_fields ~context expected fields =
   match find_duplicate fields with
   | Some key -> invalidf "%s has duplicate field %s" context key

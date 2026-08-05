@@ -1,6 +1,10 @@
 (** Production spawn wrappers around [Process_eio].  Actor, source, and
     summary are observability context only. *)
 
+val raw_source_of_argv : string list -> string
+(** Joins [argv] with a single space after passing each element through
+    [Filename.quote], producing the string passed as [~raw_source]. *)
+
 val run_argv :
   actor:Agent_id.t ->
   raw_source:string ->

@@ -109,12 +109,6 @@ let parse_df_output ~path lines =
   | _ -> Probe_error "df returned no filesystem row"
 ;;
 
-let process_status_to_string = function
-  | Unix.WEXITED code -> Printf.sprintf "exited(%d)" code
-  | Unix.WSIGNALED signal -> Printf.sprintf "signaled(%d)" signal
-  | Unix.WSTOPPED signal -> Printf.sprintf "stopped(%d)" signal
-;;
-
 let probe_uncached path =
   let path = nearest_existing_path path in
   try
@@ -126,7 +120,7 @@ let probe_uncached path =
     with
     | lines, Unix.WEXITED 0 -> parse_df_output ~path lines
     | _lines, status ->
-      let detail = "df -Pk " ^ process_status_to_string status in
+      let detail = "df -Pk " ^ With_process.status_to_string status in
       Log.Keeper.warn "disk_observation: probe failed path=%s detail=%s" path detail;
       Probe_error detail
   with

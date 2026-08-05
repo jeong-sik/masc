@@ -156,6 +156,13 @@ val running_under_test_executable : unit -> bool
 val test_allow_home_base_path_env : string
 val base_path_prod_guard : string -> string
 val base_path : unit -> string
+
+val resolve_against_base_path : string -> string
+(** [resolve_against_base_path raw] returns [raw] unchanged when it is
+    absolute, and [Filename.concat (base_path ()) raw] when it is
+    relative.  Raises [Config_error] through [base_path] when
+    [MASC_BASE_PATH] is unset. *)
+
 val sb_path_opt : unit -> string option
 val sb_path_result : unit -> (string, string) result
 val sb_path : unit -> string

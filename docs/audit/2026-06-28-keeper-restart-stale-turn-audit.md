@@ -84,11 +84,6 @@ P0: restarted keepers inherit old completed-turn metadata and immediately burn r
     - Surface: prompt resolver/config prompt store.
     - Status: follow-up; binary fallback is an SSOT risk if the external prompt is required.
 
-12. P1 compaction manifest event schema drift
-    - Root: dashboard reader surfaced unknown manifest events `memory_injected` / `memory_flushed`.
-    - Surface: `lib/keeper/keeper_runtime_manifest.ml`, `lib/keeper_registry/keeper_runtime_manifest_types.ml`, `lib/server/server_dashboard_http_keeper_api.ml`.
-    - Status: follow-up; current source appears to know these event names, so verify live binary freshness.
-
 13. P1 source entries accept-and-ignore invalid shape
     - Root: `source_entries_arg` ignores null/non-object/non-list sources instead of rejecting caller shape.
     - Surface: `lib/board_tool_adapter/board_tool_format.ml`.

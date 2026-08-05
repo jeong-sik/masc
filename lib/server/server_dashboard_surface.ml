@@ -21,26 +21,21 @@ type t = {
 
 let schema = "masc.dashboard_surface.v1"
 
-let assoc_field key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-;;
-
 let string_field key json =
-  match assoc_field key json with
+  match Json_util.assoc_member_opt key json with
   | Some (`String value) -> String_util.trim_to_option value
   | _ -> None
 ;;
 
 let float_field key json =
-  match assoc_field key json with
+  match Json_util.assoc_member_opt key json with
   | Some (`Float value) -> Some value
   | Some (`Int value) -> Some (float_of_int value)
   | _ -> None
 ;;
 
 let projection_diagnostics json =
-  match assoc_field "projection_diagnostics" json with
+  match Json_util.assoc_member_opt "projection_diagnostics" json with
   | Some (`Assoc fields) -> `Assoc fields
   | _ -> `Assoc []
 ;;

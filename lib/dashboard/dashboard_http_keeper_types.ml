@@ -121,12 +121,7 @@ let parse_json_line_opt line =
 let string_member_nonempty key json =
   Option.bind (Safe_ops.json_string_opt key json) nonempty_string_opt
 
-let rec take_list n xs =
-  if n <= 0 then []
-  else
-    match xs with
-    | [] -> []
-    | x :: rest -> x :: take_list (n - 1) rest
+let take_list n xs = List_util.take_first n xs
 
 let percentile_sorted_float (sorted : float array) (p : float) : float =
   let n = Array.length sorted in

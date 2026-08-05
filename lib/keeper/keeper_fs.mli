@@ -199,6 +199,24 @@ module For_testing : sig
     -> (unit, durable_remove_error) result
 end
 
+(** {1 Path Locks} *)
+
+(** A lock held in the process-wide registry under one path key, carrying an
+    [Eio.Mutex.t] and the number of holders that currently reference it. *)
+type path_lock
+
+(** The [Eio.Mutex.t] carried by [path_lock]. *)
+val path_lock_mutex : path_lock -> Eio.Mutex.t
+
+(** Return the lock registered under [key], creating and registering a fresh
+    one when the key has no entry, and add one to its holder count. *)
+val acquire_path_lock : string -> path_lock
+
+(** Subtract one from the holder count of [lock]. When the count reaches zero
+    and the entry registered under [key] is still physically the same lock,
+    that entry is removed from the registry. *)
+val release_path_lock : string -> path_lock -> unit
+
 (** {1 Standard Keeper Paths} *)
 
 (** [.masc/keepers/] directory. *)

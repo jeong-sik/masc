@@ -130,6 +130,10 @@ val compact_text : ?max_len:int -> string -> string
 
 val strip_trailing_cr : string -> string
 (** [strip_trailing_cr s] removes a trailing ['\\r'] character if present. *)
+
+val first_line : string -> string
+(** [first_line text] returns the bytes of [text] before the first ['\\n'].
+    Returns [text] unchanged when it contains no ['\\n']. Does not trim. *)
 val escape_xml : string -> string
 (** Escape the five XML 1.0 predefined entities: ampersand,
     less-than, greater-than, double-quote, and apostrophe.

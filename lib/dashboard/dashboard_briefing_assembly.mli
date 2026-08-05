@@ -51,3 +51,16 @@ val build_internal_signals :
     operator's incident + recommended-action streams into
     one internal-signal list, sorted by descending
     pressure rank. *)
+
+(** {1 Incident / action pairing} *)
+
+val action_matches_incident : Yojson.Safe.t -> Yojson.Safe.t -> bool
+(** [action_matches_incident incident action] returns [true]
+    when [action] targets the same [target_type] /
+    [target_id] pair as [incident] and either its
+    normalized [reason] equals the incident's normalized
+    [summary] (both non-empty), or its [action_type] is one
+    of the types listed for the incident's [kind].  Returns
+    [false] on a target mismatch.  Shared with
+    {!Dashboard_briefing}, which pairs the same operator
+    digest streams. *)

@@ -30,17 +30,9 @@ let default_config ~label ~interval_s =
     warn_first_failure = true;
   }
 
-let is_internal_race_cancel exn =
-  match exn with
-  | Eio.Cancel.Cancelled _ ->
-      let msg = Printexc.to_string exn in
-      String.equal msg "Cancelled: Eio__core__Fiber.Not_first"
-      || String.ends_with ~suffix:"Eio__core__Fiber.Not_first" msg
-  | _ -> false
-
 let should_reraise_cancel exn =
   match exn with
-  | Eio.Cancel.Cancelled _ -> not (is_internal_race_cancel exn)
+  | Eio.Cancel.Cancelled _ -> not (Cancel_safe.is_internal_race_cancel exn)
   | _ -> false
 
 let timeout_failure_message ~label ~phase ~timeout_s ~elapsed_s =

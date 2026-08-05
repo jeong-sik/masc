@@ -17,12 +17,6 @@ let default_binding_audit_path = ".gate/runtime/imessage/binding_audit.jsonl"
 let stale_after_sec () =
   Env_config_core.get_int ~default:30 "MASC_IMESSAGE_STATUS_STALE_SEC"
 
-let resolve_path raw_path =
-  if Filename.is_relative raw_path then
-    Filename.concat (Env_config_core.base_path ()) raw_path
-  else
-    raw_path
-
 let redact_chat_guid raw =
   let value = String.trim raw in
   if value = "" then ""
@@ -34,8 +28,8 @@ let redact_chat_guid raw =
 
 let configured_write_path env_name ~default =
   match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
-  | Some raw -> resolve_path raw
-  | None -> resolve_path default
+  | Some raw -> Env_config_core.resolve_against_base_path raw
+  | None -> Env_config_core.resolve_against_base_path default
 
 let status_path () =
   configured_write_path "MASC_IMESSAGE_STATUS_PATH" ~default:default_status_path
@@ -82,12 +76,6 @@ let stale_of_updated_at updated_at =
   match Gate_time_util.parse_iso8601_opt updated_at with
   | Some ts -> Unix.gettimeofday () -. ts > float_of_int (stale_after_sec ())
   | None -> true
-
-let connector_state_label ~available ~connected ~stale =
-  if not available then "offline"
-  else if stale then "stale"
-  else if connected then "connected"
-  else "disconnected"
 
 (* RFC-0223 P2: presence surface. Both recomputed per call — no cached
    presence state. *)
@@ -146,7 +134,10 @@ let status_json ?(audit_limit = 10) () =
       ("connected", `Bool connected);
       ("stale", `Bool stale);
       ("stale_after_sec", `Int (stale_after_sec ()));
-      ("status", `String (connector_state_label ~available ~connected ~stale));
+      ( "status",
+        `String
+          (Channel_gate_connector.connector_state_label ~available ~connected
+             ~stale) );
       ("error", `String error);
       ("status_path", `String status_path);
       ("binding_store_path", `String binding_store_path);
@@ -181,19 +172,6 @@ let list_assoc_field key = function
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
 
-let find_assoc_by_string_field ~field ~value = function
-  | `List rows ->
-      List.find_map
-        (function
-          | (`Assoc _ as row) -> (
-              match list_assoc_field field row with
-              | Some (`String candidate) when String.equal candidate value ->
-                  Some row
-              | _ -> None)
-          | _ -> None)
-        rows
-  | _ -> None
-
 let connector_json ?gate_status_json ?(audit_limit = 10) () =
   let status = status_json ~audit_limit () in
   let observed_channel =
@@ -203,7 +181,8 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
         match list_assoc_field "channels" json with
         | Some channels -> (
             match
-              find_assoc_by_string_field ~field:"channel" ~value:channel channels
+              Json_util.find_assoc_row_by_string_field ~field:"channel"
+                ~value:channel channels
             with
             | Some row -> row
             | None -> `Null)

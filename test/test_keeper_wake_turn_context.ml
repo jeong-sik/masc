@@ -433,8 +433,8 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
     autonomous_system_prompt;
   check bool "unresolved goal remains as a bare id" true
     (contains ~needle:"- missing-goal\n" base_system_prompt);
-  check bool "identity anchor is preserved" true
-    (contains ~needle:"<identity_anchor>" base_system_prompt);
+  check bool "identity block is preserved" true
+    (contains ~needle:"<identity>" base_system_prompt);
   (* The shared block is one [<system>] element now. Its former
      [<world>]/[<capabilities>] tags are gone, so the two contracts they
      wrapped are pinned by their own sentences instead of by a tag name. *)

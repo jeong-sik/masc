@@ -21,14 +21,6 @@ module Provider_binding = Runtime_provider_binding
 
 (* --- Inlined from the deleted [Runtime_config_provider_binding] --- *)
 
-(* Trim, lowercase, and replace [-] with [_] in a provider identifier so
-   label/binding lookups are case- and separator-insensitive. *)
-let normalize_provider_id provider_id =
-  String.trim provider_id
-  |> String.lowercase_ascii
-  |> String.map (fun c -> if c = '-' then '_' else c)
-;;
-
 let normalize_header_key key = String.lowercase_ascii (String.trim key)
 
 let is_auth_header_key key =
@@ -111,7 +103,7 @@ let resolve_provider_prefix (provider_id : string) : string option =
   match runtime_binding_id provider_id with
   | Some _ as found -> found
   | None ->
-    let normalized = normalize_provider_id provider_id in
+    let normalized = Provider_binding.normalize_provider_id provider_id in
     runtime_binding_id normalized
 ;;
 

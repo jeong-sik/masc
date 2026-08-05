@@ -154,8 +154,7 @@ let child_exit_code = function
   | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> 128 + signal
 ;;
 
-let lease_owner_environment_key =
-  "MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID="
+let lease_owner_environment_key = "MASC_DEPLOYMENT_LEASE_OWNER_PID="
 ;;
 
 let environment_without_lease_owner () =
@@ -183,7 +182,7 @@ let run_child command environment =
     (try
        let arguments = Array.of_list command in
        (* [Process_eio_detached] redirects child output and returns immediately.
-          Cutover preparation must inherit the operator streams and be reaped
+          Deployment preparation must inherit the operator streams and be reaped
           synchronously, so this helper owns the process group directly. *)
        let forwarded_signals = [ Sys.sigterm; Sys.sigint ] in
        let previous_signal_mask =
@@ -209,7 +208,7 @@ let run_child command environment =
          with
          | exn ->
            Printf.eprintf
-             "cutover command failed to start executable=%s: %s\n%!"
+             "deployment command failed to start executable=%s: %s\n%!"
              executable
              (Printexc.to_string exn);
            Unix._exit 127);
@@ -258,7 +257,7 @@ let run_child command environment =
      with
      | Unix.Unix_error (error, syscall, argument) ->
        errorf
-         "cutover command failed to start or wait syscall=%s argument=%s: %s"
+         "deployment command failed to start or wait syscall=%s argument=%s: %s"
          syscall
          argument
          (Unix.error_message error))
@@ -309,7 +308,7 @@ let write_prepared_file path =
   with
   | Unix.Unix_error (error, syscall, argument) ->
     errorf
-      "cutover preparation marker failed syscall=%s argument=%s: %s"
+      "deployment preparation marker failed syscall=%s argument=%s: %s"
       syscall
       argument
       (Unix.error_message error)
@@ -406,7 +405,7 @@ let handoff_base_path_lease
                   | exn ->
                     release ();
                     errorf
-                      "cutover runtime handoff failed executable=%s: %s"
+                      "deployment runtime handoff failed executable=%s: %s"
                       next_executable
                       (Printexc.to_string exn))))))
 ;;
@@ -447,7 +446,7 @@ let validate_current_queue_cmd =
 ;;
 
 let validate_current_wal_cmd =
-  let doc = "validate a v5 WAL with the production empty-state replay path" in
+  let doc = "validate the current WAL with the production empty-state replay path" in
   Cmd.v
     (Cmd.info "validate-current-wal" ~doc)
     Term.(
@@ -486,7 +485,7 @@ let command =
 ;;
 
 let lease_run_cmd =
-  let doc = "run a cutover check under the canonical BasePath writer lease" in
+  let doc = "run a deployment check under the canonical BasePath writer lease" in
   Cmd.v
     (Cmd.info "lease-run" ~doc)
     Term.(
@@ -532,7 +531,7 @@ let prepared_file =
 ;;
 
 let lease_handoff_cmd =
-  let doc = "prepare a cutover under lease, then atomically exec the new runtime" in
+  let doc = "prepare a deployment under lease, then atomically exec the new runtime" in
   Cmd.v
     (Cmd.info "lease-handoff" ~doc)
     Term.(
@@ -554,11 +553,11 @@ let lease_handoff_cmd =
 ;;
 
 let () =
-  let doc = "typed helpers for the event-queue v15 hard-cut gate" in
+  let doc = "typed helpers for runtime deployment preflight" in
   exit
     (Cmd.eval
        (Cmd.group
-          (Cmd.info "masc-keeper-event-queue-v15-cutover-helper" ~doc)
+          (Cmd.info "masc-deployment-preflight-helper" ~doc)
           [ lease_run_cmd
           ; lease_handoff_cmd
           ; verify_lease_owner_cmd

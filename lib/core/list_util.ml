@@ -11,6 +11,15 @@
 let count_if pred xs =
   List.fold_left (fun n x -> if pred x then n + 1 else n) 0 xs
 
+(** [take_first n xs] returns the first [n] elements of [xs].
+    Returns [[]] when [n <= 0] and [xs] when [List.length xs <= n]. *)
+let rec take_first n xs =
+  if n <= 0 then []
+  else
+    match xs with
+    | [] -> []
+    | x :: rest -> x :: take_first (n - 1) rest
+
 (** [take_last n xs] returns the last [n] elements of [xs].
     Returns [[]] when [n <= 0] and [xs] when [List.length xs <= n]. *)
 let take_last n xs =

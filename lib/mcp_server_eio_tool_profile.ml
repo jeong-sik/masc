@@ -343,20 +343,12 @@ let rec drop_list n = function
   | [] -> []
   | _ :: rest -> drop_list (n - 1) rest
 
-let rec take_list n xs =
-  if n <= 0 then
-    []
-  else
-    match xs with
-    | [] -> []
-    | x :: rest -> x :: take_list (n - 1) rest
-
 let paginate_json_items ?(page_size = 128) ~field_name items cursor =
   match decode_cursor_offset cursor with
   | Error msg -> Error msg
   | Ok offset ->
       let total = List.length items in
-      let page = items |> drop_list offset |> take_list page_size in
+      let page = items |> drop_list offset |> List_util.take_first page_size in
       let next_offset = offset + List.length page in
       let fields =
         [ (field_name, `List page) ]

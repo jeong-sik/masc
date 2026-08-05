@@ -63,6 +63,16 @@ module type S = sig
       (status file staleness, in-process gateway state). RFC-0223 P2. *)
 end
 
+(** {1 Connector status vocabulary} *)
+
+val connector_state_label :
+  available:bool -> connected:bool -> stale:bool -> string
+(** [connector_state_label ~available ~connected ~stale] returns the
+    value connectors put in the [status] field of {!S.status_json}:
+    ["offline"] when not available, otherwise ["stale"] when the
+    liveness source is stale, otherwise ["connected"] or
+    ["disconnected"]. *)
+
 (** {1 Registry} *)
 
 val register : (module S) -> unit

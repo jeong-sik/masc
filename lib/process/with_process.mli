@@ -11,6 +11,11 @@ val set_process_guard : process_guard -> unit
 val reset_process_guard_for_testing : unit -> unit
 (** Restore the default direct guard. Intended for focused tests. *)
 
+val status_to_string : Unix.process_status -> string
+(** Render the exit status returned by {!with_process_args_in} as
+    ["exited(N)"], ["signaled(N)"] or ["stopped(N)"], where [N] is the exit
+    code or signal number. Intended for log and probe-error text. *)
+
 val with_process_args_in :
   string -> string array -> (in_channel -> 'a) -> 'a * Unix.process_status
 (** [with_process_args_in prog argv f] opens [prog] with exact argv control,

@@ -83,7 +83,7 @@ function goalTreeTask(overrides: Partial<GoalTreeTask> = {}): GoalTreeTask {
   return {
     id: 'task-tree',
     title: 'Tree task',
-    status: 'completed',
+    status: 'done',
     status_color: GOAL_FIXTURE_OK_COLOR,
     priority: 2,
     assignee: null,
@@ -1228,7 +1228,36 @@ describe('Work', () => {
         expect(screen.getByTestId('work-view-list').classList.contains('on')).toBe(true)
       })
 
-      it('includes recursive goal tree tasks in KPIs and kanban, normalizing completed to done', () => {
+      // The tree used to speak its own status spelling ("completed" for done,
+      // "pending" for todo) and the frontend translated it. Both sides now use
+      // Masc_domain.task_status_to_string, so the fixture carries the spelling
+      // the backend actually emits and no translation is involved.
+      it('surfaces an unrecognised tree status as unknown instead of translating it', () => {
+        // The removed map silently rewrote a second vocabulary into the first.
+        // With one spelling there is nothing to translate, so a status the
+        // domain never produces must read as unknown and keep its raw text
+        // rather than being guessed into a neighbouring state.
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [goalTreeTask({ id: 'T-legacy', title: 'Legacy spelling', status: 'completed' })],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, total_tasks: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+        const doneCol = screen.getByTestId('kanban-col-done')
+        expect(doneCol.textContent).not.toContain('Legacy spelling')
+      })
+
+      it('includes recursive goal tree tasks in KPIs and kanban', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
           { id: 'G-child', title: 'Child Goal', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
@@ -1239,14 +1268,14 @@ describe('Work', () => {
             goalTreeNode({
               id: 'G-1',
               tasks: [
-                goalTreeTask({ id: 'T-root', title: 'Root completed task', goal_id: 'G-1', status: 'completed' }),
+                goalTreeTask({ id: 'T-root', title: 'Root completed task', goal_id: 'G-1', status: 'done' }),
               ],
               children: [
                 goalTreeNode({
                   id: 'G-child',
                   title: 'Child Goal',
                   tasks: [
-                    goalTreeTask({ id: 'T-child', title: 'Child completed task', goal_id: 'G-child', status: 'completed' }),
+                    goalTreeTask({ id: 'T-child', title: 'Child completed task', goal_id: 'G-child', status: 'done' }),
                   ],
                 }),
               ],
@@ -1349,7 +1378,7 @@ describe('Work', () => {
             goalTreeNode({
               id: 'G-1',
               tasks: [
-                goalTreeTask({ id: 'T-goal', title: 'Goal store task', goal_id: 'G-1', status: 'completed' }),
+                goalTreeTask({ id: 'T-goal', title: 'Goal store task', goal_id: 'G-1', status: 'done' }),
               ],
             }),
           ],
@@ -1451,11 +1480,11 @@ describe('Work', () => {
           tree: [
             goalTreeNode({
               id: 'G-1',
-              tasks: [goalTreeTask({ id: 'T-1', goal_id: 'G-1', status: 'completed' })],
+              tasks: [goalTreeTask({ id: 'T-1', goal_id: 'G-1', status: 'done' })],
               children: [
                 goalTreeNode({
                   id: 'G-1',
-                  tasks: [goalTreeTask({ id: 'T-2', goal_id: 'G-1', status: 'completed' })],
+                  tasks: [goalTreeTask({ id: 'T-2', goal_id: 'G-1', status: 'done' })],
                 }),
               ],
             }),

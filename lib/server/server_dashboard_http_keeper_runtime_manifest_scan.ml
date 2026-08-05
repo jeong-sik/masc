@@ -6,7 +6,6 @@
 open Server_dashboard_http_keeper_api_types
 
 type manifest_scan_diagnostic =
-  | Retired_event_row of Keeper_runtime_manifest.retired_event_kind
   | Unsupported_event_row of string
   | Invalid_manifest_row of string
   | Invalid_json_row of string
@@ -44,7 +43,6 @@ type runtime_manifest_scan =
   ; mutable scanned_lines : int
   ; scan_line_limit : int
   ; scan_scope : string
-  ; retired_event_counts : (Keeper_runtime_manifest.retired_event_kind, int) Hashtbl.t
   ; unsupported_event_counts : (string, int) Hashtbl.t
   ; mutable unsupported_event_count : int
   ; mutable unsupported_event_unattributed_count : int
@@ -98,7 +96,6 @@ let make_runtime_manifest_scan ~path ~limit ~scan_line_limit ~scan_scope =
   ; scanned_lines = 0
   ; scan_line_limit
   ; scan_scope
-  ; retired_event_counts = Hashtbl.create 7
   ; unsupported_event_counts = Hashtbl.create 7
   ; unsupported_event_count = 0
   ; unsupported_event_unattributed_count = 0
@@ -117,15 +114,6 @@ let queue_to_list queue =
   Queue.iter (fun value -> values := value :: !values) queue;
   List.rev !values
 
-let increment_count table key =
-  let current =
-    match Hashtbl.find_opt table key with
-    | Some count -> count
-    | None -> 0
-  in
-  Hashtbl.replace table key (current + 1)
-;;
-
 let increment_bounded_count table ~capacity key =
   match Hashtbl.find_opt table key with
   | Some current ->
@@ -139,7 +127,6 @@ let increment_bounded_count table ~capacity key =
 
 let record_manifest_scan_diagnostic scan diagnostic =
   (match diagnostic with
-   | Retired_event_row event -> increment_count scan.retired_event_counts event
    | Unsupported_event_row event ->
      scan.unsupported_event_count <- scan.unsupported_event_count + 1;
      if not (increment_bounded_count scan.unsupported_event_counts ~capacity:scan.limit event)
@@ -162,14 +149,7 @@ let sorted_count_rows table key_to_string =
     `Assoc [ "event", `String event; "count", `Int count ])
 ;;
 
-let count_total table = Hashtbl.fold (fun _ count total -> total + count) table 0
-
 let manifest_scan_diagnostic_to_json = function
-  | Retired_event_row event ->
-    `Assoc
-      [ "kind", `String "retired_event"
-      ; "event", `String (Keeper_runtime_manifest.retired_event_kind_to_string event)
-      ]
   | Unsupported_event_row event ->
     `Assoc [ "kind", `String "unsupported_event"; "event", `String event ]
   | Invalid_manifest_row detail ->
@@ -185,12 +165,6 @@ let runtime_manifest_scan_diagnostics_schema =
 let runtime_manifest_scan_diagnostics_json scan =
   `Assoc
     [ "schema", `String runtime_manifest_scan_diagnostics_schema
-    ; "retired_event_count", `Int (count_total scan.retired_event_counts)
-    ; ( "retired_event_counts"
-      , `List
-          (sorted_count_rows
-             scan.retired_event_counts
-             Keeper_runtime_manifest.retired_event_kind_to_string) )
     ; "unsupported_event_count", `Int scan.unsupported_event_count
     ; ( "unsupported_event_counts"
       , `List (sorted_count_rows scan.unsupported_event_counts Fun.id) )
@@ -360,9 +334,6 @@ let read_runtime_manifest_scan ~config ~keeper_name ~trace_id ?turn_id ~limit ()
             | Ok (Keeper_runtime_manifest.Active_row row)
               when manifest_row_matches ?turn_id keeper_name trace_id row ->
               update_runtime_manifest_scan scan row
-            | Ok (Keeper_runtime_manifest.Retired_row (identity, retired))
-              when manifest_identity_matches ?turn_id keeper_name trace_id identity ->
-              record_manifest_scan_diagnostic scan (Retired_event_row retired)
             | Ok (Keeper_runtime_manifest.Unsupported_row (identity, unsupported))
               when manifest_identity_matches ?turn_id keeper_name trace_id identity ->
               record_manifest_scan_diagnostic scan (Unsupported_event_row unsupported)

@@ -16,7 +16,7 @@
     high-cardinality so kept internal), [grpc_enabled] /
     [grpc_port] / [ws_port] (env-derived), [set_agent_heartbeat_age]
     / [inc_agent_stale] (per-agent labels, internal-only), the
-    JSON helpers (\[assoc_field], [int_field], [int_field_opt],
+    JSON helpers ([int_field], [int_field_opt],
     [int_option_json], [workspace_id_from_config], [cluster_summary_json]),
     [http_listener_mode], [primary_path], [queue_pressure],
     [tcp_port_reachable], [hot_session_json], the

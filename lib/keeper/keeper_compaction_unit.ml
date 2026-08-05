@@ -71,6 +71,11 @@ type open_cycle =
   ; messages_rev : T.message list
   }
 
+let messages_of_closed_unit = function
+  | Ordinary_message message -> [ message ]
+  | Closed_tool_cycle messages -> messages
+;;
+
 (* Blank classification must not normalize the provider-owned identity used
    by cycle matching and persisted evidence. *)
 let tool_id_is_blank tool_use_id = String.trim tool_use_id = ""

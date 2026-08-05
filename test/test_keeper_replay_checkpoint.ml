@@ -1,7 +1,8 @@
 (** Regression tests for the live OAS checkpoint replay contract.
 
-    These tests deliberately exercise typed checkpoint messages. Retired
-    model-authored prose state is not a checkpoint authority. *)
+    These tests deliberately exercise typed checkpoint messages. A successful
+    assistant response is durable conversation state even when the autonomous
+    cycle has no external effect. *)
 
 module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
 module Replay_prefix = Masc.Keeper_replay_prefix
@@ -9,6 +10,8 @@ module Replay_prefix = Masc.Keeper_replay_prefix
 let message role content =
   Agent_sdk.Types.{ role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
+
+let text_of_message = Agent_sdk.Types.text_of_message
 
 let checkpoint ?(working_context = Some (`Assoc [])) messages =
   Agent_sdk.Checkpoint.
@@ -412,98 +415,112 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
         (persisted.messages = canonical_history @ [ current_assistant ]))
 ;;
 
-(* RFC-0351 S1 / #25462: a completed bare-wake turn with no tool or external
-   delivery must leave the replay transcript unchanged. The provider still
-   receives the wake marker and may answer with idle prose, but neither is a
-   durable effect. *)
+(* Each autonomous cycle is an ordinary durable user/assistant exchange. This
+   continuation boundary does not depend on a tool call, an external delivery,
+   or a turn identifier. *)
 let wake_marker_text = Masc.Keeper_unified_prompt.autonomous_wake_marker
 
-let wake_persistence ~user_turn_record ~turn_effect_record ~response_text messages =
+let wake_persistence ~history_messages ~response_text messages =
   Finalize.checkpoint_for_replay_persistence
-    ~history_messages:
-      Agent_sdk.Types.
-        [ { role = User
-          ; content = [ Text "seed" ]
-          ; name = None
-          ; tool_call_id = None
-          ; metadata = []
-          }
-        ]
+    ~history_messages
     ~session_id:"new-session"
     ~response_text
-    ~user_turn_record
-    ~turn_effect_record
     (checkpoint messages)
 ;;
 
 let history_seed = [ message Agent_sdk.Types.User [ Agent_sdk.Types.Text "seed" ] ]
 
-let test_inert_wake_does_not_persist_internal_assistant () =
+let test_autonomous_response_is_durable_conversation () =
   Alcotest.(check (option string))
-    "idle prose has no replay authority"
-    None
+    "assistant response is durable without an external effect"
+    (Some "I will inspect the queue next.")
     (Finalize.replay_response_text_for_persistence
-       ~turn_effect_record:Masc.Keeper_run_prompt.Inert_autonomous_turn
        ~suppress_visible_response:false
-       ~response_text:"observed, nothing to do");
-  Alcotest.(check (option string))
-    "meaningful turn keeps replay text"
-    (Some "delivered reply")
-    (Finalize.replay_response_text_for_persistence
-       ~turn_effect_record:Masc.Keeper_run_prompt.Meaningful_turn
-       ~suppress_visible_response:false
-       ~response_text:"delivered reply")
+       ~response_text:"I will inspect the queue next.")
 ;;
 
-let test_inert_wake_does_not_grow_replay () =
+let test_autonomous_turn_persists_cue_and_assistant () =
   let open Agent_sdk.Types in
   let suffix =
     [ message User [ Text wake_marker_text ]
-    ; message Assistant [ Text "observed, nothing to do" ]
+    ; message Assistant [ Text "I will inspect the queue next." ]
     ]
   in
   let patched, _ =
     wake_persistence
-      ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
-      ~turn_effect_record:Masc.Keeper_run_prompt.Inert_autonomous_turn
-      ~response_text:"observed, nothing to do"
+      ~history_messages:history_seed
+      ~response_text:"I will inspect the queue next."
       (history_seed @ suffix)
     |> expect_ok
   in
   Alcotest.(check int)
-    "inert wake leaves only the pre-turn history"
-    1
+    "assistant joins the durable conversation"
+    3
     (List.length patched.messages);
+  Alcotest.(check string)
+    "assistant intent survives"
+    "I will inspect the queue next."
+    (patched.messages |> List.rev |> List.hd |> text_of_message);
   Alcotest.(check bool)
-    "no message carries the wake marker"
-    false
+    "ordinary continuation cue is durable"
+    true
     (List.exists
        (fun (m : message) -> m.content = [ Text wake_marker_text ])
        patched.messages)
 ;;
 
-let test_recorded_turn_keeps_identical_marker_text () =
+let test_two_autonomous_cycles_continue_same_conversation () =
   let open Agent_sdk.Types in
-  let suffix =
+  let first_response = "I will inspect the queue next." in
+  let first_suffix =
     [ message User [ Text wake_marker_text ]
-    ; message Assistant [ Text "reply" ]
+    ; message Assistant [ Text first_response ]
     ]
   in
-  let patched, _ =
+  let first, _ =
     wake_persistence
-      ~user_turn_record:Masc.Keeper_run_prompt.Record_user_turn
-      ~turn_effect_record:Masc.Keeper_run_prompt.Meaningful_turn
-      ~response_text:"reply"
-      (history_seed @ suffix)
+      ~history_messages:history_seed
+      ~response_text:first_response
+      (history_seed @ first_suffix)
     |> expect_ok
   in
-  Alcotest.(check int)
-    "recorded turn persists the user message even with marker text"
-    3
-    (List.length patched.messages)
+  with_temp_dir (fun session_dir ->
+    (match
+       Masc.Keeper_checkpoint_store.save_oas_classified ~session_dir first
+     with
+     | Ok (Masc.Keeper_checkpoint_store.Saved _) -> ()
+     | Ok (Masc.Keeper_checkpoint_store.Stale_noop _) ->
+       Alcotest.fail "first autonomous checkpoint was classified as stale"
+     | Error detail -> Alcotest.fail ("first checkpoint save failed: " ^ detail));
+    let reloaded =
+      match
+        Masc.Keeper_checkpoint_store.load_oas
+          ~session_dir
+          ~session_id:"new-session"
+      with
+      | Ok checkpoint -> checkpoint
+      | Error _ -> Alcotest.fail "first autonomous checkpoint did not reload"
+    in
+    let second_response = "The queue inspection is complete." in
+    let second_suffix =
+      [ message User [ Text wake_marker_text ]
+      ; message Assistant [ Text second_response ]
+      ]
+    in
+    let second, _ =
+      wake_persistence
+        ~history_messages:reloaded.messages
+        ~response_text:second_response
+        (reloaded.messages @ second_suffix)
+      |> expect_ok
+    in
+    Alcotest.(check (list string))
+      "both ordinary turns survive save, reload, and conversation order"
+      [ "seed"; wake_marker_text; first_response; wake_marker_text; second_response ]
+      (List.map text_of_message second.messages))
 ;;
 
-let test_skipped_wake_leaves_non_marker_suffix_untouched () =
+let test_non_marker_user_turn_is_untouched () =
   let open Agent_sdk.Types in
   let suffix =
     [ message User [ Text "an actual user question" ]
@@ -512,34 +529,32 @@ let test_skipped_wake_leaves_non_marker_suffix_untouched () =
   in
   let patched, _ =
     wake_persistence
-      ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
-      ~turn_effect_record:Masc.Keeper_run_prompt.Meaningful_turn
+      ~history_messages:history_seed
       ~response_text:"reply"
       (history_seed @ suffix)
     |> expect_ok
   in
   Alcotest.(check int)
-    "a non-marker leading user message survives the skip record"
+    "ordinary user message remains in replay"
     3
     (List.length patched.messages)
 ;;
 
-let test_skipped_wake_blank_response_drops_only_inert_suffix () =
+let test_blank_response_drops_only_blank_assistant () =
   let open Agent_sdk.Types in
   let suffix =
     [ message User [ Text wake_marker_text ]; message Assistant [ Text "" ] ]
   in
   let patched, _ =
     wake_persistence
-      ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
-      ~turn_effect_record:Masc.Keeper_run_prompt.Inert_autonomous_turn
+      ~history_messages:history_seed
       ~response_text:""
       (history_seed @ suffix)
     |> expect_ok
   in
   Alcotest.(check int)
-    "blank canonicalization keeps only the pre-turn history"
-    1
+    "blank canonicalization keeps the current user turn"
+    2
     (List.length patched.messages)
 ;;
 
@@ -584,25 +599,25 @@ let () =
             `Quick
             test_media_degraded_projection_persists_canonical_checkpoint
         ; Alcotest.test_case
-            "inert wake does not persist internal assistant"
+            "autonomous response is durable conversation"
             `Quick
-            test_inert_wake_does_not_persist_internal_assistant
+            test_autonomous_response_is_durable_conversation
         ; Alcotest.test_case
-            "inert wake does not grow replay"
+            "autonomous turn persists cue and assistant"
             `Quick
-            test_inert_wake_does_not_grow_replay
+            test_autonomous_turn_persists_cue_and_assistant
         ; Alcotest.test_case
-            "recorded turn keeps identical marker text"
+            "two autonomous cycles continue one conversation"
             `Quick
-            test_recorded_turn_keeps_identical_marker_text
+            test_two_autonomous_cycles_continue_same_conversation
         ; Alcotest.test_case
-            "skipped wake leaves non-marker suffix untouched"
+            "non-marker user turn is untouched"
             `Quick
-            test_skipped_wake_leaves_non_marker_suffix_untouched
+            test_non_marker_user_turn_is_untouched
         ; Alcotest.test_case
-            "skipped wake blank response drops only inert suffix"
+            "blank response drops only blank assistant"
             `Quick
-            test_skipped_wake_blank_response_drops_only_inert_suffix
+            test_blank_response_drops_only_blank_assistant
         ] )
     ]
 ;;

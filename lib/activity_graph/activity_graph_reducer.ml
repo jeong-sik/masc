@@ -33,10 +33,9 @@ let payload_string field json =
 
 let is_generic_status = function
   | Unset | Active | Observed -> true
-  | Offline | Spawned | Retired | Compacting | Handoff | Autonomy | Guardrail
+  | Compacting
   | Todo | Claimed | In_progress | Done | Cancelled
-  | Posted | Discussed | Open | Resolved | Approved | Denied
-  | Running | Paused | Stopped | Finalized | Workspace -> false
+  | Posted | Discussed | Workspace -> false
 
 (* Semantic weight multiplier by event kind.
    Completion events score high; routine lifecycle events score low. *)
@@ -45,21 +44,14 @@ let semantic_multiplier kind =
   | Some (External_tool_called | Keeper_in_turn_tool_executed) -> 0.3
   | None ->
     (match kind with
-  | "task.done" | "task.approved" | "decision.resolved" | "operation.finalized" -> 5.0
-  | "task.created" | "task.claimed" | "decision.opened" -> 3.0
-  | "agent.handoff" | "agent.spawned" -> 3.0
+  | "task.done" | "task.approved" -> 5.0
+  | "task.created" | "task.claimed" -> 3.0
   | "board.posted" | "board.voted" -> 2.0
   | "task.started" | "task.released" | "task.cancelled" -> 1.5
   | "message.broadcast" | "message.mentioned" -> 1.0
-  | "team.turn" | "team.turn_failed" -> 1.0
-  | "board.commented" | "decision.voted" -> 1.0
-  | "operation.started" | "operation.resumed" -> 1.0
-  | "policy.approved" | "policy.denied" -> 2.0
-  | "agent.session_bound" | "agent.left" -> 0.5
-  | "agent.retired" | "agent.compacted" -> 0.5
-  | "keeper.compaction" | "keeper.guardrail" -> 0.5
-  | "keeper.autonomy_started" | "keeper.autonomy_completed" -> 1.5
-  | "operation.paused" | "operation.stopped" -> 0.5
+  | "board.commented" -> 1.0
+  | "agent.session_bound" -> 0.5
+  | "keeper.compaction" -> 0.5
      | "keeper.turn_completed" -> 0.4
      | _ -> 1.0)
 
@@ -180,18 +172,6 @@ let reduce_event ~nodes ~edges (value : event) =
   | None ->
   (match value.kind with
   | "agent.session_bound" -> set_subject_status Active
-  | "agent.left" -> set_subject_status Offline
-  | "agent.spawned" -> set_subject_status Spawned
-  | "agent.retired" -> set_subject_status Retired
-  | "agent.compacted" -> set_subject_status Compacting
-  | "agent.handoff" ->
-      set_actor_status Handoff;
-      set_subject_status Active;
-      (match (actor_id, subject_id) with
-      | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"hands_off_to" ~active:true
-            ~ts_iso:value.ts_iso ~meta:value.payload
-      | (None, _) | (_, None) -> ())
   | "task.created" ->
       set_subject_status Todo;
       (match (actor_id, subject_id) with
@@ -288,59 +268,5 @@ let reduce_event ~nodes ~edges (value : event) =
           ensure_edge edges ~source ~target ~kind:"votes_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | (None, _) | (_, None) -> ())
-  | "decision.opened" ->
-      set_subject_status Open;
-      (match (actor_id, subject_id) with
-      | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"opens" ~active:false
-            ~ts_iso:value.ts_iso ~meta:value.payload
-      | (None, _) | (_, None) -> ())
-  | "decision.voted" ->
-      (match (actor_id, subject_id) with
-      | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"votes_on" ~active:false
-            ~ts_iso:value.ts_iso ~meta:value.payload
-      | (None, _) | (_, None) -> ())
-  | "decision.resolved" -> set_subject_status Resolved
-  | "policy.approved" ->
-      set_subject_status Approved;
-      (match (actor_id, subject_id) with
-      | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"governs" ~active:false
-            ~ts_iso:value.ts_iso ~meta:value.payload
-      | (None, _) | (_, None) -> ())
-  | "policy.denied" ->
-      set_subject_status Denied;
-      (match (actor_id, subject_id) with
-      | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"governs" ~active:false
-            ~ts_iso:value.ts_iso ~meta:value.payload
-      | (None, _) | (_, None) -> ())
-  | "operation.started" ->
-      set_subject_status Running;
-      (match (actor_id, subject_id) with
-      | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"operates_on" ~active:true
-            ~ts_iso:value.ts_iso ~meta:value.payload
-      | (None, _) | (_, None) -> ())
-  | "operation.paused" -> set_subject_status Paused
-  | "operation.resumed" -> set_subject_status Running
-  | "operation.stopped" -> set_subject_status Stopped
-  | "operation.finalized" -> set_subject_status Finalized
-  | "team.turn" ->
-      (match (actor_id, subject_id) with
-      | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"participates_in"
-            ~active:true ~ts_iso:value.ts_iso ~meta:value.payload
-      | (None, _) | (_, None) -> ())
-  | "team.turn_failed" ->
-      (match (actor_id, subject_id) with
-      | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"participates_in"
-            ~active:false ~ts_iso:value.ts_iso ~meta:value.payload
-      | (None, _) | (_, None) -> ())
-  | "keeper.autonomy_started" -> set_actor_status Autonomy
-  | "keeper.autonomy_completed" -> set_actor_status Active
-  | "keeper.guardrail" -> set_actor_status Guardrail
   | "keeper.compaction" -> set_actor_status Compacting
   | _kind -> Log.Misc.debug "reduce_event: unhandled kind=%s" _kind))

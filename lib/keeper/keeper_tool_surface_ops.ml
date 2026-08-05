@@ -5,7 +5,7 @@ module String = Stdlib.String
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Keeper_tool_surface facade.  MCP entrypoints stay stable while keeper internals live in dedicated keeper modules. Keeper_tool_surface owns only runtime wrappers and dispatch. *)
+(** Runtime operations used by the keeper MCP tool surface. *)
 open Tool_args
 open Keeper_types
 open Keeper_meta_contract
@@ -28,7 +28,7 @@ type 'a context = 'a Keeper_types_profile.context = {
     Keeper_publication_recovery_availability.provider;
 }
 type tool_result = Keeper_types_profile.tool_result
-let schemas = Keeper_types_profile.schemas
+let schemas = Keeper_schema.schemas
 
 type handler_error =
   | Message_error of string

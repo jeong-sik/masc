@@ -49,6 +49,11 @@ type restore_shutdown_result =
   | Shutdown_already_restored
   | Shutdown_restore_conflict of Keeper_shutdown_types.Operation_id.t
 
+type transition_shutdown_result =
+  | Shutdown_transition_applied
+  | Shutdown_transition_already_applied
+  | Shutdown_transition_reserved_by_other of Keeper_shutdown_types.Operation_id.t
+
 type 'a registration_commit_result =
   | Registration_committed of 'a
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
@@ -443,6 +448,51 @@ let restore_shutdown ~base_path ~keeper_name ~operation_id =
     | Some existing when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
       Shutdown_already_restored
     | Some existing -> Shutdown_restore_conflict existing)
+;;
+
+let transition_shutdown
+      ~base_path
+      ~keeper_name
+      ~from_operation_id
+      ~to_operation_id
+  =
+  let transition slot =
+    Stdlib.Mutex.protect slot.state_mu (fun () ->
+      match slot.shutdown_operation_id, to_operation_id with
+      | Some existing, _
+        when Keeper_shutdown_types.Operation_id.equal existing from_operation_id ->
+        slot.shutdown_operation_id <- to_operation_id;
+        Shutdown_transition_applied
+      | None, None -> Shutdown_transition_already_applied
+      | Some existing, Some successor
+        when Keeper_shutdown_types.Operation_id.equal existing successor ->
+        Shutdown_transition_already_applied
+      | None, Some successor ->
+        slot.shutdown_operation_id <- Some successor;
+        Shutdown_transition_applied
+      | Some existing, _ -> Shutdown_transition_reserved_by_other existing)
+  in
+  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
+  let slot =
+    match to_operation_id with
+    | Some _ -> Some (slot_for ~base_path ~keeper_name)
+    | None -> Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key)
+  in
+  match slot with
+  | None -> Shutdown_transition_already_applied
+  | Some slot ->
+    let result = transition slot in
+    (match result, to_operation_id with
+     | Shutdown_transition_applied, None ->
+       notify_slot_transition slot Shutdown_rolled_back
+     | ( Shutdown_transition_applied
+       | Shutdown_transition_already_applied
+       | Shutdown_transition_reserved_by_other _ ),
+       Some _
+     | ( Shutdown_transition_already_applied
+       | Shutdown_transition_reserved_by_other _ ),
+       None -> ());
+    result
 ;;
 
 let commit_registration_if_open ~base_path ~keeper_name commit =

@@ -173,7 +173,6 @@ type t =
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsExplicitFactWrite
-  | MemoryOsInertTurnExtractionSkipped
   | RuntimeRequestWireBytes
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
@@ -186,6 +185,9 @@ type t =
   | KeeperToolCallRetryLoop
   | ShellIrEffectTotal
   | RawTraceSinkDegraded
+  | RawTraceRetentionDeleted
+  | RawTraceRetentionSkipped
+  | RawTraceRetentionUnlinkFailed
   | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped

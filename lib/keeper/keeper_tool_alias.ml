@@ -1,20 +1,17 @@
 (** Keeper_tool_alias — flat routing table for two-surface tool naming.
 
-    RFC-0064: replaces the 3-tier classification (aliases / oas_dual_register
-    / hallucinated_builtins) with a single [route] type. Each LLM-native tool
+    Each LLM-native tool
     name maps to one route record containing the internal handler name, an
     input translator, and an optional public schema.
 
     Two descriptor-backed surfaces:
-    - LLM native-style tools: Execute, Grep/Search, Read, Edit, Write,
+    - LLM native-style tools: Execute, Grep, Read, Edit, Write,
       WebSearch, WebFetch
     - MCP tools: names with the masc_ prefix
 
     Internal [keeper_*] names are implementation details of the routing layer,
     not a public surface. A tool call for a name we don't handle is a routing
-    miss — captured by result-based telemetry, not by upfront classification.
-
-    @since 2.187.0 — RFC-0064 two-surface model *)
+    miss — captured by result-based telemetry, not by upfront classification. *)
 
 (* ── Route type ──────────────────────────────────────────────────── *)
 
@@ -84,8 +81,7 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   | Tool_voice_dispatch
   | Tool_task_dispatch
   (* masc_fusion / masc_fusion_status are keeper-native in-process tools (own
-     orchestrator / registry read), not masc-MCP coordination proxies — routed
-     via descriptors, not this alias path. *)
+     orchestrator / registry read), not masc-MCP coordination proxies. *)
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
   | Tool_web_search
@@ -117,8 +113,8 @@ let known_runtime_names_tbl : (string, unit) Hashtbl.t =
     (fun d -> if is_masc_mcp_descriptor d then add_internal_names t d)
     (Keeper_tool_descriptor.all_descriptors ());
   List.iter
-    (fun public_mcp -> Hashtbl.replace t public_mcp ())
-    Keeper_tool_name.public_mcp_non_descriptor_names;
+    (fun (schema : Masc_domain.tool_schema) -> Hashtbl.replace t schema.name ())
+    Tool_schemas_inline.schemas;
   t
 ;;
 
@@ -186,21 +182,21 @@ let strip_mcp_masc_prefix name =
 ;;
 
 type canonical_resolution =
-  | Public_alias of { internal : string }
+  | Public_name of { internal : string }
   | Internal of { canonical : string }
   | Unknown
 
 let canonical_resolution name =
   let stripped = strip_mcp_masc_prefix name in
   match route stripped with
-  | Some r -> Public_alias { internal = r.internal_name }
+  | Some r -> Public_name { internal = r.internal_name }
   | None ->
     if is_known_runtime_name stripped then Internal { canonical = stripped } else Unknown
 ;;
 
 let canonical_internal_name name =
   match canonical_resolution name with
-  | Public_alias { internal } -> Some internal
+  | Public_name { internal } -> Some internal
   | Internal { canonical } -> Some canonical
   | Unknown -> None
 ;;

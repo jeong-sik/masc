@@ -22,7 +22,7 @@ let init_eio_clock ?sw env =
   Eio_context.set_clock clock;
   Option.iter Eio_context.set_switch sw
 
-let init_keeper_tool_registry () =
+let init_unified_tool_registry () =
   if not (Tool_dispatch.is_tag_registry_initialized ()) then
     (Masc.Unified_tool_registry.register_all ();
      Masc.Unified_tool_registry.enforce_visible_tag_coverage ())

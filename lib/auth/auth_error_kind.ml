@@ -52,7 +52,16 @@ let classify : Masc_domain.t -> t = function
   | Masc_domain.Agent (Masc_domain.Agent_error.NotFound _) -> Agent_not_found
   | Masc_domain.System (Masc_domain.System_error.IoError _) -> Io_error
   | Masc_domain.System (Masc_domain.System_error.InvalidJson _) -> Invalid_json
-  | _ -> Other
+  (* Named rather than swept, so the closure this module documents is the one
+     the compiler enforces: every Auth_error constructor is placed above, and a
+     new one cannot reach [Other] without an edit here. The remaining families
+     have no auth-relevant label of their own. *)
+  | Masc_domain.Agent _
+  | Masc_domain.System _
+  | Masc_domain.Task _
+  | Masc_domain.RateLimitExceeded _
+  | Masc_domain.CacheError _ ->
+    Other
 
 let all =
   [ Token_mismatch

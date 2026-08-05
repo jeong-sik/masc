@@ -17,7 +17,6 @@ val run :
   oas_turn_count:int ->
   actual_tools:string list ->
   librarian_messages:Agent_sdk.Types.message list ->
-  turn_effect_record:Keeper_run_prompt.turn_effect_record ->
   post_turn_t0:float ->
   inference_telemetry:Agent_sdk.Types.inference_telemetry option ->
   unit ->
@@ -41,10 +40,6 @@ val run :
     Disabled or invalid configuration does not submit a Librarian unit or read
     its snapshot. An admitted asynchronous unit re-checks the live setting
     before snapshot I/O so disabling it while queued remains effective. When
-    enabled, [turn_effect_record] admits only [Meaningful_turn]; on
-    [Inert_autonomous_turn] the librarian unit is never submitted, so its
-    cadence counter does not advance and an idle stretch spends no extraction
-    budget.
-    The deterministic write series runs either way: a model-owned
-    [keeper_memory_write] on an otherwise inert turn is an explicit decision to
-    remember, not an extraction from prose. *)
+    enabled, every completed conversation turn is eligible for Librarian
+    extraction; the Librarian owns semantic selection rather than a scheduler-
+    side external-effect heuristic. *)

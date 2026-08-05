@@ -9,6 +9,10 @@
     delimiter arrives, so partial secret-like tokens are not published
     before the redactor can see the complete token.
 
+    While the run is active, the production adapter refreshes Discord's
+    native typing indicator. Tool lifecycle events refresh that indicator
+    but never create standalone tool messages.
+
     @since 2.145.0 *)
 
 val min_edit_interval_s : float
@@ -52,8 +56,9 @@ val adapter_loop :
     - [Link_block], [Image_block], [Audio_block]: send rich block embeds
     - [Status_block]: replace the terminal assistant text with typed status UI
       or messages.
-    - [Tool_context_block]: enriches the matching tool embed with argument
-      and result summaries on [Tool_call_end].
+    - [Tool_call_start], [Tool_call_args], [Tool_call_args_snapshot],
+      [Tool_call_end], and [Tool_context_block]: no message projection;
+      activity stays on Discord's native typing surface.
 
     [base_url] is used to build public voice-audio URLs; when omitted the
     configured {!Env_config_core.masc_http_base_url} is used.
@@ -97,13 +102,16 @@ module For_testing : sig
     post_message:(content:string -> (string, error) result) ->
     edit_message:(message_id:string -> content:string -> (unit, error) result) ->
     send_message:(content:string -> (unit, error) result) ->
+    ?show_activity:(unit -> (unit, error) result) ->
     ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     ?base_url:string ->
     ?on_send_result:((unit, error) result -> unit) ->
     unit ->
     unit
-  (** Test seam for the text-delivery transport. Production uses
+  (** Test seam for the text-delivery and activity transports. Production uses
       {!Discord_rest_client}; tests can inject exact POST/PATCH outcomes while
-      exercising the real event-loop state machine. Rich side-message helpers
-      remain production-backed and should not be emitted by transport tests. *)
+      exercising the real event-loop state machine. [show_activity] represents
+      one native typing refresh; its failure is observational and never settles
+      [on_send_result]. Rich side-message helpers remain production-backed and
+      should not be emitted by transport tests. *)
 end

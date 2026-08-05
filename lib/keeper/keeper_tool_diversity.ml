@@ -1,18 +1,14 @@
-(** Keeper_tool_diversity — Information-theoretic tool usage analysis.
+(** Keeper_tool_diversity — Shannon entropy of a keeper's tool usage.
 
-    Measures Shannon entropy of a keeper's tool usage distribution to detect
-    exploitation-only behavior (low entropy = same tools repeated).
-    When entropy falls below a threshold, generates a deterministic hint
-    that the LLM (non-deterministic layer) can use to explore new tools.
+    Two values leave this module, both as telemetry: the normalized entropy,
+    which the heartbeat loop writes into the keeper's decision audit record,
+    and the count of allowed tools the keeper has barely called, which is
+    published as a gauge. Nothing branches on either -- no turn is skipped,
+    no prompt is altered, no tool is offered or withheld because of them.
 
-    The boundary is strict:
-    - Deterministic: entropy calculation, threshold comparison, hint text
-    - Non-deterministic: LLM decides whether/how to act on the hint
-
-    Based on:
-    - Shannon (1948) entropy H = -Σ p(x) log2(p(x))
-    - Pathak et al. (2017) curiosity-driven exploration via intrinsic reward
-    - The max entropy for N tools is log2(N); we normalize to [0,1]
+    H = -Σ p(x) log2(p(x)) over the call counts; the maximum for N tools is
+    log2(N), so dividing by it puts the result in [0,1] where 1 is a
+    perfectly uniform spread.
 
     @since 2.258.0 *)
 
@@ -30,7 +26,6 @@ type diversity_summary = {
   entropy : float;
   normalized_entropy : float;  (** [0,1] where 1 = perfectly uniform *)
   underused_tools : string list;
-  overused_tools : string list;
 }
 
 (** Shannon entropy in bits from a list of counts.
@@ -63,15 +58,6 @@ let compute_diversity ~(available_tools : string list)
   let n_available = List.length available_tools in
   let raw_h = shannon_entropy counts in
   let norm_h = normalized_entropy ~n_categories:n_available raw_h in
-  (* Overused: tools with > 2x average share *)
-  let avg_share =
-    if n_available = 0 then 0.0
-    else Float.of_int total_calls /. Float.of_int n_available
-  in
-  let overused = stats
-    |> List.filter (fun s -> Float.of_int s.count > avg_share *. 2.0)
-    |> List.map (fun s -> s.name)
-  in
   (* Underused: available tools never called or called < 1% *)
   let module SS = Set_util.StringSet in
   let used_set =
@@ -87,9 +73,9 @@ let compute_diversity ~(available_tools : string list)
   in
   { total_calls; unique_tools; available_tools = n_available;
     entropy = raw_h; normalized_entropy = norm_h;
-    underused_tools = underused; overused_tools = overused }
+    underused_tools = underused }
 
-let record_underused_tool_metrics ~keeper_name ~available_tools:_ summary =
+let record_underused_tool_metrics ~keeper_name summary =
   let underused_tools =
     List.sort_uniq String.compare summary.underused_tools
   in
@@ -97,13 +83,6 @@ let record_underused_tool_metrics ~keeper_name ~available_tools:_ summary =
     Keeper_metrics.(to_string ToolUnderusedAllowedCount)
     ~labels:[ ("keeper", keeper_name) ]
     (float_of_int (List.length underused_tools))
-
-(** Default normalized entropy threshold.  Below this, the keeper is
-    considered to be in an exploitation-only pattern.
-    Empirical: a keeper using 5 of 25 tools at roughly equal rates
-    has normalized entropy ~0.43.  We set the threshold at 0.35 to
-    allow some specialization while catching extreme loops. *)
-let default_entropy_threshold = 0.35
 
 (** Convert in-memory tool_call_entry list (from Keeper_registry.tool_usage_of)
     into tool_stat list. This avoids file I/O and uses the live data. *)

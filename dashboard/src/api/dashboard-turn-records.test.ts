@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const getMock = vi.hoisted(() => vi.fn())
+const ensureDevToken = vi.hoisted(() => vi.fn(async () => undefined))
 
 vi.mock('./core', () => ({
   get: getMock,
 }))
+vi.mock('./dev-token', () => ({ ensureDevToken }))
 
 import { fetchKeeperTurnRecords } from './dashboard-turn-records'
 

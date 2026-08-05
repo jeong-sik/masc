@@ -142,19 +142,6 @@ let emit_turn_end_safely ~keeper_name () =
         keeper_name
         (Printexc.to_string e)
 
-let digest_text text = Digest.to_hex (Digest.string text)
-
-let digest_message_texts_as_joined messages =
-  let module Hash = Digestif.MD5 in
-  let rec loop ctx = function
-    | [] -> ctx
-    | [ message ] -> Hash.feed_string ctx (Agent_sdk.Types.text_of_message message)
-    | message :: rest ->
-        let ctx = Hash.feed_string ctx (Agent_sdk.Types.text_of_message message) in
-        loop (Hash.feed_string ctx "\n") rest
-  in
-  Hash.(to_hex (get (loop empty messages)))
-
 let runtime_manifest_context ~keeper_name ~agent_name ~trace_id ~generation
     ~keeper_turn_id : Keeper_runtime_manifest.turn_context =
   {

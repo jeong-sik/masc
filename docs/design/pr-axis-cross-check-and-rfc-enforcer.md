@@ -3,7 +3,7 @@
 > **Status**: Draft sketch
 > **Created**: 2026-05-09
 > **Author**: jeong-sik
-> **Related**: RFC-0052, RFC-0053, RFC-0038 Phase 2
+> **Related**: RFC-0052, RFC-0038 Phase 2
 
 ## §0 Summary
 

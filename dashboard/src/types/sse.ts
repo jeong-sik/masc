@@ -33,7 +33,7 @@ export type SSEEventType =
   | 'keeper_phase_changed'
   | 'keeper_composite_changed'
   | 'keeper_chat_appended'
-  | 'keeper_chat_queue_changed'
+  | 'keeper_waiting_inventory_changed'
   | 'ide_cursor_changed'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
@@ -182,10 +182,9 @@ export interface SSEEvent {
   before_tokens?: number
   after_tokens?: number
   saved_tokens?: number
-  // Durable Keeper chat-queue projection invalidation. The event does not
-  // carry lifecycle truth; consumers re-read the receipt projection at this
-  // exact revision instead of reconstructing queue state from deltas.
-  revision?: number
+  // Waiting-inventory invalidation queue kind. The event carries no rows or
+  // revision ID; consumers re-read the authoritative projection.
+  queue_kind?: 'chat_queue' | 'event_queue'
   trigger?: string
   runtime?: string
   reason?: string

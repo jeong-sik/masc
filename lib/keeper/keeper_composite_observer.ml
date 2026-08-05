@@ -9,64 +9,17 @@ type turn_phase = Keeper_registry.turn_phase =
   | Turn_finalizing
   | Turn_exhausted
 
-let all_turn_phases : Keeper_registry.packed_turn_phase list =
-  [ Keeper_registry.Packed Turn_idle
-  ; Keeper_registry.Packed Turn_prompting
-  ; Keeper_registry.Packed Turn_routing
-  ; Keeper_registry.Packed Turn_executing
-  ; Keeper_registry.Packed Turn_compacting
-  ; Keeper_registry.Packed Turn_finalizing
-  ; Keeper_registry.Packed Turn_exhausted
-  ]
-
 type decision_stage = Keeper_registry.decision_stage =
   | Decision_undecided
   | Decision_guard_ok
   | Decision_tool_policy_selected
 
-let all_decision_stages : Keeper_registry.packed_decision_stage list =
-  [ Keeper_registry.Packed Decision_undecided
-  ; Keeper_registry.Packed Decision_guard_ok
-  ; Keeper_registry.Packed Decision_tool_policy_selected
-  ]
-
 type runtime_state = string
-
-let all_runtime_states = [ "idle"; "routing"; "executing"; "done"; "exhausted" ]
 
 type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_accumulating
   | Compaction_compacting
   | Compaction_done
-
-let all_compaction_stages : Keeper_registry.packed_compaction_stage list =
-  [ Keeper_registry.Packed Compaction_accumulating
-  ; Keeper_registry.Packed Compaction_compacting
-  ; Keeper_registry.Packed Compaction_done
-  ]
-
-type tla_action =
-  | Action_start_turn
-  | Action_measurement_broadcast
-  | Action_decide_guard
-  | Action_select_tool_policy
-  | Action_start_runtime_selection
-  | Action_select_runtime
-  | Action_runtime_done
-  | Action_runtime_exhausted
-  | Action_finish_turn
-  | Action_start_compaction
-  | Action_finish_compaction
-  | Action_enter_failing
-  | Action_clear_failing
-
-let all_tla_actions =
-  [
-    Action_start_turn; Action_measurement_broadcast; Action_decide_guard; Action_select_tool_policy;
-    Action_start_runtime_selection; Action_select_runtime; Action_runtime_done;
-    Action_runtime_exhausted; Action_finish_turn; Action_start_compaction; Action_finish_compaction;
-    Action_enter_failing; Action_clear_failing;
-  ]
 
 type invariant_key =
   | Invariant_phase_turn_alignment
@@ -74,13 +27,6 @@ type invariant_key =
   | Invariant_compaction_atomicity
   | Invariant_event_priority_monotone
   | Invariant_phase_derivation_agreement
-
-let all_invariant_keys =
-  [
-    Invariant_phase_turn_alignment; Invariant_no_runtime_before_measurement;
-    Invariant_compaction_atomicity; Invariant_event_priority_monotone;
-    Invariant_phase_derivation_agreement;
-  ]
 
 type invariants_check = {
   phase_turn_alignment : bool;
@@ -212,34 +158,13 @@ let turn_phase_to_string (tp : Keeper_registry.packed_turn_phase) =
   | Keeper_registry.Packed Turn_finalizing -> "finalizing"
   | Keeper_registry.Packed Turn_exhausted -> "exhausted"
 
-let turn_phase_of_string = function
-  | "idle" -> Some Turn_idle
-  | "prompting" -> Some Turn_prompting
-  | "routing" -> Some Turn_routing
-  | "executing" -> Some Turn_executing
-  | "compacting" -> Some Turn_compacting
-  | "finalizing" -> Some Turn_finalizing
-  | "exhausted" -> Some Turn_exhausted
-  | _ -> None
-
 let decision_stage_to_string (s : Keeper_registry.packed_decision_stage) =
   match s with
   | Keeper_registry.Packed Decision_undecided -> "undecided"
   | Keeper_registry.Packed Decision_guard_ok -> "guard_ok"
   | Keeper_registry.Packed Decision_tool_policy_selected -> "tool_policy_selected"
 
-let decision_stage_of_string = function
-  | "undecided" -> Some Decision_undecided
-  | "guard_ok" -> Some Decision_guard_ok
-  | "tool_policy_selected" -> Some Decision_tool_policy_selected
-  | _ -> None
-
 let runtime_state_to_string (s : runtime_state) = s
-
-let runtime_state_of_string = function
-  | "idle" | "routing" | "executing" | "done" | "exhausted" as state ->
-    Some state
-  | _ -> None
 
 let compaction_stage_to_string (s : Keeper_registry.packed_compaction_stage) =
   match s with
@@ -247,57 +172,12 @@ let compaction_stage_to_string (s : Keeper_registry.packed_compaction_stage) =
   | Keeper_registry.Packed Compaction_compacting -> "compacting"
   | Keeper_registry.Packed Compaction_done -> "done"
 
-let compaction_stage_of_string = function
-  | "accumulating" -> Some Compaction_accumulating
-  | "compacting" -> Some Compaction_compacting
-  | "done" -> Some Compaction_done
-  | _ -> None
-
-let tla_action_to_string = function
-  | Action_start_turn -> "StartTurn"
-  | Action_measurement_broadcast -> "MeasurementBroadcast"
-  | Action_decide_guard -> "DecideGuard"
-  | Action_select_tool_policy -> "SelectToolPolicy"
-  | Action_start_runtime_selection -> "StartRuntimeSelection"
-  | Action_select_runtime -> "SelectRuntime"
-  | Action_runtime_done -> "RuntimeDone"
-  | Action_runtime_exhausted -> "RuntimeExhausted"
-  | Action_finish_turn -> "FinishTurn"
-  | Action_start_compaction -> "StartCompaction"
-  | Action_finish_compaction -> "FinishCompaction"
-  | Action_enter_failing -> "EnterFailing"
-  | Action_clear_failing -> "ClearFailing"
-
-let tla_action_of_string = function
-  | "StartTurn" -> Some Action_start_turn
-  | "MeasurementBroadcast" -> Some Action_measurement_broadcast
-  | "DecideGuard" -> Some Action_decide_guard
-  | "SelectToolPolicy" -> Some Action_select_tool_policy
-  | "StartRuntimeSelection" -> Some Action_start_runtime_selection
-  | "SelectRuntime" -> Some Action_select_runtime
-  | "RuntimeDone" -> Some Action_runtime_done
-  | "RuntimeExhausted" -> Some Action_runtime_exhausted
-  | "FinishTurn" -> Some Action_finish_turn
-  | "StartCompaction" -> Some Action_start_compaction
-  | "FinishCompaction" -> Some Action_finish_compaction
-  | "EnterFailing" -> Some Action_enter_failing
-  | "ClearFailing" -> Some Action_clear_failing
-  | _ -> None
-
 let invariant_key_to_string = function
   | Invariant_phase_turn_alignment -> "PhaseTurnAlignment"
   | Invariant_no_runtime_before_measurement -> "NoRuntimeBeforeMeasurement"
   | Invariant_compaction_atomicity -> "CompactionAtomicity"
   | Invariant_event_priority_monotone -> "EventPriorityMonotone"
   | Invariant_phase_derivation_agreement -> "PhaseDerivationAgreement"
-
-let invariant_key_of_string = function
-  | "PhaseTurnAlignment" -> Some Invariant_phase_turn_alignment
-  | "NoRuntimeBeforeMeasurement" -> Some Invariant_no_runtime_before_measurement
-  | "CompactionAtomicity" -> Some Invariant_compaction_atomicity
-  | "EventPriorityMonotone" -> Some Invariant_event_priority_monotone
-  | "PhaseDerivationAgreement" -> Some Invariant_phase_derivation_agreement
-  | _ -> None
 
 (* Derivation from registry entry *)
 
@@ -645,15 +525,6 @@ let observe
       |> int_of_float;
     fsm_guard_violation_breakdown = fsm_guard_violation_breakdown ();
   }
-
-(* Fleet fold — observe every currently-registered keeper under
-   [base_path] once. Preserves registry iteration order so downstream
-   matrix rendering stays stable across successive polls.
-
-   Used by GET /api/v1/keepers/composite (LT-16a). *)
-let all_snapshots ~(base_path : string) () : snapshot list =
-  Keeper_registry.all ~base_path ()
-  |> List.map (fun entry -> observe entry)
 
 (* JSON serialisation (RFC-0003 §7) *)
 

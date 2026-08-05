@@ -1,41 +1,11 @@
 (** Provider-attempt provenance and health helpers for keeper turn driver. *)
 
-let provider_attempt_status_of_result = function
-  | Ok _ -> "provider_returned"
-  | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) -> "timeout"
-  | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) -> "timeout"
-  | Error _ -> "error"
-
-let provider_attempt_exception_kind_of_result = function
-  | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) ->
-    Some "outer_oas_timeout"
-  | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) ->
-    Some "outer_oas_timeout"
-  | Ok _ | Error _ -> None
-
-let provider_attempt_status_and_error_of_exception = function
-  | Eio.Time.Timeout -> "timeout", "Eio.Time.Timeout"
-  | Eio.Cancel.Cancelled inner ->
-    ( "cancelled"
-    , Printf.sprintf
-        "Eio.Cancel.Cancelled(%s)"
-        (Printexc.to_string inner) )
-  | exn -> "exception", Printexc.to_string exn
-
 type provider_attempt_provenance =
   { model_source : string
   ; resolved_model_source : string
   ; capability_source : string
   ; fallback_authority : string
   ; provider_source_runtime : string option
-  }
-
-let base_provider_attempt_provenance =
-  { model_source = "named_runtime"
-  ; resolved_model_source = "runtime_catalog_binding"
-  ; capability_source = "provider_config_from_runtime_catalog"
-  ; fallback_authority = "declared_runtime"
-  ; provider_source_runtime = None
   }
 
 let provider_attempt_provenance_fields p =
@@ -88,14 +58,6 @@ let provider_attempt_finished_decision record =
     | Some kind -> ("exception_kind", `String kind) :: decision_fields
   in
   `Assoc decision_fields
-;;
-
-let client_capacity_full_decision ~capacity_key =
-  `Assoc
-    [ "blocker", `String "client_capacity_full"
-    ; "capacity_key", `String capacity_key
-    ; "provider_attempt_started", `Bool false
-    ]
 ;;
 
 let success_selected_model_raw candidate =

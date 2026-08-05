@@ -19,8 +19,6 @@ end
 (** {1 Tempo (polling interval)} *)
 
 module Tempo : sig
-  val min_interval_seconds : float
-  val max_interval_seconds : float
   val default_interval_seconds : float
 end
 
@@ -71,12 +69,6 @@ module Voice : sig
   val default_port : int
   val http_request_timeout_sec : float
   val audio_test_tone_timeout_sec : float
-end
-
-(** {1 Message GC} *)
-
-module Message : sig
-  val max_count : int
 end
 
 (** {1 Transport} *)

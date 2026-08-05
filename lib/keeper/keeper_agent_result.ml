@@ -6,11 +6,17 @@ open Keeper_agent_tool_surface
 type tool_call_detail =
   { tool_name : string
   ; provider : string
-  ; outcome : string
-      (** Progress-classification label retained for receipt compatibility. *)
   ; execution_outcome : Tool_result.tool_call_outcome
       (** Typed [Tool_result.Ok]/[Error] truth captured at the OAS hook boundary.
-          Turn-local only; durable audit is written by [Keeper_tool_call_log]. *)
+          Turn-local only; durable audit is written by [Keeper_tool_call_log].
+
+          A [string] rendering of this used to sit beside it, described as a
+          progress-classification label kept for receipt compatibility. Both
+          were derived from the same success bool on adjacent lines, and the
+          string was the one every reader consulted while this field -- the one
+          documented as the truth -- had none. The receipt JSON still carries
+          the rendering, produced here by
+          [Tool_result.string_of_tool_call_outcome]. *)
   ; typed_outcome : Keeper_tool_outcome.t option
   ; latency_ms : float
   ; task_id : string option
@@ -54,7 +60,8 @@ let tool_call_detail_to_json (detail : tool_call_detail) =
     ([
        ("tool_name", `String detail.tool_name);
        ("provider", `String detail.provider);
-       ("outcome", `String detail.outcome);
+       ( "outcome"
+       , `String (Tool_result.string_of_tool_call_outcome detail.execution_outcome) );
        ("latency_ms", `Float detail.latency_ms);
      ]
      @ typed_outcome_field
@@ -71,6 +78,7 @@ let tool_names_of_calls (tool_calls : tool_call_detail list) : string list =
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
+  ; turn_outcome : Keeper_turn_outcome.t
   ; model_used : string
   ; prompt_metrics : prompt_metrics
   ; ctx_composition : ctx_composition_metrics

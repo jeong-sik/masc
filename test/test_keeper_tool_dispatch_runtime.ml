@@ -205,7 +205,6 @@ let tool_call_detail_of_execution tool_name
   in
   { tool_name
   ; provider = "test"
-  ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
   ; execution_outcome
   ; typed_outcome = None
   ; latency_ms = 1.0
@@ -410,7 +409,7 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   check bool "discovery_fields leaves active_names to shared runtime" true
     (Option.is_none (List.assoc_opt "active_names" execute_fields));
   let execute = find_descriptor "tool_execute" in
-  check string "Execute public alias" "Execute"
+  check string "Execute public name" "Execute"
     (string_member "public_name" execute);
   check string "Execute executor" "shell_ir"
     (string_member "executor" execute);
@@ -477,8 +476,6 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (list_member_contains "active_names" "tool_search_files" grep);
   check bool "Grep preferred model name listed" true
     (list_member_contains "active_names" "Grep" grep);
-  check bool "Grep compatibility alias is not a model name" false
-    (list_member_contains "active_names" "Search" grep);
   let malformed_execute =
     { (descriptor_for_internal "tool_execute") with
       KTD.input_schema =
@@ -4020,7 +4017,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
 ;;
 
 let () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
     ("execute_keeper_tool_call_with_outcome", [
       test_case "public Read rejects unsupported range fields" `Quick

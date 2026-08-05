@@ -195,13 +195,7 @@ let keeper_raw_trace_sink
          ~path
          ()
      with
-     | Ok sink ->
-       let (_removed : int) =
-         Keeper_types_support.prune_keeper_raw_trace_turn_files
-           config
-           meta.name
-       in
-       Sink_ready sink
+     | Ok sink -> Sink_ready sink
      | Error err -> Sink_degraded err)
 ;;
 
@@ -225,6 +219,47 @@ let raw_trace_for_dispatch
       "raw-trace sink degraded; dispatching turn untraced: %s"
       (Agent_sdk.Error.to_string err);
     None
+;;
+
+let prune_raw_traces_after_turn_record
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      (raw_trace : Agent_sdk.Raw_trace.t option)
+  =
+  match raw_trace with
+  | None -> ()
+  | Some _ ->
+    (match Keeper_raw_trace_retention.prune ~config ~keeper_name:meta.name () with
+     | Error error ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string RawTraceRetentionSkipped)
+         ~labels:[ "keeper", meta.name ]
+         ();
+       Log.Keeper.warn ~keeper_name:meta.name
+         "raw-trace retention skipped after TurnRecord commit without gating the turn: %s"
+         (Keeper_raw_trace_retention.error_to_string error)
+     | Ok { removed; deletion_failures; _ } ->
+       if removed > 0
+       then
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string RawTraceRetentionDeleted)
+           ~labels:[ "keeper", meta.name ]
+           ~delta:(float_of_int removed)
+           ();
+       (match deletion_failures with
+        | [] -> ()
+        | first :: rest ->
+          let failure_count = 1 + List.length rest in
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string RawTraceRetentionUnlinkFailed)
+            ~labels:[ "keeper", meta.name ]
+            ~delta:(float_of_int failure_count)
+            ();
+          Log.Keeper.warn ~keeper_name:meta.name
+            "raw-trace retention completed with %d unlink failure(s); first=%s: %s"
+            failure_count
+            first.path
+            first.detail))
 ;;
 
 let provider_transcript_admission messages =
@@ -306,6 +341,7 @@ module For_testing = struct
     normalize_response_text_for_finalization
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
+  let prune_raw_traces_after_turn_record = prune_raw_traces_after_turn_record
   let runtime_yield_reason = runtime_yield_reason
   let repeated_exact_tool_call = repeated_exact_tool_call
   let provider_transcript_admission = provider_transcript_admission
@@ -531,9 +567,9 @@ let run_turn
       ~turn_start
       ~seq_ref
   in
-  let digest_text = Turn_helpers.digest_text in
+  let digest_text = Keeper_context_digest.text in
   let digest_message_texts_as_joined =
-    Turn_helpers.digest_message_texts_as_joined
+    Keeper_context_digest.message_texts_as_joined
   in
   append_manifest ~site:"checkpoint_loaded"
     ~keeper_turn_id:manifest_keeper_turn_id
@@ -547,7 +583,7 @@ let run_turn
      and user message append — Keeper_run_prompt. *)
   let prompt_user_turn_record =
     match hitl_resolution with
-    | Some _ -> Keeper_run_prompt.Skip_uninformative_wake
+    | Some _ -> Keeper_run_prompt.Skip_already_checkpointed_user_turn
     | None -> user_turn_record
   in
   let prompt_ctx =
@@ -765,6 +801,7 @@ let run_turn
          ~max_context
          ();
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
+       let raw_trace = raw_trace_for_dispatch ~config ~meta in
        let turn_result =
          let cooperative_yield_probe =
            Some
@@ -931,10 +968,7 @@ let run_turn
                  degrades to [None] (turn runs untraced, typed record
                  emitted) — sink trouble never fails the turn pre-dispatch. *)
          (match
-                 call_run_named
-                   ?raw_trace:(raw_trace_for_dispatch ~config ~meta)
-                   ~initial_messages:history_messages
-                   ()
+                 call_run_named ?raw_trace ~initial_messages:history_messages ()
                with
                | Error e -> Error e
                | Ok result ->
@@ -1016,20 +1050,37 @@ let run_turn
                       with
                       | Error e -> Error e
                       | Ok response_text ->
-                        (match !final_oas_turn_ordinal_ref with
-                         | None ->
+                        let turn_outcome =
+                          match s.terminal_effect_state () with
+                          | Keeper_tools_oas.Terminal_effect_completed ->
+                            Ok Keeper_turn_outcome.External_effect_completed
+                          | Keeper_tools_oas.Terminal_effect_failed failure ->
+                            Error
+                              (Agent_sdk.Error.Internal
+                                 ("successful Keeper run retained a failed terminal effect: "
+                                  ^ failure.diagnostic))
+                          | Keeper_tools_oas.Terminal_effect_open
+                          | Keeper_tools_oas.Deferred_tool_result
+                          | Keeper_tools_oas.External_effect_deferred ->
+                            Ok
+                              (Keeper_turn_outcome.of_result_surface
+                                 ~response_text
+                                 result.stop_reason)
+                        in
+                        (match turn_outcome, !final_oas_turn_ordinal_ref with
+                         | Error e, _ -> Error e
+                         | Ok _, None ->
                            Error
                              (Agent_sdk.Error.Internal
                                 "successful Agent.run returned without an \
                                  AfterTurn ordinal")
-                         | Some final_oas_turn_ordinal ->
+                         | Ok turn_outcome, Some final_oas_turn_ordinal ->
                            Keeper_agent_run_finalize_response.finalize
                              ~config ~meta ~generation ~profile_defaults
                              ~manifest_keeper_turn_id
                              ~session ~append_manifest ~model
                              ~acc
                              ~actual_keeper_tool_names
-                             ~user_turn_record
                              ~result ~final_oas_turn_ordinal
                              ~checkpoint_persistence_error
                              ~post_turn_t0 ~runtime_id_string
@@ -1038,6 +1089,7 @@ let run_turn
                              ~receipt_response_text_present_ref
                              ~history_assistant_source
                              ~raw_response_text:response_text
+                             ~turn_outcome
                              ?continuation_delivery_channel
                              ~capture_replay_response:
                                (fun ~response_text ->
@@ -1276,6 +1328,7 @@ let run_turn
           ~blocks
           ~input_components
           ();
+        prune_raw_traces_after_turn_record ~config ~meta raw_trace;
         (* RFC-0233 §2.3 PR-4: project the same record onto the ambient
            turn span. Both turn drivers (unified "invoke_agent <keeper>"
            and direct "keeper_turn") keep their span open across this

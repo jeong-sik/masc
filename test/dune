@@ -1948,6 +1948,10 @@
 
 (include stanzas/test_keeper_approval_queue.inc)
 
+(include stanzas/test_assertion_kind_mirror.inc)
+
+(include stanzas/test_workspace_heartbeat_outcome.inc)
+
 (include stanzas/test_keeper_approval_resolved_history.inc)
 
 (include stanzas/test_keeper_toml_parser.inc)

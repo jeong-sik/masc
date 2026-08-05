@@ -98,25 +98,3 @@ val channel_to_yojson : channel -> Yojson.Safe.t
 val channel_of_yojson : Yojson.Safe.t -> (channel, string) Result.t
 val to_yojson : t -> Yojson.Safe.t
 
-(** {1 MAGI Archetype System} *)
-
-(** MAGI archetypes for agent specialization *)
-type archetype =
-  | Melchior   (** 🔬 Scientist *)
-  | Balthasar  (** 🪞 Mirror/Ethics *)
-  | Casper     (** ♟️ Strategist *)
-  | Athena     (** 🧠 Reasoner *)
-  | Generalist (** 🌐 No specialization *)
-
-val archetype_to_string : archetype -> string
-
-(** Strict parse: returns [None] when the wire string is not one of the
-    canonical archetype labels (with aliases), so drift is visible at the
-    caller boundary. Issue #8691. *)
-val archetype_of_string_opt : string -> archetype option
-
-val archetype_emoji : archetype -> string
-
-val set_archetype : t -> archetype -> t
-
-val archetype_weight : archetype -> string -> float

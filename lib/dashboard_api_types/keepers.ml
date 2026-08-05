@@ -18,7 +18,7 @@ type keeper_status =
   | Live
   | Warn
   | Dead
-[@@deriving yojson]
+[@@deriving to_yojson]
 
 (** One tool-span in a keeper's cycle, positioned as a percentage of the
     last-60-min window. *)
@@ -28,14 +28,14 @@ type keeper_lane_frame = {
   width : int;                  (* width %, 0..100 *)
   label : string;
 }
-[@@deriving yojson { strict = false }]
+[@@deriving to_yojson]
 
 (** One sample on the 60-min context-pressure polyline. *)
 type keeper_ctx_sample = {
   t_minus_min : int;            (* minutes ago, 0..60 *)
   ctx_pct : int;                (* 0..100 *)
 }
-[@@deriving yojson { strict = false }]
+[@@deriving to_yojson]
 
 (** Total run-state classification (#16, 38-bug campaign PR-5). Mirrors
     [Keeper_composite_observer.run_state]; see .mli for why this library
@@ -44,7 +44,7 @@ type keeper_run_state_kind =
   | In_turn
   | Waiting
   | Suspended
-[@@deriving yojson]
+[@@deriving to_yojson]
 
 (** Per-kind fields are [None] / [[]] when not applicable to [kind]. *)
 type keeper_run_state = {
@@ -57,7 +57,7 @@ type keeper_run_state = {
   skip_reasons : string list;     [@default []]
   phase : string option;          [@default None]
 }
-[@@deriving yojson { strict = false }]
+[@@deriving to_yojson]
 
 (** Per-keeper summary. *)
 type keeper = {
@@ -74,7 +74,7 @@ type keeper = {
   ctx_history : keeper_ctx_sample list;   [@default []]
   run_state : keeper_run_state;
 }
-[@@deriving yojson { strict = false }]
+[@@deriving to_yojson]
 
 (** Top-level response. *)
 type response = {
@@ -83,4 +83,4 @@ type response = {
   workspace : string option;         [@default None]
   generated_at : string;        (* ISO-8601 UTC *)
 }
-[@@deriving yojson { strict = false }]
+[@@deriving to_yojson]

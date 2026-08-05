@@ -141,9 +141,10 @@ export function isVisibleDirectConversationEntry(entry: KeeperConversationEntry)
     && entry.source !== 'system'
 }
 
-/** Turns the keeper ran on its own (projected from typed turn records, never
- *  persisted to the chat store). Shown without the internal toggle because the
- *  transcript folds them into one collapsed group rather than listing each. */
+/** Turns the keeper ran on its own. Their semantic conversation is persisted
+ *  in the OAS checkpoint; typed turn records provide a stable dashboard
+ *  projection without duplicating it into the chat store. Shown without the
+ *  internal toggle and folded into one collapsed group. */
 export function isAutonomousTurnEntry(entry: KeeperConversationEntry): boolean {
   return entry.source === 'autonomous_turn'
 }

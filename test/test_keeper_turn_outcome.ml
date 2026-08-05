@@ -25,6 +25,7 @@ let outcome : TO.t testable =
 let all =
   [ TO.Visible_reply
   ; TO.Continuation_checkpoint
+  ; TO.External_effect_completed
   ; TO.External_effect_pending
   ; TO.No_visible_reply
   ]
@@ -89,6 +90,18 @@ let test_external_effect_wait_is_typed_status () =
   check outcome "external effect remains typed with blank text"
     TO.External_effect_pending
     (TO.of_result_surface ~response_text:"" stop_reason)
+
+let test_external_effect_completed_has_no_direct_reply_error () =
+  let payload_json =
+    `Assoc
+      [ TO.wire_key, `String (TO.to_label TO.External_effect_completed)
+      ; "reply", `String ""
+      ]
+  in
+  check (option string) "terminal surface delivery is already visible" None
+    (Stream.For_testing.direct_reply_terminal_error
+       (Some payload_json)
+       "")
 
 let test_external_effect_status_survives_server_projection () =
   let turn_outcome =
@@ -187,7 +200,6 @@ let tool_call ?(input = Some "input") ?(output = Some "output") tool_name
     : Masc.Keeper_agent_result.tool_call_detail =
   { tool_name
   ; provider = "test"
-  ; outcome = "ok"
   ; execution_outcome = Tool_result.Ok
   ; typed_outcome = None
   ; latency_ms = 1.
@@ -352,6 +364,9 @@ let test_payload_decode () =
   check outcome "visible label" TO.Visible_reply
     (decoded_exn
        (payload [ (TO.wire_key, `String "visible_reply") ]));
+  check outcome "completed external effect label" TO.External_effect_completed
+    (decoded_exn
+       (payload [ (TO.wire_key, `String "external_effect_completed") ]));
   check outcome "no visible reply label" TO.No_visible_reply
     (decoded_exn
        (payload [ (TO.wire_key, `String "no_visible_reply") ]));
@@ -613,6 +628,16 @@ let test_connector_projection_keeps_continuation_typed () =
   | Connector_text _ | Connector_no_visible_reply ->
     fail "continuation checkpoint must remain a typed connector status"
 
+let test_connector_projection_suppresses_completed_external_effect () =
+  match
+    Masc.Keeper_chat_blocks.connector_projection
+      ~turn_outcome:TO.External_effect_completed
+      ~reply:None
+  with
+  | Connector_no_visible_reply -> ()
+  | Connector_status _ | Connector_text _ ->
+    fail "completed external effect must not emit a duplicate connector reply"
+
 let test_direct_reply_projection_keeps_external_wait_typed () =
   match
     Ops.direct_reply_projection
@@ -640,6 +665,8 @@ let () =
           test_case "of_result_surface" `Quick test_of_result_surface;
           test_case "external effect wait is typed status" `Quick
             test_external_effect_wait_is_typed_status;
+          test_case "completed external effect has no direct reply error" `Quick
+            test_external_effect_completed_has_no_direct_reply_error;
           test_case "external effect status survives server projection" `Quick
             test_external_effect_status_survives_server_projection;
           test_case "external effect status becomes persisted chat block" `Quick
@@ -682,6 +709,8 @@ let () =
             test_connector_projection_keeps_external_wait_typed;
           test_case "connector projection keeps continuation typed" `Quick
             test_connector_projection_keeps_continuation_typed;
+          test_case "connector projection suppresses completed effect" `Quick
+            test_connector_projection_suppresses_completed_external_effect;
           test_case "direct reply keeps external wait typed" `Quick
             test_direct_reply_projection_keeps_external_wait_typed;
         ] );

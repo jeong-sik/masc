@@ -871,7 +871,7 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
     "outside-append-missing"
     (Fs_compat.load_file outside_target)
 
-let check_invalid_mode_is_rejected ~label ~mode ~expected_error =
+let check_invalid_mode_json_is_rejected ~label ~mode_json ~expected_error =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground (label ^ ".txt") in
   let raw =
@@ -882,7 +882,7 @@ let check_invalid_mode_is_rejected ~label ~mode ~expected_error =
         (`Assoc
           [
             ("path", `String path);
-            ("mode", `String mode);
+            ("mode", mode_json);
             ("content", `String "fresh");
           ])
       ()
@@ -892,6 +892,55 @@ let check_invalid_mode_is_rejected ~label ~mode ~expected_error =
     (Some expected_error)
     (parse_error raw);
   Alcotest.(check bool) "file not written" false (Fs_compat.file_exists path)
+
+let check_invalid_mode_is_rejected ~label ~mode ~expected_error =
+  check_invalid_mode_json_is_rejected ~label ~mode_json:(`String mode)
+    ~expected_error
+
+(* A mode that is not a string used to miss the rejection above entirely:
+   [Safe_ops.json_string] returned its "overwrite" default for every non-string
+   member, so {"mode": ["append"]} wrote in Overwrite while the misspelled
+   {"mode": "apend"} was refused. These pin the type-wrong value onto the same
+   path as the value-wrong one. *)
+let expected_mode_error value =
+  Printf.sprintf "mode must be one of [overwrite, append, patch], got %S."
+    (Yojson.Safe.to_string value)
+
+let test_list_mode_is_rejected () =
+  let value = `List [ `String "append" ] in
+  check_invalid_mode_json_is_rejected ~label:"list-mode" ~mode_json:value
+    ~expected_error:(expected_mode_error value)
+
+let test_int_mode_is_rejected () =
+  let value = `Int 42 in
+  check_invalid_mode_json_is_rejected ~label:"int-mode" ~mode_json:value
+    ~expected_error:(expected_mode_error value)
+
+(* The other half of the contract: absence still takes the documented
+   Overwrite default. A present null is not absence; the schema permits only a
+   string when [mode] is present, so it follows the rejection path above. *)
+let check_mode_defaults_to_overwrite ~label ~args_extra =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground (label ^ ".txt") in
+  let raw =
+    handle_file_write ~turn_sandbox_factory:None ~config
+      ~meta
+      ~publication_recovery
+      ~args:
+        (`Assoc
+          ([ ("path", `String path); ("content", `String "fresh") ] @ args_extra))
+      ()
+  in
+  Alcotest.(check bool) (label ^ " ok=true") true (parse_ok raw);
+  Alcotest.(check bool) "file written" true (Fs_compat.file_exists path);
+  Alcotest.(check string) "overwrite content" "fresh" (Fs_compat.load_file path)
+
+let test_absent_mode_defaults_to_overwrite () =
+  check_mode_defaults_to_overwrite ~label:"absent-mode" ~args_extra:[]
+
+let test_null_mode_is_rejected () =
+  check_invalid_mode_json_is_rejected ~label:"null-mode" ~mode_json:`Null
+    ~expected_error:(expected_mode_error `Null)
 
 let test_empty_mode_is_rejected () =
   check_invalid_mode_is_rejected ~label:"empty-mode" ~mode:""
@@ -1088,6 +1137,14 @@ let () =
             test_spaces_only_mode_is_rejected;
           Alcotest.test_case "tab-only mode rejected" `Quick
             test_tab_only_mode_is_rejected;
+          Alcotest.test_case "list mode rejected" `Quick
+            test_list_mode_is_rejected;
+          Alcotest.test_case "int mode rejected" `Quick
+            test_int_mode_is_rejected;
+          Alcotest.test_case "absent mode defaults to overwrite" `Quick
+            test_absent_mode_defaults_to_overwrite;
+          Alcotest.test_case "null mode rejected" `Quick
+            test_null_mode_is_rejected;
           Alcotest.test_case "public Edit uses explicit repo path" `Quick
             test_public_edit_file_uses_explicit_repo_path;
           Alcotest.test_case "public Write uses explicit repo path" `Quick

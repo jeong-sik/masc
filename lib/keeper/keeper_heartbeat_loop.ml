@@ -147,12 +147,6 @@ let consume_deferred_runtime_lane_hint hint_ref expected =
 
 exception Event_queue_cycle_failed of string
 
-type board_attention_settlement_outcome =
-  | Board_attention_settled of
-      Keeper_board_attention_worker.settlement
-  | Board_attention_settlement_deferred of
-      Keeper_turn_admission.autonomous_block
-
 let connector_attention_event_ids_of_stimuli stimuli =
   List.filter_map
     (fun (stimulus : Keeper_event_queue.stimulus) ->
@@ -322,21 +316,6 @@ let turn_status_event ~turn_fail_count : Keeper_state_machine.event =
   if turn_fail_count > 0
   then Keeper_state_machine.Turn_failed { consecutive = turn_fail_count }
   else Keeper_state_machine.Turn_succeeded
-;;
-
-let settle_board_attention_on_owner_lane ~base_path ~keeper_name =
-  match
-    Keeper_turn_admission.run_if_free
-      ~base_path
-      ~keeper_name
-      (fun () ->
-         Keeper_board_attention_worker.settle_one_completed
-           ~base_path
-           ~keeper_name)
-  with
-  | `Ran (Ok settlement) -> Ok (Board_attention_settled settlement)
-  | `Ran (Error detail) -> Error detail
-  | `Busy block -> Ok (Board_attention_settlement_deferred block)
 ;;
 
 let run_keepalive_unified_turn
@@ -580,7 +559,6 @@ let run_keepalive_unified_turn
       in
       Keeper_tool_diversity.record_underused_tool_metrics
         ~keeper_name:meta_after_triage.name
-        ~available_tools
         tool_diversity_summary;
       let audit_wall_clock = Time_compat.now () in
       let tool_diversity_entropy =

@@ -541,9 +541,9 @@ let test_post_cursors_broadcasts_ws_invalidation () =
     let token = create_worker_token base_path "alice" in
     let subscriber_id = "test-ide-cursor-ws-invalidation" in
     let received = ref [] in
-    Sse.subscribe_external ~id:subscriber_id (fun frame ->
-      received := frame :: !received;
-      true);
+    Sse.subscribe_external ~id:subscriber_id
+      ~callback:(fun frame -> received := frame :: !received)
+      ();
     Fun.protect
       ~finally:(fun () -> Sse.unsubscribe_external subscriber_id)
       (fun () ->

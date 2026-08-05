@@ -284,6 +284,37 @@ let test_recall_preserves_selected_facts_without_local_ranking () =
      | _ -> false)
 ;;
 
+(* An unreadable snapshot and an empty store produce the same turn: no block.
+   The removed keeper.memory_os_recall.unavailable asset stated the absence to
+   the keeper instead, which made "my memory is missing" a fact the turn could
+   reason from. The reason is operator-only now: the MemoryOsRecallUnavailable
+   counter and the warn log at the call site. *)
+let test_recall_read_failure_injects_no_block () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let prompt_dir = Filename.concat repo_root "config/prompts" in
+  Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.load_prompts_from_directory prompt_dir;
+  ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
+  let snapshot_path =
+    Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+  in
+  let oc = open_out snapshot_path in
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () -> output_string oc "{ not json");
+  (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+   | Error _ -> ()
+   | Ok _ -> fail "fixture must leave the snapshot unreadable");
+  let rendered =
+    Masc.Keeper_memory_os_recall.render_context
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~now:240.0
+      ()
+  in
+  check string "unreadable snapshot injects no recall block" "" rendered
+;;
+
 let test_snapshot_write_rejects_rendered_fact_payload_over_budget () =
   with_temp_keepers @@ fun keepers_dir ->
   match
@@ -602,6 +633,10 @@ let () =
             "recall preserves selected facts and order"
             `Quick
             test_recall_preserves_selected_facts_without_local_ranking
+        ; test_case
+            "recall read failure injects no block"
+            `Quick
+            test_recall_read_failure_injects_no_block
         ; test_case
             "snapshot rejects rendered facts over budget"
             `Quick

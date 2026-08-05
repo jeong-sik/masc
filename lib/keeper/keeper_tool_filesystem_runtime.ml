@@ -1956,8 +1956,27 @@ let handle_file_write_with_outcome
   in
   let path = Safe_ops.json_string ~default:"" "path" args in
   let content = Safe_ops.json_string ~default:"" "content" args in
-  let mode_raw = Safe_ops.json_string ~default:"overwrite" "mode" args in
-  let mode_opt = fs_write_mode_of_string_opt mode_raw in
+  (* [Safe_ops.json_string] maps "key absent" and "key present but not a
+     string" onto the same default, and that default is the destructive mode.
+     {"mode": ["append"]} therefore reached Overwrite while the merely
+     misspelled {"mode": "apend"} was rejected below — a type error was handled
+     more permissively than a value error, in the destructive direction. Read
+     the member so a non-string is rejected on the same path as a bad string.
+     An explicit JSON null still reads as absent: [safe_member] returns [`Null]
+     for both, and "null means take the default" is the schema's intent. *)
+  let mode_member = Safe_ops.safe_member "mode" args in
+  let mode_raw =
+    match mode_member with
+    | `String s -> s
+    | `Null -> fs_write_mode_to_string Overwrite
+    | other -> Yojson.Safe.to_string other
+  in
+  let mode_opt =
+    match mode_member with
+    | `Null -> Some Overwrite
+    | `String s -> fs_write_mode_of_string_opt s
+    | _ -> None
+  in
   let after_gate ~confined ~target ~input continue =
     if confined_write_is_keeper_playground ~config ~meta confined
     then (

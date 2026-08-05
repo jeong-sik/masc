@@ -14,11 +14,8 @@ open Masc_domain
 module Core = Tool_local_runtime_core
 
 (* Re-export sub-module public values used by external callers *)
-let runtime_status_json = Tool_local_runtime_status.runtime_status_json
 let runtime_verify_json = Tool_local_runtime_verify.runtime_verify_json
 let runtime_ollama_probe_json = Tool_local_runtime_probe.runtime_ollama_probe_json
-let run_bench = Tool_local_runtime_bench.run_bench
-let provider_health_reachable = Tool_local_runtime_verify.provider_health_reachable
 let ollama_loaded_models_of_ps_json = Tool_local_runtime_probe.ollama_loaded_models_of_ps_json
 let ollama_probe_run_of_generate_json = Tool_local_runtime_probe.ollama_probe_run_of_generate_json
 let kv_cache_assessment_json = Tool_local_runtime_probe.kv_cache_assessment_json
@@ -40,45 +37,6 @@ let err_response ~tool_name ~start_time ~class_ msg : Core.tool_result =
     ~data
     (Yojson.Safe.to_string data)
 ;;
-
-let handle_models _ctx : Core.tool_result =
-  let tool_name = "masc_runtime_models" in
-  let start_time = Time_compat.now () in
-  match Core.fetch_models () with
-  | Error msg ->
-      err_response
-        ~tool_name
-        ~start_time
-        ~class_:Tool_result.Transient_error
-        msg
-  | Ok (url, models) ->
-      ok_response
-        ~tool_name
-        ~start_time
-        [
-          ( "result",
-            `Assoc
-              [
-                ("server_url", `String Env_config.Local_runtime.server_url);
-                ("endpoint", `String url);
-                ("source", `String "llama.cpp /v1/models");
-                ("models", `List (List.map (fun m -> `String m) models));
-                ("model_count", `Int (List.length models));
-              ] );
-        ]
-
-let handle_runtime_status _ctx args : Core.tool_result =
-  let tool_name = "masc_runtime_status" in
-  let start_time = Time_compat.now () in
-  let include_models =
-    match Json_util.assoc_member_opt "include_models" args with
-    | Some (`Bool flag) -> flag
-    | _ -> true
-  in
-  ok_response
-    ~tool_name
-    ~start_time
-    [ ("result", runtime_status_json ~include_models ()) ]
 
 let handle_runtime_verify _ctx args : Core.tool_result =
   let tool_name = "masc_runtime_verify" in
@@ -104,64 +62,6 @@ let handle_runtime_verify _ctx args : Core.tool_result =
       ( "result",
         runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () );
     ]
-
-let handle_runtime_bench _ctx args : Core.tool_result =
-  let tool_name = "masc_runtime_bench" in
-  let start_time = Time_compat.now () in
-  let model_id = Json_util.get_string args "model" in
-  let runtime_pool = Json_util.get_string args "runtime_pool" in
-  let parallelism =
-    match Json_util.assoc_member_opt "parallelism" args with
-    | Some (`Int value) -> max 1 (min 128 value)
-    | Some (`Intlit value) -> (
-        match Core.parse_int_opt value with
-        | Some parsed -> max 1 (min 128 parsed)
-        | None -> 8)
-    | _ -> 8
-  in
-  let rounds =
-    match Json_util.assoc_member_opt "rounds" args with
-    | Some (`Int value) -> max 1 (min 8 value)
-    | Some (`Intlit value) -> (
-        match Core.parse_int_opt value with
-        | Some parsed -> max 1 (min 8 parsed)
-        | None -> 1)
-    | _ -> 1
-  in
-  let max_tokens =
-    match Json_util.assoc_member_opt "max_tokens" args with
-    | Some (`Int value) -> max 1 (min 128 value)
-    | Some (`Intlit value) -> (
-        match Core.parse_int_opt value with
-        | Some parsed -> max 1 (min 128 parsed)
-        | None -> 16)
-    | _ -> 16
-  in
-  let timeout_sec =
-    match Json_util.assoc_member_opt "timeout_sec" args with
-    | Some (`Int value) -> max 3 (min 120 value)
-    | Some (`Intlit value) -> (
-        match Core.parse_int_opt value with
-        | Some parsed -> max 3 (min 120 parsed)
-        | None -> 8)
-    | _ -> 8
-  in
-  let prompt =
-    match Json_util.assoc_member_opt "prompt" args with
-    | Some (`String value) when not (String.equal (String.trim value) "") -> String.trim value
-    | _ -> "Reply with exactly one short word: ready"
-  in
-  match
-    run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt
-      ~max_tokens ~timeout_sec ()
-  with
-  | Ok json -> ok_response ~tool_name ~start_time [ ("result", json) ]
-  | Error err ->
-      err_response
-        ~tool_name
-        ~start_time
-        ~class_:Tool_result.Runtime_failure
-        err
 
 let run_runtime_ollama_probe ?timeout_sec args : Core.tool_result =
   let tool_name = "masc_runtime_ollama_probe" in

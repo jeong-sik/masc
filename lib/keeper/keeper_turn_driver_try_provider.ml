@@ -313,30 +313,30 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
     let planned =
       if String.equal ctx.base_path ""
       then
-        { Keeper_tool_result_demotion.messages; pending = [] }
-      else Keeper_tool_result_demotion.plan ~measure_message_bytes messages
+        { Keeper_model_input_demotion.messages; pending = [] }
+      else Keeper_model_input_demotion.plan ~measure_message_bytes messages
     in
     let windowed =
-      match cut planned.Keeper_tool_result_demotion.messages with
+      match cut planned.Keeper_model_input_demotion.messages with
       | Error error ->
         Error (Runtime_model_input_tail_window.budget_error_to_string error)
       | Ok windowed ->
-        (match planned.Keeper_tool_result_demotion.pending with
+        (match planned.Keeper_model_input_demotion.pending with
          | [] -> Ok windowed
          | pending ->
            let outcome =
-             Keeper_tool_result_demotion.materialize
+             Keeper_model_input_demotion.materialize
                ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
                ~pending
                windowed
            in
-           if outcome.Keeper_tool_result_demotion.reverted = 0
-           then Ok outcome.Keeper_tool_result_demotion.messages
+           if outcome.Keeper_model_input_demotion.reverted = 0
+           then Ok outcome.Keeper_model_input_demotion.messages
            else
              (* A restored body is larger than the placeholder the cut was
                 measured against, so the cut is no longer known to fit. Choose
                 it again against what will actually be sent. *)
-             (match cut outcome.Keeper_tool_result_demotion.messages with
+             (match cut outcome.Keeper_model_input_demotion.messages with
               | Ok recut -> Ok recut
               | Error error ->
                 Error

@@ -1,4 +1,4 @@
-(** Keeper_tool_result_demotion — replace aged tool-result bodies with their
+(** Keeper_model_input_demotion — replace aged tool-result bodies with their
     blob marker in the provider-bound copy (RFC-0363).
 
     A tool result is externalized at creation only when it exceeds

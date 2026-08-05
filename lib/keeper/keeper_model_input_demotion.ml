@@ -1,4 +1,4 @@
-(** See [keeper_tool_result_demotion.mli] for the contract (RFC-0363). *)
+(** See [keeper_model_input_demotion.mli] for the contract (RFC-0363). *)
 
 (* Not derived from [Runtime_model_input_tail_window.atoms_per_window] even
    though it currently shares its value: that quantum bounds how often the cut

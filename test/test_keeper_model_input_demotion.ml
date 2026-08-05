@@ -1,4 +1,4 @@
-(** Tests for {!Keeper_tool_result_demotion} (RFC-0363).
+(** Tests for {!Keeper_model_input_demotion} (RFC-0363).
 
     The load-bearing property is soundness of the size bound: {!Demotion.plan}
     substitutes a placeholder, the window chooses a cut against that
@@ -8,7 +8,7 @@
     other case here is an input shape that was found — during the RFC's
     adversarial review — to break that direction. *)
 
-module Demotion = Masc.Keeper_tool_result_demotion
+module Demotion = Masc.Keeper_model_input_demotion
 module Types = Agent_sdk.Types
 
 (* The production encoder, not a test-local one: the bound is only meaningful
@@ -286,7 +286,7 @@ let boundary_moves_at_the_tail () =
 
 let () =
   Alcotest.run
-    "keeper_tool_result_demotion"
+    "keeper_model_input_demotion"
     [ ( "bound"
       , [ Alcotest.test_case
             "demotion actually fires (suite is not vacuous)"

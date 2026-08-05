@@ -314,10 +314,32 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ~report_tool_schema () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ~report_tool_schema ~lookup () ->
     let verdict_ref = ref None in
     let protocol_error_ref = ref None in
-    let dispatch ~name ~args =
+    let lookup_schemas, lookup_dispatch =
+      match (lookup : Task.Anti_rationalization.lookup_surface) with
+      | No_lookup_surface -> [], None
+      | Lookup_tools { schemas; dispatch } -> schemas, Some dispatch
+    in
+    (* The verdict tool and the lookup tools share one dispatch entry point, so
+       the name decides which surface answers. A name belonging to neither is an
+       error the evaluator can read and correct, not a silently dropped call. *)
+    let dispatch_lookup ~name ~args =
+      let start_time = Time_compat.now () in
+      match lookup_dispatch with
+      | None ->
+        Tool_result.error ~tool_name:name ~start_time
+          (Printf.sprintf
+             "unknown tool %s; this review offers only %s"
+             name
+             report_tool_schema.Masc_domain.name)
+      | Some dispatch ->
+        (match dispatch ~name ~args with
+         | Ok output -> Tool_result.ok ~tool_name:name ~start_time output
+         | Error detail -> Tool_result.error ~tool_name:name ~start_time detail)
+    in
+    let dispatch_verdict ~name ~args =
       let start_time = Time_compat.now () in
       match !verdict_ref with
       | Some verdict ->
@@ -351,6 +373,11 @@ let install () =
              ~start_time
              (Printf.sprintf "Invalid verdict format: %s" msg))
     in
+    let dispatch ~name ~args =
+      if String.equal name report_tool_schema.Masc_domain.name
+      then dispatch_verdict ~name ~args
+      else dispatch_lookup ~name ~args
+    in
     let apply_review_verdict_output_contract provider_cfg =
       Ok
         (Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config
@@ -362,7 +389,7 @@ let install () =
           ~runtime_id:evaluator_runtime
           ~base_path
           ~goal:prompt
-          ~masc_tools:[ report_tool_schema ]
+          ~masc_tools:(report_tool_schema :: lookup_schemas)
           ~dispatch
           ~provider_config_transform:apply_review_verdict_output_contract
           ?sw

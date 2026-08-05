@@ -320,11 +320,12 @@ let registered_keeper_names (ctx : context) =
       entries
 ;;
 
-(* TEL-OK: the observable record for this transition is goal_events.jsonl, not
-   a counter or a log line. emit_goal_event below writes both the previous and
-   the new owner, so a reassignment reads back as who lost the Goal and who
-   gained it; a metric would say only that one happened, and a log line would
-   duplicate a record that is already typed, durable and queryable. *)
+(* The observable record for this transition is goal_events.jsonl, not a counter
+   or a log line. emit_goal_event below writes both the previous and the new
+   owner, so a reassignment reads back as who lost the Goal and who gained it; a
+   metric would say only that one happened, and a log line would duplicate a
+   record that is already typed, durable and queryable.
+   TEL-OK: goal_events.jsonl carries this transition. *)
 let handle_goal_assign ~tool_name ~start_time (ctx : context) args
     : Tool_result.result =
   match get_string_opt args "goal_id", get_string_opt args "owner" with

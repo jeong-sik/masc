@@ -457,6 +457,14 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Filename.concat (Common.masc_dir_from_base_path ~base_path) "fusion-runs.jsonl"
   in
   Fusion_run_registry.set_global (Fusion_run_registry.replay registry_path);
+  (* RFC-0361 D4: same shape for completion-authority reviews. Replayed
+     [Running] entries are dropped inside [replay] — the review fiber dies with
+     the process and the authority rescans [AwaitingVerification] at boot. *)
+  let verification_registry_path =
+    Filename.concat (Common.masc_dir_from_base_path ~base_path) "verification-runs.jsonl"
+  in
+  Verification_run_registry.set_global
+    (Verification_run_registry.replay verification_registry_path);
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
   Eio_context.set_switch sw;

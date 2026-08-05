@@ -51,7 +51,14 @@ let write
   in
   try
     let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-    Dated_jsonl.append store (Turn_record.to_json record)
+    Dated_jsonl.append store (Turn_record.to_json record);
+    match turn_kind with
+    | Turn_record.Autonomous ->
+      Keeper_chat_broadcast.chat_appended
+        ~keeper_name
+        ~source:"agent"
+        ()
+    | Turn_record.Direct -> ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

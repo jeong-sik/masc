@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.2"
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.13"
 # v0.231.0 is a hard-cut wave: checkpoint schema is v9 only (v1-v8
 # rejected; #2867), provider_config.output_schema is removed in favor of
 # response_format = JsonSchema as the single structured-output request state
@@ -35,9 +35,16 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.2"
 # #2875 agent-card current-interface contract hard-cut. MASC consumes the same
 # public Agent SDK contract; no compatibility or migration code retained.
 # Pinned to the 0.231.2 release commit (1ea60e7a1).
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.2"
+# v0.231.3..v0.231.13 are patch releases on the same hard-cut wave: streaming
+# fixes (fail closed on malformed Gemini SSE parts #2930, classify malformed
+# SSE discriminators #2926, quarantine streaming connections after transport
+# EOF #2919), OS-entropy ID reuse for artifacts/traces/session (#2928/#2929),
+# and terminal stop-semantics preservation (#2927). MASC consumes the same
+# public Agent SDK contract; no compatibility or migration code retained.
+# Pinned to the 0.231.13 release commit (59ccced68).
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.13"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="1ea60e7a1d379d0229eb1c83cfd5005b429eca81"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.231.2"
+readonly OAS_AGENT_SDK_SHA="59ccced68c2dc96389a91eee24d0b2c6bd5c53a6"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.231.13"

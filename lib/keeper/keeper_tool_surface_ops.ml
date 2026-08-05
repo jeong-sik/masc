@@ -357,18 +357,6 @@ let with_keeper_name args name =
       `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
   | other -> other
 
-let with_invocation_request args request =
-  match args with
-  | `Assoc fields ->
-    let fields =
-      fields |> List.remove_assoc "name" |> List.remove_assoc "message"
-    in
-    `Assoc
-      (("name", `String (Keeper_invocation_contract.target_name request))
-       :: ("message", `String (Keeper_invocation_contract.prompt request))
-       :: fields)
-  | other -> other
-;;
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let prepare_passive_keeper_identity_config ~(config : Workspace.config) ~(agent_name : string) args =
   let requested_name =
@@ -528,8 +516,8 @@ let keeper_name_lookup_candidates raw_name =
     in
     trimmed :: aliases
 
-let resolve_keeper_name_config ~(config : Workspace.config) args =
-  let name = String.trim (get_string args "name" "") in
+let resolve_keeper_name_string_config ~(config : Workspace.config) name =
+  let name = String.trim name in
   let rec loop = function
     | [] -> Error (Printf.sprintf "keeper not found: %s" name)
     | candidate :: rest ->
@@ -540,9 +528,16 @@ let resolve_keeper_name_config ~(config : Workspace.config) args =
   in
   loop (keeper_name_lookup_candidates name)
 
+let resolve_keeper_name_config ~(config : Workspace.config) args =
+  resolve_keeper_name_string_config
+    ~config
+    (get_string args "name" "")
 
-let resolve_keeper_name ctx args =
-  resolve_keeper_name_config ~config:ctx.config args
+
+let resolve_keeper_name ctx message =
+  resolve_keeper_name_string_config
+    ~config:ctx.config
+    (Keeper_invocation_contract.direct_message_target_name message)
 
 let direct_reply_projection json =
   match Keeper_turn_outcome.of_reply_payload (Some json) with
@@ -571,9 +566,18 @@ let direct_reply_visible_text json =
   | Connector_status _ | Connector_no_visible_reply -> None
 ;;
 
-let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args result =
-  if get_bool args "direct_reply" false && tool_result_success result then (
-    let user_content = get_string args "message" "" |> String.trim in
+let append_direct_chat_pair_if_reply
+      ~(config : Workspace.config)
+      ~name
+      ~message
+      result
+  =
+  if Keeper_invocation_contract.direct_message_direct_reply message
+     && tool_result_success result
+  then (
+    let user_content =
+      Keeper_invocation_contract.direct_message_prompt message |> String.trim
+    in
     (* RFC-0233 §7: the join key the keeper minted into the reply payload,
        threaded onto the persisted row of this agent-initiated / connector
        turn (parse, don't repair — absent/malformed reads as None). *)
@@ -601,7 +605,7 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
            site owns the assistant reply only. Without [channel] this
            is a genuine agent-initiated message with no upstream
            recorder, so it still owns the full pair. *)
-        let channel = String.trim (get_string args "channel" "") in
+        let channel = Keeper_invocation_contract.direct_message_channel message in
         if channel = "" then begin
           Keeper_chat_store.append_turn
             ~base_dir:config.base_path
@@ -670,27 +674,31 @@ let submit_keeper_invocation
   | Error error -> tool_result_of_handler_error error
 ;;
 
-let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result =
+let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_result =
   match
-    let* name = message_error (resolve_keeper_name ctx args) in
-    let worker_args = with_keeper_name args name in
-    let* request = message_error (Turn.preflight_keeper_msg ctx worker_args) in
+    let* name = message_error (resolve_keeper_name ctx message) in
+    let* message =
+      Keeper_invocation_contract.direct_message_with_keeper_name message name
+      |> Result.map_error Keeper_invocation_contract.request_error_to_string
+      |> message_error
+    in
+    let* message = message_error (Turn.preflight_keeper_msg ctx message) in
+    let request = Keeper_invocation_contract.direct_message_request message in
     Ok
       (submit_keeper_invocation
          ~submitted_by
          ~submission_to_json:Keeper_invocation_contract.submission_to_json
          ~submission_error_to_json:Keeper_msg_async.submit_error_to_json
-         ~run_turn:(fun ?event_bus request worker_ctx ->
-           let worker_args = with_invocation_request worker_args request in
+         ~run_turn:(fun ?event_bus _request worker_ctx ->
            let result =
              Turn.handle_keeper_msg
                ?event_bus
                ?continuation_channel
                worker_ctx
-               worker_args
+               message
            in
            append_direct_chat_pair_if_reply
-             ~config:ctx.config ~name ~args:worker_args result;
+             ~config:ctx.config ~name ~message result;
            result)
          ctx ~request)
   with
@@ -868,80 +876,84 @@ let handle_keeper_msg_stream
       ?on_admission_rejected
       ?on_admitted
       ctx
-      args
+      message
   : tool_result
   =
   let run name =
-    let resolved_args = with_keeper_name args name in
-    (* Stream turns are synchronous today, but still pin the bus visible at the
-       public surface boundary so later refactors cannot reintroduce a nested
-       fallback lookup in the turn body. *)
-    let event_bus = Event_bus_slots.get_keeper () in
-    let result =
-      Turn.handle_keeper_msg
-        ?on_text_delta
-        ?on_event
-        ?event_bus
-        ?continuation_channel
-        ?on_admission_rejected
-        ?on_admitted
-        ctx
-        resolved_args
-    in
-    complete_keeper_msg_stream_result result
+    match
+      Keeper_invocation_contract.direct_message_with_keeper_name message name
+    with
+    | Error error ->
+      tool_result_error (Keeper_invocation_contract.request_error_to_string error)
+    | Ok message ->
+      (* Stream turns are synchronous today, but still pin the bus visible at the
+         public surface boundary so later refactors cannot reintroduce a nested
+         fallback lookup in the turn body. *)
+      let event_bus = Event_bus_slots.get_keeper () in
+      let result =
+        Turn.handle_keeper_msg
+          ?on_text_delta
+          ?on_event
+          ?event_bus
+          ?continuation_channel
+          ?on_admission_rejected
+          ?on_admitted
+          ctx
+          message
+      in
+      complete_keeper_msg_stream_result result
   in
-  match resolve_keeper_name ctx args with
+  match resolve_keeper_name ctx message with
   | Ok name -> run name
   | Error err ->
-      let raw_name = String.trim (get_string args "name" "") in
-      if not (Keeper_config.validate_name raw_name)
-      then tool_result_error err
-      else
-        (* Preserve typed admission truth after lifecycle teardown removes the
-           metadata row: a shutdown-fenced queued receipt must return to
-           Pending, not become a terminal lookup failure. An open lane still
-           runs the admitted body and surfaces its authoritative metadata
-           error. *)
-        run raw_name
+    let raw_name = Keeper_invocation_contract.direct_message_target_name message in
+    (* Preserve typed admission truth after lifecycle teardown removes the
+       metadata row: a shutdown-fenced queued receipt must return to Pending,
+       not become a terminal lookup failure. An open lane still runs the
+       admitted body and surfaces its authoritative metadata error. *)
+    ignore err;
+    run raw_name
 
 let handle_keeper_msg_stream_if_free
       ?on_text_delta
       ?on_event
       ?continuation_channel
       ctx
-      args
+      message
   =
-  match resolve_keeper_name ctx args with
+  match resolve_keeper_name ctx message with
   | Error err ->
-    let raw_name = String.trim (get_string args "name" "") in
-    if not (Keeper_config.validate_name raw_name)
-    then `Ran (tool_result_error err)
-    else
-      (* A connector message already accepted for a live/raw Keeper identity
-         must remain queueable even if metadata resolution is temporarily
-         unavailable. Run the resolution error itself through the same
-         post-lock admission boundary: a held slot, parked waiter, active
-         receipt, or queue read error returns Busy; only an atomically free
-         lane returns the original metadata error. *)
-      Keeper_turn_admission.run_chat_if_free
-          ~base_path:ctx.config.base_path
-          ~keeper_name:raw_name
-          (fun () -> tool_result_error err)
+    let raw_name = Keeper_invocation_contract.direct_message_target_name message in
+    (* A connector message already accepted for a live/raw Keeper identity
+       must remain queueable even if metadata resolution is temporarily
+       unavailable. Run the resolution error itself through the same
+       post-lock admission boundary: a held slot, parked waiter, active
+       receipt, or queue read error returns Busy; only an atomically free
+       lane returns the original metadata error. *)
+    Keeper_turn_admission.run_chat_if_free
+      ~base_path:ctx.config.base_path
+      ~keeper_name:raw_name
+      (fun () -> tool_result_error err)
   | Ok name ->
-    let resolved_args = with_keeper_name args name in
-    let event_bus = Event_bus_slots.get_keeper () in
-    (match
-       Turn.handle_keeper_msg_if_free
-         ?on_text_delta
-         ?on_event
-         ?event_bus
-         ?continuation_channel
-         ctx
-         resolved_args
-     with
-     | `Busy rejection -> `Busy rejection
-     | `Ran result ->
-       `Ran (complete_keeper_msg_stream_result result))
+    (match Keeper_invocation_contract.direct_message_with_keeper_name message name with
+     | Error error ->
+       `Ran
+         (tool_result_error
+            (Keeper_invocation_contract.request_error_to_string error))
+     | Ok message ->
+       let event_bus = Event_bus_slots.get_keeper () in
+       (match
+          Turn.handle_keeper_msg_if_free
+            ?on_text_delta
+            ?on_event
+            ?event_bus
+            ?continuation_channel
+            ctx
+            message
+        with
+        | `Busy rejection -> `Busy rejection
+        | `Ran result ->
+          `Ran (complete_keeper_msg_stream_result result)))
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in

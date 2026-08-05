@@ -245,9 +245,6 @@ let normalized_or_unknown value =
   | "" -> "unknown"
   | trimmed -> trimmed
 
-let string_assoc_json fields =
-  `Assoc (List.map (fun (key, value) -> (key, `String value)) fields)
-
 (** Sanitize a value for use as a filesystem path component.
     Replaces everything outside [A-Za-z0-9_-] with '_' so that the resulting
     string cannot escape its intended parent directory via '/', '\\', or '..'
@@ -716,26 +713,19 @@ let dispatch_core ?on_text_snapshot ~submitted_by ~sw ~clock ~proc_mgr ~net
     ();
   Keeper_chat_broadcast.chat_appended
     ~keeper_name ~source:lane ();
-  let args =
-    `Assoc [
-      ("name", `String keeper_name);
-      ( "message",
-        `String
-          (contextualize_message ~channel ~channel_user_id ~channel_user_name
-             ~channel_workspace_id ~metadata ~content) );
-      ("direct_reply", `Bool true);
-      ("channel_session_key", `String channel_session_key);
-      (* RFC-0223 P1: raw connector identity, consumed by
-         [Keeper_tool_surface_ops.append_direct_chat_pair_if_reply] so the
-         persisted chat line carries the lane label and speaker instead
-         of the generic "agent" source. Internal-only args, same class
-         as [direct_reply] / [channel_session_key]. *)
-      ("channel", `String channel);
-      ("channel_workspace_id", `String channel_workspace_id);
-      ("channel_user_id", `String channel_user_id);
-      ("channel_user_name", `String channel_user_name);
-      ("channel_metadata", string_assoc_json metadata);
-    ]
+  let direct_message =
+    Keeper_invocation_contract.direct_message
+      ~keeper_name
+      ~prompt:
+        (contextualize_message ~channel ~channel_user_id ~channel_user_name
+           ~channel_workspace_id ~metadata ~content)
+      ~direct_reply:true
+      ~channel_session_key
+      ~channel
+      ~user_blocks:[]
+      ~attachments:[]
+      ()
+    |> Result.map_error Keeper_invocation_contract.request_error_to_string
   in
   let keeper_ctx : _ Keeper_tool_surface.context = {
     config;
@@ -762,26 +752,30 @@ let dispatch_core ?on_text_snapshot ~submitted_by ~sw ~clock ~proc_mgr ~net
                  "channel gate text snapshot callback failed (keeper=%s): %s"
                  keeper_name (Printexc.to_string exn))
   in
-  let defer_to_existing_work
+  let defer_to_existing_work message
       (admission_rejection : Keeper_turn_admission.rejection) =
     `Async_ack
       ( admission_rejection.in_flight
       , Some
           (Keeper_tool_surface.dispatch_keeper_msg ~submitted_by keeper_ctx
-             ~args) )
+             ~message) )
   in
   let dispatch_result =
-    (* The admission boundary, not a route-level peek, owns the FIFO decision.
-       It rechecks the durable queue after acquiring the Keeper turn slot. *)
-    match
-      Keeper_tool_surface.dispatch_keeper_msg_stream_if_free
-        ~on_text_delta keeper_ctx ~args
-    with
-    | `Ran result -> `Streaming result
-    | `Busy admission_rejection ->
-      defer_to_existing_work admission_rejection
+    match direct_message with
+    | Error error -> `Invalid_message error
+    | Ok message ->
+      (* The admission boundary, not a route-level peek, owns the FIFO decision.
+         It rechecks the durable queue after acquiring the Keeper turn slot. *)
+      (match
+         Keeper_tool_surface.dispatch_keeper_msg_stream_if_free
+           ~on_text_delta keeper_ctx ~message
+       with
+       | `Ran result -> `Streaming result
+       | `Busy admission_rejection ->
+         defer_to_existing_work message admission_rejection)
   in
   match dispatch_result with
+  | `Invalid_message error -> Gate_protocol.Keeper_error_result error
   | `Async_ack (in_flight, Some result) when not (Tool_result.is_failed result) ->
       let body = Tool_result.message result in
       let duration_ms =

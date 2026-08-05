@@ -366,31 +366,37 @@ let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
     }
   in
   let post_id = Board.Post_id.to_string post.id in
-  let args =
-    `Assoc
-      [
-        ("name", `String target_keeper);
-        ("message", `String (board_context_inference_message post));
-        ("direct_reply", `Bool true);
-        ( "surface_context",
-          board_context_inference_surface_context post comments );
-      ]
-  in
-  let result =
-    Keeper_tool_surface.dispatch_keeper_msg
-      ~submitted_by:agent_name
-      keeper_ctx
-      ~args
-  in
-  if Tool_result.is_success result
-  then
-    (match
-       board_context_inference_submission_json ~post_id ~target_source
-         (Tool_result.data result)
-     with
-     | Ok json -> Ok json
-     | Error msg -> Error (`Internal_server_error msg))
-  else Error (`Bad_request (Tool_result.message result))
+  match
+    Keeper_invocation_contract.direct_message
+      ~keeper_name:target_keeper
+      ~prompt:(board_context_inference_message post)
+      ~direct_reply:true
+      ~surface_context:(board_context_inference_surface_context post comments)
+      ~channel:""
+      ~user_blocks:[]
+      ~attachments:[]
+      ()
+  with
+  | Error error ->
+    Error
+      (`Bad_request
+         (Keeper_invocation_contract.request_error_to_string error))
+  | Ok message ->
+    let result =
+      Keeper_tool_surface.dispatch_keeper_msg
+        ~submitted_by:agent_name
+        keeper_ctx
+        ~message
+    in
+    if Tool_result.is_success result
+    then
+      (match
+         board_context_inference_submission_json ~post_id ~target_source
+           (Tool_result.data result)
+       with
+       | Ok json -> Ok json
+       | Error msg -> Error (`Internal_server_error msg))
+    else Error (`Bad_request (Tool_result.message result))
 
 let respond_board_context_inference_error request reqd ~status ~message =
   respond_json_value_with_cors ~status request reqd

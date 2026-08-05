@@ -21,16 +21,16 @@ val attachment_to_yojson : Keeper_chat_store.attachment -> Yojson.Safe.t
 
 val attachments_to_yojson : Keeper_chat_store.attachment list -> Yojson.Safe.t
 
-val parse_attachments : Yojson.Safe.t -> Keeper_chat_store.attachment list
-(** Parse optional [attachments] from a request/tool argument object.  Malformed
-    attachment entries are ignored, matching the historical chat stream
-    behavior; referenced-but-missing media is rejected later by {!to_oas_blocks}. *)
+val parse_attachments :
+  Yojson.Safe.t -> (Keeper_chat_store.attachment list, string) result
+(** Parse optional [attachments] from a request object. Duplicate or undeclared
+    fields, wrong types, and missing [id]/[data] are request errors. *)
 
 val user_blocks_to_yojson : user_input_block list -> Yojson.Safe.t
 
 val parse_user_blocks : Yojson.Safe.t -> (user_input_block list, string) result
-(** Parse the optional [user_blocks] request field.  Unknown block types and
-    malformed media refs are request errors, not silently ignored. *)
+(** Parse the optional [user_blocks] request field. Duplicate or undeclared
+    fields, unknown block types, and malformed media refs are request errors. *)
 
 val fallback_message :
   attachments:Keeper_chat_store.attachment list -> user_input_block list -> string

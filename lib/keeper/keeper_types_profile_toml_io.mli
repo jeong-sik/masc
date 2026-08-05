@@ -12,15 +12,12 @@ val float_of_env_default :
 val clamp_int : int -> min_v:int -> max_v:int -> int
 val validate_name : string -> bool
 val removed_keeper_input_key_names : string list
-val removed_keeper_msg_input_key_names : string list
 val present_json_keys : string list -> Yojson.Safe.t -> string list
 val reject_removed_keeper_input_keys :
   ?allow_sandbox_fields:bool ->
   tool_name:string ->
   Yojson.Safe.t ->
   (unit, string) result
-val reject_removed_keeper_msg_input_keys :
-  tool_name:string -> Yojson.Safe.t -> (unit, string) result
 val utf8_repair_string : string -> string
 val normalize_prompt_text : max_bytes:int -> string -> string
 val keeper_bootstrap_proactive_warmup_sec : unit -> int

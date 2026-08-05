@@ -8,6 +8,18 @@ type request =
   ; prompt : string
   }
 
+type direct_message =
+  { request : request
+  ; direct_reply : bool
+  ; turn_instructions : string option
+  ; surface_context : Yojson.Safe.t option
+  ; channel_session_key : string option
+  ; channel : string
+  ; user_blocks : Keeper_multimodal_input.user_input_block list
+  ; attachments : Keeper_chat_store.attachment list
+  ; user_oas_blocks : Agent_sdk.Types.content_block list option
+  }
+
 type run_ref =
   { run_id : string
   ; target : target
@@ -35,6 +47,7 @@ type request_error =
   | Invalid_target of string
   | Empty_prompt
   | Invalid_entry_projection
+  | Invalid_multimodal_input of string
   | Invalid_wire_value of
       { field : string
       ; expected : string
@@ -113,6 +126,82 @@ let request ~keeper_name ~prompt =
   else Ok { target = Keeper keeper_name; capability = Invoke_turn; prompt }
 ;;
 
+let nonempty_trimmed_option = function
+  | None -> None
+  | Some value ->
+    let value = String.trim value in
+    if String.equal value "" then None else Some value
+;;
+
+let direct_message
+      ~keeper_name
+      ~prompt
+      ~direct_reply
+      ?turn_instructions
+      ?surface_context
+      ?channel_session_key
+      ~channel
+      ~user_blocks
+      ~attachments
+      ()
+  =
+  let* request = request ~keeper_name ~prompt in
+  let* surface_context =
+    match surface_context with
+    | None -> Ok None
+    | Some (`Assoc _ as context) -> Ok (Some context)
+    | Some _ -> invalid_wire_value ~field:"surface_context" ~expected:"object"
+  in
+  let* user_oas_blocks =
+    Keeper_multimodal_input.to_oas_blocks ~attachments user_blocks
+    |> Result.map
+         (function
+           | [] -> None
+           | blocks -> Some blocks)
+    |> Result.map_error (fun reason -> Invalid_multimodal_input reason)
+  in
+  Ok
+    { request
+    ; direct_reply
+    ; turn_instructions = nonempty_trimmed_option turn_instructions
+    ; surface_context
+    ; channel_session_key = nonempty_trimmed_option channel_session_key
+    ; channel = String.trim channel
+    ; user_blocks
+    ; attachments
+    ; user_oas_blocks
+    }
+;;
+
+let direct_message_with_keeper_name message keeper_name =
+  direct_message
+    ~keeper_name
+    ~prompt:message.request.prompt
+    ~direct_reply:message.direct_reply
+    ?turn_instructions:message.turn_instructions
+    ?surface_context:message.surface_context
+    ?channel_session_key:message.channel_session_key
+    ~channel:message.channel
+    ~user_blocks:message.user_blocks
+    ~attachments:message.attachments
+    ()
+;;
+
+let direct_message_request message = message.request
+let direct_message_target_name message =
+  match message.request.target with
+  | Keeper name -> Keeper_id.Keeper_name.to_string name
+;;
+let direct_message_prompt message = message.request.prompt
+let direct_message_direct_reply message = message.direct_reply
+let direct_message_turn_instructions message = message.turn_instructions
+let direct_message_surface_context message = message.surface_context
+let direct_message_channel_session_key message = message.channel_session_key
+let direct_message_channel message = message.channel
+let direct_message_user_blocks message = message.user_blocks
+let direct_message_attachments message = message.attachments
+let direct_message_user_oas_blocks message = message.user_oas_blocks
+
 let request_of_json json =
   let* fields = object_fields ~field:"delegate" json in
   let* () =
@@ -134,6 +223,7 @@ let request_error_to_string = function
   | Invalid_target reason -> reason
   | Empty_prompt -> "message is required"
   | Invalid_entry_projection -> "Keeper invocation entry projection is not an object"
+  | Invalid_multimodal_input reason -> reason
   | Invalid_wire_value { field; expected } ->
     Printf.sprintf "%s must be %s" field expected
   | Run_ref_mismatch -> "run_ref does not identify the stored Keeper invocation"

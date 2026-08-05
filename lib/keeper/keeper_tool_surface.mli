@@ -30,7 +30,7 @@ val dispatch_keeper_msg
   :  submitted_by:string
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> _ context
-  -> args:Yojson.Safe.t
+  -> message:Keeper_invocation_contract.direct_message
   -> tool_result
 
 module For_testing : sig
@@ -52,7 +52,9 @@ val dispatch_keeper_msg_stream :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?on_admission_rejected:(Keeper_turn_admission.rejection -> unit) ->
   ?on_admitted:(unit -> (unit, string) result) ->
-  _ context -> args:Yojson.Safe.t -> tool_result option
+  _ context ->
+  message:Keeper_invocation_contract.direct_message ->
+  tool_result option
 
 (** Non-blocking streaming dispatch for direct chat admission. The Keeper turn
     slot performs the authoritative post-lock durable-queue recheck; [`Busy]
@@ -62,5 +64,5 @@ val dispatch_keeper_msg_stream_if_free :
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   _ context ->
-  args:Yojson.Safe.t ->
+  message:Keeper_invocation_contract.direct_message ->
   [ `Ran of tool_result option | `Busy of Keeper_turn_admission.rejection ]

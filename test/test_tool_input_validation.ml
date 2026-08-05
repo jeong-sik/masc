@@ -644,13 +644,8 @@ let test_validate_args_keeper_board_list_rejects_unknown_field () =
       (Yojson.Safe.to_string forwarded)
   | Error _ -> ()
 
-(* The keeper/persona tool schemas in [Keeper_schema] hand-roll their
-   [`Assoc] input_schema. Eleven of them omitted [additionalProperties],
-   so [Tool_input_validation.unsupported_arg_names] returned [] for them and
-   an undeclared field reached the handler, which then dropped it with no
-   error. Only the fourteen names hand-listed in
-   [Keeper_config_text.removed_keeper_msg_inputs] produced a rejection;
-   a typo did not. *)
+(* Keeper/persona tool schemas are closed: undeclared input cannot reach a
+   handler and disappear silently. *)
 let keeper_schema_input name =
   find_schema_exn name Masc.Keeper_schema.schemas
 
@@ -676,14 +671,6 @@ let assert_rejects_undeclared_field ~tool ~field =
 
 let test_keeper_up_rejects_undeclared_field () =
   assert_rejects_undeclared_field ~tool:"masc_keeper_up" ~field:"shrt_goal"
-
-(* The retired goal inputs were rejected only because they were hand-listed.
-   Closing the schema rejects them through the same path as any other
-   undeclared name, which is what makes the hand-list redundant. *)
-let test_keeper_up_rejects_retired_goal_inputs () =
-  List.iter
-    (fun field -> assert_rejects_undeclared_field ~tool:"masc_keeper_up" ~field)
-    [ "goal"; "short_goal"; "mid_goal"; "long_goal"; "new_goal" ]
 
 let test_keeper_down_rejects_undeclared_field () =
   assert_rejects_undeclared_field ~tool:"masc_keeper_down" ~field:"remove_metaa"
@@ -2258,8 +2245,6 @@ let () =
     ("keeper_schema_closure", [
       Alcotest.test_case "keeper_up rejects an undeclared field" `Quick
         test_keeper_up_rejects_undeclared_field;
-      Alcotest.test_case "keeper_up rejects retired goal inputs" `Quick
-        test_keeper_up_rejects_retired_goal_inputs;
       Alcotest.test_case "keeper_down rejects an undeclared field" `Quick
         test_keeper_down_rejects_undeclared_field;
       Alcotest.test_case "keeper_up accepts live-traffic fields" `Quick

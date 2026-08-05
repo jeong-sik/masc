@@ -365,7 +365,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
            task_id_string
            err
        | Ok () ->
-         (* Cycle 44: KeeperTaskAcquisition.tla SubmitTask post-action
+         (* SubmitTask post-action
             guard pins that the directive successfully attached the
             [task_id] to the keeper's meta. The [@@fsm_guard] PPX
             routes the assertion through [wrap_unit ~stage:"guard"]

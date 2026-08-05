@@ -418,11 +418,9 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
     slices.add('goals')
   }
   // Board rows are actor/filter scoped (`voter`, blind-vote policy, author and
-  // hearth filters) and are loaded through refreshBoard's HTTP query. The WS
-  // snapshot provider is route-scoped only, so subscribing the board slice here
-  // can hydrate the list with a different query immediately after the route HTTP
-  // refresh. Raw board events still reach the client and schedule/increment
-  // board refreshes through sse-store.
+  // hearth filters) and are loaded through refreshBoard's HTTP query. Raw board
+  // events still reach the client and schedule/increment board refreshes through
+  // sse-store; there is no unscoped board slice subscription.
   if (routeState.tab === 'monitoring') {
     const section = routeState.params.section
     if (section === 'observatory' || section === 'journey' || section === 'agents') {
@@ -650,25 +648,6 @@ function handleRpcResponse(raw: JsonObject): boolean {
   return true
 }
 
-function applySnapshot(raw: unknown): void {
-  batch(() => {
-    const snapshot = raw as { slices?: unknown; seq?: unknown }
-    if (typeof snapshot.seq === 'number') {
-      dashboardWsLastSeq.value = snapshot.seq
-    }
-    const slices = snapshot.slices as Record<string, unknown> | undefined
-    if (!slices || typeof slices !== 'object') return
-    for (const [slice, payload] of Object.entries(slices)) {
-      hydrateRouteDashboardSlice(slice, payload)
-    }
-  })
-}
-
-function applySubscribeResult(raw: unknown): void {
-  const result = raw as { snapshot?: unknown }
-  if (result.snapshot) applySnapshot(result.snapshot)
-}
-
 function applyDelta(raw: unknown): void {
   batch(() => {
     const delta = raw as {
@@ -709,10 +688,6 @@ function hydrateRouteDashboardSlice(slice: string, payload: unknown, eventType?:
 function handleNotification(raw: JsonObject): boolean {
   if (raw.method === 'dashboard/delta') {
     applyDelta(raw.params)
-    return true
-  }
-  if (raw.method === 'dashboard/snapshot') {
-    applySnapshot(raw.params)
     return true
   }
   return false
@@ -835,12 +810,11 @@ export async function subscribeDashboardRoute(routeState: DashboardRouteState): 
   if (key === lastSubscribeKey) return
   lastSubscribeKey = key
   try {
-    const result = await sendRpc('dashboard/subscribe', {
+    await sendRpc('dashboard/subscribe', {
       route: routeKey(desired),
       slices,
     })
     if (lastSubscribeKey !== key) return
-    applySubscribeResult(result)
   } catch (err) {
     if (lastSubscribeKey === key) lastSubscribeKey = ''
     throw err
@@ -908,7 +882,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     void sendRpc('dashboard/hello', {
       protocol: 'dashboard-ws.v1',
       token: token ?? undefined,
-      features: ['snapshot', 'delta', 'mode_snapshot'],
+      features: ['delta', 'mode_snapshot'],
     })
       .then(() => {
         if (socket !== ws) return

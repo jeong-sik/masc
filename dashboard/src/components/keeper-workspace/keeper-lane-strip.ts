@@ -15,7 +15,7 @@
 // as such.
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { Keeper } from '../../types'
 import type {
@@ -23,8 +23,6 @@ import type {
   DashboardKeeperWaitingKeeper,
   DashboardKeeperWaitingRow,
 } from '../../api'
-import { fetchKeeperWaitingInventory } from '../../api'
-import { KEEPER_WAITING_INVENTORY_REFRESH_MS } from '../tools/tool-state'
 import { StatusChip } from '../common/status-chip'
 import {
   enumLabel,
@@ -34,20 +32,10 @@ import {
 import { formatDateTimeKo } from '../../lib/format-time'
 import { CountBadge } from '../v2/primitives-v2'
 import { dashboardWsReady } from '../../dashboard-ws-state'
-import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
-import { isAbortError } from '../../lib/async-state'
-import { registerKeeperWaitingInventoryRefresh } from '../../sse-store'
-
-// Queue commits push a signal-only invalidation over WS. The 15s timer is a
-// missed-event verifier and focus-recovery path, not the primary update path.
-const LANE_REFRESH_MS = KEEPER_WAITING_INVENTORY_REFRESH_MS
-
-function formatLaneRefreshLabel(intervalMs: number, pushReady: boolean): string {
-  const seconds = Math.max(1, Math.round(intervalMs / 1000))
-  return pushReady
-    ? `WS 즉시 반영 · ${seconds}초마다 상태 검산`
-    : `WS 연결 대기 · ${seconds}초마다 재조회`
-}
+import {
+  keeperWaitingInventoryState,
+  subscribeKeeperWaitingInventory,
+} from '../../keeper-waiting-inventory-store'
 
 const LANE_STATE_LABELS: Record<string, string> = {
   idle: '대기열 비어 있음',
@@ -148,27 +136,22 @@ function LaneWaitingRow({ row }: { row: DashboardKeeperWaitingRow }): VNode {
   `
 }
 
-/** Pure presentational part — container feeds it from the shared tools
- *  resource; tests feed it fixtures. */
+/** Pure presentational part; tests feed it fixtures. */
 export function KeeperLaneStrip({
   keeper,
   inventory,
   ready,
   loading,
   error,
-  autoRefreshMs,
   pushReady = false,
 }: {
   keeper: Keeper
   inventory: DashboardKeeperWaitingInventory | null | undefined
-  /** true once the shared tools resource has a response body — separates
+  /** true once the keeper-scoped resource has a response body — separates
    *  "field absent from the response" from "response not fetched yet". */
   ready: boolean
   loading: boolean
   error: string | null
-  /** when set, the container polls at this cadence — shown next to the
-   *  snapshot time so the operator knows the panel refreshes on its own. */
-  autoRefreshMs?: number
   /** Whether the authenticated dashboard WS handshake completed. */
   pushReady?: boolean
 }): VNode {
@@ -222,10 +205,8 @@ export function KeeperLaneStrip({
                   </div>`
                 : null}
               ${inventory?.generated_at
-                ? html`<div class="text-2xs text-[var(--color-fg-muted)]">서버 기준 ${formatDateTimeKo(inventory.generated_at)}${autoRefreshMs ? html` · ${formatLaneRefreshLabel(autoRefreshMs, pushReady)}` : null}</div>`
-                : autoRefreshMs
-                  ? html`<div class="text-2xs text-[var(--color-fg-muted)]">${formatLaneRefreshLabel(autoRefreshMs, pushReady)}</div>`
-                  : null}
+                ? html`<div class="text-2xs text-[var(--color-fg-muted)]">서버 기준 ${formatDateTimeKo(inventory.generated_at)}${pushReady ? ' · WS 즉시 반영' : ''}</div>`
+                : null}
             </div>
           `
         : inventory
@@ -239,81 +220,14 @@ export function KeeperLaneStrip({
   `
 }
 
-type LaneInventoryState = {
-  keeperName: string
-  inventory: DashboardKeeperWaitingInventory | null
-  ready: boolean
-  loading: boolean
-  error: string | null
-}
-
-/** Read only this keeper's lane projection. WS queue mutations trigger the
- *  primary refresh; the visibility-aware timer only verifies missed events. */
+/** Read only this keeper's lane projection. Queue commits and reconnects
+ * invalidate the shared keeper-scoped store; no periodic poll is mounted. */
 export function KeeperLaneSection({ keeper }: { keeper: Keeper }): VNode {
-  const [state, setState] = useState<LaneInventoryState>({
-    keeperName: keeper.name,
-    inventory: null,
-    ready: false,
-    loading: true,
-    error: null,
-  })
-
   useEffect(() => {
-    let active = true
-    let controller: AbortController | null = null
-    const load = () => {
-      controller?.abort()
-      const requestController = new AbortController()
-      controller = requestController
-      setState(previous => ({
-        keeperName: keeper.name,
-        inventory: previous.keeperName === keeper.name ? previous.inventory : null,
-        ready: previous.keeperName === keeper.name && previous.ready,
-        loading: true,
-        error: null,
-      }))
-      void fetchKeeperWaitingInventory(keeper.name, { signal: requestController.signal })
-        .then(inventory => {
-          if (!active || requestController.signal.aborted) return
-          setState({
-            keeperName: keeper.name,
-            inventory,
-            ready: true,
-            loading: false,
-            error: null,
-          })
-        })
-        .catch((error: unknown) => {
-          if (!active || isAbortError(error)) return
-          setState(previous => ({
-            keeperName: keeper.name,
-            inventory: previous.keeperName === keeper.name ? previous.inventory : null,
-            ready: previous.keeperName === keeper.name && previous.ready,
-            loading: false,
-            error: error instanceof Error ? error.message : String(error),
-          }))
-        })
-    }
-    load()
-    const unregisterPush = registerKeeperWaitingInventoryRefresh(changedKeeper => {
-      if (changedKeeper === keeper.name) load()
-    })
-    const stopPolling = setupVisibleAutoRefresh(load, LANE_REFRESH_MS)
-    return () => {
-      active = false
-      controller?.abort()
-      unregisterPush()
-      stopPolling()
-    }
+    return subscribeKeeperWaitingInventory(keeper.name)
   }, [keeper.name])
 
-  const current = state.keeperName === keeper.name ? state : {
-    keeperName: keeper.name,
-    inventory: null,
-    ready: false,
-    loading: true,
-    error: null,
-  }
+  const current = keeperWaitingInventoryState(keeper.name)
   return html`
     <${KeeperLaneStrip}
       keeper=${keeper}
@@ -321,7 +235,6 @@ export function KeeperLaneSection({ keeper }: { keeper: Keeper }): VNode {
       ready=${current.ready}
       loading=${current.loading}
       error=${current.error}
-      autoRefreshMs=${LANE_REFRESH_MS}
       pushReady=${dashboardWsReady.value}
     />
   `

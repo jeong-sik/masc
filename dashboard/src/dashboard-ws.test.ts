@@ -199,7 +199,7 @@ async function connectReadyDashboard(): Promise<MockWebSocket> {
   socket.receive({
     jsonrpc: '2.0',
     id: subscribe.id,
-    result: { snapshot: { seq: 1, slices: {} } },
+    result: {},
   })
   await flushPromises()
   return socket
@@ -280,7 +280,7 @@ describe('dashboardSlicesForRoute', () => {
     })).toContain('execution')
   })
 
-  it('keeps board route snapshots HTTP-owned while subscribing goals and fleet FSM slices', () => {
+  it('keeps board data HTTP-owned while subscribing goals and fleet FSM slices', () => {
     expect(dashboardSlicesForRoute({ tab: 'board', params: {} }))
       .toEqual([
         'namespace',
@@ -573,7 +573,7 @@ describe('dashboard websocket route subscriptions', () => {
     firstSocket.receive({
       jsonrpc: '2.0',
       id: subscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
     expect(dashboardWsReady.value).toBe(true)
@@ -613,7 +613,7 @@ describe('dashboard websocket route subscriptions', () => {
     const hello = parseRpc(socket, 0)
     socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
     const subscribe = parseRpc(socket, 1)
-    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: {} })
     await flushPromises()
     expect(dashboardWsReady.value).toBe(true)
 
@@ -633,7 +633,7 @@ describe('dashboard websocket route subscriptions', () => {
     const hello = parseRpc(socket, 0)
     socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
     const subscribe = parseRpc(socket, 1)
-    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: {} })
     await flushPromises()
     expect(dashboardWsReady.value).toBe(true)
 
@@ -689,7 +689,7 @@ describe('dashboard websocket route subscriptions', () => {
     const hello = parseRpc(socket, 0)
     socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
     const subscribe = parseRpc(socket, 1)
-    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: {} })
     await flushPromises()
     expect(dashboardWsReady.value).toBe(true)
 
@@ -712,7 +712,7 @@ describe('dashboard websocket route subscriptions', () => {
     const hello = parseRpc(socket, 0)
     socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
     const subscribe = parseRpc(socket, 1)
-    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: {} })
     await flushPromises()
     expect(dashboardWsReady.value).toBe(true)
 
@@ -736,7 +736,7 @@ describe('dashboard websocket route subscriptions', () => {
     const hello = parseRpc(socket, 0)
     socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
     const subscribe = parseRpc(socket, 1)
-    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: {} })
     await flushPromises()
     expect(dashboardWsReady.value).toBe(true)
 
@@ -759,7 +759,7 @@ describe('dashboard websocket route subscriptions', () => {
     const hello = parseRpc(socket, 0)
     socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
     const subscribe = parseRpc(socket, 1)
-    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: {} })
     await flushPromises()
     expect(dashboardWsReady.value).toBe(true)
 
@@ -854,7 +854,7 @@ describe('dashboard websocket route subscriptions', () => {
     freshSocket.receive({
       jsonrpc: '2.0',
       id: subscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
     expect(dashboardWsReady.value).toBe(true)
@@ -915,7 +915,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: subscribe.id,
-      result: { snapshot: { seq: 7, slices: {} } },
+      result: {},
     })
     await flushPromises()
   })
@@ -1066,7 +1066,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: subscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
 
@@ -1101,7 +1101,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: subscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
     sseStoreMocks.hydrateDashboardSlice.mockClear()
@@ -1117,7 +1117,7 @@ describe('dashboard websocket route subscriptions', () => {
       },
     })
 
-    expect(dashboardWsLastSeq.value).toBe(1)
+    expect(dashboardWsLastSeq.value).toBe(0)
     expect(dashboardWsEventCount60s.value).toBe(1)
     expect(socket.sent).toHaveLength(sentBeforeDelta)
     expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(
@@ -1141,7 +1141,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: subscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
     sseStoreMocks.hydrateDashboardSlice.mockClear()
@@ -1175,7 +1175,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: subscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
     sseStoreMocks.hydrateDashboardSlice.mockClear()
@@ -1210,7 +1210,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: subscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
     sseStoreMocks.hydrateDashboardSlice.mockClear()
@@ -1250,7 +1250,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: subscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
     dashboardWsLastSeq.value = 0
@@ -1292,7 +1292,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: subscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
 
@@ -1344,7 +1344,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets[1]!.readyState).toBe(MockWebSocket.CONNECTING)
   })
 
-  it('ignores stale subscribe snapshots that arrive after a newer route subscription', async () => {
+  it('treats subscribe responses as acknowledgements without mutating delta sequence', async () => {
     installWebSocketMocks()
 
     await connectDashboardWS({ tab: 'overview', params: {} })
@@ -1358,7 +1358,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: initialSubscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
     dashboardWsLastSeq.value = 0
@@ -1378,7 +1378,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: staleSubscribe.id,
-      result: { snapshot: { seq: 11, slices: {} } },
+      result: {},
     })
     await stalePromise
     expect(dashboardWsLastSeq.value).toBe(0)
@@ -1386,10 +1386,10 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: latestSubscribe.id,
-      result: { snapshot: { seq: 22, slices: {} } },
+      result: {},
     })
     await latestPromise
-    expect(dashboardWsLastSeq.value).toBe(22)
+    expect(dashboardWsLastSeq.value).toBe(0)
   })
 
   it('rejects in-flight subscribe RPCs when the socket closes', async () => {
@@ -1406,7 +1406,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: initialSubscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
 
@@ -1436,7 +1436,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: initialSubscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
 
@@ -1470,7 +1470,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: initialSubscribe.id,
-      result: { snapshot: { seq: 1, slices: {} } },
+      result: {},
     })
     await flushPromises()
 
@@ -1490,14 +1490,14 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: subscribe.id,
-      result: { snapshot: { seq: 99, slices: {} } },
+      result: {},
     })
     await flushPromises()
 
-    expect(dashboardWsLastSeq.value).toBe(1)
+    expect(dashboardWsLastSeq.value).toBe(0)
   })
 
-  it('ignores board slice snapshots and deltas because the board list is HTTP-owned', async () => {
+  it('ignores board deltas because the board list is HTTP-owned', async () => {
     installWebSocketMocks()
 
     await connectDashboardWS({ tab: 'workspace', params: { section: 'board' } })
@@ -1511,7 +1511,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: initialSubscribe.id,
-      result: { snapshot: { seq: 1, slices: { board: { posts: [] } } } },
+      result: {},
     })
     await flushPromises()
     sseStoreMocks.hydrateDashboardSlice.mockClear()
@@ -1532,7 +1532,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.receive({
       jsonrpc: '2.0',
       id: routeSubscribe.id,
-      result: { snapshot: { seq: 3, slices: { execution: { agents: [] } } } },
+      result: {},
     })
     await switchPromise
     sseStoreMocks.hydrateDashboardSlice.mockClear()

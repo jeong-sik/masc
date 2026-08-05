@@ -186,6 +186,9 @@ type t =
   | KeeperToolCallRetryLoop
   | ShellIrEffectTotal
   | RawTraceSinkDegraded
+  | RawTraceRetentionDeleted
+  | RawTraceRetentionSkipped
+  | RawTraceRetentionUnlinkFailed
   | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped

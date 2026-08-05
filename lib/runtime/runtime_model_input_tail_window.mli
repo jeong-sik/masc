@@ -56,6 +56,26 @@ val preamble_marker_key : string
     exists only in the transmitted copy; nothing writes it to durable
     state. *)
 
+type label =
+  | Pinned
+      (** Survives every cut: [System] entries and messages carrying
+          extra-system-context provenance, both re-assembled fresh each turn. *)
+  | Atom of int  (** Zero-based index of the atom this message belongs to. *)
+
+val annotate
+  :  Agent_sdk.Types.message list
+  -> (Agent_sdk.Types.message * label) list * int
+(** Label every message with its atom index, in order, and return the atom
+    count. [User] and [Assistant] open a new atom; [Tool] joins the atom of the
+    assistant that issued the call, so both sides of a tool exchange always
+    share one label.
+
+    Exported because the atom is now a shared unit of the projection pipeline
+    rather than a private detail of the cut: a stage that runs before
+    {!project} and needs to reason about age must use the same labelling, and
+    a second implementation of it would let the two stages disagree about
+    where an atom begins. *)
+
 type budget_error =
   | Reservation_exceeds_capacity of
       { capacity_bytes : int

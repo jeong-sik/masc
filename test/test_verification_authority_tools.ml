@@ -103,6 +103,28 @@ let test_list_dir_missing_directory_is_an_error () =
     | Error _ -> ())
 ;;
 
+(* An unreadable directory must come back as a result, not as an exception.
+   The dispatcher's caller aborts the whole review on a raise, so one
+   subdirectory the producer left unreadable would cost the verdict rather than
+   the tool call. Both outcomes are accepted here — a privileged runner can
+   read mode 0 — because the property is that the call returns at all. *)
+let test_unreadable_directory_does_not_raise () =
+  with_surface [] (fun surface root ->
+    let locked = Filename.concat root "locked" in
+    Unix.mkdir locked 0o000;
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod locked 0o700)
+      (fun () ->
+         match
+           dispatch_result surface ~name:"verification_list_dir"
+             ~args:(`Assoc [ "path", `String "locked" ])
+         with
+         | Ok _ | Error _ -> ()
+         | exception exn ->
+           Alcotest.failf "list_dir raised instead of returning: %s"
+             (Printexc.to_string exn)))
+;;
+
 (* A judge that calls a name this surface does not offer must be told so. A
    dropped call would read to the model as a tool that returned nothing. *)
 let test_unknown_tool_name_is_an_error () =
@@ -217,6 +239,8 @@ let () =
         ; Alcotest.test_case "list dir lists the root" `Quick test_list_dir_lists_the_root
         ; Alcotest.test_case "missing directory is an error" `Quick
             test_list_dir_missing_directory_is_an_error
+        ; Alcotest.test_case "unreadable directory does not raise" `Quick
+            test_unreadable_directory_does_not_raise
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case "unknown tool name is an error" `Quick

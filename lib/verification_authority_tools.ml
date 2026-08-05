@@ -6,6 +6,14 @@
 let max_directory_entries = 200
 let max_git_log_commits = 50
 
+(* How long a review may wait on git. This is the judge's budget, not an
+   estimate of how long the command takes: the review fiber is blocked for the
+   whole call, and a producer root on a slow mount or under index contention
+   would otherwise hold a verdict open with no bound. Exceeding it is reported
+   as a tool error the judge can act on, so a stalled lookup costs one tool
+   call rather than the review. *)
+let git_timeout_seconds = 5.0
+
 (* The tool names the evaluator may call. Parsed once at the dispatch boundary
    so the rest of this module matches on a constructor: a name that is not one
    of these cannot reach an implementation, and adding a tool without wiring it
@@ -187,7 +195,16 @@ let list_dir t ~relative =
   | Ok Fs_compat.Owned_directory_missing ->
     Error (Printf.sprintf "%s: directory does not exist" relative)
   | Ok (Fs_compat.Owned_directory _) ->
-    let entries = Fs_compat.read_dir target in
+    (* The chain check and the read are two syscalls, so the directory can
+       become unreadable in between, and a subdirectory the producer created
+       unreadable fails here too. Either way the judge gets a tool error it can
+       route around; letting the exception out would abort the whole review
+       over one unreadable directory. *)
+    (match Fs_compat.read_dir target with
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception exn ->
+       Error (Printf.sprintf "%s: %s" relative (Printexc.to_string exn))
+     | entries ->
     let total = List.length entries in
     let shown = List.filteri (fun index _ -> index < max_directory_entries) entries in
     let lines = List.map (fun name -> entry_line t ~directory:target ~name) shown in
@@ -197,7 +214,7 @@ let list_dir t ~relative =
         Printf.sprintf "%d entries, showing the first %d" total max_directory_entries
       else Printf.sprintf "%d entries" total
     in
-    Ok (String.concat "\n" (header :: lines))
+    Ok (String.concat "\n" (header :: lines)))
 ;;
 
 (* Read-only git, expressed as fixed argv. The evaluator supplies no
@@ -205,7 +222,10 @@ let list_dir t ~relative =
    could carry it. [--no-optional-locks] keeps a concurrent keeper's index from
    being touched by a review. *)
 let run_read_only_git t arguments =
-  match Repo_git.run_git ~cwd:t.ownership_root ("--no-optional-locks" :: arguments) with
+  match
+    Repo_git.run_git ~cwd:t.ownership_root ~timeout_sec:git_timeout_seconds
+      ("--no-optional-locks" :: arguments)
+  with
   | Error detail -> Error detail
   | Ok [] -> Ok "(no output)"
   | Ok lines -> Ok (String.concat "\n" lines)

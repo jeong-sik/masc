@@ -11,11 +11,13 @@ response the Bonsai island consumes. Two consumers:
 - **Server** — `lib/dashboard/dashboard_http_*.ml` serialize via
   `<Module>.response_to_yojson` instead of hand-rolling
   `Yojson.Safe.t` trees.
-- **Client** — `dashboard_bonsai/src/*_types.ml` deserialize via
-  `<Module>.response_of_yojson`.
+- **Client** — `dashboard_bonsai/src/*_types.ml` restate the record by hand
+  and read it with `Yojson.Safe.Util`. The client does not link this
+  library, so it never calls a generated decoder.
 
-A schema change is a single `.ml` edit; both sides re-compile against the
-new type.
+Only the encoder is derived (`to_yojson`). A schema change is therefore two
+edits — this library, then the client mirror — and no compiler checks that
+the second one happened.
 
 ## Modules
 
@@ -48,9 +50,11 @@ Full ppx sharing is Phase 2.
 
 ## Guarantees we do **not** make
 
-- Field order in generated JSON — use `strict = false` so clients tolerate
-  extra fields and server can add without breaking the contract.
-- Variant tags — encoded as JSON strings (`"Live"` / `"Warn"` / `"Dead"`).
-  Renaming requires a paired server+client deploy.
+- Field order in generated JSON — the client reads each field by name with
+  `Yojson.Safe.Util.member`, so order is free and a field the mirror does not
+  know about is ignored rather than fatal.
+- Variant tags — `ppx_deriving_yojson` emits a one-element array
+  (`["Live"]` / `["Warn"]` / `["Dead"]`), not a bare string. Renaming a
+  constructor requires a paired server+client deploy.
 - Backward compatibility for removed fields — remove at end of a Bonsai
   migration phase only, never mid-release.

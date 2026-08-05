@@ -43,12 +43,19 @@ WHAT THIS TOOL CANNOT DECIDE
 Unreachable is not the same as removable, and the difference is a judgement no
 scan makes for you. Categories found so far, each from an actual candidate:
 
-  Spec bridges. `keeper_composite_observer` exports `all_tla_actions`,
-  `tla_action_of_string` and siblings backing
-  `specs/keeper-state-machine/KeeperCompositeLifecycle.tla`; `recovery` exports
-  `all_error_mode_tla_symbols`. Nothing in OCaml or `scripts/` reads them. If
-  they exist so a conformance test can enumerate the symbol set, deleting them
-  removes the seam rather than dead weight -- ask whoever owns the spec.
+  Spec bridges. `recovery` exports `all_error_mode_tla_symbols`; nothing in
+  OCaml or `scripts/` reads it. If such a list exists so a conformance test can
+  enumerate the symbol set, deleting it removes the seam rather than dead
+  weight -- ask whoever owns the spec.
+
+  This category was settled once, against it. `keeper_composite_observer`
+  exported `all_tla_actions`, `tla_action_of_string` and six `all_*` lists,
+  deleted in #26988: no conformance test enumerated any of them, and the spec
+  file they named no longer exists. What actually pins the spec's enums is the
+  equality-type re-export (`type decision_stage = Keeper_registry.decision_stage
+  = ...`), which fails the build when a constructor is added upstream. A literal
+  list cannot do that -- it goes stale silently. Look for the re-export before
+  concluding a list is the seam.
 
   Alternative entry points onto a live path. `Audit_log` exported six wrappers
   over `log_action` and a second route into `Dated_jsonl.prune`. "Nothing calls

@@ -7,11 +7,9 @@
 
 (** {1 Environment-variable parsing} *)
 
-(** [true] iff the env var is set to ["1" | "true" | "yes" | "y"]
-    (case/whitespace insensitive). Default [false]. *)
-
 val bool_default_true_of_env : string -> bool
-(** Inverse default: [false] only when set to ["0" | "false" | "no" | "n"]. *)
+(** [false] only when the env var is set to ["0" | "false" | "no" | "n"]
+    (case/whitespace insensitive); [true] otherwise, including when unset. *)
 
 val int_of_env_default :
   string -> default:int -> min_v:int -> max_v:int -> int
@@ -23,7 +21,6 @@ val float_of_env_default :
 
 (** {1 Dashboard-tunable limits} *)
 
-
 val operator_snapshot_recent_completed_limit : unit -> int
 
 (** {1 Tag/detail parsing} *)
@@ -32,9 +29,6 @@ val bool_of_tag_value : string -> bool
 (** Truthy tag value: ["1" | "true" | "yes" | "y" | "on"], case-insensitive. *)
 
 (** {1 Numeric helpers} *)
-
-(** Nearest-rank percentile over a non-empty sorted copy of [values].
-    Returns [None] for the empty list. *)
 
 val safe_age_seconds_opt :
   now_ts:float -> event_ts:float -> int option
@@ -61,8 +55,6 @@ val json_string_field_opt : string -> Yojson.Safe.t -> string option
 
 val json_assoc_field : string -> Yojson.Safe.t -> Yojson.Safe.t
 (** Extract a record field; returns [`Assoc \[\]] on missing/wrong-type. *)
-
-(** Like {!json_assoc_field} but [None] when missing/wrong-type. *)
 
 (** {1 List helpers} *)
 

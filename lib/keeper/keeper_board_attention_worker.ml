@@ -1709,6 +1709,14 @@ let drain_available
     ~execute
 ;;
 
+let drain_outcome_to_string = function
+  | Drained -> "drained"
+  | Retry_later { reason = Exact_claim_contended; _ } ->
+    "retry_exact_claim_contended"
+  | Retry_later { reason = Selected_generation_changed; _ } ->
+    "retry_selected_generation_changed"
+;;
+
 let run
       ~sw
       ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
@@ -1728,6 +1736,10 @@ let run
          with_process_recovery_claim ~base_path ~keeper_name
          @@ fun owns_process_recovery ->
          let worker_epoch = Partition.Worker_epoch.generate () in
+         Log.Keeper.info
+           "board_attention_worker_start keeper=%s generation=%s"
+           keeper_name
+           (Partition.Worker_epoch.to_string worker_epoch);
          let fail stage detail =
            observe_error ~base_path ~keeper_name detail;
            Error { stage; detail }
@@ -1784,6 +1796,10 @@ let run
                  ~execute
              with
              | Ok outcome ->
+               Log.Keeper.info
+                 "board_attention_worker_drain keeper=%s outcome=%s"
+                 keeper_name
+                 (drain_outcome_to_string outcome);
                ignore
                  (apply_drain_rearm contention_rearms outcome
                   : rearm_schedule option);

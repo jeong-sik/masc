@@ -263,18 +263,59 @@ let measure_message_bytes (message : Agent_sdk.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
+module Message_identity = struct
+  type t = Agent_sdk.Types.message
+
+  let equal left right = left == right
+
+  let mix accumulator value = ((accumulator * 65599) lxor value) land max_int
+
+  (* A constant-work string hint keeps the hash independent of tool-result body
+     size. Equality remains physical, so collisions only share a bucket. *)
+  let string_hint value =
+    let length = String.length value in
+    if length = 0
+    then 0
+    else
+      let sample index = Char.code (String.unsafe_get value index) in
+      mix
+        (mix (mix (mix length (sample 0)) (sample (length / 3)))
+           (sample ((2 * length) / 3)))
+        (sample (length - 1))
+  ;;
+
+  let optional_string_hint = function
+    | None -> 0
+    | Some value -> string_hint value
+  ;;
+
+  let role_hint = function
+    | Agent_sdk.Types.System -> 1
+    | Agent_sdk.Types.User -> 2
+    | Agent_sdk.Types.Assistant -> 3
+    | Agent_sdk.Types.Tool -> 4
+  ;;
+
+  let hash (message : t) =
+    mix
+      (mix (role_hint message.role) (optional_string_hint message.name))
+      (optional_string_hint message.tool_call_id)
+  ;;
+end
+
+module Message_measurement_cache = Hashtbl.Make (Message_identity)
+
 let memoize_message_measurement measure =
-  (* The projection is small (normally bounded by the tail-window atoms), and
-     physical comparison is constant-time. A polymorphic hash table would
-     still hash the contents of large strings inside each message, recreating
-     the very scan this cache is meant to eliminate. *)
-  let cache = ref [] in
+  (* A polymorphic hash would scan large strings inside the message. This
+     table hashes only constant-size identity hints, then confirms hits with
+     physical equality. *)
+  let cache = Message_measurement_cache.create 128 in
   fun message ->
-    match List.find_opt (fun (cached, _) -> cached == message) !cache with
-    | Some (_, bytes) -> bytes
+    match Message_measurement_cache.find_opt cache message with
+    | Some bytes -> bytes
     | None ->
       let bytes = measure message in
-      cache := (message, bytes) :: !cache;
+      Message_measurement_cache.add cache message bytes;
       bytes
 ;;
 

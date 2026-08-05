@@ -3,14 +3,14 @@
 open Masc
 
 (* The [done] transition runs the configured-LLM completion review (#24332),
-   which renders the [verification.anti_rationalization] registry prompt. This
+   which renders the [verification] registry prompt. This
    executable exercises the real tool-dispatch path, so it pins prompt
    resolution to the repo's own prompt files — the same idiom
    test_tool_task_coverage uses so the prompt resolves whether run under dune
    (DUNE_SOURCEROOT) or as a bare executable. *)
 let has_prompt_root path =
   Sys.file_exists
-    (Filename.concat path "config/prompts/verification.anti_rationalization.md")
+    (Filename.concat path "config/prompts/verification.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with

@@ -10,7 +10,7 @@ afterEach(() => {
 
 function prompt(overrides: Partial<DashboardPromptItem>): DashboardPromptItem {
   return {
-    key: 'keeper.world',
+    key: 'keeper.system',
     category: 'keeper',
     description: 'Keeper prompt',
     current: '',
@@ -33,22 +33,26 @@ describe('buildKeeperPromptAssemblyReport', () => {
   it('maps keeper prompt sources into assembly rows', () => {
     const report = buildKeeperPromptAssemblyReport([
       prompt({
-        key: 'keeper.world',
+        key: 'keeper.system',
         effective: 'world override',
         override_value: 'world override',
         source: 'override',
         has_override: true,
-        file_path: '/tmp/.masc/config/prompts/keeper.world.md',
-      }),
-      prompt({
-        key: 'keeper.capabilities',
-        effective: 'tool policy',
-        file_path: '/tmp/.masc/config/prompts/keeper.capabilities.md',
+        file_path: '/tmp/.masc/config/prompts/keeper.system.md',
       }),
     ])
 
-    expect(report.stats.totalRows).toBeGreaterThan(10)
-    expect(report.stats.overrideRows).toBeGreaterThanOrEqual(2)
+    // Every prompt the server listed reaches a row, plus the two computed
+    // rows the world stage contributes. Pinned by what the input supplies
+    // rather than a threshold: the previous `> 10` encoded the stage specs'
+    // former key list, so folding keeper.world/capabilities/constitution into
+    // keeper.system (#26823) failed it without any behavior changing.
+    expect(report.rows.filter(row => row.promptKey.startsWith('keeper.')).length)
+      .toBeGreaterThanOrEqual(3)
+    expect(report.rows.some(row => row.promptKey === '(computed:world_observation)')).toBe(true)
+    // One stage key is supplied and overridden; the other is deliberately
+    // absent so the missing-row path below stays exercised.
+    expect(report.stats.overrideRows).toBeGreaterThanOrEqual(1)
     expect(report.stages.map(stage => stage.title)).toEqual(
       expect.arrayContaining(['Prompt sources', 'System rules', 'World message']),
     )
@@ -59,22 +63,24 @@ describe('buildKeeperPromptAssemblyReport', () => {
       'turn-soft-context',
       'oas-hook',
     ])
-    expect(report.stages.find(stage => stage.id === 'unified-world')?.promptCount).toBe(1)
+    // The world message carries no prompt asset: keeper.turn_intent was its
+    // only one and #26823 removed it. Its two rows are computed observations.
+    expect(report.stages.find(stage => stage.id === 'unified-world')?.promptCount).toBe(0)
     expect(report.rows.find(row => row.promptKey === '(computed:world_observation)')?.source).toBe('computed')
     expect(report.rows.find(row => row.promptKey === '(computed:scheduled_automation)')?.source).toBe('computed')
     expect(report.activePromptRoots).toEqual(['/tmp/.masc/config/prompts'])
-    expect(report.rows.find(row => row.promptKey === 'keeper.world')?.source).toBe('override')
-    expect(report.rows.find(row => row.promptKey === 'keeper.recovery_block')?.missing).toBe(true)
+    expect(report.rows.find(row => row.promptKey === 'keeper.system')?.source).toBe('override')
+    expect(report.rows.find(row => row.promptKey === 'keeper.memory_os_recall.context')?.missing).toBe(true)
   })
 
   it('detects stale argument shapes in effective prompt text', () => {
     const report = buildKeeperPromptAssemblyReport([
       prompt({
-        key: 'keeper.tool_hints',
+        key: 'keeper.system',
         effective: 'Call keeper_task_done { notes: "evidence" }',
       }),
       prompt({
-        key: 'keeper.capabilities',
+        key: 'keeper.memory_os_recall.context',
         effective: 'Use keeper_pr_create and repos/masc/lib/foo.ml for PR work',
       }),
     ])
@@ -92,7 +98,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
   it('labels host-storage prompt residue without legacy-era wording', () => {
     const report = buildKeeperPromptAssemblyReport([
       prompt({
-        key: 'keeper.world',
+        key: 'keeper.system',
         effective: 'Do not pass .masc/playground/name/repos/foo as a tool path.',
       }),
     ])
@@ -107,17 +113,17 @@ describe('buildKeeperPromptAssemblyReport', () => {
       <${KeeperPromptAssemblyPanel}
         prompts=${[
           prompt({
-            key: 'keeper.world',
+            key: 'keeper.system',
             effective: 'world override',
             override_value: 'world override',
             source: 'override',
             has_override: true,
-            file_path: '/tmp/.masc/config/prompts/keeper.world.md',
+            file_path: '/tmp/.masc/config/prompts/keeper.system.md',
           }),
           prompt({
-            key: 'keeper.capabilities',
+            key: 'keeper.memory_os_recall.context',
             effective: 'tool policy',
-            file_path: '/tmp/.masc/config/prompts/keeper.capabilities.md',
+            file_path: '/tmp/.masc/config/prompts/keeper.memory_os_recall.context.md',
           }),
         ]}
       />
@@ -135,14 +141,14 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(container.textContent).toContain('Prompt roots')
     expect(container.querySelector('[data-prompt-minimap]')).not.toBeNull()
     expect(container.querySelector('[data-prompt-source-roots]')?.textContent).toContain('/tmp/.masc/config/prompts')
-    expect(container.querySelectorAll('[data-prompt-document-row]').length).toBeGreaterThan(10)
+    expect(container.querySelectorAll('[data-prompt-document-row]').length).toBeGreaterThan(0)
     expect(defaultRoute?.textContent).toContain('system')
     expect(defaultRoute?.textContent).toContain('user')
     expect(defaultRoute?.textContent).toContain('final')
     expect(defaultRoute?.textContent).toContain('Final context')
     expect(defaultRoute?.textContent).toContain('scheduler signals')
-    expect(defaultRoute?.textContent).toContain('keeper.world')
-    expect(defaultRoute?.textContent).toContain('/tmp/.masc/config/prompts/keeper.world.md')
+    expect(defaultRoute?.textContent).toContain('keeper.system')
+    expect(defaultRoute?.textContent).toContain('/tmp/.masc/config/prompts/keeper.system.md')
     expect(defaultRoute?.textContent).toContain('world override')
     expect(defaultRoute?.textContent).toContain('tool policy')
     expect(defaultRoute?.textContent).toContain('fingerprint')
@@ -187,7 +193,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(rawFileList).not.toBeNull()
     expect(rawFileList?.hasAttribute('open')).toBe(false)
     expect(rawFileList?.querySelector('summary')?.textContent).toContain('Raw prompt files')
-    expect(evidence?.textContent).toContain('keeper.world')
+    expect(evidence?.textContent).toContain('keeper.system')
     expect(evidence?.textContent).toContain('(computed:scheduled_automation)')
     expect(evidence?.textContent).toContain('fingerprint')
 
@@ -206,7 +212,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
       <${KeeperPromptAssemblyPanel}
         prompts=${[
           prompt({
-            key: 'keeper.world',
+            key: 'keeper.system',
             effective: 'Do not pass .masc/playground/name/repos/foo as a tool path.',
           }),
         ]}

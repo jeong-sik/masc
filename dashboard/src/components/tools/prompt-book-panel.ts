@@ -27,11 +27,10 @@ function basename(path: string): string {
 }
 
 // Family classification (client curation). The server exposes category/file_path
-// but not a "does this feed the keeper turn" flag — keeper.librarian.system.md is
-// category=keeper yet never assembles into a turn — so the feedsTurn split is
-// authored here. Ordered specific→generic: the first matching rule wins, so
-// keeper.turn_intent / librarian / judge are classified before the generic
-// keeper.* family. An unmatched prompt falls to an explicit Other bucket rather
+// but not a "does this feed the keeper turn" flag — the librarian and judge
+// prompts are category=keeper yet never assemble into a turn — so the feedsTurn
+// split is authored here. Ordered specific→generic: the first matching rule
+// wins, so librarian / judge are classified before the generic keeper.* family. An unmatched prompt falls to an explicit Other bucket rather
 // than being silently folded into a feeding family.
 interface FamilyDef {
   id: string
@@ -43,14 +42,6 @@ interface FamilyDef {
 }
 
 const FAMILY_DEFS: readonly FamilyDef[] = [
-  {
-    id: 'turn_intent',
-    family: 'Turn Intent · 조각',
-    feedsTurn: true,
-    order: 2,
-    note: 'unified.system 렌더 뒤 Turn Intent 가이드로 이어붙는 조각 (큐레이션)',
-    match: h => h.includes('keeper.turn_intent'),
-  },
   {
     id: 'librarian',
     family: 'Librarian · 메모리',

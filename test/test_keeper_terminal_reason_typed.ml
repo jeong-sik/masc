@@ -876,6 +876,7 @@ let () =
       }
     in
     { response_text = "completed"
+    ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
     ; model_used = "test-model"
     ; prompt_metrics
     ; ctx_composition

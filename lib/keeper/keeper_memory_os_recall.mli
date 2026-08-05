@@ -18,8 +18,5 @@ val render_if_enabled
   :  keepers_dir:string
   -> keeper_id:string
   -> now:float
-  -> trace_id:string
-  -> turn:int
-  -> masc_root:string
   -> unit
   -> string option

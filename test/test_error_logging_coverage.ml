@@ -115,16 +115,19 @@ let test_tool_task_done_nonexistent_logs () =
   check bool "stderr contains [Task] prefix for done on missing task"
     true (str_contains output "[Task]")
 
-(** handle_cancel with a task_id that does not exist → "[task]" eprintf. *)
+(** Cancelling a task_id that does not exist → "[Task]" eprintf. Driven through
+    [handle_transition], the entry point production actually dispatches; the
+    dedicated [handle_cancel_task] this used to call had no dispatch at all. *)
 let test_tool_task_cancel_nonexistent_logs () =
   with_test_workspace @@ fun config ->
   let ctx : Tool_task.context = { config; agent_name = "test-agent"; sw = None } in
   let args = `Assoc [
     ("task_id", `String "task-phantom-abc");
+    ("action", `String "cancel");
     ("reason", `String "test cancel");
   ] in
   let output = capture_stderr (fun () ->
-    ignore (Tool_task.handle_cancel_task ~tool_name:"test_tool" ~start_time:0.0 ctx args)
+    ignore (Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx args)
   ) in
   check bool "stderr contains [Task] prefix for cancel on missing task"
     true (str_contains output "[Task]")

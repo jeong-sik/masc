@@ -43,9 +43,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     prompt: {
       instructions: 'Prefer direct remediation',
       system_prompt_blocks: {
-        constitution: { key: 'keeper.constitution', source: 'file', text: 'constitution text' },
-        world: { key: 'keeper.world', source: 'override', text: 'world text' },
-        capabilities: { key: 'keeper.capabilities', source: 'file', text: 'capabilities text' },
+        system: { key: 'keeper.system', source: 'file', text: 'system text' },
       },
       effective_system_prompt: 'full prompt',
       assembled_system_prompt: 'assembled prompt',
@@ -1448,7 +1446,7 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('조립 추적')
     expect(container.querySelector('.kasm')).not.toBeNull()
     // 3 base blocks + instructions + goals = 5 segments
-    expect(container.querySelectorAll('.kasm-seg').length).toBe(5)
+    expect(container.querySelectorAll('.kasm-seg').length).toBe(3)
     // only prompt.instructions is overridden → exactly one win badge
     const winBadges = container.querySelectorAll('.kasm-seg-win')
     expect(winBadges.length).toBe(1)
@@ -1536,7 +1534,7 @@ describe('buildKcfAssemblySegments', () => {
       sources: { ...base.sources, override_fields: ['prompt.instructions'] },
     })
     const segs = buildKcfAssemblySegments(c)
-    expect(segs.map((s) => s.src)).toEqual(['base', 'base', 'base', 'override', 'goals'])
+    expect(segs.map((s) => s.src)).toEqual(['base', 'override', 'goals'])
     const instrSeg = segs.find((s) => s.field.includes('instructions'))
     expect(instrSeg?.win).toBe(true)
     expect(instrSeg?.src).toBe('override')
@@ -1549,7 +1547,7 @@ describe('buildKcfAssemblySegments', () => {
       workspace: { ...base.workspace, active_goals: [] },
     })
     const segs = buildKcfAssemblySegments(c)
-    expect(segs.map((s) => s.field)).toEqual(['헌법', '세계관', '능력'])
+    expect(segs.map((s) => s.field)).toEqual(['공유 시스템'])
     expect(segs.every((s) => s.src === 'base')).toBe(true)
   })
 })

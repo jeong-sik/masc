@@ -68,7 +68,6 @@ val observe_task_transition_fn : (Workspace_utils_backend_setup.config ->
             transition:Masc_domain.task_action ->
             details:Yojson.Safe.t -> unit)
            Atomic.t
-val cleanup_board_artifacts_fn : (unit -> int) Atomic.t
 val on_task_mutation_fn : (unit -> unit) Atomic.t
 
 val operator_pending_confirm_trace_id_fn : (string -> string) Atomic.t

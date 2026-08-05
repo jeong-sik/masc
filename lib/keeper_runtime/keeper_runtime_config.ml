@@ -180,6 +180,40 @@ let validate_stream_idle_timeout doc =
       | Keeper_toml_loader.Toml_local_time _) ->
     Error (Printf.sprintf "%s: expected a numeric TOML value" key)
 
+(* Bootstrap labels its failure counter from this. It used to recover the label
+   by re-reading the rendered message for a "read " or "parse " prefix, which
+   left the validate failure — and any future one — incrementing nothing, while
+   the counter's help text advertised those two as the whole domain. *)
+type load_failure_kind =
+  | Read
+  | Parse
+  | Validate
+
+let load_failure_kind_label = function
+  | Read -> "read_error"
+  | Parse -> "parse_error"
+  | Validate -> "validate_error"
+;;
+
+let all_load_failure_kinds = [ Read; Parse; Validate ]
+
+let load_failure_kind_labels = List.map load_failure_kind_label all_load_failure_kinds
+
+type load_failure =
+  { kind : load_failure_kind
+  ; message : string
+  }
+
+let load_failure_to_string { kind; message } =
+  let verb =
+    match kind with
+    | Read -> "read"
+    | Parse -> "parse"
+    | Validate -> "validate"
+  in
+  Printf.sprintf "%s %s" verb message
+;;
+
 let load_and_apply ~base_path =
   let path = toml_path ~base_path in
   if not (Sys.file_exists path) then
@@ -187,14 +221,15 @@ let load_and_apply ~base_path =
   else
     match read_file path with
     | Error msg ->
-      Error (Printf.sprintf "read %s: %s" path msg)
+      Error { kind = Read; message = Printf.sprintf "%s: %s" path msg }
     | Ok content ->
       match Keeper_toml_loader.parse_toml content with
       | Error msg ->
-        Error (Printf.sprintf "parse %s: %s" path msg)
+        Error { kind = Parse; message = Printf.sprintf "%s: %s" path msg }
       | Ok doc ->
         (match validate_stream_idle_timeout doc with
-         | Error msg -> Error (Printf.sprintf "validate %s: %s" path msg)
+         | Error msg ->
+           Error { kind = Validate; message = Printf.sprintf "%s: %s" path msg }
          | Ok () ->
            let count =
              List.fold_left

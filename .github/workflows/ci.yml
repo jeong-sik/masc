@@ -427,6 +427,15 @@ jobs:
       - name: Run deploy preflight safety contract
         run: bash test/test_deploy_preflight.sh
 
+      # Deleting a prompt asset is a server-side change that leaves the
+      # dashboard's key strings syntactically valid, so a panel keeps rendering
+      # a block that silently resolves to empty. #26823 folded keeper.world,
+      # keeper.capabilities and keeper.constitution into keeper.system and the
+      # config panel kept decoding all three. Unconditional: the drift appears
+      # when either config/prompts or dashboard/src moves.
+      - name: Check dashboard prompt keys
+        run: bash scripts/audit-dashboard-prompt-keys.sh
+
       - name: Check doc truth
         if: needs.changes.outputs.doc_truth == 'true'
         run: |
@@ -1109,7 +1118,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          prompt_targets="@test/runtest-test_keeper_system_prompt_bytes @test/runtest-test_keeper_prompt_metrics @test/runtest-test_keeper_prompt_external @test/runtest-test_keeper_surface_presence_prompt"
+          prompt_targets="@test/runtest-test_keeper_system_prompt_bytes @test/runtest-test_keeper_prompt_metrics @test/runtest-test_keeper_surface_presence_prompt"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${prompt_targets}"
 
       - name: Run tool blob retention suite

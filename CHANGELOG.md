@@ -1096,7 +1096,7 @@ Multi-repository architecture Phase 1. Introduces explicit repository registry a
 
 ### Added
 
-- `Repo_store` module for repository CRUD, TOML persistence, git discovery, and backward-compatible default repo injection (#12401).
+- `Repo_store` module for repository CRUD, TOML persistence, and git discovery (#12401).
 - `Keeper_repo_mapping` module for keeper-to-repository access control with wildcard support and credential isolation (#12401).
 - `Credential_store` module for credential CRUD and type-safe storage (#12401).
 - `Repo_git` and `Repo_sync` modules for branch listing and sync scheduling (#12401).

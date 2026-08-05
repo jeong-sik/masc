@@ -56,7 +56,7 @@ const promptApiMock = vi.hoisted(() => ({
   fetchDashboardPrompts: vi.fn(async () => ({
     prompts: [
       {
-        key: 'keeper.world',
+        key: 'keeper.system',
         category: 'keeper',
         description: 'Shared world prompt',
         current: 'Hello {{keeper}} in {{namespace}}',
@@ -64,7 +64,7 @@ const promptApiMock = vi.hoisted(() => ({
         effective: 'Hello {{keeper}} in {{namespace}}',
         file_value: 'Hello {{keeper}} in {{namespace}}',
         override_value: null,
-        file_path: 'fixture/config/prompts/keeper.world.md',
+        file_path: 'fixture/config/prompts/keeper.system.md',
         file_exists: true,
         source: 'file' as const,
         has_override: false,

@@ -109,9 +109,8 @@ let prune_keeper_scoped_flat_stores ~days ~masc_root =
    startup pass and the 24h periodic pass. SSOT: replaces the two inline
    sums that had already drifted apart — the startup pass lacked
    tool_calls/transition-audit while the periodic pass lacked
-   resilience_audit. recall_injections keeps its typed ledger pruner and
-   data/tool-metrics stays startup-only (it lives under base_path, not the
-   masc root); both remain at the callers.
+   resilience_audit. data/tool-metrics stays startup-only (it lives under
+   base_path, not the masc root), so it remains at the caller.
    oas-events joined 2026-07-31: 434 MB accumulated with no retention.
    costs and audit-approvals joined 2026-08-05: both write the same
    [YYYY-MM/DD.jsonl] shape through [Dated_jsonl.create]
@@ -170,25 +169,11 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
          Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
        else 0
      in
-     let prune_recall_injections () =
-       match
-         Keeper_recall_injection_ledger.prune_older_than
-           ~masc_root:masc
-           ~retention_days:days
-       with
-       | Ok count -> count
-       | Error label ->
-         Log.Misc.warn
-           "startup prune: recall_injections failed label=%s"
-           (Keeper_recall_injection_ledger.string_of_prune_error label);
-         0
-     in
      let tool_metrics_dir =
        Filename.concat (Mcp_server.workspace_config state).base_path "data/tool-metrics"
      in
      let total =
        prune_dir tool_metrics_dir
-       + prune_recall_injections ()
        + prune_shared_jsonl_stores ~prune_dir ~days ~masc_root:masc
      in
      if total > 0 then

@@ -313,6 +313,7 @@ let adapter_loop_with_transport
        content:string -> blocks:Yojson.Safe.t list -> (unit, error) result)
     ?base_url
     ?(on_send_result = fun _ -> ()) () =
+  let external_effect_completed = ref false in
   let rec loop ~acc_text ~acc_blocks ~run_id_opt =
     match Keeper_chat_events.subscribe events with
     | Text_delta text ->
@@ -320,16 +321,23 @@ let adapter_loop_with_transport
     | Text_message_end ->
         loop ~acc_text ~acc_blocks ~run_id_opt
     | Run_finished { run_id = _ } ->
-        let blocks =
-          final_message_blocks ~content:acc_text
-            ~event_blocks:(List.rev acc_blocks)
-        in
-        if String.length acc_text > 0 || List.length blocks > 0
-        then on_send_result (send_blocks ~content:acc_text ~blocks)
-        else
-          on_send_result
-            (Error (Other "Slack terminal reply contained no text or blocks"));
+        if !external_effect_completed
+        then on_send_result (Ok ())
+        else begin
+          let blocks =
+            final_message_blocks ~content:acc_text
+              ~event_blocks:(List.rev acc_blocks)
+          in
+          if String.length acc_text > 0 || List.length blocks > 0
+          then on_send_result (send_blocks ~content:acc_text ~blocks)
+          else
+            on_send_result
+              (Error (Other "Slack terminal reply contained no text or blocks"))
+        end;
         ()
+    | External_effect_completed ->
+        external_effect_completed := true;
+        loop ~acc_text ~acc_blocks ~run_id_opt
     | Event_error { message } ->
         on_send_result (send_plain ~content:("Keeper error: " ^ message));
         ()

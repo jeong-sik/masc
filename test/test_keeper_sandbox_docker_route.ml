@@ -152,10 +152,22 @@ let write_repositories_toml ~base_path ~repo_name ~url =
   write_file
     (Filename.concat config_dir "repositories.toml")
     (Printf.sprintf
-       "[repository.%s]\nname = \"%s\"\nurl = \"%s\"\n"
+       "[repository.%s]\n\
+        name = \"%s\"\n\
+        url = \"%s\"\n\
+        local_path = \"repos/%s\"\n\
+        aliases = []\n\
+        default_branch = \"main\"\n\
+        keepers = []\n\
+        status = \"Active\"\n\
+        auto_sync = false\n\
+        sync_interval = 300\n\
+        created_at = 0\n\
+        updated_at = 0\n"
        repo_name
        repo_name
-       (String.escaped url))
+       (String.escaped url)
+       repo_name)
 
 let setup_ready_repo_with_origin ~config ~repo_name ~repo =
   let base_path = config.Workspace.base_path in
@@ -235,8 +247,14 @@ let setup ~sandbox f =
         name = \"masc\"\n\
         url = \"%s\"\n\
         local_path = \"repos/masc\"\n\
+        aliases = []\n\
+        default_branch = \"main\"\n\
         status = \"Active\"\n\
-        keepers = [\"minjae\"]\n"
+        keepers = [\"minjae\"]\n\
+        auto_sync = false\n\
+        sync_interval = 300\n\
+        created_at = 0\n\
+        updated_at = 0\n"
        playground);
   f ~config ~meta ~playground
 
@@ -261,8 +279,14 @@ let setup_with_sandbox ~sandbox f =
         name = \"masc\"\n\
         url = \"%s\"\n\
         local_path = \"repos/masc\"\n\
+        aliases = []\n\
+        default_branch = \"main\"\n\
         status = \"Active\"\n\
-        keepers = [\"minjae\"]\n"
+        keepers = [\"minjae\"]\n\
+        auto_sync = false\n\
+        sync_interval = 300\n\
+        created_at = 0\n\
+        updated_at = 0\n"
        playground);
   f ~config ~meta ~playground
 

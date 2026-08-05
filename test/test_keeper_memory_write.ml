@@ -324,6 +324,36 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
       (int_field "memory_facts_total" status))
 ;;
 
+(* The source parser sits behind Safe_ops.json_string, which returns its
+   default for both an absent key and a key holding a non-string. Before the
+   fix {"source": ["memory"]} reached Memory while {"source": "memry"} was
+   refused, so a type error was treated more permissively than a value error.
+   These pin the parser itself; the handler now feeds it the member directly. *)
+let test_source_parser_accepts_every_supported_value () =
+  List.iter
+    (fun s ->
+      match Runtime.memory_search_source_of_string_opt s with
+      | Some _ -> ()
+      | None -> Alcotest.failf "supported source %S rejected" s)
+    Runtime.valid_memory_search_source_strings
+;;
+
+let test_source_parser_rejects_unknown_value () =
+  Alcotest.(check bool)
+    "misspelled source is not a source"
+    true
+    (Runtime.memory_search_source_of_string_opt "memry" = None)
+;;
+
+let test_source_parser_rejects_json_rendering_of_a_non_string () =
+  Alcotest.(check bool)
+    "a rendered JSON array is not a source"
+    true
+    (Runtime.memory_search_source_of_string_opt
+       (Yojson.Safe.to_string (`List [ `String "memory" ]))
+     = None)
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
@@ -347,6 +377,18 @@ let () =
             "search filters exact substring without ranking"
             `Quick
             test_search_filters_exact_substring_without_ranking
+        ; Alcotest.test_case
+            "source parser accepts every supported value"
+            `Quick
+            test_source_parser_accepts_every_supported_value
+        ; Alcotest.test_case
+            "source parser rejects unknown value"
+            `Quick
+            test_source_parser_rejects_unknown_value
+        ; Alcotest.test_case
+            "source parser rejects a non-string rendering"
+            `Quick
+            test_source_parser_rejects_json_rendering_of_a_non_string
         ] )
     ]
 ;;

@@ -94,9 +94,6 @@ let action_of_string = function
 let parse_action s =
   String.trim s |> String.lowercase_ascii |> action_of_string
 
-type transition_outcome =
-  | Move_to of t
-  | Complete
 
 (* Every (phase, action) pair is stated. The catch-all this replaces absorbed
    22 of the 35 pairs, so adding a phase or an action compiled cleanly and the
@@ -111,24 +108,24 @@ let decide_transition ~phase ~(action : action) =
   in
   match phase, action with
   (* Executing: the only phase that can request completion. *)
-  | Executing, Request_complete -> Ok Complete
-  | Executing, Pause -> Ok (Move_to Paused)
-  | Executing, Block -> Ok (Move_to Blocked)
-  | Executing, Drop -> Ok (Move_to Dropped)
+  | Executing, Request_complete -> Ok Completed
+  | Executing, Pause -> Ok (Paused)
+  | Executing, Block -> Ok (Blocked)
+  | Executing, Drop -> Ok (Dropped)
   | Executing, (Resume | Unblock | Reopen) -> invalid
   (* Paused: resumes or drops; it is not blocked and not finished. *)
-  | Paused, Resume -> Ok (Move_to Executing)
-  | Paused, Drop -> Ok (Move_to Dropped)
+  | Paused, Resume -> Ok (Executing)
+  | Paused, Drop -> Ok (Dropped)
   | Paused, (Request_complete | Pause | Block | Unblock | Reopen) -> invalid
   (* Blocked: unblocks or drops. Completing while blocked would skip the
      impediment rather than resolve it. *)
-  | Blocked, Unblock -> Ok (Move_to Executing)
-  | Blocked, Drop -> Ok (Move_to Dropped)
+  | Blocked, Unblock -> Ok (Executing)
+  | Blocked, Drop -> Ok (Dropped)
   | Blocked, (Request_complete | Pause | Resume | Block | Reopen) -> invalid
   (* Completed and Dropped are terminal: only reopening leaves them. *)
-  | Completed, Reopen -> Ok (Move_to Executing)
-  | Completed, Drop -> Ok (Move_to Dropped)
+  | Completed, Reopen -> Ok (Executing)
+  | Completed, Drop -> Ok (Dropped)
   | Completed, (Request_complete | Pause | Resume | Block | Unblock) -> invalid
-  | Dropped, Reopen -> Ok (Move_to Executing)
+  | Dropped, Reopen -> Ok (Executing)
   | Dropped, (Request_complete | Pause | Resume | Block | Unblock | Drop) ->
     invalid

@@ -116,7 +116,7 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'source_prep',
     messageSlot: 'not sent',
     summary: 'MASC picks the active text from defaults, files, or saved edits.',
-    promptKeys: ['keeper.world', 'keeper.capabilities'],
+    promptKeys: ['keeper.system'],
   },
   {
     id: 'base-system',
@@ -126,12 +126,7 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'model_input',
     messageSlot: 'system',
     summary: 'Identity, rules, and safety boundaries.',
-    promptKeys: [
-      'keeper.constitution',
-      'keeper.world',
-      'keeper.capabilities',
-      'keeper.recovery_block',
-    ],
+    promptKeys: ['keeper.system'],
   },
   {
     id: 'unified-world',
@@ -141,7 +136,7 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'model_input',
     messageSlot: 'user',
     summary: 'Current task, workspace state, scheduler signals, and turn intent.',
-    promptKeys: ['keeper.turn_intent'],
+    promptKeys: [],
     computedRows: [
       { id: 'world-observation', promptKey: '(computed:world_observation)' },
       { id: 'scheduled-automation', promptKey: '(computed:scheduled_automation)' },
@@ -155,7 +150,7 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'model_input',
     messageSlot: 'context',
     summary: 'Recent continuity and memory hints.',
-    promptKeys: ['keeper.reply_guidelines'],
+    promptKeys: [],
   },
   {
     id: 'oas-hook',

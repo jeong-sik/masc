@@ -1382,18 +1382,12 @@ interface KeeperSupervisorDiagnostics {
 
 interface KeeperConfigPrompt {
   instructions: string
+  // The server emits exactly one shared block. keeper.constitution,
+  // keeper.world and keeper.capabilities were folded into keeper.system by
+  // #26823; decoding them produced three empty blocks and the panel rendered
+  // nothing for the shared prompt.
   system_prompt_blocks: {
-    constitution: {
-      key: string
-      source: string
-      text: string
-    }
-    world: {
-      key: string
-      source: string
-      text: string
-    }
-    capabilities: {
+    system: {
       key: string
       source: string
       text: string

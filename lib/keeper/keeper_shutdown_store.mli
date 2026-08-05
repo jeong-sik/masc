@@ -36,23 +36,8 @@ type corrupt_record =
   ; error : error
   }
 
-type retired_terminal_kind =
-  | Stale_paused_prune_completed of
-      { meta_version : int
-      ; last_updated : string
-      ; latched_reason : Keeper_latched_reason.t option
-      }
-
-type retired_terminal_record =
-  { keeper_name : string
-  ; operation_id : Keeper_shutdown_types.Operation_id.t
-  ; path : string
-  ; kind : retired_terminal_kind
-  }
-
 type inventory_entry =
   | Operation of Keeper_shutdown_types.t
-  | Retired_terminal of retired_terminal_record
   | Corrupt_record of corrupt_record
 
 val error_to_string : error -> string
@@ -64,10 +49,7 @@ val path :
   (string, error) result
 
 val to_json : Keeper_shutdown_types.t -> Yojson.Safe.t
-(** Decode the current schema and deterministically upgrade schema 6
-    supersession records, schema 5 blocked records, schema 4 lifecycle
-    records, and schema 3 shutdown records emitted by preceding deployments.
-    Unknown versions remain explicit decode failures. *)
+(** Decode the current schema. Any other version is an explicit decode failure. *)
 val of_json : Yojson.Safe.t -> (Keeper_shutdown_types.t, error) result
 
 val persist_new :
@@ -127,9 +109,7 @@ val list_for_keeper :
   keeper_name:string ->
   (Keeper_shutdown_types.t list, error) result
 
-(** Enumerate every owner-addressable operation independently. A verified
-    terminal record from a retired wire contract remains typed as
-    [Retired_terminal] and never re-enters the current operation model. A corrupt
+(** Enumerate every owner-addressable operation independently. A corrupt
     payload remains associated with the Keeper and operation identities from
     its validated directory/file path, so boot can fence only that Keeper and
     continue recovering unrelated lanes. Store entries whose path does not

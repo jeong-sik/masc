@@ -182,120 +182,12 @@ let dashboard_purge_cleanup requested_name
   }
 ;;
 
-let replace_assoc_field key value fields =
-  (key, value) :: List.remove_assoc key fields
-;;
-
-let shutdown_schema3_fixture (operation : Shutdown_types.t) =
-  let lane_id =
-    match operation.lane_ownership with
-    | Shutdown_types.Registered_lane lane_id -> Lane.Id.to_string lane_id
-    | Shutdown_types.Dormant_meta ->
-      fail "schema 3 fixture cannot encode dormant lane ownership"
-  in
-  let meta_disposition =
-    match operation.cleanup_intent.reason with
-    | Shutdown_types.Operator_stop_retain_meta -> "retain_operator_pause"
-    | Shutdown_types.Operator_stop_remove_meta -> "remove_meta"
-    | Shutdown_types.Dead_tombstone_cleanup -> "retain_dead_tombstone"
-    | Shutdown_types.Dashboard_keeper_purge _ ->
-      fail "schema 3 fixture cannot encode dashboard Keeper purge"
-  in
-  match Shutdown_store.to_json operation with
-  | `Assoc fields ->
-    let phase =
-      match List.assoc_opt "phase" fields with
-      | Some (`Assoc phase_fields) ->
-        let phase_fields =
-          match List.assoc_opt "evidence" phase_fields with
-          | Some (`Assoc evidence_fields) ->
-            replace_assoc_field
-              "evidence"
-              (`Assoc (List.remove_assoc "accumulator_dropped" evidence_fields))
-              phase_fields
-          | Some _
-          | None -> phase_fields
-        in
-        `Assoc phase_fields
-      | Some phase -> phase
-      | None -> fail "current shutdown JSON omitted phase"
-    in
-    `Assoc
-      (fields
-       |> List.remove_assoc "lane_ownership"
-       |> replace_assoc_field "schema_version" (`Int 3)
-       |> replace_assoc_field "lane_id" (`String lane_id)
-       |> replace_assoc_field
-            "cleanup_intent"
-            (`Assoc
-              [ "meta_disposition", `String meta_disposition
-              ; "remove_session", `Bool operation.cleanup_intent.remove_session
-              ])
-       |> replace_assoc_field "phase" phase)
-  | _ -> fail "shutdown JSON codec did not return an object"
-;;
-
-let shutdown_schema4_fixture (operation : Shutdown_types.t) =
-  match Shutdown_store.to_json operation with
-  | `Assoc fields ->
-    `Assoc (replace_assoc_field "schema_version" (`Int 4) fields)
-  | _ -> fail "shutdown JSON codec did not return an object"
-;;
-
-let shutdown_schema5_fixture (operation : Shutdown_types.t) =
-  match Shutdown_store.to_json operation with
-  | `Assoc fields ->
-    `Assoc (replace_assoc_field "schema_version" (`Int 5) fields)
-  | _ -> fail "shutdown JSON codec did not return an object"
-;;
-
-let shutdown_schema6_fixture (operation : Shutdown_types.t) =
-  match Shutdown_store.to_json operation with
-  | `Assoc fields ->
-    `Assoc (replace_assoc_field "schema_version" (`Int 6) fields)
-  | _ -> fail "shutdown JSON codec did not return an object"
-;;
-
-let retired_stale_paused_schema5_fixture (operation : Shutdown_types.t) =
+let unsupported_shutdown_schema_fixture (operation : Shutdown_types.t) =
   match Shutdown_store.to_json operation with
   | `Assoc fields ->
     `Assoc
-      (fields
-       |> replace_assoc_field "schema_version" (`Int 5)
-       |> replace_assoc_field
-            "cleanup_intent"
-            (`Assoc
-              [ ( "reason"
-                , `Assoc
-                    [ "kind", `String "stale_paused_prune"
-                    ; "meta_version", `Int 21383
-                    ; "last_updated", `String "2026-07-11T09:04:05Z"
-                    ; "latched_reason", `Null
-                    ] )
-              ; "remove_session", `Bool false
-              ])
-       |> replace_assoc_field
-            "phase"
-            (`Assoc
-              [ "kind", `String "finalized"
-              ; ( "evidence"
-                , `Assoc
-                    [ ( "cleanup"
-                      , `Assoc
-                          [ "settled_task_ids", `List []
-                          ; "pending_confirms_removed", `Int 0
-                          ] )
-                    ; "meta_removed", `Bool true
-                    ; "session_removed", `Bool false
-                    ; "registry_unregistered", `Bool false
-                    ; "accumulator_dropped", `Bool true
-                    ; ( "completion"
-                      , `Assoc
-                          [ "kind", `String "delivered"
-                          ; "action", `String "paused_meta_pruned"
-                          ] )
-                    ] )
-              ]))
+      (("schema_version", `Int (Shutdown_types.schema_version - 1))
+       :: List.remove_assoc "schema_version" fields)
   | _ -> fail "shutdown JSON codec did not return an object"
 ;;
 
@@ -976,79 +868,14 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
              (Shutdown_types.Finalized_completion_mismatch _)) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "store accepted completion outside dead-tombstone intent");
-      let legacy_finalized =
-        { operation with
-          phase =
-            Shutdown_types.Finalized
-              { cleanup =
-                  { settled_task_ids = []; pending_confirms_removed = 0 }
-              ; meta_removed = false
-              ; session_removed = false
-              ; registry_unregistered = true
-              ; accumulator_dropped = true
-              ; completion = Shutdown_types.Completion_not_requested
-              }
-        }
-      in
-      let migrated =
-        match
-          legacy_finalized
-          |> shutdown_schema3_fixture
-          |> Shutdown_store.of_json
-        with
-        | Ok operation -> operation
-        | Error error -> fail (Shutdown_store.error_to_string error)
-      in
-      check int
-        "schema 3 shutdown record migrates to current schema"
-        Shutdown_types.schema_version
-        migrated.schema_version;
-      (match migrated.lane_ownership, migrated.cleanup_intent.reason with
-       | Shutdown_types.Registered_lane migrated_lane,
-         Shutdown_types.Operator_stop_retain_meta ->
-         check bool
-           "schema 3 lane identity survives migration"
-           true
-           (Lane.Id.equal (Lane.id lane) migrated_lane)
-       | _ -> fail "schema 3 ownership or cleanup intent changed during migration");
-      (match migrated.phase with
-       | Shutdown_types.Finalized { accumulator_dropped = true; _ } -> ()
-       | Shutdown_types.Finalized _ ->
-         fail "schema 3 unregister receipt did not restore accumulator evidence"
-       | _ -> fail "schema 3 finalized phase changed during migration");
-      let migrated_schema4 =
-        match
-          operation
-          |> shutdown_schema4_fixture
-          |> Shutdown_store.of_json
-        with
-        | Ok operation -> operation
-        | Error error -> fail (Shutdown_store.error_to_string error)
-      in
-      check int
-        "schema 4 lifecycle record migrates to current schema"
-        Shutdown_types.schema_version
-        migrated_schema4.schema_version;
-      check bool
-        "schema 4 immutable intent survives migration"
-        true
-        (Shutdown_types.cleanup_intent_equal
-           operation.cleanup_intent
-           migrated_schema4.cleanup_intent);
-      let dashboard_v5_operation =
-        { operation with
-          operation_id = Shutdown_types.Operation_id.generate ()
-        ; cleanup_intent = dashboard_purge_cleanup meta.name meta
-        }
-      in
       (match
-         dashboard_v5_operation
-         |> shutdown_schema4_fixture
+         operation
+         |> unsupported_shutdown_schema_fixture
          |> Shutdown_store.of_json
        with
        | Error (Shutdown_store.Decode_error _) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
-       | Ok _ -> fail "schema 4 accepted a schema 5 dashboard cleanup reason");
+       | Ok _ -> fail "shutdown decoder accepted an unsupported schema");
       let loaded =
         match Shutdown_store.load ~config ~keeper_name:meta.name operation_id with
         | Ok loaded -> loaded
@@ -1295,27 +1122,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
       (match
-         Keeper_fs.save_json_atomic
-           blocked_path
-           (shutdown_schema5_fixture blocked)
-       with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      let migrated_v5 =
-        match
-          Shutdown_store.load
-            ~config
-            ~keeper_name:blocked.keeper_name
-            blocked.operation_id
-        with
-        | Ok operation -> operation
-        | Error error -> fail (Shutdown_store.error_to_string error)
-      in
-      check int
-        "schema 5 blocked record decodes at current schema"
-        Shutdown_types.schema_version
-        migrated_v5.schema_version;
-      (match
          Masc.Keeper_turn_admission.begin_shutdown
            ~base_path:config.base_path
            ~keeper_name:blocked.keeper_name
@@ -1342,8 +1148,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         | Error error -> fail (Shutdown_supersession.error_to_string error)
       in
       check int
-        "schema 5 CAS write upgrades the durable record to schema 7"
-        7
+        "supersession keeps the current schema"
+        Shutdown_types.schema_version
         superseded.schema_version;
       (match superseded.phase with
        | Shutdown_types.Superseded
@@ -1372,7 +1178,10 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
            | _ -> fail "persisted supersession omitted schema_version")
         | _ -> fail "persisted supersession is not an object"
       in
-      check int "supersession wire schema is upgraded" 7 persisted_schema;
+      check int
+        "supersession wire schema remains current"
+        Shutdown_types.schema_version
+        persisted_schema;
       (* #25491: a [Reconciliation_required] fence previously had no release
          path at all. The worker no-ops on it by design and supersession
          accepted only [Blocked], so the keeper was unreachable in every
@@ -1470,30 +1279,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
              (Shutdown_types.Superseded_cleanup_reason_mismatch _)) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "Superseded accepted a non-retained cleanup intent");
-      (match
-         superseded
-         |> shutdown_schema5_fixture
-         |> Shutdown_store.of_json
-       with
-       | Error (Shutdown_store.Decode_error _) -> ()
-       | Error error -> fail (Shutdown_store.error_to_string error)
-       | Ok _ -> fail "schema 5 accepted the superseded phase");
-      (match
-         superseded
-         |> shutdown_schema6_fixture
-         |> Shutdown_store.of_json
-       with
-       | Ok _ -> ()
-       | Error error -> fail (Shutdown_store.error_to_string error));
-      (match
-         reconciling_superseded
-         |> shutdown_schema6_fixture
-         |> Shutdown_store.of_json
-       with
-       | Error (Shutdown_store.Decode_error _) -> ()
-       | Error error -> fail (Shutdown_store.error_to_string error)
-       | Ok _ ->
-         fail "schema 6 accepted the schema 7 reconciliation supersession");
       (match
          Masc.Keeper_turn_admission.restore_shutdown
            ~base_path:config.base_path
@@ -2026,8 +1811,6 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
         List.fold_left
           (fun (operations, corrupt_records) -> function
              | Shutdown_store.Operation operation -> operation :: operations, corrupt_records
-             | Shutdown_store.Retired_terminal _ ->
-               fail "corrupt-owner fixture produced a retired terminal"
              | Shutdown_store.Corrupt_record corrupt ->
                operations, corrupt :: corrupt_records)
           ([], [])
@@ -2105,10 +1888,10 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
           (recovered.phase = recoverable_operation.phase)
       | Error detail -> fail detail)
 
-let test_retired_stale_paused_terminal_releases_exact_fence () =
+let test_unsupported_shutdown_schema_retains_exact_fence () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir "retired-stale-paused-terminal" in
+  let base_dir = temp_dir "unsupported-shutdown-schema" in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_turn_admission.For_testing.reset ();
@@ -2116,73 +1899,36 @@ let test_retired_stale_paused_terminal_releases_exact_fence () =
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
       let (_init_message : string) =
-        Masc.Workspace.init config ~agent_name:(Some "operator")
+        Masc.Workspace.init config ~agent_name:(Some "tester")
       in
       let backlog_version =
         match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
         | Error detail -> fail detail
       in
-      let meta = make_meta "retired-stale-paused-owner" in
+      let meta = make_meta "unsupported-schema-owner" in
       let operation_id = Shutdown_types.Operation_id.generate () in
+      let now = Masc_domain.now_iso () in
       let operation : Shutdown_types.t =
         { schema_version = Shutdown_types.schema_version
-        ; revision = 3
+        ; revision = 0
         ; operation_id
         ; keeper_name = meta.name
-        ; lane_ownership = Shutdown_types.Dormant_meta
+        ; lane_ownership = Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
         ; generation = meta.runtime.nonce
-        ; actor = "keeper-autoboot"
-        ; cleanup_intent = remove_meta_cleanup
+        ; actor = "tester"
+        ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
         ; expected_backlog_version = backlog_version
         ; owned_task_ids = []
         ; join_evidence = None
-        ; phase =
-            Shutdown_types.Finalized
-              { cleanup = { settled_task_ids = []; pending_confirms_removed = 0 }
-              ; meta_removed = true
-              ; session_removed = false
-              ; registry_unregistered = false
-              ; accumulator_dropped = true
-              ; completion = Shutdown_types.Completion_not_requested
-              }
-        ; created_at = "2026-07-12T09:36:07Z"
-        ; updated_at = "2026-07-12T09:36:07Z"
-        }
-      in
-      let blocked_meta = make_meta "current-blocked-owner" in
-      let blocked_operation_id = Shutdown_types.Operation_id.generate () in
-      let blocked_operation : Shutdown_types.t =
-        { operation with
-          operation_id = blocked_operation_id
-        ; keeper_name = blocked_meta.name
-        ; trace_id = blocked_meta.runtime.trace_id
-        ; cleanup_intent = retain_operator_cleanup
-        ; phase =
-            Shutdown_types.Blocked
-              { stage = Shutdown_types.Unhandled_worker
-              ; detail = "Sys_error(\"Mutex.lock: Resource deadlock avoided\")"
-              }
-        }
-      in
-      let malformed_meta = make_meta "retired-malformed-owner" in
-      let malformed_operation_id = Shutdown_types.Operation_id.generate () in
-      let malformed_operation : Shutdown_types.t =
-        { operation with
-          operation_id = malformed_operation_id
-        ; keeper_name = malformed_meta.name
-        ; trace_id = malformed_meta.runtime.trace_id
+        ; phase = Shutdown_types.Prepared
+        ; created_at = now
+        ; updated_at = now
         }
       in
       (match Shutdown_store.persist_new ~config operation with
-       | Ok () -> ()
-       | Error error -> fail (Shutdown_store.error_to_string error));
-      (match Shutdown_store.persist_new ~config blocked_operation with
-       | Ok () -> ()
-       | Error error -> fail (Shutdown_store.error_to_string error));
-      (match Shutdown_store.persist_new ~config malformed_operation with
        | Ok () -> ()
        | Error error -> fail (Shutdown_store.error_to_string error));
       let operation_path =
@@ -2193,104 +1939,23 @@ let test_retired_stale_paused_terminal_releases_exact_fence () =
       (match
          Fs_compat.save_file_atomic
            operation_path
-           (retired_stale_paused_schema5_fixture operation |> Yojson.Safe.to_string)
+           (unsupported_shutdown_schema_fixture operation |> Yojson.Safe.to_string)
        with
        | Ok () -> ()
        | Error detail -> fail detail);
-      let malformed_operation_path =
-        match
-          Shutdown_store.path
-            ~config
-            ~keeper_name:malformed_meta.name
-            malformed_operation_id
-        with
-        | Ok path -> path
-        | Error error -> fail (Shutdown_store.error_to_string error)
-      in
-      let malformed_fixture =
-        match retired_stale_paused_schema5_fixture malformed_operation with
-        | `Assoc fields -> `Assoc (replace_assoc_field "trace_id" (`Int 7) fields)
-        | _ -> fail "retired fixture did not return an object"
-      in
-      (match
-         Fs_compat.save_file_atomic
-           malformed_operation_path
-           (Yojson.Safe.to_string malformed_fixture)
-       with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      (match
-         Masc.Keeper_turn_admission.begin_shutdown
-           ~base_path:config.base_path
-           ~keeper_name:meta.name
-           ~operation_id
-       with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
-         fail "retired fixture unexpectedly found an existing fence");
-      (match
-         Masc.Keeper_turn_admission.begin_shutdown
-           ~base_path:config.base_path
-           ~keeper_name:blocked_meta.name
-           ~operation_id:blocked_operation_id
-       with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
-         fail "current blocked fixture unexpectedly found an existing fence");
-      (match
-         Masc.Keeper_turn_admission.begin_shutdown
-           ~base_path:config.base_path
-           ~keeper_name:malformed_meta.name
-           ~operation_id:malformed_operation_id
-       with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
-         fail "malformed retired fixture unexpectedly found an existing fence");
       let inventory =
         match Shutdown_store.scan_inventory ~config with
         | Ok inventory -> inventory
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
-      let current_operations, retired_terminals, corrupt_records =
-        List.fold_left
-          (fun (operations, terminals, corrupt) -> function
-             | Shutdown_store.Operation current ->
-               current :: operations, terminals, corrupt
-             | Shutdown_store.Retired_terminal terminal ->
-               operations, terminal :: terminals, corrupt
-             | Shutdown_store.Corrupt_record record ->
-               operations, terminals, record :: corrupt)
-          ([], [], [])
-          inventory
-      in
-      (match retired_terminals with
-       | [ terminal ] ->
-         check string "retired terminal keeps path owner" meta.name terminal.keeper_name;
+      (match inventory with
+       | [ Shutdown_store.Corrupt_record corrupt ] ->
+         check string "unsupported row keeps its path owner" meta.name corrupt.keeper_name;
          check bool
-           "retired terminal keeps operation identity"
+           "unsupported row keeps its operation identity"
            true
-           (Shutdown_types.Operation_id.equal operation_id terminal.operation_id)
-       | _ -> fail "retired terminal was not isolated from current operations");
-      (match current_operations with
-       | [ current ] ->
-         check string
-           "current blocked operation remains current"
-           blocked_meta.name
-           current.keeper_name
-       | _ -> fail "current blocked operation changed inventory class");
-      (match corrupt_records with
-       | [ corrupt ] ->
-         check string
-           "malformed retired record keeps its path owner"
-           malformed_meta.name
-           corrupt.keeper_name;
-         check bool
-           "malformed retired record keeps its operation identity"
-           true
-           (Shutdown_types.Operation_id.equal
-              malformed_operation_id
-              corrupt.operation_id)
-       | _ -> fail "malformed retired record did not remain corrupt");
+           (Shutdown_types.Operation_id.equal operation_id corrupt.operation_id)
+       | _ -> fail "unsupported row was not isolated as one corrupt record");
       let restored =
         match Shutdown_runtime.restore_inventory_admission ~config inventory with
         | Ok restored -> restored
@@ -2298,56 +1963,17 @@ let test_retired_stale_paused_terminal_releases_exact_fence () =
       in
       check
         (list string)
-        "only the current blocked owner remains blocked"
-        [ blocked_meta.name; malformed_meta.name ]
+        "unsupported row keeps its owner fenced"
+        [ meta.name ]
         restored.blocked_keeper_names;
-      check int "retired terminal remains observable" 1
-        (List.length restored.retired_terminal_records);
-      check bool
-        "retired terminal releases only its exact fence"
-        true
-        (Option.is_none
-           (Masc.Keeper_turn_admission.snapshot_for
-              ~base_path:config.base_path
-             ~keeper_name:meta.name)
-             .snapshot_shutdown_operation_id);
+      check int "unsupported row remains explicit" 1
+        (List.length restored.corrupt_records);
+      check int "unsupported row is not a recoverable operation" 0
+        (List.length restored.operations);
       check
         (option string)
-        "current blocked operation keeps its exact fence"
-        (Some (Shutdown_types.Operation_id.to_string blocked_operation_id))
-        (Option.map
-           Shutdown_types.Operation_id.to_string
-           (Masc.Keeper_turn_admission.snapshot_for
-              ~base_path:config.base_path
-              ~keeper_name:blocked_meta.name)
-             .snapshot_shutdown_operation_id);
-      check
-        (option string)
-        "malformed retired record keeps its exact fence"
-        (Some (Shutdown_types.Operation_id.to_string malformed_operation_id))
-        (Option.map
-           Shutdown_types.Operation_id.to_string
-           (Masc.Keeper_turn_admission.snapshot_for
-              ~base_path:config.base_path
-              ~keeper_name:malformed_meta.name)
-             .snapshot_shutdown_operation_id);
-      let newer_operation_id = Shutdown_types.Operation_id.generate () in
-      (match
-         Masc.Keeper_turn_admission.begin_shutdown
-           ~base_path:config.base_path
-           ~keeper_name:meta.name
-           ~operation_id:newer_operation_id
-       with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
-         fail "newer shutdown fixture was already reserved");
-      (match Shutdown_runtime.restore_inventory_admission ~config inventory with
-       | Ok _ -> ()
-       | Error detail -> fail detail);
-      check
-        (option string)
-        "retired terminal does not clear a newer owner"
-        (Some (Shutdown_types.Operation_id.to_string newer_operation_id))
+        "unsupported row keeps its exact fence"
+        (Some (Shutdown_types.Operation_id.to_string operation_id))
         (Option.map
            Shutdown_types.Operation_id.to_string
            (Masc.Keeper_turn_admission.snapshot_for
@@ -4252,8 +3878,8 @@ let () =
         test_keeper_up_shared_boundary_outlives_calling_turn;
       test_case "shutdown store isolates corrupt owner" `Quick
         test_keeper_shutdown_store_isolates_corrupt_owner;
-      test_case "retired stale paused terminal releases exact fence" `Quick
-        test_retired_stale_paused_terminal_releases_exact_fence;
+      test_case "unsupported shutdown schema retains exact fence" `Quick
+        test_unsupported_shutdown_schema_retains_exact_fence;
       test_case "dashboard purge resolution is fail closed" `Quick
         test_dashboard_purge_resolution_is_fail_closed;
       test_case "shutdown prepare joins idle lane" `Quick

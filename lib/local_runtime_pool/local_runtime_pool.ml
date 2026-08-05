@@ -45,14 +45,6 @@ let default_parallel_hint = 12
 
 let wall_now () = Unix.gettimeofday ()
 
-let float_of_env_default name ~default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw ->
-      match float_of_string_opt (String.trim raw) with
-      | Some value when value > 0.0 -> value
-      | _ -> default
-
 let cooldown_seconds () =
   match Env_config.Worker.local_runtime_cooldown_sec_opt () with
   | Some raw ->
@@ -194,42 +186,6 @@ let refresh_runtime_metrics (runtime : runtime) =
       { runtime with queue_depth; cooldown_until = None; failure_streak = 0 }
   | _ -> { runtime with queue_depth }
 
-let normalize_runtime_json json =
-  let base_url = Json_util.get_string json "base_url" |> trim_opt in
-  match base_url with
-  | None -> Error "runtime.base_url is required"
-  | Some base_url ->
-      let id =
-        Json_util.get_string json "id" |> trim_opt
-        |> Option.value ~default:(runtime_id_of_base_url base_url)
-      in
-      let model = Json_util.get_string json "model" |> trim_opt in
-      let max_concurrency =
-        match json |> Json_util.assoc_member_opt "max_concurrency" with
-        | Some (`Int value) -> max 1 value
-        | Some (`Intlit raw) -> (
-            match parse_int_opt raw with
-            | Some value -> max 1 value
-            | None -> default_parallel_hint)
-        | _ -> default_parallel_hint
-      in
-      Ok
-        {
-          id;
-          base_url;
-          model;
-          max_concurrency;
-          active_slots = 0;
-          queue_depth = 0;
-          latency_ema_ms = None;
-          failure_streak = 0;
-          cooldown_until = None;
-          last_error = None;
-          total_started = 0;
-          total_success = 0;
-          total_failure = 0;
-        }
-
 let default_runtime () =
   let base_url = Env_config.Local_runtime.server_url in
   {
@@ -248,31 +204,6 @@ let default_runtime () =
     total_success = 0;
     total_failure = 0;
   }
-
-let runtime_from_endpoint base_url =
-  {
-    id = runtime_id_of_base_url base_url;
-    base_url;
-    model = trim_opt (Env_config.Local_runtime.worker_model_opt ());
-    max_concurrency =
-      int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
-        ~default:default_parallel_hint;
-    active_slots = 0;
-    queue_depth = 0;
-    latency_ema_ms = None;
-    failure_streak = 0;
-    cooldown_until = None;
-    last_error = None;
-    total_started = 0;
-    total_success = 0;
-    total_failure = 0;
-  }
-
-let parse_llm_endpoints raw =
-  raw
-  |> String.split_on_char ','
-  |> List.filter_map (fun item -> trim_opt (Some item))
-  |> List.map runtime_from_endpoint
 
 let current_fingerprint () =
   String.concat "||"

@@ -510,6 +510,53 @@ let test_maintenance_malformed_reference_fails_closed () =
         (Some "must survive malformed source")
         (fetch_ok store ~sha256:blob.sha256))
 
+let test_maintenance_scan_budget_fails_closed_before_deletion () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"must survive exhausted scan budget" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "unreferenced blob is a prior candidate"
+        1
+        observed.candidates_recorded;
+      let candidate_path = M.candidate_snapshot_path ~base_path in
+      let candidate_before = Fs_compat.load_file candidate_path in
+      (match
+         M.run
+           ~max_scan_seconds:0.0
+           ~base_path
+           ~mode:M.Delete_previous_candidates
+       with
+       | Error
+           (M.Scan_budget_exhausted
+             { max_duration_sec
+             ; files_examined
+             ; bytes_examined
+             ; _
+             }) ->
+         Alcotest.(check bool)
+           "exact zero budget"
+           true
+           (Float.equal max_duration_sec 0.0);
+         Alcotest.(check int) "no file read after exhaustion" 0 files_examined;
+         Alcotest.(check int64) "no bytes read after exhaustion" 0L bytes_examined
+       | Error error ->
+         Alcotest.failf
+           "unexpected scan-budget error: %s"
+           (M.error_to_string error)
+       | Ok _ -> Alcotest.fail "exhausted scan budget reached deletion");
+      Alcotest.(check string)
+        "prior candidate snapshot is unchanged"
+        candidate_before
+        (Fs_compat.load_file candidate_path);
+      Alcotest.(check (option string))
+        "candidate blob is retained"
+        (Some "must survive exhausted scan budget")
+        (fetch_ok store ~sha256:blob.sha256))
+
 let test_maintenance_does_not_scan_repository_mirrors () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -1002,6 +1049,10 @@ let () =
             "maintenance malformed reference fails closed"
             `Quick
             test_maintenance_malformed_reference_fails_closed;
+          Alcotest.test_case
+            "maintenance scan budget fails closed before deletion"
+            `Quick
+            test_maintenance_scan_budget_fails_closed_before_deletion;
           Alcotest.test_case
             "maintenance keeps wire-capture reference within retention"
             `Quick

@@ -28,6 +28,13 @@ type error =
       ; line : int
       ; detail : string
       }
+  | Scan_budget_exhausted of
+      { path : string
+      ; max_duration_sec : float
+      ; elapsed_seconds : float
+      ; files_examined : int
+      ; bytes_examined : int64
+      }
   | Candidate_snapshot_invalid of
       { path : string
       ; detail : string
@@ -74,6 +81,21 @@ let error_to_string = function
       path
       line
       detail
+  | Scan_budget_exhausted
+      { path
+      ; max_duration_sec
+      ; elapsed_seconds
+      ; files_examined
+      ; bytes_examined
+      } ->
+    Printf.sprintf
+      "scan budget exhausted path=%s max_duration_seconds=%.3f \
+       elapsed_seconds=%.3f files_examined=%d bytes_examined=%Ld"
+      path
+      max_duration_sec
+      elapsed_seconds
+      files_examined
+      bytes_examined
   | Candidate_snapshot_invalid { path; detail } ->
     Printf.sprintf "blob maintenance candidate snapshot invalid path=%s: %s" path detail
   | Candidate_snapshot_read_failed { path; detail } ->
@@ -102,6 +124,45 @@ let candidate_snapshot_path ~base_path =
        (Common.masc_dir_from_base_path ~base_path)
        "tool_blob_maintenance")
     "candidates.json"
+;;
+
+type scan_budget =
+  { started_at : Mtime.t
+  ; max_duration_sec : float
+  ; mutable files_examined : int
+  ; mutable bytes_examined : int64
+  }
+
+let scan_elapsed_seconds budget =
+  Mtime.Span.to_float_ns (Mtime.span budget.started_at (Mtime_clock.now ()))
+  /. 1e9
+;;
+
+let check_scan_budget budget_opt ~path =
+  match budget_opt with
+  | None -> Ok ()
+  | Some budget ->
+    let elapsed_seconds = scan_elapsed_seconds budget in
+    if elapsed_seconds < budget.max_duration_sec
+    then Ok ()
+    else
+      Error
+        (Scan_budget_exhausted
+           { path
+           ; max_duration_sec = budget.max_duration_sec
+           ; elapsed_seconds
+           ; files_examined = budget.files_examined
+           ; bytes_examined = budget.bytes_examined
+           })
+;;
+
+let note_file_examined budget_opt payload =
+  match budget_opt with
+  | None -> ()
+  | Some budget ->
+    budget.files_examined <- budget.files_examined + 1;
+    budget.bytes_examined <-
+      Int64.add budget.bytes_examined (Int64.of_int (String.length payload))
 ;;
 
 let add_references ~path ~line references text =
@@ -168,7 +229,9 @@ let rec references_in_json ~path ~line references = function
     Ok references
 ;;
 
-let references_in_file ~ownership_root path =
+let references_in_file ~scan_budget ~ownership_root path =
+  let open Result.Syntax in
+  let* () = check_scan_budget scan_budget ~path in
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Error error ->
     Error
@@ -182,20 +245,24 @@ let references_in_file ~ownership_root path =
       (Durable_source_read_failed
          { path; reason = "durable source disappeared during scan" })
   | Ok (Some payload) ->
-    try
-      references_in_json
-        ~path
-        ~line:1
-        String_set.empty
-        (Yojson.Safe.from_string payload)
-    with
-    | Yojson.Json_error _ ->
-      payload
-      |> String.split_on_char '\n'
-      |> List.fold_left
-           (fun (line_number, result) line ->
-              let next =
-                Result.bind result (fun references ->
+    note_file_examined scan_budget payload;
+    let* () = check_scan_budget scan_budget ~path in
+    let parsed =
+      try
+        references_in_json
+          ~path
+          ~line:1
+          String_set.empty
+          (Yojson.Safe.from_string payload)
+      with
+      | Yojson.Json_error _ ->
+        payload
+        |> String.split_on_char '\n'
+        |> List.fold_left
+             (fun (line_number, result) line ->
+                let next =
+                  let* references = result in
+                  let* () = check_scan_budget scan_budget ~path in
                   try
                     references_in_json
                       ~path
@@ -219,11 +286,15 @@ let references_in_file ~ownership_root path =
                         ~path
                         ~line:line_number
                         references
-                        line)
-              in
-              line_number + 1, next)
-           (1, Ok String_set.empty)
-      |> snd
+                        line
+                in
+                line_number + 1, next)
+             (1, Ok String_set.empty)
+        |> snd
+    in
+    let* references = parsed in
+    let* () = check_scan_budget scan_budget ~path in
+    Ok references
 ;;
 
 let durable_consumer_basenames =
@@ -313,7 +384,7 @@ let reject_uncoordinated_cluster_roots ~base_path =
             }))
 ;;
 
-let live_references ~base_path =
+let live_references ~scan_budget ~base_path =
   let read_directory path =
     let inspect () =
       match
@@ -362,13 +433,15 @@ let live_references ~base_path =
              })
   in
   let rec scan_entry path references =
+    let open Result.Syntax in
+    let* () = check_scan_budget scan_budget ~path in
     try
       match (Unix.lstat path).Unix.st_kind with
       | Unix.S_DIR -> scan_directory path references
       | Unix.S_REG ->
         Result.map
           (String_set.union references)
-          (references_in_file ~ownership_root:base_path path)
+          (references_in_file ~scan_budget ~ownership_root:base_path path)
       | Unix.S_LNK ->
         Error
           (Durable_source_stat_failed
@@ -391,6 +464,8 @@ let live_references ~base_path =
                Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
            })
   and scan_directory path references =
+    let open Result.Syntax in
+    let* () = check_scan_budget scan_budget ~path in
     match read_directory path with
     | Error _ as error -> error
     | Ok None -> Ok references
@@ -536,11 +611,24 @@ let save_candidate_snapshot ~base_path candidates =
     Error (Candidate_snapshot_write_failed { path; detail })
 ;;
 
-let run ~base_path ~mode =
+let run ?max_scan_seconds ~base_path ~mode =
   let open Result.Syntax in
   let* () = reject_uncoordinated_cluster_roots ~base_path in
   let store = Tool_blob_store.create ~base_path in
-  let* live = live_references ~base_path in
+  let scan_budget =
+    Option.map
+      (fun max_duration_sec ->
+         { started_at = Mtime_clock.now ()
+         ; max_duration_sec
+         ; files_examined = 0
+         ; bytes_examined = 0L
+         })
+      max_scan_seconds
+  in
+  let* live = live_references ~scan_budget ~base_path in
+  let* () =
+    check_scan_budget scan_budget ~path:(candidate_snapshot_path ~base_path)
+  in
   let* previous_candidates = load_candidate_snapshot ~base_path in
   let* blob_list =
     match Tool_blob_store.list_all_result store with

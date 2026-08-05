@@ -48,6 +48,13 @@ type error =
       ; line : int
       ; detail : string
       }
+  | Scan_budget_exhausted of
+      { path : string
+      ; max_duration_sec : float
+      ; elapsed_seconds : float
+      ; files_examined : int
+      ; bytes_examined : int64
+      }
   | Candidate_snapshot_invalid of
       { path : string
       ; detail : string
@@ -72,4 +79,12 @@ type report =
 
 val error_to_string : error -> string
 val candidate_snapshot_path : base_path:string -> string
-val run : base_path:string -> mode:mode -> (report, error) result
+val run :
+  ?max_scan_seconds:float ->
+  base_path:string ->
+  mode:mode ->
+  (report, error) result
+(** [run ?max_scan_seconds] aborts a partial durable-consumer scan before
+    publishing a candidate snapshot or deleting blobs when the monotonic
+    elapsed-time budget is exhausted. Omitting the budget preserves the
+    unbounded administrative maintenance operation. *)

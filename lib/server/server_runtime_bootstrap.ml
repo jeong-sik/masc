@@ -885,9 +885,26 @@ let initialize_owner_state_blocking
        Log.Server.info
          "startup wire-capture retention: pruned %d expired day-file(s)"
          wire_capture_pruned;
+     let watchdog_remaining_seconds =
+       max
+         0.0
+         (Server_startup_state.watchdog_timeout_sec ()
+          -. Server_startup_state.elapsed_since_start ())
+     in
+     (* The scan is synchronous because deletion is valid only at this
+        quiescent startup boundary. Give it half of the remaining watchdog
+        window so a growing durable store cannot consume readiness authority;
+        a budget failure retains the prior candidates and every blob. *)
+     let max_scan_seconds = watchdog_remaining_seconds /. 2.0 in
+     Log.Server.info
+       "startup tool blob maintenance: max_scan_seconds=%.1f \
+        watchdog_remaining_seconds=%.1f"
+       max_scan_seconds
+       watchdog_remaining_seconds;
      (match
         Eio_unix.run_in_systhread (fun () ->
           Tool_blob_maintenance.run
+            ~max_scan_seconds
             ~base_path
             ~mode:Tool_blob_maintenance.Delete_previous_candidates)
       with

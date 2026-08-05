@@ -67,6 +67,7 @@ type t =
   | BoardSignalDeliveryTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
+  | BoardSignalAttentionCandidateNoWorker
   | MetaJsonFailures
   | ToolsOasFailures
   | TurnUpUpdateFailures

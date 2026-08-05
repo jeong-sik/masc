@@ -396,15 +396,38 @@ let record_board_attention_candidate
          ~base_path:config.base_path
          candidate
      with
-     | Ok _ ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
-         ~labels:
-           [ ("keeper", meta.name)
-           ; ("kind", signal_kind_label)
-           ; ("audience", Keeper_board_audience.label Keeper_board_audience.Discoverable)
-           ]
-         ()
+     | Ok { Keeper_board_attention_candidate.wake; _ } ->
+       (match wake with
+        | Keeper_board_attention_candidate.Wake_not_required
+        | Keeper_board_attention_candidate.Judgment_worker_requested
+            (Keeper_board_attention_worker_wake.Signaled
+            | Keeper_board_attention_worker_wake.Coalesced) ->
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
+            ~labels:
+              [ ("keeper", meta.name)
+              ; ("kind", signal_kind_label)
+              ; ( "audience"
+                , Keeper_board_audience.label Keeper_board_audience.Discoverable
+                )
+              ]
+            ()
+        | Keeper_board_attention_candidate.Judgment_worker_requested
+            Keeper_board_attention_worker_wake.Not_registered ->
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string BoardSignalAttentionCandidateNoWorker)
+            ~labels:
+              [ ("keeper", meta.name)
+              ; ("kind", signal_kind_label)
+              ; ( "audience"
+                , Keeper_board_audience.label Keeper_board_audience.Discoverable
+                )
+              ]
+            ();
+          Log.Keeper.warn
+            "board attention candidate recorded without a judgment worker: keeper=%s post=%s"
+            meta.name
+            signal.post_id)
      | Error err ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string KeepaliveSignalFailures)

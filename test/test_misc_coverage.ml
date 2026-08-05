@@ -126,13 +126,9 @@ let test_config_of_json_invalid () =
   check bool "pause allowed on admin/catalog surface" true
     (Config.is_tool_allowed "masc_pause")
 
-let test_env_tempo_min () =
-  let min = Env_config.Tempo.min_interval_seconds in
-  check bool "positive min" true (min > 0.0)
-
-let test_env_tempo_max () =
-  let max = Env_config.Tempo.max_interval_seconds in
-  check bool "positive max" true (max > 0.0)
+let test_env_session_max_age () =
+  let max_age = Env_config.Session.max_age_seconds in
+  check bool "positive max_age" true (max_age > 0.0)
 
 let test_env_tempo_default () =
   let default = Env_config.Tempo.default_interval_seconds in
@@ -186,6 +182,9 @@ let () =
       test_case "default" `Quick test_config_default;
       test_case "to_json" `Quick test_config_to_json;
       test_case "of_json invalid" `Quick test_config_of_json_invalid;
+    ];
+    "env_config.session", [
+      test_case "max_age" `Quick test_env_session_max_age;
     ];
     "env_config.tempo", [
       test_case "default" `Quick test_env_tempo_default;

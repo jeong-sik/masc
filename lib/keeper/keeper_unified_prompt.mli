@@ -52,6 +52,19 @@ val effective_instructions :
 (** Resolve the single instructions value used by every system-prompt
     entrypoint and its dashboard projection. *)
 
+val owned_executing_goals_without_tasks :
+  config:Workspace.config ->
+  keeper_name:string ->
+  (string * string) list
+(** RFC-0362 §4.3 — the Goals this keeper owns that are still executing and
+    carry no linked Task. Read from [goal.owner], not from
+    [meta.active_goal_ids]: ownership lives on the Goal, and that keeper-side
+    pointer is empty for every keeper on the live workspace.
+
+    The RFC's acceptance criterion (§4.3) reads off this list: the measured
+    0-of-10 executing goals with a Task must move, or the owner field is
+    decoration and should be removed. *)
+
 val active_goal_summaries :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

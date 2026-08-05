@@ -591,6 +591,43 @@ let active_goal_summaries
     meta.active_goal_ids
 ;;
 
+(* RFC-0362 §4.3 — the one consumer of [goal.owner].
+
+   A Goal this keeper owns, still executing, with no Task linked to it, is a
+   fact the owner is positioned to act on and nobody else is. It is stated, not
+   demanded: no gate, no cap, no required action, and no empty case is named
+   (#26901 — naming the empty branch is what produced the flood it replaced).
+
+   The 0-of-10 measurement in RFC-0362 §1 is exactly this predicate over the
+   live store, so the RFC's acceptance criterion reads off this list moving. *)
+let owned_executing_goals_without_tasks
+      ~(config : Workspace.config)
+      ~(keeper_name : string)
+  =
+  let goals =
+    List.filter
+      (fun (g : Goal_store.goal) ->
+         match g.owner with
+         | Some o -> String.equal o keeper_name
+         | None -> false)
+      (Goal_store.list_goals config ())
+  in
+  match goals with
+  | [] -> []
+  | _ :: _ ->
+    let tasks = Workspace.get_tasks_raw config in
+    let index = Workspace_goal_index.build_goal_task_index_for_config config tasks in
+    List.filter_map
+      (fun (g : Goal_store.goal) ->
+         if not (Goal_phase.admits_self_directed_progress g.phase)
+         then None
+         else (
+           match Hashtbl.find_opt index g.id with
+           | Some (_ :: _) -> None
+           | None | Some [] -> Some (g.id, g.title)))
+      goals
+;;
+
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
@@ -703,18 +740,44 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
        resolved them (RFC-0315); every id from the world observation remains
        rendered even when title enrichment is partial. *)
     | Keeper_context_layers.Active_goals ->
-      if observation.active_goals <> [] then
-        Some
-          (Printf.sprintf "### Active Goals (%d)\n"
-             (List.length observation.active_goals)
-          ^ (match active_goal_summaries with
-             | Some summaries ->
-                 format_goal_summaries_for_active_goals
-                   ~active_goal_ids:observation.active_goals
-                   summaries
-             | None -> format_goals observation.active_goals)
-          ^ "\n\n")
-      else None
+      let active_block =
+        if observation.active_goals <> [] then
+          Some
+            (Printf.sprintf "### Active Goals (%d)\n"
+               (List.length observation.active_goals)
+            ^ (match active_goal_summaries with
+               | Some summaries ->
+                   format_goal_summaries_for_active_goals
+                     ~active_goal_ids:observation.active_goals
+                     summaries
+               | None -> format_goals observation.active_goals)
+            ^ "\n\n")
+        else None
+      in
+      (* RFC-0362 §4.3. Rendered independently of [active_goal_ids]: that field
+         is a keeper-side pointer nothing writes today, so hanging this off it
+         would show nothing. Ownership lives on the Goal. *)
+      let owned_block =
+        match owned_executing_goals_without_tasks ~config ~keeper_name:meta.name with
+        | [] -> None
+        | goals ->
+          Some
+            (Printf.sprintf
+               "### Goals you own with no Task yet (%d)\n%s\n\n"
+               (List.length goals)
+               (String.concat "\n"
+                  (List.map
+                     (fun (goal_id, title) ->
+                        if String.trim title = ""
+                        then Printf.sprintf "- %s" goal_id
+                        else Printf.sprintf "- %s — %s" goal_id title)
+                     goals)))
+      in
+      (match active_block, owned_block with
+       | None, None -> None
+       | Some a, None -> Some a
+       | None, Some o -> Some o
+       | Some a, Some o -> Some (a ^ o))
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->

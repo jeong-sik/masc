@@ -24,8 +24,16 @@ cd "$REPO_ROOT"
 OUTPUT="${OUTPUT:-docs/rfc/RFC-0071-inventory.csv}"
 
 # --check regenerates into a temp file and diffs, leaving the tracked file
-# untouched. The inventory is derived from lib/ and nothing verified it, so it
-# had drifted 85 rows from the source it claims to describe.
+# untouched.
+#
+# Deliberately not a CI gate. The rows carry line numbers, so any edit to a
+# file containing one shifts them: gating exact equality would fail every PR
+# that touches lib/, which is the same failure mode that retired the catch-all
+# `dune test` step (see .github/workflows/ci.yml). This inventory is a
+# migration work list, not a contract between two artifacts.
+#
+# Use it when working on RFC-0071, or to see how far the committed snapshot has
+# drifted — it was 85 rows stale when this flag was added.
 CHECK_ONLY=0
 if [ "${1:-}" = "--check" ]; then
   CHECK_ONLY=1

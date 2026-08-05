@@ -195,6 +195,9 @@ type t =
   | KeeperToolCallRetryLoop     (* counter: consecutive identical tool calls with errors *)
   | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
   | RawTraceSinkDegraded        (* counter: raw-trace sink create failed; turn dispatched untraced *)
+  | RawTraceRetentionDeleted   (* counter: unreachable raw-trace files deleted after TurnRecord commit *)
+  | RawTraceRetentionSkipped   (* counter: retention skipped because the reachability root was uncertain *)
+  | RawTraceRetentionUnlinkFailed (* counter: unreachable raw-trace files that could not be deleted *)
   | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
   | WireCaptureRecordSkipped    (* counter: wire-capture record dropped by current-file byte cap *)
@@ -405,6 +408,10 @@ let to_string = function
   | KeeperToolCallRetryLoop -> "masc_keeper_tool_call_retry_loop_total"
   | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
   | RawTraceSinkDegraded -> "masc_keeper_raw_trace_sink_degraded_total"
+  | RawTraceRetentionDeleted -> "masc_keeper_raw_trace_retention_deleted_total"
+  | RawTraceRetentionSkipped -> "masc_keeper_raw_trace_retention_skipped_total"
+  | RawTraceRetentionUnlinkFailed ->
+    "masc_keeper_raw_trace_retention_unlink_failed_total"
   | WireCaptureResponseSuppressed ->
     "masc_keeper_wire_capture_response_suppressed_total"
   | WireCaptureWriteFailures -> "masc_keeper_wire_capture_write_failures_total"

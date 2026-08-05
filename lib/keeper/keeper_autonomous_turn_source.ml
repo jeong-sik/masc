@@ -11,7 +11,7 @@ type turn =
   ; trace : Keeper_chat_blocks.trace_step list
   }
 
-let default_limit = 200
+let default_limit = Keeper_raw_trace_retention.history_limit
 
 let sdk_run_ref (run_ref : Turn_record.raw_trace_run_ref) : Agent_sdk.Raw_trace.run_ref =
   { worker_run_id = run_ref.worker_run_id
@@ -111,11 +111,7 @@ let trace_step_of_trajectory = function
 let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
   match record.turn_kind, record.raw_trace_run_ref with
   | Turn_record.Direct, _ -> None
-  | Turn_record.Autonomous, None ->
-    Log.Keeper.warn ~keeper_name
-      "autonomous turn source: current turn record %s has no exact raw-trace run"
-      (Ids.Turn_ref.to_string record.turn_ref);
-    None
+  | Turn_record.Autonomous, None -> None
   | Turn_record.Autonomous, Some run_ref ->
     let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
     if not (String.equal record.keeper keeper_name)

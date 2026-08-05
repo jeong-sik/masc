@@ -14,7 +14,9 @@ type turn =
   }
 
 val default_limit : int
-(** Newest current-schema turn records inspected per request. *)
+(** Newest current-schema turn records inspected per request. Shared with
+    {!Keeper_raw_trace_retention.history_limit}; retention cannot evict an
+    exact run that this reader still considers current. *)
 
 val load_recent :
   config:Workspace.config ->
@@ -23,7 +25,8 @@ val load_recent :
   ?since:float ->
   unit ->
   turn list
-(** Returns exact-run autonomous turns oldest-first. Strictly incompatible
-    turn records, missing/pruned raw traces, non-regular files, and failed run
-    summaries are logged and skipped. There is no legacy decoder or fallback
-    classifier. *)
+(** Returns exact-run autonomous turns oldest-first. [Autonomous] records with
+    no exact run are a typed absence and are skipped without a warning.
+    Strictly incompatible records, unexpectedly missing/non-regular referenced
+    traces, and failed run summaries are logged and skipped. There is no legacy
+    decoder or fallback classifier. *)

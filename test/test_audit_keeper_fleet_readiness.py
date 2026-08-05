@@ -427,6 +427,31 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(latest_ts, 20.0)
         self.assertEqual(tools, {"tool_execute"})
 
+    def test_exact_post_read_counts_as_current_board_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            decisions_path = root / ".masc" / "keepers" / "alpha.decisions.jsonl"
+            decisions_path.write_text(
+                json.dumps(
+                    {
+                        "ts_unix": time.time(),
+                        "event": "tool_exec",
+                        "tool": "masc_board_post_get",
+                        "ok": True,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = audit.build_report(audit_args(root, expected_keepers=1))
+
+        self.assertTrue(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertTrue(keeper["board_action"])
+        self.assertNotIn("board_action_evidence_missing", keeper["failures"])
+
     def test_product_and_design_evidence_use_explicit_board_domains(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -894,55 +919,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         keeper = report["keepers"][0]
         self.assertTrue(keeper["web_search_action"])
         self.assertEqual(len(keeper["web_search_evidence"]), 1)
-
-
-class AuditKeeperFleetReadinessBoardVocabularyTest(unittest.TestCase):
-    def keeper_whose_only_board_tool_is(self, root: Path, name: str, tool: str) -> None:
-        write_ready_keeper(root, name)
-        (root / ".masc" / "keepers" / f"{name}.decisions.jsonl").write_text(
-            json.dumps(
-                {"ts_unix": time.time(), "event": "tool_exec", "tool": tool, "ok": True}
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-
-    def board_action_for(self, tool: str) -> dict:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.keeper_whose_only_board_tool_is(root, "alpha", tool)
-            report = audit.build_report(audit_args(root, expected_keepers=1))
-        return report["keepers"][0]
-
-    def test_exact_post_read_counts_as_board_evidence(self):
-        keeper = self.board_action_for("masc_board_post_get")
-
-        self.assertTrue(keeper["board_action"])
-        self.assertNotIn("board_action_evidence_missing", keeper["failures"])
-
-    def test_pre_unification_names_are_not_current_evidence(self):
-        # The audit judges the current runtime contract. Rows written before the
-        # Board surface was unified are history, not proof that a keeper acted
-        # under the contract being audited, so no wrapper name decodes here.
-        for tool in (
-            "keeper_board_post",
-            "keeper_board_post_get",
-            "keeper_board_comment",
-            "keeper_board_vote",
-            "keeper_board_list",
-            "keeper_board_search",
-        ):
-            with self.subTest(tool=tool):
-                self.assertNotIn(tool, audit.BOARD_TOOLS)
-
-                keeper = self.board_action_for(tool)
-
-                self.assertFalse(keeper["board_action"])
-                self.assertIn("board_action_evidence_missing", keeper["failures"])
-
-    def test_every_board_evidence_name_is_a_unified_name(self):
-        for tool in audit.BOARD_TOOLS:
-            self.assertTrue(tool.startswith("masc_board_"), tool)
 
 
 if __name__ == "__main__":

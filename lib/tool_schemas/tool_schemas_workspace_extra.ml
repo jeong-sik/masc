@@ -55,6 +55,33 @@ let schemas : tool_schema list =
           ; "additionalProperties", `Bool false
           ]
     }
+  ; { name = "masc_goal_assign"
+    ; description =
+        "Assign a Goal to the keeper responsible for turning it into Tasks. \
+         Both fields are required; this tool never picks an owner for you."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "goal_id"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "Goal to assign."
+                      ] )
+                ; ( "owner"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Keeper name that becomes responsible for this \
+                             Goal. Must be a registered keeper." )
+                      ] )
+                ] )
+          ; "required", `List [ `String "goal_id"; `String "owner" ]
+          ; "additionalProperties", `Bool false
+          ]
+    }
   ; { name = "masc_goal_transition"
     ; description =
         "Apply an explicit Goal lifecycle transition. request_complete completes the Goal directly."

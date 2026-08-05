@@ -8,16 +8,11 @@
 // what a Keeper submitted, a run is what the completion authority did with it.
 // Only the registry shows a review that produced no verdict at all.
 
-import { isRecord, asInt, asNumber, asRecordArray, asString } from '../components/common/normalize'
+import { isRecord } from '../components/common/normalize'
 import { get, type AbortableRequestOptions } from './core'
 
-/** How a completion-authority review ended, mirroring the backend
-    Verification_run_registry.status_label vocabulary.
-
-    `unknown` is not a backend label. The backend emits a closed set, so an
-    unrecognized value can only come from a protocol break; mapping it to a real
-    outcome would let a garbled row pose as an approval or misattribute a
-    failure. See CLAUDE.md "Unknown → Permissive Default". */
+/** How a completion-authority review ended, mirroring the closed backend
+    Verification_run_registry.status_label vocabulary. */
 export type VerificationRunStatusLabel =
   | 'running'
   | 'approved'
@@ -26,7 +21,6 @@ export type VerificationRunStatusLabel =
   | 'not_reviewed'
   | 'commit_failed'
   | 'raised'
-  | 'unknown'
 
 const BACKEND_STATUSES: readonly string[] = [
   'running',
@@ -62,38 +56,136 @@ export interface VerificationRunRecord {
 export interface DashboardVerificationRunsResponse {
   runs: VerificationRunRecord[]
   count: number
-  generatedAt: string | null
+  generatedAt: string
 }
 
-function asVerificationRunStatus(value: unknown): VerificationRunStatusLabel {
-  return typeof value === 'string' && BACKEND_STATUSES.includes(value)
-    ? (value as VerificationRunStatusLabel)
-    : 'unknown'
+function protocolError(message: string): never {
+  throw new Error(`Invalid verification runs response: ${message}`)
+}
+
+function exactFields(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+  context: string,
+): void {
+  const expected = new Set([...required, ...optional])
+  const missing = required.filter(field => !(field in value))
+  const unknown = Object.keys(value).filter(field => !expected.has(field))
+  if (missing.length > 0 || unknown.length > 0) {
+    protocolError(`${context} fields mismatch (missing=[${missing.join(',')}], unknown=[${unknown.join(',')}])`)
+  }
+}
+
+function nonEmptyString(value: unknown, context: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    protocolError(`${context} must be a non-empty string`)
+  }
+  return value
+}
+
+function finiteNumber(value: unknown, context: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    protocolError(`${context} must be a finite number`)
+  }
+  return value
+}
+
+function optionalNonEmptyString(value: unknown, context: string): string | undefined {
+  return value === undefined ? undefined : nonEmptyString(value, context)
+}
+
+function verificationStatus(value: unknown, context: string): VerificationRunStatusLabel {
+  if (typeof value !== 'string' || !BACKEND_STATUSES.includes(value)) {
+    protocolError(`${context} has unknown status ${JSON.stringify(value)}`)
+  }
+  return value as VerificationRunStatusLabel
+}
+
+const RUN_BASE_FIELDS = [
+  'verification_id',
+  'task_id',
+  'producer',
+  'authority_kind',
+  'authority_actor',
+  'started_at',
+  'status',
+] as const
+
+function parseRun(raw: unknown, index: number): VerificationRunRecord {
+  const context = `runs[${index}]`
+  if (!isRecord(raw)) protocolError(`${context} must be an object`)
+  const status = verificationStatus(raw.status, `${context}.status`)
+  let requiredOutcomeFields: readonly string[] = []
+  let optionalFields: readonly string[] = []
+  switch (status) {
+    case 'running':
+      break
+    case 'approved':
+      requiredOutcomeFields = ['elapsed_s']
+      optionalFields = ['evaluator_runtime']
+      break
+    case 'rejected':
+      requiredOutcomeFields = ['elapsed_s', 'reason']
+      optionalFields = ['evaluator_runtime']
+      break
+    case 'not_reviewed':
+      requiredOutcomeFields = ['elapsed_s', 'gate', 'detail']
+      optionalFields = ['evaluator_runtime']
+      break
+    case 'contract_rejected':
+    case 'commit_failed':
+    case 'raised':
+      requiredOutcomeFields = ['elapsed_s', 'detail']
+      optionalFields = ['evaluator_runtime']
+      break
+  }
+  exactFields(raw, [...RUN_BASE_FIELDS, ...requiredOutcomeFields], optionalFields, context)
+  const startedAt = finiteNumber(raw.started_at, `${context}.started_at`)
+  if (startedAt < 0) protocolError(`${context}.started_at must be non-negative`)
+  const elapsedSeconds = status === 'running'
+    ? undefined
+    : finiteNumber(raw.elapsed_s, `${context}.elapsed_s`)
+  if (elapsedSeconds != null && elapsedSeconds < 0) {
+    protocolError(`${context}.elapsed_s must be non-negative`)
+  }
+  return {
+    verificationId: nonEmptyString(raw.verification_id, `${context}.verification_id`),
+    taskId: nonEmptyString(raw.task_id, `${context}.task_id`),
+    producer: nonEmptyString(raw.producer, `${context}.producer`),
+    authorityKind: nonEmptyString(raw.authority_kind, `${context}.authority_kind`),
+    authorityActor: nonEmptyString(raw.authority_actor, `${context}.authority_actor`),
+    startedAt,
+    status,
+    elapsedSeconds,
+    evaluatorRuntime: optionalNonEmptyString(raw.evaluator_runtime, `${context}.evaluator_runtime`),
+    cause: status === 'rejected'
+      ? nonEmptyString(raw.reason, `${context}.reason`)
+      : status === 'contract_rejected' || status === 'not_reviewed'
+        || status === 'commit_failed' || status === 'raised'
+        ? nonEmptyString(raw.detail, `${context}.detail`)
+        : undefined,
+    gate: status === 'not_reviewed'
+      ? nonEmptyString(raw.gate, `${context}.gate`)
+      : undefined,
+  }
 }
 
 export function parseVerificationRunsResponse(raw: unknown): DashboardVerificationRunsResponse {
-  const root = isRecord(raw) ? raw : {}
-  const runs: VerificationRunRecord[] = asRecordArray(root.runs)
-    .map(row => ({
-      verificationId: asString(row.verification_id) ?? '',
-      taskId: asString(row.task_id) ?? '',
-      producer: asString(row.producer) ?? '',
-      authorityKind: asString(row.authority_kind) ?? '',
-      authorityActor: asString(row.authority_actor) ?? '',
-      startedAt: asNumber(row.started_at) ?? 0,
-      status: asVerificationRunStatus(row.status),
-      elapsedSeconds: asNumber(row.elapsed_s),
-      evaluatorRuntime: asString(row.evaluator_runtime),
-      // The backend names a rejection's cause `reason` and every failure shape's
-      // cause `detail`; the panel shows one column either way.
-      cause: asString(row.reason) ?? asString(row.detail),
-      gate: asString(row.gate),
-    }))
-    .filter(run => run.verificationId.length > 0)
+  if (!isRecord(raw)) protocolError('root must be an object')
+  exactFields(raw, ['runs', 'count', 'generated_at'], [], 'root')
+  if (!Array.isArray(raw.runs)) protocolError('root.runs must be an array')
+  if (!Number.isSafeInteger(raw.count) || (raw.count as number) < 0) {
+    protocolError('root.count must be a non-negative safe integer')
+  }
+  const runs = raw.runs.map(parseRun)
+  if (raw.count !== runs.length) {
+    protocolError(`root.count=${String(raw.count)} does not match runs.length=${runs.length}`)
+  }
   return {
     runs,
-    count: asInt(root.count) ?? runs.length,
-    generatedAt: asString(root.generated_at) ?? null,
+    count: raw.count as number,
+    generatedAt: nonEmptyString(raw.generated_at, 'root.generated_at'),
   }
 }
 

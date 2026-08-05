@@ -98,6 +98,7 @@ module Make (Payload : Payload) = struct
   type t =
     { entries : entry list Atomic.t
     ; path : string option
+    ; mutation_mutex : Stdlib.Mutex.t
     }
 
   type event =
@@ -130,7 +131,11 @@ module Make (Payload : Payload) = struct
     running @ recent_completed
   ;;
 
-  let create ?path () = { entries = Atomic.make []; path }
+  let create ?path () =
+    { entries = Atomic.make []
+    ; path
+    ; mutation_mutex = Stdlib.Mutex.create ()
+    }
 
   let event_to_yojson = function
     | Register { id; started_at; registration } ->
@@ -195,42 +200,46 @@ module Make (Payload : Payload) = struct
            (Printexc.to_string exn))
   ;;
 
-  let rec replace_entry t entry =
+  let replace_entry_locked t entry =
     let current = Atomic.get t.entries in
     let without_same_id =
       List.filter (fun existing -> not (String.equal existing.id entry.id)) current
     in
     let next = prune (entry :: without_same_id) in
-    if not (Atomic.compare_and_set t.entries current next)
-    then replace_entry t entry
+    Atomic.set t.entries next
   ;;
 
   let register t ~id ~started_at ~registration =
     let entry = { id; started_at; registration; status = Running } in
-    replace_entry t entry;
-    append_event t (Register { id; started_at; registration })
+    (* Memory publication and JSONL append are one ordered mutation. Without
+       this registry-local lock, a completion on another domain can observe the
+       new row after the CAS and append [Complete] before this [Register]
+       reaches the path-level append lock. Replay then skips the completion as
+       unknown and drops the trailing register as stale Running. *)
+    Stdlib.Mutex.protect t.mutation_mutex (fun () ->
+      replace_entry_locked t entry;
+      append_event t (Register { id; started_at; registration }))
   ;;
 
-  let rec complete t ~id ~completion =
-    let current = Atomic.get t.entries in
-    if not (List.exists (fun entry -> String.equal entry.id id) current)
-    then (
-      Log.Misc.warn "%s: completion for unknown id %s" Payload.name id;
-      `Unknown)
-    else (
-      let next =
-        current
-        |> List.map (fun entry ->
-          if String.equal entry.id id
-          then { entry with status = Completed completion }
-          else entry)
-        |> prune
-      in
-      if Atomic.compare_and_set t.entries current next
+  let complete t ~id ~completion =
+    Stdlib.Mutex.protect t.mutation_mutex (fun () ->
+      let current = Atomic.get t.entries in
+      if not (List.exists (fun entry -> String.equal entry.id id) current)
       then (
+        Log.Misc.warn "%s: completion for unknown id %s" Payload.name id;
+        `Unknown)
+      else (
+        let next =
+          current
+          |> List.map (fun entry ->
+            if String.equal entry.id id
+            then { entry with status = Completed completion }
+            else entry)
+          |> prune
+        in
+        Atomic.set t.entries next;
         append_event t (Complete { id; completion });
-        `Completed)
-      else complete t ~id ~completion)
+        `Completed))
   ;;
 
   let list_entries t =
@@ -311,7 +320,11 @@ module Make (Payload : Payload) = struct
     in
     try
       match Fs_compat.save_file_atomic path content with
-      | Ok () -> ()
+      | Ok () ->
+        (* [save_file_atomic] replaces the inode. Drop any writer cached by an
+           earlier in-process registry instance so the first post-replay append
+           cannot continue writing to the unlinked pre-compaction file. *)
+        Fs_compat.invalidate_cached_writer path
       | Error message ->
         Log.Misc.warn
           "%s: replay compaction failed for %s: %s"
@@ -385,7 +398,10 @@ module Make (Payload : Payload) = struct
       |> prune
     in
     if reached_end && malformed = [] then compact_replay_log path entries;
-    { entries = Atomic.make entries; path = Some path }
+    { entries = Atomic.make entries
+    ; path = Some path
+    ; mutation_mutex = Stdlib.Mutex.create ()
+    }
   ;;
 end
 

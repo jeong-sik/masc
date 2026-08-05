@@ -3812,25 +3812,12 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
 // transcript stops yanking the viewport while old messages are read.
 const STICK_TO_BOTTOM_THRESHOLD_PX = 80
 
-/** "21:44–00:28" for a collapsed run. Returns null when no turn in the run
- *  carried a timestamp, so the header omits the range instead of showing a
- *  fabricated one. */
-function autonomousGroupSpanLabel(entries: KeeperConversationEntry[]): string | null {
-  const start = timeLabel(entries[0]?.timestamp)
-  const end = timeLabel(entries[entries.length - 1]?.timestamp)
-  if (!start && !end) return null
-  if (!start) return end
-  if (!end || start === end) return start
-  return `${start}–${end}`
-}
-
-/** A run of consecutive autonomous turns, collapsed into a single row. Starts
- *  closed: these turns are the keeper working on its own, and the transcript's
- *  subject is the conversation around them. Expanding renders each turn through
- *  TurnWorkBundle — the same component a direct turn uses. Each expanded row
- *  renders the exact run's final text and typed work trace. */
+/** One autonomous turn, collapsed into a single row. Starts closed: the turn is
+ *  the keeper working on its own, and the transcript's subject is the
+ *  conversation around it. Expanding renders the exact turn's final text and
+ *  typed work trace through the same surfaces a direct turn uses. */
 function AutonomousTurnGroup({
-  entries,
+  entry,
   showMetadata,
   variant,
   showSourceBadge,
@@ -3839,7 +3826,7 @@ function AutonomousTurnGroup({
   toolOutputHydrationContract,
   action,
 }: {
-  entries: KeeperConversationEntry[]
+  entry: KeeperConversationEntry
   showMetadata?: boolean
   variant: ChatTranscriptVariant
   showSourceBadge: boolean
@@ -3849,7 +3836,7 @@ function AutonomousTurnGroup({
   action?: ChatTranscriptAction
 }) {
   const [open, setOpen] = useState(false)
-  const span = autonomousGroupSpanLabel(entries)
+  const timestamp = timeLabel(entry.timestamp)
   return html`
     <div class="chat-block-trace ${open ? 'open' : ''}">
       <button
@@ -3860,11 +3847,11 @@ function AutonomousTurnGroup({
       >
         <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
         <span class="chat-block-trace-label">자율턴</span>
-        <span class="chat-block-trace-count">${entries.length}개</span>
-        ${span ? html`<span class="chat-block-trace-meta">${span}</span>` : null}
+        <span class="chat-block-trace-count">1개</span>
+        ${timestamp ? html`<span class="chat-block-trace-meta">${timestamp}</span>` : null}
       </button>
       ${open
-        ? entries.map((entry) => (entry.traceSteps?.length ?? 0) > 0
+        ? (entry.traceSteps?.length ?? 0) > 0
           ? html`<${TurnWorkBundle}
               key=${entry.id}
               tools=${[]}
@@ -3884,7 +3871,7 @@ function AutonomousTurnGroup({
               variant=${variant}
               showSourceBadge=${showSourceBadge}
               action=${action}
-            />`)
+            />`
         : null}
     </div>
   `
@@ -3894,11 +3881,12 @@ type ChatRenderUnit =
   | { kind: 'entry'; entry: KeeperConversationEntry }
   | { kind: 'toolGroup'; id: string; entries: KeeperConversationEntry[] }
   | { kind: 'turnBundle'; id: string; entries: KeeperConversationEntry[]; entry: KeeperConversationEntry }
-  // A run of turns the keeper took on its own, collapsed into one row. Kept
+  // One turn the keeper took on its own, collapsed into one row. Kept
   // separate from turnBundle because these are not answers to anyone: a keeper
-  // wakes on the order of once a minute, so rendering each one inline would
-  // bury the conversation it sits between.
-  | { kind: 'autonomousGroup'; id: string; entries: KeeperConversationEntry[] }
+  // wakes on the order of once a minute, so rendering each turn expanded would
+  // bury the conversation it sits between. The exact turn remains the group
+  // boundary; adjacent autonomous turns must never merge into one giant run.
+  | { kind: 'autonomousGroup'; id: string; entry: KeeperConversationEntry }
 
 function entryTurnRef(entry: KeeperConversationEntry): string | null {
   const value = entry.turnRef?.trim()
@@ -3951,7 +3939,6 @@ export function buildChatRenderUnits(
 ): ChatRenderUnit[] {
   const units: ChatRenderUnit[] = []
   let run: KeeperConversationEntry[] = []
-  let autonomousRun: KeeperConversationEntry[] = []
   const flush = () => {
     if (run.length === 0) return
     const first = run[0]
@@ -3959,23 +3946,13 @@ export function buildChatRenderUnits(
     units.push({ kind: 'toolGroup', id: `tracegroup-${first.id}`, entries: run })
     run = []
   }
-  // Autonomous turns collapse whether or not tool folding is on: grouping them
-  // guards against their volume, it is not a tool-rendering preference.
-  const flushAutonomous = () => {
-    if (autonomousRun.length === 0) return
-    const first = autonomousRun[0]
-    if (!first) return
-    units.push({ kind: 'autonomousGroup', id: `autonomous-${first.id}`, entries: autonomousRun })
-    autonomousRun = []
-  }
   for (const entry of entries) {
     if (isAutonomousTurnEntry(entry)) {
       // Any open tool run belongs to the direct turn that preceded this wake.
       flush()
-      autonomousRun.push(entry)
+      units.push({ kind: 'autonomousGroup', id: `autonomous-${entry.id}`, entry })
       continue
     }
-    flushAutonomous()
     if (!groupToolCalls) {
       units.push({ kind: 'entry', entry })
       continue
@@ -4012,12 +3989,11 @@ export function buildChatRenderUnits(
     }
   }
   flush()
-  flushAutonomous()
   return units
 }
 
 function unitTimestamp(unit: ChatRenderUnit): string | null {
-  const ts = unit.kind === 'entry'
+  const ts = unit.kind === 'entry' || unit.kind === 'autonomousGroup'
     ? unit.entry.timestamp
     : unit.entries[0]?.timestamp ?? (unit.kind === 'turnBundle' ? unit.entry.timestamp : null)
   return ts ?? null
@@ -4078,7 +4054,7 @@ function renderChatTranscriptBody(opts: {
     if (unit.kind === 'autonomousGroup') {
       out.push(html`<${AutonomousTurnGroup}
         key=${unit.id}
-        entries=${unit.entries}
+        entry=${unit.entry}
         showMetadata=${showMetadata}
         variant=${variant}
         showSourceBadge=${showSourceBadge}

@@ -444,6 +444,33 @@ jobs:
       - name: Check CI test targets
         run: bash scripts/audit-ci-test-targets.sh
 
+      # Eleven repo-scanning audits that existed and never ran. scripts/ holds
+      # 182 scripts and ci.yml called 63 of them; these are the audit/check
+      # ones that read only tracked files, so CI can run them as-is. The rest
+      # of the unwired set either reads a live .masc runtime (credential and
+      # fleet audits, meaningless on a runner) or needs a tool the image lacks
+      # (valgrind), and stays out.
+      - name: Run repo audit scripts
+        run: |
+          set -e
+          for s in \
+            audit-catchall.sh \
+            audit-cross-module-exhaustive-match.sh \
+            audit-path-ssot.sh \
+            audit-tla-cfg-orphan.sh \
+            check_silent_failure.sh \
+            check-board-attention-exact-flow-boundary.sh \
+            check-compaction-exact-flow-boundary.sh \
+            check-doc-code-refs.sh \
+            check-keeper-turn-content-boundary.sh \
+            check-tool-error-format.sh \
+            check-variants.sh
+          do
+            echo "::group::$s"
+            bash "scripts/$s"
+            echo "::endgroup::"
+          done
+
       # SSOT and distribution-contract guards that existed but never ran.
       # test_prompt_asset_sync is the merge-time half of the managed-assets
       # manifest contract: a mismatch between the manifest and the embedded

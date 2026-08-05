@@ -185,6 +185,32 @@ let query_required ~tool_name ~start_time =
 let missing_required ~tool_name ~start_time field =
   workflow_err ~tool_name ~start_time (sprintf "%s is required" field)
 
+(* [confidence] decides whether a document is filed for review or published
+   straight into the library, and both schemas mark it required. Reading it
+   with a default would put an omitted field, an explicit null and a
+   non-number on the same value, and every one of those defaults landed on
+   the publishing side of the threshold. *)
+type confidence_read =
+  | Confidence of float
+  | Confidence_absent
+  | Confidence_not_a_number
+  | Confidence_out_of_range
+
+let confidence_in_range value =
+  Float.is_finite value
+  && Stdlib.Float.compare value 0.0 >= 0
+  && Stdlib.Float.compare value 1.0 <= 0
+
+let read_confidence args =
+  match Json_util.assoc_member_opt "confidence" args with
+  | None | Some `Null -> Confidence_absent
+  | Some (`Float value) ->
+    if confidence_in_range value then Confidence value else Confidence_out_of_range
+  | Some (`Int value) ->
+    let value = Float.of_int value in
+    if confidence_in_range value then Confidence value else Confidence_out_of_range
+  | Some _ -> Confidence_not_a_number
+
 (* Free-form library content remains opaque text. *)
 let text_ok ~tool_name ~start_time body : Tool_result.result =
   Tool_result.ok ~tool_name ~start_time body
@@ -276,7 +302,6 @@ let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
 let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
   let title = Json_util.get_string args "title" |> Option.value ~default:"" in
   let source = Json_util.get_string args "source" |> Option.value ~default:"direct_experience" in
-  let confidence = Json_util.get_float args "confidence" |> Option.value ~default:0.7 in
   let tags = Json_util.get_string_list args "tags" in
   let content = Json_util.get_string args "content" |> Option.value ~default:"" in
 
@@ -294,6 +319,12 @@ let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
        (sprintf "Invalid source. Must be one of: %s"
          (String.concat ", " valid_source_strings))
     | Some _ -> begin
+      match read_confidence args with
+      | Confidence_absent -> missing_required ~tool_name ~start_time "confidence"
+      | Confidence_not_a_number | Confidence_out_of_range ->
+        workflow_err ~tool_name ~start_time
+          "confidence must be a number between 0.0 and 1.0"
+      | Confidence confidence -> begin
       (* Determine destination based on confidence *)
       let dest_dir = if Stdlib.Float.compare confidence library_confidence_threshold < 0 then candidates_dir () else library_root () in
       let date = Time_compat.now () |> Unix.localtime in
@@ -328,7 +359,11 @@ verified_by: []
       (* Write file *)
       try
         Out_channel.with_open_text filepath (fun oc -> Out_channel.output_string oc full_content);
-        let status = if Stdlib.Float.compare confidence 0.5 < 0 then "candidate (needs verification)" else "library" in
+        let status =
+          if Stdlib.Float.compare confidence library_confidence_threshold < 0
+          then "candidate (needs verification)"
+          else "library"
+        in
         text_ok ~tool_name ~start_time
           (sprintf "Document added to %s: %s" status filepath)
       with
@@ -339,19 +374,24 @@ verified_by: []
                (Tool_error.to_string (Tool_error.of_exn exn)))
     end
   end
+  end
 
 (* Promote candidate to library *)
 let handle_promote ~tool_name ~start_time ctx args : Tool_result.result =
   let topic = Json_util.get_string args "topic"
     |> Option.value ~default:"" in
-  let new_confidence = Json_util.get_float args "confidence"
-    |> Option.value ~default:0.7 in
-
   if String.equal topic "" then topic_required ~tool_name ~start_time
-  else if Stdlib.Float.compare new_confidence 0.5 < 0 then
-    workflow_err ~tool_name ~start_time
-      "confidence must be >= 0.5 to promote"
-  else begin
+  else
+    match read_confidence args with
+    | Confidence_absent -> missing_required ~tool_name ~start_time "confidence"
+    | Confidence_not_a_number | Confidence_out_of_range ->
+      workflow_err ~tool_name ~start_time
+        "confidence must be a number between 0.0 and 1.0"
+    | Confidence new_confidence
+      when Stdlib.Float.compare new_confidence library_confidence_threshold < 0 ->
+      workflow_err ~tool_name ~start_time
+        (sprintf "confidence must be >= %.1f to promote" library_confidence_threshold)
+    | Confidence new_confidence -> begin
     let topic_lower = String.lowercase_ascii topic in
     let candidates = list_documents ~include_candidates:true () |> List.filter (fun f ->
       string_contains ~needle:"/candidates/" f &&
@@ -440,7 +480,11 @@ let tool_definitions = [
   ("masc_library_read", {|Read a specific library document by topic name.|}, [
     ("topic", "string", true, "Topic name or partial match (e.g., 'eio-mutex')");
   ]);
-  ("masc_library_add", {|Add a new document to the library. Documents with confidence < 0.5 go to candidates/.|}, [
+  ("masc_library_add",
+   sprintf
+     "Add a new document to the library. Documents with confidence < %.1f go to candidates/."
+     library_confidence_threshold,
+   [
     ("title", "string", true, "Document title");
     ("source", "string", true,
      sprintf "Source type: %s" (String.concat ", " valid_source_strings));
@@ -450,7 +494,8 @@ let tool_definitions = [
   ]);
   ("masc_library_promote", {|Promote a candidate document to the main library after verification.|}, [
     ("topic", "string", true, "Topic name to promote");
-    ("confidence", "number", true, "New confidence score (must be >= 0.5)");
+    ("confidence", "number", true,
+     sprintf "New confidence score (must be >= %.1f)" library_confidence_threshold);
   ]);
   ("masc_library_search", {|Search library documents by content or tags.|}, [
     ("query", "string", false, "Search query; empty or missing returns a workflow error");

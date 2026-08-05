@@ -13,45 +13,28 @@
 
 open Result.Syntax
 
-(** Verification criteria *)
-type criterion =
-  | Schema_match of Yojson.Safe.t   (** Output matches JSON schema *)
-  | Contains of string              (** Output must contain string *)
-  | Not_contains of string          (** Output must not contain string *)
-  | Custom of string                (** Natural language criterion for verifier *)
+(** A verification criterion. One constructor, because one is what is
+    produced: [Verification_protocol.submit_request_spec] builds the list with
+    [List.map (fun s -> Custom s)] over the task's completion contract, and
+    [Completion_authority_agent.completion_contract_of_request] accepts only
+    [Custom].
+
+    Three more used to sit here — [Schema_match], [Contains] and
+    [Not_contains]. Nothing ever constructed them; their only appearance
+    outside this module was the arm that rejected them with "criteria[i] is not
+    a persisted custom completion contract". Verifying a deliverable by testing
+    whether its text contains a substring was never wired, and the wire tag is
+    kept so the JSON shape does not change. *)
+type criterion = Custom of string  (** Natural-language criterion for a verifier *)
 [@@deriving show, eq]
 
 let criterion_to_yojson = function
-  | Schema_match schema ->
-      `Assoc [("type", `String "schema_match"); ("schema", schema)]
-  | Contains s ->
-      `Assoc [("type", `String "contains"); ("value", `String s)]
-  | Not_contains s ->
-      `Assoc [("type", `String "not_contains"); ("value", `String s)]
   | Custom s ->
       `Assoc [("type", `String "custom"); ("description", `String s)]
 
 let criterion_of_yojson = function
   | `Assoc fields ->
       (match List.assoc_opt "type" fields with
-       | Some (`String "schema_match") ->
-           (match List.assoc_opt "schema" fields with
-            | Some schema -> Ok (Schema_match schema)
-            | None -> Error "schema_match requires 'schema' field")
-       | Some (`String "contains") ->
-           let* value =
-             match List.assoc_opt "value" fields with
-             | Some (`String s) -> Ok s
-             | _ -> Error "contains requires 'value' string field"
-           in
-           Ok (Contains value)
-       | Some (`String "not_contains") ->
-           let* value =
-             match List.assoc_opt "value" fields with
-             | Some (`String s) -> Ok s
-             | _ -> Error "not_contains requires 'value' string field"
-           in
-           Ok (Not_contains value)
        | Some (`String "custom") ->
            let* description =
              match List.assoc_opt "description" fields with

@@ -116,12 +116,7 @@ let test_rejected_verdict_event_preserves_wire_type () =
 (* --- Criterion tests --- *)
 
 let test_criterion_roundtrip () =
-  let criteria = [
-    V.Schema_match (`Assoc [("type", `String "string")]);
-    V.Contains "hello";
-    V.Not_contains "error";
-    V.Custom "output should be helpful";
-  ] in
+  let criteria = [ V.Custom "output should be helpful"; V.Custom "" ] in
   List.iter (fun c ->
     let json = V.criterion_to_yojson c in
     match V.criterion_of_yojson json with
@@ -136,7 +131,14 @@ let test_criterion_of_yojson_errors () =
     (`String "not an object", "not object");
     (`Assoc [], "missing type");
     (`Assoc [("type", `String "banana")], "unknown type");
-    (`Assoc [("type", `String "contains")], "contains missing value");
+    (* The three criteria that no producer ever built -- a substring check, its
+       negation and a schema match -- are gone. A persisted request naming one
+       is now rejected at the parse instead of loading and being refused by the
+       completion authority. *)
+    (`Assoc [("type", `String "contains"); ("value", `String "hello")], "contains");
+    (`Assoc [("type", `String "not_contains"); ("value", `String "err")], "not_contains");
+    (`Assoc [("type", `String "schema_match"); ("schema", `Assoc [])], "schema_match");
+    (`Assoc [("type", `String "custom")], "custom missing description");
   ] in
   List.iter (fun (json, label) ->
     match V.criterion_of_yojson json with
@@ -1062,7 +1064,7 @@ let test_raw_workspace_submission_notifies_once () =
 let test_create_and_load () =
   with_temp_dir (fun base_path ->
     match V.create_request ~base_path ~task_id:"task-1"
-        ~output:(`String "result") ~criteria:[V.Contains "result"]
+        ~output:(`String "result") ~criteria:[V.Custom "result"]
         ~worker:"claude" () with
     | Error e -> Alcotest.fail e
     | Ok req ->
@@ -1083,7 +1085,7 @@ let test_create_and_load () =
 let test_delete_request () =
   with_temp_dir (fun base_path ->
     match V.create_request ~base_path ~task_id:"task-1"
-        ~output:(`String "result") ~criteria:[V.Contains "result"]
+        ~output:(`String "result") ~criteria:[V.Custom "result"]
         ~worker:"claude" () with
     | Error e -> Alcotest.fail e
     | Ok req ->

@@ -7,18 +7,11 @@ import type { DashboardKeeperWaitingInventory } from '../../api'
 const mocks = vi.hoisted(() => ({
   fetchKeeperWaitingInventory: vi.fn(),
   refresh: null as ((keeperName: string) => void) | null,
-  stopPolling: vi.fn(),
   unregisterPush: vi.fn(),
 }))
 
 vi.mock('../../api', () => ({
   fetchKeeperWaitingInventory: mocks.fetchKeeperWaitingInventory,
-}))
-vi.mock('../tools/tool-state', () => ({
-  KEEPER_WAITING_INVENTORY_REFRESH_MS: 15_000,
-}))
-vi.mock('../../lib/auto-refresh', () => ({
-  setupVisibleAutoRefresh: vi.fn(() => mocks.stopPolling),
 }))
 vi.mock('../../sse-store', () => ({
   registerKeeperWaitingInventoryRefresh: vi.fn((refresh: (keeperName: string) => void) => {
@@ -28,6 +21,10 @@ vi.mock('../../sse-store', () => ({
 }))
 vi.mock('../../dashboard-ws-state', () => ({
   dashboardWsReady: { value: true },
+  dashboardWsReconnectCount: {
+    value: 0,
+    subscribe: vi.fn(() => vi.fn()),
+  },
 }))
 
 import { KeeperLaneSection } from './keeper-lane-strip'

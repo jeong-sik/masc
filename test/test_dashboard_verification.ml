@@ -413,6 +413,59 @@ let test_requests_json_surfaces_conflict_triage_fields () =
      | `String "Reconcile board / planning / mutation surfaces before ordinary approval." -> ()
      | _ -> Alcotest.fail "next_action mismatch"))
 
+(* Edges the live store does not currently hold but the writer can produce: an
+   empty snapshot, an invalid-reference item that carries no reference at all,
+   and a kind this module never writes. The first two must project; the third
+   must fail the whole array rather than silently drop one item. *)
+let test_requests_json_snapshot_projection_edges () =
+  let row_for ~task_id items =
+    with_temp_base_path (fun base_path ->
+      let output =
+        `Assoc [
+          ("required_artifacts", `List []);
+          ("submitted_evidence", `List items);
+        ]
+      in
+      (match V.create_request ~base_path ~task_id ~output ~criteria:[]
+               ~worker:"keeper-alpha" () with
+       | Ok _ -> ()
+       | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e));
+      match member "requests" (D.requests_json ~base_path ()) with
+      | `List [row] -> row
+      | _ -> Alcotest.fail "expected one request")
+  in
+  let evidence row =
+    member "submitted_evidence" row |> Yojson.Safe.Util.to_list
+    |> List.map Yojson.Safe.Util.to_string
+  in
+  let error row =
+    match member "evidence_projection_error" row with
+    | `String s -> Some s
+    | _ -> None
+  in
+  let empty = row_for ~task_id:"task-empty-evidence" [] in
+  Alcotest.(check (list string)) "empty snapshot projects empty" [] (evidence empty);
+  Alcotest.(check (option string)) "empty snapshot is not an error" None (error empty);
+  let no_ref =
+    row_for ~task_id:"task-invalid-reference"
+      [ `Assoc [
+          ("kind", `String "artifact_unreadable");
+          ("reason", `Assoc [("code", `String "invalid_reference")]);
+        ] ]
+  in
+  Alcotest.(check (list string)) "reference-less unreadable still names its reason"
+    ["(unreadable: invalid_reference)"] (evidence no_ref);
+  let unknown =
+    row_for ~task_id:"task-unknown-kind"
+      [ `Assoc [("kind", `String "hologram"); ("content", `String "x")] ]
+  in
+  Alcotest.(check (list string)) "unknown kind projects nothing" [] (evidence unknown);
+  Alcotest.(check (option string)) "unknown kind fails the whole array"
+    (Some
+       ("malformed current-schema field \"submitted_evidence\": "
+        ^ "unknown submitted evidence item kind \"hologram\""))
+    (error unknown)
+
 let test_requests_json_surfaces_evidence_projection_error () =
   with_temp_base_path (fun base_path ->
     let output =
@@ -576,6 +629,8 @@ let () =
         test_requests_json_surfaces_evidence_projection_error;
       Alcotest.test_case "projects every snapshot item kind" `Quick
         test_requests_json_projects_every_snapshot_item_kind;
+      Alcotest.test_case "snapshot projection edges" `Quick
+        test_requests_json_snapshot_projection_edges;
       Alcotest.test_case "fd pressure remains observation-only" `Quick
         test_requests_and_summary_remain_available_after_fd_observation;
     ];

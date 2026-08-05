@@ -297,50 +297,62 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
       ~system_prompt:ctx.system_prompt
       ~tools:ctx.tools
   in
-  let cut candidate =
-    Runtime_model_input_tail_window.project
+  let raw_cut candidate =
+    Runtime_model_input_tail_window.project_with_drop
       ~measure_message_bytes
       ~capacity_bytes:ctx.max_request_body_bytes
       ~reserved_bytes
       candidate
   in
+  let cut candidate =
+    Result.map
+      (fun projection -> projection.Runtime_model_input_tail_window.messages)
+      (raw_cut candidate)
+  in
   fun messages ->
-    (* RFC-0363: aged tool-result bodies become blob markers before the cut is
-       chosen, so the same budget carries more atoms. [plan] only substitutes
-       upper-bound placeholders; the bytes are stored after the cut, for the
-       messages that survived it. An empty [base_path] means no blob store, so
-       there is nothing to demote into. *)
-    let planned =
-      if String.equal ctx.base_path ""
-      then
-        { Keeper_model_input_demotion.messages; pending = [] }
-      else Keeper_model_input_demotion.plan ~measure_message_bytes messages
-    in
+    (* RFC-0363: the unmodified history chooses the authoritative cut first.
+       Demotion may rewrite only atoms that cut already omitted, so appending a
+       turn cannot move the rewrite boundary unless the raw cut itself moves.
+       Markers can then buy some of those omitted atoms back without causing a
+       per-turn prompt-cache miss. *)
     let windowed =
-      match cut planned.Keeper_model_input_demotion.messages with
+      match raw_cut messages with
       | Error error ->
         Error (Runtime_model_input_tail_window.budget_error_to_string error)
-      | Ok windowed ->
+      | Ok raw_projection ->
+        let planned =
+          if String.equal ctx.base_path "" || raw_projection.dropped_atoms = 0
+          then { Keeper_model_input_demotion.messages; pending = [] }
+          else
+            Keeper_model_input_demotion.plan
+              ~measure_message_bytes
+              ~demote_before:raw_projection.dropped_atoms
+              messages
+        in
         (match planned.Keeper_model_input_demotion.pending with
-         | [] -> Ok windowed
+         | [] -> Ok raw_projection.messages
          | pending ->
-           let outcome =
-             Keeper_model_input_demotion.materialize
-               ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
-               ~pending
-               windowed
-           in
-           if outcome.Keeper_model_input_demotion.reverted = 0
-           then Ok outcome.Keeper_model_input_demotion.messages
-           else
-             (* A restored body is larger than the placeholder the cut was
-                measured against, so the cut is no longer known to fit. Choose
-                it again against what will actually be sent. *)
-             (match cut outcome.Keeper_model_input_demotion.messages with
-              | Ok recut -> Ok recut
-              | Error error ->
-                Error
-                  (Runtime_model_input_tail_window.budget_error_to_string error)))
+           (match cut planned.Keeper_model_input_demotion.messages with
+            | Error error ->
+              Error (Runtime_model_input_tail_window.budget_error_to_string error)
+            | Ok windowed ->
+              let outcome =
+                Keeper_model_input_demotion.materialize
+                  ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
+                  ~pending
+                  windowed
+              in
+              if outcome.Keeper_model_input_demotion.reverted = 0
+              then Ok outcome.Keeper_model_input_demotion.messages
+              else
+                (* A restored body is larger than the placeholder the cut was
+                   measured against, so the cut is no longer known to fit.
+                   Choose it again against what will actually be sent. *)
+                (match cut outcome.Keeper_model_input_demotion.messages with
+                 | Ok recut -> Ok recut
+                 | Error error ->
+                   Error
+                     (Runtime_model_input_tail_window.budget_error_to_string error))))
     in
     match windowed with
     | Error _ as error -> error

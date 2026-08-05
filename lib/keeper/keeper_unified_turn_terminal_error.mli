@@ -3,7 +3,7 @@
 
     Two paths based on [Keeper_error_classify.is_runtime_exhausted_error]:
 
-    - [Runtime_exhausted] — sets registry to [Turn_runtime_exhausted],
+    - [Runtime_exhausted] — calls [Keeper_registry.mark_turn_runtime_exhausted],
       increments the [kcl_to_ktc_exhaustion] FSM edge counter, logs a
       structured WARN listing the attempted runtimes, and increments
       the [oas_execution_errors] counter with phase [Runtime_exhausted].

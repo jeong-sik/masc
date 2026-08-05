@@ -60,6 +60,8 @@ val get : t -> verification_id:string -> run option
 val outcome_label : outcome -> string
 val status_label : run_status -> string
 val run_to_yojson : run -> Yojson.Safe.t
+type global_install_error = Already_installed
+
 val global : unit -> t
-val set_global : t -> unit
+val install_global : t -> (unit, global_install_error) result
 val max_completed_retained : int

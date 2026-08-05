@@ -74,3 +74,18 @@ module Make (Payload : Payload) : sig
   val list_entries : t -> entry list
   val get : t -> id:string -> entry option
 end
+
+(** Single-owner lifecycle for a process-wide registry. The first installation
+    replaces the inert pre-boot registry; every later installation is rejected
+    without changing the active registry. *)
+module Global (Registry : sig
+    type t
+
+    val initial : t
+  end) : sig
+  type t = Registry.t
+  type install_error = Already_installed
+
+  val current : unit -> t
+  val install : t -> (unit, install_error) result
+end

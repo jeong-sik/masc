@@ -71,6 +71,8 @@ describe('parseVerificationRunsResponse', () => {
 
   it('reads a rejection cause from `reason`', () => {
     const parsed = parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 1,
       runs: [row({ status: 'rejected', reason: 'aria attributes are not committed' })],
     })
     expect(onlyRun(parsed).status).toBe('rejected')
@@ -79,6 +81,8 @@ describe('parseVerificationRunsResponse', () => {
 
   it('reads a failure cause from `detail` and keeps the gate', () => {
     const parsed = parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 1,
       runs: [
         row({ status: 'not_reviewed', gate: 'evaluator_unavailable', detail: 'no runtime' }),
       ],
@@ -88,35 +92,50 @@ describe('parseVerificationRunsResponse', () => {
     expect(onlyRun(parsed).gate).toBe('evaluator_unavailable')
   })
 
-  it('maps an unrecognized status to `unknown` rather than a real outcome', () => {
-    // The backend emits a closed set, so an unrecognized value is a protocol
-    // break. Mapping it onto `approved` would let a garbled row claim a Task
-    // passed review; mapping it onto a specific failure would misattribute one.
-    const parsed = parseVerificationRunsResponse({
+  it('rejects an unrecognized status as a protocol break', () => {
+    expect(() => parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 1,
       runs: [row({ status: 'probably_fine' })],
-    })
-    expect(onlyRun(parsed).status).toBe('unknown')
+    })).toThrow('runs[0].status has unknown status')
   })
 
-  it('drops rows with no verification id', () => {
-    const parsed = parseVerificationRunsResponse({
-      runs: [row(), row({ verification_id: '' }), { status: 'approved' }],
-    })
-    expect(parsed.runs).toHaveLength(1)
+  it('rejects rows with no verification id instead of dropping evidence', () => {
+    expect(() => parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 1,
+      runs: [row({ verification_id: '' })],
+    })).toThrow('runs[0].verification_id must be a non-empty string')
   })
 
-  it('survives a malformed payload', () => {
-    expect(parseVerificationRunsResponse(null)).toEqual({
-      runs: [],
-      count: 0,
-      generatedAt: null,
-    })
+  it('rejects a malformed root instead of projecting an empty registry', () => {
+    expect(() => parseVerificationRunsResponse(null)).toThrow('root must be an object')
+  })
+
+  it('rejects outcome-specific fields on the wrong constructor', () => {
+    expect(() => parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 1,
+      runs: [row({ detail: 'cannot belong to approved' })],
+    })).toThrow('runs[0] fields mismatch')
+  })
+
+  it('rejects a count that disagrees with the decoded rows', () => {
+    expect(() => parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 2,
+      runs: [row()],
+    })).toThrow('root.count=2 does not match runs.length=1')
   })
 })
 
 describe('fetchVerificationRuns', () => {
   it('reads the dashboard verification-runs endpoint', async () => {
-    getMock.mockResolvedValue({ runs: [row()], count: 1 })
+    getMock.mockResolvedValue({
+      generated_at: '2026-08-05T00:00:00Z',
+      runs: [row()],
+      count: 1,
+    })
     const result = await fetchVerificationRuns()
     expect(getMock).toHaveBeenCalledWith(
       '/api/v1/dashboard/verification-runs',

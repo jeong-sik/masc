@@ -188,7 +188,31 @@ let test_replay_streams_and_compacts () =
   | None -> fail "expected compacted replay log to exist"
 ;;
 
-(* (6) Replay does not compact away an unterminated tail line. *)
+(* (6) Atomic replay compaction replaces the path inode. The shared JSONL
+   writer caches descriptors, so replay must invalidate the descriptor opened
+   by the pre-compaction registry before the replayed owner appends again. *)
+let test_append_after_replay_compaction_targets_live_path () =
+  let path = fresh_path "-append-after-replay.jsonl" in
+  let original = R.create ~path () in
+  R.register_running original ~run_id:"before" ~keeper:"k" ~preset:"p" ~started_at:1.0;
+  R.mark_completed original ~run_id:"before" ~outcome:R.Succeeded;
+  let replayed = R.replay path in
+  R.register_running replayed ~run_id:"after" ~keeper:"k" ~preset:"p" ~started_at:2.0;
+  R.mark_completed replayed ~run_id:"after" ~outcome:R.Succeeded;
+  let replayed_again = R.replay path in
+  check
+    bool
+    "pre-compaction run remains"
+    true
+    (Option.is_some (R.get replayed_again ~run_id:"before"));
+  check
+    bool
+    "post-compaction append reaches live path"
+    true
+    (Option.is_some (R.get replayed_again ~run_id:"after"))
+;;
+
+(* (7) Replay does not compact away an unterminated tail line. *)
 let test_replay_preserves_unterminated_tail () =
   let path = fresh_path "-partial-tail.jsonl" in
   let complete =
@@ -221,6 +245,10 @@ let () =
         ; test_case "no-path registry is in-memory only" `Quick test_no_path_is_in_memory_only
         ; test_case "replay skips malformed lines" `Quick test_replay_skips_malformed_lines
         ; test_case "replay streams and compacts log" `Quick test_replay_streams_and_compacts
+        ; test_case
+            "append after replay compaction targets the live path"
+            `Quick
+            test_append_after_replay_compaction_targets_live_path
         ; test_case
             "replay preserves unterminated tail"
             `Quick

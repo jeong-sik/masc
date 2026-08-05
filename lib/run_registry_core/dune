@@ -4,4 +4,4 @@
  (name run_registry_core)
  (public_name masc.run_registry_core)
  (wrapped false)
- (libraries fs_compat masc_log yojson))
+ (libraries fs_compat masc_log threads yojson))

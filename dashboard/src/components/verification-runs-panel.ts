@@ -39,8 +39,8 @@ const AUTO_REFRESH_MS = 15_000
  *  `rejected` is `info`, not a warning: a rejection returns the producer to
  *  work, which is the review loop functioning. The tones that mean something
  *  is wrong are the ones where no verdict reached the Task —
- *  `not_reviewed` / `commit_failed` / `raised` — plus `unknown`, which can only
- *  come from a protocol break and must never pose as healthy.
+ *  `not_reviewed` / `commit_failed` / `raised`. Protocol breaks are rejected by
+ *  the decoder before a row reaches this projection.
  *
  *  `contract_rejected` is `warn`: the Task was rejected without the configured
  *  LLM ever running, so repeated rows point upstream at malformed evidence
@@ -58,7 +58,6 @@ export function verificationRunTone(status: VerificationRunStatusLabel): StatusB
     case 'not_reviewed':
     case 'commit_failed':
     case 'raised':
-    case 'unknown':
       return 'bad'
   }
 }
@@ -81,8 +80,6 @@ export function verificationRunLabel(status: VerificationRunStatusLabel): string
       return '커밋 실패'
     case 'raised':
       return '예외'
-    case 'unknown':
-      return '알 수 없음'
   }
 }
 

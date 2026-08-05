@@ -64,6 +64,8 @@ module Make (Payload : Payload) : sig
     -> started_at:float
     -> registration:Payload.registration
     -> unit
+(** Registry mutations and their JSONL events are serialized per [t], so a
+    concurrent completion cannot overtake its registration on disk. *)
 
   val complete
     :  t

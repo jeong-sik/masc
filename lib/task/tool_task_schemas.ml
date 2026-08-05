@@ -42,6 +42,7 @@ let schemas : Masc_domain.tool_schema list = [
     description = Printf.sprintf
       "Add a new task to the backlog for agents to claim. \
 Task contracts provide completion/evidence context to the judge; they do not select a completion lane. \
+Write one when you know what done looks like: none is derived from the title, so a task without a contract reaches the judge with no criteria and is judged against a standard the worker never saw. \
 Every task must be submitted for an out-of-band system LLM completion-authority verdict. \
 submit_for_verification creates an asynchronous review state that no agent or Keeper can claim. The application-owned system LLM agent reads the immutable submitted-evidence snapshot and commits the typed verdict; an authenticated human operator is the separate HITL path. \
 To re-run completed work, create a new task with predecessor_task_id instead of touching the done one. \
@@ -75,20 +76,13 @@ Example: %s({title: 'Fix login bug', priority: 1, description: 'Users cannot log
         ]);
         ("contract", `Assoc [
           ("type", `String "object");
-          ("description", `String "Optional persisted task contract for strict deterministic completion gating.");
+          ("description", `String "What counts as done for this task, and what evidence shows it. Recorded at creation and never rewritten. Omit it and the task carries no criteria.");
           ("properties", `Assoc [
             ("strict", `Assoc [ ("type", `String "boolean") ]);
             ("completion_contract", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
             ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
             ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
             ("verify_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
-            ("links", `Assoc [
-              ("type", `String "object");
-              ("properties", `Assoc [
-                ("operation_id", `Assoc [ ("type", `String "string") ]);
-                ("session_id", `Assoc [ ("type", `String "string") ]);
-              ]);
-            ]);
           ]);
         ]);
       ]);
@@ -100,10 +94,9 @@ Example: %s({title: 'Fix login bug', priority: 1, description: 'Users cannot log
     description = Printf.sprintf
       "Add multiple tasks in one call (more efficient than repeated %s). \
 Use when: loading sprint backlog, importing from JIRA, creating related tasks. \
-Tasks default to the same advisory verification contract/evidence requirements as %s. \
+A task carries a completion contract only if you write one; none is derived from the title. \
 Each task gets unique ID (task-XXX). Atomic: all succeed or all fail. \
 Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: 'Task B', goal_id: 'g-124'}]})"
-      masc_add_task_name
       masc_add_task_name;
     input_schema = `Assoc [
       ("type", `String "object");

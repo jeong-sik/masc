@@ -2341,6 +2341,7 @@ let gc_make_task ~id ~created_at ~status : Masc_domain.task =
   ; handoff_context = None
   ; cycle_count = 0
   ; reclaim_policy = None
+  ; execution_links = Masc_domain.no_execution_links
   ; do_not_reclaim_reason = None
   }
 ;;
@@ -2585,6 +2586,7 @@ let test_append_archive_tasks () =
       ; handoff_context = None
       ; cycle_count = 0
       ; reclaim_policy = None
+      ; execution_links = Masc_domain.no_execution_links
       ; do_not_reclaim_reason = None
       }
     in
@@ -2712,6 +2714,154 @@ let test_predecessor_blank_treated_as_none () =
     | Error e ->
       Alcotest.fail
         ("blank predecessor rejected: " ^ Workspace.add_task_error_to_string e))
+;;
+
+(* ============================================================ *)
+(* Contract vs. execution links — one concept, one field         *)
+(* ============================================================ *)
+
+let task_of config task_id =
+  match
+    List.find_opt
+      (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+      (Workspace.read_backlog config).tasks
+  with
+  | Some t -> t
+  | None -> Alcotest.fail (Printf.sprintf "%s missing from backlog" task_id)
+;;
+
+let test_task_without_contract_keeps_none () =
+  with_test_env (fun config ->
+    match
+      Workspace.add_task_with_result
+        config
+        ~title:"Unstated criteria"
+        ~priority:2
+        ~description:"body text a title-derived criterion would have swallowed"
+    with
+    | Error e -> Alcotest.fail ("add_task rejected: " ^ Workspace.add_task_error_to_string e)
+    | Ok created ->
+      let task = task_of config created.task_id in
+      Alcotest.(check bool)
+        "creation states no criteria rather than inventing them"
+        true
+        (task.contract = None))
+;;
+
+let test_link_execution_artifacts_leaves_contract_alone () =
+  with_test_env (fun config ->
+    let stated : Masc_domain.task_contract =
+      { strict = false
+      ; completion_contract = [ "dashboard renders the linked run" ]
+      ; required_evidence = [ "artifact:run.log" ]
+      ; inspect_gate_evidence = []
+      ; verify_gate_evidence = [ "artifact:run.log" ]
+      }
+    in
+    match
+      Workspace.add_task_with_result
+        config
+        ~contract:stated
+        ~title:"Stated criteria"
+        ~priority:2
+        ~description:""
+    with
+    | Error e -> Alcotest.fail ("add_task rejected: " ^ Workspace.add_task_error_to_string e)
+    | Ok created ->
+      (match
+         Workspace.link_task_execution_artifacts_r
+           config
+           ~task_id:created.task_id
+           ~session_id:"session-alpha"
+           ~operation_id:"op-beta"
+           ()
+       with
+       | Error err ->
+         Alcotest.failf "link failed: %s" (Masc_domain.show_masc_error err)
+       | Ok _ -> ());
+      let task = task_of config created.task_id in
+      Alcotest.(check (option string))
+        "session id lands on the task"
+        (Some "session-alpha")
+        task.execution_links.session_id;
+      Alcotest.(check (option string))
+        "operation id lands on the task"
+        (Some "op-beta")
+        task.execution_links.operation_id;
+      Alcotest.(check (list string))
+        "linking did not rewrite the stated criteria"
+        stated.completion_contract
+        (match task.contract with
+         | Some c -> c.completion_contract
+         | None -> Alcotest.fail "linking dropped the stated contract"))
+;;
+
+let test_link_execution_artifacts_does_not_create_a_contract () =
+  with_test_env (fun config ->
+    match
+      Workspace.add_task_with_result
+        config
+        ~title:"Unstated criteria, later linked"
+        ~priority:2
+        ~description:""
+    with
+    | Error e -> Alcotest.fail ("add_task rejected: " ^ Workspace.add_task_error_to_string e)
+    | Ok created ->
+      (match
+         Workspace.link_task_execution_artifacts_r
+           config
+           ~task_id:created.task_id
+           ~session_id:"session-gamma"
+           ()
+       with
+       | Error err ->
+         Alcotest.failf "link failed: %s" (Masc_domain.show_masc_error err)
+       | Ok _ -> ());
+      let task = task_of config created.task_id in
+      Alcotest.(check (option string))
+        "session id lands on the task"
+        (Some "session-gamma")
+        task.execution_links.session_id;
+      Alcotest.(check bool)
+        "recording who ran it does not state what done means"
+        true
+        (task.contract = None))
+;;
+
+let test_execution_links_codec_omits_empty () =
+  let task = gc_make_task ~id:"task-l1" ~created_at:gc_ancient_ts ~status:Masc_domain.Todo in
+  let keys =
+    match Masc_domain.task_to_yojson task with
+    | `Assoc kvs -> List.map fst kvs
+    | _ -> []
+  in
+  Alcotest.(check bool)
+    "unlinked task writes no execution_links key"
+    false
+    (List.mem "execution_links" keys);
+  (match Masc_domain.task_of_yojson (Masc_domain.task_to_yojson task) with
+   | Ok decoded ->
+     Alcotest.(check bool)
+       "absent key decodes to no links"
+       true
+       (decoded.execution_links = Masc_domain.no_execution_links)
+   | Error e -> Alcotest.fail ("decode without key failed: " ^ e));
+  let linked =
+    { task with
+      execution_links = { operation_id = Some "op-1"; session_id = Some "sess-1" }
+    }
+  in
+  match Masc_domain.task_of_yojson (Masc_domain.task_to_yojson linked) with
+  | Ok decoded ->
+    Alcotest.(check (option string))
+      "operation id round-trips"
+      (Some "op-1")
+      decoded.execution_links.operation_id;
+    Alcotest.(check (option string))
+      "session id round-trips"
+      (Some "sess-1")
+      decoded.execution_links.session_id
+  | Error e -> Alcotest.fail ("decode with key failed: " ^ e)
 ;;
 
 let test_predecessor_codec_absent_and_malformed () =
@@ -3045,6 +3195,24 @@ let () =
             "codec absent and malformed"
             `Quick
             test_predecessor_codec_absent_and_malformed
+        ] )
+    ; ( "task contract vs execution links"
+      , [ Alcotest.test_case
+            "creation without a contract keeps None"
+            `Quick
+            test_task_without_contract_keeps_none
+        ; Alcotest.test_case
+            "linking leaves a stated contract alone"
+            `Quick
+            test_link_execution_artifacts_leaves_contract_alone
+        ; Alcotest.test_case
+            "linking does not create a contract"
+            `Quick
+            test_link_execution_artifacts_does_not_create_a_contract
+        ; Alcotest.test_case
+            "execution_links codec omits the empty value"
+            `Quick
+            test_execution_links_codec_omits_empty
         ] )
     ]
 ;;

@@ -411,7 +411,7 @@ let task_operation_updated_at (task : Masc_domain.task) =
   | Masc_domain.Todo -> task.created_at
 
 let task_operation_id (task : Masc_domain.task) =
-  match Option.bind task.contract (fun contract -> contract.links.operation_id) with
+  match task.execution_links.operation_id with
   | Some operation_id -> (
       match String_util.trim_to_option operation_id with
       | Some operation_id -> operation_id

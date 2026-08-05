@@ -532,7 +532,18 @@ type task_execution_links = {
   session_id : string option; [@default None]
 } [@@deriving show, yojson { strict = false }]
 
+(** No producer has been linked yet. A task starts here and stays here until a
+    runtime records the operation or session that carried it out. *)
+let no_execution_links = { operation_id = None; session_id = None }
+
 (** Task contract - persisted completion criteria and evidence facts.
+
+    Written once, when the task is created, and never rewritten: what counts as
+    done cannot change while the task runs. Execution identifiers live on the
+    task itself ([execution_links]) because they arrive afterwards — keeping
+    them here forced every link update to rewrite the contract, and a contract
+    that had to exist to be rewritten was manufactured with a placeholder
+    criterion.
 
     [completion_contract], [required_evidence], and [verify_gate_evidence] are
     supplied to the completion authority as task facts. The workspace FSM never
@@ -551,7 +562,6 @@ type task_contract = {
   required_evidence : string list; [@default []]
   inspect_gate_evidence : string list; [@default []]
   verify_gate_evidence : string list; [@default []]
-  links : task_execution_links; [@default { operation_id = None; session_id = None }]
 } [@@deriving show, yojson { strict = false }]
 
 (** Handoff context persisted across release/reclaim cycles *)
@@ -643,6 +653,10 @@ type task = {
      side registry). *)
   predecessor_task_id: string option; [@default None]
   contract: task_contract option; [@default None]
+  (* Runtime identifiers attached after the task is created, by whichever
+     execution picks it up. Separate from [contract] so linking them never
+     touches what counts as done. *)
+  execution_links: task_execution_links; [@default no_execution_links]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
   reclaim_policy: task_reclaim_policy option; [@default None]
@@ -760,10 +774,19 @@ let task_to_yojson t =
     | Some contract ->
         with_predecessor @ [ ("contract", task_contract_to_yojson contract) ]
   in
-  let with_handoff_context = match t.handoff_context with
-    | None -> with_contract
-    | Some handoff_context ->
+  (* Omitted while unlinked, so a task carries the key only once an execution
+     claimed it. *)
+  let with_execution_links =
+    match t.execution_links with
+    | { operation_id = None; session_id = None } -> with_contract
+    | links ->
         with_contract
+        @ [ ("execution_links", task_execution_links_to_yojson links) ]
+  in
+  let with_handoff_context = match t.handoff_context with
+    | None -> with_execution_links
+    | Some handoff_context ->
+        with_execution_links
         @
         [ ( "handoff_context",
             task_handoff_context_to_yojson handoff_context ) ]
@@ -811,6 +834,13 @@ let task_of_yojson json =
            | Ok contract -> Some contract
            | Error _ -> None)
     in
+    let execution_links = match m "execution_links" with
+      | `Null -> no_execution_links
+      | links_json ->
+          (match task_execution_links_of_yojson links_json with
+           | Ok links -> links
+           | Error _ -> no_execution_links)
+    in
     let handoff_context = match m "handoff_context" with
       | `Null -> None
       | handoff_json ->
@@ -842,6 +872,7 @@ let task_of_yojson json =
             created_by;
             predecessor_task_id;
             contract;
+            execution_links;
             handoff_context;
             cycle_count;
             reclaim_policy;

@@ -202,7 +202,6 @@ let make_task_contract ?(strict = false) ?(completion_contract = [])
     required_evidence;
     inspect_gate_evidence;
     verify_gate_evidence;
-    links = { operation_id = None; session_id = None };
   }
 
 let add_priority_task ctx ~title =
@@ -650,13 +649,17 @@ let () = test "handle_add_task_persists_contract" (fun () ->
   | _ -> failwith "expected exactly one task"
 )
 
-let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
+(* A caller who states no completion criteria gets a task that says so. The
+   handler used to fill the gap with "Task scope satisfied: <title>", which
+   read as stated criteria to everything downstream while telling a verifier
+   nothing. *)
+let () = test "handle_add_task_omits_contract_when_unstated" (fun () ->
   let ctx = make_test_ctx () in
   let result =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
-          ("title", `String "Default verification task");
+          ("title", `String "Unstated criteria task");
           ("description", `String "Need verifier-visible evidence.");
         ])
   in
@@ -664,21 +667,16 @@ let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
   match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.contract with
+      | None -> ()
       | Some contract ->
-          assert (not contract.strict);
-          assert (contract.completion_contract <> []);
-          (* The default contract carries task facts, not magic-token evidence
-             requirements. The LLM reviewer judges the completion claim in
-             context; this layer does not search for required substrings. *)
-          assert (contract.required_evidence = []);
-          assert (contract.verify_gate_evidence = []);
-          assert (str_contains (List.hd contract.completion_contract)
-                    "Default verification task")
-      | None -> failwith "expected default verification contract")
+          failwith
+            (Printf.sprintf
+               "expected no contract, got completion_contract=[%s]"
+               (String.concat "; " contract.completion_contract)))
   | _ -> failwith "expected exactly one task"
 )
 
-let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (fun () ->
+let () = test "handle_batch_add_tasks_omits_contract_when_unstated" (fun () ->
   let ctx = make_test_ctx () in
   let result =
     Task.Tool.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -698,14 +696,13 @@ let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (f
   List.iter
     (fun (task : Masc_domain.task) ->
        match task.contract with
+       | None -> ()
        | Some contract ->
-           (* Default verification contract is injected (completion_contract
-              present); RFC-0311 §8: it no longer carries magic-token
-              required/verify evidence. *)
-           assert (contract.completion_contract <> []);
-           assert (contract.required_evidence = []);
-           assert (contract.verify_gate_evidence = [])
-       | None -> failwith "expected default verification contract for batch task")
+           failwith
+             (Printf.sprintf
+                "expected no contract for %s, got completion_contract=[%s]"
+                task.id
+                (String.concat "; " contract.completion_contract)))
     tasks
 )
 

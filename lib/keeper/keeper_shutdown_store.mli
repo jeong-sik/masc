@@ -40,6 +40,12 @@ type inventory_entry =
   | Operation of Keeper_shutdown_types.t
   | Corrupt_record of corrupt_record
 
+(** Select one stable owner-addressable identity per Keeper with corrupt
+    durable state. *)
+val canonical_corrupt_operation_ids :
+  inventory_entry list ->
+  (string * Keeper_shutdown_types.Operation_id.t) list
+
 val error_to_string : error -> string
 
 val path :
@@ -108,6 +114,14 @@ val list_for_keeper :
   config:Workspace.config ->
   keeper_name:string ->
   (Keeper_shutdown_types.t list, error) result
+
+(** Return the deterministic owner-addressable identity for any corrupt
+    record belonging to [keeper_name]. The lexicographically smallest typed
+    operation id is selected so every recovery path restores the same fence. *)
+val corrupt_operation_id_for_keeper :
+  config:Workspace.config ->
+  keeper_name:string ->
+  (Keeper_shutdown_types.Operation_id.t option, error) result
 
 (** Enumerate every owner-addressable operation independently. A corrupt
     payload remains associated with the Keeper and operation identities from

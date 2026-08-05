@@ -1,5 +1,7 @@
 open Keeper_shutdown_types
 
+module String_map = Map.Make (String)
+
 type error =
   | Already_exists of string
   | Not_found of string
@@ -54,6 +56,29 @@ type corrupt_record =
 type inventory_entry =
   | Operation of Keeper_shutdown_types.t
   | Corrupt_record of corrupt_record
+
+let canonical_corrupt_operation_ids inventory =
+  inventory
+  |> List.fold_left
+       (fun selected -> function
+          | Operation _ -> selected
+          | Corrupt_record corrupt ->
+            let operation_id =
+              match String_map.find_opt corrupt.keeper_name selected with
+              | None -> corrupt.operation_id
+              | Some existing ->
+                if
+                  String.compare
+                    (Operation_id.to_string corrupt.operation_id)
+                    (Operation_id.to_string existing)
+                  < 0
+                then corrupt.operation_id
+                else existing
+            in
+            String_map.add corrupt.keeper_name operation_id selected)
+       String_map.empty
+  |> String_map.bindings
+;;
 
 let error_to_string = function
   | Already_exists path -> Printf.sprintf "shutdown operation already exists: %s" path
@@ -1085,6 +1110,13 @@ let scan_keeper_dir ~config ~keeper_name =
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Io_error (Printexc.to_string exn))))
+;;
+
+let corrupt_operation_id_for_keeper ~config ~keeper_name =
+  let* inventory = scan_keeper_dir ~config ~keeper_name in
+  Ok
+    (canonical_corrupt_operation_ids inventory
+     |> List.assoc_opt keeper_name)
 ;;
 
 let scan_inventory ~config =

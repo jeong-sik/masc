@@ -1167,6 +1167,81 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         (Option.map
            Shutdown_types.Operation_id.to_string
            released.snapshot_shutdown_operation_id);
+      let corrupt_owner_name = "superseded-corrupt-owner" in
+      let corrupt_owner_blocked =
+        operation
+          ~name:corrupt_owner_name
+          ~reason:Shutdown_types.Operator_stop_retain_meta
+          ~phase:blocked_phase
+      in
+      let corrupt_sibling =
+        operation
+          ~name:corrupt_owner_name
+          ~reason:Shutdown_types.Operator_stop_retain_meta
+          ~phase:Shutdown_types.Prepared
+      in
+      (match Shutdown_store.persist_new ~config corrupt_owner_blocked with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match Shutdown_store.persist_new ~config corrupt_sibling with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let corrupt_sibling_path =
+        match
+          Shutdown_store.path
+            ~config
+            ~keeper_name:corrupt_owner_name
+            corrupt_sibling.operation_id
+        with
+        | Ok path -> path
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match
+         Fs_compat.save_file_atomic
+           corrupt_sibling_path
+           (unsupported_shutdown_schema_fixture corrupt_sibling
+            |> Yojson.Safe.to_string)
+       with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:corrupt_owner_name
+           ~operation_id:corrupt_owner_blocked.operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "corrupt-owner fixture admission was already reserved");
+      let corrupt_owner_token =
+        match
+          Shutdown_supersession.preflight
+            ~config
+            ~keeper_name:corrupt_owner_name
+            ~actor:"tester"
+        with
+        | Ok token -> token
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      (match
+         Shutdown_supersession.commit_after_metadata_update
+           ~config
+           corrupt_owner_token
+       with
+       | Ok (Shutdown_supersession.Shutdown_superseded _) -> ()
+       | Ok Shutdown_supersession.No_shutdown_admission ->
+         fail "corrupt-owner blocked admission was not superseded"
+       | Error error -> fail (Shutdown_supersession.error_to_string error));
+      check
+        (option string)
+        "supersession hands admission directly to the corrupt sibling"
+        (Some (Shutdown_types.Operation_id.to_string corrupt_sibling.operation_id))
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:corrupt_owner_name)
+             .snapshot_shutdown_operation_id);
       let persisted_json =
         Fs_compat.load_file blocked_path |> Yojson.Safe.from_string
       in
@@ -1315,12 +1390,23 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
       (match Shutdown_runtime.restore_inventory_admission ~config inventory with
-       | Ok { blocked_keeper_names = []; _ } -> ()
+       | Error detail -> fail detail
        | Ok restored ->
-         failf
-           "Superseded boot restore fenced keepers: %s"
-           (String.concat "," restored.blocked_keeper_names)
-       | Error detail -> fail detail);
+         check
+           (list string)
+           "boot restore fences only the corrupt sibling owner"
+           [ corrupt_owner_name ]
+           restored.blocked_keeper_names;
+         check
+           (option string)
+           "boot restore keeps the superseded owner's corrupt identity"
+           (Some (Shutdown_types.Operation_id.to_string corrupt_sibling.operation_id))
+           (Option.map
+              Shutdown_types.Operation_id.to_string
+              (Masc.Keeper_turn_admission.snapshot_for
+                 ~base_path:config.base_path
+                 ~keeper_name:corrupt_owner_name)
+                .snapshot_shutdown_operation_id));
 
       let conflict =
         operation
@@ -2013,21 +2099,19 @@ let test_unsupported_shutdown_schema_retains_exact_fence () =
               ~base_path:config.base_path
               ~keeper_name:meta.name)
              .snapshot_shutdown_operation_id);
-      (match
-         Masc.Keeper_turn_admission.rollback_shutdown
-           ~base_path:config.base_path
-           ~keeper_name:meta.name
-           ~operation_id:current_operation.operation_id
-       with
-       | Masc.Keeper_turn_admission.Shutdown_rolled_back -> ()
-       | Masc.Keeper_turn_admission.Shutdown_not_reserved
-       | Masc.Keeper_turn_admission.Shutdown_reserved_by_other _ ->
-         fail "current operation did not release its exact recovery fence");
       (match restored.corrupt_owner_fences with
        | [ fence ] ->
-         (match Shutdown_runtime.restore_corrupt_owner_fence ~config fence with
-          | Ok () -> ()
-          | Error detail -> fail detail)
+         (match
+            Masc.Keeper_turn_admission.transition_shutdown
+              ~base_path:config.base_path
+              ~keeper_name:meta.name
+              ~from_operation_id:current_operation.operation_id
+              ~to_operation_id:(Some fence.operation_id)
+          with
+          | Masc.Keeper_turn_admission.Shutdown_transition_applied -> ()
+          | Masc.Keeper_turn_admission.Shutdown_transition_already_applied
+          | Masc.Keeper_turn_admission.Shutdown_transition_reserved_by_other _ ->
+            fail "current operation did not hand admission to its corrupt sibling")
        | _ -> fail "corrupt owner fence cardinality changed");
       check
         (option string)

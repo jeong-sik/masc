@@ -35,11 +35,6 @@ val restore_inventory_admission :
   Keeper_shutdown_store.inventory_entry list ->
   (restored_inventory, string) result
 
-(** Restore the deterministic corrupt-owner fence after a same-owner current
-    operation has recovered and released admission. *)
-val restore_corrupt_owner_fence :
-  config:Workspace.config -> corrupt_owner_fence -> (unit, string) result
-
 (** Fence admission and persist the operation synchronously, then fork lane
     join/finalization on the process-lifetime Keeper supervisor switch. The
     returned operation id is durable before this function returns. *)

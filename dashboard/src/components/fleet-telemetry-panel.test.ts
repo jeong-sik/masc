@@ -99,7 +99,6 @@ const namespaceTruthResponse: DashboardNamespaceTruthResponse = {
   root: {},
   execution: {
     summary: {
-      active_sessions: 2,
       active_operations: 4,
       continuity_alerts: 1,
     },

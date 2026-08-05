@@ -63,6 +63,7 @@ import {
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
+import { hydrateOasTelemetrySample } from './oas-telemetry-store'
 import {
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
@@ -780,6 +781,14 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
 
   if (event.type === 'keeper_heartbeat') {
     handleKeeperHeartbeat(event)
+    return true
+  }
+
+  // The payload is the sample itself (schema-validated at the boundary), so
+  // the read model hydrates from the push directly — zero HTTP fetch. The
+  // runtime monitor renders latestOasTelemetrySample; nothing to refresh.
+  if (event.type === 'oas_telemetry_sample') {
+    hydrateOasTelemetrySample(event)
     return true
   }
 

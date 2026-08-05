@@ -73,6 +73,7 @@ function makeGoal(id: string, title: string, children: GoalTreeNode[] = []): Goa
     target_value: null,
     due_date: null,
     parent_goal_id: null,
+    owner: null,
     attainment: {
       state: 'unmeasured',
       basis: 'unmeasured',

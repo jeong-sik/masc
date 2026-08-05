@@ -136,21 +136,6 @@ val permission_denied : action:string -> resource:string -> t
 val conflict         : resource:string -> reason:string -> t
 val timeout          : operation:string -> t
 
-(** {1 Drift-specific responses} *)
-
-val drift_detected :
-  similarity:float ->
-  drift_type:string ->
-  threshold:float ->
-  details:string ->
-  t
-(** Emits a [Warning]-severity response whose recovery hints are
-    selected by [drift_type] (["factual" | "semantic" | "structural"]
-    — anything else gets generic hints). *)
-
-val handoff_verified : similarity:float -> t
-(** Success envelope for a verified handoff, reporting [similarity]. *)
-
 (** {1 Task-specific responses}
 
     These route status strings through [Masc_domain.task_status_to_string]

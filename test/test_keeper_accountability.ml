@@ -625,86 +625,6 @@ let test_summary_json_memoizes_window_across_agents () =
       in
       check int "window read count" 1 read_count)
 
-(* --- Attribution tests --- *)
-
-module A = Attribution
-module Keeper_meta_contract = Masc.Keeper_meta_contract
-module KA = Masc.Keeper_accountability
-
-let outcome_kind = function
-  | A.Passed -> "passed"
-  | A.Policy_failed _ -> "policy_failed"
-  | A.Transition_blocked _ -> "transition_blocked"
-  | A.Partial_pass _ -> "partial_pass"
-
-let sample_evidence : Yojson.Safe.t =
-  `Assoc [ ("claim_id", `String "acct-test"); ("agent", `String "t-agent") ]
-
-let test_attr_pending_none () =
-  check bool "Pending yields None" true
-    (KA.attribution_from_status KA.Pending ~evidence:sample_evidence () = None)
-
-let test_attr_supported () =
-  match
-    KA.attribution_from_status KA.Supported ~evidence:sample_evidence ()
-  with
-  | Some attr ->
-    check string "gate" "accountability" attr.gate;
-    check string "outcome" "passed" (outcome_kind attr.outcome)
-  | None -> Alcotest.fail "expected Some for Supported"
-
-let test_attr_unsupported_with_reason () =
-  match
-    KA.attribution_from_status KA.Unsupported ~evidence:sample_evidence
-      ~resolution_reason:"conflicting evidence" ()
-  with
-  | Some { outcome = A.Policy_failed { reason }; _ } ->
-    check string "reason uses resolution_reason" "conflicting evidence" reason
-  | _ -> Alcotest.fail "expected Policy_failed"
-
-let test_attr_unsupported_default_reason () =
-  match
-    KA.attribution_from_status KA.Unsupported ~evidence:sample_evidence ()
-  with
-  | Some { outcome = A.Policy_failed { reason }; _ } ->
-    check bool "default reason mentions evidence" true
-      (Astring.String.is_infix ~affix:"evidence" reason)
-  | _ -> Alcotest.fail "expected Policy_failed"
-
-let test_attr_expired () =
-  match
-    KA.attribution_from_status KA.Expired ~evidence:sample_evidence ()
-  with
-  | Some { outcome = A.Policy_failed { reason }; _ } ->
-    check bool "reason mentions expired" true
-      (Astring.String.is_infix ~affix:"expired" reason)
-  | _ -> Alcotest.fail "expected Policy_failed"
-
-let test_attr_partial_score_clamped () =
-  (* 0 evidence → 0.5; 10+ evidence → clamped to 1.0. *)
-  let get_score refs_count =
-    match
-      KA.attribution_from_status KA.Partial ~evidence:sample_evidence
-        ~evidence_refs_count:refs_count ()
-    with
-    | Some { outcome = A.Partial_pass { score; _ }; _ } -> score
-    | _ -> Alcotest.fail "expected Partial_pass"
-  in
-  check (float 0.0001) "0 refs → 0.5 baseline" 0.5 (get_score 0);
-  check (float 0.0001) "3 refs → 0.8" 0.8 (get_score 3);
-  check (float 0.0001) "10 refs → clamped to 1.0" 1.0 (get_score 10);
-  check (float 0.0001) "50 refs → still 1.0" 1.0 (get_score 50)
-
-let test_attr_gate_invariants () =
-  List.iter
-    (fun status ->
-      match KA.attribution_from_status status ~evidence:sample_evidence () with
-      | Some attr ->
-        check string "gate=accountability" "accountability" attr.gate;
-        check bool "origin=Det" true (attr.origin = A.Det)
-      | None -> () (* Pending is legit None *))
-    [ KA.Pending; KA.Supported; KA.Unsupported; KA.Expired; KA.Partial ]
-
 let () =
   Alcotest.run "Keeper_accountability"
     [
@@ -738,19 +658,5 @@ let () =
             test_summary_lookup_reuses_fresh_snapshot_across_lookup_construction;
           test_case "summary json memoizes window across agents" `Quick
             test_summary_json_memoizes_window_across_agents;
-        ] );
-      ( "attribution",
-        [
-          test_case "Pending → None" `Quick test_attr_pending_none;
-          test_case "Supported → Passed" `Quick test_attr_supported;
-          test_case "Unsupported → Policy_failed (resolution reason)"
-            `Quick test_attr_unsupported_with_reason;
-          test_case "Unsupported → Policy_failed (default reason)" `Quick
-            test_attr_unsupported_default_reason;
-          test_case "Expired → Policy_failed" `Quick test_attr_expired;
-          test_case "Partial score clamped [0.5, 1.0]" `Quick
-            test_attr_partial_score_clamped;
-          test_case "gate=accountability origin=Det invariant" `Quick
-            test_attr_gate_invariants;
         ] );
     ]

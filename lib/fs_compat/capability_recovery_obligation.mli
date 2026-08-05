@@ -535,6 +535,12 @@ module For_testing : sig
   val area_directory : store -> area -> Eio.Fs.dir_ty Eio.Path.t
 end
 
+(** The label an {!operation} carries in failure JSON.  Exported because
+    [Capability_recovery_reconciler] renders the same field and kept its
+    own copy of the 17 arms; two mappings for one type drift apart the
+    moment an operation is added. *)
+val operation_to_string : operation -> string
+
 val validation_error_to_string : validation_error -> string
 val failure_to_string : failure -> string
 val transition_error_to_string : transition_error -> string

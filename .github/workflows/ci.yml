@@ -1017,6 +1017,22 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_goal_phase_projection"
 
+      # Keeper tool descriptor registry: the suite pins each cluster tool's
+      # keeper_model_projection and asserts that Operator_only tools are absent
+      # from the autonomous Keeper bundle. Compile-only under @check leaves both
+      # ungated, so a projection change reaches Keepers without a failing check.
+      - name: Run keeper tool descriptor registry integrity suite
+        id: keeper_tool_descriptor_registry_integrity_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_tool_descriptor_registry_integrity"
+
       # Schedule occurrence reclaim: an occurrence the consumer durably accepted
       # is [Execution_dispatched] until a correlated completion path settles it,
       # so nothing in the scheduler finishes it on its own. The suite drives a

@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { route, navigate } from '../router'
 import { goals, tasks, keepers, executionTaskTotal } from '../store'
 import { goalTreeData } from '../goal-tree-state'
-import { normalizeTask } from '../store-normalizers'
+import { normalizeTask, normalizeTaskStatus } from '../store-normalizers'
 import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
 import { BoardModerationSurface } from './board/board-moderation-surface'
 import { BoardSurface } from './board/board-surface'
@@ -206,20 +206,13 @@ function isClaimableBacklogTask(task: Task): boolean {
   return (task.status ?? 'todo') === 'todo' && !hasTaskAssignee(task)
 }
 
-const GOAL_STORE_TASK_STATUS: Readonly<Record<string, NonNullable<Task['status']>>> = {
-  pending: 'todo',
-  todo: 'todo',
-  claimed: 'claimed',
-  in_progress: 'in_progress',
-  inprogress: 'in_progress',
-  awaiting_verification: 'awaiting_verification',
-  completed: 'done',
-  done: 'done',
-  cancelled: 'cancelled',
-  blocked: 'blocked',
-  paused: 'paused',
-  unknown: 'unknown',
-}
+// The Goal Store tree now speaks the domain's own status spelling
+// (Masc_domain.task_status_to_string), the same one the execution payload uses.
+// This map existed to absorb a second vocabulary — "pending" for todo,
+// "completed" for done — that dashboard_goals_types_accessor emitted on its
+// own. Issues #8412 and #8364 already ruled that emitters must route through
+// the Variant SSOT; the goals path had missed it. With one spelling there is
+// nothing left to translate, so tree statuses parse exactly like execution ones.
 
 interface GoalStoreTaskStatus {
   readonly status: NonNullable<Task['status']>
@@ -228,11 +221,10 @@ interface GoalStoreTaskStatus {
 
 function normalizeGoalStoreTaskStatus(value: unknown): GoalStoreTaskStatus {
   const raw = typeof value === 'string' ? value.trim() : ''
-  const token = raw.toLowerCase()
-  const status = GOAL_STORE_TASK_STATUS[token]
-  return status
-    ? { status, status_raw: status === 'unknown' ? raw : null }
-    : { status: 'unknown', status_raw: raw || null }
+  const status = normalizeTaskStatus(raw)
+  return status === undefined || status === 'unknown'
+    ? { status: 'unknown', status_raw: raw || null }
+    : { status, status_raw: null }
 }
 
 function goalProgressCounts(goalTasks: Task[]): GoalProgressCounts {

@@ -59,14 +59,6 @@ let task_linkage_source_opt ?(goal_task_index = Hashtbl.create 0) (task : Masc_d
 let task_assignee (task : Masc_domain.task) : string option =
   Masc_domain.task_assignee_of_status task.task_status
 
-let task_status_label (task : Masc_domain.task) : string =
-  match task.task_status with
-  | Masc_domain.Todo -> "pending"
-  | Masc_domain.Claimed _ -> "claimed"
-  | Masc_domain.InProgress _ -> "in_progress"
-  | Masc_domain.AwaitingVerification _ -> "awaiting_verification"
-  | Masc_domain.Done _ -> "completed"
-  | Masc_domain.Cancelled _ -> "cancelled"
 
 let task_is_terminal (task : Masc_domain.task) : bool =
   Masc_domain.task_status_is_terminal task.task_status

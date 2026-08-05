@@ -23,24 +23,27 @@ let goal_phase_color = function
   | Goal_phase.Completed -> "#60a5fa"
   | Goal_phase.Dropped -> "#6b7280"
 
-let task_status_color status_label =
-  match status_label with
-  | "pending" -> "#6b7280"
-  | "claimed" -> "#f59e0b"
-  | "in_progress" -> "#3b82f6"
-  | "awaiting_verification" -> "#a78bfa"
-  | "completed" -> "#4ade80"
-  | "cancelled" -> "#ef4444"
-  | _ -> "#888888"
+(* Exhaustive on [task_status], not a string match with a grey catch-all. The
+   catch-all silently absorbed every label it did not recognise, which is how a
+   second status vocabulary survived here: "pending"/"completed" coloured fine
+   while the SSOT spelling "todo"/"done" fell through to grey. A new status now
+   breaks this match instead of rendering as unknown. *)
+let task_status_color (status : Masc_domain.task_status) =
+  match status with
+  | Masc_domain.Todo -> "#6b7280"
+  | Masc_domain.Claimed _ -> "#f59e0b"
+  | Masc_domain.InProgress _ -> "#3b82f6"
+  | Masc_domain.AwaitingVerification _ -> "#a78bfa"
+  | Masc_domain.Done _ -> "#4ade80"
+  | Masc_domain.Cancelled _ -> "#ef4444"
 
 let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
-  let status = task_status_label task in
   `Assoc
     ([
       ("id", `String task.id);
       ("title", `String task.title);
-      ("status", `String status);
-      ("status_color", `String (task_status_color status));
+      ("status", `String (Masc_domain.task_status_to_string task.task_status));
+      ("status_color", `String (task_status_color task.task_status));
       ("priority", `Int task.priority);
       ("assignee", Json_util.string_opt_to_json (task_assignee task));
       ("linkage_source", `String linkage_source);
@@ -103,14 +106,19 @@ let task_summary_to_json tasks =
   let unassigned_count = ref 0 in
   List.iter
     (fun ((task, linkage_source) : Masc_domain.task * string) ->
-      let status = task_status_label task in
-      bump by_status status;
+      bump by_status (Masc_domain.task_status_to_string task.task_status);
       bump by_linkage_source linkage_source;
       if task_is_done task then incr done_count;
       if task_is_terminal task then incr terminal_count else incr open_count;
-      if String.equal status "awaiting_verification" then
-        incr awaiting_verification_count;
-      if String.equal status "cancelled" then incr cancelled_count;
+      (* One exhaustive match over the variant instead of two string equalities
+         against a label that had its own spelling. *)
+      (match task.task_status with
+       | Masc_domain.AwaitingVerification _ -> incr awaiting_verification_count
+       | Masc_domain.Cancelled _ -> incr cancelled_count
+       | Masc_domain.Todo
+       | Masc_domain.Claimed _
+       | Masc_domain.InProgress _
+       | Masc_domain.Done _ -> ());
       match task_assignee task with None -> incr unassigned_count | Some _ -> ())
     tasks;
   let total = List.length tasks in
@@ -255,7 +263,7 @@ let build_goal_timeline node linked_keepers approvals goal_events =
   let task_events =
     node.tasks
     |> List.map (fun ((task, linkage_source) : Masc_domain.task * string) ->
-           let status = task_status_label task in
+           let status = Masc_domain.task_status_to_string task.task_status in
            timeline_event_json ~ts:(task_updated_at task) ~kind:"task"
              ~lane:("task:" ^ task.id)
              ~title:task.title

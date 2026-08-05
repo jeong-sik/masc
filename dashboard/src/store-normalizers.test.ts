@@ -121,6 +121,23 @@ describe('normalizeTaskStatus', () => {
     })
   })
 
+  // PredecessorSection guards on this field and returns null when it is absent,
+  // so dropping it here makes the lineage link unrenderable no matter what the
+  // backend sends. The overlay's own test asserts on its source text, which
+  // cannot observe that.
+  it('carries the predecessor link through to the store', () => {
+    expect(normalizeTask({
+      id: 'task-2',
+      title: 'Successor task',
+      predecessor_task_id: 'task-1',
+    })).toMatchObject({ predecessor_task_id: 'task-1' })
+  })
+
+  it('reports an absent predecessor as null, not undefined', () => {
+    expect(normalizeTask({ id: 'task-3', title: 'Root task' }))
+      .toMatchObject({ predecessor_task_id: null })
+  })
+
 })
 
 describe('normalizeMessage', () => {

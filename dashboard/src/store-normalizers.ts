@@ -136,6 +136,10 @@ export function normalizeTask(raw: unknown): Task | null {
     completed_at: asString(raw.completed_at),
     cancelled_by: asString(raw.cancelled_by) ?? null,
     reason: asString(raw.reason) ?? null,
+    // The backend has emitted this since RFC-0323 G-8 and PredecessorSection
+    // reads it, but it was never copied here, so every task reached the store
+    // with it undefined and the section returned null on its first guard.
+    predecessor_task_id: asString(raw.predecessor_task_id) ?? null,
     contract,
     handoff_context: handoffContext,
     execution_links: executionLinks,

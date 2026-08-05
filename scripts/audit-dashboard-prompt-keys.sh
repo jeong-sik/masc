@@ -5,7 +5,7 @@
 # prompt asset is a server-side change that leaves those strings syntactically
 # valid, so a panel keeps rendering a block that resolves to empty instead of
 # failing. That happened after #26823 folded keeper.world / keeper.capabilities
-# / keeper.constitution into keeper.system: the config panel decoded three
+# / keeper.constitution into keeper: the config panel decoded three
 # blocks the server no longer sends and rendered nothing, and the assembly
 # panel described six stages whose keys were gone.
 #
@@ -43,7 +43,7 @@ ns="$(sed 's/\..*//' "$existing" | sort -u | paste -sd'|' -)"
 
 # -A5 so a key inside a multi-line promptKeys array is seen. Without it the
 # sink line holds only "promptKeys: [" and every key on a following line goes
-# unchecked, which is how keeper.memory_os_recall.context survived its own
+# unchecked, which is how a removed dotted prompt key survived its own
 # asset being deleted.
 grep -rn -A5 --include='*.ts' --exclude='*.test.ts' -E "$SINKS" dashboard/src 2>/dev/null \
   | grep -oE "'(${ns})(\.[a-z_.]+)?'" \

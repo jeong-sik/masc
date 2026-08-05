@@ -323,10 +323,14 @@ check_forbidden_active "V7s-retired-runtime-tool-family-authorization" \
 
 # V7t: the withdrawn completion-trust hierarchy must not return as a public
 # fixed-threshold CLI or its dedicated deterministic corpus.
+# [data/] was dropped from this list when #27091 removed its last tracked
+# files; git does not carry empty directories, so a fresh checkout has no
+# such path and the guard errored on every PR. The pattern still names
+# [data/eval/completion_trust], so the corpus returning under that path is
+# caught the moment any scanned tree references it.
 check_forbidden_active "V7t-retired-completion-trust-cli" \
   'masc_completion_trust_eval|masc-completion-trust-eval|data/eval/completion_trust' \
   "bin/" \
-  "data/" \
   "lib/" \
   "test/"
 

@@ -166,4 +166,15 @@ memory/
 # never a committed artifact.
 *.golden.actual
 
+# OCaml compilation output. Dune keeps its own under _build/, but scripts/ holds
+# .ml files compiled in place by ocamlfind/ocamlc, and two of those outputs were
+# tracked from 2026-06 until this entry landed.
+*.cmi
+*.cmo
+*.cmx
+*.cma
+*.cmxa
+*.cmt
+*.cmti
+
 # End of .gitignore

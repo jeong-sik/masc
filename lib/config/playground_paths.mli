@@ -29,12 +29,6 @@ val sanitize_keeper_name : string -> string
 val bundle_root : string -> string
 (** Relative path [".masc/playground/<safe_name>/"] (trailing slash). *)
 
-val repos_path : string -> string
-(** Relative path [".masc/playground/<safe_name>/repos/"]. *)
-
-val bundle_paths : string -> string list
-(** Bundle directories in canonical order: [\[bundle_root; repos_path\]]. *)
-
 type playground_file_path =
   { keeper_name : string
   ; relative_path : string

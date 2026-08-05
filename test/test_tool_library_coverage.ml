@@ -1,8 +1,8 @@
 (** Coverage tests for Tool_library — Knowledge library management
 
     Tests dispatch routing, input validation, and handler integration
-    for 5 tools: masc_library_list, masc_library_read, masc_library_add,
-    masc_library_promote, masc_library_search
+    for 4 tools: masc_library_list, masc_library_read, masc_library_add,
+    masc_library_search
 
     Note: Tool_library uses MASC_BASE_PATH first for library_root().
     Tests override MASC_BASE_PATH to a
@@ -84,11 +84,9 @@ let cleanup_dir dir =
 let setup_library_dirs base_path =
   let docs_dir = Filename.concat base_path "docs" in
   let lib_dir = Filename.concat docs_dir "library" in
-  let cand_dir = Filename.concat lib_dir "candidates" in
   Unix.mkdir docs_dir 0o755;
   Unix.mkdir lib_dir 0o755;
-  Unix.mkdir cand_dir 0o755;
-  (lib_dir, cand_dir)
+  lib_dir
 
 let original_home = Sys.getenv_opt "HOME"
 let original_masc_base_path = Sys.getenv_opt "MASC_BASE_PATH"
@@ -128,7 +126,7 @@ let test_dispatch_all_known () =
   with_temp_base_path (fun ctx ->
     let tools = [
       "masc_library_list"; "masc_library_read"; "masc_library_add";
-      "masc_library_promote"; "masc_library_search";
+      "masc_library_search";
     ] in
     List.iter (fun name ->
       let result = Tool_library.dispatch ctx ~name ~args:(`Assoc []) in
@@ -144,14 +142,6 @@ let test_list_empty () =
   with_temp_base_path (fun ctx ->
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_list" ~args:(`Assoc []) in
     Alcotest.(check bool) "list ok" true ok;
-    Alcotest.(check bool) "response mentions library" true (msg_contains ~needle:"librar" msg)
-  )
-
-let test_list_with_candidates () =
-  with_temp_base_path (fun ctx ->
-    let args = `Assoc [("include_candidates", `Bool true)] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_list" ~args in
-    Alcotest.(check bool) "list with candidates ok" true ok;
     Alcotest.(check bool) "response mentions library" true (msg_contains ~needle:"librar" msg)
   )
 
@@ -186,7 +176,6 @@ let test_read_by_title_roundtrip () =
       ("title", `String title);
       ("content", `String "Body of the document for round-trip.");
       ("source", `String "direct_experience");
-      ("confidence", `Float 0.9);
     ] in
     let (added, _) = dispatch_exn ctx ~name:"masc_library_add" ~args:add_args in
     Alcotest.(check bool) "add succeeds" true added;
@@ -259,22 +248,9 @@ let test_add_success () =
       ("title", `String "test knowledge");
       ("content", `String "This is test content for library.");
       ("source", `String "direct_experience");
-      ("confidence", `Float 0.8);
     ] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
     Alcotest.(check bool) "add succeeds" true ok;
-    Alcotest.(check bool) "response confirms add" true (msg_contains ~needle:"added" msg || msg_contains ~needle:"success" msg || msg_contains ~needle:"librar" msg)
-  )
-
-let test_add_low_confidence () =
-  with_temp_base_path (fun ctx ->
-    let args = `Assoc [
-      ("title", `String "uncertain knowledge");
-      ("content", `String "This might be useful.");
-      ("confidence", `Float 0.3);
-    ] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
-    Alcotest.(check bool) "low confidence accepted" true ok;
     Alcotest.(check bool) "response confirms add" true (msg_contains ~needle:"added" msg || msg_contains ~needle:"success" msg || msg_contains ~needle:"librar" msg)
   )
 
@@ -322,71 +298,80 @@ let test_search_with_query () =
   )
 
 (* ============================================================
-   library_promote tests
+   The self-scored confidence axis is gone
+   ============================================================
+
+   [confidence] was a number the writing agent chose for its own document.
+   It decided one thing: whether the file landed in [docs/library/] or
+   [docs/library/candidates/]. Both directories were read by
+   [masc_library_read] and [masc_library_search], so the split changed
+   what [masc_library_list] printed by default and nothing else.
+
+   Measured on the live library before removal: 61 of 62 documents scored
+   >= 0.70, one scored 0.40, and [verified_by] was the empty list in all 61
+   published documents — [masc_library_promote], whose only effect was to
+   raise that number and stamp a verifier, had never run.
    ============================================================ *)
 
-let test_promote_empty_topic () =
+let test_promote_is_not_a_tool () =
   with_temp_base_path (fun ctx ->
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_promote" ~args:(`Assoc []) in
-    Alcotest.(check bool) "empty topic fails" false ok;
-    Alcotest.(check bool) "error mentions topic" true (msg_contains ~needle:"topic" msg)
+    let dispatched =
+      Tool_library.dispatch ctx ~name:"masc_library_promote"
+        ~args:(`Assoc [ ("topic", `String "anything") ])
+    in
+    Alcotest.(check bool) "promote no longer dispatches" true (dispatched = None);
+    Alcotest.(check bool)
+      "promote is absent from the registered schemas"
+      false
+      (List.exists
+         (fun (schema : Masc_domain.tool_schema) ->
+           String.equal schema.name "masc_library_promote")
+         Tool_library.schemas)
   )
 
-let test_promote_nonexistent () =
-  with_temp_base_path (fun ctx ->
-    let args = `Assoc [
-      ("topic", `String "nonexistent");
-      ("confidence", `Float 0.9);
-    ] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_promote" ~args in
-    Alcotest.(check bool) "nonexistent fails" false ok;
-    Alcotest.(check bool) "error mentions not found" true
-      (msg_contains ~needle:"not found" msg || msg_contains ~needle:"no" msg)
-  )
+let test_add_schema_has_no_confidence () =
+  let schema = required_schema "masc_library_add" in
+  Alcotest.(check bool)
+    "confidence is not an input property"
+    false
+    (schema_has_property schema "confidence");
+  Alcotest.(check bool)
+    "confidence is not required"
+    false
+    (List.mem "confidence" (schema_required_fields schema))
 
-let test_promote_updates_frontmatter () =
+(* Nothing writes a self-scored number or an empty verifier list into the
+   document any more, so nothing downstream can read one back. *)
+let test_added_frontmatter_carries_only_observable_fields () =
   with_temp_base_path (fun ctx ->
-    let candidate_path =
-      Filename.concat (Tool_library.candidates_dir ()) "regex-topic-20260425.md"
+    let (added, _) =
+      dispatch_exn ctx ~name:"masc_library_add"
+        ~args:(`Assoc [
+          ("title", `String "Frontmatter Shape");
+          ("content", `String "body");
+          ("source", `String "direct_experience");
+        ])
     in
-    Out_channel.with_open_text candidate_path (fun oc ->
-      Out_channel.output_string oc
-        {|---
-title: Regex Topic
-source: direct_experience
-confidence: 0.30
-author: test-agent
-created: 2026-04-25
-updated: 2026-04-25
-tags: []
-verified_by: []
----
-
-Promotion should preserve the body.
-|});
-    let args =
-      `Assoc [
-        ("topic", `String "regex-topic");
-        ("confidence", `Float 0.91);
-      ]
+    Alcotest.(check bool) "add succeeds" true added;
+    let root = Tool_library.library_root () in
+    let path =
+      match
+        Sys.readdir root |> Array.to_list
+        |> List.filter (fun f -> Filename.check_suffix f ".md")
+      with
+      | [ single ] -> Filename.concat root single
+      | other ->
+        Alcotest.failf "expected exactly one document, got %d" (List.length other)
     in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_promote" ~args in
-    Alcotest.(check bool) "promote succeeds" true ok;
-    Alcotest.(check bool) "response mentions promoted" true
-      (msg_contains ~needle:"promoted" msg);
-    Alcotest.(check bool) "candidate removed" false
-      (Sys.file_exists candidate_path);
-    let promoted_path =
-      Filename.concat (Tool_library.library_root ())
-        (Filename.basename candidate_path)
-    in
-    Alcotest.(check bool) "library file exists" true
-      (Sys.file_exists promoted_path);
-    let promoted = In_channel.with_open_text promoted_path In_channel.input_all in
-    Alcotest.(check bool) "confidence updated" true
-      (msg_contains ~needle:"confidence: 0.91" promoted);
-    Alcotest.(check bool) "verifier added" true
-      (msg_contains ~needle:"verified_by: [test-agent]" promoted)
+    let written = In_channel.with_open_text path In_channel.input_all in
+    Alcotest.(check bool) "no confidence field" false
+      (msg_contains ~needle:"confidence:" written);
+    Alcotest.(check bool) "no verified_by field" false
+      (msg_contains ~needle:"verified_by:" written);
+    Alcotest.(check bool) "records the author" true
+      (msg_contains ~needle:"author: test-agent" written);
+    Alcotest.(check bool) "records the source" true
+      (msg_contains ~needle:"source: direct_experience" written)
   )
 
 (* ============================================================
@@ -400,7 +385,6 @@ let test_full_workflow () =
       ("title", `String "workflow test");
       ("content", `String "Knowledge about OCaml testing patterns.");
       ("source", `String "direct_experience");
-      ("confidence", `Float 0.8);
     ] in
     let (ok1, _) = dispatch_exn ctx ~name:"masc_library_add" ~args:add_args in
     Alcotest.(check bool) "add succeeds" true ok1;
@@ -432,7 +416,6 @@ let () =
     ]);
     ("library_list", [
       Alcotest.test_case "empty list" `Quick test_list_empty;
-      Alcotest.test_case "with candidates" `Quick test_list_with_candidates;
     ]);
     ("library_read", [
       Alcotest.test_case "empty topic" `Quick test_read_empty_topic;
@@ -446,7 +429,6 @@ let () =
       Alcotest.test_case "missing content" `Quick test_add_missing_content;
       Alcotest.test_case "invalid source" `Quick test_add_invalid_source;
       Alcotest.test_case "success" `Quick test_add_success;
-      Alcotest.test_case "low confidence" `Quick test_add_low_confidence;
       Alcotest.test_case "with tags" `Quick test_add_with_tags;
     ]);
     ("library_search", [
@@ -457,11 +439,12 @@ let () =
         test_search_schema_allows_runtime_query_rejection;
       Alcotest.test_case "with query" `Quick test_search_with_query;
     ]);
-    ("library_promote", [
-      Alcotest.test_case "empty topic" `Quick test_promote_empty_topic;
-      Alcotest.test_case "nonexistent" `Quick test_promote_nonexistent;
-      Alcotest.test_case "updates frontmatter" `Quick
-        test_promote_updates_frontmatter;
+    ("confidence_purged", [
+      Alcotest.test_case "promote is not a tool" `Quick test_promote_is_not_a_tool;
+      Alcotest.test_case "add schema has no confidence" `Quick
+        test_add_schema_has_no_confidence;
+      Alcotest.test_case "frontmatter carries only observable fields" `Quick
+        test_added_frontmatter_carries_only_observable_fields;
     ]);
     ("workflow", [
       Alcotest.test_case "add list search read" `Quick test_full_workflow;

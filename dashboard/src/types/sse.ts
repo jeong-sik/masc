@@ -33,7 +33,10 @@ export type SSEEventType =
   | 'keeper_phase_changed'
   | 'keeper_composite_changed'
   | 'keeper_chat_appended'
+  | 'keeper_chat_turn_progress'
   | 'keeper_waiting_inventory_changed'
+  | 'keeper_compaction_snapshots_changed'
+  | 'oas_telemetry_sample'
   | 'ide_cursor_changed'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
@@ -187,6 +190,8 @@ export interface SSEEvent {
   queue_kind?: 'chat_queue' | 'event_queue'
   trigger?: string
   runtime?: string
+  provider_id?: string
+  model_id?: string
   reason?: string
   // Keeper phase transition fields
   prev_phase?: string
@@ -251,6 +256,12 @@ export interface SSEEvent {
   // duration_sec?, device_id? }`. Optional; assistant transcript rows
   // render a user-gesture play button when present.
   audio?: SSEAudioClip
+  // keeper_chat_turn_progress: live tool-call progress for queued/
+  // consumer-side turns. `kind` is 'tool_call_start' | 'tool_call_end';
+  // receipt_ids carries the queue-lane producer identity so a live progress
+  // placeholder converges with the persisted transcript row at turn end.
+  tool_call_id?: string
+  receipt_ids?: string[]
 }
 
 // RFC-0235 P1: nested audio payload inside `keeper_chat_appended` events.

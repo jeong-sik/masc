@@ -17,26 +17,12 @@ module Float = Stdlib.Float
 
 (** Tool_library - Agent Knowledge Library operations
 
-    Manages the personal knowledge base at ~/me/docs/library/
+    Manages the personal knowledge base at [<base>/docs/library/]
     - Direct experience documents only (source: see [library_source])
-    - YAML frontmatter with confidence scores
-    - Candidates promotion flow
+    - YAML frontmatter recording who wrote the document, when, and why
 *)
 
 open Printf
-
-(* Static frontmatter patterns used during candidate promotion.
-   Hoisted to module load — promotion is rare relative to keeper
-   message paths but the patterns are pure literals, so there is no
-   reason to rebuild them per call. *)
-let promote_confidence_re =
-  Re.Pcre.re {|confidence: [0-9.]+|} |> Re.compile
-
-let promote_verified_by_re =
-  Re.Pcre.re {|verified_by: \[\]|} |> Re.compile
-
-(** Confidence threshold for routing documents to library vs candidates. *)
-let library_confidence_threshold = 0.5
 
 (** Issue #8601: SSOT for library document [source] field. Schema enum,
     handler validation, and module docstring previously listed the values
@@ -83,14 +69,10 @@ let workspace_root () =
 let library_root () =
   Filename.concat (workspace_root ()) "docs/library"
 
-let candidates_dir () =
-  Filename.concat (library_root ()) "candidates"
-
 (* YAML frontmatter parsing *)
 type frontmatter = {
   title: string;
   source: string;
-  confidence: float;
   author: string;
   created: string;
   tags: string list;
@@ -119,9 +101,6 @@ let parse_frontmatter content =
           else None
         ) yaml_lines |> Option.value ~default:""
       in
-      let get_float name default =
-        Option.value ~default (Stdlib.float_of_string_opt (get_field name))
-      in
       let get_tags () =
         let raw = get_field "tags" in
         (* Parse [tag1, tag2] format *)
@@ -138,7 +117,6 @@ let parse_frontmatter content =
       Some {
         title = get_field "title";
         source = get_field "source";
-        confidence = get_float "confidence" 0.0;
         author = get_field "author";
         created = get_field "created";
         tags = get_tags ();
@@ -146,22 +124,14 @@ let parse_frontmatter content =
   | _ -> None
 
 (* List documents *)
-let list_documents ?(include_candidates=false) () =
-  let lib_root = library_root () in
-  let read_dir dir =
-    if Sys.file_exists dir && Sys.is_directory dir then
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".md" && not (String.equal f "SCHEMA.md"))
-      |> List.map (fun f -> Filename.concat dir f)
-    else []
-  in
-  let main_docs = read_dir lib_root in
-  let candidate_docs =
-    if include_candidates then read_dir (candidates_dir ())
-    else []
-  in
-  main_docs @ candidate_docs
+let list_documents () =
+  let dir = library_root () in
+  if Sys.file_exists dir && Sys.is_directory dir then
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".md" && not (String.equal f "SCHEMA.md"))
+    |> List.map (fun f -> Filename.concat dir f)
+  else []
 
 (* RFC-0189 PR-1b.7 — handlers in this module return typed
    [Tool_result.result]. Boundary back to [Tool_result.result option] in
@@ -189,23 +159,20 @@ let missing_required ~tool_name ~start_time field =
 let text_ok ~tool_name ~start_time body : Tool_result.result =
   Tool_result.ok ~tool_name ~start_time body
 
-let handle_list ~tool_name ~start_time _ctx args : Tool_result.result =
-  let include_candidates =
-    match Json_util.assoc_member_opt "include_candidates" args with
-    | Some (`Bool b) -> b
-    | _ -> false
-  in
-  let docs = list_documents ~include_candidates () in
+(* Not a new handler. The signature moved from [args] to [_args] because
+   [masc_library_list] stopped reading an argument, not because a new action
+   appeared. It reads a directory and hands the listing back to its caller; a
+   log line here would restate an outcome the caller already holds.
+   TEL-OK *)
+let handle_list ~tool_name ~start_time _ctx _args : Tool_result.result =
+  let docs = list_documents () in
   let entries = List.filter_map (fun path ->
     try
       let content = In_channel.with_open_text path In_channel.input_all in
       match parse_frontmatter content with
       | Some fm ->
-          let is_candidate = string_contains ~needle:"/candidates/" path in
-          Some (sprintf "- **%s** [%.2f] %s%s\n  tags: %s"
-            fm.title fm.confidence
-            fm.source
-            (if is_candidate then " (candidate)" else "")
+          Some (sprintf "- **%s** (%s, %s, %s)\n  tags: %s"
+            fm.title fm.source fm.author fm.created
             (String.concat ", " fm.tags))
       | None ->
           Some (sprintf "- %s (no frontmatter)" (Filename.basename path))
@@ -231,7 +198,7 @@ let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
        lowercased basename either). Content read for title-matching is cached so
        the chosen file is not read twice. *)
     let topic_lc = String.lowercase_ascii topic in
-    let files = list_documents ~include_candidates:true () in
+    let files = list_documents () in
     let title_lc content =
       match parse_frontmatter content with
       | Some fm -> String.lowercase_ascii fm.title
@@ -276,7 +243,6 @@ let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
 let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
   let title = Json_util.get_string args "title" |> Option.value ~default:"" in
   let source = Json_util.get_string args "source" |> Option.value ~default:"direct_experience" in
-  let confidence = Json_util.get_float args "confidence" |> Option.value ~default:0.7 in
   let tags = Json_util.get_string_list args "tags" in
   let content = Json_util.get_string args "content" |> Option.value ~default:"" in
 
@@ -294,8 +260,6 @@ let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
        (sprintf "Invalid source. Must be one of: %s"
          (String.concat ", " valid_source_strings))
     | Some _ -> begin
-      (* Determine destination based on confidence *)
-      let dest_dir = if Stdlib.Float.compare confidence library_confidence_threshold < 0 then candidates_dir () else library_root () in
       let date = Time_compat.now () |> Unix.localtime in
       let date_str = sprintf "%04d%02d%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday in
       let topic_slug = String.lowercase_ascii title
@@ -304,23 +268,21 @@ let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
             (match c with 'a'..'z' | '0'..'9' | '-' -> true | _ -> false))
         |> String.of_seq in
       let filename = sprintf "%s-%s.md" topic_slug date_str in
-      let filepath = Filename.concat dest_dir filename in
+      let filepath = Filename.concat (library_root ()) filename in
 
       (* Create frontmatter *)
       let tags_str = sprintf "[%s]" (String.concat ", " tags) in
       let full_content = sprintf {|---
 title: %s
 source: %s
-confidence: %.2f
 author: %s
 created: %s
 updated: %s
 tags: %s
-verified_by: []
 ---
 
 %s
-|} title source confidence ctx.agent_name
+|} title source ctx.agent_name
         (sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday)
         (sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday)
         tags_str content in
@@ -328,9 +290,8 @@ verified_by: []
       (* Write file *)
       try
         Out_channel.with_open_text filepath (fun oc -> Out_channel.output_string oc full_content);
-        let status = if Stdlib.Float.compare confidence 0.5 < 0 then "candidate (needs verification)" else "library" in
         text_ok ~tool_name ~start_time
-          (sprintf "Document added to %s: %s" status filepath)
+          (sprintf "Document added to library: %s" filepath)
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -340,54 +301,6 @@ verified_by: []
     end
   end
 
-(* Promote candidate to library *)
-let handle_promote ~tool_name ~start_time ctx args : Tool_result.result =
-  let topic = Json_util.get_string args "topic"
-    |> Option.value ~default:"" in
-  let new_confidence = Json_util.get_float args "confidence"
-    |> Option.value ~default:0.7 in
-
-  if String.equal topic "" then topic_required ~tool_name ~start_time
-  else if Stdlib.Float.compare new_confidence 0.5 < 0 then
-    workflow_err ~tool_name ~start_time
-      "confidence must be >= 0.5 to promote"
-  else begin
-    let topic_lower = String.lowercase_ascii topic in
-    let candidates = list_documents ~include_candidates:true () |> List.filter (fun f ->
-      string_contains ~needle:"/candidates/" f &&
-      string_contains ~needle:topic_lower (String.lowercase_ascii (Filename.basename f))
-    ) in
-    match candidates with
-    | [] ->
-        workflow_err ~tool_name ~start_time
-          (sprintf "No candidate matching '%s'" topic)
-    | src_path :: _ ->
-        try
-          let content = In_channel.with_open_text src_path In_channel.input_all in
-          let updated =
-            Re.replace_string promote_confidence_re
-              ~by:(sprintf "confidence: %.2f" new_confidence)
-              content
-          in
-          let with_verifier =
-            Re.replace_string promote_verified_by_re
-              ~by:(sprintf "verified_by: [%s]" ctx.agent_name)
-              updated
-          in
-          (* Move to library *)
-          let dest_path = Filename.concat (library_root ()) (Filename.basename src_path) in
-          Out_channel.with_open_text dest_path (fun oc -> Out_channel.output_string oc with_verifier);
-          Sys.remove src_path;
-          text_ok ~tool_name ~start_time
-            (sprintf "Promoted to library: %s (confidence: %.2f)" dest_path new_confidence)
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-            runtime_err ~tool_name ~start_time
-              (sprintf "Promote error: %s"
-                 (Tool_error.to_string (Tool_error.of_exn exn)))
-  end
-
 (* Search documents *)
 let handle_search ~tool_name ~start_time _ctx args : Tool_result.result =
   let query = Json_util.get_string args "query"
@@ -395,14 +308,14 @@ let handle_search ~tool_name ~start_time _ctx args : Tool_result.result =
   if String.equal query "" then query_required ~tool_name ~start_time
   else begin
     let query_lower = String.lowercase_ascii query in
-    let docs = list_documents ~include_candidates:true () in
+    let docs = list_documents () in
     let matches = List.filter_map (fun path ->
       try
         let content = In_channel.with_open_text path In_channel.input_all in
         let content_lower = String.lowercase_ascii content in
         if string_contains ~needle:query_lower content_lower then
           match parse_frontmatter content with
-          | Some fm -> Some (sprintf "- **%s** [%.2f] %s" fm.title fm.confidence (Filename.basename path))
+          | Some fm -> Some (sprintf "- **%s** %s" fm.title (Filename.basename path))
           | None -> Some (sprintf "- %s" (Filename.basename path))
         else None
       with Sys_error _ -> None
@@ -428,34 +341,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | "masc_library_list" -> lift (handle_list ~tool_name:name ~start_time:start ctx args)
   | "masc_library_read" -> lift (handle_read ~tool_name:name ~start_time:start ctx args)
   | "masc_library_add" -> lift (handle_add ~tool_name:name ~start_time:start ctx args)
-  | "masc_library_promote" -> lift (handle_promote ~tool_name:name ~start_time:start ctx args)
   | "masc_library_search" -> lift (handle_search ~tool_name:name ~start_time:start ctx args)
   | _ -> None
-
-(* Tool definitions for MCP protocol *)
-let tool_definitions = [
-  ("masc_library_list", {|List all documents in the agent knowledge library. Returns title, confidence, source, and tags for each document.|}, [
-    ("include_candidates", "boolean", false, "Include candidate documents awaiting verification");
-  ]);
-  ("masc_library_read", {|Read a specific library document by topic name.|}, [
-    ("topic", "string", true, "Topic name or partial match (e.g., 'eio-mutex')");
-  ]);
-  ("masc_library_add", {|Add a new document to the library. Documents with confidence < 0.5 go to candidates/.|}, [
-    ("title", "string", true, "Document title");
-    ("source", "string", true,
-     sprintf "Source type: %s" (String.concat ", " valid_source_strings));
-    ("confidence", "number", true, "Confidence score 0.0-1.0");
-    ("tags", "array", false, "List of tags");
-    ("content", "string", true, "Document body content (markdown)");
-  ]);
-  ("masc_library_promote", {|Promote a candidate document to the main library after verification.|}, [
-    ("topic", "string", true, "Topic name to promote");
-    ("confidence", "number", true, "New confidence score (must be >= 0.5)");
-  ]);
-  ("masc_library_search", {|Search library documents by content or tags.|}, [
-    ("query", "string", false, "Search query; empty or missing returns a workflow error");
-  ]);
-]
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

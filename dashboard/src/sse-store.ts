@@ -63,6 +63,7 @@ import {
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
+import { hydrateOasTelemetrySample } from './oas-telemetry-store'
 import {
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
@@ -107,18 +108,28 @@ export function registerKeeperTurnRefresh(fn: (keeperName: string) => void): voi
   _keeperTurnRefreshFn = fn
 }
 
-// The tools payload owns the Keeper waiting/receipt projection. The queue push is
-// deliberately an invalidation signal, so the tools resource registers its
-// authoritative re-read here instead of this transport layer importing a UI
-// store or reconstructing Pending/Inflight state from event deltas.
+// Queue push is an invalidation signal. Keeper-scoped read models register
+// their authoritative re-read here instead of reconstructing queue state from
+// event deltas.
 const _refreshKeeperWaitingInventoryFns = new Set<(keeperName: string) => void>()
-const pendingKeeperWaitingInventoryRefreshNames = new Set<string>()
 const pendingKeeperChatReceiptRefreshNames = new Set<string>()
 export function registerKeeperWaitingInventoryRefresh(
   fn: (keeperName: string) => void,
 ): () => void {
   _refreshKeeperWaitingInventoryFns.add(fn)
   return () => _refreshKeeperWaitingInventoryFns.delete(fn)
+}
+
+type KeeperCompactionRefreshReason = 'source_changed' | 'ready' | 'failed'
+const _refreshKeeperCompactionFns = new Set<(
+  keeperName: string,
+  reason: KeeperCompactionRefreshReason,
+) => void>()
+export function registerKeeperCompactionRefresh(
+  fn: (keeperName: string, reason: KeeperCompactionRefreshReason) => void,
+): () => void {
+  _refreshKeeperCompactionFns.add(fn)
+  return () => _refreshKeeperCompactionFns.delete(fn)
 }
 
 const _refreshActivityFns = new Set<() => void>()
@@ -572,6 +583,14 @@ function eventMatchesActiveBoardFilters(event: SSEEvent): boolean {
 }
 
 export function routeServerPushEvent(event: SSEEvent): void {
+  if (event.type === 'oas:context_compacted') {
+    const keeperName = event.agent_name?.trim() ?? ''
+    if (keeperName) {
+      for (const refresh of _refreshKeeperCompactionFns) {
+        refresh(keeperName, 'source_changed')
+      }
+    }
+  }
   if (hydrateServerPushEvent(event)) {
     return
   }
@@ -765,6 +784,14 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
+  // The payload is the sample itself (schema-validated at the boundary), so
+  // the read model hydrates from the push directly — zero HTTP fetch. The
+  // runtime monitor renders latestOasTelemetrySample; nothing to refresh.
+  if (event.type === 'oas_telemetry_sample') {
+    hydrateOasTelemetrySample(event)
+    return true
+  }
+
   // Signal-only freshness tick for keeper composite state. The push payload
   // carries only the keeper name and a wall-clock timestamp; it is *not* the
   // authoritative composite snapshot. Consumers that need the new state must
@@ -796,35 +823,39 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
   if (event.type === 'keeper_waiting_inventory_changed') {
     const keeperName = event.keeper_name?.trim() ?? ''
     if (keeperName) {
-      pendingKeeperWaitingInventoryRefreshNames.add(keeperName)
+      for (const refresh of _refreshKeeperWaitingInventoryFns) refresh(keeperName)
       if (event.queue_kind === 'chat_queue') {
         pendingKeeperChatReceiptRefreshNames.add(keeperName)
+        scheduleRefresh(
+          'keeper_chat_receipts',
+          () => {
+            const keeperNames = Array.from(pendingKeeperChatReceiptRefreshNames)
+            pendingKeeperChatReceiptRefreshNames.clear()
+            void import('./keeper-runtime')
+              .then(mod => Promise.all(
+                keeperNames.map(name => mod.reconcileKeeperChatReceipts(name)),
+              ))
+              .catch(err => {
+                console.warn(
+                  '[server-push] keeper chat receipt reconciliation unavailable',
+                  err instanceof Error ? err.message : err,
+                )
+              })
+          },
+          SSE_KEEPER_THREAD_DEBOUNCE_MS,
+        )
       }
     }
-    scheduleRefresh(
-      'keeper_waiting_inventory',
-      () => {
-        const inventoryKeeperNames = Array.from(pendingKeeperWaitingInventoryRefreshNames)
-        pendingKeeperWaitingInventoryRefreshNames.clear()
-        for (const name of inventoryKeeperNames) {
-          for (const refresh of _refreshKeeperWaitingInventoryFns) refresh(name)
-        }
-        const keeperNames = Array.from(pendingKeeperChatReceiptRefreshNames)
-        pendingKeeperChatReceiptRefreshNames.clear()
-        if (keeperNames.length === 0) return
-        void import('./keeper-runtime')
-          .then(mod => Promise.all(
-            keeperNames.map(name => mod.reconcileKeeperChatReceipts(name)),
-          ))
-          .catch(err => {
-            console.warn(
-              '[server-push] keeper chat receipt reconciliation unavailable',
-              err instanceof Error ? err.message : err,
-            )
-          })
-      },
-      SSE_KEEPER_THREAD_DEBOUNCE_MS,
-    )
+    return true
+  }
+
+  if (event.type === 'keeper_compaction_snapshots_changed') {
+    const keeperName = event.keeper_name?.trim() ?? ''
+    if (keeperName && (event.status === 'ready' || event.status === 'failed')) {
+      for (const refresh of _refreshKeeperCompactionFns) {
+        refresh(keeperName, event.status)
+      }
+    }
     return true
   }
 

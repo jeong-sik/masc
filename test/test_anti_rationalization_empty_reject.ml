@@ -22,6 +22,7 @@ let with_reviewer reviewer f =
 let review () =
   AR.review
     ~evaluator_runtime:"task-reviewer"
+    ~lookup:AR.No_lookup_surface
     ~base_path:(Filename.get_temp_dir_name ())
     request
 
@@ -33,11 +34,13 @@ let test_explicit_base_path_reaches_reviewer () =
   in
   let received = ref None in
   with_reviewer
-    (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () ->
        received := Some base_path;
        Ok None)
     (fun () ->
-       ignore (AR.review ~evaluator_runtime:"task-reviewer" ~base_path:expected request);
+       ignore
+         (AR.review ~evaluator_runtime:"task-reviewer" ~lookup:AR.No_lookup_surface
+            ~base_path:expected request);
        match !received with
        | Some actual ->
          Alcotest.(check string) "review uses the caller BasePath" expected actual
@@ -51,7 +54,7 @@ let configure_prompt_registry () =
 
 let test_structured_tool_is_the_only_semantic_verdict () =
   with_reviewer
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () ->
        Ok (Some AR.Approve))
     (fun () ->
        let result = review () in
@@ -67,7 +70,7 @@ let test_structured_tool_is_the_only_semantic_verdict () =
 
 let test_response_text_is_never_parsed_as_verdict () =
   with_reviewer
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () ->
        Ok None)
     (fun () ->
        let result = review () in
@@ -80,7 +83,7 @@ let test_response_text_is_never_parsed_as_verdict () =
 
 let test_evaluator_failure_is_unavailable_not_reject () =
   with_reviewer
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () ->
        Error (Agent_sdk.Error.Internal "review transport unavailable"))
     (fun () ->
        let result = review () in

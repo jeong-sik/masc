@@ -56,6 +56,26 @@ val preamble_marker_key : string
     exists only in the transmitted copy; nothing writes it to durable
     state. *)
 
+type label =
+  | Pinned
+      (** Survives every cut: [System] entries and messages carrying
+          extra-system-context provenance, both re-assembled fresh each turn. *)
+  | Atom of int  (** Zero-based index of the atom this message belongs to. *)
+
+val annotate
+  :  Agent_sdk.Types.message list
+  -> (Agent_sdk.Types.message * label) list * int
+(** Label every message with its atom index, in order, and return the atom
+    count. [User] and [Assistant] open a new atom; [Tool] joins the atom of the
+    assistant that issued the call, so both sides of a tool exchange always
+    share one label.
+
+    Exported because the atom is now a shared unit of the projection pipeline
+    rather than a private detail of the cut: a stage that runs before
+    {!project} and needs to reason about age must use the same labelling, and
+    a second implementation of it would let the two stages disagree about
+    where an atom begins. *)
+
 type budget_error =
   | Reservation_exceeds_capacity of
       { capacity_bytes : int
@@ -74,10 +94,28 @@ type budget_error =
           would separate a tool result from its call, so the request is
           refused instead. *)
 
+type projection =
+  { messages : Agent_sdk.Types.message list
+  ; dropped_atoms : int
+        (** Exact raw-history cut chosen for [messages]. Projection stages that
+            rewrite historical bytes use this as their cache-stable anchor: the
+            rewrite boundary moves only when the authoritative cut moves. *)
+  }
+
 val budget_error_to_string : budget_error -> string
 (** Diagnostic rendering carrying the measured values. Suitable as the
     [Error] payload of an [Agent_sdk.Agent.model_input_projection], which
     aborts the turn before request measurement or dispatch. *)
+
+val project_with_drop
+  :  measure_message_bytes:(Agent_sdk.Types.message -> int)
+  -> capacity_bytes:int
+  -> reserved_bytes:int
+  -> Agent_sdk.Types.message list
+  -> (projection, budget_error) result
+(** The canonical projection result, including the exact atom cut selected
+    from the unmodified input. [messages] is physically the input list when
+    [dropped_atoms = 0]. *)
 
 val project
   :  measure_message_bytes:(Agent_sdk.Types.message -> int)

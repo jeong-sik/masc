@@ -648,12 +648,11 @@ export type KeeperConversationSource =
   | 'direct_assistant'
   | 'world_state_prompt'
   | 'internal_assistant'
-  // A keeper turn that ran without anyone addressing the keeper. These rows
-  // are not in the chat store — RFC-0351 §5 keeps the wake marker and inert
-  // prose out of the durable transcript — and are projected from the raw-trace
-  // store by Keeper_autonomous_turn_source. Visible by default but folded into
-  // one collapsed group, because they outnumber direct conversation heavily
-  // (a keeper wakes on the order of once a minute).
+  // A keeper turn that ran without anyone addressing the keeper. Its ordinary
+  // User/Assistant/Tool exchange is durable in the OAS checkpoint; these
+  // dashboard-only rows avoid duplicating that conversation in the chat store
+  // and are projected by Keeper_autonomous_turn_source. Visible by default but
+  // folded into one collapsed group, because a keeper may wake once a minute.
   | 'autonomous_turn'
   | 'tool_result'
   | 'system'
@@ -1383,7 +1382,7 @@ interface KeeperSupervisorDiagnostics {
 interface KeeperConfigPrompt {
   instructions: string
   // The server emits exactly one shared block. keeper.constitution,
-  // keeper.world and keeper.capabilities were folded into keeper.system by
+  // keeper.world and keeper.capabilities were folded into keeper by
   // #26823; decoding them produced three empty blocks and the panel rendered
   // nothing for the shared prompt.
   system_prompt_blocks: {

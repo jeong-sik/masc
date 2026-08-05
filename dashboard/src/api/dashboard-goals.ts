@@ -297,6 +297,7 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     target_value: targetValue,
     due_date: asNullableString(raw.due_date),
     parent_goal_id: asNullableString(raw.parent_goal_id),
+    owner: asNullableString(raw.owner),
     attainment,
     tasks,
     task_count: taskCount,

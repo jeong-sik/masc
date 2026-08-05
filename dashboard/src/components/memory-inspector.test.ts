@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   MemoryInspector,
   factCategoryMeta,
@@ -17,6 +17,7 @@ import {
   type MemoryKeeper,
 } from './memory-inspector'
 import { type MemoryOsFact, type TurnRecordRow } from '../api/dashboard'
+import { clearStoredToken, setStoredToken } from '../api/core'
 
 const keeper: MemoryKeeper = {
   id: 'masc-improver',
@@ -115,18 +116,30 @@ function turnRecordsPayload() {
 }
 
 function stubFetch(payload: unknown = turnRecordsPayload()) {
-  const fetchMock = vi.fn().mockResolvedValue(
-    new Response(JSON.stringify(payload), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
+  // A Response body can only be read once, and fetchKeeperTurnRecords issues two
+  // requests: ensureDevToken's bootstrap call, then the turn-records call.
+  // mockResolvedValue hands back the same instance both times, so the second
+  // read failed with "failed to read response body" and the panel reported a
+  // transport error before it ever decoded a payload. Build a fresh Response per
+  // call instead.
+  const fetchMock = vi.fn().mockImplementation(
+    async () =>
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
   )
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
 }
 
+beforeEach(() => {
+  setStoredToken('memory-inspector-test-token', { source: 'manual' })
+})
+
 afterEach(() => {
   cleanup()
+  clearStoredToken()
   vi.unstubAllGlobals()
 })
 

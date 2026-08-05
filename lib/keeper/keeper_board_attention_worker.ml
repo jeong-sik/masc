@@ -359,6 +359,15 @@ let drain_outcome_label = function
     "retry_generation_changed"
 ;;
 
+(* The drain line derives its level from the outcome it reports. [Retry_later]
+   leaves the durable partition undrained and re-arms the same contention, so a
+   worker that keeps returning it makes no progress while its candidate ledger
+   grows; at [Info] that state reads the same as normal draining. *)
+let drain_outcome_log_level = function
+  | Drained -> Log.Info
+  | Retry_later _ -> Log.Warn
+;;
+
 let apply_drain_rearm scheduler = function
   | Drained ->
     reset_contention_rearms scheduler ~keep:None;
@@ -1572,51 +1581,89 @@ let replay_completed_owner_wake
     Ok (Some (wake_owner ~base_path ~keeper_name))
 ;;
 
+(* What this boundary rations is admission into the Keeper, and only a
+   [Relevant] verdict admits anything: [Candidate.consume_judged] enqueues a
+   stimulus and wakes the owner for [Relevant], and writes one consumed record
+   for [Not_relevant]. Counting a discarded signal against the same per-turn
+   slot puts every relevant verdict behind however many irrelevant ones share
+   its [created_at] order, which is the shape RFC-0334 removed when it deleted
+   the fanout limit and arrival window. Settle the discards, stop on the
+   delivery. *)
+let settles_without_admitting (item : Partition.completed_item) =
+  match item.judgment.Candidate.verdict.Keeper_board_attention_judgment.decision with
+  | Keeper_board_attention_judgment.Not_relevant -> true
+  | Keeper_board_attention_judgment.Relevant -> false
+;;
+
 let settle_one_completed
       ~base_path
       ~keeper_name
   =
-  let* completed = completed_in_order ~base_path ~keeper_name in
-  match completed with
-  | [] -> Ok No_completed_partition
-  | partition :: _ ->
+  let settle_head partition =
     let* partition =
       confirm_loaded_completed
         ~base_path
         "completed owner settlement"
         partition
     in
-    (match partition.state with
-     | Partition.Completed { item; _ } ->
-       let* (_ : Candidate.candidate) =
-         Candidate.apply_judgment_and_deliver
-           ~base_path
-           ~keeper_name
-           ~candidate_id:item.candidate_id
-           ~judgment:item.judgment
-       in
-       let* settled =
-         Partition.settle
-           ~now:(Time_compat.now ())
-           ~base_path
-           ~partition
-       in
-       let* remaining = completed_in_order ~base_path ~keeper_name in
-       let continuation_wake =
-         match remaining with
-         | [] -> None
-         | _ :: _ -> Some (owner_wake ~base_path ~keeper_name)
-       in
-       Ok
-         (Partition_settled
-            { candidate_id = settled.candidate_id; continuation_wake })
-     | Partition.Ready
-     | Partition.Running _
-     | Partition.Settled _
-     | Partition.Blocked _ ->
-       Error
-         ("completed partition query returned non-Completed state: "
-          ^ partition.partition_id))
+    match partition.Partition.state with
+    | Partition.Completed { item; _ } ->
+      let* (_ : Candidate.candidate) =
+        Candidate.apply_judgment_and_deliver
+          ~base_path
+          ~keeper_name
+          ~candidate_id:item.candidate_id
+          ~judgment:item.judgment
+      in
+      let* settled =
+        Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition
+      in
+      Ok (settled, settles_without_admitting item)
+    | Partition.Ready
+    | Partition.Running _
+    | Partition.Settled _
+    | Partition.Blocked _ ->
+      Error
+        ("completed partition query returned non-Completed state: "
+         ^ partition.partition_id)
+  in
+  (* Terminates: every iteration settles one partition out of [completed], and
+     the list is the snapshot taken before the loop. Completions the worker
+     adds while this runs are left for the continuation wake. *)
+  let rec settle_until_admission ~last_settled ~discarded = function
+    | [] -> Ok (last_settled, discarded)
+    | partition :: rest ->
+      let* settled, discarded_only = settle_head partition in
+      if discarded_only
+      then
+        settle_until_admission
+          ~last_settled:settled
+          ~discarded:(discarded + 1)
+          rest
+      else Ok (settled, discarded)
+  in
+  let* completed = completed_in_order ~base_path ~keeper_name in
+  match completed with
+  | [] -> Ok No_completed_partition
+  | first :: _ ->
+    let* settled, discarded =
+      settle_until_admission ~last_settled:first ~discarded:0 completed
+    in
+    if discarded > 0
+    then
+      Log.Keeper.info
+        "board_attention_discards_settled keeper=%s count=%d"
+        keeper_name
+        discarded;
+    let* remaining = completed_in_order ~base_path ~keeper_name in
+    let continuation_wake =
+      match remaining with
+      | [] -> None
+      | _ :: _ -> Some (owner_wake ~base_path ~keeper_name)
+    in
+    Ok
+      (Partition_settled
+         { candidate_id = settled.Partition.candidate_id; continuation_wake })
 ;;
 
 let recovered_mutex = Stdlib.Mutex.create ()
@@ -1805,18 +1852,8 @@ let run
                  ~execute
              with
              | Ok outcome ->
-               (* The level comes from the outcome, not from the call site.
-                  [Retry_later] means the durable partition is still undrained
-                  and the same candidate is re-inspected on the next wake, so a
-                  worker that never reaches [Drained] is a backlog that grows
-                  with nothing above Info to show for it. *)
-               let level =
-                 match outcome with
-                 | Drained -> Log.Info
-                 | Retry_later _ -> Log.Warn
-               in
                Log.Keeper.emit
-                 level
+                 (drain_outcome_log_level outcome)
                  (Printf.sprintf
                     "board_attention_worker_drain keeper=%s outcome=%s"
                     keeper_name
@@ -1848,6 +1885,7 @@ module For_testing = struct
   let schedule_contention_rearm = schedule_contention_rearm
   let reset_contention_rearms = reset_contention_rearms
   let drain_outcome_label = drain_outcome_label
+  let drain_outcome_log_level = drain_outcome_log_level
   let apply_drain_rearm = apply_drain_rearm
   let replay_completed_owner_wake = replay_completed_owner_wake
   let with_process_recovery_claim = with_process_recovery_claim

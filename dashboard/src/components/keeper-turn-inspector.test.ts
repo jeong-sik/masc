@@ -562,6 +562,43 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(meta).not.toContain('stop')
     expect(meta).not.toContain('deepseek-v4-flash')
     expect(meta).toContain('n/a')
+    // no raw trace run ref on this row — honest absence, never a fabricated one
+    expect(meta).toContain('raw tracen/a')
+  })
+
+  it('renders the raw trace run ref in the meta tab when the record carries one', async () => {
+    const response = turnRecordsWithMemoryOs()
+    response.entries[1] = {
+      ...response.entries[1]!,
+      record: {
+        ...response.entries[1]!.record,
+        raw_trace_run_ref: {
+          worker_run_id: 'wr-01H',
+          path: '.masc/keepers/albini/raw-trace/wr-01H.jsonl',
+          start_seq: 3,
+          end_seq: 9,
+          agent_name: 'keeper-albini-agent',
+          session_id: 'trace-active',
+        },
+      },
+    }
+    fetchKeeperTurnRecordsMock.mockResolvedValue(response)
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('실행 메타데이터')
+    })
+
+    const meta = container.querySelector('.kti-kv')?.textContent ?? ''
+    expect(meta).toContain('raw tracewr-01H · seq 3-9')
   })
 
   it.each([

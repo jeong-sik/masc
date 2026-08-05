@@ -109,8 +109,7 @@ let apply_level_to_strategy : type a.
          no [@warning "-4"] suppression, the warning-4 ratchet stays on. *)
       match Recovery.default_strategy mode with
       | Recovery.Retry _ ->
-          Recovery.Fallback
-            { fallback_value = "<degraded:L2>"; degrade_confidence_by = 0.3 }
+          Recovery.Fallback { fallback_value = "<degraded:L2>" }
       | (Recovery.Fallback _ | Recovery.Handoff _ | Recovery.Abort _) as other ->
           other)
   | L3 ->

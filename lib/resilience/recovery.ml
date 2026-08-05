@@ -38,8 +38,7 @@ type _ strategy =
       backoff : int -> float;
     }
       -> [> `Retry ] strategy
-  | Fallback : { fallback_value : string; degrade_confidence_by : float }
-      -> [> `Fallback ] strategy
+  | Fallback : { fallback_value : string } -> [> `Fallback ] strategy
   | Handoff : { operator_message : string; preserve_state : bool }
       -> [> `Handoff ] strategy
   | Abort : { reason : string; cleanup : unit -> unit }
@@ -53,7 +52,7 @@ type retry_attempt_result =
 type execution_event =
   | RetryAttempt of { attempt : int; max_attempts : int }
   | RetryBackoff of { attempt : int; delay_s : float; error : string }
-  | FallbackApply of { value : string; confidence_delta : float }
+  | FallbackApply of { value : string }
   | HandoffRequest of { message : string; preserve_state : bool }
   | AbortRun of { reason : string }
 
@@ -61,7 +60,7 @@ type execution_outcome =
   | RetrySucceeded of { attempts : int }
   | RetryExhausted of { attempts : int; last_error : string option }
   | RetryFatal of { attempt : int; error : string }
-  | FallbackApplied of { value : string; confidence_delta : float }
+  | FallbackApplied of { value : string }
   | HandoffRequested of { message : string; preserve_state : bool }
   | Aborted of { reason : string }
 
@@ -69,8 +68,7 @@ type strategy_executor = {
   run_retry_attempt : attempt:int -> retry_attempt_result;
   sleep : float -> unit;
   on_event : execution_event -> unit;
-  apply_fallback :
-    value:string -> confidence_delta:float -> (unit, string) result;
+  apply_fallback : value:string -> (unit, string) result;
   request_handoff :
     message:string -> preserve_state:bool -> (unit, string) result;
   abort : reason:string -> (unit, string) result;
@@ -139,18 +137,17 @@ let execute_strategy : type a.
               loop (attempt + 1)
       in
       loop 1
-  | Fallback { fallback_value; degrade_confidence_by } ->
-      let confidence_delta = degrade_confidence_by in
+  | Fallback { fallback_value } ->
       let* () =
-        on_event (FallbackApply { value = fallback_value; confidence_delta })
+        on_event (FallbackApply { value = fallback_value })
       in
       let* applied =
         trap_call ~op:"apply_fallback" (fun () ->
-          executor.apply_fallback ~value:fallback_value ~confidence_delta)
+          executor.apply_fallback ~value:fallback_value)
       in
       Result.map
         (fun () ->
-          FallbackApplied { value = fallback_value; confidence_delta })
+          FallbackApplied { value = fallback_value })
         applied
   | Handoff { operator_message; preserve_state } ->
       let* () =
@@ -175,35 +172,6 @@ let execute_strategy : type a.
       Result.map
         (fun () -> Aborted { reason })
         aborted
-
-(* TLA+ taxonomy mirrors for specs/resilience/ResilienceDegradation.tla.
-   Payload-bearing constructors cannot use ppx_tla's [all_states], so
-   the exhaustive functions below are the typed contract and the lists
-   are the set surface consumed by parity tests. *)
-let error_mode_to_tla_symbol = function
-  | TransientError _ -> "Transient"
-  | PermanentError _ -> "Permanent"
-  | ResourceExhausted _ -> "ResourceExhausted"
-  | AmbiguityError _ -> "Ambiguity"
-  | ConsensusError _ -> "Consensus"
-  | DegradationRequired _ -> "Degradation"
-
-let all_error_mode_tla_symbols =
-  [ "Transient";
-    "Permanent";
-    "ResourceExhausted";
-    "Ambiguity";
-    "Consensus";
-    "Degradation";
-  ]
-
-let strategy_to_tla_symbol : type a. a strategy -> string = function
-  | Retry _ -> "Retry"
-  | Fallback _ -> "Fallback"
-  | Handoff _ -> "Handoff"
-  | Abort _ -> "Abort"
-
-let all_strategy_tla_symbols = [ "Retry"; "Fallback"; "Handoff"; "Abort" ]
 
 (* ── Convenience constructors ─────────────────────────────────── *)
 
@@ -249,20 +217,11 @@ let default_strategy (mode : error_mode) :
   | PermanentError { fallback_strategy; detail } -> (
       match fallback_strategy with
       | UseDefaultString v ->
-          Fallback
-            { fallback_value = v; degrade_confidence_by = 0.2 }
+          Fallback { fallback_value = v }
       | UsePlaceholder name ->
-          Fallback
-            {
-              fallback_value = "<placeholder:" ^ name ^ ">";
-              degrade_confidence_by = 0.4;
-            }
+          Fallback { fallback_value = "<placeholder:" ^ name ^ ">" }
       | SkipArtifact aid ->
-          Fallback
-            {
-              fallback_value = "<skipped:" ^ aid ^ ">";
-              degrade_confidence_by = 0.5;
-            }
+          Fallback { fallback_value = "<skipped:" ^ aid ^ ">" }
       | HumanHandoff msg ->
           Handoff
             {

@@ -491,6 +491,7 @@ function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined
         `}
         <span class="wk-dossier-chip mono">events ${node.timeline_events.length}</span>
         <span class="wk-dossier-chip mono">stagnation ${node.stagnation_seconds == null ? 'unavailable' : `${node.stagnation_seconds}s`}</span>
+        ${node.owner ? html`<span class="wk-dossier-chip mono">owner ${node.owner}</span>` : null}
         ${node.latest_keeper_ref ? html`<span class="wk-dossier-chip mono">keeper ${node.latest_keeper_ref}</span>` : null}
         ${node.latest_turn_ref != null ? html`<span class="wk-dossier-chip mono">turn ${node.latest_turn_ref}</span>` : null}
         ${node.linked_keeper_names.map((name) => html`

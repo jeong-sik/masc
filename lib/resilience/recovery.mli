@@ -111,30 +111,13 @@ type _ strategy =
             classifier's [TransientError.backoff_ms] is just a hint. *)
     }
       -> [> `Retry ] strategy
-  | Fallback : { fallback_value : string; degrade_confidence_by : float }
-      -> [> `Fallback ] strategy
-      (** Substitute a default or placeholder string and reduce
-          confidence. The follow-up Tier may parameterise the value
-          type ('a fallback_value). *)
+  | Fallback : { fallback_value : string } -> [> `Fallback ] strategy
+      (** Substitute a default or placeholder string. The follow-up Tier
+          may parameterise the value type ('a fallback_value). *)
   | Handoff : { operator_message : string; preserve_state : bool }
       -> [> `Handoff ] strategy
   | Abort : { reason : string; cleanup : unit -> unit }
       -> [> `Abort ] strategy
-
-(** TLA+ symbol for {!error_mode}, matching
-    [specs/resilience/ResilienceDegradation.tla] [ErrorModes]. *)
-val error_mode_to_tla_symbol : error_mode -> string
-
-(** Complete TLA+ [ErrorModes] mirror for payload-bearing
-    {!error_mode} constructors. *)
-val all_error_mode_tla_symbols : string list
-
-(** TLA+ symbol for {!strategy}, matching
-    [specs/resilience/ResilienceDegradation.tla] [Strategies]. *)
-val strategy_to_tla_symbol : 'a strategy -> string
-
-(** Complete TLA+ [Strategies] mirror for {!strategy}. *)
-val all_strategy_tla_symbols : string list
 
 (** {1 Untyped classification} *)
 
@@ -170,7 +153,7 @@ type retry_attempt_result =
 type execution_event =
   | RetryAttempt of { attempt : int; max_attempts : int }
   | RetryBackoff of { attempt : int; delay_s : float; error : string }
-  | FallbackApply of { value : string; confidence_delta : float }
+  | FallbackApply of { value : string }
   | HandoffRequest of { message : string; preserve_state : bool }
   | AbortRun of { reason : string }
 
@@ -178,7 +161,7 @@ type execution_outcome =
   | RetrySucceeded of { attempts : int }
   | RetryExhausted of { attempts : int; last_error : string option }
   | RetryFatal of { attempt : int; error : string }
-  | FallbackApplied of { value : string; confidence_delta : float }
+  | FallbackApplied of { value : string }
   | HandoffRequested of { message : string; preserve_state : bool }
   | Aborted of { reason : string }
 
@@ -186,8 +169,7 @@ type strategy_executor = {
   run_retry_attempt : attempt:int -> retry_attempt_result;
   sleep : float -> unit;
   on_event : execution_event -> unit;
-  apply_fallback :
-    value:string -> confidence_delta:float -> (unit, string) result;
+  apply_fallback : value:string -> (unit, string) result;
   request_handoff :
     message:string -> preserve_state:bool -> (unit, string) result;
   abort : reason:string -> (unit, string) result;

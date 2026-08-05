@@ -23,13 +23,10 @@ type turn_prompt_parts = {
   user_message : string;
 }
 
-(* Persisted user-turn content for autonomous wake turns. The observation
-   frame is carried in [world_state] (per-turn dynamic context) — persisting
-   it re-feeds the model its own observations and starves compaction
-   (#25193: 943/945 user messages were identical frames). *)
-let autonomous_wake_marker =
-  "(autonomous wake — the current observation frame is provided per-turn in \
-   system context)"
+(* Ordinary user input for an autonomous continuation. The durable checkpoint
+   carries this cue and the assistant/tool suffix in normal conversation order;
+   the fresh observation frame alone rides [world_state] and stays ephemeral. *)
+let autonomous_wake_marker = "Continue."
 
 let format_pending_messages
       (messages : Keeper_world_observation_message_scope.pending_message list)
@@ -94,13 +91,38 @@ let format_current_task_with_heading ~heading (task : Masc_domain.task) : string
        task.Masc_domain.title status_line);
   (match task.Masc_domain.handoff_context with
    | Some h when h.Masc_domain.summary <> "" ->
+       (* RFC-0365: a handoff can now come from a previous owner, so the note
+          must say whose it is. Without this the model reads another agent's
+          first-person account ("I already verified the spec") as its own
+          recollection, which is worse than not showing the note at all. The
+          author is stated even when it is the current holder — a keeper that
+          has to compare cannot do so from a line that is sometimes attributed
+          and sometimes not. *)
+       let attribution =
+         match h.Masc_domain.updated_by, h.Masc_domain.updated_at with
+         | Some who, Some at -> Printf.sprintf " (%s, %s)" who at
+         | Some who, None -> Printf.sprintf " (%s)" who
+         | None, Some at -> Printf.sprintf " (unattributed, %s)" at
+         | None, None -> " (unattributed)"
+       in
        Buffer.add_string buf
-         (Printf.sprintf "- Prior handoff: %s\n" h.Masc_domain.summary);
+         (Printf.sprintf "- Prior handoff%s: %s\n" attribution
+            h.Masc_domain.summary);
        (match h.Masc_domain.next_step with
         | Some step when step <> "" ->
             Buffer.add_string buf
               (Printf.sprintf "- Suggested next step: %s\n" step)
-        | Some _ | None -> ())
+        | Some _ | None -> ());
+       (* The refs are where the previous owner's work actually is. Dropping
+          them leaves prose that points at an address the model never receives,
+          and the artifact/board readers that resolve them are already
+          model-visible. *)
+       (match h.Masc_domain.evidence_refs with
+        | [] -> ()
+        | refs ->
+            Buffer.add_string buf
+              (Printf.sprintf "- Handoff evidence: %s\n"
+                 (String.concat ", " refs)))
    | Some _ | None -> ());
   Buffer.add_string buf
     "\n";
@@ -650,11 +672,11 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
   in
   (* A second prompt asset used to be appended here as [## Turn Intent] on
      every turn. It restated the capability catalog, the Task-claim rule and
-     the work-placement rule that [keeper.system] already carries, and its
+     the work-placement rule that [keeper] already carries, and its
      in-binary fallback had drifted to hold continuity statements the asset
      itself had dropped — so a keeper was told its checkpoint survives across
      cycles only when prompt config was degraded. The permanent content now
-     lives in [keeper.system]; nothing in it varied per turn. *)
+     lives in [keeper]; nothing in it varied per turn. *)
   base_system_prompt
 ;;
 

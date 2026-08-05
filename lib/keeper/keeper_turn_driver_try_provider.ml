@@ -263,28 +263,18 @@ let measure_message_bytes (message : Agent_sdk.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
-module Message_identity = struct
-  type t = Agent_sdk.Types.message
-
-  let equal left right = left == right
-
-  (* Messages are immutable. [Hashtbl.hash] is bounded, so this avoids a full
-     content traversal while preserving the hash/equality contract for the
-     same record identity. Structural collisions are harmless because [equal]
-     remains physical. *)
-  let hash = Hashtbl.hash
-end
-
-module Message_measurement_cache = Hashtbl.Make (Message_identity)
-
 let memoize_message_measurement measure =
-  let cache = Message_measurement_cache.create 128 in
+  (* The projection is small (normally bounded by the tail-window atoms), and
+     physical comparison is constant-time. A polymorphic hash table would
+     still hash the contents of large strings inside each message, recreating
+     the very scan this cache is meant to eliminate. *)
+  let cache = ref [] in
   fun message ->
-    match Message_measurement_cache.find_opt cache message with
-    | Some bytes -> bytes
+    match List.find_opt (fun (cached, _) -> cached == message) !cache with
+    | Some (_, bytes) -> bytes
     | None ->
       let bytes = measure message in
-      Message_measurement_cache.add cache message bytes;
+      cache := (message, bytes) :: !cache;
       bytes
 ;;
 

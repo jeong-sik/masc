@@ -270,37 +270,6 @@ let install () =
     (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
     observe_task_transition_event config ~agent_name ~task_id ~transition ~details);
 
-  Atomic.set Workspace_hooks.cleanup_board_artifacts_fn (fun () ->
-    let stale_system_daily_sec = 12.0 *. Masc_time_constants.hour in
-    let board_artifact_title title =
-      let title = String.lowercase_ascii (String.trim title) in
-      String.starts_with ~prefix:"[keeper daily]" title
-    in
-    let board_artifact_author author =
-      let author = String.lowercase_ascii (String.trim author) in
-      author = "auto-researcher"
-      || String.starts_with ~prefix:"qa-" author
-      || ((not (String.contains author ' ')) && String.ends_with ~suffix:"-probe" author)
-    in
-    let now = Time_compat.now () in
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:5200 ()
-    |> List.fold_left
-         (fun removed (post : Board.post) ->
-            let author = Board.Agent_id.to_string post.author in
-            if
-              board_artifact_author author
-              || (String.equal (String.lowercase_ascii author) "keeper"
-                  && board_artifact_title post.title
-                  && now -. post.updated_at >= stale_system_daily_sec)
-            then (
-              match
-                Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string post.id)
-              with
-              | Ok () -> removed + 1
-              | Error _ -> removed)
-            else removed)
-         0);
-
   Atomic.set Workspace_hooks.activity_emit_fn (fun config ~actor ?subject ~kind ~payload ~tags () ->
     try
       ignore

@@ -13,7 +13,6 @@ import { hashForRoute, navigate, route } from '../router'
 import {
   dashboardWsConnected,
   dashboardWsLastDisconnectedAt,
-  dashboardWsLastError,
   dashboardWsReady,
   dashboardWsReconnectCount,
 } from '../dashboard-ws-state'
@@ -1398,7 +1397,7 @@ function SurfaceLead() {
 export function DashboardMain() {
   useSurfaceDocumentTitle()
 
-  if (dashboardLoading.value && !connected.value && !namespaceTruthInitializing.value) {
+  if (dashboardLoading.value && !dashboardWsConnected.value && !namespaceTruthInitializing.value) {
     return html`<${LoadingState}>Loading dashboard...<//>`
   }
 

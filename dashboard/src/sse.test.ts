@@ -25,7 +25,7 @@ describe('server-push OAS typed-payload handlers', () => {
   })
 
   function emitEvent(payload: Record<string, unknown>): void {
-    recordServerPushEvent(payload as Parameters<typeof recordServerPushEvent>[0])
+    recordServerPushEvent(payload as unknown as Parameters<typeof recordServerPushEvent>[0])
   }
 
   function lastJournalEntry() {

@@ -98,18 +98,6 @@ function clip(value: string | undefined, max = 90): string {
   return text.length > max ? `${text.slice(0, max - 3)}...` : text
 }
 
-function formatDisconnectedDetail(input: Pick<StatusTrayInput, 'lastDisconnectedAt' | 'reconnectCount' | 'now'>): string {
-  const parts: string[] = []
-  if (input.lastDisconnectedAt > 0) {
-    const seconds = Math.max(0, Math.floor((input.now - input.lastDisconnectedAt) / 1000))
-    parts.push(`offline ${seconds}s`)
-  }
-  if (input.reconnectCount > 0) {
-    parts.push(`${input.reconnectCount} reconnects`)
-  }
-  return parts.length > 0 ? parts.join(' - ') : 'waiting for first connection'
-}
-
 function countPendingVerification(tasksInput: readonly Task[]): number {
   return tasksInput.filter(task => task.status === 'awaiting_verification').length
 }

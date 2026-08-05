@@ -43,6 +43,7 @@ import {
   normalizeIdeTreeWidth,
 } from './ide-shell'
 import { navigate, route } from '../../router'
+import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import {
   activeIdeFile,
@@ -712,7 +713,7 @@ describe('IdeShell', () => {
       workspace_identity: { kind: 'project' },
       availability: 'available',
     })
-    const cursorOverlay = {
+    const cursorOverlay: KeeperCursorOverlay = {
       cursors: new Map([[
         'sangsu',
         {
@@ -1086,7 +1087,7 @@ describe('IdeShell', () => {
       params: { section: 'ide-shell', view: 'source' },
       postId: null,
     }
-    const cursorOverlay = {
+    const cursorOverlay: KeeperCursorOverlay = {
       cursors: new Map([[
         'sangsu',
         {

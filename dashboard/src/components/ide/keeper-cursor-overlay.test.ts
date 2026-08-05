@@ -78,7 +78,7 @@ describe('getKeeperColor', () => {
   })
 
   it('loads the initial cursor snapshot over the typed API', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({
       ok: true,
       data: {
         runtime_id: 'masc-runtime',

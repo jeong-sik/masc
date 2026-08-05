@@ -557,7 +557,9 @@ let pubsub_max_messages () =
     Read by the startup prune, the periodic maintenance prune, and the
     catch-up digest's look-back clamp. Those three decide which day files
     are deleted and how far a digest may scan; a default that differed
-    between them would delete data one of them still expects to read. *)
+    between them would delete data one of them still expects to read.
+
+    @category Policies @ops_class operator *)
 let default_jsonl_retention_days = 30
 
 let jsonl_retention_days () =

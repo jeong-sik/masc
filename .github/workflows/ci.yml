@@ -1131,9 +1131,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          # test_keeper_board_attention_candidate is left out: it has one unrelated
-          # non-finite-float failure on main, tracked separately.
-          board_attention_targets="@test/runtest-test_keeper_board_attention_worker @test/runtest-test_keeper_board_attention_partition"
+          board_attention_targets="@test/runtest-test_keeper_board_attention_worker @test/runtest-test_keeper_board_attention_partition @test/runtest-test_keeper_board_attention_candidate"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${board_attention_targets}"
 
       - name: Run tool blob retention suite

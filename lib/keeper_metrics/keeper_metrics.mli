@@ -173,7 +173,6 @@ type t =
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsExplicitFactWrite
-  | MemoryOsInertTurnExtractionSkipped
   | RuntimeRequestWireBytes
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze

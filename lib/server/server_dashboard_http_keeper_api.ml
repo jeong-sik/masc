@@ -1074,10 +1074,11 @@ let keeper_chat_history_freshness config name =
   Printf.sprintf "%s|%s|%s" chat_stamp trace_stamp turn_record_stamp
 ;;
 
-(* An autonomous turn is not a chat-store row (see
-   {!Keeper_autonomous_turn_source}): this read projection carries a typed
-   [autonomous_turn] identity so the dashboard groups it separately from
-   conversation. Final text and work trace come from the same exact OAS run. *)
+(* The canonical autonomous User/Assistant/Tool exchange lives in the Keeper's
+   OAS checkpoint, not as duplicate chat-store rows. This read projection uses
+   typed turn identity only for stable dashboard grouping and exact raw-trace
+   lookup; it is not the Keeper's semantic continuity mechanism. Final text
+   and work trace come from the same exact OAS run. *)
 let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
   let trace_fields =
     match turn.trace with

@@ -24,15 +24,18 @@ type turn_prompt_parts = {
           every turn. Inject as per-turn [dynamic_context]; never append
           to the persisted message history. *)
   user_message : string;
-      (** Persisted user-turn content: genuine utterances only. For
-          autonomous wake turns this is {!autonomous_wake_marker}; HITL
-          resolutions are appended by the turn driver. *)
+      (** Current user-turn input. Operator utterances are durable. For an
+          autonomous continuation this is {!autonomous_wake_marker}, which is
+          also durable: each cycle is an ordinary next user turn followed by
+          its assistant/tool suffix. HITL resolutions are appended by the turn
+          driver. *)
 }
 
 val autonomous_wake_marker : string
-(** Persisted user-turn content for autonomous wake turns. Constant and
-    tiny by design: the observation frame lives in
-    {!turn_prompt_parts.world_state}, not in the message history. *)
+(** Durable input for an autonomous continuation. It is appended to the same
+    checkpoint as the following assistant/tool suffix. The fresh observation
+    frame lives separately in {!turn_prompt_parts.world_state} and is never
+    persisted. *)
 
 val format_current_task : Masc_domain.task -> string
 

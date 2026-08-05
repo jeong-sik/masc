@@ -1805,10 +1805,22 @@ let run
                  ~execute
              with
              | Ok outcome ->
-               Log.Keeper.info
-                 "board_attention_worker_drain keeper=%s outcome=%s"
-                 keeper_name
-                 (drain_outcome_label outcome);
+               (* The level comes from the outcome, not from the call site.
+                  [Retry_later] means the durable partition is still undrained
+                  and the same candidate is re-inspected on the next wake, so a
+                  worker that never reaches [Drained] is a backlog that grows
+                  with nothing above Info to show for it. *)
+               let level =
+                 match outcome with
+                 | Drained -> Log.Info
+                 | Retry_later _ -> Log.Warn
+               in
+               Log.Keeper.emit
+                 level
+                 (Printf.sprintf
+                    "board_attention_worker_drain keeper=%s outcome=%s"
+                    keeper_name
+                    (drain_outcome_label outcome));
                ignore
                  (apply_drain_rearm contention_rearms outcome
                   : rearm_schedule option);

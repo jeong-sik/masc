@@ -3,9 +3,11 @@
   "schema": "masc.prompt-managed-assets.v1",
   "paths": [
     "judge.board.md",
+    "judge.catchup.md",
     "judge.effect.md",
     "keeper.md",
     "librarian.md",
-    "verification.md"
+    "verification.md",
+    "worker.md"
   ]
 }

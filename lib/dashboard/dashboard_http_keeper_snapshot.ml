@@ -172,7 +172,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ( "system_prompt_blocks",
             `Assoc
               [
-                ("system", prompt_block_json Keeper_prompt_names.system);
+                ("system", prompt_block_json Prompt_names.keeper);
               ] );
           ("effective_system_prompt", `String effective_system_prompt);
           ("assembled_system_prompt", `String assembled_system_prompt_preview);

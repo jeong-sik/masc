@@ -705,18 +705,16 @@ let default_system_prompt ~worker_name ~model_id ?role
         sprintf "Leader-selected model context: %s\n" (String.trim value)
     | _ -> ""
   in
-  sprintf
-    {|You are a MASC-managed tool-aware worker.
-Worker name: %s
-Model: %s
-%s%s
-Operate through the provided MASC tools.
-Use tools when state inspection, task updates, work delegation, or status updates are needed.
-Keep responses concise and task-focused.
-If a tool schema includes agent_name and you omit it, the runtime will inject %s automatically.
-Do not invent tool names or arguments that are not in schema.
-When the task is complete, return a short final result summarizing what you changed or learned.|}
-    worker_name model_id role_line selection_line worker_name
+  (* The worker's standing rules live beside the Keeper's, in
+     config/prompts/worker.md, so both system prompts are read and overridden
+     in one place. *)
+  Prompt_registry.render_prompt_template
+    Prompt_names.worker
+    [ "worker_name", worker_name
+    ; "model_id", model_id
+    ; "role_line", role_line
+    ; "selection_line", selection_line
+    ]
 
 let worker_session_id worker_name =
   let digest =

@@ -16,7 +16,7 @@
 # synthetic key to exercise the missing-block path.
 #
 # Authority: config/prompts/*.md basenames plus the keys declared in
-# lib/prompt_registry/keeper_prompt_names.ml.
+# lib/prompt_registry/prompt_names.ml.
 set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -28,7 +28,14 @@ trap 'rm -f "$existing" "$referenced"' EXIT
 find config/prompts -name '*.md' -print0 \
   | xargs -0 -n1 basename \
   | sed 's/\.md$//' > "$existing"
-grep -oE '"[a-z_][a-z_.]*"' lib/prompt_registry/keeper_prompt_names.ml \
+# Fail rather than contribute nothing if the constants file moves again: a
+# silent miss here is how the file sat at a stale path across two renames.
+names_file=lib/prompt_registry/prompt_names.ml
+if [ ! -f "$names_file" ]; then
+  echo "[dashboard-prompt-keys] FAIL - prompt-name constants not at $names_file"
+  exit 2
+fi
+grep -oE '"[a-z_][a-z_.]*"' "$names_file" \
   | tr -d '"' >> "$existing"
 sort -u -o "$existing" "$existing"
 

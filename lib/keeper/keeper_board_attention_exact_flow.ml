@@ -70,7 +70,7 @@ let messages candidate =
   in
   let* prompt =
     Prompt_registry.render_prompt_template
-      Keeper_prompt_names.judge_board
+      Prompt_names.judge_board
       [ "judgment_request_json", Yojson.Safe.to_string request ]
   in
   Ok [ message Agent_sdk.Types.User prompt ]

@@ -25,16 +25,7 @@ val decide :
   provider_outcome ->
   decision
 
-val decide_and_record :
-  runtime_id:string ->
-  accept_on_exhaustion:bool ->
-  is_last:bool ->
-  provider_outcome ->
-  decision
-
 val to_user_message : Llm_provider.Http_client.http_error option -> string
-
-
 
 val provider_outcome_to_string : provider_outcome -> string
 

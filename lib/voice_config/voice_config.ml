@@ -469,14 +469,7 @@ let local_playback_enabled_for_agent config agent_id =
   | [] -> true
   | agents -> List.mem agent_id agents
 
-let unique_strings values =
-  let rec loop seen acc = function
-    | [] -> List.rev acc
-    | value :: rest ->
-        if List.mem value seen then loop seen acc rest
-        else loop (value :: seen) (value :: acc) rest
-  in
-  loop [] [] values
+let unique_strings = Json_util.dedupe_keep_order
 
 let available_voices config =
   config.tts.default_voice

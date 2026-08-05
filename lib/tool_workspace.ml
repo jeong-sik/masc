@@ -50,7 +50,10 @@ let effective_cluster_name (config : Workspace.config) =
 
 (* Handlers *)
 
-let unique_strings items =
+(* Trims before comparing, so [" a"] and ["a"] are one value, and drops
+   what is blank after trimming. [Json_util.dedupe_keep_order] does
+   neither; naming this one [unique_strings] hid that difference. *)
+let unique_trimmed_nonblank items =
   List.fold_left
     (fun acc item ->
        let item = String.trim item in
@@ -65,7 +68,9 @@ let unique_strings items =
 let credential_state (ctx : context) ~actual_name =
   let auth_cfg = Auth.load_auth_config ctx.config.base_path in
   let credential_required = auth_cfg.enabled && auth_cfg.require_token in
-  let credential_candidates = unique_strings [ ctx.agent_name; actual_name ] in
+  let credential_candidates =
+    unique_trimmed_nonblank [ ctx.agent_name; actual_name ]
+  in
   let internal_keeper_credential_available name =
     match
       ( Workspace_identity_backend.keeper_name_for_agent_name name

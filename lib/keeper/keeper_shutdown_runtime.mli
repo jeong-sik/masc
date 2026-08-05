@@ -20,8 +20,9 @@ type restored_inventory =
 
 val submit_error_to_string : submit_error -> string
 
-(** Restore admission from owner-addressable durable inventory. Corrupt
-    payloads fence their path owner and remain explicit in [corrupt_records];
+(** Restore admission from owner-addressable durable inventory. A Keeper with
+    any corrupt payload is fenced once and all of its operations are withheld
+    from recovery; corrupt records remain explicit in [corrupt_records], while
     valid operations for unrelated Keepers remain recoverable. *)
 val restore_inventory_admission :
   config:Workspace.config ->

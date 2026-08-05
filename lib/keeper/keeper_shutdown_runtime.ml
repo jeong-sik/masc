@@ -1,5 +1,7 @@
 open Keeper_shutdown_types
 
+module String_map = Map.Make (String)
+
 type submit_error =
   | Prepare_error of Keeper_shutdown_prepare_join.error
   | Existing_operation_load_error of Keeper_shutdown_store.error
@@ -62,7 +64,36 @@ let restore_admission ~config ~keeper_name ~operation_id =
 ;;
 
 let restore_inventory_admission ~config inventory =
-  let rec loop operations blocked corrupt_records = function
+  let corrupt_fences, corrupt_records =
+    List.fold_left
+      (fun (fences, records) -> function
+         | Keeper_shutdown_store.Operation _ -> fences, records
+         | Keeper_shutdown_store.Corrupt_record corrupt ->
+           let operation_id =
+             match String_map.find_opt corrupt.keeper_name fences with
+             | None -> corrupt.operation_id
+             | Some existing ->
+               if
+                 String.compare
+                   (Operation_id.to_string corrupt.operation_id)
+                   (Operation_id.to_string existing)
+                 < 0
+               then corrupt.operation_id
+               else existing
+           in
+           ( String_map.add corrupt.keeper_name operation_id fences
+           , corrupt :: records ))
+      (String_map.empty, [])
+      inventory
+  in
+  let rec restore_corrupt_fences blocked = function
+    | [] -> Ok blocked
+    | (keeper_name, operation_id) :: rest ->
+      (match restore_admission ~config ~keeper_name ~operation_id with
+       | Error _ as error -> error
+       | Ok () -> restore_corrupt_fences (keeper_name :: blocked) rest)
+  in
+  let rec loop operations blocked = function
     | [] ->
       Ok
         { operations = List.rev operations
@@ -70,7 +101,9 @@ let restore_inventory_admission ~config inventory =
         ; corrupt_records = List.rev corrupt_records
         }
     | Keeper_shutdown_store.Operation operation :: rest ->
-      if operation_requires_fence operation
+      if String_map.mem operation.keeper_name corrupt_fences
+      then loop operations blocked rest
+      else if operation_requires_fence operation
       then
         (match
            restore_admission
@@ -83,30 +116,13 @@ let restore_inventory_admission ~config inventory =
            loop
              (operation :: operations)
              (operation.keeper_name :: blocked)
-             corrupt_records
              rest)
-      else
-        loop
-          (operation :: operations)
-          blocked
-          corrupt_records
-          rest
-    | Keeper_shutdown_store.Corrupt_record corrupt :: rest ->
-      (match
-         restore_admission
-           ~config
-           ~keeper_name:corrupt.keeper_name
-           ~operation_id:corrupt.operation_id
-       with
-       | Error _ as error -> error
-       | Ok () ->
-         loop
-           operations
-           (corrupt.keeper_name :: blocked)
-           (corrupt :: corrupt_records)
-           rest)
+      else loop (operation :: operations) blocked rest
+    | Keeper_shutdown_store.Corrupt_record _ :: rest -> loop operations blocked rest
   in
-  loop [] [] [] inventory
+  match restore_corrupt_fences [] (String_map.bindings corrupt_fences) with
+  | Error _ as error -> error
+  | Ok blocked -> loop [] blocked inventory
 ;;
 
 let worker_mu = Eio.Mutex.create ()

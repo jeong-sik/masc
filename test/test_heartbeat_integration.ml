@@ -1931,6 +1931,12 @@ let test_unsupported_shutdown_schema_retains_exact_fence () =
       (match Shutdown_store.persist_new ~config operation with
        | Ok () -> ()
        | Error error -> fail (Shutdown_store.error_to_string error));
+      let current_operation =
+        { operation with operation_id = Shutdown_types.Operation_id.generate () }
+      in
+      (match Shutdown_store.persist_new ~config current_operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
       let operation_path =
         match Shutdown_store.path ~config ~keeper_name:meta.name operation_id with
         | Ok path -> path
@@ -1948,8 +1954,26 @@ let test_unsupported_shutdown_schema_retains_exact_fence () =
         | Ok inventory -> inventory
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
-      (match inventory with
-       | [ Shutdown_store.Corrupt_record corrupt ] ->
+      let operations, corrupt_records =
+        List.fold_left
+          (fun (operations, corrupt_records) -> function
+             | Shutdown_store.Operation operation -> operation :: operations, corrupt_records
+             | Shutdown_store.Corrupt_record corrupt ->
+               operations, corrupt :: corrupt_records)
+          ([], [])
+          inventory
+      in
+      (match operations with
+       | [ current ] ->
+         check bool
+           "current row for corrupt owner remains stored"
+           true
+           (Shutdown_types.Operation_id.equal
+              current_operation.operation_id
+              current.operation_id)
+       | _ -> fail "current row for corrupt owner changed inventory cardinality");
+      (match corrupt_records with
+       | [ corrupt ] ->
          check string "unsupported row keeps its path owner" meta.name corrupt.keeper_name;
          check bool
            "unsupported row keeps its operation identity"
@@ -1968,7 +1992,7 @@ let test_unsupported_shutdown_schema_retains_exact_fence () =
         restored.blocked_keeper_names;
       check int "unsupported row remains explicit" 1
         (List.length restored.corrupt_records);
-      check int "unsupported row is not a recoverable operation" 0
+      check int "corrupt owner has no recoverable operation" 0
         (List.length restored.operations);
       check
         (option string)

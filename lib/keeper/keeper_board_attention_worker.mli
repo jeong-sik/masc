@@ -99,6 +99,13 @@ module For_testing : sig
       so a worker stuck on a moved generation is distinguishable from one
       losing a claim race. *)
 
+  val drain_outcome_log_level : drain_outcome -> Log.level
+  (** Severity the drain verdict line is emitted at, derived from the outcome
+      rather than fixed at the call site
+      (docs/spec/18-log-severity-taxonomy.md). Exposed so the mapping is
+      asserted directly: the line itself sits inside the worker's fiber loop,
+      where a test cannot observe which logger ran. *)
+
   val process_next_exact
     :  clock:_ Eio.Time.clock
     -> net:Eio_context.eio_net option

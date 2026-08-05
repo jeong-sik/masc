@@ -359,6 +359,23 @@ let drain_outcome_label = function
     "retry_generation_changed"
 ;;
 
+(* Severity for the drain verdict line, chosen from the outcome rather than the
+   call site (docs/spec/18-log-severity-taxonomy.md).
+
+   [Drained] is the expected lifecycle success this worker exists to produce, so
+   it is [Info]. Both [Retry_later] reasons are ordinary concurrency outcomes —
+   the claim is held elsewhere, or the partition moved — and the re-arm applied
+   alongside the log is what represents them, so the line is [Debug] diagnostic
+   detail on an already represented event.
+
+   Neither is [Warn]: the taxonomy reserves that for a requested operation that
+   returned an explicit failure, and warning on every contention would bury the
+   real ones. *)
+let drain_outcome_log_level : drain_outcome -> Log.level = function
+  | Drained -> Log.Info
+  | Retry_later _ -> Log.Debug
+;;
+
 let apply_drain_rearm scheduler = function
   | Drained ->
     reset_contention_rearms scheduler ~keep:None;
@@ -1805,7 +1822,11 @@ let run
                  ~execute
              with
              | Ok outcome ->
-               Log.Keeper.info
+               (match drain_outcome_log_level outcome with
+                | Log.Debug -> Log.Keeper.debug
+                | Log.Info -> Log.Keeper.info
+                | Log.Warn -> Log.Keeper.warn
+                | Log.Error -> Log.Keeper.error)
                  "board_attention_worker_drain keeper=%s outcome=%s"
                  keeper_name
                  (drain_outcome_label outcome);
@@ -1836,6 +1857,7 @@ module For_testing = struct
   let schedule_contention_rearm = schedule_contention_rearm
   let reset_contention_rearms = reset_contention_rearms
   let drain_outcome_label = drain_outcome_label
+  let drain_outcome_log_level = drain_outcome_log_level
   let apply_drain_rearm = apply_drain_rearm
   let replay_completed_owner_wake = replay_completed_owner_wake
   let with_process_recovery_claim = with_process_recovery_claim

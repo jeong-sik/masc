@@ -2076,6 +2076,38 @@ let test_cross_domain_wake_is_coalesced_and_rearmed () =
    two of them back into one string would restore the state the measurement on
    2026-08-05 found: pending 425 -> 1031 with zero contention lines and zero
    worker failures, and no way to tell which of the three was happening. *)
+(* The drain verdict line takes its severity from the outcome, not from the call
+   site (docs/spec/18-log-severity-taxonomy.md; enforced by the L6 gate in
+   scripts/ci/check-log-severity-anti-patterns.sh at baseline 0). The log call
+   sits inside the worker's fiber loop where a test cannot observe which logger
+   ran, so the mapping is asserted here directly. *)
+let test_drain_outcome_selects_its_log_level () =
+  let contention =
+    { W.keeper_name = "k"
+    ; partition_id = "p"
+    ; generation = P.Generation.initial
+    }
+  in
+  let level = W.For_testing.drain_outcome_log_level in
+  Alcotest.(check bool)
+    "a completed drain is expected lifecycle success"
+    true
+    (level W.Drained = Log.Info);
+  (* Both retries are ordinary concurrency outcomes: the re-arm represents the
+     event, so the line is diagnostic detail on it. Warn is reserved for a
+     requested operation that returned an explicit failure. *)
+  Alcotest.(check bool)
+    "a contended claim is diagnostic detail, not a warning"
+    true
+    (level (W.Retry_later { contention; reason = W.Exact_claim_contended })
+     = Log.Debug);
+  Alcotest.(check bool)
+    "a moved generation is diagnostic detail, not a warning"
+    true
+    (level (W.Retry_later { contention; reason = W.Selected_generation_changed })
+     = Log.Debug)
+;;
+
 let test_drain_outcome_labels_stay_distinct () =
   let contention =
     { W.keeper_name = "k"
@@ -2229,6 +2261,10 @@ let () =
             "drain outcome labels stay distinct"
             `Quick
             test_drain_outcome_labels_stay_distinct
+        ; Alcotest.test_case
+            "drain outcome selects its log level"
+            `Quick
+            test_drain_outcome_selects_its_log_level
         ] )
     ]
 ;;

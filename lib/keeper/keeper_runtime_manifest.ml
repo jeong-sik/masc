@@ -768,18 +768,14 @@ let active_row (row : parsed_row) event : t =
 let decode_persisted_row json =
   match parse_row json with
   | Error _ as error -> error
-  | Ok row -> (
-      match classify_event_wire row.event_wire with
-      | Active_event event -> Ok (Active_row (active_row row event))
-      | Retired_event event -> Ok (Retired_row (row_identity row, event))
-      | Unsupported_event event -> Ok (Unsupported_row (row_identity row, event)))
+  | Ok row ->
+    (match event_kind_of_string row.event_wire with
+     | Some event -> Ok (Active_row (active_row row event))
+     | None -> Ok (Unsupported_row (row_identity row, row.event_wire)))
 
 let of_json json =
   match decode_persisted_row json with
   | Ok (Active_row row) -> Ok row
-  | Ok (Retired_row (_, event)) ->
-      Error
-        (Printf.sprintf "unknown event: %S" (retired_event_kind_to_string event))
   | Ok (Unsupported_row (_, event)) ->
       Error (Printf.sprintf "unknown event: %S" event)
   | Error _ as error -> error

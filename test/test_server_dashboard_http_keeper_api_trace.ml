@@ -259,13 +259,13 @@ let test_runtime_manifest_scan_surfaces_diagnostics_without_repeat_warnings () =
     |> Keeper_runtime_manifest.to_json
   in
   let rows =
-    [ runtime_manifest_json_with_event active_row "state_snapshot_sidecar_saved"
-    ; runtime_manifest_json_with_event active_row "working_state_sidecar_saved"
-    ; runtime_manifest_json_with_event active_row "future_manifest_event"
-    ; runtime_manifest_json_with_event active_row "future_manifest_event_2"
-    ; runtime_manifest_json_with_event active_row "future_manifest_event_3"
+    [ runtime_manifest_json_with_event active_row "unsupported_manifest_event_1"
+    ; runtime_manifest_json_with_event active_row "unsupported_manifest_event_2"
+    ; runtime_manifest_json_with_event active_row "unsupported_manifest_event_3"
+    ; runtime_manifest_json_with_event active_row "unsupported_manifest_event_4"
+    ; runtime_manifest_json_with_event active_row "unsupported_manifest_event_5"
     ; runtime_manifest_json_with_field
-        (runtime_manifest_json_with_event active_row "state_snapshot_sidecar_saved")
+        (runtime_manifest_json_with_event active_row "unsupported_manifest_event_1")
         "schema_version"
         (`Int 2)
     ; runtime_manifest_json_without_field active_row "status"
@@ -306,16 +306,12 @@ let test_runtime_manifest_scan_surfaces_diagnostics_without_repeat_warnings () =
     "keeper.runtime_manifest_scan_diagnostics.v1"
     (diagnostics |> member "schema" |> to_string);
   check int
-    "retired rows counted"
-    2
-    (diagnostics |> member "retired_event_count" |> to_int);
-  check int
     "unsupported rows counted"
-    3
+    5
     (diagnostics |> member "unsupported_event_count" |> to_int);
   check int
     "unsupported rows outside the identity request bound are explicit"
-    1
+    3
     (diagnostics
      |> member "unsupported_event_unattributed_count"
      |> to_int);
@@ -327,8 +323,6 @@ let test_runtime_manifest_scan_surfaces_diagnostics_without_repeat_warnings () =
     "invalid json rows counted"
     1
     (diagnostics |> member "invalid_json_row_count" |> to_int);
-  let retired_counts = diagnostics |> member "retired_event_counts" |> to_list in
-  check int "retired kinds remain distinct" 2 (List.length retired_counts);
   let unsupported_counts =
     diagnostics |> member "unsupported_event_counts" |> to_list
   in
@@ -588,7 +582,7 @@ let () =
         ] )
     ; ( "runtime_manifest_scan"
       , [ test_case
-            "surfaces retired and unsupported rows without repeated warnings"
+            "surfaces unsupported rows without repeated warnings"
             `Quick
             test_runtime_manifest_scan_surfaces_diagnostics_without_repeat_warnings
         ] )

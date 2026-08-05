@@ -14,9 +14,9 @@
       creation still fails, the turn dispatches untraced with a typed
       degrade record ([Sink_degraded] -> warn log + counter), never a
       pre-dispatch error.
-    - P1b: the store is bounded — one fresh JSONL per turn under
-      [.masc/keepers/<name>/raw-traces/], deterministically pruned to
-      [Keeper_types_support.raw_trace_retained_turn_files].
+    - P1b: the store is bounded by TurnRecord reachability — after the current
+      commit attempt, every exact run referenced by the RFC-0358 window
+      survives, while orphan/unreachable regular JSONL files are removed.
     - Consumer level: a traced turn yields non-[None]
       [run_result.trace_ref]/[run_validation] via exactly the projection
       [Runtime_agent.run] performs. *)
@@ -104,6 +104,54 @@ let materialize_turn ~(meta : Keeper_meta_contract.keeper_meta) ~turn sink =
        ~final_text:(Some (Printf.sprintf "done-%d" turn))
        ~stop_reason:(Some "end_turn") ~error:None)
 
+let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
+    ~raw_trace_path =
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let raw_trace_run_ref : Turn_record.raw_trace_run_ref =
+    { worker_run_id = Printf.sprintf "run-%d" turn
+    ; path = raw_trace_path
+    ; start_seq = 1
+    ; end_seq = 1
+    ; agent_name = meta.name
+    ; session_id = trace_id
+    }
+  in
+  Keeper_turn_record_writer.write
+    ~config
+    ~keeper_name:meta.name
+    ~agent_name:meta.agent_name
+    ~generation:meta.runtime.nonce
+    ~turn_kind:Turn_record.Autonomous
+    ~trace_id
+    ~absolute_turn:turn
+    ~runtime_profile:"test-runtime"
+    ~model:(Some "test-model")
+    ~finish_reason:(Some "completed")
+    ~context_window:None
+    ~price_input_per_million:None
+    ~price_output_per_million:None
+    ~request_latency_ms:None
+    ~ttfrc_ms:None
+    ~request_wire_observation:None
+    ~raw_trace_run_ref:(Some raw_trace_run_ref)
+    ~sampling:
+      { temperature = None
+      ; top_p = None
+      ; max_tokens = None
+      ; thinking_budget = None
+      ; enable_thinking = None
+      }
+    ~usage:
+      { input_tokens = None
+      ; output_tokens = None
+      ; cache_creation_input_tokens = None
+      ; cache_read_input_tokens = None
+      }
+    ~execution_ids:[]
+    ~blocks:[]
+    ~input_components:None
+    ()
+
 (* Per-turn store lives under the keepers runtime dir — the SSOT shared
    with the metrics/receipt stores — and every call hands out a fresh
    file so [Raw_trace.create] never reads previous turns. *)
@@ -187,7 +235,9 @@ let test_per_turn_files_isolate_turns () =
     let (_ref : Agent_sdk.Raw_trace.run_ref) =
       materialize_turn ~meta ~turn sink
     in
-    Agent_sdk.Raw_trace.file_path sink
+    let path = Agent_sdk.Raw_trace.file_path sink in
+    write_turn_record config ~meta ~turn ~raw_trace_path:path;
+    path
   in
   let path1 = run_once ~turn:1 in
   let path2 = run_once ~turn:2 in
@@ -284,81 +334,148 @@ let test_degraded_sink_dispatches_untraced () =
         "degrade emits the typed RawTraceSinkDegraded counter"
         (before +. 1.0) (degrade_count ()))
 
-(* P1b: deterministic retention — oldest-by-name (= oldest-by-time via
-   the zero-padded timestamp prefix) files beyond the named bound are
-   removed; non-.jsonl entries are not candidates; pruning is idempotent. *)
-let test_prune_removes_oldest_beyond_retention () =
+let prune_or_fail config =
+  match
+    Keeper_raw_trace_retention.prune
+      ~config
+      ~keeper_name
+      ()
+  with
+  | Ok summary -> summary
+  | Error error ->
+    Alcotest.fail
+      ("reference-aware prune failed: "
+       ^ Keeper_raw_trace_retention.error_to_string error)
+
+(* P1b: TurnRecord reachability, not file age or raw file count, owns
+   retention. Orphans may sort before, between, or after referenced traces;
+   every current reference and the admitted sink survives. *)
+let test_prune_preserves_current_references_and_removes_orphans () =
+  with_workspace @@ fun config ->
+  let meta = make_test_meta () in
+  let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
+  Fs_compat.mkdir_p dir;
+  let name_of i = Printf.sprintf "turn-%013d-0000-%06d.jsonl" i i in
+  let referenced =
+    List.init 3 (fun i -> Filename.concat dir (name_of ((i * 10) + 10)))
+  in
+  List.iteri
+    (fun i path ->
+      write_file path "{}\n";
+      write_turn_record config ~meta ~turn:(i + 1) ~raw_trace_path:path)
+    referenced;
+  let orphans =
+    [ Filename.concat dir (name_of 1)
+    ; Filename.concat dir (name_of 15)
+    ; Filename.concat dir (name_of 99)
+    ]
+  in
+  List.iter (fun path -> write_file path "{}\n") orphans;
+  let non_trace = Filename.concat dir "not-a-trace.tmp" in
+  write_file non_trace "keep\n";
+  let summary = prune_or_fail config in
+  Alcotest.(check int) "all orphan regular traces removed" 3 summary.removed;
+  Alcotest.(check int) "all current references retained" 3
+    summary.retained_references;
+  List.iter
+    (fun path ->
+      Alcotest.(check bool) ("referenced trace survives: " ^ path) true
+        (Sys.file_exists path))
+    referenced;
+  List.iter
+    (fun path ->
+      Alcotest.(check bool) ("orphan trace removed: " ^ path) false
+        (Sys.file_exists path))
+    orphans;
+  Alcotest.(check bool) "non-jsonl file is not a retention candidate" true
+    (Sys.file_exists non_trace)
+
+(* A malformed current reachability root must never be converted into a
+   destructive guess. The entire cleanup is skipped and every file survives. *)
+let test_prune_fails_open_on_incompatible_turn_record () =
   with_workspace @@ fun config ->
   let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
   Fs_compat.mkdir_p dir;
-  let n_extra = 7 in
-  let total = Keeper_types_support.raw_trace_retained_turn_files + n_extra in
-  let name_of i = Printf.sprintf "turn-%013d-0000-%06d.jsonl" i i in
-  for i = 0 to total - 1 do
-    write_file (Filename.concat dir (name_of i)) "{}\n"
-  done;
-  write_file (Filename.concat dir "not-a-trace.tmp") "keep\n";
-  Alcotest.(check int) "prune removes exactly the excess" n_extra
-    (Keeper_types_support.prune_keeper_raw_trace_turn_files config keeper_name);
-  for i = 0 to n_extra - 1 do
-    Alcotest.(check bool)
-      (Printf.sprintf "oldest file %d removed" i)
-      false
-      (Sys.file_exists (Filename.concat dir (name_of i)))
-  done;
-  Alcotest.(check bool) "retention boundary file survives" true
-    (Sys.file_exists (Filename.concat dir (name_of n_extra)));
-  Alcotest.(check bool) "newest file survives" true
-    (Sys.file_exists (Filename.concat dir (name_of (total - 1))));
-  Alcotest.(check bool) "non-jsonl entries are not retention candidates" true
-    (Sys.file_exists (Filename.concat dir "not-a-trace.tmp"));
-  Alcotest.(check int) "second prune is a no-op" 0
-    (Keeper_types_support.prune_keeper_raw_trace_turn_files config keeper_name)
+  let orphan = Filename.concat dir "turn-0000000000001-0000-000001.jsonl" in
+  write_file orphan "{}\n";
+  Dated_jsonl.append
+    (Keeper_types_support.keeper_turn_record_store config keeper_name)
+    (`Assoc []);
+  (match
+     Keeper_raw_trace_retention.prune
+       ~config
+       ~keeper_name
+       ()
+   with
+   | Error (Keeper_raw_trace_retention.Incompatible_turn_record _) -> ()
+   | Error error ->
+     Alcotest.fail
+       ("unexpected typed prune error: "
+        ^ Keeper_raw_trace_retention.error_to_string error)
+  | Ok _ -> Alcotest.fail "incompatible TurnRecord must skip cleanup");
+  Alcotest.(check bool) "orphan survives fail-open cleanup" true
+    (Sys.file_exists orphan)
 
-(* P1b end-to-end: creating sinks turn after turn keeps the store at the
-   documented steady-state bound (retained + the freshly materialized
-   turn file), with the oldest turn files the ones pruned.
-
-   The store is filled to the retention boundary with placeholder turn
-   files instead of by running [retained] real turns. The subject here is
-   the sink -> prune wiring, which three real sinks exercise as well as
-   thousands do; running the full retention count of real turns costs
-   ~50s and asserts nothing the placeholders do not. Prune ordering and
-   idempotence are asserted directly in
-   [test_prune_removes_oldest_beyond_retention].
-
-   Placeholder names carry a zero-based index where the writer stamps the
-   current epoch millisecond, so they always sort below a freshly minted
-   turn file and are the prune candidates. *)
-let test_sink_creation_enforces_retention_bound () =
+(* The shared 200-row boundary is exact: a reference in row 1 falls out when
+   row 201 commits, while rows 2..201 remain protected. *)
+let test_prune_uses_shared_turn_record_window () =
   with_workspace @@ fun config ->
   let meta = make_test_meta () in
-  let retained = Keeper_types_support.raw_trace_retained_turn_files in
+  let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
+  Fs_compat.mkdir_p dir;
+  let path_of turn =
+    Filename.concat dir
+      (Printf.sprintf "turn-%013d-0000-%06d.jsonl" turn turn)
+  in
+  for turn = 1 to Keeper_raw_trace_retention.history_limit + 1 do
+    let path = path_of turn in
+    write_file path "{}\n";
+    write_turn_record config ~meta ~turn ~raw_trace_path:path
+  done;
+  let summary = prune_or_fail config in
+  Alcotest.(check int) "only the reference outside the shared window is removed"
+    1 summary.removed;
+  Alcotest.(check bool) "row outside the current window is unreachable" false
+    (Sys.file_exists (path_of 1));
+  Alcotest.(check bool) "oldest row inside the current window survives" true
+    (Sys.file_exists (path_of 2));
+  Alcotest.(check bool) "newest row survives" true
+    (Sys.file_exists
+       (path_of (Keeper_raw_trace_retention.history_limit + 1)))
+
+(* End-to-end wiring: cleanup runs after the TurnRecord commit attempt, so the
+   just-committed exact path is reachable before any orphan is removed. *)
+let test_post_commit_cleanup_prunes_orphan_and_preserves_reference () =
+  with_workspace @@ fun config ->
+  let meta = make_test_meta () in
   let dir = Keeper_types_support.keeper_raw_trace_dir config meta.name in
   Fs_compat.mkdir_p dir;
-  let placeholder i = Printf.sprintf "turn-%013d-0000-%06d.jsonl" i i in
-  for i = 0 to retained - 1 do
-    write_file (Filename.concat dir (placeholder i)) "{}\n"
-  done;
-  let oldest_placeholder = Filename.concat dir (placeholder 0) in
-  let last_path = ref "" in
-  for turn = 1 to 3 do
-    let sink =
-      sink_or_fail "keeper_raw_trace_sink"
-        (Keeper_agent_run.For_testing.keeper_raw_trace_sink ~config ~meta)
-    in
-    let (_ref : Agent_sdk.Raw_trace.run_ref) =
-      materialize_turn ~meta ~turn sink
-    in
-    last_path := Agent_sdk.Raw_trace.file_path sink
-  done;
-  Alcotest.(check int) "store is bounded at retained + 1 files"
-    (retained + 1)
-    (List.length (jsonl_files dir));
-  Alcotest.(check bool) "oldest turn file was pruned" false
-    (Sys.file_exists oldest_placeholder);
-  Alcotest.(check bool) "newest turn file was retained" true
-    (Sys.file_exists !last_path)
+  let referenced = Filename.concat dir "turn-0000000000001-0000-000001.jsonl" in
+  let orphan = Filename.concat dir "turn-9999999999998-0000-999998.jsonl" in
+  write_file referenced "{}\n";
+  write_turn_record config ~meta ~turn:1 ~raw_trace_path:referenced;
+  write_file orphan "{}\n";
+  let sink =
+    sink_or_fail "keeper_raw_trace_sink"
+      (Keeper_agent_run.For_testing.keeper_raw_trace_sink ~config ~meta)
+  in
+  let current_path = Agent_sdk.Raw_trace.file_path sink in
+  let (_ref : Agent_sdk.Raw_trace.run_ref) =
+    materialize_turn ~meta ~turn:2 sink
+  in
+  write_turn_record config ~meta ~turn:2 ~raw_trace_path:current_path;
+  Keeper_agent_run.For_testing.prune_raw_traces_after_turn_record
+    ~config
+    ~meta
+    (Some sink);
+  Alcotest.(check bool) "previous referenced trace survives cleanup" true
+    (Sys.file_exists referenced);
+  Alcotest.(check bool) "orphan is removed even when it sorts newest" false
+    (Sys.file_exists orphan);
+  Alcotest.(check bool) "just-committed trace survives cleanup" true
+    (Sys.file_exists current_path);
+  Alcotest.(check int) "only reference plus current sink remain" 2
+    (List.length (jsonl_files dir))
 
 let response ?(content = []) ?(stop_reason = Agent_sdk.Types.EndTurn) () =
   {
@@ -445,8 +562,9 @@ let repo_root () =
    ~goal:user_message, which doc-comment mentions of run_named never carry),
    ?raw_trace must be passed. This is the regression that motivated the fix:
    the parameter existed end-to-end but the dispatch never supplied it.
-   The companion check pins the option to the degrade adapter so a future
-   edit cannot silently reintroduce a hard (turn-failing) dependency. *)
+   The companion checks pin the option to the degrade adapter and keep
+   retention after TurnRecord publication, so a future edit cannot silently
+   reintroduce a hard dependency or pre-dispatch cleanup. *)
 let test_keeper_dispatch_passes_raw_trace () =
   let root = repo_root () in
   let rel_path = "lib/keeper/keeper_agent_run.ml" in
@@ -476,8 +594,30 @@ let test_keeper_dispatch_passes_raw_trace () =
         (raw_trace_for_dispatch), not a turn-failing require"
        rel_path)
     true
-    (Astring.String.is_infix ~affix:"?raw_trace:(raw_trace_for_dispatch"
-       source)
+    (Astring.String.is_infix
+       ~affix:"let raw_trace = raw_trace_for_dispatch ~config ~meta"
+       source
+     && Astring.String.is_infix
+          ~affix:"call_run_named ?raw_trace ~initial_messages"
+          source);
+  let record_write =
+    Astring.String.find_sub ~sub:"Keeper_turn_record_writer.write" source
+  in
+  let cleanup_after_write =
+    Option.bind record_write (fun start ->
+      Astring.String.find_sub
+        ~start
+        ~sub:"prune_raw_traces_after_turn_record ~config ~meta raw_trace"
+        source)
+  in
+  Alcotest.(check bool)
+    (Printf.sprintf
+       "%s: raw-trace cleanup must run only after the TurnRecord commit attempt"
+       rel_path)
+    true
+    (match record_write, cleanup_after_write with
+     | Some write_at, Some cleanup_at -> cleanup_at > write_at
+     | _ -> false)
 
 let () =
   Alcotest.run "keeper_raw_trace_sink"
@@ -496,10 +636,14 @@ let () =
             test_corrupt_history_does_not_block_sink;
           Alcotest.test_case "degraded sink dispatches untraced" `Quick
             test_degraded_sink_dispatches_untraced;
-          Alcotest.test_case "retention prunes oldest beyond bound" `Quick
-            test_prune_removes_oldest_beyond_retention;
-          Alcotest.test_case "sink creation enforces retention bound" `Quick
-            test_sink_creation_enforces_retention_bound;
+          Alcotest.test_case "retention preserves refs and removes orphans" `Quick
+            test_prune_preserves_current_references_and_removes_orphans;
+          Alcotest.test_case "retention fails open on incompatible record" `Quick
+            test_prune_fails_open_on_incompatible_turn_record;
+          Alcotest.test_case "retention shares reader's exact window" `Quick
+            test_prune_uses_shared_turn_record_window;
+          Alcotest.test_case "post-commit cleanup is reference-aware" `Quick
+            test_post_commit_cleanup_prunes_orphan_and_preserves_reference;
           Alcotest.test_case "traced turn yields result-level fields" `Quick
             test_traced_turn_yields_result_level_fields;
           Alcotest.test_case "dispatch passes ?raw_trace" `Quick

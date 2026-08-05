@@ -89,20 +89,6 @@ let keeper_runtime_dir config name =
 let raw_traces_dirname = "raw-traces"
 let raw_trace_file_extension = ".jsonl"
 
-(** Retention bound for the per-turn raw-trace store.  This is log
-    retention, not a behavioral cap: every turn still runs and still
-    traces; only the oldest persisted turn files beyond this count are
-    deleted at sink-creation time.  The steady-state on-disk bound is
-    [raw_trace_retained_turn_files + 1] files per keeper (the freshly
-    created turn file materializes after the prune that precedes it).
-
-    The count also bounds how far back the dashboard chat can show an
-    autonomous turn's public final text: the turn record keeps typed
-    identity and exact-run metadata, but the raw-trace store owns the body.
-    Dashboard display requirements do not enlarge this diagnostic-store
-    retention policy. *)
-let raw_trace_retained_turn_files = 200
-
 let keeper_raw_trace_dir config name =
   Filename.concat
     (Filename.concat (Workspace.keepers_runtime_dir config) name)
@@ -148,47 +134,6 @@ let keeper_raw_trace_turn_path config name =
     else candidate
   in
   fresh 0
-
-(** Delete the oldest per-turn raw-trace files beyond
-    [raw_trace_retained_turn_files].  Deterministic: candidates are the
-    [.jsonl] entries of the raw-traces dir sorted by file name ascending
-    (the zero-padded timestamp prefix makes that chronological), and the
-    excess prefix of that order is removed.  Total: a missing dir or a
-    failed unlink is logged and skipped, never raised — retention runs on
-    the turn dispatch path and must not gate keeper liveness.  Returns the
-    number of files removed. *)
-let prune_keeper_raw_trace_turn_files config name =
-  let dir = keeper_raw_trace_dir config name in
-  let entries =
-    try Sys.readdir dir with
-    | Sys_error _ -> [||]
-  in
-  let trace_files =
-    entries
-    |> Array.to_list
-    |> List.filter (fun entry ->
-      Filename.check_suffix entry raw_trace_file_extension)
-    |> List.sort String.compare
-  in
-  let excess = List.length trace_files - raw_trace_retained_turn_files in
-  if excess <= 0 then 0
-  else begin
-    let removed = ref 0 in
-    List.iteri
-      (fun idx entry ->
-        if idx < excess then begin
-          let path = Filename.concat dir entry in
-          try
-            Sys.remove path;
-            incr removed
-          with
-          | Sys_error msg ->
-            Log.Keeper.warn ~keeper_name:name
-              "raw-trace retention: failed to remove %s: %s" path msg
-        end)
-      trace_files;
-    !removed
-  end
 
 let keeper_generation_index_path config name =
   Filename.concat

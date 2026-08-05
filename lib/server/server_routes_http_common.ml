@@ -2,7 +2,6 @@
 open Server_auth
 
 module Http = Http_server_eio
-module Http_h2 = Http_server_h2
 module Mcp_session = Mcp_session
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio

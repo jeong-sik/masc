@@ -163,15 +163,12 @@ val with_file_lock_impl :
   config -> string -> (unit -> 'a) -> 'a
 
 (** Cooperative file lock (Eio mutex for in-process, distributed
-    lock for FileSystem backend); explicit clock argument. *)
-
-(** Cooperative file lock; uses [Eio_context.get_clock_opt]. *)
+    lock for FileSystem backend); uses [Eio_context.get_clock_opt]. *)
 val with_file_lock : config -> string -> (unit -> 'a) -> 'a
 
 val with_file_lock_r_impl :
   ?clock:_ Eio.Time.clock ->
   config -> string -> (unit -> 'a) -> ('a, masc_error) result
-
 
 val with_file_lock_r :
   config -> string -> (unit -> 'a) -> ('a, masc_error) result

@@ -87,9 +87,8 @@ module For_testing : sig
     -> (string, Agent_sdk.Error.sdk_error) result
 
   (** OAS raw-trace sink for keeper turns: a fresh per-turn file under
-      [Keeper_types_support.keeper_raw_trace_dir], pruned to
-      [Keeper_types_support.raw_trace_retained_turn_files]. The dispatch
-      section passes it into [Keeper_turn_driver.run_named] so
+      [Keeper_types_support.keeper_raw_trace_dir]. The dispatch section passes
+      it into [Keeper_turn_driver.run_named] so
       [run_result.trace_ref]/[run_validation] are populated. *)
   val keeper_raw_trace_sink
     :  config:Workspace.config
@@ -104,6 +103,15 @@ module For_testing : sig
     :  config:Workspace.config
     -> meta:Keeper_meta_contract.keeper_meta
     -> Agent_sdk.Raw_trace.t option
+
+  (** Run reference-aware cleanup only after the current TurnRecord commit
+      attempt. A missing/degraded sink is a no-op; cleanup failure is logged
+      and never changes the turn result. *)
+  val prune_raw_traces_after_turn_record
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> Agent_sdk.Raw_trace.t option
+    -> unit
 
   val runtime_yield_reason
     :  autonomous_yield_request

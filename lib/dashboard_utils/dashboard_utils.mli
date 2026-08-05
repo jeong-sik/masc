@@ -1,7 +1,6 @@
 (** Dashboard utility primitives — small string/JSON helpers, severity
-    ranking, and three ADTs (health level, session lifecycle, tone) that
-    replace ad-hoc string matching across the dashboard, briefing, and
-    operator modules. *)
+    ranking, and two ADTs (health level, tone) that replace ad-hoc string
+    matching across the dashboard, briefing, and operator modules. *)
 
 (** {1 Time} *)
 
@@ -16,8 +15,6 @@ val first_some : 'a option -> 'a option -> 'a option
 
 val string_contains : needle:string -> string -> bool
 (** Case-sensitive substring test. *)
-
-(** [Some s] for non-empty trimmed text, [None] otherwise. *)
 
 val dedup_strings : string list -> string list
 (** Order-preserving deduplication via local [String_set]. *)
@@ -46,8 +43,6 @@ val string_field : ?default:string -> string -> Yojson.Safe.t -> string
 
 val list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list
 (** Read [key] as a [`List]. Default [[]]. *)
-
-(** Wrap as [`List of `String]. *)
 
 (** {1 Ranking} *)
 
@@ -80,7 +75,6 @@ val is_keeper_offline : string -> bool
 val is_health_critical : health_level -> bool
 val is_health_warning : health_level -> bool
 val is_health_at_risk : health_level -> bool
-
 
 (** {1 Tone} *)
 

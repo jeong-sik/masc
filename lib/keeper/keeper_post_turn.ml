@@ -11,30 +11,15 @@
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split.
 
-    Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.  Sibling
-    Authoritative spec
-    mirror is [specs/keeper-state-machine/KeeperGenerationLineage.tla].
+    Generation-lineage properties this tail maintains: identity is stable
+    across generations, trace_id is replaced per generation, ancestry is
+    append-only, and checkpoint commit preserves checkpoint-valid /
+    checkpoint-generation parity once the keeper is back to idle. While an
+    in-flight turn is still resolving, the compaction phase feeds into
+    [keeper_phase] = "running".
 
-    Spec lines 10-13 already cite this module as one of three modeled
-    OCaml sources:
-      - lib/keeper/keeper_post_turn.ml   (this file — post-turn pipeline)
-      - lib/keeper_types/keeper_types.mli (type lineage — anchor deferred)
-
-    This block is the reverse-direction citation so code search for
-    "KeeperGenerationLineage" lands here.
-
-    Post-turn -> spec mapping:
-      Compaction phase    feeds into [keeper_phase] = "running" while
-                          the in-flight turn is still resolving.
-      Checkpoint commit    preserves the spec's checkpoint-valid /
-                          checkpoint-generation parity invariant.
-
-    Spec scope (line 4-8): same identity across generations,
-    trace_id replacement, append-only ancestry, checkpoint lineage
-    parity once back to idle.
-
-    Spec out-of-scope (line 15-18 in spec): explicit compaction requests,
-    Agent.run turn loop, and long-term memory recall. *)
+    Out of scope here: explicit compaction requests, the [Agent.run] turn
+    loop, and long-term memory recall. *)
 
 open Keeper_types
 open Keeper_meta_contract

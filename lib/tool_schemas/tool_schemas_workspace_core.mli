@@ -7,7 +7,7 @@
 
     Issue #8636: [assertion_kind_enum_strings] hand-mirrors
     {!Tool_workspace.valid_assertion_strings}; the sync regression test
-    [test_types.ml :: assertion_kind_ssot] catches drift. *)
+    [test_assertion_kind_mirror] catches drift. *)
 
 (** Enum of valid [masc_check] assertion strings. *)
 val assertion_kind_enum_strings : string list

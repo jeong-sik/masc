@@ -300,15 +300,10 @@ let run_keeper_cycle
   | Ok { entry; publication_recovery } ->
   let meta = entry.meta in
   let channel = turn_decision.channel in
-  (* Spec navigation: see specs/keeper-state-machine/KeeperTaskAcquisition.tla
-     (Cycle 8/Tier B2, PR #11412).  Action mapping:
-     SubmitTask=external producers, AssignTask=channel decision below,
-     EmptyQueueSleep=scheduled_autonomous else, TurnComplete=run_turn body,
-     TaskRejected=NoTaskOrphan invariant (every claim reaches Ok/Error). *)
-  (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete bracket — the
-     cycle_completed flag is set to true on the [Ok updated_meta] return at
-     the end of this function; an [Error _] branch leaves it false and
-     skips the wrap, mirroring the spec's "completed-on-success" semantics. *)
+  (* TurnComplete bracket — the cycle_completed flag is set to true on the
+     [Ok updated_meta] return at the end of this function; an [Error _]
+     branch leaves it false and skips the wrap, so completion is recorded
+     on success only. *)
   (* 0. Phase gate + state-aware runtime routing.
      The gate owns turn executability; select_runtime remains a total helper
      so dashboards/tests can inspect the same routing contract for blocked
@@ -389,8 +384,7 @@ let run_keeper_cycle
      the top of the function body, rather than burying early-exits in
      deeply nested match arms.
 
-     State-aware runtime routing (TLA+ KeeperCoreTriad.SelectRuntime)
-     resumes inside [main_path]. *)
+     State-aware runtime routing resumes inside [main_path]. *)
   let main_path (turn_state : Keeper_unified_turn_execution.turn_state)
     : (turn_success, Agent_sdk.Error.sdk_error) result
       * Keeper_unified_turn_execution.turn_state
@@ -1115,7 +1109,7 @@ dominant source of the observed CAS race exhaustion after
                   in
                   (match success with
                    | Keeper_unified_turn_success.Completed updated_meta ->
-                     (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action. *)
+                     (* TurnComplete post-action. *)
                      let turn_state =
                        { turn_state with cycle_completed = true }
                      in

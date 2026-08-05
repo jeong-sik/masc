@@ -10,10 +10,9 @@ open Masc_domain
     [Tool_workspace.valid_assertion_strings]. Cycle constraint —
     [Tool_schemas_workspace_core] is upstream of [Tool_workspace] (the schema
     library lives in [masc_tool_schemas], the handler is in [masc]).
-    The test [test_types.ml :: assertion_kind_ssot] asserts this mirror
-    stays in sync with the SSOT so adding a 6th assertion kind fails
-    compilation in [assertion_kind_to_string] AND fails the test here,
-    instead of silently dropping from the JSON Schema. *)
+    [test_assertion_kind_mirror] compares the enum [masc_check] publishes
+    against the owner's list, so a kind that grows on one side and not the
+    other fails there instead of silently dropping from the JSON Schema. *)
 let assertion_kind_enum_strings =
   [ "task_claimed"; "current_task_set" ]
 

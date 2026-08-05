@@ -17,12 +17,10 @@
     I/O. Two concurrent refreshers may both probe; that is
     wasteful but correct, and the 30 s TTL narrows the window.
 
-    Test-only mutable state ([cached_endpoints] /
-    [cache_updated_at]) is exposed deliberately —
-    [test_tool_local_runtime_verify] needs to seed and restore
-    the cache before / after exercising consumers. The .mli
-    documents this so a future "make these private" refactor
-    sees the test contract it would break. *)
+    The cache cells themselves are private. They were exposed for a
+    [test_tool_local_runtime_verify] suite that seeds and restores them, and
+    that suite does not exist -- no file, no module, no caller anywhere. The
+    only way in is {!get_cached_or_refresh}. *)
 
 (** {1 Type aliases} *)
 
@@ -40,21 +38,6 @@ val set_env :
     probing. Called once at server init by
     [server_runtime_bootstrap]; safe to re-call (last-writer-wins
     on the underlying [Atomic.t]). *)
-
-(** {1 Cache state (test-visible)} *)
-
-val cached_endpoints : endpoint_info list ref
-(** Current cached probe result. Exposed for the
-    [test_tool_local_runtime_verify] suite which needs to seed
-    a deterministic value and restore the original after the
-    test. Production callers should go through
-    {!get_cached_or_refresh} instead. *)
-
-val cache_updated_at : float Atomic.t
-(** Unix timestamp of the most recent successful refresh. The
-    TTL check in {!get_cached_or_refresh} reads this without
-    taking the cache mutex. Exposed for the same testing
-    reason as {!cached_endpoints}. *)
 
 (** {1 Refresh + read} *)
 

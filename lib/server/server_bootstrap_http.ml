@@ -135,10 +135,9 @@ let disable_nagle flow =
 
 let serve ~sw ~clock ~socket ~addr_label ~request_handler =
   let mode = "h1" in
-  (* Stable listener identity. Mirrors the [h1 host:port]/[h2 host:port]
-     tag introduced in http_server_eio.ml / http_server_h2.ml so error
-     log lines name *which* listener emitted them when a process runs
-     multiple HTTP servers. *)
+  (* Stable listener identity: the [h1 host:port] tag lets error log lines
+     name *which* listener emitted them when a process runs multiple HTTP
+     servers. [server_h2_gateway] tags its own the same way. *)
   let listener_tag = Printf.sprintf "%s %s" mode addr_label in
   let mark_stopped = register_listener_lifecycle ~sw ~mode in
   let is_cancelled exn =

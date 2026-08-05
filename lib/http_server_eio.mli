@@ -1,9 +1,7 @@
 (** Http_server_eio — Eio-native HTTP/1.1 server using
     [httpun-eio].
 
-    Sister module to {!Http_server_h2} (cycle 164, the H2
-    wrapper).  Conflict-free with [httpun-ws-eio] (no cohttp 6.x
-    dependency).
+    Conflict-free with [httpun-ws-eio] (no cohttp 6.x dependency).
 
     This module carries no routes and no handlers: it exposes
     {!config}, the {!request_handler} type, and the

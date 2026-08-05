@@ -2,8 +2,7 @@
 
     Projects a [Keeper_registry.registry_entry] into a composite snapshot
     spanning Decision / Runtime / Memory / Compaction sub-FSMs as
-    specified in RFC-0003 and
-    [specs/keeper-state-machine/KeeperCompositeLifecycle.tla].
+    specified in RFC-0003.
 
     Contract:
     - Pure read. No mutation, no I/O, no event emission.
@@ -40,7 +39,7 @@ type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_compacting
   | Compaction_done
 
-(** Named TLA invariants mirrored as OCaml variants. *)
+(** Named composite invariants, one variant per {!invariants_check} field. *)
 type invariant_key =
   | Invariant_phase_turn_alignment
   | Invariant_no_runtime_before_measurement
@@ -48,7 +47,7 @@ type invariant_key =
   | Invariant_event_priority_monotone
   | Invariant_phase_derivation_agreement
 
-(** Safety invariants from KeeperCompositeLifecycle.tla.
+(** Composite-level safety invariants.
     Each field is [true] when the invariant holds for the observed
     snapshot. A [false] value signals a composite-level safety violation
     that the dashboard should surface to the operator. *)
@@ -69,29 +68,32 @@ val bump_invariant_violations :
 
 (** {2 Pure invariant predicates}
 
-    The [check_*] functions below mirror the composite TLA+
-    [SafetyInvariant] conjuncts and the runtime phase-derivation
-    agreement check. They are exposed so cross-FSM joint tests
-    ([test/test_keeper_fsm_joints.ml]) can drive realistic state
-    combinations through the same predicates that production
-    [compute_invariants] uses, without having to construct a full
-    {!Keeper_registry.registry_entry} value.
+    The [check_*] functions below are the conjuncts of the composite
+    safety invariant plus the runtime phase-derivation agreement check.
+    They are exposed so tests can drive state combinations through the
+    same predicates production [compute_invariants] uses, without having
+    to construct a full {!Keeper_registry.registry_entry} value.
+    [test/test_event_priority_monotone_pbt.ml] does this for
+    {!check_event_priority_monotone_pure}; the other four have no test of
+    their own.
 
     Pure: no side effects, no clock, no I/O. *)
 
-(** Mirror of TLA+ I1 [PhaseTurnAlignment] (KeeperCompositeLifecycle.tla:354):
-    when KSM is in [Compacting], the turn phase must also be
-    [Turn_compacting]; conversely no other KSM phase may carry a live
-    [Turn_compacting]. *)
+(** [PhaseTurnAlignment]: when KSM is in [Compacting], the turn phase must
+    also be [Turn_compacting]; conversely no other KSM phase may carry a
+    live [Turn_compacting]. *)
 val check_phase_turn_alignment : Keeper_state_machine.phase -> Keeper_registry.packed_turn_phase -> bool
 
-(** Mirror of TLA+ I3 [CompactionAtomicity] (KeeperCompositeLifecycle.tla:368):
+(** [CompactionAtomicity]:
     [(kmc_compaction = compacting) <=> (phase = Compacting)]. *)
 val check_compaction_atomicity : Keeper_state_machine.phase -> Keeper_registry.packed_compaction_stage -> bool
 
-(** Mirror of TLA+ I2 [NoRuntimeBeforeMeasurement]
-    (KeeperCompositeLifecycle.tla:361): runtime selection past [idle]
-    requires a captured measurement. *)
+(** [NoRuntimeBeforeMeasurement] is specified as: runtime selection past
+    [idle] requires a captured measurement. The implementation discards both
+    arguments and returns [true], so
+    [masc_keeper_invariant_violations_total\{invariant="NoRuntimeBeforeMeasurement"\}]
+    cannot increment and the dashboard always reports this one as holding.
+    Tracked in #26989 — do not read a [true] here as a verified invariant. *)
 val check_no_runtime_before_measurement :
   runtime_state:runtime_state -> measurement_captured:bool -> bool
 
@@ -111,9 +113,8 @@ type event_priority_state = {
   ep_has_pending_measurement : bool;
 }
 
-(** Pure predicate for TLA+ I4 [EventPriorityMonotone]
-    (KeeperCompositeLifecycle.tla:374): at most one measurement binding
-    per turn, and a live measurement excludes a pending one. *)
+(** Pure predicate for [EventPriorityMonotone]: at most one measurement
+    binding per turn, and a live measurement excludes a pending one. *)
 val check_event_priority_monotone_pure : event_priority_state -> bool
 
 (** Frozen outcome of the most recently completed turn (RFC-0003
@@ -351,7 +352,7 @@ val decision_stage_to_string : Keeper_registry.packed_decision_stage -> string
 (** Stringify the runtime-state compatibility field. *)
 val runtime_state_to_string : runtime_state -> string
 
-(** Stringify [compaction_stage]. Mirrors KeeperCompactionLifecycle.tla. *)
+(** Stringify [compaction_stage]. *)
 val compaction_stage_to_string : Keeper_registry.packed_compaction_stage -> string
 
 val invariant_key_to_string : invariant_key -> string

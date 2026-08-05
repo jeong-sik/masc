@@ -191,7 +191,7 @@ let post_turn_complete_heartbeat ~(turn_running : bool ref) = ignore turn_runnin
 let post_wakeup_signal ~(wakeup : bool Atomic.t) = ignore wakeup
   [@@fsm_guard "Atomic.get wakeup = true"]
 
-(* SubmitTask (KeeperTaskAcquisition.tla, Cycle 44): an external
+(* SubmitTask: an external
    producer (operator directive in this case) attaches a task_id to the
    keeper's [current_task_id]. The post-action invariant is that the
    meta carries the assigned id after [persist_directive_meta_update]

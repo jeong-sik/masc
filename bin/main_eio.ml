@@ -11,7 +11,6 @@ open Cmdliner
 
 (** Module aliases *)
 module Http = Masc.Http_server_eio
-module Http_h2 = Masc.Http_server_h2
 module Mcp_server = Masc.Mcp_server
 module Mcp_eio = Masc.Mcp_server_eio
 module Workspace = Masc.Workspace

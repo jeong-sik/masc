@@ -47,14 +47,24 @@ timestamp, tool name/status/duration만 포함한다. Raw thinking, assistant bl
 tool call id, tool arguments, tool results는 이 surface에 존재하지 않는다.
 
 Raw trace path는 해당 keeper의 `raw-traces` directory에 있는 regular JSONL
-file이어야 한다. 다른 경로, 삭제된 file, incompatible record, summary failure는
-명시적으로 log하고 skip한다.
+file이어야 한다. 다른 경로, current window 안에서 예기치 않게 삭제된 file,
+incompatible record, summary failure는 명시적으로 log하고 skip한다.
+`raw_trace_run_ref = None`은 sink degrade 또는 exact run 생성 전 종료를 뜻하는
+typed absence이므로 경고 없이 skip한다.
 
 ## 3. 보존과 UI cap
 
-Writer와 reader의 bound는 모두 200이다. Disk retention 밖의 본문을 UI가 볼
-수 있다고 주장하지 않는다. Dashboard thread cap 200은 direct conversation에만
-적용하며, server에서 별도 bound된 autonomous rows는 direct rows를 축출하지 않는다.
+Reader와 retention은 동일한 최근 TurnRecord 200행을 단일 경계로 사용한다.
+Retention은 그 window의 exact `raw_trace_run_ref`를 reachability root로 보호한다.
+파일 생성 순서나 파일 개수만으로 삭제 대상을 고르지 않는다. Cleanup은 현재
+TurnRecord commit 시도 뒤에만 실행하므로 반쯤 작성된 sink를 삭제 대상으로 보지
+않는다. Window 밖의 참조와 참조되지 않은 완료/중단 trace만 정리한다. TurnRecord
+window를 읽거나 decode할 수 없으면 cleanup은 fail-open으로 아무것도 삭제하지
+않으며 Keeper turn을 막지 않는다. 삭제 파일 수, reachability root 불확실성으로
+건너뛴 횟수, unlink 실패 수는 각각 typed counter로 노출한다.
+
+Dashboard thread cap 200은 direct conversation에만 적용하며, server에서 별도
+bound된 autonomous rows는 direct rows를 축출하지 않는다.
 
 ## 4. 저장 경계
 

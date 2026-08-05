@@ -1,9 +1,8 @@
 (** Tests for {!Masc.Task_completion_claim} — deliverable completion-claim
     detection (SSOT extracted from verification_protocol / workspace_status_rendering).
 
-    Pins the documented behaviour, including the known false-negative surface
-    (non-English phrasing). When the RFC-0323 LLM-boundary replacement lands,
-    the Korean case below is the regression anchor that should flip to [true]. *)
+    Pins the documented current behaviour, including the known false-negative
+    surface for non-English phrasing. *)
 
 module T = Masc.Task_completion_claim
 
@@ -29,8 +28,8 @@ let () =
         [ case "empty deliverable" ~task_id:"task-1" ~deliverable:"" false
         ; case "'done' is not the claim token" ~task_id:"task-1"
             ~deliverable:"done with the task" false
-          (* Documented false-negative: non-English phrasing is not recognised.
-             Explicit anchor for the RFC-0323 LLM-boundary replacement. *)
+          (* Documented current limitation: non-English phrasing is not
+             recognised by the deterministic prefix matcher. *)
         ; case "Korean completion claim (known false negative)" ~task_id:"task-1"
             ~deliverable:"완료했습니다" false
         ; case "'completion' mention is not a claim" ~task_id:"task-1"

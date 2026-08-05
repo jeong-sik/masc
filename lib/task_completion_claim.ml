@@ -1,5 +1,5 @@
 (* SSOT for deliverable completion-claim detection. See task_completion_claim.mli
-   for the contract and the RFC-0323 escalation note on the string-match limit. *)
+   for the contract and the standing note on the string-match limit. *)
 
 let deliverable_claims_completion ~task_id deliverable =
   let normalized =

@@ -34,11 +34,7 @@ let rec remove_tree path =
 let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
-      (`Assoc
-         [ "name", `String name
-         ; "agent_name", `String name
-         ; "trace_id", `String ("trace-" ^ name)
-         ])
+      (`Assoc [ "name", `String name ])
   with
   | Ok meta -> meta
   | Error detail -> Alcotest.failf "keeper meta fixture failed: %s" detail
@@ -55,7 +51,6 @@ let run_post_turn ~config ~meta ~turn =
     ~oas_turn_count:1
     ~actual_tools:[]
     ~librarian_messages:[]
-    ~turn_effect_record:Masc.Keeper_run_prompt.Meaningful_turn
     ~post_turn_t0:(Time_compat.now ())
     ~inference_telemetry:None
     ()
@@ -456,10 +451,11 @@ let test_post_turn_librarian_live_config_boundaries () =
             ~base_path:config.base_path
         in
         if poison_snapshot
-        then
+        then (
+          Fs_compat.mkdir_p keepers_dir;
           Unix.mkdir
             (Memory_current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
-            0o755;
+            0o755);
         Unix.putenv env_key "true";
         let started, set_started = Eio.Promise.create () in
         let release, set_release = Eio.Promise.create () in

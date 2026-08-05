@@ -17,57 +17,18 @@ type turn_prompt_context =
   ; ctx_work : Keeper_context_runtime.working_context
   }
 
-(* RFC-0351 section 5 / #25462: an autonomous wake whose user turn is only the
-   [autonomous_wake_marker] constant carries nothing forward — the observation
-   frame it stands for rides [dynamic_context], rebuilt fresh every turn and
-   never persisted. Recording it anyway appends a byte-identical message per
-   wake, which is pure transcript duplication (analyst: the same 147B message
-   x359, part of a 25.7% exact-dup share). The distinction is typed here rather
-   than inferred from the message text. *)
+(* Ordinary user turns, including the tiny autonomous [Continue.] cue, are
+   durable conversation messages. A resumed HITL checkpoint can already own
+   the exact current input; that exceptional replay path skips only the second
+   append, never because the content is judged uninformative. *)
 type user_turn_record =
   | Record_user_turn
       (** The user turn carries content later turns need: an operator message,
-          a HITL resolution, or chat-lane input. *)
-  | Skip_uninformative_wake
-      (** Autonomous wake marker alone. Neither appended to the working context
-          nor persisted to session history. *)
-
-(* The unified lane's user turn is the wake marker constant unless a HITL
-   resolution was appended to it, so the presence of that resolution is the
-   whole signal. Extracted from the lane call site to keep the mapping
-   unit-testable and to keep the decision out of the message text. *)
-let user_turn_record_of_hitl_resolution : _ option -> user_turn_record
-  = function
-  | None -> Skip_uninformative_wake
-  | Some _ -> Record_user_turn
-;;
-
-type turn_effect_record =
-  | Meaningful_turn
-  | Inert_autonomous_turn
-
-(* One typed decision owns both replay persistence and librarian extraction.
-   A model response is not itself an external effect: scheduled idle prose has
-   no consumer, yet previously accumulated in the checkpoint and then became
-   librarian input. Existing execution facts are sufficient:
-
-   - operator/HITL input is durable input,
-   - any Keeper tool call may have changed or observed state needed later,
-   - a routed continuation has an external consumer.
-
-   No response-text classifier or duplicate field comparison is involved. *)
-let turn_effect_record_of_turn
-      ~(user_turn_record : user_turn_record)
-      ~(tool_calls_made : bool)
-      ~(external_delivery_routed : bool)
-  : turn_effect_record
-  =
-  match user_turn_record with
-  | Skip_uninformative_wake
-    when not tool_calls_made && not external_delivery_routed ->
-    Inert_autonomous_turn
-  | Skip_uninformative_wake | Record_user_turn -> Meaningful_turn
-;;
+          a HITL resolution, chat-lane input, or the autonomous continuation
+          cue. *)
+  | Skip_already_checkpointed_user_turn
+      (** The resumed OAS checkpoint already owns this exact user turn. Do not
+          append or persist a second copy before replay. *)
 
 type extra_system_context_assembly =
   { extra_system_context : string option
@@ -172,7 +133,7 @@ let build_turn_context
   let ctx_work =
     match user_turn_record with
     | Record_user_turn -> Keeper_context_runtime.append ctx_work user_msg
-    | Skip_uninformative_wake -> ctx_work
+    | Skip_already_checkpointed_user_turn -> ctx_work
   in
   (match user_turn_record, is_retry with
    | Record_user_turn, false ->
@@ -180,7 +141,7 @@ let build_turn_context
        ~source:history_user_source
        session
        user_msg
-   | Record_user_turn, true | Skip_uninformative_wake, _ -> ());
+   | Record_user_turn, true | Skip_already_checkpointed_user_turn, _ -> ());
   { turn_system_prompt
   ; dynamic_context
   ; memory_context

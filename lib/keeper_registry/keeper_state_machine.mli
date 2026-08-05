@@ -118,14 +118,13 @@ type context_actions = {
 
     Violating this rule — for example, by emitting [Compaction_started]
     from a separate async monitor fiber while a turn is still in flight
-    — reopens the {b KeepalivePhaseConsistency} safety bug formalized in
-    [specs/bug-models/KeepalivePhaseConsistency.tla]. That spec's
-    [NoDrainTransition] / [GhostDispatch] actions are the exact
-    counterexamples TLC will find.
+    — reopens the {b KeepalivePhaseConsistency} safety bug: the keepalive
+    loop then observes the keeper in [Compacting] or [HandingOff] at its
+    dispatch decision point, which is exactly what the structural pairing
+    above rules out.
 
     If a future change needs another origin for these events, add it to
-    the registry origin guard and re-verify the TLA+ spec against the new
-    code path. *)
+    the registry origin guard. *)
 type event =
   | Heartbeat_ok
   | Heartbeat_failed of { consecutive : int }

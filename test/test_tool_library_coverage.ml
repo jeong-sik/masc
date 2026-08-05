@@ -202,6 +202,7 @@ let test_read_by_title_case_insensitive_partial () =
     let _ = dispatch_exn ctx ~name:"masc_library_add" ~args:(`Assoc [
       ("title", `String "Root Cause: Orphan Count Analysis");
       ("content", `String "details about orphan counting");
+      ("confidence", `Float 0.9);
     ]) in
     let read_args = `Assoc [("topic", `String "root cause: orphan count")] in
     let (ok, _) = dispatch_exn ctx ~name:"masc_library_read" ~args:read_args in
@@ -215,6 +216,7 @@ let test_read_by_slug_still_works () =
     let _ = dispatch_exn ctx ~name:"masc_library_add" ~args:(`Assoc [
       ("title", `String "Slug Query Doc");
       ("content", `String "slug body");
+      ("confidence", `Float 0.9);
     ]) in
     let read_args = `Assoc [("topic", `String "slug-query")] in
     let (ok, _) = dispatch_exn ctx ~name:"masc_library_read" ~args:read_args in
@@ -278,11 +280,105 @@ let test_add_low_confidence () =
     Alcotest.(check bool) "response confirms add" true (msg_contains ~needle:"added" msg || msg_contains ~needle:"success" msg || msg_contains ~needle:"librar" msg)
   )
 
+(* [confidence] is required by both schemas and decides whether the document
+   is filed for review or published straight into the library. Reading it with
+   a default put an omitted field, an explicit null and a non-number on the
+   same value, and that value was on the publishing side of the threshold. *)
+let test_add_rejects_absent_confidence () =
+  with_temp_base_path (fun ctx ->
+    let args = `Assoc [
+      ("title", `String "unscored knowledge");
+      ("content", `String "No confidence supplied.");
+    ] in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    Alcotest.(check bool) "absent confidence is rejected" false ok;
+    Alcotest.(check bool) "error names the field" true
+      (msg_contains ~needle:"confidence" msg)
+  )
+
+let test_add_rejects_null_confidence () =
+  with_temp_base_path (fun ctx ->
+    let args = `Assoc [
+      ("title", `String "null scored knowledge");
+      ("content", `String "Explicit null.");
+      ("confidence", `Null);
+    ] in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    Alcotest.(check bool) "null confidence is rejected" false ok;
+    Alcotest.(check bool) "error names the field" true
+      (msg_contains ~needle:"confidence" msg)
+  )
+
+let test_add_rejects_non_numeric_confidence () =
+  with_temp_base_path (fun ctx ->
+    List.iter
+      (fun (label, value) ->
+        let args = `Assoc [
+          ("title", `String ("badly scored " ^ label));
+          ("content", `String "Confidence is not a number.");
+          ("confidence", value);
+        ] in
+        let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+        Alcotest.(check bool) (label ^ " is rejected") false ok;
+        Alcotest.(check bool) (label ^ " error names the field") true
+          (msg_contains ~needle:"confidence" msg))
+      [ ("string", `String "0.9")
+      ; ("list", `List [ `Float 0.9 ])
+      ; ("bool", `Bool true)
+      ]
+  )
+
+(* An integer 1 is a number the JSON encoder is entitled to emit for 1.0. *)
+let test_add_accepts_integer_confidence () =
+  with_temp_base_path (fun ctx ->
+    let args = `Assoc [
+      ("title", `String "integer scored knowledge");
+      ("content", `String "Confidence arrived as an int.");
+      ("confidence", `Int 1);
+    ] in
+    let (ok, _) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    Alcotest.(check bool) "integer confidence is accepted" true ok
+  )
+
+let test_add_rejects_out_of_range_confidence () =
+  with_temp_base_path (fun ctx ->
+    List.iter
+      (fun (label, value) ->
+        let args = `Assoc [
+          ("title", `String ("out of range " ^ label));
+          ("content", `String "Confidence is outside its declared domain.");
+          ("confidence", value);
+        ] in
+        let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+        Alcotest.(check bool) (label ^ " is rejected") false ok;
+        Alcotest.(check bool) (label ^ " error states the range") true
+          (msg_contains ~needle:"between 0.0 and 1.0" msg))
+      [ ("negative", `Float (-0.1)); ("above one", `Float 1.1) ]
+  )
+
+let test_promote_rejects_unusable_confidence () =
+  with_temp_base_path (fun ctx ->
+    List.iter
+      (fun (label, fields) ->
+        let args = `Assoc (("topic", `String "anything") :: fields) in
+        let (ok, msg) = dispatch_exn ctx ~name:"masc_library_promote" ~args in
+        Alcotest.(check bool) (label ^ " is rejected") false ok;
+        Alcotest.(check bool) (label ^ " error names the field") true
+          (msg_contains ~needle:"confidence" msg))
+      [ ("absent confidence", [])
+      ; ("null confidence", [ ("confidence", `Null) ])
+      ; ("string confidence", [ ("confidence", `String "0.9") ])
+      ; ("negative confidence", [ ("confidence", `Float (-0.1)) ])
+      ; ("confidence above one", [ ("confidence", `Float 1.1) ])
+      ]
+  )
+
 let test_add_with_tags () =
   with_temp_base_path (fun ctx ->
     let args = `Assoc [
       ("title", `String "tagged knowledge");
       ("content", `String "Content with tags.");
+      ("confidence", `Float 0.8);
       ("tags", `List [`String "ocaml"; `String "testing"]);
     ] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
@@ -447,6 +543,18 @@ let () =
       Alcotest.test_case "invalid source" `Quick test_add_invalid_source;
       Alcotest.test_case "success" `Quick test_add_success;
       Alcotest.test_case "low confidence" `Quick test_add_low_confidence;
+      Alcotest.test_case "absent confidence rejected" `Quick
+        test_add_rejects_absent_confidence;
+      Alcotest.test_case "null confidence rejected" `Quick
+        test_add_rejects_null_confidence;
+      Alcotest.test_case "non-numeric confidence rejected" `Quick
+        test_add_rejects_non_numeric_confidence;
+      Alcotest.test_case "integer confidence accepted" `Quick
+        test_add_accepts_integer_confidence;
+      Alcotest.test_case "out-of-range confidence rejected" `Quick
+        test_add_rejects_out_of_range_confidence;
+      Alcotest.test_case "promote rejects unusable confidence" `Quick
+        test_promote_rejects_unusable_confidence;
       Alcotest.test_case "with tags" `Quick test_add_with_tags;
     ]);
     ("library_search", [

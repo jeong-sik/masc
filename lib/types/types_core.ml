@@ -412,9 +412,10 @@ let task_status_is_done = function
     - String identity: schema enum is the actual function image, so
       renames cannot desync.
 
-    The remaining hand-coded axis is the witness list's length —
-    [test_types.ml] pins it at 6, so adding a constructor without
-    adding a witness here breaks that test.
+    The remaining hand-coded axis is the witness list itself.
+    [test_task_status_vocabulary] compares it against the arms of
+    [task_status_of_yojson], so a status one side knows and the other does
+    not fails there.
 
     Order matches the FSM lifecycle (Todo -> Claimed -> InProgress ->
     AwaitingVerification -> Done | Cancelled) for readable schema docs. *)

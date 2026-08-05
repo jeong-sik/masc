@@ -94,6 +94,11 @@ val settle_one_completed :
 module For_testing : sig
   type rearm_scheduler
 
+  val drain_outcome_label : drain_outcome -> string
+  (** The drain verdict as one token, as logged. Retry_later keeps its reason
+      so a worker stuck on a moved generation is distinguishable from one
+      losing a claim race. *)
+
   val process_next_exact
     :  clock:_ Eio.Time.clock
     -> net:Eio_context.eio_net option

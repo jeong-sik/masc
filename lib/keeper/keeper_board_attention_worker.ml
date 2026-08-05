@@ -348,6 +348,17 @@ let reset_contention_rearms scheduler ~keep =
     removed
 ;;
 
+(* The drain verdict as one token. Retry_later carries its reason so a stuck
+   worker is distinguishable from a contended one: Exact_claim_contended means
+   another flow holds the claim, Selected_generation_changed means the partition
+   moved under this worker. *)
+let drain_outcome_label = function
+  | Drained -> "drained"
+  | Retry_later { reason = Exact_claim_contended; _ } -> "retry_claim_contended"
+  | Retry_later { reason = Selected_generation_changed; _ } ->
+    "retry_generation_changed"
+;;
+
 let apply_drain_rearm scheduler = function
   | Drained ->
     reset_contention_rearms scheduler ~keep:None;
@@ -1728,6 +1739,16 @@ let run
          with_process_recovery_claim ~base_path ~keeper_name
          @@ fun owns_process_recovery ->
          let worker_epoch = Partition.Worker_epoch.generate () in
+         (* Until this line existed, three states were byte-identical from
+            outside: the worker was never forked, it was forked and never
+            inspected the ledger, or it inspected and found nothing. Measured
+            2026-08-05 while pending grew 425 -> 1031 with zero contention
+            lines and zero worker failures, so the logs that did exist could
+            not tell them apart. *)
+         Log.Keeper.info
+           "board_attention_worker_start keeper=%s epoch=%s"
+           keeper_name
+           (Partition.Worker_epoch.to_string worker_epoch);
          let fail stage detail =
            observe_error ~base_path ~keeper_name detail;
            Error { stage; detail }
@@ -1784,6 +1805,10 @@ let run
                  ~execute
              with
              | Ok outcome ->
+               Log.Keeper.info
+                 "board_attention_worker_drain keeper=%s outcome=%s"
+                 keeper_name
+                 (drain_outcome_label outcome);
                ignore
                  (apply_drain_rearm contention_rearms outcome
                   : rearm_schedule option);
@@ -1810,6 +1835,7 @@ module For_testing = struct
   let make_contention_rearm_scheduler = make_contention_rearm_scheduler
   let schedule_contention_rearm = schedule_contention_rearm
   let reset_contention_rearms = reset_contention_rearms
+  let drain_outcome_label = drain_outcome_label
   let apply_drain_rearm = apply_drain_rearm
   let replay_completed_owner_wake = replay_completed_owner_wake
   let with_process_recovery_claim = with_process_recovery_claim

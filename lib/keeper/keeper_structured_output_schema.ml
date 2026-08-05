@@ -1,11 +1,7 @@
 (** Domain JSON schemas for keeper LLM sub-call parsers and exact-output flows. *)
 
 let string_schema = `Assoc [ "type", `String "string" ]
-let number_schema = `Assoc [ "type", `String "number" ]
 let integer_schema = `Assoc [ "type", `String "integer" ]
-let boolean_schema = `Assoc [ "type", `String "boolean" ]
-let nullable_string_schema = `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
-let nullable_integer_schema = `Assoc [ "type", `List [ `String "integer"; `String "null" ] ]
 
 let string_array_schema =
   `Assoc [ "type", `String "array"; "items", string_schema ]
@@ -17,13 +13,6 @@ let enum_schema values =
   `Assoc
     [ "type", `String "string"
     ; "enum", `List (List.map (fun value -> `String value) values)
-    ]
-;;
-
-let nullable_enum_schema values =
-  `Assoc
-    [ "type", `List [ `String "string"; `String "null" ]
-    ; "enum", `List ((`Null) :: List.map (fun value -> `String value) values)
     ]
 ;;
 
@@ -73,7 +62,6 @@ let librarian_current_output_schema =
 (* Constant-size compaction boundary. The provider sees one contiguous run of
    typed eligible units and returns one faithful summary plus the first unit
    that remains exact. *)
-let compaction_plan_field_decisions = "decisions"
 let compaction_plan_field_unit_index = "unit_index"
 let compaction_plan_field_summary = "summary"
 let compaction_plan_field_keep_from_unit_index = "keep_from_unit_index"

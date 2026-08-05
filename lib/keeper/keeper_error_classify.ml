@@ -362,9 +362,7 @@ let fallback_runtime_for_unavailable_profile
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
-  else if
-    String.equal normalized_effective (Keeper_config.default_runtime_id ())
-    || String.equal normalized_effective (Keeper_config.default_runtime_id ())
+  else if String.equal normalized_effective (Keeper_config.default_runtime_id ())
   then None
   else Some (Keeper_config.default_runtime_id ())
 
@@ -391,7 +389,6 @@ let degraded_retry_after_recoverable_error
   in
   if effective_is_declared_phase_buffer
      || effective_is_declared_phase_recovery
-     || String.equal normalized_effective (Keeper_config.default_runtime_id ())
      || String.equal normalized_effective (Keeper_config.default_runtime_id ())
   then None
   else if Keeper_runtime_failure_route.sdk_error_is_hard_quota err then
@@ -555,12 +552,9 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
 let normalized_runtime_id ~catalog_names name =
   let trimmed = String.trim name in
   if List.exists (String.equal trimmed) catalog_names then trimmed
-  else if
-    String.equal trimmed (Keeper_config.default_runtime_id ())
-    || String.equal trimmed (Keeper_config.default_runtime_id ())
-    || String.equal trimmed (Keeper_config.default_runtime_id ())
+  else if String.equal trimmed (Keeper_config.default_runtime_id ())
   then trimmed
-  else String.trim trimmed
+  else trimmed
 
 let runtime_catalog_names () =
   match Runtime.get_runtime_ids () with

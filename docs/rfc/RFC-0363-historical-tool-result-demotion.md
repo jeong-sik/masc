@@ -71,11 +71,12 @@ RFC-0351 §4 타입 수명이 이미 이 줄을 적어놓았다:
 
 ## 3. 설계
 
-`model_input_projection` 안, `Runtime_model_input_tail_window.project` **앞**에 강등 단계를 둔다. 전송 사본만 바꾸고 durable state 는 건드리지 않는다 (RFC-0351 §3 L5 "history 재작성 없음").
+`model_input_projection` 안에서 원문 기준 cut 을 먼저 계산하고, 그 cut 이 이미 제외한 원자만 강등한 뒤 최종 cut 을 다시 계산한다. 전송 사본만 바꾸고 durable state 는 건드리지 않는다 (RFC-0351 §3 L5 "history 재작성 없음").
 
 ```
-demote ~retain_atoms messages   (* 순수 함수. 예산을 입력으로 받지 않는다 *)
-  |> project ~measure_message_bytes ~capacity_bytes ~reserved_bytes
+raw = project_with_drop ~measure_message_bytes ~capacity_bytes ~reserved_bytes messages
+demote ~demote_before:raw.dropped_atoms messages
+  |> project_with_drop ~measure_message_bytes ~capacity_bytes ~reserved_bytes
 ```
 
 ### 3.1 강등 대상 — 타입으로 판정한다
@@ -86,7 +87,7 @@ demote ~retain_atoms messages   (* 순수 함수. 예산을 입력으로 받지 
    `api_common.ml:304-321` — `content_blocks = Some blocks` 이면 `content` 는 **직렬화되지 않는다**. 그런 메시지의 `content` 를 마커로 바꾸면 크기가 전혀 줄지 않는데 추정기는 감소를 계상한다. 즉 추정이 **하한**이 되어, window 가 과소평가로 cut 하고 물질화된 요청이 예산을 넘는다. `Some` 은 이미지·문서를 담으며 마커로 표현할 수도 없다.
 2. `Tool_output.decode_from_oas content = Not_marker`
    `Decoded` 는 이미 강등된 것이고, **`Invalid_marker` 는 강등하지 않는다** — 마커 모양인데 파싱에 실패한 payload 를 blob 으로 다시 저장하면 손상을 고착시킨다. 세 경우를 exhaustive match 로 다룬다.
-3. 원자 인덱스 < `atom_count - retain_atoms`
+3. 원자 인덱스 < 원문 projection 의 `dropped_atoms`
 4. `upper_bound_demoted_bytes msg < measure_message_bytes msg`
 
 판단은 (a) 타입, (b) 정수 비교, (c) 바이트 비교뿐이다. 중요도 점수·문자열 분류·휴리스틱 임계값 없음 (RFC-0351 §2 원칙 2).
@@ -124,29 +125,25 @@ where saturating_ref = make_artifact_ref
 
 `val preview_max : int` 를 `tool_blob_store.mli` 에 공개하고, 강등은 그것만 참조한다.
 
-### 3.4 경계는 꼬리에서 움직인다 — 초안의 오류 정정
+### 3.4 경계는 원문 cut 에 고정한다
 
-초안은 강등 경계를 `atom_count` 로 양자화했다. 그것은 틀렸다: window 의 `drop` 은 `available_bytes` 로 결정되므로 두 경계는 **양자만 같고 트리거가 다르다**. `atom_count` 119 → 120 이고 예산이 넉넉해 `drop = 0` 인 순간, 강등 경계만 0 → 60 으로 뛰어 원자 0–59 가 원문에서 마커로 뒤집힌다. window jump 없는 **prompt-cache 전량 미스** — §1.2 가 인용한 #26535 의 비용 그 자체다.
+강등 경계가 `atom_count - N` 이면 새 원자 하나가 붙을 때마다 직전 원자 하나가 원문에서 마커로 바뀐다. 두 요청의 공통 prefix 는 항상 그 이동 지점에서 끊기므로, 매 턴 새 원자 1개가 아니라 최신 원문 N개를 다시 처리하게 된다. `N = 60`이면 prompt-cache 재처리량이 1 → 61 원자로 늘어난다.
 
-정정: 강등은 **최신 `retain_atoms` 개를 제외한 전부**로 정의한다. 예산과 무관한 순수 함수다.
+강등 자체가 별도의 나이·예산 경계를 소유하면 같은 문제가 반복된다. 권위는 이미 byte budget으로 계산되는 원문 tail-window cut 하나다:
 
-이 경계는 매 턴 1 원자씩 **꼬리 방향**으로 전진한다. 캐시는 prefix 로 매칭되므로, 오래된 쪽은 계속 마커로 고정돼 있고 바뀌는 지점은 캐시 커버리지의 **끝**이다. 커버리지는 줄지 않고 늘어난다. cut 은 여전히 머리에서 양자화된 채 움직인다 — 두 경계가 서로 다른 끝에 있으므로 간섭하지 않는다.
+1. 변경하지 않은 `messages`를 `project_with_drop`에 넣어 `dropped_atoms`를 얻는다.
+2. `index < dropped_atoms`인 tool result만 포화 마커 후보로 바꾼다.
+3. 줄어든 메시지로 최종 cut을 다시 계산한다.
 
-### 3.5 `retain_atoms`
+따라서 demotion 경계는 원문 cut이 움직일 때만 움직인다. 양자화 cut이 60으로 유지되는 동안 새 turn을 붙여도 같은 60개만 마커이고, 60 → 120으로 뛰는 순간 새 60개가 바뀌지만 그 원자들은 원문 요청에서도 바로 그 jump에 탈락한다. demotion이 prompt-cache 변경 빈도를 늘리지 않는다. exact cut fallback에서도 동일하다. raw cut이 매 turn 움직이는 상황에서는 demotion도 움직이지만, 원문 prefix가 이미 같은 빈도로 움직인다.
 
-RFC-0351 §3 이 최근 창을 명시적으로 허용한다:
-
-> L5 의 "최근 창"은 recency 구조이지 중요도 판단이 아니다. keeper 는 일직선 타임라인이므로 최근성은 타임라인의 구조 자체다.
-
-값은 실측 근거가 없다. 초기값을 `atoms_per_window` (60) 로 두고 §6 에서 측정 후 조정한다. 리터럴 금지 — named constant 로 `.mli` 에 공개하고 "empirically tuned, see RFC-0363 §6" 주석을 단다.
-
-### 3.6 물질화와 실패
+### 3.5 물질화와 실패
 
 1단계는 포화 후보로 측정만 한다. 2단계는 cut 을 살아남은 강등 메시지에 대해서만 `Tool_blob_store.put` 한다.
 
 `put` 실패 시 해당 메시지는 인라인으로 되돌린다. 그러면 실제 크기가 추정보다 **커지므로**, 물질화 후 반드시 재측정하고 초과 시 `project` 를 다시 돌린다. 조용한 통과 금지 — 실패는 typed 결과로 올라오고 카운터가 아니라 재조립으로 대응한다.
 
-### 3.7 blob 수명 — 강등 blob 은 파생 데이터다
+### 3.6 blob 수명 — 강등 blob 은 파생 데이터다
 
 강등이 만드는 blob 은 durable 참조를 갖지 않는다 (전송 사본은 영속되지 않는다). `tool_blob_maintenance.mli` 의 계약상:
 
@@ -203,8 +200,8 @@ RFC-0351 §3 이 최근 창을 명시적으로 허용한다:
 |---|---|
 | 상한이 하한이 되어 요청 초과 | §3.2 포화 후보를 실제 측정기로 통과. §6 테스트 2 |
 | `content_blocks = Some` 오계상 | §3.1 조건 1. §6 테스트 3 |
-| prompt-cache 회귀 | §3.4 꼬리 경계. §6 테스트 1. 실패 시 머지 금지 |
+| prompt-cache 회귀 | §3.4 원문 cut anchor. §6 테스트 1. 실패 시 머지 금지 |
 | `preview_max` 변경이 상한을 깸 | §3.3 export 후 단일 참조 |
-| `put` 실패 후 조용한 초과 | §3.6 재측정 필수. §6 테스트 5 |
-| 강등 blob GC 후 not-found | §3.7 — 파생 데이터, 다음 강등이 복원. typed not-found 필요 |
+| `put` 실패 후 조용한 초과 | §3.5 재측정 필수. §6 테스트 5 |
+| 강등 blob GC 후 not-found | §3.6 — 파생 데이터, 다음 강등이 복원. typed not-found 필요 |
 | checkpoint 는 계속 자람 | 본 RFC 비목표. 안 B 후속 RFC |

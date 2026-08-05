@@ -22,24 +22,12 @@
     A marker cannot be produced without hashing and storing the bytes, and the
     transmitted list is rebuilt from durable state every turn, so demoting
     everything eagerly would re-store thousands of blobs per turn. Instead
-    {!plan} substitutes a saturating placeholder whose serialized size is an
-    upper bound on the real marker, the window cuts against that, and
-    {!materialize} stores only the messages that survived the cut. The real
-    marker is never larger than the placeholder, so a request that fit the
-    plan still fits after materialization. *)
-
-val retain_atoms : int
-(** How many of the newest atoms keep their tool-result bodies verbatim.
-
-    A recency window, not an importance judgement: RFC-0351 §3 admits it on
-    the grounds that a keeper is a single timeline, so recency is the
-    timeline's own structure. The boundary moves one atom per turn at the
-    {e tail} of the transmitted list while the cut moves at its {e head}, so
-    the two never fight over the same bytes and the stable prefix a prompt
-    cache matches only grows.
-
-    Initial value is empirical and unvalidated — RFC-0363 §6 is the measurement
-    that fixes it. *)
+    the unmodified history first chooses the authoritative window cut. {!plan}
+    substitutes a saturating placeholder only below that cut, the window cuts
+    again against the smaller messages, and {!materialize} stores only the
+    messages that survived. The real marker is never larger than the
+    placeholder, so a request that fit the plan still fits after
+    materialization. *)
 
 type pending
 (** A demotion chosen by {!plan} and not yet stored. Keyed internally by
@@ -55,12 +43,12 @@ type plan_result =
 
 val plan
   :  measure_message_bytes:(Agent_sdk.Types.message -> int)
+  -> demote_before:int
   -> Agent_sdk.Types.message list
   -> plan_result
-(** Choose demotions and substitute upper-bound placeholders. Pure: no I/O, no
-    hashing, and no dependence on the byte budget — the budget belongs to the
-    cut, and giving both stages the same trigger is what keeps the demotion
-    boundary off the head of the list.
+(** Choose demotions and substitute upper-bound placeholders. Pure: no I/O or
+    hashing. The byte budget stays in the cut; this function receives only the
+    exact cut result so it cannot invent a second moving boundary.
 
     A tool result is demoted only when all of these hold:
 
@@ -73,7 +61,11 @@ val plan
       demoted; [Invalid_marker] is marker-shaped content that failed to parse
       and is left exactly as-is rather than being stored as a blob, which would
       make a corrupt payload content-addressed and permanent.
-    - its atom index is older than the newest {!retain_atoms} atoms.
+    - its atom index is below [demote_before], which must be [dropped_atoms]
+      from {!Runtime_model_input_tail_window.project_with_drop} on the same
+      unmodified message list. The demotion boundary therefore moves only when
+      the authoritative raw cut moves; appending one turn cannot rewrite the
+      previous request's retained prefix.
     - the placeholder measures strictly smaller than the message does now.
       This replaces a size threshold: the encoded marker runs from about 125
       bytes to 1,154 depending on the preview's bytes, because

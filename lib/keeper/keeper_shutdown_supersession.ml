@@ -15,6 +15,7 @@ type error =
   | Multiple_durable_shutdown_operations of
       Keeper_shutdown_types.Operation_id.t list
   | Metadata_committed_supersession_failed of Keeper_shutdown_store.error
+  | Metadata_committed_successor_lookup_failed of Keeper_shutdown_store.error
   | Metadata_committed_admission_owned_by_other of
       Keeper_shutdown_types.Operation_id.t
 
@@ -32,6 +33,10 @@ let error_to_string = function
   | Metadata_committed_supersession_failed error ->
     Printf.sprintf
       "keeper metadata was updated, but blocked shutdown supersession failed; retry the explicit keeper update: %s"
+      (Keeper_shutdown_store.error_to_string error)
+  | Metadata_committed_successor_lookup_failed error ->
+    Printf.sprintf
+      "keeper metadata and shutdown supersession were committed, but durable successor admission could not be resolved; the existing fence remains: %s"
       (Keeper_shutdown_store.error_to_string error)
   | Metadata_committed_admission_owned_by_other operation_id ->
     Printf.sprintf
@@ -98,14 +103,22 @@ let commit_after_metadata_update ~config = function
          Keeper_shutdown_store.supersession_token_operation_id token
        in
        (match
-          Keeper_turn_admission.rollback_shutdown
-            ~base_path:config.Workspace.base_path
+          Keeper_shutdown_store.corrupt_operation_id_for_keeper
+            ~config
             ~keeper_name:operation.keeper_name
-            ~operation_id
         with
-        | Keeper_turn_admission.Shutdown_rolled_back
-        | Keeper_turn_admission.Shutdown_not_reserved ->
-          Ok (Shutdown_superseded operation)
-        | Keeper_turn_admission.Shutdown_reserved_by_other existing ->
-          Error (Metadata_committed_admission_owned_by_other existing)))
+        | Error error -> Error (Metadata_committed_successor_lookup_failed error)
+        | Ok successor_operation_id ->
+          (match
+             Keeper_turn_admission.transition_shutdown
+               ~base_path:config.Workspace.base_path
+               ~keeper_name:operation.keeper_name
+               ~from_operation_id:operation_id
+               ~to_operation_id:successor_operation_id
+           with
+           | Keeper_turn_admission.Shutdown_transition_applied
+           | Keeper_turn_admission.Shutdown_transition_already_applied ->
+             Ok (Shutdown_superseded operation)
+           | Keeper_turn_admission.Shutdown_transition_reserved_by_other existing ->
+             Error (Metadata_committed_admission_owned_by_other existing))))
 ;;

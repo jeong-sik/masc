@@ -126,7 +126,13 @@ export async function ensureDevToken(): Promise<void> {
         }
         const currentMeta = getStoredTokenMeta()
         const currentToken = getStoredToken()
-        if (currentMeta?.source === 'manual') return
+        // Same rule as the pre-fetch guard above: a manually-pasted token is
+        // never silently overwritten. It needs the token as well as the meta —
+        // meta alone can outlive the token it described, and then there is
+        // nothing to protect while this return would block the bootstrap
+        // forever. shouldRefreshDevToken already admits that case (`!token`
+        // returns true), so dropping the token from this check contradicted it.
+        if (currentMeta?.source === 'manual' && currentToken) return
         if (
           token !== currentToken
           || currentMeta?.source !== 'dev'

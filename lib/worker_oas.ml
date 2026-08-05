@@ -380,7 +380,7 @@ and resume_worker_via_oas
     make_tool_tracking_hooks ~context:shared_context ()
   in
   let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
-  let system_prompt =
+  let* system_prompt =
     Worker_container_types.default_system_prompt
       ~worker_name
       ~model_id:resume_model_id

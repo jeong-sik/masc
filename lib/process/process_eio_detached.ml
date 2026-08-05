@@ -1,7 +1,8 @@
 (** Detached background spawn primitives for Execute process tasks.
 
     Extracted from [process_eio.ml] during godfile decomposition.
-    Provides fork-based process group spawning with tree-kill lifecycle.
+    Provides posix_spawn-based process group spawning with tree-kill
+    lifecycle.
 
     @since God file decomposition *)
 
@@ -23,10 +24,24 @@ type detached_devnull_handle = {
   devnull_started_at : float;
 }
 
+(* [posix_spawn] with POSIX_SPAWN_SETPGROUP establishes the child's process
+   group atomically during spawn — before the child runs any user code.  This
+   removes the fork/setpgrp signal-race window that the previous fork()+setsid()
+   implementation left open (a signal delivered to the parent group between
+   fork and setpgrp could reach the child).  POSIX_SPAWN_SETSID is also set so
+   the child becomes a new session leader, preserving the "detach from the
+   parent's controlling terminal" semantics of the old setsid() call.
+
+   The C stub (posix_spawn_detached_stubs.c) wires stdin/stdout/stderr via
+   file actions and chdir via posix_spawn_file_actions_addchdir_np. *)
+external posix_spawn_detached :
+  string array -> string array -> string -> Unix.file_descr array -> int
+  = "caml_masc_process_posix_spawn_detached"
+
 let spawn_detached ~argv ~env ~cwd =
   match argv with
   | [] -> Error "spawn_detached: empty argv"
-  | bin :: _ ->
+  | _ ->
       let out_r_ref = ref None in
       let out_w_ref = ref None in
       let err_r_ref = ref None in
@@ -58,72 +73,43 @@ let spawn_detached ~argv ~env ~cwd =
            remember devnull_ref
              (Unix.openfile "/dev/null" [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0)
          in
-         (* Use fork/exec instead of create_process_env so the child
-            can [setpgrp] before [execvpe].  OCaml's Unix module does
-            not expose [setpgid(pid, pgid)] for the parent to call on
-            a child, so the child has to establish its own process
-            group authoritatively.  A short window between fork and
-            setpgrp still leaves the child in the parent's group — any
-            signal delivered to the parent group in that window would
-            also reach the child.  Acceptable for background shells;
-            signal-race-free semantics would require posix_spawn with
-            POSIX_SPAWN_SETPGROUP via Ctypes, a follow-up item. *)
-         let pid = Unix.fork () in
-         if pid = 0 then begin
-           (* --- CHILD --- *)
-           (* [Unix.setsid] creates a new session AND a new process
-              group with the child as leader.  OCaml's stdlib does not
-              expose [setpgid], so [setsid] is the portable way to
-              guarantee a new group.  Side effect: the child detaches
-              from the parent's controlling terminal, which matches
-              the "background shell" semantics we want. *)
-           Safe_ops.protect ~default:() (fun () -> ignore (Unix.setsid ()));
-           (try
-              if cwd <> "" then Unix.chdir cwd
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | _ -> Unix._exit 126);
-           Unix.dup2 devnull Unix.stdin;
-           Unix.dup2 out_w Unix.stdout;
-           Unix.dup2 err_w Unix.stderr;
-           Unix.close out_r; Unix.close err_r;
-           Unix.close out_w; Unix.close err_w; Unix.close devnull;
-           (try Unix.execvpe bin (Array.of_list argv) env
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | _ -> Unix._exit 127)
-         end else begin
-           (* --- PARENT --- *)
-           close_registered out_w_ref;
-           close_registered err_w_ref;
-           close_registered devnull_ref;
-           out_r_ref := None;
-           err_r_ref := None;
-           Ok
-             {
-               pid;
-               pgid = pid;
-               stdout_fd = out_r;
-               stderr_fd = err_r;
-               started_at = Unix.gettimeofday ();
-             }
-         end
+         let pid =
+           posix_spawn_detached
+             (Array.of_list argv)
+             env
+             cwd
+             [| devnull; out_w; err_w |]
+         in
+         (* --- PARENT --- *)
+         close_registered out_w_ref;
+         close_registered err_w_ref;
+         close_registered devnull_ref;
+         out_r_ref := None;
+         err_r_ref := None;
+         Ok
+           {
+             pid;
+             pgid = pid;
+             stdout_fd = out_r;
+             stderr_fd = err_r;
+             started_at = Unix.gettimeofday ();
+           }
        with
        | Unix.Unix_error (err, fn, arg) ->
            cleanup_setup_fds ();
            Error
              (Printf.sprintf "spawn_detached %s: %s (%s %s)"
-                bin (Unix.error_message err) fn arg)
+                (List.hd argv) (Unix.error_message err) fn arg)
        | exn ->
            cleanup_setup_fds ();
            Error
-             (Printf.sprintf "spawn_detached %s: %s" bin
+             (Printf.sprintf "spawn_detached %s: %s" (List.hd argv)
                 (Printexc.to_string exn)))
 
 let spawn_detached_devnull ~argv ~env ~cwd =
   match argv with
   | [] -> Error "spawn_detached_devnull: empty argv"
-  | bin :: _ ->
+  | _ ->
       let devnull_ref = ref None in
       let cleanup_setup_fds () =
         match !devnull_ref with
@@ -137,43 +123,32 @@ let spawn_detached_devnull ~argv ~env ~cwd =
            Unix.openfile "/dev/null" [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0
          in
          devnull_ref := Some devnull;
-         let pid = Unix.fork () in
-         if pid = 0 then begin
-           Safe_ops.protect ~default:() (fun () -> ignore (Unix.setsid ()));
-           (try
-              if cwd <> "" then Unix.chdir cwd
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | _ -> Unix._exit 126);
-           Unix.dup2 devnull Unix.stdin;
-           Unix.dup2 devnull Unix.stdout;
-           Unix.dup2 devnull Unix.stderr;
-           Unix.close devnull;
-           (try Unix.execvpe bin (Array.of_list argv) env
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | _ -> Unix._exit 127)
-         end else begin
-           cleanup_setup_fds ();
-           Ok
-             {
-               devnull_pid = pid;
-               devnull_pgid = pid;
-               (* NDT-OK: detached process lifecycle telemetry records wall-clock
-                  start time; command behavior remains process-boundary driven. *)
-               devnull_started_at = Unix.gettimeofday ();
-             }
-         end
+         let pid =
+           posix_spawn_detached
+             (Array.of_list argv)
+             env
+             cwd
+             [| devnull; devnull; devnull |]
+         in
+         cleanup_setup_fds ();
+         Ok
+           {
+             devnull_pid = pid;
+             devnull_pgid = pid;
+             (* NDT-OK: detached process lifecycle telemetry records wall-clock
+                start time; command behavior remains process-boundary driven. *)
+             devnull_started_at = Unix.gettimeofday ();
+           }
        with
        | Unix.Unix_error (err, fn, arg) ->
            cleanup_setup_fds ();
            Error
              (Printf.sprintf "spawn_detached_devnull %s: %s (%s %s)"
-                bin (Unix.error_message err) fn arg)
+                (List.hd argv) (Unix.error_message err) fn arg)
        | exn ->
            cleanup_setup_fds ();
            Error
-             (Printf.sprintf "spawn_detached_devnull %s: %s" bin
+             (Printf.sprintf "spawn_detached_devnull %s: %s" (List.hd argv)
                 (Printexc.to_string exn)))
 
 let is_pgid_alive ~pgid =

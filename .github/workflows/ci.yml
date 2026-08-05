@@ -436,6 +436,14 @@ jobs:
       - name: Check dashboard prompt keys
         run: bash scripts/audit-dashboard-prompt-keys.sh
 
+      # Both directions of the hand-maintained CI test allowlist. A target
+      # whose suite was deleted makes dune hard-fail after a full build
+      # (#24352, and again today when config/prompts/behavior emptied), and a
+      # suite nobody wired never executes at all, so its assertions can outlive
+      # the code they pin. Seconds, and the deleting PR sees it.
+      - name: Check CI test targets
+        run: bash scripts/audit-ci-test-targets.sh
+
       - name: Check doc truth
         if: needs.changes.outputs.doc_truth == 'true'
         run: |

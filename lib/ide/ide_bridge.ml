@@ -617,7 +617,9 @@ let ingest_cursor_event_from_hook
     (try
        append_cursor ~base_dir:base_path ~partition json;
        notify_cursor_changed ~keeper_id
-     with exn ->
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
        Printf.eprintf
          "Ide_bridge.ingest_cursor_event_from_hook error: %s\n%!"
          (Printexc.to_string exn))
@@ -677,7 +679,9 @@ let ingest_cursor_event
        append_cursor ~base_dir:base_path ~partition json;
        notify_cursor_changed ~keeper_id;
        Ok ()
-     with exn ->
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
        Printf.eprintf
          "Ide_bridge.ingest_cursor_event error: %s\n%!"
          (Printexc.to_string exn);

@@ -216,7 +216,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0207 | Per-keeper LLM runtime routing | Draft | - |
 | 0208 | Withdrawn compositional Shell IR policy algebra | Withdrawn | - |
 | 0210 | Keeper Playground Repo Currency (fetch + fast-forward, work-preserving) | Draft | - |
-| 0211 | Keeper ⊥ {model, runtime}, opaque runtime id, runtime.toml keeper-assignment... | Draft | - |
 | 0212 | Withdraw Keeper exposure policy axis | Withdrawn | - |
 | 0213 | Keeper sandbox/playground isolation model (fix sandbox_repo_not_ready + macOS... | Draft | - |
 | 0214 | OTel GenAI Semantic Convention Migration | Draft | - |

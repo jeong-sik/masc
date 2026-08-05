@@ -344,6 +344,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0358 | 자율턴 신원과 exact raw-trace run을 turn record가 소유한다 | Implemented | - |
 | 0360 | Task actor provenance | Draft | - |
 | 0362 | Goal owner and the intake contract | Draft | - |
+| 0363 | Historical tool-result demotion in the bounded transmission view | Draft | - |
 | RFC-0034d-stale-agent-sync | d — release_stale_claims agent-side sync | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |

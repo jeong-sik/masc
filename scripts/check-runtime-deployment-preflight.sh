@@ -290,6 +290,10 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
 
   malformed_current_root="$fixture_root/malformed-current"
   write_schedules "$malformed_current_root" running
+  # write_current_queue creates this directory; the malformed case writes the
+  # file directly and must create it too, or the redirect fails before the
+  # assertion it is setting up ever runs.
+  mkdir -p "$malformed_current_root/.masc/keepers/fixture"
   printf '{not-json\n' \
     >"$malformed_current_root/.masc/keepers/fixture/event-queue-v15.json"
   expect_failure malformed_current_queue "$malformed_current_root"

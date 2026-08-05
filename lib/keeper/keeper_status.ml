@@ -54,7 +54,6 @@ let handle_keeper_list ctx args : tool_result =
             Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.proactive_rt.last_visible_ts
           in
           let active_model = active_model_of_meta m in
-          let next_model_hint = next_model_hint_of_meta m in
           let trace_history_count = List.length m.runtime.trace_history in
           let last_compaction_saved_tokens =
             max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
@@ -97,7 +96,7 @@ let handle_keeper_list ctx args : tool_result =
               ("keepalive_running", `Bool (runtime_keepalive_running ctx.config m));
               ("run_state", run_state_json);
               ("active_model", `String active_model);
-              ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
+              ("next_model_hint", `Null);
               ("keeper_age_s", Json_util.float_opt_to_json keeper_age_s);
               ("last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s);
               ("last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s);

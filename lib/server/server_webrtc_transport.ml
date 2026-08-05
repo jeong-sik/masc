@@ -389,13 +389,6 @@ let handle_answer_request body =
       (match Json_util.assoc_member_opt "offer_id" json with Some (`String s) -> s | _ -> "") in
     let answerer =
       (match Json_util.assoc_member_opt "agent_name" json with Some (`String s) -> s | _ -> "") in
-    (* Also accept optional answerer ICE candidates *)
-    let answer_ice =
-      match Json_util.assoc_member_opt "ice_candidates" json with
-      | None | Some `Null -> []
-      | Some candidates -> (match candidates with `List l -> l | _ -> []) |> List.map Yojson.Safe.to_string
-    in
-    ignore answer_ice;
     match accept_offer ~offer_id ~answerer_agent:answerer with
     | Ok conn ->
       (* Retrieve server-side ICE credentials to return in the answer *)

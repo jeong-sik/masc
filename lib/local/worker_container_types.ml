@@ -86,8 +86,7 @@ let extract_prompt_block ~start_marker ~end_marker (text : string) =
 let masc_http_base_url () =
   Env_config.masc_http_base_url ()
 
-let mcp_endpoint_url ~(auth_token : string option) =
-  ignore auth_token;
+let mcp_endpoint_url () =
   masc_http_base_url () ^ "/mcp"
 
 let request_id_matches request_id json =
@@ -322,7 +321,7 @@ let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
                 [ ("authorization", "Bearer " ^ token) ]
             | _ -> [])
         in
-        let url = mcp_endpoint_url ~auth_token in
+        let url = mcp_endpoint_url () in
         (match Masc_http_client.post_sync ~url ~headers ~body:request_body () with
         | Error e -> Error (sprintf "MASC HTTP request failed: %s" e)
         | Ok (status, raw_body) ->
@@ -333,7 +332,7 @@ let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
 let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : string)
     ~(params : Yojson.Safe.t) : (Yojson.Safe.t, string) result =
   let request_id = next_jsonrpc_id () in
-  let url = mcp_endpoint_url ~auth_token in
+  let url = mcp_endpoint_url () in
   let request_body =
     `Assoc
       [

@@ -17,42 +17,6 @@ let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
     ]
 ;;
 
-let dashboard_task_assignee (task : Masc_domain.task) =
-  match task.task_status with
-  | Claimed { assignee; _ }
-  | InProgress { assignee; _ }
-  | AwaitingVerification { assignee; _ }
-  | Done { assignee; _ } -> Some assignee
-  | Todo | Cancelled _ -> None
-;;
-
-let dashboard_task_json config (task : Masc_domain.task) =
-  let base_fields =
-    [ "id", `String task.id
-    ; "title", `String task.title
-    ; "description", `String task.description
-    ; "status", `String (Masc_domain.string_of_task_status task.task_status)
-    ; "priority", `Int task.priority
-    ; "assignee", Json_util.string_opt_to_json (dashboard_task_assignee task)
-    ; "created_at", `String task.created_at
-    (* RFC-0323 G-9: surface the linked re-run lineage (G-8 write-once
-       field) so the task detail can link back to the predecessor. *)
-    ; "predecessor_task_id", Json_util.string_opt_to_json task.predecessor_task_id
-    ]
-  in
-  let projection_fields =
-    match
-      (fun _t ->
-         ignore config;
-         `Assoc [])
-        task
-    with
-    | `Assoc fields -> fields
-    | _ -> []
-  in
-  `Assoc (base_fields @ projection_fields)
-;;
-
 let dashboard_agent_json (agent : Masc_domain.agent) =
   let profile = Dashboard_execution_helpers.get_agent_profile agent.name in
   let meta = agent.meta in

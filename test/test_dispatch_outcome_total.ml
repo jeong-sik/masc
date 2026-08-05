@@ -8,7 +8,6 @@ open Alcotest
       (Rejected_by_capability / Rejected_by_pre_hook / Handler_error)
       were confirmed to have zero producers.
     - Round-trip: every arm.to_string |> of_string |> to_string preserves the label
-    - classify_result_option matches the string-outcome contract
     - String vocabulary parity (handled / no_handler)
 *)
 
@@ -55,24 +54,6 @@ let test_of_string_unknown_returns_none () =
        (Dispatch_outcome.of_string "_unknown_outcome_label_"))
 ;;
 
-let test_classify_some_is_handled () =
-  match Dispatch_outcome.classify_result_option (Some 42) with
-  | Dispatch_outcome.Handled -> ()
-  | other ->
-    failf
-      "classify_result_option Some _ should be Handled, got %s"
-      (Dispatch_outcome.to_string other)
-;;
-
-let test_classify_none_is_no_handler () =
-  match Dispatch_outcome.classify_result_option None with
-  | Dispatch_outcome.No_handler -> ()
-  | other ->
-    failf
-      "classify_result_option None should be No_handler, got %s"
-      (Dispatch_outcome.to_string other)
-;;
-
 let test_string_vocabulary_parity () =
   (* Dispatch wraps emit outcome strings "handled" and "no_handler".
      Both must remain valid arms in the typed sum so the otel_metric_store
@@ -95,8 +76,6 @@ let () =
         ; test_case "to-string-labels" `Quick test_to_string_labels
         ; test_case "round-trip-string-label" `Quick test_round_trip_string_label
         ; test_case "of-string-unknown-returns-none" `Quick test_of_string_unknown_returns_none
-        ; test_case "classify-some-is-handled" `Quick test_classify_some_is_handled
-        ; test_case "classify-none-is-no-handler" `Quick test_classify_none_is_no_handler
         ; test_case "string-vocabulary-parity" `Quick test_string_vocabulary_parity
         ] )
     ]

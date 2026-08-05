@@ -99,8 +99,7 @@ let meta_only_claim_goal_scope ?task_goal_index (meta : keeper_meta) =
    [resolve_claim_goal_scope] reads the backlog ([get_tasks_safe], a disk read)
    to test for a claimable scoped task. Call
    [resolve_claim_goal_scope_for_tasks] when the caller already loaded the
-   backlog. Kept off the pure signal-only observation resolver
-   ([resolve_observation_claim_goal_scope]). *)
+   backlog. *)
 let resolve_claim_goal_scope_for_tasks ~(config : Workspace.config)
     ~(meta : keeper_meta) ~(tasks : Masc_domain.task list) ~task_eligible () =
   match meta.active_goal_ids with
@@ -129,14 +128,6 @@ let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta)
     ~task_eligible () =
   let tasks = Workspace.get_tasks_safe config in
   resolve_claim_goal_scope_for_tasks ~config ~meta ~tasks ~task_eligible ()
-
-let resolve_observation_claim_goal_scope ~(config : Workspace.config)
-    ~(meta : keeper_meta) () =
-  (* Signal-only: the observation surface just needs the scope hint, not the
-     claimability-aware fallback. Stays pure-meta so the per-turn observation
-     path adds no backlog disk read. *)
-  ignore config;
-  meta_only_claim_goal_scope meta
 
 let task_is_blocked (task : Masc_domain.task) =
   (* Enumerate every [task_status] variant so the compiler flags any new

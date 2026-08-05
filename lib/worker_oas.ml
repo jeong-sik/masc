@@ -247,7 +247,6 @@ let resume_model_id_of_checkpoint
 ;;
 
 let record_worker_mcp_client_session_duration
-      ~(auth_token : string option)
       ~(meta : Worker_container_types.worker_container_meta)
       ?error_type
       ()
@@ -256,7 +255,7 @@ let record_worker_mcp_client_session_duration
   | None -> ()
   | Some started_at ->
     Worker_container_types.record_mcp_client_session_duration
-      ~url:(Worker_container_types.mcp_endpoint_url ~auth_token)
+      ~url:(Worker_container_types.mcp_endpoint_url ())
       ~started_at
       ?error_type
       ()
@@ -346,7 +345,6 @@ let rec run_worker_via_oas
   run_existing_worker_agent
     ~sw
     ~base_path
-    ~auth_token
     ~meta
     ~prompt
     ~workspace_path
@@ -426,7 +424,6 @@ and resume_worker_via_oas
   run_existing_worker_agent
     ~sw
     ~base_path
-    ~auth_token
     ~meta
     ~prompt
     ~workspace_path
@@ -438,7 +435,6 @@ and resume_worker_via_oas
 and run_existing_worker_agent
       ~(sw : Eio.Switch.t)
       ~(base_path : string)
-      ~(auth_token : string option)
       ~(meta : Worker_container_types.worker_container_meta)
       ~(prompt : string)
       ~(workspace_path : string)
@@ -502,7 +498,6 @@ and run_existing_worker_agent
           completed_meta
       in
       record_worker_mcp_client_session_duration
-        ~auth_token
         ~meta
         ?error_type:session_error_type
         ();

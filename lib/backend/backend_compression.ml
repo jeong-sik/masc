@@ -91,13 +91,9 @@ let decode_header (data : string) : (int * string * bool) option =
     end else
       None
 
-(** Decompress with known original size and dict flag *)
-let decompress ~(orig_size : int) ~(used_dict : bool) (compressed : string) : string option =
-  match Compression_codec.decompress
-          ~orig_size
-          ~encoding:(Compression_codec.of_used_dict used_dict)
-          compressed
-  with
+(** Decompress with known original size *)
+let decompress ~(orig_size : int) (compressed : string) : string option =
+  match Compression_codec.decompress ~orig_size compressed with
   | Ok decompressed -> Some decompressed
   | Error msg ->
       Log.Misc.error "decompress failed: %s" msg;
@@ -106,8 +102,8 @@ let decompress ~(orig_size : int) ~(used_dict : bool) (compressed : string) : st
 (** Auto-decompress if ZSTD/ZSTDD header present *)
 let decompress_auto (data : string) : string =
   match decode_header data with
-  | Some (orig_size, compressed, used_dict) ->
-      (match decompress ~orig_size ~used_dict compressed with
+  | Some (orig_size, compressed, _) ->
+      (match decompress ~orig_size compressed with
        | Some decompressed -> decompressed
        | None -> data)  (* Return original on failure *)
   | None -> data

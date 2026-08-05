@@ -709,7 +709,6 @@ pinned/tool context를 포함한 전체 요청의 provider-fit 계약은 #26551�
 | 증상 | 확인 사항 | 대응 |
 |------|----------|------|
 | capsule/checkpoint 준비 실패 | 메트릭에서 `handoff.performed` 확인 | checkpoint 상태 확인 → 재생성 |
-| successor 시작 실패 | `next_model_hint` 확인 | 해당 모델의 API 접근 가능 여부 확인 |
 
 ### 7.5 Runtime Assignment 확인
 

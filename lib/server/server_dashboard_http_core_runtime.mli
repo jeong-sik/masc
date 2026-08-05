@@ -4,7 +4,7 @@
 val dashboard_runtime :
   ?net:Eio_context.eio_net ->
   ?mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
-  Workspace.config ->
+  unit ->
   Server_dashboard_http_runtime_support.runtime option
 (** Build optional dashboard runtime capabilities from server resources. *)
 

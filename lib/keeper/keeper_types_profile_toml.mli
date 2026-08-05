@@ -112,7 +112,6 @@ val warn_unknown_keeper_toml_keys :
   path:string -> Keeper_toml_loader.toml_doc -> unit
 val merge_string_list : base:'a list -> 'a list -> 'a list
 val merge_keeper_profile_defaults :
-  agent_name:'a ->
   base:keeper_profile_defaults ->
   overlay:keeper_profile_defaults -> keeper_profile_defaults
 

@@ -563,7 +563,7 @@ let backoff_with_jitter delay =
     let st = Domain.DLS.get backoff_rng_key in
     Random.State.float st delay
 
-let with_distributed_lock ?clock config _path key f =
+let with_distributed_lock ?clock config key f =
   let owner = config.backend_config.node_id in
   let ttl_seconds = config.lock_expiry_minutes * 60 in
   let rec acquire attempts delay =
@@ -599,7 +599,7 @@ let with_distributed_lock ?clock config _path key f =
          key)
   end
 
-let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
+let with_distributed_lock_r ?clock config key f : ('a, masc_error) result =
   let owner = config.backend_config.node_id in
   let ttl_seconds = config.lock_expiry_minutes * 60 in
   let rec acquire attempts delay =
@@ -632,7 +632,6 @@ let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
        "String/Substring 분류기" anti-pattern removal). *)
     (Atomic.get Workspace_hooks.distributed_lock_acquire_failed_fn)
       ~key ~attempts:50;
-    ignore path;
     Error (System (System_error.LockContention { key; attempts = 50 }))
   end
 
@@ -650,7 +649,7 @@ let with_file_lock_impl ?clock config path f =
              races in append/readback helpers. *)
           File_lock_eio.with_mutex path f
       | FileSystem _ ->
-          with_distributed_lock ?clock config path key f)
+          with_distributed_lock ?clock config key f)
 
 let with_file_lock_eio ~clock config path f =
   with_file_lock_impl ~clock config path f
@@ -667,7 +666,7 @@ let with_file_lock_r_impl ?clock config path f : ('a, masc_error) result =
       match config.backend with
       | Memory _ -> File_lock_eio.with_mutex path (fun () -> Ok (f ()))
       | FileSystem _ ->
-          with_distributed_lock_r ?clock config path key f)
+          with_distributed_lock_r ?clock config key f)
 
 let with_file_lock_r_eio ~clock config path f : ('a, masc_error) result =
   with_file_lock_r_impl ~clock config path f

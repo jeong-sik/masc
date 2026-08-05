@@ -551,14 +551,13 @@ let handle_dashboard_hello_eio state id ?mcp_session_id params =
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
 
-let handle_dashboard_subscribe_eio state id ?mcp_session_id params =
+let handle_dashboard_subscribe_eio id ?mcp_session_id params =
   match mcp_session_id, params with
   | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "dashboard/subscribe requires a WebSocket session"
   | Some session_id, Some (`Assoc fields) ->
     let route = optional_string_member "route" fields in
     let slices = string_list_member "slices" fields in
     let slices = if slices = [] then [ "shell"; "namespace"; "transport" ] else slices in
-    ignore state;
     !dashboard_subscribe_handler ~session_id ?route ~slices ()
     |> dashboard_response_or_error id
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
@@ -851,7 +850,7 @@ let handle_request
                   ~requirement:Auth_requirement.Public
                   ?auth_token
                   (fun _auth_token ->
-                     handle_dashboard_subscribe_eio state id ?mcp_session_id req.params)
+                     handle_dashboard_subscribe_eio id ?mcp_session_id req.params)
               | "dashboard/unsubscribe" ->
                 with_required_auth
                   ~base_path

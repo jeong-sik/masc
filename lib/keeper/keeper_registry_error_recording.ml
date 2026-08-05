@@ -7,8 +7,7 @@
     [Keeper_registry.set_last_error_entry] so this module does not need
     to know about the central Atomic. *)
 
-let record_common ~base_path ?details name err persist =
-  ignore base_path;
+let record_common ?details name err persist =
   (* MASC/OAS Error-Warn Reduction Goal §P6: same (keeper, error) was
      emitting at ERROR up to 96× in 30-min slices on production
      (system_log_2026-05-16 sample, 299 events/day; verifier
@@ -33,12 +32,12 @@ let record_common ~base_path ?details name err persist =
 ;;
 
 let record ~base_path ?details name err =
-  record_common ~base_path ?details name err (fun () ->
+  record_common ?details name err (fun () ->
     Keeper_registry.set_last_error_entry ~base_path ~name err)
 ;;
 
 let record_exact ?details (entry : Keeper_registry.registry_entry) err =
-  record_common ~base_path:entry.base_path ?details entry.name err (fun () ->
+  record_common ?details entry.name err (fun () ->
     match Keeper_registry.set_last_error_exact entry err with
     | Keeper_registry.Exact_updated -> ()
     | Keeper_registry.Exact_update_missing ->

@@ -30,9 +30,6 @@ let uses_dict = function
   | Dictionary -> true
   | Standard -> false
 
-let of_used_dict used_dict =
-  if used_dict then Dictionary else Standard
-
 let content_encoding = function
   | Dictionary -> "zstd-dict"
   | Standard -> "zstd"
@@ -52,8 +49,7 @@ let compress ?(level = 3) (data : string) : compress_result =
       Log.Misc.error "compression failed: %s" msg;
       Unchanged data
 
-let decompress ~(orig_size : int) ~encoding (data : string) : (string, string) Stdlib.result =
-  let _ = encoding in
+let decompress ~(orig_size : int) (data : string) : (string, string) Stdlib.result =
   try
     Ok (Zstd.decompress orig_size data)
   with Failure msg | Zstd.Error msg ->

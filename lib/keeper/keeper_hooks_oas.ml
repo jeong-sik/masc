@@ -155,7 +155,6 @@ let make_hooks
       (!meta_ref).name
       ~event_kind
   in
-  ignore trajectory_acc;
   let hooks =
     { Agent_sdk.Hooks.empty with
     pre_tool_use = Some (fun event ->

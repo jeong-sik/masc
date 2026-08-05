@@ -80,24 +80,6 @@ val run_bench :
 val provider_health_reachable : status:int option -> bool
 (** Re-export of {!Tool_local_runtime_verify.provider_health_reachable}. *)
 
-val classify_runtime_blocker :
-  provider_reachable:bool ->
-  slot_reachable:bool ->
-  chat_contract_status:string ->
-  expected_model:string option ->
-  actual_model_id:string option ->
-  expected_slots:int option ->
-  actual_slots_total:int ->
-  expected_ctx:int option ->
-  actual_ctx:int option ->
-  chat_completion_compatible:bool ->
-  string option * string option
-(** Re-export of {!Tool_local_runtime_verify.classify_runtime_blocker}.
-    Returns [(blocker_code, blocker_detail)] — both [None] when no
-    blocker.  Blocker codes: [provider_unreachable] /
-    [provider_model_mismatch] / [slot_count_insufficient] /
-    [ctx_mismatch] / [chat_contract_incompatible]. *)
-
 val ollama_loaded_models_of_ps_json :
   Yojson.Safe.t -> [> `Assoc of (string * Yojson.Safe.t) list ] list
 (** Re-export of

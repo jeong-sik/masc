@@ -202,7 +202,6 @@ let () =
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ()))
     schemas
-let looks_like_rss_payload = Tool_misc_web_search.looks_like_rss_payload
 let parse_bing_rss_items = Tool_misc_web_search.parse_bing_rss_items
 let parse_searxng_json = Tool_misc_web_search.parse_searxng_json
 let parse_ddg_html = Tool_misc_web_search.parse_ddg_html

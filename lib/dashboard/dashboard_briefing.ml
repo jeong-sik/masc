@@ -3,7 +3,6 @@ include Dashboard_utils
 type attention_context = Dashboard_briefing_assembly.attention_context = {
   severity : string;
   has_action : bool;
-  last_seen_ts : float;
   related_agent_names : string list;
   json : Yojson.Safe.t;
 }
@@ -132,7 +131,6 @@ let build_attention_queue incidents actions =
                | None -> [])
            in
            let top_action = matching_action_for_incident incident actions in
-           let last_seen_at = None in
            let id =
              Printf.sprintf "%s:%s:%s" kind target_type
                (match target_id with Some value -> value | None -> "none")
@@ -141,8 +139,6 @@ let build_attention_queue incidents actions =
              {
                severity;
                has_action = Option.is_some top_action;
-               last_seen_ts =
-                 Dashboard_utils.parse_iso_opt last_seen_at |> Option.value ~default:0.0;
                related_agent_names;
                json =
                  `Assoc
@@ -157,16 +153,12 @@ let build_attention_queue incidents actions =
                      ("related_agent_names", `List (List.map (fun value -> `String value) related_agent_names));
                      ("evidence", member_assoc "evidence" incident);
                      ("evidence_preview", `List (List.map (fun value -> `String value) (evidence_preview_strings (member_assoc "evidence" incident))));
-                     ("last_seen_at", Json_util.string_opt_to_json last_seen_at);
                    ];
              })
   |> List.sort (fun left right ->
          let by_severity = Int.compare (severity_rank right.severity) (severity_rank left.severity) in
          if by_severity <> 0 then by_severity
-         else
-           let by_action = Bool.compare right.has_action left.has_action in
-           if by_action <> 0 then by_action
-           else Float.compare right.last_seen_ts left.last_seen_ts)
+         else Bool.compare right.has_action left.has_action)
 
 
 type briefing_projection = {

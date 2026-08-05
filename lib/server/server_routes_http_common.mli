@@ -139,9 +139,6 @@ val validate_origin :
 val accepts_sse : Httpun.Request.t -> bool
 val accepts_streamable_mcp : Httpun.Request.t -> bool
 val request_force_json_response : Httpun.Request.t -> bool
-val classify_mcp_accept :
-  Httpun.Request.t ->
-  Mcp_transport_protocol.Http_negotiation.accept_mode
 val force_json_response : bool
 (** {1 Header builders} *)
 

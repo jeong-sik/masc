@@ -98,7 +98,6 @@ let run_all () =
     | exception Unix.Unix_error _ -> ()
     | dh ->
       let stop = ref false in
-      let count_after_budget = ref 0 in
       Eio_guard.protect
         ~finally:(fun () ->
           (* RFC-0145 — narrow to [Unix.Unix_error] (the only exception
@@ -112,7 +111,6 @@ let run_all () =
              | name when name = "." || name = ".." -> ()
              | _ when tmp_budget_exceeded () ->
                budget_exhausted := true;
-               incr count_after_budget;
                stop := true
              | name ->
                incr inspected;
@@ -135,8 +133,7 @@ let run_all () =
                        path
                        (Unix.error_message e))
                 | _ -> () (* skip dirs / symlinks / fifos *))
-           done);
-      ignore count_after_budget
+           done)
   in
   (* Treat empty/whitespace-only or relative [MASC_BASE_PATH] as unset.
      The repo convention sets env vars to "" via [Unix.putenv name ""]

@@ -186,7 +186,7 @@ let test_handle_answer_request_valid () =
     let offer_id = Wrtc.create_offer
       ~from_agent:"alice" ~ice_candidates:["c1"] ~dtls_fingerprint:"fp" in
     let body = Printf.sprintf
-      {|{"offer_id":"%s","agent_name":"bob","ice_candidates":["c2"],"dtls_fingerprint":"fp2"}|}
+      {|{"offer_id":"%s","agent_name":"bob","dtls_fingerprint":"fp2"}|}
       offer_id in
     let result = Wrtc.handle_answer_request body in
     Alcotest.(check bool) "answer ok" true (Result.is_ok result);

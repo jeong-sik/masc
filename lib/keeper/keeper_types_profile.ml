@@ -241,7 +241,7 @@ let load_keeper_profile_defaults_result_uncached_with_paths
                 | Error _ as error -> error
                 | Ok persona_defaults ->
                   Ok
-                    (merge_keeper_profile_defaults ~agent_name:name
+                    (merge_keeper_profile_defaults
                        ~base:persona_defaults ~overlay:defaults))
            | None -> Ok defaults)
        | Error e -> Error e)

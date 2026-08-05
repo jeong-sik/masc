@@ -377,11 +377,11 @@ let default_config base_path =
         Hashtbl.replace default_config_cache base_path cfg;
         cfg)
 
-(** Create config with Eio context.
+(** Create config bypassing the {!default_config} cache, syncing the test
+    base-path env to the resolved path.
     [on_backend_ready] is called after backend creation, allowing callers
     to initialize dependent systems (e.g., Board) without Workspace depending on them. *)
-let default_config_eio ~sw ?(on_backend_ready = fun _backend -> ()) base_path =
-  let _ = sw in
+let default_config_uncached ?(on_backend_ready = fun _backend -> ()) base_path =
   let resolved_path = resolve_masc_base_path base_path in
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in

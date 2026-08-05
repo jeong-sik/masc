@@ -68,7 +68,7 @@ let test_divergent_cwd_is_observational_only () =
   Alcotest.(check bool) "effective .masc exists" true diag.effective_has_masc_dir;
   Alcotest.(check bool) "warning removed" false (Option.is_some diag.warning)
 
-let test_divergent_cwd_is_not_a_strict_violation () =
+let test_divergent_cwd_with_strict_env_does_not_reject_startup () =
   with_temp_dir "base-path-strict" @@ fun root ->
   let cwd = Filename.concat root "repo" in
   let effective = Filename.concat root "workspace" in
@@ -88,9 +88,7 @@ let test_divergent_cwd_is_not_a_strict_violation () =
   Alcotest.(check bool) "startup_rejected stays false" false
     diag.startup_rejected;
   Alcotest.(check bool) "startup_abort_eligible stays false" false
-    diag.startup_abort_eligible;
-  Alcotest.(check bool) "divergent cwd does not violate" false
-    (Server_base_path_diagnostics.strict_violation diag)
+    diag.startup_abort_eligible
 
 let test_explicit_env_resolution_remains_observational_only () =
   with_temp_dir "base-path-explicit" @@ fun root ->
@@ -117,9 +115,7 @@ let test_explicit_env_resolution_remains_observational_only () =
   Alcotest.(check bool) "startup_rejected false for explicit env source" false
     diag.startup_rejected;
   Alcotest.(check bool) "startup_abort_eligible remains false" false
-    diag.startup_abort_eligible;
-  Alcotest.(check bool) "explicit env source stays non-violating" false
-    (Server_base_path_diagnostics.strict_violation diag)
+    diag.startup_abort_eligible
 
 let test_explicit_cli_resolution_source_remains_observational_only () =
   with_temp_dir "base-path-explicit-cli" @@ fun root ->
@@ -143,9 +139,7 @@ let test_explicit_cli_resolution_source_remains_observational_only () =
   Alcotest.(check bool) "startup_rejected false for explicit cli source" false
     diag.startup_rejected;
   Alcotest.(check bool) "startup_abort_eligible false without user STRICT" false
-    diag.startup_abort_eligible;
-  Alcotest.(check bool) "explicit cli source stays non-violating" false
-    (Server_base_path_diagnostics.strict_violation diag)
+    diag.startup_abort_eligible
 
 let test_to_yojson_exposes_effective_paths () =
   let diag =
@@ -323,8 +317,8 @@ let () =
         [
           Alcotest.test_case "divergent cwd is observational only" `Quick
             test_divergent_cwd_is_observational_only;
-          Alcotest.test_case "divergent cwd is not strict violation" `Quick
-            test_divergent_cwd_is_not_a_strict_violation;
+          Alcotest.test_case "divergent cwd with strict env does not reject startup" `Quick
+            test_divergent_cwd_with_strict_env_does_not_reject_startup;
           Alcotest.test_case
             "explicit env resolution remains observational only"
             `Quick

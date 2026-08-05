@@ -118,14 +118,6 @@ let nonempty_string_opt value =
 let parse_json_line_opt line =
   try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
 
-let metric_ts json =
-  Safe_ops.json_float ~default:0.0 "ts_unix" json
-
-let sort_by_latest_ts jsons =
-  List.sort
-    (fun left right -> Float.compare (metric_ts right) (metric_ts left))
-    jsons
-
 let string_member_nonempty key json =
   Option.bind (Safe_ops.json_string_opt key json) nonempty_string_opt
 

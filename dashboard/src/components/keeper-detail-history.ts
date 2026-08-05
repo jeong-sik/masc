@@ -2,7 +2,6 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { formatPct1 } from '../lib/format-number'
 import { unixSecondsToDate } from '../lib/format-time'
-import { isStringArray } from '../lib/type-guards'
 import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
 import {
@@ -363,12 +362,6 @@ export function KeeperCheckpointPanel({
   `
 }
 
-interface LineageDelta {
-  inherited_fields: string[]
-  changed_fields: string[]
-  dropped_fields: string[]
-}
-
 interface GenerationLineageManifest {
   generation: number
   trace_id: string
@@ -378,7 +371,6 @@ interface GenerationLineageManifest {
   created_at?: string
   trigger_reason?: string
   context_ratio?: number
-  inheritance_delta?: LineageDelta
 }
 
 interface GenerationLineageEntry {
@@ -390,15 +382,6 @@ interface GenerationLineageEntry {
   created_at?: string
   trigger_reason?: string
   context_ratio?: number
-  identity_changed_fields?: string[]
-  identity_dropped_fields?: string[]
-}
-
-function isLineageDelta(value: unknown): value is LineageDelta {
-  if (!isRecord(value)) return false
-  return isStringArray(value.inherited_fields)
-    && isStringArray(value.changed_fields)
-    && isStringArray(value.dropped_fields)
 }
 
 function isGenerationLineageManifest(value: unknown): value is GenerationLineageManifest {
@@ -410,7 +393,6 @@ function isGenerationLineageManifest(value: unknown): value is GenerationLineage
     && (value.created_at == null || typeof value.created_at === 'string')
     && (value.trigger_reason == null || typeof value.trigger_reason === 'string')
     && (value.context_ratio == null || typeof value.context_ratio === 'number')
-    && (value.inheritance_delta == null || isLineageDelta(value.inheritance_delta))
 }
 
 function isGenerationLineageEntry(value: unknown): value is GenerationLineageEntry {
@@ -422,8 +404,6 @@ function isGenerationLineageEntry(value: unknown): value is GenerationLineageEnt
     && (value.created_at == null || typeof value.created_at === 'string')
     && (value.trigger_reason == null || typeof value.trigger_reason === 'string')
     && (value.context_ratio == null || typeof value.context_ratio === 'number')
-    && (value.identity_changed_fields == null || isStringArray(value.identity_changed_fields))
-    && (value.identity_dropped_fields == null || isStringArray(value.identity_dropped_fields))
 }
 
 function compactTraceId(traceId: string): string {
@@ -454,7 +434,6 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
   if (currentGeneration == null && currentTraceId == null && recent.length === 0) return null
 
-  const delta = manifest?.inheritance_delta ?? null
   const latestEntry = recent[0] ?? null
 
   return html`
@@ -523,18 +502,6 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                   <div class="text-[var(--color-fg-disabled)]">context ratio ${formatPct1(manifest.context_ratio)}</div>
                 </div>
               </div>
-              <div class="mt-3 flex flex-wrap gap-2">
-                ${delta
-                  ? html`
-                    <${StatusChip} tone="neutral" uppercase=${false}>inherited ${delta.inherited_fields.length}</${StatusChip}>
-                    <${StatusChip} tone="neutral" uppercase=${false}>changed ${delta.changed_fields.length}</${StatusChip}>
-                    <${StatusChip} tone="neutral" uppercase=${false}>dropped ${delta.dropped_fields.length}</${StatusChip}>
-                  `
-                  : null}
-              </div>
-              ${delta && delta.changed_fields.length === 0 && delta.dropped_fields.length === 0
-                ? html`<div class="mt-2 text-2xs text-[var(--color-fg-disabled)]">identity-only inheritance stayed intact across the rollover.</div>`
-                : null}
             </div>
           `
           : html`
@@ -570,15 +537,6 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                       <div class="mt-1 text-3xs font-mono text-[var(--color-fg-disabled)] truncate" title=${entry.trace_id}>
                         ${compactTraceId(entry.trace_id)}
                       </div>
-                      ${(entry.identity_changed_fields?.length ?? 0) > 0 || (entry.identity_dropped_fields?.length ?? 0) > 0
-                        ? html`
-                          <div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">
-                            ${entry.identity_changed_fields && entry.identity_changed_fields.length > 0 ? `changed: ${entry.identity_changed_fields.join(', ')}` : ''}
-                            ${entry.identity_changed_fields && entry.identity_changed_fields.length > 0 && entry.identity_dropped_fields && entry.identity_dropped_fields.length > 0 ? ' · ' : ''}
-                            ${entry.identity_dropped_fields && entry.identity_dropped_fields.length > 0 ? `dropped: ${entry.identity_dropped_fields.join(', ')}` : ''}
-                          </div>
-                        `
-                        : null}
                     </div>
                   `
                 })}

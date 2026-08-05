@@ -39,7 +39,6 @@ val get_dict : unit -> string
 val has_dict : unit -> bool
 
 val uses_dict : encoding -> bool
-val of_used_dict : bool -> encoding
 
 val content_encoding : encoding -> string
 (** HTTP [Content-Encoding] header value for an [encoding]. *)
@@ -52,10 +51,6 @@ val compress : ?level:int -> string -> compress_result
     compression does not reduce the size. Zstd failures are logged and
     surfaced as [Unchanged]. *)
 
-val decompress :
-  orig_size:int ->
-  encoding:encoding ->
-  string ->
-  (string, string) Stdlib.result
-(** [decompress ~orig_size ~encoding data] attempts to decompress [data] into a
-    buffer of [orig_size] bytes. Returns [Error msg] on zstd failure. *)
+val decompress : orig_size:int -> string -> (string, string) Stdlib.result
+(** [decompress ~orig_size data] attempts to decompress [data] into a buffer of
+    [orig_size] bytes. Returns [Error msg] on zstd failure. *)

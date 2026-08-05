@@ -81,8 +81,7 @@ type runtime_blocker_surface =
 
 let runtime_blocker_surface_class cls = cls
 
-let runtime_blocker_class_label ?(summary = "") cls =
-  let _ = summary in
+let runtime_blocker_class_label cls =
   blocker_class_to_string (runtime_blocker_surface_class cls)
 
 let is_runtime_exhausted_blocker_class blocker_class =
@@ -120,7 +119,7 @@ let runtime_blocker_surface_of_masc_internal_error = function
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
   =
-  let str = runtime_blocker_class_label ~summary cls in
+  let str = runtime_blocker_class_label cls in
   let summary =
     match cls with
     | Capacity_backpressure ->

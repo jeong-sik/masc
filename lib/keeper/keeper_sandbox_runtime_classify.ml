@@ -11,7 +11,6 @@
 type docker_failure_class =
   | Docker_daemon_timeout
   | Docker_runtime_error
-  | Docker_command_timeout
   | Image_inspect_timeout
   | Image_inspect_error
   | Docker_info_format_error
@@ -21,7 +20,6 @@ type docker_failure_class =
 let docker_failure_class_to_string = function
   | Docker_daemon_timeout -> "docker_daemon_timeout"
   | Docker_runtime_error -> "docker_runtime_error"
-  | Docker_command_timeout -> "docker_command_timeout"
   | Image_inspect_timeout -> "image_inspect_timeout"
   | Image_inspect_error -> "image_inspect_error"
   | Docker_info_format_error -> "docker_info_format_error"
@@ -42,17 +40,6 @@ let process_status_is_timeout = function
     retained as evidence and never parsed into a control-flow class. *)
 let classify_docker_info_failure ~status =
   if process_status_is_timeout status then Docker_daemon_timeout
-  else Docker_runtime_error
-;;
-
-(** Classify failures from [docker run ...] invocations that execute a
-    keeper command inside a container. A timeout in this boundary can
-    mean the sandbox command itself hung after the container started,
-    so it is classified as [Command_timeout] rather than
-    [Docker_daemon_timeout]. Only explicit Docker daemon unavailable
-    messages are treated as daemon back-pressure. *)
-let classify_docker_run_failure ~status =
-  if process_status_is_timeout status then Docker_command_timeout
   else Docker_runtime_error
 ;;
 

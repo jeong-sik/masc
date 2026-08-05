@@ -492,7 +492,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                      in
                      let role_lc = String.lowercase_ascii role in
                      let is_internal =
-                       ignore content;
                        Keeper_types_support.is_internal_history_source source
                      in
                      let entry_kind =

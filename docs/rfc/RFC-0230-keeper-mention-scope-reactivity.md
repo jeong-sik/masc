@@ -41,7 +41,7 @@ It is a stub, but its outputs (`world_observation.pending_mentions`,
   messages into the keeper prompt (`format_mentions` / `format_scope_messages`).
 - `keeper_unified_metrics_result.ml:68` **(verified)**:
   `is_mention_reactive = observation.pending_mentions <> []`.
-- `keeper_unified_metrics_support.ml:18-20,426-449` **(verified)** classifies the
+- `keeper_unified_metrics_support.ml:18-20,422-445` **(verified)** classifies the
   reactive trigger (`direct_mention`, `scope_message`, `message_sweep`).
 - `keeper_turn_helpers.ml:155-156` **(verified)**: the post-action guard pins a
   reactive turn when `pending_mentions` / `pending_board_events` /

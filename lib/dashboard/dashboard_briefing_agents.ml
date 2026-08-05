@@ -8,7 +8,6 @@ include Dashboard_utils
 type attention_context = {
   severity : string;
   has_action : bool;
-  last_seen_ts : float;
   related_agent_names : string list;
   json : Yojson.Safe.t;
 }

@@ -135,8 +135,7 @@ curl -sS http://127.0.0.1:8935/webrtc/answer \
   -H 'Content-Type: application/json' \
   -d '{
     "offer_id":"<offer_id>",
-    "agent_name":"agent-b",
-    "ice_candidates":["127.0.0.1:5001"]
+    "agent_name":"agent-b"
   }'
 ```
 

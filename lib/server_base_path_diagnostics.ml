@@ -168,10 +168,6 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     warning;
   }
 
-let strict_violation (diag : t) =
-  let _ = diag in
-  false
-
 let startup_should_abort diag =
   diag.startup_rejected || diag.startup_abort_eligible
 
@@ -240,7 +236,6 @@ let to_yojson (diag : t) =
        ("strict_mode_requested", `Bool diag.strict_mode_requested);
        ("startup_rejected", `Bool diag.startup_rejected);
        ("startup_abort_eligible", `Bool diag.startup_abort_eligible);
-       ("strict_violation", `Bool (strict_violation diag));
      ]
     @ List.filter_map (fun item -> item)
         [

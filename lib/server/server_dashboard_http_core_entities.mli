@@ -1,5 +1,4 @@
 val dashboard_shell_status_json : Workspace.config -> Yojson.Safe.t
-val dashboard_task_json : Workspace.config -> Masc_domain.task -> Yojson.Safe.t
 val dashboard_agent_json : Masc_domain.agent -> Yojson.Safe.t
 val dashboard_message_json : Masc_domain.message -> Yojson.Safe.t
 val dashboard_tasks_safe : Workspace.config -> Masc_domain.task list

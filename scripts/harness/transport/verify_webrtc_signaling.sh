@@ -53,7 +53,7 @@ fi
 answer_resp="$(
   curl -fsS -X POST "${MASC_HTTP_BASE_URL}/webrtc/answer" \
     -H "Content-Type: application/json" \
-    -d "{\"offer_id\":\"${offer_id}\",\"agent_name\":\"e2e-answerer\",\"ice_candidates\":[\"candidate:1 1 udp 2130706431 127.0.0.1 50001 typ host\"]}"
+    -d "{\"offer_id\":\"${offer_id}\",\"agent_name\":\"e2e-answerer\"}"
 )"
 read -r peer_id ice_ufrag ice_pwd <<EOF
 $(ANSWER_JSON="$answer_resp" python3 - <<'PY'

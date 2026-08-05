@@ -46,58 +46,6 @@ let candidate_repo_roots_no_create ~base_path ~keeper_id ~repository_id =
       repo_root_of_playground_root ~playground_root ~repo_name:repository_id)
     |> List.sort_uniq String.compare
 
-type path_context =
-  { path_repo_name : string
-  ; path_repo_root : string
-  ; path_root : string
-  ; accepted_toplevels : string list
-  }
-
-let classify_path ~(config : Workspace.config) ~(meta : keeper_meta) ~path =
-  let playground =
-    playground_root_no_create ~config ~meta
-    |> normalize_path
-  in
-  let repos_root = repos_root_of_playground_root playground in
-  let path = normalize_path path in
-  if String.equal path repos_root then None
-  else
-    let prefix = repos_root ^ "/" in
-    if not (String.starts_with ~prefix path) then None
-    else
-      let suffix =
-        String.sub path (String.length prefix) (String.length path - String.length prefix)
-      in
-      match String.split_on_char '/' suffix with
-      | repo_name :: _ when safe_repo_component repo_name ->
-        let repo_root = repo_root_of_playground_root ~playground_root:playground ~repo_name in
-        Some
-          { path_repo_name = repo_name
-          ; path_repo_root = repo_root
-          ; path_root = repo_root
-          ; accepted_toplevels = [ repo_root ]
-          }
-      | _ -> None
-
-type cwd_context =
-  { repo_name : string
-  ; repo_root : string
-  ; path_root : string
-  ; is_direct_root : bool
-  }
-
-let classify_cwd ~config ~meta ~cwd =
-  let cwd = normalize_path cwd in
-  match classify_path ~config ~meta ~path:cwd with
-  | Some { path_repo_name; path_repo_root; path_root; _ } ->
-    Some
-      { repo_name = path_repo_name
-      ; repo_root = path_repo_root
-      ; path_root
-      ; is_direct_root = String.equal path_repo_root cwd
-      }
-  | None -> None
-
 type execution_location_scope =
   | Playground_root
   | Playground_subpath

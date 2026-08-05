@@ -136,8 +136,6 @@ let accepts_streamable_mcp (request : Httpun.Request.t) =
 let request_force_json_response =
   Server_mcp_transport_http.request_force_json_response
 
-let classify_mcp_accept = Server_mcp_transport_http.classify_mcp_accept
-
 let force_json_response = Server_mcp_transport_http.force_json_response
 
 let mcp_transport_http_deps () : Server_mcp_transport_http.deps =

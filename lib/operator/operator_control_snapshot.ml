@@ -288,7 +288,6 @@ let keepers_json
                         ~history_items:[]
                         ~now_ts
                       |> Keeper_status_runtime.augment_keeper_diagnostic_json
-                           ~meta
                            ~keepalive_running
                            ~keepalive_started_at
                            ~now_ts
@@ -405,7 +404,7 @@ let keepers_json
                          ]
                          @ keeper_runtime_identity_fields meta
                          @ [ "keepalive_running", `Bool keepalive_running
-                           ; "next_model_hint", Json_util.string_opt_to_json (Keeper_status_runtime.next_model_hint_of_meta meta)
+                           ; "next_model_hint", `Null
                            ; ( "active_goal_ids"
                              , `List
                                  (List.map

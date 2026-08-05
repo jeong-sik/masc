@@ -5,10 +5,9 @@
 
 open Server_dashboard_http_runtime_support
 
-let dashboard_runtime ?net ?mono_clock (config : Workspace.config)
+let dashboard_runtime ?net ?mono_clock ()
   : Server_dashboard_http_runtime_support.runtime option
   =
-  let _ = config in
   match net, mono_clock with
   | Some net, Some mono_clock -> Some { net; mono_clock }
   | Some _, None | None, Some _ | None, None -> None
@@ -23,7 +22,7 @@ let run_dashboard_compute
       ~(config : Workspace.config)
       compute
   =
-  let runtime = dashboard_runtime ?net ?mono_clock config in
+  let runtime = dashboard_runtime ?net ?mono_clock () in
   Server_dashboard_http_runtime_support.run_dashboard_compute
     ~mode
     ?runtime

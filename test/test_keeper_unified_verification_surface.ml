@@ -169,15 +169,11 @@ let init_runtime_default_for_tests () =
 
 (* A verifier is not a Keeper. An AwaitingVerification obligation is decided by
    the application-owned system LLM completion authority or an authenticated
-   HITL operator, never through the Keeper tool surface, so no Keeper — whatever
-   its mention tags — is offered a task_verify affordance. Guards against a
-   Keeper named "verifier" re-acquiring approval authority. *)
+   HITL operator, never through the Keeper tool surface, so no Keeper is
+   offered a task_verify affordance. Guards against a Keeper named "verifier"
+   re-acquiring approval authority. *)
 let test_no_task_verify_affordance_for_any_keeper () =
-  let tagged = { minimal_meta with mention_targets = [ "verifier" ] } in
-  check bool "no task_verify for verifier-tagged keeper" false
-    (List.mem "task_verify"
-       (UM.observed_affordances_of_observation ~meta:tagged base_observation));
-  check bool "no task_verify without meta" false
+  check bool "no task_verify affordance" false
     (List.mem "task_verify" (UM.observed_affordances_of_observation base_observation))
 
 let test_board_activity_exposes_curation_affordance_without_threshold () =
@@ -350,11 +346,7 @@ let test_unclaimable_backlog_is_not_a_claim_trigger () =
 (* Same boundary as the affordance guard above, at the wake-trigger layer: an
    AwaitingVerification obligation is not a keeper wake signal. *)
 let test_no_pending_verification_trigger_for_any_keeper () =
-  let tagged = { minimal_meta with mention_targets = [ "검증자" ] } in
-  check bool "no pending_verification trigger for verifier-tagged keeper" false
-    (List.mem "pending_verification"
-       (UM.observed_triggers_of_observation ~meta:tagged base_observation));
-  check bool "no pending_verification trigger without meta" false
+  check bool "no pending_verification trigger" false
     (List.mem "pending_verification"
        (UM.observed_triggers_of_observation base_observation))
 

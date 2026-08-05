@@ -30,25 +30,6 @@ let active_model_label_of_meta (m : keeper_meta) : string =
       Boundary_redaction.to_string Boundary_redaction.runtime_model_label
   | _ -> unknown_model_label
 
-let next_model_hint_of_meta (m : keeper_meta) : string option =
-  (* NOT-YET-IMPLEMENTED (#22080 follow-up): meta carries no field recording the
-     cascade's next-runtime fallback target, so there is nothing to read here.
-     The real source is [Keeper_unified_turn_cascade_resolution] /
-     [Keeper_error_classify] — the [next_runtime] of a degraded_retry, computed
-     during turn rotation but never persisted back into meta. Producing a real
-     hint requires extending the meta schema to persist next_runtime per keeper
-     (a separate change). Returns [None]; the dashboard already treats null as
-     "no hint" (keeper-store-normalize.ts). The emit sites stay wired so the
-     hint activates automatically once a source exists.
-
-     Unlike [models_resolved] (removed in this PR as a dead duplicate of the
-     live [models] field), [next_model_hint] is retained as forward-wiring:
-     same emit -> normalize -> unconsumed shape, but [models_resolved] had a
-     live sibling to serve the same data, whereas [next_model_hint] has no
-     source yet and lights up once [next_runtime] is persisted. *)
-  let _ = m in
-  None
-
 let string_of_fiber_health = function
   | Fiber_alive -> "alive"
   | Fiber_zombie -> "zombie"
@@ -403,12 +384,10 @@ let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reaso
       | _ -> "Keeper is reachable. Send a direct message for an immediate response.")
 
 let keeper_continuity_state
-    ~(meta : keeper_meta)
     ~(keepalive_running : bool)
     ~(keepalive_started_at : float option)
     ~(health_state : keeper_health)
     ~(now_ts : float) : keeper_continuity =
-  let _ = meta in
   let healthy_like =
     match health_state with KH_healthy | KH_idle -> true | KH_offline | KH_stale | KH_degraded | KH_zombie | KH_dead -> false
   in
@@ -432,7 +411,6 @@ let keeper_lifecycle_summary = function
       "Keeper runtime is aligned with the durable keeper state."
 
 let augment_keeper_diagnostic_json
-    ~(meta : keeper_meta)
     ~(keepalive_running : bool)
     ~(keepalive_started_at : float option)
     ~(now_ts : float)
@@ -443,7 +421,7 @@ let augment_keeper_diagnostic_json
     |> keeper_health_or_offline ~source:"augment_keeper_diagnostic_json"
   in
   let continuity_state =
-    keeper_continuity_state ~meta ~keepalive_running
+    keeper_continuity_state ~keepalive_running
       ~keepalive_started_at ~health_state ~now_ts
   in
   let lifecycle_summary = keeper_lifecycle_summary continuity_state in

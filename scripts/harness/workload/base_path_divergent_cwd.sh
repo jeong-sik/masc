@@ -133,7 +133,6 @@ HEALTH_WARNING="$(jq -r '.paths.warning // ""' "$HEALTH_JSON")"
 STRICT_MODE_REQUESTED="$(jq -r '.paths.strict_mode_requested // false' "$HEALTH_JSON")"
 STARTUP_REJECTED="$(jq -r '.paths.startup_rejected // false' "$HEALTH_JSON")"
 STARTUP_ABORT_ELIGIBLE="$(jq -r '.paths.startup_abort_eligible // false' "$HEALTH_JSON")"
-STRICT_VIOLATION="$(jq -r '.paths.strict_violation // false' "$HEALTH_JSON")"
 CONFIG_ROOT="$(jq -r '.startup.config_resolution.config_root.path // ""' "$HEALTH_JSON")"
 EXPECTED_CWD="$(canonical_path "$CWD_PATH")"
 EXPECTED_BASE_PATH="$(canonical_path "$BASE_PATH")"
@@ -183,11 +182,6 @@ fi
 
 if [[ "$STARTUP_ABORT_ELIGIBLE" != "false" ]]; then
   echo "FAIL: expected startup_abort_eligible=false, got $STARTUP_ABORT_ELIGIBLE" >&2
-  exit 1
-fi
-
-if [[ "$STRICT_VIOLATION" != "false" ]]; then
-  echo "FAIL: expected strict_violation=false, got $STRICT_VIOLATION" >&2
   exit 1
 fi
 

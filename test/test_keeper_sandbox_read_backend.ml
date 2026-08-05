@@ -1066,28 +1066,6 @@ let test_docker_failure_class_is_typed_and_serializes_stable_string () =
     "runtime error class serializes to stable string"
     "docker_runtime_error"
     (docker_failure_class_to_string Docker_runtime_error);
-  Alcotest.(check string)
-    "command timeout class serializes to stable string"
-    "docker_command_timeout"
-    (docker_failure_class_to_string Docker_command_timeout);
-  Alcotest.(check bool)
-    "free-form daemon text does not create a semantic class"
-    true
-    (match
-       classify_docker_run_failure
-         ~status:(Unix.WEXITED 1)
-     with
-     | Docker_runtime_error -> true
-     | _ -> false);
-  Alcotest.(check bool)
-    "run classifier maps timeout output to Docker_command_timeout, not Docker_daemon_timeout"
-    true
-    (match
-       classify_docker_run_failure
-         ~status:(Unix.WEXITED 124)
-     with
-     | Docker_command_timeout -> true
-     | _ -> false);
   Alcotest.(check bool)
     "info classifier maps timeout output to Docker_daemon_timeout"
     true

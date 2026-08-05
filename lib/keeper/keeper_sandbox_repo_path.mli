@@ -19,40 +19,6 @@ val candidate_repo_roots_no_create :
     not a safe single path component. This performs no filesystem mutation and
     does not require the keeper registry. *)
 
-type path_context =
-  { path_repo_name : string
-  ; path_repo_root : string
-  ; path_root : string
-  ; accepted_toplevels : string list
-  }
-(** Path-only facts for any path inside a keeper sandbox repo. [path_root] is
-    the repo root for the path. *)
-
-val classify_path :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  path:string ->
-  path_context option
-(** Classify [path] as a keeper sandbox repo path. This performs no git probes
-    and no repo setup. *)
-
-type cwd_context =
-  { repo_name : string
-  ; repo_root : string
-  ; path_root : string
-  ; is_direct_root : bool
-  }
-(** Path-only facts for a cwd inside a keeper sandbox repo. [path_root] is the
-    repo root expected for the cwd. *)
-
-val classify_cwd :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  cwd_context option
-(** Classify [cwd] as a keeper sandbox repo cwd. This reports path facts only;
-    callers own command-shape and write-gate policy. *)
-
 val execution_location_json :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

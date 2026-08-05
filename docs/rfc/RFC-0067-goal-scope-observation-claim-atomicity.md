@@ -11,8 +11,6 @@ Keeper observation captures `meta.active_goal_ids` at T1, but `keeper_task_claim
 
 **Observed failure mode**: Keeper observes goal G1 → LLM decides to claim a task linked to G1 → Between observation and claim, G1 is marked completed by another agent → Claim still succeeds (goal still in `meta.active_goal_ids` in-memory) but the task is now irrelevant.
 
-**Current mitigation**: PR #13673 added `resolve_observation_claim_goal_scope` with `allow_empty_goal_scope_fallback` for auto-keeper goals. This is a fallback, not atomicity — it widens scope instead of detecting staleness.
-
 ## 2. Non-Goals
 
 - Distributed transaction across keeper turns (single-process in-memory state is sufficient)

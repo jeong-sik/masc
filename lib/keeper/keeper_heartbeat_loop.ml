@@ -467,7 +467,6 @@ let run_keepalive_unified_turn
       in
       let scheduling =
         decide_keepalive_scheduling
-          ~reactive_wake
           ~event_queue_triggers:event_intake.event_queue_triggers
           ~stop
           ~meta:meta_after_triage
@@ -1150,8 +1149,8 @@ let run_heartbeat_loop
                "running" -> "idle". *)
             turn_running := true;
             (* [Woken] => this cycle was triggered by an external broadcast, not
-               the keeper's own cadence; suppress global-backlog-driven turns to
-               avoid the all-keeper stampede. *)
+               the keeper's own cadence. The distinction is recorded as the
+               turn's wake reason. *)
             let reactive_wake =
               match !last_wake_source with
               | Keeper_keepalive_signal.Woken -> true

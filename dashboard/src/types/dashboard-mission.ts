@@ -51,7 +51,6 @@ export interface DashboardMissionAttentionQueueItem {
   evidence?: unknown
   evidence_preview: string[]
   grounded_verdict?: GroundedVerdict | null
-  last_seen_at?: string | null
 }
 
 export interface GroundedVerdictEvidenceRef {

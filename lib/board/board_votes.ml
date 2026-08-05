@@ -291,7 +291,6 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
                   vote_voter = voter;
                   vote_direction = direction;
                   vote_ts = now;
-                  ;
                 }
             | None ->
                 let updated = match direction with
@@ -308,7 +307,6 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
                   vote_voter = voter;
                   vote_direction = direction;
                   vote_ts = now;
-                  ;
                 }
       )
       |> Result.map (fun outcome ->

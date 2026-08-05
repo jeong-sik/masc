@@ -389,13 +389,11 @@ let run_keeper_cycle
      deeply nested match arms.
 
      State-aware runtime routing (TLA+ KeeperCoreTriad.SelectRuntime)
-     resumes inside [main_path]; at that point [phase_opt] is whatever
-     the registry returned for an executable phase. *)
-  let main_path (turn_state : Keeper_unified_turn_execution.turn_state) phase_opt
+     resumes inside [main_path]. *)
+  let main_path (turn_state : Keeper_unified_turn_execution.turn_state)
     : (turn_success, Agent_sdk.Error.sdk_error) result
       * Keeper_unified_turn_execution.turn_state
     =
-      let _ = phase_opt in
       let effective_runtime_id =
         match deferred_runtime_lane with
         | Some hint -> hint.Keeper_turn_driver.next_runtime_id
@@ -1160,8 +1158,8 @@ dominant source of the observed CAS race exhaustion after
     Ok (Turn_skipped meta)
   | Keeper_unified_turn_phase_gate.Phase_gate_terminal_error err ->
     Error (failure_of_error err)
-  | Keeper_unified_turn_phase_gate.Phase_gate_proceed phase_opt ->
-    let result, turn_state = main_path turn_state phase_opt in
+  | Keeper_unified_turn_phase_gate.Phase_gate_proceed ->
+    let result, turn_state = main_path turn_state in
     (match result with
      | Ok success -> Ok success
      | Error error ->

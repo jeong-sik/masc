@@ -11,7 +11,7 @@ open Keeper_types_profile
 open Keeper_context_runtime
 
 type phase_gate_outcome =
-  | Phase_gate_proceed of Keeper_state_machine.phase option
+  | Phase_gate_proceed
   | Phase_gate_cancelled of keeper_meta
   | Phase_gate_skipped of keeper_meta
   | Phase_gate_terminal_error of Agent_sdk.Error.sdk_error
@@ -162,4 +162,4 @@ let decide_and_record
         ~turn_id:keeper_turn_id
         ~prev:Keeper_turn_fsm.Phase_gating
         Keeper_turn_fsm.Runtime_routing;
-      Phase_gate_proceed phase_opt, turn_state)
+      Phase_gate_proceed, turn_state)

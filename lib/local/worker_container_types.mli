@@ -131,13 +131,9 @@ val merge_usage :
 
 (** {1 MCP / MASC transport URL} *)
 
-val mcp_endpoint_url : auth_token:string option -> string
+val mcp_endpoint_url : unit -> string
 (** Resolves the MCP HTTP endpoint URL the local worker
-    should call.  The [auth_token] is currently consulted
-    only to decide whether to route through the
-    authenticated path (the URL itself is the same; the
-    parameter is preserved so future routing changes can
-    branch on it without API churn). *)
+    should call. *)
 
 (** {1 MASC tool client} *)
 

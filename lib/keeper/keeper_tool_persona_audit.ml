@@ -54,7 +54,7 @@ let status ~(config : Workspace.config) (meta : keeper_meta) =
     Keeper_status_runtime.keeper_diagnostic_json
       ~meta ~agent_status ~keepalive_running ~history_items:[] ~now_ts
     |> Keeper_status_runtime.augment_keeper_diagnostic_json
-         ~meta ~keepalive_running
+         ~keepalive_running
          ~keepalive_started_at:
            (Keeper_status_bridge.runtime_keepalive_started_at config meta)
          ~now_ts

@@ -210,7 +210,7 @@ let messages_and_input_for_librarian (inp : Keeper_librarian.input) =
      to keep in step. *)
   let+ user =
     render_prompt
-      Keeper_prompt_names.librarian_current_selection
+      Prompt_names.librarian
       (Keeper_librarian.prompt_variables input)
   in
   input, [ message Agent_sdk.Types.User user ]

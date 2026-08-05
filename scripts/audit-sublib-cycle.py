@@ -124,7 +124,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_lifecycle_events",
     "masc.keeper_usage_trust",
     "masc.keeper_measurement",
-    "masc.keeper_prompt_names",
+    "masc.prompt_names",
     # [masc.keeper_event_bus] and [masc.masc_event_bus] were merged into this
     # single library. The name must be updated here, not just dropped: [check]
     # silently [continue]s past a leaf that is absent from the dune graph, so a

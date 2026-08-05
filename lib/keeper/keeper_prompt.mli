@@ -5,7 +5,7 @@
 val exact_direct_mention_present : targets:string list -> string -> bool
 
 val system_prompt_body : unit -> string
-(** The shared [keeper.system] block, read from the prompt registry. *)
+(** The shared [keeper] block, read from the prompt registry. *)
 
 val build_keeper_system_prompt :
   instructions:string ->

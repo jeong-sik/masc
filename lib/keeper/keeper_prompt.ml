@@ -23,11 +23,11 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
   Mention.any_mentioned ~targets content
 
 
-(* [keeper.system] declares no template variables, so it is read directly.
+(* [keeper] declares no template variables, so it is read directly.
    The former [render_world_prompt] carried a render-failure fallback for a
    template that never had a variable to render. *)
 let system_prompt_body () : string =
-  Prompt_registry.get_prompt Keeper_prompt_names.system
+  Prompt_registry.get_prompt Prompt_names.keeper
 
 let build_keeper_system_prompt
     ~instructions ?(keeper_name = "")

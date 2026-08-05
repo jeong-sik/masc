@@ -155,33 +155,6 @@ let test_every_schema_name_dispatches () =
       (VAT.schemas surface))
 ;;
 
-let test_git_log_limit_is_bounded () =
-  with_surface [] (fun surface _root ->
-    match
-      dispatch_result surface ~name:"verification_git_log"
-        ~args:(`Assoc [ "limit", `Int (VAT.max_git_log_commits + 1) ])
-    with
-    | Ok output -> Alcotest.failf "over-cap limit should not run; got %s" output
-    | Error detail ->
-      Alcotest.(check bool)
-        "states the cap"
-        true
-        (Astring.String.is_infix
-           ~affix:(string_of_int VAT.max_git_log_commits)
-           detail))
-;;
-
-(* A tree that is not a repository yields an error, not a clean status. A
-   fabricated "nothing changed" would be the strongest possible false evidence
-   for an approval. *)
-let test_git_status_outside_a_repository_is_an_error () =
-  with_surface [] (fun surface _root ->
-    match dispatch_result surface ~name:"verification_git_status" ~args:(`Assoc []) with
-    | Ok output ->
-      Alcotest.failf "non-repository should not report a status; got %s" output
-    | Error _ -> ())
-;;
-
 (* RFC-0361 D2. The prompt states what the evaluator can see, and the two
    surfaces are different claims. Rendering the toolless text for a
    tool-carrying review is the exact gap D1 exists to close. *)
@@ -247,10 +220,6 @@ let () =
             test_unknown_tool_name_is_an_error
         ; Alcotest.test_case "every schema name dispatches" `Quick
             test_every_schema_name_dispatches
-        ; Alcotest.test_case "git log limit is bounded" `Quick
-            test_git_log_limit_is_bounded
-        ; Alcotest.test_case "git status outside a repository is an error" `Quick
-            test_git_status_outside_a_repository_is_an_error
         ] )
     ; ( "prompt"
       , [ Alcotest.test_case "prompt states the available surface" `Quick

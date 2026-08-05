@@ -26,12 +26,15 @@
     therefore share one byte cap, one UTF-8 policy, and one failure vocabulary,
     and cannot report differently about the same file.
 
-    {1 Git}
+    {1 What is deliberately absent}
 
-    The git tools take no subcommand from the model. Each one runs a fixed
-    argv and accepts only a bounded count, so there is no allowlist to parse
-    and no string to match: a write subcommand is not rejected, it is
-    unexpressible. *)
+    There is no tool that reports whether the producer's work is committed.
+    That question needs the repository the producer commits in, and this root
+    is not it: [Playground_paths.bundle_root] is the bundle directory, and
+    checkouts live one level below it under [repos/]. Running git at the root
+    would answer "not a repository" for every producer while looking like a
+    working check. Which checkout is authoritative is [Repo_manager]'s
+    keeper-to-repository mapping to answer, not this module's to guess. *)
 
 type t
 
@@ -55,7 +58,3 @@ val dispatch : t -> name:string -> args:Yojson.Safe.t -> (string, string) result
 
 val max_directory_entries : int
 (** Entry cap for [verification_list_dir]. Exposed for tests. *)
-
-val max_git_log_commits : int
-(** Upper bound on the [limit] [verification_git_log] accepts. Exposed for
-    tests. *)

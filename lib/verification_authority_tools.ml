@@ -1,18 +1,8 @@
 (** See [verification_authority_tools.mli]. *)
 
-(* Bounds. Both are limits on how much one tool call may return, not policy
-   about what the judge may look at: the judge can page through a directory by
-   naming subdirectories, and can ask for a shorter log. *)
+(* How many entries one listing may return. A bound on the answer, not on what
+   the judge may look at: deeper paths are reached by naming a subdirectory. *)
 let max_directory_entries = 200
-let max_git_log_commits = 50
-
-(* How long a review may wait on git. This is the judge's budget, not an
-   estimate of how long the command takes: the review fiber is blocked for the
-   whole call, and a producer root on a slow mount or under index contention
-   would otherwise hold a verdict open with no bound. Exceeding it is reported
-   as a tool error the judge can act on, so a stalled lookup costs one tool
-   call rather than the review. *)
-let git_timeout_seconds = 5.0
 
 (* The tool names the evaluator may call. Parsed once at the dispatch boundary
    so the rest of this module matches on a constructor: a name that is not one
@@ -21,17 +11,13 @@ let git_timeout_seconds = 5.0
 type tool =
   | Read_file
   | List_dir
-  | Git_status
-  | Git_log
 
 let tool_name = function
   | Read_file -> "verification_read_file"
   | List_dir -> "verification_list_dir"
-  | Git_status -> "verification_git_status"
-  | Git_log -> "verification_git_log"
 ;;
 
-let all_tools = [ Read_file; List_dir; Git_status; Git_log ]
+let all_tools = [ Read_file; List_dir ]
 
 let tool_of_name name =
   List.find_opt (fun tool -> String.equal (tool_name tool) name) all_tools
@@ -120,38 +106,6 @@ let schema_of_tool tool : Types_core.tool_schema =
           ; "required", `List [ `String "path" ]
           ]
     }
-  | Git_status ->
-    { name = tool_name Git_status
-    ; description =
-        "Report whether the producer's tree has uncommitted changes, as git \
-         porcelain-v1 lines. An approved change that appears only here and not in \
-         the log exists solely in a working tree."
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
-    }
-  | Git_log ->
-    { name = tool_name Git_log
-    ; description =
-        Printf.sprintf
-          "List the producer's most recent commits as \"HASH subject\" lines. \
-           limit is capped at %d."
-          max_git_log_commits
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "limit"
-                  , `Assoc
-                      [ "type", `String "integer"
-                      ; ( "description"
-                        , `String
-                            (Printf.sprintf "How many commits to list (1 to %d)."
-                               max_git_log_commits) )
-                      ] )
-                ] )
-          ; "required", `List [ `String "limit" ]
-          ]
-    }
 ;;
 
 let schemas _t = List.map schema_of_tool all_tools
@@ -217,31 +171,6 @@ let list_dir t ~relative =
     Ok (String.concat "\n" (header :: lines)))
 ;;
 
-(* Read-only git, expressed as fixed argv. The evaluator supplies no
-   subcommand, so a mutating one is not rejected — there is no argument that
-   could carry it. [--no-optional-locks] keeps a concurrent keeper's index from
-   being touched by a review. *)
-let run_read_only_git t arguments =
-  match
-    Repo_git.run_git ~cwd:t.ownership_root ~timeout_sec:git_timeout_seconds
-      ("--no-optional-locks" :: arguments)
-  with
-  | Error detail -> Error detail
-  | Ok [] -> Ok "(no output)"
-  | Ok lines -> Ok (String.concat "\n" lines)
-;;
-
-let git_status t = run_read_only_git t [ "status"; "--porcelain=v1" ]
-
-let git_log t ~limit =
-  if limit < 1 || limit > max_git_log_commits
-  then
-    Error
-      (Printf.sprintf "limit must be between 1 and %d, got %d" max_git_log_commits limit)
-  else
-    run_read_only_git t [ "log"; "--oneline"; "--no-decorate"; "-n"; string_of_int limit ]
-;;
-
 (* ================================================================ *)
 (* Dispatch                                                         *)
 (* ================================================================ *)
@@ -260,9 +189,4 @@ let dispatch t ~name ~args =
     (match Json_util.require_string args "path" with
      | Error detail -> Error detail
      | Ok relative -> list_dir t ~relative)
-  | Some Git_status -> git_status t
-  | Some Git_log ->
-    (match Json_util.require_int args "limit" with
-     | Error detail -> Error detail
-     | Ok limit -> git_log t ~limit)
 ;;

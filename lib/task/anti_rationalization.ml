@@ -157,8 +157,8 @@ let lookup_section = function
        They are confined to that producer's root and cannot change anything.\n\n\
        The snapshot is what was true when the work was submitted. A lookup is what \
        is true now. Both are evidence, and disagreement between them is also \
-       evidence: work the snapshot shows but `verification_git_status` reports as \
-       uncommitted lives only in a working tree.\n\n\
+       evidence: a file the snapshot shows and the tree no longer contains was \
+       not durable.\n\n\
        A note claiming a path, a commit, or a command result is still not proof by \
        itself. The difference is that you can now check the claims that name \
        something in the producer's tree, so approving without checking an \

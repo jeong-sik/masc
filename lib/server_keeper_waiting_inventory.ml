@@ -950,10 +950,12 @@ let pending_approval_read_error error =
   }
 ;;
 
-let dashboard_json_with_pending_reader ~read_pending config =
+let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config =
   let now = Time_compat.now () in
   let keeper_names, keeper_name_read_error_rows =
-    keeper_names_or_error_rows config
+    match keeper_name with
+    | Some name -> [ name ], []
+    | None -> keeper_names_or_error_rows config
   in
   let pending_approvals, pending_approval_state, pending_approval_read_error_rows =
     match read_pending ~base_path:config.Workspace.base_path with
@@ -1016,7 +1018,9 @@ let dashboard_json_with_pending_reader ~read_pending config =
             | Busy | Waiting | Deferred -> count + 1)
          0
   in
-  record_metrics ~now ~per_keeper ~global_rows;
+  (match keeper_name with
+   | None -> record_metrics ~now ~per_keeper ~global_rows
+   | Some _ -> ());
   `Assoc
     [ "schema", `String "masc.dashboard.keeper_waiting_inventory.v3"
     ; "source", `String "server_keeper_waiting_inventory"
@@ -1041,8 +1045,19 @@ let dashboard_json_with_pending_reader ~read_pending config =
     ]
 ;;
 
+let dashboard_json_with_pending_reader ~read_pending config =
+  dashboard_json_with_pending_reader_scoped ~read_pending config
+;;
+
 let dashboard_json config =
   dashboard_json_with_pending_reader
+    ~read_pending:Keeper_approval_queue.list_pending_entries_for_workspace
+    config
+;;
+
+let dashboard_json_for_keeper config ~keeper_name =
+  dashboard_json_with_pending_reader_scoped
+    ~keeper_name
     ~read_pending:Keeper_approval_queue.list_pending_entries_for_workspace
     config
 ;;

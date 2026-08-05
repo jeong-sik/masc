@@ -229,10 +229,10 @@ ID, source, timestamp, and lifecycle detail. Snapshot load failures appear as
 explicit `read_error` rows.
 
 Every committed mutation invokes one post-commit transition observer outside
-queue locks. The server emits `keeper_chat_queue_changed` with Keeper name and
-revision. This event is an invalidation signal: the Dashboard debounces it and
-rereads the authoritative waiting inventory instead of reconstructing state
-from deltas.
+queue locks. The server emits `keeper_waiting_inventory_changed` with Keeper
+name and queue kind. This event is an invalidation signal: the Dashboard debounces
+it and rereads the authoritative waiting inventory instead of reconstructing
+state from deltas.
 
 The chat composer renders server pending/inflight/read-error counts independently
 from browser-local drafts and from the Keeper's active turn state. The waiting

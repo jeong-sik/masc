@@ -284,15 +284,6 @@ module KeeperCompactionSnapshots = struct
          "MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_LIMIT_MULTIPLIER")
   ;;
 
-  (** Tail line count read from each selected manifest file. Default: 200.
-      @category Runtime @ops_class operator *)
-  let manifest_tail_max_lines =
-    max
-      1
-      (get_int_nonneg
-         ~default:200
-         "MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_TAIL_MAX_LINES")
-  ;;
 end
 
 (** {1 Keeper Vision Tool Configuration} *)

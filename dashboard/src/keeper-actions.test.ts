@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { callMcpTool } = vi.hoisted(() => ({ callMcpTool: vi.fn() }))
 const { runOperatorAction } = vi.hoisted(() => ({ runOperatorAction: vi.fn() }))
-const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
+const { invalidateDashboardCache, refreshDashboard, shellAuthSummary } = vi.hoisted(() => ({
   invalidateDashboardCache: vi.fn(),
   refreshDashboard: vi.fn(async () => undefined),
+  shellAuthSummary: { value: { effective_role: 'admin', default_role: 'admin' } },
 }))
 const {
   cancelKeeperChatPendingReceipt,
@@ -68,7 +69,7 @@ vi.mock('./api/keeper', () => ({
   streamKeeperMessage,
 }))
 vi.mock('./api/dashboard', () => ({ fetchKeeperToolCalls }))
-vi.mock('./store', () => ({ invalidateDashboardCache, refreshDashboard }))
+vi.mock('./store', () => ({ invalidateDashboardCache, refreshDashboard, shellAuthSummary }))
 
 import {
   _resetLiveSendRequestOwnersForTests,
@@ -128,6 +129,7 @@ import type { ToolCallEntry } from './api/dashboard'
 import type { ChatBlock, KeeperConversationAttachment, KeeperStatusDetail } from './types'
 
 beforeEach(() => {
+  shellAuthSummary.value = { effective_role: 'admin', default_role: 'admin' }
   fetchKeeperChatPending.mockReset()
   fetchKeeperChatPending.mockImplementation(async (keeperName: string) => ({
     keeperName,
@@ -255,6 +257,14 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatReceipt.mockReset()
     cancelKeeperChatPendingReceipt.mockReset()
     resolveKeeperChatRecovery.mockReset()
+  })
+
+  it('does not call the Admin-only receipt endpoint for a Worker session', async () => {
+    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' }
+
+    await reconcileKeeperChatReceipts('echo')
+
+    expect(fetchKeeperChatPending).not.toHaveBeenCalled()
   })
 
   it('restores pending payload and controls source from the durable queue after reload', async () => {

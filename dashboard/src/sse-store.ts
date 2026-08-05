@@ -111,10 +111,14 @@ export function registerKeeperTurnRefresh(fn: (keeperName: string) => void): voi
 // deliberately an invalidation signal, so the tools resource registers its
 // authoritative re-read here instead of this transport layer importing a UI
 // store or reconstructing Pending/Inflight state from event deltas.
-let _refreshKeeperChatQueueFn: (() => void) | null = null
-const pendingKeeperChatQueueRefreshNames = new Set<string>()
-export function registerKeeperChatQueueRefresh(fn: () => void): void {
-  _refreshKeeperChatQueueFn = fn
+const _refreshKeeperWaitingInventoryFns = new Set<(keeperName: string) => void>()
+const pendingKeeperWaitingInventoryRefreshNames = new Set<string>()
+const pendingKeeperChatReceiptRefreshNames = new Set<string>()
+export function registerKeeperWaitingInventoryRefresh(
+  fn: (keeperName: string) => void,
+): () => void {
+  _refreshKeeperWaitingInventoryFns.add(fn)
+  return () => _refreshKeeperWaitingInventoryFns.delete(fn)
 }
 
 const _refreshActivityFns = new Set<() => void>()
@@ -789,15 +793,25 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
-  if (event.type === 'keeper_chat_queue_changed') {
+  if (event.type === 'keeper_waiting_inventory_changed') {
     const keeperName = event.keeper_name?.trim() ?? ''
-    if (keeperName) pendingKeeperChatQueueRefreshNames.add(keeperName)
+    if (keeperName) {
+      pendingKeeperWaitingInventoryRefreshNames.add(keeperName)
+      if (event.queue_kind === 'chat_queue') {
+        pendingKeeperChatReceiptRefreshNames.add(keeperName)
+      }
+    }
     scheduleRefresh(
-      'keeper_chat_queue',
+      'keeper_waiting_inventory',
       () => {
-        const keeperNames = Array.from(pendingKeeperChatQueueRefreshNames)
-        pendingKeeperChatQueueRefreshNames.clear()
-        _refreshKeeperChatQueueFn?.()
+        const inventoryKeeperNames = Array.from(pendingKeeperWaitingInventoryRefreshNames)
+        pendingKeeperWaitingInventoryRefreshNames.clear()
+        for (const name of inventoryKeeperNames) {
+          for (const refresh of _refreshKeeperWaitingInventoryFns) refresh(name)
+        }
+        const keeperNames = Array.from(pendingKeeperChatReceiptRefreshNames)
+        pendingKeeperChatReceiptRefreshNames.clear()
+        if (keeperNames.length === 0) return
         void import('./keeper-runtime')
           .then(mod => Promise.all(
             keeperNames.map(name => mod.reconcileKeeperChatReceipts(name)),

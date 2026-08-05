@@ -73,6 +73,43 @@ let test_broadcast_notifies_external () =
             with Not_found -> false);
     Masc.Sse.unsubscribe_external "test-broadcast")
 
+let test_waiting_inventory_changed_wire_contract () =
+  setup ();
+  Eio_main.run (fun _env ->
+    Masc.Sse.subscribe_external
+      ~id:"test-waiting-inventory-changed"
+      ~callback:(fun ev -> received_events := ev :: !received_events)
+      ();
+    Masc.Keeper_waiting_inventory_broadcast.changed
+      ~keeper_name:"kidsnote"
+      ~source:Event_queue;
+    Alcotest.(check int) "received invalidation" 1 (List.length !received_events);
+    let frame = List.hd !received_events in
+    let payload =
+      match Masc.Sse.data_payload_of_frame frame with
+      | Ok payload -> Yojson.Safe.from_string payload
+      | Error Masc.Sse.Missing_data_payload ->
+        Alcotest.fail "waiting inventory invalidation has no SSE data payload"
+    in
+    let open Yojson.Safe.Util in
+    Alcotest.(check string)
+      "event type"
+      "keeper_waiting_inventory_changed"
+      (payload |> member "type" |> to_string);
+    Alcotest.(check string)
+      "keeper name"
+      "kidsnote"
+      (payload |> member "keeper_name" |> to_string);
+    Alcotest.(check string)
+      "queue kind"
+      "event_queue"
+      (payload |> member "queue_kind" |> to_string);
+    Alcotest.(check bool)
+      "revision ID is absent"
+      true
+      (payload |> member "revision" = `Null);
+    Masc.Sse.unsubscribe_external "test-waiting-inventory-changed")
+
 let test_broadcast_skips_after_unsubscribe () =
   setup ();
   Eio_main.run (fun _env ->
@@ -282,6 +319,8 @@ let () =
     ("broadcast", [
       Alcotest.test_case "broadcast notifies external" `Quick
         test_broadcast_notifies_external;
+      Alcotest.test_case "waiting inventory invalidation wire contract" `Quick
+        test_waiting_inventory_changed_wire_contract;
       Alcotest.test_case "skips after unsubscribe" `Quick
         test_broadcast_skips_after_unsubscribe;
       Alcotest.test_case "error does not crash broadcast" `Quick

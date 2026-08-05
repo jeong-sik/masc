@@ -36,7 +36,7 @@ let task_status_color status_label =
 let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
   let status = task_status_label task in
   `Assoc
-    [
+    ([
       ("id", `String task.id);
       ("title", `String task.title);
       ("status", `String status);
@@ -48,6 +48,22 @@ let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
       ("created_at", `String task.created_at);
       ("updated_at", `String (task_updated_at task));
     ]
+    (* A cancellation that has aged out of the execution payload reaches the
+       surface through this tree alone. Without these the card degrades to a
+       bare "cancelled" while the status it was built from holds both the actor
+       and the reason. [reason] is emitted only when the canceller gave one:
+       an absent field and an empty one are different facts. *)
+    @ (match task.task_status with
+       | Masc_domain.Cancelled { cancelled_by; reason; _ } ->
+         [ ("cancelled_by", `String cancelled_by) ]
+         @ (match reason with
+            | None -> []
+            | Some reason -> [ ("reason", `String reason) ])
+       | Masc_domain.Todo
+       | Masc_domain.Claimed _
+       | Masc_domain.InProgress _
+       | Masc_domain.AwaitingVerification _
+       | Masc_domain.Done _ -> []))
 
 let count_assoc_json preferred_keys table =
   let keys =

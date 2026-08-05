@@ -1241,6 +1241,42 @@ describe('Work', () => {
         expect(selectedTask.value?.completed_at).toBe('2026-01-02')
       })
 
+      it('shows the canceller and reason on a tree-only cancellation', () => {
+        // Aged-out cancellations reach Work through the tree alone. Without
+        // these fields the card degrades to a bare 취소 with no actor and no
+        // explanation, while the status it was built from holds both.
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [
+                goalTreeTask({
+                  id: 'T-aged',
+                  title: 'Aged out cancellation',
+                  goal_id: null,
+                  status: 'cancelled',
+                  cancelled_by: 'keeper-rondo-agent',
+                  reason: 'superseded by G-2',
+                }),
+              ],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, total_tasks: 1, done_tasks: 0 }),
+        }
+
+        render(html`<${Work} />`)
+
+        const item = screen
+          .getByTestId('work-aside')
+          .querySelector('[data-testid="wka-blocker-item"]')
+        expect(item?.textContent).toContain('취소')
+        expect(item?.textContent).toContain('keeper-rondo-agent')
+        expect(item?.textContent).toContain('superseded by G-2')
+      })
+
       it('links a tree task to its containing node when the projection carries no goal_id', () => {
         // The backend tree projection has no per-task goal_id. A task that
         // reaches the surface only through the tree — anything older than the

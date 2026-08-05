@@ -5,11 +5,7 @@
     written to a replayable JSONL store under
     [.masc/keepers/<keeper>/reaction-ledger/v5/YYYY-MM/DD.jsonl].  The
     generation namespace is a hard boundary: older stores are neither read nor
-    written by this module.
-
-    Legacy [record_kind = "cursor_ack"] rows (written by a since-removed
-    durable board-cursor-ack path) may still exist in historical stores; they
-    are quarantined as [Unknown_record_kind] on read rather than decoded. *)
+    written by this module. *)
 
 type stimulus_kind =
   | Board_signal
@@ -138,7 +134,7 @@ val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t
 (** Summarize the recent ledger rows for a keeper.  The summary is intentionally
     derived from the durable JSONL rows so an operator can see a stimulus that
-    has not yet produced a turn/reaction/cursor acknowledgement. *)
+    has not yet produced a turn or terminal reaction. *)
 
 val fleet_summary_json :
   base_path:string ->

@@ -3,18 +3,23 @@ open Alcotest
 module KSD = Masc.Keeper_sandbox_docker
 module KT = Keeper_types
 
+(* [sandbox_profile] and [network_mode] still live on the keeper_meta record —
+   Keeper_sandbox_docker.effective_sandbox_profile reads them — but they left
+   the JSON wire schema, so keeper_meta_json_parse now rejects them as fields
+   outside the current schema. They arrive from keeper.toml instead. The fixture
+   therefore parses the wire fields and sets the two record fields directly,
+   which is what this suite is about. *)
 let make_meta ~name ~sandbox_profile ~network_mode =
   let json =
     `Assoc
       [ "name", `String name
-      ; "agent_name", `String ("agent-" ^ name)
+      ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
       ; "trace_id", `String ("trace-" ^ name)
-      ; "sandbox_profile", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
-      ; "network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string network_mode)
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
+  | Ok meta ->
+    { meta with Masc.Keeper_meta_contract.sandbox_profile; network_mode }
   | Error err -> fail ("make_meta: " ^ err)
 
 let check_effective label expected meta =

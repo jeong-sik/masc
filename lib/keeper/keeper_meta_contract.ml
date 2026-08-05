@@ -116,6 +116,23 @@ type blocker_class =
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_input_required
+  | Internal_unhandled_exception
+    (** RFC-0159 follow-up (task-194): unhandled internal exception escaped the
+        turn driver.  Previously [blocker_class_of_sdk_error] returned [None]
+        for this variant, so dashboards/operators could not distinguish an
+        unhandled internal failure from a clean turn. *)
+  | Internal_bridge_exception
+    (** Internal bridge (OAS/stream) exception escaped the turn driver. *)
+  | Internal_contract_rejected
+    (** Internal contract was rejected by the turn driver. *)
+  | Incomplete_tool_transcript
+    (** Tool transcript was quarantined as incomplete. *)
+  | Terminal_effect_failed
+    (** A terminal tool effect failed after the turn's terminal outcome. *)
+  | Receipt_persistence_failed
+    (** Execution receipt persistence failed. *)
+  | Gate_replay_repair_required
+    (** Gate replay repair was required for an approval/effect. *)
 
 let blocker_class_to_string = function
   | Runtime_exhausted _ -> "runtime_exhausted"
@@ -127,6 +144,13 @@ let blocker_class_to_string = function
   | Sdk_guardrail_violation -> "sdk_guardrail_violation"
   | Sdk_tripwire_violation -> "sdk_tripwire_violation"
   | Sdk_input_required -> "sdk_input_required"
+  | Internal_unhandled_exception -> "internal_unhandled_exception"
+  | Internal_bridge_exception -> "internal_bridge_exception"
+  | Internal_contract_rejected -> "internal_contract_rejected"
+  | Incomplete_tool_transcript -> "incomplete_tool_transcript"
+  | Terminal_effect_failed -> "terminal_effect_failed"
+  | Receipt_persistence_failed -> "receipt_persistence_failed"
+  | Gate_replay_repair_required -> "gate_replay_repair_required"
 ;;
 
 let blocker_class_of_serialized_string = function
@@ -139,6 +163,13 @@ let blocker_class_of_serialized_string = function
   | "sdk_guardrail_violation" -> Some Sdk_guardrail_violation
   | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
   | "sdk_input_required" -> Some Sdk_input_required
+  | "internal_unhandled_exception" -> Some Internal_unhandled_exception
+  | "internal_bridge_exception" -> Some Internal_bridge_exception
+  | "internal_contract_rejected" -> Some Internal_contract_rejected
+  | "incomplete_tool_transcript" -> Some Incomplete_tool_transcript
+  | "terminal_effect_failed" -> Some Terminal_effect_failed
+  | "receipt_persistence_failed" -> Some Receipt_persistence_failed
+  | "gate_replay_repair_required" -> Some Gate_replay_repair_required
   | _ -> None
 ;;
 

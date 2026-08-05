@@ -33,6 +33,13 @@ let all_variants : blocker_class list =
   ; Sdk_guardrail_violation
   ; Sdk_tripwire_violation
   ; Sdk_input_required
+  ; Internal_unhandled_exception
+  ; Internal_bridge_exception
+  ; Internal_contract_rejected
+  ; Incomplete_tool_transcript
+  ; Terminal_effect_failed
+  ; Receipt_persistence_failed
+  ; Gate_replay_repair_required
   ]
 ;;
 

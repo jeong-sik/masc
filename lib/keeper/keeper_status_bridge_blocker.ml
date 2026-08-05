@@ -37,17 +37,23 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
     Some (Runtime_exhausted (blocker_reason_of_turn_driver_reason reason))
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
-  (* RFC-0159 Phase A: typed [Internal_*] variants carry an opaque exception
-     repr.  They are not yet mapped to a dedicated [blocker_class]; returning
-     [None] keeps Phase A scope to typed substrate only.  A follow-up RFC may
-  introduce a typed blocker_class for unhandled internal failures. *)
-  | Some (Keeper_turn_driver.Internal_unhandled_exception _) -> None
-  | Some (Keeper_turn_driver.Internal_bridge_exception _) -> None
-  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> None
-  | Some (Keeper_turn_driver.Incomplete_tool_transcript _) -> None
-  | Some (Keeper_turn_driver.Terminal_effect_failed _) -> None
-  | Some (Keeper_turn_driver.Receipt_persistence_failed _) -> None
-  | Some (Keeper_turn_driver.Gate_replay_repair_required _) -> None
+  (* RFC-0159 follow-up (task-194): typed [Internal_*] variants now map to
+     dedicated [blocker_class] values so dashboards/operators can distinguish
+     unhandled internal failures instead of collapsing them to [None]. *)
+  | Some (Keeper_turn_driver.Internal_unhandled_exception _) ->
+    Some Internal_unhandled_exception
+  | Some (Keeper_turn_driver.Internal_bridge_exception _) ->
+    Some Internal_bridge_exception
+  | Some (Keeper_turn_driver.Internal_contract_rejected _) ->
+    Some Internal_contract_rejected
+  | Some (Keeper_turn_driver.Incomplete_tool_transcript _) ->
+    Some Incomplete_tool_transcript
+  | Some (Keeper_turn_driver.Terminal_effect_failed _) ->
+    Some Terminal_effect_failed
+  | Some (Keeper_turn_driver.Receipt_persistence_failed _) ->
+    Some Receipt_persistence_failed
+  | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
+    Some Gate_replay_repair_required
   | None ->
     (match err with
      | Agent_sdk.Error.Internal _ -> None
@@ -144,7 +150,14 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Sdk_unrecognized_stop_reason
     | Sdk_guardrail_violation
     | Sdk_tripwire_violation
-    | Sdk_input_required -> if summary = "" then str else summary
+    | Sdk_input_required
+    | Internal_unhandled_exception
+    | Internal_bridge_exception
+    | Internal_contract_rejected
+    | Incomplete_tool_transcript
+    | Terminal_effect_failed
+    | Receipt_persistence_failed
+    | Gate_replay_repair_required -> if summary = "" then str else summary
   in
   { blocker_class = str; summary }
 ;;

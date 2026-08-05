@@ -194,12 +194,21 @@ type confidence_read =
   | Confidence of float
   | Confidence_absent
   | Confidence_not_a_number
+  | Confidence_out_of_range
+
+let confidence_in_range value =
+  Float.is_finite value
+  && Stdlib.Float.compare value 0.0 >= 0
+  && Stdlib.Float.compare value 1.0 <= 0
 
 let read_confidence args =
   match Json_util.assoc_member_opt "confidence" args with
   | None | Some `Null -> Confidence_absent
-  | Some (`Float value) -> Confidence value
-  | Some (`Int value) -> Confidence (Float.of_int value)
+  | Some (`Float value) ->
+    if confidence_in_range value then Confidence value else Confidence_out_of_range
+  | Some (`Int value) ->
+    let value = Float.of_int value in
+    if confidence_in_range value then Confidence value else Confidence_out_of_range
   | Some _ -> Confidence_not_a_number
 
 (* Free-form library content remains opaque text. *)
@@ -312,7 +321,7 @@ let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
     | Some _ -> begin
       match read_confidence args with
       | Confidence_absent -> missing_required ~tool_name ~start_time "confidence"
-      | Confidence_not_a_number ->
+      | Confidence_not_a_number | Confidence_out_of_range ->
         workflow_err ~tool_name ~start_time
           "confidence must be a number between 0.0 and 1.0"
       | Confidence confidence -> begin
@@ -375,7 +384,7 @@ let handle_promote ~tool_name ~start_time ctx args : Tool_result.result =
   else
     match read_confidence args with
     | Confidence_absent -> missing_required ~tool_name ~start_time "confidence"
-    | Confidence_not_a_number ->
+    | Confidence_not_a_number | Confidence_out_of_range ->
       workflow_err ~tool_name ~start_time
         "confidence must be a number between 0.0 and 1.0"
     | Confidence new_confidence

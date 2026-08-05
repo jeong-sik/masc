@@ -340,6 +340,22 @@ let test_add_accepts_integer_confidence () =
     Alcotest.(check bool) "integer confidence is accepted" true ok
   )
 
+let test_add_rejects_out_of_range_confidence () =
+  with_temp_base_path (fun ctx ->
+    List.iter
+      (fun (label, value) ->
+        let args = `Assoc [
+          ("title", `String ("out of range " ^ label));
+          ("content", `String "Confidence is outside its declared domain.");
+          ("confidence", value);
+        ] in
+        let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+        Alcotest.(check bool) (label ^ " is rejected") false ok;
+        Alcotest.(check bool) (label ^ " error states the range") true
+          (msg_contains ~needle:"between 0.0 and 1.0" msg))
+      [ ("negative", `Float (-0.1)); ("above one", `Float 1.1) ]
+  )
+
 let test_promote_rejects_unusable_confidence () =
   with_temp_base_path (fun ctx ->
     List.iter
@@ -352,6 +368,8 @@ let test_promote_rejects_unusable_confidence () =
       [ ("absent confidence", [])
       ; ("null confidence", [ ("confidence", `Null) ])
       ; ("string confidence", [ ("confidence", `String "0.9") ])
+      ; ("negative confidence", [ ("confidence", `Float (-0.1)) ])
+      ; ("confidence above one", [ ("confidence", `Float 1.1) ])
       ]
   )
 
@@ -533,6 +551,8 @@ let () =
         test_add_rejects_non_numeric_confidence;
       Alcotest.test_case "integer confidence accepted" `Quick
         test_add_accepts_integer_confidence;
+      Alcotest.test_case "out-of-range confidence rejected" `Quick
+        test_add_rejects_out_of_range_confidence;
       Alcotest.test_case "promote rejects unusable confidence" `Quick
         test_promote_rejects_unusable_confidence;
       Alcotest.test_case "with tags" `Quick test_add_with_tags;

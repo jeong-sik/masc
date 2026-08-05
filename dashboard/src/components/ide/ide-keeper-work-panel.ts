@@ -288,14 +288,8 @@ function taskExecutionRouteContext(task: Task): {
   readonly telemetryQuery: string | null
   readonly hasTelemetry: boolean
 } {
-  const sessionId = firstNonEmptyString(
-    task.execution_links?.session_id,
-    task.contract?.links?.session_id,
-  )
-  const operationId = firstNonEmptyString(
-    task.execution_links?.operation_id,
-    task.contract?.links?.operation_id,
-  )
+  const sessionId = firstNonEmptyString(task.execution_links?.session_id)
+  const operationId = firstNonEmptyString(task.execution_links?.operation_id)
   return {
     sessionId,
     operationId,

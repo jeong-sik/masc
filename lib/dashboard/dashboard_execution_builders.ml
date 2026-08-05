@@ -443,7 +443,7 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
                      ("task_status", `String (Masc_domain.task_status_to_string task.task_status));
                      ("objective", `String task.title);
                      ("updated_at", `String updated_at);
-                     ("source", `String "task_contract");
+                     ("source", `String "task_execution_links");
                      ("task_id", `String task.id);
                      ("severity", `String (Dashboard_utils.string_of_tone severity));
                      ( "handoff",

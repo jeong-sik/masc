@@ -2864,8 +2864,81 @@ let test_execution_links_codec_omits_empty () =
   | Error e -> Alcotest.fail ("decode with key failed: " ^ e)
 ;;
 
+let set_json_member key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | other -> other
+;;
+
+let test_task_codec_rejects_unknown_contract_fields () =
+  let task =
+    gc_make_task ~id:"task-l2" ~created_at:gc_ancient_ts ~status:Masc_domain.Todo
+  in
+  let legacy_contract =
+    `Assoc
+      [ ( "links"
+        , `Assoc
+            [ "operation_id", `String "op-old"
+            ; "session_id", `String "session-old"
+            ] )
+      ]
+  in
+  let json =
+    Masc_domain.task_to_yojson task
+    |> set_json_member "contract" legacy_contract
+  in
+  (match Masc_domain.task_of_yojson json with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "unknown task.contract field was silently dropped");
+  let backlog_json =
+    `Assoc
+      [ "tasks", `List [ json ]
+      ; "last_updated", `String "2026-08-05T00:00:00Z"
+      ; "version", `Int 1
+      ]
+  in
+  match Masc_domain.backlog_of_yojson backlog_json with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "corrupt task.contract was accepted by backlog decoder"
+;;
+
+let test_task_codec_rejects_malformed_execution_links () =
+  let task =
+    gc_make_task ~id:"task-l3" ~created_at:gc_ancient_ts ~status:Masc_domain.Todo
+  in
+  let base = Masc_domain.task_to_yojson task in
+  (match
+     base
+     |> set_json_member "execution_links" (`Assoc [])
+     |> Masc_domain.task_of_yojson
+   with
+   | Ok decoded ->
+     Alcotest.(check bool)
+       "empty execution links stay unlinked"
+       true
+       (decoded.execution_links = Masc_domain.no_execution_links)
+   | Error error ->
+     Alcotest.failf "empty execution_links must remain valid: %s" error);
+  List.iter
+    (fun malformed ->
+       match
+         base
+         |> set_json_member "execution_links" malformed
+         |> Masc_domain.task_of_yojson
+       with
+       | Error _ -> ()
+       | Ok _ ->
+         Alcotest.failf
+           "malformed execution_links was silently defaulted: %s"
+           (Yojson.Safe.to_string malformed))
+    [ `Null
+    ; `String "op-1"
+    ; `Assoc [ "operation_id", `Int 7 ]
+    ; `Assoc [ "unknown", `String "value" ]
+    ]
+;;
+
 let test_predecessor_codec_absent_and_malformed () =
-  (* Encoder omits the key when None (old readers never see it). *)
+  (* Encoder omits the key when no predecessor exists. *)
   let without =
     gc_make_task ~id:"task-c1" ~created_at:gc_ancient_ts ~status:Masc_domain.Todo
   in
@@ -2875,7 +2948,7 @@ let test_predecessor_codec_absent_and_malformed () =
     "key omitted when None"
     false
     (List.mem "predecessor_task_id" keys);
-  (* Absent key decodes to None (pre-W2 backlogs parse unchanged). *)
+  (* Absent key decodes to None. *)
   (match Masc_domain.task_of_yojson json with
    | Ok t ->
      Alcotest.(check (option string)) "absent -> None" None t.predecessor_task_id
@@ -2889,8 +2962,7 @@ let test_predecessor_codec_absent_and_malformed () =
        (Some "task-000")
        t.predecessor_task_id
    | Error e -> Alcotest.fail ("round-trip decode failed: " ^ e));
-  (* Malformed value degrades to None instead of erroring — a decode Error
-     would make backlog_of_yojson silently drop the whole task. *)
+  (* A non-string value does not define a predecessor edge. *)
   let malformed =
     match json with
     | `Assoc kvs -> `Assoc (kvs @ [ "predecessor_task_id", `Int 7 ])
@@ -3213,6 +3285,14 @@ let () =
             "execution_links codec omits the empty value"
             `Quick
             test_execution_links_codec_omits_empty
+        ; Alcotest.test_case
+            "unknown contract fields are rejected"
+            `Quick
+            test_task_codec_rejects_unknown_contract_fields
+        ; Alcotest.test_case
+            "malformed execution links are rejected"
+            `Quick
+            test_task_codec_rejects_malformed_execution_links
         ] )
     ]
 ;;

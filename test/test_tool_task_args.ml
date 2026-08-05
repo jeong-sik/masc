@@ -41,13 +41,21 @@ let test_object_contract () =
       fail
         (Printf.sprintf "object contract must be Ok (Some _), got Error %s" e)
 
-(* A present-but-non-object contract is the ONLY Error case. The catch-all must
-   not swallow this into a silent default; the canonical parser additionally
-   names the received JSON kind in its message. *)
+(* A present-but-non-object contract is an Error. The catch-all must not swallow
+   this into a silent default; the canonical parser additionally names the
+   received JSON kind in its message. *)
 let test_wrong_type_contract () =
   match T.parse_task_contract (`Assoc [ ("contract", `String "nope") ]) with
   | Error _ -> ()
   | Ok _ -> fail "non-object contract must be Error, not Ok"
+
+let test_unknown_contract_field_is_rejected () =
+  match
+    T.parse_task_contract
+      (`Assoc [ "contract", `Assoc [ "links", `Assoc [] ] ])
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "unknown contract field must be Error, not silently dropped"
 
 let () =
   run "Task.Args"
@@ -56,5 +64,7 @@ let () =
         ; test_case "explicit null -> Ok None" `Quick test_explicit_null_contract
         ; test_case "object -> Ok (Some _)" `Quick test_object_contract
         ; test_case "wrong type -> Error" `Quick test_wrong_type_contract
+        ; test_case "unknown field -> Error" `Quick
+            test_unknown_contract_field_is_rejected
         ] )
     ]

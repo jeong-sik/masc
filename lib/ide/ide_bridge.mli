@@ -34,6 +34,10 @@ val cursor_focus_mode_of_string : string -> string option
 (** Return the canonical cursor focus mode when [mode] is part of the IDE
     cursor contract. *)
 
+val register_cursor_changed_sink : (keeper_id:string -> unit) -> unit
+(** Register the server-push adapter notified after a cursor record is durable.
+    The IDE storage layer does not depend on the server transport. *)
+
 (** Ingest a cursor event from an external source (e.g. editor or LSP).
     Unlike [ingest_cursor_event_from_hook], this does not require a tool hook
     context and uses the provided [source] label as the tool_name field. *)

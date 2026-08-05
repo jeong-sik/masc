@@ -234,6 +234,37 @@ let test_cursor_from_hook_uses_real_file_and_line () =
     | _ -> fail "expected one cursor")
 ;;
 
+let test_cursor_from_hook_notifies_after_persist () =
+  with_temp_dir (fun base_dir ->
+    let notified_keeper = ref None in
+    Ide_bridge.register_cursor_changed_sink (fun ~keeper_id ->
+      notified_keeper := Some keeper_id);
+    Fun.protect
+      ~finally:(fun () ->
+        Ide_bridge.register_cursor_changed_sink (fun ~keeper_id:_ -> ()))
+      (fun () ->
+        Ide_bridge.ingest_tool_event_from_hook
+          ~base_path:base_dir
+          ~partition:Ide_paths.Legacy_default
+          ~tool_name:"keeper_ide_annotate"
+          ~keeper_id:"k1"
+          ~turn_id:"turn-7"
+          ~outcome:"ok"
+          ~typed_outcome_str:"progress"
+          ~duration_ms:10.0
+          ~output_text:"annotated"
+          ~input:
+            (`Assoc
+               [ "file_path", `String "lib/test.ml"
+               ; "line_start", `Int 12
+               ; "focus_mode", `String "editing"
+               ]);
+        check (option string) "durable cursor notification keeper" (Some "k1")
+          !notified_keeper;
+        check int "cursor is durable before notification returns" 1
+          (List.length (Ide_bridge.list_cursors ~base_path:base_dir ()))))
+;;
+
 let test_cursor_from_hook_skips_missing_line () =
   with_temp_dir (fun base_dir ->
     let input = `Assoc [ "file_path", `String "lib/test.ml" ] in
@@ -899,6 +930,10 @@ let () =
         ] )
     ; ( "cursor"
       , [ test_case "from hook uses real file and line" `Quick test_cursor_from_hook_uses_real_file_and_line
+        ; test_case
+            "from hook notifies after persist"
+            `Quick
+            test_cursor_from_hook_notifies_after_persist
         ; test_case "from hook skips missing line" `Quick test_cursor_from_hook_skips_missing_line
         ; test_case
             "from hook skips missing focus mode"

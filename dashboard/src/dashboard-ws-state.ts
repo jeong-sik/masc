@@ -13,6 +13,7 @@ export const dashboardWsLastDisconnectedAt = signal(0)
 let hasReachedReady = false
 
 export function noteDashboardWsReady(): void {
+  dashboardWsReady.value = true
   if (hasReachedReady) dashboardWsReconnectCount.value++
   hasReachedReady = true
 }
@@ -66,5 +67,6 @@ export function _resetDashboardWsCounterForTests(): void {
   dashboardWsLastPongLatencyMs.value = null
   dashboardWsReconnectCount.value = 0
   dashboardWsLastDisconnectedAt.value = 0
+  dashboardWsReady.value = false
   hasReachedReady = false
 }

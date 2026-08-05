@@ -571,6 +571,45 @@ let test_post_cursors_broadcasts_ws_invalidation () =
         | [] -> fail "POST cursor did not broadcast a websocket invalidation"))
 ;;
 
+let test_hook_cursors_broadcast_ws_invalidation () =
+  with_ide_server (fun ~base_path ~state:_ ~router:_ ->
+    let subscriber_id = "test-hook-cursor-ws-invalidation" in
+    let received = ref [] in
+    Sse.subscribe_external ~id:subscriber_id (fun frame ->
+      received := frame :: !received;
+      true);
+    Fun.protect
+      ~finally:(fun () -> Sse.unsubscribe_external subscriber_id)
+      (fun () ->
+        Ide_bridge.ingest_tool_event_from_hook
+          ~base_path
+          ~partition:Ide_paths.Legacy_default
+          ~tool_name:"keeper_ide_annotate"
+          ~keeper_id:"alice"
+          ~turn_id:"turn-7"
+          ~outcome:"ok"
+          ~typed_outcome_str:"progress"
+          ~duration_ms:10.0
+          ~output_text:"annotated"
+          ~input:
+            (`Assoc
+               [ "file_path", `String "lib/a.ml"
+               ; "line_start", `Int 7
+               ; "focus_mode", `String "editing"
+               ]);
+        match !received with
+        | frame :: _ ->
+          (match Sse.data_payload_of_frame frame with
+           | Error Sse.Missing_data_payload -> fail "hook cursor invalidation frame has no data"
+           | Ok payload ->
+             let json = Yojson.Safe.from_string payload in
+             check string "hook cursor invalidation type" "ide_cursor_changed"
+               (json_string_member "hook cursor invalidation" "type" json);
+             check string "hook cursor invalidation keeper" "alice"
+               (json_string_member "hook cursor invalidation" "keeper_id" json))
+        | [] -> fail "tool-hook cursor did not broadcast a websocket invalidation"))
+;;
+
 let test_post_cursors_honors_canonical_url_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let token = create_worker_token base_path "alice" in
@@ -1157,6 +1196,8 @@ let () =
             test_post_cursors_persists_valid_focus_mode
         ; test_case "POST cursor broadcasts WS invalidation" `Quick
             test_post_cursors_broadcasts_ws_invalidation
+        ; test_case "tool-hook cursor broadcasts WS invalidation" `Quick
+            test_hook_cursors_broadcast_ws_invalidation
         ; test_case "POST cursor honors canonical_url scope" `Quick
             test_post_cursors_honors_canonical_url_scope
         ; test_case "POST annotation accepts matching repo scope" `Quick

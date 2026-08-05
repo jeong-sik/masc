@@ -1,5 +1,5 @@
 ---
-rfc: "0361"
+rfc: "0362"
 title: "Goal owner and the intake contract"
 status: Draft
 created: 2026-08-05

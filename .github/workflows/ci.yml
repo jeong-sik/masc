@@ -823,6 +823,52 @@ jobs:
             @test/runtest-test_tool_registry_consistency \
             @test/runtest-test_tool_spec
 
+      - name: Run invariant and SSOT guard suites
+        # These assert on repository shape -- baselines, mirrors, vocabulary
+        # parity, path SSOTs -- rather than on behaviour, so @check compiles
+        # them and nothing runs them. A guard that never runs stops guarding:
+        # test_masc_dirname_ssot sat red on main for a week for exactly this
+        # reason (#27117), and #26075 found the same shape by tripping over it.
+        #
+        # Every suite here was executed against origin/main before being added.
+        # Four more guards in this family are red today and are deliberately
+        # NOT listed, so this step cannot go green by ignoring them:
+        # test_masc_dirname_ssot, test_keeper_runtime_contract,
+        # test_keeper_identity_drift_counter,
+        # test_keeper_supervisor_persona_drift_order (#26075 comment).
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_assertion_kind_mirror \
+            @test/runtest-test_base_path_prod_guard \
+            @test/runtest-test_bind_required_guard_counter \
+            @test/runtest-test_board_persistence_load_contract \
+            @test/runtest-test_clean_only_bug_mirrors \
+            @test/runtest-test_contract_harness_auth_script \
+            @test/runtest-test_eio_guard_yield_meter \
+            @test/runtest-test_event_bus_subscription_contract \
+            @test/runtest-test_fs_compat_home_guard \
+            @test/runtest-test_guarded_dispatch_telemetry \
+            @test/runtest-test_keeper_checkpoint_stale_guard \
+            @test/runtest-test_keeper_contract_classifier_pure \
+            @test/runtest-test_keeper_fsm_guard_actions \
+            @test/runtest-test_keeper_invariant \
+            @test/runtest-test_keeper_invocation_contract_hints \
+            @test/runtest-test_keeper_path_ssot \
+            @test/runtest-test_keeper_phase_drift_contract \
+            @test/runtest-test_keepers_runtime_dir_ssot \
+            @test/runtest-test_mcp_h1_h2_admission_parity \
+            @test/runtest-test_nickname_words_ssot \
+            @test/runtest-test_oas_canonical_delegation_contract \
+            @test/runtest-test_oas_message_constructor_contract \
+            @test/runtest-test_otel_port_ssot \
+            @test/runtest-test_release_train_guard_script \
+            @test/runtest-test_rfc_0086_keeper_namespace_invariant \
+            @test/runtest-test_server_base_path_guard \
+            @test/runtest-test_sse_retry_ssot \
+            @test/runtest-test_task_cache_invariant_13397 \
+            @test/runtest-test_tool_contract_truth \
+            @test/runtest-test_voice_command_descriptor_parity
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was

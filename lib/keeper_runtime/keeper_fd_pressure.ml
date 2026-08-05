@@ -180,12 +180,6 @@ let parse_system_fd_snapshot lines =
   | _ -> None
 ;;
 
-let process_status_to_string = function
-  | Unix.WEXITED code -> Printf.sprintf "exited(%d)" code
-  | Unix.WSIGNALED signal -> Printf.sprintf "signaled(%d)" signal
-  | Unix.WSTOPPED signal -> Printf.sprintf "stopped(%d)" signal
-;;
-
 let read_first_line path =
   try
     let ic = open_in path in
@@ -235,7 +229,7 @@ let detect_darwin_system_fd_snapshot_now () =
       | _lines, status ->
         Log.Keeper.warn
           "fd_observation: sysctl FD probe exited with %s"
-          (process_status_to_string status);
+          (With_process.status_to_string status);
         None
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn

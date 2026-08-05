@@ -201,3 +201,9 @@ val runtime_manifest_public_json :
   Keeper_runtime_manifest.t -> Yojson.Safe.t
 (** Pure: convert a manifest row to its public JSON, with provider/model
     identity redaction applied. *)
+
+(** {1 Error envelope} *)
+
+val error_json : ?ok:bool -> string -> Yojson.Safe.t
+(** [error_json ?ok message] builds [`Assoc] with an ["error"] field holding
+    [message], prefixed by an ["ok"] boolean field when [ok] is supplied. *)

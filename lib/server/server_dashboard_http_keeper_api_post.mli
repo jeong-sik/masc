@@ -16,7 +16,6 @@ val merge_keeper_trace_lines :
   Trajectory.trajectory_line list ->
   Trajectory.trajectory_line list
 
-val error_json : ?ok:bool -> string -> Yojson.Safe.t
 val respond_error :
   ?status:Httpun.Status.t ->
   ?request:Httpun.Request.t ->

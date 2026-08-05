@@ -179,12 +179,6 @@ let format_docker_exec_error ~head_program ~st ~out =
   | Unix.WSTOPPED n -> Printf.sprintf "docker_%s_stopped: signal=%d" head_program n
 ;;
 
-let image_preflight_start_error (failure : Keeper_sandbox_runtime.classified_error) =
-  Keeper_sandbox_runtime.docker_image_preflight_failure_message
-    ~prefix:"docker_container_start_failed"
-    failure
-;;
-
 let sandbox_environment () =
   Env_keeper_scrub.filter_environment (Unix.environment ())
 ;;
@@ -371,7 +365,8 @@ let start_container ?timeout_sec (t : t) =
         ?timeout_sec
         ()
     with
-    | Error failure -> Error (image_preflight_start_error failure)
+    | Error failure ->
+      Error (Keeper_sandbox_runtime.image_preflight_start_error failure)
     | Ok () ->
       match
         Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime_optional

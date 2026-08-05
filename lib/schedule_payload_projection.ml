@@ -38,11 +38,6 @@ type support_summary =
 
 let ( let* ) = Result.bind
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if String.equal trimmed "" then None else Some trimmed
-;;
-
 let known_kind_to_string = function
   | Keeper_wake -> Schedule_supported_kinds.keeper_wake
 ;;
@@ -82,14 +77,14 @@ let classify_kind = function
 
 let assoc_string key fields =
   match List.assoc_opt key fields with
-  | Some (`String value) -> trim_nonempty value
+  | Some (`String value) -> String_util.trim_nonempty value
   | _ -> None
 ;;
 
 let required_string_field name fields =
   match List.assoc_opt name fields with
   | Some (`String value) ->
-    (match trim_nonempty value with
+    (match String_util.trim_nonempty value with
      | Some value -> Ok value
      | None -> Error (name ^ " must be non-empty"))
   | Some _ -> Error ("expected string field: " ^ name)
@@ -99,7 +94,7 @@ let required_string_field name fields =
 let optional_string_field name fields =
   match List.assoc_opt name fields with
   | None | Some `Null -> Ok None
-  | Some (`String value) -> Ok (trim_nonempty value)
+  | Some (`String value) -> Ok (String_util.trim_nonempty value)
   | Some _ -> Error ("expected string field: " ^ name)
 ;;
 

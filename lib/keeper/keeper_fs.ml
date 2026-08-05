@@ -749,6 +749,41 @@ end
 ;;
 
 (* ================================================================ *)
+(* Path Locks (refcounted Eio.Mutex registry keyed by path)         *)
+(* ================================================================ *)
+
+type path_lock =
+  { mutex : Eio.Mutex.t
+  ; mutable users : int
+  }
+
+let path_locks : (string, path_lock) Hashtbl.t = Hashtbl.create 16
+let path_locks_mutex = Stdlib.Mutex.create ()
+let path_lock_mutex lock = lock.mutex
+
+let acquire_path_lock key =
+  Stdlib.Mutex.protect path_locks_mutex (fun () ->
+    match Hashtbl.find_opt path_locks key with
+    | Some lock ->
+      lock.users <- lock.users + 1;
+      lock
+    | None ->
+      let lock = { mutex = Eio.Mutex.create (); users = 1 } in
+      Hashtbl.add path_locks key lock;
+      lock)
+;;
+
+let release_path_lock key lock =
+  Stdlib.Mutex.protect path_locks_mutex (fun () ->
+    lock.users <- lock.users - 1;
+    if lock.users = 0
+    then
+      match Hashtbl.find_opt path_locks key with
+      | Some current when current == lock -> Hashtbl.remove path_locks key
+      | Some _ | None -> ())
+;;
+
+(* ================================================================ *)
 (* Standard Keeper Paths                                            *)
 (* ================================================================ *)
 

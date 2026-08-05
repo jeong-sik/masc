@@ -19,6 +19,14 @@ val push_event_to_sessions_fn : (Yojson.Safe.t -> unit) Atomic.t
 val set_task_owner_hooks : task_owner_hooks -> unit
 val current_task_owner_hooks : unit -> task_owner_hooks
 
+(** Formats [fmt] and emits it on [Log.Task] at warn level, prefixed with
+    [task_id=<task_id> ]. *)
+val task_log_warn : task_id:string -> ('a, unit, string, unit) format4 -> 'a
+
+(** Formats [fmt] and emits it on [Log.Task] at error level, prefixed with
+    [task_id=<task_id> ]. *)
+val task_log_error : task_id:string -> ('a, unit, string, unit) format4 -> 'a
+
 include module type of Tool_task_payloads
 include module type of Tool_task_args
 include module type of Tool_task_completion_review

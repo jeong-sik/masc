@@ -2770,22 +2770,14 @@ let atomic_orphan_cleanup_operation_to_string = function
   | Close_cleanup_descriptor -> "close_cleanup_descriptor"
 ;;
 
-let file_kind_to_string = function
-  | Unix.S_REG -> "regular_file"
-  | Unix.S_DIR -> "directory"
-  | Unix.S_CHR -> "character_device"
-  | Unix.S_BLK -> "block_device"
-  | Unix.S_LNK -> "symbolic_link"
-  | Unix.S_FIFO -> "fifo"
-  | Unix.S_SOCK -> "socket"
-;;
-
 let atomic_orphan_cleanup_cause_to_string = function
   | Unix_failure (error, fn, arg) ->
     Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error)
   | Sys_failure detail -> detail
   | Unexpected_file_kind kind ->
-    Printf.sprintf "unexpected file kind: %s" (file_kind_to_string kind)
+    Printf.sprintf
+      "unexpected file kind: %s"
+      (Owned_directory_chain.file_kind_to_string kind)
   | Outside_ownership_root { ownership_root } ->
     Printf.sprintf "path is outside ownership root: %s" ownership_root
   | Identity_changed -> "filesystem identity changed during cleanup"

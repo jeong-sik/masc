@@ -109,20 +109,6 @@ let string_field name fields =
   | None -> Error ("missing field: " ^ name)
 ;;
 
-let float_field name fields =
-  match List.assoc_opt name fields with
-  | Some (`Float value) -> Ok value
-  | Some (`Int value) -> Ok (float_of_int value)
-  | Some _ -> Error ("expected float field: " ^ name)
-  | None -> Error ("missing field: " ^ name)
-;;
-
-let assoc_field name fields =
-  match List.assoc_opt name fields with
-  | Some value -> Ok value
-  | None -> Error ("missing field: " ^ name)
-;;
-
 let wake_signal_to_yojson signal =
   `Assoc
     [ "event_type", `String (signal_kind_to_string signal.kind)
@@ -143,10 +129,10 @@ let wake_signal_of_yojson = function
     let* occurrence_id = string_field "occurrence_id" fields in
     let* schedule_instance_id = string_field "schedule_instance_id" fields in
     let* schedule_id = string_field "schedule_id" fields in
-    let* emitted_at = float_field "emitted_at" fields in
-    let* due_at = float_field "due_at" fields in
+    let* emitted_at = Schedule_domain.float_field "emitted_at" fields in
+    let* due_at = Schedule_domain.float_field "due_at" fields in
     let* payload_digest = string_field "payload_digest" fields in
-    let* payload = assoc_field "payload" fields in
+    let* payload = Schedule_domain.assoc_field "payload" fields in
     let* decoded_payload = Schedule_domain.payload_of_yojson payload in
     let actual_payload_digest = Schedule_domain.payload_digest decoded_payload in
     let* () =

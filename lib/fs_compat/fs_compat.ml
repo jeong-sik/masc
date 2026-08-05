@@ -698,15 +698,7 @@ let owned_regular_file_read_operation_to_string = function
   | Close_descriptor -> "close_descriptor"
 ;;
 
-let file_kind_to_string = function
-  | Unix.S_REG -> "regular_file"
-  | Unix.S_DIR -> "directory"
-  | Unix.S_CHR -> "character_device"
-  | Unix.S_BLK -> "block_device"
-  | Unix.S_LNK -> "symbolic_link"
-  | Unix.S_FIFO -> "fifo"
-  | Unix.S_SOCK -> "socket"
-;;
+let file_kind_to_string = Owned_directory_chain.file_kind_to_string
 
 let owned_regular_file_read_failure_to_string = function
   | Ownership_boundary_rejected { path; rejection } ->

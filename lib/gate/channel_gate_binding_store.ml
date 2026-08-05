@@ -219,6 +219,12 @@ let bound_channels_result store ~keeper_name =
              else None)
            bindings)
 
+let find_binding_by_channel_id (bindings : binding list) ~channel_id =
+  List.find_map
+    (fun (binding : binding) ->
+      if String.equal binding.channel_id channel_id then Some binding else None)
+    bindings
+
 let binding_json (binding : binding) =
   `Assoc
     [

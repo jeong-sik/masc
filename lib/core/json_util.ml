@@ -192,6 +192,13 @@ let string_opt_to_json_trimmed : string option -> Yojson.Safe.t = function
     if trimmed <> "" then `String trimmed else `Null
   | None -> `Null
 
+(** Ratio of two ints as a JSON float, or [`Null] when the denominator
+    is 0 (no NaN reaches the wire). *)
+let int_ratio_json numerator denominator =
+  if denominator = 0
+  then `Null
+  else `Float (float_of_int numerator /. float_of_int denominator)
+
 let float_opt_to_json : float option -> Yojson.Safe.t = function
   | Some f -> `Float f
   | None -> `Null
@@ -235,6 +242,21 @@ let assoc_float_opt name json =
   | Some (`Int value) -> Some (Float.of_int value)
   | _ -> None
 
+(** Scans a JSON array for the first [`Assoc] row whose [field] member is
+    the string [value].  Rows that are not objects, and rows without a
+    string [field], are skipped. *)
+let find_assoc_row_by_string_field ~field ~value = function
+  | `List rows ->
+    List.find_map
+      (function
+        | (`Assoc _ as row) -> (
+          match assoc_member_opt field row with
+          | Some (`String candidate) when String.equal candidate value -> Some row
+          | _ -> None)
+        | _ -> None)
+      rows
+  | _ -> None
+
 let json_string_list_member name json =
   try
     match Yojson.Safe.Util.member name json with
@@ -250,6 +272,63 @@ let json_string_list_member name json =
   | Yojson.Safe.Util.Type_error _ -> []
 
 
+(** {1 Assoc field validation (Result-returning)}
+
+    These operate on an already-destructured [`Assoc] field list rather
+    than on a whole [Yojson.Safe.t] (that is the [require_*] family
+    above).  [surface] names the object in the error message, so a
+    failure reads ["<surface>.<field> is required"]. *)
+
+let reject_unknown_fields ~surface ~allowed fields =
+  let rec duplicate seen = function
+    | [] -> None
+    | (key, _) :: rest ->
+      if List.mem key seen then Some key else duplicate (key :: seen) rest
+  in
+  match duplicate [] fields with
+  | Some field -> Error (Printf.sprintf "%s contains duplicate field %s" surface field)
+  | None ->
+    (match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
+     | None -> Ok ()
+     | Some (field, _) ->
+       Error (Printf.sprintf "%s contains unsupported field %s" surface field))
+
+let require_field_string ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`String value) when String.trim value <> "" -> Ok value
+  | Some (`String _) ->
+    Error (Printf.sprintf "%s.%s must be non-blank" surface field)
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a string" surface field)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+
+let require_field_float ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`Float value) -> Ok value
+  | Some (`Int value) -> Ok (Float.of_int value)
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a number" surface field)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+
+let require_field_positive_int ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`Int value) when value > 0 -> Ok value
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a positive integer" surface field)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+
+let require_field_string_list ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`List values) ->
+    let rec parse index acc = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest -> parse (index + 1) (value :: acc) rest
+      | _ :: _ ->
+        Error
+          (Printf.sprintf "%s.%s[%d] must be a string" surface field index)
+    in
+    parse 0 [] values
+  | Some _ -> Error (Printf.sprintf "%s.%s must be an array" surface field)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+
+
 (** List utilities *)
 
 let dedupe_keep_order xs =
@@ -262,3 +341,9 @@ let dedupe_keep_order xs =
           loop (x :: seen) (x :: acc) rest
   in
   loop [] [] xs
+
+let normalize_string_list items =
+  items
+  |> List.map String.trim
+  |> List.filter (fun item -> not (String.equal item ""))
+  |> dedupe_keep_order

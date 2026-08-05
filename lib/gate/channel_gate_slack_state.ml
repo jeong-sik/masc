@@ -26,15 +26,10 @@ let default_binding_audit_path = ".gate/runtime/slack/binding_audit.jsonl"
 
 (* Slack has no Discord-style guilds; the bot token authorizes per-workspace.
    Path resolvers read an env override, else fall back to the default. *)
-let resolve_path raw_path =
-  if Filename.is_relative raw_path then
-    Filename.concat (Env_config_core.base_path ()) raw_path
-  else raw_path
-
 let slack_path ~env_var ~default () =
   match Env_config_core.raw_value_opt env_var |> Env_config_core.trim_opt with
-  | Some path -> resolve_path path
-  | None -> resolve_path default
+  | Some path -> Env_config_core.resolve_against_base_path path
+  | None -> Env_config_core.resolve_against_base_path default
 
 let status_path () =
   slack_path ~env_var:"MASC_SLACK_STATUS_PATH" ~default:default_status_path ()
@@ -69,12 +64,6 @@ let set_trigger_policy (p : Slack_gateway_state.trigger_policy) =
   trigger_policy_ref := Some p
 
 let get_trigger_policy () = !trigger_policy_ref
-
-let connector_state_label ~available ~connected ~stale =
-  if not available then "offline"
-  else if stale then "stale"
-  else if connected then "connected"
-  else "disconnected"
 
 (* Outbound REST uses the bot token (xoxb-...). The app token (xapp-...) is read
    only by {!Slack_socket_client} for apps.connections.open. Both resolve
@@ -159,7 +148,10 @@ let status_json ?(audit_limit = 10) () =
     ; ("connected", `Bool connected)
     ; ("stale", `Bool stale)
     ; ("stale_after_sec", `Int (stale_after_sec ()))
-    ; ("status", `String (connector_state_label ~available ~connected ~stale))
+    ; ("status",
+       `String
+         (Channel_gate_connector.connector_state_label ~available ~connected
+            ~stale))
     ; ("error", `String error)
     ; ("status_source", `String "in_process_gateway")
     ; ("gateway_state", `String (gateway_state_label gateway_state))
@@ -313,12 +305,6 @@ type keeper_binding_resolution = {
   via_parent : bool;
 }
 
-let binding_for_channel bindings ~channel_id =
-  List.find_map
-    (fun (b : binding) ->
-      if String.equal b.channel_id channel_id then Some b else None)
-    bindings
-
 (* Slack threads share the parent channel id (a thread_ts is a message
    timestamp, not a channel), so resolution is a single exact lookup — no
    thread→parent fallback like Discord. *)
@@ -329,7 +315,9 @@ let resolve_keeper_for_channel_result ~channel_id =
     match read_bindings_result () with
     | Error error -> Error error
     | Ok candidates -> (
-      match binding_for_channel candidates ~channel_id:normalized with
+      match
+        Store.find_binding_by_channel_id candidates ~channel_id:normalized
+      with
       | Some b ->
         Ok
           (Some

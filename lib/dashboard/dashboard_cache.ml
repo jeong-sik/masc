@@ -173,14 +173,6 @@ let is_compute_timeout exn =
   | Compute_timeout _ -> true
   | _ -> false
 
-let is_internal_race_cancel exn =
-  match exn with
-  | Eio.Cancel.Cancelled _ ->
-      let msg = Printexc.to_string exn in
-      String.equal msg "Cancelled: Eio__core__Fiber.Not_first"
-      || String.ends_with ~suffix:"Eio__core__Fiber.Not_first" msg
-  | _ -> false
-
 let should_restore_stale_after_failure exn =
   match exn with
   | Compute_timeout _ -> true
@@ -370,7 +362,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
         | exception exn ->
           (match exn with
            | Compute_timeout _ -> ()
-           | _ when is_internal_race_cancel exn ->
+           | _ when Cancel_safe.is_internal_race_cancel exn ->
                Log.Dashboard.debug "cache bg-revalidate race-cancel for %s, scheduling early retry" key
            | _ -> Log.Dashboard.warn "cache bg-revalidate failed (%s): %s" key (Printexc.to_string exn));
           atomic_update table (fun map ->
@@ -381,7 +373,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
               (* After race-cancel, set expires_at = ts so the next lookup
                  immediately triggers recompute instead of returning stale. *)
               let expires_at =
-                if is_internal_race_cancel exn then ts else ts +. backoff_grace
+                if Cancel_safe.is_internal_race_cancel exn then ts else ts +. backoff_grace
               in
               ((), SMap.add key (Ready { value = stale_value; expires_at; stale_until = ts +. backoff_grace }) map)
             | _ -> ((), map)
@@ -474,7 +466,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            value
        | Some (Error exn) ->
            let fallback_val = ref None in
-           if not (is_internal_race_cancel exn || is_compute_timeout exn) then
+           if not (Cancel_safe.is_internal_race_cancel exn || is_compute_timeout exn) then
              Log.Dashboard.error "cache revalidation failed: %s" (Printexc.to_string exn);
            atomic_update table (fun map ->
              match SMap.find_opt key map with

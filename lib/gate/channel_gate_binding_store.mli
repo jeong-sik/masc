@@ -79,6 +79,13 @@ val mutation_error_to_string : mutation_error -> string
 val read_bindings_result : t -> (binding list, binding_store_error) result
 val bound_channels_result :
   t -> keeper_name:string -> (string list, binding_store_error) result
+val find_binding_by_channel_id :
+  binding list -> channel_id:string -> binding option
+(** [find_binding_by_channel_id bindings ~channel_id] returns the first
+    binding whose [channel_id] is equal to [channel_id], or [None] when
+    no binding matches.  Compares the ids as given; callers normalize
+    beforehand. *)
+
 val binding_json : binding -> Yojson.Safe.t
 val audit_event_json : t -> audit_event -> Yojson.Safe.t
 val mutate_bindings :

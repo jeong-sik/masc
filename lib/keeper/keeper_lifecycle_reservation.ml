@@ -57,6 +57,12 @@ let snapshot_to_string snapshot =
     (purpose_to_string snapshot.purpose)
 ;;
 
+let release_outcome_to_string = function
+  | Released -> "released"
+  | Release_missing -> "release_missing"
+  | Release_not_owner owner -> "release_not_owner: " ^ snapshot_to_string owner
+;;
+
 let canonical_key ~base_path ~keeper_name =
   Keeper_registry_types.registry_key ~base_path (String.trim keeper_name)
 ;;

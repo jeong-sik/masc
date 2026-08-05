@@ -2,6 +2,8 @@
    fields are observability context; they do not authorize or classify the
    command. *)
 
+let raw_source_of_argv argv = String.concat " " (List.map Filename.quote argv)
+
 let run_argv ~actor:_ ~raw_source:_ ~summary:_
     ?timeout_sec ?env argv =
   Process_eio.run_argv ?timeout_sec ?env argv

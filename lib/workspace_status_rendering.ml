@@ -26,11 +26,6 @@ let option_or_dash = function
   | Some value when not (String.equal (String.trim value) "") -> value
   | _ -> "-"
 
-let first_line text =
-  match String.index_opt text '\n' with
-  | Some i -> String.sub text 0 i
-  | None -> text
-
 let take_items limit items =
   let rec loop remaining acc = function
     | _ when remaining <= 0 -> List.rev acc
@@ -123,7 +118,7 @@ let agent_focus_label ~active_assigned_task_ids (agent : Masc_domain.agent) =
   | [] -> (
       match agent.current_task with
       | Some raw_task ->
-          let task = raw_task |> String.trim |> first_line in
+          let task = raw_task |> String.trim |> String_util.first_line in
           if String.equal task "" then
             Masc_domain.agent_status_to_string agent.status
           else

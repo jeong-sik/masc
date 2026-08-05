@@ -248,30 +248,11 @@ let to_yojson partition =
     ]
 ;;
 
-let assoc ~context = function
-  | `Assoc fields -> Ok fields
-  | _ -> Error (context ^ " must be an object")
-;;
-
-let exact_fields ~context expected fields =
-  let actual = List.map fst fields in
-  if List.length actual = List.length expected
-     && List.for_all (fun key -> List.mem key actual) expected
-  then Ok ()
-  else
-    Error
-      (Printf.sprintf
-         "%s fields must be exactly [%s], got [%s]"
-         context
-         (String.concat "," expected)
-         (String.concat "," actual))
-;;
-
-let field ~context key fields =
-  match List.assoc_opt key fields with
-  | Some value -> Ok value
-  | None -> Error (Printf.sprintf "%s missing field %s" context key)
-;;
+(* Structural decode helpers live in Candidate, which decodes the same
+   candidate JSON; these aliases keep the call sites in this module short. *)
+let assoc = Candidate.assoc
+let exact_fields = Candidate.exact_fields
+let field = Candidate.field
 
 let string_json ~context = function
   | `String value when not (String.equal value "") -> Ok value

@@ -60,11 +60,6 @@ let empty_tool_audit_snapshot =
 let age_seconds_opt ~now_ts timestamp =
   if timestamp <= 0.0 then None else Some (now_ts -. timestamp)
 
-let ratio_json numerator denominator =
-  if denominator = 0
-  then `Null
-  else `Float (float_of_int numerator /. float_of_int denominator)
-
 let metrics_summary_to_json (summary : metrics_summary) : Yojson.Safe.t =
   let interaction_points =
     summary.turn_points + summary.proactive_points
@@ -76,22 +71,15 @@ let metrics_summary_to_json (summary : metrics_summary) : Yojson.Safe.t =
     ; "proactive_points", `Int summary.proactive_points
     ; "window_interactions", `Int interaction_points
     ; ( "intervention_share"
-      , ratio_json summary.proactive_points interaction_points )
+      , Json_util.int_ratio_json summary.proactive_points interaction_points )
     ; ( "intervention_per_turn"
-      , ratio_json summary.proactive_points summary.turn_points )
+      , Json_util.int_ratio_json summary.proactive_points summary.turn_points )
     ; "handoff_count", `Int summary.handoff_count
     ; ( "last_handoff"
       , match summary.last_handoff with
         | Some json -> json
         | None -> `Null )
     ]
-
-let nonempty_string_opt key json =
-  match Safe_ops.json_string_opt key json with
-  | Some value ->
-      let value = String.trim value in
-      if value = "" then None else Some value
-  | None -> None
 
 let summarize_metrics_lines (lines : string list) : metrics_summary =
   List.fold_left
@@ -128,7 +116,7 @@ let summarize_metrics_lines (lines : string list) : metrics_summary =
             in
             (match
                Safe_ops.json_float_opt "ts_unix" json,
-               nonempty_string_opt "trace_id" json,
+               Safe_ops.json_string_nonempty_opt "trace_id" json,
                Safe_ops.json_int_opt "generation" json,
                Safe_ops.json_bool_opt "handoff_performed" json,
                parsed_channel
@@ -161,12 +149,12 @@ let summarize_metrics_lines (lines : string list) : metrics_summary =
                          ; "generation", `Int generation
                          ; ( "prev_trace_id"
                            , Json_util.string_opt_to_json
-                               (nonempty_string_opt
+                               (Safe_ops.json_string_nonempty_opt
                                   "prev_trace_id"
                                   handoff) )
                          ; ( "new_trace_id"
                            , Json_util.string_opt_to_json
-                               (nonempty_string_opt
+                               (Safe_ops.json_string_nonempty_opt
                                   "new_trace_id"
                                   handoff) )
                          ; ( "to_generation"
@@ -279,14 +267,14 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
              (match
                 string_list_member_opt "tools_used" json,
                 Safe_ops.json_int_opt "tool_call_count" json,
-                nonempty_string_opt "ts" json
+                Safe_ops.json_string_nonempty_opt "ts" json
               with
               | Some tools, Some tool_call_count, Some timestamp ->
                   Some
                     { latest_tool_names = tools
                     ; latest_tool_call_count = Some tool_call_count
                     ; latest_action_source =
-                        nonempty_string_opt "action_source" json
+                        Safe_ops.json_string_nonempty_opt "action_source" json
                     ; tool_audit_source = Some "keeper_metrics"
                     ; tool_audit_at = Some timestamp
                     }

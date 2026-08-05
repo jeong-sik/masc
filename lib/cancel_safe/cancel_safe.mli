@@ -21,3 +21,12 @@ val observe : on_exn:(exn -> unit) -> (unit -> unit) -> unit
 (** [observe ~on_exn f] is [protect ~on_exn f] specialised for callbacks
     whose result is [unit]. Typical use: lifecycle observers that must
     record a failure but continue the surrounding workflow. *)
+
+val is_internal_race_cancel : exn -> bool
+(** [is_internal_race_cancel exn] returns [true] when [exn] is an
+    [Eio.Cancel.Cancelled] whose [Printexc.to_string] rendering is
+    ["Cancelled: Eio__core__Fiber.Not_first"] or ends with
+    ["Eio__core__Fiber.Not_first"]. That payload comes from Eio's own
+    [Fiber.first] race resolution — the losing fiber is cancelled by the
+    runtime, not by the surrounding switch. Any other exception, including
+    every other [Cancelled] payload, returns [false]. *)

@@ -148,3 +148,18 @@ val wake_record_of_yojson :
   Yojson.Safe.t -> (wake_record, string) result
 val schedule_request_to_yojson : schedule_request -> Yojson.Safe.t
 val schedule_request_of_yojson : Yojson.Safe.t -> (schedule_request, string) result
+
+(* JSON field accessors. Exported because the schedule store, runner, and the
+   server-side payload consumers decode the same object shapes and previously
+   each carried a private copy. *)
+
+val assoc_field :
+  string -> (string * Yojson.Safe.t) list -> (Yojson.Safe.t, string) result
+(** [assoc_field name fields] returns the value bound to [name], or
+    [Error ("missing field: " ^ name)] when [name] is absent. *)
+
+val float_field : string -> (string * Yojson.Safe.t) list -> (float, string) result
+(** [float_field name fields] reads [name] as a float. A [`Int] value is
+    widened with [float_of_int]. Returns [Error ("missing field: " ^ name)]
+    when [name] is absent, and [Error (name ^ ": expected float")] for any
+    other JSON value. *)

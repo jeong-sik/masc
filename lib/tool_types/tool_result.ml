@@ -298,3 +298,16 @@ let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
   in
   Failed { class_; message; data = `String message; tool_name; duration_ms }
 ;;
+
+(** {1 Class-specialised constructors}
+
+    {!make_err} with the [class_] fixed, for the two classes that
+    [Tool_*.dispatch] handlers construct directly. *)
+
+let workflow_err ~tool_name ~start_time message_str : result =
+  make_err ~tool_name ~class_:Workflow_rejection ~start_time message_str
+;;
+
+let runtime_err ~tool_name ~start_time message_str : result =
+  make_err ~tool_name ~class_:Runtime_failure ~start_time message_str
+;;

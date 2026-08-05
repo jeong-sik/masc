@@ -21,6 +21,11 @@ let set_process_guard guard = Atomic.set process_guard guard
 let reset_process_guard_for_testing () = Atomic.set process_guard default_process_guard
 let with_process_guard f = (Atomic.get process_guard).run f
 
+let status_to_string = function
+  | Unix.WEXITED code -> Printf.sprintf "exited(%d)" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signaled(%d)" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped(%d)" signal
+
 let close_best_effort ic =
   try let _ = (Unix.close_process_in ic : Unix.process_status) in ()
   with Unix.Unix_error _ | Sys_error _ | Failure _ -> ()

@@ -196,11 +196,14 @@ let approval_event_timeline_event json =
               "approval requested and waiting for operator decision",
               Some "resolve_approval" )
         | Resolved ->
-            let decision_label = Option.value ~default:"resolved" decision in
-            ( "approval_resolved",
-              approval_title,
-              Printf.sprintf "approval %s" decision_label,
-              None )
+            (* A record with no decision is not one that was resolved as
+               "resolved"; say which of the two the operator is looking at. *)
+            let outcome =
+              match decision with
+              | Some recorded -> Printf.sprintf "approval %s" recorded
+              | None -> "approval resolved with no recorded decision"
+            in
+            ("approval_resolved", approval_title, outcome, None)
         | Summary_updated ->
             ("approval_summary", approval_title, "approval summary updated", None)
         | Rule_created ->

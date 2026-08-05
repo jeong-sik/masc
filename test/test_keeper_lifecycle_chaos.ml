@@ -20,7 +20,7 @@ let make_meta name =
   let json =
     `Assoc
       [ ("name", `String name)
-      ; ("agent_name", `String ("agent-" ^ name))
+      ; ("agent_name", `String (Masc.Keeper_identity.keeper_agent_name name))
       ; ("trace_id", `String ("trace-chaos-" ^ name))
       ]
   in

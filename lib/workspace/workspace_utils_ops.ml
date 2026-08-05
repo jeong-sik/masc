@@ -78,20 +78,6 @@ let validate_task_id_r id : (string, masc_error) result =
   |> Result.map (fun _ -> id)
   |> Result.map_error (fun msg -> Task (Task_error.InvalidId msg))
 
-let validate_file_path_r path : (string, masc_error) result =
-  (* Delegate to Validation module, convert error type *)
-  let* () =
-    if String.length path > 500 then Error (System (System_error.InvalidFilePath "too long (max 500 chars)"))
-    else Ok ()
-  in
-  let* () =
-    if String_util.contains_substring path "<" || String_util.contains_substring path ">" then
-      Error (System (System_error.InvalidFilePath "invalid characters (security)"))
-    else Ok ()
-  in
-  Validation.Safe_path.validate_relative path
-  |> Result.map_error (fun msg -> System (System_error.InvalidFilePath msg))
-
 (* ============================================ *)
 (* Ensure initialized                           *)
 (* ============================================ *)
@@ -117,10 +103,6 @@ let () =
 
 let ensure_initialized config =
   if not (is_initialized config) then raise Not_initialized
-
-let ensure_initialized_r config : (unit, masc_error) result =
-  if is_initialized config then Ok ()
-  else Error (System System_error.NotInitialized)
 
 (* ============================================ *)
 (* File I/O helpers                             *)
@@ -221,17 +203,6 @@ let write_json_root config path json =
       write_json_local path json
       |> Result.iter_error (fun msg ->
            Log.Misc.warn "write_json_root: local write failed for %s: %s" path msg)
-
-let delete_path_root config path =
-  match root_key_of_path config path with
-  | Some key ->
-      backend_delete config ~key
-      |> Result.fold
-           ~ok:(fun _ -> try Sys.remove path with Sys_error _ -> ())
-           ~error:(fun e ->
-             Log.Misc.error "delete_path_root: backend_delete failed for %s: %s" key
-               (Backend_types.show_error e))
-  | None -> if Sys.file_exists path then Sys.remove path
 
 let path_exists_root config path =
   match root_key_of_path config path with
@@ -403,25 +374,6 @@ let path_exists config path =
        | FileSystem _ -> Sys.file_exists path || backend_exists config ~key
        | Memory _ -> backend_exists config ~key)
   | None -> Sys.file_exists path
-
-let append_text config path content =
-  match key_of_path config path with
-  | Some key ->
-      let existing =
-        backend_get config ~key
-        |> Result.fold
-             ~ok:(function Some value -> value | None -> "")
-             ~error:(fun e ->
-               Log.Misc.warn "[append_text] backend_get failed for %s: %s" key (Backend_types.show_error e);
-               "")
-      in
-      backend_set config ~key ~value:(existing ^ content)
-      |> Result.iter_error (fun e ->
-           Log.Misc.warn "append_text backend_set failed for %s: %s" key
-             (Backend_types.show_error e))
-  | None ->
-      mkdir_p (Filename.dirname path);
-      Fs_compat.append_file path content
 
 let read_json_opt config path =
   match key_of_path config path with
@@ -651,9 +603,6 @@ let with_file_lock_impl ?clock config path f =
       | FileSystem _ ->
           with_distributed_lock ?clock config key f)
 
-let with_file_lock_eio ~clock config path f =
-  with_file_lock_impl ~clock config path f
-
 let with_file_lock config path f =
   with_file_lock_impl ?clock:(Eio_context.get_clock_opt ()) config path f
 
@@ -667,9 +616,6 @@ let with_file_lock_r_impl ?clock config path f : ('a, masc_error) result =
       | Memory _ -> File_lock_eio.with_mutex path (fun () -> Ok (f ()))
       | FileSystem _ ->
           with_distributed_lock_r ?clock config key f)
-
-let with_file_lock_r_eio ~clock config path f : ('a, masc_error) result =
-  with_file_lock_r_impl ~clock config path f
 
 let with_file_lock_r config path f : ('a, masc_error) result =
   with_file_lock_r_impl ?clock:(Eio_context.get_clock_opt ()) config path f

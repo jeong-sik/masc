@@ -394,7 +394,7 @@ let validate_initial_request (request : Schedule_domain.schedule_request) =
   else
     match request.status with
     | Scheduled -> Ok ()
-    | _ ->
+    | Due | Running | Succeeded | Failed | Cancelled | Expired ->
       Error
         (Invalid_initial_status
            "new requests must start scheduled")
@@ -566,7 +566,9 @@ let cancel_matching config ~should_cancel =
              (Printf.sprintf
                 "cannot cancel running schedule %s while retiring its consumer"
                 request.schedule_id))
-      | request :: rest -> cancel (request :: schedules) changed rest
+      (* Already terminal: nothing to cancel, and no error to raise. *)
+      | ({ status = Succeeded | Failed | Cancelled | Expired; _ } as request) :: rest ->
+        cancel (request :: schedules) changed rest
     in
     let* schedules, changed = cancel [] false state.schedules in
     if changed

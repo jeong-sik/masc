@@ -835,5 +835,9 @@ let mark_due ~now (request : schedule_request) =
   | Scheduled | Due when expired_at ~now request ->
     { request with status = Expired }
   | Scheduled when request.due_at <= now -> { request with status = Due }
-  | _ -> request
+  (* Not yet due, or already Due and not yet expired. *)
+  | Scheduled | Due -> request
+  (* Running is the executor's to move; the four terminal states never
+     transition again. *)
+  | Running | Succeeded | Failed | Cancelled | Expired -> request
 ;;

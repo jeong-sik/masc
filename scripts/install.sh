@@ -696,8 +696,8 @@ detect_asset() {
 
 ASSET=$(detect_asset)
 PLATFORM_SUFFIX="${ASSET#masc-}"
-CUTOVER_HELPER_ASSET="masc-keeper-event-queue-v15-cutover-helper-$PLATFORM_SUFFIX"
-CUTOVER_GATE_ASSET="masc-check-keeper-event-queue-v15-cutover-$PLATFORM_SUFFIX"
+PREFLIGHT_HELPER_ASSET="masc-deployment-preflight-helper-$PLATFORM_SUFFIX"
+PREFLIGHT_GATE_ASSET="masc-check-runtime-deployment-preflight-$PLATFORM_SUFFIX"
 log "platform: $ASSET"
 
 
@@ -768,8 +768,8 @@ fetch_release_checksums() {
 # --- 3. download binary -------------------------------------------------------
 URL="$RELEASE_BASE_URL/$VERSION/$ASSET"
 DEST="$PREFIX/masc"
-CUTOVER_HELPER_DEST="$PREFIX/masc-keeper-event-queue-v15-cutover-helper"
-CUTOVER_GATE_DEST="$PREFIX/masc-check-keeper-event-queue-v15-cutover"
+PREFLIGHT_HELPER_DEST="$PREFIX/masc-deployment-preflight-helper"
+PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"
 
 model_catalog_env_value() {
   if [ -n "${OAS_MODEL_CATALOG:-}" ]; then
@@ -863,10 +863,10 @@ install_release_companion() {
   log "installed: $dest"
 }
 
-# Install and verify the cutover authorities before replacing the main binary.
+# Install and verify the deployment preflight companions before replacing the main binary.
 # A failed companion download must leave the currently installed runtime intact.
-install_release_companion "$CUTOVER_HELPER_ASSET" "$CUTOVER_HELPER_DEST"
-install_release_companion "$CUTOVER_GATE_ASSET" "$CUTOVER_GATE_DEST"
+install_release_companion "$PREFLIGHT_HELPER_ASSET" "$PREFLIGHT_HELPER_DEST"
+install_release_companion "$PREFLIGHT_GATE_ASSET" "$PREFLIGHT_GATE_DEST"
 
 if [ "$SKIP_DL" -ne 1 ]; then
   log "downloading $URL"

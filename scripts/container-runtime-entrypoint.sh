@@ -3,8 +3,8 @@
 set -euo pipefail
 
 BASE_PATH="${MASC_BASE_PATH:?MASC_BASE_PATH is required}"
-HELPER=/app/masc-keeper-event-queue-v15-cutover-helper
-GATE=/app/masc-check-keeper-event-queue-v15-cutover
+HELPER=/app/masc-deployment-preflight-helper
+GATE=/app/masc-check-runtime-deployment-preflight
 
 if [[ $# -eq 0 ]]; then
   set -- /app/masc --port "${PORT:-8080}" --base-path "$BASE_PATH"
@@ -30,5 +30,5 @@ HANDOFF_ARGS+=(
   --allow-empty-workspace
 )
 
-MASC_EVENT_QUEUE_V15_CUTOVER_HELPER="$HELPER" \
+MASC_DEPLOYMENT_PREFLIGHT_HELPER="$HELPER" \
   exec "$HELPER" "${HANDOFF_ARGS[@]}"

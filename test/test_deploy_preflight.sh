@@ -22,11 +22,11 @@ mkdir -p \
 cp "$ROOT_DIR/scripts/deploy.sh" "$FIXTURE_DIR/repo/scripts/deploy.sh"
 touch \
     "$FIXTURE_DIR/repo/_build/default/bin/main_eio.exe" \
-    "$FIXTURE_DIR/repo/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe"
+    "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe"
 chmod +x \
     "$FIXTURE_DIR/repo/scripts/deploy.sh" \
     "$FIXTURE_DIR/repo/_build/default/bin/main_eio.exe" \
-    "$FIXTURE_DIR/repo/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe"
+    "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe"
 printf '%s\n' 'false' > "$FIXTURE_DIR/repo/config/keeper.env"
 
 sleep 30 &

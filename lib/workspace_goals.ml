@@ -320,6 +320,11 @@ let registered_keeper_names (ctx : context) =
       entries
 ;;
 
+(* TEL-OK: the observable record for this transition is goal_events.jsonl, not
+   a counter or a log line. emit_goal_event below writes both the previous and
+   the new owner, so a reassignment reads back as who lost the Goal and who
+   gained it; a metric would say only that one happened, and a log line would
+   duplicate a record that is already typed, durable and queryable. *)
 let handle_goal_assign ~tool_name ~start_time (ctx : context) args
     : Tool_result.result =
   match get_string_opt args "goal_id", get_string_opt args "owner" with
@@ -354,7 +359,7 @@ let handle_goal_assign ~tool_name ~start_time (ctx : context) args
          ~start_time
          ~code:Validation_error
          (Printf.sprintf "unknown goal '%s'" goal_id)
-     | Some _ ->
+     | Some existing ->
        let known = registered_keeper_names ctx in
        if not (List.mem owner known)
        then
@@ -374,10 +379,25 @@ let handle_goal_assign ~tool_name ~start_time (ctx : context) args
          | Error msg ->
            error_result_typed ~tool_name ~start_time ~code:Validation_error msg
          | Ok goal ->
+           (* RFC-0362 §4.2: the transition is recorded in goal_events. Both
+              sides are written, so a reassignment can be read back as who lost
+              the Goal and who gained it -- a counter would say only that one
+              happened. *)
+           emit_goal_event
+             ctx
+             ~goal_id
+             ~event_type:"goal_owner"
+             ~payload:
+               (`Assoc
+                  [ "previous_owner", Json_util.string_opt_to_json existing.owner
+                  ; "owner", Json_util.string_opt_to_json goal.owner
+                  ; "actor", `String ctx.agent_name
+                  ]);
            ok_result
              ~tool_name
              ~start_time
              [ "goal_id", `String goal.id
+             ; "previous_owner", Json_util.string_opt_to_json existing.owner
              ; "owner", Json_util.string_opt_to_json goal.owner
              ; "goal", Goal_store.goal_to_yojson goal
              ]))

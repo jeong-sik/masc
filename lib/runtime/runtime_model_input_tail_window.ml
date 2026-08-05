@@ -29,6 +29,11 @@ type budget_error =
       ; newest_atom_bytes : int
       }
 
+type projection =
+  { messages : Agent_sdk.Types.message list
+  ; dropped_atoms : int
+  }
+
 let budget_error_to_string = function
   | Reservation_exceeds_capacity
       { capacity_bytes; reserved_bytes; undroppable_bytes } ->
@@ -172,7 +177,7 @@ let assemble ~drop ~messages labelled =
     | Some Agent_sdk.Types.System -> preamble_message :: kept)
 ;;
 
-let project
+let project_with_drop
     ~measure_message_bytes
     ~capacity_bytes
     ~reserved_bytes
@@ -203,13 +208,13 @@ let project
       (Reservation_exceeds_capacity
          { capacity_bytes; reserved_bytes; undroppable_bytes })
   else if atom_count = 0
-  then Ok messages
+  then Ok { messages; dropped_atoms = 0 }
   else (
     let per_atom, suffix =
       atom_suffix_bytes ~measure_message_bytes ~atom_count labelled
     in
     match quantized_drop ~available_bytes ~atom_count suffix with
-    | Some drop -> Ok (assemble ~drop ~messages labelled)
+    | Some drop -> Ok { messages = assemble ~drop ~messages labelled; dropped_atoms = drop }
     | None ->
       let drop = exact_drop ~available_bytes ~atom_count suffix in
       if drop >= atom_count
@@ -217,5 +222,15 @@ let project
         Error
           (Newest_atom_exceeds_available
              { available_bytes; newest_atom_bytes = per_atom.(atom_count - 1) })
-      else Ok (assemble ~drop ~messages labelled))
+      else Ok { messages = assemble ~drop ~messages labelled; dropped_atoms = drop })
+;;
+
+let project ~measure_message_bytes ~capacity_bytes ~reserved_bytes messages =
+  Result.map
+    (fun projection -> projection.messages)
+    (project_with_drop
+       ~measure_message_bytes
+       ~capacity_bytes
+       ~reserved_bytes
+       messages)
 ;;

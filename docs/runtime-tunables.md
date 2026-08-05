@@ -14,11 +14,11 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 204 unique knobs across 8 modules.
+**Total**: 205 unique knobs across 8 modules.
 
-**Typed getter classification**: 37/117 tagged (`operator`: 37, `algorithm`: 0, `unclassified`: 80).
+**Typed getter classification**: 37/118 tagged (`operator`: 37, `algorithm`: 0, `unclassified`: 81).
 
-## Env_config_core (23 knobs; typed classification 2/5)
+## Env_config_core (24 knobs; typed classification 2/6)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -36,6 +36,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_HOST_FD_PRESSURE_STATE_FILE` | string_literal | n/a | n/a | 319 | {1 Host pressure integration} |
 | `MASC_HTTP_BASE_URL` | string_literal | n/a | n/a | 277 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
 | `MASC_HTTP_PORT` | string_literal | n/a | n/a | 236 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
+| `MASC_JSONL_RETENTION_DAYS` | typed:int | unclassified | unclassified | 564 | Day-file retention for the JSONL stores under [.masc]. Default: 30. Read by the startup prune, the periodic maintenan... |
 | `MASC_LOG_LEVEL` | string_literal | n/a | n/a | 526 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_LOG_ROUTINE_LEVEL` | string_literal | n/a | n/a | 527 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_ORCHESTRATOR_ENABLED` | string_literal | n/a | n/a | 477 | SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352). Referenced by feature_flag_registry catalog, env_co... |

@@ -552,4 +552,15 @@ let build_git_commit_opt () =
 let pubsub_max_messages () =
   get_int ~default:1000 "MASC_PUBSUB_MAX_MESSAGES"
 
+(** Day-file retention for the JSONL stores under [.masc]. Default: 30.
+
+    Read by the startup prune, the periodic maintenance prune, and the
+    catch-up digest's look-back clamp. Those three decide which day files
+    are deleted and how far a digest may scan; a default that differed
+    between them would delete data one of them still expects to read. *)
+let default_jsonl_retention_days = 30
+
+let jsonl_retention_days () =
+  get_int ~default:default_jsonl_retention_days "MASC_JSONL_RETENTION_DAYS"
+
 (** {1 Keeper Defaults} *)

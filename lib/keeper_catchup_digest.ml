@@ -8,20 +8,14 @@ let digest_items_cap = 20
    payload out without limit; the digest reports at most this many failures. *)
 let read_errors_cap = 50
 
-let jsonl_retention_env = "MASC_JSONL_RETENTION_DAYS"
-let default_jsonl_retention_days = 30
-
-(* Retention SSOT is MASC_JSONL_RETENTION_DAYS, read the same way as startup
-   and periodic pruning. The digest still uses the default when pruning is
-   disabled with a non-positive value; otherwise an old cursor could trigger
-   an unbounded synchronous scan from a dashboard read. *)
+(* Retention SSOT is [Env_config_core.jsonl_retention_days], the same
+   getter the startup and periodic prunes call. The digest still falls back
+   to the default when pruning is disabled with a non-positive value;
+   otherwise an old cursor could trigger an unbounded synchronous scan from
+   a dashboard read. *)
 let jsonl_retention_scan_days () =
-  let days =
-    Safe_ops.get_env_int_logged
-      jsonl_retention_env
-      ~default:default_jsonl_retention_days
-  in
-  if days > 0 then days else default_jsonl_retention_days
+  let days = Env_config_core.jsonl_retention_days () in
+  if days > 0 then days else Env_config_core.default_jsonl_retention_days
 ;;
 
 (* Termination guard for the backward chat paging loop: each page walks at

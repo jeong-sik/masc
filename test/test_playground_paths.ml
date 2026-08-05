@@ -46,17 +46,6 @@ let test_bundle_root_format () =
     ".masc/playground/a_b/"
     (PP.bundle_root "a/b")
 
-let test_repos_path () =
-  check string "repos path"
-    ".masc/playground/sangsu/repos/"
-    (PP.repos_path "sangsu")
-
-let test_bundle_paths_order () =
-  check (list string) "bundle order: root, repos"
-    [ ".masc/playground/k1/";
-      ".masc/playground/k1/repos/" ]
-    (PP.bundle_paths "k1")
-
 let test_no_path_escape () =
   (* A poisoned name containing path separators must not produce a
      path that escapes the playground prefix. *)
@@ -101,9 +90,6 @@ let test_strip_canonical_to_short () =
     (PP.sanitize_keeper_name "keeper-sangsu-agent")
 
 let test_canonical_short_path_identity () =
-  check string "repos path identity"
-    (PP.repos_path "masc-improver")
-    (PP.repos_path "keeper-masc-improver-agent");
   check string "bundle_root identity"
     (PP.bundle_root "cheolsu")
     (PP.bundle_root "keeper-cheolsu-agent")
@@ -201,8 +187,6 @@ let () =
       ]);
       ("paths", [
         test_case "bundle_root format" `Quick test_bundle_root_format;
-        test_case "repos path" `Quick test_repos_path;
-        test_case "bundle_paths order" `Quick test_bundle_paths_order;
       ]);
       ("security", [
         test_case "no path escape" `Quick test_no_path_escape;

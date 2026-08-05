@@ -35,7 +35,6 @@ end
 (** {1 Keeper supervisor} *)
 
 module KeeperSupervisor : sig
-  val domain_pool_enabled : bool
   val sweep_interval_sec : float
   val dead_ttl_sec : float
 end

@@ -59,7 +59,6 @@ let get_global_switch = Keeper_process_switch.get
 let set_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.set
 let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enabled
 let with_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.with_noop
-let domain_pool_ignored_warning_emitted = Atomic.make false
 
 let launch_supervised_fiber_body
       ~proactive_warmup_sec
@@ -82,39 +81,7 @@ let launch_supervised_fiber_body
       }
     in
     Keeper_registry_event_queue.enqueue ~base_path meta.name bootstrap_signal;
-    (* RFC-0059 PR-7-pilot originally routed the whole keepalive body through
-       a Domain_pool worker.  Live recovery proved that unsafe: the body is
-       an Eio fiber loop that uses the server switch, clock, turn timeouts, and
-       provider streaming.  Moving it to an Executor_pool domain can touch an
-       Eio switch from the wrong domain and tear down keepers at boot.  Keep
-       the flag observable, but run the supervisor fiber on the owning Eio
-       domain.  Only pure/blocking sub-work should use [Domain_pool]. *)
-    let domain_pool_flag = Env_config.KeeperSupervisor.domain_pool_enabled in
-    let bump_fork_outcome outcome =
-      (* Label order mirrors the other [keeper_supervisor.ml] inc_counter
-         call sites ([keeper] first, then the discriminator).  Otel_metric_store
-         label-set keys are order-sensitive, so a single per-metric
-         convention prevents accidental time-series splitting when new
-         call sites add the same labels in a different order. *)
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string DomainPoolFork)
-        ~labels:[ "keeper", meta.name; "outcome", outcome ]
-        ()
-    in
     let fork_body body =
-      bump_fork_outcome
-        (if domain_pool_flag then "inline_eio_context" else "inline_disabled");
-      if
-        domain_pool_flag
-        && Atomic.compare_and_set
-             domain_pool_ignored_warning_emitted
-             false
-             true
-      then
-        Log.Keeper.warn
-          "keeper supervise domain pool ignored: keepalive body requires the owning \
-           Eio domain (first_keeper=%s)"
-          meta.name;
       match
         Keeper_lane.fork
           ~sw:ctx.sw

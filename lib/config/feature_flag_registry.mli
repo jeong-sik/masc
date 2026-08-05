@@ -7,10 +7,9 @@
 
     + Runtime enumeration for operators
     + Consistency verification (CI lint: [check-feature-flag-consistency.sh])
-    + Lifecycle tracking: Active → Deprecated → (removed from registry)
+    + Current lifecycle classification: Active or Experimental
     + Machine-readable flag catalog
 
-    @since 2.162.0
     @see <docs/design/inventory-gap-analysis-rfc.md> H5 Feature Flags *)
 
 (** {1 Types} *)
@@ -18,7 +17,6 @@
 (** Flag lifecycle state machine. *)
 type lifecycle =
   | Active
-  | Deprecated of string  (** reason for deprecation *)
   | Experimental          (** not yet stable, may change without notice *)
 
 type flag = {
@@ -27,7 +25,6 @@ type flag = {
   default : bool;
   category : string;      (** Grouping: transport/tool/keeper/dashboard/inference/runtime *)
   lifecycle : lifecycle;
-  since : string;
 }
 
 (** {1 Registry} *)
@@ -49,9 +46,9 @@ val runtime_value : flag -> bool
     ["default"]. *)
 val runtime_source : flag -> string
 
-(** [get_bool env_name] = registry-aware lookup. Falls back to
-    [Env_config_core.get_bool ~default:false] and logs a warning if
-    [env_name] is not registered. *)
+(** [get_bool env_name] reads the registered flag using its canonical
+    default. Raises {!Env_config_core.Config_error} when [env_name] is not
+    registered. *)
 val get_bool : string -> bool
 
 (** {1 Serialisation} *)
@@ -59,7 +56,7 @@ val get_bool : string -> bool
 val lifecycle_to_string : lifecycle -> string
 
 (** JSON shape: [{env_name, description, canonical_default, runtime_value,
-    source, category, lifecycle, since}]. *)
+    source, category, lifecycle}]. *)
 val flag_to_json : flag -> Yojson.Safe.t
 
 (** All flags grouped by category:
@@ -70,6 +67,3 @@ val to_json : unit -> Yojson.Safe.t
 
 (** Flags whose runtime value differs from the canonical default. *)
 val overridden_flags : unit -> flag list
-
-(** Flags currently in [Deprecated _] lifecycle state. *)
-val deprecated_flags : unit -> flag list

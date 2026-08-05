@@ -3,8 +3,7 @@
 
     Aggregates status, enablement source, and lifecycle buckets for
     every flag in {!Feature_flag_registry.all_flags} to provide a
-    runtime view of which features are active, experimental, or
-    deprecated. *)
+    runtime view of which features are active or experimental. *)
 
 (** {1 Types} *)
 
@@ -12,7 +11,6 @@ type feature_status =
   | Healthy
   | Warning
   | Inactive
-  | Deprecated
 
 type feature_health_item = {
   env_name : string;
@@ -22,7 +20,6 @@ type feature_health_item = {
   is_enabled : bool;
   source : string;  (** ["env"] when overridden, else ["default"]. *)
   status : feature_status;
-  since : string;
 }
 
 (** {1 Enumeration} *)

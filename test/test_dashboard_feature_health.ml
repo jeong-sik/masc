@@ -1,9 +1,4 @@
-(** Pure-function unit tests for [Dashboard_feature_health].
-
-    Audit P2 follow-up (2026-04-29 §3.1.2) — listed as
-    "테스트 완전 부재" with the recommendation
-    "basic smoke test".  Closes that gap with property pins
-    instead of a smoke test (richer regression coverage). *)
+(** Pure-function unit tests for [Dashboard_feature_health]. *)
 
 module H = Dashboard_feature_health
 module R = Feature_flag_registry
@@ -33,16 +28,13 @@ let test_status_to_string_warning () =
 let test_status_to_string_inactive () =
   assert (H.status_to_string H.Inactive = "inactive")
 
-let test_status_to_string_deprecated () =
-  assert (H.status_to_string H.Deprecated = "deprecated")
-
 let test_status_to_string_distinct () =
   let labels =
-    [ H.Healthy; H.Warning; H.Inactive; H.Deprecated ]
+    [ H.Healthy; H.Warning; H.Inactive ]
     |> List.map H.status_to_string
   in
   let unique = List.sort_uniq compare labels in
-  assert (List.length unique = 4)
+  assert (List.length unique = 3)
 
 (* ─── (2) lifecycle_to_status mapping ──────────────────────────── *)
 
@@ -51,17 +43,6 @@ let test_lifecycle_active_maps_to_healthy () =
 
 let test_lifecycle_experimental_maps_to_warning () =
   assert (H.lifecycle_to_status R.Experimental = H.Warning)
-
-let test_lifecycle_deprecated_maps_to_deprecated () =
-  assert (
-    H.lifecycle_to_status (R.Deprecated "any reason")
-    = H.Deprecated)
-
-let test_lifecycle_deprecated_empty_reason_still_maps () =
-  (* Edge: an empty deprecation reason still produces Deprecated
-     status (the reason string is irrelevant for the status
-     classification). *)
-  assert (H.lifecycle_to_status (R.Deprecated "") = H.Deprecated)
 
 (* ─── (3) feature_to_health_item: status derivation ──────────── *)
 
@@ -72,7 +53,6 @@ let dummy_flag ~env_name ~lifecycle ~default =
     default;
     category = "runtime";
     lifecycle;
-    since = "0.0.0";
   }
 
 let test_active_enabled_is_healthy () =
@@ -103,25 +83,15 @@ let test_experimental_is_warning_regardless_of_enabled () =
   let item = H.feature_to_health_item f in
   assert (item.status = H.Warning)
 
-let test_deprecated_is_deprecated_regardless_of_enabled () =
-  let env = "MASC_TEST_HEALTH_DEPRECATED_XYZ123" in
-  with_env_unset env @@ fun () ->
-  let f =
-    dummy_flag ~env_name:env
-      ~lifecycle:(R.Deprecated "use MASC_X instead") ~default:true
-  in
-  let item = H.feature_to_health_item f in
-  assert (item.status = H.Deprecated)
-
 let test_lifecycle_field_serialised () =
   let env = "MASC_TEST_HEALTH_LIFECYCLE_FIELD_XYZ123" in
   with_env_unset env @@ fun () ->
   let f =
     dummy_flag ~env_name:env
-      ~lifecycle:(R.Deprecated "old API") ~default:false
+      ~lifecycle:R.Experimental ~default:false
   in
   let item = H.feature_to_health_item f in
-  assert (item.lifecycle = "deprecated: old API")
+  assert (item.lifecycle = "experimental")
 
 (* ─── (4) get_feature_categories: distinct + sorted ─────────── *)
 
@@ -153,28 +123,24 @@ let test_categories_subset_of_documented () =
 (* ─── (5) count_by_status partition ────────────────────────────── *)
 
 let test_count_by_status_partition () =
-  (* The 4 status buckets together must account for every
+  (* The current status buckets together must account for every
      feature.  Pin that
-       count Healthy + count Warning + count Inactive
-       + count Deprecated = total. *)
+       count Healthy + count Warning + count Inactive = total. *)
   let features = H.get_all_features () in
   let total = List.length features in
   let h = H.count_by_status features H.Healthy in
   let w = H.count_by_status features H.Warning in
   let i = H.count_by_status features H.Inactive in
-  let d = H.count_by_status features H.Deprecated in
-  assert (h + w + i + d = total)
+  assert (h + w + i = total)
 
 let test_count_by_status_nonneg () =
   let features = H.get_all_features () in
   let h = H.count_by_status features H.Healthy in
   let w = H.count_by_status features H.Warning in
   let i = H.count_by_status features H.Inactive in
-  let d = H.count_by_status features H.Deprecated in
   assert (h >= 0);
   assert (w >= 0);
-  assert (i >= 0);
-  assert (d >= 0)
+  assert (i >= 0)
 
 (* ─── (6) JSON shape ──────────────────────────────────────────── *)
 
@@ -187,7 +153,7 @@ let test_feature_health_item_json_shape () =
   let j = H.feature_health_item_to_json item in
   let expected_keys =
     [ "env_name"; "description"; "category"; "lifecycle";
-      "is_enabled"; "source"; "status"; "since" ]
+      "is_enabled"; "source"; "status" ]
   in
   List.iter
     (fun k ->
@@ -213,16 +179,12 @@ let () =
   test_status_to_string_healthy ();
   test_status_to_string_warning ();
   test_status_to_string_inactive ();
-  test_status_to_string_deprecated ();
   test_status_to_string_distinct ();
   test_lifecycle_active_maps_to_healthy ();
   test_lifecycle_experimental_maps_to_warning ();
-  test_lifecycle_deprecated_maps_to_deprecated ();
-  test_lifecycle_deprecated_empty_reason_still_maps ();
   test_active_enabled_is_healthy ();
   test_active_disabled_is_inactive ();
   test_experimental_is_warning_regardless_of_enabled ();
-  test_deprecated_is_deprecated_regardless_of_enabled ();
   test_lifecycle_field_serialised ();
   test_categories_are_distinct ();
   test_categories_sorted ();

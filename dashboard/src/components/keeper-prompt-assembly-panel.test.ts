@@ -222,8 +222,8 @@ describe('buildKeeperPromptAssemblyReport', () => {
 
 // The "Total size" metric is what an operator sizes a keeper's context budget
 // against. Two stages carry messageSlot 'not sent' — 'registry-bootstrap'
-// re-lists keeper.system as source preparation, and 'manifest-edge' is the
-// post-assembly audit record. Summing every row counted keeper.system twice:
+// re-lists keeper as source preparation, and 'manifest-edge' is the
+// post-assembly audit record. Summing every row counted keeper twice:
 // the live fleet panel read 15.3 KiB / 3,920 tok against a real model input of
 // 1,985 tok.
 describe('buildKeeperPromptAssemblyReport sent totals', () => {
@@ -231,9 +231,9 @@ describe('buildKeeperPromptAssemblyReport sent totals', () => {
     const body = 'x'.repeat(4096)
     const report = buildKeeperPromptAssemblyReport([
       prompt({
-        key: 'keeper.system',
+        key: 'keeper',
         effective: body,
-        file_path: '/tmp/.masc/config/prompts/keeper.system.md',
+        file_path: '/tmp/.masc/config/prompts/keeper.md',
         char_count: body.length,
       }),
     ])
@@ -254,9 +254,9 @@ describe('buildKeeperPromptAssemblyReport sent totals', () => {
     const body = 'y'.repeat(2048)
     const report = buildKeeperPromptAssemblyReport([
       prompt({
-        key: 'keeper.system',
+        key: 'keeper',
         effective: body,
-        file_path: '/tmp/.masc/config/prompts/keeper.system.md',
+        file_path: '/tmp/.masc/config/prompts/keeper.md',
         char_count: body.length,
       }),
     ])
@@ -264,7 +264,7 @@ describe('buildKeeperPromptAssemblyReport sent totals', () => {
     const systemStage = report.stages.find(stage => stage.id === 'base-system')
     const sourceStage = report.stages.find(stage => stage.id === 'registry-bootstrap')
     expect(sourceStage?.messageSlot).toBe('not sent')
-    // Both stages render keeper.system, so the naive all-rows sum is ~2x.
+    // Both stages render keeper, so the naive all-rows sum is ~2x.
     expect(sourceStage?.bytes).toBe(systemStage?.bytes)
     expect(report.stats.sentEstimatedTokens).toBeLessThan(
       report.rows.reduce((sum, row) => sum + row.estimatedTokens, 0),

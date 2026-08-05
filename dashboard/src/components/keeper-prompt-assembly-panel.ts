@@ -97,8 +97,8 @@ export interface KeeperPromptAssemblyReport {
     criticalCount: number
     // Only rows whose stage actually reaches the model. Two stages carry
     // messageSlot 'not sent' — 'registry-bootstrap' (source preparation, which
-    // re-lists keeper.system) and 'manifest-edge' (the post-assembly audit
-    // record). Summing every row double-counted keeper.system and reported
+    // re-lists keeper) and 'manifest-edge' (the post-assembly audit record).
+    // Summing every row double-counted keeper and reported
     // 3,920 tok against a real model input of 1,985 tok on the live fleet.
     sentPromptBytes: number
     sentEstimatedTokens: number

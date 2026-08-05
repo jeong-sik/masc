@@ -504,7 +504,6 @@ let extra_guard_fragments_for_name = function
         "fusion requires the server root switch + net (unavailable)";
         "\"reason\":\"disabled\"";
       ]
-  | "masc_library_promote" -> [ "no candidate matching" ]
   | "masc_keeper_delegate" ->
       [
         "keeper management tool";

@@ -947,7 +947,6 @@ let receipt_detail_of_provider_call
   in
   { tool_name = call.name
   ; provider
-  ; outcome = "ok"
   ; execution_outcome = Tool_result.Ok
   ; typed_outcome = Some Keeper_tool_outcome.Progress
   ; latency_ms = 1.0

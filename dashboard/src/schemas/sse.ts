@@ -58,7 +58,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_phase_changed',
   'keeper_composite_changed',
   'keeper_chat_appended',
-  'keeper_chat_queue_changed',
+  'keeper_waiting_inventory_changed',
   'ide_cursor_changed',
   'keeper_tool_call',
   'masc/keeper_tool_call',
@@ -340,12 +340,12 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     return fail('audio', 'Expected audio clip object')
   }
 
-  if (value.type === 'keeper_chat_queue_changed') {
+  if (value.type === 'keeper_waiting_inventory_changed') {
     if (typeof value.keeper_name !== 'string' || value.keeper_name.trim() === '') {
       return fail('keeper_name', 'Expected non-empty keeper_name')
     }
-    if (!Number.isSafeInteger(value.revision) || (value.revision as number) < 0) {
-      return fail('revision', 'Expected exact non-negative integer revision')
+    if (value.queue_kind !== 'chat_queue' && value.queue_kind !== 'event_queue') {
+      return fail('queue_kind', 'Expected chat_queue or event_queue queue_kind')
     }
   }
 

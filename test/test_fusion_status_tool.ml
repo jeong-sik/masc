@@ -145,7 +145,7 @@ let test_empty_registry () =
    registry boot invariant (enforce_visible_tag_coverage) so a Default-visible
    tool without a dispatch tag would fail loudly here. *)
 let test_tool_is_keeper_visible () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   let visible_names =
     Keeper_tool_descriptor.model_visible_descriptors ()
     |> List.concat_map Keeper_tool_descriptor.keeper_model_names

@@ -12,7 +12,7 @@ type runtime_decision_outcome =
     need the pure or telemetry-emitting string projection. *)
 let runtime_decision name =
   match Keeper_tool_alias.canonical_resolution name with
-  | Keeper_tool_alias.Public_alias { internal } -> Route_hit { internal }
+  | Keeper_tool_alias.Public_name { internal } -> Route_hit { internal }
   | Keeper_tool_alias.Internal { canonical } -> Already_internal { canonical }
   | Keeper_tool_alias.Unknown -> Miss
 

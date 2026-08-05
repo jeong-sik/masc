@@ -14,18 +14,22 @@ and worker_start_error =
 
 type restored_inventory =
   { operations : Keeper_shutdown_types.t list
-  ; retired_terminal_records : Keeper_shutdown_store.retired_terminal_record list
   ; blocked_keeper_names : string list
   ; corrupt_records : Keeper_shutdown_store.corrupt_record list
+  ; corrupt_owner_fences : corrupt_owner_fence list
+  }
+
+and corrupt_owner_fence =
+  { keeper_name : string
+  ; operation_id : Keeper_shutdown_types.Operation_id.t
   }
 
 val submit_error_to_string : submit_error -> string
 
-(** Restore admission from owner-addressable durable inventory. Verified
-    retired terminal records release only a matching in-memory fence and remain
-    explicit in [retired_terminal_records]. Corrupt payloads fence their path
-    owner and remain explicit in [corrupt_records]; valid operations for
-    unrelated Keepers remain recoverable. *)
+(** Restore admission from owner-addressable durable inventory. A Keeper with
+    any corrupt payload is fenced once. A current operation that still requires
+    a fence owns admission long enough to recover; otherwise the deterministic
+    [corrupt_owner_fences] entry owns it. Corrupt records remain explicit. *)
 val restore_inventory_admission :
   config:Workspace.config ->
   Keeper_shutdown_store.inventory_entry list ->
@@ -60,6 +64,15 @@ val recover_at_boot :
     lets bootstrap isolate every Keeper in its own process-lifetime fiber. *)
 val recover_operation :
   config:Workspace.config ->
+  Keeper_shutdown_types.t ->
+  (Keeper_shutdown_types.t, string) result
+
+(** Recover one current operation. If recovery releases admission and the
+    owner also has corrupt durable state, restore that deterministic fail-closed
+    fence before returning success. *)
+val recover_operation_with_corrupt_owner_fence :
+  config:Workspace.config ->
+  corrupt_owner_fence:corrupt_owner_fence option ->
   Keeper_shutdown_types.t ->
   (Keeper_shutdown_types.t, string) result
 

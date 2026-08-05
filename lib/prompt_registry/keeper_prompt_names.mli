@@ -13,5 +13,7 @@ val board_attention_judgment_batch : string
 val gate_judgment : string
 val verification_anti_rationalization : string
 val memory_os_recall_context : string
-val memory_os_recall_unavailable : string
+(** The only recall asset. A turn whose recall is empty or failed injects no
+    block at all — there is no counterpart key naming the absence. *)
+
 val librarian_current_selection : string

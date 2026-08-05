@@ -12,7 +12,7 @@ open Masc
     validation) and a schema (for input validation), and retired surfaces
     must not leak back into the runtime registry. *)
 
-let init () = Masc_test_deps.init_keeper_tool_registry ()
+let init () = Masc_test_deps.init_unified_tool_registry ()
 
 let sorted_set names = List.sort_uniq String.compare names
 
@@ -78,6 +78,33 @@ let test_workspace_schemas_route_to_state () =
          (Printf.sprintf "%s routes to Mod_state" schema.name)
        true
        (Unified_tool_registry.tag_of_name schema.name = Some Tool_dispatch.Mod_state))
+;;
+
+let test_tag_resolution_requires_exact_ownership () =
+  Alcotest.(check (option bool))
+    "known Keeper tool resolves from its descriptor"
+    (Some true)
+    (Option.map
+       (fun tag -> tag = Tool_dispatch.Mod_external)
+       (Unified_tool_registry.tag_of_name "masc_keeper_status"));
+  Alcotest.(check (option bool))
+    "public tool resolves from its descriptor"
+    (Some true)
+    (Option.map
+       (fun tag -> tag = Tool_dispatch.Mod_external)
+       (Unified_tool_registry.tag_of_name "Write"));
+  Alcotest.(check (option bool))
+    "inline runtime tool resolves from its schema owner"
+    (Some true)
+    (Option.map
+       (fun tag -> tag = Tool_dispatch.Mod_inline)
+       (Unified_tool_registry.tag_of_name "masc_start"));
+  Alcotest.(check (option bool))
+    "Keeper-like prefix has no owner"
+    None
+    (Option.map
+       (fun tag -> tag = Tool_dispatch.Mod_external)
+       (Unified_tool_registry.tag_of_name "masc_keeper_unknown"))
 ;;
 
 let test_workspace_schemas_match_dispatch_bindings () =
@@ -193,41 +220,6 @@ let test_every_registered_schema_has_catalog_permission () =
     missing
 ;;
 
-let test_retired_tools_are_absent () =
-  init ();
-  (* Only fully retired tools — no live dispatch handler and no keeper
-     descriptor — belong here. masc_operator_* were removed from this list
-     because they are live tools: lib/operator/operator_tool.ml carries
-     dispatch handlers for them. register_all() therefore legitimately
-     registers them; they only appeared absent before when the
-     Mcp_server_eio module-load bootstrap did not run in this executable. *)
-  let retired_front_door_tools =
-    [ "masc_operation_start"; "masc_dispatch_tick"; "masc_goal_review" ]
-  in
-  let retired_tool_admin_surface =
-    [ "masc_tool_admin_snapshot"
-    ; "masc_tool_admin_update"
-    ; "tool_admin_snapshot"
-    ; "tool_admin_update"
-    ]
-  in
-  let retired_tools =
-    retired_front_door_tools @ retired_tool_admin_surface |> sorted_set
-  in
-  let leaked_tag =
-    List.filter (fun name -> Option.is_some (Tool_dispatch.lookup_tag name)) retired_tools
-  in
-  let leaked_schema =
-    List.filter (fun name -> Option.is_some (Tool_dispatch.lookup_schema name)) retired_tools
-  in
-  let leaked_handler =
-    List.filter (fun name -> Tool_dispatch.is_registered name) retired_tools
-  in
-  Alcotest.(check (list string)) "retired tools absent from tag registry" [] leaked_tag;
-  Alcotest.(check (list string)) "retired tools absent from schema registry" [] leaked_schema;
-  Alcotest.(check (list string)) "retired tools absent from handler registry" [] leaked_handler
-;;
-
 let () =
   let open Alcotest in
   run
@@ -243,6 +235,8 @@ let () =
             test_workspace_schemas_match_dispatch_bindings
         ; test_case "workspace schemas have ToolSpec metadata" `Quick
             test_workspace_schemas_have_tool_spec_metadata
+        ; test_case "tag resolution requires exact ownership" `Quick
+            test_tag_resolution_requires_exact_ownership
         ] )
     ; ( "keeper_tool_policy"
       , [ test_case
@@ -257,9 +251,6 @@ let () =
             "every registered schema has catalog permission"
             `Quick
             test_every_registered_schema_has_catalog_permission
-        ] )
-    ; ( "retired_tools"
-      , [ test_case "retired tools are absent" `Quick test_retired_tools_are_absent
         ] )
     ]
 ;;

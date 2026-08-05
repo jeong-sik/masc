@@ -54,7 +54,6 @@ type input_schema_source =
   | Descriptor_owned
   | Canonical_registry
   | Keeper_projection
-  | Missing_canonical_registry
 
 type readonly_of_input = Yojson.Safe.t -> bool option
 
@@ -133,7 +132,6 @@ type t =
   ; keeper_tool_group : keeper_tool_group
   ; input_schema_source : input_schema_source
   ; public_name : string
-  ; public_aliases : string list
   ; internal_name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
@@ -159,9 +157,8 @@ val sandbox_to_string : sandbox -> string
 val keeper_tool_group_to_string : keeper_tool_group -> string
 val runtime_handler_to_string : runtime_handler -> string
 
-(** [public_descriptors] is the LLM-native public surface (RFC-0064 hard-cut).
-    Each descriptor has one preferred [public_name] and may expose secondary
-    [public_aliases] that reuse the same schema/translation/runtime. *)
+(** [public_descriptors] is the LLM-native public surface. Each descriptor has
+    exactly one [public_name]. *)
 val public_descriptors : t list
 
 (** [all_descriptors ()] is [public_descriptors] plus the module-private
@@ -191,9 +188,7 @@ val model_visible_schemas : unit -> Masc_domain.tool_schema list
 val keeper_model_names : t -> string list
 
 (** Names admitted by the Keeper execution/candidate boundary. A preferred
-    public descriptor retains compatibility aliases and its internal handler
-    route for transport/runtime dispatch. Only [keeper_model_names] controls
-    the model schema, so these aliases cannot become duplicate model tools. *)
+    public descriptor admits its public name and internal handler route. *)
 val keeper_candidate_names : t -> string list
 
 (** Every name owned by a descriptor, including transport-alias names. This is

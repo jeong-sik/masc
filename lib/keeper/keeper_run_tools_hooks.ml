@@ -212,14 +212,14 @@ let assemble_hooks
               ~input
               ~output_text
           in
-          let outcome =
-            if success then "ok" else "error"
-          in
           (match Keeper_registry.get ~base_path:config.base_path meta.name with
            | Some entry ->
              acc.meta <- entry.meta;
              meta_ref := entry.meta
            | None -> ());
+          let execution_outcome =
+            if success then Tool_result.Ok else Tool_result.Error
+          in
           let task_id =
             Keeper_run_tools_task_scope.task_id_scope_of_tool_call
               ~tool_name
@@ -229,9 +229,7 @@ let assemble_hooks
           acc.tool_calls
           <- { tool_name
              ; provider
-             ; outcome
-             ; execution_outcome =
-                 (if success then Tool_result.Ok else Tool_result.Error)
+             ; execution_outcome
              ; typed_outcome
              ; latency_ms = duration_ms
              ; task_id
@@ -254,7 +252,7 @@ let assemble_hooks
              | Some Keeper_tool_outcome.Progress -> "progress"
              | Some (Keeper_tool_outcome.No_progress _) -> "no_progress"
              | Some (Keeper_tool_outcome.Error _) -> "error"
-             | None -> outcome
+             | None -> Tool_result.string_of_tool_call_outcome execution_outcome
            in
            let turn_id =
              match acc.meta.Keeper_meta_contract.current_task_id with
@@ -279,7 +277,7 @@ let assemble_hooks
              ; tool_name
              ; keeper_id = acc.meta.name
              ; turn_id
-             ; outcome
+             ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
              ; typed_outcome = typed_outcome_str
              ; duration_ms
              ; output_text

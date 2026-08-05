@@ -79,6 +79,12 @@ function authBadgeSummary(): {
       label: 'Auth error',
     }
   }
+  if (!hasToken && bootstrap === 'warming') {
+    return {
+      dotColor: 'bg-[var(--color-status-warn)]',
+      label: 'Server warming up',
+    }
+  }
   // No token and bootstrap failed — show actionable prompt
   if (
     !hasToken

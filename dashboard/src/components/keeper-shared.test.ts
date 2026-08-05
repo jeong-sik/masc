@@ -994,7 +994,40 @@ describe('KeeperConversationPanel', () => {
     })
   })
 
+  it('does not open Admin-only queue controls for the loopback Worker session', async () => {
+    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [{
+          keeper_name: 'sangsu',
+          state: 'waiting',
+          waiting_count: 1,
+          sources: { chat_queue_pending: 1 },
+          waiting_on: [],
+        }],
+      },
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+
+    const button = await waitFor(() => {
+      const node = container.querySelector('[data-open-keeper-queue-control]') as HTMLButtonElement | null
+      expect(node?.disabled).toBe(true)
+      expect(node?.textContent).toContain('Admin 권한 필요')
+      return node!
+    })
+    fireEvent.click(button)
+
+    expect(container.querySelector('[data-keeper-queue-control-panel]')).toBeNull()
+    expect(fetchKeeperChatPending).not.toHaveBeenCalled()
+    expect(fetchKeeperEventQueuePending).not.toHaveBeenCalled()
+  })
+
   it('opens an operator drawer with exact durable chat and event queue evidence', async () => {
+    shellAuthSummary.value = { effective_role: 'admin', default_role: 'admin' } as typeof shellAuthSummary.value
     const receiptId = 'chatq_00000000-0000-4000-8000-000000000022'
     fetchKeeperChatPending.mockResolvedValue({
       keeperName: 'sangsu',
@@ -1082,6 +1115,7 @@ describe('KeeperConversationPanel', () => {
   })
 
   it('shows exact inflight and recovery evidence and resolves recovery with a fresh receipt fence', async () => {
+    shellAuthSummary.value = { effective_role: 'admin', default_role: 'admin' } as typeof shellAuthSummary.value
     const inflightReceiptId = 'chatq_00000000-0000-4000-8000-000000000031'
     const recoveryReceiptId = 'chatq_00000000-0000-4000-8000-000000000032'
     fetchKeeperChatPending.mockResolvedValue({
@@ -1251,6 +1285,7 @@ describe('KeeperConversationPanel', () => {
   })
 
   it('replays an ambiguous event mutation with the exact preserved operation identity', async () => {
+    shellAuthSummary.value = { effective_role: 'admin', default_role: 'admin' } as typeof shellAuthSummary.value
     fetchKeeperChatPending.mockResolvedValue({
       keeperName: 'sangsu',
       revision: '22',

@@ -176,9 +176,9 @@ export default defineConfig(({ command }) => {
       ? {
           proxy: {
             '/api': proxyTarget,
-            '/mcp': { target: proxyTarget },
+            '/mcp': { target: proxyTarget, changeOrigin: true },
             '/sse': { target: proxyTarget },
-            '/ws': { target: proxyTarget, ws: true },
+            '/ws': { target: proxyTarget, ws: true, changeOrigin: true },
             '/yjs': { target: proxyTarget, ws: true },
           },
         }

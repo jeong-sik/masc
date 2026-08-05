@@ -1,13 +1,25 @@
 (** Env-gated capture of the MASC->OAS request boundary (redacted).
 
     Records the effective request parameters MASC hands to OAS per SDK turn —
-    system prompt, extra system context, tool schemas, user message, and the
-    replayed conversation history ([initial_messages]) — so
+    system prompt, extra system context, tool schemas, and user message — so
     degenerate-repetition feedback loops can be diagnosed from the actual
-    input rather than from digests/sizes. Tool schemas use the same
-    {!Agent_sdk.Tool.schema_to_json} projection OAS prepares for the provider.
-    String content is passed through {!Llm_provider.Secret_redactor} and the exact
-    {!Keeper_secret_redaction} projection snapshot before it is written.
+    input rather than from digests/sizes. These are the parameters no other
+    durable store holds: the OAS checkpoint keeps [system_prompt] and the
+    replayed messages, but nothing else keeps the per-turn injected context.
+    Tool schemas use the same {!Agent_sdk.Tool.schema_to_json} projection OAS
+    prepares for the provider. String content is passed through
+    {!Llm_provider.Secret_redactor} and the exact {!Keeper_secret_redaction}
+    projection snapshot before it is written.
+
+    The replayed conversation itself is recorded as [history_message_count]
+    and [history_messages_digest] rather than as text. The text is already
+    durable in the checkpoint and its [oas-snapshot-*] history, and this
+    function runs once per SDK turn: embedding it made one record as large as
+    the checkpoint (measured 2026-08-05 on a live keeper: 14,465 messages =
+    9.8MB per record, exhausting the 64MiB day-file budget after 7 records and
+    skipping every request after that). The digest is the same MD5 the
+    [context_injected] runtime manifest records, so a capture row joins to
+    the manifest row and to the checkpoint that holds the text.
 
     Writes are best-effort and dated under
     [<masc_root>/wire-capture/YYYY-MM/DD.jsonl] (same [Dated_jsonl] per-day
@@ -19,10 +31,13 @@
 
     Motivation: the request boundary is the primary suspect for
     self-reinforcing repetition — the keeper's own prior visible text is
-    replayed into [initial_messages] with no content-level dedup guard. This
-    capture makes that input observable. Provider-independent structural
-    redaction is composed with the exact Keeper secret projection snapshot;
-    token formats are never inferred from product prefixes or lengths. See
+    replayed into [initial_messages] with no content-level dedup guard. The
+    replayed text is readable from the checkpoint; what was unreadable is the
+    context this module injects on top of it, and what {!capture_response}
+    pairs with it is the output that becomes the next turn's replayed input.
+    Provider-independent structural redaction is composed with the exact
+    Keeper secret projection snapshot; token formats are never inferred from
+    product prefixes or lengths. See
     [docs/masc-keeper-repetition-blast-radius-design-2026-07-02.html] (Phase O).
 
     Disabled unless [MASC_KEEPER_WIRE_CAPTURE] is enabled through the feature
@@ -73,7 +88,9 @@ val capture_request :
     snapshot; [masc_root] must already be the effective cluster-aware MASC
     root. [tool_schema_bytes] records the byte length of the exact unredacted
     compact JSON schema array while [tools] stores its recursively redacted
-    content. *)
+    content. [history_messages] is consumed for [history_message_count] and
+    [history_messages_digest] only; the messages themselves are not written
+    (see the module header). *)
 
 val capture_response :
   base_path:string ->

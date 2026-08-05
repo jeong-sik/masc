@@ -2070,6 +2070,70 @@ let test_cross_domain_wake_is_coalesced_and_rearmed () =
     Alcotest.fail "worker lifetime left a stale wake registration"
 ;;
 
+(* The drain verdict must stay three distinguishable tokens. This is what the
+   worker logs, and it is the only thing that separates "drained, nothing to
+   do" from "could not claim" from "the partition moved under me". Collapsing
+   two of them back into one string would restore the state the measurement on
+   2026-08-05 found: pending 425 -> 1031 with zero contention lines and zero
+   worker failures, and no way to tell which of the three was happening. *)
+let test_drain_outcome_labels_stay_distinct () =
+  let contention =
+    { W.keeper_name = "k"
+    ; partition_id = "p"
+    ; generation = P.Generation.initial
+    }
+  in
+  let labels =
+    List.map
+      W.For_testing.drain_outcome_label
+      [ W.Drained
+      ; W.Retry_later { contention; reason = W.Exact_claim_contended }
+      ; W.Retry_later { contention; reason = W.Selected_generation_changed }
+      ]
+  in
+  Alcotest.(check (list string))
+    "one token per verdict"
+    [ "drained"; "retry_claim_contended"; "retry_generation_changed" ]
+    labels;
+  Alcotest.(check int)
+    "no two verdicts share a token"
+    3
+    (List.length (List.sort_uniq compare labels))
+;;
+
+(* A drain that returns Retry_later left the durable partition undrained and
+   re-armed the same contention, so the next wake re-inspects the same root.
+   Emitting that at the same level as a completed drain makes a worker that
+   never finishes read as routine while its candidate ledger grows (#26863). *)
+let test_undrained_outcomes_are_not_routine () =
+  let contention =
+    { W.keeper_name = "k"
+    ; partition_id = "p"
+    ; generation = P.Generation.initial
+    }
+  in
+  let level_name outcome =
+    match W.For_testing.drain_outcome_log_level outcome with
+    | Log.Debug -> "debug"
+    | Log.Info -> "info"
+    | Log.Warn -> "warn"
+    | Log.Error -> "error"
+  in
+  Alcotest.(check string)
+    "a completed drain is routine"
+    "info"
+    (level_name W.Drained);
+  Alcotest.(check string)
+    "a contended claim is not routine"
+    "warn"
+    (level_name (W.Retry_later { contention; reason = W.Exact_claim_contended }));
+  Alcotest.(check string)
+    "a moved generation is not routine"
+    "warn"
+    (level_name
+       (W.Retry_later { contention; reason = W.Selected_generation_changed }))
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_worker"
@@ -2194,6 +2258,14 @@ let () =
             "cross-domain wake coalesces and rearms"
             `Quick
             test_cross_domain_wake_is_coalesced_and_rearmed
+        ; Alcotest.test_case
+            "undrained outcomes are not routine"
+            `Quick
+            test_undrained_outcomes_are_not_routine
+        ; Alcotest.test_case
+            "drain outcome labels stay distinct"
+            `Quick
+            test_drain_outcome_labels_stay_distinct
         ] )
     ]
 ;;

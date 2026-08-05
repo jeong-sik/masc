@@ -1,11 +1,11 @@
 let keeper_tool_names_for_outcome ~(tool_calls : Keeper_agent_result.tool_call_detail list)
-      ~(outcome : string)
+      ~(outcome : Tool_result.tool_call_outcome)
   : string list
   =
   tool_calls
   |> List.rev
   |> List.filter_map (fun (detail : Keeper_agent_result.tool_call_detail) ->
-    if String.equal detail.outcome outcome
+    if detail.execution_outcome = outcome
     then Some (Keeper_tool_resolution.canonical_tool_name detail.tool_name)
     else None)
 ;;
@@ -17,7 +17,7 @@ let progress_keeper_tool_names_for_contract
   =
   match tool_calls with
   | [] -> actual_keeper_tool_names
-  | _ :: _ -> keeper_tool_names_for_outcome ~tool_calls ~outcome:"ok"
+  | _ :: _ -> keeper_tool_names_for_outcome ~tool_calls ~outcome:Tool_result.Ok
 ;;
 
 let observed_completion_evidence

@@ -139,32 +139,33 @@ let execution_summary_json execution_json =
   in
   let execution_keepers = json_list_field "keepers" execution_json |> take_n 20 in
   let has_text key json = json_string_field_opt key json |> Option.is_some in
-  let existing = json_assoc_field "summary" execution_json in
-  match Json_util.assoc_member_opt "blocked_sessions" existing with
-  | Some (`Int _ | `Intlit _) -> existing
-  | _ ->
-      `Assoc
-        [
-          ("active_operations", `Int (List.length execution_operation_briefs));
-          ( "blocked_operations",
-            `Int
-              (count_where execution_operation_briefs (has_text "blocker_summary"))
-          );
-          ( "worker_alerts",
-            `Int
-              (count_where execution_worker_support (fun row ->
-                   match json_string_field_opt "tone" row with
-                   | Some "warn" | Some "bad" -> true
-                   | _ -> false)) );
-          ( "continuity_alerts",
-            `Int
-              (count_where execution_continuity (fun row ->
-                   match json_string_field_opt "tone" row with
-                   | Some "warn" | Some "bad" -> true
-                   | _ -> false)) );
-          ("priority_items", `Int (List.length execution_queue));
-          ("keepers", `Int (List.length execution_keepers));
-        ]
+  (* This summary is always derived here. A pass-through arm used to return an
+     upstream [summary] whose [blocked_sessions] count was already an int, but
+     the team-session surfaces that produced that field were removed in #6363
+     and no producer has written it since — the arm could not be reached, so the
+     derivation below already ran on every request. Keeping the arm advertised a
+     pass-through path that does not exist. *)
+  `Assoc
+    [
+      ("active_operations", `Int (List.length execution_operation_briefs));
+      ( "blocked_operations",
+        `Int (count_where execution_operation_briefs (has_text "blocker_summary"))
+      );
+      ( "worker_alerts",
+        `Int
+          (count_where execution_worker_support (fun row ->
+               match json_string_field_opt "tone" row with
+               | Some "warn" | Some "bad" -> true
+               | _ -> false)) );
+      ( "continuity_alerts",
+        `Int
+          (count_where execution_continuity (fun row ->
+               match json_string_field_opt "tone" row with
+               | Some "warn" | Some "bad" -> true
+               | _ -> false)) );
+      ("priority_items", `Int (List.length execution_queue));
+      ("keepers", `Int (List.length execution_keepers));
+    ]
 
 let namespace_truth_dashboard_surface = "/api/v1/dashboard/namespace-truth"
 let namespace_truth_source = "namespace_truth_read_model"

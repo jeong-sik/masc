@@ -549,27 +549,46 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined, undefined)
   })
 
-  it('invalidates the authoritative Keeper chat-queue projection once per burst', async () => {
+  it('invalidates the authoritative Keeper waiting inventory once per burst', async () => {
     const { sseStore } = await loadSseStore()
     const refreshQueue = vi.fn()
-    sseStore.registerKeeperChatQueueRefresh(refreshQueue)
+    sseStore.registerKeeperWaitingInventoryRefresh(refreshQueue)
 
     sseStore.routeServerPushEvent({
-      type: 'keeper_chat_queue_changed',
+      type: 'keeper_waiting_inventory_changed',
       keeper_name: 'echo',
-      revision: 4,
+      queue_kind: 'chat_queue',
     })
     sseStore.routeServerPushEvent({
-      type: 'keeper_chat_queue_changed',
+      type: 'keeper_waiting_inventory_changed',
       keeper_name: 'echo',
-      revision: 5,
+      queue_kind: 'chat_queue',
     })
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
     expect(refreshQueue).toHaveBeenCalledTimes(1)
+    expect(refreshQueue).toHaveBeenCalledWith('echo')
     expect(reconcileKeeperChatReceipts).toHaveBeenCalledTimes(1)
     expect(reconcileKeeperChatReceipts).toHaveBeenCalledWith('echo')
+  })
+
+  it('refreshes waiting inventory for event-queue changes without reading Admin chat receipts', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshQueue = vi.fn()
+    sseStore.registerKeeperWaitingInventoryRefresh(refreshQueue)
+
+    sseStore.routeServerPushEvent({
+      type: 'keeper_waiting_inventory_changed',
+      keeper_name: 'echo',
+      queue_kind: 'event_queue',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshQueue).toHaveBeenCalledTimes(1)
+    expect(refreshQueue).toHaveBeenCalledWith('echo')
+    expect(reconcileKeeperChatReceipts).not.toHaveBeenCalled()
   })
 
   it('forwards RFC-0235 audio clips on keeper_chat_appended to the chat handler', async () => {

@@ -84,28 +84,6 @@ let test_audio_block_escapes_message_text () =
   check bool "raw mention removed" false (contains s "<@U123>");
   check bool "message escaped" true (contains s "&lt;@U123&gt; &amp; done")
 
-let test_tool_context_block_renders_tool () =
-  let json =
-    S.tool_context_block_json ~name:"read_file" ~args_summary:"path: foo.txt"
-      ~result_summary:(Some "contents")
-  in
-  let s = json_string json in
-  check bool "type section" true (contains s "\"type\":\"section\"");
-  check bool "tool name" true (contains s "*Tool:* read_file");
-  check bool "args" true (contains s "args: path: foo.txt");
-  check bool "result" true (contains s "result: contents")
-
-let test_tool_context_block_escapes_summaries () =
-  let json =
-    S.tool_context_block_json ~name:"<tool>" ~args_summary:"<@U123> & args"
-      ~result_summary:(Some "result > ok")
-  in
-  let s = json_string json in
-  check bool "raw mention removed" false (contains s "<@U123>");
-  check bool "name escaped" true (contains s "&lt;tool&gt;");
-  check bool "args escaped" true (contains s "&lt;@U123&gt; &amp; args");
-  check bool "result escaped" true (contains s "result &gt; ok")
-
 let test_truncate_to_limit_keeps_utf8_boundary () =
   let s = String.concat "" (List.init 10 (fun _ -> "가")) in
   let truncated = S.truncate_to_limit s 4 in
@@ -210,12 +188,13 @@ let test_final_message_blocks_merges_text_and_event_blocks () =
   check bool "event block preserved" true
     (contains second "https://event.example.com")
 
-let run_adapter events ~send_plain ~send_blocks =
+let run_adapter ?set_activity_status events ~send_plain ~send_blocks =
   Eio_main.run @@ fun _env ->
   let stream = Masc.Keeper_chat_events.create () in
   List.iter (Masc.Keeper_chat_events.publish stream) events;
   let outcomes = ref [] in
   S.adapter_loop ~events:stream ~send_plain ~send_blocks
+    ?set_activity_status
     ~on_send_result:(fun result -> outcomes := result :: !outcomes)
     ();
   List.rev !outcomes
@@ -340,6 +319,57 @@ let test_message_body_preserves_reply_thread () =
   check string "reply thread retained" "1710000000.123456"
     (body |> member "thread_ts" |> to_string)
 
+let test_thread_status_body_uses_assistant_contract () =
+  let body =
+    S.build_thread_status_body ~channel:"C-status"
+      ~thread_ts:"1710000000.654321" ~status:"답변을 준비하고 있어요…"
+    |> Yojson.Safe.from_string
+  in
+  let open Yojson.Safe.Util in
+  check string "channel_id" "C-status"
+    (body |> member "channel_id" |> to_string);
+  check string "thread_ts" "1710000000.654321"
+    (body |> member "thread_ts" |> to_string);
+  check string "status" "답변을 준비하고 있어요…"
+    (body |> member "status" |> to_string)
+
+let test_native_activity_failure_does_not_affect_delivery () =
+  let statuses = ref [] in
+  let sends = ref [] in
+  let outcomes =
+    run_adapter
+      ~set_activity_status:(fun ~status ->
+        statuses := status :: !statuses;
+        Error (Masc.Keeper_chat_slack.Slack_api { error = "missing_scope" }))
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-activity"; thread_id = "thread-activity" }
+      ; Masc.Keeper_chat_events.Tool_call_start
+          { tool_call_id = "call-activity"
+          ; tool_call_name = "keeper_surface_post"
+          }
+      ; Masc.Keeper_chat_events.Tool_context_block
+          { tool_call_id = "call-activity"
+          ; name = "keeper_surface_post"
+          ; args_summary = "private args"
+          ; result_summary = Some "private result"
+          }
+      ; Masc.Keeper_chat_events.Tool_call_end
+          { tool_call_id = "call-activity" }
+      ; Masc.Keeper_chat_events.Text_delta "final"
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-activity" }
+      ]
+      ~send_plain:(fun ~content:_ -> fail "final reply uses blocks sender")
+      ~send_blocks:(fun ~content ~blocks:_ ->
+        sends := content :: !sends;
+        Ok ())
+  in
+  check (list string) "typed activity lifecycle"
+    [ "답변을 준비하고 있어요…"; "필요한 작업을 진행하고 있어요…"; "" ]
+    (List.rev !statuses);
+  check (list string) "tool context is not exposed" [ "final" ]
+    (List.rev !sends);
+  check bool "delivery still succeeds" true (outcomes = [ Ok () ])
+
 let () =
   run "keeper_chat_slack"
     [
@@ -359,10 +389,6 @@ let () =
             test_audio_block_renders_voice_link
         ; test_case "audio block escapes message text" `Quick
             test_audio_block_escapes_message_text
-        ; test_case "tool context block renders tool" `Quick
-            test_tool_context_block_renders_tool
-        ; test_case "tool context block escapes summaries" `Quick
-            test_tool_context_block_escapes_summaries
         ; test_case "truncate keeps utf8 boundary" `Quick
             test_truncate_to_limit_keeps_utf8_boundary
         ; test_case "block limit adds visible omission notice" `Quick
@@ -399,9 +425,13 @@ let () =
             test_completed_external_effect_settles_without_duplicate_send
         ; test_case "typed external-effect status settles successfully" `Quick
             test_adapter_external_effect_status_is_terminal_success
+        ; test_case "native activity failure is isolated" `Quick
+            test_native_activity_failure_does_not_affect_delivery
         ] )
     ; ( "thread-routing"
       , [ test_case "deferred reply keeps thread_ts" `Quick
             test_message_body_preserves_reply_thread
+        ; test_case "assistant status body uses thread contract" `Quick
+            test_thread_status_body_uses_assistant_contract
         ] )
     ]

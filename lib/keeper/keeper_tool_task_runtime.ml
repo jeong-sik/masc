@@ -623,7 +623,12 @@ let handle_keeper_task_tool_with_outcome
          | Some { task_status = Masc_domain.InProgress _; _ } -> false
          | Some { task_status = Masc_domain.Done _ | Masc_domain.Cancelled _
                  | Masc_domain.AwaitingVerification _; _ } -> false
-         | _ -> true
+         | Some { task_status = Masc_domain.Todo | Masc_domain.Claimed _; _ } -> true
+         (* The claim above succeeded, so the task was in the backlog a moment
+            ago. If a concurrent write removed it, the Start dispatch below
+            fails and auto_started_ok records that -- the message then does not
+            claim the task was auto-started. *)
+         | None -> true
        in
        if needs_start then begin
          let start_result =
@@ -742,7 +747,10 @@ let handle_keeper_task_tool_with_outcome
           , Keeper_tool_outcome.to_json
               (Keeper_tool_outcome.Error
                  { reason = Printf.sprintf "keeper_task_claim rejected: %s" e }) )
-      | _ -> None
+      (* A claimed task carries no typed_outcome field. Keeper_tool_outcome
+         .is_nonprogress reads its absence the same as Progress, and adding the
+         field here would change the tool payload. *)
+      | Workspace.Claim_next_claimed _ -> None
     in
     let payload =
       Yojson.Safe.to_string

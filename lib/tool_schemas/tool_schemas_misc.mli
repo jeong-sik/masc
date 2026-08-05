@@ -5,11 +5,7 @@
     lists.  Adding / removing values requires synchronized
     updates at the SSOT (which lives in a downstream module
     that cannot be referenced here without re-introducing the
-    cycle).  A test invariant keeps the mirror aligned:
-
-    - [test_types.ml :: dashboard_scope_ssot] —
-      {!dashboard_scope_enum_strings} vs
-      [Dashboard.valid_scope_strings]
+    cycle).
 
     The [masc_config] category enum SSOT lives in
     [Tool_schemas_specs_types.config_category_enum_strings]
@@ -18,15 +14,6 @@
     [Env_config_snapshot.valid_config_category_strings]. *)
 
 (** {1 Enum string mirrors (SSOT)} *)
-
-val dashboard_scope_enum_strings : string list
-(** Mirror of [Dashboard.valid_scope_strings] (issue #8592).
-    Currently [\["all"; "current"\]] — adding a 3rd scope
-    constructor must fail [scope_to_string] compilation AND
-    the [dashboard_scope_ssot] test, instead of silently
-    dropping from the JSON Schema.  Hand-mirrored because
-    [Tool_schemas_misc] is upstream of [Dashboard] in the
-    dependency graph. *)
 
 (** {1 Tool schema list} *)
 

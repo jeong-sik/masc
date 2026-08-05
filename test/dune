@@ -1957,6 +1957,8 @@
 
 (include stanzas/test_assertion_kind_mirror.inc)
 
+(include stanzas/test_agent_card_action_mirror.inc)
+
 (include stanzas/test_workspace_heartbeat_outcome.inc)
 
 (include stanzas/test_keeper_approval_resolved_history.inc)
@@ -2562,4 +2564,3 @@
   (source_tree %{workspace_root}/config/prompts)
   %{workspace_root}/test/fixtures/keeper_system_prompt/assembled_prompt.golden)
  (libraries alcotest masc_test_deps))
-

@@ -16,7 +16,7 @@
 # synthetic key to exercise the missing-block path.
 #
 # Authority: config/prompts/*.md basenames plus the keys declared in
-# lib/keeper_metrics/keeper_prompt_names.ml.
+# lib/prompt_registry/keeper_prompt_names.ml.
 set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -28,7 +28,7 @@ trap 'rm -f "$existing" "$referenced"' EXIT
 find config/prompts -name '*.md' -print0 \
   | xargs -0 -n1 basename \
   | sed 's/\.md$//' > "$existing"
-grep -oE '"[a-z_]+\.[a-z_.]+"' lib/keeper_metrics/keeper_prompt_names.ml \
+grep -oE '"[a-z_][a-z_.]*"' lib/prompt_registry/keeper_prompt_names.ml \
   | tr -d '"' >> "$existing"
 sort -u -o "$existing" "$existing"
 
@@ -42,7 +42,7 @@ SINKS='normalizePromptBlock|promptKeys?|system_prompt_blocks'
 ns="$(sed 's/\..*//' "$existing" | sort -u | paste -sd'|' -)"
 
 grep -rn --include='*.ts' --exclude='*.test.ts' -E "$SINKS" dashboard/src 2>/dev/null \
-  | grep -oE "'(${ns})\.[a-z_.]+'" \
+  | grep -oE "'(${ns})(\.[a-z_.]+)?'" \
   | tr -d "'" \
   | sort -u > "$referenced"
 

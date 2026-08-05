@@ -7,12 +7,22 @@ export const dashboardWsLastSeq = signal(0)
 export const dashboardWsLastPingAt = signal(0)
 export const dashboardWsLastPongAt = signal(0)
 export const dashboardWsLastPongLatencyMs = signal<number | null>(null)
-export const dashboardWsSseFallbackActive = signal(false)
-export const dashboardWsSseFallbackReason = signal<string | null>(null)
+export const dashboardWsReconnectCount = signal(0)
+export const dashboardWsLastDisconnectedAt = signal(0)
 
-// Cutover beacon signals.  The transport beacon (operator-facing UI)
-// reads these to show whether events are actually flowing through the WS
-// channel after a WS-only cutover.  [lastEventAt] is the wall-clock ms
+let hasReachedReady = false
+
+export function noteDashboardWsReady(): void {
+  if (hasReachedReady) dashboardWsReconnectCount.value++
+  hasReachedReady = true
+}
+
+export function noteDashboardWsDisconnected(now: number = Date.now()): void {
+  dashboardWsLastDisconnectedAt.value = now
+}
+
+// Transport beacon signals. The operator-facing UI reads these to show
+// whether events are flowing through the WS channel. [lastEventAt] is the wall-clock ms
 // timestamp of the last applied delta; [eventCount60s] is a running
 // counter of deltas applied in the last 60 seconds (decayed lazily by
 // the beacon component on each render).
@@ -54,6 +64,7 @@ export function _resetDashboardWsCounterForTests(): void {
   dashboardWsLastPingAt.value = 0
   dashboardWsLastPongAt.value = 0
   dashboardWsLastPongLatencyMs.value = null
-  dashboardWsSseFallbackActive.value = false
-  dashboardWsSseFallbackReason.value = null
+  dashboardWsReconnectCount.value = 0
+  dashboardWsLastDisconnectedAt.value = 0
+  hasReachedReady = false
 }

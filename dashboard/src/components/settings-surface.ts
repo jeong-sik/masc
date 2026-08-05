@@ -217,7 +217,7 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
     label: 'Browser notification delivery',
     kind: 'browser-local',
     source: 'Notification permission + dashboard:notify:rules-v1 localStorage',
-    action: 'browser-local writer; delivers on typed SSE events the operator opts into',
+    action: 'browser-local writer; delivers on typed WS events the operator opts into',
   },
   {
     id: 'settings-prompts',

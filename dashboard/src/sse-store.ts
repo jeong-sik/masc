@@ -1,19 +1,20 @@
-// SSE event reaction and periodic refresh — extracted from store.ts
-// Routes SSE events to the minimal refresh function needed.
+// WebSocket server-push reaction and periodic refresh — extracted from store.ts
+// Routes pushed events to the minimal refresh function needed.
 //
 // Event routing uses a declarative map for simple refresh-only events,
 // and named handlers for events with custom logic (conditional hydration,
 // async imports, signal-only updates).
 
 import {
-  lastEvent,
-  connected,
-  reconnectCount,
-  lastDisconnectedAt,
   pauseQueuedOasRuntimeIngress,
   resumeQueuedOasRuntimeIngress,
   normalizeSSEDispatchType,
 } from './sse'
+import {
+  dashboardWsLastDisconnectedAt,
+  dashboardWsReady,
+  dashboardWsReconnectCount,
+} from './dashboard-ws-state'
 import type {
   BoardPost,
   DashboardExecutionResponse,
@@ -106,7 +107,7 @@ export function registerKeeperTurnRefresh(fn: (keeperName: string) => void): voi
   _keeperTurnRefreshFn = fn
 }
 
-// The tools payload owns the Keeper waiting/receipt projection. Queue SSE is
+// The tools payload owns the Keeper waiting/receipt projection. The queue push is
 // deliberately an invalidation signal, so the tools resource registers its
 // authoritative re-read here instead of this transport layer importing a UI
 // store or reconstructing Pending/Inflight state from event deltas.
@@ -134,6 +135,14 @@ export function registerIdeWorkspaceRefresh(fn: () => void): () => void {
   _refreshIdeFns.add(fn)
   return () => {
     _refreshIdeFns.delete(fn)
+  }
+}
+
+const _refreshIdeCursorFns = new Set<() => void>()
+export function registerIdeCursorRefresh(fn: () => void): () => void {
+  _refreshIdeCursorFns.add(fn)
+  return () => {
+    _refreshIdeCursorFns.delete(fn)
   }
 }
 
@@ -178,7 +187,7 @@ interface SimpleRoute {
   force?: boolean
 }
 
-// Route table maps SSE event type → refresh target. Only entries whose
+// Route table maps server-push event type → refresh target. Only entries whose
 // corresponding server emitter exists in lib/ are kept; dead keys were
 // removed after cross-referencing the OCaml sources under lib/.
 const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
@@ -260,11 +269,11 @@ function scheduleBoardHearthsRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
   }, delayMs)
 }
 
-// SSE events after which a keeper may have changed workspace files: tool runs
+// Server-push events after which a keeper may have changed workspace files: tool runs
 // (which include Edit/Write) and turn completion (a coarser backstop that also
 // catches edits whose per-call event was coalesced). All already reach the
 // dashboard live; the IDE just never listened. keeper_tool_call already exists
-// in the FIXED_SSE_EVENT_TYPES allowlist (schemas/sse.ts) and is broadcast by
+// in the fixed event-type allowlist (schemas/sse.ts) and is broadcast by
 // lib/keeper_tools_oas_handler_telemetry.ml.
 const IDE_WORKSPACE_REFRESH_EVENTS = new Set([
   'keeper_tool_call',
@@ -285,6 +294,13 @@ function scheduleIdeWorkspaceRefresh(): void {
   scheduleRefresh('ide-workspace', REFRESH_FNS.ide)
 }
 
+function scheduleIdeCursorRefresh(): void {
+  if (_refreshIdeCursorFns.size === 0) return
+  scheduleRefresh('ide-cursors', () => {
+    for (const fn of _refreshIdeCursorFns) fn()
+  }, 0)
+}
+
 // --- Named handlers for complex events ---
 
 const KEEPER_LIFECYCLE_EVENTS = new Set([
@@ -296,7 +312,7 @@ function normalizeMascEventType(type: string): string {
   return type.startsWith('masc/') ? type.slice('masc/'.length) : type
 }
 
-/** Hydrate project-snapshot signals directly from SSE payload — zero HTTP fetch. */
+/** Hydrate project-snapshot signals directly from a push payload — zero HTTP fetch. */
 function handleNamespaceTruthSnapshot(payload: unknown): void {
   try {
     const normalized = normalizeNamespaceTruth(payload)
@@ -309,16 +325,16 @@ function handleNamespaceTruthSnapshot(payload: unknown): void {
     // Mirrors the transport-health P2 fix below: hydration failures are
     // operator-actionable (UI shows stale data + falls back to HTTP), not
     // background-debug, so they get console.warn instead of console.debug.
-    console.warn('[SSE] project-snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
+    console.warn('[server-push] project-snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
   }
 }
 
-/** Hydrate execution signals directly from SSE payload — zero HTTP fetch. */
+/** Hydrate execution signals directly from a push payload — zero HTTP fetch. */
 function handleExecutionSnapshot(payload: unknown): void {
   try {
     hydrateExecutionSnapshot(payload as DashboardExecutionResponse)
   } catch (err) {
-    console.warn('[SSE] execution snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
+    console.warn('[server-push] execution snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
   }
 }
 
@@ -326,7 +342,7 @@ function handleOperatorSnapshot(payload: unknown): void {
   try {
     operatorSnapshot.value = normalizeOperatorSnapshot(payload)
   } catch (err) {
-    console.warn('[SSE] operator snapshot hydration failed', err instanceof Error ? err.message : '')
+    console.warn('[server-push] operator snapshot hydration failed', err instanceof Error ? err.message : '')
   }
 }
 
@@ -334,15 +350,15 @@ function handleOperatorDigest(payload: unknown): void {
   try {
     operatorWorkspaceDigest.value = normalizeOperatorDigest(payload)
   } catch (err) {
-    console.warn('[SSE] operator digest hydration failed', err instanceof Error ? err.message : '')
+    console.warn('[server-push] operator digest hydration failed', err instanceof Error ? err.message : '')
   }
 }
 
 // P2 silent-failure fix: previously the dynamic import retried on every
-// SSE transport-health event with only console.debug on failure (hidden
+// Transport-health push event with only console.debug on failure (hidden
 // from default DevTools view).  Two improvements:
 //   1. Cache the imported module so failure is signalled exactly once
-//      per session, not on every SSE tick.
+//      per session, not on every push.
 //   2. Promote the failure log to console.warn so operators see it
 //      when investigating "transport health widget is missing/stale."
 let transportHealthModule: Promise<typeof TransportHealth> | null = null
@@ -360,7 +376,7 @@ function handleTransportHealth(payload: unknown): void {
     .catch((err: unknown) => {
       transportHealthImportFailed = true
       console.warn(
-        '[SSE] transport health module import failed — widget hydration disabled for this session',
+        '[server-push] transport health module import failed — widget hydration disabled for this session',
         err,
       )
     })
@@ -406,13 +422,13 @@ async function refreshActiveRoute(): Promise<void> {
     const { refreshForRoute } = await import('./tab-refresh')
     refreshForRoute(route.value)
   } catch (err) {
-    console.debug('[SSE] tab-refresh unavailable, using fallback refreshes', err instanceof Error ? err.message : '')
+    console.debug('[server-push] tab-refresh unavailable, using fallback refreshes', err instanceof Error ? err.message : '')
     _refreshOperatorFn?.()
     _refreshMissionFn?.()
   }
 }
 
-// --- SSE reconnection handler ---
+// --- WebSocket reconnection handler ---
 
 let activeOperatorSnapshotEpoch: string | null = null
 let latestOperatorSnapshotGeneration: number | null = null
@@ -421,8 +437,8 @@ let latestOperatorSnapshotTerminalSequence: number | null = null
 const retiredOperatorSnapshotEpochs = new Set<string>()
 
 function handleReconnect(): void {
-  const disconnectedMs = lastDisconnectedAt.value > 0
-    ? Date.now() - lastDisconnectedAt.value
+  const disconnectedMs = dashboardWsLastDisconnectedAt.value > 0
+    ? Date.now() - dashboardWsLastDisconnectedAt.value
     : 0
   const durationSec = Math.round(disconnectedMs / 1000)
   const label = durationSec > 0 ? `${durationSec}초 단절 후 재연결됨` : '서버 연결 복구됨'
@@ -444,7 +460,7 @@ async function hydrateAfterReconnect(): Promise<void> {
     const { replayOasRuntimeTelemetry } = await import('./oas-runtime-store')
     await replayOasRuntimeTelemetry()
   } catch (err) {
-    console.warn('[SSE] reconnect OAS replay failed', err instanceof Error ? err.message : err)
+    console.warn('[server-push] reconnect OAS replay failed', err instanceof Error ? err.message : err)
   }
   requestNamespaceTruthNow()
   // Recover approval-queue state that may have changed while disconnected: the
@@ -453,7 +469,7 @@ async function hydrateAfterReconnect(): Promise<void> {
   // gap must be re-fetched on reconnect, not only on the Gate surface.
   handleGate()
   // Recover keeper_chat_appended events that fell outside the server replay
-  // buffer while disconnected. The live stream cannot re-deliver them, so the
+  // buffer while disconnected. The WS channel cannot re-deliver them, so the
   // open conversation panel must re-fetch its transcript. Route and periodic
   // refreshes deliberately skip this (guard-respecting no-op to avoid polling),
   // so force it here — reconnect is the only path that knows a gap may exist.
@@ -461,13 +477,14 @@ async function hydrateAfterReconnect(): Promise<void> {
   void import('./keeper-runtime')
     .then(mod => { mod.refreshActiveKeeperChatHistory({ force: true }) })
     .catch(err =>
-      console.warn('[SSE] reconnect keeper chat re-hydration unavailable', err instanceof Error ? err.message : err),
+      console.warn('[server-push] reconnect keeper chat re-hydration unavailable', err instanceof Error ? err.message : err),
     )
+  for (const fn of _refreshIdeCursorFns) fn()
   void refreshDashboard({ force: true }).catch(err =>
-    console.warn('[SSE] reconnect dashboard refresh failed', err instanceof Error ? err.message : err),
+    console.warn('[server-push] reconnect dashboard refresh failed', err instanceof Error ? err.message : err),
   )
   void refreshActiveRoute().catch(err =>
-    console.warn('[SSE] reconnect route refresh failed', err instanceof Error ? err.message : err),
+    console.warn('[server-push] reconnect route refresh failed', err instanceof Error ? err.message : err),
   )
   // Safety-net retry: if project-snapshot fetch failed (e.g. server warm-up),
   // the scheduler's error signal will be set. Retry once after delay.
@@ -477,18 +494,18 @@ async function hydrateAfterReconnect(): Promise<void> {
     }
     void refreshDashboard({ force: true }).catch(retryErr =>
       console.warn(
-        '[SSE] reconnect dashboard retry failed',
+        '[server-push] reconnect dashboard retry failed',
         retryErr instanceof Error ? retryErr.message : retryErr,
       ),
     )
     void refreshActiveRoute().catch(retryErr =>
-      console.warn('[SSE] reconnect route retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
+      console.warn('[server-push] reconnect route retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
     )
   }, SSE_RECONNECT_RETRY_MS)
 }
 
 // --- Board incremental hydration ---
-// When a post_created SSE event carries content and the board is sorted by
+// When a post_created push event carries content and the board is sorted by
 // recent, we can prepend the post directly — zero HTTP fetch. For other sort
 // modes the position is algorithm-dependent so we fall through to refreshBoard.
 
@@ -585,6 +602,10 @@ export function routeServerPushEvent(event: SSEEvent): void {
 
   if (IDE_WORKSPACE_REFRESH_EVENTS.has(normalizeMascEventType(routedType))) {
     scheduleIdeWorkspaceRefresh()
+  }
+
+  if (routedType === 'ide_cursor_changed') {
+    scheduleIdeCursorRefresh()
   }
 
   // summary_updated carries the Auto Judge verdict transition (summary
@@ -730,7 +751,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
         })
       })
       .catch(err => {
-        console.debug('[SSE] agent-failed notification unavailable', err instanceof Error ? err.message : '')
+        console.debug('[server-push] agent-failed notification unavailable', err instanceof Error ? err.message : '')
       })
     return false
   }
@@ -740,7 +761,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
-  // Signal-only freshness tick for keeper composite state. The SSE payload
+  // Signal-only freshness tick for keeper composite state. The push payload
   // carries only the keeper name and a wall-clock timestamp; it is *not* the
   // authoritative composite snapshot. Consumers that need the new state must
   // observe [compositeTick] and re-fetch [/api/v1/keepers/:name/composite]
@@ -762,7 +783,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
       void import('./keeper-runtime')
         .then(mod => { mod.noteKeeperChatAppended(name, payload.audio, payload.blocks) })
         .catch(err => {
-          console.debug('[SSE] keeper chat refresh unavailable', err instanceof Error ? err.message : '')
+          console.debug('[server-push] keeper chat refresh unavailable', err instanceof Error ? err.message : '')
         })
     }
     return true
@@ -783,7 +804,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
           ))
           .catch(err => {
             console.warn(
-              '[SSE] keeper chat receipt reconciliation unavailable',
+              '[server-push] keeper chat receipt reconciliation unavailable',
               err instanceof Error ? err.message : err,
             )
           })
@@ -857,7 +878,7 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
       }
       if (record.tree && !hydrateGoalTreeSnapshot(record.tree)) {
         hydrateGoalTreeObservationError(
-          new Error('Goal Store SSE tree payload was malformed'),
+          new Error('Goal Store push tree payload was malformed'),
         )
       }
       return
@@ -868,23 +889,16 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
   }
 }
 
-// --- SSE reaction setup ---
+// --- WebSocket server-push reaction setup ---
 
-export function setupSSEReaction(): () => void {
-  // Watch for reconnections (false -> true transitions)
-  const unsubReconnect = reconnectCount.subscribe(() => {
-    if (connected.value) {
+export function setupServerPushReaction(): () => void {
+  const unsubReconnect = dashboardWsReconnectCount.subscribe((count) => {
+    if (count > 0 && dashboardWsReady.value) {
       handleReconnect()
     }
   })
 
-  const unsubscribe = lastEvent.subscribe((event) => {
-    if (!event) return
-    routeServerPushEvent(event)
-  })
-
   return () => {
-    unsubscribe()
     unsubReconnect()
     for (const key of Object.keys(_debounceTimers)) {
       clearTimeout(_debounceTimers[key])
@@ -904,7 +918,7 @@ let _periodicId: ReturnType<typeof setInterval> | null = null
 export function startPeriodicRefresh(): void {
   if (_periodicId) return
   _periodicId = setInterval(() => {
-    if (!connected.value) {
+    if (!dashboardWsReady.value) {
       invalidateDashboardCache()
     }
     requestNamespaceTruth()
@@ -921,10 +935,10 @@ export function stopPeriodicRefresh(): void {
   }
 }
 
-/** Cancel all pending SSE-triggered refresh timers.
+/** Cancel all pending server-push refresh timers.
  *  Call on route change to prevent stale fetches from firing after the user
  *  navigates to a different tab. */
-export function cancelPendingSSERefreshes(): void {
+export function cancelPendingServerPushRefreshes(): void {
   for (const key of Object.keys(_debounceTimers)) {
     clearTimeout(_debounceTimers[key])
     delete _debounceTimers[key]

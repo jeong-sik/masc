@@ -3,17 +3,16 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Activity, AlertTriangle, Bell, Radio, Users, X } from 'lucide-preact'
 import type { JournalEntry, Keeper, Task } from '../types'
 import { isKeeperCrashed } from '../lib/keeper-predicates'
-import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import {
   dashboardWsConnected,
   dashboardWsEventCount60s,
+  dashboardWsLastDisconnectedAt,
   dashboardWsLastError,
   dashboardWsLastEventAt,
   dashboardWsLastPongAt,
   dashboardWsLastPongLatencyMs,
   dashboardWsReady,
-  dashboardWsSseFallbackActive,
-  dashboardWsSseFallbackReason,
+  dashboardWsReconnectCount,
 } from '../dashboard-ws-state'
 import { route } from '../router'
 import {
@@ -22,10 +21,7 @@ import {
   tasks,
 } from '../store'
 import {
-  connected,
   journal,
-  lastDisconnectedAt,
-  reconnectCount,
 } from '../sse'
 import {
   DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
@@ -68,16 +64,12 @@ export interface StatusTraySummary {
 }
 
 export interface StatusTrayInput {
-  wsOnly: boolean
-  sseConnected: boolean
   wsConnected: boolean
   wsReady: boolean
   wsLastEventAt: number
   wsEventCount60s: number
   wsLastPongAt: number
   wsLastPongLatencyMs: number | null
-  wsSseFallbackActive?: boolean
-  wsSseFallbackReason?: string | null
   wsLastError: string | null
   reconnectCount: number
   lastDisconnectedAt: number
@@ -106,18 +98,6 @@ function clip(value: string | undefined, max = 90): string {
   return text.length > max ? `${text.slice(0, max - 3)}...` : text
 }
 
-function formatDisconnectedDetail(input: Pick<StatusTrayInput, 'lastDisconnectedAt' | 'reconnectCount' | 'now'>): string {
-  const parts: string[] = []
-  if (input.lastDisconnectedAt > 0) {
-    const seconds = Math.max(0, Math.floor((input.now - input.lastDisconnectedAt) / 1000))
-    parts.push(`offline ${seconds}s`)
-  }
-  if (input.reconnectCount > 0) {
-    parts.push(`${input.reconnectCount} reconnects`)
-  }
-  return parts.length > 0 ? parts.join(' - ') : 'waiting for first connection'
-}
-
 function countPendingVerification(tasksInput: readonly Task[]): number {
   return tasksInput.filter(task => task.status === 'awaiting_verification').length
 }
@@ -143,9 +123,9 @@ function latestEntries(entries: readonly JournalEntry[]): JournalEntry[] {
 }
 
 type TransportInput = Pick<StatusTrayInput,
-  | 'wsOnly' | 'sseConnected' | 'wsConnected' | 'wsReady'
+  | 'wsConnected' | 'wsReady'
   | 'wsLastEventAt' | 'wsEventCount60s' | 'wsLastPongAt' | 'wsLastPongLatencyMs'
-  | 'wsSseFallbackActive' | 'wsSseFallbackReason' | 'wsLastError'
+  | 'wsLastError'
   | 'reconnectCount' | 'lastDisconnectedAt' | 'now'>
 
 type FleetInput = Pick<StatusTrayInput,
@@ -169,73 +149,49 @@ interface FleetSummary {
 // ws deltas — dashboardWsLastEventAt updates on every WS event (very frequent),
 // but transport is the only item that reads it.
 function computeTransportItem(input: TransportInput): StatusTrayItem {
-  if (input.wsOnly) {
-    if (!input.wsConnected || !input.wsReady) {
-      if (input.wsSseFallbackActive && input.sseConnected) {
-        return {
-          key: 'transport',
-          tone: 'warn',
-          label: 'Client',
-          value: 'SSE fallback',
-          detail: input.wsSseFallbackReason
-            ? `client WS degraded; ${clip(input.wsSseFallbackReason)}`
-            : 'client WS degraded; SSE fallback is live',
-        }
-      }
-      if (input.wsConnected && !input.wsReady) {
-        return {
-          key: 'transport',
-          tone: 'warn',
-          label: 'Client',
-          value: 'handshake',
-          detail: 'client WS socket is open; waiting for dashboard/hello before route events resume',
-        }
-      }
+  if (!input.wsConnected || !input.wsReady) {
+    if (input.wsConnected && !input.wsReady) {
       return {
         key: 'transport',
-        tone: 'err',
+        tone: 'warn',
         label: 'Client',
-        value: 'closed',
-        detail: input.wsLastError
-          ? clip(input.wsLastError)
-          : 'client WS channel is not ready; server transport truth is in Diagnostics > Transport',
+        value: 'handshake',
+        detail: 'client WS socket is open; waiting for dashboard/hello before route events resume',
       }
     }
-    const silentMs = input.wsLastEventAt === 0
-      ? Number.POSITIVE_INFINITY
-      : input.now - input.wsLastEventAt
-    const silent = input.wsLastEventAt === 0 || silentMs > STATUS_TRAY_SILENT_MS
-    const pongAgeMs = input.wsLastPongAt === 0
-      ? Number.POSITIVE_INFINITY
-      : input.now - input.wsLastPongAt
-    const heartbeatFresh = pongAgeMs <= STATUS_TRAY_HEARTBEAT_FRESH_MS
-    const pongLatency = input.wsLastPongLatencyMs == null
-      ? 'pong'
-      : `${input.wsLastPongLatencyMs}ms`
     return {
       key: 'transport',
-      tone: silent && !heartbeatFresh ? 'warn' : 'ok',
+      tone: 'err',
       label: 'Client',
-      value: silent
-        ? heartbeatFresh ? pongLatency : 'silent'
-        : `${input.wsEventCount60s} deltas/min`,
-      detail: silent
-        ? heartbeatFresh
-          ? `client WS channel is idle; heartbeat pong ${Math.floor(pongAgeMs / 1000)}s ago`
-          : 'client WS channel is open but no recent event or heartbeat pong has arrived'
-        : `last applied route delta ${Math.floor(silentMs / 1000)}s ago`,
+      value: 'closed',
+      detail: input.wsLastError
+        ? clip(input.wsLastError)
+        : 'client WS channel is not ready; server transport truth is in Diagnostics > Transport',
     }
   }
+  const silentMs = input.wsLastEventAt === 0
+    ? Number.POSITIVE_INFINITY
+    : input.now - input.wsLastEventAt
+  const silent = input.wsLastEventAt === 0 || silentMs > STATUS_TRAY_SILENT_MS
+  const pongAgeMs = input.wsLastPongAt === 0
+    ? Number.POSITIVE_INFINITY
+    : input.now - input.wsLastPongAt
+  const heartbeatFresh = pongAgeMs <= STATUS_TRAY_HEARTBEAT_FRESH_MS
+  const pongLatency = input.wsLastPongLatencyMs == null
+    ? 'pong'
+    : `${input.wsLastPongLatencyMs}ms`
   return {
     key: 'transport',
-    tone: input.sseConnected ? 'ok' : 'err',
+    tone: silent && !heartbeatFresh ? 'warn' : 'ok',
     label: 'Client',
-    value: input.sseConnected ? 'live' : 'offline',
-    detail: input.sseConnected
-      ? input.wsConnected
-        ? 'client SSE is live with WS mirror connected'
-        : 'client SSE is live'
-      : formatDisconnectedDetail(input),
+    value: silent
+      ? heartbeatFresh ? pongLatency : 'silent'
+      : `${input.wsEventCount60s} deltas/min`,
+    detail: silent
+      ? heartbeatFresh
+        ? `client WS channel is idle; heartbeat pong ${Math.floor(pongAgeMs / 1000)}s ago`
+        : 'client WS channel is open but no recent event or heartbeat pong has arrived'
+      : `last applied route delta ${Math.floor(silentMs / 1000)}s ago`,
   }
 }
 
@@ -493,19 +449,15 @@ const EMPTY_ITEM: StatusTrayItem = {
 // Reads only ws signals + now. ws deltas re-render this chip alone.
 function TransportChip({ active, onActivate }: { active: boolean; onActivate: () => void }) {
   const transport = computeTransportItem({
-    wsOnly: dashboardWsOnlyEnabled(),
-    sseConnected: connected.value,
     wsConnected: dashboardWsConnected.value,
     wsReady: dashboardWsReady.value,
     wsLastEventAt: dashboardWsLastEventAt.value,
     wsEventCount60s: dashboardWsEventCount60s.value,
     wsLastPongAt: dashboardWsLastPongAt.value,
     wsLastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
-    wsSseFallbackActive: dashboardWsSseFallbackActive.value,
-    wsSseFallbackReason: dashboardWsSseFallbackReason.value,
     wsLastError: dashboardWsLastError.value,
-    reconnectCount: reconnectCount.value,
-    lastDisconnectedAt: lastDisconnectedAt.value,
+    reconnectCount: dashboardWsReconnectCount.value,
+    lastDisconnectedAt: dashboardWsLastDisconnectedAt.value,
     now: Date.now(),
   })
   return html`<${TrayButton} item=${transport} active=${active} onClick=${onActivate} />`
@@ -563,24 +515,20 @@ function StatusTrayPopover({
         keeperAttention: 0,
         pendingVerificationTasks: 0,
         unacknowledgedErrors: 0,
-        reconnectCount: reconnectCount.value,
+        reconnectCount: dashboardWsReconnectCount.value,
         wsEventCount60s: dashboardWsEventCount60s.value,
       },
       items: {
         transport: computeTransportItem({
-          wsOnly: dashboardWsOnlyEnabled(),
-          sseConnected: connected.value,
           wsConnected: dashboardWsConnected.value,
           wsReady: dashboardWsReady.value,
           wsLastEventAt: dashboardWsLastEventAt.value,
           wsEventCount60s: dashboardWsEventCount60s.value,
           wsLastPongAt: dashboardWsLastPongAt.value,
           wsLastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
-          wsSseFallbackActive: dashboardWsSseFallbackActive.value,
-          wsSseFallbackReason: dashboardWsSseFallbackReason.value,
           wsLastError: dashboardWsLastError.value,
-          reconnectCount: reconnectCount.value,
-          lastDisconnectedAt: lastDisconnectedAt.value,
+          reconnectCount: dashboardWsReconnectCount.value,
+          lastDisconnectedAt: dashboardWsLastDisconnectedAt.value,
           now: Date.now(),
         }),
         fleet: EMPTY_ITEM,

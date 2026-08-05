@@ -1,7 +1,7 @@
 /**
  * run-activity-store - typed snapshot store for the IDE ACTIVITY pane.
  *
- * The live SSE bridge can append the same event shape later; the current
+ * The live push bridge can append the same event shape later; the current
  * IDE mock seeds static events through this store so filtering, ordering, and
  * keeper grouping are no longer embedded in the renderer.
  */

@@ -20,7 +20,7 @@ export function routeWantsRefreshTarget(
       // so its registry refetch is scoped to that route (RFC-0266 Phase 4).
       return routeState.tab === 'fusion'
     case 'ide':
-      // The IDE workspace store is an app-lifetime singleton, so its live SSE
+      // The IDE workspace store is an app-lifetime singleton, so its live push
       // refresh must be scoped to the code surface — otherwise a keeper editing
       // files would refetch the workspace tree/diff while the user is on another
       // tab. Off-tab, the singleton simply holds its last snapshot.

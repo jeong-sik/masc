@@ -1,6 +1,7 @@
 import type { RouteState, SSEEvent } from './types'
 import { parseSSEMessage } from './schemas/sse'
 import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
+import { recordServerPushEvent } from './sse'
 import { batch } from '@preact/signals'
 import { dashboardBearerToken, subscribeStoredTokenChanges } from './api/core'
 import { parseWebSocketSseFrames } from './dashboard-ws-parse'
@@ -21,9 +22,11 @@ import {
   dashboardWsLastError,
   dashboardWsLastSeq,
   dashboardWsReady,
+  noteDashboardWsDisconnected,
   noteDashboardWsEvent,
   noteDashboardWsPing,
   noteDashboardWsPong,
+  noteDashboardWsReady,
 } from './dashboard-ws-state'
 import { errorToString } from './lib/format-string'
 
@@ -418,7 +421,7 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
   // hearth filters) and are loaded through refreshBoard's HTTP query. The WS
   // snapshot provider is route-scoped only, so subscribing the board slice here
   // can hydrate the list with a different query immediately after the route HTTP
-  // refresh. Raw board SSE events still reach the client and schedule/increment
+  // refresh. Raw board events still reach the client and schedule/increment
   // board refreshes through sse-store.
   if (routeState.tab === 'monitoring') {
     const section = routeState.params.section
@@ -485,8 +488,8 @@ function websocketReadyStateName(state: number): string {
   return `UNKNOWN(${state})`
 }
 
-// WebSocket reconnect uses an explicit 500ms base (half of the SSE
-// RECONNECT_BASE_MS) so transient socket churn recovers faster. Derive the
+// WebSocket reconnect uses an explicit 500ms base so transient socket churn
+// recovers quickly. Derive the
 // exp clamp from the configured cap so a future operator bump of
 // RECONNECT_MAX_MS actually grows the achievable backoff.
 const WS_RECONNECT_BASE_MS = 500
@@ -727,7 +730,9 @@ function handleRawPush(raw: unknown): void {
     const candidate = unwrapSseCandidate(raw as JsonObject)
     const parsed = parseSSEMessage(candidate)
     if (!parsed) return
-    routeServerPushEvent(parsed as unknown as SSEEvent)
+    const event = parsed as unknown as SSEEvent
+    recordServerPushEvent(event)
+    routeServerPushEvent(event)
   })
 }
 
@@ -786,6 +791,9 @@ function handleMessage(data: unknown): void {
 
 function reconnectAfterCurrentSocketFailure(ws: WebSocket, err: unknown): void {
   if (socket !== ws) return
+  if (dashboardWsConnected.value || dashboardWsReady.value) {
+    noteDashboardWsDisconnected()
+  }
   batch(() => {
     dashboardWsConnected.value = false
     dashboardWsReady.value = false
@@ -803,6 +811,9 @@ function reconnectAfterAuthTokenChange(): void {
   connectGeneration += 1
   clearReconnectTimer()
   lastSubscribeKey = ''
+  if (dashboardWsConnected.value || dashboardWsReady.value) {
+    noteDashboardWsDisconnected()
+  }
   batch(() => {
     dashboardWsConnected.value = false
     dashboardWsReady.value = false
@@ -903,6 +914,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
         if (socket !== ws) return
         if (!discovery.fromCache) writeCachedWsUrl(wsUrl)
         resetDiscoveryCacheFailures()
+        noteDashboardWsReady()
         batch(() => {
           dashboardWsReady.value = true
           dashboardWsLastError.value = null
@@ -950,18 +962,17 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     if (socket !== ws) return
     const closeError = new Error(formatCloseEventError(event))
     // Clean close (wasClean=true) is server-initiated (shutdown/redeploy/idle),
-    // not a degraded-WS error. Leaving lastError set on a clean close would trip
-    // the SSE fallback (dashboard-transport-fallback.ts) for every clean close ->
-    // reconnect window, producing the "dashboard keeps falling back to SSE"
-    // symptom. Abnormal closes (wasClean=false: network drop, code 1006/1011)
-    // keep lastError set so the fallback still engages. reconnect runs either
-    // way; pending RPCs are rejected either way (socket is gone).
+    // not a degraded-WS error. Abnormal closes keep lastError set; reconnect
+    // runs either way and pending RPCs are rejected because the socket is gone.
     const clean = event.wasClean === true
     // Fatal closes indicate a persistent condition (policy violation, server
     // error, or abnormal close after hello was explicitly rejected). Stop
     // reconnecting so the client does not spin on a rejected session.
     const fatal = FATAL_CLOSE_CODES.has(event.code) || (helloFailed && !clean)
     clearHeartbeatTimer()
+    if (dashboardWsConnected.value || dashboardWsReady.value) {
+      noteDashboardWsDisconnected()
+    }
     batch(() => {
       dashboardWsConnected.value = false
       dashboardWsReady.value = false

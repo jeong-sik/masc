@@ -1357,7 +1357,7 @@ export async function moveKeeperChatPendingEntryToEnd(
  *  failed match still falls back to the history re-merge (the clip is
  *  persisted server-side too).
  *
- *  [blocks] is accepted so the live SSE path can carry server-parsed
+ *  [blocks] is accepted so the live push path can carry server-parsed
  *  rich blocks; the current implementation refreshes history (which now
  *  persists blocks) so the dashboard's normalizeHistoryEntry path prefers
  *  them automatically. */

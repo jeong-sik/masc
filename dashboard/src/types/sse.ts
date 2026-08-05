@@ -34,6 +34,7 @@ export type SSEEventType =
   | 'keeper_composite_changed'
   | 'keeper_chat_appended'
   | 'keeper_chat_queue_changed'
+  | 'ide_cursor_changed'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
   | 'keeper_tool_skipped'
@@ -167,6 +168,7 @@ export interface SSEEvent {
   hearth?: string
   agent_name?: string
   keeper_name?: string
+  keeper_id?: string
   event_type?: string
   // Keeper event fields
   name?: string

@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  buildKeeperCursorStreamUrl,
-  connectKeeperCursorStream,
+  connectKeeperCursorPush,
   getKeeperColor,
   normalizeKeeperCursorSnapshot,
 } from './keeper-cursor-overlay'
@@ -78,155 +77,12 @@ describe('getKeeperColor', () => {
     })
   })
 
-  it('connects to the dedicated cursor stream endpoint', () => {
-    const instances: Array<{
-      readonly url: string
-      onopen: ((event: Event) => void) | null
-      onmessage: ((event: MessageEvent) => void) | null
-      onerror: ((event: Event) => void) | null
-      close: () => void
-    }> = []
-    class MockEventSource {
-      onopen: ((event: Event) => void) | null = null
-      onmessage: ((event: MessageEvent) => void) | null = null
-      onerror: ((event: Event) => void) | null = null
-      readonly url: string
-
-      constructor(url: string) {
-        this.url = url
-        instances.push(this)
-      }
-
-      close = vi.fn()
-    }
-    vi.stubGlobal('EventSource', MockEventSource)
-
-    const cleanup = connectKeeperCursorStream('http://localhost:8935', () => {})
-
-    expect(instances[0]?.url).toBe('http://localhost:8935/api/v1/ide/cursors/stream')
-    cleanup()
-    expect(instances[0]?.close).toHaveBeenCalled()
-  })
-
-  it('builds cursor stream URLs with repository and token scope', () => {
-    window.sessionStorage.setItem('masc_bearer_token', 'token-1')
-
-    expect(buildKeeperCursorStreamUrl('', ' masc ')).toBe(
-      '/api/v1/ide/cursors/stream?repo_id=masc&token=token-1',
-    )
-  })
-
-  it('builds cursor stream URLs with canonical URL scope', () => {
-    expect(buildKeeperCursorStreamUrl('', {
-      scope: {
-        kind: 'canonical_url',
-        canonicalUrl: 'https://github.com/jeong-sik/masc.git',
-      },
-    })).toBe(
-      '/api/v1/ide/cursors/stream?canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git',
-    )
-  })
-
-  it('reports a degraded cursor stream when EventSource is unavailable', () => {
-    vi.stubGlobal('EventSource', undefined)
-    const onStatus = vi.fn()
-
-    const cleanup = connectKeeperCursorStream('', () => {}, { onStatus })
-
-    expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({
-      status: 'degraded',
-      failedCount: 1,
-      error: 'EventSource unavailable',
-      lastErrorMs: expect.any(Number),
-    }))
-    cleanup()
-    expect(onStatus).toHaveBeenLastCalledWith({ status: 'closed', failedCount: 1 })
-  })
-
-  it('reports cursor stream lifecycle state to callers', () => {
-    vi.useFakeTimers()
-    vi.spyOn(Math, 'random').mockReturnValue(0)
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    const instances: Array<{
-      readonly url: string
-      onopen: ((event: Event) => void) | null
-      onmessage: ((event: MessageEvent) => void) | null
-      onerror: ((event: Event) => void) | null
-      close: () => void
-    }> = []
-    class MockEventSource {
-      onopen: ((event: Event) => void) | null = null
-      onmessage: ((event: MessageEvent) => void) | null = null
-      onerror: ((event: Event) => void) | null = null
-      readonly url: string
-
-      constructor(url: string) {
-        this.url = url
-        instances.push(this)
-      }
-
-      close = vi.fn()
-    }
-    vi.stubGlobal('EventSource', MockEventSource)
-
-    const onStatus = vi.fn()
-    const cleanup = connectKeeperCursorStream('http://localhost:8935', () => {}, {
-      repoId: 'masc',
-      onStatus,
-    })
-
-    expect(instances[0]?.url).toBe('http://localhost:8935/api/v1/ide/cursors/stream?repo_id=masc')
-    expect(onStatus).toHaveBeenLastCalledWith({ status: 'connecting', failedCount: 0 })
-
-    instances[0]!.onopen?.(new Event('open'))
-    expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({
-      status: 'live',
-      failedCount: 0,
-      lastOpenMs: expect.any(Number),
-    }))
-
-    instances[0]!.onerror?.(new Event('error'))
-    expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({
-      status: 'degraded',
-      failedCount: 1,
-      error: 'SSE transport error',
-      lastErrorMs: expect.any(Number),
-    }))
-
-    cleanup()
-    expect(onStatus).toHaveBeenLastCalledWith({ status: 'closed', failedCount: 1 })
-  })
-
-  it('cancels cursor stream reconnect timers during cleanup', () => {
-    vi.useFakeTimers()
-    vi.spyOn(Math, 'random').mockReturnValue(0)
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    const instances: Array<{
-      readonly url: string
-      onopen: ((event: Event) => void) | null
-      onmessage: ((event: MessageEvent) => void) | null
-      onerror: ((event: Event) => void) | null
-      close: () => void
-    }> = []
-    class MockEventSource {
-      onopen: ((event: Event) => void) | null = null
-      onmessage: ((event: MessageEvent) => void) | null = null
-      onerror: ((event: Event) => void) | null = null
-      readonly url: string
-
-      constructor(url: string) {
-        this.url = url
-        instances.push(this)
-      }
-
-      close = vi.fn()
-    }
-    vi.stubGlobal('EventSource', MockEventSource)
-
-    const onUpdate = vi.fn()
-    const cleanup = connectKeeperCursorStream('http://localhost:8935', onUpdate)
-    instances[0]!.onmessage?.({
-      data: JSON.stringify({
+  it('loads the initial cursor snapshot over the typed API', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({
+      ok: true,
+      data: {
+        runtime_id: 'masc-runtime',
+        connected: true,
         cursors: [{
           keeper_id: 'sangsu',
           file_path: 'lib/a.ml',
@@ -235,17 +91,39 @@ describe('getKeeperColor', () => {
           focus_mode: 'editing',
           last_update: Date.now(),
         }],
-      }),
-    } as MessageEvent)
-    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onUpdate = vi.fn()
+    const onStatus = vi.fn()
+
+    const cleanup = connectKeeperCursorPush(onUpdate, { repoId: 'masc', onStatus })
+
+    await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
       active_file: 'lib/a.ml',
+    })))
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/v1/ide/cursors?repo_id=masc')
+    expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({
+      status: 'live',
+      failedCount: 0,
     }))
 
-    instances[0]!.onerror?.(new Event('error'))
     cleanup()
-    vi.advanceTimersByTime(1_000)
+    expect(onStatus).toHaveBeenLastCalledWith({ status: 'closed', failedCount: 0 })
+  })
 
-    expect(instances).toHaveLength(1)
-    expect(instances[0]!.close).toHaveBeenCalled()
+  it('reports typed snapshot refresh failures without a fallback transport', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('unavailable', { status: 503 })))
+    const onStatus = vi.fn()
+
+    const cleanup = connectKeeperCursorPush(() => {}, { onStatus })
+
+    await vi.waitFor(() => expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({
+      status: 'degraded',
+      failedCount: 1,
+      lastErrorMs: expect.any(Number),
+    })))
+    cleanup()
   })
 })

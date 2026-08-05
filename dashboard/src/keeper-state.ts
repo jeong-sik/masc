@@ -758,7 +758,7 @@ function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[
 
 /** Try to attach an audio clip to the most recent assistant entry whose
  *  rendered text matches the clip's message text. Returns true if a match
- *  was found and updated. This handles the live SSE path: the assistant
+ *  was found and updated. This handles the live push path: the assistant
  *  bubble is already streaming when the synthesized audio event arrives. */
 export function attachKeeperAudioClip(name: string, rawAudio: unknown): boolean {
   const clip = normalizeAudioClip(rawAudio)

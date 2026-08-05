@@ -182,9 +182,8 @@ let set_markdown_dir dir =
    DUNE_SOURCEROOT is set by dune for every build/exec/runtest and absent
    in production processes, so this is a deterministic, environment-scoped
    branch — not a permissive default: outside dune the behaviour is
-   byte-identical to before (None). Tests that need true prompt absence
-   pin an explicit empty dir (see [with_task_create_prompt_missing] in
-   test_keeper_prompt_external.ml), which this never overrides. *)
+   byte-identical to before (None). Tests that need true prompt absence pin an
+   explicit empty dir, which this never overrides. *)
 let dune_sourceroot_markdown_dir =
   lazy
     (match Sys.getenv_opt "DUNE_SOURCEROOT" with

@@ -49,7 +49,6 @@ let with_repo_prompt_config f =
       Prompt_registry.clear ();
       Prompt_registry.set_markdown_dir prompts_dir;
       Masc.Prompt_defaults.init ();
-      Masc.Keeper_prompt_external.reset_cache ();
       f ())
 
 let base_observation : WO.world_observation =
@@ -119,7 +118,7 @@ let init_prompt_config_for_tests () =
   let original_cwd = Sys.getcwd () in
   let rec find_root dir hops =
     if hops > 8 then None
-    else if Sys.file_exists (Filename.concat dir "config/prompts/behavior")
+    else if Sys.file_exists (Filename.concat dir "config/prompts")
     then Some dir
     else
       let parent = Filename.dirname dir in
@@ -128,11 +127,10 @@ let init_prompt_config_for_tests () =
   match find_root original_cwd 0 with
   | None ->
       Alcotest.fail
-        "could not locate repo root (config/prompts/behavior) from test cwd"
+        "could not locate repo root (config/prompts) from test cwd"
   | Some root ->
       Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config");
-      Config_dir_resolver.reset ();
-      Masc.Keeper_prompt_external.reset_cache ()
+      Config_dir_resolver.reset ()
 
 let user_message observation =
   let turn_decision = WO.keeper_cycle_decision ~meta observation in

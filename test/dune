@@ -2552,14 +2552,3 @@
   %{workspace_root}/test/fixtures/keeper_system_prompt/assembled_prompt.golden)
  (libraries alcotest masc_test_deps))
 
-; Stands alone rather than joining the shared group above for one reason: it
-; reads config/prompts/behavior/*.md off the source tree at run time, resolving
-; the repo root through DUNE_SOURCEROOT, so the group's single
-; ../bin/main_eio.exe dep would let an edit under config/prompts replay a cached
-; pass. CI runs this as a hard gate, and a gate that can be served from cache is
-; not a gate. Same reason the golden above declares the tree.
-(test
- (name test_keeper_prompt_external)
- (modules test_keeper_prompt_external)
- (deps (source_tree %{workspace_root}/config/prompts))
- (libraries alcotest masc_test_deps))

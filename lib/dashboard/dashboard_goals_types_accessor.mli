@@ -40,7 +40,6 @@ val task_is_linked_to_goal :
 val task_linkage_source_opt :
   ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> string option
 val task_assignee : Masc_domain.task -> string option
-val task_status_label : Masc_domain.task -> string
 val task_is_terminal : Masc_domain.task -> bool
 val task_is_done : Masc_domain.task -> bool
 val task_updated_at : Masc_domain.task -> string

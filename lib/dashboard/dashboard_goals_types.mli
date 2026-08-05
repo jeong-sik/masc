@@ -40,7 +40,6 @@ val task_is_linked_to_goal :
 val task_linkage_source_opt :
   ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> string option
 val task_assignee : Masc_domain.task -> string option
-val task_status_label : Masc_domain.task -> string
 val task_is_terminal : Masc_domain.task -> bool
 val task_is_done : Masc_domain.task -> bool
 val task_updated_at : Masc_domain.task -> string
@@ -146,7 +145,7 @@ val goal_fsm_to_json :
 (** {1 Color helpers + task tree JSON projection (pure)} *)
 
 val goal_phase_color : Goal_phase.t -> string
-val task_status_color : string -> string
+val task_status_color : Masc_domain.task_status -> string
 
 val task_to_tree_json : Masc_domain.task * string -> Yojson.Safe.t
 val task_summary_to_json : (Masc_domain.task * string) list -> Yojson.Safe.t

@@ -2101,6 +2101,39 @@ let test_drain_outcome_labels_stay_distinct () =
     (List.length (List.sort_uniq compare labels))
 ;;
 
+(* A drain that returns Retry_later left the durable partition undrained and
+   re-armed the same contention, so the next wake re-inspects the same root.
+   Emitting that at the same level as a completed drain makes a worker that
+   never finishes read as routine while its candidate ledger grows (#26863). *)
+let test_undrained_outcomes_are_not_routine () =
+  let contention =
+    { W.keeper_name = "k"
+    ; partition_id = "p"
+    ; generation = P.Generation.initial
+    }
+  in
+  let level_name outcome =
+    match W.For_testing.drain_outcome_log_level outcome with
+    | Log.Debug -> "debug"
+    | Log.Info -> "info"
+    | Log.Warn -> "warn"
+    | Log.Error -> "error"
+  in
+  Alcotest.(check string)
+    "a completed drain is routine"
+    "info"
+    (level_name W.Drained);
+  Alcotest.(check string)
+    "a contended claim is not routine"
+    "warn"
+    (level_name (W.Retry_later { contention; reason = W.Exact_claim_contended }));
+  Alcotest.(check string)
+    "a moved generation is not routine"
+    "warn"
+    (level_name
+       (W.Retry_later { contention; reason = W.Selected_generation_changed }))
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_worker"
@@ -2225,6 +2258,10 @@ let () =
             "cross-domain wake coalesces and rearms"
             `Quick
             test_cross_domain_wake_is_coalesced_and_rearmed
+        ; Alcotest.test_case
+            "undrained outcomes are not routine"
+            `Quick
+            test_undrained_outcomes_are_not_routine
         ; Alcotest.test_case
             "drain outcome labels stay distinct"
             `Quick

@@ -359,6 +359,15 @@ let drain_outcome_label = function
     "retry_generation_changed"
 ;;
 
+(* The drain line derives its level from the outcome it reports. [Retry_later]
+   leaves the durable partition undrained and re-arms the same contention, so a
+   worker that keeps returning it makes no progress while its candidate ledger
+   grows; at [Info] that state reads the same as normal draining. *)
+let drain_outcome_log_level = function
+  | Drained -> Log.Info
+  | Retry_later _ -> Log.Warn
+;;
+
 let apply_drain_rearm scheduler = function
   | Drained ->
     reset_contention_rearms scheduler ~keep:None;
@@ -1805,18 +1814,8 @@ let run
                  ~execute
              with
              | Ok outcome ->
-               (* The level comes from the outcome, not from the call site.
-                  [Retry_later] means the durable partition is still undrained
-                  and the same candidate is re-inspected on the next wake, so a
-                  worker that never reaches [Drained] is a backlog that grows
-                  with nothing above Info to show for it. *)
-               let level =
-                 match outcome with
-                 | Drained -> Log.Info
-                 | Retry_later _ -> Log.Warn
-               in
                Log.Keeper.emit
-                 level
+                 (drain_outcome_log_level outcome)
                  (Printf.sprintf
                     "board_attention_worker_drain keeper=%s outcome=%s"
                     keeper_name
@@ -1848,6 +1847,7 @@ module For_testing = struct
   let schedule_contention_rearm = schedule_contention_rearm
   let reset_contention_rearms = reset_contention_rearms
   let drain_outcome_label = drain_outcome_label
+  let drain_outcome_log_level = drain_outcome_log_level
   let apply_drain_rearm = apply_drain_rearm
   let replay_completed_owner_wake = replay_completed_owner_wake
   let with_process_recovery_claim = with_process_recovery_claim

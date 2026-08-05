@@ -183,9 +183,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     prompt: {
       instructions: asNullableString(prompt.instructions) ?? '',
       system_prompt_blocks: {
-        constitution: normalizePromptBlock(promptBlocks.constitution, 'keeper.constitution'),
-        world: normalizePromptBlock(promptBlocks.world, 'keeper.world'),
-        capabilities: normalizePromptBlock(promptBlocks.capabilities, 'keeper.capabilities'),
+        system: normalizePromptBlock(promptBlocks.system, 'keeper.system'),
       },
       effective_system_prompt: asNullableString(prompt.effective_system_prompt) ?? '',
       assembled_system_prompt: asNullableString(prompt.assembled_system_prompt) ?? '',

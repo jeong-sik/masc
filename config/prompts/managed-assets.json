@@ -2,14 +2,11 @@
   "managed_by": "MASC",
   "schema": "masc.prompt-managed-assets.v1",
   "paths": [
-    "behavior/conversation_routing.md",
     "keeper.board_attention_judgment_batch.md",
     "keeper.gate_judgment.md",
     "keeper.librarian.current_selection.md",
-    "keeper.librarian.system.md",
     "keeper.memory_os_recall.context.md",
     "keeper.memory_os_recall.unavailable.md",
-    "keeper.reply_guidelines.md",
     "keeper.system.md",
     "verification.anti_rationalization.md"
   ]

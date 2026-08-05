@@ -205,18 +205,15 @@ let messages_and_input_for_librarian (inp : Keeper_librarian.input) =
     }
   in
   let open Result.Syntax in
-  let* system =
-    render_prompt Keeper_prompt_names.librarian_system []
-  in
+  (* One asset, one message: the librarian's role statement lives at the top
+     of the selection prompt it is rendered with, so there is no second file
+     to keep in step. *)
   let+ user =
     render_prompt
       Keeper_prompt_names.librarian_current_selection
       (Keeper_librarian.prompt_variables input)
   in
-  input,
-  [ message Agent_sdk.Types.System system
-  ; message Agent_sdk.Types.User user
-  ]
+  input, [ message Agent_sdk.Types.User user ]
 ;;
 
 let messages_for_librarian inp =

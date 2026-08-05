@@ -373,15 +373,14 @@ let test_direct_and_autonomous_share_system_prompt () =
         Masc.Keeper_types_profile_defaults.empty_keeper_profile_defaults
       ~meta
   in
-  let direct_system_prompt =
-    Turn.For_testing.direct_turn_system_prompt
-      ~base_system_prompt
-      ~direct_reply:false
-  in
+  (* Direct and autonomous turns share one system prompt outright: the
+     channel-specific block that used to be appended for direct_reply was the
+     last split between them and no longer exists, so the base prompt IS the
+     contract for both entrypoints. *)
   check string
     "stable contract is byte-identical across turn entrypoints"
     autonomous_system_prompt
-    direct_system_prompt;
+    base_system_prompt;
   (* The discovery sentence this used to match was cut in masc#26579; the
      policy it stated — an unregistered or unavailable checkout is handled
      explicitly, and absent evidence blocks rather than licenses a guess —
@@ -389,11 +388,11 @@ let test_direct_and_autonomous_share_system_prompt () =
   check bool "shared contract carries repository checkout policy" true
     (contains
        ~needle:"handle a behind, diverged, dirty, unregistered, or unavailable"
-       direct_system_prompt);
+       base_system_prompt);
   check bool "shared contract refuses to infer checkout state" true
     (contains
        ~needle:"Missing, ambiguous, or stale checkout evidence is a blocker"
-       direct_system_prompt)
+       base_system_prompt)
 
 let test_unresolved_goal_keeps_one_stable_safety_contract () =
   with_repo_prompt_config @@ fun () ->
@@ -421,7 +420,7 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
       ~observation:base_observation
       ()
   in
-  let direct_system_prompt =
+  let base_system_prompt =
     Masc.Keeper_run_context.build_base_system_prompt
       ~config
       ~profile_defaults:
@@ -430,25 +429,25 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
   in
   check string
     "unresolved goal does not split direct and autonomous prompts"
-    direct_system_prompt
+    base_system_prompt
     autonomous_system_prompt;
   check bool "unresolved goal remains as a bare id" true
-    (contains ~needle:"- missing-goal\n" direct_system_prompt);
+    (contains ~needle:"- missing-goal\n" base_system_prompt);
   check bool "identity anchor is preserved" true
-    (contains ~needle:"<identity_anchor>" direct_system_prompt);
+    (contains ~needle:"<identity_anchor>" base_system_prompt);
   (* The shared block is one [<system>] element now. Its former
      [<world>]/[<capabilities>] tags are gone, so the two contracts they
      wrapped are pinned by their own sentences instead of by a tag name. *)
   check bool "shared system block is preserved" true
-    (contains ~needle:"<system>" direct_system_prompt);
+    (contains ~needle:"<system>" base_system_prompt);
   check bool "ownership contract is preserved" true
     (contains
        ~needle:"MASC owns Board, Task, Goal, Schedule"
-       direct_system_prompt);
+       base_system_prompt);
   check bool "capability contract is preserved" true
     (contains
        ~needle:"The active typed schema is the sole callable catalog"
-       direct_system_prompt)
+       base_system_prompt)
 
 (* --- 2. Threaded turn decision --- *)
 

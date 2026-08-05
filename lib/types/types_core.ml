@@ -161,23 +161,25 @@ let agent_of_yojson json =
             in
             Printf.sprintf "%s (last_seen=%s)" original_error last_seen_repr
           in
-          let now_iso () =
-            `String (iso8601_of_unix_seconds (Unix.gettimeofday ()))
-          in
+          (* No liveness evidence at all. [agent_to_yojson] always writes
+             [last_seen], so reaching here means the record did not come from
+             this codec: truncated, hand-edited, or an older schema. Keeping
+             the record is still right (#9751) — it is rebuilt on the next
+             heartbeat — but the filler must not claim liveness. The epoch
+             makes [parse_agent_status] treat the timestamp as absent, so the
+             derived age is omitted and consumers fall back to their
+             [max_float] "infinitely stale" default. A [now ()] filler
+             inverted that: a corrupt record read as "seen just now" and
+             satisfied every downstream liveness check. *)
+          let no_evidence_iso () = `String (iso8601_of_unix_seconds 0.0) in
           let normalized_last_seen =
             match last_seen_raw with
             | Some value ->
                 normalize_agent_last_seen ~session_bound_at:session_bound_at_value value
             | None ->
-                (* Missing last_seen → bootstrap from session_bound_at when
-                   present, otherwise fall back to the current wall-clock
-                   time (#9751).  [last_seen] is a liveness marker, not
-                   identity-critical; a recent-but-approximate timestamp
-                   is strictly better than failing the whole record
-                   deserialisation for an optional field. *)
                 (match session_bound_at_value with
                  | Some _ as v -> v
-                 | None -> Some (now_iso ()))
+                 | None -> Some (no_evidence_iso ()))
           in
           (match normalized_last_seen with
           | Some normalized_last_seen ->
@@ -185,16 +187,15 @@ let agent_of_yojson json =
                 ("last_seen", normalized_last_seen)
                 :: List.remove_assoc "last_seen" fields
               in
-              (* If session_bound_at is also unusable, inject a now() value so
-                 the generated deserialiser's required-field check passes.
-                 The agent record can always be rebuilt from a heartbeat;
-                 losing the whole entry because of a missing timestamp is
-                 strictly worse (#9751). *)
+              (* Same reasoning for session_bound_at: the generated
+                 deserialiser requires the field, so fill it to keep the
+                 record, but with the epoch rather than a value that claims
+                 the session was bound just now. *)
               let normalized_fields =
                 match session_bound_at_value with
                 | Some _ -> fields_without_last_seen
                 | None ->
-                    ("session_bound_at", now_iso ())
+                    ("session_bound_at", no_evidence_iso ())
                     :: List.remove_assoc "session_bound_at" fields_without_last_seen
               in
               (match agent_of_yojson_generated (`Assoc normalized_fields) with

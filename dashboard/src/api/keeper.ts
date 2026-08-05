@@ -311,7 +311,6 @@ async function callKeeperMessageViaOperator(
 ): Promise<KeeperToolReply> {
   const payload: Record<string, unknown> = {
     message,
-    direct_reply: true,
   }
   const response = await runOperatorAction({
     actor: currentDashboardActor(),
@@ -353,7 +352,6 @@ export async function submitQueuedKeeperMessage(
     target_id: name,
     payload: {
       message,
-      direct_reply: true,
     },
   })
   const operatorResult = isRecord(response.result) ? response.result : null
@@ -537,7 +535,6 @@ export async function streamKeeperMessage(
   const body: Record<string, unknown> = {
     name,
     message,
-    direct_reply: true,
   }
   if (channel && channel.trim() !== '') {
     body.channel = channel.trim()

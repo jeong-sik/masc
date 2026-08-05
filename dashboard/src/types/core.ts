@@ -154,7 +154,6 @@ export interface BoardContributorQuality {
   response_rate?: number
   board_posts?: number
   board_comments?: number
-  thompson_confidence?: number
   evidence_state?: 'default' | 'measured'
 }
 
@@ -631,7 +630,6 @@ export interface KeeperDiagnostic {
   last_reply_at?: string | null
   last_reply_preview?: string | null
   last_error?: string | null
-  next_eligible_at_s?: number | null
   recoverable?: boolean
   summary?: string
   keepalive_running?: boolean

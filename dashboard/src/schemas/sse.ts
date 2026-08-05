@@ -59,6 +59,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_composite_changed',
   'keeper_chat_appended',
   'keeper_chat_queue_changed',
+  'ide_cursor_changed',
   'keeper_tool_call',
   'masc/keeper_tool_call',
   'keeper_tool_skipped',
@@ -119,6 +120,7 @@ const STRING_FIELDS = new Set([
   'hearth',
   'agent_name',
   'keeper_name',
+  'keeper_id',
   'event_type',
   'name',
   'from_model',
@@ -429,7 +431,7 @@ function flushDriftWindow(kind: string, raw: unknown): void {
   driftWindows.delete(kind)
   if (!state || state.count <= 1) return
   console.warn(
-    `[SSE] schema drift, event dropped: kind=${kind} dropped ${state.count} in `
+    `[server-push] schema drift, event dropped: kind=${kind} dropped ${state.count} in `
     + `${DRIFT_LOG_WINDOW_MS / 1000}s, first_raw=${truncateRawPreview(raw)}`,
   )
 }
@@ -457,9 +459,9 @@ function logSchemaDrift(raw: unknown, issues: readonly SchemaIssue[]): void {
   // replaced by a truncated preview so a single drifting kind cannot flood
   // the console with large objects (see module doc above).
   if (import.meta.env.DEV) {
-    console.warn('[SSE] schema drift, event dropped', { issues, raw })
+    console.warn('[server-push] schema drift, event dropped', { issues, raw })
   } else {
-    console.warn(`[SSE] schema drift, event dropped: kind=${kind} first_raw=${truncateRawPreview(raw)}`)
+    console.warn(`[server-push] schema drift, event dropped: kind=${kind} first_raw=${truncateRawPreview(raw)}`)
   }
 }
 

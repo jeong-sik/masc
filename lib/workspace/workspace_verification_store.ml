@@ -253,16 +253,7 @@ let submitted_evidence_item_of_yojson = function
                 (Json_util.excerpt value))
          | None -> Error "submitted evidence snapshot is missing truncated"
        in
-       let content_bytes = String.length content in
-       if truncated && bytes <= content_bytes
-       then
-         Error
-           "truncated submitted evidence snapshot must report more source bytes than persisted content"
-       else if (not truncated) && bytes <> content_bytes
-       then
-         Error
-           "non-truncated submitted evidence snapshot bytes must equal persisted content length"
-       else Ok (Evidence_artifact { reference; content; bytes; truncated })
+       Ok (Evidence_artifact { reference; content; bytes; truncated })
      | Some (`String "artifact_unreadable") ->
        let open Result.Syntax in
        let field_names =

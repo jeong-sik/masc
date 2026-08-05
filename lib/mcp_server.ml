@@ -1092,7 +1092,6 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     Workspace.default_config_eio ~sw
       ~on_backend_ready:(fun _backend ->
         Log.Backend.info "Board: JSONL default backend";
-        Board_agent_effect_hooks.install ();
         Board_metric_hooks_adapter.install ();
         Workspace_metric_hooks.install ();
         Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;

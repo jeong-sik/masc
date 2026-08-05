@@ -2,7 +2,6 @@
 status: in-progress
 last_verified: 2026-04-26
 code_refs:
-  - dashboard/src/dashboard-ws-cutover.ts
   - dashboard/src/components/transport-beacon.ts
   - dashboard/.env.development
 ---

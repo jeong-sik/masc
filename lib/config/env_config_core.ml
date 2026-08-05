@@ -349,7 +349,7 @@ let base_path_input_env_key = "MASC_BASE_PATH_INPUT"
    SSOT constant is in scope at first use. *)
 
 (** Project base path for .masc data directory.
-    Used by board, checkpoint, thompson_sampling, voice, keeper.
+    Used by board, checkpoint, voice, keeper.
     Set at startup; may be overridden from inside the running process via
     [Unix.putenv] before use. Parent-shell env edits do not affect an already
     running server.

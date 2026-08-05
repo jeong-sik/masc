@@ -208,7 +208,6 @@ const KEEPER_RELATIVE_AGE_FIELDS = new Set<string>([
   'last_turn_ago_s',
   'last_handoff_ago_s',
   'last_proactive_ago_s',
-  'next_eligible_at_s',
 ])
 
 function relativeAgeRenderBucket(value: unknown): unknown {

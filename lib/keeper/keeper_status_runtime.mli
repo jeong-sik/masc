@@ -52,7 +52,6 @@ val keeper_health_state :
   keepalive_running:bool ->
   agent_status:Yojson.Safe.t ->
   quiet_reason:string option ->
-  now_ts:float ->
   unit ->
   keeper_health
 

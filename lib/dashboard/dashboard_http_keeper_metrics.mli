@@ -7,12 +7,8 @@
     runtime-visible entries available in the keeper-detail JSON
     builder.
 
-    Internal helpers stay private — token / similarity / text
-    helpers ([String_util.utf8_prefix], [truncate_text],
-    [contains_ci], 2 normalize regexes,
-    [normalize_similarity_text], [token_set_of_text],
-    [jaccard_similarity_text], [take_last]),
-    plus [keeper_history_summary_json]. *)
+    [truncate_text] stays private — it is used only by the
+    history-summary preview builder. *)
 
 (** {1 Model name normalization (runtime-visible)} *)
 

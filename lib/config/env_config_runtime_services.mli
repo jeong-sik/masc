@@ -43,13 +43,6 @@ module Autonomy : sig
   (** [MASC_AUTONOMY_QUIET_END] (default [7]). *)
 end
 
-(** {1 Thompson sampling agent selection} *)
-
-module AgentSelection : sig
-  val vote_decay_factor : float
-  (** [MASC_AUTONOMY_VOTE_DECAY_FACTOR] (default [0.95]). *)
-end
-
 (** {1 Timeouts} *)
 
 module Timeouts : sig

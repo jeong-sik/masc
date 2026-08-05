@@ -6,7 +6,6 @@
 
 let system = "keeper.system"
 let reply_guidelines = "keeper.reply_guidelines"
-let recovery_block = "keeper.recovery_block"
 let board_attention_judgment_batch = "keeper.board_attention_judgment_batch"
 let gate_judgment = "keeper.gate_judgment"
 let librarian_system = "keeper.librarian.system"

@@ -239,7 +239,6 @@
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
-  test_keeper_tool_visibility_projection
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_repo_store
@@ -536,7 +535,6 @@
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
-  test_keeper_tool_visibility_projection
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_repo_store
@@ -954,7 +952,6 @@
   test_cache_eio
   test_metrics_store_eio
   test_planning_eio
-  test_thompson_sampling
   test_safe_ops
   test_json_util
   test_process_eio_coverage
@@ -1107,7 +1104,6 @@
   test_cache_eio
   test_metrics_store_eio
   test_planning_eio
-  test_thompson_sampling
   test_safe_ops
   test_json_util
   test_process_eio_coverage

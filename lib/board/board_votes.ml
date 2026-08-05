@@ -140,7 +140,6 @@ type vote_outcome = {
   vote_voter : string;
   vote_direction : vote_direction;
   vote_ts : float;
-  vote_author_name : string;
 }
 
 let record_vote_side_effect store outcome =
@@ -149,15 +148,7 @@ let record_vote_side_effect store outcome =
         ~target:outcome.vote_target
         ~voter:outcome.vote_voter
         ~direction:outcome.vote_direction
-        ~ts:outcome.vote_ts);
-  let vote_dir =
-    match outcome.vote_direction with
-    | Up -> Board_effect_hooks.Up
-    | Down -> Board_effect_hooks.Down
-  in
-  Board_effect_hooks.record_vote
-    ~agent_name:outcome.vote_author_name
-    ~direction:vote_dir
+        ~ts:outcome.vote_ts)
 
 let current_vote_for_post store ~voter ~post_id
     : (vote_direction option, board_error) Result.t =
@@ -210,13 +201,12 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                   Hashtbl.replace store.vote_log vote_key (direction, now);
                   mark_dirty_post store (Post_id.to_string pid);
                   invalidate_post_caches store;
-                  let author_name = Agent_id.to_string post.author in
                   Ok { delta = flipped.votes_up - flipped.votes_down;
                        vote_target = vote_key;
                        vote_voter = voter;
                        vote_direction = direction;
                        vote_ts = now;
-                       vote_author_name = author_name }
+                       }
               | None ->
                   let updated = match direction with
                     | Up -> { post with votes_up = post.votes_up + 1; updated_at = now }
@@ -226,13 +216,12 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                   Hashtbl.replace store.vote_log vote_key (direction, now);
                   mark_dirty_post store (Post_id.to_string pid);
                   invalidate_post_caches store;
-                  let author_name = Agent_id.to_string post.author in
                   Ok { delta = updated.votes_up - updated.votes_down;
                        vote_target = vote_key;
                        vote_voter = voter;
                        vote_direction = direction;
                        vote_ts = now;
-                       vote_author_name = author_name })
+                       })
       in
       (* Side-effect hooks run outside the store lock. Selection observers
          write their own state on unrelated paths and modify no board state,
@@ -296,14 +285,12 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
                 Hashtbl.replace store.vote_log vote_key (direction, now);
                 mark_dirty_comment store (Comment_id.to_string cid);
                 invalidate_comment_caches store;
-                let author_name = Agent_id.to_string cmt.author in
                 Ok {
                   delta = flipped.votes_up - flipped.votes_down;
                   vote_target = vote_key;
                   vote_voter = voter;
                   vote_direction = direction;
                   vote_ts = now;
-                  vote_author_name = author_name;
                 }
             | None ->
                 let updated = match direction with
@@ -314,14 +301,12 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
                 Hashtbl.replace store.vote_log vote_key (direction, now);
                 mark_dirty_comment store (Comment_id.to_string cid);
                 invalidate_comment_caches store;
-                let author_name = Agent_id.to_string cmt.author in
                 Ok {
                   delta = updated.votes_up - updated.votes_down;
                   vote_target = vote_key;
                   vote_voter = voter;
                   vote_direction = direction;
                   vote_ts = now;
-                  vote_author_name = author_name;
                 }
       )
       |> Result.map (fun outcome ->

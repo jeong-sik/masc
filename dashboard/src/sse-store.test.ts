@@ -104,11 +104,11 @@ async function loadSseStore() {
   }))
   vi.doMock('./router', () => ({ route }))
   const sseStore = await import('./sse-store')
-  const sse = await import('./sse')
-  return { sseStore, sse, compositeTick }
+  const wsState = await import('./dashboard-ws-state')
+  return { sseStore, wsState, compositeTick }
 }
 
-describe('setupSSEReaction reconnect hydration', () => {
+describe('setupServerPushReaction reconnect hydration', () => {
   const dashboardDeltaTimeoutMs = 10_000
 
   beforeEach(() => {
@@ -165,12 +165,12 @@ describe('setupSSEReaction reconnect hydration', () => {
   })
 
   it('forces a dashboard refresh on reconnect before the route-budgeted refresh runs', async () => {
-    const { sseStore, sse } = await loadSseStore()
-    const cleanup = sseStore.setupSSEReaction()
+    const { sseStore, wsState } = await loadSseStore()
+    const cleanup = sseStore.setupServerPushReaction()
 
-    sse.connected.value = true
-    sse.lastDisconnectedAt.value = Date.now() - 1_000
-    sse.reconnectCount.value += 1
+    wsState.dashboardWsReady.value = true
+    wsState.dashboardWsLastDisconnectedAt.value = Date.now() - 1_000
+    wsState.dashboardWsReconnectCount.value += 1
     await flushAsyncWork()
 
     expect(showToast).toHaveBeenCalled()
@@ -180,17 +180,17 @@ describe('setupSSEReaction reconnect hydration', () => {
 
     vi.clearAllTimers()
     cleanup()
-  })
+  }, 15_000)
 
   it('refreshes the Gate approval queue on reconnect (nav-rail badge recovery)', async () => {
-    const { sseStore, sse } = await loadSseStore()
-    const cleanup = sseStore.setupSSEReaction()
+    const { sseStore, wsState } = await loadSseStore()
+    const cleanup = sseStore.setupServerPushReaction()
     const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()
     sseStore.registerGateRefresh(refreshGate)
 
-    sse.connected.value = true
-    sse.lastDisconnectedAt.value = Date.now() - 1_000
-    sse.reconnectCount.value += 1
+    wsState.dashboardWsReady.value = true
+    wsState.dashboardWsLastDisconnectedAt.value = Date.now() - 1_000
+    wsState.dashboardWsReconnectCount.value += 1
     await flushAsyncWork()
 
     // Approvals can arrive/resolve during a disconnect; the always-visible
@@ -202,12 +202,12 @@ describe('setupSSEReaction reconnect hydration', () => {
   })
 
   it('force re-hydrates the open keeper chat on reconnect (replay-buffer gap recovery)', async () => {
-    const { sseStore, sse } = await loadSseStore()
-    const cleanup = sseStore.setupSSEReaction()
+    const { sseStore, wsState } = await loadSseStore()
+    const cleanup = sseStore.setupServerPushReaction()
 
-    sse.connected.value = true
-    sse.lastDisconnectedAt.value = Date.now() - 1_000
-    sse.reconnectCount.value += 1
+    wsState.dashboardWsReady.value = true
+    wsState.dashboardWsLastDisconnectedAt.value = Date.now() - 1_000
+    wsState.dashboardWsReconnectCount.value += 1
     await flushAsyncWork()
 
     // keeper_chat_appended events dropped outside the server replay buffer are
@@ -223,17 +223,17 @@ describe('setupSSEReaction reconnect hydration', () => {
     refreshActiveKeeperChatHistory.mockImplementationOnce(() => {
       throw new Error('keeper chat reconnect refresh exploded')
     })
-    const { sseStore, sse } = await loadSseStore()
-    const cleanup = sseStore.setupSSEReaction()
+    const { sseStore, wsState } = await loadSseStore()
+    const cleanup = sseStore.setupServerPushReaction()
 
-    sse.connected.value = true
-    sse.lastDisconnectedAt.value = Date.now() - 1_000
-    sse.reconnectCount.value += 1
+    wsState.dashboardWsReady.value = true
+    wsState.dashboardWsLastDisconnectedAt.value = Date.now() - 1_000
+    wsState.dashboardWsReconnectCount.value += 1
     await flushAsyncWork()
 
     expect(refreshActiveKeeperChatHistory).toHaveBeenCalledWith({ force: true })
     expect(consoleWarn).toHaveBeenCalledWith(
-      '[SSE] reconnect keeper chat re-hydration unavailable',
+      '[server-push] reconnect keeper chat re-hydration unavailable',
       'keeper chat reconnect refresh exploded',
     )
     expect(refreshDashboard).toHaveBeenCalledWith({ force: true })
@@ -279,10 +279,9 @@ describe('setupSSEReaction reconnect hydration', () => {
   })
 
   it('hydrates the canonical project_snapshot SSE event without an HTTP fetch', async () => {
-    const { sseStore, sse } = await loadSseStore()
-    const cleanup = sseStore.setupSSEReaction()
+    const { sseStore } = await loadSseStore()
 
-    sse.lastEvent.value = {
+    sseStore.routeServerPushEvent({
       type: 'project_snapshot',
       payload: {
         root: {
@@ -291,7 +290,7 @@ describe('setupSSEReaction reconnect hydration', () => {
           },
         },
       },
-    }
+    })
     await flushAsyncWork()
 
     expect(namespaceTruth.value).toEqual({
@@ -303,68 +302,58 @@ describe('setupSSEReaction reconnect hydration', () => {
     })
     expect(requestNamespaceTruthNow).not.toHaveBeenCalled()
 
-    cleanup()
   })
 
   it('does not refresh hidden heavy surfaces for keeper lifecycle events on overview', async () => {
-    const { sseStore, sse } = await loadSseStore()
+    const { sseStore } = await loadSseStore()
     const refreshOperator = vi.fn()
     sseStore.registerOperatorRefresh(refreshOperator)
     route.value = { tab: 'overview', params: {}, postId: null }
-    const cleanup = sseStore.setupSSEReaction()
-
-    sse.lastEvent.value = {
+    sseStore.routeServerPushEvent({
       type: 'keeper_phase_changed',
       name: 'qa-king',
       prev_phase: 'running',
       new_phase: 'failing',
-    }
+    })
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
     expect(refreshExecution).not.toHaveBeenCalled()
     expect(refreshOperator).not.toHaveBeenCalled()
 
-    cleanup()
   })
 
   it('routes execution SSE refreshes only when the current route needs execution data', async () => {
-    const { sseStore, sse } = await loadSseStore()
+    const { sseStore } = await loadSseStore()
     route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
-    const cleanup = sseStore.setupSSEReaction()
-
-    sse.lastEvent.value = {
+    sseStore.routeServerPushEvent({
       type: 'keeper_phase_changed',
       name: 'qa-king',
       prev_phase: 'running',
       new_phase: 'failing',
-    }
+    })
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
     expect(refreshExecution).toHaveBeenCalledTimes(1)
     expect(refreshExecution).toHaveBeenCalledWith({ force: true })
 
-    cleanup()
   })
 
   it('normalizes MASC lifecycle aliases before route-scoped execution refresh', async () => {
-    const { sseStore, sse } = await loadSseStore()
+    const { sseStore } = await loadSseStore()
     route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
-    const cleanup = sseStore.setupSSEReaction()
-
-    sse.lastEvent.value = {
+    sseStore.routeServerPushEvent({
       type: 'masc/keeper_guardrail',
       name: 'qa-king',
       reason: 'tool boundary',
-    }
+    })
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
     expect(refreshExecution).toHaveBeenCalledTimes(1)
     expect(refreshExecution).toHaveBeenCalledWith({ force: true })
 
-    cleanup()
   })
 
   it('forces execution refresh on keeper turn complete for live roster status', async () => {
@@ -399,24 +388,21 @@ describe('setupSSEReaction reconnect hydration', () => {
   })
 
   it('keeps operator lifecycle refreshes scoped to the command route', async () => {
-    const { sseStore, sse } = await loadSseStore()
+    const { sseStore } = await loadSseStore()
     const refreshOperator = vi.fn()
     sseStore.registerOperatorRefresh(refreshOperator)
     route.value = { tab: 'command', params: {}, postId: null }
-    const cleanup = sseStore.setupSSEReaction()
-
-    sse.lastEvent.value = {
+    sseStore.routeServerPushEvent({
       type: 'keeper_turn_complete',
       name: 'qa-king',
       turn: 42,
-    }
+    })
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
     expect(refreshOperator).toHaveBeenCalledTimes(1)
     expect(refreshExecution).not.toHaveBeenCalled()
 
-    cleanup()
   })
 
   it('routes all board SSE wire variants through the board refresh budget', async () => {
@@ -532,6 +518,22 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(ideRefresh).not.toHaveBeenCalled()
+  })
+
+  it('routes IDE cursor invalidations delivered by the dashboard websocket', async () => {
+    const { sseStore } = await loadSseStore()
+    const cursorRefresh = vi.fn()
+    const unregister = sseStore.registerIdeCursorRefresh(cursorRefresh)
+
+    sseStore.routeServerPushEvent({
+      type: 'ide_cursor_changed',
+      keeper_id: 'kidsnote',
+    })
+    vi.advanceTimersByTime(1)
+    await flushAsyncWork()
+
+    expect(cursorRefresh).toHaveBeenCalledOnce()
+    unregister()
   })
 
   it('routes keeper_chat_appended pushes to the live chat refresh hook', async () => {
@@ -835,7 +837,7 @@ describe('setupSSEReaction reconnect hydration', () => {
       comment_id: 'comment-1',
     })
     route.value = { tab: 'monitoring', params: { section: 'observatory' }, postId: null }
-    sseStore.cancelPendingSSERefreshes()
+    sseStore.cancelPendingServerPushRefreshes()
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 

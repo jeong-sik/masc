@@ -529,7 +529,6 @@ let test_board_dashboard_json_embeds_contributor_quality () =
       response_rate = 0.6;
       board_posts = 3;
       board_comments = 5;
-      thompson_confidence = 0.7;
     }
   in
   let contributor_quality =

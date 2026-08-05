@@ -392,7 +392,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   // Fetch the workspace snapshot for the current file/keeper/repo/task.
   //
   // Called two ways: reactively via the effect() below (on navigation-signal
-  // changes) and imperatively via the live SSE refresh (when a keeper edits
+  // changes) and imperatively via the live server-push refresh (when a keeper edits
   // files — see registerIdeWorkspaceRefresh). Both share `abortController`, so
   // the latest call always wins and a live refresh cannot race a navigation
   // refresh to stale data. The fetches are idempotent (server is SSOT), so a

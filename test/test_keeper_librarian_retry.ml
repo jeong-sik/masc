@@ -439,9 +439,28 @@ let test_constraint_category_excludes_self_imposed_scope () =
     check bool "already being stored is not a reason to retain" true
       (String_util.contains_substring user_text
          "does not earn retention by already being there");
-    check bool "stored self-scope constraints are dropped" true
+    (* Scoping the omit rule to the constraint bullet left the category itself
+       as the escape hatch. Observed live 2026-08-05 within one hour: kidsnote's
+       store went from revision 129 carrying [constraint] "standing-by policy,
+       only intervening ... when directly mentioned" to revision 131 carrying
+       [preference] "Skip polling on non-scheduled wakes, acting only when the
+       trigger includes a concrete signal like a mention or task assignment" --
+       the same self-limit, relabelled, and retained because the retention rule
+       also named only [constraint]. Both rules are judged on what the claim
+       does to future action instead. *)
+    check bool "the omit rule spans every category" true
       (String_util.contains_substring user_text
-         "drop a stored `constraint` that no external rule enforces");
+         "omitted under EVERY\ncategory, not only under `constraint`");
+    check bool "relabelling does not launder a self-limit" true
+      (String_util.contains_substring user_text
+         "the same sentence relabelled `preference`, `lesson`, or `fact`");
+    check bool "retention reads the claim, not the category" true
+      (String_util.contains_substring user_text
+         "Read the claim, not its category");
+    check bool "stored self-scope memories are dropped" true
+      (String_util.contains_substring user_text
+         "drop a stored memory that no external rule enforces but that still \
+          narrows what the agent takes on");
     (* Measured 2026-08-05. kidsnote's operator instructions say "@kidsnote로
        요청받으면 같은 post_id에 구체적인 댓글을 남긴다" -- when to act. The
        stored memory reads "standing-by policy, only intervening in board posts

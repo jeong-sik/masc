@@ -10,9 +10,12 @@ import {
   type DashboardRuntimeProbePayload,
 } from '../api/dashboard-tools-prompts'
 import { hashForRoute, navigate, route } from '../router'
-import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
-import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
-import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
+import {
+  dashboardWsConnected,
+  dashboardWsLastDisconnectedAt,
+  dashboardWsReady,
+  dashboardWsReconnectCount,
+} from '../dashboard-ws-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
 import { KEEPER_STATUS_LABEL_KO } from '../lib/keeper-operational-state'
 import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution, tasksByStatus } from '../store'
@@ -135,43 +138,25 @@ function describeReconnecting(args: {
 }
 
 export function ConnectionStatus() {
-  const wsOnly = dashboardWsOnlyEnabled()
-  const reconn = reconnectCount.value
+  const reconn = dashboardWsReconnectCount.value
   const reconnecting = describeReconnecting({
-    disconnectedAt: lastDisconnectedAt.value,
+    disconnectedAt: dashboardWsLastDisconnectedAt.value,
     now: Date.now(),
     reconnects: reconn,
   })
   const status = (() => {
-    if (wsOnly) {
-      if (dashboardWsReady.value) {
-        return {
-          tone: 'ok' as const,
-          label: reconn > 0 ? 'Reconnected' : 'Connected',
-          title: reconn > 0 ? `Reconnect attempts ${reconn}` : '',
-        }
-      }
-      if (dashboardWsSseFallbackActive.value) {
-        return {
-          tone: 'warn' as const,
-          label: 'SSE fallback',
-          title: dashboardWsLastError.value
-            ? `Client WS degraded: ${dashboardWsLastError.value}`
-            : 'Client WS degraded; SSE fallback is carrying events.',
-        }
-      }
-      if (dashboardWsConnected.value) {
-        return {
-          tone: 'warn' as const,
-          label: 'Connecting WS',
-          title: 'Client WS socket is open; waiting for dashboard/hello.',
-        }
-      }
-    } else if (connected.value) {
+    if (dashboardWsReady.value) {
       return {
         tone: 'ok' as const,
         label: reconn > 0 ? 'Reconnected' : 'Connected',
         title: reconn > 0 ? `Reconnect attempts ${reconn}` : '',
+      }
+    }
+    if (dashboardWsConnected.value) {
+      return {
+        tone: 'warn' as const,
+        label: 'Connecting WS',
+        title: 'Client WS socket is open; waiting for dashboard/hello.',
       }
     }
     return {
@@ -643,10 +628,7 @@ export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
     }
   }, [])
 
-  const wsOnly = dashboardWsOnlyEnabled()
-  const live = wsOnly
-    ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
-    : connected.value
+  const live = dashboardWsReady.value
   // dashboardHealthChips does 2 keeper filter passes + resolveRuntimeCounts +
   // up to ~12 chip objects. The input object below is a fresh literal every
   // render, so memoizing on the object would always miss — instead list the
@@ -934,10 +916,7 @@ function dashboardRouteBoundaryKey(routeState: RouteState): string {
 }
 
 function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
-  const wsOnly = dashboardWsOnlyEnabled()
-  const live = wsOnly
-    ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
-    : connected.value
+  const live = dashboardWsReady.value
   const snap = missionSnapshot.value
   const attentionQueue = snap?.attention_queue ?? []
   const attentionCount = attentionQueue.length
@@ -1418,7 +1397,7 @@ function SurfaceLead() {
 export function DashboardMain() {
   useSurfaceDocumentTitle()
 
-  if (dashboardLoading.value && !connected.value && !namespaceTruthInitializing.value) {
+  if (dashboardLoading.value && !dashboardWsConnected.value && !namespaceTruthInitializing.value) {
     return html`<${LoadingState}>Loading dashboard...<//>`
   }
 

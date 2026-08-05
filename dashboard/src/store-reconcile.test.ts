@@ -169,33 +169,6 @@ describe('reconcileKeepers', () => {
     expect(result[0]).toBe(updated)
   })
 
-  it('keeps row references for nested diagnostic countdown drift within the same display bucket', () => {
-    const keeper = makeKeeper({
-      diagnostic: {
-        summary: 'Keeper is waiting for a scheduled wake.',
-        health_state: 'healthy',
-        quiet_reason: 'min_gap',
-        next_action_path: 'direct_message',
-        last_reply_status: 'never',
-        next_eligible_at_s: 281.1,
-      },
-    })
-    const next = makeKeeper({
-      diagnostic: {
-        summary: 'Keeper is waiting for a scheduled wake.',
-        health_state: 'healthy',
-        quiet_reason: 'min_gap',
-        next_action_path: 'direct_message',
-        last_reply_status: 'never',
-        next_eligible_at_s: 275.5,
-      },
-    })
-
-    const result = reconcileKeepers([keeper], [next])
-
-    expect(result[0]).toBe(keeper)
-  })
-
   it('updates immediately for meaningful keeper state changes', () => {
     const keeper = makeKeeper({ status: 'idle', pipeline_stage: 'idle' })
     const updated = makeKeeper({ status: 'offline', pipeline_stage: 'failing' })

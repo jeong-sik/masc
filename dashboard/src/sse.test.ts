@@ -1,85 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  buildDashboardSseUrl,
-  connected,
-  disconnectSSE,
-  flushPendingSseEvents,
   journal,
   normalizeSSEDispatchType,
+  recordServerPushEvent,
 } from './sse'
-import { clearStoredToken, setStoredToken } from './api/core'
-
-class MockEventSource {
-  static readonly CONNECTING = 0
-  static readonly OPEN = 1
-  static readonly CLOSED = 2
-
-  static instances: MockEventSource[] = []
-
-  onopen: ((event: Event) => void) | null = null
-  onmessage: ((event: MessageEvent) => void) | null = null
-  onerror: ((event: Event) => void) | null = null
-  readyState = MockEventSource.CONNECTING
-  readonly url: string
-  close = vi.fn(() => {
-    this.readyState = MockEventSource.CLOSED
-  })
-
-  constructor(url: string) {
-    this.url = url
-    MockEventSource.instances.push(this)
-  }
-
-  simulateOpen(): void {
-    this.readyState = MockEventSource.OPEN
-    this.onopen?.(new Event('open'))
-  }
-
-  simulateMessage(data: string): void {
-    this.onmessage?.(new MessageEvent('message', { data }))
-  }
-
-  static reset(): void {
-    MockEventSource.instances = []
-  }
-}
-
-async function importSseConnect(): Promise<typeof import('./sse')> {
-  return import('./sse')
-}
-
-describe('buildDashboardSseUrl', () => {
-  afterEach(() => {
-    clearStoredToken()
-  })
-
-  it('includes token from sessionStorage and agent from query params', () => {
-    setStoredToken('secret')
-    expect(
-      buildDashboardSseUrl('dash_test', '?agent=keeper-a'),
-    ).toBe('/mcp?agent=keeper-a&token=secret&session_id=dash_test&sse_kind=observer')
-  })
-
-  it('omits blank raw stored tokens through the shared auth reader', () => {
-    sessionStorage.setItem('masc_bearer_token', '   ')
-
-    expect(buildDashboardSseUrl('dash_test', '?agent=keeper-a')).toBe(
-      '/mcp?agent=keeper-a&session_id=dash_test&sse_kind=observer',
-    )
-  })
-
-  it('omits token when sessionStorage is empty', () => {
-    expect(buildDashboardSseUrl('dash_test', '?agent=keeper-a')).toBe(
-      '/mcp?agent=keeper-a&session_id=dash_test&sse_kind=observer',
-    )
-  })
-
-  it('omits optional params when they are absent', () => {
-    expect(buildDashboardSseUrl('dash_test', '')).toBe(
-      '/mcp?session_id=dash_test&sse_kind=observer',
-    )
-  })
-})
 
 describe('normalizeSSEDispatchType', () => {
   it('routes Event_bus audit events to the audit handler', () => {
@@ -95,26 +19,13 @@ describe('normalizeSSEDispatchType', () => {
   })
 })
 
-describe('SSE OAS typed-payload handlers', () => {
+describe('server-push OAS typed-payload handlers', () => {
   beforeEach(() => {
-    MockEventSource.reset()
-    vi.stubGlobal('EventSource', MockEventSource)
-    disconnectSSE()
     journal.value = []
-    connected.value = false
-    sessionStorage.removeItem('masc_dashboard_sse_session_id')
-  })
-
-  afterEach(() => {
-    disconnectSSE()
-    vi.unstubAllGlobals()
   })
 
   function emitEvent(payload: Record<string, unknown>): void {
-    const es = MockEventSource.instances[0]
-    if (!es) throw new Error('MockEventSource not created')
-    es.simulateMessage(JSON.stringify(payload))
-    flushPendingSseEvents()
+    recordServerPushEvent(payload as unknown as Parameters<typeof recordServerPushEvent>[0])
   }
 
   function lastJournalEntry() {
@@ -122,10 +33,7 @@ describe('SSE OAS typed-payload handlers', () => {
     return journal.value[0]
   }
 
-  it('creates a journal entry from a typed oas:agent_started payload', async () => {
-    const { connectSSE } = await importSseConnect()
-    connectSSE()
-    MockEventSource.instances[0]!.simulateOpen()
+  it('creates a journal entry from a typed oas:agent_started payload', () => {
     emitEvent({
       type: 'oas:agent_started',
       event_type: 'agent_started',
@@ -142,10 +50,7 @@ describe('SSE OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.agent).toBe('alpha')
   })
 
-  it('creates a journal entry from a typed oas:agent_completed payload', async () => {
-    const { connectSSE } = await importSseConnect()
-    connectSSE()
-    MockEventSource.instances[0]!.simulateOpen()
+  it('creates a journal entry from a typed oas:agent_completed payload', () => {
     emitEvent({
       type: 'oas:agent_completed',
       event_type: 'agent_completed',
@@ -161,10 +66,7 @@ describe('SSE OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Agent run completed · t1 · 12.5s')
   })
 
-  it('creates a journal entry from a typed oas:agent_failed payload with all error fields', async () => {
-    const { connectSSE } = await importSseConnect()
-    connectSSE()
-    MockEventSource.instances[0]!.simulateOpen()
+  it('creates a journal entry from a typed oas:agent_failed payload with all error fields', () => {
     emitEvent({
       type: 'oas:agent_failed',
       event_type: 'agent_failed',
@@ -189,12 +91,9 @@ describe('SSE OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Agent run failed · t1 · 3.0s · boom')
   })
 
-  it('drops a malformed oas:agent_started payload and logs a warning', async () => {
+  it('drops a malformed oas:agent_started payload and logs a warning', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const beforeCount = journal.value.length
-    const { connectSSE } = await importSseConnect()
-    connectSSE()
-    MockEventSource.instances[0]!.simulateOpen()
     emitEvent({
       type: 'oas:agent_started',
       event_type: 'agent_started',
@@ -212,10 +111,7 @@ describe('SSE OAS typed-payload handlers', () => {
     warnSpy.mockRestore()
   })
 
-  it('creates a journal entry from a typed oas:tool_called payload', async () => {
-    const { connectSSE } = await importSseConnect()
-    connectSSE()
-    MockEventSource.instances[0]!.simulateOpen()
+  it('creates a journal entry from a typed oas:tool_called payload', () => {
     emitEvent({
       type: 'oas:tool_called',
       event_type: 'tool_called',
@@ -232,10 +128,7 @@ describe('SSE OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.agent).toBe('alpha')
   })
 
-  it('creates a journal entry from a typed oas:turn_completed payload', async () => {
-    const { connectSSE } = await importSseConnect()
-    connectSSE()
-    MockEventSource.instances[0]!.simulateOpen()
+  it('creates a journal entry from a typed oas:turn_completed payload', () => {
     emitEvent({
       type: 'oas:turn_completed',
       event_type: 'turn_completed',
@@ -251,10 +144,7 @@ describe('SSE OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Turn completed · T5')
   })
 
-  it('creates a journal entry from a typed oas:handoff_requested payload', async () => {
-    const { connectSSE } = await importSseConnect()
-    connectSSE()
-    MockEventSource.instances[0]!.simulateOpen()
+  it('creates a journal entry from a typed oas:handoff_requested payload', () => {
     emitEvent({
       type: 'oas:handoff_requested',
       event_type: 'handoff_requested',
@@ -270,10 +160,7 @@ describe('SSE OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Handoff requested · alpha→beta · load')
   })
 
-  it('creates a journal entry and compaction record from a typed oas:context_compacted payload', async () => {
-    const { connectSSE } = await importSseConnect()
-    connectSSE()
-    MockEventSource.instances[0]!.simulateOpen()
+  it('creates a journal entry and compaction record from a typed oas:context_compacted payload', () => {
     emitEvent({
       type: 'oas:context_compacted',
       event_type: 'context_compacted',

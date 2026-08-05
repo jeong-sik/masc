@@ -44,7 +44,7 @@ export function getIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 /**
  * Dispose and clear the singleton. Test-only: production never disposes the
  * store (it is intentionally app-lifetime). Vitest suites that construct a
- * store must call this in afterEach to avoid leaking the live SSE
+ * store must call this in afterEach to avoid leaking the live push
  * registration and signal effect across tests.
  */
 export function resetIdeDataWorkspaceStoreForTest(): void {

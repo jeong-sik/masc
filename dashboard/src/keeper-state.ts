@@ -758,7 +758,7 @@ function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[
 
 /** Try to attach an audio clip to the most recent assistant entry whose
  *  rendered text matches the clip's message text. Returns true if a match
- *  was found and updated. This handles the live SSE path: the assistant
+ *  was found and updated. This handles the live push path: the assistant
  *  bubble is already streaming when the synthesized audio event arrives. */
 export function attachKeeperAudioClip(name: string, rawAudio: unknown): boolean {
   const clip = normalizeAudioClip(rawAudio)
@@ -860,7 +860,6 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
     last_reply_at: toIsoTimestamp(raw.last_reply_at) ?? null, // undefined->null: field is string|null
     last_reply_preview: asString(raw.last_reply_preview) ?? null,
     last_error: asString(raw.last_error) ?? null,
-    next_eligible_at_s: asNumber(raw.next_eligible_at_s) ?? null,
     recoverable: typeof raw.recoverable === 'boolean' ? raw.recoverable : undefined,
     summary: asString(raw.summary),
     keepalive_running: typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,

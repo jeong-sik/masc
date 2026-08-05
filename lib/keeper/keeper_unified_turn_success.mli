@@ -9,7 +9,6 @@ module For_testing : sig
     | Terminal_input_required
 
   val terminal_outcome_of_result : Keeper_agent_run.run_result -> terminal_outcome
-  val terminal_outcome_is_completed_turn : terminal_outcome -> bool
 
   val persist_terminal_turn_meta_for_outcome
     :  config:Workspace.config

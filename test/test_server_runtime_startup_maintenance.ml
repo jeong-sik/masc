@@ -93,6 +93,8 @@ let test_top_level_store_list_is_ssot () =
     "top-level dated stores pinned"
     [ "activity-events"
     ; "audit"
+    ; "audit-approvals"
+    ; "costs"
     ; "events"
     ; "messages"
     ; "oas-events"
@@ -165,9 +167,30 @@ let test_prune_shared_jsonl_stores_production_geometry () =
   let raw_old = p [ "keepers"; "keeper-a"; "raw-traces"; "turn-old.jsonl" ] in
   let manifest_old = p [ "keepers"; "keeper-a"; "runtime-manifests"; "trace-x.jsonl.1" ] in
   let manifest_fresh = p [ "keepers"; "keeper-a"; "runtime-manifests"; "trace-x.jsonl" ] in
+  (* Stores that were on no prune list until 2026-08-05. costs and
+     audit-approvals are top-level dated; decision_audit is keeper-scoped at
+     the masc root, like resilience_audit. *)
+  let costs_old = p [ "costs"; "2020-01"; "01.jsonl" ] in
+  let costs_fresh = p [ "costs"; "2999-01"; "01.jsonl" ] in
+  let approvals_old = p [ "audit-approvals"; "2020-01"; "01.jsonl" ] in
+  let decision_old = p [ "decision_audit"; "keeper-a"; "2020-01"; "01.jsonl" ] in
+  let decision_fresh = p [ "decision_audit"; "keeper-a"; "2999-01"; "01.jsonl" ] in
   List.iter
     write
-    [ oas_old; oas_fresh; logs_old; logs_fresh; turn_old; raw_old; manifest_old; manifest_fresh ];
+    [ oas_old
+    ; oas_fresh
+    ; logs_old
+    ; logs_fresh
+    ; turn_old
+    ; raw_old
+    ; manifest_old
+    ; manifest_fresh
+    ; costs_old
+    ; costs_fresh
+    ; approvals_old
+    ; decision_old
+    ; decision_fresh
+    ];
   List.iter (fun f -> Unix.utimes f old_ts old_ts) [ logs_old; raw_old; manifest_old ];
   let prune_dir dir =
     if Sys.file_exists dir
@@ -175,7 +198,15 @@ let test_prune_shared_jsonl_stores_production_geometry () =
     else 0
   in
   let n = SM.prune_shared_jsonl_stores ~prune_dir ~days:30 ~masc_root in
-  Alcotest.(check int) "five stale files pruned" 5 n;
+  Alcotest.(check int) "eight stale files pruned" 8 n;
+  Alcotest.(check bool) "stale costs day removed" false (Sys.file_exists costs_old);
+  Alcotest.(check bool) "future costs day kept" true (Sys.file_exists costs_fresh);
+  Alcotest.(check bool)
+    "stale audit-approvals day removed" false (Sys.file_exists approvals_old);
+  Alcotest.(check bool)
+    "stale decision_audit day removed" false (Sys.file_exists decision_old);
+  Alcotest.(check bool)
+    "future decision_audit day kept" true (Sys.file_exists decision_fresh);
   Alcotest.(check bool) "stale oas-events day removed" false (Sys.file_exists oas_old);
   Alcotest.(check bool) "future oas-events day kept" true (Sys.file_exists oas_fresh);
   Alcotest.(check bool) "stale log day removed" false (Sys.file_exists logs_old);

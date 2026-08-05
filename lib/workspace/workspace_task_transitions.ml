@@ -930,12 +930,7 @@ let commit_verdict_r
                   ~error_message:None
                   ~collaborators:[]
                   ~handoff_from:None
-                  ~handoff_to:None);
-              run_post_commit "thompson_result" (fun () ->
-                (Atomic.get Workspace_hooks.record_thompson_result_fn)
-                  ~agent_name:assignee
-                  ~success:true
-                  ~reason:None)
+                  ~handoff_to:None)
             | Masc_domain.Todo
             | Masc_domain.Claimed _
             | Masc_domain.InProgress _

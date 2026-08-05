@@ -43,6 +43,7 @@ import {
   normalizeIdeTreeWidth,
 } from './ide-shell'
 import { navigate, route } from '../../router'
+import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import {
   activeIdeFile,
@@ -113,6 +114,10 @@ const dashboardFetchHandlers: ReadonlyArray<[
   [/\/api\/v1\/git\/diff/, () => jsonResponse({ unified: [] })],
   [/\/api\/v1\/ide\/regions/, () => jsonResponse({ ok: true, data: [] })],
   [/\/api\/v1\/ide\/annotations/, () => jsonResponse({ ok: true, data: [] })],
+  [/\/api\/v1\/ide\/cursors/, () => jsonResponse({
+    ok: true,
+    data: { runtime_id: 'masc-runtime', connected: true, cursors: [] },
+  })],
   [/\/api\/v1\/activity\/events/, () => jsonResponse({ events: [] })],
   [/\/api\/v1\/ide\/events/, () => jsonResponse({ ok: true, data: { events: [] } })],
   [/\/state-diagram/, () => jsonResponse({
@@ -708,7 +713,7 @@ describe('IdeShell', () => {
       workspace_identity: { kind: 'project' },
       availability: 'available',
     })
-    cursorOverlaySignal.value = {
+    const cursorOverlay: KeeperCursorOverlay = {
       cursors: new Map([[
         'sangsu',
         {
@@ -728,6 +733,11 @@ describe('IdeShell', () => {
     }
 
     render(h(IdeShell, {}), container)
+    await waitFor(() => expect(cursorOverlaySignal.value.stream?.status).toBe('live'))
+    cursorOverlaySignal.value = {
+      ...cursorOverlay,
+      stream: cursorOverlaySignal.value.stream,
+    }
 
     const keeperButton = await waitFor(() => {
       const button = container.querySelector<HTMLButtonElement>('.ide-breadcrumb-keeper')
@@ -1071,23 +1081,13 @@ describe('IdeShell', () => {
   })
 
 
-  it('switches the IDE right rail tabs and renders cursor stream focus', async () => {
+  it('switches the IDE right rail tabs and renders cursor push focus', async () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
       postId: null,
     }
-    class MockEventSource {
-      onopen: ((event: Event) => void) | null = null
-      onmessage: ((event: MessageEvent) => void) | null = null
-      onerror: ((event: Event) => void) | null = null
-
-      constructor(_url: string) {}
-
-      close = vi.fn()
-    }
-    vi.stubGlobal('EventSource', MockEventSource)
-    cursorOverlaySignal.value = {
+    const cursorOverlay: KeeperCursorOverlay = {
       cursors: new Map([[
         'sangsu',
         {
@@ -1106,16 +1106,15 @@ describe('IdeShell', () => {
       collisions: [{ line: 94, keeper_ids: ['sangsu', 'nick0cave'] }],
       active_file: 'lib/scheduler/round.ml',
     }
-
     render(h(IdeShell, {}), container)
-    await waitFor(() => expect(cursorOverlaySignal.value.stream?.status).toBe('connecting'))
+    await waitFor(() => expect(cursorOverlaySignal.value.stream?.status).toBe('live'))
     cursorOverlaySignal.value = {
-      ...cursorOverlaySignal.value,
+      ...cursorOverlay,
       stream: {
         status: 'degraded',
         failedCount: 2,
         lastErrorMs: Date.UTC(2026, 6, 4, 1, 2, 3),
-        error: 'SSE transport error',
+        error: 'cursor snapshot unavailable',
       },
     }
 

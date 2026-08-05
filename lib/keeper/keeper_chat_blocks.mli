@@ -131,9 +131,22 @@ type trace_tool_status =
 type trace_step =
   | Trace_think of {
       text : string;
+      content_withheld : bool;
       ts : string option;
       oas_block_index : int option;
     }
+      (** [content_withheld = true] states that the step happened and its
+          content is not carried on this surface — the public autonomous
+          projection of RFC-0358 §2, which admits the step's existence and
+          timestamp but no reasoning text. [trace_step_to_yojson] and the
+          decoder both force [text = ""] in that case, so a caller building
+          [Trace_think { text = <real reasoning>; content_withheld = true }]
+          cannot transmit the text behind a flag that says it was dropped.
+
+          Distinct from {!thinking_block}'s [redacted], which means the
+          provider sent a signature-only [RedactedThinking] block. Both hide
+          content; only this one is a read-boundary policy, so consumers that
+          explain why must not conflate them. *)
   | Trace_reason of {
       text : string;
       detail : string option;

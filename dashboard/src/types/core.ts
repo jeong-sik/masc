@@ -828,7 +828,18 @@ export type ChatMermaidBlock = { t: 'mermaid'; source: string; caption?: string 
 // `ts` (ISO-8601) records when the trace event arrived. Live streams preserve
 // think/tool order structurally in this array; persisted legacy rows may omit
 // timestamps and still render in stored order.
-export type ChatTraceThinkStep = { kind: 'think'; text: string; ts?: string; oasBlockIndex?: number }
+// `contentWithheld` marks a step the server admitted without carrying its
+// reasoning (RFC-0358 §2 public autonomous projection). `text` is '' in that
+// case and the label shown for it is this client's to choose. Distinct from
+// ChatThinkingBlock's `redacted`, which means the provider itself sent only a
+// signature.
+export type ChatTraceThinkStep = {
+  kind: 'think'
+  text: string
+  contentWithheld?: boolean
+  ts?: string
+  oasBlockIndex?: number
+}
 export type ChatTraceReasonStep = { kind: 'reason'; text: string; detail?: string; ts?: string }
 export type ChatTraceProgressStep = { kind: 'progress'; text: string; ts?: string; oasBlockIndex?: number }
 export type ChatTraceToolStep = {

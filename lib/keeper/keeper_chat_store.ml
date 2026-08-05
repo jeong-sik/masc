@@ -274,9 +274,10 @@ let redact_table_cell redaction = function
     Keeper_chat_blocks.Cell_value { v = redact_string redaction v; num; muted }
 
 let redact_trace_step redaction = function
-  | Keeper_chat_blocks.Trace_think { text; ts; oas_block_index } ->
+  | Keeper_chat_blocks.Trace_think { text; content_withheld; ts; oas_block_index } ->
     Keeper_chat_blocks.Trace_think
-      { text = redact_string redaction text
+      { text = (if content_withheld then "" else redact_string redaction text)
+      ; content_withheld
       ; ts = redact_string_opt redaction ts
       ; oas_block_index
       }

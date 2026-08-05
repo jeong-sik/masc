@@ -156,6 +156,7 @@ let trajectory_line_to_chat_trace_step = function
     Some
       (Keeper_chat_blocks.Trace_think
          { text = entry.content
+         ; content_withheld = false
          ; ts = Some entry.ts_iso
          ; oas_block_index = None
          })

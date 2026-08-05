@@ -1700,6 +1700,33 @@ function ChatTraceStep({
   const [open, setOpen] = useState(false)
   const sourceBadge = traceSourceBadge(step)
 
+  if (step.kind === 'think' && step.contentWithheld) {
+    // The server admitted the step without its reasoning (RFC-0358 §2), so
+    // there is nothing to preview, expand, or stream — only the fact and its
+    // timestamp. The wording lives here because the read boundary is a policy
+    // of this surface, not a property of the run.
+    return html`
+      <div
+        class="chat-block-tstep think"
+        data-chat-trace-step="think"
+        data-chat-trace-content-withheld="true"
+        data-chat-turn-order-index=${orderIndex ?? undefined}
+        data-chat-turn-order-kind="trace"
+        data-chat-trace-provenance=${sourceBadge.label}
+        data-chat-trace-ts=${step.ts ?? undefined}
+      >
+        <span class="chat-block-tnode"></span>
+        <div class="min-w-0 flex-1">
+          <div class="chat-block-tstep-row">
+            <span class="chat-block-tstep-kind">Thinking</span>
+            <${TraceSourceBadge} info=${sourceBadge} />
+          </div>
+          <div class="chat-block-tstep-text">내부 판단 단계 (내용 비공개)</div>
+        </div>
+      </div>
+    `
+  }
+
   if (step.kind === 'think') {
     const longThinking = !streaming && step.text.length > THINKING_TRACE_PREVIEW_CHARS
     const previewText = longThinking

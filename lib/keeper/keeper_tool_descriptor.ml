@@ -1498,15 +1498,14 @@ let masc_library_descriptor (definition : Tool_schemas_library.definition) =
     match definition.operation with
     | Tool_schemas_library.List_documents ->
       ( Internal_name
-      , "List all documents in the agent knowledge library with title, confidence, \
-         source, and tags. Use keeper_library_read to fetch a document or \
-         keeper_library_search to query by content." )
+      , "List all documents in the agent knowledge library with title, source, \
+         author, created date, and tags. Use keeper_library_read to fetch a \
+         document or keeper_library_search to query by content." )
     | Tool_schemas_library.Read_document ->
       Transport_alias { projected_by = "keeper_library_read" }, schema.description
     | Tool_schemas_library.Search_documents ->
       Transport_alias { projected_by = "keeper_library_search" }, schema.description
-    | Tool_schemas_library.Add_document
-    | Tool_schemas_library.Promote_document -> Internal_name, schema.description
+    | Tool_schemas_library.Add_document -> Internal_name, schema.description
   in
   cluster_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity

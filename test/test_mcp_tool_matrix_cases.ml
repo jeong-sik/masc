@@ -500,7 +500,6 @@ let ensure_library_topic fixture =
   | Some topic -> topic
   | None ->
       mkdir_p (Filename.concat fixture.base_path "docs/library");
-      mkdir_p (Filename.concat fixture.base_path "docs/library/candidates");
       ignore
         (execute_tool_ok fixture ~name:"masc_library_add"
            ~arguments:
@@ -509,7 +508,6 @@ let ensure_library_topic fixture =
                  ("title", `String "Tool Matrix Library");
                  ("content", `String "knowledge");
                  ("source", `String "direct_experience");
-                 ("confidence", `Float 0.9);
                  ("tags", `List [ `String "tool-matrix" ]);
                ]));
       fixture.library_topic <- Some "tool-matrix-library";
@@ -545,11 +543,9 @@ let prepare_for_name fixture name =
       ]
   then
     ignore (ensure_code_file fixture);
-  if name = "masc_library_add" then begin
+  if name = "masc_library_add" then
     mkdir_p (Filename.concat fixture.base_path "docs/library");
-    mkdir_p (Filename.concat fixture.base_path "docs/library/candidates")
-  end;
-  if List.mem name [ "masc_library_list"; "masc_library_read"; "masc_library_promote"; "masc_library_search" ] then
+  if List.mem name [ "masc_library_list"; "masc_library_read"; "masc_library_search" ] then
     ignore (ensure_library_topic fixture);
   (* masc_handover_* tools pruned from registry; no preparation needed. *)
   let _ = ensure_handover in

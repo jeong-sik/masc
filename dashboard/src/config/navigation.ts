@@ -193,7 +193,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'registry',
     label: 'Registry',
     icon: 'registry',
-    description: 'Persona forms, keeper instances, and runtime bindings',
+    description: 'Keeper instances, instructions, and runtime bindings',
     defaultTab: 'registry',
     tabs: ['registry'],
   },

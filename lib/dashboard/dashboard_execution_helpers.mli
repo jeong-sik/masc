@@ -22,8 +22,7 @@
     [populate_neo4j_identity_cache_locked] internal
     cache state and loader, the every-other-let
     accumulator helpers consumed only inside
-    [load_persona_profile] / [extract_persona_name] /
-    [merge_profiles] / [lookup_neo4j_profile] /
+    [extract_keeper_name] / [lookup_neo4j_profile] /
     [is_keeper_offline] / [is_health_at_risk] / [option_or_else] /
     [string_list_json] / [latest_iso_timestamp] /
     [cap_string_list] / [execution_tool_preview_limit] /
@@ -68,16 +67,10 @@ type continuity_context = {
 type agent_profile = {
   emoji : string;
   korean_name : string;
-  model : string option;
-  traits : string list;
-  interests : string list;
-  activity_level : float option;
-  primary_value : string option;
 }
 
 val get_agent_profile : string -> agent_profile
-(** Resolves the agent's profile through the persona
-    file → Neo4j cache → fallback chain. *)
+(** Resolves the agent's profile through Neo4j and an identity fallback. *)
 
 (** {1 JSON envelope helpers} *)
 

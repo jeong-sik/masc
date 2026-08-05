@@ -446,7 +446,6 @@ describe('SettingsSurface', () => {
       runtime: { path: MOCK_RUNTIME_PATH, exists: true, source: 'runtime.toml' },
       prompts: { path: '/workspace/.masc/config/prompts', exists: true, source: 'derived' },
       keepers: { path: '/workspace/.masc/keepers', exists: true, source: 'derived' },
-      personas: { path: '/workspace/.masc/personas', exists: true, source: 'derived' },
     }
     shellAuthSummary.value = null
     localStorage.clear()

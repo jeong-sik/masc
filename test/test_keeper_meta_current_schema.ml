@@ -52,8 +52,7 @@ let wrong_value = function
 ;;
 
 let nullable_field_names =
-  [ "persona"
-  ; "message_scope_ack_id"
+  [ "message_scope_ack_id"
   ; "last_blocker"
   ; "last_runtime_attempt"
   ; "latched_reason"

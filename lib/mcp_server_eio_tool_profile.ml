@@ -42,16 +42,6 @@ let managed_agent_passthrough_tool_set : (string, unit) Hashtbl.t =
 module StringSet = Set_util.StringSet
 module StringMap = Set_util.StringMap
 
-let dedupe_tool_schemas_by_name (schemas : Masc_domain.tool_schema list) =
-  let _, result =
-    List.fold_left
-      (fun (seen, acc) (schema : Masc_domain.tool_schema) ->
-        if StringSet.mem schema.name seen then (seen, acc)
-        else (StringSet.add schema.name seen, schema :: acc))
-      (StringSet.empty, []) schemas
-  in
-  List.rev result
-
 let default_instructions () =
   "MASC (Multi-Agent Streaming Workspace) enables AI agent collaboration. \
 PROJECT: Agents sharing the same base path (.masc/ folder) align together. \
@@ -60,21 +50,13 @@ READ: use resources/list + resources/read (status/tasks/agents/events/schema) fo
 WRITE: task state changes are CAS-guarded; pass expected_version."
 
 let tool_schemas_for_profile ?(include_hidden = false)
-    ?(include_agent_internal = false) _state
-    profile =
+    _state profile =
   let schemas =
     match profile with
     | Full ->
         let show_all = include_hidden in
-        (* The Agent_internal surface was empty (agent_internal_surface_tools =
-           []), so no schema was ever agent-internal.  Surface deleted in the
-           surface-cut refactor; [include_agent_internal] no longer adds any
-           schema and the per-schema agent-internal branch is unreachable. *)
         let all =
-          Config.visible_tool_schemas
-            ~include_hidden:(show_all || include_agent_internal)
-            ()
-          |> dedupe_tool_schemas_by_name
+          Config.visible_tool_schemas ~include_hidden:show_all ()
         in
         let full_profile_tools =
           List.filter
@@ -88,30 +70,25 @@ let tool_schemas_for_profile ?(include_hidden = false)
           Config.visible_tool_schemas ~include_hidden:true ()
           |> List.filter (fun (schema : Masc_domain.tool_schema) ->
                  Hashtbl.mem managed_agent_passthrough_tool_set schema.name
+                 && Option.is_none
+                      (Sdk_tool_contract.sdk_binding_by_name schema.name)
                  && Tool_catalog.is_visible ~include_hidden:true schema.name)
         in
-        dedupe_tool_schemas_by_name
-          (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
+        Sdk_tool_contract.sdk_tool_schemas @ passthrough
     | Operator_remote -> Tool_operator.remote_schemas ()
   in
+  Config.validate_schemas schemas;
   schemas
 
-let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
-    tool_name =
+let tool_allowed_in_profile state profile tool_name =
   match profile with
   | Full ->
-      (* The Agent_internal surface was empty, so no tool was ever
-         agent-internal; [internal_keeper_runtime] no longer gates anything.
-         Surface deleted in the surface-cut refactor.
-         Equivalent to [List.mem tool_name (names from
+      (* Equivalent to [List.mem tool_name (names from
          visible_tool_schemas ~include_hidden:true)]: that helper
-         composes raw schemas → dedupe → canonicalize → filter
-         is_visible.  Dedupe and
-         canonicalize do not change the name set, so the name set is
+         composes raw schemas → canonicalize → filter is_visible. The name set is
          exactly { n | n ∈ raw_all_tool_schemas.names ∧ is_visible n }.
          Two O(1) checks replace ~150 schema canonicalizations + a
          List.mem per dispatch. *)
-      ignore (internal_keeper_runtime : bool);
       Config.is_raw_tool_name tool_name
       && Tool_catalog.is_visible ~include_hidden:true tool_name
   | Managed_agent ->

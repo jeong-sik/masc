@@ -52,7 +52,6 @@ export interface DashboardConfigResolution {
   runtime: DashboardConfigResolutionItem
   prompts: DashboardConfigResolutionItem
   keepers: DashboardConfigResolutionItem
-  personas: DashboardConfigResolutionItem
 }
 
 export interface DashboardRuntimeDiagnostic {

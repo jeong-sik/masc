@@ -65,9 +65,7 @@ let execute_tool_eio
       Mcp_server_eio_caller_identity.Catalog_policy
     | Managed_agent | Operator_remote ->
       if
-        Mcp_server_eio_tool_profile.tool_allowed_in_profile
-          ~internal_keeper_runtime
-          state
+        Mcp_server_eio_tool_profile.tool_allowed_in_profile state
           profile
           name
       then Mcp_server_eio_caller_identity.Restricted_profile

@@ -31,7 +31,7 @@ LLM calls — run on demand. Deterministic given fixed model output (temperature
 reproducible via the recorded label output.
 
 This "judge" is the memory-os VALUE-EVAL judge (labels a fact useful/noise). It
-is NOT the keeper `verifier` persona (a keeper that approves tasks), and NOT the
+is NOT the `verifier` Keeper (which approves tasks), and NOT the
 [fusion] judge (RFC-0252, synthesizes a panel of model answers). Three distinct roles,
 three distinct config keys: [runtime.assignments] verifier / [fusion] judge /
 [memory_os] judge.
@@ -145,7 +145,7 @@ def resolve_judge_target(cfg: dict) -> tuple[str, str, str]:
 
     Precedence (CLI override is applied by the caller, above this):
       1. [memory_os] judge = "provider.model"  — the memory-os value-eval judge,
-         distinct from the keeper `verifier` persona and the [fusion] judge.
+         distinct from the `verifier` Keeper and the [fusion] judge.
       2. [runtime] default = "provider.model"  — fallback to the runtime's default.
     Aborts if neither is set (no permissive guess about which model to trust)."""
     mo = cfg.get("memory_os")

@@ -416,7 +416,6 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
 (* Delegate to Keeper_prompt — single source of truth for keeper prompts. *)
 let build_keeper_system_prompt = Keeper_prompt.build_keeper_system_prompt
 
-let append_trait_clause = Keeper_prompt.append_trait_clause
 
 
 include Keeper_text_processing

@@ -76,7 +76,7 @@ type error_mode =
       (** Two or more equally plausible interpretations; speculative
           execution is the recommended response when available. *)
   | ConsensusError of { detail : string; dissenters : string list }
-      (** CREW personas could not reach agreement. *)
+      (** CREW members could not reach agreement. *)
   | DegradationRequired of {
       detail : string;
       recommended_level : int;

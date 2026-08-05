@@ -297,7 +297,6 @@ let parse_oas_env fields =
 let decode_current_meta fields =
   let* name = string_field fields "name" in
   let* agent_name = string_field fields "agent_name" in
-  let* persona = nullable_string_field fields "persona" in
   let* instructions = string_field fields "instructions" in
   let* trace_id_raw = string_field fields "trace_id" in
   let* trace_id = parse_trace_id trace_id_raw in
@@ -432,7 +431,6 @@ let decode_current_meta fields =
       { id = None
       ; name
       ; agent_name
-      ; persona
       ; instructions
       ; sandbox_profile
       ; sandbox_image = None

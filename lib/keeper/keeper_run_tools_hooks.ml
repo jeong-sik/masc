@@ -477,16 +477,16 @@ let assemble_hooks
                 (* RFC-0233 PR-3 + #20936: snapshot this SDK turn's
                    assembly into the accumulator the receipt/TurnRecord
                    writer reads. Appended blocks hash their raw appended
-                   text; Persona reuses the prompt-metrics fingerprint
+                   text; Keeper instructions reuse the prompt-metrics fingerprint
                    (sha256 of the sanitized rendered system prompt) —
                    the digest the prompt store already records. *)
                 let sha256_hex text =
                   Digestif.SHA256.(digest_string text |> to_hex)
                 in
-                let persona_blocks =
+                let keeper_instruction_blocks =
                   match prompt_metrics.system_prompt_segment.fingerprint with
                   | Some digest ->
-                    [ { Turn_record.block = Prompt_block_id.Persona
+                    [ { Turn_record.block = Prompt_block_id.Keeper_instructions
                       ; bytes = prompt_metrics.system_prompt_segment.bytes
                       ; digest
                       }
@@ -494,7 +494,7 @@ let assemble_hooks
                   | None -> []
                 in
                 acc.prompt_blocks
-                <- persona_blocks
+                <- keeper_instruction_blocks
                    @ List.map
                        (fun (block, text) ->
                           { Turn_record.block

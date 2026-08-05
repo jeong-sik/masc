@@ -206,10 +206,6 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         | Some value -> Ok value
         | None -> Error "payload.message is required"
       in
-      let* () =
-        Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_delegate"
-          request.payload
-      in
       let args =
         `Assoc
           [ ( "target"

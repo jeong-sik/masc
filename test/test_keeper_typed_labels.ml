@@ -220,13 +220,8 @@ let test_is_actionable_matches_variants () =
 
 let all_profile_load_failure_sites : Keeper_profile_load_failure_site.t list =
   [
-    Personas_root;
-    Personas_dirs_resolve;
     Toml_discovery_error;
     Materializable_check;
-    Load_persona_extended;
-    Agent_md_read;
-    List_persona_summaries;
   ]
 
 let test_profile_load_failure_site_labels_unique () =

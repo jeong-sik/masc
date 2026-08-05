@@ -2,7 +2,7 @@
 // CrewPlane.jsx — Phase C-2: synthetic fleet view
 // ─────────────────────────────────────────────────────────────────────
 // Two layouts: SOLO (1 keeper computer) and SWARM (2x2 grid w/ pagination).
-// Roster on the left lists all 14 keepers as persona cards.
+// Roster on the left lists all 14 keeper cards.
 // Stage on the right is the keeper's "computer" — header + action stream + memory.
 // All data comes from window.MASC_CREW. Repository previews intentionally do
 // not ship .masc dumps, keeper prompts, runtime profiles, or decision logs.
@@ -55,8 +55,8 @@ const TOOL_ICON = {
   plan: "▢", git: "⎇", tool: "·", act: "·"
 };
 
-// ─── persona avatar (initial-based, deterministic color) ──────────────
-function PersonaAvatar({ name, size = 40 }) {
+// ─── keeper avatar (initial-based, deterministic color) ──────────────
+function KeeperAvatar({ name, size = 40 }) {
   const initial = (name || "?")[0].toUpperCase();
   // hash → hue
   let h = 0;
@@ -82,7 +82,7 @@ function RosterCard({ k, active, onSelect, onPick, picked }) {
       onClick={() => onSelect(k.id)}
       title={k.motto}>
       <div className="cp-rc-top">
-        <PersonaAvatar name={k.name} size={36} />
+        <KeeperAvatar name={k.name} size={36} />
         <div className="cp-rc-id">
           <div className="cp-rc-name">{k.name}</div>
           <div className="cp-rc-motto">{k.motto || "—"}</div>
@@ -182,7 +182,7 @@ function KeeperStage({ id, compact = false }) {
   return (
     <div className={`cp-stage ${compact ? "compact" : ""} st-${st}`}>
       <div className="cp-stage-head">
-        <PersonaAvatar name={k.name} size={compact ? 32 : 48} />
+        <KeeperAvatar name={k.name} size={compact ? 32 : 48} />
         <div className="cp-sh-id">
           <div className="cp-sh-name-row">
             <span className="cp-sh-name">{k.name}</span>
@@ -213,7 +213,7 @@ function KeeperStage({ id, compact = false }) {
         <button className={tab==="stream"?"active":""} onClick={()=>setTab("stream")}>actions <span className="cnt">{events.length}</span></button>
         <button className={tab==="decisions"?"active":""} onClick={()=>setTab("decisions")}>decisions <span className="cnt">{decisions.length}</span></button>
         <button className={tab==="memory"?"active":""} onClick={()=>setTab("memory")}>memory <span className="cnt">{memory.length}</span></button>
-        {!compact && <button className={tab==="instructions"?"active":""} onClick={()=>setTab("instructions")}>persona</button>}
+        {!compact && <button className={tab==="instructions"?"active":""} onClick={()=>setTab("instructions")}>instructions</button>}
       </div>
 
       <div className="cp-stage-body">
@@ -236,10 +236,10 @@ function KeeperStage({ id, compact = false }) {
           </div>
         )}
         {tab === "instructions" && !compact && (
-          <div className="cp-persona">
+          <div className="cp-instructions">
             <section><h4>goal</h4><p>{k.goal || "—"}</p></section>
             <section><h4>instructions</h4><p className="instr">{k.instructions_preview || "—"}</p></section>
-            <section className="cp-persona-meta">
+            <section className="cp-instructions-meta">
               <div><b>agent</b> {k.agent_name}</div>
               <div><b>capabilities</b> {(k.capabilities||[]).join(", ") || "—"}</div>
               <div><b>mention</b> {(k.mention_targets||[]).join(", ") || "—"}</div>
@@ -361,4 +361,4 @@ function CrewPlane({ branch, keepers: selKeepers }) {
   );
 }
 
-Object.assign(window, { CrewPlane, KeeperStage, RosterCard, PersonaAvatar });
+Object.assign(window, { CrewPlane, KeeperStage, RosterCard, KeeperAvatar });

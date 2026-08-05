@@ -324,7 +324,7 @@ describe('keeper turn record final input composition', () => {
   it('carries typed content components through the decoder', async () => {
     getMock.mockResolvedValue(payload(entry({
       input_components: [
-        { component: 'prompt.persona', bytes: 1200 },
+        { component: 'prompt.keeper_instructions', bytes: 1200 },
         { component: 'tool_schemas', bytes: 64000 },
         { component: 'message_tool_result', bytes: 2800 },
       ],
@@ -333,7 +333,7 @@ describe('keeper turn record final input composition', () => {
     const response = await fetchKeeperTurnRecords('sangsu')
 
     expect(response.entries[0]?.record.input_components).toEqual([
-      { component: 'prompt.persona', bytes: 1200 },
+      { component: 'prompt.keeper_instructions', bytes: 1200 },
       { component: 'tool_schemas', bytes: 64000 },
       { component: 'message_tool_result', bytes: 2800 },
     ])
@@ -403,7 +403,7 @@ describe('keeper turn record final input composition', () => {
   it('accepts only current unique blocks with lowercase sha256 digests', async () => {
     getMock.mockResolvedValue(payload(entry({
       blocks: [{
-        block: 'persona',
+        block: 'keeper_instructions',
         bytes: 4,
         digest: 'a'.repeat(64),
       }],
@@ -411,18 +411,18 @@ describe('keeper turn record final input composition', () => {
 
     const response = await fetchKeeperTurnRecords('sangsu')
     expect(response.entries[0]?.record.blocks).toEqual([{
-      block: 'persona',
+      block: 'keeper_instructions',
       bytes: 4,
       digest: 'a'.repeat(64),
     }])
   })
 
   it.each([
-    { blocks: [{ block: 'persona', bytes: 4, digest: 'A'.repeat(64) }] },
+    { blocks: [{ block: 'keeper_instructions', bytes: 4, digest: 'A'.repeat(64) }] },
     {
       blocks: [
-        { block: 'persona', bytes: 4, digest: 'a'.repeat(64) },
-        { block: 'persona', bytes: 5, digest: 'b'.repeat(64) },
+        { block: 'keeper_instructions', bytes: 4, digest: 'a'.repeat(64) },
+        { block: 'keeper_instructions', bytes: 5, digest: 'b'.repeat(64) },
       ],
     },
   ])('rejects malformed or duplicate current blocks', async ({ blocks }) => {

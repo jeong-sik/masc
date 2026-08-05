@@ -1,14 +1,11 @@
 (** Tool schema registry and visibility helpers. *)
 
-val dedupe_schemas : Masc_domain.tool_schema list -> Masc_domain.tool_schema list
-(** Remove duplicate tool schemas by name, keeping the first occurrence. *)
-
 val raw_all_tool_schemas : Masc_domain.tool_schema list
 (** All tool schemas before capability filtering. *)
 
 val validate_schemas : Masc_domain.tool_schema list -> unit
-(** Validate tool schemas at module initialization time.
-    Logs warnings for duplicates, empty names/descriptions, non-object input_schema. *)
+(** Validate tool schemas, raising [Invalid_argument] for duplicates, empty
+    names/descriptions, or non-object input schemas. *)
 
 val all_tool_schemas : Masc_domain.tool_schema list
 (** All tool schemas after capability filtering and validation. *)

@@ -28,19 +28,19 @@ let test_valid_trace_id () =
 let test_explicit_keeper_name_is_not_nickname_canonicalized () =
   let json =
     `Assoc
-      [ ("name", `String "personality-resync-test")
+      [ ("name", `String "instruction-resync-test")
       ; (* keeper_meta_json_parse rejects an agent_name that is not
            Keeper_identity.keeper_agent_name of the keeper name. The point of
            this case is that [name] itself is not nickname-canonicalized, which
            the assertion below still checks. *)
-        ("agent_name", `String "keeper-personality-resync-test-agent")
-      ; ("trace_id", `String "personality-resync-test-001")
+        ("agent_name", `String "keeper-instruction-resync-test-agent")
+      ; ("trace_id", `String "instruction-resync-test-001")
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
       check string "explicit keeper name"
-        "personality-resync-test" meta.name
+        "instruction-resync-test" meta.name
   | Error e -> fail ("expected Ok, got Error: " ^ e)
 
 let test_missing_trace_id () =
@@ -93,3 +93,4 @@ let () =
         ; test_case "invalid trace_id (..)" `Quick test_invalid_trace_id
         ] )
     ]
+;;

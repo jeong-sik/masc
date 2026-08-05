@@ -152,14 +152,13 @@ module Keeper_id = struct
 end
 
 type name_bundle = {
-  persona_name : string;
   keeper_name : string;
   agent_name : string;
 }
 
 type validation_error =
   | Empty_input
-  | Persona_not_found of {
+  | Keeper_not_found of {
       input : string;
       resolved : string;
       searched : string;
@@ -169,9 +168,9 @@ type validation_error =
 
 let pp_validation_error fmt = function
   | Empty_input -> Format.fprintf fmt "Empty_input"
-  | Persona_not_found { input; resolved; searched } ->
+  | Keeper_not_found { input; resolved; searched } ->
       Format.fprintf fmt
-        "Persona_not_found { input=%S; resolved=%S; searched=%S }" input
+        "Keeper_not_found { input=%S; resolved=%S; searched=%S }" input
         resolved searched
   | Name_ambiguous { input; candidates } ->
       Format.fprintf fmt "Name_ambiguous { input=%S; candidates=[%s] }" input
@@ -192,7 +191,7 @@ let show_validation_error err =
    so no telemetry path silently aggregates to a generic bucket. *)
 let validation_error_outcome_label = function
   | Empty_input -> "empty_input"
-  | Persona_not_found _ -> "persona_not_found"
+  | Keeper_not_found _ -> "keeper_not_found"
   | Name_ambiguous _ -> "name_ambiguous"
   | Ephemeral_suffix_rejected _ -> "ephemeral_suffix_rejected"
 
@@ -205,28 +204,15 @@ let strip_nickname_once name =
     | _ -> name
   else name
 
-(* #10692: persona search must consult [Config_dir_resolver] (the SSOT
-   that already handles [MASC_PERSONAS_DIR] env override + resolved
-   config root).  The legacy hardcoded path [<base_path>/.masc/personas]
-   does not exist in production deployments — personas live under the
-   repo's [config/personas/] which the resolver finds, but the legacy
-   path silently fails [check_persona] and triggers logging-only
-   fallback at every workspace_bind_normalize call.
-
-   Design: prefer the resolver result; fall back to the legacy path
-   only when the resolver yields no candidate (preserves test
-   ergonomics where [~base_path] is set explicitly without spinning up
-   the full resolver chain). *)
-let persona_path_for ~base_path persona_name =
-  match Config_dir_resolver.personas_dir_opt () with
-  | Some dir -> Filename.concat dir persona_name
-  | None ->
-      Filename.concat
-        (Filename.concat (Common.masc_dir_from_base_path ~base_path) "personas")
-        persona_name
+let keeper_prompt_path_for ~base_path keeper_name =
+  Filename.concat
+    (Filename.concat
+       (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+       keeper_name)
+    "AGENT.md"
 
 let normalize_all_names ~input_agent_name ?(base_path = "")
-    ?(check_persona = false) () :
+    ?(check_keeper = false) () :
     (name_bundle, validation_error) result =
   let trimmed = String.trim input_agent_name in
   if trimmed = "" then Error Empty_input
@@ -234,33 +220,31 @@ let normalize_all_names ~input_agent_name ?(base_path = "")
     match canonical_keeper_name trimmed with
     | None ->
         Error
-          (Persona_not_found
+          (Keeper_not_found
              {
                input = input_agent_name;
                resolved = trimmed;
-               searched = persona_path_for ~base_path trimmed;
+               searched = keeper_prompt_path_for ~base_path trimmed;
              })
     | Some keeper_first_pass ->
         let keeper_name = strip_nickname_once keeper_first_pass in
-        let persona_name = keeper_name in
         let bundle =
           {
-            persona_name;
             keeper_name;
             agent_name = input_agent_name;
           }
         in
-        let persona_check () =
-          if not check_persona then Ok ()
+        let keeper_check () =
+          if not check_keeper then Ok ()
           else
-            let path = persona_path_for ~base_path persona_name in
+            let path = keeper_prompt_path_for ~base_path keeper_name in
             if Sys.file_exists path then Ok ()
             else
               Error
-                (Persona_not_found
-                   { input = input_agent_name; resolved = persona_name; searched = path })
+                (Keeper_not_found
+                   { input = input_agent_name; resolved = keeper_name; searched = path })
         in
-        Result.bind (persona_check ()) (fun () -> Ok bundle)
+        Result.bind (keeper_check ()) (fun () -> Ok bundle)
 
 type parsed_identity = {
   keeper_name : string;

@@ -46,20 +46,27 @@ type capability_seed = {
   projection : projection;
 }
 
-let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
-  let _, results =
+let require_unique_schemas ~label (schemas : Masc_domain.tool_schema list) =
+  let duplicates, _ =
     List.fold_left
-      (fun (seen, acc) (schema : Masc_domain.tool_schema) ->
-        if StringSet.mem schema.name seen then (seen, acc)
-        else (StringSet.add schema.name seen, schema :: acc))
-      (StringSet.empty, []) schemas
+      (fun (duplicates, seen) (schema : Masc_domain.tool_schema) ->
+        if StringSet.mem schema.name seen
+        then schema.name :: duplicates, seen
+        else duplicates, StringSet.add schema.name seen)
+      ([], StringSet.empty) schemas
   in
-  List.rev results
+  match duplicates with
+  | [] -> schemas
+  | names ->
+    invalid_arg
+      (Printf.sprintf "%s: duplicate tool schema(s): %s"
+         label
+         (names |> List.sort_uniq String.compare |> String.concat ", "))
 
-let dedupe_projections projections =
-  let _, results =
+let require_unique_projections ~label projections =
+  let duplicates, _ =
     List.fold_left
-      (fun (seen, acc) (projection : projection) ->
+      (fun (duplicates, seen) (projection : projection) ->
         let key =
           Printf.sprintf "%s|%s"
             (match projection.surface with
@@ -69,11 +76,18 @@ let dedupe_projections projections =
             | Keeper -> "keeper")
             projection.tool_name
         in
-        if StringSet.mem key seen then (seen, acc)
-        else (StringSet.add key seen, projection :: acc))
-      (StringSet.empty, []) projections
+        if StringSet.mem key seen
+        then key :: duplicates, seen
+        else duplicates, StringSet.add key seen)
+      ([], StringSet.empty) projections
   in
-  List.rev results
+  match duplicates with
+  | [] -> projections
+  | keys ->
+    invalid_arg
+      (Printf.sprintf "%s: duplicate tool projection(s): %s"
+         label
+         (keys |> List.sort_uniq String.compare |> String.concat ", "))
 
 let prefixed_tool_names names =
   names |> List.map (fun name -> "mcp__masc__" ^ name)
@@ -134,9 +148,6 @@ let spawned_agent_prefixed_tools : string list =
 let local_worker_public_tool_names : string list =
   Tool_catalog_surfaces.local_worker_surface_tools
 
-let local_worker_internal_schemas : Masc_domain.tool_schema list =
-  Keeper_tool_surfaces.local_worker_internal_schemas
-
 let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
   let public_schemas =
@@ -184,18 +195,6 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
   in
   public_schemas |> List.concat_map make_public_seed
 
-let local_worker_internal_seeds : capability_seed list =
-  let base =
-    local_worker_internal_schemas
-    |> List.map (fun schema ->
-           make_seed
-             ~audiences:[ Local_worker_agent ]
-             ~supports_audit_evidence:true
-             ~supports_direct_user_discovery:false ~surface:Local_worker
-             schema)
-  in
-  base
-
 let keeper_projection_seeds : capability_seed list =
   Keeper_tool_descriptor.model_visible_descriptors ()
   |> List.concat_map (fun (descriptor : Keeper_tool_descriptor.t) ->
@@ -218,7 +217,7 @@ let keeper_projection_seeds : capability_seed list =
 let all_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
   public_projection_seeds_from public_tool_source_schemas
-  @ local_worker_internal_seeds @ keeper_projection_seeds
+  @ keeper_projection_seeds
 
 let all_capabilities_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_def list =
@@ -251,7 +250,9 @@ let all_capabilities_from (public_tool_source_schemas : Masc_domain.tool_schema 
                   existing.supports_direct_user_discovery
                   || seed.supports_direct_user_discovery;
                 projections =
-                  dedupe_projections (existing.projections @ [ seed.projection ]);
+                  require_unique_projections
+                    ~label:("capability " ^ seed.capability_id)
+                    (existing.projections @ [ seed.projection ]);
               }
             in
             (StringMap.add seed.capability_id def tbl, ordered_ids))
@@ -267,12 +268,12 @@ let surface_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_sch
       |> Tool_help_registry.canonicalize_schemas
       |> List.filter (fun (schema : Masc_domain.tool_schema) ->
              Tool_catalog.is_public_mcp schema.name)
-      |> dedupe_schemas
+      |> require_unique_schemas ~label:"public MCP capability surface"
   | _ ->
       all_projection_seeds_from public_tool_source_schemas
       |> List.filter (fun (seed : capability_seed) -> seed.projection.surface = surface)
       |> List.map (fun (seed : capability_seed) -> projection_to_schema seed.projection)
-      |> dedupe_schemas
+      |> require_unique_schemas ~label:"capability surface"
 
 let surface_tool_names_from (public_tool_source_schemas : Masc_domain.tool_schema list)
     surface : string list =
@@ -281,7 +282,7 @@ let surface_tool_names_from (public_tool_source_schemas : Masc_domain.tool_schem
 
 let public_raw_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     Masc_domain.tool_schema list =
-  dedupe_schemas public_tool_source_schemas
+  require_unique_schemas ~label:"public raw tool catalog" public_tool_source_schemas
 
 (* Surface filtering at this layer removed in #1961 — all registered tools pass
    through here unchanged. The public MCP surface is now filtered at the profile
@@ -299,7 +300,7 @@ let public_raw_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_
    once all callers migrate. *)
 let public_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     Masc_domain.tool_schema list =
-  dedupe_schemas public_tool_source_schemas
+  require_unique_schemas ~label:"public tool catalog" public_tool_source_schemas
   |> Tool_help_registry.canonicalize_schemas
 
 let visible_public_tool_schemas_from

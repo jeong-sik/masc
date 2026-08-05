@@ -41,15 +41,7 @@ export function paletteForAgent(name: string): AvatarPalette {
   return PALETTE_POOL[hash % PALETTE_POOL.length] as AvatarPalette
 }
 
-export function templateForAgent(name: string, traits?: string[]): AvatarTemplate {
-  // Trait-based template selection
-  if (traits && traits.length > 0) {
-    const joined = traits.join(' ').toLowerCase()
-    if (joined.includes('robot') || joined.includes('machine') || joined.includes('auto')) return 'robot'
-    if (joined.includes('animal') || joined.includes('creature') || joined.includes('pet')) return 'animal'
-    if (joined.includes('abstract') || joined.includes('concept') || joined.includes('system')) return 'abstract'
-  }
-  // Fallback: name-based deterministic selection
+export function templateForAgent(name: string): AvatarTemplate {
   const hash = hashString(name.toLowerCase() + '_template')
   return TEMPLATES[hash % TEMPLATES.length] as AvatarTemplate
 }

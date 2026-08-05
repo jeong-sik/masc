@@ -14,7 +14,6 @@ import { KpiGrid } from './keeper-detail-kpi'
 import {
   EquipmentList,
   RelationshipList,
-  TraitsList,
 } from './keeper-detail-lists'
 import {
   InferenceTelemetryPanel,
@@ -191,7 +190,7 @@ export function KeeperDetailBody({
           title="진단 / 운영"
           defaultCollapsed=${true}
         >
-          ${'' /* ── 런타임 model (RFC-0207 persona runtime_id) — read-only card surfaced here one expand away; edits deep-link to the 설정(.kcf) 런타임 tab, the single write path ── */}
+          ${'' /* Runtime assignment is read-only here; edits deep-link to the config runtime tab, the single write path. */}
           <${KeeperRuntimeModelEditor} keeperName=${keeper.name} onOpenRuntimeConfig=${onOpenRuntimeConfig} />
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
           <${KeeperSecretProjectionPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />
@@ -243,14 +242,7 @@ export function KeeperDetailBody({
         >
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <${PanelCard} title="프로필">
-          <${TraitsList} traits=${keeper.traits ?? []} label="특성" />
-          <${TraitsList} traits=${keeper.interests ?? []} label="관심사" />
-          ${keeper.primaryValue
-            ? html`<div class="flex items-center gap-2 mt-3 text-xs text-[var(--color-fg-muted)]">
-                <span class="text-[var(--color-fg-muted)]">핵심 가치:</span>
-                <span class="font-medium text-[var(--color-status-ok)]">${keeper.primaryValue}</span>
-              </div>`
-            : null}
+              <div class="text-xs text-[var(--color-fg-muted)]">Keeper ${keeper.name}</div>
             <//>
 
           ${keeper.inventory && keeper.inventory.length > 0

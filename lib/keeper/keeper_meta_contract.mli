@@ -257,7 +257,6 @@ type keeper_meta = {
   id : Ids.Keeper_id.t option;
   name : string;
   agent_name : string;
-  persona : string option;
   instructions : string;
   (* Policy *)
   sandbox_profile : Keeper_types_profile.sandbox_profile;
@@ -310,7 +309,7 @@ val mark_resumed : keeper_meta -> keeper_meta
 (** Reject [paused = false] paired with a terminal or reset-required latch. *)
 val terminal_latch_pause_violation : keeper_meta -> string option
 
-(** Overlay TOML/persona defaults onto persisted runtime meta for
+(** Overlay Keeper configuration defaults onto persisted runtime meta for
     status-facing reads. Persisted runtime JSON intentionally omits
     TOML-owned fields such as [sandbox_profile] and [network_mode]. *)
 val effective_meta_result :
@@ -390,22 +389,3 @@ val map_proactive_rt :
   keeper_meta ->
   keeper_meta
 (** Nested update of [m.runtime.proactive_rt]. *)
-
-(** {1 Removed model-arg marker list} *)
-
-val removed_keeper_model_arg_names : string list
-(** Names of removed keeper-creation tool arguments that have
-    been retired because runtime/provider/model selection is not part
-    of the keeper contract
-    (["models"], ["allowed_models"], ["active_model"]).
-    Consumed by {!reject_removed_model_args} which
-    surfaces operator-readable rejection messages instead of
-    silently ignoring removed args.  Pinned data table —
-    drift would either re-accept removed args silently or
-    reject newly added args by mistake. *)
-
-val reject_removed_model_args :
-  tool_name:string -> Yojson.Safe.t -> (unit, string) result
-(** Reject retired keeper model-selection input fields at tool/API boundaries.
-    Model and provider identity is resolved from the default Runtime binding,
-    not per-call keeper arguments. *)

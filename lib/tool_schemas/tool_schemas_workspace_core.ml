@@ -1,8 +1,7 @@
 (** MCP tool schemas for workspace management operations (core).
 
     Only schemas dispatched by Tool_workspace remain here.
-    Other schemas have been moved to their owning modules:
-      Mcp_tool_runtime (via Tool_schemas_inline) *)
+    Other schemas live in their owning modules. *)
 
 open Masc_domain
 

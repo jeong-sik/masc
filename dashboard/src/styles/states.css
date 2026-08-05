@@ -308,21 +308,6 @@
   border-color: var(--volt);
 }
 
-.kcp-traits {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-}
-
-.kcp-trait {
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  background: var(--accent-10);
-  color: var(--volt);
-  font-size: var(--fs-11);
-  font-weight: 500;
-}
 
 .kcp-seg {
   display: inline-flex;

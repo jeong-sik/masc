@@ -78,7 +78,7 @@ Keeper: sangsu
   Messages:              430
 
   Goals
-  Goal:                  keeper persona for Vincent
+  Goal:                  keeper for Vincent
 
   Model
   Active Model:          llama:qwen3.5-35b-a3b-ud-q8-xl

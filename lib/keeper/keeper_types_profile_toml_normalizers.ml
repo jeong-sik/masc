@@ -9,7 +9,7 @@ include Keeper_config
 include Keeper_types_profile_sandbox
 include Keeper_types_profile_defaults
 
-(* ── Normalizers (shared by TOML section and persona JSON loader) ── *)
+(* ── Normalizers ────────────────────────────────────────────────── *)
 
 let dedupe_keep_order = Json_util.dedupe_keep_order
 
@@ -29,11 +29,6 @@ let lower_string_list_opt = function
   | xs -> Some (List.map String.lowercase_ascii xs)
 
 let first_some = Dashboard_utils.first_some
-
-(* ── Persona path helpers ──────────────────────────────────────── *)
-
-let personas_root_opt = Keeper_types_profile_persona.personas_root_opt
-let persona_profile_path_opt = Keeper_types_profile_persona.persona_profile_path_opt
 
 (* ================================================================ *)
 (* TOML -> keeper_profile_defaults conversion                        *)

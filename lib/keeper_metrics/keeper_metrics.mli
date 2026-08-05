@@ -96,7 +96,6 @@ type t =
   | DecisionAuditFlushFailures
   | OasCancel
   | ClaimAutoProvision
-  | PersonaDriftMissing
   | WorkspaceInitFailures
   | PresenceSyncFailures
   | StaleStormPaused

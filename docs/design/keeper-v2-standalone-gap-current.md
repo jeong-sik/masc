@@ -295,7 +295,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
 - The standalone Composer/Copilot flow still has richer microphone/STT
   affordances than the current dashboard. Board/ops Composer now covers command
   grouping and visible binary attachment metadata, and CopilotDock now covers
-  backed co-view context, route-specific starters, selected-keeper Keepers
+  backed co-view context, route-specific starters, selected Keeper context
   context, Keepers FAB suppression, and mobile full-width dock fallback for
   persisted desktop floating state. Voice/STT should not be copied until there
   is a real audio capture/transcription/send contract.
@@ -457,7 +457,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   same-origin WebSocket metadata, so this was recorded as residual transport
   diagnostics rather than a schedule-card regression.
 - CopilotDock Vitest: `src/components/copilot-dock.test.ts` passes (17 tests),
-  covering selected-keeper Keepers context, fleet fallback, route-specific
+  covering selected Keeper context, fleet fallback, route-specific
   starter prompt selection, rendered empty-state starter buttons, normalized
   field tone classes, stream surface-context posting, and keeper picker flow.
 - Work Vitest: `src/components/work.test.ts` passes (11 tests), covering

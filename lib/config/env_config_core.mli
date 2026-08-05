@@ -168,14 +168,9 @@ val sb_path_result : unit -> (string, string) result
 val sb_path : unit -> string
 val orchestrator_enabled_env_key : string
 
-(** {1 Config / personas / data dir} *)
+(** {1 Config / data dir} *)
 
 val config_dir_env_key : string
-val personas_dir_env_key : string
-
-(* RFC-0085 PR-8 — [config_dir_opt] and [personas_dir_opt] removed
-   from the public surface; callers now read these path values from
-   [Host_config.from_env ()] (fields [config_dir] / [personas_dir]). *)
 
 val data_dir_env_key : string
 val data_dir_opt : unit -> string option

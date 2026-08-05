@@ -1,13 +1,13 @@
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { describe, it, expect, afterEach } from 'vitest'
-import { RelationshipList, TraitsList } from './keeper-detail-lists'
+import { RelationshipList } from './keeper-detail-lists'
 
 afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('RelationshipList and TraitsList primitives', () => {
+describe('RelationshipList primitive', () => {
   it('renders relationship names with the shared status chip primitive', () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -16,18 +16,6 @@ describe('RelationshipList and TraitsList primitives', () => {
 
     const chip = container.querySelector('[data-status-chip]')
     expect(chip?.textContent).toContain('alpha')
-    expect(chip?.getAttribute('data-status-chip-tone')).toBe('info')
-    expect(chip?.getAttribute('data-status-chip-uppercase')).toBe('false')
-  })
-
-  it('renders trait labels with the shared status chip primitive', () => {
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-
-    render(html`<${TraitsList} label="traits" traits=${['planner']} />`, container)
-
-    const chip = container.querySelector('[data-status-chip]')
-    expect(chip?.textContent).toContain('planner')
     expect(chip?.getAttribute('data-status-chip-tone')).toBe('info')
     expect(chip?.getAttribute('data-status-chip-uppercase')).toBe('false')
   })

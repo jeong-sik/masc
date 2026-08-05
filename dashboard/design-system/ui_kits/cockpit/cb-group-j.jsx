@@ -101,7 +101,6 @@ window.MASC_P3 = (function () {
     { hash: "1014c9", keeper: "nick0cave", branch: "main", subject: "fix(dashboard): surface fleet FSM runtime causes", age: "2m", adds: 112, dels: 21 },
     { hash: "7afa7d", keeper: "masc-improver", branch: "feat/keeper-clarity", subject: "refactor keeper claim decision tree", age: "14m", adds: 88, dels: 43 },
     { hash: "e45f2e", keeper: "sangsu", branch: "feat/oas-error-runtime-name-label-10285", subject: "label runtime mismatch errors", age: "24m", adds: 31, dels: 6 },
-    { hash: "35e89b", keeper: "rama", branch: "diag/personality-resync-fields-10269", subject: "trace resync fields through keeper manifest", age: "38m", adds: 42, dels: 10 },
     { hash: "717da6", keeper: "qa-king", branch: "feat/auth-rotate-shared-tokens-10304", subject: "add auth rotation regression case", age: "41m", adds: 53, dels: 18 },
     { hash: "5c89fb", keeper: "sangsu", branch: "agent-code/git-access-risk-policy-20260424", subject: "tighten git access risk policy", age: "1h", adds: 21, dels: 8 },
     { hash: "1c5fb3", keeper: "masc-improver", branch: "chore/tool-access-policy-immutable-dedupe", subject: "dedupe immutable tool access policy", age: "2h", adds: 64, dels: 55 },

@@ -170,9 +170,6 @@ select.kcf-inline-control {
 }
 .kcf-text.mono { font-family: var(--font-mono); font-size: var(--fs-12); }
 .kcf-text:focus { outline: none; border-color: var(--volt-dim); }
-.kcf-traits { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.kcf-trait { font-size: 10.5px; color: var(--volt); padding: 3px 9px; border: 1px solid color-mix(in oklab, var(--volt) 32%, transparent); border-radius: var(--radius-pill); }
-
 /* ── runtime chain ── */
 .kcf-chain { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .kcf-chain-item { font-size: 11.5px; color: var(--text-mid); padding: 5px 11px; border: 1px solid var(--border-main); border-radius: var(--radius-pill); background: var(--bg-card); }

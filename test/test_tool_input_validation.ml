@@ -671,7 +671,7 @@ let test_validate_args_masc_board_list_rejects_unknown_field () =
       (Yojson.Safe.to_string forwarded)
   | Error _ -> ()
 
-(* Keeper/persona tool schemas are closed: undeclared input cannot reach a
+(* Keeper tool schemas are closed: undeclared input cannot reach a
    handler and disappear silently. *)
 let keeper_schema_input name =
   find_schema_exn name Masc.Keeper_schema.schemas
@@ -706,15 +706,11 @@ let test_keeper_down_rejects_undeclared_field () =
    ~/me/.masc tool-call logs must still be accepted. Closing a schema turns
    a silent drop into a hard rejection, so an under-declared property breaks
    a working call — the same failure the missing [compact] declaration
-   produced above. [persona_name] is in this list because
-   [Keeper_turn_up_args.parse] reads it and
-   [Keeper_turn_up_config_persistence] writes it to the keeper TOML, while
-   the schema did not declare it. *)
+   produced above. *)
 let test_keeper_up_accepts_live_traffic_fields () =
   let args =
     `Assoc
       [ "name", `String "sangsu"
-      ; "persona_name", `String "sangsu"
       ; "instructions", `String "do the thing"
       ; "active_goal_ids", `List [ `String "g1" ]
       ; "sandbox_profile", `String "local"
@@ -758,9 +754,7 @@ let test_keeper_clear_accepts_live_traffic_fields () =
       "expected masc_keeper_clear to accept its live-traffic fields, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
-(* [network_mode] stays undeclared on purpose: it is accepted only on the
-   dashboard HTTP path, which calls [Keeper_turn_up_args.parse] with
-   [~allow_sandbox_fields:true] and never validates against this schema. *)
+(* [network_mode] stays undeclared on the MCP contract. *)
 let test_keeper_up_rejects_network_mode () =
   assert_rejects_undeclared_field ~tool:"masc_keeper_up" ~field:"network_mode"
 

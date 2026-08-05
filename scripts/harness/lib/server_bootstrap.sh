@@ -121,7 +121,6 @@ harness_seed_server_config() {
   mkdir -p \
     "$config_dir" \
     "$config_dir/keepers" \
-    "$config_dir/personas" \
     "$config_dir/prompts"
 
   if [[ ! -f "$config_dir/runtime.toml" ]]; then

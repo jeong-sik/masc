@@ -39,3 +39,15 @@ let control_schemas = List.map control_schema control_operations
    [Keeper_tool_descriptor.public_descriptors] so the keeper universe still
    knows they exist without duplicating their schema ownership. *)
 let schemas : tool_schema list = Tool_descriptors_gen.schemas
+
+let mcp_runtime_tool_names =
+  [ "masc_start"
+  ; "masc_broadcast"
+  ; "masc_messages"
+  ]
+
+let mcp_runtime_schemas =
+  List.filter
+    (fun (schema : tool_schema) ->
+       List.mem schema.name mcp_runtime_tool_names)
+    schemas

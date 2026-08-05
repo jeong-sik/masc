@@ -6,35 +6,6 @@ open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
 
-(** #10061: compare personality text fields ignoring leading/trailing
-    whitespace.  The TOML heredoc parser drops the newline before the
-    closing triple-quote; the state JSON writer preserves the in-
-    memory value.  That 1-byte drift drives a re-sync storm on every
-    hot-reload tick unless the compare normalizes whitespace.
-
-    Layer 1 (personality SSOT unification, see
-    [planning/2026-04-25-keeper-identity-canonicalization-rfc.md]):
-    [String.trim] alone is insufficient — when the persisted text
-    exceeds [Keeper_config.prompt_render_max_bytes] (e.g. a 357-byte
-    [instructions]), the read path normalises to ~319 bytes, while
-    [target_instructions] computed from
-    [apply_default defaults.instructions meta.instructions] keeps the
-    raw 357-byte value.  trim-only compare flagged that 38-byte gap as
-    drift on every reconcile tick (~2880 redundant writes/day).
-    Apply the same byte-cap normalisation on both sides so write
-    preserves disk-of-record (raw bytes), but compare uses the
-    capped form that the prompt actually renders.  Disk data is
-    preserved; loop terminates. *)
-let personality_text_equal =
-  Keeper_runtime_personality_diff.personality_text_equal
-let personality_field_diff_entry =
-  Keeper_runtime_personality_diff.personality_field_diff_entry
-let personality_diff_summary =
-  Keeper_runtime_personality_diff.personality_diff_summary
-let personality_field_diff_summary =
-  Keeper_runtime_personality_diff.personality_field_diff_summary
-
-
 type boot_meta_resolution = {
   meta : keeper_meta;
   materialized : bool;
@@ -254,7 +225,7 @@ let sandbox_profile_required_boot_error ~keeper_name ~manifest_path =
 let effective_declarative_runtime_id
     (_defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
-  (* persona⊥{model,runtime}: the keeper's runtime is assigned in runtime.toml,
+  (* The keeper's runtime is assigned in runtime.toml,
      not in [defaults].  Delegate to {!Keeper_meta_contract.runtime_id_of_meta}
      (the dispatcher) so the declare/status view and the wire share ONE source
      by construction — divergence is structurally impossible, not convention-
@@ -272,9 +243,10 @@ let keeper_meta_persistent_drift_categories
     ~(target : keeper_meta) =
   List.filter_map Fun.id
     [
-      drift_if "persona" (current.persona <> target.persona);
       drift_if "instructions"
-        (not (personality_text_equal current.instructions target.instructions));
+        (not
+           (Keeper_runtime_instructions.text_equal
+              current.instructions target.instructions));
       drift_if "oas_env" (current.oas_env <> target.oas_env);
     ]
 
@@ -331,7 +303,7 @@ let ensure_keeper_meta_with_cause config name =
     (
     (* Re-sync ALL declarative keeper fields from profile/env defaults on bootstrap.
        Persisted meta may have stale values from a previous session;
-       persona config (TOML) plus explicit env overrides are the source of truth.
+       Keeper config plus explicit env overrides are the source of truth.
        Fields where TOML has [Some v] are overwritten; [None] keeps runtime value. *)
     let defaults_result =
       profile_defaults_result_for_config config meta.name
@@ -340,12 +312,10 @@ let ensure_keeper_meta_with_cause config name =
     | Error error ->
         Error (profile_defaults_boot_error ~keeper_name:meta.name error)
     | Ok defaults ->
-    let target_persona = apply_default_opt defaults.persona_name meta.persona in
-
     (* --- Proactive --- *)
     let target_proactive =
       apply_default defaults.proactive_enabled Keeper_config.default_proactive_enabled in
-    (* --- Personality --- *)
+    (* --- Keeper instructions --- *)
     let target_instructions = apply_default defaults.instructions meta.instructions in
 
     (* --- Policy --- *)
@@ -359,13 +329,11 @@ let ensure_keeper_meta_with_cause config name =
        declared. The previous behaviour silently fell through to
        [default_sandbox_profile = Local] when TOML omitted the key,
        which strips docker isolation from any operator who forgets to
-       set it (or copies a stale persona JSON: persona profiles are
-       declared elsewhere as not allowed to own this field). Reject at
+       set it. Reject at
        reconcile time so the keeper visibly fails to boot rather than
        running un-sandboxed.
 
-       Persona-only keepers cannot satisfy this check today and must
-       gain a TOML wrapper that sets [sandbox_profile]. The
+       Every Keeper must declare a TOML sandbox profile. The
        [Keeper_types_profile.default_sandbox_profile] constant is left
        in place because other read paths (JSON parser, env override,
        turn_up_args) still need a value when reading already-persisted
@@ -408,7 +376,6 @@ let ensure_keeper_meta_with_cause config name =
     in
     let overlayed =
       { meta with
-        persona = target_persona;
         proactive = {
           enabled = target_proactive;
         };
@@ -438,11 +405,8 @@ let ensure_keeper_meta_with_cause config name =
         ~target:overlayed
     in
     emit_keeper_meta_overlay_drift ~keeper_name:meta.name overlay_cats;
-    (* Keep the runtime snapshot honest as well as the live overlay.  The
-       previous overlay-only path made operators see stale JSON forever
-       (for example persona=analyst while TOML declared masc-improver),
-       which hid prompt/tool/autonomy drift from health and bootstrap
-       checks. TOML-only [active_goal_ids] is overlaid in the returned meta but
+    (* Keep the runtime snapshot honest as well as the live overlay.
+       TOML-only [active_goal_ids] is overlaid in the returned meta but
        does not trigger
        a runtime JSON rewrite by themselves. *)
     let cats =

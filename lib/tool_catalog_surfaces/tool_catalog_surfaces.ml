@@ -83,11 +83,6 @@ let public_mcp_surface_tools =
        purpose: it wipes transcript messages, which is a different decision
        from asking a keeper to compact. *)
     "masc_keeper_compact"
-  ; (* Persona authoring is operator-visible. *)
-    "masc_persona_list"
-  ; "masc_persona_create"
-  ; "masc_persona_update"
-  ; "masc_persona_delete"
   ; (* Board. [masc_board_reaction] is intentionally public: it is the
        operator/client counterpart to existing board comment/vote actions. *)
     "masc_board_post"

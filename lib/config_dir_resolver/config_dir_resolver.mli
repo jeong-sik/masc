@@ -33,7 +33,6 @@ type resolution = {
   config_root : path_item;
   prompts : path_item;
   keepers : path_item;
-  personas : path_item;
 }
 
 type inputs = {
@@ -41,7 +40,6 @@ type inputs = {
   executable_name : string;
   env_base_path : string option;
   env_config_dir : string option;
-  env_personas_dir : string option;
 }
 
 (** {1 SSOT filenames}
@@ -79,9 +77,6 @@ val reset : unit -> unit
 
 val prompts_dir : unit -> string
 val keepers_dir : unit -> string
-val personas_dir_opt : unit -> string option
-val personas_dirs : unit -> string list
-val personas_dirs_with : inputs -> resolution -> string list
 val keeper_toml_path_opt : string -> string option
 (** [keeper_toml_path_opt name] checks for [keepers/<name>.toml]. *)
 
@@ -94,7 +89,7 @@ val base_path_config_root : cwd:string -> string -> string
 
 val resolve_for_base_path : base_path:string -> resolution
 (** Resolve the config root for an explicit workspace [base_path]. Explicit
-    [MASC_CONFIG_DIR] and [MASC_PERSONAS_DIR] overrides are still honored, but
+    [MASC_CONFIG_DIR] overrides are still honored, but
     ambient [MASC_BASE_PATH] and process cwd do not replace the caller's
     workspace. *)
 
@@ -105,9 +100,6 @@ val keepers_dir_for_base_path : base_path:string -> string
 val keeper_runtime_store_of_dirname : string -> Common.keeper_runtime_store option
 (** Base-path-independent resolver for canonical child-store names under
     [Common.keepers_runtime_dirname]. *)
-
-val personas_dirs_for_base_path : base_path:string -> string list
-(** Base-path-scoped variant of {!personas_dirs}. *)
 
 val keeper_toml_path_opt_for_base_path :
   base_path:string -> string -> string option
@@ -171,13 +163,13 @@ val keeper_repo_mappings_toml_path : base_path:string -> string
 
 val config_signature_exists : string -> bool
 (** [config_signature_exists dir] checks whether [dir] looks like a valid
-    MASC config directory (has runtime.toml, prompts/, keepers/, or personas/). *)
+    MASC config directory (has runtime.toml, prompts/, or keepers/). *)
 
 (** {1 Env introspection}
 
     Sanitized env var readers that strip inherited test values when running
     under a test executable. [MASC_BASE_PATH] uses
-    [MASC_TEST_ALLOW_BASE_PATH_OVERRIDE]; config/persona paths use
+    [MASC_TEST_ALLOW_BASE_PATH_OVERRIDE]; config paths use
     [MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE]. *)
 
 val current_env_base_path_opt : unit -> string option
@@ -202,7 +194,6 @@ val canonical_base_path : string -> (string, canonical_base_path_error) result
     typed error; callers must not fall back to the raw string. *)
 
 val current_env_config_dir_opt : unit -> string option
-val current_env_personas_dir_opt : unit -> string option
 
 (** Sanitize inherited test environment values.
     Strips env vars captured at process start when running under a test
@@ -245,7 +236,3 @@ val source_to_string : source -> string
 val status_to_string : status -> string
 val item_to_json : path_item -> Yojson.Safe.t
 val to_json : resolution -> Yojson.Safe.t
-
-(** {1 Utility} *)
-
-val dedupe_paths : string list -> string list

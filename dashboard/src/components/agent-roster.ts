@@ -649,9 +649,6 @@ function keeperRuntimeAgentProjection(source: Keeper): RosterAgent | null {
     capabilities: linkedAgent?.capabilities,
     emoji: source.emoji,
     koreanName: source.koreanName,
-    traits: source.traits,
-    activityLevel: source.activityLevel,
-    primaryValue: source.primaryValue,
     rosterSource: 'keeper_runtime',
   }
 }
@@ -675,9 +672,6 @@ function mergeRosterAgent(existing: RosterAgent | undefined, next: RosterAgent):
     emoji: existing.emoji ?? next.emoji,
     koreanName: existing.koreanName ?? next.koreanName,
     model: existing.model ?? next.model,
-    traits: existing.traits?.length ? existing.traits : next.traits,
-    activityLevel: existing.activityLevel ?? next.activityLevel,
-    primaryValue: existing.primaryValue ?? next.primaryValue,
   }
 }
 
@@ -1202,7 +1196,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <${AgentAvatar}
               name=${row.agent.name}
               status=${row.presenceDisplay.status}
-              traits=${row.agent.traits}
               size="md"
               currentWork=${row.currentWork}
               activityAge=${row.lastActivityAge}
@@ -1394,7 +1387,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 <${AgentAvatar}
                   name=${selectedRow.agent.name}
                   status=${selectedRow.presenceDisplay.status}
-                  traits=${selectedRow.agent.traits}
                   size="lg"
                   currentWork=${selectedRow.currentWork}
                   activityAge=${selectedRow.lastActivityAge}

@@ -1,5 +1,3 @@
-module StringSet = Set_util.StringSet
-
 (** SSOT for config filenames documented in [docs/TOML-RELOAD-MATRIX.md].
     Consumed by the resolver here and by config loaders elsewhere in the
     codebase. Issue #8414. *)
@@ -29,7 +27,6 @@ type resolution = {
   config_root : path_item;
   prompts : path_item;
   keepers : path_item;
-  personas : path_item;
 }
 
 type inputs = {
@@ -37,7 +34,6 @@ type inputs = {
   executable_name : string;
   env_base_path : string option;
   env_config_dir : string option;
-  env_personas_dir : string option;
 }
 
 let trim_opt = Env_config_core.trim_opt
@@ -70,7 +66,6 @@ let allow_inherited_test_base_path () =
    so the SSOT lives in lib/host_config/ instead of Env_config_core. *)
 let initial_env_base_path = (Host_config.from_env ()).base_path
 let initial_env_config_dir = (Host_config.from_env ()).config_dir
-let initial_env_personas_dir = (Host_config.from_env ()).personas_dir
 let initial_env_home = Sys.getenv_opt "HOME" |> trim_opt
 
 let sanitize_inherited_test_env_opt ~running_under_test_executable ~allow_inherited
@@ -122,14 +117,6 @@ let current_env_base_path_opt () =
     ~initial:initial_env_base_path
     ~current:((Host_config.from_env ()).base_path)
     ~home:initial_env_home
-
-let current_env_personas_dir_opt () =
-  sanitize_inherited_test_env_opt
-    ~running_under_test_executable:
-      (running_under_test_executable ())
-    ~allow_inherited:(allow_inherited_test_config_paths ())
-    ~initial:initial_env_personas_dir
-    ~current:((Host_config.from_env ()).personas_dir)
 
 let fallback_cwd_from_env () =
   let host = Host_config.from_env () in
@@ -213,18 +200,15 @@ let to_json (resolution : resolution) =
       ("config_root", item_to_json resolution.config_root);
       ("prompts", item_to_json resolution.prompts);
       ("keepers", item_to_json resolution.keepers);
-      ("personas", item_to_json resolution.personas);
     ]
 
 let config_signature_exists config_dir =
   let runtime_toml = Filename.concat config_dir runtime_toml_filename in
   let prompts = Filename.concat config_dir "prompts" in
   let keepers = Filename.concat config_dir "keepers" in
-  let personas = Filename.concat config_dir "personas" in
   existing_dir config_dir
   && (existing_file runtime_toml
-     || existing_dir prompts || existing_dir keepers
-     || existing_dir personas)
+     || existing_dir prompts || existing_dir keepers)
 
 let rec ancestor_dirs path =
   let dir = absolute_path path in
@@ -303,37 +287,21 @@ let file_item (root : path_item) name =
   let exists = root.exists && existing_file path in
   { path; exists; source = root.source }
 
-let personas_item (inputs : inputs) root =
-  match trim_opt inputs.env_personas_dir with
-  | Some raw ->
-      let path = absolute_path_from ~cwd:inputs.cwd raw in
-      if existing_dir path then
-        ({ path; exists = true; source = Env }, [])
-      else
-        ( { path; exists = false; source = Invalid_env },
-          [ Printf.sprintf
-              "MASC_PERSONAS_DIR is set but does not point to a directory: %s"
-              path ] )
-  | None -> (child_item root "personas", [])
-
 let inputs_from_env () =
   {
     cwd = current_working_dir ();
     executable_name = Sys.executable_name;
     env_base_path = current_env_base_path_opt ();
     env_config_dir = current_env_config_dir_opt ();
-    env_personas_dir = current_env_personas_dir_opt ();
   }
 
 let resolve_with inputs =
   let config_root, root_warnings = config_root_resolution inputs in
   let prompts = child_item config_root "prompts" in
   let keepers = child_item config_root "keepers" in
-  let personas, persona_warnings = personas_item inputs config_root in
   let missing_child_warnings =
     [ ("prompts", prompts.exists)
     ; ("keepers", keepers.exists)
-    ; ("personas", personas.exists)
     ]
     |> List.filter_map (fun (label, exists) ->
            if exists then None
@@ -342,7 +310,7 @@ let resolve_with inputs =
                (Printf.sprintf "Resolved config child is missing: %s" label))
   in
   let warnings =
-    root_warnings @ persona_warnings @ missing_child_warnings
+    root_warnings @ missing_child_warnings
   in
   let status =
     match config_root.source with
@@ -357,7 +325,6 @@ let resolve_with inputs =
     config_root;
     prompts;
     keepers;
-    personas;
   }
 
 let cached_resolution : resolution option ref = ref None
@@ -385,7 +352,6 @@ let inputs_for_base_path ~base_path =
     executable_name = Sys.executable_name;
     env_base_path = Some base_path;
     env_config_dir = current_env_config_dir_opt ();
-    env_personas_dir = current_env_personas_dir_opt ();
   }
 
 let resolve_for_base_path ~base_path =
@@ -396,66 +362,6 @@ let keepers_dir_for_base_path ~base_path =
 
 let keeper_runtime_store_of_dirname =
   Common.keeper_runtime_store_of_dirname
-
-let personas_dir_opt () =
-  let resolution = resolve () in
-  match resolution.config_root.source with
-  | Env | Local_masc when resolution.personas.exists ->
-      Some resolution.personas.path
-  | Env | Local_masc | Invalid_env | Missing ->
-      None
-
-let dedupe_paths paths =
-  let rec go seen acc = function
-    | [] -> List.rev acc
-    | p :: rest ->
-      if StringSet.mem p seen then go seen acc rest
-      else go (StringSet.add p seen) (p :: acc) rest
-  in
-  go StringSet.empty [] paths
-
-let personas_dirs_with inputs resolution =
-  (* Mirror [personas_dir_opt]'s invariant: when the resolver is Missing or
-     Invalid_env, never expose a personas path even if [resolution.personas.exists]
-     happens to be true (e.g. [default_missing_root] pointing at a repo-local
-     config/ tree). Without this gate, callers can silently load personas from
-     a fallback root the resolver explicitly disowned. *)
-  let explicit_personas_dir_override = trim_opt inputs.env_personas_dir in
-  (* Persona resolution is intentionally single-source:
-     - MASC_PERSONAS_DIR when explicitly set (bypasses config-root gating;
-       operator-declared persona roots stand on their own — a user may
-       legitimately want personas without a full MASC config directory)
-     - otherwise the resolved config root's personas/
-     Hidden secondary searches (secondary personas roots, base-path-root personas)
-     make the dashboard/config panel lie about the actual source of truth. *)
-  match explicit_personas_dir_override with
-  | Some _ ->
-    (* The env override path is captured in [resolution.personas] by
-       [personas_item] when MASC_PERSONAS_DIR is set; honor its exists
-       flag regardless of [config_root.source].  If the env path is
-       invalid the source comes back as [Invalid_env] and we still
-       suppress to keep the no-silent-fallback contract. *)
-    (match resolution.personas.source with
-     | Env when resolution.personas.exists -> [ resolution.personas.path ]
-     | _ -> [])
-  | None ->
-    let primary =
-      match resolution.config_root.source with
-      | Invalid_env | Missing -> []
-      | Env | Local_masc ->
-        if resolution.personas.exists then [ resolution.personas.path ] else []
-    in
-    dedupe_paths primary
-
-let personas_dirs_for_base_path ~base_path =
-  let inputs = inputs_for_base_path ~base_path in
-  let resolution = resolve_with inputs in
-  personas_dirs_with inputs resolution
-
-let personas_dirs () =
-  let resolution = resolve () in
-  let inputs = inputs_from_env () in
-  personas_dirs_with inputs resolution
 
 let keeper_toml_path_opt name =
   let path = Filename.concat (keepers_dir ()) (name ^ ".toml") in

@@ -153,15 +153,21 @@ let seed_runtime_meta config name =
   | Error err -> Alcotest.failf "write_meta failed: %s" err)
 
 let write_keeper_toml ~keepers_dir ~name ~sandbox_profile ~instructions =
+  let agent_dir = Filename.concat keepers_dir name in
+  mkdir_p agent_dir;
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
        {|[keeper]
 sandbox_profile = "%s"
-instructions = "%s"
 |}
-       sandbox_profile
-       instructions)
+       sandbox_profile);
+  write_file (Filename.concat agent_dir "AGENT.md") instructions
+
+let write_keeper_agent ~keepers_dir ~name instructions =
+  let agent_dir = Filename.concat keepers_dir name in
+  mkdir_p agent_dir;
+  write_file (Filename.concat agent_dir "AGENT.md") instructions
 
 let status_instructions_with ?(agent_name = "test-agent") ?name config =
   let args =
@@ -260,6 +266,7 @@ let test_keeper_surface_resolves_alias_names () =
 let test_toml_overlay_reaches_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "analyst" in
+  write_keeper_agent ~keepers_dir ~name "Analyze carefully.";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
@@ -280,25 +287,17 @@ sandbox_profile = "docker"
         "none"
         (Profile.network_mode_to_string meta.network_mode)
 
-let test_profile_identity_snapshot_reaches_meta_json () =
-  with_config_dir @@ fun ~base ~config_dir ~keepers_dir ->
+let test_keeper_instructions_reach_meta_json () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "probe" in
-  let persona_dir = Filename.concat (Filename.concat config_dir "personas") name in
-  mkdir_p persona_dir;
+  let agent_dir = Filename.concat keepers_dir name in
+  mkdir_p agent_dir;
   write_file
-    (Filename.concat persona_dir "profile.json")
-    {|{
-  "persona_name": "probe",
-  "display_name": "Probe",
-  "keeper": {
-    "instructions": "profile instructions"
-  }
-}
-|};
+    (Filename.concat agent_dir "AGENT.md")
+    "keeper instructions";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-persona_name = "probe"
 sandbox_profile = "local"
 multimodal_policy = "delegate"
 |};
@@ -308,22 +307,14 @@ multimodal_policy = "delegate"
   | Error err -> Alcotest.failf "read_effective_meta failed: %s" err
   | Ok None -> Alcotest.fail "expected seeded keeper meta"
   | Ok (Some meta) ->
-      Alcotest.(check (option string))
-        "persona overlays from profile"
-        (Some "probe")
-        meta.persona;
       Alcotest.(check string)
-        "instructions overlays from profile"
-        "profile instructions"
+        "instructions overlay from Keeper AGENT"
+        "keeper instructions"
         meta.instructions;
       let json = Masc.Keeper_meta_json.meta_to_json meta in
       Alcotest.(check (option string))
-        "meta json keeps persona snapshot"
-        (Some "probe")
-        (json_string_field "persona" json);
-      Alcotest.(check (option string))
         "meta json keeps instructions snapshot"
-        (Some "profile instructions")
+        (Some "keeper instructions")
         (json_string_field "instructions" json);
       Alcotest.(check (option string))
         "meta json keeps multimodal policy"
@@ -346,23 +337,22 @@ multimodal_policy = "delegate"
         Yojson.Safe.from_string (Profile.tool_result_body status_result)
       in
       Alcotest.(check (option string))
-        "status keeps persona snapshot"
-        (Some "probe")
-        (json_string_field "persona" status_json);
-      Alcotest.(check (option string))
         "status keeps instructions snapshot"
-        (Some "profile instructions")
+        (Some "keeper instructions")
         (json_string_field "instructions" status_json)
 
 let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "masc-improver" in
+  let agent_dir = Filename.concat keepers_dir name in
+  mkdir_p agent_dir;
+  write_file
+    (Filename.concat agent_dir "AGENT.md")
+    "Improve MASC autonomously";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-persona_name = "masc-improver"
 sandbox_profile = "docker"
-instructions = "Improve MASC autonomously"
 proactive_enabled = true
 allowed_paths = ["workspace/yousleepwhen/masc"]
 active_goal_ids = ["goal-masc-improver"]
@@ -378,7 +368,6 @@ active_goal_ids = ["goal-masc-improver"]
   let stale =
     {
       persisted with
-      persona = Some "analyst";
       instructions = "stale instructions";
       proactive = { enabled = false };
       allowed_paths = [ "/tmp/stale-local-path" ];
@@ -408,14 +397,6 @@ active_goal_ids = ["goal-masc-improver"]
     "disk meta contains only current fields"
     []
     leaked_config_keys;
-  Alcotest.(check (option string))
-    "disk meta keeps persona snapshot"
-    (Some "masc-improver")
-    (json_string_field "persona" disk_json);
-  Alcotest.(check (option string))
-    "returned persona is TOML canonical"
-    (Some "masc-improver")
-    returned.persona;
   Alcotest.(check string)
     "returned instructions are TOML canonical"
     "Improve MASC autonomously"
@@ -440,11 +421,11 @@ active_goal_ids = ["goal-masc-improver"]
 let test_ensure_keeper_meta_preserves_live_usage_during_reconcile () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "reconcile-live-usage" in
+  write_keeper_agent ~keepers_dir ~name "fresh instructions";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "local"
-instructions = "fresh instructions"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -512,6 +493,7 @@ instructions = "fresh instructions"
 let test_turn_setup_uses_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "turnsetup" in
+  write_keeper_agent ~keepers_dir ~name "Prepare the turn.";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
@@ -544,6 +526,7 @@ sandbox_profile = "docker"
 let test_keepalive_meta_selection_overlays_disk_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "taskmaster" in
+  write_keeper_agent ~keepers_dir ~name "Coordinate the work.";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
@@ -608,10 +591,10 @@ network_mode = "inherit"
 let test_missing_sandbox_profile_fails_loud_for_profile_source () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "nosandbox" in
+  write_keeper_agent ~keepers_dir ~name "Missing sandbox profile";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -626,10 +609,10 @@ instructions = "missing sandbox profile"
 let test_keeper_up_rejects_profile_source_without_sandbox_profile () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "nosandboxup" in
+  write_keeper_agent ~keepers_dir ~name "Missing sandbox profile";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -1149,10 +1132,10 @@ let test_status_surfaces_chat_queue_runtime () =
 let test_keeper_list_row_surfaces_effective_meta_errors () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "badprofile" in
+  write_keeper_agent ~keepers_dir ~name "Missing sandbox profile";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -1174,10 +1157,10 @@ instructions = "missing sandbox profile"
 let test_keeper_list_error_row_preserves_keepalive_state () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "badprofile-running" in
+  write_keeper_agent ~keepers_dir ~name "Missing sandbox profile";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
@@ -1204,7 +1187,7 @@ let () =
             `Quick test_toml_overlay_reaches_effective_meta;
           Alcotest.test_case
             "profile identity snapshot reaches meta JSON"
-            `Quick test_profile_identity_snapshot_reaches_meta_json;
+            `Quick test_keeper_instructions_reach_meta_json;
           Alcotest.test_case
             "ensure keeper meta persists TOML identity snapshot"
             `Quick test_ensure_keeper_meta_persists_toml_identity_snapshot;

@@ -368,7 +368,6 @@ type keeper_meta =
     id : Ids.Keeper_id.t option [@default None]
   ; name : string
   ; agent_name : string
-  ; persona : string option
   ; instructions : string
   ; (* -- Policy -- *)
     sandbox_profile : Keeper_types_profile.sandbox_profile
@@ -511,7 +510,6 @@ let effective_meta_of_profile_defaults
       in
       Ok
         { meta with
-          persona = apply_profile_default_opt defaults.persona_name meta.persona;
           proactive =
             { enabled =
                 apply_profile_default defaults.proactive_enabled
@@ -573,12 +571,9 @@ let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string
   | Ok defaults -> effective_meta_of_profile_defaults defaults meta
 ;;
 
-(* persona⊥{model,runtime}: a keeper's runtime is assigned in runtime.toml
-   ([[runtime.assignments]], the sole SSOT), keyed by keeper name — NOT read
-   from the persona profile [model] field. An unassigned keeper falls to the
-   default runtime (the designed fallback; RFC-0206 §2.1 fail-fast still applies
-   to the default itself). The id is opaque here; only the OAS adapter parses
-   it. *)
+(* A keeper's runtime is assigned in runtime.toml ([[runtime.assignments]],
+   the sole SSOT), keyed by keeper name. An unassigned keeper uses the default
+   runtime. The id is opaque here; only the OAS adapter parses it. *)
 let runtime_id_of_meta (meta : keeper_meta) =
   match Runtime.runtime_id_for_keeper meta.name with
   | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id
@@ -685,31 +680,4 @@ let map_proactive_rt (f : proactive_runtime -> proactive_runtime) (m : keeper_me
   : keeper_meta
   =
   { m with runtime = { m.runtime with proactive_rt = f m.runtime.proactive_rt } }
-;;
-
-let removed_keeper_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
-
-let reject_removed_model_args ~tool_name (args : Yojson.Safe.t) =
-  let present =
-    removed_keeper_model_arg_names
-    |> List.filter (fun key ->
-      (* A legacy arg counts as "present" only when supplied with a real value.
-         [assoc_member_opt] returns [None] for an absent key; the prior
-         [| _ -> true] arm classified that [None] as present, so a request
-         that simply omitted all three keys (e.g. the [{name}] used by base
-         autoboot materialization) was rejected as if it had passed them.
-         Absent ([None]) and explicit-null are both "not supplied". *)
-      match Json_util.assoc_member_opt key args with
-      | None | Some `Null -> false
-      | Some _ -> true)
-  in
-  match present with
-  | [] -> Ok ()
-  | fields ->
-    Error
-      (Printf.sprintf
-         "removed keeper model args for %s: %s. Use runtime_id; concrete \
-          provider/model identity is resolved from the default runtime."
-         tool_name
-         (String.concat ", " fields))
 ;;

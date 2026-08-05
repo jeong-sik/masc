@@ -62,3 +62,9 @@ val schemas : Masc_domain.tool_schema list
     {!dashboard_scope_enum_strings} /
     [Tool_schemas_specs_types.config_category_enum_strings] so
     adding a value updates the schema automatically. *)
+
+val mcp_runtime_tool_names : string list
+(** Exact names dispatched by [Mcp_tool_runtime]. *)
+
+val mcp_runtime_schemas : Masc_domain.tool_schema list
+(** Canonical schemas for {!mcp_runtime_tool_names}, projected from {!schemas}. *)

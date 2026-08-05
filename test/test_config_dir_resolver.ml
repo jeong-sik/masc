@@ -58,7 +58,6 @@ let make_config_root root =
   let config = Filename.concat root "config" in
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
-  mkdir_p (Filename.concat config "personas");
   write_file (Filename.concat config "runtime.toml") "";
   config
 
@@ -97,7 +96,7 @@ target = "runtime.primary"
 |};
   config
 
-let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir
+let make_inputs ?env_base_path ?env_config_dir
     ?(cwd = "/tmp/cwd") ?(executable_name = "/tmp/bin/masc") () =
   Config_dir_resolver.
     {
@@ -105,7 +104,6 @@ let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir
       executable_name;
       env_base_path;
       env_config_dir;
-      env_personas_dir;
     }
 
 let test_sanitize_inherited_test_env_opt_drops_captured_parent_shell_value () =
@@ -172,19 +170,14 @@ let test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in () =
 let test_inputs_from_env_honors_config_path_override_opt_in () =
   with_temp_dir "config-dir-inputs-env-config" @@ fun root ->
   let config = make_config_root root in
-  let personas = Filename.concat config "personas" in
   with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" (Some "true") @@ fun () ->
   with_env "MASC_CONFIG_DIR" (Some config) @@ fun () ->
-  with_env "MASC_PERSONAS_DIR" (Some personas) @@ fun () ->
   let inputs = Config_dir_resolver.inputs_from_env () in
   check (option string) "inputs preserve config env" (Some config)
     inputs.env_config_dir;
-  check (option string) "inputs preserve personas env" (Some personas)
-    inputs.env_personas_dir;
   let resolution = Config_dir_resolver.resolve_with inputs in
   check string "root source" "env"
-    (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "personas env exists" true resolution.personas.exists
+    (Config_dir_resolver.source_to_string resolution.config_root.source)
 
 let test_inputs_from_env_honors_base_path_override_opt_in () =
   with_temp_dir "config-dir-inputs-env-base" @@ fun root ->
@@ -192,7 +185,6 @@ let test_inputs_from_env_honors_base_path_override_opt_in () =
   let _config = make_config_root (Filename.concat base Common.masc_dirname) in
   with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" (Some "true") @@ fun () ->
   with_env "MASC_CONFIG_DIR" None @@ fun () ->
-  with_env "MASC_PERSONAS_DIR" None @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base) @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" (Some base) @@ fun () ->
   let inputs = Config_dir_resolver.inputs_from_env () in
@@ -212,7 +204,6 @@ let test_inputs_from_env_survives_deleted_cwd () =
   let _config = make_config_root (Filename.concat base Common.masc_dirname) in
   with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" (Some "true") @@ fun () ->
   with_env "MASC_CONFIG_DIR" None @@ fun () ->
-  with_env "MASC_PERSONAS_DIR" None @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base) @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" (Some base) @@ fun () ->
   let saved_cwd = Sys.getcwd () in
@@ -318,9 +309,6 @@ let test_executable_relative_config_is_seed_only_not_fallback () =
     (Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "missing"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "personas hidden because repo config is not active"
-    false resolution.personas.exists
-
 let test_external_config_is_not_a_fallback () =
   with_temp_dir "config-dir-external" @@ fun external_root ->
   let external_config_root = Filename.concat external_root Common.masc_dirname in
@@ -384,62 +372,6 @@ let test_no_legacy_me_root_fallback () =
   check string "root source" "missing"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
   check bool "warning present" true (resolution.warnings <> [])
-
-(* ================================================================ *)
-(* personas_dirs tests                                              *)
-(* ================================================================ *)
-
-let test_personas_dirs_default_repo_only () =
-  with_temp_dir "pd-default" @@ fun root ->
-  let config = make_config_root root in
-  let inputs = make_inputs ~env_config_dir:config () in
-  let resolution = Config_dir_resolver.resolve_with inputs in
-  let dirs = Config_dir_resolver.personas_dirs_with inputs resolution in
-  check (list string) "repo personas only"
-    [ Filename.concat config "personas" ] dirs
-
-let test_personas_dirs_ignores_external_personas () =
-  with_temp_dir "pd-external" @@ fun root ->
-  let config = make_config_root root in
-  let external_root = Filename.concat root "external" in
-  let external_personas = Filename.concat external_root ".masc/personas" in
-  mkdir_p external_personas;
-  let inputs = make_inputs ~env_config_dir:config () in
-  let resolution = Config_dir_resolver.resolve_with inputs in
-  let dirs = Config_dir_resolver.personas_dirs_with inputs resolution in
-  check (list string) "repo personas only despite external personas"
-    [ Filename.concat config "personas" ] dirs
-
-let test_personas_dirs_env_override_is_sole_source () =
-  with_temp_dir "pd-env" @@ fun root ->
-  let env_personas = Filename.concat root "env-personas" in
-  mkdir_p env_personas;
-  let external_root = Filename.concat root "external" in
-  let external_personas = Filename.concat external_root ".masc/personas" in
-  mkdir_p external_personas;
-  let inputs = make_inputs ~env_personas_dir:env_personas () in
-  let resolution = Config_dir_resolver.resolve_with inputs in
-  let dirs = Config_dir_resolver.personas_dirs_with inputs resolution in
-  (* MASC_PERSONAS_DIR overrides: only the env dir, no secondary dir *)
-  check (list string) "env override only" [ env_personas ] dirs
-
-let test_personas_dirs_ignores_base_path_fallback () =
-  with_temp_dir "pd-base" @@ fun root ->
-  let config_root = Filename.concat root "config" in
-  mkdir_p (Filename.concat config_root "prompts");
-  mkdir_p (Filename.concat config_root "keepers");
-  mkdir_p (Filename.concat config_root "personas");
-  write_file (Filename.concat config_root "runtime.toml") "";
-  let base = Filename.dirname config_root in
-  let base_personas = Filename.concat (Filename.concat base Common.masc_dirname) "personas" in
-  mkdir_p base_personas;
-  let config_personas = Filename.concat config_root "personas" in
-  let inputs = make_inputs ~env_config_dir:config_root ~env_base_path:base
-      ~cwd:root () in
-  let resolution = Config_dir_resolver.resolve_with inputs in
-  let dirs = Config_dir_resolver.personas_dirs_with inputs resolution in
-  check (list string) "base path fallback ignored"
-    [ config_personas ] dirs
 
 (* RFC-0121 — .masc/<sub> sub-directory accessors. The accessors derive
    layout from [base_path] without filesystem access, so we only check
@@ -587,17 +519,6 @@ let () =
             test_external_config_is_not_a_fallback;
           test_case "does not fallback to legacy me_root repo path" `Quick
             test_no_legacy_me_root_fallback;
-        ] );
-      ( "personas_dirs",
-        [
-          test_case "default returns repo personas only" `Quick
-            test_personas_dirs_default_repo_only;
-          test_case "ignores secondary personas dir" `Quick
-            test_personas_dirs_ignores_external_personas;
-          test_case "MASC_PERSONAS_DIR overrides as sole source" `Quick
-            test_personas_dirs_env_override_is_sole_source;
-          test_case "ignores base_path .masc/personas fallback" `Quick
-            test_personas_dirs_ignores_base_path_fallback;
         ] );
       ( "test_env_sanitization",
         [

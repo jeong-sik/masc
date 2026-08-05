@@ -343,7 +343,7 @@ panel_system_prompt = "z"
       (List.mem (Fusion_config.Duplicate_panelist ("p", "dup")) es)
   | Ok _ -> Alcotest.fail "expected Error Duplicate_panelist"
 
-(* 같은 model을 서로 다른 라벨로 둔 두 그룹(persona ensemble) → 정체성이 달라
+(* 같은 model을 서로 다른 라벨로 둔 두 그룹(ensemble) → 정체성이 달라
    ["skeptic (claude)"; "optimist (claude)"] → Ok. RFC-0278의 핵심 시나리오. *)
 let same_model_diff_prompt_toml =
   {|

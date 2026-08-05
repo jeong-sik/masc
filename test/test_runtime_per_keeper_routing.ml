@@ -1,6 +1,6 @@
 (* Per-keeper LLM runtime routing via runtime.toml [[runtime.assignments]].
 
-   persona⊥{model,runtime}: runtime.toml is the sole SSOT for keeper→runtime
+   runtime.toml is the sole SSOT for keeper→runtime
    assignment, keyed by keeper name.  [Keeper_meta_contract.runtime_id_of_meta]
    resolves a keeper's assignment via [Runtime.runtime_id_for_keeper] so it
    reaches the turn driver; an unassigned keeper falls through to
@@ -136,7 +136,7 @@ let make_meta name : KMC.keeper_meta =
 (* Runtime config materializing two bindings: the default ["runpod_mtp.qwen"]
    and ["openai.gpt"] (used to prove [get_runtime_by_id] resolution).
 
-   persona⊥{model,runtime}: per-keeper routing is declared in
+   Per-keeper routing is declared in
    [[runtime.assignments]] (runtime.toml SSOT), keyed by keeper name — NOT in
    keeper TOML.  [routingtest]/[budgettest] route to the non-default
    [openai.gpt]; an unassigned keeper falls to [runtime].default. *)
@@ -758,17 +758,6 @@ let test_runtime_config_text_save_rejects_invalid_without_write () =
       "runtime cache unchanged"
       "runpod_mtp.qwen"
       (Runtime.get_default_runtime_id ()))
-;;
-
-let test_runtime_id_tool_arg_is_not_removed_keeper_arg () =
-  match
-    Keeper_types_profile.reject_removed_keeper_input_keys
-      ~tool_name:"masc_keeper_up"
-      (`Assoc [ "runtime_id", `String "openai.gpt" ])
-  with
-  | Ok () -> ()
-  | Error msg ->
-    Alcotest.failf "runtime_id dashboard patch arg should be accepted: %s" msg
 ;;
 
 let test_undeclared_keeper_falls_to_default () =
@@ -1824,10 +1813,6 @@ let () =
             "dashboard raw runtime.toml save rejects invalid source before write"
             `Quick
             test_runtime_config_text_save_rejects_invalid_without_write
-        ; Alcotest.test_case
-            "runtime_id API arg is not rejected as a removed keeper arg"
-            `Quick
-            test_runtime_id_tool_arg_is_not_removed_keeper_arg
         ; Alcotest.test_case
             "messages-http provider loads and keeper assignment resolves"
             `Quick

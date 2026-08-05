@@ -219,57 +219,7 @@ fn known_skill_lore(skill_name: &str) -> Option<SkillLore> {
     }
 }
 
-fn trait_icon(name: &str) -> &'static str {
-    match normalize_lore_key(name).as_str() {
-        "suspicious" => "\u{1F575}\u{FE0F}",
-        "precise" => "\u{1F3AF}",
-        "vengeful" => "\u{1F525}",
-        "calm" => "\u{1F9D8}",
-        "self_sacrificing" => "\u{1FA79}",
-        "idealistic" => "\u{2728}",
-        "calculating" => "\u{1F9E0}",
-        "charming" => "\u{1F48E}",
-        "risk_seeking" => "\u{1F3B2}",
-        "stubborn" => "\u{1FAA8}",
-        "protective" => "\u{1F6E1}\u{FE0F}",
-        "honor_bound" => "\u{2696}\u{FE0F}",
-        "intense" => "\u{1F525}",
-        "empathetic" => "\u{1FA76}",
-        "fatalistic" => "\u{1F52E}",
-        "pragmatic" => "\u{2699}\u{FE0F}",
-        "frugal" => "\u{1F4B0}",
-        "impatient" => "\u{23F1}\u{FE0F}",
-        _ => "\u{1F4CC}",
-    }
-}
-
-fn trait_description(name: &str) -> String {
-    match normalize_lore_key(name).as_str() {
-        "suspicious" => "배신 가능성을 먼저 계산해 위험 징후 탐지에 강합니다.".to_string(),
-        "precise" => "정확도 중심으로 행동해 단일 목표 처리 성공률이 높습니다.".to_string(),
-        "vengeful" => "피해를 입은 뒤 반격 의지가 강해 추격/마무리에 유리합니다.".to_string(),
-        "calm" => "혼전에서도 판단이 흔들리지 않아 안정적인 선택을 유지합니다.".to_string(),
-        "self_sacrificing" => "팀 보호를 우선해 방어/치유 선택을 자주 성공시킵니다.".to_string(),
-        "idealistic" => "가치 기반 선택을 선호해 협상/중재 상황에서 힘을 발휘합니다.".to_string(),
-        "calculating" => "확률과 대가를 계산해 손익이 좋은 경로를 찾아냅니다.".to_string(),
-        "charming" => "대화 압박을 완화하고 설득/관계 형성 판정에 유리합니다.".to_string(),
-        "risk_seeking" => "높은 위험의 대가를 노려 큰 전환점을 만드는 성향입니다.".to_string(),
-        "stubborn" => "의지가 강해 정신 내성/버티기 상황에서 쉽게 물러서지 않습니다.".to_string(),
-        "protective" => "아군 대신 맞거나 엄호하는 선택을 우선합니다.".to_string(),
-        "honor_bound" => {
-            "약속과 규율을 중시해 협상/명예 관련 장면에서 신뢰를 얻습니다.".to_string()
-        }
-        "intense" => "집중력이 높아 짧은 폭발력이나 몰입이 필요한 장면에 강합니다.".to_string(),
-        "empathetic" => "상대 감정 신호를 잘 읽어 통찰/중재 상황에서 유리합니다.".to_string(),
-        "fatalistic" => "불리한 상황을 감수하고 큰 대가를 선택하는 경향이 있습니다.".to_string(),
-        "pragmatic" => "당장 생존과 효율을 우선해 자원 운용 판단이 빠릅니다.".to_string(),
-        "frugal" => "소모를 줄여 장기전에서 팀 유지력을 끌어올립니다.".to_string(),
-        "impatient" => "결단은 빠르지만 장기 설정보다 즉시 행동을 선호합니다.".to_string(),
-        _ => "상황 선택에 성향 보정을 주는 캐릭터 특성입니다.".to_string(),
-    }
-}
-
-fn fallback_skill_description(_actor: &Actor, skill_name: &str, modifier: i32) -> String {
+fn fallback_skill_description(skill_name: &str, modifier: i32) -> String {
     if let Some(lore) = known_skill_lore(skill_name) {
         return lore.description.to_string();
     }
@@ -312,12 +262,12 @@ fn fallback_skill_description(_actor: &Actor, skill_name: &str, modifier: i32) -
     }
 }
 
-fn fallback_skill_hint(actor: &Actor, skill_name: &str) -> String {
+fn fallback_skill_hint(skill_name: &str) -> String {
     if let Some(lore) = known_skill_lore(skill_name) {
         return lore.hint.to_string();
     }
     let key = skill_name.trim().to_ascii_lowercase();
-    let base = if key.contains("heal") || key.contains("cure") || key.contains("치유") {
+    if key.contains("heal") || key.contains("cure") || key.contains("치유") {
         "전열 유지가 급할 때 우선 사용하면 안정적입니다.".to_string()
     } else if key.contains("guard")
         || key.contains("defend")
@@ -333,11 +283,6 @@ fn fallback_skill_hint(actor: &Actor, skill_name: &str) -> String {
         "정면 교전보다 선제/우회 루트 선택 시 효과가 큽니다.".to_string()
     } else {
         "행동 탭에서 스킬 성격에 맞는 키워드를 고르면 성공률이 올라갑니다.".to_string()
-    };
-    if actor.persona.trim().is_empty() {
-        base
-    } else {
-        format!("{base} 페르소나: {}", actor.persona.trim())
     }
 }
 
@@ -378,15 +323,15 @@ fn fallback_skill_dnd5(skill_name: &str) -> String {
     }
 }
 
-fn skill_copy(skill: &Skill, actor: &Actor) -> (String, String, String) {
+fn skill_copy(skill: &Skill) -> (String, String, String) {
     let modifier = skill.modifier();
     let description = if skill.description.trim().is_empty() {
-        fallback_skill_description(actor, &skill.name, modifier)
+        fallback_skill_description(&skill.name, modifier)
     } else {
         skill.description.trim().to_string()
     };
     let usage_hint = if skill.usage_hint.trim().is_empty() {
-        fallback_skill_hint(actor, &skill.name)
+        fallback_skill_hint(&skill.name)
     } else {
         skill.usage_hint.trim().to_string()
     };
@@ -576,22 +521,10 @@ pub fn update_character_panel_dom(
                 html_escape(actor.archetype.trim())
             )
         };
-        let persona_line = if actor.persona.trim().is_empty() {
+        let lore_line = if archetype_line.is_empty() {
             String::new()
         } else {
-            let persona = html_escape(actor.persona.trim());
-            format!(
-                "<span class=\"char-persona\" title=\"{}\">{}</span>",
-                persona, persona
-            )
-        };
-        let lore_line = if archetype_line.is_empty() && persona_line.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "<div class=\"char-lore\">{}{}</div>",
-                archetype_line, persona_line
-            )
+            format!("<div class=\"char-lore\">{}</div>", archetype_line)
         };
 
         // Buffs / debuffs
@@ -633,15 +566,9 @@ pub fn update_character_panel_dom(
         };
 
         // Collapsible section IDs
-        let traits_id = format!("toggle-traits-{}", actor.id);
         let skills_id = format!("toggle-skills-{}", actor.id);
         let equip_id = format!("toggle-equip-{}", actor.id);
 
-        let traits_checked = if expanded.contains(&traits_id) {
-            " checked"
-        } else {
-            ""
-        };
         let skills_checked = if expanded.contains(&skills_id) {
             " checked"
         } else {
@@ -653,50 +580,6 @@ pub fn update_character_panel_dom(
             ""
         };
 
-        // Traits section
-        let traits_section = if actor.traits.is_empty() {
-            String::new()
-        } else {
-            let rows: String = actor
-                .traits
-                .iter()
-                .map(|trait_name| {
-                    let escaped_name = html_escape(trait_name);
-                    let description = trait_description(trait_name);
-                    format!(
-                        concat!(
-                            "<div class=\"trait-row\">",
-                            "<div class=\"trait-main\">",
-                            "<span class=\"trait-icon\">{}</span>",
-                            "<span class=\"trait-name\">{}</span>",
-                            "</div>",
-                            "<div class=\"trait-desc\">{}</div>",
-                            "</div>",
-                        ),
-                        trait_icon(trait_name),
-                        escaped_name,
-                        html_escape(&description),
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("");
-            format!(
-                concat!(
-                    "<input type=\"checkbox\" class=\"section-toggle\" id=\"{}\"{}/>",
-                    "<label class=\"section-header\" for=\"{}\" title=\"Trait은 캐릭터의 행동 성향입니다.\">Traits (성향) <span class=\"section-count\">({})</span></label>",
-                    "<div class=\"section-body traits-list\">{}</div>",
-                ),
-                traits_id, traits_checked,
-                traits_id,
-                actor.traits.len(),
-                format!(
-                    "{}{}",
-                    "<div class=\"section-guide\">행동 선택 방향을 잡는 성향 태그입니다.</div>",
-                    rows
-                ),
-            )
-        };
-
         // Skills section
         let skills_section = if actor.skills.is_empty() {
             String::new()
@@ -706,7 +589,7 @@ pub fn update_character_panel_dom(
                 .iter()
                 .map(|s| {
                     let m = s.modifier();
-                    let (description, usage_hint, dnd5_check) = skill_copy(s, actor);
+                    let (description, usage_hint, dnd5_check) = skill_copy(s);
                     let escaped_name = html_escape(&s.name);
                     let escaped_desc = html_escape(&description);
                     let escaped_hint = html_escape(&usage_hint);
@@ -845,7 +728,6 @@ pub fn update_character_panel_dom(
                 "<div class=\"char-effects\">{}{}</div>",
                 "{}",
                 "{}",
-                "{}",
                 "</div>",
             ),
             dead_class,
@@ -869,7 +751,6 @@ pub fn update_character_panel_dom(
             conditions_html,
             buffs_html,
             debuffs_html,
-            traits_section,
             skills_section,
             equip_section,
         ));

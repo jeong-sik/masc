@@ -311,9 +311,6 @@ next_step "masc_board_curation_read after submit"
 r_curation_read_after="$(call_tool 5034 "masc_board_curation_read" '{}')"
 expect_ok "masc_board_curation_read after submit" "$r_curation_read_after"
 
-next_step "masc_persona_list"
-r_persona_list="$(call_tool 5035 "masc_persona_list" '{}')"
-expect_ok "masc_persona_list" "$r_persona_list"
 
 next_step "masc_agent_timeline"
 r_agent_timeline="$(call_tool 5036 "masc_agent_timeline" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name,limit:5}')")"

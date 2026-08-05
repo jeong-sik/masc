@@ -539,7 +539,7 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
   let metrics =
     KAPM.build_ctx_composition_metrics
       ~prompt_blocks:
-        [ prompt_block Prompt_block_id.Persona "System prompt"
+        [ prompt_block Prompt_block_id.Keeper_instructions "System prompt"
         ; prompt_block Prompt_block_id.Dynamic_context "Dynamic context"
         ; prompt_block Prompt_block_id.Memory_os_recall "Memory context"
         ; prompt_block Prompt_block_id.Temporal_summary "Temporal context"
@@ -555,7 +555,7 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
     |> Option.value ~default:0
   in
   check bool "system prompt bucket present" true
-    (segment_bytes (Turn_record.Prompt_block Prompt_block_id.Persona) > 0);
+    (segment_bytes (Turn_record.Prompt_block Prompt_block_id.Keeper_instructions) > 0);
   check bool "tool schema bucket present" true
     (segment_bytes Turn_record.Tool_schemas > 0);
   check bool "history user bucket present" true

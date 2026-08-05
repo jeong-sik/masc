@@ -415,8 +415,6 @@ let path_entries =
       "Config directory override; None when unset";
     entry ~default:"(none)" Env_config_core.data_dir_env_key
       "Data directory override; None=<base_path>/data";
-    entry ~default:"(none)" Env_config_core.personas_dir_env_key
-      "Personas directory override; None when unset";
   ]
 
 let session_entries =
@@ -470,7 +468,7 @@ let test_entries =
     entry ~default:"false" "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE"
       "Allow explicit MASC_BASE_PATH override handling in test executables";
     entry ~default:"false" "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"
-      "Allow explicit MASC_CONFIG_DIR and MASC_PERSONAS_DIR overrides in test executables";
+      "Allow explicit MASC_CONFIG_DIR overrides in test executables";
   ]
 
 let tool_entries =

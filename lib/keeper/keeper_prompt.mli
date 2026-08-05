@@ -1,4 +1,4 @@
-(** Keeper_prompt — System prompts, personality evolution, and text processing
+(** Keeper_prompt — System prompts, Keeper instructions, and text processing
     for keeper agents. OAS-aligned: these functions define agent identity and
     text output. *)
 
@@ -16,8 +16,6 @@ val build_keeper_system_prompt :
   string
 (** Repository identity and checkout freshness are obtained from the typed
     context projection rather than inferred from prompt prose. *)
-
-val append_trait_clause : base:string -> clause:string -> string
 
 (** {1 Text Processing}
 

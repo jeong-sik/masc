@@ -16,7 +16,6 @@ type AvatarSize = 'sm' | 'md' | 'lg' | 'xl'
 interface AgentAvatarProps {
   name: string
   status?: string
-  traits?: string[]
   size?: AvatarSize
   showName?: boolean
   onClick?: () => void
@@ -74,7 +73,6 @@ function handleKeyActivate(onClick?: () => void) {
 export function AgentAvatar({
   name,
   status,
-  traits,
   size,
   showName,
   onClick,
@@ -85,7 +83,7 @@ export function AgentAvatar({
   alwaysShowBubble,
 }: AgentAvatarProps) {
   const palette = paletteForAgent(name)
-  const template = templateForAgent(name, traits)
+  const template = templateForAgent(name)
   const grid = PIXEL_TEMPLATES[template]
   const sizeClass = size === 'sm' ? 'pixel-avatar--sm' : size === 'lg' ? 'pixel-avatar--lg' : size === 'xl' ? 'pixel-avatar--xl' : ''
   const statusAttr = status ?? 'idle'

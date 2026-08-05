@@ -28,20 +28,13 @@ module Random = Stdlib.Random
     - **Spawned-agent**: tools available to MCP-spawned agent
       sub-processes (a small public set for scripting agents).
     - **Local-worker**: tools available to in-process worker
-      flows (a larger set including SDK contract schemas).
-    - **Role-catalogue**: dynamic role-based filtering for the
-      autonomous agent (worker / workspace_lead / fleet_leader). *)
+      flows (a larger set including SDK contract schemas). *)
 
 (** {1 Helpers} *)
 
 (** [unique_preserve_order xs] removes duplicates from [xs] while
     preserving first-occurrence order.  Thin alias over
     {!Json_util.dedupe_keep_order} re-exported for siblings. *)
-
-val dedupe_schemas :
-  Masc_domain.tool_schema list -> Masc_domain.tool_schema list
-(** [dedupe_schemas schemas] removes duplicate-by-[name] entries
-    while preserving first-occurrence order. *)
 
 val lookup_schemas_by_name_exn :
   label:string ->
@@ -71,10 +64,6 @@ val local_worker_public_tool_names : string list
 val local_worker_contract_schemas : Masc_domain.tool_schema list
 (** Re-export of {!Sdk_tool_contract.sdk_tool_schemas}. *)
 
-val local_worker_internal_schemas : Masc_domain.tool_schema list
-(** Internal-only schemas (currently just [masc_heartbeat]).
-    Filtered from {!Tool_schemas_workspace_core.schemas}. *)
-
 val local_worker_run_schemas : Masc_domain.tool_schema list
 (** Domain-grouped schema bundle (run)
     used by {!select_public_local_worker_schemas} and the
@@ -83,8 +72,8 @@ val local_worker_run_schemas : Masc_domain.tool_schema list
 val select_public_local_worker_schemas :
   unit -> Masc_domain.tool_schema list
 (** [select_public_local_worker_schemas ()] returns the union of
-    board / workspace-core / workspace-extra / agent / run / spawn schemas,
-    deduped, intersected with
+    board / workspace-core / workspace-extra / agent / run schemas,
+    intersected with
     {!local_worker_public_tool_names}.  This is the public local-
     worker surface as the dashboard sees it. *)
 
@@ -103,8 +92,8 @@ val local_worker_tool_schemas :
   (Masc_domain.tool_schema list, string) Result.t
 (** [local_worker_tool_schemas ?names ()] returns the full local-
     worker schema set when [names] is omitted, or the named
-    subset when provided.  The full set is the deduped union of
-    internal + contract + {!select_public_local_worker_schemas}
+    subset when provided.  The full set is the union of
+    contract + {!select_public_local_worker_schemas}
     outputs.
 
     [Error] when [names] contains an unknown name (operator-

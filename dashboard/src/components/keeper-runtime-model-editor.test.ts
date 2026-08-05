@@ -439,7 +439,7 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
   it('shows an actionable read-only hint (no deep-link) for a keeper without a valid name', async () => {
     refs.config = makeConfig({ selected_runtime_id: 'a.one' }, {}, '')
     render(
-      html`<${KeeperRuntimeModelEditor} keeperName="persona-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
+      html`<${KeeperRuntimeModelEditor} keeperName="prompt-only-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
       container,
     )
     await flush()

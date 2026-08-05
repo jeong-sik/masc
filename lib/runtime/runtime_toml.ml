@@ -929,7 +929,7 @@ let extract_after_all_errors_guard ~label = function
 ;;
 
 (* [[runtime.assignments]] — keeper name → runtime id ["provider.model"]. The
-   sole SSOT for keeper→runtime assignment (persona⊥{model,runtime}). Each
+   sole SSOT for keeper-to-runtime assignment. Each
    value must be a TOML string (an opaque runtime id resolved later against the
    binding list at {!Runtime.load_list}). A non-string value is a parse error,
    not a silent drop — an operator typo (e.g. an inline table) must fail loud

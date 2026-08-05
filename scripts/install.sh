@@ -944,7 +944,7 @@ fi
 maybe_run_wizard "$BASE_PATH"
 
 # --- 4c. keeper team preset ----------------------------------------------------
-# Seeds presets/<preset>/{keepers,personas} into the config root (verified via
+# Seeds presets/<preset>/keepers into the config root (verified via
 # the release SHA256SUMS, like the config seed). The keepers inherit
 # [runtime].default, so no catalog is edited. Runs after config seed so
 # runtime.toml exists first.

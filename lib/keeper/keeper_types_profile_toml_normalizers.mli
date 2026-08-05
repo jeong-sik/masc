@@ -11,13 +11,6 @@ val float_of_env_default :
   string -> default:float -> min_v:float -> max_v:float -> float
 val clamp_int : int -> min_v:int -> max_v:int -> int
 val validate_name : string -> bool
-val removed_keeper_input_key_names : string list
-val present_json_keys : string list -> Yojson.Safe.t -> string list
-val reject_removed_keeper_input_keys :
-  ?allow_sandbox_fields:bool ->
-  tool_name:string ->
-  Yojson.Safe.t ->
-  (unit, string) result
 val utf8_repair_string : string -> string
 val normalize_prompt_text : max_bytes:int -> string -> string
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
@@ -62,7 +55,6 @@ type keeper_profile_defaults =
   Keeper_types_profile_defaults.keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
-  persona_name : string option;
   instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;
@@ -79,7 +71,6 @@ type keeper_profile_defaults =
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
   oas_env : (string * string) list;
-  unknown_toml_keys : string list;
 }
 val empty_keeper_profile_defaults : keeper_profile_defaults
 val dedupe_keep_order : 'a list -> 'a list
@@ -87,5 +78,3 @@ val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option
 val lower_string_list_opt : string list -> string list option
 val first_some : 'a option -> 'a option -> 'a option
-val personas_root_opt : unit -> string option
-val persona_profile_path_opt : string -> string option

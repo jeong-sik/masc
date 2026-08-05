@@ -78,8 +78,6 @@
 }
 .kcf-text.mono { font-family: var(--font-mono); font-size: 12px; }
 .kcf-text:focus { outline: none; border-color: var(--volt-dim); }
-.kcf-traits { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.kcf-trait { font-size: 10.5px; color: var(--volt); padding: 3px 9px; border: 1px solid color-mix(in oklab, var(--volt) 32%, transparent); border-radius: var(--radius-pill); }
 
 /* ── runtime chain ── */
 .kcf-chain { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

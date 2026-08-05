@@ -527,7 +527,7 @@ export function buildKeeperPromptAssemblyReport(
       title: `Duplicated tool guidance: ${term}`,
       detail: `${term} appears across ${hits.length} Keeper/behavior prompts.`,
       promptKeys: hits,
-      expected: 'Keep generic tool grammar in one canonical prompt and leave persona/runtime files to add only local policy.',
+      expected: 'Keep generic tool grammar in one canonical prompt and leave Keeper/runtime files to add only local policy.',
     })
   }
 

@@ -10,7 +10,6 @@
        reason], records the denial and publishes an [Admission_denied]
        lifecycle event in [Offline] phase; the keeper does not spawn.
     2. On [Ok ()]:
-       - logs persona drift if missing
        - registers offline in [Keeper_registry]
        - lazily initializes the workspace root (Workspace.init)
        - syncs keeper workspace presence + writes meta (failures degrade
@@ -82,9 +81,6 @@ let supervise_keepalive
       ()
   in
   let launch_registered reg =
-    let () =
-      Startup_helpers.log_persona_drift_if_missing ~base_path meta
-    in
     (try
        if not (Workspace_utils.is_initialized ctx.config)
        then (

@@ -332,15 +332,10 @@ let test_keeper_management_projection_is_explicit () =
     ; "masc_keeper_sandbox_start"
     ; "masc_keeper_sandbox_stop"
     ; "masc_keeper_reset"
-    ; "masc_keeper_persona_audit"
+    ; "masc_keeper_audit"
     ; "masc_keeper_status"
     ; "masc_keeper_down"
     ; "masc_keeper_up"
-    ; "masc_keeper_create_from_persona"
-    ; "masc_persona_list"
-    ; "masc_persona_create"
-    ; "masc_persona_update"
-    ; "masc_persona_delete"
     ]
 ;;
 
@@ -1260,16 +1255,11 @@ let cluster_projection_table =
   ; "masc_keeper_sandbox_start", "tool_masc_keeper_dispatch"
   ; "masc_keeper_sandbox_stop", "tool_masc_keeper_dispatch"
   ; "masc_keeper_reset", "tool_masc_keeper_dispatch"
-  ; "masc_keeper_persona_audit", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_audit", "tool_masc_keeper_dispatch"
   ; "masc_keeper_status", "tool_masc_keeper_dispatch"
   ; "masc_keeper_down", "tool_masc_keeper_dispatch"
   ; "masc_keeper_delegate", "tool_masc_keeper_dispatch"
   ; "masc_keeper_up", "tool_masc_keeper_dispatch"
-  ; "masc_keeper_create_from_persona", "tool_masc_keeper_dispatch"
-  ; "masc_persona_list", "tool_masc_keeper_dispatch"
-  ; "masc_persona_create", "tool_masc_keeper_dispatch"
-  ; "masc_persona_update", "tool_masc_keeper_dispatch"
-  ; "masc_persona_delete", "tool_masc_keeper_dispatch"
   ]
 ;;
 
@@ -1434,8 +1424,8 @@ let test_keeper_dispatch_ref_reaches_every_keeper_descriptor () =
 
 let test_public_mcp_surface_has_exact_dispatch_owner () =
   let descriptor_names = descriptor_internal_name_set () in
-  let inline_names =
-    Tool_schemas_inline.schemas
+  let runtime_names =
+    Tool_schemas_misc.mcp_runtime_schemas
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   let surface = Tool_catalog_surfaces.public_mcp_surface_tools in
@@ -1443,7 +1433,7 @@ let test_public_mcp_surface_has_exact_dispatch_owner () =
     List.filter
       (fun name ->
          (not (Hashtbl.mem descriptor_names name))
-         && not (List.mem name inline_names))
+         && not (List.mem name runtime_names))
       surface
   in
   if missing <> []

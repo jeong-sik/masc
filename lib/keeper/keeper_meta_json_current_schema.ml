@@ -17,7 +17,6 @@ let invalid_currentf format =
 type field =
   | Name
   | Agent_name
-  | Persona
   | Instructions
   | Trace_id
   | Multimodal_policy
@@ -72,7 +71,6 @@ type field =
 let all_fields =
   [ Name
   ; Agent_name
-  ; Persona
   ; Instructions
   ; Trace_id
   ; Multimodal_policy
@@ -128,7 +126,6 @@ let all_fields =
 let field_name = function
   | Name -> "name"
   | Agent_name -> "agent_name"
-  | Persona -> "persona"
   | Instructions -> "instructions"
   | Trace_id -> "trace_id"
   | Multimodal_policy -> "multimodal_policy"

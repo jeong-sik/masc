@@ -24,11 +24,11 @@ Result:
 
 | Direction | Count | Examples |
 |---|---|---|
-| surface ∖ descriptor | **7** | `masc_start`, `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `masc_agents`, `masc_keeper_create_from_persona` |
+| surface ∖ descriptor | **7** | `masc_start`, `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `masc_agents`, `masc_keeper_up` |
 | descriptor ∖ surface | 82 | `masc_board_*`, `masc_board_delete`, `masc_config`, `masc_get_metrics`, … (intentionally not operator-visible) |
 | intersect | 46 | already descriptor-backed surface entries |
 
-The retired persona-generate surface is guarded by `scripts/lint/no-retired-tool-husks.sh`; it is not a descriptor target. For the current live surface, this RFC applies to the remaining **7** lifecycle/persona-create tools that never entered the descriptor system because their handlers live in `lib/mcp_tool_runtime.ml` (MCP server-level inline path), not in `Tool_workspace.dispatch` or the cluster `*_dispatch_ref` references the descriptor `runtime_handler` enum routes to.
+The retired keeper-generate surface is guarded by `scripts/lint/no-retired-tool-husks.sh`; it is not a descriptor target. For the current live surface, this RFC applies to the remaining **7** lifecycle/keeper-create tools that never entered the descriptor system because their handlers live in `lib/mcp_tool_runtime.ml` (MCP server-level inline path), not in `Tool_workspace.dispatch` or the cluster `*_dispatch_ref` references the descriptor `runtime_handler` enum routes to.
 
 The descriptor enum (`In_process | Filesystem | Shell_ir`) is closed and assumes the descriptor *owns* execution. Tools handled by MCP runtime have no slot.
 
@@ -97,7 +97,7 @@ let handle ctx ~descriptor ~args =
 | `masc_broadcast` | `masc.comm.broadcast` | `Tool_schemas_comm.schemas` |
 | `masc_messages` | `masc.comm.messages` | `Tool_schemas_comm.schemas` |
 | `masc_agents` | `masc.comm.agents` | `Tool_schemas_comm.schemas` |
-| `masc_keeper_create_from_persona` | `masc.persona.create_from` | existing keeper persona-create schema |
+| `masc_keeper_up` | `masc.keeper.create_from` | Keeper creation schema |
 
 Each entry pulls `description` and `input_schema` from the MCP runtime's existing schema registration; **no duplication is introduced** — descriptors reference the same `Masc_domain.tool_schema` records the inline path already publishes.
 
@@ -108,7 +108,7 @@ Each entry pulls `description` and `input_schema` from the MCP runtime's existin
 | **P1** | `External_inline` + `Tool_external_inline` enum extension. `handle` returns `None` for `External_inline`. Zero descriptor entries added yet. | Build green. `internal_descriptors` count unchanged. Test: a synthetic `External_inline` descriptor routes through `handle` → `None`. |
 | **P2** | Add 3 workspace lifecycle descriptors (`masc_start/join/leave`). | `audit_descriptor_surface` shows 4 missing, not 7. `masc_start` etc. carry `Public_mcp` visibility. |
 | **P3** | Add 3 comm descriptors (`masc_broadcast/messages/who`). | 1 missing. Inline path untouched. |
-| **P4** | Add the remaining `masc_keeper_create_from_persona` descriptor. | 0 missing. **Visibility projection** introduced: `public_mcp_surface_tools = filter (visibility = Public_mcp) all_descriptors |> sort_uniq`. Existing hand list deleted. Compile-time test fails if any surface drift. |
+| **P4** | Add the remaining `masc_keeper_up` descriptor. | 0 missing. **Visibility projection** introduced: `public_mcp_surface_tools = filter (visibility = Public_mcp) all_descriptors |> sort_uniq`. Existing hand list deleted. Compile-time test fails if any surface drift. |
 | **P5** (follow-up) | Audit other surfaces (`spawned_agent_surface_tools` etc.) → separate RFC. | Out of scope for 0190. |
 
 P1–P4 each merges independently. P1 has the only schema change; P2–P4 are pure data additions. No phase requires an inline-path code change.
@@ -124,12 +124,12 @@ This RFC does *not* trigger workaround signatures:
 ## 8. Open questions
 
 1. Should `External_inline` permit a non-empty `runtime_handler` other than `Tool_external_inline` for future inline-cluster splits? Pinning to one variant is the conservative choice; reconsider only if a real second consumer appears.
-2. `masc_keeper_create_from_persona` may have stricter `approval` semantics than current handler defaults — confirm against `mcp_tool_runtime` `inline_tool_requires_*` lists in P4.
+2. `masc_keeper_up` may have stricter `approval` semantics than current handler defaults — confirm against `mcp_tool_runtime` `inline_tool_requires_*` lists in P4.
 3. RFC-0064 hard-cut public set (7 LLM-native names) is unchanged; the visibility projection covers MCP surface only.
 
 ## 9. Rejected alternatives
 
-- **(A-pragmatic)** Add 7 descriptors with `In_process` executor + dispatch arms in `handle_masc_workspace` / `handle_masc_persona` / `handle_masc_keeper` that call back into `Mcp_tool_runtime`. Rejected: introduces dual handlers for the same tool name (descriptor cluster *and* inline path), guaranteed drift under future changes.
+- **(A-pragmatic)** Add 7 descriptors with `In_process` executor + dispatch arms in `handle_masc_workspace` / `handle_masc_keeper` / `handle_masc_keeper` that call back into `Mcp_tool_runtime`. Rejected: introduces dual handlers for the same tool name (descriptor cluster *and* inline path), guaranteed drift under future changes.
 - **(B-only)** Keep the hand list, add a test that asserts every surface entry exists in *some* known set (descriptor or allowlist). Rejected as the *final* state — drift cannot be eliminated, only reported. Acceptable as an *interim* gate (see RFC-0190 implementation companion: invariant test PR can land before P1 to ratchet the count down).
 
 ## 10. Acceptance criteria

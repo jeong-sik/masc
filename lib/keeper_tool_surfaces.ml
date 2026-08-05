@@ -28,16 +28,23 @@ open Masc_domain
 module SS = Set_util.StringSet
 
 
-let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
-  let unique, _ =
+let require_unique_schemas ~label (schemas : Masc_domain.tool_schema list) =
+  let duplicates, _ =
     List.fold_left
-      (fun (acc, seen) (schema : Masc_domain.tool_schema) ->
-        if SS.mem schema.name seen then (acc, seen)
-        else (schema :: acc, SS.add schema.name seen))
+      (fun (duplicates, seen) (schema : Masc_domain.tool_schema) ->
+        if SS.mem schema.name seen
+        then schema.name :: duplicates, seen
+        else duplicates, SS.add schema.name seen)
       ([], SS.empty)
       schemas
   in
-  List.rev unique
+  match duplicates with
+  | [] -> schemas
+  | names ->
+    invalid_arg
+      (Printf.sprintf "%s: duplicate tool schema(s): %s"
+         label
+         (names |> List.sort_uniq String.compare |> String.concat ", "))
 
 (* Hashtbl materialisation helper for membership-only checks.  Used
    below where we'd otherwise scan a name list per element of a
@@ -80,11 +87,6 @@ let local_worker_public_tool_names : string list =
 let local_worker_contract_schemas : Masc_domain.tool_schema list =
   Sdk_tool_contract.sdk_tool_schemas
 
-let local_worker_internal_schemas : Masc_domain.tool_schema list =
-  List.filter
-    (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name "masc_heartbeat")
-    Tool_schemas_workspace_core.schemas
-
 let local_worker_run_schemas : Masc_domain.tool_schema list =
   Tool_schemas_run.schemas
 
@@ -92,15 +94,16 @@ let local_worker_run_schemas : Masc_domain.tool_schema list =
 
 let select_public_local_worker_schemas () =
   let wanted_set = name_set local_worker_public_tool_names in
-  dedupe_schemas
+  require_unique_schemas ~label:"public local-worker schema catalog"
     (Board_tool.tools
-    @ Tool_schemas_workspace_core.schemas
-    @ Tool_schemas_workspace_extra.schemas
-    @ Task.Schemas.schemas
-    @ Tool_schemas_agent.schemas
-    @ local_worker_run_schemas)
+     @ Tool_schemas_workspace_core.schemas
+     @ Tool_schemas_workspace_extra.schemas
+     @ Task.Schemas.schemas
+     @ Tool_schemas_agent.schemas
+     @ local_worker_run_schemas)
   |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-         Hashtbl.mem wanted_set schema.name)
+         Hashtbl.mem wanted_set schema.name
+         && Option.is_none (Sdk_tool_contract.sdk_binding_by_name schema.name))
 
 let resolve_named_schemas all_schemas values :
     (Masc_domain.tool_schema list, string) Result.t =
@@ -143,9 +146,8 @@ let resolve_named_schemas all_schemas values :
 let local_worker_tool_schemas ?names () :
     (Masc_domain.tool_schema list, string) Result.t =
   let all_schemas =
-    dedupe_schemas
-      ( local_worker_internal_schemas
-      @ local_worker_contract_schemas
+    require_unique_schemas ~label:"local-worker schema catalog"
+      ( local_worker_contract_schemas
       @ select_public_local_worker_schemas () )
   in
   match names with

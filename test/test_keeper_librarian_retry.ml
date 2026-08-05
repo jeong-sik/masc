@@ -47,7 +47,7 @@ let input () : Librarian.input =
         ~trace_id:"trace-selection"
         ~absolute_turn:7
   ; generation = 7
-  ; persona = "You are the retry-test keeper."
+  ; keeper_instructions = "You are the retry-test keeper."
   ; current =
       Some
         { Librarian.facts = [ current_a; current_b ] }
@@ -351,15 +351,15 @@ let test_prompt_contains_exact_current_selection () =
     (String_util.contains_substring current_memory "first_seen")
 ;;
 
-let test_prompt_carries_persona () =
+let test_prompt_carries_keeper_instructions () =
   let variables = Librarian.prompt_variables (input ()) in
-  check string "persona is the resolved text"
+  check string "Keeper instructions are the resolved text"
     "You are the retry-test keeper."
-    (List.assoc "persona" variables);
-  let blank = { (input ()) with persona = " \n \t " } in
-  check string "blank persona renders an explicit marker"
-    "[no persona]"
-    (List.assoc "persona" (Librarian.prompt_variables blank))
+    (List.assoc "keeper_instructions" variables);
+  let blank = { (input ()) with keeper_instructions = " \n \t " } in
+  check string "blank Keeper instructions render an explicit marker"
+    "[no keeper instructions]"
+    (List.assoc "keeper_instructions" (Librarian.prompt_variables blank))
 ;;
 
 let user_text_of_messages messages =
@@ -480,26 +480,26 @@ let test_constraint_category_excludes_self_imposed_scope () =
          "keep the boundary at the width it was written")
 ;;
 
-let test_repo_template_renders_persona () =
+let test_repo_template_renders_keeper_instructions () =
   (match Runtime.messages_for_librarian (input ()) with
    | Error detail -> failf "librarian render failed: %s" detail
    | Ok messages ->
      let user_text = user_text_of_messages messages in
-     check bool "persona section header present" true
+     check bool "Keeper instructions section header present" true
        (String_util.contains_substring user_text
-          "Persona of the agent whose memory you curate:");
-     check bool "persona text present" true
+          "Instructions of the Keeper whose memory you curate:");
+     check bool "Keeper instructions text present" true
        (String_util.contains_substring user_text
           "You are the retry-test keeper."));
   match
-    Runtime.messages_for_librarian { (input ()) with persona = "" }
+    Runtime.messages_for_librarian { (input ()) with keeper_instructions = "" }
   with
-  | Error detail -> failf "blank-persona render failed: %s" detail
+  | Error detail -> failf "blank Keeper instructions render failed: %s" detail
   | Ok messages ->
-    check bool "blank persona renders explicit marker" true
+    check bool "blank Keeper instructions render explicit marker" true
       (String_util.contains_substring
          (user_text_of_messages messages)
-         "[no persona]")
+         "[no keeper instructions]")
 ;;
 
 let test_cadence_fresh_then_periodic () =
@@ -565,12 +565,12 @@ let () =
             test_removed_contract_fields_reject
         ; test_case "prompt carries exact current selection" `Quick
             test_prompt_contains_exact_current_selection
-        ; test_case "prompt carries persona" `Quick
-            test_prompt_carries_persona
+        ; test_case "prompt carries Keeper instructions" `Quick
+            test_prompt_carries_keeper_instructions
         ; test_case "prompt carries recall byte budget" `Quick
             test_prompt_carries_recall_fact_byte_budget
-        ; test_case "repo template renders persona" `Quick
-            test_repo_template_renders_persona
+        ; test_case "repo template renders Keeper instructions" `Quick
+            test_repo_template_renders_keeper_instructions
         ; test_case "constraint category excludes self-imposed scope" `Quick
             test_constraint_category_excludes_self_imposed_scope
         ] )

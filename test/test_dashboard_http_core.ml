@@ -2264,15 +2264,21 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   in
   let keepers_dir = Filename.concat config_root "keepers" in
   mkdir_p keepers_dir;
+  List.iter
+    (fun name ->
+      let agent_dir = Filename.concat keepers_dir name in
+      mkdir_p agent_dir;
+      write_file (Filename.concat agent_dir "AGENT.md") ("Keeper " ^ name))
+    [ "base"; "alpha"; "beta" ];
   write_file
     (Filename.concat keepers_dir "base.toml")
     "[keeper]\nautoboot_enabled = false\n";
   write_file
     (Filename.concat keepers_dir "alpha.toml")
-    "[keeper]\nautoboot_enabled = true\npersona_name = \"alpha\"\n";
+    "[keeper]\nautoboot_enabled = true\n";
   write_file
     (Filename.concat keepers_dir "beta.toml")
-    "[keeper]\nautoboot_enabled = true\npersona_name = \"beta\"\n";
+    "[keeper]\nautoboot_enabled = true\n";
   with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
   Config_dir_resolver.reset ();
   Fun.protect

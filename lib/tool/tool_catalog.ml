@@ -329,12 +329,11 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_status", read_state_tool);
     ("masc_keeper_sandbox_start", broadcast_tool);
     ("masc_keeper_sandbox_stop", mutating_tool);
-    ("masc_keeper_create_from_persona", broadcast_tool);
     ("masc_keeper_delegate", broadcast_tool);
     ("masc_keeper_delegate_status", read_state_tool);
     ("masc_keeper_delegate_cancel", broadcast_tool);
     ("masc_keeper_delegate_list", read_state_tool);
-    ("masc_keeper_persona_audit", read_state_tool);
+    ("masc_keeper_audit", read_state_tool);
     ("masc_keeper_waiting_inventory", read_state_tool);
     ("masc_keeper_up", broadcast_tool);
     ("masc_keeper_down", admin_tool);
@@ -355,10 +354,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_operator_snapshot", read_state_tool);
     ("masc_operator_digest", read_state_tool);
     ("masc_operator_confirm", broadcast_tool);
-    ("masc_persona_list", read_state_tool);
-    ("masc_persona_create", broadcast_tool);
-    ("masc_persona_update", broadcast_tool);
-    ("masc_persona_delete", broadcast_tool);
     ("masc_runtime_verify", read_state_tool);
     ("masc_runtime_ollama_probe", read_state_tool);
     ("masc_board_hearths", read_state_tool);

@@ -203,7 +203,7 @@ The two labels are *currently equal strings*. The private type still serves a pu
 
 ### 2.2 Module location
 
-`lib/types_boundary/` is a new sub-library directory. Rationale: keep the module out of `lib/runtime/` and `lib/keeper/` so neither subsystem owns the policy. A future RFC may move other boundary-redaction concerns (e.g., persona name redaction) here.
+`lib/types_boundary/` is a new sub-library directory. Rationale: keep the module out of `lib/runtime/` and `lib/keeper/` so neither subsystem owns the policy. A future RFC may move other boundary-redaction concerns (e.g., keeper name redaction) here.
 
 If a new sub-library introduces a build-graph cycle with existing godfiles (RFC-0085 territory), PR-1 will fall back to placing the module at `lib/types/boundary_redaction.{ml,mli}` instead. The directory choice is **not load-bearing for the RFC's typed-surface guarantee**.
 

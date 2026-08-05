@@ -764,12 +764,6 @@ export function ConfigResolutionPanel({
                   rootPath=${rootPath}
                   rootSource=${rootSource}
                 />
-                <${ConfigRow}
-                  label="personas"
-                  item=${resolution.personas}
-                  rootPath=${rootPath}
-                  rootSource=${rootSource}
-                />
               </div>
             </div>
           `

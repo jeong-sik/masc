@@ -60,13 +60,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     proactive: {
       enabled: true,
     },
-    drift: {
-      status: 'wired',
-      enabled: true,
-      min_turn_gap: 4,
-      count_total: 2,
-      last_reason: 'board quiet',
-    },
     hooks: {
       scope: 'keeper_runtime_composite',
       slots: {},
@@ -92,7 +85,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       live_meta_path: '/tmp/.masc/keepers/keeper-sangsu/live.json',
       default_manifest_path: '/tmp/config/keepers/default.toml',
       default_source_kind: 'toml',
-      precedence: ['live_meta', 'toml', 'persona'],
+      precedence: ['live_meta', 'keeper_config'],
       has_live_override: true,
       override_fields: ['prompt.instructions'],
     },
@@ -120,7 +113,7 @@ describe('filterHookSlots', () => {
   const entries: HookSlotEntry[] = [
     ['pre_tool_call', makeSlot({ source: 'builtin', gates: ['typed_input', 'path_scope'] })],
     ['post_turn', makeSlot({ source: 'override', effects: ['handoff_auto'] })],
-    ['compaction_watcher', makeSlot({ source: 'persona', features: ['snapshot'] })],
+    ['compaction_watcher', makeSlot({ source: 'keeper', features: ['snapshot'] })],
     ['orphan', makeSlot({ source: 'builtin' })],
   ]
 
@@ -138,7 +131,7 @@ describe('filterHookSlots', () => {
   })
 
   it('matches by source substring', () => {
-    const result = filterHookSlots(entries, 'persona')
+    const result = filterHookSlots(entries, 'keeper')
     expect(result.map(([name]) => name)).toEqual(['compaction_watcher'])
   })
 
@@ -245,12 +238,12 @@ describe('keeperRuntimeConfigCanWrite', () => {
     expect(keeperRuntimeConfigWriteUnsupportedReason(base)).toBeNull()
   })
 
-  it('allows persona-backed config when a valid keeper name is present', () => {
+  it('allows config without a manifest path when a valid Keeper name is present', () => {
     const base = makeKeeperConfig()
     const c = makeKeeperConfig({
       sources: {
         ...base.sources,
-        default_source_kind: 'persona',
+        default_source_kind: null,
         default_manifest_path: '/tmp/config/keepers/default.toml',
       },
     })
@@ -335,10 +328,10 @@ describe('keeperConfigControlInventory', () => {
   it('classifies runtime-backed controls from the manifest writer guard', () => {
     const toml = makeKeeperConfig()
     const base = makeKeeperConfig()
-    const persona = makeKeeperConfig({
+    const promptOnly = makeKeeperConfig({
       sources: {
         ...base.sources,
-        default_source_kind: 'persona',
+        default_source_kind: null,
         default_manifest_path: null,
       },
     })
@@ -357,7 +350,7 @@ describe('keeperConfigControlInventory', () => {
       operation: 'runtime_id',
     })
 
-    const runtimeAssignment = findItem('runtime', persona, 'kcf-runtime-assignment')
+    const runtimeAssignment = findItem('runtime', promptOnly, 'kcf-runtime-assignment')
     expect(runtimeAssignment.kind).toBe('live-write')
   })
 
@@ -393,16 +386,16 @@ describe('keeperConfigControlInventory', () => {
 
   it('keeps lifecycle directives live when runtime manifest writes are unsupported', () => {
     const base = makeKeeperConfig()
-    const persona = makeKeeperConfig({
+    const promptOnly = makeKeeperConfig({
       sources: {
         ...base.sources,
-        default_source_kind: 'persona',
+        default_source_kind: null,
         default_manifest_path: null,
       },
     })
 
-    expect(findItem('policy', persona, 'kcf-policy-proactive').kind).toBe('live-write')
-    expect(findItem('health', persona, 'kcf-health-directives').kind).toBe('live-write')
+    expect(findItem('policy', promptOnly, 'kcf-policy-proactive').kind).toBe('live-write')
+    expect(findItem('health', promptOnly, 'kcf-health-directives').kind).toBe('live-write')
   })
 
   it('marks hooks as read-only global state plus browser-local filtering, not a fake editor', () => {
@@ -428,7 +421,6 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     proactive: {
       enabled: false,
     } as KeeperConfig['proactive'],
-    drift: {} as KeeperConfig['drift'],
     runtime: {} as KeeperConfig['runtime'],
     workspace: {
       mention_targets: [],
@@ -1060,16 +1052,16 @@ describe('KeeperConfigPanel', () => {
     expect(keeperConfigSubscriptionCountsForTests()).toEqual({ reset: 0, update: 0 })
   })
 
-  it('allows runtime config assignment writes when keeper name is valid even if persona-backed', async () => {
+  it('allows runtime config assignment writes when Keeper name is valid without a manifest path', async () => {
     const base = makeKeeperConfig()
-    const personaConfig = makeKeeperConfig({
+    const promptOnlyConfig = makeKeeperConfig({
       sources: {
         ...base.sources,
-        default_source_kind: 'persona',
+        default_source_kind: null,
         default_manifest_path: null,
       },
     })
-    mocks.fetchKeeperConfig.mockResolvedValueOnce(personaConfig)
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(promptOnlyConfig)
 
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()

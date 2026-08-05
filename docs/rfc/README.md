@@ -216,7 +216,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0207 | Per-keeper LLM runtime routing | Draft | - |
 | 0208 | Withdrawn compositional Shell IR policy algebra | Withdrawn | - |
 | 0210 | Keeper Playground Repo Currency (fetch + fast-forward, work-preserving) | Draft | - |
-| 0211 | Persona ⊥ {model, runtime}, opaque runtime id, runtime.toml keeper-assignment... | Draft | - |
+| 0211 | Keeper ⊥ {model, runtime}, opaque runtime id, runtime.toml keeper-assignment... | Draft | - |
 | 0212 | Withdraw Keeper exposure policy axis | Withdrawn | - |
 | 0213 | Keeper sandbox/playground isolation model (fix sandbox_repo_not_ready + macOS... | Draft | - |
 | 0214 | OTel GenAI Semantic Convention Migration | Draft | - |
@@ -279,7 +279,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0279 | Withdraw completion-contract result taxonomy | Withdrawn | - |
 | 0280 | Fusion: validated preset type (Parse, don't validate) | Draft | - |
 | 0281 | WebSocket transport SSOT — separate upgrade-attachment from session-protocol,... | Draft | - |
-| 0282 | Reduce Keeper persona to ordinary instructions | Implemented | - |
+| 0282 | Keeper authored content is ordinary instructions | Implemented | - |
 | 0283 | Fusion: judge-of-judges 위상 (flat/staged reducer) | Draft | - |
 | 0284 | Fusion 심판 실행 관측 record (judge observation record) (`RFC-0284-fusion-judge-observation-record.md`)<br>Goal-loop status SSE liveness — server-side change detection extends the goal... (`RFC-0284-goal-loop-sse-liveness.md`)<br>Supersede command-semantics guidance guards (`RFC-0284-keeper-guidance-visibility-drift-guard.md`) | Draft<br>Superseded — RFC-0352 Path B (2026-07-21). The goal-loop OODA<br>Superseded | - |
 | 0285 | Memory OS — Self-Observation Claim Volatility (closing RFC-0259's internal-st... | Draft | - |

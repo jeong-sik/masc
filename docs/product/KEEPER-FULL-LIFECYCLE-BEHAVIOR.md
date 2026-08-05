@@ -80,7 +80,7 @@ One fresh-state proof must show this uninterrupted sequence:
 11. The next Keeper turn uses the updated context.
 12. Vincent and an agent see the same status, reason, receipt, and next action.
 13. Every selected Keeper remains alive or visibly blocked with a reason.
-14. Each Keeper can clearly distinguish its Persona, current Goal, assigned Task, recent decisions, and another Keeper's evidence.
+14. Each Keeper can clearly distinguish its Keeper, current Goal, assigned Task, recent decisions, and another Keeper's evidence.
 15. The collaborating agent completes the project through public MASC surfaces; direct filesystem access is used only to verify evidence.
 
 Partial source evidence does not satisfy this definition.
@@ -288,7 +288,7 @@ with immediate equality after an activation config POST.
 
 **Expected behavior:**
 
-- Persona instructions remain recognizable without overriding the current Task.
+- Keeper instructions remain recognizable without overriding the current Task.
 - The current Goal and assigned Task are present and correctly prioritized.
 - Recent decisions replace superseded decisions instead of appearing beside them as equal truth.
 - Recalled facts retain source, owner, and time.
@@ -309,7 +309,7 @@ with immediate equality after an activation config POST.
 
 **Live measurements:**
 
-- `identity_correct`: correct Persona and role
+- `identity_correct`: correct Keeper and role
 - `task_correct`: correct Goal and Task identifiers
 - `decision_fresh`: latest decision selected over superseded history
 - `provenance_correct`: owner and source preserved
@@ -353,7 +353,7 @@ Pricing may be measured and displayed later. It does not limit, route, rank, adm
 |---|---|---|---|
 | 2026-08-03 19:34 KST | live `GET /health?full=1` | `status=ok`, `overall_status=ok`; configured, materializable, running, and executable Keeper counts were all 8 (`analyst`, `code-reviewer`, `full-cycle-probe`, `kidsnote`, `lane-smith`, `rondo`, `sangsu`, `taskmaster`); `completion_authority_pending=false`; no operator action required | High for the current roster/authority boundary, not full behavior proof |
 | 2026-07-27 17:31 KST | `GET /health?full=1` | old build `0.21.2@b91dcb6995`; `keeper_fibers=0`; five lifecycle authority blockers | High |
-| 2026-07-27 17:33 KST | fresh-state filesystem operation | old `.masc` retired; only active config, Keeper TOML, Persona, and prompts copied | High |
+| 2026-07-27 17:33 KST | fresh-state filesystem operation | old `.masc` retired; only active config, Keeper TOML, Keeper, and prompts copied | High |
 | 2026-07-27 17:38 KST | GitHub CLI open PR list and close results | all 13 previously open MASC PRs closed as superseded | High |
 | 2026-07-27 17:37 KST | authenticated `POST https://ollama.com/api/show` | Qwen 3.5 Cloud and Gemma 4 31B Cloud available; both 262,144 context; tools/thinking/vision declared | High |
 | 2026-07-27 17:38 KST | authenticated `POST https://ollama.com/v1/chat/completions` with `json_object` | Qwen and Gemma returned valid JSON; DeepSeek Flash reached the service but 32 output tokens were insufficient | High |

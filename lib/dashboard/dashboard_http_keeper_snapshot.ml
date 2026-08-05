@@ -220,9 +220,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ("enabled", `Bool m.proactive.enabled);
         ]
       in
-      let drift =
-        drift_surface_json ~unknown_toml_keys:defaults.unknown_toml_keys
-      in
       let metrics =
         `Assoc [
           ("generation", `Int m.runtime.nonce);
@@ -294,7 +291,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("prompt", prompt);
          ("execution", execution);
          ("proactive", proactive);
-         ("drift", drift);
          ("auto_execution_session", auto_execution_session_surface_json ());
          ("hooks", Keeper_hooks_oas.hook_introspection_json ());
          ("runtime", runtime_surface_json config m);

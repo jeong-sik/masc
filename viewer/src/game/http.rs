@@ -83,10 +83,6 @@ pub struct CharacterData {
     pub class: String,
     #[serde(default)]
     pub archetype: String,
-    #[serde(default)]
-    pub persona: String,
-    #[serde(default)]
-    pub traits: Vec<String>,
     #[serde(default = "default_hp")]
     pub hp: i32,
     #[serde(default = "default_hp")]
@@ -495,8 +491,6 @@ pub fn apply_initial_state(
             name: ch.name,
             class: ch.class,
             archetype: ch.archetype,
-            persona: ch.persona,
-            traits: ch.traits,
             hp: ch.hp,
             max_hp: ch.max_hp,
             mp: ch.mp,
@@ -1044,21 +1038,6 @@ fn parse_party_characters(
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            let persona = info
-                .get("persona")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            let traits = info
-                .get("traits")
-                .and_then(Value::as_array)
-                .map(|rows| {
-                    rows.iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
             let hp = info.get("hp").and_then(Value::as_i64).unwrap_or(20) as i32;
             let max_hp = info
                 .get("max_hp")
@@ -1186,8 +1165,6 @@ fn parse_party_characters(
                 name,
                 class,
                 archetype,
-                persona,
-                traits,
                 hp,
                 max_hp,
                 mp,

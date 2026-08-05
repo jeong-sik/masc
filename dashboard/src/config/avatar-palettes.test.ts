@@ -50,53 +50,8 @@ describe('templateForAgent', () => {
     expect(['humanoid', 'robot', 'animal', 'abstract']).toContain(template)
   })
 
-  it('returns robot for robot trait', () => {
-    expect(templateForAgent('any', ['robot'])).toBe('robot')
-  })
-
-  it('returns robot for machine trait', () => {
-    expect(templateForAgent('any', ['machine'])).toBe('robot')
-  })
-
-  it('returns robot for auto trait', () => {
-    expect(templateForAgent('any', ['auto-responder'])).toBe('robot')
-  })
-
-  it('returns animal for animal trait', () => {
-    expect(templateForAgent('any', ['animal'])).toBe('animal')
-  })
-
-  it('returns animal for creature trait', () => {
-    expect(templateForAgent('any', ['creature'])).toBe('animal')
-  })
-
-  it('returns animal for pet trait', () => {
-    expect(templateForAgent('any', ['pet'])).toBe('animal')
-  })
-
-  it('returns abstract for abstract trait', () => {
-    expect(templateForAgent('any', ['abstract'])).toBe('abstract')
-  })
-
-  it('returns abstract for concept trait', () => {
-    expect(templateForAgent('any', ['concept'])).toBe('abstract')
-  })
-
-  it('returns abstract for system trait', () => {
-    expect(templateForAgent('any', ['system'])).toBe('abstract')
-  })
-
-  it('returns deterministic template without traits', () => {
+  it('returns a deterministic template', () => {
     expect(templateForAgent('janitor')).toBe(templateForAgent('janitor'))
-  })
-
-  it('prioritizes trait-based over name-based', () => {
-    const traitBased = templateForAgent('janitor', ['robot'])
-    expect(traitBased).toBe('robot')
-  })
-
-  it('returns deterministic template for empty traits', () => {
-    expect(templateForAgent('janitor', [])).toBe(templateForAgent('janitor'))
   })
 })
 

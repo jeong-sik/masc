@@ -787,10 +787,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                         ])
                 else
                   `Null );
-              ( "persona",
-                match m.persona with
-                | Some persona when String.trim persona <> "" -> `String persona
-                | _ -> `Null );
               ("instructions",
                 if String.trim m.instructions = "" then `Null else `String m.instructions);
               ( "models"

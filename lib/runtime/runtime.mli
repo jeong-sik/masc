@@ -223,8 +223,7 @@ val runtime_id_for_keeper : string -> string option
     [keeper_name] in [\[runtime.assignments\]] (runtime.toml SSOT), or [None]
     when no explicit assignment exists (caller falls back to
     {!get_default_runtime_id}). The id is opaque (only the OAS adapter parses
-    it). persona⊥{model,runtime}: keeper→runtime assignment is NOT sourced from
-    persona JSON or keeper TOML. *)
+    it). Keeper-to-runtime assignment is not sourced from keeper TOML. *)
 
 val keeper_assignments : unit -> (string * string) list
 (** Snapshot of explicit [keeper_name -> runtime_id] assignments loaded from
@@ -274,7 +273,7 @@ val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id
     ["provider.model"] equals [id], or [None] if no such runtime is configured.
     Used by the keeper turn driver to dispatch to the requested runtime (a
-    keeper's persona [model] selection or the default); [None] makes the driver
+    keeper's runtime assignment or the default); [None] makes the driver
     fail fast rather than silently substituting the default (RFC-0207). *)
 
 val is_local_runtime : t -> bool

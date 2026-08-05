@@ -281,7 +281,6 @@ let handle_list_tools_eio
       ?names
       ?(include_hidden = false)
       ?(include_usage = false)
-      ?(include_agent_internal = false)
       ?cursor
       ?agent_id
       state
@@ -299,7 +298,6 @@ let handle_list_tools_eio
   let tools =
     TP.tool_schemas_for_profile
       ~include_hidden
-      ~include_agent_internal
       state
       profile
     |> (match names with
@@ -307,9 +305,6 @@ let handle_list_tools_eio
       | Some wanted ->
         List.filter (fun (schema : Masc_domain.tool_schema) ->
           List.mem schema.name wanted))
-    (* The Agent_internal surface was empty, so the former agent-internal-first
-       ranking applied to no schema; the order reduces to name comparison.
-       Surface deleted in the surface-cut refactor. *)
     |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
       String.compare a.name b.name)
   in
@@ -913,7 +908,6 @@ let handle_request
                          ?names
                          ~include_hidden
                          ~include_usage
-                         ~include_agent_internal:internal_keeper_runtime
                          ?cursor
                          ?agent_id:auth_token
                          state
@@ -963,9 +957,7 @@ let handle_request
                       in
                       if
                         not
-                          (TP.tool_allowed_in_profile
-                             ~internal_keeper_runtime
-                             state
+                          (TP.tool_allowed_in_profile state
                              call_profile
                              name)
                       then

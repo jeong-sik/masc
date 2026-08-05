@@ -476,17 +476,8 @@ let sb_path () =
     env_config_snapshot entry, and orchestrator bootstrap. *)
 let orchestrator_enabled_env_key = "MASC_ORCHESTRATOR_ENABLED"
 
-(** SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352).
-    Shared by snapshot catalog and docker worker inheritance list. *)
+(** SSOT for the MASC_CONFIG_DIR env-var name (issue 8352). *)
 let config_dir_env_key = "MASC_CONFIG_DIR"
-let personas_dir_env_key = "MASC_PERSONAS_DIR"
-
-(* RFC-0085 PR-8 — [config_dir_opt] and [personas_dir_opt] removed.
-   All readers now obtain these path values from
-   [Host_config.from_env ()] (fields [config_dir] / [personas_dir]).
-   The two [_env_key] string constants above remain because docker
-   inheritance lists and snapshot catalogs still need them as
-   identifier strings, not as readers. *)
 
 (** SSOT for the MASC_DATA_DIR env-var name (issue 8352).
     Overrides [<base_path>/data] as the root for runtime data stores. *)

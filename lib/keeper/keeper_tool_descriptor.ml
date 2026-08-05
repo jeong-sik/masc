@@ -1960,7 +1960,7 @@ let internal_descriptors : t list =
       ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "reset" "masc_keeper_reset"
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "persona_audit" "masc_keeper_persona_audit"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "audit" "masc_keeper_audit"
       ~readonly:true
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "status" "masc_keeper_status"
       ~readonly:true
@@ -1969,16 +1969,6 @@ let internal_descriptors : t list =
   ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate" "masc_keeper_delegate"
       ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "up" "masc_keeper_up"
-      ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "create_from_persona" "masc_keeper_create_from_persona"
-      ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "persona_list" "masc_persona_list"
-      ~readonly:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "persona_create" "masc_persona_create"
-      ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "persona_update" "masc_persona_update"
-      ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "persona_delete" "masc_persona_delete"
       ~readonly:false
   ]
   @ masc_board_descriptors

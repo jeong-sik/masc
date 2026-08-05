@@ -25,7 +25,7 @@ The retained boundaries are independent:
 - authenticated dashboard writes update their owning product configuration and
   return explicit validation/persistence errors;
 - `runtime.toml` remains the SSOT for Keeper-to-Runtime assignment;
-- Keeper persona and instructions remain Keeper configuration;
+- Keeper instructions remain Keeper configuration;
 - exact Always Allowed rules are Gate records, not descriptor allowlists or
   guessed tool permissions;
 - the dashboard may configure and observe Gate decisions, but it does not turn

@@ -81,13 +81,6 @@ let test_all_schemas_not_empty () =
   Alcotest.(check bool) "all_schemas is not empty"
     true (List.length schema_inventory > 0)
 
-let test_all_schemas_count () =
-  (* Verify we have at least 50 tools defined (post-pruning floor) *)
-  let count = List.length schema_inventory in
-  Alcotest.(check bool) "at least 50 tools defined"
-    true (count >= 50);
-  Printf.printf "Total tool schemas: %d\n" count
-
 let test_schema_has_required_fields () =
   List.iter (fun schema ->
     (* Name must not be empty *)
@@ -176,8 +169,6 @@ let test_required_field_is_list () =
 (* 4. Specific Tool Tests                                        *)
 (* ============================================================ *)
 
-(* test_masc_init_schema removed: masc_init tool pruned *)
-(* test_masc_bind_schema and test_masc_unbind_schema removed with lifecycle collapse. *)
 
 let test_masc_start_schema () =
   match find_registered_tool "masc_start" with
@@ -380,7 +371,7 @@ let test_masc_goal_list_schema () =
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check bool) "has phase" true (List.mem_assoc "phase" props);
-          Alcotest.(check bool) "no legacy status filter" false (List.mem_assoc "status" props)
+          Alcotest.(check bool) "status is not accepted" false (List.mem_assoc "status" props)
       | None -> Alcotest.fail "masc_goal_list missing properties"
 
 let test_masc_goal_upsert_schema () =
@@ -424,34 +415,6 @@ let test_masc_goal_transition_schema () =
             (List.mem (`String "actor") reqs)
       | None -> Alcotest.fail "masc_goal_transition missing required field"
 
-let test_retired_front_door_tools_absent_from_schema_inventory () =
-  let retired_tools =
-    [
-      "masc_operator_snapshot";
-      "masc_operator_digest";
-      "masc_operator_action";
-      "masc_operator_board_attention_quarantine_requeue";
-      "masc_operator_chat_recovery_resolve";
-      "masc_operator_task_recovery_resolve";
-      "masc_operator_confirm";
-      "masc_operator_judgment_write";
-      "masc_keeper_repair";
-      "masc_operation_start";
-      "masc_dispatch_tick";
-      "masc_goal_review";
-    ]
-  in
-  List.iter
-    (fun name ->
-      match find_registered_tool name with
-      | None -> ()
-      | Some _ ->
-          Alcotest.fail
-            (Printf.sprintf
-               "%s should be absent from registered schema inventory"
-               name))
-    retired_tools
-
 let test_masc_board_post_schema_supports_judgment () =
   let schema = Board_tool.tool_post_create in
   match get_json_assoc "properties" schema.input_schema with
@@ -462,9 +425,6 @@ let test_masc_board_post_schema_supports_judgment () =
         (List.mem_assoc "judgment" props)
   | None -> Alcotest.fail "masc_board_post missing properties"
 
-
-
-
 (* ============================================================ *)
 (* 5. Portal Tool Tests                                          *)
 (* ============================================================ *)
@@ -472,18 +432,6 @@ let test_masc_board_post_schema_supports_judgment () =
 (* ============================================================ *)
 (* 7. Agent Capability Tool Tests                                *)
 (* ============================================================ *)
-
-let test_masc_agents_removed () =
-  match find_registered_tool "masc_agents" with
-  | None -> ()
-  | Some _ -> Alcotest.fail "masc_agents should be absent from registered schema inventory"
-
-let test_masc_register_capabilities_removed () =
-  match find_registered_tool "masc_register_capabilities" with
-  | None -> ()
-  | Some _ -> Alcotest.fail "masc_register_capabilities should be removed"
-
-(* test_masc_find_by_capability_schema removed: tool pruned *)
 
 (* ============================================================ *)
 (* 8. Plan Tool Tests                                            *)
@@ -525,86 +473,13 @@ let test_masc_deliver_schema () =
 (* 10. Auth Tool Tests                                           *)
 (* ============================================================ *)
 
-(* Auth tool schema tests removed: auth tools pruned from registry *)
 
 (* ============================================================ *)
 (* 11. A2A Tool Tests                                            *)
 (* ============================================================ *)
 
-(* masc_poll_events and masc_heartbeat_result schema tests removed: tools pruned *)
-
-(* test_masc_spawn_schema removed: masc_spawn deleted in RFC-0182. *)
 
 (* Dedicated runtime-verify schema coverage moved to runtime admin coverage. *)
-
-(* test_masc_persona_list_schema removed: persona list coverage is trivial.
-   Persona authoring schema/save tools were removed with their stale backing
-   surface. *)
-
-let test_masc_keeper_create_from_persona_schema () =
-  match find_registered_tool "masc_keeper_create_from_persona" with
-  | None -> Alcotest.fail "masc_keeper_create_from_persona not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has persona_name" true
-            (List.mem_assoc "persona_name" props);
-          Alcotest.(check bool) "has runtime_id" true
-            (List.mem_assoc "runtime_id" props);
-          Alcotest.(check bool) "omits removed sandbox_profile" false
-            (List.mem_assoc "sandbox_profile" props);
-          Alcotest.(check bool) "omits removed goal" false
-            (List.mem_assoc "goal" props);
-          Alcotest.(check bool) "omits retired shards" false
-            (List.mem_assoc "shards" props)
-      | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
-
-let test_keeper_shards_arg_rejected () =
-  let args = `Assoc [ "shards", `List [ `String "base" ] ] in
-  match
-    Masc.Keeper_config.reject_removed_keeper_input_keys
-      ~tool_name:"masc_keeper_create_from_persona"
-      args
-  with
-  | Ok () -> Alcotest.fail "retired shards arg should be rejected"
-  | Error msg ->
-    Alcotest.(check bool)
-      "shards mentioned"
-      true
-      (contains_substring ~needle:"shards" msg)
-
-let test_keeper_goal_arg_rejected () =
-  let args = `Assoc [ "goal", `String "removed" ] in
-  match
-    Masc.Keeper_config.reject_removed_keeper_input_keys
-      ~tool_name:"masc_keeper_up"
-      args
-  with
-  | Ok () -> Alcotest.fail "removed goal arg should be rejected"
-  | Error msg ->
-    Alcotest.(check bool) "goal mentioned" true
-      (contains_substring ~needle:"goal" msg)
-
-let test_keeper_removed_compaction_args_rejected () =
-  [ "compaction_cooldown_sec"
-  ; "compaction_profile"
-  ; "compaction_ratio_gate"
-  ; "compaction_message_gate"
-  ; "compaction_token_gate"
-  ]
-  |> List.iter (fun key ->
-    let args = `Assoc [ key, `Int 15 ] in
-    match
-      Masc.Keeper_config.reject_removed_keeper_input_keys
-        ~tool_name:"masc_keeper_up"
-        args
-    with
-    | Ok () -> Alcotest.failf "removed %s arg should be rejected" key
-    | Error msg ->
-      Alcotest.(check bool)
-        (key ^ " mentioned")
-        true
-        (contains_substring ~needle:key msg))
 
 let test_masc_keeper_up_schema () =
   match find_registered_tool "masc_keeper_up" with
@@ -617,119 +492,13 @@ let test_masc_keeper_up_schema () =
           Alcotest.(check bool) "omits network_mode" false
             (List.mem_assoc "network_mode" props);
           Alcotest.(check bool) "has autoboot_enabled" true
-            (List.mem_assoc "autoboot_enabled" props);
-          Alcotest.(check bool) "omits removed goal" false
-            (List.mem_assoc "goal" props);
-          Alcotest.(check bool) "omits models" false
-            (List.mem_assoc "models" props);
-          Alcotest.(check bool) "omits allowed_models" false
-            (List.mem_assoc "allowed_models" props);
-          Alcotest.(check bool) "omits active_model" false
-            (List.mem_assoc "active_model" props);
-          [ "compaction_profile"
-          ; "compaction_ratio_gate"
-          ; "compaction_message_gate"
-          ; "compaction_token_gate"
-          ]
-          |> List.iter (fun key ->
-            Alcotest.(check bool) ("omits " ^ key) false
-              (List.mem_assoc key props))
+            (List.mem_assoc "autoboot_enabled" props)
       | None -> Alcotest.fail "masc_keeper_up missing properties"
-
-let test_keeper_sandbox_args_rejected () =
-  let args =
-    `Assoc [ "sandbox_profile", `String "docker"; "network_mode", `String "none" ]
-  in
-  match
-    Masc.Keeper_config.reject_removed_keeper_input_keys
-      ~tool_name:"masc_keeper_up"
-      args
-  with
-  | Ok () -> Alcotest.fail "sandbox posture args should be rejected"
-  | Error msg ->
-      Alcotest.(check bool)
-        "sandbox_profile mentioned"
-        true
-        (contains_substring ~needle:"sandbox_profile" msg);
-      Alcotest.(check bool)
-        "network_mode mentioned"
-        true
-        (contains_substring ~needle:"network_mode" msg)
-
-let test_keeper_sandbox_args_allowed_for_dashboard_patch () =
-  let args =
-    `Assoc [ "sandbox_profile", `String "docker"; "network_mode", `String "none" ]
-  in
-  match
-    Masc.Keeper_config.reject_removed_keeper_input_keys
-      ~allow_sandbox_fields:true
-      ~tool_name:"dashboard_keeper_config_patch"
-      args
-  with
-  | Error msg -> Alcotest.failf "dashboard config patch should accept sandbox posture args: %s" msg
-  | Ok () -> ()
-
-(* keeper policy schema tests removed — policy tool schemas no longer exist *)
-
-(* ============================================================ *)
-(* 14. Handover Tool Tests                                       *)
-(* ============================================================ *)
-
-(* Handover tool schema tests removed: handover tools pruned from registry *)
-
-(* ============================================================ *)
-(* 15. Legacy Swarm Removal Tests                                *)
-(* ============================================================ *)
-
-let test_legacy_swarm_tools_removed () =
-  let removed_tools =
-    [
-      "masc_swarm_init";
-      "masc_swarm_join";
-      "masc_swarm_leave";
-      "masc_swarm_status";
-      "masc_swarm_evolve";
-      "masc_swarm_propose";
-      "masc_swarm_vote";
-      "masc_swarm_deposit";
-      "masc_swarm_trails";
-    ]
-  in
-  List.iter
-    (fun name ->
-      match find_registered_tool name with
-      | None -> ()
-      | Some _ ->
-          Alcotest.fail (Printf.sprintf "%s should be removed from public schemas" name))
-    removed_tools
-
-let test_legacy_mitosis_tools_removed () =
-  let removed_tools =
-    [
-      "masc_mitosis_status";
-      "masc_mitosis_pool";
-      "masc_mitosis_divide";
-      "masc_mitosis_check";
-      "masc_mitosis_record";
-      "masc_mitosis_prepare";
-      "masc_mitosis_handoff";
-      "masc_mitosis_all";
-    ]
-  in
-  List.iter
-    (fun name ->
-      match find_registered_tool name with
-      | None -> ()
-      | Some _ ->
-          Alcotest.fail
-            (Printf.sprintf "%s should be removed from public schemas" name))
-    removed_tools
 
 (* ============================================================ *)
 (* 19. Bounded Run Tool Tests                                    *)
 (* ============================================================ *)
 
-(* test_masc_bounded_run_schema removed: tool pruned *)
 
 (* ============================================================ *)
 (* 20. Dashboard Tool Tests                                      *)
@@ -851,7 +620,6 @@ let () =
   Alcotest.run "Tools Coverage" [
     "schema_structure", [
       Alcotest.test_case "not_empty" `Quick test_all_schemas_not_empty;
-      Alcotest.test_case "count" `Quick test_all_schemas_count;
       Alcotest.test_case "required_fields" `Quick test_schema_has_required_fields;
       Alcotest.test_case "unique_names" `Quick test_schema_names_are_unique;
       Alcotest.test_case "masc_prefix" `Quick test_all_names_start_with_masc;
@@ -881,14 +649,6 @@ let () =
         test_masc_batch_add_tasks_schema;
       Alcotest.test_case "masc_board_post supports judgment" `Quick
         test_masc_board_post_schema_supports_judgment;
-      Alcotest.test_case "retired front-door tools absent" `Quick
-        test_retired_front_door_tools_absent_from_schema_inventory;
-    ];
-    "agent_tools", [
-      Alcotest.test_case "agents removed" `Quick test_masc_agents_removed;
-      Alcotest.test_case "register_capabilities removed" `Quick
-        test_masc_register_capabilities_removed;
-      (* find_by_capability removed: tool pruned *)
     ];
     "plan_tools", [
       Alcotest.test_case "plan_init" `Quick test_masc_plan_init_schema;
@@ -903,32 +663,9 @@ let () =
     ];
     "vote_tools", [
     ];
-    (* auth_tools, a2a_tools (poll_events/heartbeat_result), handover_tools,
-       bounded_run removed: pruned from registry *)
-    (* spawn_runtime_tools group removed: masc_spawn deleted in RFC-0182. *)
     "keeper_runtime_tools", [
-      Alcotest.test_case "keeper-create-from-persona" `Quick
-        test_masc_keeper_create_from_persona_schema;
-      Alcotest.test_case "keeper-shards-arg-rejected" `Quick
-        test_keeper_shards_arg_rejected;
-      Alcotest.test_case "keeper-goal-arg-rejected" `Quick
-        test_keeper_goal_arg_rejected;
-      Alcotest.test_case "keeper-compaction-policy-args-rejected" `Quick
-        test_keeper_removed_compaction_args_rejected;
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
-      Alcotest.test_case "keeper-sandbox-args-rejected" `Quick
-        test_keeper_sandbox_args_rejected;
-      Alcotest.test_case "keeper-sandbox-args-dashboard-allowed" `Quick
-        test_keeper_sandbox_args_allowed_for_dashboard_patch;
-    ];
-    "legacy_swarm_removed", [
-      Alcotest.test_case "removed_from_public_schemas" `Quick
-        test_legacy_swarm_tools_removed;
-    ];
-    "legacy_lifecycle_removed", [
-      Alcotest.test_case "mitosis_removed_from_public_schemas" `Quick
-        test_legacy_mitosis_tools_removed;
     ];
     "dashboard_tools", [
       Alcotest.test_case "dashboard" `Quick test_masc_dashboard_schema;

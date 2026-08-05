@@ -7,8 +7,8 @@ describe('copyablePath (pure)', () => {
     // Reference UIs (GitHub breadcrumb, Vercel deployment, Datadog host
     // path): the displayed form is frequently shortened (~/foo,
     // relative-to-root) but the CLIPBOARD form is always absolute.
-    expect(copyablePath({ path: '/Users/dancer/me/.masc/config/personas' }))
-      .toBe('/Users/dancer/me/.masc/config/personas')
+    expect(copyablePath({ path: '/Users/dancer/me/.masc/config/keepers' }))
+      .toBe('/Users/dancer/me/.masc/config/keepers')
   })
 
   it('empty path → empty string (no undefined leak into toast/clipboard)', () => {

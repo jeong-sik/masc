@@ -4,6 +4,32 @@ include Keeper_types_profile_defaults
 include Keeper_types_profile_toml_normalizers
 include Keeper_types_profile_oas_env
 
+let keeper_toml_field_names =
+  [ "name"
+  ; "autoboot_enabled"
+  ; "mention_targets"
+  ; "proactive_enabled"
+  ; "allowed_paths"
+  ; "sandbox_profile"
+  ; "sandbox_image"
+  ; "network_mode"
+  ; "multimodal_policy"
+  ; "active_goal_ids"
+  ; "max_context_override"
+  ; "telemetry_feedback_enabled"
+  ; "telemetry_feedback_window_hours"
+  ; "always_allow"
+  ]
+
+let unknown_keeper_toml_keys doc =
+  let known = List.map (fun key -> "keeper." ^ key) keeper_toml_field_names in
+  doc
+  |> List.map fst
+  |> List.filter (fun key ->
+       not (List.mem key known)
+       && not (String.starts_with key ~prefix:oas_env_key_prefix))
+  |> List.sort_uniq String.compare
+
 let toml_value_kind = function
   | Keeper_toml_loader.Toml_string _ -> "string"
   | Keeper_toml_loader.Toml_int _ -> "integer"
@@ -22,7 +48,7 @@ let toml_value_kind = function
 
 let validate_known_keeper_field_types doc =
   let string_fields =
-    [ "name"; "persona_name"; "instructions"; "sandbox_profile"
+    [ "name"; "sandbox_profile"
     ; "sandbox_image"; "network_mode"; "multimodal_policy" ]
   in
   let bool_fields =
@@ -85,35 +111,18 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let oas_env = extract_oas_env_from_doc doc in
-  let removed_present =
-    removed_keeper_input_key_names
-    |> List.map k
-    |> List.filter (fun key -> List.mem_assoc key doc)
-  in
   let result =
-    if has "goal" then
-      Error
-        "keeper.goal is removed. Link Goal entities through active_goal_ids; \
-         keeper instructions remain under keeper.instructions."
-    else
-      match removed_present with
-      | [] -> Ok ()
-      | fields ->
-          Error
-            (Printf.sprintf
-               "removed keeper TOML keys: %s"
-               (String.concat ", " fields))
+    match unknown_keeper_toml_keys doc with
+    | [] -> Ok ()
+    | fields ->
+        Error
+          (Printf.sprintf
+             "unknown keeper TOML keys: %s"
+             (String.concat ", " fields))
   in
   let result =
     Result.bind result (fun () ->
         validate_known_keeper_field_types doc)
-  in
-  let result =
-    Result.bind result (fun () ->
-        match str "persona_name" with
-        | Some raw when not (validate_name raw) ->
-            Error (Printf.sprintf "invalid persona_name '%s'" raw)
-        | _ -> Ok ())
   in
   let result =
     Result.bind result (fun () ->
@@ -158,24 +167,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      (String.concat ", " valid_multimodal_policy_strings)))
         | None -> Ok ())
   in
-  (* persona⊥{model,runtime}: keeper TOML no longer carries a runtime/model
-     selection.  keeper→runtime assignment is the sole responsibility of
-     runtime.toml [[runtime.assignments]] (keyed by keeper name), resolved via
-     {!Runtime.runtime_id_for_keeper}.  Both the legacy [keeper.model] and the
-     (now removed) [keeper.runtime_id] keys are rejected at load — fail loud
-     rather than silently discard, pointing the operator at the new SSOT.
-     BREAKING: a keeper TOML still carrying [runtime_id] fails to load; migrate
-     its value to runtime.toml [[runtime.assignments]]. *)
-  let runtime_assignment_result =
-    let present key = has key in
-    match present "model", present "runtime_id" with
-    | true, _ | _, true ->
-      Error
-        "keeper.model / keeper.runtime_id are removed. Assign the keeper's \
-         runtime in runtime.toml [[runtime.assignments]] (keyed by keeper name)."
-    | false, false -> Ok ()
-  in
-  let result = Result.bind result (fun () -> runtime_assignment_result) in
   let max_context_override_result =
     match int_ "max_context_override" with
     | None -> Ok None
@@ -189,8 +180,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       {
         id = None;
         manifest_path = None;
-        persona_name = str "persona_name";
-        instructions = str "instructions";
+        instructions = None;
         autoboot_enabled = bool_ "autoboot_enabled";
         mention_targets = strs "mention_targets";
         proactive_enabled = bool_ "proactive_enabled";
@@ -213,70 +203,24 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
         always_allow = bool_ "always_allow";
         oas_env;
-        unknown_toml_keys = [];
       })
       max_context_override_result)
 
 (** Fields actually read by [profile_defaults_of_toml] from the [[keeper]]
     TOML table.  Keep this in sync with the record construction above — the
     compile-time assertion below will fail if the two lists diverge. *)
-let parsed_field_key_names =
-  [ "name"
-  ; "persona_name"
-  ; "instructions"
-  ; "autoboot_enabled"
-  ; "mention_targets"
-  ; "proactive_enabled"
-  ; "allowed_paths"
-  ; "sandbox_profile"
-  ; "sandbox_image"
-  ; "network_mode"
-  ; "multimodal_policy"
-  ; "active_goal_ids"
-  ; "max_context_override"
-  ; "telemetry_feedback_enabled"
-  ; "telemetry_feedback_window_hours"
-  ; "always_allow"
-  ]
+let parsed_field_key_names = keeper_toml_field_names
 
-(** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
-    Keys outside this set under [[keeper]] (or any other table) are silently
-    ignored by the loader, which historically let dead config accumulate
-    (e.g. legacy [legacy_scope], [scope_kind]).  [warn_unknown_keeper_toml_keys]
-    uses this list to surface drift on boot. The JSON side no longer has a
-    symmetric warning: [Keeper_meta_json.meta_of_json] decodes only the exact
-    current shape, so an unknown persisted key is a decode error there rather
-    than a warning.
-
-    Must be kept in sync with [parsed_field_key_names] — the assertion below
-    catches drift at compile time. *)
-let canonical_keeper_toml_key_names =
-  [ "name"
-  ; "persona_name"
-  ; "instructions"
-  ; "autoboot_enabled"
-  ; "mention_targets"
-  ; "proactive_enabled"
-  ; "allowed_paths"
-  ; "sandbox_profile"
-  ; "sandbox_image"
-  ; "network_mode"
-  ; "multimodal_policy"
-  ; "active_goal_ids"
-  ; "max_context_override"
-  ; "telemetry_feedback_enabled"
-  ; "telemetry_feedback_window_hours"
-  ; "always_allow"
-  ]
+(** Canonical TOML key names used by the strict parser and config audit.
+    Must be kept in sync with [parsed_field_key_names]. *)
+let canonical_keeper_toml_key_names = keeper_toml_field_names
 
 let () =
   assert (
     List.sort String.compare canonical_keeper_toml_key_names
     = List.sort String.compare parsed_field_key_names)
 
-(** Pure detector: returns TOML keys that [profile_defaults_of_toml] does not
-    consume.  Exposed separately from the logging wrapper so tests can
-    assert on the key list without mocking the Log subsystem. *)
+(** Pure detector used by the strict parser and invalid-config audit. *)
 let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
   let known =
     canonical_keeper_toml_key_names |> List.map (fun k -> "keeper." ^ k)
@@ -293,63 +237,6 @@ let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
        not (List.mem key known) && not (starts_with_oas_env key))
   |> dedupe_keep_order
 
-let unknown_keeper_toml_warning_key_limit = 256
-let unknown_keeper_toml_warning_keys : string list Atomic.t = Atomic.make []
-
-let current_unknown_keeper_toml_warning_keys () =
-  Atomic.get unknown_keeper_toml_warning_keys
-
-let rec take_warning_keys n keys =
-  match n, keys with
-  | n, _ when n <= 0 -> []
-  | _, [] -> []
-  | n, key :: rest -> key :: take_warning_keys (n - 1) rest
-
-let normalize_unknown_keeper_toml_keys unknown =
-  List.sort_uniq String.compare unknown
-;;
-
-let warn_unknown_keeper_toml_keys_once ~path unknown =
-  let normalized_unknown = normalize_unknown_keeper_toml_keys unknown in
-  let warning_key =
-    path ^ "\x1f" ^ String.concat "," normalized_unknown
-  in
-  let rec loop () =
-    let seen = Atomic.get unknown_keeper_toml_warning_keys in
-    if List.mem warning_key seen then
-      false
-    else
-      let next =
-        take_warning_keys unknown_keeper_toml_warning_key_limit (warning_key :: seen)
-      in
-      if Atomic.compare_and_set unknown_keeper_toml_warning_keys seen next then
-        true
-      else
-        loop ()
-  in
-  loop ()
-
-let warn_unknown_keeper_toml_key_names ~path unknown =
-  match normalize_unknown_keeper_toml_keys unknown with
-  | [] -> ()
-  | unknown ->
-    if warn_unknown_keeper_toml_keys_once ~path unknown then begin
-      Otel_metric_store.inc_counter
-        Otel_metric_store.metric_config_unknown_keys_ignored
-        ~labels:[("file_path", path)]
-        ~delta:(float_of_int (List.length unknown))
-        ();
-      Log.Keeper.warn
-        "keeper TOML %s has unknown keys: %s"
-        path
-        (String.concat ", " unknown)
-    end
-
-let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
-  warn_unknown_keeper_toml_key_names
-    ~path
-    (detect_unknown_keeper_toml_keys doc)
-
 let merge_string_list ~base overlay =
   match overlay with [] -> base | xs -> xs
 
@@ -362,7 +249,6 @@ let merge_keeper_profile_defaults
   {
     id = prefer overlay.id base.id;
     manifest_path = prefer overlay.manifest_path base.manifest_path;
-    persona_name = prefer overlay.persona_name base.persona_name;
     instructions = prefer overlay.instructions base.instructions;
     autoboot_enabled = prefer overlay.autoboot_enabled base.autoboot_enabled;
     mention_targets =
@@ -388,6 +274,4 @@ let merge_keeper_profile_defaults
          List.filter (fun (k, _) -> not (List.mem k overlay_keys)) base.oas_env
        in
        surviving_base @ overlay.oas_env);
-    unknown_toml_keys =
-      merge_string_list ~base:base.unknown_toml_keys overlay.unknown_toml_keys;
   }

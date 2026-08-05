@@ -244,9 +244,8 @@ type config =
         rejected at load. *)
   ; keeper_assignments : (string * string) list
     (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
-        runtime.toml is the sole SSOT for keeper→runtime assignment (persona⊥
-        {model,runtime}: persona JSON and keeper TOML no longer carry a runtime
-        selection). A keeper absent from this table routes to the default
+        runtime.toml is the sole SSOT for keeper-to-runtime assignment; keeper
+        TOML does not carry a runtime selector. A keeper absent from this table routes to the default
         runtime; an assignment to an unknown id is rejected at load
         ({!Runtime.load_list}), mirroring [\[runtime\].default] validation. The
         id is an opaque binding key here — only the OAS adapter parses it into

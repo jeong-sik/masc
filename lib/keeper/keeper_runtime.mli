@@ -1,35 +1,9 @@
 (** Keeper Runtime — keeper reconciliation and supervisor runtime.
 
-    Reconciles persisted keeper meta against on-disk personality / TOML and
+    Reconciles persisted keeper meta against on-disk Keeper configuration and
     materialises boot-time defaults; supplies the supervisor sweep used by the
     server-owned Keeper bootstrap. Runtime-only mutable state stays behind
     keeper runtime/execution modules. *)
-
-(** {1 Personality compare helpers}
-
-    [String.trim]-based compare alone produced a re-sync storm
-    (see #10479): the persisted text exceeds
-    [Keeper_config.prompt_render_max_bytes] for some keepers, which the
-    read path normalises while [target_will] keeps the raw value.  These
-    helpers normalise both sides before diffing so reconcile is
-    idempotent. *)
-
-val personality_text_equal : string -> string -> bool
-(** [true] when two personality fields compare equal under the same
-    byte-cap normalisation the prompt renderer uses. *)
-
-val personality_field_diff_entry :
-  string -> string -> string -> string option
-(** [(field, current, target)] -> human-readable diff line, or [None]
-    when the field already compares equal. *)
-
-val personality_diff_summary : (string * string * string) list -> string list
-(** Render a list of [(field, current, target)] tuples as diff lines. *)
-
-val personality_field_diff_summary :
-  field:string -> current:string -> target:string -> string option
-(** Single-field convenience wrapper around
-    [personality_field_diff_entry]. *)
 
 (** {1 Boot meta materialization} *)
 

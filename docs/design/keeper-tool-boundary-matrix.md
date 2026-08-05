@@ -23,7 +23,7 @@ Scope:
 
 | Owner | Responsibility | Must not own |
 | --- | --- | --- |
-| `execution-dispatch` | Keeper-side command, board, status, task, persona, memory, and receipt execution dispatch. | Tool name policy, sandbox runtime mechanics, GitHub transport details. |
+| `execution-dispatch` | Keeper-side command, board, status, task, keeper, memory, and receipt execution dispatch. | Tool name policy, sandbox runtime mechanics, GitHub transport details. |
 | `hook-observation` | OAS hook event parsing, metrics, and observational adapters. | OAS tool handler execution or keeper runtime dispatch. |
 | `oas-tool-bridge` | Keeper tool bridge for OAS bundle, handler, telemetry, and deterministic errors. | Generic tool policy or non-OAS hook observation. |
 | `sandbox-runtime` | Sandbox containment, Docker runtime, read/session runners, executor, and shell IR target plumbing. | Tool naming policy or GitHub runtime. |
@@ -44,10 +44,10 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_in_process_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_memory_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_memory_runtime.mli` - execution-dispatch
-- `lib/keeper/keeper_tool_persona_crud.ml` - execution-dispatch
-- `lib/keeper/keeper_tool_persona_crud.mli` - execution-dispatch
-- `lib/keeper/keeper_tool_persona_runtime.ml` - execution-dispatch
-- `lib/keeper/keeper_tool_persona_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_keeper_crud.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_keeper_crud.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_keeper_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_keeper_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_registered_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_registered_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_shared_runtime.ml` - execution-dispatch
@@ -152,8 +152,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_emission_hook.mli` - tool-surface-policy
 - `lib/keeper_outcome_taxonomy/keeper_tool_outcome.ml` - tool-surface-policy
 - `lib/keeper_outcome_taxonomy/keeper_tool_outcome.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_persona_audit.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_persona_audit.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_keeper_audit.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_keeper_audit.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_progress_identity.ml` - tool-surface-policy

@@ -364,7 +364,7 @@ let seed_server_config ~base_path =
   ensure_dir config_dir;
   List.iter
     (fun name -> ensure_dir (Filename.concat config_dir name))
-    [ "keepers"; "personas"; "prompts" ];
+    [ "keepers"; "prompts" ];
   let runtime_dst = Filename.concat config_dir "runtime.toml" in
   if not (Sys.file_exists runtime_dst) then
     let oc = open_out runtime_dst in

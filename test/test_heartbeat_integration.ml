@@ -138,7 +138,7 @@ let remove_meta_cleanup : Shutdown_types.cleanup_intent =
 
 (* Keepalive resolves its sandbox profile from the persisted keeper TOML. Seed
    the fixture explicitly so this test exercises the lifecycle path rather than
-   the intentional missing-profile rejection. *)
+   keeper configuration validation. *)
 let seed_keeper_sandbox_profile ~base_dir name =
   let keepers_dir =
     List.fold_left Filename.concat base_dir [ ".masc"; "config"; "keepers" ]
@@ -1514,7 +1514,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
-        ; persona_name_opt = None
         ; instructions_arg = Some "new operator intent"
         ; profile_defaults
         ; instructions_opt = profile_defaults.instructions
@@ -1641,7 +1640,6 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
-        ; persona_name_opt = None
         ; instructions_arg = Some "rejected mid-turn intent"
         ; profile_defaults
         ; instructions_opt = profile_defaults.instructions

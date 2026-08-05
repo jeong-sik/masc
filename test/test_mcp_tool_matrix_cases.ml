@@ -235,14 +235,18 @@ let rec waitpid_nointr pid =
   | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
 ;;
 
-let seed_persona_dir base_path agent_name =
-  let personas_dir =
+let seed_keeper_config base_path agent_name =
+  let keepers_dir =
     Filename.concat
       (Filename.concat (Filename.concat base_path ".masc") "config")
-      "personas"
+      "keepers"
   in
-  mkdir_p (Filename.concat personas_dir agent_name);
-  Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
+  let agent_dir = Filename.concat keepers_dir agent_name in
+  mkdir_p agent_dir;
+  Fs_compat.save_file
+    (Filename.concat keepers_dir (agent_name ^ ".toml"))
+    "[keeper]\nautoboot_enabled = true\n";
+  Fs_compat.save_file (Filename.concat agent_dir "AGENT.md") "Run the tool matrix.\n";
   Config_dir_resolver.reset ()
 
 let run_cmd_exn argv =
@@ -339,7 +343,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net
       ~base_path
   in
-  seed_persona_dir base_path tool_matrix_agent_name;
+  seed_keeper_config base_path tool_matrix_agent_name;
   let auth_token =
     match
       Masc.Auth.create_token base_path ~agent_name:tool_matrix_agent_name
@@ -997,7 +1001,6 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
 	  let saved_env =
 	    [
 	      ("MASC_BASE_PATH", Sys.getenv_opt "MASC_BASE_PATH");
-	      ("MASC_PERSONAS_DIR", Sys.getenv_opt "MASC_PERSONAS_DIR");
 	    ]
 	  in
 	  let base_path = temp_dir "mcp-tool-matrix-" in

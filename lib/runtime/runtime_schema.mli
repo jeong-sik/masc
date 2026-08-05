@@ -190,7 +190,7 @@ type config =
         [\[runtime\].default]. Unknown ids are rejected at load. *)
   ; keeper_assignments : (string * string) list
     (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
-        Sole SSOT for keeper→runtime assignment (persona⊥{model,runtime}). A
+        Sole SSOT for keeper-to-runtime assignment. A
         keeper absent from this table routes to the default runtime; an
         assignment to an unknown id is rejected at load. The id is an opaque
         binding key (only the OAS adapter parses it into provider/model/spec). *)

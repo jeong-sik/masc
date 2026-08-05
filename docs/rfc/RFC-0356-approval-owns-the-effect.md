@@ -10,7 +10,7 @@
 Gate가 external effect를 `Deferred{Judge_requested}`로 미루면, 승인이 나도 그 효과는 실행되지 않는다. 실행되려면 Keeper가 **바이트 단위로 동일한 도구 호출을 다시 내야** 한다. `keeper_approval_queue.ml consume_approved_resolution`이 grant를 소비하는 조건이
 
 ```
-entry.keeper_name = keeper_name
+entry.name = keeper_name
 ∧ entry.tool_name = tool_name
 ∧ entry.input_hash = normalized_input_hash input
 ```

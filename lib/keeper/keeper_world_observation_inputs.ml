@@ -22,7 +22,7 @@ type current_task_observation =
       }
 
 (* A keeper must not treat a task it authored itself as work waiting for it.
-   Without this, a persona whose response to "an unclaimed task exists" is to
+   Without this, a Keeper whose response to "an unclaimed task exists" is to
    create a routing/report task produces a closed positive feedback loop: the
    new task is itself an unclaimed Todo authored by the same keeper, so it
    re-satisfies the trigger on the next observation. Live evidence: taskmaster

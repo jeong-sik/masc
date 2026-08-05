@@ -640,10 +640,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let json = `Assoc ([
            ("name", `String name);
            ("meta", Keeper_meta_json.meta_to_json m);
-           ( "persona",
-             match m.persona with
-             | Some persona when String.trim persona <> "" -> `String persona
-             | _ -> `Null );
            ("instructions",
             if String.trim m.instructions = "" then `Null else `String m.instructions);
            ("paused", `Bool m.paused);
@@ -710,15 +706,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                then `Null
                else `String m.runtime.proactive_rt.last_preview);
            ]);
-           ("drift",
-             let toml_defaults =
-               (Keeper_types_profile.keeper_default_source_snapshot
-                  ~base_path:config.Workspace.base_path
-                  name)
-                 .defaults
-             in
-             drift_surface_json
-               ~unknown_toml_keys:toml_defaults.unknown_toml_keys);
            ("policy", `Assoc [
              ("voice_tools_available", `Bool (List.mem "keeper_voice_speak" allowed_tools));
              ("sandbox_profile",

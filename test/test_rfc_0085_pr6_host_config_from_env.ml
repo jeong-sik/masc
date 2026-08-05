@@ -4,7 +4,7 @@ open Alcotest
     so Config_dir_resolver and other callers can route through
     [Host_config.from_env ()] instead of importing
     [Env_config_core.base_path_raw_opt] / [config_dir_opt] /
-    [personas_dir_opt] / [normalize_masc_base_path_input] directly.
+    [normalize_masc_base_path_input] directly.
 
     Phase 1 (this PR): introduce the surface.  Phase 2 (follow-up PR)
     migrates [Config_dir_resolver] callers and deletes the
@@ -44,16 +44,6 @@ let test_data_dir_field_reads_env () =
     check (option string) "data_dir field reflects env" (Some "/var/lib/masc") h.data_dir)
 ;;
 
-let test_personas_dir_field_reads_env () =
-  with_env "MASC_PERSONAS_DIR" (Some "/etc/masc/personas") (fun () ->
-    let h = Host_config.host () in
-    check
-      (option string)
-      "personas_dir field reflects env"
-      (Some "/etc/masc/personas")
-      h.personas_dir)
-;;
-
 let test_empty_env_yields_none () =
   with_env "MASC_BASE_PATH" (Some "") (fun () ->
     let h = Host_config.host () in
@@ -74,7 +64,6 @@ let () =
       , [ test_case "base_path" `Quick test_base_path_field_reads_env
         ; test_case "config_dir" `Quick test_config_dir_field_reads_env
         ; test_case "data_dir" `Quick test_data_dir_field_reads_env
-        ; test_case "personas_dir" `Quick test_personas_dir_field_reads_env
         ] )
     ; ( "empty env semantics"
       , [ test_case "empty -> None" `Quick test_empty_env_yields_none ] )

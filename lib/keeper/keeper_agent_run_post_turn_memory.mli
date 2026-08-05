@@ -12,7 +12,6 @@ val run :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   generation:int ->
-  profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   turn:int ->
   oas_turn_count:int ->
   actual_tools:string list ->
@@ -29,12 +28,6 @@ val run :
 
     [inference_telemetry] is [result.response.telemetry] from the OAS
     result; it is optional because some providers do not emit telemetry.
-
-    [profile_defaults] feeds the persona-name resolution shared with the
-    keeper's own system prompt
-    ([Keeper_types_profile.load_resolved_persona_extended]); the resolved
-    persona text rides the Librarian input so curation judges importance
-    through the keeper's identity.
 
     The post-turn entrypoint owns Librarian admission and its execution fence.
     Disabled or invalid configuration does not submit a Librarian unit or read

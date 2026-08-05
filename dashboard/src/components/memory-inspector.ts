@@ -63,11 +63,11 @@ interface BlockMeta {
   readonly color: string
   // Whether this block is the memory-os contribution to the prompt. Mirrors the
   // prototype MEM_BLOCKS `mem` flag (memory.jsx) — only memory_os_recall
-  // carries recalled memory; the rest are persona/context/surface.
+  // carries recalled memory; the rest are instructions/context/surface.
   readonly mem: boolean
 }
 const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
-  persona: { lbl: '페르소나', color: 'var(--text-dim)', mem: false },
+  keeper_instructions: { lbl: 'Keeper 지침', color: 'var(--text-dim)', mem: false },
   dynamic_context: { lbl: '동적 컨텍스트', color: 'var(--volt)', mem: false },
   temporal_summary: { lbl: '시간 요약', color: 'var(--status-warn)', mem: false },
   memory_os_recall: { lbl: '메모리 회상', color: 'var(--volt-strong)', mem: true },
@@ -103,7 +103,7 @@ export function memCompositionFromBlocks(blocks: readonly TurnBlock[]): Composit
 }
 
 const INPUT_COMPONENT_META: Readonly<Record<TurnInputComponentId, BlockMeta>> = {
-  'prompt.persona': PROMPT_BLOCK_META.persona,
+  'prompt.keeper_instructions': PROMPT_BLOCK_META.keeper_instructions,
   'prompt.dynamic_context': PROMPT_BLOCK_META.dynamic_context,
   'prompt.temporal_summary': PROMPT_BLOCK_META.temporal_summary,
   'prompt.memory_os_recall': PROMPT_BLOCK_META.memory_os_recall,

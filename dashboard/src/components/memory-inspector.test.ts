@@ -92,11 +92,11 @@ function turnRecordsPayload() {
         absolute_turn: 7,
         turn_ref: 'trace-a#7',
         blocks: [
-          { block: 'persona', bytes: 1_200, digest: 'a'.repeat(64) },
+          { block: 'keeper_instructions', bytes: 1_200, digest: 'a'.repeat(64) },
           { block: 'memory_os_recall', bytes: 800, digest: 'c'.repeat(64) },
         ],
         input_components: [
-          { component: 'prompt.persona', bytes: 1_200 },
+          { component: 'prompt.keeper_instructions', bytes: 1_200 },
           { component: 'prompt.memory_os_recall', bytes: 800 },
           { component: 'tool_schemas', bytes: 1_600 },
           { component: 'message_user', bytes: 100 },
@@ -235,12 +235,12 @@ describe('MemoryInspector pure projections', () => {
 
   it('keeps prompt and final-input composition as separate measured views', () => {
     expect(memCompositionFromBlocks([
-      { block: 'persona', bytes: 1_200, digest: 'a' },
+      { block: 'keeper_instructions', bytes: 1_200, digest: 'a' },
       { block: 'memory_os_recall', bytes: 800, digest: 'b' },
       { block: 'temporal_summary', bytes: 0, digest: 'c' },
     ])).toMatchObject({
       totalBytes: 2_000,
-      parts: [{ key: 'persona' }, { key: 'memory_os_recall' }],
+      parts: [{ key: 'keeper_instructions' }, { key: 'memory_os_recall' }],
     })
     expect(memCompositionFromInputComponents([
       { component: 'tool_schemas', bytes: 64_000 },

@@ -8,7 +8,7 @@ import { isRecord, asBoolean, asNumber, asNullableString, asString, asRecordArra
 import { type TelemetryFreshnessMetadata } from './dashboard-shared'
 
 export type TurnPromptBlockId =
-  | 'persona'
+  | 'keeper_instructions'
   | 'dynamic_context'
   | 'temporal_summary'
   | 'memory_os_recall'
@@ -370,7 +370,7 @@ function wholeSecondIsoOfUnixSeconds(raw: number): string | null {
 
 function decodeTurnPromptBlockId(raw: unknown): TurnPromptBlockId | null {
   switch (raw) {
-    case 'persona':
+    case 'keeper_instructions':
     case 'dynamic_context':
     case 'temporal_summary':
     case 'memory_os_recall':
@@ -406,7 +406,7 @@ function decodeTurnBlockList(raw: unknown): TurnBlock[] | null {
 
 function decodeTurnInputComponentId(raw: unknown): TurnInputComponentId | null {
   switch (raw) {
-    case 'prompt.persona':
+    case 'prompt.keeper_instructions':
     case 'prompt.dynamic_context':
     case 'prompt.temporal_summary':
     case 'prompt.memory_os_recall':

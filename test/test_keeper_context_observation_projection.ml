@@ -37,7 +37,7 @@ let sample_record
   ; absolute_turn
   ; turn_ref = Ids.Turn_ref.make ~trace_id:sample_trace ~absolute_turn
   ; blocks =
-      [ { Turn_record.block = Prompt_block_id.Persona
+      [ { Turn_record.block = Prompt_block_id.Keeper_instructions
         ; bytes = 4
         ; digest = digest_of_label "aaaa"
         }

@@ -60,8 +60,8 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_list ctx args : tool_result =
   keeper_list_body ~config:ctx.config args
 
-let handle_keeper_persona_audit ctx args =
-  Persona_audit.handle ~config:ctx.config args
+let handle_keeper_audit ctx args =
+  Keeper_tool_keeper_audit.handle ~config:ctx.config args
 
 let parse_network_mode_or_error raw =
   match network_mode_of_string raw with
@@ -448,11 +448,6 @@ let handle_keeper_clear ctx args : tool_result =
 let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
   let ctx = resolve_ctx ctx ~name in
   match name with
-  | "masc_persona_list" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_list ctx args))
-  | "masc_persona_create" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_create ctx args))
-  | "masc_persona_update" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_update ctx args))
-  | "masc_persona_delete" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_delete ctx args))
-  | "masc_keeper_create_from_persona" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_create_from_persona ctx args))
   | "masc_keeper_up" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
   | "masc_keeper_status" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))
   | "masc_keeper_delegate" ->
@@ -480,7 +475,11 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
               ~config:ctx.config ~caller:ctx.agent_name args))
   | "masc_keeper_down" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
   | "masc_keeper_list" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_list ctx args))
-  | "masc_keeper_persona_audit" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_persona_audit ctx args))
+  | "masc_keeper_audit" ->
+    Some
+      (tool_result_with_tool_name
+         ~tool_name:name
+         (handle_keeper_audit ctx args))
   | "masc_keeper_reset" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_reset ctx args))
   | "masc_keeper_compact" ->
     Some
@@ -641,40 +640,6 @@ let () =
       | _ -> eio_context_missing name
     in
     match name with
-    | "masc_persona_list" ->
-      with_eio_context (fun ctx ->
-        Some
-          (tool_result_with_tool_name
-             ~tool_name:name
-             (Persona.handle_persona_list ctx args)))
-    | "masc_persona_create" ->
-      with_eio_context (fun ctx ->
-        run_external_effect (fun () ->
-          Some
-            (tool_result_with_tool_name
-               ~tool_name:name
-               (Keeper_tool_persona_crud.handle_persona_create ctx args))))
-    | "masc_persona_update" ->
-      with_eio_context (fun ctx ->
-        run_external_effect (fun () ->
-          Some
-            (tool_result_with_tool_name
-               ~tool_name:name
-               (Keeper_tool_persona_crud.handle_persona_update ctx args))))
-    | "masc_persona_delete" ->
-      with_eio_context (fun ctx ->
-        run_external_effect (fun () ->
-          Some
-            (tool_result_with_tool_name
-               ~tool_name:name
-               (Keeper_tool_persona_crud.handle_persona_delete ctx args))))
-    | "masc_keeper_create_from_persona" ->
-      with_eio_context (fun ctx ->
-        run_external_effect (fun () ->
-          Some
-            (tool_result_with_tool_name
-               ~tool_name:name
-               (handle_keeper_create_from_persona ctx args))))
     | "masc_keeper_list" ->
       Some (tool_result_with_tool_name ~tool_name:name (keeper_list_body ~config args))
     | "masc_keeper_delegate_status" ->
@@ -708,11 +673,11 @@ let () =
         Some (tool_result_with_tool_name ~tool_name:name (keeper_clear_body ~config args)))
     | "masc_keeper_reset" ->
       Some (tool_result_with_tool_name ~tool_name:name (keeper_reset_body ~config args))
-    | "masc_keeper_persona_audit" ->
+    | "masc_keeper_audit" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Keeper_tool_persona_audit.handle ~config args))
+           (Keeper_tool_keeper_audit.handle ~config args))
     | "masc_keeper_status" ->
       Some
         (tool_result_with_tool_name

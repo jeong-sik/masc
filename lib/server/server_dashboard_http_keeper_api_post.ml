@@ -848,8 +848,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                         }
                       in
                       (match
-                         Keeper_turn_up_args.parse
-                           ~allow_sandbox_fields:true keeper_ctx args_with_name
+                         Keeper_turn_up_args.parse keeper_ctx args_with_name
                        with
                        | Error result ->
                            respond_error reqd

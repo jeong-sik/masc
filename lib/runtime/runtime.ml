@@ -1191,9 +1191,8 @@ let runtimes_and_media_failover () =
   state.runtimes, state.media_failover
 ;;
 
-(* RFC persona⊥{model,runtime}: keeper→runtime assignment is sourced from
-   [[runtime.assignments]] (runtime.toml SSOT), NOT from persona JSON or keeper
-   TOML. [None] = no explicit assignment; the caller falls back to
+(* Keeper-to-runtime assignment is sourced from [[runtime.assignments]] in
+   runtime.toml, not from keeper TOML. [None] = no explicit assignment; the caller falls back to
    {!get_default_runtime_id}. The returned id is opaque (masc never parses it;
    only the OAS adapter resolves it to provider/model/spec). Reads
    [keeper_assignments_ref], never a module-level eager binding. *)
@@ -1241,8 +1240,8 @@ let get_lane_by_id (id : string) : Runtime_lane.t option =
 ;;
 
 (* RFC-0207: resolve a runtime by its binding-key id ["provider.model"].  The
-   keeper turn driver dispatches to the *requested* runtime (a keeper's persona
-   [model] selection or the default) instead of unconditionally the default; an
+   keeper turn driver dispatches to the requested runtime assignment (or the
+   default) instead of unconditionally the default; an
    unknown id returns [None] so the driver fails fast (no silent substitution —
    RFC-0206 §2.1).  Reads [runtimes_ref], never a module-level eager binding. *)
 let get_runtime_by_id (id : string) : t option =

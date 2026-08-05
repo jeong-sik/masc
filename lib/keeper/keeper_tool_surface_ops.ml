@@ -15,8 +15,6 @@ open Keeper_runtime
 open Result.Syntax
 module Turn = Keeper_turn
 module Status = Keeper_status
-module Persona = Keeper_persona
-module Persona_audit = Keeper_tool_persona_audit
 type 'a context = 'a Keeper_types_profile.context = {
   config : Workspace.config;
   agent_name : string;
@@ -274,7 +272,7 @@ let keeper_list_effective_meta_error_json name err =
       ("terminal_reason", `String "effective_meta_read_failed");
       ("severity", `String "error");
       ("operator_action_required", `Bool true);
-      ("next_action", `String "fix_keeper_toml_or_persona_profile");
+      ("next_action", `String "fix_keeper_toml_or_keeper_instructions");
     ]
 
 let keeper_list_error_row_json ~runtime_class config name err =
@@ -388,64 +386,6 @@ let attach_identity_reseed ?identity_reseed json =
   match identity_reseed with
   | None -> json
   | Some note -> attach_assoc_field "identity_reseed" note json
-let handle_keeper_create_from_persona ctx args : tool_result =
-  if not Server_startup_state.((!state).state_ready) then begin
-    let elapsed = Server_startup_state.elapsed_since_start () in
-    Log.Keeper.warn "create_from_persona rejected: server not ready (%.1fs)" elapsed;
-    tool_result_error_data (startup_not_ready_error_data elapsed)
-  end else
-    match
-      let* persona, resolved_args =
-        Keeper_tool_persona_runtime.resolved_keeper_args_from_persona args
-        |> Result.map_error (fun e -> "" ^ e)
-      in
-      let dry_run = get_bool args "dry_run" false in
-      if dry_run then
-        Ok
-          (tool_result_ok_data
-             (`Assoc
-                [
-                  ( "persona",
-                    Keeper_tool_persona_runtime.persona_summary_to_json persona );
-                  ("created", `Bool false);
-                  ("resolved_args", resolved_args);
-                ]))
-      else
-        let* _rendered_toml =
-          Keeper_tool_persona_runtime.render_keeper_toml_from_resolved_args
-            resolved_args
-          |> Result.map_error (fun e -> "" ^ e)
-        in
-        let result =
-          with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args)
-        in
-        if not (tool_result_success result) then
-          Ok result
-        else
-          let* durable_config =
-            Keeper_tool_persona_runtime.persist_keeper_toml_from_resolved_args
-              resolved_args
-            |> Result.map_error (fun e ->
-                "keeper created but durable config write failed: " ^ e)
-          in
-          let created_json = Tool_result.data result in
-          let json =
-            `Assoc
-              [
-                ( "persona",
-                  Keeper_tool_persona_runtime.persona_summary_to_json persona );
-                ("created", `Bool true);
-                ("durable_config", durable_config);
-                ( "result",
-                  annotate_keeper_json ~runtime_class:"keeper" created_json );
-                ("resolved_args", resolved_args);
-              ]
-          in
-          invalidate_keeper_list_cache ();
-          Ok (tool_result_ok_data json)
-    with
-    | Ok result -> result
-    | Error err -> tool_result_error err
 let handle_keeper_up ctx args : tool_result =
   with_keeper_startup_gate (fun () -> execute_keeper_up ctx args)
 

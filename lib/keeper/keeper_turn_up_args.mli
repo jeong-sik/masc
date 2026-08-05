@@ -25,7 +25,6 @@ type parsed_args =
   ; proactive_enabled_opt : bool option
   ; sandbox_profile_opt : string option
   ; network_mode_opt : string option
-  ; persona_name_opt : string option
   ; instructions_arg : string option
   ; profile_defaults : keeper_profile_defaults
   ; instructions_opt : string option
@@ -50,7 +49,6 @@ val parse_max_context_override :
 (** Top-level parser: project the [keeper_up] tool args JSON to a
     [parsed_args] record, or return a [tool_result] error envelope. *)
 val parse :
-  ?allow_sandbox_fields:bool ->
   _ context ->
   Yojson.Safe.t ->
   (parsed_args, tool_result) result

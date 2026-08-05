@@ -128,7 +128,6 @@ readonly SCRIPT_DIR REPO_DIR RELEASE_DIR PROD_PORT HEALTH_URL BASE_PATH \
     PREPARE_UNDER_DEPLOYMENT_LEASE BUILD_EXE BUILD_PREFLIGHT_HELPER RELEASE_EXE \
     BACKUP_EXE KEEPER_ENV
 preserve_env_override MASC_CONFIG_DIR
-preserve_env_override MASC_PERSONAS_DIR
 if [ -f "$KEEPER_ENV" ]; then
     set -a
     # shellcheck disable=SC1090
@@ -142,7 +141,6 @@ if [ -f "$REPO_DIR/.env" ]; then
     set +a
 fi
 restore_env_override MASC_CONFIG_DIR
-restore_env_override MASC_PERSONAS_DIR
 
 if [ ! -d "$RUNTIME_ROOT" ] || [ -L "$RUNTIME_ROOT" ]; then
     echo "Error: deployment requires an existing exact runtime directory at $RUNTIME_ROOT" >&2

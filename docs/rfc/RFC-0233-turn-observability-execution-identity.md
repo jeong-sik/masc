@@ -54,7 +54,7 @@ identity is minted at the execution boundary.
 `keeper_run_tools_hooks.ml` assembles `extra_system_context` as an
 append chain — dynamic context, temporal summary, claimed-task nudge,
 retry nudge, memory-os recall **(verified)** — and
-`build_keeper_system_prompt` renders persona fields per turn. None of
+`build_keeper_system_prompt` renders keeper fields per turn. None of
 this is persisted per turn. Execution receipts carry only
 `extra_system_context_digest` and sizes
 (`lib/keeper/keeper_agent_run_receipt.ml:121-123` **(verified)**) — a
@@ -63,7 +63,7 @@ digest can prove *change* but cannot show *what changed*.
 Consequences observed in the diagnosis session:
 
 - Operators cannot answer "which instruction blocks entered or left this
-  turn's context" (issue trail: persona tone drift, post-idle amnesia —
+  turn's context" (issue trail: keeper tone drift, post-idle amnesia —
   the mechanism was only reconstructable by reading source).
 - Sampling options (model profile, temperature, thinking budget) are
   scattered: `runtime_profile` lives in `runtime_contract` per tool
@@ -132,7 +132,7 @@ type turn_record =
 
 `Prompt_block_id.t` is a closed sum mirroring today's real assembly
 chain in `keeper_run_tools_hooks.ml` and `keeper_prompt.ml`
-**(verified)**: `Persona | Continuity | Dynamic_context |
+**(verified)**: `Keeper | Continuity | Dynamic_context |
 Temporal_summary | Claimed_task_nudge | Retry_nudge | Memory_os_recall
 | Connected_surface | Other of string` — adding a new injection site
 without extending the variant is a compile-time error at the record

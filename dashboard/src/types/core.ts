@@ -39,13 +39,8 @@ export interface Agent {
   emoji?: string
   koreanName?: string
   model?: string
-  traits?: string[]
-  interests?: string[]
-  activityLevel?: number
   preferredHours?: number[]
   peakHour?: number
-  primaryValue?: string
-  personalityHint?: string
   synthetic?: boolean
 }
 
@@ -1270,10 +1265,6 @@ export interface Keeper {
     message_count?: number
     has_checkpoint?: boolean
   }
-  traits?: string[]
-  interests?: string[]
-  primaryValue?: string
-  activityLevel?: number
   recent_input_preview?: string | null
   recent_output_preview?: string | null
   recent_tool_names?: string[]
@@ -1418,16 +1409,6 @@ export interface RuntimeRef {
   item: string | null
 }
 
-export type KeeperFeatureStatus = 'wired' | 'source_only' | 'unwired'
-
-interface KeeperConfigDrift {
-  status: KeeperFeatureStatus
-  enabled: boolean | null
-  min_turn_gap: number | null
-  count_total: number | null
-  last_reason: string | null
-}
-
 export interface KeeperConfigActiveGoal {
   id: string
   title: string
@@ -1468,7 +1449,7 @@ interface KeeperConfigWorkspace {
 interface KeeperConfigSources {
   live_meta_path: string
   default_manifest_path: string | null
-  default_source_kind: 'toml' | 'persona' | null
+  default_source_kind: 'toml' | null
   precedence: string[]
   has_live_override: boolean
   override_fields: string[]
@@ -1523,7 +1504,6 @@ export interface KeeperConfig {
   prompt: KeeperConfigPrompt
   execution: KeeperConfigExecution
   proactive: KeeperConfigProactive
-  drift: KeeperConfigDrift
   hooks?: KeeperHookIntrospection
   runtime: KeeperConfigRuntime
   runtime_trust?: KeeperConfigRuntimeTrust | null

@@ -33,11 +33,6 @@ let dashboard_agent_json (agent : Masc_domain.agent) =
     ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
     ; "emoji", `String profile.emoji
     ; "koreanName", `String profile.korean_name
-    ; "model", `Null
-    ; "traits", `List (List.map (fun t -> `String t) profile.traits)
-    ; "interests", `List (List.map (fun i -> `String i) profile.interests)
-    ; "activityLevel", Json_util.float_opt_to_json profile.activity_level
-    ; "primaryValue", Json_util.string_opt_to_json profile.primary_value
     ]
 ;;
 

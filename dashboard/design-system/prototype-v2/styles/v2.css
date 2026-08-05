@@ -720,8 +720,6 @@
 /* keeper config drawer */
 .kc-text { width: 100%; font-family: var(--font-body); font-size: 13px; line-height: 1.55; padding: 10px 12px; background: var(--bg-sunken); color: var(--text-primary); border: 1px solid var(--border-main); border-radius: var(--radius-sm); outline: none; resize: vertical; }
 .kc-text:focus { border-color: var(--volt-dim); box-shadow: 0 0 0 2px var(--volt-wash); }
-.kc-traits { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.kc-trait { font-family: var(--font-ui); font-size: 10.5px; color: var(--volt-strong); border: 1px solid var(--volt-dim); background: var(--volt-wash); padding: 2px 9px; border-radius: var(--radius-pill); }
 .kc-save { width: 100%; margin-top: 4px; padding: 11px; background: var(--volt); color: var(--volt-ink); border: 0; border-radius: var(--radius-sm); font-family: var(--font-ui); font-weight: 600; font-size: 13px; cursor: pointer; transition: 0.14s; }
 .kc-save:hover { filter: brightness(1.06); }
 .turn-sec .set-row { padding: 8px 0; }

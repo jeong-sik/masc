@@ -214,8 +214,6 @@ val build_keeper_system_prompt
   -> unit
   -> string
 
-val append_trait_clause : base:string -> clause:string -> string
-
 (** {1 Fragment Detection (used by dashboard)} *)
 
 val looks_fragmentary_history_text : string -> bool

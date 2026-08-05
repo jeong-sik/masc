@@ -622,37 +622,6 @@ let launch_supervised_fiber
     launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg
 ;;
 
-(* #10993: persona drift visibility.
-
-   [Keeper_identity.normalize_all_names ~check_persona:true] runs on
-   every dispatch via [Mcp_tool_runtime_workspace] (RFC P3-a
-   logging-only mode), but its [Persona_not_found] branch emits a
-   Log.Misc.warn that is hard to triage:
-
-   - WARN level (alert ROC blends with normal degradation noise).
-   - Per-event (24h sample: 11 events × 5 keepers vs the underlying
-     truth of 9 keepers permanently mis-configured), so operators can
-     not tell whether the gap is widening or stable.
-   - Lacks the per-keeper startup snapshot that would let an operator
-     run a quick \[ls personas/\] and reconcile.
-
-   Surface the gap once at supervise_keepalive entry — the code path
-   that actually puts the keeper into the registry. Behaviour is
-   unchanged (still proceeds with fallback) so the boot path stays
-   compatible with the current 9-missing-personas fleet; the value is
-   in turning a silent runtime drift into a single ERROR per keeper
-   per supervisor restart.
-
-   The visibility ERROR is bounded by fleet size (~14 keepers) and
-   only fires on first registration — the [is_registered] guard above
-   skips repeat calls. *)
-let persona_name_for_drift_check = Startup_helpers.persona_name_for_drift_check
-let persona_profile_path_for_drift_check =
-  Startup_helpers.persona_profile_path_for_drift_check
-;;
-
-let log_persona_drift_if_missing = Startup_helpers.log_persona_drift_if_missing
-
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =
   Keeper_supervisor_supervise_keepalive.supervise_keepalive
     ~publish_lifecycle

@@ -32,9 +32,9 @@ List.map (fun (name, res) -> outcome_of_result name res) run_results
 
 그 결과 RFC-0277은 같은 model이 두 번 나타나면 parse-time에 거부할 수밖에 없었다(`preset_duplicate_model`): 두 패널이 동일 정체성 `"claude"`를 가지면 심판이 둘을 구분하지 못하고(`<panel model="claude">`가 두 개), `supporting_models: ["claude"]`가 어느 패널인지 모호해진다.
 
-### 1.2 막힌 시나리오: persona ensemble
+### 1.2 막힌 시나리오: keeper ensemble
 
-이 제약은 의미 있는 심의 패턴 하나를 막는다 — **같은 model을 다른 system_prompt로 여러 번** 돌리는 것(예: "Claude를 회의론자로 + Claude를 낙관론자로"). single-model multi-persona는 모델 다양성 없이도 입장 다양성을 만든다. RFC-0277의 이종 그룹은 *다른 model*의 이질성만 표현했고, *같은 model 다른 prompt*는 명시적 비목표였다.
+이 제약은 의미 있는 심의 패턴 하나를 막는다 — **같은 model을 다른 system_prompt로 여러 번** 돌리는 것(예: "Claude를 회의론자로 + Claude를 낙관론자로"). single-model multi-keeper는 모델 다양성 없이도 입장 다양성을 만든다. RFC-0277의 이종 그룹은 *다른 model*의 이질성만 표현했고, *같은 model 다른 prompt*는 명시적 비목표였다.
 
 ### 1.3 이 RFC가 하는 것
 

@@ -66,21 +66,10 @@ val done_signal_of_registry_result :
 val should_publish_lifecycle_for_done_signal : done_signal_resolution -> bool
 (** True only when this supervisor branch resolved [done_p] itself. *)
 
-val persona_name_for_drift_check :
-  keeper_meta -> (string, Keeper_types_profile.keeper_toml_load_error) result
-(** Resolve the persona handle used by supervisor persona-drift checks.
-    Honors keeper TOML [persona_name] overlays and preserves typed config
-    failures instead of projecting a fallback identity. *)
-
-val persona_profile_path_for_drift_check :
-  base_path:string -> string -> string
-(** Return the concrete persona [profile.json] path reported by supervisor
-    drift diagnostics. *)
-
-(** supervision_cohort type + cohort/persona helpers live in
+(** Supervision cohort types and helpers live in
     Keeper_supervisor_types (intra-library file split, 2026-05-16).
     Re-exported here so existing callers keep using
-    [Keeper_supervisor.supervision_cohort] etc. unchanged. *)
+    [Keeper_supervisor.supervision_cohort]. *)
 include module type of Keeper_supervisor_types
 
 

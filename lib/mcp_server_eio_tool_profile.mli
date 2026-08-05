@@ -15,7 +15,7 @@
     fields are part of the contract.  Cursor values themselves are
     opaque base64 strings produced by {!page_items_with_cursor}.
 
-    Internal: [StringSet] / [StringMap], [dedupe_tool_schemas_by_name],
+    Internal: [StringSet] / [StringMap],
     [managed_agent_passthrough_tool_names] (consumed by
     {!tool_schemas_for_profile} only), [label_words_from_identifier]
     + the [custom_tool_titles] / [custom_title_table] data tables
@@ -68,18 +68,14 @@ val operator_remote_instructions : string
 
 val tool_schemas_for_profile :
   ?include_hidden:bool ->
-  ?include_agent_internal:bool ->
   Mcp_server.server_state ->
   tool_profile ->
   Masc_domain.tool_schema list
-(** [tool_schemas_for_profile ?include_hidden ?include_agent_internal
+(** [tool_schemas_for_profile ?include_hidden
       state profile] returns the schema
     list visible on [profile]:
 
-    - [Full]: [Config.visible_tool_schemas] (gated by [include_hidden]),
-      deduped by name.  [include_agent_internal] is a retained no-op:
-      the Agent_internal surface was empty and was deleted in the
-      surface-cut refactor, so it adds no schema.
+    - [Full]: [Config.visible_tool_schemas] (gated by [include_hidden]).
     - [Managed_agent]: SDK tool contract +
       [managed_agent_passthrough_tool_names] subset.
     - [Operator_remote]: pinned [Tool_operator.remote_schemas].
@@ -88,20 +84,15 @@ val tool_schemas_for_profile :
     state-dependent filtering; currently unused. *)
 
 val tool_allowed_in_profile :
-  ?internal_keeper_runtime:bool ->
   Mcp_server.server_state ->
   tool_profile ->
   string ->
   bool
-(** [tool_allowed_in_profile ?internal_keeper_runtime state
+(** [tool_allowed_in_profile state
       profile tool_name] is the call-time gate (vs the
       list-time {!tool_schemas_for_profile}):
 
-    - [Full]: [tool_name] is in
-      [Config.visible_tool_schemas].  [internal_keeper_runtime] is a
-      retained no-op (default [false]): the Agent_internal surface was
-      empty and was deleted in the surface-cut refactor, so no tool is
-      gated by it.
+    - [Full]: [tool_name] is in [Config.visible_tool_schemas].
     - [Managed_agent]: SDK binding by name, OR present in the
       managed-agent profile schema list.
     - [Operator_remote]: in [Tool_operator.remote_tool_names]. *)

@@ -75,7 +75,7 @@ The roadmap proposes new architecture without acknowledging RFCs already drafted
 
 | RFC | Topic | Roadmap section it shadows |
 |---|---|---|
-| `RFC-0008` | CredentialProvider trait | Phase 2-2 (Provider backend separation) |
+| `RFC-0008` | CredentialProvider property | Phase 2-2 (Provider backend separation) |
 | `RFC-0019` | Keeper credential unification | Phase 2-2 |
 | `RFC-0020` | Keeper event queue layer separation | Phase 3-2 (Event-driven Queue) |
 | `RFC-0022` | Runtime attempt liveness contract | Phase 1-1 (Livelock FSM) |

@@ -25,7 +25,7 @@ code_refs:
 Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위에서 동작하며, 장기 실행 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession)을 담당한다. Task verification verdict는 Keeper lifecycle 밖의 application-owned system LLM agent 또는 authenticated HITL authority가 typed completion-authority 경계에서 결정한다. Keeper는 evidence를 제출할 수 있지만 verifier가 되지 않는다.
 
 Keeper 하나는 다음을 소유한다:
-- **identity**: `keeper_meta` 레코드 (이름, persona, instructions, typed goal/task links)
+- **identity**: `keeper_meta` 레코드 (이름, keeper, instructions, typed goal/task links)
 - **context**: `working_context` (system prompt + messages + token count + OAS context)
 - **memory**: Memory OS fact/episode store (legacy memory bank 제거 — RFC keeper-memory-consolidation Stage 4)
 - **lifecycle**: heartbeat fiber + supervisor + checkpoint store
@@ -78,7 +78,7 @@ graph LR
 | Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_oas.ml`, `keeper_hooks_oas.ml` | 4 |
 | Decision | `keeper_deliberation.ml` | 1 |
 | Supervision | `keeper_supervisor.ml`, `keeper_keepalive.ml`, `keeper_world_observation.ml` | 3 |
-| MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_persona.ml`, `keeper_schema.ml` | 4 |
+| MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_keeper.ml`, `keeper_schema.ml` | 4 |
 | Alerting / Metrics | `keeper_alerting*.ml`, `keeper_status_runtime*.ml`, `keeper_status_detail.ml` | 6+ |
 
 ---
@@ -421,20 +421,18 @@ Keeper work budget.
 Canonical file model:
 
 ```text
-<basepath>/.masc/config/personas/{name}/profile.json
+<basepath>/.masc/config/keepers/{name}/AGENT.md
 <basepath>/.masc/config/keepers/{name}.toml
 <basepath>/.masc/keepers/{name}.json
 <basepath>/.masc/keepers/{name}/...
 ```
 
-- `profile.json`: identity / persona blueprint
+- `AGENT.md`: complete Keeper prompt
 - `keepers/{name}.toml`: deployment declaration for this basepath
 - `.masc/keepers/{name}.json`: durable runtime state
 - `.masc/keepers/{name}/...`: metrics, decisions, trajectories, checkpoints, and other high-cardinality runtime artifacts
 
-keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, persona defaults를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
-
-Current implementation note: compatibility reasons may still cause some authored fields to be materialized into `.masc/keepers/{name}.json`, but the intended edit surfaces remain persona profile and keeper TOML.
+keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, Keeper prompt를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
 
 ---
 

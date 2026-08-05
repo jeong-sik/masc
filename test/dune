@@ -297,7 +297,6 @@
   test_keeper_typed_labels
   test_exec_shell_command_gate
   test_keeper_classifier_helper
-  test_persona_crud_profile_shape
   test_turn_id_propagation
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
@@ -592,7 +591,6 @@
   test_keeper_typed_labels
   test_exec_shell_command_gate
   test_keeper_classifier_helper
-  test_persona_crud_profile_shape
   test_turn_id_propagation
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
@@ -800,7 +798,7 @@
  (modules test_fusion_run_registry_persist)
  (libraries alcotest fs_compat yojson masc.fusion_core))
 
-; RFC-0207: per-keeper LLM runtime routing (persona [model] selection + driver fail-fast).
+; RFC-0207: per-keeper LLM runtime routing (runtime assignment + driver fail-fast).
 
 (test
  (name test_runtime_per_keeper_routing)
@@ -822,7 +820,7 @@
  (libraries masc_test_deps))
 
 ; A keeper must not be offered its own authored tasks as claimable work —
-; otherwise a routing/report persona re-triggers on its own output.
+; otherwise a routing/report keeper re-triggers on its own output.
 
 (test
  (name test_keeper_self_authored_task_exclusion)
@@ -937,11 +935,6 @@
   test_keeper_identity_parse
   test_keeper_identity_normalize
   test_workspace_bind_fail_closed
-  test_keeper_personality_io_parse
-  test_keeper_personality_io_coerce
-  test_keeper_personality_io_validate
-  test_keeper_personality_io_compare
-  test_keeper_personality_io_render
   test_keeper_identity_outcome_label
   test_worker_runtime
   test_capability_registry
@@ -976,8 +969,6 @@
   test_sandbox_inspect_trim_10488
   test_credential_alias_10440
   test_dashboard_k2_feeds
-  test_keeper_profile_normalize_10552
-  test_personality_field_diff_10269
   test_masc_log_utc_filename_10392
   test_keeper_tag_dispatch
   test_mcp_server_eio
@@ -1090,11 +1081,6 @@
   test_keeper_identity_parse
   test_keeper_identity_normalize
   test_workspace_bind_fail_closed
-  test_keeper_personality_io_parse
-  test_keeper_personality_io_coerce
-  test_keeper_personality_io_validate
-  test_keeper_personality_io_compare
-  test_keeper_personality_io_render
   test_keeper_identity_outcome_label
   test_worker_runtime
   test_capability_registry
@@ -1129,8 +1115,6 @@
   test_sandbox_inspect_trim_10488
   test_credential_alias_10440
   test_dashboard_k2_feeds
-  test_keeper_profile_normalize_10552
-  test_personality_field_diff_10269
   test_masc_log_utc_filename_10392
   test_keeper_tag_dispatch
   test_mcp_server_eio
@@ -1892,7 +1876,6 @@
 
 
 
-(include stanzas/test_keeper_personality_round_trip.inc)
 
 (include stanzas/test_keeper_post_turn_wirein_order.inc)
 (include stanzas/test_keeper_request_wire_observation.inc)
@@ -1916,7 +1899,6 @@
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
-(include stanzas/test_keeper_supervisor_persona_drift_order.inc)
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
 
@@ -2005,9 +1987,6 @@
 
 (include stanzas/test_otel_otlp_export_e2e.inc)
 
-(include stanzas/test_personality_diff_summary_10269.inc)
-
-(include stanzas/test_personality_text_equal.inc)
 
 (include stanzas/test_shutdown_flag.inc)
 
@@ -2238,7 +2217,7 @@
   ../lib/server/server_runtime_bootstrap.ml))
 
 ; RFC-0085 PR-6 — Host_config exposes env-derived path fields
-; (base_path / config_dir / data_dir / personas_dir) + from_env alias.
+; (base_path / config_dir / data_dir) + from_env alias.
 
 (test
  (name test_rfc_0085_pr6_host_config_from_env)
@@ -2283,7 +2262,7 @@
   unix))
 
 ; RFC-0085 PR-8 — config_dir_resolver env-derived path reads routed through
-; Host_config.from_env; Env_config_core config_dir_opt + personas_dir_opt
+; Host_config.from_env; Env_config_core config_dir boundary
 ; removed.
 
 (test
@@ -2348,16 +2327,6 @@
  (modules test_rfc_0085_pr16_dashboard_http_core_rename)
  (libraries alcotest ast_grep)
  (deps ../lib/server/server_dashboard_http_core.ml))
-
-; RFC-0085 PR-15 — Retroactive AST test for tool_schemas_inline rename
-; (#15483 shipped without a regression test; restored by #15495).
-
-(test
- (name test_rfc_0085_pr15_tool_schemas_inline_rename)
- (modules test_rfc_0085_pr15_tool_schemas_inline_rename)
- (libraries alcotest ast_grep)
- (deps
-  ../lib/tool_schemas/tool_schemas_inline.ml))
 
 ; RFC-0085 PR-14 — dispatch / dispatch_structured / guarded_dispatch
 ; 3-step chain inlined; guarded_dispatch is the only dispatch entry.
@@ -2555,4 +2524,3 @@
   (source_tree %{workspace_root}/config/prompts)
   %{workspace_root}/test/fixtures/keeper_system_prompt/assembled_prompt.golden)
  (libraries alcotest masc_test_deps))
-

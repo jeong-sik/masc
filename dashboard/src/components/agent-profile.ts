@@ -231,7 +231,6 @@ function CharacterPlate({ name }: { name: string }) {
         <${AgentAvatar}
           name=${name}
           status=${headerStatus}
-          traits=${agent?.traits}
           size="xl"
           currentWork=${currentWork}
           activityAge=${lastActivity}

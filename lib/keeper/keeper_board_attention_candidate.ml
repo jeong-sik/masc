@@ -260,7 +260,6 @@ let keeper_context_to_yojson (meta : Keeper_meta_contract.keeper_meta) =
          ; "keeper_record_id", Json_util.option_to_yojson Ids.Keeper_id.to_yojson meta.id
          ; ( "keeper_runtime_uid"
            , Json_util.option_to_yojson Keeper_id.uid_to_yojson meta.keeper_id )
-         ; "persona", Json_util.option_to_yojson (fun value -> `String value) meta.persona
          ; "instructions", `String meta.instructions
          ; "active_goal_ids", json_string_list meta.active_goal_ids
          ; ( "current_task_id"
@@ -1073,7 +1072,6 @@ let validate_keeper_context ~keeper_name json =
       ; "agent_name"
       ; "keeper_record_id"
       ; "keeper_runtime_uid"
-      ; "persona"
       ; "instructions"
       ; "active_goal_ids"
       ; "current_task_id"
@@ -1111,10 +1109,6 @@ let validate_keeper_context ~keeper_name json =
     optional_string_of_yojson
       ~context:(context ^ ".keeper_runtime_uid")
       keeper_runtime_uid
-  in
-  let* persona = field ~context "persona" fields in
-  let* () =
-    optional_string_of_yojson ~context:(context ^ ".persona") persona
   in
   let* active_goal_ids = field ~context "active_goal_ids" fields in
   let* () =

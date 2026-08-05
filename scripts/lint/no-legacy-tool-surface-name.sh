@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Guard against re-emergence of pre-RFC-0064 public tool names in the
-# descriptor-backed tool surface and keeper-facing prompt/persona/config files.
+# descriptor-backed tool surface and keeper-facing prompt/config files.
 #
 # After the MASC web-alias split, the active keeper-facing public names are:
 #   Execute, Read, Edit, Write, Grep, Search, WebSearch, WebFetch
@@ -8,10 +8,10 @@
 # The retired names — Bash, ReadFile, WriteFile, EditFile, SearchFiles,
 # SearchWeb, FetchWeb — must not reappear as quoted string literals in active
 # tool-surface modules or as prompt-visible tool names in keeper prompts,
-# personas, and keeper TOML configs. Prompt-visible text must also not tell
+# prompts and keeper TOML configs. Prompt-visible text must also not tell
 # keepers to call stale implementation names such as keeper_bash or
 # keeper_shell. This script is intentionally narrow: it only scans files that
-# declare/route public tool names plus prompt/persona/config files that tell
+# declare/route public tool names plus prompt/config files that tell
 # keepers what to call. Identifiers and code symbols (e.g. OCaml `Read`
 # modules) are untouched.
 #
@@ -67,7 +67,7 @@ SCAN_GLOBS=(
 )
 
 PROMPT_SCAN_FILES=("docs/KEEPER-CAPABILITY-MATRIX.md")
-for prompt_dir in config/prompts config/personas config/keepers; do
+for prompt_dir in config/prompts config/keepers; do
   [[ -d "$prompt_dir" ]] || continue
   while IFS= read -r prompt_file; do
     PROMPT_SCAN_FILES+=("$prompt_file")

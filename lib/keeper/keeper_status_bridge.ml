@@ -5,13 +5,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 
-let drift_surface_json ~unknown_toml_keys =
-  `Assoc
-    [ "unknown_toml_keys", Json_util.json_string_list unknown_toml_keys
-    ; "unknown_toml_keys_count", `Int (List.length unknown_toml_keys)
-    ]
-;;
-
 let auto_execution_session_surface_json () =
   `Assoc [ "status", `String "removed"; "enabled", `Bool false ]
 ;;
@@ -26,7 +19,7 @@ let effective_declarative_runtime_id
       (_defaults : keeper_profile_defaults)
       (meta : keeper_meta)
   =
-  (* persona⊥{model,runtime}: the keeper's runtime is assigned in runtime.toml,
+  (* The keeper's runtime is assigned in runtime.toml,
      not in [_defaults].  Delegate to
      {!Keeper_meta_contract.runtime_id_of_meta} (the dispatcher), matching the
      keeper_runtime.ml copy, so the status override view and the wire share ONE
@@ -424,7 +417,7 @@ let source_provenance_json config (meta : keeper_meta) =
      ; ( "active_config_root_source"
        , `String (Config_dir_resolver.source_to_string resolution.config_root.source) )
      ; "config_resolution", Config_dir_resolver.to_json resolution
-     ; "precedence", `List [ `String "live_meta"; `String "toml"; `String "persona" ]
+     ; "precedence", `List [ `String "live_meta"; `String "keeper_config" ]
      ]
      @ [ "has_live_override", `Bool (override_fields <> [])
        ; "override_fields", Json_util.json_string_list override_fields

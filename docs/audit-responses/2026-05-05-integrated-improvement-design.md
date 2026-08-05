@@ -117,9 +117,9 @@ GitHub identity materialization은 현재 설계 대상이 아니다. audit이 �
 |--------|------|------|
 | `config/keepers/`에 14개 .toml 파일 | **6개** (`base.toml`, `issue_king.toml`, `masc-improver.toml`, `ramarama.toml`, `sangsu.toml`, `taskmaster.toml`) | **D** |
 | 36개로 확장 → 36개 파일 | base+overrides 패턴 이미 적용됨 — `sangsu.toml` line 2: `base = "base.toml"` (overrides 4 줄) — superseded 2026-07-27 | **D** |
-| "5개 keeper 파일을 base+overrides로 축소 필요"의 근거 | 이미 5 persona × ~5 line override + 1 base.toml 구조 — superseded 2026-07-27 | **D** |
+| "5개 keeper 파일을 base+overrides로 축소 필요"의 근거 | 이미 5 keeper × ~5 line override + 1 base.toml 구조 — superseded 2026-07-27 | **D** |
 
-**§1-4 결과**: audit의 가장 명백한 stale. 5 persona file은 이미 minimal
+**§1-4 결과**: audit의 가장 명백한 stale. 5 keeper file은 이미 minimal
 override 형태이고 36-keeper로 늘어나도 1 line 추가 수준. base+overrides는
 이미 land.
 
@@ -154,13 +154,12 @@ override 형태이고 36-keeper로 늘어나도 1 line 추가 수준. base+overr
 실시간 reload는 RFC-0027의 PR-9a/9b가 dual-track resolver로 풀고 있는 axis.
 사용자 결정 후 별도 RFC로.
 
-### §2 요구사항 2: Persona 생성 + 올바른 필드만
+### §2 요구사항 2: Keeper 생성 + 올바른 필드만
 
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
-| `unknown keys: keeper.base` 경고 | **경고 없음으로 확인됨**: `lib/keeper/keeper_types_profile.ml:1237` 에서 `keeper.base` 를 base inheritance pointer 로 별도 처리하고, 1253 줄에서 `unknown_toml_keys` 리스트에서 명시적으로 filter out (`k <> "keeper.base"`). 즉 `keeper.base` 키는 valid key 로 인정되며 warning 발생 시점이 없음 — **superseded 2026-07-27: 인용된 코드는 삭제됨. `keeper.base` 는 이제 unknown key 로 WARN + drift 보고됨(audit 쪽이 맞음)** | **D → 현재 무효** |
-| 죽은 필드 (`work_discovery_sources`, `retired_git_author_config`, etc.) | active cleanup 트랙: **#13091 (drop dead persona-schema computed signals -6 LOC)**, **#13076 (unexport internal-only helpers across 4 components)**, **#13070 (-655 LOC dead ide-editor-mock)**, **#13071 (-40 LOC orphans)** — 같은 axis 매주 진행 | **B** |
-| `masc persona create` CLI + validate | 미구현 | **C — design idea** |
+| 죽은 필드 (`work_discovery_sources`, `retired_git_author_config`, etc.) | active cleanup 트랙: **#13091 (drop dead keeper-schema computed signals -6 LOC)**, **#13076 (unexport internal-only helpers across 4 components)**, **#13070 (-655 LOC dead ide-editor-mock)**, **#13071 (-40 LOC orphans)** — 같은 axis 매주 진행 | **B** |
+| `masc keeper create` CLI + validate | 미구현 | **C — design idea** |
 
 **§2-2 결과**: 죽은 필드 cleanup은 매우 active한 트랙. CLI 자체는 unimplemented.
 
@@ -169,7 +168,7 @@ override 형태이고 36-keeper로 늘어나도 1 line 추가 수준. base+overr
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
 | 모든 필드가 TOML에 노출됨 | sangsu.toml 실제 5줄 (basic 필드만) — base.toml에 default 응집 — **superseded 2026-07-27: base.toml 삭제, default 응집 없음. 각 keeper TOML 이 자기 값을 명시** | **D → 현재 무효** |
-| `--advanced` 옵션 필요 | 5 persona file이 모두 minimal override임을 감안하면 advanced disclosure는 unprioritized | **C** |
+| `--advanced` 옵션 필요 | 5 keeper file이 모두 minimal override임을 감안하면 advanced disclosure는 unprioritized | **C** |
 
 **§2-3 결과**: 현재 config는 이미 minimal. Progressive disclosure는 향후 CLI
 도입 시점에 reopen.
@@ -178,7 +177,7 @@ override 형태이고 36-keeper로 늘어나도 1 line 추가 수준. base+overr
 
 ### §3-1 3-Tier Config (Basic / Advanced / Godmode)
 
-설계 자체는 design idea. 현재 5 persona TOML이 이미 minimal이라 즉시 도입할
+설계 자체는 design idea. 현재 5 keeper TOML이 이미 minimal이라 즉시 도입할
 경계는 약함. **C — design idea, low priority**.
 
 ### §3-2 생성 기능: CLI + API + TUI
@@ -220,7 +219,7 @@ candidate (RFC-0029)**.
 | retired nested tool-access preset field | 중복 with `tools.preset` | sangsu.toml line 8 실제 사용. `tools.preset`은 audit의 가정 키 | **D — false** |
 | `sandbox_profile` | 기본값이라 advanced로 | 5 TOML 모두 미선언 — 이미 default | **D** |
 | `network_mode` | 기본값이라 advanced로 | 5 TOML 모두 미선언 — 이미 default | **D** |
-| `retired_credential_config` | persona에서 파생 | 검증 필요 | TBD |
+| `retired_credential_config` | keeper에서 파생 | 검증 필요 | TBD |
 | `max_context_tokens` | tier에서 파생 | tier 자체가 runtime routing이라 derive 가능 | **C** |
 | `fallback_runtime` | tier 순서에서 파생 | RFC-0027의 weighted_entry로 더 정밀 | **B** |
 | `keeper_assignable` | advanced로 | 5 TOML 미선언 | **D** |
@@ -266,7 +265,7 @@ cleanup 트랙에 추가 가능.
 |---|------------|------|------|
 | 4 | `masc create keeper` CLI/API | **C** | 진짜 unimplemented. 사용자 결정 필요 |
 | 5 | `masc create runtime` CLI/API | **C** | 진짜 unimplemented. RFC-0027과 정합성 확인 |
-| 6 | `masc create persona` CLI/API | **C** | 진짜 unimplemented |
+| 6 | `masc create keeper` CLI/API | **C** | 진짜 unimplemented |
 | 7 | Auto-credential + auto-registration | **C** | dependency on #4-6 |
 
 ### Phase 2: 구조 변경
@@ -276,7 +275,7 @@ cleanup 트랙에 추가 가능.
 | 8 | Turn slot 1개 → K/2개 | **D** | 이미 32 default + env-tunable |
 | 9 | Semaphore → Token Bucket | **B** | RFC-0026/0027 active axis (memory `feedback_semaphore_tier_is_architectural_anti_pattern.md`) |
 | 10 | Dashboard N+1 → batch query | **C** | 진짜 design improvement. SQL 제안은 스택 mismatch — RFC-0029 후보 |
-| 11 | Config TOML 14개 → base+overrides 2개 | **D → 현재 무효** | 이미 적용됨 (5 persona × `base = "base.toml"`) — superseded 2026-07-27: 기제 제거, 파일당 self-contained |
+| 11 | Config TOML 14개 → base+overrides 2개 | **D → 현재 무효** | 이미 적용됨 (5 keeper × `base = "base.toml"`) — superseded 2026-07-27: 기제 제거, 파일당 self-contained |
 
 ### Phase 3: 필드 정리
 
@@ -320,7 +319,7 @@ cleanup 트랙에 추가 가능.
 | 후보 RFC | 내용 | 우선순위 결정 사항 |
 |---------|------|-----------------|
 | **RFC-0029 후보** | Dashboard snapshot N+1 → fiber-batched aggregation (SQL 아님) | 진짜 measurement 데이터 수집 후 결정 |
-| **RFC-0030 후보** | `masc create keeper/runtime/persona` CLI/API + auto-registration | "operator UX" priority confirm 필요 |
+| **RFC-0030 후보** | `masc create keeper/runtime/keeper` CLI/API + auto-registration | "operator UX" priority confirm 필요 |
 | **RFC-0031 후보** | 3-Tier 필드 노출 (Progressive Disclosure) | RFC-0030 후 도입 시 자연스러움 |
 | **RFC-0032 후보** | 1662 raw env mention → unified JSON config | 매우 큰 cross-cut 변경. 별도 sprint |
 
@@ -352,7 +351,7 @@ cleanup 트랙에 추가 가능.
 
 **`work.source`는 audit이 추정한 키이며 코드에 존재하지 않음**. 분류 **D**.
 
-### §10.2 §4-1 `retired_credential_config` ("persona에서 파생 가능")
+### §10.2 §4-1 `retired_credential_config` ("keeper에서 파생 가능")
 
 `rg "retired_credential_config\b" lib/keeper/` → 12 hit, 명시 필드:
 
@@ -364,7 +363,7 @@ cleanup 트랙에 추가 가능.
   의 valid value 중 하나로 사용 — 즉 *파생 가능한 다른 모드와의 enumeration*
   으로 선택되는 명시 필드.
 
-**Persona에서 자동 파생되는 구조가 아님**; 분류 **D**.
+**Keeper에서 자동 파생되는 구조가 아님**; 분류 **D**.
 
 ### §10.3 §4-3 `probe_timeout_sec` ("orphan")
 

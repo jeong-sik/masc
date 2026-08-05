@@ -164,7 +164,7 @@ record (`memory_os_selection_policy`) so the JSON object is not an untyped inlin
 
 The `dashboard_*` bounds describe read-panel payload bounds. The `recall_*` bounds describe prompt
 injection defaults from `Keeper_memory_os_recall` and are intentionally separate: the dashboard scans
-more rows than the prompt injects. `persona_weighting` is not emitted because no such runtime feature
+more rows than the prompt injects. `keeper_weighting` is not emitted because no such runtime feature
 exists. For non-`_shared` keepers, the policy must include the shared tier: actual recall reads the
 keeper-local bounded store and then appends private-precedence facts from `_shared`.
 
@@ -184,7 +184,7 @@ Replace the fixture-bound model in `memory-inspector.ts` with decoders over the 
   A `categoryMeta(c): {lbl; glyph; cls}` is **exhaustive** (TS `never` check on the closed arms);
   the `{unknown}` arm renders the raw label, never drops it. This is the no-string-match property.
 - **Composition** from real blocks: take the latest `entries` row for the keeper, group its
-  `blocks` by `block` id, sum `bytes`. Parts are the real `Prompt_block_id` arms (Persona,
+  `blocks` by `block` id, sum `bytes`. Parts are the real `Prompt_block_id` arms (Keeper,
   Dynamic_context, Memory_os_recall, User_model, Connected_surface, …), each labeled and colored;
   the "memory" portion is the real `Memory_os_recall` + `User_model` blocks. Total/secondary line:
   real `usage.input_tokens` and `context_window`. Units are **bytes** for the bar, **tokens** for the

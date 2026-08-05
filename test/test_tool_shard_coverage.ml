@@ -20,19 +20,6 @@ let schema_names schemas =
   List.map (fun (schema : Types.tool_schema) -> schema.name) schemas
 ;;
 
-let dedupe_names names =
-  let _, names_rev =
-    List.fold_left
-      (fun (seen, names_rev) name ->
-         if Set_util.StringSet.mem name seen
-         then seen, names_rev
-         else Set_util.StringSet.add name seen, name :: names_rev)
-      (Set_util.StringSet.empty, [])
-      names
-  in
-  List.rev names_rev
-;;
-
 let get_json_assoc key = function
   | `Assoc fields ->
     (match List.assoc_opt key fields with
@@ -55,7 +42,7 @@ let family_catalog =
 ;;
 
 let test_complete_flat_schema_catalog () =
-  let expected_names = family_catalog |> schema_names |> dedupe_names in
+  let expected_names = family_catalog |> schema_names in
   let catalog_names = schema_names Tool_shard.all_keeper_tool_schemas in
   Alcotest.(check (list string))
     "catalog contains every schema family exactly once"
@@ -66,7 +53,7 @@ let test_complete_flat_schema_catalog () =
 let test_catalog_names_are_unique () =
   let names = schema_names Tool_shard.all_keeper_tool_schemas in
   Alcotest.(check int)
-    "exact-name de-duplication"
+    "schema names are unique"
     (List.length (List.sort_uniq String.compare names))
     (List.length names)
 ;;
@@ -159,7 +146,7 @@ let test_board_projections_are_not_in_flat_keeper_catalog () =
   |> List.filter_map Tool_shard_types.keeper_board_schema
   |> List.iter (fun (schema : Types.tool_schema) ->
     Alcotest.(check bool)
-      (schema.name ^ " is not a global first-wins schema")
+      (schema.name ^ " is not in the flat handler catalog")
       false
       (List.mem schema.name flat_names))
 ;;

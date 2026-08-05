@@ -488,7 +488,6 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TaskLoadFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ReconcileFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string DecisionAuditFlushFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string PersonaDriftMissing) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string WorkspaceInitFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string PresenceSyncFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string CycleExceptions) |> int_of_float)

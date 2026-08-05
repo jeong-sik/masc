@@ -303,26 +303,30 @@ Failed tool calls include recovery hints automatically. Common patterns:
 
 ## 7. Keeper Bootstrap
 
-Persona blueprint에서 keeper를 명시적으로 만들려면:
+Keeper를 새로 만들려면:
 
 ```text
-masc_keeper_create_from_persona(persona_name: "sangsu")
+masc_keeper_up(
+  name: "sangsu",
+  instructions: "Keep working autonomously and report concrete evidence.",
+  sandbox_profile: "local"
+)
 ```
 
-이미 등록된 keeper를 다시 올리거나, template 기준으로 fresh 재생성하려면:
+이미 설정된 Keeper를 다시 올리려면:
 
 ```text
 masc_keeper_up(name: "sangsu")
 ```
 
 전제조건:
-- `PERSONAS_ROOT/<name>/profile.json`이 존재해야 한다 (또는 `CONFIG_ROOT/keepers/<name>.toml`)
-- `PERSONAS_ROOT`는 `MASC_PERSONAS_DIR` 우선, 없으면 resolved `CONFIG_ROOT/personas`를 사용한다.
+- TOML-backed Keeper는 `CONFIG_ROOT/keepers/<name>.toml`과
+  `CONFIG_ROOT/keepers/<name>/AGENT.md`를 함께 가져야 한다.
+- config root는 `MASC_CONFIG_DIR` 우선, 없으면 `<base-path>/.masc/config`다.
 - 운영 기준은 항상 `<base-path>/.masc`다. 공유 keeper 상태를 보려면 `--base-path` 또는 `MASC_BASE_PATH`를 명시해서 서버와 같은 base path를 사용한다.
 - `start-masc.sh`는 worktree에서 실행해도 base-path 규칙을 그대로 따른다.
 - shared keeper 상태 대신 별도 `.masc/`를 쓰고 싶을 때만 `--base-path`를 다른 base path로 명시적으로 덮어쓴다.
 - resolved config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `<MASC_BASE_PATH>/.masc/config`를 초기화/사용한다. repo `config/`는 체크인된 default/example seed source이며, live root가 아니다.
-- `MASC_PERSONAS_DIR` 환경변수로 persona만 repo 밖 경로로 분리할 수 있다.
 
 ## 8. Release-Grade Smoke
 
@@ -336,11 +340,10 @@ scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/lo
 
 bundle contract와 해석 기준은 `docs/RELEASE-EVIDENCE.md`를 SSOT로 본다.
 
-공유 config/persona를 repo 밖에 두고 실행하는 예시:
+공유 config/keeper를 repo 밖에 두고 실행하는 예시:
 
 ```bash
 export MASC_CONFIG_DIR=/srv/masc/config
-export MASC_PERSONAS_DIR=/srv/masc/personas
 ./start-masc.sh --http --port 8935 --base-path /srv/masc/runtime
 ```
 

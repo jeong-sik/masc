@@ -1450,11 +1450,16 @@ let masc_agent_descriptor id name description ~readonly =
     ()
 ;;
 
-let masc_workspace_descriptor id name description ~readonly
+let masc_workspace_descriptor
+    ?(keeper_model_projection = Internal_name)
+    id
+    name
+    description
+    ~readonly
   =
   cluster_descriptor
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection
     ~id:("masc.workspace." ^ id)
     ~name
     ~description
@@ -1921,7 +1926,28 @@ let internal_descriptors : t list =
   ; masc_agent_descriptor "get_metrics" "masc_get_metrics"
       "Read aggregated agent metrics." ~readonly:true
   (* ── RFC-0182 §3.1 — masc_workspace_* cluster (8 entries) ────────── *)
-  ; masc_workspace_descriptor "status" "masc_status"
+  (* Operator-only: [masc_status] answers with the operator's status *screen*.
+     Workspace_status renders it for a terminal — emoji, a box-drawing rule, a
+     [Players:] roster that includes non-Keeper MCP clients, a [Task binding:]
+     line of seven fields, and an [Attention:] list whose entry for a Keeper is
+     "Your agent session is not bound", a CLI concept a Keeper has no session to
+     bind. Its own header calls it a display and caps the roster at
+     [max_agents_display].
+
+     A Keeper is handed the same facts as typed per-turn context: the world
+     state frame already carries the backlog counts, the running fiber count,
+     and the Keeper's own recent Board posts. Exposing the screen on top of that
+     offered a second, untyped copy whose only Keeper-specific line was a false
+     warning.
+
+     The tool itself stays registered: the dashboard Settings "Server check"
+     calls it through MCP, [GET /api/v1/status] maps to it, and it remains in
+     the public MCP surface for CLI clients. Only the Keeper model projection
+     goes. *)
+  ; masc_workspace_descriptor
+      ~keeper_model_projection:Operator_only
+      "status"
+      "masc_status"
       "Read overall workspace status." ~readonly:true
   ; masc_workspace_descriptor
       "heartbeat"

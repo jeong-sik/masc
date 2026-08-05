@@ -28,6 +28,7 @@ type pending_board_event_kind =
   | Goal_assigned
   | Goal_reconciliation_ready
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
+  | Task_cancelled of Keeper_event_queue.task_cancellation
 
 type pending_board_event =
   { event_kind : pending_board_event_kind
@@ -60,7 +61,9 @@ let is_board_activity_event (event : pending_board_event) =
      event to the Scheduled Automation renderer and drop it from
      [board_activity_count]. *)
   | Goal_reconciliation_ready -> true
-  | Completion_authority_rejected _ -> false
+  (* Neither carries a Board post, so routing either here would count a
+     non-existent post in [board_activity_count]. Each has its own renderer. *)
+  | Completion_authority_rejected _ | Task_cancelled _ -> false
 ;;
 
 let is_scheduled_automation_event (event : pending_board_event) =
@@ -73,7 +76,8 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | External_attention
   | Goal_assigned
   | Goal_reconciliation_ready
-  | Completion_authority_rejected _ -> false
+  | Completion_authority_rejected _
+  | Task_cancelled _ -> false
 ;;
 
 let is_completion_authority_rejection_event (event : pending_board_event) =
@@ -86,7 +90,25 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Schedule_due _
   | External_attention
   | Goal_assigned
-  | Goal_reconciliation_ready -> false
+  | Goal_reconciliation_ready
+  | Task_cancelled _ -> false
+;;
+
+(* A cancellation of a Task this Keeper authored. Kept off the Board Activity
+   and Scheduled Automation renderers: it has no Board post to point at and no
+   schedule behind it. *)
+let is_task_cancellation_event (event : pending_board_event) =
+  match event.event_kind with
+  | Task_cancelled _ -> true
+  | Board_post_created
+  | Board_comment_added
+  | Board_reaction_changed _
+  | Fusion_completed
+  | Schedule_due _
+  | External_attention
+  | Goal_assigned
+  | Goal_reconciliation_ready
+  | Completion_authority_rejected _ -> false
 ;;
 
 type scheduled_automation_item =
@@ -141,6 +163,7 @@ type event_queue_trigger =
   | Connector_attention_stimulus
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
+  | Task_cancellation_stimulus
   | Manual_compaction_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
@@ -151,6 +174,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Connector_attention_pending
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
+  | Task_cancellation_pending
   | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
@@ -685,6 +709,44 @@ let pending_board_event_of_completion_authority_rejection
   }
 ;;
 
+(* The author asked for this work and another Keeper ended it. Without this
+   projection the cancellation reached the author through no channel at all:
+   completion posts a verdict to Board and submission posts a request, but a
+   cancellation left only a backlog field and an activity row. *)
+let pending_board_event_of_task_cancellation
+      ~(arrived_at : float)
+      (cancellation : Keeper_event_queue.task_cancellation)
+  : pending_board_event
+  =
+  let reason_text =
+    match cancellation.tc_reason with
+    | Some reason when String.trim reason <> "" -> reason
+    | Some _ | None -> "no reason was given"
+  in
+  { event_kind = Task_cancelled cancellation
+  ; post_id = Keeper_event_queue.task_cancellation_post_id cancellation
+  ; author = cancellation.tc_cancelled_by
+  ; title = Printf.sprintf "Task %s was cancelled" cancellation.tc_task_id
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (Printf.sprintf
+           "Task %s, which you created, was cancelled by %s. Stated reason: %s"
+           cancellation.tc_task_id
+           cancellation.tc_cancelled_by
+           reason_text)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = Some cancellation.tc_cancelled_by
+  ; latest_external_preview = Some (short_preview ~max_len:80 reason_text)
+  }
+;;
+
 let pending_board_event_of_stimulus
       ~(meta : keeper_meta)
   (stimulus : Keeper_event_queue.stimulus)
@@ -737,6 +799,12 @@ let pending_board_event_of_stimulus
          (pending_board_event_of_completion_authority_rejection
             ~arrived_at:stimulus.arrived_at
             rejection))
+  | Keeper_event_queue.Task_cancelled cancellation ->
+    Ok
+      (Some
+         (pending_board_event_of_task_cancellation
+            ~arrived_at:stimulus.arrived_at
+            cancellation))
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
@@ -1194,6 +1262,10 @@ let has_pending_completion_authority_rejection
     observation.pending_board_events
 ;;
 
+let has_pending_task_cancellation (observation : world_observation) =
+  List.exists is_task_cancellation_event observation.pending_board_events
+;;
+
 let keeper_cycle_decision
       ?(reactive_wake = false)
       ?(event_queue_triggers = [])
@@ -1241,6 +1313,7 @@ let keeper_cycle_decision
                  | Bootstrap_stimulus_pending
                  | Connector_attention_pending
                  | Hitl_resolved_pending
+                 | Task_cancellation_pending
                  | Manual_compaction_pending
                  | Scheduled_autonomous_turn
                  | Scheduled_automation_due
@@ -1248,6 +1321,15 @@ let keeper_cycle_decision
                  | Never_started -> false)
                triggers)
     then triggers @ [ Completion_authority_rejection_pending ]
+    else triggers
+    (* Same shape as the rejection injection above: the observation may carry a
+       cancellation whose stimulus was already consumed from the event queue by
+       an earlier cycle, and the turn must still be attributable to it rather
+       than reported as an unexplained autonomous tick. *)
+  |> fun triggers ->
+    if has_pending_task_cancellation observation
+       && not (List.mem Task_cancellation_pending triggers)
+    then triggers @ [ Task_cancellation_pending ]
     else triggers
   in
   let blocked_channel =

@@ -413,7 +413,8 @@ let source_terminal_receipt_of_stimulus source =
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_reconciliation_ready _
-  | Keeper_event_queue.Completion_authority_rejected _ ->
+  | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_cancelled _ ->
     Error "source event does not carry a typed terminal receipt"
 ;;
 

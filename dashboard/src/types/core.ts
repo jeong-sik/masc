@@ -62,6 +62,14 @@ export interface Task {
   created_at?: string
   updated_at?: string
   completed_at?: string
+  /** Present only for status=cancelled; the API flattens it out of the task
+   *  status. `assignee` is null on a cancelled task because the status no
+   *  longer carries one, so this is the only actor the row can name. */
+  cancelled_by?: string | null
+  /** Stated reason for a terminal transition, flattened out of the task status
+   *  alongside `cancelled_by`. Distinct from `handoff_context.reason`, which is
+   *  a working note the assignee left and is usually absent on a plain cancel. */
+  reason?: string | null
   predecessor_task_id?: string | null
   contract?: TaskContract | null
   handoff_context?: TaskHandoffContext | null

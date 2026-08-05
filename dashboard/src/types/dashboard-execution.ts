@@ -575,6 +575,9 @@ export interface DashboardExecutionResponse {
   offline_worker_briefs?: unknown[]
   agents?: unknown[]
   tasks?: unknown[]
+  /** Backlog counts computed server-side. `total` is the whole backlog, while
+   *  `tasks` above carries only the rows the payload chose to send. */
+  task_counts?: unknown
   messages?: unknown[]
   keepers?: unknown[]
 }
@@ -623,6 +626,12 @@ export interface GoalTreeTask {
   goal_id: string | null
   linkage_source: 'explicit' | 'title_tag' | 'mixed' | 'none' | string
   is_terminal: boolean
+  /** Present only for status=cancelled. A cancellation that has aged out of
+   *  the execution payload reaches Work through this tree alone, so the card
+   *  has no other source for the actor or the reason. `reason` is absent when
+   *  the canceller gave none. */
+  cancelled_by?: string | null
+  reason?: string | null
   created_at: string
   updated_at: string
 }

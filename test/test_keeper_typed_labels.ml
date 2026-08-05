@@ -154,7 +154,8 @@ let test_actionable_signal_labels_unique () =
     "no duplicate actionable_signal labels" [] (duplicates labels)
 
 (* Precedence is documented contract in [keeper_contract_classifier.mli]:
-   unclaimed_tasks > completion_authority_rejection > board_activity. The caller in
+   unclaimed_tasks > completion_authority_rejection > task_cancellation >
+   board_activity. The caller in
    [keeper_agent_run.ml] (issue #11266 Track 2c) relies on this ordering
    to attribute violation log lines to the strongest available signal. *)
 let test_classify_precedence_unclaimed_dominates_board () =
@@ -162,6 +163,7 @@ let test_classify_precedence_unclaimed_dominates_board () =
     { unclaimed_task_count = 1
     ; board_activity_count = 1
     ; completion_authority_rejection_count = 0
+    ; task_cancellation_count = 0
     }
   in
   match Keeper_contract_classifier.classify_actionable_signal o with
@@ -176,6 +178,7 @@ let test_classify_board_signal () =
     { unclaimed_task_count = 0
     ; board_activity_count = 1
     ; completion_authority_rejection_count = 0
+    ; task_cancellation_count = 0
     }
   in
   match Keeper_contract_classifier.classify_actionable_signal o with
@@ -190,6 +193,7 @@ let test_classify_no_signal_returns_no_actionable () =
     { unclaimed_task_count = 0
     ; board_activity_count = 0
     ; completion_authority_rejection_count = 0
+    ; task_cancellation_count = 0
     }
   in
   match Keeper_contract_classifier.classify_actionable_signal o with

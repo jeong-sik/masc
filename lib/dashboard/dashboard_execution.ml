@@ -4,6 +4,50 @@ include Dashboard_execution_builders
 
 module Agent_name_map = Set_util.StringMap
 
+(* How many tasks that reached a terminal status inside the recency window the
+   execution payload carries. The window itself is the filter; this bounds the
+   payload when a burst of tasks ends at once. *)
+let recent_terminal_limit = 20
+
+(* Tasks that reached a terminal status within [cutoff], newest first, bounded
+   by [recent_terminal_limit].
+
+   Ordering is part of the contract, not a presentation detail: the previous
+   implementation truncated in backlog order, which is insertion order, so once
+   more than the limit ended inside the window the surfaced rows were the
+   *oldest* of them — new tasks append — and a panel labelled "recent" omitted
+   the most recent entries.
+
+   Pure and separately exported so the ordering is testable without booting a
+   workspace; the payload builder holds no second copy of this rule. *)
+let recent_terminal_tasks ~cutoff (tasks : Masc_domain.task list) : Masc_domain.task list =
+  tasks
+  |> List.filter_map (fun (t : Masc_domain.task) ->
+    let terminal_at =
+      (* Exhaustive on [task_status]: a new terminal status must name its own
+         recency field here rather than silently never appearing. *)
+      match t.task_status with
+      | Masc_domain.Done { completed_at; _ } -> Some completed_at
+      | Masc_domain.Cancelled { cancelled_at; _ } -> Some cancelled_at
+      | Masc_domain.Todo
+      | Masc_domain.Claimed _
+      | Masc_domain.InProgress _
+      | Masc_domain.AwaitingVerification _ -> None
+    in
+    match terminal_at with
+    | None -> None
+    | Some timestamp ->
+      (* An unparseable timestamp places the row in neither the window nor the
+         ordering, so it is left out of this panel rather than pinned to an
+         invented time. The task still counts toward [total]. *)
+      (match Masc_domain.parse_iso8601_opt timestamp with
+       | Some ts when ts >= cutoff -> Some (ts, t)
+       | Some _ | None -> None))
+  |> List.sort (fun (left, _) (right, _) -> Float.compare right left)
+  |> take recent_terminal_limit
+  |> List.map snd
+;;
+
 let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
   let workspace_state_opt =
     if Workspace.is_initialized config then Some (Workspace.read_state config) else None
@@ -815,21 +859,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
            not (Masc_domain.task_status_is_terminal t.task_status))
         tasks
     in
-    let recent_done =
-      tasks
-      |> List.filter (fun (t : Masc_domain.task) ->
-        match t.task_status with
-        | Masc_domain.Done { completed_at; _ } ->
-          (match Masc_domain.parse_iso8601_opt completed_at with
-           | Some ts -> ts >= recent_cutoff
-           | None -> false)
-        | Masc_domain.Cancelled { cancelled_at; _ } ->
-          (match Masc_domain.parse_iso8601_opt cancelled_at with
-           | Some ts -> ts >= recent_cutoff
-           | None -> false)
-        | _ -> false)
-      |> take 20
-    in
+    let recent_done = recent_terminal_tasks ~cutoff:recent_cutoff tasks in
     (* Cap removed (2026-04-16): active_tasks is already bounded by
          how many tasks exist in state, and recent_done is capped at 20
          above. The previous [take 50] silently truncated the backlog in

@@ -534,6 +534,46 @@ type task_handoff_context = {
   updated_by : string option; [@default None]
 } [@@deriving show, yojson { strict = false }]
 
+(** The "why" behind a transition that stopped work, from whichever argument
+    carried it. Two entry points supply it differently: [transition_task_r]
+    takes an explicit [reason], while [release_task_r] takes none at all and
+    forwards only a handoff context, which the production release tool requires
+    for a strict release. [task_handoff_context.reason] is the same concept
+    under a different argument, so it is read when the explicit one is empty.
+
+    Single definition on purpose: the committed broadcast and the author wake
+    both answer "why did this stop", and computing the answer twice let them
+    disagree about the same cancellation. Returns [None] when neither carries a
+    non-blank reason — distinct from a reason that is the empty string. *)
+let stated_reason ~(reason : string option)
+      ~(handoff_context : task_handoff_context option) : string option =
+  let non_blank value =
+    match String.trim value with
+    | "" -> None
+    | trimmed -> Some trimmed
+  in
+  (* [reason] then [summary]. A strict release is rejected without
+     [handoff_context.summary] while [reason] stays optional, so a release
+     whose whole explanation is its summary would otherwise publish a bare
+     "Released <id>" — dropping text the caller was required to supply.
+     [failure_mode] is left out: it classifies, it does not explain. *)
+  let from_handoff () =
+    match handoff_context with
+    | None -> None
+    | Some context ->
+      (match context.reason with
+       | Some context_reason when Option.is_some (non_blank context_reason) ->
+         non_blank context_reason
+       | Some _ | None -> non_blank context.summary)
+  in
+  match reason with
+  | None -> from_handoff ()
+  | Some explicit ->
+    (match non_blank explicit with
+     | Some stated -> Some stated
+     | None -> from_handoff ())
+;;
+
 (** Task definition *)
 type task = {
   id: string;

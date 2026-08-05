@@ -11,6 +11,7 @@ type stimulus_kind =
       (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
   | Goal_reconciliation_ready
   | Completion_authority_rejected
+  | Task_cancelled
 
 type reaction_kind =
   | Turn_started
@@ -37,6 +38,7 @@ let stimulus_kind_to_string = function
   | Goal_assigned -> "goal_assigned"
   | Goal_reconciliation_ready -> "goal_reconciliation_ready"
   | Completion_authority_rejected -> "completion_authority_rejected"
+  | Task_cancelled -> "task_cancelled"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -54,6 +56,7 @@ let stimulus_kind_of_string = function
   | "goal_assigned" -> Some Goal_assigned
   | "goal_reconciliation_ready" -> Some Goal_reconciliation_ready
   | "completion_authority_rejected" -> Some Completion_authority_rejected
+  | "task_cancelled" -> Some Task_cancelled
   | _ -> None
 ;;
 
@@ -95,6 +98,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
     Goal_reconciliation_ready
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Completion_authority_rejected
+  | Keeper_event_queue.Task_cancelled _ -> Task_cancelled
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -207,6 +211,11 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "completion_authority_rejected task_id=%s verification_id=%s"
       rejection.car_task_id
       rejection.car_verification_id
+  | Keeper_event_queue.Task_cancelled cancellation ->
+    Printf.sprintf
+      "task_cancelled task_id=%s cancelled_by=%s"
+      cancellation.tc_task_id
+      cancellation.tc_cancelled_by
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -226,6 +235,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Goal_assigned _
     | Keeper_event_queue.Goal_reconciliation_ready _ -> None
     | Keeper_event_queue.Completion_authority_rejected _ -> None
+    | Keeper_event_queue.Task_cancelled _ -> None
   in
   `Assoc
     (base_fields
@@ -837,7 +847,8 @@ let decode_current_row ~keeper_name row =
         | Manual_compaction
         | Goal_assigned
         | Goal_reconciliation_ready
-        | Completion_authority_rejected ),
+        | Completion_authority_rejected
+        | Task_cancelled ),
         _ -> Ok ()
     in
     let expected_event_id = digest_id "krl" (stimulus_id ^ "|stimulus") in
@@ -1218,7 +1229,8 @@ let board_stimulus_token metadata stimulus_kind =
   | Manual_compaction
   | Goal_assigned
   | Goal_reconciliation_ready
-  | Completion_authority_rejected -> None
+  | Completion_authority_rejected
+  | Task_cancelled -> None
 ;;
 
 let summarize_rows ~keeper_name ~limit rows =

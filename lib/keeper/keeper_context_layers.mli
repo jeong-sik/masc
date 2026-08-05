@@ -20,6 +20,7 @@ type layer_id =
   | Autonomous_trigger
   | Scheduled_automation
   | Completion_authority
+  | Task_cancellations
   | Pending_mentions
   | Scope_messages
   | Own_board_posts

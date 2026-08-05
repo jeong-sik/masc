@@ -73,6 +73,10 @@ type stimulus_payload =
          turn_reason; the injected pending observation drives the turn. *)
   | Goal_reconciliation_ready of goal_reconciliation_ready
   | Completion_authority_rejected of completion_authority_rejection
+  (* Cancellation is the one terminal outcome with no Board projection, and
+     Goal_reconciliation_ready targets the Goal owner — a Task with no Goal
+     link reaches no one. This carries the cancellation to the Task's author. *)
+  | Task_cancelled of task_cancellation
 
 and board_attention = {
   candidate_id : string;
@@ -154,6 +158,12 @@ and completion_authority_rejection = {
   car_authority : Masc_domain.completion_authority;
 }
 
+and task_cancellation = {
+  tc_task_id : string;
+  tc_cancelled_by : string;
+  tc_reason : string option;
+}
+
 let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_id
 
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
@@ -173,6 +183,11 @@ let completion_authority_rejection_post_id
   =
   "completion-authority-rejected:" ^ rejection.car_task_id ^ ":"
   ^ rejection.car_verification_id
+
+(* Cancellation is terminal, so the task id alone is a complete key: a second
+   cancellation of the same task cannot occur. *)
+let task_cancellation_post_id (cancellation : task_cancellation) =
+  "task-cancelled:" ^ cancellation.tc_task_id
 
 let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
@@ -210,6 +225,11 @@ let enqueue (queue : t) (s : stimulus) : t =
 let identity_payload = function
   | Goal_assigned ga ->
     Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
+  | Task_cancelled cancellation ->
+    (* The reason is operator-facing prose whose wording can vary between
+       retries of the same cancellation; identity is the task and who ended
+       it. *)
+    Task_cancelled { cancellation with tc_reason = None }
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Manual_compaction_requested | Goal_reconciliation_ready _
@@ -318,13 +338,15 @@ let payload_kind_label = function
   | Goal_assigned _ -> "goal_assigned"
   | Goal_reconciliation_ready _ -> "goal_reconciliation_ready"
   | Completion_authority_rejected _ -> "completion_authority_rejected"
+  | Task_cancelled _ -> "task_cancelled"
 
 let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
   | Bootstrap | Fusion_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
   | Manual_compaction_requested | Goal_assigned _
-  | Goal_reconciliation_ready _ | Completion_authority_rejected _ ->
+  | Goal_reconciliation_ready _ | Completion_authority_rejected _
+  | Task_cancelled _ ->
     false
 
 let drain_board_all (queue : t) : stimulus list * t =
@@ -559,6 +581,16 @@ let payload_to_yojson = function
         , `String
             (Masc_domain.completion_authority_actor rejection.car_authority) )
       ]
+  | Task_cancelled cancellation ->
+    `Assoc
+      [ "kind", `String "task_cancelled"
+      ; "task_id", `String cancellation.tc_task_id
+      ; "cancelled_by", `String cancellation.tc_cancelled_by
+      ; ( "reason"
+        , match cancellation.tc_reason with
+          | None -> `Null
+          | Some reason -> `String reason )
+      ]
 
 let continuation_channel_field fields =
   let* json = required_field ~context:"stimulus.payload" "channel" fields in
@@ -756,6 +788,28 @@ let payload_of_yojson json =
          ; car_reason = reason
          ; car_authority = authority
          })
+  | "task_cancelled" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "task_id"; "cancelled_by"; "reason" ]
+        fields
+    in
+    let* task_id = string_field ~context "task_id" fields in
+    let* cancelled_by = string_field ~context "cancelled_by" fields in
+    (* [`Null] is the durable encoding of "no reason given" and round-trips
+       back to [None]; a missing field is a malformed record, not a silent
+       absence. *)
+    let* reason =
+      match List.assoc_opt "reason" fields with
+      | Some `Null -> Ok None
+      | Some (`String reason) -> Ok (Some reason)
+      | Some _ -> Error (context ^ ".reason must be a string or null")
+      | None -> Error (context ^ ".reason is missing")
+    in
+    Ok
+      (Task_cancelled
+         { tc_task_id = task_id; tc_cancelled_by = cancelled_by; tc_reason = reason })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =

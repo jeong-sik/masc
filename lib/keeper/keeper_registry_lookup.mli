@@ -7,6 +7,13 @@ open Keeper_registry_types
 (** Look up a keeper by name across all base_paths (O(n) scan). *)
 val find_by_name : string -> registry_entry option
 
+(** Look up a keeper by name within one base path. Callers that act on the
+    result inside a single workspace must use this rather than
+    {!find_by_name}: a same-named Keeper registered under another base path
+    is not a lane of this workspace, and treating it as one writes to a
+    queue nobody reads. *)
+val find_by_name_in_base_path : base_path:string -> string -> registry_entry option
+
 (** Look up a keeper by agent_name across all base_paths (O(n) scan). *)
 val find_by_agent_name : string -> registry_entry option
 

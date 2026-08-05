@@ -268,6 +268,88 @@ let test_goals_tree_preserves_approval_queue_unavailable () =
   check bool "summary is not synthesized" true
     (Yojson.Safe.Util.member "summary" json = `Null)
 
+(* A cancellation that has aged out of the execution payload's window reaches
+   the Work surface through this tree alone. Emitting only status left the card
+   as a bare "cancelled" with no actor and no explanation, while the status it
+   was built from carries both. [reason] is emitted only when the canceller
+   gave one, so an unexplained cancellation stays distinguishable from one
+   whose stated reason was empty. *)
+let cancelled_task id ~reason : MD.task =
+  { (make_done_task id) with
+    task_status =
+      MD.Cancelled
+        { cancelled_by = "keeper-rondo-agent"; cancelled_at = iso_now (); reason }
+  }
+
+let tree_field name json =
+  match json with
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+(* The explanation may have arrived on the handoff context rather than the
+   status field, and this payload carries no handoff_context for the reader to
+   fall back through. Serializing only [Cancelled.reason] left the card blank
+   for exactly the cancellations the broadcast and the author wake explain. *)
+let cancelled_with_handoff id ~handoff_reason ~summary : MD.task =
+  { (make_done_task id) with
+    task_status =
+      MD.Cancelled
+        { cancelled_by = "keeper-rondo-agent"; cancelled_at = iso_now (); reason = None }
+  ; handoff_context =
+      Some
+        { MD.summary
+        ; MD.reason = handoff_reason
+        ; next_step = None
+        ; failure_mode = None
+        ; reclaim_policy = None
+        ; evidence_refs = []
+        ; updated_at = None
+        ; updated_by = None
+        }
+  }
+
+let test_tree_task_falls_through_to_the_handoff_reason () =
+  let json =
+    Timeline.task_to_tree_json
+      ( cancelled_with_handoff "task-handoff" ~handoff_reason:(Some "sandbox lacks the service")
+          ~summary:"returning to backlog"
+      , "explicit" )
+  in
+  check (option string) "the handoff reason is projected" (Some "sandbox lacks the service")
+    (match tree_field "reason" json with Some (`String v) -> Some v | _ -> None)
+
+let test_tree_task_falls_through_to_the_handoff_summary () =
+  let json =
+    Timeline.task_to_tree_json
+      ( cancelled_with_handoff "task-summary" ~handoff_reason:None
+          ~summary:"returning to backlog until the sandbox ships it"
+      , "explicit" )
+  in
+  check (option string) "the handoff summary is projected"
+    (Some "returning to backlog until the sandbox ships it")
+    (match tree_field "reason" json with Some (`String v) -> Some v | _ -> None)
+
+let test_tree_task_carries_the_cancellation_actor_and_reason () =
+  let json = Timeline.task_to_tree_json (cancelled_task "task-aged" ~reason:(Some "superseded by G-2"), "explicit") in
+  check (option string) "the canceller is projected" (Some "keeper-rondo-agent")
+    (match tree_field "cancelled_by" json with Some (`String v) -> Some v | _ -> None);
+  check (option string) "the reason is projected" (Some "superseded by G-2")
+    (match tree_field "reason" json with Some (`String v) -> Some v | _ -> None)
+
+let test_tree_task_omits_an_absent_cancellation_reason () =
+  let json = Timeline.task_to_tree_json (cancelled_task "task-bare" ~reason:None, "explicit") in
+  check bool "the canceller is still projected" true
+    (Option.is_some (tree_field "cancelled_by" json));
+  check bool "no reason field when none was given" false
+    (Option.is_some (tree_field "reason" json))
+
+let test_tree_task_without_cancellation_carries_no_cancellation_fields () =
+  let json = Timeline.task_to_tree_json (make_done_task "task-done", "explicit") in
+  check bool "no canceller on a completed task" false
+    (Option.is_some (tree_field "cancelled_by" json));
+  check bool "no reason on a completed task" false
+    (Option.is_some (tree_field "reason" json))
+
 let () =
   run "goal metric unevaluated"
     [
@@ -291,5 +373,15 @@ let () =
             test_goal_projection_surfaces_invalid_activity_time;
           test_case "queue failure remains typed unavailable" `Quick
             test_goals_tree_preserves_approval_queue_unavailable;
+          test_case "tree task carries the cancellation actor and reason" `Quick
+            test_tree_task_carries_the_cancellation_actor_and_reason;
+          test_case "tree task falls through to the handoff reason" `Quick
+            test_tree_task_falls_through_to_the_handoff_reason;
+          test_case "tree task falls through to the handoff summary" `Quick
+            test_tree_task_falls_through_to_the_handoff_summary;
+          test_case "tree task omits an absent cancellation reason" `Quick
+            test_tree_task_omits_an_absent_cancellation_reason;
+          test_case "non-cancelled tree task carries no cancellation fields" `Quick
+            test_tree_task_without_cancellation_carries_no_cancellation_fields;
         ] );
     ]

@@ -22,6 +22,8 @@ type stimulus_kind =
       (** Linked Tasks reached a terminal boundary and Goal synthesis is ready. *)
   | Completion_authority_rejected
       (** System completion authority rejected Keeper evidence. *)
+  | Task_cancelled
+      (** Another Keeper cancelled a Task this Keeper authored. *)
 
 type reaction_kind =
   | Turn_started

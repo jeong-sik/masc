@@ -13,6 +13,7 @@ let obs ?(tasks = 0) ?(board = 0) () =
     C.unclaimed_task_count = tasks;
     board_activity_count = board;
     completion_authority_rejection_count = 0;
+    task_cancellation_count = 0;
   }
 
 let test_no_signal_when_empty () =

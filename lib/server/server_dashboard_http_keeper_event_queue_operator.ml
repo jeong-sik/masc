@@ -100,6 +100,16 @@ let pending_page ~after ~limit pending =
                [ "rejection_reason", `String rejection.car_reason
                ; "rejection_task_id", `String rejection.car_task_id
                ]
+             | Keeper_event_queue.Task_cancelled cancellation ->
+               (* The reason is emitted only when the canceller gave one, so an
+                  operator can tell an unexplained cancellation from one whose
+                  stated reason was empty. *)
+               [ "cancelled_task_id", `String cancellation.tc_task_id
+               ; "cancelled_by", `String cancellation.tc_cancelled_by
+               ]
+               @ (match cancellation.tc_reason with
+                  | None -> []
+                  | Some reason -> [ "cancelled_reason", `String reason ])
              | Keeper_event_queue.Board_signal _
              | Keeper_event_queue.Board_attention _
              | Keeper_event_queue.Bootstrap

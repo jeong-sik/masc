@@ -134,6 +134,8 @@ export function normalizeTask(raw: unknown): Task | null {
     created_at: asString(raw.created_at),
     updated_at: asString(raw.updated_at),
     completed_at: asString(raw.completed_at),
+    cancelled_by: asString(raw.cancelled_by) ?? null,
+    reason: asString(raw.reason) ?? null,
     contract,
     handoff_context: handoffContext,
     execution_links: executionLinks,

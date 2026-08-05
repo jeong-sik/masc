@@ -6,7 +6,7 @@ import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { route, navigate } from '../router'
-import { goals, tasks, keepers } from '../store'
+import { goals, tasks, keepers, executionTaskTotal } from '../store'
 import { goalTreeData } from '../goal-tree-state'
 import { normalizeTask } from '../store-normalizers'
 import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
@@ -49,11 +49,17 @@ type JobBucket = 'done' | 'wip' | 'verify' | 'blocked' | 'todo'
 type JobStateCls = 'done' | 'wip' | 'verify' | 'claimed' | 'cancelled' | 'todo' | 'blocked' | 'paused' | 'unknown'
 
 // ── Kanban view columns ─────────────────────────────────────────────────────
-// Closed tuple — cancelled is excluded by design (it has its own aside panel).
+// Closed tuple covering every terminal and non-terminal status.
 // Each entry: [task.status value, Korean column label, CSS modifier cls].
 // The cls values come directly from JobStateCls so KanbanCard can reuse the
 // same .wk-kcard.<cls> and .wk-kcol-dot.<cls> rules without extra mapping.
-type KanbanStatus = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification' | 'blocked' | 'paused' | 'unknown' | 'done'
+//
+// `cancelled` was previously the one status with no column, on the grounds that
+// the aside covers it — but the aside files it under 차단 alongside genuinely
+// blocked tasks, so a cancellation was indistinguishable from a stall and its
+// canceller was never shown. `done` was already a column, so excluding the
+// other terminal status was the inconsistency, not the fix.
+type KanbanStatus = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification' | 'blocked' | 'paused' | 'unknown' | 'done' | 'cancelled'
 type KanbanColumn = readonly [status: KanbanStatus, label: string, cls: JobStateCls]
 
 const KANBAN_COLUMNS: ReadonlyArray<KanbanColumn> = [
@@ -65,6 +71,7 @@ const KANBAN_COLUMNS: ReadonlyArray<KanbanColumn> = [
   ['paused',                statusLabel('paused'), 'paused'],
   ['unknown',               statusLabel('unknown'), 'unknown'],
   ['done',                  statusLabel('done'), 'done'],
+  ['cancelled',             statusLabel('cancelled'), 'cancelled'],
 ] as const
 
 interface JobState {
@@ -91,9 +98,24 @@ function jobStateForTask(task: Task): JobState {
   }
 }
 
+function nonBlank(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : undefined
+}
+
 function blockerNoteForTask(task: Task): string | null {
   if (task.status === 'cancelled') {
-    return task.handoff_context?.reason
+    // The canceller's stated reason arrives on the task itself; handoff_context
+    // is a note the assignee left and is usually absent on a plain cancel, so
+    // reading it first would show the older note instead of why this stopped.
+    // Mirrors Masc_domain.stated_reason: reason, then the handoff reason, then
+    // the handoff summary — which a strict transition is rejected without while
+    // reason stays optional, so it is often the only explanation there is. The
+    // backend already publishes it as the stated reason; skipping it here made
+    // the surface disagree with the broadcast and the author wake.
+    return task.reason
+      ?? task.handoff_context?.reason
+      ?? nonBlank(task.handoff_context?.summary)
       ?? task.handoff_context?.failure_mode
       ?? 'cancelled'
   }
@@ -214,9 +236,13 @@ function normalizeGoalStoreTaskStatus(value: unknown): GoalStoreTaskStatus {
 }
 
 function goalProgressCounts(goalTasks: Task[]): GoalProgressCounts {
-  const counts: GoalProgressCounts = { done: 0, wip: 0, verify: 0, blocked: 0, total: goalTasks.length }
-  for (const t of goalTasks) {
-    if (t.status === 'cancelled') continue
+  // Cancelled tasks leave the denominator as well as the numerators. They were
+  // already skipped for every bucket while still counted in `total`, so a goal
+  // with one completed and one cancelled task sat at 50% and could never
+  // reach 100%. Work that was called off is not work left to do.
+  const active = goalTasks.filter(t => t.status !== 'cancelled')
+  const counts: GoalProgressCounts = { done: 0, wip: 0, verify: 0, blocked: 0, total: active.length }
+  for (const t of active) {
     const bucket = jobStateForTask(t).bucket
     if (bucket === 'done') counts.done++
     else if (bucket === 'blocked') counts.blocked++
@@ -226,10 +252,16 @@ function goalProgressCounts(goalTasks: Task[]): GoalProgressCounts {
   return counts
 }
 
-function taskFromGoalTreeTask(task: GoalTreeTask): Task | null {
+// `containingGoalId` is the id of the tree node the task hangs under. The
+// backend tree projection carries no per-task goal_id, so without it a
+// tree-only task renders unlinked and its owning-goal jump is dead — visible
+// on any task older than the execution snapshot's window, which reaches the
+// surface through the tree alone.
+function taskFromGoalTreeTask(task: GoalTreeTask, containingGoalId: string): Task | null {
   const status = normalizeGoalStoreTaskStatus(task.status)
   const normalized = normalizeTask({
     ...task,
+    goal_id: task.goal_id ?? containingGoalId,
     status: status.status,
     status_raw: status.status_raw,
   })
@@ -257,7 +289,7 @@ function collectGoalTreeTasks(
     seen.add(node.id)
     return [
       ...node.tasks
-        .map(taskFromGoalTreeTask)
+        .map(task => taskFromGoalTreeTask(task, node.id))
         .filter((task): task is Task => task !== null),
       ...collectGoalTreeTasks(node.children, seen),
     ]
@@ -691,6 +723,15 @@ interface WkaBlockerTask {
   readonly title: string
   readonly blocker: string
   readonly goalId: string
+  /** Carried from the task status. A cancellation and a stall both landed in
+   *  this list under the same 차단 label, which made an operator unable to tell
+   *  "someone ended this" from "this is stuck". The status decides the label;
+   *  deriving it from `cancelledBy` instead would relabel every cancellation
+   *  that reaches this list without an actor as a block. */
+  readonly cancelled: boolean
+  /** The canceller, when the projection supplying this row carries one. Controls
+   *  only whether the actor is named, never whether the row reads as cancelled. */
+  readonly cancelledBy?: string
 }
 
 interface WkaBacklogTask {
@@ -1098,9 +1139,9 @@ function WorkAside({
                 onClick=${() => onJump(t.goalId)}
                 data-testid="wka-blocker-item"
               >
-                <span class="wka-todo-k">차단</span>
+                <span class="wka-todo-k">${t.cancelled ? '취소' : '차단'}</span>
                 <span class="wka-todo-t">${t.title}</span>
-                <span class="wka-todo-m">${t.blocker}</span>
+                <span class="wka-todo-m">${t.cancelledBy === undefined ? t.blocker : `${t.cancelledBy} · ${t.blocker}`}</span>
               </button>
             `)}
             ${backlog.length > 0 ? (() => {
@@ -1232,18 +1273,28 @@ function WorkSurfaceV2() {
     })
   }, [allTasks, claimed])
 
-  const liveTasks = claimedTasks.filter(t => t.status !== 'cancelled')
   // KPI semantics: when a Goal Store tree summary is present, use its active
   // goal count; otherwise fall back to the execution goal list. Task counts are
-  // always derived from the merged live task set so execution and tree tasks
-  // are counted consistently.
+  // always derived from the merged task set so execution and tree tasks are
+  // counted consistently.
+  //
+  // The "전체 작업" tile counts every task, so it reads the backlog size the
+  // execution payload reports rather than counting the rows it happened to
+  // send. Those rows are active tasks plus a bounded window of recent terminal
+  // ones; anything older is in neither that window nor the goal tree, and
+  // cancellations leave the window like everything else. Counting the visible
+  // set understated a total labelled 전체 — and it previously ran off a set
+  // with cancelled filtered out while `done` stayed in, so it was short by the
+  // cancelled tasks twice over. The visible count remains the fallback for a
+  // payload that omits task_counts. The sub-counts below are deliberately
+  // visible-set counts: they describe rows this view can show.
   const totals = useMemo(() => ({
     goals: goalTreeSnapshot?.summary.active_goals ?? goalList.length,
-    tasks: liveTasks.length,
-    wip: liveTasks.filter(t => t.status === 'in_progress' || t.status === 'claimed').length,
-    verify: liveTasks.filter(t => t.status === 'awaiting_verification').length,
+    tasks: executionTaskTotal.value ?? claimedTasks.length,
+    wip: claimedTasks.filter(t => t.status === 'in_progress' || t.status === 'claimed').length,
+    verify: claimedTasks.filter(t => t.status === 'awaiting_verification').length,
     backlog: claimedTasks.filter(t => isClaimableBacklogTask(t)).length,
-  }), [goalTreeSnapshot, goalList, liveTasks, claimedTasks])
+  }), [goalTreeSnapshot, goalList, claimedTasks, executionTaskTotal.value])
 
   // Goal title lookup: prefer execution-side goalList titles, but fall back
   // to Goal Store tree titles so tree-only goals still render context.
@@ -1348,6 +1399,8 @@ function WorkSurfaceV2() {
         title: t.title,
         blocker: blockerNoteForTask(t) ?? '',
         goalId: t.goal_id ?? '',
+        cancelled: t.status === 'cancelled',
+        cancelledBy: t.status === 'cancelled' ? (t.cancelled_by ?? undefined) : undefined,
       })),
   [claimedTasks])
 
@@ -1380,11 +1433,12 @@ function WorkSurfaceV2() {
     backlog: totals.backlog,
   }), [totals])
 
-  // Flat list of all non-cancelled tasks with goal context injected.
+  // Flat list of every task with goal context injected, cancelled included:
+  // KANBAN_COLUMNS now has a column for it, so filtering here would leave that
+  // column permanently empty.
   // Used by KanbanView to group by status column.
   const kanbanTasks = useMemo((): ReadonlyArray<KanbanTask> =>
     claimedTasks
-      .filter(t => t.status !== 'cancelled')
       .map(t => ({
         ...t,
         _goalId: t.goal_id ?? '',

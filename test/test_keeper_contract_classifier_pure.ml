@@ -14,11 +14,13 @@ let check_bool label expected actual =
   Alcotest.(check bool) label expected actual
 
 (* Helper to build a [world_observation] with named fields. *)
-let make_obs ?(rejections = 0) ~tasks ~board () : KCC.world_observation =
+let make_obs ?(rejections = 0) ?(cancellations = 0) ~tasks ~board ()
+  : KCC.world_observation =
   {
     unclaimed_task_count = tasks;
     board_activity_count = board;
     completion_authority_rejection_count = rejections;
+    task_cancellation_count = cancellations;
   }
 
 let signal_testable : KCC.actionable_signal Alcotest.testable =
@@ -95,6 +97,33 @@ let test_classify_none () =
 
 (* ── runner ──────────────────────────────────────────────────────────── *)
 
+(* A turn woken only by a cancellation of a Task this Keeper authored had no
+   count of its own, and cancellations are deliberately excluded from Board
+   activity because no Board post backs them. The receipt therefore recorded
+   "no_actionable_signal" for a turn that ran precisely because of one. *)
+let test_classify_cancellation_alone_is_actionable () =
+  check_signal "cancellation alone" KCC.Has_task_cancellation
+    (KCC.classify_actionable_signal
+       (make_obs ~tasks:0 ~board:0 ~cancellations:1 ()))
+
+let test_classify_cancellation_outranks_board () =
+  check_signal "cancellation > board" KCC.Has_task_cancellation
+    (KCC.classify_actionable_signal
+       (make_obs ~tasks:0 ~board:3 ~cancellations:1 ()))
+
+let test_classify_rejection_outranks_cancellation () =
+  check_signal "rejection > cancellation" KCC.Has_completion_authority_rejection
+    (KCC.classify_actionable_signal
+       (make_obs ~tasks:0 ~board:0 ~rejections:1 ~cancellations:1 ()))
+
+let test_signal_label_cancellation () =
+  check_string "Has_task_cancellation" "has_task_cancellation"
+    (KCC.actionable_signal_label KCC.Has_task_cancellation)
+
+let test_is_actionable_cancellation () =
+  check_bool "Has_task_cancellation is actionable" true
+    (KCC.is_actionable KCC.Has_task_cancellation)
+
 let () =
   Alcotest.run "Keeper_contract_classifier_pure"
     [
@@ -104,6 +133,8 @@ let () =
           Alcotest.test_case "Has_board_activity" `Quick test_signal_label_board;
           Alcotest.test_case "Has_completion_authority_rejection" `Quick
             test_signal_label_completion_authority_rejection;
+          Alcotest.test_case "Has_task_cancellation" `Quick
+            test_signal_label_cancellation;
           Alcotest.test_case "No_actionable_signal" `Quick test_signal_label_none;
         ] );
       ( "is_actionable",
@@ -112,6 +143,8 @@ let () =
           Alcotest.test_case "board → true" `Quick test_is_actionable_board;
           Alcotest.test_case "completion authority rejection → true" `Quick
             test_is_actionable_completion_authority_rejection;
+          Alcotest.test_case "cancellation → true" `Quick
+            test_is_actionable_cancellation;
           Alcotest.test_case "none → false" `Quick test_is_actionable_none;
         ] );
       ( "classify_actionable_signal precedence",
@@ -121,6 +154,12 @@ let () =
           Alcotest.test_case "board signal" `Quick test_classify_board_signal;
           Alcotest.test_case "completion authority rejection" `Quick
             test_classify_completion_authority_rejection;
+          Alcotest.test_case "cancellation alone is actionable" `Quick
+            test_classify_cancellation_alone_is_actionable;
+          Alcotest.test_case "cancellation > board" `Quick
+            test_classify_cancellation_outranks_board;
+          Alcotest.test_case "rejection > cancellation" `Quick
+            test_classify_rejection_outranks_cancellation;
           Alcotest.test_case "no signal" `Quick test_classify_none;
         ] );
     ]

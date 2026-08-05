@@ -6,9 +6,12 @@
       admitted the turn (before: current_task_id only suppressed guidance).
    2. [turn_decision] threads the scheduler's real cycle decision into the
       wake-reason section, so stimulus-driven wakes render their reason.
-   3. [?active_goal_summaries] renders goal titles next to ids, and a keeper
-      WITH goals receives a self-direction directive (parity with the
-      pre-existing no-goal branch). *)
+   3. [?active_goal_summaries] renders goal titles next to ids.
+
+   The third item once also pinned a self-direction directive for a keeper that
+   holds goals, mirroring a no-goal branch. masc#26123 ("stop the runtime
+   choosing the agent's next tool") removed both branches on purpose, so what is
+   pinned here now is their absence. *)
 
 open Alcotest
 
@@ -152,6 +155,32 @@ let contains ~needle haystack =
   in
   loop 0
 
+(* Prose assertions match a sentence, not a line. The prompt assets are
+   hard-wrapped markdown, so a needle that spans a wrap point fails on a space
+   the file writes as a newline — masc#26823 re-wrapped the merged asset and
+   broke an assertion whose sentence was still there, word for word. Collapse
+   runs of whitespace on both sides so re-wrapping prose stays invisible here
+   while deleting the sentence still fails. *)
+let collapse_whitespace text =
+  let buf = Buffer.create (String.length text) in
+  let in_space = ref false in
+  String.iter
+    (fun c ->
+      match c with
+      | ' ' | '\t' | '\n' | '\r' ->
+        if not !in_space then Buffer.add_char buf ' ';
+        in_space := true
+      | c ->
+        Buffer.add_char buf c;
+        in_space := false)
+    text;
+  Buffer.contents buf
+;;
+
+let contains_prose ~needle haystack =
+  contains ~needle:(collapse_whitespace needle) (collapse_whitespace haystack)
+;;
+
 let count_occurrences ~needle haystack =
   let needle_length = String.length needle in
   let haystack_length = String.length haystack in
@@ -231,7 +260,11 @@ let test_current_task_section_renders () =
     (contains ~needle:"- Prior handoff: lexer done, parser half-wired" user);
   check bool "handoff next step" true
     (contains ~needle:"- Suggested next step: wire parser to store" user);
-  check bool "continue-or-release directive" true
+  (* masc#24651 cut the "continue it or release it with a handoff summary"
+     directive from this section; masc#26123 then made not choosing the agent's
+     next action the standing policy. The section states what is held and what
+     the prior handoff said, and stops there. *)
+  check bool "section does not direct the next action" false
     (contains ~needle:"release it with a handoff summary" user)
 
 let test_current_task_section_absent_without_task () =
@@ -387,11 +420,11 @@ let test_direct_and_autonomous_share_system_prompt () =
      explicitly, and absent evidence blocks rather than licenses a guess —
      is now stated in the merged [keeper.system] body. *)
   check bool "shared contract carries repository checkout policy" true
-    (contains
+    (contains_prose
        ~needle:"handle a behind, diverged, dirty, unregistered, or unavailable"
        direct_system_prompt);
   check bool "shared contract refuses to infer checkout state" true
-    (contains
+    (contains_prose
        ~needle:"Missing, ambiguous, or stale checkout evidence is a blocker"
        direct_system_prompt)
 
@@ -584,10 +617,15 @@ let test_goal_holder_gets_self_direction_directive () =
       ~turn_decision:goal_turn_decision ~current_task:Inputs.No_current_task
       ~observation:base_observation ()
   in
-  check bool "goal-holder directive present" true
+  (* masc#26123 removed both self-direction branches. The prompt states the
+     goals a keeper holds and leaves the choice of next action to it, so the
+     directive that used to accompany them must not come back. *)
+  check bool "no self-direction directive for a goal holder" false
     (contains ~needle:"advance one of your active" system);
-  check bool "defer is stated as valid" true
+  check bool "no defer directive either" false
     (contains ~needle:"Deferring is a valid choice" system);
+  check bool "the goal itself is still named" true
+    (contains ~needle:"goal-x" system);
   let no_goal_turn_decision =
     WO.keeper_cycle_decision ~meta base_observation
   in
@@ -596,9 +634,9 @@ let test_goal_holder_gets_self_direction_directive () =
       ~turn_decision:no_goal_turn_decision ~current_task:Inputs.No_current_task
       ~observation:base_observation ()
   in
-  check bool "no-goal branch keeps its own directive" true
+  check bool "no-goal branch directs nothing either" false
     (contains ~needle:"You have no active goal" no_goal_system);
-  check bool "goal-holder directive absent without goals" false
+  check bool "and carries no goal-holder directive" false
     (contains ~needle:"advance one of your active" no_goal_system)
 
 let () =

@@ -60,9 +60,15 @@ let publication_recovery_turn_context ~registry ~keeper_name =
     }
 ;;
 
+(* [agent_name] is not free-form: keeper_meta_json_parse rejects a persisted
+   meta whose agent_name is not [Keeper_identity.keeper_agent_name name]
+   ("keeper-<name>-agent"). Spelling it out here as [name] made every test in
+   this suite that builds a meta fail at construction. Derive it the same way
+   production does so a change to the canonical form breaks in one place. *)
 let make_meta ?(name = "test-keeper") () : Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture
-    (`Assoc [("name", `String name); ("agent_name", `String name);
+    (`Assoc [("name", `String name);
+             ("agent_name", `String (Keeper_identity.keeper_agent_name name));
              ("trace_id", `String "test-trace-warn")]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
@@ -257,10 +263,20 @@ let test_missing_current_task_reconciled_before_transition_hint () =
           match description with
           | None -> fail "masc_transition not found in bundle"
           | Some description ->
-            check bool "missing task hint removed" false
+            (* masc#26123 stopped the runtime injecting task state into tool
+               descriptions: the reconciled "No task currently assigned" hint
+               went with the stale "not found in backlog" one. The contract is
+               now stronger than either — the description states what the tool
+               does and carries no turn-specific state at all, even though this
+               keeper holds a current_task_id that no backlog resolves. That
+               commit updated the registry-integrity suite and missed this one,
+               which no runtest target runs. *)
+            check bool "no stale task hint" false
               (string_contains description "not found in backlog");
-            check bool "reconciled hint asks for claim/list" true
-              (string_contains description "No task currently assigned")))
+            check bool "no reconciled task hint either" false
+              (string_contains description "No task currently assigned");
+            check string "description is the static capability statement"
+              "Transition a task to a new status." description))
 
 let test_tool_bundle_does_not_emit_full_universe_assignment () =
   ignore (init_registry ());

@@ -1178,6 +1178,24 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_sse_coverage @test/runtest-test_ag_ui_coverage @test/runtest-test_sse_storm_e2e"
 
+      # Keeper prompt and tool-bundle contracts. Both suites assert on rendered
+      # prompt text and on a meta the production decoder must accept, and both
+      # went red without a failing check: @check compiles them and no runtest
+      # target ran them. masc#24651 and masc#26123 removed prompt directives and
+      # masc#26823 re-wrapped the merged asset; the assertions drifted silently
+      # through all three.
+      - name: Run keeper prompt and tool-bundle contract suites
+        id: keeper_prompt_contract_suites
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_wake_turn_context @test/runtest-test_warn_root_causes"
+
       - name: Run transport harness suite
         id: transport_harness_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

@@ -257,35 +257,21 @@ let task_status_to_string = Masc_domain.task_status_to_string
 let task_assignee_of_status = Masc_domain.task_assignee_of_status
 
 (** Issue #7646: symmetric to [task_assignee_of_status]. When a transition
-    fails for a reason other than ownership mismatch, surface what
-    actions ARE legal from the current state so the LLM stops
-    guess-retrying.
+    fails for a reason other than ownership mismatch, surface what actions ARE
+    legal from the current state so the LLM stops guess-retrying.
 
-    Exhaustive [match] over [Masc_domain.task_status]: adding a 7th constructor
-    will fail to compile. Each branch lists actions that
-    [transition_task_r]'s match-arms accept for that status — keep this
-    in sync if you add new transitions there. *)
-let valid_next_actions_for_status : Masc_domain.task_status -> Masc_domain.task_action list =
-  function
-  | Masc_domain.Todo -> [ Masc_domain.Claim; Masc_domain.Release; Masc_domain.Cancel ]
-  | Masc_domain.Claimed _ ->
-    [ Masc_domain.Start
-    ; Masc_domain.Submit_for_verification
-    ; Masc_domain.Release
-    ; Masc_domain.Cancel
-    ]
-  | Masc_domain.InProgress _ ->
-    [ Masc_domain.Submit_for_verification
-    ; Masc_domain.Release
-    ; Masc_domain.Cancel
-    ]
-  | Masc_domain.AwaitingVerification _ ->
-    (* No agent action applies. The verdict is issued by a completion authority
-       through [Workspace_task_lifecycle.decide_verdict], which is not part of
-       the agent action surface. Distinct from the terminal case below: this
-       obligation is still live, it just is not an agent's to advance. *)
-    []
-  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> [] (* terminal *)
+    Derived from the FSM rather than restated beside it. This was a
+    hand-maintained match whose own doc said "keep this in sync if you add new
+    transitions there", while [Workspace_task_lifecycle.valid_next_actions] —
+    which asks [decide] directly and therefore cannot drift — sat unused next
+    to it. The hint can no longer disagree with the transition it describes.
+
+    [same_agent:true]: the hint is shown to the actor that just failed a
+    transition on a task it owns. Ownership mismatch is reported separately and
+    suppresses this hint entirely, so the not-same-agent projection is never
+    the one rendered. *)
+let valid_next_actions_for_status (status : Masc_domain.task_status) =
+  Workspace_task_lifecycle.valid_next_actions ~same_agent:true ~task_status:status
 ;;
 
 let next_actions_hint status =

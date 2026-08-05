@@ -366,19 +366,6 @@ let test_prompt_keeps_caller_owned_workspace_generation () =
       check bool "prompt does not resolve a second workspace generation" false
         (Astring.String.is_infix ~affix:divergent_root prompt))
 
-let test_retired_path_jail_env_detection () =
-  let configured value =
-    Retired_env_warnings.For_testing.shell_ir_path_jail_env_configured
-      ~getenv:(fun name ->
-        if String.equal name "MASC_SHELL_IR_PATH_JAIL_ENABLED"
-        then value
-        else None)
-      ()
-  in
-  check bool "absent retired path jail env" false (configured None);
-  check bool "blank retired path jail env" false (configured (Some "  "));
-  check bool "non-empty retired path jail env" true (configured (Some "false"))
-
 (* Source-level pin: assert that no [("cwd", `String <ident>)]
    literal remains in keeper_sandbox_docker.ml. The four sites
    from #11080's sibling leak class must be wired through
@@ -439,11 +426,5 @@ let () =
           test_case
             "no raw (\"cwd\", `String cwd) literal remains in source"
             `Quick test_source_has_no_raw_cwd_string_literal
-        ] )
-    ; ( "retired-env"
-      , [
-          test_case
-            "path jail retired env detection ignores blanks"
-            `Quick test_retired_path_jail_env_detection
         ] )
     ]

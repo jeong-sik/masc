@@ -175,18 +175,44 @@ let list_dir t ~relative =
 (* Dispatch                                                         *)
 (* ================================================================ *)
 
+(* What the judge looked at, and whether it got an answer. An operator reading
+   the logs otherwise cannot tell a review that inspected the tree from one that
+   only read the submitted snapshot, and that difference is the whole point of
+   this surface. Content is never logged — only the path asked for, which is
+   already the model's own argument. *)
+let log_lookup t ~name ~argument ~outcome =
+  Log.Task.info
+    "[verification-lookup] tool=%s root=%s argument=%s outcome=%s"
+    name
+    t.ownership_root
+    argument
+    outcome
+;;
+
 let dispatch t ~name ~args =
   match tool_of_name name with
   | None ->
-    Error
-      (Printf.sprintf "unknown tool %s; this review offers %s" name
-         (String.concat ", " (List.map tool_name all_tools)))
-  | Some Read_file ->
+    let detail =
+      Printf.sprintf "unknown tool %s; this review offers %s" name
+        (String.concat ", " (List.map tool_name all_tools))
+    in
+    log_lookup t ~name ~argument:"" ~outcome:"unknown_tool";
+    Error detail
+  | Some tool ->
+    (* Both tools address the producer's tree by the same [path] argument. The
+       match on [tool] stays exhaustive, so a tool that takes something else
+       fails to compile here rather than silently reading a missing key. *)
     (match Json_util.require_string args "path" with
-     | Error detail -> Error detail
-     | Ok relative -> read_file t ~relative)
-  | Some List_dir ->
-    (match Json_util.require_string args "path" with
-     | Error detail -> Error detail
-     | Ok relative -> list_dir t ~relative)
+     | Error detail ->
+       log_lookup t ~name ~argument:"" ~outcome:"invalid_argument";
+       Error detail
+     | Ok relative ->
+       let result =
+         match tool with
+         | Read_file -> read_file t ~relative
+         | List_dir -> list_dir t ~relative
+       in
+       log_lookup t ~name ~argument:relative
+         ~outcome:(match result with Ok _ -> "ok" | Error _ -> "rejected");
+       result)
 ;;

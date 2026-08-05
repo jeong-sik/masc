@@ -99,7 +99,7 @@ let make_executor
     ?(run_retry_attempt = fun ~attempt:_ -> R.Retry_success)
     ?(sleep = fun _ -> ())
     ?(on_event = fun _ -> ())
-    ?(apply_fallback = fun ~value:_ ~confidence_delta:_ -> Ok ())
+    ?(apply_fallback = fun ~value:_ -> Ok ())
     ?(request_handoff = fun ~message:_ ~preserve_state:_ -> Ok ())
     ?(abort = fun ~reason:_ -> Ok ())
     () =

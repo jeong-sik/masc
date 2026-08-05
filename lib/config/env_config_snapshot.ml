@@ -363,8 +363,6 @@ let memory_entries =
 
 let message_gc_entries =
   [
-    entry ~default:"200" "MASC_MESSAGE_MAX_COUNT"
-      "Maximum message files retained per workspace";
   ]
 
 let model_routing_entries =

@@ -73,12 +73,6 @@ module Voice : sig
   val audio_test_tone_timeout_sec : float
 end
 
-(** {1 Message GC} *)
-
-module Message : sig
-  val max_count : int
-end
-
 (** {1 Transport} *)
 
 module Transport : sig

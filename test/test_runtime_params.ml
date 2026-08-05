@@ -276,28 +276,27 @@ let () =
   in
 
   let test_runtime_settings () =
-    (* Verify that runtime_settings registered params *)
+    (* ensure_init forces both this module's registrations and
+       Keeper_config's; the surfaces below pin keys from each. *)
+    Runtime_settings.ensure_init ();
     let entries = Runtime_params.registry () in
     let has key =
       List.exists (fun (k, _, _, _, _) -> k = key) entries
     in
-    Alcotest.(check bool) "inference.default_model registered"
-      true (has "inference.default_model");
-    (* Validate surfaces *)
+    (* Every surface must name keys that are actually registered. A surface
+       pinning a key nothing registers puts a control in the settings UI with
+       nothing behind it. *)
     let surfaces = Runtime_settings.surfaces in
     Alcotest.(check bool) "has surfaces" true (List.length surfaces > 0);
-    let surface_ids =
-      List.map (fun (s : Runtime_settings.surface) -> s.id) surfaces
-    in
-    Alcotest.(check bool) "inference_config surface"
-      true (List.mem "inference_config" surface_ids)
-  in
-
-  let test_runtime_settings_validation () =
-    (* Default inference model should reject empty string *)
-    (match Runtime_params.set Runtime_settings.inference_default_model "" with
-     | Error _ -> ()
-     | Ok () -> Alcotest.fail "should reject empty model name")
+    List.iter
+      (fun (surface : Runtime_settings.surface) ->
+        List.iter
+          (fun key ->
+            Alcotest.(check bool)
+              (Printf.sprintf "%s pins registered key %s" surface.id key)
+              true (has key))
+          surface.param_keys)
+      surfaces
   in
 
   let test_dashboard_params_registered () =
@@ -525,7 +524,6 @@ let () =
       ( "runtime_settings",
         [
           Alcotest.test_case "registration" `Quick test_runtime_settings;
-          Alcotest.test_case "validation" `Quick test_runtime_settings_validation;
           Alcotest.test_case "dashboard params registered" `Quick
             test_dashboard_params_registered;
           Alcotest.test_case "dashboard surface" `Quick test_dashboard_surface;

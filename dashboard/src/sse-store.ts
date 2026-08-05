@@ -216,7 +216,10 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   keeper_compaction:    { target: 'execution', force: true },
   keeper_guardrail:     { target: 'execution', force: true },
   keeper_phase_changed: { target: 'execution', force: true },
-  keeper_turn_complete: { target: 'execution', force: true },
+  // A turn-complete hook precedes the durable TurnRecord commit and does not
+  // mutate the execution cache. The selected Keeper is refreshed through the
+  // scoped status reader in [handleKeeperLifecycle]; the proactive canonical
+  // execution snapshot updates the roster without a per-turn global rebuild.
   // Board content — emitted by lib/mcp_tool_runtime_board.ml
   board_post:          { target: 'board' },
   'masc/board_post':    { target: 'board' },

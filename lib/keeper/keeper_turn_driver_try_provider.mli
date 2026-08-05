@@ -90,4 +90,7 @@ module For_testing : sig
         option ->
     Agent_sdk.Error.sdk_error ->
     unit
+
+  val memoize_message_measurement :
+    (Agent_sdk.Types.message -> int) -> Agent_sdk.Types.message -> int
 end

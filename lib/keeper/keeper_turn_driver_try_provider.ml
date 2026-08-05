@@ -263,6 +263,31 @@ let measure_message_bytes (message : Agent_sdk.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
+module Message_identity = struct
+  type t = Agent_sdk.Types.message
+
+  let equal left right = left == right
+
+  (* Messages are immutable. [Hashtbl.hash] is bounded, so this avoids a full
+     content traversal while preserving the hash/equality contract for the
+     same record identity. Structural collisions are harmless because [equal]
+     remains physical. *)
+  let hash = Hashtbl.hash
+end
+
+module Message_measurement_cache = Hashtbl.Make (Message_identity)
+
+let memoize_message_measurement measure =
+  let cache = Message_measurement_cache.create 128 in
+  fun message ->
+    match Message_measurement_cache.find_opt cache message with
+    | Some bytes -> bytes
+    | None ->
+      let bytes = measure message in
+      Message_measurement_cache.add cache message bytes;
+      bytes
+;;
+
 let declared_request_reserve_bytes ~capacity_bytes ~system_prompt ~tools =
   let tool_schema_bytes =
     List.fold_left
@@ -297,19 +322,25 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
       ~system_prompt:ctx.system_prompt
       ~tools:ctx.tools
   in
-  let raw_cut candidate =
-    Runtime_model_input_tail_window.project_with_drop
-      ~measure_message_bytes
-      ~capacity_bytes:ctx.max_request_body_bytes
-      ~reserved_bytes
-      candidate
-  in
-  let cut candidate =
-    Result.map
-      (fun projection -> projection.Runtime_model_input_tail_window.messages)
-      (raw_cut candidate)
-  in
   fun messages ->
+    (* The raw cut and demotion plan both measure immutable message records.
+       Cache only for this projection call so repeated candidates are encoded
+       once without retaining a long-lived Keeper's historical message graph. *)
+    let measure_message_bytes =
+      memoize_message_measurement measure_message_bytes
+    in
+    let raw_cut candidate =
+      Runtime_model_input_tail_window.project_with_drop
+        ~measure_message_bytes
+        ~capacity_bytes:ctx.max_request_body_bytes
+        ~reserved_bytes
+        candidate
+    in
+    let cut candidate =
+      Result.map
+        (fun projection -> projection.Runtime_model_input_tail_window.messages)
+        (raw_cut candidate)
+    in
     (* RFC-0363: the unmodified history chooses the authoritative cut first.
        Demotion may rewrite only atoms that cut already omitted, so appending a
        turn cannot move the rewrite boundary unless the raw cut itself moves.
@@ -545,4 +576,5 @@ let run_try_provider
 module For_testing = struct
   let apply_accept = apply_accept
   let observe_request_wire_error = observe_request_wire_error
+  let memoize_message_measurement = memoize_message_measurement
 end

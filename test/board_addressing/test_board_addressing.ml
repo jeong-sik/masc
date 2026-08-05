@@ -77,6 +77,37 @@ let test_parse_broadcast () =
   check_parse "unsupported broadcast hides direct targets" "unsupported:analyst"
     "@@analyst and @alpha"
 
+(* Code spans are not address text. Every one of these strings appeared in a
+   live keeper_board_comment that was rejected whole: @internals/libs/datadogRum
+   is an npm scope, @/lib/constants is a path alias, @@ is an OCaml operator.
+   Board validates candidates fail-closed, which is right for a mistyped
+   address and wrong for an @ that was never an address. *)
+let test_parse_code_spans () =
+  check_parse "npm scope in a code span is not a target" "none"
+    "see `@internals/libs/datadogRum` for the setup";
+  check_parse "path alias in a code span is not a target" "none"
+    "the fix renames `@/lib/constents` to `@/lib/constants`";
+  check_parse "operator in a code span is not a broadcast selector" "none"
+    "use `f @@ x` instead of the parens";
+  check_parse "fenced block is not address text" "none"
+    "before\n```\n@@all\n@alpha\n```\nafter";
+  (* A real address outside the span still parses. *)
+  check_parse "target outside a code span still parses" "targets:alpha"
+    "@alpha please look at `@/lib/constants`";
+  check_parse "broadcast outside a code span still parses" "broadcast"
+    "@@all see `@internals/libs/errors`";
+  (* Blanking must separate, not delete: a span between two tokens keeps them
+     apart instead of splicing them into one. Here the trailing @internals/...
+     sits outside the span, so it is still a candidate and still fails closed
+     -- the point is that it is a separate candidate rather than glued onto
+     alpha. *)
+  check_parse "blanked span separates rather than joins"
+    "targets:alpha,internals/libs/datadogRum"
+    "@alpha`x`@internals/libs/datadogRum";
+  (* An unterminated span addresses nobody after it: fail-closed direction. *)
+  check_parse "unterminated span swallows the rest" "none"
+    "opening `@alpha and never closing"
+
 let () =
   run "board_addressing"
     [ ( "tokenization",
@@ -84,4 +115,5 @@ let () =
           test_case "tokens_of_text" `Quick test_tokens_of_text ] );
       ( "parse",
         [ test_case "targets" `Quick test_parse_targets;
-          test_case "broadcast" `Quick test_parse_broadcast ] ) ]
+          test_case "broadcast" `Quick test_parse_broadcast;
+          test_case "code spans" `Quick test_parse_code_spans ] ) ]

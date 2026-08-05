@@ -44,6 +44,14 @@ type t =
           RFC-0097 backpressure. PR-3 of RFC-0134 routes this to a
           DEBUG line (or a separate metric in PR-4), not the
           data-integrity counter. *)
+  | Tail_partial_write
+  (** RFC-0134 classification. The last line of an append-only file was
+          still being written when a tail reader reached it, so it parses
+          as truncated JSON. Not data loss: the reader skips to the
+          previous complete line and the next read sees the row whole.
+          Belongs with [Concurrent_removal] and [Transient_fd_pressure]
+          on the not-a-loss side rather than on the data-integrity
+          counter. *)
   | Other of string
   (** Escape hatch for one-off surfaces. PR introducing a new
           [Other] payload must justify why the value cannot be
@@ -70,6 +78,7 @@ type t =
     - [Stat_error] → ["stat_error"]
     - [Concurrent_removal] → ["concurrent_removal"] (RFC-0134 PR-1)
     - [Transient_fd_pressure] → ["transient_fd_pressure"] (RFC-0134 PR-1)
+    - [Tail_partial_write] → ["tail_partial_write"] (RFC-0134)
     - [Other s] → [s] (verbatim) *)
 val to_wire : t -> string
 

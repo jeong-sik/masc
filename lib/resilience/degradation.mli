@@ -28,10 +28,9 @@
 
     {1 Numeric mapping}
 
-    The companion stub field [Resilience_outcome.PartialSuccess.degradation_level]
-    carries an [int] in [\[1, 4\]]. {!to_int} and {!of_int_opt} are
-    the canonical bridges; the integer encoding is the lattice
-    ordinal (lower = higher capability).
+    The level is carried across boundaries as an [int] in [\[1, 4\]].
+    {!to_int} and {!of_int_opt} are the canonical bridges; the integer
+    encoding is the lattice ordinal (lower = higher capability).
 
     {1 Policy boundary}
 

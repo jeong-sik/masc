@@ -400,6 +400,13 @@ let persistence_read_drop_reason_entry_load_error = "entry_load_error"
 let persistence_read_drop_reason_invalid_payload = "invalid_payload"
 let persistence_read_drop_reason_json_syntax_error = "json_syntax_error"
 
+(* The last line of an append-only file was still being written when a tail
+   reader reached it. Kept apart from [entry_load_error] because it is not a
+   loss: the reader falls through to the previous complete line and the next
+   read sees the row whole. Same not-a-loss family as RFC-0134's
+   [concurrent_removal] and [transient_fd_pressure]. *)
+let persistence_read_drop_reason_tail_partial_write = "tail_partial_write"
+
 let report_persistence_read_drop ~on_drop ~surface ~reason ~path ~detail =
   Log.Misc.warn "[%s] persistence read drop (%s) path=%s: %s"
     surface reason path detail;

@@ -425,23 +425,41 @@ let latest_decision_json ~(config : Workspace.config) ~(keeper_name : string) :
   let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   if not (Fs_compat.file_exists path) then None
   else
-    (match
-       Keeper_memory.read_file_tail_lines_result path
-         ~max_bytes:40000 ~max_lines:20
-     with
-     | Ok lines -> lines
-     | Error exn_class ->
-         Keeper_memory.record_memory_recall_read_error
-           ~site:"keeper_runtime_trust_decisions" path exn_class;
-         [])
+    let lines, completion =
+      match
+        Keeper_memory.read_file_tail_lines_with_completion path
+          ~max_bytes:40000 ~max_lines:20
+      with
+      | Ok (lines, completion) -> (lines, completion)
+      | Error exn_class ->
+          Keeper_memory.record_memory_recall_read_error
+            ~site:"keeper_runtime_trust_decisions" path exn_class;
+          ([], Keeper_memory.Complete)
+    in
+    lines
     |> List.rev
-    |> List.find_map (fun line ->
+    (* [List.rev] puts the newest row first, so index 0 is the file's last
+       line. The decision log is append-only and this read is not synchronised
+       with the writer, so that one line can be mid-write. When the reader
+       reports the tail as unterminated, its parse failure is an in-flight
+       append rather than corruption: [find_map] falls through to the previous
+       complete row and the next read sees it whole. Position alone is not
+       enough — a genuinely malformed last line is newline-terminated and must
+       keep [entry_load_error]. *)
+    |> List.mapi (fun index line -> (index, line))
+    |> List.find_map (fun (index, line) ->
            match Yojson.Safe.from_string line with
            | exception Yojson.Json_error detail ->
-               report_decision_log_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-                 ~path
-                 ~detail;
+               let reason =
+                 match (index, completion) with
+                 | 0, Keeper_memory.Partial_last_line ->
+                     Safe_ops.persistence_read_drop_reason_tail_partial_write
+                 | 0, Keeper_memory.Complete
+                 | _, Keeper_memory.Partial_last_line
+                 | _, Keeper_memory.Complete ->
+                     Safe_ops.persistence_read_drop_reason_entry_load_error
+               in
+               report_decision_log_read_drop ~reason ~path ~detail;
                None
            | (`Assoc _ as json) -> Some json
            | _ ->

@@ -26,6 +26,11 @@ type t =
   | Stat_error
   | Concurrent_removal (* RFC-0134 PR-1. *)
   | Transient_fd_pressure (* RFC-0134 PR-1. *)
+  | Tail_partial_write
+      (* RFC-0134 classification: the last line of an append-only file was
+         still being written when the reader reached it. Not data loss; the
+         reader skips to the previous complete line and the next read sees
+         the row whole. *)
   | Other of string
 
 let to_wire = function
@@ -40,6 +45,7 @@ let to_wire = function
   | Stat_error -> "stat_error"
   | Concurrent_removal -> "concurrent_removal"
   | Transient_fd_pressure -> "transient_fd_pressure"
+  | Tail_partial_write -> "tail_partial_write"
   | Other s -> s
 ;;
 
@@ -55,6 +61,7 @@ let of_wire = function
   | "stat_error" -> Stat_error
   | "concurrent_removal" -> Concurrent_removal
   | "transient_fd_pressure" -> Transient_fd_pressure
+  | "tail_partial_write" -> Tail_partial_write
   | s -> Other s
 ;;
 
@@ -70,7 +77,8 @@ let equal a b =
   | Path_normalization_error, Path_normalization_error
   | Stat_error, Stat_error
   | Concurrent_removal, Concurrent_removal
-  | Transient_fd_pressure, Transient_fd_pressure -> true
+  | Transient_fd_pressure, Transient_fd_pressure
+  | Tail_partial_write, Tail_partial_write -> true
   | Other a, Other b -> String.equal a b
   | List_dir_error, _
   | Entry_load_error, _
@@ -83,6 +91,7 @@ let equal a b =
   | Stat_error, _
   | Concurrent_removal, _
   | Transient_fd_pressure, _
+  | Tail_partial_write, _
   | Other _, _ -> false
 ;;
 

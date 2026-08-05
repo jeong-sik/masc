@@ -666,11 +666,6 @@
  (libraries alcotest masc_test_deps eio_main))
 
 (test
- (name test_keeper_current_operations)
- (modules test_keeper_current_operations)
- (libraries alcotest masc_test_deps))
-
-(test
  (name test_server_request_authority)
  (modules test_server_request_authority)
  (libraries alcotest masc_test_deps eio_main h2))
@@ -1051,10 +1046,6 @@
   test_system_error_class
   test_set_util
   test_board_core_payload
-  test_board_attachment_meta
-  test_board_render
-  test_board_render_discord
-  test_board_render_slack
   test_board_moderation)
  (modules
   test_keeper_busy_connector_deferred
@@ -1208,10 +1199,6 @@
   test_system_error_class
   test_set_util
   test_board_core_payload
-  test_board_attachment_meta
-  test_board_render
-  test_board_render_discord
-  test_board_render_slack
   test_board_moderation)
  (libraries
   masc_test_deps

@@ -166,8 +166,11 @@ as alternate lifecycle writers or control authorities.
 - `keeper_execution_join`: replace the process-local
   `tool_use_id -> execution_id` Hashtbl with a durable typed link carried by
   the MASC operation and OAS invocation reference;
-- `keeper_current_operations`: project one MASC Operation Journal instead of
-  joining two independently authored stores;
+- current-work projection: build it on one MASC Operation Journal rather than
+  joining two independently authored stores. The `keeper_current_operations`
+  module that joined event-queue and async-request stores was removed once it
+  became unreachable from every entry point — the requirement stands, the
+  discarded implementation does not;
 - `keeper_execution_receipt`, runtime manifests, Turn records, and Trajectory:
   retain distinct product facts, but derive subordinate OAS execution facts
   from OAS cursors;

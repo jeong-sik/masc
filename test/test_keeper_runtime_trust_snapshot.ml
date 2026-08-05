@@ -163,6 +163,58 @@ let test_snapshot_counts_malformed_decision_rows () =
          (drop_value invalid_payload -. before_invalid_payload))
 ;;
 
+(* Same shape as the test above with one byte of difference: no trailing
+   newline. That is what an append caught in flight looks like on disk, and it
+   is the only thing separating it from the malformed-row case, which ends
+   with "\n" and must keep counting as entry_load_error. Classifying by line
+   position alone cannot tell them apart; an earlier attempt that did was
+   caught by the test above. *)
+let test_snapshot_counts_unterminated_tail_separately () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-decision-tail" in
+       let meta = make_meta keeper_name in
+       let path = Masc.Keeper_types_support.keeper_decision_log_path config keeper_name in
+       let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
+       let tail_partial = Safe_ops.persistence_read_drop_reason_tail_partial_write in
+       let before_entry_error = drop_value entry_error in
+       let before_tail_partial = drop_value tail_partial in
+       write_file
+         path
+         (String.concat
+            "\n"
+            [ Yojson.Safe.to_string
+                (`Assoc
+                    [ "turn_id", `Int 21
+                    ; "turn_verdict", `String "run"
+                    ; "telemetry", `Assoc [ "selected_model", `String "tail-model" ]
+                    ])
+            ; {|{"turn_id": 22, "turn_verdict": "ru|}
+            ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check int)
+         "falls back past the in-flight append"
+         21
+         (snapshot |> member "latest_decision" |> member "turn_id" |> to_int);
+       Alcotest.(check (float 0.001))
+         "unterminated tail counts as tail_partial_write"
+         1.0
+         (drop_value tail_partial -. before_tail_partial);
+       Alcotest.(check (float 0.001))
+         "and stays off the data-integrity reason"
+         0.0
+         (drop_value entry_error -. before_entry_error))
+;;
+
 let test_snapshot_uses_receipt_runtime_model_when_decision_absent () =
   Eio_main.run
   @@ fun env ->
@@ -897,6 +949,10 @@ let () =
             "malformed decision rows increment drop metrics"
             `Quick
             test_snapshot_counts_malformed_decision_rows
+        ; Alcotest.test_case
+            "unterminated tail is not a data-integrity drop"
+            `Quick
+            test_snapshot_counts_unterminated_tail_separately
         ] )
     ; ( "receipt_runtime_model"
       , [ Alcotest.test_case

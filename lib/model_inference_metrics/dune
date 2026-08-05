@@ -21,7 +21,6 @@
   digestif
   eio
   fs_compat
-  masc.runtime_provider_labels
   masc_core
   masc_log
   masc_types

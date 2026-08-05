@@ -7,7 +7,6 @@
  (modules
   board
   board_agent_effect_hooks
-  board_attachment_meta
   board_audience
   board_core
   board_core_classify
@@ -20,7 +19,6 @@
   board_metrics_hooks
   board_moderation
   board_paths
-  board_render
   board_sort
   board_sub_board_json
   board_vote_key

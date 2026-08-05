@@ -441,7 +441,24 @@ let test_constraint_category_excludes_self_imposed_scope () =
          "does not earn retention by already being there");
     check bool "stored self-scope constraints are dropped" true
       (String_util.contains_substring user_text
-         "drop a stored `constraint` that no external rule enforces")
+         "drop a stored `constraint` that no external rule enforces");
+    (* Measured 2026-08-05. kidsnote's operator instructions say "@kidsnote로
+       요청받으면 같은 post_id에 구체적인 댓글을 남긴다" -- when to act. The
+       stored memory reads "standing-by policy, only intervening in board posts
+       or tasks when directly mentioned (@kidsnote) or assigned" -- the
+       inverse, with an exclusivity the operator never wrote. The category
+       rules do not catch it because it looks like operator policy, which is
+       the family they preserve. This is about the shape of the statement, not
+       its category. *)
+    check bool "rules are recorded as their source states them" true
+      (String_util.contains_substring user_text
+         "Record a rule the way its source states it");
+    check bool "the inverse is named and refused" true
+      (String_util.contains_substring user_text
+         "does not license \"only when X\"");
+    check bool "boundaries keep their written width" true
+      (String_util.contains_substring user_text
+         "keep the boundary at the width it was written")
 ;;
 
 let test_repo_template_renders_persona () =

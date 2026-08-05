@@ -1710,6 +1710,11 @@
  (modules test_keeper_chat_slack)
  (libraries alcotest masc_test_deps))
 
+(test
+ (name test_keeper_chat_broadcast)
+ (modules test_keeper_chat_broadcast)
+ (libraries alcotest masc_test_deps))
+
 (include stanzas/test_ci_run_tests_script.inc)
 
 (include stanzas/test_contract_harness_auth_script.inc)

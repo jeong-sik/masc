@@ -18,6 +18,7 @@
   channel_gate_metrics
   connector_ingress_lane
   discord_observability
+  gate_connector_observability
   discord_gateway_client
   discord_gateway_state
   discord_rest_client

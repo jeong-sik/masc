@@ -823,6 +823,15 @@ jobs:
             @test/runtest-test_tool_registry_consistency \
             @test/runtest-test_tool_spec
 
+      - name: Run connector observability label contract
+        # These strings are metric label values, so a rename is a wire change
+        # that compiles. @check cannot catch that, and the pre-existing
+        # test_discord_observability is itself unwired (part of the inventory
+        # in #26075), so nothing was running here at all.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_gate_connector_observability
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was

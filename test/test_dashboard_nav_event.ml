@@ -81,6 +81,14 @@ let test_parse_full_event () =
   check (option string) "redirected_from" None event.redirected_from
 ;;
 
+let test_parse_internal_agents_section () =
+  let event =
+    parse_ok {|{"surface":"monitoring","section":"internal-agents"}|}
+  in
+  check string "surface" "monitoring" event.surface;
+  check (option string) "section" (Some "internal-agents") event.section
+;;
+
 let test_parse_redirected () =
   let event =
     parse_ok
@@ -237,6 +245,10 @@ let () =
             `Quick
             test_parse_settings_repositories_section
         ; test_case "full event" `Quick test_parse_full_event
+        ; test_case
+            "internal agents section"
+            `Quick
+            test_parse_internal_agents_section
         ; test_case "redirected_from accepted" `Quick test_parse_redirected
         ; test_case "rejects unknown surface" `Quick test_reject_unknown_surface
         ; test_case "rejects unknown section" `Quick test_reject_unknown_section

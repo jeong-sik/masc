@@ -387,6 +387,13 @@ let observe_rejection_wakeup
       detail
 ;;
 
+(* Returns the control-flow outcome the scan loop acts on, paired with the
+   observation outcome recorded for this review (RFC-0361 D4). [on_commit] is
+   what the record should say when the durable commit succeeds — the caller
+   knows whether this verdict came from the configured LLM or from the agent's
+   own evidence-contract rejection, and a surface that cannot tell those apart
+   shows "rejected" without saying whether a judge ever ran. A failed commit is
+   its own outcome: the verdict was decided but never reached the Task. *)
 let commit_verdict
       (runtime : runtime)
       (task : Masc_domain.task)
@@ -396,6 +403,8 @@ let commit_verdict
       ~verdict
       ~notes
       ~verdict_label
+      ~on_commit
+      ~(evaluator_runtime : string option)
   =
   match
     Workspace.commit_verdict_r
@@ -405,6 +414,7 @@ let commit_verdict
       ~task_id:task.id
       ~verification_id
       ~notes
+      ?evaluator_runtime
       ()
   with
   | Ok _ ->
@@ -424,13 +434,11 @@ let commit_verdict
       verification_id
       (Masc_domain.completion_authority_actor authority)
       verdict_label;
-    Committed
+    Committed, on_commit
   | Error error ->
-    defer
-      ~task_id:task.id
-      ~verification_id
-      ~authority
-      ~reason:(Masc_domain.masc_error_to_string error)
+    let detail = Masc_domain.masc_error_to_string error in
+    ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail
+    , Verification_run_registry.Commit_failed { detail } )
 ;;
 
 let process_task_once
@@ -441,6 +449,35 @@ let process_task_once
   =
   let agent_run_id = Random_id.prefixed ~prefix:"system-llm-agent-" ~bytes:16 in
   let authority = Masc_domain.System_llm_agent { agent_run_id } in
+  (* RFC-0361 D4: register before any work so a review that raises or defers is
+     still visible. Every exit below records through [complete], including the
+     paths that produce no verdict — those were previously invisible, since only
+     a committed verdict emitted a durable event. *)
+  let registry = Verification_run_registry.global () in
+  let started_at = Eio.Time.now runtime.clock in
+  let tools = ref [] in
+  let on_tool_result ~input result =
+    tools := Verification_run_registry.observe_tool_result ~input result :: !tools
+  in
+  Verification_run_registry.register_running
+    registry
+    ~verification_id
+    ~task_id:task.id
+    ~producer:assignee
+    ~authority_kind:(Masc_domain.completion_authority_kind authority)
+    ~authority_actor:(Masc_domain.completion_authority_actor authority)
+    ~started_at;
+  let complete ?evaluator_runtime (process_outcome, outcome) =
+    Verification_run_registry.mark_completed
+      registry
+      ~verification_id
+      ~outcome
+      ~tools:(List.rev !tools)
+      ?evaluator_runtime
+      ~elapsed_s:(Eio.Time.now runtime.clock -. started_at)
+      ();
+    process_outcome
+  in
   try
     match
       prepare_review
@@ -452,15 +489,21 @@ let process_task_once
     with
     | Error reason ->
       let rejection_reason = "completion evidence contract invalid: " ^ reason in
-      commit_verdict
-        runtime
-        task
-        ~assignee
-        ~verification_id
-        ~authority
-        ~verdict:(Masc_domain.Verdict_rejected { reason = rejection_reason })
-        ~notes:rejection_reason
-        ~verdict_label:"rejected_contract"
+      complete
+        (commit_verdict
+           runtime
+           task
+           ~assignee
+           ~verification_id
+           ~authority
+           ~verdict:(Masc_domain.Verdict_rejected { reason = rejection_reason })
+           ~notes:rejection_reason
+           ~verdict_label:"rejected_contract"
+           ~on_commit:
+             (Verification_run_registry.Contract_rejected { detail = reason })
+             (* The evidence contract was rejected before any evaluator ran, so
+                this verdict has no judging runtime to name. *)
+           ~evaluator_runtime:None)
     | Ok prepared ->
       (* The lookup surface is bound to the producer under review, so the same
          judge gets a different root on the next task. [assignee] is the worker
@@ -484,18 +527,26 @@ let process_task_once
           ?completion_contract:prepared.completion_contract
           ~required_evidence:prepared.required_artifacts
           ~verify_gate_evidence:[]
+          ~on_tool_result
           prepared.review_request
       in
+      let evaluator_runtime = result.evaluator_runtime in
       (match result.verdict with
        | None ->
-         defer
-           ~task_id:task.id
-           ~verification_id
-           ~authority
-           ~reason:
-             (Option.value
-                result.fallback_reason
-                ~default:(Task.Anti_rationalization.gate_to_string result.gate))
+         let gate = Task.Anti_rationalization.gate_to_string result.gate in
+         (* Both arms are real descriptions, not a default standing in for an
+            unknown: the reviewer's own fallback text when it produced one, the
+            gate name when it did not. Written as a match so neither arm hides
+            inside an [Option.value ~default]. *)
+         let detail =
+           match result.fallback_reason with
+           | Some reason -> reason
+           | None -> gate
+         in
+         complete
+           ~evaluator_runtime
+           ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail
+           , Verification_run_registry.Not_reviewed { gate; detail } )
        | Some review_verdict ->
          let verdict = completion_verdict_of_review review_verdict in
          let notes =
@@ -505,24 +556,33 @@ let process_task_once
              ~result
              ~authority
          in
-         commit_verdict
-           runtime
-           task
-           ~assignee
-           ~verification_id
-           ~authority
-           ~verdict
-           ~notes
-           ~verdict_label:
-             (Task.Anti_rationalization.verdict_constructor_name review_verdict))
+         let on_commit =
+           match verdict with
+           | Masc_domain.Verdict_approved -> Verification_run_registry.Approved
+           | Masc_domain.Verdict_rejected { reason } ->
+             Verification_run_registry.Rejected { reason }
+         in
+         complete
+           ~evaluator_runtime
+           (commit_verdict
+              runtime
+              task
+              ~assignee
+              ~verification_id
+              ~authority
+              ~verdict
+              ~notes
+              ~verdict_label:
+                (Task.Anti_rationalization.verdict_constructor_name review_verdict)
+              ~on_commit
+              ~evaluator_runtime:(Some evaluator_runtime)))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    defer
-      ~task_id:task.id
-      ~verification_id
-      ~authority
-      ~reason:(Printexc.to_string exn)
+    let detail = Printexc.to_string exn in
+    complete
+      ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail
+      , Verification_run_registry.Raised { detail } )
 ;;
 
 let request_scan (runtime : runtime) =

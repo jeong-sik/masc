@@ -2542,6 +2542,9 @@
 
 (include stanzas/test_dashboard_continuity_briefs.inc)
 
+(include stanzas/test_verification_run_registry.inc)
+(include stanzas/test_exact_lane_run_registry.inc)
+
 ; The tool-call quality benchmark reads its case set and evidence fixture from
 ; repo-root JSON (benchmarks/data, test/fixtures) rather than from sandbox
 ; deps, so under the shared group stanza dune had no reason to re-run it when
@@ -2569,4 +2572,3 @@
   (source_tree %{workspace_root}/config/prompts)
   %{workspace_root}/test/fixtures/keeper_system_prompt/assembled_prompt.golden)
  (libraries alcotest masc_test_deps))
-

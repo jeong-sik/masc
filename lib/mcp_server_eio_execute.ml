@@ -454,12 +454,7 @@ let execute_tool_eio
                        (* Keep MCP tools/call on the shared post-dispatch
                           transformer and observer contract. *)
                        let r = Tool_dispatch_emit.finalize_from_handler r in
-                       let outcome =
-                         match r with
-                         | Some _ -> "handled"
-                         | None -> "no_handler"
-                       in
-                       r, outcome)
+                       r, Dispatch_outcome.(to_string (of_result_option r)))
                    in
                    result
                  in

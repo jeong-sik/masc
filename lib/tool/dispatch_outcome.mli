@@ -23,6 +23,12 @@ type t =
           miss).  The string outcome ["no_handler"] maps to this arm. *)
 [@@deriving show, eq]
 
+(** [of_result_option r] is the outcome a handler result denotes:
+    [Some _] is {!Handled}, [None] is {!No_handler}.  Every dispatch path
+    makes this same decision, so they share it rather than each writing
+    the match — and, with {!to_string}, the label it produces. *)
+val of_result_option : 'a option -> t
+
 (** [to_string t] returns the label used by Otel_metric_store counters /
     [Tool_telemetry.with_span] outcome strings ("handled" / "no_handler"). *)
 val to_string : t -> string

@@ -268,19 +268,6 @@ let terminal_class_label = function
   | Terminal_effect_workflow_rejection -> "terminal_effect_workflow_rejection"
   | Internal_opaque -> "internal_opaque"
 
-let failure_provenance_label = function
-  | Oas_api_error -> "oas_api_error"
-  | Oas_provider_error -> "oas_provider_error"
-  | Oas_agent_error -> "oas_agent_error"
-  | Oas_mcp_error -> "oas_mcp_error"
-  | Oas_config_error -> "oas_config_error"
-  | Oas_serialization_error -> "oas_serialization_error"
-  | Oas_io_error -> "oas_io_error"
-  | Oas_orchestration_error -> "oas_orchestration_error"
-  | Oas_internal_error -> "oas_internal_error"
-  | Masc_internal_error -> "masc_internal_error"
-  | Completion_contract -> "completion_contract"
-
 let route_class_label = function
   | Retry_after_observed { retry_class; _ } -> retry_class_label retry_class
   | Rotate_now { rotate } -> rotate_class_label rotate

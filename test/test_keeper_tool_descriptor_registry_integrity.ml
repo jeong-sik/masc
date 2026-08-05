@@ -361,7 +361,14 @@ let test_registered_cluster_model_projections_are_explicit () =
          (name ^ " is absent from the autonomous Keeper model bundle")
          false
          (List.mem name keeper_model_names))
-    [ "masc_pause"; "masc_resume" ];
+    [ (* Operator status screen, not a Keeper observation: the world-state frame
+         already carries the backlog counts and fiber count as typed context,
+         and the screen's only Keeper-specific line is a false "session is not
+         bound" warning. The tool stays registered for MCP/HTTP consumers. *)
+      "masc_status"
+    ; "masc_pause"
+    ; "masc_resume"
+    ];
   List.iter
     (fun (name, projected_by) ->
        check_projection name (Descriptor.Transport_alias { projected_by }))

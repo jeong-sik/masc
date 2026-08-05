@@ -121,8 +121,6 @@ type keeper_execution_snapshot = {
   owners : keeper_execution_owner list;
   executable_names : string list;
 }
-val keeper_non_executable_cause_to_wire :
-  keeper_non_executable_cause -> string
 val empty_keeper_execution_snapshot : keeper_execution_snapshot
 val keeper_execution_snapshot :
   Workspace.config -> keeper_execution_snapshot

@@ -26,12 +26,6 @@
 val target_prefix : string
 (** ["@"] — the single-at direct-target prefix. *)
 
-val broadcast_selector_prefix : string
-(** ["@@"] — the double-at broadcast selector prefix. *)
-
-val broadcast_all_selector : string
-(** ["all"] — the only universally supported broadcast selector. *)
-
 val trim_token_edges : string -> string
 (** Trim non-word characters from both ends of a token, keeping internal
     ones.  Word chars are [A-Za-z0-9@_-]; ['.'] is NOT a word char, so

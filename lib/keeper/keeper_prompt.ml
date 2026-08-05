@@ -22,69 +22,6 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
 
-(* One anchor, because there is now one shared block. The former
-   [<continuity>] / [<world>] pair anchored two of the four shared prompts,
-   so a partial load that dropped [capabilities] or [core_behavior] passed
-   the check. [<system>] covers the whole merged block. *)
-let critical_prompt_anchors = [ ("system", "<system>") ]
-
-let missing_critical_prompt_anchors prompt =
-  List.filter_map
-    (fun (name, needle) ->
-      if String_util.contains_substring prompt needle then None else Some name)
-    critical_prompt_anchors
-
-let critical_prompt_recovery_block_fallback =
-  String.concat "\n"
-    [ "<system>";
-      "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
-      "Continuity is runtime-owned: use the checkpoint, typed task/goal state, events, and tool results. Never infer a runtime transition from prose.";
-      "Act from the configured base path and active runtime tool schema; do not invent paths, repos, PRs, tasks, or tools.";
-      "</system>" ]
-
-(* Recovery fallback content normally lives at
-   config/prompts/keeper.recovery_block.md so operators can edit it with the
-   other prompts. Keep the in-code fallback because this guard must still work
-   when prompt file loading is exactly what degraded.
-
-   The registry version is trusted only when it carries all required anchors:
-   an operator who accidentally edits out [<system>]
-   would otherwise produce a non-empty block that [ensure_critical_prompt_anchors]
-   appends without restoring the missing safeguard — a silent regression vs the
-   previous hardcoded path. Drift triggers the existing prompt failure counter
-   plus a warn so the operator hears about it. *)
-let critical_prompt_recovery_block () =
-  let from_registry =
-    String.trim (Prompt_registry.get_prompt Keeper_prompt_names.recovery_block)
-  in
-  if String.equal from_registry "" then critical_prompt_recovery_block_fallback
-  else
-    match missing_critical_prompt_anchors from_registry with
-    | [] -> from_registry
-    | missing ->
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string PromptFailures)
-          ~labels:[("prompt", "keeper.recovery_block.anchors")]
-          ();
-        Log.Keeper.warn
-          "critical_prompt_recovery_block: registry text missing anchors (%s); \
-           using in-code fallback to preserve safeguards"
-          (String.concat "," missing);
-        critical_prompt_recovery_block_fallback
-
-let ensure_critical_prompt_anchors prompt =
-  match missing_critical_prompt_anchors prompt with
-  | [] -> prompt
-  | missing ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string PromptFailures)
-        ~labels:[("prompt", "critical_prompt_anchors")]
-        ();
-      Log.Keeper.warn
-        "build_keeper_system_prompt: critical prompt anchors missing (%s); \
-         appending recovery guard"
-        (String.concat "," missing);
-      prompt ^ "\n\n" ^ critical_prompt_recovery_block ()
 
 (* [keeper.system] declares no template variables, so it is read directly.
    The former [render_world_prompt] carried a render-failure fallback for a
@@ -170,7 +107,6 @@ let build_keeper_system_prompt
       active_goals_block;
       "</identity>";
     ]
-  |> ensure_critical_prompt_anchors
 
 (* XML wrapping stays in code — it is structure, not prompt content. *)
 let direct_reply_mode_body () =

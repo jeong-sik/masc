@@ -10,7 +10,6 @@ val system : string
     the same rule families in a different wording. *)
 
 val reply_guidelines : string
-val recovery_block : string
 val board_attention_judgment_batch : string
 val gate_judgment : string
 val librarian_system : string

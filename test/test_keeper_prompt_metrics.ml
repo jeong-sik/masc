@@ -69,15 +69,6 @@ let () =
   Prompt_registry.set_markdown_dir prompts_dir;
   Masc.Prompt_defaults.init ()
 
-let restore_prompt_registry () =
-  let root = repo_root () in
-  Prompt_registry.clear ();
-  Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config");
-  Config_dir_resolver.reset ();
-  Masc.Keeper_prompt_external.reset_cache ();
-  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
-  Masc.Prompt_defaults.init ()
-
 (* ── Fixture: realistic keeper prompt components ──────── *)
 
 let base_system_prompt =
@@ -446,71 +437,33 @@ let test_repository_checkout_authority_prompt () =
   check bool "a missing repository is a blocker, not a retry" true
     (has_in prompt "that is the blocker to report — not a reason to retry the path")
 
-let test_prompt_recovery_guard_restores_missing_anchors () =
-  let prompt =
-    KP.ensure_critical_prompt_anchors
-      "You are imseonghan, a keeper agent.\nInstructions: keep going."
+(* The retired [ensure_critical_prompt_anchors] guard searched the assembled
+   prompt for "<system>" — a literal the same [String.concat] emits as its
+   first element, so the check could never fail and its recovery block never
+   ran. What the guard claimed to protect is a real invariant, though: every
+   assembled keeper system prompt must open with the shared block, because the
+   KV-cache prefix and every downstream reader assume it. Assert that directly,
+   where a caller who reorders or drops the literal fails the test. *)
+let test_assembled_prompt_opens_with_system_tag () =
+  let cases =
+    [ ("no instructions", KP.build_keeper_system_prompt ~instructions:"" ())
+    ; ( "with instructions and identity"
+      , KP.build_keeper_system_prompt ~instructions:"stay terse"
+          ~keeper_name:"imseonghan" ~workspace_root:"/tmp/ws" () )
+    ; ( "with active goals"
+      , KP.build_keeper_system_prompt ~instructions:"" ~keeper_name:"imseonghan"
+          ~active_goals:[ ("g-1", "ship it") ]
+          () )
+    ]
   in
-  check bool "original persona text kept" true
-    (has_in prompt "You are imseonghan");
-  check bool "recovery system anchor present" true
-    (has_in prompt "<system>");
-  check bool "recovery names runtime-owned continuity" true
-    (has_in prompt "Continuity is runtime-owned");
-  (* The second guarantee the retired [<world>] recovery block carried. *)
-  check bool "recovery forbids inventing paths and tools" true
-    (has_in prompt "do not invent paths, repos, PRs, tasks, or tools")
+  List.iter
+    (fun (label, prompt) ->
+      check bool (label ^ ": opens with the system tag") true
+        (String.length prompt >= 8 && String.sub prompt 0 8 = "<system>");
+      check bool (label ^ ": closes the system block") true
+        (has_in prompt "</system>"))
+    cases
 
-let test_prompt_recovery_guard_uses_code_fallback_when_registry_empty () =
-  Prompt_registry.clear ();
-  Fun.protect ~finally:restore_prompt_registry (fun () ->
-      let prompt =
-        KP.ensure_critical_prompt_anchors
-          "You are imseonghan, a keeper agent.\nInstructions: keep going."
-      in
-      check bool "fallback system anchor present" true
-        (has_in prompt "<system>");
-      check bool "fallback names runtime-owned continuity" true
-        (has_in prompt "checkpoint");
-      check bool "fallback forbids inventing paths and tools" true
-        (has_in prompt "do not invent paths, repos, PRs, tasks, or tools"))
-
-(* [critical_prompt_recovery_block] trusts the operator-editable
-   [keeper.recovery_block] text only when it still carries every critical
-   anchor. With one anchor left, an override that drops [<system>] is the
-   whole drift surface: without this test the registry text could lose the
-   anchor and [ensure_critical_prompt_anchors] would append a block that
-   restores no safeguard. *)
-let recovery_block_anchor_failure_count () =
-  Masc.Otel_metric_store.metric_value_or_zero
-    Keeper_metrics.(to_string PromptFailures)
-    ~labels:[ ("prompt", "keeper.recovery_block.anchors") ]
-    ()
-
-let test_recovery_block_without_system_anchor_falls_back_to_code () =
-  let anchorless = "Recovery guard text with no anchor at all." in
-  Fun.protect ~finally:restore_prompt_registry (fun () ->
-      (match
-         Prompt_registry.set_override Keeper_prompt_names.recovery_block
-           anchorless
-       with
-       | Ok () -> ()
-       | Error message -> fail message);
-      let before = recovery_block_anchor_failure_count () in
-      let prompt =
-        KP.ensure_critical_prompt_anchors
-          "You are imseonghan, a keeper agent.\nInstructions: keep going."
-      in
-      check (float 0.0001) "anchor drift counted" (before +. 1.0)
-        (recovery_block_anchor_failure_count ());
-      check bool "anchorless registry text is not appended" false
-        (has_in prompt anchorless);
-      check bool "in-code fallback restores the system anchor" true
-        (has_in prompt "<system>");
-      check bool "in-code fallback restores the continuity guarantee" true
-        (has_in prompt "Continuity is runtime-owned");
-      check bool "in-code fallback restores the no-invention guarantee" true
-        (has_in prompt "do not invent paths, repos, PRs, tasks, or tools"))
 
 let test_prompt_preserves_typed_external_effect_boundary () =
   let prompt =
@@ -781,14 +734,8 @@ let () =
             test_system_block_states_the_collaboration_surface;
           test_case "no catalog repository injection (RFC-0324 B-1)" `Quick
             test_repository_checkout_authority_prompt;
-          test_case "prompt recovery guard restores missing anchors" `Quick
-            test_prompt_recovery_guard_restores_missing_anchors;
-          test_case "prompt recovery guard survives empty registry value"
-            `Quick
-            test_prompt_recovery_guard_uses_code_fallback_when_registry_empty;
-          test_case "recovery block missing the system anchor is rejected"
-            `Quick
-            test_recovery_block_without_system_anchor_falls_back_to_code;
+          test_case "assembled system prompt opens with the system tag" `Quick
+            test_assembled_prompt_opens_with_system_tag;
           test_case "prompt preserves typed external effect boundary" `Quick
             test_prompt_preserves_typed_external_effect_boundary;
           test_case "user message sanitizer preserves normal text" `Quick

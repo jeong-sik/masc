@@ -381,8 +381,6 @@ type capability_recovery_effect =
 
 type recovery_failure_detail =
   | Recovery_transition_failed of Recovery.transition_error
-  | Recovery_validation_failed of Recovery.validation_error
-  | Recovery_lane_admission_failed of Recovery_access.lane_open_error
   | Recovery_transition_interrupted of
       { reason : exn
       ; cleanup_failures : Recovery.failure list
@@ -621,10 +619,6 @@ let capability_recovery_failure_to_string failure =
     match failure.recovery_detail with
     | Recovery_transition_failed error ->
       Recovery.transition_error_to_string error
-    | Recovery_validation_failed error ->
-      Recovery.validation_error_to_string error
-    | Recovery_lane_admission_failed error ->
-      Recovery_access.lane_open_error_to_string error
     | Recovery_transition_interrupted { reason; cleanup_failures } ->
       let cleanup =
         match cleanup_failures with

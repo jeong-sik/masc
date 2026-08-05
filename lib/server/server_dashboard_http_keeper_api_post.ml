@@ -20,33 +20,16 @@ let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
 let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
   Http.Response.json_value ?request ~status (error_json ?ok message) reqd
 
+(* The rubric and the output sections are the operator's, not this handler's:
+   they live in config/prompts/judge.catchup.md next to the two other judge
+   prompts, so all three are read and overridden in one place. *)
 let keeper_catchup_judge_prompt ~keeper_name ~(digest : Keeper_catchup_digest.t) =
   let digest_json = Keeper_catchup_digest.to_json digest in
-  Printf.sprintf
-    {|You are a strict MASC activity judge.
-
-Write the assessment in Korean. Judge only the activity digest below. Do not invent unseen messages, hidden intent, or external context.
-This assessment is advisory and non-blocking: do not claim it gates merge, keeper progress, task ownership, or user access. A FAIL verdict means immediate operator attention is recommended, not an automatic stop.
-
-Rubric:
-- Outcome quality: did the keeper make observable progress, or only produce motion?
-- Risk: are there failed turns, crashes, transport failures, read errors, or lower-bound coverage warnings?
-- Responsiveness: do the message/turn/board/task counts suggest useful engagement?
-- Improvement: name concrete next actions an operator or keeper should take.
-
-Return concise Markdown with these sections:
-1. Verdict: one of PASS, WATCH, or FAIL, with one sentence.
-2. Evidence: 3-5 bullets tied to exact digest fields.
-3. Improvement points: 2-4 concrete recommendations.
-4. Missing evidence: note any coverage/read limitations.
-
-Keeper: %s
-Digest JSON:
-```json
-%s
-```|}
-    keeper_name
-    (Yojson.Safe.pretty_to_string digest_json)
+  Prompt_registry.render_prompt_template
+    Prompt_names.judge_catchup
+    [ "keeper_name", keeper_name
+    ; "digest_json", Yojson.Safe.pretty_to_string digest_json
+    ]
 ;;
 
 let parse_fusion_result text =
@@ -83,8 +66,12 @@ let handle_keeper_catchup_judge_post state req reqd body_str =
           Keeper_catchup_digest.build ~base_path:config.base_path
             ~keeper_name:name ~since_unix ~now_unix
         in
-        let prompt = keeper_catchup_judge_prompt ~keeper_name:name ~digest in
-        (match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
+        (match keeper_catchup_judge_prompt ~keeper_name:name ~digest with
+         | Error detail ->
+           respond_error ~status:`Internal_server_error reqd
+             ("judge.catchup prompt unavailable: " ^ detail)
+         | Ok prompt ->
+        match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
          | None, _ | _, None ->
            respond_error reqd "fusion requires the server root switch + net (unavailable)"
          | Some sw, Some net ->

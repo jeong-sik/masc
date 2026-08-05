@@ -3,14 +3,14 @@
 open Masc
 
 (* The [done] transition runs the configured-LLM completion review (#24332),
-   which renders the [verification.anti_rationalization] registry prompt. This
+   which renders the [verification] registry prompt. This
    executable exercises the real tool-dispatch path, so it pins prompt
    resolution to the repo's own prompt files — the same idiom
    test_tool_task_coverage uses so the prompt resolves whether run under dune
    (DUNE_SOURCEROOT) or as a bare executable. *)
 let has_prompt_root path =
   Sys.file_exists
-    (Filename.concat path "config/prompts/verification.anti_rationalization.md")
+    (Filename.concat path "config/prompts/verification.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -115,7 +115,7 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
      structured APPROVE so the [done] transition reaches its terminal state and
      emits the lifecycle telemetry under test. *)
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () ->
       Ok (Some Task.Anti_rationalization.Approve));
   Atomic.set Workspace_hooks.get_default_runtime_id_fn
     (fun () -> "test-evaluator-runtime");

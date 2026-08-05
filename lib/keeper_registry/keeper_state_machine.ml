@@ -352,8 +352,8 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
        exclusivity).  Operator_clear_requested is deliberately *not*
        arm-enforced beyond the terminal guard — see its arm below for
        the operator escape-hatch rationale.
-   Other events have no spec preconditions beyond NotTerminal and
-   fall through the catch-all.  The overflow-lifecycle preconditions
+   Other events have no spec preconditions beyond NotTerminal and are
+   listed explicitly in the final arm.  The overflow-lifecycle preconditions
    (Context_overflow_detected, Auto_compact_triggered) were retired with
    their events (#26546).
 
@@ -406,13 +406,37 @@ let check_event_precondition (c : conditions) (ev : event)
        to make the deliberate minimal precondition explicit — adding any
        check beyond NotTerminal would weaken the operator escape-hatch. *)
     Ok ()
-  (* Other events have no TLA+ state preconditions beyond what
+  (* The remaining events have no TLA+ state preconditions beyond what
      [apply_event]'s terminal guard already enforces; their semantics
      are encoded in [update_conditions] + [derive_phase] (e.g.
      [Heartbeat_failed] always flips [heartbeat_healthy] to false
-     regardless of prior state).  Adding speculative arms here would
-     drift from the spec. *)
-  | _ -> Ok ()
+     regardless of prior state).  Adding speculative checks here would
+     drift from the spec.
+
+     They are listed rather than caught by [| _ ->] so that adding an
+     event forces this decision to be made once, in this arm, instead of
+     inheriting Ok () silently.  Listing is not a check: the answer for
+     every event below is still "no precondition". *)
+  | Heartbeat_ok
+  | Heartbeat_failed _
+  | Turn_succeeded
+  | Turn_failed _
+  | Context_measured _
+  | Compaction_started
+  | Compaction_completed
+  | Compaction_failed _
+  | Handoff_started
+  | Handoff_completed _
+  | Handoff_failed _
+  | Operator_pause
+  | Operator_resume
+  | Operator_stop _
+  | Stop_requested
+  | Drain_complete
+  | Fiber_started
+  | Fiber_terminated _
+  | Supervisor_restart_attempt _
+  | Credential_archived -> Ok ()
 ;;
 
 (* ── apply_event ───────────────────────────────────────── *)

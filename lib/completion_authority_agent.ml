@@ -161,19 +161,9 @@ let required_string_list_field ~context name fields =
 let completion_contract_of_request
       (request : Verification.verification_request)
   =
-  let rec custom_criteria index acc = function
-    | [] -> Ok (List.rev acc)
-    | Verification.Custom description :: rest ->
-      custom_criteria (index + 1) (description :: acc) rest
-    | Verification.Schema_match _ :: _
-    | Verification.Contains _ :: _
-    | Verification.Not_contains _ :: _ ->
-      Error
-        (Printf.sprintf
-           "verification request criteria[%d] is not a persisted custom completion contract"
-           index)
+  let completion_contract =
+    List.map (fun (Verification.Custom description) -> description) request.criteria
   in
-  let* completion_contract = custom_criteria 0 [] request.criteria in
   let completion_contract =
     match completion_contract with
     | [] -> None

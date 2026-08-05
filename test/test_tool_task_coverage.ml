@@ -11,7 +11,7 @@ let () = Workspace_metric_hooks.install ()
 let () = Keeper_task_owner_backend.install_hooks ()
 
 (* The completion-review path renders the registry prompt
-   [verification.anti_rationalization]. This executable never pinned a
+   [verification]. This executable never pinned a
    markdown dir, so prompt resolution depended on whatever the host/dune
    context happened to expose — green on developer machines, "Prompt ...
    is missing" inside the CI dune sandbox, which failed every
@@ -21,7 +21,7 @@ let () = Keeper_task_owner_backend.install_hooks ()
    inside the CI sandbox, so the mechanism is CI-proven. *)
 let has_prompt_root path =
   Sys.file_exists
-    (Filename.concat path "config/prompts/verification.anti_rationalization.md")
+    (Filename.concat path "config/prompts/verification.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with

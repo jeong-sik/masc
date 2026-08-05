@@ -10,7 +10,7 @@ afterEach(() => {
 
 function prompt(overrides: Partial<DashboardPromptItem>): DashboardPromptItem {
   return {
-    key: 'keeper.system',
+    key: 'keeper',
     category: 'keeper',
     description: 'Keeper prompt',
     current: '',
@@ -33,25 +33,20 @@ describe('buildKeeperPromptAssemblyReport', () => {
   it('maps keeper prompt sources into assembly rows', () => {
     const report = buildKeeperPromptAssemblyReport([
       prompt({
-        key: 'keeper.system',
+        key: 'keeper',
         effective: 'world override',
         override_value: 'world override',
         source: 'override',
         has_override: true,
-        file_path: '/tmp/.masc/config/prompts/keeper.system.md',
+        file_path: '/tmp/.masc/config/prompts/keeper.md',
       }),
     ])
 
-    // Every prompt the server listed reaches a row, plus the two computed
-    // rows the world stage contributes. Pinned by what the input supplies
-    // rather than a threshold: the previous `> 10` encoded the stage specs'
-    // former key list, so folding keeper.world/capabilities/constitution into
-    // keeper.system (#26823) failed it without any behavior changing.
-    expect(report.rows.filter(row => row.promptKey.startsWith('keeper.')).length)
-      .toBeGreaterThanOrEqual(3)
+    // The shared keeper asset appears once as registry source and once as the
+    // system message. The world and recall blocks are computed at turn time.
+    expect(report.rows.filter(row => row.promptKey === 'keeper').length).toBe(2)
     expect(report.rows.some(row => row.promptKey === '(computed:world_observation)')).toBe(true)
-    // One stage key is supplied and overridden; the other is deliberately
-    // absent so the missing-row path below stays exercised.
+    // The one stage key is supplied and overridden.
     expect(report.stats.overrideRows).toBeGreaterThanOrEqual(1)
     expect(report.stages.map(stage => stage.title)).toEqual(
       expect.arrayContaining(['Prompt sources', 'System rules', 'World message']),
@@ -69,19 +64,15 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(report.rows.find(row => row.promptKey === '(computed:world_observation)')?.source).toBe('computed')
     expect(report.rows.find(row => row.promptKey === '(computed:scheduled_automation)')?.source).toBe('computed')
     expect(report.activePromptRoots).toEqual(['/tmp/.masc/config/prompts'])
-    expect(report.rows.find(row => row.promptKey === 'keeper.system')?.source).toBe('override')
-    expect(report.rows.find(row => row.promptKey === 'keeper.memory_os_recall.context')?.missing).toBe(true)
+    expect(report.rows.find(row => row.promptKey === 'keeper')?.source).toBe('override')
+    expect(report.rows.find(row => row.promptKey === '(computed:memory_os_recall)')?.source).toBe('computed')
   })
 
   it('detects stale argument shapes in effective prompt text', () => {
     const report = buildKeeperPromptAssemblyReport([
       prompt({
-        key: 'keeper.system',
-        effective: 'Call keeper_task_done { notes: "evidence" }',
-      }),
-      prompt({
-        key: 'keeper.memory_os_recall.context',
-        effective: 'Use keeper_pr_create and repos/masc/lib/foo.ml for PR work',
+        key: 'keeper',
+        effective: 'Call keeper_task_done { notes: "evidence" }. Use keeper_pr_create and repos/masc/lib/foo.ml for PR work.',
       }),
     ])
 
@@ -98,7 +89,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
   it('labels host-storage prompt residue without legacy-era wording', () => {
     const report = buildKeeperPromptAssemblyReport([
       prompt({
-        key: 'keeper.system',
+        key: 'keeper',
         effective: 'Do not pass .masc/playground/name/repos/foo as a tool path.',
       }),
     ])
@@ -113,17 +104,12 @@ describe('buildKeeperPromptAssemblyReport', () => {
       <${KeeperPromptAssemblyPanel}
         prompts=${[
           prompt({
-            key: 'keeper.system',
-            effective: 'world override',
-            override_value: 'world override',
+            key: 'keeper',
+            effective: 'world override tool policy',
+            override_value: 'world override tool policy',
             source: 'override',
             has_override: true,
-            file_path: '/tmp/.masc/config/prompts/keeper.system.md',
-          }),
-          prompt({
-            key: 'keeper.memory_os_recall.context',
-            effective: 'tool policy',
-            file_path: '/tmp/.masc/config/prompts/keeper.memory_os_recall.context.md',
+            file_path: '/tmp/.masc/config/prompts/keeper.md',
           }),
         ]}
       />
@@ -147,8 +133,8 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(defaultRoute?.textContent).toContain('final')
     expect(defaultRoute?.textContent).toContain('Final context')
     expect(defaultRoute?.textContent).toContain('scheduler signals')
-    expect(defaultRoute?.textContent).toContain('keeper.system')
-    expect(defaultRoute?.textContent).toContain('/tmp/.masc/config/prompts/keeper.system.md')
+    expect(defaultRoute?.textContent).toContain('keeper')
+    expect(defaultRoute?.textContent).toContain('/tmp/.masc/config/prompts/keeper.md')
     expect(defaultRoute?.textContent).toContain('world override')
     expect(defaultRoute?.textContent).toContain('tool policy')
     expect(defaultRoute?.textContent).toContain('fingerprint')
@@ -193,7 +179,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(rawFileList).not.toBeNull()
     expect(rawFileList?.hasAttribute('open')).toBe(false)
     expect(rawFileList?.querySelector('summary')?.textContent).toContain('Raw prompt files')
-    expect(evidence?.textContent).toContain('keeper.system')
+    expect(evidence?.textContent).toContain('keeper')
     expect(evidence?.textContent).toContain('(computed:scheduled_automation)')
     expect(evidence?.textContent).toContain('fingerprint')
 
@@ -212,7 +198,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
       <${KeeperPromptAssemblyPanel}
         prompts=${[
           prompt({
-            key: 'keeper.system',
+            key: 'keeper',
             effective: 'Do not pass .masc/playground/name/repos/foo as a tool path.',
           }),
         ]}
@@ -236,8 +222,8 @@ describe('buildKeeperPromptAssemblyReport', () => {
 
 // The "Total size" metric is what an operator sizes a keeper's context budget
 // against. Two stages carry messageSlot 'not sent' — 'registry-bootstrap'
-// re-lists keeper.system as source preparation, and 'manifest-edge' is the
-// post-assembly audit record. Summing every row counted keeper.system twice:
+// re-lists keeper as source preparation, and 'manifest-edge' is the
+// post-assembly audit record. Summing every row counted keeper twice:
 // the live fleet panel read 15.3 KiB / 3,920 tok against a real model input of
 // 1,985 tok.
 describe('buildKeeperPromptAssemblyReport sent totals', () => {
@@ -245,9 +231,9 @@ describe('buildKeeperPromptAssemblyReport sent totals', () => {
     const body = 'x'.repeat(4096)
     const report = buildKeeperPromptAssemblyReport([
       prompt({
-        key: 'keeper.system',
+        key: 'keeper',
         effective: body,
-        file_path: '/tmp/.masc/config/prompts/keeper.system.md',
+        file_path: '/tmp/.masc/config/prompts/keeper.md',
         char_count: body.length,
       }),
     ])
@@ -268,9 +254,9 @@ describe('buildKeeperPromptAssemblyReport sent totals', () => {
     const body = 'y'.repeat(2048)
     const report = buildKeeperPromptAssemblyReport([
       prompt({
-        key: 'keeper.system',
+        key: 'keeper',
         effective: body,
-        file_path: '/tmp/.masc/config/prompts/keeper.system.md',
+        file_path: '/tmp/.masc/config/prompts/keeper.md',
         char_count: body.length,
       }),
     ])
@@ -278,7 +264,7 @@ describe('buildKeeperPromptAssemblyReport sent totals', () => {
     const systemStage = report.stages.find(stage => stage.id === 'base-system')
     const sourceStage = report.stages.find(stage => stage.id === 'registry-bootstrap')
     expect(sourceStage?.messageSlot).toBe('not sent')
-    // Both stages render keeper.system, so the naive all-rows sum is ~2x.
+    // Both stages render keeper, so the naive all-rows sum is ~2x.
     expect(sourceStage?.bytes).toBe(systemStage?.bytes)
     expect(report.stats.sentEstimatedTokens).toBeLessThan(
       report.rows.reduce((sum, row) => sum + row.estimatedTokens, 0),

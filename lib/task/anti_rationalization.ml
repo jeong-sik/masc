@@ -199,7 +199,7 @@ let build_prompt ?(few_shot_block = "") ?completion_contract
     ]
   in
   Prompt_registry.render_prompt_template
-    Keeper_prompt_names.verification_anti_rationalization
+    Prompt_names.verification
     vars
 ;;
 

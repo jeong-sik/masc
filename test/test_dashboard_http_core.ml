@@ -3021,6 +3021,75 @@ let post_config ~sw ~clock ~state ~name body =
   in
   raw, Yojson.Safe.from_string body
 
+let post_catchup_judge ~state ~name body =
+  let output = Buffer.create 512 in
+  let connection =
+    Httpun.Server_connection.create (fun reqd ->
+      Keeper_config_post.handle_keeper_catchup_judge_post
+        state
+        (Httpun.Reqd.request reqd)
+        reqd
+        body)
+  in
+  let request =
+    Printf.sprintf
+      "POST /api/v1/keepers/%s/catchup-judge HTTP/1.1\r\nHost: x\r\n\r\n"
+      name
+  in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
+  ignore
+    (Httpun.Server_connection.read_eof
+       connection
+       input
+       ~off:0
+       ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let bytes =
+        List.fold_left
+          (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+            Buffer.add_string output
+              (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+            total + iov.len)
+          0
+          iovecs
+      in
+      Httpun.Server_connection.report_write_result connection (`Ok bytes);
+      drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  Buffer.contents output
+;;
+
+let test_catchup_judge_prompt_failure_is_server_error () =
+  let base_path = test_dir () in
+  let empty_prompts = Filename.concat base_path "empty-prompts" in
+  Unix.mkdir empty_prompts 0o755;
+  let previous_prompt_dir = Prompt_registry.get_markdown_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Option.iter Prompt_registry.set_markdown_dir previous_prompt_dir;
+      cleanup_dir base_path)
+    (fun () ->
+      Prompt_registry.set_markdown_dir empty_prompts;
+      let raw =
+        post_catchup_judge
+          ~state:(Lib.Mcp_server.For_testing.create_state ~base_path)
+          ~name:"catchup-prompt-fixture"
+          {|{"since_unix":0}|}
+      in
+      check bool
+        "missing server-owned prompt is HTTP 500"
+        true
+        (String.starts_with ~prefix:"HTTP/1.1 500" raw);
+      check bool
+        "response identifies the unavailable prompt"
+        true
+        (contains_substring raw "judge.catchup prompt unavailable"))
+;;
+
 let test_config_post_restarts_from_atomic_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-success" in
@@ -3242,6 +3311,8 @@ let () =
       ( "dashboard behavior contracts",
         [ test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
+          test_case "catch-up prompt failure is a server error" `Quick
+            test_catchup_judge_prompt_failure_is_server_error;
           test_case "proof payload exposes submission index" `Quick
             test_dashboard_proof_http_json_surfaces_submission_index;
           test_case "offline keeper composite exposes secret projection" `Quick

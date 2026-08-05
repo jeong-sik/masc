@@ -26,19 +26,18 @@ function basename(path: string): string {
   return slash >= 0 ? path.slice(slash + 1) : path
 }
 
-// Family classification (client curation). The server exposes category/file_path
-// but not a "does this feed the keeper turn" flag — the librarian and judge
-// prompts are category=keeper yet never assemble into a turn — so the feedsTurn
-// split is authored here. Ordered specific→generic: the first matching rule
-// wins, so librarian / judge are classified before the generic keeper.* family. An unmatched prompt falls to an explicit Other bucket rather
-// than being silently folded into a feeding family.
+// Family classification (client curation). The server exposes the exact
+// frontmatter category but not a "does this feed the keeper turn" flag, so only
+// that boolean is authored here. Key/file-name substring matching is forbidden:
+// renaming an asset must not silently change its family. An unrecognized
+// category lands in an explicit Other bucket.
 interface FamilyDef {
   id: string
   family: string
   feedsTurn: boolean
   order: number
   note: string
-  match: (haystack: string) => boolean
+  category: string
 }
 
 const FAMILY_DEFS: readonly FamilyDef[] = [
@@ -48,7 +47,7 @@ const FAMILY_DEFS: readonly FamilyDef[] = [
     feedsTurn: false,
     order: 5,
     note: 'memory-os 라이브러리안 전용 — 별도 호출자',
-    match: h => h.includes('librarian'),
+    category: 'librarian',
   },
   {
     id: 'judge',
@@ -56,23 +55,7 @@ const FAMILY_DEFS: readonly FamilyDef[] = [
     feedsTurn: false,
     order: 4,
     note: '대시보드 판정용 — keeper 턴 아님',
-    match: h => h.includes('judge'),
-  },
-  {
-    id: 'deliberation',
-    family: 'Analysis · Deliberation',
-    feedsTurn: false,
-    order: 6,
-    note: '숙의·드라이런 — 다중 keeper 합의',
-    match: h => h.includes('analysis.dry_run') || h.includes('deliberation'),
-  },
-  {
-    id: 'tool_contract',
-    family: 'Tool Contract',
-    feedsTurn: true,
-    order: 3,
-    note: '태스크 라이프사이클 도구 계약 (큐레이션)',
-    match: h => h.includes('tool_contract'),
+    category: 'judge',
   },
   {
     id: 'verification',
@@ -80,15 +63,15 @@ const FAMILY_DEFS: readonly FamilyDef[] = [
     feedsTurn: false,
     order: 7,
     note: '검증·적대적 리뷰 — verifier 호출자',
-    match: h => h.includes('verification'),
+    category: 'verification',
   },
   {
-    id: 'orchestrator',
-    family: 'Orchestrator',
+    id: 'worker',
+    family: 'Worker · 로컬 워커',
     feedsTurn: false,
-    order: 8,
-    note: '시스템 오케스트레이션',
-    match: h => h.includes('orchestrator'),
+    order: 2,
+    note: '로컬 워커 시스템 프롬프트 — keeper 턴 아님',
+    category: 'worker',
   },
   {
     id: 'keeper',
@@ -96,7 +79,7 @@ const FAMILY_DEFS: readonly FamilyDef[] = [
     feedsTurn: true,
     order: 1,
     note: 'keeper 시스템 프롬프트를 이루는 md 계열 (큐레이션 · 런타임 조립과 1:1 아님)',
-    match: h => h.includes('keeper.') || h.includes('/behavior/') || h.includes('behavior.'),
+    category: 'keeper',
   },
 ]
 
@@ -109,12 +92,11 @@ const OTHER_FAMILY: FamilyDef = {
   feedsTurn: false,
   order: 9,
   note: '위 계열에 분류되지 않은 프롬프트',
-  match: () => true,
+  category: 'other',
 }
 
 function classifyFamily(item: DashboardPromptItem): FamilyDef {
-  const haystack = `${item.key}|${item.file_path ?? ''}`
-  return FAMILY_DEFS.find(def => def.match(haystack)) ?? OTHER_FAMILY
+  return FAMILY_DEFS.find(def => def.category === item.category) ?? OTHER_FAMILY
 }
 
 interface FamilyGroup {

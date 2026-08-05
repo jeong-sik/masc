@@ -22,7 +22,7 @@ import { PromptRegistryPanel, promptSourceCounts } from './prompt-registry-panel
 
 function makePrompt(overrides: Partial<DashboardPromptItem>): DashboardPromptItem {
   return {
-    key: 'keeper.system',
+    key: 'keeper',
     category: 'keeper',
     description: 'Keeper system prompt',
     current: '',
@@ -42,7 +42,7 @@ function makePrompt(overrides: Partial<DashboardPromptItem>): DashboardPromptIte
 }
 
 const HELPER_FIXTURES: DashboardPromptItem[] = [
-  makePrompt({ key: 'keeper.system', category: 'keeper', description: 'k1', source: 'file' }),
+  makePrompt({ key: 'keeper', category: 'keeper', description: 'k1', source: 'file' }),
   makePrompt({ key: 'keeper.turn', category: 'keeper', description: 'k2', source: 'override' }),
   makePrompt({ key: 'planner.root', category: 'planner', description: 'p1', source: 'default' }),
   makePrompt({ key: 'planner.step', category: 'planner', description: 'p2', source: 'missing' }),
@@ -57,7 +57,7 @@ const HELPER_FIXTURES: DashboardPromptItem[] = [
 function defaultPromptItems(): DashboardPromptItem[] {
   return [
     makePrompt({
-      key: 'keeper.system',
+      key: 'keeper',
       category: 'keeper',
       description: 'world block',
       current: 'override world',
@@ -65,7 +65,7 @@ function defaultPromptItems(): DashboardPromptItem[] {
       effective: 'override world',
       file_value: 'file world',
       override_value: 'override world',
-      file_path: 'fixture/config/prompts/keeper.system.md',
+      file_path: 'fixture/config/prompts/keeper.md',
       source: 'override',
       has_override: true,
       char_count: 14,
@@ -141,8 +141,8 @@ describe('PromptRegistryPanel', () => {
     expect(container.querySelector('.v2-lab-panel')).not.toBeNull()
     expect(container.querySelector('.v2-lab-row')).not.toBeNull()
     expect(container.textContent).toContain('프롬프트 레지스트리')
-    expect(container.textContent).toContain('keeper.system')
-    expect(container.textContent).toContain('fixture/config/prompts/keeper.system.md')
+    expect(container.textContent).toContain('keeper')
+    expect(container.textContent).toContain('fixture/config/prompts/keeper.md')
     expect(container.querySelector('[data-prompt-preset-switcher]')).not.toBeNull()
     expect(container.querySelector('[data-prompt-destinations]')?.textContent).toContain('System rules')
     expect(container.querySelector('[data-prompt-destinations]')?.textContent).toContain('system')

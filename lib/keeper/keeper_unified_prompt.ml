@@ -672,11 +672,11 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
   in
   (* A second prompt asset used to be appended here as [## Turn Intent] on
      every turn. It restated the capability catalog, the Task-claim rule and
-     the work-placement rule that [keeper.system] already carries, and its
+     the work-placement rule that [keeper] already carries, and its
      in-binary fallback had drifted to hold continuity statements the asset
      itself had dropped — so a keeper was told its checkpoint survives across
      cycles only when prompt config was degraded. The permanent content now
-     lives in [keeper.system]; nothing in it varied per turn. *)
+     lives in [keeper]; nothing in it varied per turn. *)
   base_system_prompt
 ;;
 

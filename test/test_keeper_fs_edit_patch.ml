@@ -917,7 +917,8 @@ let test_int_mode_is_rejected () =
     ~expected_error:(expected_mode_error value)
 
 (* The other half of the contract: absence still takes the documented
-   Overwrite default, and an explicit null reads as absence. *)
+   Overwrite default. A present null is not absence; the schema permits only a
+   string when [mode] is present, so it follows the rejection path above. *)
 let check_mode_defaults_to_overwrite ~label ~args_extra =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground (label ^ ".txt") in
@@ -937,9 +938,9 @@ let check_mode_defaults_to_overwrite ~label ~args_extra =
 let test_absent_mode_defaults_to_overwrite () =
   check_mode_defaults_to_overwrite ~label:"absent-mode" ~args_extra:[]
 
-let test_null_mode_defaults_to_overwrite () =
-  check_mode_defaults_to_overwrite ~label:"null-mode"
-    ~args_extra:[ ("mode", `Null) ]
+let test_null_mode_is_rejected () =
+  check_invalid_mode_json_is_rejected ~label:"null-mode" ~mode_json:`Null
+    ~expected_error:(expected_mode_error `Null)
 
 let test_empty_mode_is_rejected () =
   check_invalid_mode_is_rejected ~label:"empty-mode" ~mode:""
@@ -1142,8 +1143,8 @@ let () =
             test_int_mode_is_rejected;
           Alcotest.test_case "absent mode defaults to overwrite" `Quick
             test_absent_mode_defaults_to_overwrite;
-          Alcotest.test_case "null mode defaults to overwrite" `Quick
-            test_null_mode_defaults_to_overwrite;
+          Alcotest.test_case "null mode rejected" `Quick
+            test_null_mode_is_rejected;
           Alcotest.test_case "public Edit uses explicit repo path" `Quick
             test_public_edit_file_uses_explicit_repo_path;
           Alcotest.test_case "public Write uses explicit repo path" `Quick

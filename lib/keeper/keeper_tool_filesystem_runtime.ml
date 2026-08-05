@@ -1962,20 +1962,24 @@ let handle_file_write_with_outcome
      misspelled {"mode": "apend"} was rejected below — a type error was handled
      more permissively than a value error, in the destructive direction. Read
      the member so a non-string is rejected on the same path as a bad string.
-     An explicit JSON null still reads as absent: [safe_member] returns [`Null]
-     for both, and "null means take the default" is the schema's intent. *)
-  let mode_member = Safe_ops.safe_member "mode" args in
+     Keep absence distinct from an explicit JSON null: the schema permits an
+     omitted optional member, but a present member must be a string. *)
+  let mode_member =
+    match args with
+    | `Assoc members -> List.assoc_opt "mode" members
+    | _ -> None
+  in
   let mode_raw =
     match mode_member with
-    | `String s -> s
-    | `Null -> fs_write_mode_to_string Overwrite
-    | other -> Yojson.Safe.to_string other
+    | None -> fs_write_mode_to_string Overwrite
+    | Some (`String s) -> s
+    | Some other -> Yojson.Safe.to_string other
   in
   let mode_opt =
     match mode_member with
-    | `Null -> Some Overwrite
-    | `String s -> fs_write_mode_of_string_opt s
-    | _ -> None
+    | None -> Some Overwrite
+    | Some (`String s) -> fs_write_mode_of_string_opt s
+    | Some _ -> None
   in
   let after_gate ~confined ~target ~input continue =
     if confined_write_is_keeper_playground ~config ~meta confined

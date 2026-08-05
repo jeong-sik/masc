@@ -16,6 +16,7 @@ Retention criteria:
 - Retain an existing ID only when its exact fact is still true, important, non-duplicative, and worth occupying future context.
 - Drop stale, superseded, transient, or derivable existing memories. Dropping is the deletion operation, and each drop states its reason in one sentence (what made this memory stop earning its place).
 - Never recreate a dropped existing fact as a new claim merely to reword it.
+- Record a rule the way its source states it. Do not store the inverse: "when X, do Y" does not license "only when X", and "Y is not yours to do" does not license "stay out of everything nearby". The inverse adds an exclusivity the source never wrote, and once stored it reads as authoritative in every later turn. If the source names when to act, keep it as that; if it names a boundary, keep the boundary at the width it was written.
 - Apply the category criteria below to existing memories too, not only to new claims. A stored memory that would not be written today does not earn retention by already being there. In particular, drop a stored `constraint` that no external rule enforces — one describing what the agent decided to stay out of, wait for, or not take on — with the reason that it was the agent's own scope decision rather than an enforced rule.
 
 New-claim criteria:

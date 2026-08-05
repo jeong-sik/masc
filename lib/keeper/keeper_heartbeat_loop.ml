@@ -580,7 +580,6 @@ let run_keepalive_unified_turn
       in
       Keeper_tool_diversity.record_underused_tool_metrics
         ~keeper_name:meta_after_triage.name
-        ~available_tools
         tool_diversity_summary;
       let audit_wall_clock = Time_compat.now () in
       let tool_diversity_entropy =

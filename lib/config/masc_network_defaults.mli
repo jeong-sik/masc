@@ -12,6 +12,11 @@
 (** {1 Ollama defaults} *)
 
 (** Default port for Ollama (OpenAI-compatible at [/v1]). *)
+val trim_trailing_slashes : string -> string
+(** Strip every trailing ['/'] from a URL-shaped value.  [""] and ["/"]
+    both become [""].  Paths keep their root: use
+    {!Env_config_core.strip_path_trailing_slashes} for those. *)
+
 val ollama_default_port : int
 
 (** ["http://127.0.0.1:<ollama_default_port>"]. *)

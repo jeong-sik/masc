@@ -262,6 +262,8 @@
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
   test_tool_input_validation
+  test_tool_schema_constraint_enforcement
+  test_keeper_artifact_read_request
   test_tool_schema_oas_boundary
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
@@ -557,6 +559,8 @@
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
   test_tool_input_validation
+  test_tool_schema_constraint_enforcement
+  test_keeper_artifact_read_request
   test_tool_schema_oas_boundary
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle

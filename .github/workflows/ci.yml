@@ -955,6 +955,28 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_verification"
 
+      # Declared JSON-Schema bounds (minimum/maximum/exclusiveMinimum/
+      # exclusiveMaximum/minLength/maxLength/minItems/maxItems) are dropped
+      # by Tool_bridge.params_of_json_schema, so for a long time nothing
+      # read them: keeper_artifact_read answered max_bytes=565244 with a
+      # message naming sha256 (2026-08-05 20:06:36, keeper kidsnote). These
+      # suites assert the bounds are enforced pre-dispatch, that every
+      # declaration masc holds is reachable and readable by that
+      # enforcement, and that artifact-read rejections name the field that
+      # actually failed without changing which requests are served.
+      - name: Run tool input constraint enforcement suite
+        id: tool_input_constraint_enforcement_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          constraint_targets="@test/runtest-test_tool_schema_constraint_enforcement @test/runtest-test_keeper_artifact_read_request"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${constraint_targets}"
+
       # The tool-call quality benchmark scores keeper runs against selectors
       # declared in benchmarks/data/tool_call_quality_cases.json. Those
       # selectors name descriptors in the live keeper registry, so deleting or

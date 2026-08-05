@@ -162,10 +162,8 @@ val repositories_toml_basename : string
     of a scattered literal. [repositories_toml_path] derives from this. *)
 
 val repositories_toml_path : base_path:string -> string
-(** [<base_path>/.masc/config/repositories.toml]. Backwards-compatible
-    direct derivation from [base_path]. A future RFC may extend this to
-    honour [MASC_CONFIG_DIR] override; until then the location matches
-    pre-RFC-0121 caller behaviour. *)
+(** [<base_path>/.masc/config/repositories.toml]. Direct derivation from
+    [base_path]. *)
 
 val keeper_repo_mappings_toml_path : base_path:string -> string
 (** [<base_path>/.masc/config/keeper_repo_mappings.toml]. Same caveat as

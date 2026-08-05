@@ -7,15 +7,6 @@ let repos_toml_path base_path =
      previous direct concat (test_rfc0121_repositories_toml). *)
   Config_dir_resolver.repositories_toml_path ~base_path
 
-let repositories_toml_exists base_path =
-  Sys.file_exists (repos_toml_path base_path)
-
-(* NB: [default_local_path] returns a cwd-relative path because it is the
-   default value for the [local_path] field in repositories.toml; the
-   on-disk TOML representation is cwd/base-path-relative by design.
-   Resolver routing for this default is deferred — see RFC-0121 §6. *)
-let default_local_path id = Filename.concat ".masc/repos" id
-
 let now_unix_seconds () = Int64.of_float (Unix.time ())
 
 let string_of_status = function
@@ -24,59 +15,88 @@ let string_of_status = function
   | Cloning -> "Cloning"
   | Error _ -> "Error"
 
-let status_of_string = function
-  | "Active" | "active" -> Ok Active
-  | "Paused" | "paused" -> Ok Paused
-  | "Cloning" | "cloning" -> Ok Cloning
-  | "Error" | "error" -> Ok (Error "")
-  | s -> Error (Printf.sprintf "Unknown repository status: %s" s)
+let repository_field_names =
+  [
+    "name";
+    "url";
+    "local_path";
+    "aliases";
+    "default_branch";
+    "keepers";
+    "status";
+    "status_error";
+    "auto_sync";
+    "sync_interval";
+    "created_at";
+    "updated_at";
+  ]
 
 let repository_of_toml toml id =
-  let ( let* ) = Result.bind in
   let path field = ["repository"; id; field] in
-  (* RFC-0141 PR-2: Type_mismatch is propagated as Error instead of being
-     silenced into [Ok default]. Missing fields still fall back to default. *)
-  let find_string_default field default =
-    Field_resolution.resolve_string toml (path field)
-    |> Field_resolution.or_default ~default
-  in
-  let find_bool_default field default =
-    Field_resolution.resolve_bool toml (path field)
-    |> Field_resolution.or_default ~default
-  in
-  let find_int64_default field default =
-    match Field_resolution.resolve_int toml (path field) with
-    | Present v -> Ok (Int64.of_int v)
-    | Missing -> Ok default
+  let required field = function
+    | Field_resolution.Present value -> Ok value
+    | Missing ->
+      Error
+        (Printf.sprintf "repositories.toml: required field %s is absent"
+           (String.concat "." (path field)))
     | Type_mismatch { path; expected; message } ->
       Error
-        (Printf.sprintf "TOML field %s: expected %s (%s)"
+        (Printf.sprintf "repositories.toml: field %s must be %s (%s)"
            (String.concat "." path) expected message)
   in
-  let find_string_list_default field default =
-    Field_resolution.resolve_strings toml (path field)
-    |> Field_resolution.or_default ~default
+  let required_string field =
+    required field (Field_resolution.resolve_string toml (path field))
   in
-  let* name = Otoml.find_result toml Otoml.get_string (path "name") in
-  let* url = Otoml.find_result toml Otoml.get_string (path "url") in
-  let* local_path = find_string_default "local_path" (default_local_path id) in
-  let* aliases = find_string_list_default "aliases" [] in
-  let* default_branch = find_string_default "default_branch" "main" in
-  let* keepers = find_string_list_default "keepers" [] in
-  let* status_str = find_string_default "status" "Active" in
-  let* status = status_of_string status_str in
-  let status =
-    match status with
-    | Error _ -> (
-        match Otoml.find_result toml Otoml.get_string (path "status_error") with
-        | Ok msg -> Error msg
-        | Error _ -> Error "")
-    | Active | Paused | Cloning -> status
+  let required_bool field =
+    required field (Field_resolution.resolve_bool toml (path field))
   in
-  let* auto_sync = find_bool_default "auto_sync" false in
-  let* sync_interval = find_int64_default "sync_interval" (Int64.of_int 300) in
-  let* created_at = find_int64_default "created_at" Int64.zero in
-  let* updated_at = find_int64_default "updated_at" Int64.zero in
+  let required_int field =
+    required field (Field_resolution.resolve_int toml (path field))
+  in
+  let required_strings field =
+    required field (Field_resolution.resolve_strings toml (path field))
+  in
+  let require_no_status_error () =
+    match Field_resolution.resolve_string toml (path "status_error") with
+    | Missing -> Ok ()
+    | Present _ ->
+      Error
+        (Printf.sprintf
+           "repositories.toml: field %s is only valid when status is Error"
+           (String.concat "." (path "status_error")))
+    | Type_mismatch { path; expected; message } ->
+      Error
+        (Printf.sprintf "repositories.toml: field %s must be %s (%s)"
+           (String.concat "." path) expected message)
+  in
+  let* name = required_string "name" in
+  let* url = required_string "url" in
+  let* local_path = required_string "local_path" in
+  let* aliases = required_strings "aliases" in
+  let* default_branch = required_string "default_branch" in
+  let* keepers = required_strings "keepers" in
+  let* status_name = required_string "status" in
+  let* status =
+    match status_name with
+    | "Active" ->
+      let* () = require_no_status_error () in
+      Ok Active
+    | "Paused" ->
+      let* () = require_no_status_error () in
+      Ok Paused
+    | "Cloning" ->
+      let* () = require_no_status_error () in
+      Ok Cloning
+    | "Error" ->
+      let* message = required_string "status_error" in
+      Ok (Error message)
+    | value ->
+      Error (Printf.sprintf "Unknown repository status: %s" value)
+  in
+  let* auto_sync = required_bool "auto_sync" in
+  let* sync_interval = required_int "sync_interval" in
+  let* created_at = required_int "created_at" in
+  let* updated_at = required_int "updated_at" in
   Ok
     {
       id;
@@ -88,9 +108,9 @@ let repository_of_toml toml id =
       keepers;
       status;
       auto_sync;
-      sync_interval = Int64.to_int sync_interval;
-      created_at;
-      updated_at;
+      sync_interval;
+      created_at = Int64.of_int created_at;
+      updated_at = Int64.of_int updated_at;
     }
 
 let toml_of_repository repo =
@@ -115,63 +135,79 @@ let toml_of_repository repo =
   in
   let fields =
     match repo.status with
-    | Error msg when String.trim msg <> "" ->
-        ("status_error", Otoml.string msg) :: fields
-    | Error _ | Active | Paused | Cloning -> fields
+    | Error msg -> ("status_error", Otoml.string msg) :: fields
+    | Active | Paused | Cloning -> fields
   in
   Otoml.TomlTable fields
 
 let load_all ~base_path =
   let path = repos_toml_path base_path in
   if not (Sys.file_exists path) then
-    (* backward compatibility: treat base_path as a single default repository *)
-    let now = now_unix_seconds () in
-    Ok
-      [
-        {
-          id = "default";
-          name = Filename.basename base_path;
-          url = "";
-          local_path = base_path;
-          aliases = [];
-          default_branch = "main";
-          keepers = [];
-          status = Active;
-          auto_sync = false;
-          sync_interval = 0;
-          created_at = now;
-          updated_at = now;
-        };
-      ]
+    Ok []
   else
     match Otoml.Parser.from_file_result path with
     | Error msg -> Error msg
     | Ok toml -> (
-        match Otoml.find_result toml Fun.id ["repository"] with
-        | Error _ -> Ok []
-        | Ok (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
+        match Otoml.get_table toml with
+        | exception Otoml.Type_error message ->
+          Error
+            (Printf.sprintf
+               "repositories.toml: top level must be a table (%s)" message)
+        | top_level_fields ->
+          match
+            List.find_opt
+              (fun (field, _) -> not (String.equal field "repository"))
+              top_level_fields
+          with
+          | Some (field, _) ->
+            Error
+              (Printf.sprintf
+                 "repositories.toml: unknown top-level field %s" field)
+          | None -> (
+            match List.assoc_opt "repository" top_level_fields with
+            | None ->
+              Error "repositories.toml: required repository table is absent"
+            | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
             let rec loop acc = function
               | [] -> Ok (List.rev acc)
               | (id, value) :: rest ->
-                  if is_toml_table value then
+                  (match value with
+                  | Otoml.TomlTable row_fields | Otoml.TomlInlineTable row_fields ->
+                    (match
+                       List.find_opt
+                         (fun (field, _) ->
+                           not (List.mem field repository_field_names))
+                         row_fields
+                     with
+                    | Some (field, _) ->
+                      Error
+                        (Printf.sprintf
+                           "repositories.toml: unknown field repository.%s.%s"
+                           id field)
+                    | None ->
                     let repo_toml =
                       Otoml.TomlTable
                         [("repository", Otoml.TomlTable [(id, value)])]
                     in
                     (match repository_of_toml repo_toml id with
                     | Ok repo -> loop (repo :: acc) rest
-                    | Error msg -> Error msg)
-                  else
-                    Error (Printf.sprintf "repository.%s must be a table" id)
+                    | Error msg -> Error msg))
+                  | Otoml.TomlString _ | Otoml.TomlInteger _
+                  | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+                  | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+                  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+                  | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
+                    Error (Printf.sprintf "repository.%s must be a table" id))
             in
             loop [] fields
-        | Ok (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
-             | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
-             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
-             | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _) ->
-            Ok [])
+            | Some (Otoml.TomlString _ | Otoml.TomlInteger _
+                   | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+                   | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+                   | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+                   | Otoml.TomlArray _ | Otoml.TomlTableArray _) ->
+              Error "repositories.toml: repository must be a table"))
 
-let save_all ~base_path (repos : repository list) =
+let write_all ~base_path (repos : repository list) =
   let path = repos_toml_path base_path in
   let config_dir = Filename.dirname path in
   Fs_compat.mkdir_p config_dir;
@@ -180,16 +216,24 @@ let save_all ~base_path (repos : repository list) =
   in
   let toml = Otoml.TomlTable [("repository", Otoml.TomlTable repo_entries)] in
   let content = Otoml.Printer.to_string toml in
+  Fs_compat.save_file_atomic_strict path content
+
+let with_store_lock ~base_path (f : unit -> ('value, string) result) :
+    ('value, string) result =
+  let path = repos_toml_path base_path in
   try
-    let oc = open_out path in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc content);
-    Ok ()
+    Fs_compat.mkdir_p (Filename.dirname path);
+    File_lock_eio.with_lock path f
   with
-  | Sys_error msg -> Error msg
-  | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
-  | Failure msg -> Error msg
+  | File_lock_eio.Flock_timeout { path; attempts; _ } ->
+    Stdlib.Error
+      (Printf.sprintf
+         "timed out acquiring repository catalog lock %s after %d attempts"
+         path attempts)
+  | Sys_error message -> Stdlib.Error message
+
+let save_all ~base_path repos =
+  with_store_lock ~base_path (fun () -> write_all ~base_path repos)
 
 let find ~base_path id =
   let* repos = load_all ~base_path in
@@ -198,81 +242,85 @@ let find ~base_path id =
   | None -> Error (Printf.sprintf "Repository not found: %s" id)
 
 let add ~base_path (repo : repository) =
-  let* repos = load_all ~base_path in
-  if List.exists (fun (r : repository) -> String.equal r.id repo.id) repos then
-    Error (Printf.sprintf "Repository already exists: %s" repo.id)
+  if String.trim repo.local_path = "" then
+    Stdlib.Error "Repository local_path must be non-empty"
   else
-    let now = now_unix_seconds () in
-    let repo =
-      {
-        repo with
-        local_path =
-          (if String.trim repo.local_path = "" then default_local_path repo.id
-           else repo.local_path);
-        created_at = (if Int64.equal repo.created_at Int64.zero then now else repo.created_at);
-        updated_at = (if Int64.equal repo.updated_at Int64.zero then now else repo.updated_at);
-      }
-    in
-    let* () = save_all ~base_path (repo :: repos) in
-    Ok repo
+    with_store_lock ~base_path (fun () ->
+      let* repos = load_all ~base_path in
+      if List.exists (fun (r : repository) -> String.equal r.id repo.id) repos then
+        Error (Printf.sprintf "Repository already exists: %s" repo.id)
+      else
+        let now = now_unix_seconds () in
+        let repo =
+          {
+            repo with
+            created_at = now;
+            updated_at = now;
+          }
+        in
+        let* () = write_all ~base_path (repo :: repos) in
+        Ok repo)
 
 let remove ~base_path id =
-  let* repos = load_all ~base_path in
-  let filtered =
-    List.filter (fun (r : repository) -> not (String.equal r.id id)) repos
-  in
-  if List.length filtered = List.length repos then
-    Error (Printf.sprintf "Repository not found: %s" id)
-  else
-    save_all ~base_path filtered
+  with_store_lock ~base_path (fun () ->
+      let* repos = load_all ~base_path in
+      let filtered =
+        List.filter (fun (r : repository) -> not (String.equal r.id id)) repos
+      in
+      if List.length filtered = List.length repos then
+        Error (Printf.sprintf "Repository not found: %s" id)
+      else
+        write_all ~base_path filtered)
 
 let update_status ~base_path id status =
-  let* repos = load_all ~base_path in
-  let found = ref false in
-  let now = now_unix_seconds () in
-  let updated =
-    List.map
-      (fun (r : repository) ->
-        if String.equal r.id id then (
-          found := true;
-          { r with status; updated_at = now })
-        else r)
-      repos
-  in
-  if not !found then Error (Printf.sprintf "Repository not found: %s" id)
-  else save_all ~base_path updated
+  with_store_lock ~base_path (fun () ->
+      let* repos = load_all ~base_path in
+      let found = ref false in
+      let now = now_unix_seconds () in
+      let updated =
+        List.map
+          (fun (r : repository) ->
+            if String.equal r.id id then (
+              found := true;
+              { r with status; updated_at = now })
+            else r)
+          repos
+      in
+      if not !found then Error (Printf.sprintf "Repository not found: %s" id)
+      else write_all ~base_path updated)
 
 let update ~base_path id (repo : repository) =
-  let* repos = load_all ~base_path in
-  let now = now_unix_seconds () in
-  let result : (repository, string) Stdlib.result ref =
-    ref (Stdlib.Error (Printf.sprintf "Repository not found: %s" id))
-  in
-  let updated =
-    List.map
-      (fun (r : repository) ->
-        if String.equal r.id id then
-          let normalised =
-            {
-              repo with
-              id;
-              local_path =
-                (if String.trim repo.local_path = "" then default_local_path id
-                 else repo.local_path);
-              created_at = r.created_at;
-              updated_at = now;
-            }
-          in
-          result := Stdlib.Ok normalised;
-          normalised
-        else r)
-      repos
-  in
-  match !result with
-  | Stdlib.Error _ as e -> e
-  | Stdlib.Ok _ ->
-      let* () = save_all ~base_path updated in
-      !result
+  if String.trim repo.local_path = "" then
+    Stdlib.Error "Repository local_path must be non-empty"
+  else
+    with_store_lock ~base_path (fun () ->
+      let* repos = load_all ~base_path in
+      let now = now_unix_seconds () in
+      let result : (repository, string) Stdlib.result ref =
+        ref (Stdlib.Error (Printf.sprintf "Repository not found: %s" id))
+      in
+      let updated =
+        List.map
+          (fun (r : repository) ->
+            if String.equal r.id id then
+              let normalised =
+                {
+                  repo with
+                  id;
+                  created_at = r.created_at;
+                  updated_at = now;
+                }
+              in
+              result := Stdlib.Ok normalised;
+              normalised
+            else r)
+          repos
+      in
+      match !result with
+      | Stdlib.Error _ as error -> error
+      | Stdlib.Ok persisted ->
+        let* () = write_all ~base_path updated in
+        Ok persisted)
 
 let local_path ~base_path repo =
   if Filename.is_relative repo.local_path then
@@ -364,7 +412,6 @@ let canonical_path raw =
   with Unix.Unix_error _ | Sys_error _ -> normalize_path raw
 
 let discover_repositories ~base_path =
-  let toml_exists = repositories_toml_exists base_path in
   (* Issue #13188 + #13217 review: [find <base_path>] echoes the
      search-path prefix in every result, and a relative base_path
      (e.g. ["workspace"]) used to duplicate via [Filename.concat
@@ -377,28 +424,12 @@ let discover_repositories ~base_path =
      + redundant "." collapsed) before invoking [find] so every
      downstream comparison sees a single normalized representation. *)
   let abs_base_path = canonical_path base_path in
+  let* repositories = load_all ~base_path in
   let existing_paths =
-    match load_all ~base_path with
-    | Ok repos ->
-        repos
-        |> List.filter (fun (r : repository) ->
-            (* Reviewer #13217: legacy-default detection used to compare
-               [local_path r] against [base_path] textually.  When
-               [base_path = "."] and [repo.local_path = "."],
-               [local_path] concatenates to ["./."] which does not
-               equal [base_path] — the default repo then leaks into
-               [existing_paths], causing the real repo at base_path to
-               be classified as "already known" and skipped.  Compare
-               raw [r.local_path] against [base_path] directly so the
-               relative-default case is detected without going through
-               [Filename.concat]. *)
-            not
-              ((not toml_exists)
-               && String.equal r.id "default"
-               && String.equal r.local_path base_path))
-        |> List.map (fun (r : repository) ->
-            canonical_path (local_path ~base_path:abs_base_path r))
-    | Error _ -> []
+    List.map
+      (fun (repo : repository) ->
+        canonical_path (local_path ~base_path:abs_base_path repo))
+      repositories
   in
   let git_dirs = discover_git_dirs ~base_path:abs_base_path in
   let has_hidden_segment_under_base path =
@@ -462,33 +493,88 @@ let discover_repositories ~base_path =
 
 let register_discovered ~base_path =
   let* candidates = discover_repositories ~base_path in
-  let* existing =
-    if repositories_toml_exists base_path then load_all ~base_path else Ok []
-  in
-  let existing_ids = List.map (fun (r : repository) -> r.id) existing in
-  let timestamp = now_unix_seconds () in
-  let rec collect seen_ids acc = function
-    | [] -> List.rev acc
-    | (candidate : repository) :: rest ->
-        if List.exists (String.equal candidate.id) seen_ids then
-          collect seen_ids acc rest
-        else
-          let registered =
-            { candidate with created_at = timestamp; updated_at = timestamp }
-          in
-          collect (candidate.id :: seen_ids) (registered :: acc) rest
-  in
-  match collect existing_ids [] candidates with
-  | [] -> Ok []
-  | registered ->
-      let* () = save_all ~base_path (existing @ registered) in
-      Ok registered
+  with_store_lock ~base_path (fun () ->
+      let* existing = load_all ~base_path in
+      let existing_ids = List.map (fun (r : repository) -> r.id) existing in
+      let timestamp = now_unix_seconds () in
+      let rec collect seen_ids acc = function
+        | [] -> List.rev acc
+        | (candidate : repository) :: rest ->
+          if List.exists (String.equal candidate.id) seen_ids then
+            collect seen_ids acc rest
+          else
+            let registered =
+              { candidate with created_at = timestamp; updated_at = timestamp }
+            in
+            collect (candidate.id :: seen_ids) (registered :: acc) rest
+      in
+      match collect existing_ids [] candidates with
+      | [] -> Ok []
+      | registered ->
+        let* () = write_all ~base_path (existing @ registered) in
+        Ok registered)
 
-module Lookup = Repo_store_lookup.Make (struct
-  let load_all = load_all
-  let local_path = local_path
-end)
+let strip_trailing_slash path =
+  let length = String.length path in
+  if length > 0 && Char.equal path.[length - 1] '/' then
+    String.sub path 0 (length - 1)
+  else path
 
-let find_url_by_id = Lookup.find_url_by_id
-let find_url_by_identity = Lookup.find_url_by_identity
-let find_repo_by_path_prefix = Lookup.find_repo_by_path_prefix
+let is_path_prefix ~prefix path =
+  let prefix = strip_trailing_slash prefix in
+  let prefix_length = String.length prefix in
+  if prefix_length = 0 then false
+  else if String.length path = prefix_length && String.equal path prefix then true
+  else
+    String.length path > prefix_length
+    && String.equal (String.sub path 0 prefix_length) prefix
+    && Char.equal path.[prefix_length] '/'
+
+let rel_under_path ~prefix path =
+  let prefix = strip_trailing_slash prefix in
+  let prefix_length = String.length prefix in
+  if String.length path = prefix_length then ""
+  else
+    String.sub path (prefix_length + 1)
+      (String.length path - prefix_length - 1)
+
+let find_url_by_id ~base_path id =
+  let* repositories = load_all ~base_path in
+  Ok
+    (match
+       List.find_opt
+         (fun (repository : repository) -> String.equal repository.id id)
+         repositories
+     with
+     | Some repository when not (String.equal repository.url "") ->
+       Some repository.url
+     | Some _ | None -> None)
+
+let find_repo_by_path_prefix ~base_path path =
+  let* repositories = load_all ~base_path in
+  let candidates =
+    List.filter_map
+      (fun (repository : repository) ->
+        let repository_path = local_path ~base_path repository in
+        if is_path_prefix ~prefix:repository_path path then
+          Some
+            ( repository,
+              repository_path,
+              rel_under_path ~prefix:repository_path path )
+        else None)
+      repositories
+  in
+  let longest =
+    match candidates with
+    | [] -> None
+    | first :: rest ->
+      Some
+        (List.fold_left
+           (fun ((_, best_path, _) as best)
+                ((_, candidate_path, _) as candidate) ->
+             if String.length candidate_path > String.length best_path then
+               candidate
+             else best)
+           first rest)
+  in
+  Ok (Option.map (fun (repository, _, rel) -> (repository, rel)) longest)

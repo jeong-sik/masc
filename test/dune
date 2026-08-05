@@ -241,7 +241,6 @@
   test_keeper_tool_policy_masc_surface
   test_tool_resolution_runtime_projection
   test_keeper_id
-  test_repo_store
   test_keeper_repo_mapping
   test_repo_sync
   test_repo_git
@@ -536,7 +535,6 @@
   test_keeper_tool_policy_masc_surface
   test_tool_resolution_runtime_projection
   test_keeper_id
-  test_repo_store
   test_keeper_repo_mapping
   test_repo_sync
   test_repo_git
@@ -616,6 +614,12 @@
   test_runtime_model_input_tail_window)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref))
+
+; Repository catalog tests depend only on the focused repo_manager library.
+(test
+ (name test_repo_store)
+ (modules test_repo_store)
+ (libraries alcotest repo_manager unix))
 
 ; Request-authority admission uses Eio fiber-local bindings and therefore owns
 ; an explicit executable stanza instead of borrowing the pure synchronous test
@@ -1456,12 +1460,12 @@
  (modules test_schedule_tool_wiring)
  (libraries masc_test_deps masc_schedule))
 
-; Typed TOML field resolution helper (RFC-0141 Phase 1).
+; Typed TOML field resolution.
 
 (test
  (name test_field_resolution)
  (modules test_field_resolution)
- (libraries masc_test_deps))
+ (libraries alcotest repo_manager otoml))
 
 ; SSE per-connection pump cancellation (issue #21548).
 

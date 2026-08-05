@@ -482,24 +482,30 @@ let resolve_partition_for_write ~base_dir ~kind ~file_path =
   with
   | Some (repo_id, rel) ->
     (match Repo_store.find_url_by_id ~base_path:base_dir repo_id with
-     | Some url ->
+     | Ok (Some url) ->
        resolve_by_url
          ~rel
          ~repo_url:url
          ~orphan_reasons:("sandbox_url_unparseable", "sandbox_blank_url")
-     | None ->
+     | Ok None ->
        bump_orphan ~reason:"sandbox_unregistered_repo";
+       (Agent_observation.Unmatched, file_path)
+     | Error _ ->
+       bump_orphan ~reason:"repository_catalog_unavailable";
        (Agent_observation.Unmatched, file_path))
   | None ->
     (match Repo_store.find_repo_by_path_prefix ~base_path:base_dir abs with
-     | None ->
+     | Ok None ->
        bump_orphan ~reason:"unregistered_repo";
        (Agent_observation.Base_unresolved, file_path)
-     | Some (repo, rel) ->
+     | Ok (Some (repo, rel)) ->
        resolve_by_url
          ~rel
          ~repo_url:repo.url
-         ~orphan_reasons:("url_unparseable", "blank_url"))
+         ~orphan_reasons:("url_unparseable", "blank_url")
+     | Error _ ->
+       bump_orphan ~reason:"repository_catalog_unavailable";
+       (Agent_observation.Base_unresolved, file_path))
 ;;
 
 (** After a successful file write, record the code region in [.masc-ide/].

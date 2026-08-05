@@ -15,9 +15,8 @@ implementation_prs: [16837, 16887]
 
 ## 1. Summary
 
-Replace `Otoml.find_result toml ... |> function Ok v -> Ok v | Error _ -> Ok default`
-with a typed `Field_resolution.t` variant that distinguishes a legitimate
-missing field from a schema type mismatch.
+Use a typed `Field_resolution.t` variant that distinguishes an absent field
+from a schema type mismatch.
 
 The live scope is repository config parsing:
 
@@ -30,34 +29,31 @@ repo-manager credential store deletion.
 
 ## 2. Behavior
 
-`Field_resolution.or_default` substitutes defaults only for missing fields.
-Type mismatches propagate as errors, so corrupt repository TOML is not silently
-accepted.
+Repository catalog callers require every field emitted by the current writer.
+Both absence and type mismatch are errors at that boundary.
 
 Example:
 
 ```ocaml
-let* local_path =
-  Field_resolution.(
-    resolve_string toml (path "local_path")
-    |> or_default ~default:(default_local_path id))
-in
+match Field_resolution.resolve_string toml (path "local_path") with
+| Present value -> Ok value
+| Missing -> Error "required local_path is absent"
+| Type_mismatch _ -> Error "local_path must be a string"
 ```
 
 If `repositories.toml` declares `local_path = 42`, repository parsing returns an
-error naming the field instead of silently selecting a default path.
+error naming the field.
 
-## 3. Compatibility
+## 3. Contract
 
-- Valid repository TOML remains valid.
-- Missing optional repository fields keep their defaults.
-- Wrong-typed repository fields are rejected.
-- No repository credential TOML compatibility path exists.
+- Only rows containing every field emitted by the current writer are valid.
+- Missing and wrong-typed repository fields are rejected.
+- Unknown repository fields are rejected.
 
 ## 4. Verification
 
-- Unit coverage for `Field_resolution` variants and helpers.
-- Repository store tests for defaults, round-trip parsing, and wrong-type
+- Unit coverage for `Field_resolution` variants.
+- Repository store tests for complete round-trip parsing and schema
   rejection.
 - No repo-manager credential parser, materializer, route, or dashboard surface
   remains in scope.

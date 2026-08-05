@@ -62,14 +62,33 @@ let init_empty_store base_path =
   let toml_file = Filename.concat toml_path "repositories.toml" in
   write_file toml_file "[repository]\n"
 
-let test_load_all_backward_compat () =
+let complete_repository_toml ?(aliases = "[]") ?(status = "Active")
+    ?status_error () =
+  let status_error =
+    match status_error with
+    | None -> ""
+    | Some message -> Printf.sprintf "status_error = \"%s\"\n" message
+  in
+  Printf.sprintf
+    "[repository.demo]\n\
+     name = \"demo\"\n\
+     url = \"https://github.com/example/demo.git\"\n\
+     local_path = \"repos/demo\"\n\
+     aliases = %s\n\
+     default_branch = \"main\"\n\
+     keepers = []\n\
+     status = \"%s\"\n\
+     %s\
+     auto_sync = false\n\
+     sync_interval = 300\n\
+     created_at = 1700000000\n\
+     updated_at = 1700000100\n"
+    aliases status status_error
+
+let test_load_missing_catalog_is_empty () =
   with_temp_base_path (fun base_path ->
       match Repo_store.load_all ~base_path with
-      | Ok repos ->
-          Alcotest.(check int) "backward compat default repo" 1 (List.length repos);
-          let repo = List.hd repos in
-          Alcotest.(check string) "default id" "default" repo.id;
-          Alcotest.(check string) "local_path is base_path" base_path repo.local_path
+      | Ok repos -> Alcotest.(check int) "empty catalog" 0 (List.length repos)
       | Error e -> Alcotest.fail ("unexpected error: " ^ e))
 
 let test_save_and_load_roundtrip () =
@@ -87,6 +106,17 @@ let test_save_and_load_roundtrip () =
               Alcotest.(check bool) "has r2" true (List.mem "r2" ids);
               let r1 = List.find (fun (r : repository) -> String.equal r.id "r1") loaded in
               Alcotest.(check (list string)) "aliases roundtrip" [ "keeper" ] r1.aliases))
+
+let test_empty_catalog_roundtrip () =
+  with_temp_base_path (fun base_path ->
+      match Repo_store.save_all ~base_path [] with
+      | Error error -> Alcotest.fail ("save failed: " ^ error)
+      | Ok () ->
+        match Repo_store.load_all ~base_path with
+        | Error error -> Alcotest.fail ("load failed: " ^ error)
+        | Ok repositories ->
+          Alcotest.(check int) "explicit empty catalog" 0
+            (List.length repositories))
 
 let test_add_new_repo () =
   with_temp_base_path (fun base_path ->
@@ -110,7 +140,16 @@ let test_add_duplicate_fails () =
           | Ok _ -> Alcotest.fail "expected error for duplicate"
           | Error msg ->
               Alcotest.(check bool) "mentions already exists" true
-                (contains_substring msg "already exists")))
+              (contains_substring msg "already exists")))
+
+let test_add_rejects_blank_local_path () =
+  with_temp_base_path (fun base_path ->
+      let repository = { (sample_repo "blank") with local_path = "  " } in
+      match Repo_store.add ~base_path repository with
+      | Ok _ -> Alcotest.fail "blank local_path must be rejected"
+      | Error error ->
+        Alcotest.(check bool) "names local_path" true
+          (contains_substring error "local_path"))
 
 let test_find_existing () =
   with_temp_base_path (fun base_path ->
@@ -194,6 +233,19 @@ let test_update_missing () =
       | Error msg ->
           Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
 
+let test_update_rejects_blank_local_path () =
+  with_temp_base_path (fun base_path ->
+      let repository = sample_repo "update-blank" in
+      match Repo_store.add ~base_path repository with
+      | Error error -> Alcotest.fail ("add failed: " ^ error)
+      | Ok _ ->
+        let update = { repository with local_path = "" } in
+        match Repo_store.update ~base_path repository.id update with
+        | Ok _ -> Alcotest.fail "blank local_path must be rejected"
+        | Error error ->
+          Alcotest.(check bool) "names local_path" true
+            (contains_substring error "local_path"))
+
 let test_local_path_absolute_preserved () =
   let repo = { (sample_repo "abs") with local_path = "/absolute/path" } in
   let path = Repo_store.local_path ~base_path:"/tmp/base" repo in
@@ -206,24 +258,24 @@ let test_local_path_relative_resolved () =
 
 let test_status_roundtrip () =
   let statuses = [ Active; Paused; Cloning; Error "network failure" ] in
-  List.iter
-    (fun status ->
-      let str =
-        match status with
-        | Active -> "Active"
-        | Paused -> "Paused"
-        | Cloning -> "Cloning"
-        | Error _ -> "Error"
-      in
-      Alcotest.(check string) ("status string for " ^ str) str
-        (match status with
-         | Active -> "Active"
-         | Paused -> "Paused"
-         | Cloning -> "Cloning"
-         | Error _ -> "Error"))
-    statuses
+  with_temp_base_path (fun base_path ->
+      List.iteri
+        (fun index status ->
+          let repository = { (sample_repo (string_of_int index)) with status } in
+          match Repo_store.save_all ~base_path [ repository ] with
+          | Error error -> Alcotest.fail ("save failed: " ^ error)
+          | Ok () ->
+            match Repo_store.load_all ~base_path with
+            | Error error -> Alcotest.fail ("load failed: " ^ error)
+            | Ok [ loaded ] ->
+              Alcotest.(check bool) "status roundtrip" true
+                (equal_repository_status status loaded.status)
+            | Ok repositories ->
+              Alcotest.failf "expected one repository, got %d"
+                (List.length repositories))
+        statuses)
 
-let test_load_minimal_toml_defaults () =
+let test_load_rejects_incomplete_repository () =
   with_temp_base_path (fun base_path ->
       let path = Filename.concat base_path ".masc/config/repositories.toml" in
       write_file path
@@ -231,15 +283,95 @@ let test_load_minimal_toml_defaults () =
          name = \"demo\"\n\
          url = \"https://github.com/example/demo.git\"\n";
       match Repo_store.load_all ~base_path with
-      | Error e -> Alcotest.fail ("load failed: " ^ e)
-      | Ok [repo] ->
-          Alcotest.(check string) "id" "demo" repo.id;
-          Alcotest.(check string) "local_path default" ".masc/repos/demo" repo.local_path;
-          Alcotest.(check string) "default branch" "main" repo.default_branch;
-          Alcotest.(check bool) "auto_sync default" false repo.auto_sync;
-          Alcotest.(check int) "interval default" 300 repo.sync_interval
-      | Ok repos ->
-          Alcotest.failf "expected one repo, got %d" (List.length repos))
+      | Ok _ -> Alcotest.fail "incomplete repository row must be rejected"
+      | Error error ->
+          Alcotest.(check bool) "names first missing field" true
+            (contains_substring error "repository.demo.local_path"))
+
+let test_load_rejects_missing_repository_table () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/repositories.toml" in
+      write_file path "";
+      match Repo_store.load_all ~base_path with
+      | Ok _ -> Alcotest.fail "catalog without repository table must be rejected"
+      | Error error ->
+          Alcotest.(check bool) "names required table" true
+            (contains_substring error "required repository table"))
+
+let test_load_rejects_unknown_top_level_field () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/repositories.toml" in
+      write_file path "answer = 42\n";
+      match Repo_store.load_all ~base_path with
+      | Ok _ -> Alcotest.fail "unknown top-level field must be rejected"
+      | Error error ->
+        Alcotest.(check bool) "names unknown top-level field" true
+          (contains_substring error "unknown top-level field answer"))
+
+let test_load_rejects_noncanonical_status () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/repositories.toml" in
+      write_file path
+        "[repository.demo]\n\
+         name = \"demo\"\n\
+         url = \"https://github.com/example/demo.git\"\n\
+         local_path = \"repos/demo\"\n\
+         aliases = []\n\
+         default_branch = \"main\"\n\
+         keepers = []\n\
+         status = \"active\"\n\
+         auto_sync = false\n\
+         sync_interval = 300\n\
+         created_at = 1700000000\n\
+         updated_at = 1700000100\n";
+      match Repo_store.load_all ~base_path with
+      | Ok _ -> Alcotest.fail "noncanonical status must be rejected"
+      | Error error ->
+          Alcotest.(check bool) "names rejected status" true
+            (contains_substring error "Unknown repository status: active"))
+
+let test_load_rejects_unknown_field () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/repositories.toml" in
+      write_file path
+        "[repository.demo]\n\
+         name = \"demo\"\n\
+         url = \"https://github.com/example/demo.git\"\n\
+         local_path = \"repos/demo\"\n\
+         aliases = []\n\
+         default_branch = \"main\"\n\
+         keepers = []\n\
+         status = \"Active\"\n\
+         auto_sync = false\n\
+         sync_interval = 300\n\
+         created_at = 1700000000\n\
+         updated_at = 1700000100\n\
+         retired_path = \"old\"\n";
+      match Repo_store.load_all ~base_path with
+      | Ok _ -> Alcotest.fail "unknown repository field must be rejected"
+      | Error error ->
+          Alcotest.(check bool) "names unknown field" true
+            (contains_substring error "repository.demo.retired_path"))
+
+let test_load_rejects_wrong_field_type () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/repositories.toml" in
+      write_file path (complete_repository_toml ~aliases:"\"alias\"" ());
+      match Repo_store.load_all ~base_path with
+      | Ok _ -> Alcotest.fail "wrong field type must be rejected"
+      | Error error ->
+        Alcotest.(check bool) "names wrong field" true
+          (contains_substring error "repository.demo.aliases"))
+
+let test_error_status_requires_message () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/repositories.toml" in
+      write_file path (complete_repository_toml ~status:"Error" ());
+      match Repo_store.load_all ~base_path with
+      | Ok _ -> Alcotest.fail "Error status without status_error must be rejected"
+      | Error error ->
+        Alcotest.(check bool) "names required status_error" true
+          (contains_substring error "repository.demo.status_error"))
 
 let run_git_quiet args =
   let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
@@ -388,42 +520,6 @@ let test_discover_relative_base_path_keeps_visible_repos () =
                 let repo = List.hd repos in
                 Alcotest.(check string) "id" "project-a" repo.id))
 
-let test_migration_backward_compat_to_explicit () =
-  with_temp_base_path (fun base_path ->
-      (* Phase 1: no TOML — backward compat returns default repo *)
-      match Repo_store.load_all ~base_path with
-      | Error e -> Alcotest.fail ("load failed: " ^ e)
-      | Ok repos ->
-          Alcotest.(check int) "backward compat count" 1 (List.length repos);
-          let default = List.hd repos in
-          Alcotest.(check string) "default id" "default" default.id;
-          (* Phase 2: operator discovers and adds explicit repos *)
-          let explicit = sample_repo "migrated" in
-          (match Repo_store.add ~base_path explicit with
-           | Error e -> Alcotest.fail ("add failed: " ^ e)
-           | Ok _ -> (
-               match Repo_store.load_all ~base_path with
-               | Error e -> Alcotest.fail ("load after migration failed: " ^ e)
-               | Ok migrated ->
-                   Alcotest.(check int) "migrated count" 2 (List.length migrated);
-                   let ids = List.map (fun (r : repository) -> r.id) migrated in
-                   Alcotest.(check bool) "has default" true (List.mem "default" ids);
-                   Alcotest.(check bool) "has migrated" true (List.mem "migrated" ids))))
-
-let test_migration_preserves_existing_toml () =
-  with_temp_base_path (fun base_path ->
-      let path = Filename.concat base_path ".masc/config/repositories.toml" in
-      write_file path
-        "[repository.existing]\n\
-         name = \"existing\"\n\
-         url = \"https://github.com/test/existing.git\"\n";
-      (* TOML exists — backward compat must NOT inject default *)
-      match Repo_store.load_all ~base_path with
-      | Error e -> Alcotest.fail ("load failed: " ^ e)
-      | Ok repos ->
-          Alcotest.(check int) "existing toml count" 1 (List.length repos);
-          Alcotest.(check string) "existing id" "existing" (List.hd repos).id)
-
 let test_discover_skips_registered () =
   if not (git_available ()) then Alcotest.skip ()
   else
@@ -466,7 +562,7 @@ let test_register_discovered_auto_adds () =
             | Ok loaded ->
                 Alcotest.(check int) "persisted 2 repos" 2 (List.length loaded))
 
-let test_register_discovered_includes_legacy_root_repo () =
+let test_register_discovered_includes_root_repo () =
   if not (git_available ()) then Alcotest.skip ()
   else
     with_temp_base_path (fun base_path ->
@@ -548,74 +644,37 @@ let with_two_absolute_repos f =
 let test_find_url_by_id_known () =
   with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
     match Repo_store.find_url_by_id ~base_path "masc" with
-    | Some url ->
+    | Ok (Some url) ->
       Alcotest.(check string)
         "masc url"
         "https://github.com/jeong-sik/masc"
         url
-    | None -> Alcotest.fail "expected Some url for masc")
+    | Ok None -> Alcotest.fail "expected Some url for masc"
+    | Error error -> Alcotest.fail ("lookup failed: " ^ error))
 
 let test_find_url_by_id_unknown () =
   with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
     match Repo_store.find_url_by_id ~base_path "nonexistent" with
-    | None -> ()
-    | Some s -> Alcotest.fail ("expected None for unknown, got: " ^ s))
-
-let test_find_url_by_identity_alias () =
-  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
-    match Repo_store.find_url_by_identity ~base_path "masc-mcp" with
-    | Some url ->
-      Alcotest.(check string)
-        "masc alias url"
-        "https://github.com/jeong-sik/masc"
-        url
-    | None -> Alcotest.fail "expected Some url for masc-mcp alias")
-
-let test_find_url_by_identity_ambiguous_alias () =
-  with_temp_base_path (fun base_path ->
-    init_empty_store base_path;
-    let workspace = Filename.concat base_path "workspace" in
-    Unix.mkdir workspace 0o755;
-    let left_path = Filename.concat workspace "left" in
-    let right_path = Filename.concat workspace "right" in
-    Unix.mkdir left_path 0o755;
-    Unix.mkdir right_path 0o755;
-    let left =
-      { (sample_repo "left") with
-        url = "https://github.com/example/left"
-      ; local_path = left_path
-      ; aliases = [ "shared" ]
-      }
-    in
-    let right =
-      { (sample_repo "right") with
-        url = "https://github.com/example/right"
-      ; local_path = right_path
-      ; aliases = [ "shared" ]
-      }
-    in
-    (match Repo_store.save_all ~base_path [ left; right ] with
-     | Ok () -> ()
-     | Error e -> Alcotest.fail ("save_all: " ^ e));
-    match Repo_store.find_url_by_identity ~base_path "shared" with
-    | None -> ()
-    | Some url -> Alcotest.fail ("ambiguous alias must not pick url: " ^ url))
+    | Ok None -> ()
+    | Ok (Some s) -> Alcotest.fail ("expected None for unknown, got: " ^ s)
+    | Error error -> Alcotest.fail ("lookup failed: " ^ error))
 
 let test_find_repo_by_path_prefix_match () =
   with_two_absolute_repos (fun ~base_path ~masc_path ~oas_path:_ ->
     let abs = Filename.concat masc_path "lib/foo.ml" in
     match Repo_store.find_repo_by_path_prefix ~base_path abs with
-    | Some (repo, rel) ->
+    | Ok (Some (repo, rel)) ->
       Alcotest.(check string) "matched repo id" "masc" repo.id;
       Alcotest.(check string) "relative path" "lib/foo.ml" rel
-    | None -> Alcotest.fail "expected match under masc_path")
+    | Ok None -> Alcotest.fail "expected match under masc_path"
+    | Error error -> Alcotest.fail ("lookup failed: " ^ error))
 
 let test_find_repo_by_path_prefix_outside () =
   with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
     match Repo_store.find_repo_by_path_prefix ~base_path "/tmp/elsewhere.ml" with
-    | None -> ()
-    | Some (repo, _) ->
-      Alcotest.fail ("unexpected match: " ^ repo.id))
+    | Ok None -> ()
+    | Ok (Some (repo, _)) -> Alcotest.fail ("unexpected match: " ^ repo.id)
+    | Error error -> Alcotest.fail ("lookup failed: " ^ error))
 
 let test_find_repo_by_path_prefix_sibling_not_matched () =
   (* Sibling-style collision: /tmp/masc and /tmp/masc-mirror must not
@@ -645,32 +704,49 @@ let test_find_repo_by_path_prefix_sibling_not_matched () =
      | Error e -> Alcotest.fail ("save_all: " ^ e));
     let inside_mirror = Filename.concat mirror "lib/x.ml" in
     match Repo_store.find_repo_by_path_prefix ~base_path inside_mirror with
-    | Some (repo, rel) ->
+    | Ok (Some (repo, rel)) ->
       Alcotest.(check string) "must pick mirror, not masc" "mirror" repo.id;
       Alcotest.(check string) "rel" "lib/x.ml" rel
-    | None -> Alcotest.fail "expected match under mirror")
+    | Ok None -> Alcotest.fail "expected match under mirror"
+    | Error error -> Alcotest.fail ("lookup failed: " ^ error))
 
 let test_find_repo_by_path_prefix_root () =
   (* abs_path equals the repo's local_path itself → empty rel. *)
   with_two_absolute_repos (fun ~base_path ~masc_path ~oas_path:_ ->
     match Repo_store.find_repo_by_path_prefix ~base_path masc_path with
-    | Some (repo, rel) ->
+    | Ok (Some (repo, rel)) ->
       Alcotest.(check string) "matched repo id" "masc" repo.id;
       Alcotest.(check string) "empty rel at root" "" rel
-    | None -> Alcotest.fail "expected match at repo root")
+    | Ok None -> Alcotest.fail "expected match at repo root"
+    | Error error -> Alcotest.fail ("lookup failed: " ^ error))
+
+let test_lookup_preserves_catalog_error () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/repositories.toml" in
+      write_file path "repository = \"broken\"\n";
+      match Repo_store.find_url_by_id ~base_path "masc" with
+      | Error error ->
+        Alcotest.(check bool) "catalog error preserved" true
+          (contains_substring error "repository must be a table")
+      | Ok _ -> Alcotest.fail "catalog error must not become a missing lookup")
 
 let () =
   Alcotest.run "Repo_store"
     [
       ( "roundtrip",
         [
-          Alcotest.test_case "backward compat default" `Quick test_load_all_backward_compat;
+          Alcotest.test_case "missing catalog is empty" `Quick
+            test_load_missing_catalog_is_empty;
           Alcotest.test_case "save and load roundtrip" `Quick test_save_and_load_roundtrip;
+          Alcotest.test_case "empty catalog roundtrip" `Quick
+            test_empty_catalog_roundtrip;
         ] );
       ( "add",
         [
           Alcotest.test_case "add new repo" `Quick test_add_new_repo;
           Alcotest.test_case "add duplicate fails" `Quick test_add_duplicate_fails;
+          Alcotest.test_case "blank local_path fails" `Quick
+            test_add_rejects_blank_local_path;
         ] );
       ( "find",
         [
@@ -691,6 +767,8 @@ let () =
         [
           Alcotest.test_case "update existing" `Quick test_update_existing;
           Alcotest.test_case "update missing" `Quick test_update_missing;
+          Alcotest.test_case "blank local_path fails" `Quick
+            test_update_rejects_blank_local_path;
         ] );
       ( "local_path",
         [
@@ -701,10 +779,22 @@ let () =
         [
           Alcotest.test_case "status string roundtrip" `Quick test_status_roundtrip;
         ] );
-      ( "defaults",
+      ( "schema",
         [
-          Alcotest.test_case "minimal TOML gets production defaults" `Quick
-            test_load_minimal_toml_defaults;
+          Alcotest.test_case "rejects incomplete repository" `Quick
+            test_load_rejects_incomplete_repository;
+          Alcotest.test_case "rejects missing repository table" `Quick
+            test_load_rejects_missing_repository_table;
+          Alcotest.test_case "rejects unknown top-level field" `Quick
+            test_load_rejects_unknown_top_level_field;
+          Alcotest.test_case "rejects noncanonical status" `Quick
+            test_load_rejects_noncanonical_status;
+          Alcotest.test_case "rejects unknown field" `Quick
+            test_load_rejects_unknown_field;
+          Alcotest.test_case "rejects wrong field type" `Quick
+            test_load_rejects_wrong_field_type;
+          Alcotest.test_case "Error requires status_error" `Quick
+            test_error_status_requires_message;
         ] );
       ( "discover",
         [
@@ -722,16 +812,12 @@ let () =
             test_discover_relative_base_path_keeps_visible_repos;
           Alcotest.test_case "skips registered repos" `Quick test_discover_skips_registered;
         ] );
-      ( "migration",
+      ( "registration",
         [
-          Alcotest.test_case "backward compat to explicit" `Quick
-            test_migration_backward_compat_to_explicit;
-          Alcotest.test_case "preserves existing toml" `Quick
-            test_migration_preserves_existing_toml;
           Alcotest.test_case "register_discovered auto-adds" `Quick
             test_register_discovered_auto_adds;
-          Alcotest.test_case "register_discovered includes legacy root repo" `Quick
-            test_register_discovered_includes_legacy_root_repo;
+          Alcotest.test_case "register_discovered includes root repo" `Quick
+            test_register_discovered_includes_root_repo;
           Alcotest.test_case "register_discovered skips existing" `Quick
             test_register_discovered_skips_existing;
         ] );
@@ -739,14 +825,12 @@ let () =
         [
           Alcotest.test_case "find_url_by_id known" `Quick test_find_url_by_id_known;
           Alcotest.test_case "find_url_by_id unknown" `Quick test_find_url_by_id_unknown;
-          Alcotest.test_case "find_url_by_identity alias" `Quick
-            test_find_url_by_identity_alias;
-          Alcotest.test_case "find_url_by_identity ambiguous alias" `Quick
-            test_find_url_by_identity_ambiguous_alias;
           Alcotest.test_case "path_prefix match" `Quick test_find_repo_by_path_prefix_match;
           Alcotest.test_case "path_prefix outside" `Quick test_find_repo_by_path_prefix_outside;
           Alcotest.test_case "path_prefix sibling-safe" `Quick
             test_find_repo_by_path_prefix_sibling_not_matched;
           Alcotest.test_case "path_prefix at repo root" `Quick test_find_repo_by_path_prefix_root;
+          Alcotest.test_case "catalog errors are preserved" `Quick
+            test_lookup_preserves_catalog_error;
         ] );
     ]

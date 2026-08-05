@@ -190,7 +190,10 @@ type recovery_report =
   ; staging_cleanup : Fs_compat.atomic_orphan_cleanup_report
   }
 
-let recover_startup ?(registry = Fusion_run_registry.global ()) ~base_path =
+(* [()] closes the argument list so [?registry] can be erased: OCaml only
+   drops an optional when a positional argument follows it, and every other
+   parameter here is labelled. *)
+let recover_startup ?(registry = Fusion_run_registry.global ()) ~base_path () =
   let* staging_cleanup =
     Fusion_delivery_obligation.cleanup_staging_for_startup ~base_path
   in

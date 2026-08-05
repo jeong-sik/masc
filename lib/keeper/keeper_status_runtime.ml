@@ -222,8 +222,8 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
    decoded. [meta.runtime.proactive_rt.last_reason] used to be searched for
    error keywords, but its producer documents it as display detail and a
    successful cycle formats it as "unified:tools=[...]" — so a cycle that
-   called masc_runtime_status matched the "runtime" keyword and reported the
-   keeper as degraded. *)
+   called masc_runtime_status matched one of those keywords on the tool name
+   alone and reported the keeper as degraded. *)
 let keeper_error_hint ~agent_status = json_string_opt "error" agent_status
 
 (* A live signal newer than the persisted error snapshot means

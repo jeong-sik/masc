@@ -51,6 +51,15 @@ export { reportToolHostFailure } from './tool-host-failure'
 export { fetchDashboardBootstrap, fetchDashboardShell } from './dashboard-hot'
 export type { FusionRunStatusLabel, FusionRunRecord, DashboardFusionRunsResponse } from './dashboard-fusion'
 export { parseFusionRunsResponse, fetchFusionRuns } from './dashboard-fusion'
+export type {
+  VerificationRunStatusLabel,
+  VerificationRunRecord,
+  DashboardVerificationRunsResponse,
+} from './dashboard-verification-runs'
+export {
+  parseVerificationRunsResponse,
+  fetchVerificationRuns,
+} from './dashboard-verification-runs'
 
 // --- Dashboard projections ---
 

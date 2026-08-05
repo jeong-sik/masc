@@ -10,7 +10,7 @@
 
 module Demotion = Masc.Keeper_model_input_demotion
 module Types = Agent_sdk.Types
-module Window = Masc.Runtime_model_input_tail_window
+module Window = Runtime_model_input_tail_window
 
 (* The production encoder, not a test-local one: the bound is only meaningful
    against the encoder the window will use, and a simplified stand-in would

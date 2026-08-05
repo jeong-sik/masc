@@ -182,7 +182,7 @@ let project_with_drop
     ~capacity_bytes
     ~reserved_bytes
     (messages : Agent_sdk.Types.message list)
-  : (Agent_sdk.Types.message list, budget_error) result
+  : (projection, budget_error) result
   =
   let labelled, atom_count = annotate messages in
   (* Everything the cut cannot remove is charged before any atom is

@@ -570,9 +570,17 @@ let test_emit_success_projects_board_chat_and_registry () =
             ~base_path:base_dir
             ~keeper_name:keeper));
     match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
-    | Some { Fusion_run_registry.status = Completed { ok = true; _ }; _ } -> ()
-    | Some { Fusion_run_registry.status = Completed { ok = false; _ }; _ } ->
-      fail "fusion run should complete ok=true"
+    | Some
+        { Fusion_run_registry.status =
+            Fusion_run_registry.Completed Fusion_run_registry.Succeeded
+        ; _
+        } -> ()
+    | Some
+        { Fusion_run_registry.status =
+            Fusion_run_registry.Completed (Fusion_run_registry.Failed _)
+        ; _
+        } ->
+      fail "fusion run should complete successfully"
     | Some { Fusion_run_registry.status = Running; _ } ->
       fail "fusion run should not remain running"
     | None -> fail "fusion run should remain visible")
@@ -953,9 +961,17 @@ let test_tool_handle_async_success_projects_running_then_completed () =
        check string "chat fusion block run id" run_id block_run_id
      | None -> fail "chat lane should carry a Fusion block after async completion");
     match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
-    | Some { Fusion_run_registry.status = Completed { ok = true; _ }; _ } -> ()
-    | Some { Fusion_run_registry.status = Completed { ok = false; _ }; _ } ->
-      fail "fusion run should complete ok=true"
+    | Some
+        { Fusion_run_registry.status =
+            Fusion_run_registry.Completed Fusion_run_registry.Succeeded
+        ; _
+        } -> ()
+    | Some
+        { Fusion_run_registry.status =
+            Fusion_run_registry.Completed (Fusion_run_registry.Failed _)
+        ; _
+        } ->
+      fail "fusion run should complete successfully"
     | Some { Fusion_run_registry.status = Running; _ } ->
       fail "fusion run should not remain Running after background success"
     | None -> fail "fusion run should remain visible after background success")

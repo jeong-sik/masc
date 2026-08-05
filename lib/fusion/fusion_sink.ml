@@ -539,15 +539,17 @@ let emit ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges ~jud
          match judge with
          | Ok j ->
            Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-             ~ok:true ();
+             ~outcome:Fusion_run_registry.Succeeded;
            broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
            wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel ~ok:true
              ~resolved_answer:j.Fusion_types.resolved_answer ~board_post_id
          | Error e ->
            Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-             ~failure:(Fusion_types.judge_failure_text e)
-             ~failure_code:(Fusion_types.judge_failure_tag e)
-             ~ok:false ();
+             ~outcome:
+               (Fusion_run_registry.Failed
+                  { reason = Fusion_types.judge_failure_text e
+                  ; code = Fusion_types.judge_failure_tag e
+                  });
            broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
            wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel ~ok:false
              ~resolved_answer:
@@ -588,7 +590,7 @@ let emit_failure ~base_dir ~keeper ~run_id ~channel ~failure_code ~detail =
     | Error _ as error -> error
   in
   Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-    ~failure:detail ~failure_code ~ok:false ();
+    ~outcome:(Fusion_run_registry.Failed { reason = detail; code = failure_code });
   broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
   wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel ~ok:false
     ~resolved_answer:content ~board_post_id:""

@@ -362,8 +362,10 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
   })
 
-  it('forces execution refresh on keeper turn complete for live roster status', async () => {
+  it('refreshes only the scoped Keeper status on turn complete', async () => {
     const { sseStore } = await loadSseStore()
+    const refreshKeeperTurn = vi.fn<(keeperName: string) => void>()
+    sseStore.registerKeeperTurnRefresh(refreshKeeperTurn)
     route.value = { tab: 'keepers', params: { keeper: 'qa-king' }, postId: null }
 
     sseStore.routeServerPushEvent({
@@ -374,8 +376,12 @@ describe('setupServerPushReaction reconnect hydration', () => {
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshExecution).toHaveBeenCalledTimes(1)
-    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
+    // The SDK hook precedes durable commit, so rebuilding the global execution
+    // snapshot here is both premature and expensive. The registered
+    // keeper-scoped status reader remains the authoritative immediate refresh.
+    expect(refreshExecution).not.toHaveBeenCalled()
+    expect(refreshKeeperTurn).toHaveBeenCalledTimes(1)
+    expect(refreshKeeperTurn).toHaveBeenCalledWith('qa-king')
   })
 
   it('normalizes MASC broadcast aliases before route-scoped execution refresh', async () => {

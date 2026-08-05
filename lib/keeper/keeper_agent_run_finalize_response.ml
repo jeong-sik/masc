@@ -109,7 +109,12 @@ let canonical_success_replay_checkpoint
            ; working_context = None
            }
          else
-           let base_messages = history_messages @ current_suffix in
+           (* [split] already proved that [checkpoint.messages] is exactly the
+              validated history prefix followed by [current_suffix]. Keep that
+              immutable list when no replay edit is required: rebuilding the
+              prefix here hid that the pipeline checkpoint had already been
+              durably persisted. *)
+           let base_messages = checkpoint.messages in
            let messages =
              if
                List.exists
@@ -206,6 +211,45 @@ let checkpoint_for_replay_persistence
       checkpoint
 ;;
 
+(* OAS constructs the mutation-boundary checkpoint and then installs the same
+   immutable message values on the agent state. The list spines are rebuilt, so
+   list physical equality is too strict; comparing each message record by
+   identity proves the state boundary without hashing or scanning large text and
+   tool-result bodies. *)
+let rec messages_share_values_by_identity left right =
+  match left, right with
+  | [], [] -> true
+  | left_message :: left_rest, right_message :: right_rest
+    when left_message == right_message ->
+    messages_share_values_by_identity left_rest right_rest
+  | _ -> false
+;;
+
+let select_finalization_checkpoint
+    ~(last_persisted_checkpoint : Agent_sdk.Checkpoint.t option)
+    (result_checkpoint : Agent_sdk.Checkpoint.t) =
+  match last_persisted_checkpoint with
+  | Some persisted
+    when Int.equal persisted.turn_count result_checkpoint.turn_count
+         && messages_share_values_by_identity
+              persisted.messages
+              result_checkpoint.messages ->
+    persisted, true
+  | Some _ | None -> result_checkpoint, false
+;;
+
+let finalization_checkpoint_already_persisted
+    ~source_already_persisted
+    ~(source : Agent_sdk.Checkpoint.t)
+    ~(patched : Agent_sdk.Checkpoint.t)
+    ~replay_suffix_pruned =
+  source_already_persisted
+  && Option.is_none replay_suffix_pruned
+  && String.equal source.session_id patched.session_id
+  && source.messages == patched.messages
+  && source.working_context == patched.working_context
+;;
+
 module For_testing = struct
   let replay_suffix_prune_reason_to_string =
     replay_suffix_prune_reason_to_string
@@ -213,6 +257,10 @@ module For_testing = struct
   let checkpoint_for_replay_persistence = checkpoint_for_replay_persistence
   let replay_response_text_for_capture = replay_response_text_for_capture
   let replay_response_text_for_persistence = replay_response_text_for_persistence
+  let select_finalization_checkpoint = select_finalization_checkpoint
+
+  let finalization_checkpoint_already_persisted =
+    finalization_checkpoint_already_persisted
 
   let wire_capture_response_suppression_reasons =
     wire_capture_response_suppression_reasons
@@ -222,7 +270,6 @@ module For_testing = struct
 
   let emit_wire_capture_response_suppressed_metrics =
     emit_wire_capture_response_suppressed_metrics
-
 end
 
 let finalize
@@ -237,6 +284,7 @@ let finalize
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~actual_keeper_tool_names
     ~(result : Runtime_agent.run_result)
+    ~last_persisted_checkpoint
     ~final_oas_turn_ordinal
     ~checkpoint_persistence_error
     ~post_turn_t0
@@ -298,7 +346,12 @@ let finalize
    | _ -> ());
   let saved_checkpoint_result =
     match result.checkpoint with
-    | Some checkpoint ->
+    | Some result_checkpoint ->
+      let checkpoint, source_already_persisted =
+        select_finalization_checkpoint
+          ~last_persisted_checkpoint
+          result_checkpoint
+      in
       let checkpoint_for_save_result =
         checkpoint_for_replay_persistence
           ~history_messages
@@ -315,12 +368,25 @@ let finalize
               ~keeper_name:meta.name
               ~detail)
        | Ok (patched, replay_suffix_pruned) ->
-         (match
-            Keeper_checkpoint_store.save_oas_classified
-              ~session_dir:session.session_dir
-              patched
-          with
-       | Ok (Keeper_checkpoint_store.Saved _) ->
+         let already_persisted =
+           finalization_checkpoint_already_persisted
+             ~source_already_persisted
+             ~source:checkpoint
+             ~patched
+             ~replay_suffix_pruned
+         in
+         let save_outcome =
+           if already_persisted
+           then Ok `Reused
+           else
+             Keeper_checkpoint_store.save_oas_classified
+               ~session_dir:session.session_dir
+               patched
+             |> Result.map (fun outcome -> `Written outcome)
+         in
+         (match save_outcome with
+       | Ok `Reused
+       | Ok (`Written (Keeper_checkpoint_store.Saved _)) ->
          append_manifest ~site:"checkpoint_saved"
            ~keeper_turn_id:manifest_keeper_turn_id
            ~oas_turn_count:result.turns
@@ -341,6 +407,7 @@ let finalize
                    | Some reason ->
                      `String (replay_suffix_prune_reason_to_string reason)
                    | None -> `Null) );
+                ("pipeline_checkpoint_reused", `Bool already_persisted);
                 ( "completion_contract_result"
                 , `String
                     (Keeper_execution_receipt
@@ -349,8 +416,8 @@ let finalize
                ])
            Keeper_runtime_manifest.Checkpoint_saved;
          Ok (Some patched)
-       | Ok (Keeper_checkpoint_store.Stale_noop
-                { incoming_turn_count; known_turn_count }) ->
+       | Ok (`Written (Keeper_checkpoint_store.Stale_noop
+                { incoming_turn_count; known_turn_count })) ->
          Log.Keeper.warn ~keeper_name:meta.name
            "runtime=%s OAS checkpoint stale no-op: incoming turn_count=%d, last saved=%d"
            (Keeper_meta_contract.runtime_id_of_meta meta)

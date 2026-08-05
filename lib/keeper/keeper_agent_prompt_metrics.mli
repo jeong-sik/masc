@@ -56,6 +56,15 @@ val build_prompt_metrics :
   user_message:string ->
   prompt_metrics
 
+module For_testing : sig
+  val build_prompt_metrics_with_sanitizer :
+    sanitize:(string -> string) ->
+    system_prompt:string ->
+    dynamic_context:string ->
+    user_message:string ->
+    prompt_metrics
+end
+
 val prompt_segment_metrics_to_json :
   prompt_segment_metrics -> Yojson.Safe.t
 

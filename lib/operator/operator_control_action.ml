@@ -44,7 +44,24 @@ let judgment_write_json (ctx : 'a context) args =
     in
     let fresh_until_unix = now_unix +. float_of_int fresh_ttl_sec in
     let fresh_until = Masc_domain.iso8601_of_unix_seconds fresh_until_unix in
-    let confidence = get_float args "confidence" 0.5 in
+    (* No default. An omitted [confidence] used to become 0.5, which put "the
+       judge did not say" and "the judge is half sure" on one number in the
+       operator digest. The schema declares the field required with bounds; a
+       caller that omits it or sends something else is told which field. *)
+    let* confidence =
+      match Json_util.assoc_member_opt "confidence" args with
+      | Some (`Float value) -> Ok value
+      | Some (`Int value) -> Ok (float_of_int value)
+      | Some _ -> Error "confidence must be a number between 0.0 and 1.0"
+      | None -> Error "confidence is required"
+    in
+    let* confidence =
+      if Float.is_finite confidence
+         && Float.compare confidence 0.0 >= 0
+         && Float.compare confidence 1.0 <= 0
+      then Ok confidence
+      else Error "confidence must be a number between 0.0 and 1.0"
+    in
     let keeper_name =
       match get_string_opt args "keeper_name" with
       | Some raw ->

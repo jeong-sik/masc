@@ -32,5 +32,54 @@ let with_turn_span f =
 let runtime_events_enabled () =
   Safe_ops.get_env_bool_logged "MASC_RUNTIME_EVENTS" ~default:true
 
+let dump_suffix = ".events"
+
+let dump_pid_of_filename name =
+  match Filename.chop_suffix_opt ~suffix:dump_suffix name with
+  | None -> None
+  | Some stem -> int_of_string_opt stem
+
+(* [Unix.kill pid 0] probes existence without signalling.  EPERM means the
+   process exists but belongs to another user, so it counts as live; any other
+   error is treated as live too, because deleting a buffer a consumer is
+   reading from is worse than leaving a file behind. *)
+let pid_is_live pid =
+  match Unix.kill pid 0 with
+  | () -> true
+  | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
+  | exception _ -> true
+
+let prune_stale_dumps ~dir =
+  match Sys.readdir dir with
+  | exception Sys_error msg ->
+    Log.warn ~ctx:"runtime_events" "cannot scan %s for stale dumps: %s" dir msg
+  | entries ->
+    let self = Unix.getpid () in
+    Array.iter
+      (fun name ->
+        match dump_pid_of_filename name with
+        | None -> ()
+        | Some pid when pid = self -> ()
+        | Some pid when pid_is_live pid -> ()
+        | Some pid ->
+          let path = Filename.concat dir name in
+          (match Sys.remove path with
+           | () ->
+             Log.info
+               ~ctx:"runtime_events"
+               "removed stale dump %s (pid %d no longer exists)"
+               name
+               pid
+           | exception Sys_error msg ->
+             Log.warn
+               ~ctx:"runtime_events"
+               "cannot remove stale dump %s: %s"
+               name
+               msg))
+      entries
+
 let start_listener () =
-  if runtime_events_enabled () then Runtime_events.start ()
+  if runtime_events_enabled ()
+  then (
+    prune_stale_dumps ~dir:(Sys.getcwd ());
+    Runtime_events.start ())

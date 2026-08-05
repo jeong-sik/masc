@@ -30,8 +30,26 @@ val with_turn_span : (unit -> 'a) -> 'a
     a body exception is preserved.  Brackets the pair so a caller cannot
     emit a start without its matching end. *)
 
+val prune_stale_dumps : dir:string -> unit
+(** Remove [<pid>.events] ring-buffer dumps in [dir] whose owning process no
+    longer exists.
+
+    [Runtime_events.start] writes the buffer as [<pid>.events] in the process
+    working directory and never removes it, so without this a checkout gains
+    one dump per run. A dump belonging to a live process is left alone: a
+    consumer (Olly, an in-process cursor) may be reading it. Existence is
+    probed with signal 0; [EPERM] and any other error count as live, since
+    deleting a buffer under an active reader is worse than leaving a file.
+
+    Failures are logged, never raised — pruning must not prevent the listener
+    from starting. Exposed for tests; {!start_listener} calls it with the
+    current working directory. *)
+
 val start_listener : unit -> unit
 (** Install the Runtime_events ring buffer listener.
+
+    Prunes stale dumps via {!prune_stale_dumps} before starting, so the
+    directory does not accumulate one buffer per run.
 
     Idempotent-safe per [Runtime_events] semantics. Should be called
     once, early inside the [Eio_main.run] entry. Set

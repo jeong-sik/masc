@@ -56,12 +56,73 @@ let test_with_turn_span_propagates_exn () =
     (fun () ->
       ignore (Masc_runtime_events.with_turn_span (fun () -> failwith "boom")))
 
+(* One past the largest pid any supported platform allocates (Linux caps
+   pid_max at 4194304; macOS at 99999), so no process can hold it and
+   [Unix.kill] answers ESRCH.  Picking a real reaped pid would need a fork,
+   which this module's own docs warn against. *)
+let dead_pid () = 4194305
+
+let with_temp_dir f =
+  let dir = Filename.temp_file "masc_events_prune" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      Array.iter (fun n -> try Sys.remove (Filename.concat dir n) with _ -> ())
+        (try Sys.readdir dir with _ -> [||]);
+      try Unix.rmdir dir with _ -> ())
+    (fun () -> f dir)
+
+let touch path = close_out (open_out path)
+
+let test_prune_removes_dump_of_dead_pid () =
+  with_temp_dir (fun dir ->
+    let dead = Filename.concat dir (string_of_int (dead_pid ()) ^ ".events") in
+    touch dead;
+    Masc_runtime_events.prune_stale_dumps ~dir;
+    Alcotest.(check bool) "dead pid dump removed" false (Sys.file_exists dead))
+
+let test_prune_keeps_dump_of_live_pid () =
+  with_temp_dir (fun dir ->
+    let live =
+      Filename.concat dir (string_of_int (Unix.getpid ()) ^ ".events")
+    in
+    touch live;
+    Masc_runtime_events.prune_stale_dumps ~dir;
+    Alcotest.(check bool) "live pid dump kept" true (Sys.file_exists live))
+
+let test_prune_ignores_non_dump_files () =
+  with_temp_dir (fun dir ->
+    let keep = Filename.concat dir "notes.txt" in
+    let keep_named = Filename.concat dir "olly.events" in
+    touch keep;
+    touch keep_named;
+    Masc_runtime_events.prune_stale_dumps ~dir;
+    Alcotest.(check bool) "unrelated file kept" true (Sys.file_exists keep);
+    Alcotest.(check bool)
+      "non-numeric .events kept" true (Sys.file_exists keep_named))
+
+let test_prune_survives_missing_dir () =
+  let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc_no_such_dir" in
+  (* Must log and return, not raise: pruning cannot block the listener. *)
+  Masc_runtime_events.prune_stale_dumps ~dir
+
 let () =
   Alcotest.run "masc_runtime_events"
     [ ( "span-roundtrip"
       , [ Alcotest.test_case
             "emit_turn_start/emit_turn_end visible to in-process cursor"
             `Quick test_turn_span_roundtrip
+        ] )
+    ; ( "prune-stale-dumps"
+      , [ Alcotest.test_case "removes dump of dead pid" `Quick
+            test_prune_removes_dump_of_dead_pid
+        ; Alcotest.test_case "keeps dump of live pid" `Quick
+            test_prune_keeps_dump_of_live_pid
+        ; Alcotest.test_case "ignores non-dump files" `Quick
+            test_prune_ignores_non_dump_files
+        ; Alcotest.test_case "survives missing directory" `Quick
+            test_prune_survives_missing_dir
         ] )
     ; ( "with_turn_span"
       , [ Alcotest.test_case "returns body result" `Quick

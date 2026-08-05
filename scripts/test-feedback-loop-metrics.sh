@@ -30,8 +30,14 @@ chmod +x "$fixture/scripts/dune-local.sh"
 
 # Deterministic mock artifact so bin_size_bytes is assertable.
 printf 'mock-binary' >"$fixture/_build/default/bin/main_eio.exe"
-expected_size="$(stat -f %z "$fixture/_build/default/bin/main_eio.exe" 2>/dev/null \
-  || stat -c %s "$fixture/_build/default/bin/main_eio.exe")"
+# Platform-branch like the script under test: GNU stat treats "-f %z" as a
+# file-system query that succeeds, so a macOS-first fallback chain silently
+# yields the wrong number on Linux instead of falling back.
+if [ "$(uname -s)" = "Darwin" ]; then
+  expected_size="$(stat -f %z "$fixture/_build/default/bin/main_eio.exe")"
+else
+  expected_size="$(stat -c %s "$fixture/_build/default/bin/main_eio.exe")"
+fi
 
 cp "$FEEDBACK_LOOP" "$fixture/scripts/feedback-loop.sh"
 

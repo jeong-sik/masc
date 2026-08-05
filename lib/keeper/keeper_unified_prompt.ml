@@ -91,13 +91,38 @@ let format_current_task_with_heading ~heading (task : Masc_domain.task) : string
        task.Masc_domain.title status_line);
   (match task.Masc_domain.handoff_context with
    | Some h when h.Masc_domain.summary <> "" ->
+       (* RFC-0364: a handoff can now come from a previous owner, so the note
+          must say whose it is. Without this the model reads another agent's
+          first-person account ("I already verified the spec") as its own
+          recollection, which is worse than not showing the note at all. The
+          author is stated even when it is the current holder — a keeper that
+          has to compare cannot do so from a line that is sometimes attributed
+          and sometimes not. *)
+       let attribution =
+         match h.Masc_domain.updated_by, h.Masc_domain.updated_at with
+         | Some who, Some at -> Printf.sprintf " (%s, %s)" who at
+         | Some who, None -> Printf.sprintf " (%s)" who
+         | None, Some at -> Printf.sprintf " (unattributed, %s)" at
+         | None, None -> " (unattributed)"
+       in
        Buffer.add_string buf
-         (Printf.sprintf "- Prior handoff: %s\n" h.Masc_domain.summary);
+         (Printf.sprintf "- Prior handoff%s: %s\n" attribution
+            h.Masc_domain.summary);
        (match h.Masc_domain.next_step with
         | Some step when step <> "" ->
             Buffer.add_string buf
               (Printf.sprintf "- Suggested next step: %s\n" step)
-        | Some _ | None -> ())
+        | Some _ | None -> ());
+       (* The refs are where the previous owner's work actually is. Dropping
+          them leaves prose that points at an address the model never receives,
+          and the artifact/board readers that resolve them are already
+          model-visible. *)
+       (match h.Masc_domain.evidence_refs with
+        | [] -> ()
+        | refs ->
+            Buffer.add_string buf
+              (Printf.sprintf "- Handoff evidence: %s\n"
+                 (String.concat ", " refs)))
    | Some _ | None -> ());
   Buffer.add_string buf
     "\n";

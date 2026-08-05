@@ -49,13 +49,25 @@ let test_wrong_type_contract () =
   | Error _ -> ()
   | Ok _ -> fail "non-object contract must be Error, not Ok"
 
-let test_unknown_contract_field_is_rejected () =
+(* [links] is the field this change removes from the contract, and main writes
+   it on every task a keeper executes (keeper_agent_run_phase5_task_link.ml:27).
+   The decoder must read past it: it also decodes the persisted backlog, where
+   one rejected task fails the whole file (workspace_backlog.ml:17) and stops
+   every keeper's claim and transition. A field we deleted is not corruption.
+
+   Wrong types stay Error — see [test_wrong_type_contract]. That is the split:
+   unknown key ignored, malformed value rejected. *)
+let test_removed_contract_field_still_decodes () =
   match
     T.parse_task_contract
       (`Assoc [ "contract", `Assoc [ "links", `Assoc [] ] ])
   with
-  | Error _ -> ()
-  | Ok _ -> fail "unknown contract field must be Error, not silently dropped"
+  | Ok _ -> ()
+  | Error detail ->
+    fail
+      (Printf.sprintf
+         "a contract carrying the removed [links] key must still decode: %s"
+         detail)
 
 let () =
   run "Task.Args"
@@ -64,7 +76,7 @@ let () =
         ; test_case "explicit null -> Ok None" `Quick test_explicit_null_contract
         ; test_case "object -> Ok (Some _)" `Quick test_object_contract
         ; test_case "wrong type -> Error" `Quick test_wrong_type_contract
-        ; test_case "unknown field -> Error" `Quick
-            test_unknown_contract_field_is_rejected
+        ; test_case "removed field still decodes" `Quick
+            test_removed_contract_field_still_decodes
         ] )
     ]

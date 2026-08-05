@@ -165,7 +165,7 @@ type task_contract =
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]
   }
-[@@deriving show, yojson { strict = true }]
+[@@deriving show, yojson { strict = false }]
 
 type task_reclaim_policy =
   | Allow_reclaim

@@ -197,12 +197,6 @@ function formatTime(timestamp?: string | null): string | null {
   return result === NO_TIME_INFO ? null : result
 }
 
-function formatEligible(seconds?: number | null): string | null {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return null
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  return `${Math.ceil(seconds / 60)}m`
-}
-
 function cancelKeeperThreadFromUi(keeperName: string): void {
   void cancelActiveKeeperThreadMessage(keeperName)
     .then(cancelled => {
@@ -421,7 +415,6 @@ export function KeeperDiagnosticSummary({
       <div class="text-xs text-[var(--color-fg-primary)] leading-relaxed mt-1 v2-monitoring-row">
         응답: ${diagnostic?.last_reply_status ?? '미조회'}
         ${diagnostic?.last_reply_at ? html` -- ${formatTime(diagnostic.last_reply_at)}` : null}
-        ${diagnostic?.next_eligible_at_s ? html` -- 다음 응답 가능 ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
       </div>
       ${diagnostic?.last_error
         ? html`<${AgentFailure}

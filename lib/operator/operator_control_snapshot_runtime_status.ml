@@ -26,15 +26,23 @@ let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
   | _ -> None
 ;;
 
+(* [keeper_diagnostic_json] always emits "health_state", so a missing or
+   unparseable field means the blob did not come from that producer. Deny the
+   override in that case: this gate exists to stop a non-healthy keeper from
+   being displayed as live, and the previous code defaulted twice — first to
+   the string "offline", then to [KH_offline] — both landing on a constructor
+   that is in the allow set, so an absent or corrupt field granted the
+   override. *)
 let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
-  let kh =
-    Safe_ops.json_string ~default:"offline" "health_state" diagnostic
-    |> Keeper_status_runtime.keeper_health_of_string_opt
-    |> Option.value ~default:Keeper_types.KH_offline
-  in
-  match kh with
-  | Keeper_types.KH_stale | KH_degraded | KH_zombie | KH_dead -> false
-  | KH_healthy | KH_idle | KH_offline -> true
+  match
+    Json_util.get_string diagnostic "health_state"
+    |> Option.map Keeper_status_runtime.keeper_health_of_string_opt
+  with
+  | None | Some None -> false
+  | Some (Some kh) ->
+    (match kh with
+     | Keeper_types.KH_stale | KH_degraded | KH_zombie | KH_dead -> false
+     | KH_healthy | KH_idle | KH_offline -> true)
 ;;
 
 let align_keeper_runtime_status

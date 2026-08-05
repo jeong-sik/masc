@@ -18,7 +18,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(checkpoint_bytes : int)
     ~(message_count : int)
     ~(handoff_json : Yojson.Safe.t option)
-    ?(count_completed_turn = true)
     () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
@@ -81,12 +80,10 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~channel:(Keeper_world_observation.channel_to_string channel)
     ~runtime_profile
     ~latency_ms;
-  if count_completed_turn
-  then
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string TurnCompleted)
-      ~labels:[("keeper", meta.name)]
-      ();
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string TurnCompleted)
+    ~labels:[("keeper", meta.name)]
+    ();
   let snapshot =
     `Assoc
       (Keeper_metrics_record.fields Keeper_metrics_record.Turn

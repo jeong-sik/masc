@@ -75,9 +75,6 @@ let terminal_outcome_of_result result =
     Terminal_checkpoint
 ;;
 
-let terminal_outcome_is_completed_turn _ = true
-;;
-
 let terminal_outcome_to_activity_kind = function
   | Terminal_done | Terminal_checkpoint -> "keeper.turn_completed"
   | Terminal_input_required -> "keeper.turn_input_required"
@@ -126,7 +123,6 @@ let append_metrics_snapshot
       ~checkpoint_bytes:lifecycle.checkpoint_bytes
       ~message_count:lifecycle.message_count
       ~handoff_json:lifecycle.handoff_json
-      ~count_completed_turn:(terminal_outcome_is_completed_turn terminal_outcome)
       ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -509,7 +505,6 @@ module For_testing = struct
     | Terminal_input_required
 
   let terminal_outcome_of_result = terminal_outcome_of_result
-  let terminal_outcome_is_completed_turn = terminal_outcome_is_completed_turn
 
   let persist_terminal_turn_meta_for_outcome
         ~config

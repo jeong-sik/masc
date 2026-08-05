@@ -860,7 +860,6 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
     last_reply_at: toIsoTimestamp(raw.last_reply_at) ?? null, // undefined->null: field is string|null
     last_reply_preview: asString(raw.last_reply_preview) ?? null,
     last_error: asString(raw.last_error) ?? null,
-    next_eligible_at_s: asNumber(raw.next_eligible_at_s) ?? null,
     recoverable: typeof raw.recoverable === 'boolean' ? raw.recoverable : undefined,
     summary: asString(raw.summary),
     keepalive_running: typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,

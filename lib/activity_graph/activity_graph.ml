@@ -775,15 +775,13 @@ let graph_json config ?(kinds = []) ?(limit = 500)
 let span_start_kind = function
   | "task.claimed" | "task.started" -> Some "task"
   | "agent.session_bound" -> Some "presence"
-  | "operation.started" -> Some "operation"
-  | "keeper.autonomy_started" -> Some "autonomy"
   | _ -> None
 
 (** Issue #8711: single SSOT for span-ending event kinds. The previous
     [span_end_kind] / [span_end_status] pair reproduced the same
-    8-symbol alphabet in two places; if either gained a constructor
-    without the other being updated the catch-all in [span_end_status]
-    would silently map the new kind to [Span_ended], losing semantic
+    alphabet in two places; if either gained a constructor without the
+    other being updated the catch-all in [span_end_status] would
+    silently map the new kind to [Span_ended], losing semantic
     information. Combining them forces both pieces to stay in sync at
     compile time (Parse, don't validate). *)
 let span_end_classification = function
@@ -792,11 +790,6 @@ let span_end_classification = function
   | "task.approved"             -> Some ("task",      Span_completed)
   | "task.released"             -> Some ("task",      Span_released)
   | "task.cancelled"            -> Some ("task",      Span_cancelled)
-  | "agent.left"                -> Some ("presence",  Span_left)
-  | "agent.retired"             -> Some ("presence",  Span_retired)
-  | "operation.finalized"       -> Some ("operation", Span_finalized)
-  | "operation.stopped"         -> Some ("operation", Span_stopped)
-  | "keeper.autonomy_completed" -> Some ("autonomy",  Span_completed)
   | _                           -> None
 
 

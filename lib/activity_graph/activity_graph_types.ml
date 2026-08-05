@@ -5,45 +5,30 @@
     @since 7182 *)
 type node_status =
   (* Agent lifecycle *)
-  | Active | Offline | Spawned | Retired | Compacting | Handoff
-  | Autonomy | Guardrail
+  | Active | Compacting
   (* Task lifecycle *)
   | Todo | Claimed | In_progress | Done | Cancelled
   (* Board *)
   | Posted | Discussed
-  (* Decision *)
-  | Open | Resolved
-  (* Policy *)
-  | Approved | Denied
-  (* Operation lifecycle *)
-  | Running | Paused | Stopped | Finalized
   (* Generic / fallback *)
   | Observed | Workspace | Unset
 
 let node_status_to_string = function
-  | Active -> "active" | Offline -> "offline" | Spawned -> "spawned"
-  | Retired -> "retired" | Compacting -> "compacting" | Handoff -> "handoff"
-  | Autonomy -> "autonomy" | Guardrail -> "guardrail"
+  | Active -> "active" | Compacting -> "compacting"
   | Todo -> "todo" | Claimed -> "claimed" | In_progress -> "in_progress"
   | Done -> "done" | Cancelled -> "cancelled"
   | Posted -> "posted" | Discussed -> "discussed"
-  | Open -> "open" | Resolved -> "resolved"
-  | Approved -> "approved" | Denied -> "denied"
-  | Running -> "running" | Paused -> "paused"
-  | Stopped -> "stopped" | Finalized -> "finalized"
   | Observed -> "observed" | Workspace -> "workspace" | Unset -> ""
 
 (** Span status: separate from node_status (different lifecycle).
     @since 7182 *)
 type span_status =
   | Span_open | Span_completed | Span_released | Span_cancelled
-  | Span_left | Span_retired | Span_finalized | Span_stopped | Span_ended
+  | Span_ended
 
 let span_status_to_string = function
   | Span_open -> "open" | Span_completed -> "completed"
   | Span_released -> "released" | Span_cancelled -> "cancelled"
-  | Span_left -> "left" | Span_retired -> "retired"
-  | Span_finalized -> "finalized" | Span_stopped -> "stopped"
   | Span_ended -> "ended"
 
 (** Strict parser. Returns [None] on unknown wire so callers can react
@@ -53,10 +38,6 @@ let span_status_of_string_opt = function
   | "completed" -> Some Span_completed
   | "released" -> Some Span_released
   | "cancelled" -> Some Span_cancelled
-  | "left" -> Some Span_left
-  | "retired" -> Some Span_retired
-  | "finalized" -> Some Span_finalized
-  | "stopped" -> Some Span_stopped
   | "ended" -> Some Span_ended
   | _ -> None
 

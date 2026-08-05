@@ -317,7 +317,8 @@
   test_keeper_wire_capture
   test_board_rest_routes
   test_board_context_inference_resolution
-  test_runtime_model_input_tail_window)
+  test_runtime_model_input_tail_window
+  test_keeper_model_input_demotion)
  (modules
   test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
@@ -613,7 +614,8 @@
   test_keeper_wire_capture
   test_board_rest_routes
   test_board_context_inference_resolution
-  test_runtime_model_input_tail_window)
+  test_runtime_model_input_tail_window
+  test_keeper_model_input_demotion)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref))
 

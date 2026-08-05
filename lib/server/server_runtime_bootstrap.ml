@@ -1434,47 +1434,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
               Log.Server.warn "gRPC keeper client init failed: %s"
                 (Printexc.to_string exn))
        | Http | Ws | Webrtc | Local -> ());
-      Server_mcp_transport_ws.set_dashboard_snapshot_provider (function
-        | "shell" ->
-            Some
-              (Server_dashboard_http.dashboard_shell_payload_json ~light:true
-                 (Mcp_server.workspace_config state))
-        | "execution" ->
-            Some (Server_dashboard_http.dashboard_execution_snapshot_json ())
-        | "operator" ->
-            Some
-              (`Assoc
-                [
-                  ( "snapshot",
-                    Server_dashboard_http.operator_snapshot_cache_diagnostics_json
-                      () );
-                  ( "digest",
-                    Server_dashboard_http.cached_surface_json
-                      Server_dashboard_http.operator_digest_cache );
-                ])
-        | "transport" ->
-            Some (Server_dashboard_http.dashboard_transport_health_snapshot_json ())
-        | "namespace" ->
-            Server_dashboard_http.namespace_truth_snapshot_from_caches state
-        | "composite" ->
-            Some
-              (Server_dashboard_http.dashboard_fleet_composite_json
-                 ~config:(Mcp_server.workspace_config state) ())
-        | "board" ->
-            Some
-              (Server_dashboard_http.dashboard_board_json
-                 ~sort_by:Board_dispatch.Recent ~exclude_system:true
-                 ~limit:100 ~offset:0 ())
-        | "goals" ->
-            Some
-              (Server_dashboard_http.dashboard_goals_snapshot_json
-                 ~config:(Mcp_server.workspace_config state))
-        | "ide" ->
-            Some
-              (Server_dashboard_http.dashboard_ide_snapshot_json
-                 ~config:(Mcp_server.workspace_config state))
-        | _ ->
-            None);
       let dispatch_ws_inbound_message ws_session_id body_str =
           let jsonrpc_id_opt body =
             match Yojson.Safe.from_string body with

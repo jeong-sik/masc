@@ -103,8 +103,29 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
   let required_artifacts, required_artifacts_error =
     string_list_of_output "required_artifacts" req.output
   in
+  (* [submitted_evidence] is the materialized snapshot the completion authority
+     read, not the producer's raw reference strings: the submit boundary
+     replaces the field with resolved items carrying unreadable markers. The
+     store owns that shape and projects it to identity lines; reading it as a
+     string array rejected every request on the live store. *)
   let submitted_evidence, submitted_evidence_error =
-    string_list_of_output "submitted_evidence" req.output
+    match req.output with
+    | `Assoc fields ->
+      (match List.assoc_opt "submitted_evidence" fields with
+       | None -> [], Some "missing current-schema field \"submitted_evidence\""
+       | Some value ->
+         (match
+            Workspace_verification_store.submitted_evidence_identity_lines value
+          with
+          | Ok lines -> lines, None
+          | Error detail ->
+            ( []
+            , Some
+                (Printf.sprintf
+                   "malformed current-schema field %S: %s"
+                   "submitted_evidence"
+                   detail) )))
+    | _ -> [], Some "verification output must be an object"
   in
   let evidence_projection_error =
     [required_artifacts_error; submitted_evidence_error]

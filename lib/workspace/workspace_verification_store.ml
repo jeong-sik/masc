@@ -48,6 +48,11 @@ type submitted_evidence_access =
       ; reason : evidence_access_failure
       }
 
+(* Reason code for a reference this module refused to materialize. Unlike the
+   [evidence_read_failure] codes it sits beside on the wire, it has no variant:
+   the rejected reference is never persisted, so there is nothing to carry. *)
+let invalid_reference_code = "invalid_reference"
+
 let evidence_read_failure_code = function
   | Evidence_missing -> "missing"
   | Evidence_not_regular_file -> "not_regular_file"
@@ -98,7 +103,7 @@ let submitted_evidence_item_to_yojson = function
   | Evidence_invalid_reference ->
     `Assoc
       [ "kind", `String "artifact_unreadable"
-      ; "reason", `Assoc [ "code", `String "invalid_reference" ]
+      ; "reason", `Assoc [ "code", `String invalid_reference_code ]
       ]
   | Evidence_artifact_unreadable { reference; reason } ->
     `Assoc
@@ -174,7 +179,7 @@ let submitted_evidence_item_metadata_to_yojson = function
   | Evidence_invalid_reference ->
     `Assoc
       [ "kind", `String "artifact_unreadable"
-      ; "reason", `String "invalid_reference"
+      ; "reason", `String invalid_reference_code
       ]
   | Evidence_artifact_unreadable { reference; reason } ->
     `Assoc
@@ -568,6 +573,44 @@ let snapshot_submitted_evidence_json ~base_path ~worker references =
          snapshot_submitted_evidence_item ~base_path ~worker reference
          |> submitted_evidence_item_to_yojson)
        references)
+
+(* Decode through this module's own snapshot decoder instead of re-reading the
+   JSON fields. Both surfaces read the same persisted bytes, so they have to
+   agree on which snapshots are well-formed: re-deriving the shape here let an
+   artifact item with a [reference] but missing or invalid [content]/[bytes]/
+   [truncated] render as an ordinary identity line while the authority-scoped
+   payload route rejected the very same item. Matching on the typed value makes
+   that divergence unrepresentable, and a new variant becomes a compile error
+   here rather than an [unknown kind] string at runtime. *)
+let submitted_evidence_identity_line (item : Yojson.Safe.t) =
+  match submitted_evidence_item_of_yojson item with
+  | Error detail -> Error detail
+  | Ok (Evidence_note note) -> Ok (note_reference_prefix ^ note)
+  | Ok (Evidence_artifact { reference; _ }) -> Ok reference
+  | Ok Evidence_invalid_reference ->
+    Ok (Printf.sprintf "(unreadable: %s)" invalid_reference_code)
+  | Ok (Evidence_artifact_unreadable { reference; reason }) ->
+    Ok
+      (Printf.sprintf
+         "%s (unreadable: %s)"
+         reference
+         (evidence_read_failure_code reason))
+;;
+
+let submitted_evidence_identity_lines (json : Yojson.Safe.t) =
+  match json with
+  | `List items ->
+    List.fold_left
+      (fun acc item ->
+        match acc, submitted_evidence_identity_line item with
+        | Error _, _ -> acc
+        | Ok lines, Ok line -> Ok (line :: lines)
+        | Ok _, Error detail -> Error detail)
+      (Ok [])
+      items
+    |> Result.map List.rev
+  | _ -> Error "submitted evidence must be an array"
+;;
 
 let inspect_submitted_evidence_for_authority ~base_path ~request_id ~task_id
     ~task_worker ~(authority : Masc_domain.completion_authority) =

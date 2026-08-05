@@ -243,6 +243,66 @@ describe('VerificationRequestsPanel', () => {
     })
   })
 
+  // The identity lines the store now projects are not opaque tokens: they carry
+  // path separators, a note prefix, Korean text, and a parenthesised failure
+  // reason. Each must survive rendering intact, and an unreadable artifact must
+  // stay visible instead of being dropped from the list.
+  it('renders projected snapshot identity lines verbatim', async () => {
+    setData([
+      makeRequest({
+        submitted_evidence: [
+          'artifact:repos/demo/services/request-form/src/lib/reportError.ts',
+          'note:executor summary — 비동기 에러 핸들링 통일 완료',
+          'artifact:repos/demo/gone.ml (unreadable: missing)',
+          '(unreadable: invalid_reference)',
+        ],
+      }),
+    ])
+    render(html`<${VerificationRequestsPanel} />`)
+
+    fireEvent.click(screen.getByText('자세히'))
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          'artifact:repos/demo/services/request-form/src/lib/reportError.ts',
+        ),
+      ).toBeTruthy()
+      expect(
+        screen.getByText('note:executor summary — 비동기 에러 핸들링 통일 완료'),
+      ).toBeTruthy()
+      expect(
+        screen.getByText('artifact:repos/demo/gone.ml (unreadable: missing)'),
+      ).toBeTruthy()
+      expect(screen.getByText('(unreadable: invalid_reference)')).toBeTruthy()
+    })
+  })
+
+  // Live store extremes: a 1083-char reference and 77 notes over 200 chars.
+  // A path carries no spaces, so without break-words the row overflows sideways
+  // rather than wrapping. Assert the wrap class rides on both evidence lists.
+  it('wraps oversized identity lines instead of overflowing the row', async () => {
+    const longPath = `artifact:repos/demo/${'segment/'.repeat(120)}file.ts`
+    expect(longPath.length).toBeGreaterThan(900)
+    expect(longPath).not.toContain(' ')
+    setData([
+      makeRequest({
+        required_artifacts: [longPath],
+        submitted_evidence: [longPath],
+      }),
+    ])
+    render(html`<${VerificationRequestsPanel} />`)
+
+    fireEvent.click(screen.getByText('자세히'))
+    await waitFor(() => {
+      const lists = document.querySelectorAll('ul.list-disc')
+      expect(lists.length).toBe(2)
+      for (const list of lists) {
+        expect(list.classList.contains('break-words')).toBe(true)
+      }
+      expect(screen.getAllByText(longPath).length).toBe(2)
+    })
+  })
+
   it('renders missing and malformed evidence projection warnings', () => {
     setData([
       makeRequest({

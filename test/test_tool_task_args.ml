@@ -49,25 +49,53 @@ let test_wrong_type_contract () =
   | Error _ -> ()
   | Ok _ -> fail "non-object contract must be Error, not Ok"
 
-(* [links] is the field this change removes from the contract, and main writes
-   it on every task a keeper executes (keeper_agent_run_phase5_task_link.ml:27).
-   The decoder must read past it: it also decodes the persisted backlog, where
-   one rejected task fails the whole file (workspace_backlog.ml:17) and stops
-   every keeper's claim and transition. A field we deleted is not corruption.
-
-   Wrong types stay Error — see [test_wrong_type_contract]. That is the split:
-   unknown key ignored, malformed value rejected. *)
-let test_removed_contract_field_still_decodes () =
+let test_public_contract_rejects_removed_field () =
   match
     T.parse_task_contract
       (`Assoc [ "contract", `Assoc [ "links", `Assoc [] ] ])
   with
+  | Error _ -> ()
+  | Ok _ -> fail "public contract input must reject the removed [links] field"
+
+let test_persisted_contract_accepts_removed_field () =
+  match Masc_domain.task_contract_of_yojson (`Assoc [ "links", `Assoc [] ]) with
   | Ok _ -> ()
   | Error detail ->
     fail
       (Printf.sprintf
-         "a contract carrying the removed [links] key must still decode: %s"
+         "persisted contract carrying removed [links] must still decode: %s"
          detail)
+
+let test_public_contract_rejects_duplicate_field () =
+  match
+    T.parse_task_contract
+      (`Assoc
+        [ ( "contract"
+          , `Assoc [ "strict", `Bool true; "strict", `Bool false ] )
+        ])
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "public contract input must reject duplicate fields"
+
+let test_current_contract_shape_decodes () =
+  match
+    T.parse_task_contract
+      (`Assoc
+        [ ( "contract"
+          , `Assoc
+              [ "strict", `Bool true
+              ; "completion_contract", `List [ `String "done" ]
+              ; "required_evidence", `List [ `String "test" ]
+              ; "inspect_gate_evidence", `List [ `String "review" ]
+              ; "verify_gate_evidence", `List [ `String "ci" ]
+              ] )
+        ])
+  with
+  | Ok (Some contract) ->
+    check bool "strict" true contract.strict;
+    check (list string) "completion contract" [ "done" ] contract.completion_contract
+  | Ok None -> fail "current contract object must decode to Some"
+  | Error detail -> fail (Printf.sprintf "current contract must decode: %s" detail)
 
 let () =
   run "Task.Args"
@@ -76,7 +104,13 @@ let () =
         ; test_case "explicit null -> Ok None" `Quick test_explicit_null_contract
         ; test_case "object -> Ok (Some _)" `Quick test_object_contract
         ; test_case "wrong type -> Error" `Quick test_wrong_type_contract
-        ; test_case "removed field still decodes" `Quick
-            test_removed_contract_field_still_decodes
+        ; test_case "public removed field -> Error" `Quick
+            test_public_contract_rejects_removed_field
+        ; test_case "persisted removed field still decodes" `Quick
+            test_persisted_contract_accepts_removed_field
+        ; test_case "public duplicate field -> Error" `Quick
+            test_public_contract_rejects_duplicate_field
+        ; test_case "current contract shape -> Ok" `Quick
+            test_current_contract_shape_decodes
         ] )
     ]

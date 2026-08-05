@@ -76,6 +76,7 @@ Example: %s({title: 'Fix login bug', priority: 1, description: 'Users cannot log
         ]);
         ("contract", `Assoc [
           ("type", `String "object");
+          ("additionalProperties", `Bool false);
           ("description", `String "What counts as done for this task, and what evidence shows it. Recorded at creation and never rewritten. Omit it and the task carries no criteria.");
           ("properties", `Assoc [
             ("strict", `Assoc [ ("type", `String "boolean") ]);
@@ -126,6 +127,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
               ]);
               ("contract", `Assoc [
                 ("type", `String "object");
+                ("additionalProperties", `Bool false);
                 ("properties", `Assoc [
                   ("strict", `Assoc [ ("type", `String "boolean") ]);
                   ("completion_contract", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);

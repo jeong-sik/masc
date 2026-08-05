@@ -2606,6 +2606,59 @@ let () = test "handle_batch_add_tasks_rejects_unknown_item_fields" (fun () ->
        "Unknown argument(s): retired_tool_policy_field")
 )
 
+let () = test "handle_batch_add_tasks_rejects_removed_contract_field" (fun () ->
+  let ctx = make_test_ctx () in
+  let args =
+    `Assoc
+      [ ( "tasks"
+        , `List
+            [ `Assoc
+                [ "title", `String "Task 1"
+                ; "contract", `Assoc [ "links", `Assoc [] ]
+                ]
+            ] )
+      ]
+  in
+  let result =
+    Task.Tool.handle_batch_add_tasks
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      args
+  in
+  assert (not (Tool_result.is_success result));
+  assert
+    (str_contains
+       (Tool_result.message result)
+       "contract contains unsupported field links"))
+
+let () = test "handle_batch_add_tasks_rejects_duplicate_contract_field" (fun () ->
+  let ctx = make_test_ctx () in
+  let args =
+    `Assoc
+      [ ( "tasks"
+        , `List
+            [ `Assoc
+                [ "title", `String "Task 1"
+                ; ( "contract"
+                  , `Assoc [ "strict", `Bool true; "strict", `Bool false ] )
+                ]
+            ] )
+      ]
+  in
+  let result =
+    Task.Tool.handle_batch_add_tasks
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      args
+  in
+  assert (not (Tool_result.is_success result));
+  assert
+    (str_contains
+       (Tool_result.message result)
+       "contract contains duplicate field strict"))
+
 (* Test helper functions *)
 let () = test "get_string_present" (fun () ->
   let args = `Assoc [("key", `String "value")] in

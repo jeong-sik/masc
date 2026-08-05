@@ -6,20 +6,35 @@
 
     @since God file decomposition — extracted from tool_task.ml *)
 
+let task_contract_keys =
+  [ "strict"
+  ; "completion_contract"
+  ; "required_evidence"
+  ; "inspect_gate_evidence"
+  ; "verify_gate_evidence"
+  ]
+
+let parse_task_contract_object = function
+  | `Assoc fields as json ->
+    Result.bind
+      (Json_util.reject_unknown_fields
+         ~surface:"contract"
+         ~allowed:task_contract_keys
+         fields)
+      (fun () -> Masc_domain.task_contract_of_yojson json)
+  | other ->
+    Error
+      (Printf.sprintf
+         "contract must be an object when provided (received %s)"
+         (Json_util.kind_name other))
+
 let parse_task_contract args =
   match Json_util.assoc_member_opt "contract" args with
   | None | Some `Null -> Ok None
-  | Some (`Assoc _ as json) -> (
-      match Masc_domain.task_contract_of_yojson json with
-      | Ok contract -> Ok (Some contract)
-      | Error error ->
-          Error
-            (Printf.sprintf "Invalid contract payload: %s" error))
-  | Some other ->
-      Error
-        (Printf.sprintf
-           "contract must be an object when provided (received %s)"
-           (Json_util.kind_name other))
+  | Some json ->
+    parse_task_contract_object json
+    |> Result.map Option.some
+    |> Result.map_error (Printf.sprintf "Invalid contract payload: %s")
 
 let handoff_example_evidence_ref =
   Filename.concat Common.masc_dirname "harness-evidence/proof.json"

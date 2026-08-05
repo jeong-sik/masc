@@ -2869,7 +2869,7 @@ let set_json_member key value = function
   | other -> other
 ;;
 
-let test_task_codec_rejects_unknown_contract_fields () =
+let test_task_codec_accepts_removed_contract_fields () =
   let task =
     gc_make_task ~id:"task-l2" ~created_at:gc_ancient_ts ~status:Masc_domain.Todo
   in
@@ -2887,8 +2887,9 @@ let test_task_codec_rejects_unknown_contract_fields () =
     |> set_json_member "contract" legacy_contract
   in
   (match Masc_domain.task_of_yojson json with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "unknown task.contract field was silently dropped");
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf "persisted removed task.contract field was rejected: %s" error);
   let backlog_json =
     `Assoc
       [ "tasks", `List [ json ]
@@ -2897,8 +2898,9 @@ let test_task_codec_rejects_unknown_contract_fields () =
       ]
   in
   match Masc_domain.backlog_of_yojson backlog_json with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "corrupt task.contract was accepted by backlog decoder"
+  | Ok _ -> ()
+  | Error error ->
+    Alcotest.failf "backlog with removed task.contract field was rejected: %s" error
 ;;
 
 let test_task_codec_rejects_malformed_execution_links () =
@@ -3286,9 +3288,9 @@ let () =
             `Quick
             test_execution_links_codec_omits_empty
         ; Alcotest.test_case
-            "unknown contract fields are rejected"
+            "removed contract fields remain readable"
             `Quick
-            test_task_codec_rejects_unknown_contract_fields
+            test_task_codec_accepts_removed_contract_fields
         ; Alcotest.test_case
             "malformed execution links are rejected"
             `Quick

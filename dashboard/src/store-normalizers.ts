@@ -170,8 +170,6 @@ export function normalizeExecutionTone(value: unknown): DashboardExecutionQueueI
 export function normalizeExecutionSummary(raw: unknown): DashboardExecutionSummary | null {
   if (!isRecord(raw)) return null
   return {
-    active_sessions: asNumber(raw.active_sessions),
-    blocked_sessions: asNumber(raw.blocked_sessions),
     active_operations: asNumber(raw.active_operations),
     blocked_operations: asNumber(raw.blocked_operations),
     runtime_pressure: asNumber(raw.runtime_pressure),

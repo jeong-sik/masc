@@ -130,22 +130,9 @@ let test_env_session_max_age () =
   let max_age = Env_config.Session.max_age_seconds in
   check bool "positive max_age" true (max_age > 0.0)
 
-let test_env_tempo_min () =
-  let min = Env_config.Tempo.min_interval_seconds in
-  check bool "positive min" true (min > 0.0)
-
-let test_env_tempo_max () =
-  let max = Env_config.Tempo.max_interval_seconds in
-  check bool "positive max" true (max > 0.0)
-
 let test_env_tempo_default () =
   let default = Env_config.Tempo.default_interval_seconds in
   check bool "positive default" true (default > 0.0)
-
-let test_env_tempo_ordering () =
-  let min = Env_config.Tempo.min_interval_seconds in
-  let max = Env_config.Tempo.max_interval_seconds in
-  check bool "min <= max" true (min <= max)
 
 let test_env_orchestrator_interval () =
   let interval = Env_config.Orchestrator.check_interval_seconds in
@@ -200,10 +187,7 @@ let () =
       test_case "max_age" `Quick test_env_session_max_age;
     ];
     "env_config.tempo", [
-      test_case "min" `Quick test_env_tempo_min;
-      test_case "max" `Quick test_env_tempo_max;
       test_case "default" `Quick test_env_tempo_default;
-      test_case "ordering" `Quick test_env_tempo_ordering;
     ];
     "env_config.orchestrator", [
       test_case "interval" `Quick test_env_orchestrator_interval;

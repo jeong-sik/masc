@@ -866,7 +866,6 @@ describe('sendKeeperMessageDetailed', () => {
       target_id: 'sangsu',
       payload: {
         message: 'ping',
-        direct_reply: true,
       },
     })
     expect(reply.text).toBe('pong')
@@ -895,7 +894,6 @@ describe('submitQueuedKeeperMessage', () => {
       target_id: 'sangsu',
       payload: {
         message: 'ping',
-        direct_reply: true,
       },
     })
     expect(submitted).toEqual({
@@ -1116,7 +1114,6 @@ describe('streamKeeperMessage', () => {
     expect(JSON.parse(String(init.body))).toEqual({
       name: 'sangsu',
       message: 'ping',
-      direct_reply: true,
     })
     const actorHeader = headers['X-MASC-Agent'] ?? headers['x-masc-agent']
     expect(actorHeader).toBe('dashboard-eager-manta')
@@ -1154,7 +1151,6 @@ describe('streamKeeperMessage', () => {
     expect(JSON.parse(String(init.body))).toEqual({
       name: 'sangsu',
       message: 'ping',
-      direct_reply: true,
       channel: 'copilot',
       channel_workspace_id: 'session-7',
       turn_instructions: 'focus on overview',
@@ -1205,7 +1201,6 @@ describe('streamKeeperMessage', () => {
     expect(JSON.parse(String(init.body))).toMatchObject({
       name: 'sangsu',
       message: 'describe this',
-      direct_reply: true,
       attachments: [
         {
           id: 'att-img',

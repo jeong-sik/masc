@@ -293,23 +293,24 @@ let test_merged_system_block_keeps_turn_intent_rules () =
     (has_in prompt "Choose the smallest useful action that current evidence supports");
   check bool "task claim is coordination, not authority" true
     (has_in prompt "A Task claim coordinates ownership; it grants no additional authority");
-  check bool "no-work report is a valid outcome" true
-    (has_in prompt "give a concise no-work report");
-  (* The rule said to report and never said where, so the report went to the
-     shared surface. Measured on the live workspace 2026-08-05: every one of
-     the 26 board posts of the preceding 4.7 hours was taskmaster's
-     "[TASKMASTER] Hourly status -- 0 unclaimed", none of them answered, the
-     gap between them shrinking from 85 minutes to 4; the newest comment by
-     then was 9.2 hours old. That keeper's own config already carries the same
-     defect from 2026-07-20, when an unrouted "report" instruction flowed into
-     keeper_task_create and left 272 identical meta-tasks -- naming
-     keeper_broadcast fixed the channel but not the unconditional report, so
-     the flood moved to the Board. [Own_board_posts] is a context layer, so
-     the copies also accumulate in the poster's own history. *)
-  check bool "a no-work report is answered, not posted" true
-    (has_in prompt "A no-work report is not a Board post");
-  check bool "the cost of republishing an unchanged status is stated" true
-    (has_in prompt "an unchanged status republished every cycle crowds that view");
+  (* No empty case is named at all. Naming one -- even to forbid output --
+     creates a branch the keeper must first decide it has reached, and having
+     decided, it reports. Every instance measured on 2026-08-05 has that shape:
+     this prompt's own "give a concise no-work report" produced 26 identical
+     board posts in 4.7 hours; taskmaster's config guard "세상 상태가 지난
+     턴과 같으면 아무것도 하지 않는 것이 정답" did not hold against it; the
+     hourly wake message's "If nothing needs you, say so in one line" runs on
+     six keepers; and 23 of taskmaster's 29 stored memory facts were board
+     snapshots written in place of work. Routing the report (2026-07-20:
+     keeper_task_create -> keeper_broadcast) only moved the flood, because the
+     report itself stayed unconditional -- so the branch is removed rather
+     than rerouted. *)
+  check bool "no empty-case branch is named" false
+    (has_in prompt "no-work report"
+     || has_in prompt "If nothing is actionable"
+     || has_in prompt "there is nothing to do");
+  check bool "the board does not decide whether work exists" true
+    (has_in prompt "not the register that decides whether work exists");
   check bool "posting is tied to newness" true
     (has_in prompt "Post when what you found is new");
   check bool "completion claims name their evidence" true
@@ -340,8 +341,8 @@ let test_system_block_states_product_and_capabilities () =
     (has_in prompt "The Librarian, a system Keeper");
   check bool "communication is stated as load-bearing" true
     (has_in prompt "Communication is the load-bearing part of this system");
-  check bool "empty board is supply, not a verdict" true
-    (has_in prompt "that is a fact about supply, not a conclusion that there is nothing to do")
+  check bool "goals, memory and repositories are work surfaces" true
+    (has_in prompt "Your goals, memory, and repositories are work surfaces of their own")
 
 (* The collaboration surface a keeper is actually given. Board alone exposes
    sixteen keeper-callable tools (post, comment, votes, search, stats, five

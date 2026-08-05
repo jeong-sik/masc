@@ -1281,6 +1281,21 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_wake_turn_context @test/runtest-test_warn_root_causes"
 
+      # Mirror guards and the workspace heartbeat outcome suite landed without
+      # a runtest target, so the ci-test-targets ratchet counted them as
+      # compile-only. Run them.
+      - name: Run mirror guard and workspace heartbeat suites
+        id: mirror_guard_suites
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_assertion_kind_mirror @test/runtest-test_workspace_heartbeat_outcome"
+
       - name: Run transport harness suite
         id: transport_harness_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

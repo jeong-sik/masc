@@ -1,14 +1,14 @@
 ---
 rfc: "0267"
 title: "Make task↔goal links visible and explicitly assignable"
-status: Draft
+status: Implemented
 created: 2026-06-20
-updated: 2026-06-20
+updated: 2026-08-05
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0245"]
-implementation_prs: []
+implementation_prs: ["21704", "21722"]
 ---
 
 ## 1. Motivation

@@ -267,7 +267,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0264 | Memory OS recall outcome-anchored eval harness | Draft | - |
 | 0265 | Withdraw MASC modality capability rerouting | Withdrawn | - |
 | 0266 | Fusion async-completion wake + in-progress 가시성 | Draft | - |
-| 0267 | Make task↔goal links visible and explicitly assignable | Draft | - |
+| 0267 | Make task↔goal links visible and explicitly assignable | Implemented | - |
 | 0269 | Process Critic Loop for Keeper Work Traces | Draft | - |
 | 0270 | CI Gate merge guard: block merges on a non-success CI Gate and trip on red main | Draft | - |
 | 0271 | Withdraw progress-based turn rejection and pause | Withdrawn | - |

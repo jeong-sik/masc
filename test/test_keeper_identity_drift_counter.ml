@@ -27,8 +27,11 @@ let make_meta name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
+          (* [agent_name] omitted so Masc_test_deps derives the canonical
+             [keeper-<name>-agent]. The drift these tests exercise is
+             registering under a name other than [meta.name], not a mismatched
+             agent_name inside the meta. *)
           ("name", `String name);
-          ("agent_name", `String ("agent-" ^ name));
           ("trace_id", `String ("trace-" ^ name));
           ("allowed_paths", `List [ `String "*" ]);
         ])

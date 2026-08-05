@@ -25,8 +25,12 @@ let make_meta ?(active_goal_ids = []) () =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
+        (* [agent_name] is omitted: Masc_test_deps derives the canonical
+           [keeper-<name>-agent] from [name]. Spelling it here pinned a value
+           that stopped matching when 28ef484a39 made the meta decoder check
+           the pair, which killed this suite in make_meta before any
+           active_goal_claim_scope assertion ran. *)
         [ "name", `String "runtime-contract-keeper"
-        ; "agent_name", `String "keeper-runtime-contract"
         ; "trace_id", `String "runtime-contract-trace"
         ; ( "active_goal_ids"
           , `List (List.map (fun id -> `String id) active_goal_ids) )

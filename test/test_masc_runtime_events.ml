@@ -102,6 +102,34 @@ let test_prune_ignores_non_dump_files () =
     Alcotest.(check bool)
       "non-numeric .events kept" true (Sys.file_exists keep_named))
 
+(* int_of_string accepts these as integers; the runtime never emits them as
+   buffer names, so treating them as pids would unlink unrelated files. *)
+let test_prune_rejects_non_decimal_pid_stems () =
+  with_temp_dir (fun dir ->
+    let names = [ "0x10.events"; "+123.events"; "1_000.events"; "-5.events" ] in
+    List.iter (fun n -> touch (Filename.concat dir n)) names;
+    Masc_runtime_events.prune_stale_dumps ~dir;
+    List.iter
+      (fun n ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s kept (not a decimal pid)" n)
+          true
+          (Sys.file_exists (Filename.concat dir n)))
+      names)
+
+(* Must run last in this file.  The guard keys on the variable's presence, the
+   same way the OCaml runtime does, and the stdlib has no unsetenv — putenv ""
+   still reads as present.  So this test permanently enables preserve mode for
+   the remainder of the process and no later case may depend on pruning. *)
+let test_prune_honors_preserve_env_runs_last () =
+  with_temp_dir (fun dir ->
+    let dead = Filename.concat dir (string_of_int (dead_pid ()) ^ ".events") in
+    touch dead;
+    Unix.putenv "OCAML_RUNTIME_EVENTS_PRESERVE" "1";
+    Masc_runtime_events.prune_stale_dumps ~dir;
+    Alcotest.(check bool)
+      "dead dump kept when PRESERVE is set" true (Sys.file_exists dead))
+
 let test_prune_survives_missing_dir () =
   let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc_no_such_dir" in
   (* Must log and return, not raise: pruning cannot block the listener. *)
@@ -121,6 +149,8 @@ let () =
             test_prune_keeps_dump_of_live_pid
         ; Alcotest.test_case "ignores non-dump files" `Quick
             test_prune_ignores_non_dump_files
+        ; Alcotest.test_case "rejects non-decimal pid stems" `Quick
+            test_prune_rejects_non_decimal_pid_stems
         ; Alcotest.test_case "survives missing directory" `Quick
             test_prune_survives_missing_dir
         ] )
@@ -129,5 +159,12 @@ let () =
             test_with_turn_span_returns_body
         ; Alcotest.test_case "propagates body exception" `Quick
             test_with_turn_span_propagates_exn
+        ] )
+      (* Last group on purpose: it sets OCAML_RUNTIME_EVENTS_PRESERVE and the
+         stdlib cannot unset it, so any prune case after this would be skipped
+         by the guard and pass vacuously. *)
+    ; ( "prune-preserve-env"
+      , [ Alcotest.test_case "honors OCAML_RUNTIME_EVENTS_PRESERVE" `Quick
+            test_prune_honors_preserve_env_runs_last
         ] )
     ]

@@ -624,7 +624,6 @@ export interface GoalTreeTask {
   priority: number
   assignee: string | null
   goal_id: string | null
-  linkage_source: 'explicit' | 'title_tag' | 'mixed' | 'none' | string
   is_terminal: boolean
   /** Present only for status=cancelled. A cancellation that has aged out of
    *  the execution payload reaches Work through this tree alone, so the card
@@ -646,7 +645,6 @@ export interface GoalTaskSummary {
   unassigned: number
   completion_pct: number | null
   by_status: Record<string, number>
-  by_linkage_source: Record<string, number>
 }
 
 export interface GoalCompletionSummary {
@@ -773,7 +771,6 @@ export interface GoalTreeActivityProjection {
 }
 
 export interface GoalTreeLinkageProjection {
-  linkage_source: 'explicit' | 'title_tag' | 'mixed' | 'none' | string
   latest_keeper_ref?: string | null
   latest_turn_ref?: number | null
 }

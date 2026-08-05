@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 
 import {
   goalTaskCompletionLabel,
-  goalTaskLinkageLabel,
   goalTaskSummaryForNode,
 } from './goal-task-summary'
 
@@ -22,13 +21,11 @@ describe('goalTaskSummaryForNode', () => {
         unassigned: 2,
         completion_pct: 33,
         by_status: { completed: 1, pending: 1, cancelled: 1 },
-        by_linkage_source: { explicit: 3 },
       },
     })
 
     expect(summary.total).toBe(3)
     expect(goalTaskCompletionLabel(summary)).toBe('1/3 done · 33%')
-    expect(goalTaskLinkageLabel(summary)).toBe('explicit goal_id')
   })
 
   it('falls back to task rows for older payloads', () => {
@@ -44,7 +41,6 @@ describe('goalTaskSummaryForNode', () => {
           priority: 3,
           assignee: 'keeper-a',
           goal_id: 'g1',
-          linkage_source: 'explicit',
           is_terminal: true,
           created_at: '2026-05-25T00:00:00Z',
           updated_at: '2026-05-25T00:00:00Z',
@@ -57,7 +53,6 @@ describe('goalTaskSummaryForNode', () => {
           priority: 3,
           assignee: null,
           goal_id: 'g1',
-          linkage_source: 'explicit',
           is_terminal: false,
           created_at: '2026-05-25T00:00:00Z',
           updated_at: '2026-05-25T00:00:00Z',
@@ -74,6 +69,5 @@ describe('goalTaskSummaryForNode', () => {
       completion_pct: 50,
     })
     expect(summary.by_status).toMatchObject({ completed: 1, pending: 1 })
-    expect(summary.by_linkage_source).toMatchObject({ explicit: 2 })
   })
 })

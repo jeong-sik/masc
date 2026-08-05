@@ -51,7 +51,6 @@ import {
 import { trustHasPendingFirstEvidence } from './trust-summary-evidence'
 import {
   goalTaskCompletionLabel,
-  goalTaskLinkageLabel,
   goalTaskSummaryForNode,
 } from './goal-task-summary'
 import {
@@ -408,9 +407,6 @@ function TreeTask({ task }: { task: GoalTreeTask }) {
     <div class="flex flex-wrap items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs">
       <span class="size-2 rounded-[var(--r-0)] shrink-0" style="background:${task.status_color}"></span>
       <span class="min-w-0 flex-1 truncate text-text-body">${task.title}</span>
-      <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-3xs font-medium text-text-muted">
-        ${task.linkage_source === 'explicit' ? 'goal_id' : 'title tag'}
-      </span>
       ${task.assignee ? html`
         <span class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-medium text-accent-fg">${task.assignee}</span>
       ` : null}
@@ -508,7 +504,7 @@ function GoalTaskRelationStrip({
     return html`
       <span
         class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-accent-fg"
-        title=${`Goal-Task links: ${goalTaskCompletionLabel(summary)}; ${goalTaskLinkageLabel(summary)}`}
+        title=${`Goal-Task links: ${goalTaskCompletionLabel(summary)}`}
       >
         Task ${summary.done}/${summary.total}
       </span>
@@ -522,9 +518,6 @@ function GoalTaskRelationStrip({
           <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">Goal-Task 관계</div>
           <div class="mt-1 text-sm text-text-body">${goalTaskCompletionLabel(summary)}</div>
         </div>
-        <span class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-accent-fg">
-          ${goalTaskLinkageLabel(summary)}
-        </span>
       </div>
       <div class="grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-2 text-xs">
         <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
@@ -1084,7 +1077,6 @@ function GoalDetailPanel({
           <${DetailMetric} label="작업" value=${`${selectedNode.task_done_count}/${selectedNode.task_count}`} tone=${selectedNode.task_done_count === selectedNode.task_count && selectedNode.task_count > 0 ? 'ok' : 'default'} />
           <${DetailMetric} label="연결된 키퍼" value=${selectedNode.linked_keeper_names.length} />
           <${DetailMetric} label="승인 대기" value=${selectedNode.pending_approval_count} tone=${selectedNode.pending_approval_count > 0 ? 'warn' : 'default'} />
-          <${DetailMetric} label="연결 출처" value=${selectedNode.linkage_source} />
           <${DetailMetric}
             label="최근 활동"
             value=${selectedNode.stagnation_seconds == null

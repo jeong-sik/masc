@@ -29,7 +29,6 @@ function validTask(id: string, title: string, overrides: Record<string, unknown>
     priority: 1,
     assignee: null,
     goal_id: null,
-    linkage_source: 'explicit',
     is_terminal: false,
     created_at: '2026-01-01',
     updated_at: '2026-01-02',

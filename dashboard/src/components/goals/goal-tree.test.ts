@@ -99,7 +99,6 @@ function makeGoal(id: string, title: string, children: GoalTreeNode[] = []): Goa
     activity_observation: 'goal_metadata',
     linked_keeper_names: [],
     pending_approval_count: 0,
-    linkage_source: 'explicit',
     created_at: '2026-05-25T00:00:00Z',
     updated_at: '2026-05-25T00:00:00Z',
   }

@@ -82,7 +82,6 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
     stagnation_seconds: 0,
     linked_keeper_names: [],
     pending_approval_count: 0,
-    linkage_source: 'none',
     latest_keeper_ref: null,
     latest_turn_ref: null,
     created_at: '2026-04-23T00:00:00Z',

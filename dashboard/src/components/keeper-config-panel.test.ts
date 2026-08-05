@@ -676,7 +676,6 @@ const mocks = vi.hoisted(() => {
           stagnation_seconds: 0,
           linked_keeper_names: [],
           pending_approval_count: 0,
-          linkage_source: 'none',
           created_at: '',
           updated_at: '',
         },

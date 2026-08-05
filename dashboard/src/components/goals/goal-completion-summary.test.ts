@@ -32,7 +32,6 @@ const task = (id: string, done: boolean): GoalTreeTask => ({
   priority: 3,
   assignee: done ? 'keeper-a' : null,
   goal_id: 'g1',
-  linkage_source: 'explicit',
   is_terminal: done,
   created_at: '2026-05-25T00:00:00Z',
   updated_at: '2026-05-25T00:00:00Z',

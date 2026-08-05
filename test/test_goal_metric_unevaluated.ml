@@ -64,12 +64,11 @@ let make_node ?(tasks = []) goal : Acc.tree_node =
   {
     goal;
     children = [];
-    tasks = List.map (fun task -> (task, "explicit")) tasks;
+    tasks;
     last_activity_at = iso_now ();
     stagnation_seconds = Some 0;
     linked_keeper_names = [];
     pending_approval_count = 0;
-    linkage_source = "explicit";
     latest_keeper_ref = None;
     latest_turn_ref = None;
     activity_observation = "none";
@@ -311,9 +310,9 @@ let cancelled_with_handoff id ~handoff_reason ~summary : MD.task =
 let test_tree_task_falls_through_to_the_handoff_reason () =
   let json =
     Timeline.task_to_tree_json
-      ( cancelled_with_handoff "task-handoff" ~handoff_reason:(Some "sandbox lacks the service")
+      (cancelled_with_handoff "task-handoff" ~handoff_reason:(Some "sandbox lacks the service")
           ~summary:"returning to backlog"
-      , "explicit" )
+)
   in
   check (option string) "the handoff reason is projected" (Some "sandbox lacks the service")
     (match tree_field "reason" json with Some (`String v) -> Some v | _ -> None)
@@ -321,30 +320,30 @@ let test_tree_task_falls_through_to_the_handoff_reason () =
 let test_tree_task_falls_through_to_the_handoff_summary () =
   let json =
     Timeline.task_to_tree_json
-      ( cancelled_with_handoff "task-summary" ~handoff_reason:None
+      (cancelled_with_handoff "task-summary" ~handoff_reason:None
           ~summary:"returning to backlog until the sandbox ships it"
-      , "explicit" )
+)
   in
   check (option string) "the handoff summary is projected"
     (Some "returning to backlog until the sandbox ships it")
     (match tree_field "reason" json with Some (`String v) -> Some v | _ -> None)
 
 let test_tree_task_carries_the_cancellation_actor_and_reason () =
-  let json = Timeline.task_to_tree_json (cancelled_task "task-aged" ~reason:(Some "superseded by G-2"), "explicit") in
+  let json = Timeline.task_to_tree_json (cancelled_task "task-aged" ~reason:(Some "superseded by G-2")) in
   check (option string) "the canceller is projected" (Some "keeper-rondo-agent")
     (match tree_field "cancelled_by" json with Some (`String v) -> Some v | _ -> None);
   check (option string) "the reason is projected" (Some "superseded by G-2")
     (match tree_field "reason" json with Some (`String v) -> Some v | _ -> None)
 
 let test_tree_task_omits_an_absent_cancellation_reason () =
-  let json = Timeline.task_to_tree_json (cancelled_task "task-bare" ~reason:None, "explicit") in
+  let json = Timeline.task_to_tree_json (cancelled_task "task-bare" ~reason:None) in
   check bool "the canceller is still projected" true
     (Option.is_some (tree_field "cancelled_by" json));
   check bool "no reason field when none was given" false
     (Option.is_some (tree_field "reason" json))
 
 let test_tree_task_without_cancellation_carries_no_cancellation_fields () =
-  let json = Timeline.task_to_tree_json (make_done_task "task-done", "explicit") in
+  let json = Timeline.task_to_tree_json (make_done_task "task-done") in
   check bool "no canceller on a completed task" false
     (Option.is_some (tree_field "cancelled_by" json));
   check bool "no reason on a completed task" false

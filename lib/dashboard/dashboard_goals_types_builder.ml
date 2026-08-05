@@ -35,11 +35,8 @@ let rec build_tree context goals goal =
   let linked_tasks =
     context.all_tasks
     |> List.filter_map (fun task ->
-           task_linkage_source_opt ~goal_task_index:context.goal_task_index task goal.Goal_store.id
-           |> Option.map (fun source -> (task, source)))
-  in
-  let direct_linkage_source =
-    linked_tasks |> List.map snd |> link_source_of_values
+           task_is_linked_opt ~goal_task_index:context.goal_task_index task goal.Goal_store.id
+           |> Option.map (fun () -> task))
   in
   let direct_pending_approvals =
     context.pending_approvals
@@ -47,7 +44,7 @@ let rec build_tree context goals goal =
   in
   let direct_task_keeper_names =
     linked_tasks
-    |> List.filter_map (fun ((task, _) : Masc_domain.task * string) ->
+    |> List.filter_map (fun (task : Masc_domain.task) ->
            match task_assignee task with
            | Some assignee ->
                keeper_name_of_assignee context.keeper_metas assignee
@@ -79,7 +76,7 @@ let rec build_tree context goals goal =
   in
   let task_activity_values =
     linked_tasks
-    |> List.map (fun ((task, _) : Masc_domain.task * string) -> task_updated_at task)
+    |> List.map (fun (task : Masc_domain.task) -> task_updated_at task)
   in
   let approval_activity_values =
     direct_pending_approvals
@@ -170,7 +167,6 @@ let rec build_tree context goals goal =
     stagnation_seconds;
     linked_keeper_names = direct_linked_keeper_names;
     pending_approval_count = List.length direct_pending_approvals;
-    linkage_source = direct_linkage_source;
     latest_keeper_ref;
     latest_turn_ref;
     activity_observation;

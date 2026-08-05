@@ -4,4 +4,4 @@
 (test
  (name test_verification_run_registry)
  (modules test_verification_run_registry)
- (libraries masc_test_deps))
+ (libraries masc_test_deps masc.run_registry_core))

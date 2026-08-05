@@ -205,7 +205,7 @@ let test_startup_recovery_projects_canonical_terminal () =
              { durability = Keeper_msg_async.Durable; _ } -> ()
          | _ -> fail "worker did not produce one durable canonical terminal");
         let report =
-          Fusion_delivery_projector.recover_startup ~registry ~base_path
+          Fusion_delivery_projector.recover_startup ~registry ~base_path ()
           |> function
           | Ok report -> report
           | Error error -> fail (Obligation.error_to_string error)
@@ -254,7 +254,7 @@ let test_startup_cleanup_observes_atomic_orphans () =
       Fs_compat.save_file (Filename.concat staging ".atomic_empty.tmp") "";
       Fs_compat.save_file (Filename.concat staging ".atomic_payload.tmp") "payload";
       let report =
-        Fusion_delivery_projector.recover_startup ~registry ~base_path
+        Fusion_delivery_projector.recover_startup ~registry ~base_path ()
         |> function
         | Ok report -> report
         | Error error -> fail (Obligation.error_to_string error)
@@ -316,7 +316,7 @@ let test_startup_recovery_remediates_missing_evidence () =
              { durability = Keeper_msg_async.Durable; _ } -> ()
          | _ -> fail "worker did not produce one durable canonical terminal");
         let report =
-          Fusion_delivery_projector.recover_startup ~registry ~base_path
+          Fusion_delivery_projector.recover_startup ~registry ~base_path ()
           |> function
           | Ok report -> report
           | Error error -> fail (Obligation.error_to_string error)

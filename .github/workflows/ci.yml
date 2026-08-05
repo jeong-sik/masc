@@ -444,6 +444,13 @@ jobs:
       - name: Check CI test targets
         run: bash scripts/audit-ci-test-targets.sh
 
+      # RFC-0071's inventory is derived from lib/ by its own regen script, and
+      # nothing checked it. It had drifted 85 rows. Of the three generators in
+      # scripts/, the other two (gen-grpc-descriptors, gen-tla-index) are
+      # already verified in CI; this one was not.
+      - name: Check RFC-0071 inventory
+        run: bash scripts/regen-rfc-0071-inventory.sh --check
+
       # SSOT and distribution-contract guards that existed but never ran.
       # test_prompt_asset_sync is the merge-time half of the managed-assets
       # manifest contract: a mismatch between the manifest and the embedded

@@ -23,6 +23,14 @@ cd "$REPO_ROOT"
 
 OUTPUT="${OUTPUT:-docs/rfc/RFC-0071-inventory.csv}"
 
+# --check regenerates into a temp file and diffs, leaving the tracked file
+# untouched. The inventory is derived from lib/ and nothing verified it, so it
+# had drifted 85 rows from the source it claims to describe.
+CHECK_ONLY=0
+if [ "${1:-}" = "--check" ]; then
+  CHECK_ONLY=1
+fi
+
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
@@ -53,8 +61,21 @@ trap 'rm -f "$tmp"' EXIT
     | sort -t, -k1,1 -k2,2n
 } > "$tmp"
 
+rows=$(( $(wc -l < "$tmp") - 1 ))
+
+if [ "$CHECK_ONLY" = "1" ]; then
+  if diff -q "$OUTPUT" "$tmp" >/dev/null 2>&1; then
+    echo "[rfc-0071-inventory] OK - $rows data rows, matches lib/" >&2
+    exit 0
+  fi
+  echo "[rfc-0071-inventory] FAIL - $OUTPUT is stale relative to lib/" >&2
+  echo >&2
+  diff "$OUTPUT" "$tmp" | head -40 >&2
+  echo >&2
+  echo "Run scripts/regen-rfc-0071-inventory.sh and commit the result." >&2
+  exit 2
+fi
+
 mv "$tmp" "$OUTPUT"
 trap - EXIT
-
-rows=$(( $(wc -l < "$OUTPUT") - 1 ))
 echo "Regenerated $OUTPUT: $rows data rows." >&2

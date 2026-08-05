@@ -18,6 +18,12 @@ type restored_inventory =
   { operations : Keeper_shutdown_types.t list
   ; blocked_keeper_names : string list
   ; corrupt_records : Keeper_shutdown_store.corrupt_record list
+  ; corrupt_owner_fences : corrupt_owner_fence list
+  }
+
+and corrupt_owner_fence =
+  { keeper_name : string
+  ; operation_id : Operation_id.t
   }
 
 let submit_error_to_string = function
@@ -86,43 +92,95 @@ let restore_inventory_admission ~config inventory =
       (String_map.empty, [])
       inventory
   in
-  let rec restore_corrupt_fences blocked = function
-    | [] -> Ok blocked
-    | (keeper_name, operation_id) :: rest ->
-      (match restore_admission ~config ~keeper_name ~operation_id with
-       | Error _ as error -> error
-       | Ok () -> restore_corrupt_fences (keeper_name :: blocked) rest)
+  let current_fences_result =
+    List.fold_left
+      (fun fences -> function
+         | Keeper_shutdown_store.Corrupt_record _ -> fences
+         | Keeper_shutdown_store.Operation operation
+           when operation_requires_fence operation ->
+           (match fences with
+            | Error _ as error -> error
+            | Ok fences ->
+              (match String_map.find_opt operation.keeper_name fences with
+               | None ->
+                 Ok
+                   (String_map.add
+                      operation.keeper_name
+                      operation.operation_id
+                      fences)
+               | Some existing when Operation_id.equal existing operation.operation_id ->
+                 Ok fences
+               | Some existing ->
+                 Error
+                   (Printf.sprintf
+                      "multiple current shutdown admission owners: keeper=%s first=%s second=%s"
+                      operation.keeper_name
+                      (Operation_id.to_string existing)
+                      (Operation_id.to_string operation.operation_id))))
+         | Keeper_shutdown_store.Operation _ -> fences)
+      (Ok String_map.empty)
+      inventory
   in
-  let rec loop operations blocked = function
-    | [] ->
-      Ok
-        { operations = List.rev operations
-        ; blocked_keeper_names = List.sort_uniq String.compare blocked
-        ; corrupt_records = List.rev corrupt_records
-        }
-    | Keeper_shutdown_store.Operation operation :: rest ->
-      if String_map.mem operation.keeper_name corrupt_fences
-      then loop operations blocked rest
-      else if operation_requires_fence operation
-      then
-        (match
-           restore_admission
-             ~config
-             ~keeper_name:operation.keeper_name
-             ~operation_id:operation.operation_id
-         with
-         | Error _ as error -> error
-         | Ok () ->
-           loop
-             (operation :: operations)
-             (operation.keeper_name :: blocked)
-             rest)
-      else loop (operation :: operations) blocked rest
-    | Keeper_shutdown_store.Corrupt_record _ :: rest -> loop operations blocked rest
-  in
-  match restore_corrupt_fences [] (String_map.bindings corrupt_fences) with
+  match current_fences_result with
   | Error _ as error -> error
-  | Ok blocked -> loop [] blocked inventory
+  | Ok current_fences ->
+    let corrupt_owner_fences =
+      String_map.bindings corrupt_fences
+      |> List.map (fun (keeper_name, operation_id) -> { keeper_name; operation_id })
+    in
+    let rec restore_corrupt_fences blocked = function
+      | [] -> Ok blocked
+      | { keeper_name; operation_id } :: rest ->
+        let operation_id =
+          match String_map.find_opt keeper_name current_fences with
+          | Some current -> current
+          | None -> operation_id
+        in
+        (match restore_admission ~config ~keeper_name ~operation_id with
+         | Error _ as error -> error
+         | Ok () -> restore_corrupt_fences (keeper_name :: blocked) rest)
+    in
+    let rec loop operations blocked = function
+      | [] ->
+        Ok
+          { operations = List.rev operations
+          ; blocked_keeper_names = List.sort_uniq String.compare blocked
+          ; corrupt_records = List.rev corrupt_records
+          ; corrupt_owner_fences
+          }
+      | Keeper_shutdown_store.Operation operation :: rest ->
+        if String_map.mem operation.keeper_name corrupt_fences
+        then
+          if operation_requires_fence operation
+          then loop (operation :: operations) blocked rest
+          else loop operations blocked rest
+        else if operation_requires_fence operation
+        then
+          (match
+             restore_admission
+               ~config
+               ~keeper_name:operation.keeper_name
+               ~operation_id:operation.operation_id
+           with
+           | Error _ as error -> error
+           | Ok () ->
+             loop
+               (operation :: operations)
+               (operation.keeper_name :: blocked)
+               rest)
+        else loop (operation :: operations) blocked rest
+      | Keeper_shutdown_store.Corrupt_record _ :: rest -> loop operations blocked rest
+    in
+    (match restore_corrupt_fences [] corrupt_owner_fences with
+     | Error _ as error -> error
+     | Ok blocked -> loop [] blocked inventory)
+;;
+
+let restore_corrupt_owner_fence ~config fence =
+  restore_admission
+    ~config
+    ~keeper_name:fence.keeper_name
+    ~operation_id:fence.operation_id
 ;;
 
 let worker_mu = Eio.Mutex.create ()
@@ -438,6 +496,25 @@ let recover_operation ~config operation =
      | Superseded _ -> Ok recovered)
 ;;
 
+let recover_operation_with_corrupt_owner_fence
+    ~config
+    ~corrupt_owner_fence
+    operation
+  =
+  match recover_operation ~config operation with
+  | Error _ as error -> error
+  | Ok recovered ->
+    if Keeper_shutdown_types.requires_admission_fence recovered
+    then Ok recovered
+    else
+      (match corrupt_owner_fence with
+       | None -> Ok recovered
+       | Some fence ->
+         (match restore_corrupt_owner_fence ~config fence with
+          | Ok () -> Ok recovered
+          | Error detail -> Error detail))
+;;
+
 let recover_at_boot ~config =
   match Keeper_shutdown_store.scan_inventory ~config with
   | Error error -> [ Error (Keeper_shutdown_store.error_to_string error) ]
@@ -457,7 +534,18 @@ let recover_at_boot ~config =
                    (Keeper_shutdown_store.error_to_string corrupt.error)))
            restored.corrupt_records
        in
-       List.map (recover_operation ~config) restored.operations @ corrupt_results)
+       let recover operation =
+         let corrupt_owner_fence =
+           List.find_opt
+             (fun fence -> String.equal fence.keeper_name operation.keeper_name)
+             restored.corrupt_owner_fences
+         in
+         recover_operation_with_corrupt_owner_fence
+           ~config
+           ~corrupt_owner_fence
+           operation
+       in
+       List.map recover restored.operations @ corrupt_results)
 ;;
 
 module For_testing = struct

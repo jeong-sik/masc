@@ -1992,11 +1992,46 @@ let test_unsupported_shutdown_schema_retains_exact_fence () =
         restored.blocked_keeper_names;
       check int "unsupported row remains explicit" 1
         (List.length restored.corrupt_records);
-      check int "corrupt owner has no recoverable operation" 0
+      check int "corrupt owner current operation remains recoverable" 1
         (List.length restored.operations);
+      (match restored.operations with
+       | [ recoverable ] ->
+         check bool
+           "current operation owns admission during recovery"
+           true
+           (Shutdown_types.Operation_id.equal
+              current_operation.operation_id
+              recoverable.operation_id)
+       | _ -> fail "corrupt owner current recovery cardinality changed");
       check
         (option string)
-        "unsupported row keeps its exact fence"
+        "current operation owns the initial fence"
+        (Some (Shutdown_types.Operation_id.to_string current_operation.operation_id))
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:meta.name)
+             .snapshot_shutdown_operation_id);
+      (match
+         Masc.Keeper_turn_admission.rollback_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           ~operation_id:current_operation.operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_rolled_back -> ()
+       | Masc.Keeper_turn_admission.Shutdown_not_reserved
+       | Masc.Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+         fail "current operation did not release its exact recovery fence");
+      (match restored.corrupt_owner_fences with
+       | [ fence ] ->
+         (match Shutdown_runtime.restore_corrupt_owner_fence ~config fence with
+          | Ok () -> ()
+          | Error detail -> fail detail)
+       | _ -> fail "corrupt owner fence cardinality changed");
+      check
+        (option string)
+        "corrupt owner fence is restored after current recovery"
         (Some (Shutdown_types.Operation_id.to_string operation_id))
         (Option.map
            Shutdown_types.Operation_id.to_string

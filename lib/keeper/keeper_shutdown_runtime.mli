@@ -16,18 +16,29 @@ type restored_inventory =
   { operations : Keeper_shutdown_types.t list
   ; blocked_keeper_names : string list
   ; corrupt_records : Keeper_shutdown_store.corrupt_record list
+  ; corrupt_owner_fences : corrupt_owner_fence list
+  }
+
+and corrupt_owner_fence =
+  { keeper_name : string
+  ; operation_id : Keeper_shutdown_types.Operation_id.t
   }
 
 val submit_error_to_string : submit_error -> string
 
 (** Restore admission from owner-addressable durable inventory. A Keeper with
-    any corrupt payload is fenced once and all of its operations are withheld
-    from recovery; corrupt records remain explicit in [corrupt_records], while
-    valid operations for unrelated Keepers remain recoverable. *)
+    any corrupt payload is fenced once. A current operation that still requires
+    a fence owns admission long enough to recover; otherwise the deterministic
+    [corrupt_owner_fences] entry owns it. Corrupt records remain explicit. *)
 val restore_inventory_admission :
   config:Workspace.config ->
   Keeper_shutdown_store.inventory_entry list ->
   (restored_inventory, string) result
+
+(** Restore the deterministic corrupt-owner fence after a same-owner current
+    operation has recovered and released admission. *)
+val restore_corrupt_owner_fence :
+  config:Workspace.config -> corrupt_owner_fence -> (unit, string) result
 
 (** Fence admission and persist the operation synchronously, then fork lane
     join/finalization on the process-lifetime Keeper supervisor switch. The
@@ -58,6 +69,15 @@ val recover_at_boot :
     lets bootstrap isolate every Keeper in its own process-lifetime fiber. *)
 val recover_operation :
   config:Workspace.config ->
+  Keeper_shutdown_types.t ->
+  (Keeper_shutdown_types.t, string) result
+
+(** Recover one current operation. If recovery releases admission and the
+    owner also has corrupt durable state, restore that deterministic fail-closed
+    fence before returning success. *)
+val recover_operation_with_corrupt_owner_fence :
+  config:Workspace.config ->
+  corrupt_owner_fence:corrupt_owner_fence option ->
   Keeper_shutdown_types.t ->
   (Keeper_shutdown_types.t, string) result
 

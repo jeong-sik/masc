@@ -1219,7 +1219,20 @@ let start_keeper_loops_owned
                    (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
                    (Printexc.to_string exn))
                (fun () ->
-                 match Keeper_shutdown_runtime.recover_operation ~config operation with
+                 let corrupt_owner_fence =
+                   List.find_opt
+                     (fun fence ->
+                        String.equal
+                          fence.Keeper_shutdown_runtime.keeper_name
+                          operation.Keeper_shutdown_types.keeper_name)
+                     restored.corrupt_owner_fences
+                 in
+                 match
+                   Keeper_shutdown_runtime.recover_operation_with_corrupt_owner_fence
+                     ~config
+                     ~corrupt_owner_fence
+                     operation
+                 with
                  | Ok recovered ->
                    Log.Keeper.info
                      "recovered shutdown operation keeper=%s operation=%s"

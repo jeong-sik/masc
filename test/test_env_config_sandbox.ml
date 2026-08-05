@@ -111,8 +111,6 @@ let test_defaults_pinned () =
   check bool "Cleanup.enabled default" true (S.Cleanup.enabled ());
   check approx "Cleanup.interval_sec default" 300.0
     (S.Cleanup.interval_sec ());
-  check int "Cleanup.managed_sleep_sec default" 3600
-    (S.Cleanup.managed_sleep_sec ());
   (* Runtime *)
   check string "Runtime.docker_image default" "masc-keeper-sandbox:local"
     (S.Runtime.docker_image ());

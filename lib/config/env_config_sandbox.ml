@@ -4,10 +4,9 @@
     rationale.  Notes:
 
     - Fresh read per call.
-    - The currently-hardcoded values
-      ([Cleanup.managed_sleep_sec], [Shell_timeout.Cleanup_rm]) are
-      exposed as getters that return the historical literal —
-      enabling future env-override without behavior change. *)
+    - [Shell_timeout.Cleanup_rm] is still a hardcoded literal exposed
+      as a getter; it has callers, so the getter is the seam an
+      env-override would use. *)
 
 open Env_config_core
 
@@ -62,8 +61,6 @@ module Cleanup = struct
       (max 10
          (get_int ~default:300 "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"))
 
-  (* P2c will optionally wire an env var; today the literal stands. *)
-  let managed_sleep_sec () = 3600
 end
 
 (* --------------------------------------------------------------- *)
@@ -185,13 +182,6 @@ let entry_env_overridable ~env_var (value : Yojson.Safe.t) : Yojson.Safe.t =
     ; "env_var", `String env_var
     ]
 
-let entry_hardcoded (value : Yojson.Safe.t) : Yojson.Safe.t =
-  `Assoc
-    [ "value", value
-    ; "source", `String "hardcoded"
-    ; "env_var", `Null
-    ]
-
 let bool_v b : Yojson.Safe.t = `Bool b
 let int_v i : Yojson.Safe.t = `Int i
 let float_v f : Yojson.Safe.t = `Float f
@@ -234,8 +224,6 @@ let raw_cleanup () : Yojson.Safe.t =
       entry_env_overridable
         ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
         (float_v (Cleanup.interval_sec ()))
-    ; "managed_sleep_sec",
-      entry_hardcoded (int_v (Cleanup.managed_sleep_sec ()))
     ]
 
 let raw_runtime () : Yojson.Safe.t =

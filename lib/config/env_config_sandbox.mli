@@ -67,13 +67,6 @@ module Cleanup : sig
       Env: [MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC].  Default: 300
       (5m). *)
 
-  val managed_sleep_sec : unit -> int
-  (** Marker sleep duration for the [managed] container init loop
-      (currently [sleep 3600] in {!Keeper_sandbox_control}).
-      Exposed here so a future PR can env-override; today this
-      getter still returns the historical literal 3600 because no
-      caller is wired yet.
-      Env: not yet read.  Default: 3600. *)
 end
 
 (** {1 Runtime — image and execution mode} *)

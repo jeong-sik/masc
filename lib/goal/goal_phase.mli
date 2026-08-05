@@ -53,13 +53,18 @@ val all_actions : action list
 
 (** Outcome of {!decide_transition}. [Move_to] is a direct phase change and
     [Complete] is the terminal success transition. *)
-type transition_outcome =
-  | Move_to of t
-  | Complete
 
 val decide_transition :
   phase:t ->
   action:action ->
-  (transition_outcome, string) result
-(** Pure transition decider. [Request_complete] completes directly from
-    [Executing]. Returns [Error msg] for invalid pairs. *)
+  (t, string) result
+(** Pure transition decider: the phase the goal moves to, or [Error msg] for
+    an invalid pair.
+
+    This returned a [transition_outcome] whose [Complete] arm was the
+    else-branch of a verifier-policy check — one of four outcomes alongside
+    [Open_verification] and [Open_approval], removed with the goal quorum
+    engine in #24332. With those gone [Complete] and [Move_to Completed] named
+    the same thing, and both consumers immediately collapsed one into the
+    other while the doc still called [Complete] a distinct terminal
+    transition. A phase is now just a phase. *)

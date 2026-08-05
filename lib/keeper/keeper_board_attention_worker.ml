@@ -1595,6 +1595,19 @@ let settles_without_admitting (item : Partition.completed_item) =
   | Keeper_board_attention_judgment.Relevant -> false
 ;;
 
+(* Each settlement performs at least the candidate-consumption write and the
+   partition transition write. Keep one owner turn to at most sixteen such
+   durability operations, then persist a continuation wake for the remainder.
+   This is deliberately a settlement bound, not a scan or arrival-window
+   heuristic: every successful iteration removes one exact Completed
+   partition. *)
+let max_completed_settlements_per_owner_turn = 8
+
+let yield_between_discard_settlements () =
+  try Eio.Fiber.yield () with
+  | Effect.Unhandled _ -> ()
+;;
+
 let settle_one_completed
       ~base_path
       ~keeper_name
@@ -1627,19 +1640,22 @@ let settle_one_completed
         ("completed partition query returned non-Completed state: "
          ^ partition.partition_id)
   in
-  (* Terminates: every iteration settles one partition out of [completed], and
-     the list is the snapshot taken before the loop. Completions the worker
-     adds while this runs are left for the continuation wake. *)
+  (* Terminates within the owner-turn bound: every iteration settles one
+     partition out of [completed]. Completions beyond the bound, including ones
+     the worker adds while this runs, are left for the continuation wake. *)
   let rec settle_until_admission ~last_settled ~discarded = function
     | [] -> Ok (last_settled, discarded)
+    | _ when discarded >= max_completed_settlements_per_owner_turn ->
+      Ok (last_settled, discarded)
     | partition :: rest ->
       let* settled, discarded_only = settle_head partition in
       if discarded_only
-      then
+      then (
+        yield_between_discard_settlements ();
         settle_until_admission
           ~last_settled:settled
           ~discarded:(discarded + 1)
-          rest
+          rest)
       else Ok (settled, discarded)
   in
   let* completed = completed_in_order ~base_path ~keeper_name in

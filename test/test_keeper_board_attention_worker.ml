@@ -440,6 +440,89 @@ let test_discards_do_not_hold_the_owner_delivery_slot () =
     [ discarded; admitted ]
 ;;
 
+let test_discard_settlement_is_bounded_and_continues () =
+  with_temp_base "board-attention-worker-discard-bound" @@ fun base_path ->
+  let discard_count = W.max_completed_settlements_per_owner_turn + 1 in
+  let discarded =
+    List.init discard_count (fun index ->
+      record
+        ~base_path
+        (candidate
+           ~id:(Printf.sprintf "candidate-discard-%02d" index)
+           ~recorded_at:(float_of_int (index + 1))
+           ()))
+  in
+  let admitted =
+    record
+      ~base_path
+      (candidate
+         ~id:"candidate-admitted-after-bound"
+         ~recorded_at:(float_of_int (discard_count + 1))
+         ())
+  in
+  let judge_next decision expected_candidate_id =
+    let execute ~before_dispatch ~before_advance prepared =
+      let attempt = provenance ("attempt-" ^ A.(prepared.candidate_id)) in
+      ok "bind" (before_dispatch attempt);
+      ignore before_advance;
+      Ok (judgment attempt decision)
+    in
+    match
+      ok
+        "judge next pending"
+        (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+    with
+    | W.Judgment_completed { candidate_id; _ } ->
+      Alcotest.(check string) "judged candidate order" expected_candidate_id candidate_id
+    | W.Idle
+    | W.Contended _
+    | W.Rescan_later _
+    | W.Candidate_already_consumed _
+    | W.Partition_blocked _ -> Alcotest.fail "fixture did not complete a judgment"
+  in
+  List.iter
+    (fun (candidate : A.candidate) ->
+       judge_next J.Not_relevant candidate.candidate_id)
+    discarded;
+  judge_next J.Relevant admitted.candidate_id;
+  (match
+     ok
+       "bounded owner settlement"
+       (W.settle_one_completed ~base_path ~keeper_name:"sangsu")
+   with
+   | W.Partition_settled { candidate_id; continuation_wake = Some _ } ->
+     Alcotest.(check string)
+       "first owner turn stops at the discard bound"
+       (Printf.sprintf
+          "candidate-discard-%02d"
+          (W.max_completed_settlements_per_owner_turn - 1))
+       candidate_id
+   | W.Partition_settled { continuation_wake = None; _ } ->
+     Alcotest.fail "bounded discard settlement did not request continuation"
+   | W.No_completed_partition -> Alcotest.fail "bounded discard fixture had no completion");
+  Alcotest.(check int)
+    "the first owner turn does not cross the settlement bound"
+    0
+    (relevant_delivery_count ~base_path ~candidate_id:admitted.candidate_id);
+  (match
+     ok
+       "continued owner settlement"
+       (W.settle_one_completed ~base_path ~keeper_name:"sangsu")
+   with
+   | W.Partition_settled { candidate_id; continuation_wake = None } ->
+     Alcotest.(check string)
+       "continuation reaches the relevant verdict"
+       admitted.candidate_id
+       candidate_id
+   | W.Partition_settled { continuation_wake = Some _; _ } ->
+     Alcotest.fail "continued settlement left unexpected completed work"
+   | W.No_completed_partition -> Alcotest.fail "continuation lost completed work");
+  Alcotest.(check int)
+    "the relevant verdict reaches the Keeper on continuation"
+    1
+    (relevant_delivery_count ~base_path ~candidate_id:admitted.candidate_id)
+;;
+
 let test_setup_error_stops_before_claim_without_hot_retry () =
   with_temp_base "board-attention-worker-setup-error" @@ fun base_path ->
   ignore (record ~base_path (candidate ()) : A.candidate);
@@ -2359,6 +2442,10 @@ let () =
             "discards do not hold the owner delivery slot"
             `Quick
             test_discards_do_not_hold_the_owner_delivery_slot
+        ; Alcotest.test_case
+            "discard settlement is bounded and continues"
+            `Quick
+            test_discard_settlement_is_bounded_and_continues
         ; Alcotest.test_case
             "drain outcome labels stay distinct"
             `Quick

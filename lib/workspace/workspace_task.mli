@@ -112,9 +112,6 @@ val recover_owned_task_to_todo_r :
 
 (** {1 Task cancellation} *)
 
-val cancel_task_r :
-  config -> agent_name:string -> task_id:string ->
-  reason:string -> string Masc_domain.masc_result
 
 val link_task_execution_artifacts_r :
   config -> task_id:string ->

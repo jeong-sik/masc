@@ -2098,8 +2098,8 @@ let test_bug006_cancel_with_unsuffixed_name () =
      | Ok _ -> ()
      | Error e -> Alcotest.failf "claim failed: %s" (Masc_domain.show_masc_error e));
     (* Cancel using the unsuffixed name — should resolve to "keeper-bob-agent" *)
-    (match Workspace.cancel_task_r config ~agent_name:"keeper-bob" ~task_id:"task-001"
-             ~reason:"test" with
+    (match Workspace.transition_task_r config ~agent_name:"keeper-bob" ~task_id:"task-001"
+             ~action:Masc_domain.Cancel ~reason:"test" () with
      | Ok _ -> ()
      | Error e ->
          Alcotest.failf "cancel with unsuffixed name failed (BUG-006): %s"

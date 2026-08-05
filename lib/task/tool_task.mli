@@ -26,7 +26,6 @@ val handle_claim_next : tool_name:string -> start_time:float -> context -> Yojso
 val handle_release : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_done :
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_cancel_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_transition :
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_update_priority : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result

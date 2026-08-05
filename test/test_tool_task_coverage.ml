@@ -2424,7 +2424,7 @@ let () = test "handle_done_already_done_guidance" (fun () ->
 let () = test "handle_done_cancelled_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Cancelled test")]) in
-  let _ = Workspace.cancel_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~reason:"stop" in
+  let _ = Workspace.transition_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~action:Masc_domain.Cancel ~reason:"stop" () in
   let result =
     Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
@@ -2587,7 +2587,7 @@ let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () 
 let () = test "claim_next_filters_out_cancelled_tasks" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Cancelled task")]) in
-  let _ = Workspace.cancel_task_r ctx.config ~agent_name:ctx.agent_name ~task_id:"task-001" ~reason:"not needed" in
+  let _ = Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name ~task_id:"task-001" ~action:Masc_domain.Cancel ~reason:"not needed" () in
   let agent2_ctx = make_test_ctx_with_agent "agent-claim-2" in
   let msg_result = Task.Tool.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 agent2_ctx (`Assoc []) in
   match String.index_opt (Tool_result.message msg_result) 'N' with

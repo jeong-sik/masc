@@ -41,6 +41,7 @@ type recovery_report =
 val recover_startup :
   ?registry:Fusion_run_registry.t
   -> base_path:string
+  -> unit
   -> (recovery_report, Fusion_delivery_obligation.error) result
 (** With producer writes quiesced by startup ownership, reconcile atomic
     staging orphans and all producer obligations against canonical durable

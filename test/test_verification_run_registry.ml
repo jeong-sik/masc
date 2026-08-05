@@ -14,7 +14,7 @@ open Alcotest
 module R = Masc.Verification_run_registry
 module E = Masc.Verification_run_registry
 
-module Lifecycle = Masc.Run_registry_core.Global (struct
+module Lifecycle = Run_registry_core.Global (struct
     type t = int
 
     let initial = 0

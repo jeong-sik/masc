@@ -159,10 +159,11 @@ let missing_required ~tool_name ~start_time field =
 let text_ok ~tool_name ~start_time body : Tool_result.result =
   Tool_result.ok ~tool_name ~start_time body
 
-(* TEL-OK: not a new handler. The signature moved from [args] to [_args]
-   because [masc_library_list] stopped reading an argument, not because a
-   new action appeared. It reads a directory and returns the listing to its
-   caller; a log line here would report an outcome the caller already has. *)
+(* Not a new handler. The signature moved from [args] to [_args] because
+   [masc_library_list] stopped reading an argument, not because a new action
+   appeared. It reads a directory and hands the listing back to its caller; a
+   log line here would restate an outcome the caller already holds.
+   TEL-OK *)
 let handle_list ~tool_name ~start_time _ctx _args : Tool_result.result =
   let docs = list_documents () in
   let entries = List.filter_map (fun path ->

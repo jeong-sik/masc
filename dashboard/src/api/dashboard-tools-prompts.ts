@@ -415,6 +415,29 @@ export interface DashboardKeeperWaitingInventory {
   global_waiting_on?: DashboardKeeperWaitingRow[]
 }
 
+function normalizeKeeperWaitingRow(row: DashboardKeeperWaitingRow): DashboardKeeperWaitingRow {
+  const source = parseDashboardKeeperWaitingSource(row.source)
+  if (!source) {
+    throw new Error(`Unknown keeper waiting inventory source: ${JSON.stringify(row.source)}`)
+  }
+  return { ...row, source }
+}
+
+export function normalizeKeeperWaitingInventory(
+  inventory: DashboardKeeperWaitingInventory,
+): DashboardKeeperWaitingInventory {
+  return {
+    ...inventory,
+    keepers: inventory.keepers.map(keeper => ({
+      ...keeper,
+      waiting_on: keeper.waiting_on.map(normalizeKeeperWaitingRow),
+    })),
+    ...(inventory.global_waiting_on
+      ? { global_waiting_on: inventory.global_waiting_on.map(normalizeKeeperWaitingRow) }
+      : {}),
+  }
+}
+
 // Keeper autonomous background (server_keeper_background.dashboard_json). Surfaces
 // per-keeper recurring tasks with the owning keeper's loop liveness as context.
 // Deferred async work (bg-shell / fusion / hitl) is NOT here — it is reused from
@@ -752,6 +775,7 @@ export function normalizeFullHealthResponse(
 }
 
 export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promise<DashboardToolsResponse> {
+  await ensureDevToken()
   const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools', { signal: opts?.signal })
   const normalizeScheduledAutomation = (
     rawAutomation: DashboardScheduledAutomation,
@@ -821,24 +845,8 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
     // filter simply degrades to zero counts. Mirrors category/tier above.
     surfaces: t.surfaces ?? [],
   }))
-  const normalizeWaitingRow = (row: DashboardKeeperWaitingRow): DashboardKeeperWaitingRow => {
-    const source = parseDashboardKeeperWaitingSource(row.source)
-    if (!source) {
-      throw new Error(`Unknown keeper waiting inventory source: ${JSON.stringify(row.source)}`)
-    }
-    return { ...row, source }
-  }
   const normalizedWaitingInventory = raw.keeper_waiting_inventory
-    ? {
-        ...raw.keeper_waiting_inventory,
-        keepers: raw.keeper_waiting_inventory.keepers.map(keeper => ({
-          ...keeper,
-          waiting_on: keeper.waiting_on.map(normalizeWaitingRow),
-        })),
-        ...(raw.keeper_waiting_inventory.global_waiting_on
-          ? { global_waiting_on: raw.keeper_waiting_inventory.global_waiting_on.map(normalizeWaitingRow) }
-          : {}),
-      }
+    ? normalizeKeeperWaitingInventory(raw.keeper_waiting_inventory)
     : undefined
   const normalizedScheduledAutomation = raw.scheduled_automation
     ? normalizeScheduledAutomation(raw.scheduled_automation)
@@ -856,6 +864,18 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
       ? { scheduled_automation: normalizedScheduledAutomation }
       : {}),
   }
+}
+
+export async function fetchKeeperWaitingInventory(
+  keeperName: string,
+  opts?: AbortableRequestOptions,
+): Promise<DashboardKeeperWaitingInventory> {
+  await ensureDevToken()
+  const raw = await get<DashboardKeeperWaitingInventory>(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/waiting-inventory`,
+    { signal: opts?.signal },
+  )
+  return normalizeKeeperWaitingInventory(raw)
 }
 
 // --- Prompts (override management) ---

@@ -1687,8 +1687,10 @@ let start_keeper_loops_owned
            delivered instead of sitting queued until the next unrelated wake. *)
         Keeper_chat_queue.set_transition_observer
           (Some
-             (fun ~keeper_name ~revision ->
-                Keeper_chat_broadcast.queue_changed ~keeper_name ~revision ();
+             (fun ~keeper_name ~revision:_ ->
+                Keeper_waiting_inventory_broadcast.changed
+                  ~keeper_name
+                  ~source:Chat_queue;
                 Keeper_chat_consumer.notify_transition ~keeper_name));
         (* A queued turn can fail preflight before it parks on the admission
            mutex. Release and shutdown rollback re-arm only a consumer attempt

@@ -11,6 +11,7 @@ import {
 } from './core'
 
 const DEV_TOKEN_FETCH_TIMEOUT_MS = 3000
+const DEV_TOKEN_WARMUP_RETRY_MS = 1_000
 
 let devTokenBootstrapPromise: Promise<void> | null = null
 let devTokenRefreshPromise: Promise<boolean> | null = null
@@ -20,6 +21,7 @@ let devTokenRefreshPromise: Promise<boolean> | null = null
  * distinguish "auth required but no token" from "network error" etc.
  *   idle       — not yet attempted
  *   fetching   — in-flight
+ *   warming    — server accepted HTTP but has not installed runtime state yet
  *   ok         — token stored
  *   no_endpoint — /dev-token returned 404 (loopback disabled or strict auth)
  *   invalid_response — endpoint response violated the exact token contract
@@ -28,6 +30,7 @@ let devTokenRefreshPromise: Promise<boolean> | null = null
 export type DevTokenBootstrapStatus =
   | 'idle'
   | 'fetching'
+  | 'warming'
   | 'ok'
   | 'no_endpoint'
   | 'invalid_response'
@@ -40,6 +43,11 @@ interface DevTokenBootstrapPayload {
   token?: unknown
   actor?: unknown
   role?: unknown
+  status?: unknown
+}
+
+function waitForWarmupRetry(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, DEV_TOKEN_WARMUP_RETRY_MS))
 }
 
 const REFRESHABLE_AUTH_CODES: ReadonlySet<DashboardAuthErrorCode> = new Set([
@@ -85,45 +93,57 @@ export async function ensureDevToken(): Promise<void> {
   if (devTokenBootstrapPromise) return devTokenBootstrapPromise
   devTokenBootstrapPromise = (async () => {
     const storedMeta = getStoredTokenMeta()
-    const storedToken = getStoredToken()
     ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'fetching'
-    try {
-      const res = await fetchWithTimeout(
-        '/api/v1/dashboard/dev-token',
-        { method: 'GET', headers: { Accept: 'application/json' } },
-        DEV_TOKEN_FETCH_TIMEOUT_MS,
-      )
-      if (!res.ok) {
-        if (res.status === 404 && storedMeta?.source === 'dev') {
-          clearStoredToken()
+    while (true) {
+      if (getStoredTokenMeta()?.source === 'manual' && getStoredToken()) return
+      try {
+        const res = await fetchWithTimeout(
+          '/api/v1/dashboard/dev-token',
+          { method: 'GET', headers: { Accept: 'application/json' } },
+          DEV_TOKEN_FETCH_TIMEOUT_MS,
+        )
+        if (!res.ok) {
+          if (res.status === 404 && storedMeta?.source === 'dev') {
+            clearStoredToken()
+          }
+          ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'no_endpoint'
+          if (isRetryableDevTokenStatus(res.status)) {
+            devTokenBootstrapPromise = null
+          }
+          return
         }
-        ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'no_endpoint'
-        if (isRetryableDevTokenStatus(res.status)) {
+        const payload = (await res.json()) as DevTokenBootstrapPayload
+        if (payload.status === 'initializing') {
+          ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'warming'
+          await waitForWarmupRetry()
+          continue
+        }
+        const token = typeof payload.token === 'string' ? payload.token.trim() : ''
+        if (!token || payload.actor !== 'dashboard' || payload.role !== 'worker') {
+          ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'invalid_response'
           devTokenBootstrapPromise = null
+          return
         }
+        const currentMeta = getStoredTokenMeta()
+        const currentToken = getStoredToken()
+        if (currentMeta?.source === 'manual') return
+        if (
+          token !== currentToken
+          || currentMeta?.source !== 'dev'
+        ) {
+          setStoredToken(token, {
+            source: 'dev',
+            actor: 'dashboard',
+            role: 'worker',
+          })
+        }
+        ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'ok'
         return
-      }
-      const payload = (await res.json()) as DevTokenBootstrapPayload
-      const token = typeof payload.token === 'string' ? payload.token.trim() : ''
-      if (!token || payload.actor !== 'dashboard' || payload.role !== 'worker') {
-        ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'invalid_response'
+      } catch {
+        ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'network'
         devTokenBootstrapPromise = null
         return
       }
-      if (
-        token !== storedToken
-        || storedMeta?.source !== 'dev'
-      ) {
-        setStoredToken(token, {
-          source: 'dev',
-          actor: 'dashboard',
-          role: 'worker',
-        })
-      }
-      ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'ok'
-    } catch {
-      ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'network'
-      devTokenBootstrapPromise = null
     }
   })()
   return devTokenBootstrapPromise

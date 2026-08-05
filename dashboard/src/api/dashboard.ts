@@ -254,6 +254,7 @@ export {
   fetchDashboardRuntimeProbe,
   fetchDashboardFullHealth,
   fetchDashboardTools,
+  fetchKeeperWaitingInventory,
   fetchDashboardPrompts,
   savePromptOverride,
   clearPromptOverride,

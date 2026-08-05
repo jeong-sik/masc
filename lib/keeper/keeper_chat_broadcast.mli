@@ -41,14 +41,3 @@ val chat_appended :
     downstream. [content] is used to derive rich blocks for the event. *)
 val chat_appended_with_audio :
   keeper_name:string -> source:string -> audio:audio_clip -> ?content:string -> unit -> unit
-
-(** Broadcast a [keeper_chat_queue_changed] invalidation whenever a durable
-    receipt transition commits. [revision] is the exact queue projection
-    revision after that transition. Lifecycle truth is intentionally absent
-    from this event: dashboards re-read the authoritative receipt projection
-    instead of guessing Pending/Inflight/Delivered/Failed from deltas.
-
-    Same failure contract as {!chat_appended}: exceptions from
-    [Sse.broadcast] are counted and logged at WARN, {!Eio.Cancel.Cancelled}
-    propagates. *)
-val queue_changed : keeper_name:string -> revision:int64 -> unit -> unit

@@ -17,7 +17,7 @@ let keeper_composite_cache_ttl_s = 5.0
 
 (* Bounded dashboard hydration defaults for the operator compaction inspector.
    These cap best-effort filesystem scans; [scan_truncated] in the response makes
-   the bound observable when there are more manifest files/rows than scanned. *)
+   the bound observable when there are more manifest segments than scanned. *)
 let compaction_snapshot_default_limit =
   Env_config.KeeperCompactionSnapshots.default_limit
 ;;
@@ -32,9 +32,7 @@ let compaction_snapshot_manifest_scan_limit_multiplier =
   Env_config.KeeperCompactionSnapshots.manifest_scan_limit_multiplier
 ;;
 
-let compaction_snapshot_manifest_tail_max_lines =
-  Env_config.KeeperCompactionSnapshots.manifest_tail_max_lines
-;;
+let compaction_snapshot_manifest_scan_max_bytes = 64 * 1024 * 1024
 
 (* Maximum number of trajectory/trace entries returned per query. *)
 let trajectory_max_limit = 500
@@ -308,11 +306,11 @@ let runtime_manifest_row_scope ~base_dir path line_no =
     line_no
 ;;
 
-let safe_regular_mtime ~base_dir path =
+let safe_regular_file_info ~base_dir path =
   try
     let st = Unix.stat path in
     if st.Unix.st_kind = Unix.S_REG
-    then Some st.Unix.st_mtime, []
+    then Some (st.Unix.st_mtime, st.Unix.st_size), []
     else None, []
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -329,6 +327,20 @@ let safe_regular_mtime ~base_dir path =
           ~scope:(runtime_manifest_file_scope ~base_dir path)
           ~error:(Printexc.to_string exn)
       ] )
+;;
+
+let is_runtime_manifest_segment_file name =
+  Filename.check_suffix name Keeper_runtime_manifest.manifest_file_suffix
+  ||
+  match String.rindex_opt name '.' with
+  | None -> false
+  | Some dot ->
+    let rotation = String.sub name (dot + 1) (String.length name - dot - 1) in
+    rotation <> ""
+    && String.for_all (fun c -> c >= '0' && c <= '9') rotation
+    && Filename.check_suffix
+         (String.sub name 0 dot)
+         Keeper_runtime_manifest.manifest_file_suffix
 ;;
 
 let runtime_manifest_paths ~config ~keeper_id ~limit =
@@ -351,24 +363,37 @@ let runtime_manifest_paths ~config ~keeper_id ~limit =
       let entries, read_errors =
         Sys.readdir dir
         |> Array.to_list
-        |> List.filter
-             (String.ends_with
-                ~suffix:Keeper_runtime_manifest.manifest_file_suffix)
+        |> List.filter is_runtime_manifest_segment_file
         |> List.fold_left
              (fun (entries, read_errors) file ->
         let path = Filename.concat dir file in
-        let mtime, errors = safe_regular_mtime ~base_dir:dir path in
+        let file_info, errors = safe_regular_file_info ~base_dir:dir path in
         let entries =
-          match mtime with
-          | Some mtime -> (path, mtime) :: entries
+          match file_info with
+          | Some (mtime, size) -> (path, mtime, size) :: entries
           | None -> entries
         in
         entries, List.rev_append errors read_errors)
              ([], [])
       in
-      let sorted_entries = List.sort (fun (_, a) (_, b) -> Float.compare b a) entries in
-      let scan_truncated = List.length sorted_entries > scan_limit in
-      ( sorted_entries |> compaction_snapshot_take scan_limit |> List.map fst
+      let sorted_entries =
+        List.sort (fun (_, a, _) (_, b, _) -> Float.compare b a) entries
+      in
+      let rec select selected_count selected_bytes selected = function
+        | [] -> List.rev selected, false
+        | _ when selected_count >= scan_limit -> List.rev selected, true
+        | (path, _, size) :: rest ->
+          if selected_bytes + size > compaction_snapshot_manifest_scan_max_bytes
+          then List.rev selected, true
+          else
+            select
+              (selected_count + 1)
+              (selected_bytes + size)
+              (path :: selected)
+              rest
+      in
+      let selected_paths, scan_truncated = select 0 0 [] sorted_entries in
+      ( selected_paths
       , List.rev read_errors
       , scan_truncated )
   with
@@ -390,11 +415,8 @@ let runtime_manifest_paths ~config ~keeper_id ~limit =
     , false )
 ;;
 
-let read_runtime_manifest_tail_rows ~base_dir path =
+let read_runtime_manifest_rows ~base_dir path =
   try
-    Dated_jsonl.load_tail_lines path
-      ~max_lines:compaction_snapshot_manifest_tail_max_lines
-    |> fun lines ->
     let compaction_snapshot_manifest_event_name = function
       | `Assoc fields -> (
           match List.assoc_opt "event" fields with
@@ -402,41 +424,56 @@ let read_runtime_manifest_tail_rows ~base_dir path =
           | _ -> None)
       | _ -> None
     in
-    let rec parse_manifest_row line_no rows read_errors rest json =
+    let parse_manifest_row line_no rows read_errors json =
       match Keeper_runtime_manifest.of_json json with
-      | Ok row -> loop (line_no + 1) (row :: rows) read_errors rest
+      | Ok row -> row :: rows, read_errors
       | Error msg ->
-        loop (line_no + 1) rows
-          (compaction_snapshot_read_error
-             ~scope:(runtime_manifest_row_scope ~base_dir path line_no)
-             ~error:msg
-           :: read_errors)
-          rest
-    and loop line_no rows read_errors = function
-      | [] -> List.rev rows, List.rev read_errors
-      | line :: rest ->
-      try
-        let json = Yojson.Safe.from_string line in
+        ( rows
+        , compaction_snapshot_read_error
+            ~scope:(runtime_manifest_row_scope ~base_dir path line_no)
+            ~error:msg
+          :: read_errors )
+    in
+    let input = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr input)
+      (fun () ->
+    let rec loop line_no rows read_errors =
+      match input_line input with
+      | line ->
+        let trimmed = String.trim line in
+        if String.equal trimmed ""
+        then loop line_no rows read_errors
+        else
+          let next_line_no = line_no + 1 in
+          (try
+        let json = Yojson.Safe.from_string trimmed in
         (match compaction_snapshot_manifest_event_name json with
          | Some event -> (
            match Keeper_runtime_manifest.classify_compaction_snapshot_event event with
            | Keeper_runtime_manifest.Compaction_snapshot_known_unrelated ->
-             loop (line_no + 1) rows read_errors rest
+             loop next_line_no rows read_errors
            | Keeper_runtime_manifest.Compaction_snapshot_relevant
            | Keeper_runtime_manifest.Compaction_snapshot_unknown ->
-             parse_manifest_row line_no rows read_errors rest json)
-         | None -> parse_manifest_row line_no rows read_errors rest json)
+             let rows, read_errors =
+               parse_manifest_row next_line_no rows read_errors json
+             in
+             loop next_line_no rows read_errors)
+         | None ->
+           let rows, read_errors =
+             parse_manifest_row next_line_no rows read_errors json
+           in
+           loop next_line_no rows read_errors)
       with
           | Yojson.Json_error msg | Yojson.Safe.Util.Type_error (msg, _) ->
-            loop (line_no + 1) rows
+            loop next_line_no rows
               (compaction_snapshot_read_error
-                 ~scope:(runtime_manifest_row_scope ~base_dir path line_no)
+                 ~scope:(runtime_manifest_row_scope ~base_dir path next_line_no)
                  ~error:msg
-               :: read_errors)
-              rest
+               :: read_errors))
+      | exception End_of_file -> List.rev rows, List.rev read_errors
     in
-    let rows, read_errors = loop 1 [] [] lines in
-    rows, read_errors, List.length lines >= compaction_snapshot_manifest_tail_max_lines
+    loop 0 [] [])
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -445,7 +482,7 @@ let read_runtime_manifest_tail_rows ~base_dir path =
           ~scope:(runtime_manifest_file_scope ~base_dir path)
           ~error:(Printexc.to_string exn)
       ]
-    , false )
+    )
 ;;
 
 let compaction_snapshot_clock_refs decision =
@@ -871,17 +908,19 @@ let compaction_snapshots_json ~config ~keeper_id ~limit =
     runtime_manifest_paths ~config ~keeper_id ~limit
   in
   let rows_and_errors =
-    List.map (read_runtime_manifest_tail_rows ~base_dir:manifest_base_dir) manifest_paths
+    List.map (read_runtime_manifest_rows ~base_dir:manifest_base_dir) manifest_paths
   in
-  let manifest_rows = List.map (fun (rows, _, _) -> rows) rows_and_errors |> List.concat in
+  let manifest_rows =
+    rows_and_errors
+    |> List.rev
+    |> List.map fst
+    |> List.concat
+  in
   let manifest_read_errors =
     path_read_errors
-    @ (List.map (fun (_, read_errors, _) -> read_errors) rows_and_errors |> List.concat)
+    @ (List.map snd rows_and_errors |> List.concat)
   in
-  let tail_scan_truncated =
-    List.exists (fun (_, _, scan_truncated) -> scan_truncated) rows_and_errors
-  in
-  let scan_truncated = path_scan_truncated || tail_scan_truncated in
+  let scan_truncated = path_scan_truncated in
   let manifest_items =
     let manifest_rows = List.mapi (fun index row -> index, row) manifest_rows in
     manifest_rows
@@ -1648,6 +1687,24 @@ let handle_keeper_get_subroutes state req request reqd =
                 ("coverage_gaps", `List coverage_gaps);
                 ("entries", `List entries);
               ])
+      in
+      Http.Response.json_value ~compress:true ~request:req json reqd
+  else if ends_with "/waiting-inventory" then
+    let name = extract_name "/waiting-inventory" in
+    if String.length name = 0 then
+      respond_error reqd "keeper name is required"
+    else if not (Keeper_config.validate_name name) then
+      Http.Response.json_value ~status:`Bad_request
+        (`Assoc
+           [ ("error", `String (Printf.sprintf "invalid keeper name: %s" name)) ])
+        reqd
+    else
+      let config = Mcp_server.workspace_config state in
+      let json =
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+          Server_keeper_waiting_inventory.dashboard_json_for_keeper
+            config
+            ~keeper_name:name)
       in
       Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/feedback" then

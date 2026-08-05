@@ -3,6 +3,7 @@ import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
 import { Markdown } from "./common/markdown"
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
+import { dashboardAuthAccess } from '../lib/dashboard-auth-access'
 import { isInFlightDelivery } from '../lib/keeper-delivery'
 import { formatTimeAgo, relativeTime, NO_TIME_INFO } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
@@ -637,6 +638,8 @@ function ServerQueueStatus({
   currentExecution,
   readErrorAction,
   onInspect,
+  inspectAllowed,
+  inspectReason,
 }: {
   busy: boolean
   pendingCount: number
@@ -650,6 +653,8 @@ function ServerQueueStatus({
   currentExecution?: DashboardKeeperWaitingKeeper['current_execution']
   readErrorAction?: string | null
   onInspect: () => void
+  inspectAllowed: boolean
+  inspectReason: string | null
 }) {
   const projectionUnavailable = Boolean(projectionError) || !projectionReady || !projectionPresent
   if (
@@ -682,9 +687,11 @@ function ServerQueueStatus({
         <button
           type="button"
           class="font-semibold text-[var(--color-accent-fg)] underline decoration-dotted underline-offset-2"
+          disabled=${!inspectAllowed}
+          title=${inspectAllowed ? '서버 대기열 상세 및 제어' : inspectReason ?? 'Admin 권한이 필요합니다.'}
           onClick=${onInspect}
           data-open-keeper-queue-control
-        >Keeper 서버 대기열 상세/제어</button>
+        >${inspectAllowed ? 'Keeper 서버 대기열 상세/제어' : '대기열 상세/제어 · Admin 권한 필요'}</button>
         ${inflightCount > 0
           ? html`<span class="rounded-[var(--r-0)] border border-[var(--info-20)] bg-[var(--info-10)] px-2 py-0.5" data-server-chat-queue-state="inflight">처리 중 ${inflightCount}</span>`
           : null}
@@ -1259,11 +1266,8 @@ export function KeeperConversationPanel({
   const bumpQueue = () => setQueueVersion(v => v + 1)
   const isDrainingRef = useRef(false)
 
-  // Keep the shared keeper waiting inventory live on surfaces that do NOT
-  // render KeeperLaneSection (which is what normally polls it every 15 s).
-  // Mirror the lane strip's visibility-aware auto-refresh: pause while the tab
-  // is hidden, refresh immediately on focus/return, and return the cleanup so
-  // the busy chip / interrupt button cannot freeze on a stale snapshot.
+  // Keep the shared tools projection live for the conversation's busy chip and
+  // interrupt button. The right-side Lane has its own keeper-scoped read path.
   useEffect(() => {
     const unsubscribeToolsRefresh = subscribeToolsAutoRefresh()
     void reconcileKeeperChatReceipts(keeperName)
@@ -1376,6 +1380,7 @@ export function KeeperConversationPanel({
     if (newestEntryTsUnix !== null) advanceKeeperLastSeen(keeperName, newestEntryTsUnix)
   }
   const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
+  const queueControlAccess = dashboardAuthAccess(shellAuthSummary.value, 'admin')
   // Stable action object so the memoized ChatMessageBubble's shallow prop
   // compare can skip unchanged messages — an inline `{ ...onClick }` literal
   // would be a new reference each render and defeat the memo.
@@ -1607,9 +1612,11 @@ export function KeeperConversationPanel({
         ? inventoryEntry?.source_next_actions?.read_error?.[0] ?? inventoryEntry?.next_action
         : null}
       onInspect=${() => setQueueControlOpen(true)}
+      inspectAllowed=${queueControlAccess.allowed}
+      inspectReason=${queueControlAccess.reason}
     />
   `
-  const queueControlPanel = queueControlOpen
+  const queueControlPanel = queueControlOpen && queueControlAccess.allowed
     ? html`
         <${KeeperQueueControlPanel}
           keeperName=${keeperName}

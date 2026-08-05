@@ -5,11 +5,9 @@ import { signal, computed } from '@preact/signals'
 import { fetchDashboardTools, type DashboardToolsResponse, type DashboardToolInventoryItem } from '../../api'
 import { createManagedAsyncResource } from '../../lib/async-state'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
-import { registerKeeperChatQueueRefresh } from '../../sse-store'
 
 // Managed (stale-while-revalidate): the previously loaded response stays
-// readable while a refetch is in flight. Panel-level polling — the keeper
-// lane strip re-fetches this shared resource on an interval — therefore
+// readable while a refetch is in flight. Panel-level polling therefore
 // keeps showing the last inventory instead of flashing a loading gap every
 // cycle. A plain createAsyncResource would blank the data on each load.
 const toolsResource = createManagedAsyncResource<DashboardToolsResponse>()
@@ -49,8 +47,8 @@ export const KEEPER_WAITING_INVENTORY_REFRESH_MS = 15_000
 let toolsRefreshSubscriberCount = 0
 let stopToolsRefresh: (() => void) | null = null
 
-/** Share one visibility-aware tools poller across every mounted Keeper lane
- * and conversation surface. The managed resource deduplicates fetch state;
+/** Share one visibility-aware tools poller across mounted tools, schedule,
+ * and Keeper conversation surfaces. The managed resource deduplicates fetch state;
  * this subscription also deduplicates the timer and global visibility/focus
  * listeners that trigger it. */
 export function subscribeToolsAutoRefresh(): () => void {
@@ -69,10 +67,6 @@ export function subscribeToolsAutoRefresh(): () => void {
     }
   }
 }
-
-registerKeeperChatQueueRefresh(() => {
-  void loadTools()
-})
 
 export function hasSurface(item: DashboardToolInventoryItem, surface: string): boolean {
   return (item.surfaces ?? []).includes(surface)

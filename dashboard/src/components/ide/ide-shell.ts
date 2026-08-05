@@ -347,7 +347,7 @@ function disconnectionReasonLabel(): string {
   if (!hasToken && bootstrap === 'network') {
     return 'dashboard · server unreachable'
   }
-  if (!hasToken && bootstrap === 'fetching') {
+  if (!hasToken && (bootstrap === 'fetching' || bootstrap === 'warming')) {
     return 'dashboard · bootstrapping...'
   }
   if (!hasToken) {

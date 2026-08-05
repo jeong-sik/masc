@@ -417,17 +417,6 @@ let install () =
     with Eio.Cancel.Cancelled _ as e -> raise e
        | exn -> Log.Task.error ~keeper_name:task_id "Metrics_store_eio.record dynamic hook failed: %s" (Stdlib.Printexc.to_string exn));
 
-  Atomic.set Workspace_hooks.record_thompson_result_fn (fun ~agent_name ~success ~reason ->
-    let direction = if success then `Up else `Down in
-    let verdict =
-      if success then Thompson_sampling.Pass
-      else
-        let r = Option.value ~default:"task_cancelled" reason in
-        Thompson_sampling.Fail r
-    in
-    Thompson_sampling.record_vote ~agent_name ~direction;
-    Thompson_sampling.record_quality_signal ~agent_name ~verdict);
-
   Atomic.set Workspace_hooks.push_task_event_fn (fun ~event_type ~details ->
     let payload = `Assoc (
       ("type", `String event_type) ::

@@ -48,9 +48,6 @@ type agent_reputation = {
   (** Proportion of goal completions that were on-topic and within budget. 0.0–1.0. *)
   safety_compliance: float; [@default 1.0]
   (** Penalty-adjusted safety score; decreases with each sandbox violation. 0.0–1.0. *)
-  thompson_confidence: float; [@default 0.5]
-  (** Thompson Sampling Beta expected value (alpha/(alpha+beta)).
-      0.5 is the neutral prior (alpha=1.0, beta=1.0). *)
   evidence_state: string; [@default "default"]
 } [@@deriving yojson { strict = false }]
 
@@ -75,7 +72,6 @@ let default_reputation ~(agent_name : string) : agent_reputation =
     execution_reliability = 1.0;
     goal_adherence = 1.0;
     safety_compliance = 1.0;
-    thompson_confidence = 0.5;
     evidence_state = "default";
   }
 
@@ -255,18 +251,6 @@ let accountability_metrics (config : Workspace.config) ~(agent_name : string) =
 (** Default window for v2 ledger metrics: 14 days matches accountability window. *)
 let v2_ledger_window_days = 14
 
-(** {1 Thompson Confidence}
-
-    Compute the Thompson Sampling Beta expected value for an agent.
-    Returns 0.5 (neutral prior) when no stats exist or when alpha+beta
-    is zero (should not happen given min 0.1 priors, but safe division
-    handles the edge case). *)
-let thompson_confidence_for_agent (agent_name : string) : float =
-  let stats = Thompson_sampling.get_stats agent_name in
-  let sum = stats.Thompson_sampling.alpha +. stats.Thompson_sampling.beta in
-  if sum > 0.0 then stats.Thompson_sampling.alpha /. sum
-  else 0.5
-
 let compute_reputation (config : Workspace.config) ~(agent_name : string)
     : agent_reputation =
   let (tasks_claimed, tasks_completed) =
@@ -294,7 +278,6 @@ let compute_reputation (config : Workspace.config) ~(agent_name : string)
        accountability_source_label) =
     accountability_metrics config ~agent_name
   in
-  let thompson_confidence = thompson_confidence_for_agent agent_name in
   (* v2: pull multi-dimensional metrics from the reputation ledger. *)
   let v2_metrics =
     (try
@@ -314,10 +297,6 @@ let compute_reputation (config : Workspace.config) ~(agent_name : string)
     || v2_metrics.Reputation_ledger_v2.tool_calls > 0
     || v2_metrics.Reputation_ledger_v2.goal_completions > 0
     || v2_metrics.Reputation_ledger_v2.safety_violations > 0
-    || (let stats = Thompson_sampling.get_stats agent_name in
-        stats.Thompson_sampling.total_votes_up > 0
-        || stats.Thompson_sampling.total_votes_down > 0
-        || stats.Thompson_sampling.selections > 0)
   in
   let evidence_state = if has_evidence then "measured" else "default" in
   { agent_name;
@@ -333,6 +312,5 @@ let compute_reputation (config : Workspace.config) ~(agent_name : string)
     execution_reliability = v2_metrics.Reputation_ledger_v2.execution_reliability;
     goal_adherence = v2_metrics.Reputation_ledger_v2.goal_adherence;
     safety_compliance = v2_metrics.Reputation_ledger_v2.safety_compliance;
-    thompson_confidence;
     evidence_state;
   }

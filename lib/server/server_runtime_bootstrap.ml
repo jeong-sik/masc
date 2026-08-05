@@ -444,15 +444,6 @@ let record_runtime_toml_load_failure msg =
       ())
     reason
 
-let thompson_shutdown_hook_registered = Atomic.make false
-
-let ensure_thompson_persistence ~base_path =
-  Thompson_sampling.set_base_path base_path;
-  Thompson_sampling.load_stats ();
-  if Atomic.compare_and_set thompson_shutdown_hook_registered false true then
-    Shutdown.register ~name:"thompson_sampling_save" ~priority:24 (fun () ->
-      Thompson_sampling.save_stats ())
-
 let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     ~proc_mgr ~fs ?env ()
     : Mcp_server.server_state =
@@ -496,7 +487,6 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Env_config_core.base_path_input_env_key
     (Option.value ~default:"" input_base_path);
   Unix.putenv Env_config_core.base_path_env_key base_path;
-  ensure_thompson_persistence ~base_path;
   bootstrap_base_path_config_root ~base_path;
   let config_root = (startup_config_resolution ~base_path).config_root.path in
   warn_ignored_config_root_full_catalogs ~config_root ();

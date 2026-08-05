@@ -33,7 +33,27 @@
     Returns [Ok num_overrides] (count of TOML keys actually applied,
     excluding those preempted by existing env vars), or [Error msg] on
     parse failure.  Missing file is not an error: returns [Ok 0]. *)
-val load_and_apply : base_path:string -> (int, string) result
+(** Why [load_and_apply] failed. The bootstrap counter labels itself from this
+    rather than re-reading the rendered message, so a new constructor forces a
+    label rather than silently counting nothing. *)
+type load_failure_kind =
+  | Read
+  | Parse
+  | Validate
+
+type load_failure =
+  { kind : load_failure_kind
+  ; message : string
+  }
+
+val load_failure_kind_label : load_failure_kind -> string
+val all_load_failure_kinds : load_failure_kind list
+val load_failure_kind_labels : string list
+
+val load_failure_to_string : load_failure -> string
+(** Renders as before: "read <path>: <detail>", "parse …", "validate …". *)
+
+val load_and_apply : base_path:string -> (int, load_failure) result
 
 (** Read the raw TOML value for [env_name] from the shadow registry.
     Returns [None] when the key was absent from [runtime.toml]

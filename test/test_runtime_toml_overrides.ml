@@ -63,7 +63,7 @@ let test_missing_file_returns_zero () =
   match Keeper_runtime_config.load_and_apply ~base_path with
   | Ok 0 -> ()
   | Ok n -> failf "expected 0 overrides, got %d" n
-  | Error msg -> failf "unexpected error: %s" msg
+  | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
 
 
 let test_applies_sleep_and_throttle_overrides () =
@@ -174,7 +174,7 @@ let test_load_and_apply_records_boot_override () =
     with_base_path @@ fun base_path ->
     write_toml base_path "[turn]\nstream_idle_timeout_sec = 42\n";
     match Keeper_runtime_config.load_and_apply ~base_path with
-    | Error msg -> failf "unexpected error: %s" msg
+    | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
     | Ok n ->
       check int "applied count" 1 n;
       check (option string) "boot override stored"
@@ -208,7 +208,7 @@ let test_explicit_config_dir_wins_over_base_path () =
   let override_config_dir = Filename.concat override_root ".masc/config" in
   with_env "MASC_CONFIG_DIR" (Some override_config_dir) @@ fun () ->
   match Keeper_runtime_config.load_and_apply ~base_path with
-  | Error msg -> failf "unexpected error: %s" msg
+  | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
   | Ok n ->
     check int "applied count" 1 n;
     check (option string) "explicit config dir stored"
@@ -233,7 +233,7 @@ let test_resolved_runtime_freezes_toml_values_after_init () =
     "[turn]\n\
      stream_idle_timeout_sec = 50\n";
   (match Keeper_runtime_config.load_and_apply ~base_path with
-   | Error msg -> failf "unexpected error: %s" msg
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   Config_boot_overrides.set "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" "90";
@@ -267,7 +267,7 @@ let test_resolved_stream_idle_timeout_uses_toml () =
   with_base_path @@ fun base_path ->
   write_toml base_path "[turn]\nstream_idle_timeout_sec = 75\n";
   (match Keeper_runtime_config.load_and_apply ~base_path with
-   | Error msg -> failf "unexpected error: %s" msg
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
@@ -283,7 +283,7 @@ let test_resolved_runtime_prefers_env_over_toml () =
   write_toml base_path "[turn]\nstream_idle_timeout_sec = 50\n";
   with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some "55") @@ fun () ->
   (match Keeper_runtime_config.load_and_apply ~base_path with
-   | Error msg -> failf "unexpected error: %s" msg
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
@@ -339,13 +339,14 @@ let test_stream_idle_timeout_invalid_toml_returns_error () =
   write_toml base_path "[turn]\nstream_idle_timeout_sec = 0\n";
   match Keeper_runtime_config.load_and_apply ~base_path with
   | Ok _ -> fail "expected non-positive stream idle timeout to be rejected"
-  | Error message ->
+  | Error failure ->
+    check bool "classified as a validate failure" true
+      (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate);
     check bool "diagnostic names the TOML key" true
-      (String.starts_with ~prefix:"validate " message
-       && String.ends_with
-            ~suffix:
-              "turn.stream_idle_timeout_sec: expected a finite, positive number of seconds"
-            message)
+      (String.ends_with
+         ~suffix:
+           "turn.stream_idle_timeout_sec: expected a finite, positive number of seconds"
+         (Keeper_runtime_config.load_failure_to_string failure))
 
 let test_stream_idle_timeout_toml_wrong_type_returns_error () =
   with_clean_boot_overrides @@ fun () ->
@@ -353,12 +354,14 @@ let test_stream_idle_timeout_toml_wrong_type_returns_error () =
   write_toml base_path "[turn]\nstream_idle_timeout_sec = \"120\"\n";
   match Keeper_runtime_config.load_and_apply ~base_path with
   | Ok _ -> fail "expected string stream idle timeout to be rejected"
-  | Error message ->
+  | Error failure ->
+    check bool "classified as a validate failure" true
+      (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate);
     check bool "diagnostic requires a numeric TOML value" true
       (String.ends_with
          ~suffix:
            "turn.stream_idle_timeout_sec: expected a numeric TOML value"
-         message)
+         (Keeper_runtime_config.load_failure_to_string failure))
 
 let test_resolved_cli_subprocess_idle_default_120s () =
   with_clean_boot_overrides @@ fun () ->
@@ -385,11 +388,41 @@ let test_resolved_cli_subprocess_idle_from_toml () =
   with_base_path @@ fun base_path ->
   write_toml base_path "[turn]\ncli_subprocess_idle_sec = 45\n";
   (match Keeper_runtime_config.load_and_apply ~base_path with
-   | Error msg -> failf "unexpected error: %s" msg
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   check (float 0.0001) "cli_subprocess_idle from toml"
     45.0 (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
+
+(* The bootstrap counter labels itself from load_failure_kind. Its help text
+   enumerates the labels, so a constructor added without a label — or a label
+   added without a constructor — has to break here rather than at whatever
+   dashboard reads the metric. *)
+let test_every_failure_kind_has_a_label () =
+  check (list string) "labels cover the constructors"
+    [ "read_error"; "parse_error"; "validate_error" ]
+    Keeper_runtime_config.load_failure_kind_labels;
+  check int "one label per constructor"
+    (List.length Keeper_runtime_config.all_load_failure_kinds)
+    (List.length Keeper_runtime_config.load_failure_kind_labels)
+;;
+
+let test_rendering_keeps_the_verb_prefix () =
+  List.iter
+    (fun (kind, verb) ->
+      let rendered =
+        Keeper_runtime_config.load_failure_to_string
+          { Keeper_runtime_config.kind; message = "x: y" }
+      in
+      check bool
+        (verb ^ " prefix preserved")
+        true
+        (String.starts_with ~prefix:(verb ^ " ") rendered))
+    [ Keeper_runtime_config.Read, "read"
+    ; Keeper_runtime_config.Parse, "parse"
+    ; Keeper_runtime_config.Validate, "validate"
+    ]
+;;
 
 let () =
   run "runtime_toml_overrides"
@@ -401,6 +434,10 @@ let () =
         ; test_case "applies lifecycle enabled overrides (RFC-0297 P0-1)" `Quick test_applies_lifecycle_enabled_overrides
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
+        ; test_case "every failure kind has a label" `Quick
+            test_every_failure_kind_has_a_label
+        ; test_case "rendering keeps the verb prefix" `Quick
+            test_rendering_keeps_the_verb_prefix
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init

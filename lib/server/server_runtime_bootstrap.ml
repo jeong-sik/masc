@@ -425,24 +425,16 @@ let () =
     ~help:
       "Total Keeper_runtime_config.load_and_apply failures. Bootstrap logs WARN; \
        this counter exposes the same event to monitoring aggregation. Labels: \
-       reason in {read_error | parse_error}."
+       reason in {read_error | parse_error | validate_error}, derived from \
+       Keeper_runtime_config.load_failure_kind."
     ()
 
-let record_runtime_toml_load_failure msg =
-  let reason =
-    if String.starts_with ~prefix:"read " msg
-    then Some "read_error"
-    else if String.starts_with ~prefix:"parse " msg
-    then Some "parse_error"
-    else None
-  in
-  Option.iter
-    (fun reason ->
-       Otel_metric_store.inc_counter
-         metric_keeper_runtime_config_load_failures
-         ~labels:[ "reason", reason ]
-      ())
-    reason
+let record_runtime_toml_load_failure (failure : Keeper_runtime_config.load_failure) =
+  Otel_metric_store.inc_counter
+    metric_keeper_runtime_config_load_failures
+    ~labels:
+      [ "reason", Keeper_runtime_config.load_failure_kind_label failure.kind ]
+    ()
 
 let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     ~proc_mgr ~fs ?env ()
@@ -500,8 +492,9 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
    | Ok 0 -> ()
    | Ok n ->
        Log.Server.info "runtime.toml: applied %d override(s)" n
-   | Error msg ->
-       record_runtime_toml_load_failure msg;
+   | Error failure ->
+       record_runtime_toml_load_failure failure;
+       let msg = Keeper_runtime_config.load_failure_to_string failure in
        Log.Server.error "runtime.toml load failed: %s" msg;
        raise (Env_config_core.Config_error msg));
   Keeper_runtime_resolved.init ();

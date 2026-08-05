@@ -215,59 +215,6 @@ let timeout ~operation : t =
     ()
 
 (* ========================================
-   Drift-Specific Responses (MAGI #2)
-   ======================================== *)
-
-(** Drift detection result with recovery hints
-    @param threshold The similarity threshold used for detection (pass from caller) *)
-let drift_detected ~similarity ~drift_type ~threshold ~details : t =
-  let hints = match drift_type with
-    | "factual" -> [
-        "Re-request context from source agent";
-        "Check for content truncation during handoff";
-        "Verify the original context is still available";
-      ]
-    | "semantic" -> [
-        "Verify task understanding with source agent";
-        Printf.sprintf "Consider lowering the threshold (current: %.2f)" threshold;
-        "Review the transformation applied to context";
-      ]
-    | "structural" -> [
-        "Check for format conversion issues";
-        "Verify both sides use compatible data formats";
-      ]
-    | _ -> [
-        "Review the handoff process";
-        "Check for network or encoding issues";
-      ]
-  in
-  {
-    success = false;
-    data = `Assoc [
-      ("similarity", `Float similarity);
-      ("drift_type", `String drift_type);
-      ("threshold", `Float threshold);
-    ];
-    message = Printf.sprintf "Context drift detected (%.0f%% similarity)" (similarity *. 100.0);
-    errors = [{
-      code = "DRIFT_DETECTED";
-      severity = Warning;
-      message = details;
-      recovery_hints = hints;
-    }];
-    timestamp = Time_compat.now ();
-  }
-
-(** Handoff verified successfully *)
-let handoff_verified ~similarity : t =
-  ok
-    ~message:(Printf.sprintf "Context verified (%.0f%% similarity)" (similarity *. 100.0))
-    (`Assoc [
-      ("similarity", `Float similarity);
-      ("verified", `Bool true);
-    ])
-
-(* ========================================
    Task-Specific Responses
    ======================================== *)
 

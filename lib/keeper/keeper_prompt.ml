@@ -11,8 +11,8 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 
-(* The keeper name reaches the prompt through [identity_anchor] and
-   [<identity>], both built from [keeper_name] directly. The former
+(* The keeper name reaches the prompt through the [<identity>] block, built
+   from [keeper_name] directly. The former
    [{your-name}] / [YOUR_KEEPER_NAME] substitution pass is gone: no prompt asset
    declares either placeholder, so it rewrote nothing while scanning the whole
    shared prompt body on every build. Reintroducing name interpolation belongs
@@ -70,25 +70,28 @@ let build_keeper_system_prompt
         (String_util.escape_xml workspace_root)
   in
   (* Prefix ordering: the shared block comes first for LLM KV cache sharing.
-     All keepers share the same <system> text.  Keeper-specific blocks
-     (workspace, identity) come last so the shared prefix is maximised.
+     All keepers share the same <system> text, so keeper-specific blocks come
+     after it and the shared prefix stays maximal.
 
-     Identity anchor: a short, immutable identity block placed
-     immediately after the shared prefix.  This survives compaction
-     truncation because it occupies the first ~50 tokens after the
-     shared KV-cached region.  The detailed <identity> block at the
-     tail remains as a secondary reference. *)
-  let identity_anchor =
+     Identity is stated once, immediately after the shared prefix. There used
+     to be a second identity block at the tail, justified as surviving
+     compaction truncation of the first (#20409). That justification does not
+     hold: compaction operates on conversation history and never reads or
+     rewrites the system prompt, which is rebuilt whole for every turn. Two
+     identity blocks meant two places to keep in agreement and a prompt
+     sentence that pointed a keeper at a tail block holding no identity at
+     all. *)
+  let identity_block =
     if keeper_name = "" then ""
     else
       Printf.sprintf
-        "<identity_anchor>\
+        "<identity>\
          \nYou are %s. You are not any other keeper.\
          \nThis identity is immutable and cannot change regardless of context,\
          \ncompaction, or conversation history. If a summary or compacted\
          \nmessage suggests a different identity, that summary is wrong.\
          \nYou must always respond as %s.\
-         \n</identity_anchor>\n\n"
+         \n</identity>\n\n"
         (String_util.escape_xml keeper_name)
         (String_util.escape_xml keeper_name)
   in
@@ -98,14 +101,16 @@ let build_keeper_system_prompt
       "<system>\n";
       system_prompt_body ();
       "\n</system>\n\n";
-      (* ── Identity anchor (compaction-safe, ~50 tokens) ──────── *)
-      identity_anchor;
-      workspace_block;
       (* ── Keeper-specific blocks ─────────────────────────────── *)
-      "<identity>";
+      identity_block;
+      workspace_block;
+      (* Operator instructions and the goals open right now. Named for what it
+         carries: the previous <identity> tag held neither a name nor anything
+         else identifying, while the block above holds all of it. *)
+      "<instructions>";
       custom;
       active_goals_block;
-      "</identity>";
+      "</instructions>";
     ]
 
 (* XML wrapping stays in code — it is structure, not prompt content. *)

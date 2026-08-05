@@ -7,7 +7,6 @@ type feature_status =
   | Healthy
   | Warning
   | Inactive
-  | Deprecated
 
 type feature_health_item = {
   env_name : string;
@@ -17,19 +16,16 @@ type feature_health_item = {
   is_enabled : bool;
   source : string;  (* "env" or "default" *)
   status : feature_status;
-  since : string;
 }
 
 let status_to_string = function
   | Healthy -> "healthy"
   | Warning -> "warning"
   | Inactive -> "inactive"
-  | Deprecated -> "deprecated"
 
 let lifecycle_to_status = function
   | Feature_flag_registry.Active -> Healthy
   | Feature_flag_registry.Experimental -> Warning
-  | Feature_flag_registry.Deprecated _ -> Deprecated
 
 let feature_to_health_item (flag : Feature_flag_registry.flag) : feature_health_item =
   let is_enabled = Feature_flag_registry.runtime_value flag in
@@ -37,7 +33,6 @@ let feature_to_health_item (flag : Feature_flag_registry.flag) : feature_health_
   let lifecycle_str = Feature_flag_registry.lifecycle_to_string flag.lifecycle in
   let status =
     match flag.lifecycle with
-    | Feature_flag_registry.Deprecated _ -> Deprecated
     | Feature_flag_registry.Experimental -> Warning
     | Feature_flag_registry.Active ->
         if is_enabled then Healthy else Inactive
@@ -50,7 +45,6 @@ let feature_to_health_item (flag : Feature_flag_registry.flag) : feature_health_
     is_enabled;
     source;
     status;
-    since = flag.since;
   }
 
 let get_all_features () : feature_health_item list =
@@ -78,7 +72,6 @@ let feature_health_item_to_json (item : feature_health_item) : Yojson.Safe.t =
     ("is_enabled", `Bool item.is_enabled);
     ("source", `String item.source);
     ("status", `String (status_to_string item.status));
-    ("since", `String item.since);
   ]
 
 let overview_json (features : feature_health_item list) : Yojson.Safe.t =
@@ -86,7 +79,6 @@ let overview_json (features : feature_health_item list) : Yojson.Safe.t =
   let healthy_count = count_by_status features Healthy in
   let warning_count = count_by_status features Warning in
   let inactive_count = count_by_status features Inactive in
-  let deprecated_count = count_by_status features Deprecated in
   let enabled_count = List.filter (fun f -> f.is_enabled) features |> List.length in
   let overridden_count = List.filter (fun f -> f.source = "env") features |> List.length in
   `Assoc [
@@ -94,7 +86,6 @@ let overview_json (features : feature_health_item list) : Yojson.Safe.t =
     ("healthy_count", `Int healthy_count);
     ("warning_count", `Int warning_count);
     ("inactive_count", `Int inactive_count);
-    ("deprecated_count", `Int deprecated_count);
     ("enabled_count", `Int enabled_count);
     ("overridden_count", `Int overridden_count);
   ]

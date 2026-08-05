@@ -39,6 +39,7 @@ const BACKEND_EMITTED: Record<string, string> = {
   runtime_param_changed: '../lib/server/server_routes_http_routes_activity.ml',
   keeper_chat_appended: '../lib/keeper/keeper_chat_broadcast.ml',
   keeper_chat_queue_changed: '../lib/keeper/keeper_chat_broadcast.ml',
+  ide_cursor_changed: '../lib/server/server_ide_http.ml',
   keeper_composite_changed: '../lib/server/server_mcp_transport_ws.ml',
   keeper_heartbeat: '../lib/keeper/keeper_heartbeat_snapshot.ml',
   keeper_turn_complete: '../lib/keeper/keeper_hooks_oas.ml',

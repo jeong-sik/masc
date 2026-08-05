@@ -4,8 +4,12 @@ const sseStoreMocks = vi.hoisted(() => ({
   hydrateDashboardSlice: vi.fn(),
   routeServerPushEvent: vi.fn(),
 }))
+const serverPushProjectionMocks = vi.hoisted(() => ({
+  recordServerPushEvent: vi.fn(),
+}))
 
 vi.mock('./sse-store', () => sseStoreMocks)
+vi.mock('./sse', () => serverPushProjectionMocks)
 
 import {
   clearDashboardWsDiscoveryCacheForTests,
@@ -230,6 +234,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   sseStoreMocks.hydrateDashboardSlice.mockClear()
   sseStoreMocks.routeServerPushEvent.mockClear()
+  serverPushProjectionMocks.recordServerPushEvent.mockClear()
 })
 
 describe('dashboardSlicesForRoute', () => {
@@ -581,7 +586,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('clears lastError on a clean close so the SSE fallback does not engage', async () => {
+  it('clears lastError on a clean close while reconnect remains active', async () => {
     vi.useFakeTimers()
     installWebSocketMocks()
     await connectDashboardWS({ tab: 'overview', params: {} })
@@ -594,15 +599,14 @@ describe('dashboard websocket route subscriptions', () => {
     await flushPromises()
     expect(dashboardWsReady.value).toBe(true)
 
-    // Server-initiated clean close (wasClean=true) is not a degraded-WS error:
-    // lastError stays null so the SSE fallback (dashboard-transport-fallback.ts)
-    // does not fire. reconnect still runs.
+    // A server-initiated clean close is not a protocol error. Reconnect still
+    // runs, while lastError stays null.
     socket.close({ code: 1001, reason: 'server restart', wasClean: true })
     expect(dashboardWsLastError.value).toBe(null)
     expect(dashboardWsReady.value).toBe(false)
   })
 
-  it('sets lastError on an abnormal close so the SSE fallback can engage', async () => {
+  it('sets lastError on an abnormal close', async () => {
     vi.useFakeTimers()
     installWebSocketMocks()
     await connectDashboardWS({ tab: 'overview', params: {} })
@@ -1008,6 +1012,26 @@ describe('dashboard websocket route subscriptions', () => {
 
     expect(mockSockets).toHaveLength(2)
     expect(mockSockets[1]!.readyState).toBe(MockWebSocket.CONNECTING)
+  })
+
+  it('projects and routes raw server-push frames forwarded over websocket', async () => {
+    installWebSocketMocks()
+    const socket = await connectReadyDashboard()
+    const event = {
+      type: 'keeper_chat_appended',
+      name: 'kidsnote',
+      source: 'autonomous_turn',
+    }
+
+    socket.onmessage?.({
+      data: `data: ${JSON.stringify(event)}\n\n`,
+    } as MessageEvent)
+    flushPendingInbound()
+
+    expect(serverPushProjectionMocks.recordServerPushEvent).toHaveBeenCalledOnce()
+    expect(serverPushProjectionMocks.recordServerPushEvent).toHaveBeenCalledWith(event)
+    expect(sseStoreMocks.routeServerPushEvent).toHaveBeenCalledOnce()
+    expect(sseStoreMocks.routeServerPushEvent).toHaveBeenCalledWith(event)
   })
 
   it('acknowledges dashboard deltas as notifications without response tracking', async () => {

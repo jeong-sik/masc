@@ -249,17 +249,6 @@ let resolve_turn_runtime_id (meta : keeper_meta) =
   else
     Ok runtime_id
 
-let user_oas_blocks_of_args args =
-  match Keeper_multimodal_input.parse_user_blocks args with
-  | Error err -> Error err
-  | Ok [] -> Ok None
-  | Ok user_blocks ->
-      let attachments = Keeper_multimodal_input.parse_attachments args in
-      match Keeper_multimodal_input.to_oas_blocks ~attachments user_blocks with
-      | Error err -> Error err
-      | Ok [] -> Ok None
-      | Ok blocks -> Ok (Some blocks)
-
 type invocation_surface =
   | Direct_message
   | Keeper_delegate
@@ -272,16 +261,6 @@ let invocation_tool_name = function
 let invocation_turn_type = function
   | Direct_message -> "direct"
   | Keeper_delegate -> "delegate"
-;;
-
-let direct_invocation_request args =
-  let name = get_string args "name" "" in
-  let message = get_string args "message" "" in
-  if not (validate_name name)
-  then Error (invalid_name_error name)
-  else
-    Keeper_invocation_contract.request ~keeper_name:name ~prompt:message
-    |> Result.map_error Keeper_invocation_contract.request_error_to_string
 ;;
 
 let turn_resources_error ~surface failure =
@@ -297,41 +276,23 @@ let turn_resources_error ~surface failure =
        ])
 ;;
 
-let preflight_keeper_invocation ~surface ctx args request =
+let preflight_keeper_invocation ctx request =
   let name = Keeper_invocation_contract.target_name request in
-    let tool_name = invocation_tool_name surface in
-    match Keeper_meta_contract.reject_removed_model_args ~tool_name args with
-    | Error e -> Error e
-    | Ok () ->
-    (match reject_removed_keeper_input_keys ~tool_name args with
-    | Error e -> Error e
-    | Ok () ->
-    (match reject_removed_keeper_msg_input_keys ~tool_name args with
-    | Error e -> Error e
-    | Ok () ->
-    (match user_oas_blocks_of_args args with
-    | Error e -> Error e
-    | Ok _ ->
-    match ensure_keeper_exists ~ctx ~name with
-    | Error e -> Error e
-    | Ok meta ->
-      resolve_turn_runtime_id meta
-      |> Result.map (fun _ -> request))))
+  match ensure_keeper_exists ~ctx ~name with
+  | Error e -> Error e
+  | Ok meta ->
+    resolve_turn_runtime_id meta
+    |> Result.map (fun _ -> request)
+;;
 
-let preflight_keeper_msg ctx args =
-  let name = get_string args "name" "" in
-  let message = get_string args "message" "" in
-  match Keeper_invocation_contract.request ~keeper_name:name ~prompt:message with
-  | Error error -> Error (Keeper_invocation_contract.request_error_to_string error)
-  | Ok request -> preflight_keeper_invocation ~surface:Direct_message ctx args request
+let preflight_keeper_msg ctx message =
+  let request = Keeper_invocation_contract.direct_message_request message in
+  preflight_keeper_invocation ctx request
+  |> Result.map (fun _ -> message)
 ;;
 
 let preflight_keeper_delegate ctx request =
-  preflight_keeper_invocation
-    ~surface:Keeper_delegate
-    ctx
-    (`Assoc [])
-    request
+  preflight_keeper_invocation ctx request
 ;;
 
 (* -- Direct-message turn FSM wrapper ---------------------------------------- *)
@@ -439,8 +400,8 @@ let run_keeper_invocation_turn_admitted_inner
       ?continuation_channel
       ~surface
       ~request
+      ?direct_message
       ctx
-      args
   : tool_result
   =
   with_span
@@ -463,33 +424,26 @@ let run_keeper_invocation_turn_admitted_inner
   in
   let name = Keeper_invocation_contract.target_name request in
   let message = Keeper_invocation_contract.prompt request in
-    let turn_instructions =
-      match get_string_opt args "turn_instructions" with
-      | Some _ as ti -> ti
-      | None -> (
-          match args with
-          | `Assoc fields -> (
-              match List.assoc_opt "surface_context" fields with
-              | Some ctx -> surface_context_to_instructions ctx
-              | None -> None)
-          | _ -> None)
-    in
-    let direct_reply = get_bool args "direct_reply" false in
-    let channel_session_key = get_string_opt args "channel_session_key" in
-    let channel = get_string args "channel" "" in
-    let tool_name = invocation_tool_name surface in
-    (match Keeper_meta_contract.reject_removed_model_args ~tool_name args with
-    | Error e -> tool_result_error ("" ^ e)
-    | Ok () ->
-    (match reject_removed_keeper_input_keys ~tool_name args with
-    | Error e -> tool_result_error ("" ^ e)
-    | Ok () ->
-    (match reject_removed_keeper_msg_input_keys ~tool_name args with
-    | Error e -> tool_result_error ("" ^ e)
-    | Ok () ->
-    (match user_oas_blocks_of_args args with
-    | Error e -> tool_result_error ("" ^ e)
-    | Ok user_blocks ->
+  let turn_instructions, direct_reply, channel_session_key, channel, user_blocks =
+    match direct_message with
+    | None -> None, false, None, "", None
+    | Some direct_message ->
+      let turn_instructions =
+        match
+          Keeper_invocation_contract.direct_message_turn_instructions direct_message
+        with
+        | Some _ as instructions -> instructions
+        | None ->
+          Option.bind
+            (Keeper_invocation_contract.direct_message_surface_context direct_message)
+            surface_context_to_instructions
+      in
+      ( turn_instructions
+      , Keeper_invocation_contract.direct_message_direct_reply direct_message
+      , Keeper_invocation_contract.direct_message_channel_session_key direct_message
+      , Keeper_invocation_contract.direct_message_channel direct_message
+      , Keeper_invocation_contract.direct_message_user_oas_blocks direct_message )
+  in
     match ensure_keeper_exists
       ~ctx ~name
     with
@@ -985,7 +939,7 @@ let run_keeper_invocation_turn_admitted_inner
               in
               tool_result_ok_data reply_json
 
-))))))))
+))))
 
 (* Turn-observation boundary for the chat lane.
 
@@ -1014,8 +968,8 @@ let run_keeper_invocation_turn_admitted
       ?continuation_channel
       ~surface
       ~request
+      ?direct_message
       ctx
-      args
   : tool_result
   =
   let base_path = ctx.config.base_path in
@@ -1038,8 +992,8 @@ let run_keeper_invocation_turn_admitted
       ?continuation_channel
       ~surface
       ~request
+      ?direct_message
       ctx
-      args
   with
   | result ->
     finish ();
@@ -1058,8 +1012,8 @@ let handle_keeper_invocation
       ?on_admitted
       ~surface
       ~request
+      ?direct_message
       ctx
-      args
   : tool_result
   =
   let event_bus =
@@ -1084,8 +1038,8 @@ let handle_keeper_invocation
                ?continuation_channel
                ~surface
                ~request
+               ?direct_message
                ctx
-               args
            | Error detail ->
              tool_result_error
                ("keeper turn admission persistence failed: " ^ detail))
@@ -1097,8 +1051,9 @@ let handle_keeper_invocation
             ?continuation_channel
             ~surface
             ~request
+            ?direct_message
             ctx
-            args)
+            )
     with
     | `Ran result -> result
     | `Rejected
@@ -1142,22 +1097,22 @@ let handle_keeper_msg
       ?on_admission_rejected
       ?on_admitted
       ctx
-      args
+      direct_message
   =
-  match direct_invocation_request args with
-  | Error error -> tool_result_error error
-  | Ok request ->
-    handle_keeper_invocation
-      ?on_text_delta
-      ?on_event
-      ?event_bus
-      ?continuation_channel
-      ?on_admission_rejected
-      ?on_admitted
-      ~surface:Direct_message
-      ~request
-      ctx
-      args
+  let request =
+    Keeper_invocation_contract.direct_message_request direct_message
+  in
+  handle_keeper_invocation
+    ?on_text_delta
+    ?on_event
+    ?event_bus
+    ?continuation_channel
+    ?on_admission_rejected
+    ?on_admitted
+    ~surface:Direct_message
+    ~request
+    ~direct_message
+    ctx
 ;;
 
 let handle_keeper_delegate ?event_bus ctx request =
@@ -1166,7 +1121,6 @@ let handle_keeper_delegate ?event_bus ctx request =
     ~surface:Keeper_delegate
     ~request
     ctx
-    (`Assoc [])
 ;;
 
 let handle_keeper_msg_if_free
@@ -1175,27 +1129,27 @@ let handle_keeper_msg_if_free
       ?event_bus
       ?continuation_channel
       ctx
-      args
+      direct_message
   =
   let event_bus =
     match event_bus with
     | Some _ -> event_bus
     | None -> Event_bus_slots.get_keeper ()
   in
-  match direct_invocation_request args with
-  | Error error -> `Ran (tool_result_error error)
-  | Ok request ->
-    let name = Keeper_invocation_contract.target_name request in
-    Keeper_turn_admission.run_chat_if_free
-      ~base_path:ctx.config.base_path
-      ~keeper_name:name
-      (fun () ->
-        run_keeper_invocation_turn_admitted
-          ?on_text_delta
-          ?on_event
-          ?event_bus
-          ?continuation_channel
-          ~surface:Direct_message
-          ~request
-          ctx
-          args)
+  let request =
+    Keeper_invocation_contract.direct_message_request direct_message
+  in
+  let name = Keeper_invocation_contract.target_name request in
+  Keeper_turn_admission.run_chat_if_free
+    ~base_path:ctx.config.base_path
+    ~keeper_name:name
+    (fun () ->
+      run_keeper_invocation_turn_admitted
+        ?on_text_delta
+        ?on_event
+        ?event_bus
+        ?continuation_channel
+        ~surface:Direct_message
+        ~request
+        ~direct_message
+        ctx)

@@ -5,30 +5,19 @@ const NOW = 1_000_000_000_000
 
 function beaconInput(overrides: Partial<Parameters<typeof computeBeaconView>[0]> = {}) {
   return {
-    wsOnly: true,
     connected: true,
     ready: true,
     lastEventAt: NOW - 1000,
     eventCount60s: 5,
     lastPongAt: 0,
     lastPongLatencyMs: null,
-    sseFallbackActive: false,
-    sseFallbackReason: null,
     now: NOW,
     ...overrides,
   }
 }
 
 describe('computeBeaconView', () => {
-  it('returns gray (parallel mode) when wsOnly is false', () => {
-    const view = computeBeaconView(beaconInput({
-      wsOnly: false,
-    }))
-    expect(view.state).toBe('gray')
-    expect(view.label).toBe('Client WS+SSE parallel')
-  })
-
-  it('returns red when wsOnly and the socket is not connected', () => {
+  it('returns red when the socket is not connected', () => {
     const view = computeBeaconView(beaconInput({
       connected: false,
       ready: false,
@@ -37,19 +26,7 @@ describe('computeBeaconView', () => {
     expect(view.label).toContain('disconnected')
   })
 
-  it('returns yellow SSE fallback when wsOnly but fallback is active', () => {
-    const view = computeBeaconView(beaconInput({
-      connected: false,
-      ready: false,
-      sseFallbackActive: true,
-      sseFallbackReason: 'dashboard websocket rpc timed out: dashboard/ping',
-    }))
-    expect(view.state).toBe('yellow')
-    expect(view.label).toBe('Client SSE fallback')
-    expect(view.title).toContain('dashboard/ping')
-  })
-
-  it('returns yellow when wsOnly, socket connected but handshake not ready', () => {
+  it('returns yellow when the socket is connected but handshake is not ready', () => {
     const view = computeBeaconView(beaconInput({
       ready: false,
     }))
@@ -57,7 +34,7 @@ describe('computeBeaconView', () => {
     expect(view.label).toBe('Client WS · handshaking')
   })
 
-  it('returns yellow when wsOnly, ready, but no event has ever arrived', () => {
+  it('returns yellow when ready but no event has ever arrived', () => {
     const view = computeBeaconView(beaconInput({
       lastEventAt: 0,
       eventCount60s: 0,
@@ -68,7 +45,7 @@ describe('computeBeaconView', () => {
     expect(view.title).not.toContain(String(Math.floor(NOW / 1000)))
   })
 
-  it('returns yellow when wsOnly, ready, but the last event is older than the silent threshold', () => {
+  it('returns yellow when ready but the last event is older than the silent threshold', () => {
     const view = computeBeaconView(beaconInput({
       lastEventAt: NOW - 60_000,
       eventCount60s: 0,
@@ -88,14 +65,14 @@ describe('computeBeaconView', () => {
     expect(view.label).toContain('41ms')
   })
 
-  it('returns green when wsOnly, ready, and an event arrived within the threshold', () => {
+  it('returns green when ready and an event arrived within the threshold', () => {
     const view = computeBeaconView(beaconInput({
       lastEventAt: NOW - 5_000,
       eventCount60s: 12,
     }))
     expect(view.state).toBe('green')
     expect(view.label).toContain('12 deltas / 60s')
-    expect(view.title).toContain('Client WS mode')
+    expect(view.title).toContain('Client WS is active')
   })
 
   it('uses computed silentMs in the title for diagnostic display', () => {

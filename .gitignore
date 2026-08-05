@@ -161,4 +161,9 @@ data/bench/
 memory/
 !dashboard/src/components/memory/
 
+# Golden-mismatch output. test_keeper_system_prompt_bytes writes the assembled
+# prompt next to the golden on failure so it can be diffed; it is a diagnostic,
+# never a committed artifact.
+*.golden.actual
+
 # End of .gitignore

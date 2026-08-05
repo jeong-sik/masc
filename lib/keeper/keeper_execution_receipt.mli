@@ -18,20 +18,13 @@ type outcome_kind =
   ]
 
 (** Stable serialisation: [`Ok -> "ok"], [`Skipped -> "skipped"],
-    [`Error -> "error"], [`Cancelled -> "cancelled"]. Used at the JSON
-    boundary while the receipt record still stores the legacy string
-    form. *)
+    [`Error -> "error"], [`Cancelled -> "cancelled"]. *)
 val outcome_kind_to_string : outcome_kind -> string
 
 (** TLA+ receipt symbol mapping: [`Ok] serializes as ["ok"] in JSON but
     corresponds to ["receipt_done"] in [KeeperTurnFSM.tla]; [`Error]
     similarly maps to ["receipt_failed"]. *)
 val outcome_kind_to_tla_receipt : outcome_kind -> string
-
-(** Parse the legacy string form. Recognises the four terminal kinds
-    and returns [None] for everything else (including ["unset"]) so
-    callers can decide whether to fail-closed or surface as [`Error]. *)
-val outcome_kind_of_string : string -> outcome_kind option
 
 (** [true] for [`Ok] and [`Skipped] (PhaseGateSkip is a successful
     no-op, not a failure). [false] for [`Error] and [`Cancelled].

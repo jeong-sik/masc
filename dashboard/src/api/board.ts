@@ -573,7 +573,6 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
   const responseRate = asNumber(raw.response_rate)
   const boardPosts = asNumber(raw.board_posts)
   const boardComments = asNumber(raw.board_comments)
-  const thompsonConfidence = asNumber(raw.thompson_confidence)
   const source = asString(raw.source, '').trim() || undefined
   const rawEvidenceState = asString(raw.evidence_state, '').trim()
   const evidenceState = rawEvidenceState === 'measured' || rawEvidenceState === 'default'
@@ -585,7 +584,6 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
     && responseRate === undefined
     && boardPosts === undefined
     && boardComments === undefined
-    && thompsonConfidence === undefined
     && source === undefined
     && evidenceState === undefined
   ) return null
@@ -595,7 +593,6 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
     response_rate: responseRate,
     board_posts: boardPosts,
     board_comments: boardComments,
-    thompson_confidence: thompsonConfidence,
     evidence_state: evidenceState,
   }
 }

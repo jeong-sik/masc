@@ -132,9 +132,6 @@ val record_task_metric_fn :
    handoff_to:string option ->
    unit) Atomic.t
 
-val record_thompson_result_fn :
-  (agent_name:string -> success:bool -> reason:string option -> unit) Atomic.t
-
 val push_task_event_fn :
   (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t
 

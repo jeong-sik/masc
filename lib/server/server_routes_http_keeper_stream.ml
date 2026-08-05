@@ -42,6 +42,7 @@ type keeper_chat_stream_request = {
   channel_user_name : string;
   channel_workspace_id : string;
   attachments : Keeper_chat_store.attachment list;
+  direct_message : Keeper_invocation_contract.direct_message;
 }
 
 let keeper_chat_stream_error_json message =
@@ -109,56 +110,24 @@ let chat_speaker_of_request payload =
       speaker_name = None;
       speaker_authority = Keeper_chat_store.Owner }
 
-let turn_instructions_for_request payload =
+let combined_turn_instructions ~turn_instructions ~surface_context =
   let ctx_text =
-    match payload.surface_context with
+    match surface_context with
     | Some ctx -> format_surface_context ctx
     | None -> ""
   in
-  match payload.turn_instructions with
+  match turn_instructions with
   | None -> if ctx_text = "" then None else Some ctx_text
   | Some ti ->
       if ctx_text = "" then Some ti
       else Some (ti ^ "\n\n" ^ ctx_text)
 
-let args_of_request payload : Yojson.Safe.t =
-  let message = message_for_request payload in
-  let base_fields =
-    [ ("name", `String payload.name);
-      ("message", `String message);
-      ("direct_reply", `Bool true) ]
-    @
-    (match turn_instructions_for_request payload with
-     | Some instructions when String.trim instructions <> "" ->
-         [ ("turn_instructions", `String instructions) ]
-     | _ -> [])
-  in
-  let connector_fields =
-    (if has_connector_context payload then
-       [ ("channel", `String payload.channel);
-         ("channel_workspace_id", `String payload.channel_workspace_id) ]
-     else [])
-    @
-    (if payload.channel_user_id <> "" then
-       [ ("channel_user_id", `String payload.channel_user_id) ]
-     else [])
-    @
-    (if payload.channel_user_name <> "" then
-       [ ("channel_user_name", `String payload.channel_user_name) ]
-     else [])
-  in
-  let fields = base_fields @ connector_fields in
-  let fields =
-    if payload.user_blocks = [] then fields
-    else
-      ("user_blocks", Keeper_multimodal_input.user_blocks_to_yojson payload.user_blocks)
-      :: fields
-  in
-  `Assoc
-    (if payload.attachments = [] then fields
-     else
-       ("attachments", Keeper_multimodal_input.attachments_to_yojson payload.attachments)
-       :: fields)
+let turn_instructions_for_request payload =
+  combined_turn_instructions
+    ~turn_instructions:payload.turn_instructions
+    ~surface_context:payload.surface_context
+
+let direct_message_of_request payload = payload.direct_message
 
 let modalities_for_request payload =
   match Keeper_multimodal_input.modalities payload.user_blocks with
@@ -531,99 +500,132 @@ let keeper_stream_success = function
 
 let parse_keeper_chat_stream_request body_str =
   try
+    let ( let* ) = Result.bind in
     let json = Yojson.Safe.from_string body_str in
-    if not (match json with `Assoc _ -> true | _ -> false) then
-      Error "request body must be a JSON object"
+    let* fields =
+      match json with
+      | `Assoc fields ->
+        let allowed =
+          [ "name"
+          ; "message"
+          ; "user_blocks"
+          ; "turn_instructions"
+          ; "surface_context"
+          ; "channel"
+          ; "channel_user_id"
+          ; "channel_user_name"
+          ; "channel_workspace_id"
+          ; "attachments"
+          ]
+        in
+        let keys = List.map fst fields in
+        if List.length keys <> List.length (List.sort_uniq String.compare keys)
+        then Error "request body must contain unique fields"
+        else
+          (match List.find_opt (fun key -> not (List.mem key allowed)) keys with
+           | None -> Ok fields
+           | Some key ->
+             Error
+               (Printf.sprintf
+                  "request body field %s is undeclared; accepted fields: %s"
+                  key
+                  (String.concat ", " allowed)))
+      | _ -> Error "request body must be a JSON object"
+    in
+    let required_string key =
+      match List.assoc_opt key fields with
+      | Some (`String value) -> Ok value
+      | Some _ -> Error (key ^ " must be a string")
+      | None -> Error (key ^ " is required")
+    in
+    let optional_string key =
+      match List.assoc_opt key fields with
+      | None -> Ok ""
+      | Some (`String value) -> Ok value
+      | Some _ -> Error (key ^ " must be a string")
+    in
+    let* name = required_string "name" |> Result.map String.trim in
+    let* raw_message = optional_string "message" |> Result.map String.trim in
+    let* channel = optional_string "channel" |> Result.map String.trim in
+    let* channel_user_id =
+      optional_string "channel_user_id" |> Result.map String.trim
+    in
+    let* channel_user_name =
+      optional_string "channel_user_name" |> Result.map String.trim
+    in
+    let* channel_workspace_id =
+      optional_string "channel_workspace_id" |> Result.map String.trim
+    in
+    let* turn_instructions =
+      match List.assoc_opt "turn_instructions" fields with
+      | None -> Ok None
+      | Some (`String value) ->
+        let value = String.trim value in
+        Ok (if String.equal value "" then None else Some value)
+      | Some _ -> Error "turn_instructions must be a string"
+    in
+    let* surface_context =
+      match List.assoc_opt "surface_context" fields with
+      | None | Some `Null -> Ok None
+      | Some (`Assoc _ as context) -> Ok (Some context)
+      | Some _ -> Error "surface_context must be an object"
+    in
+    let* attachments = Keeper_multimodal_input.parse_attachments json in
+    let* user_blocks = Keeper_multimodal_input.parse_user_blocks json in
+    let message =
+      if String.equal raw_message ""
+      then Keeper_multimodal_input.fallback_message ~attachments user_blocks
+      else raw_message
+    in
+    let has_connector_context =
+      channel <> "" || channel_user_id <> ""
+      || channel_user_name <> "" || channel_workspace_id <> ""
+    in
+    if has_connector_context && (channel = "" || channel_workspace_id = "")
+    then
+      Error
+        "channel and channel_workspace_id are required when connector context is supplied"
     else
-      let name = Json_util.get_string_with_default json ~key:"name" ~default:"" |> String.trim in
-      let raw_message =
-        Json_util.get_string_with_default json ~key:"message" ~default:""
-        |> String.trim
+      let invocation_prompt =
+        if channel <> "" && channel_workspace_id <> "" && channel_user_id <> ""
+        then
+          Gate_keeper_backend.contextualize_message
+            ~channel
+            ~channel_user_id
+            ~channel_user_name
+            ~channel_workspace_id
+            ~metadata:[]
+            ~content:message
+        else message
       in
-      let channel =
-        Json_util.get_string_with_default json ~key:"channel" ~default:""
-        |> String.trim
+      let combined_turn_instructions =
+        combined_turn_instructions ~turn_instructions ~surface_context
       in
-      let channel_user_id =
-        Json_util.get_string_with_default json ~key:"channel_user_id" ~default:""
-        |> String.trim
+      let* direct_message =
+        Keeper_invocation_contract.direct_message
+          ~keeper_name:name
+          ~prompt:invocation_prompt
+          ~direct_reply:true
+          ?turn_instructions:combined_turn_instructions
+          ~channel
+          ~user_blocks
+          ~attachments
+          ()
+        |> Result.map_error Keeper_invocation_contract.request_error_to_string
       in
-      let channel_user_name =
-        Json_util.get_string json "channel_user_name"
-        |> Option.value ~default:""
-        |> String.trim
-      in
-      let channel_workspace_id =
-        Json_util.get_string json "channel_workspace_id"
-        |> Option.value ~default:""
-        |> String.trim
-      in
-      let turn_instructions =
-        match Json_util.get_string json "turn_instructions" with
-        | None -> None
-        | Some s ->
-            let s = String.trim s in
-            if s = "" then None else Some s
-      in
-      let surface_context : Yojson.Safe.t option =
-        match Json_util.assoc_member_opt "surface_context" json with
-        | Some (`Assoc _ as obj) -> Some obj
-        | Some `Null | None -> None
-        | Some _ -> None
-      in
-      let has_connector_context =
-        channel <> "" || channel_user_id <> ""
-        || channel_user_name <> "" || channel_workspace_id <> ""
-      in
-      let attachments = Keeper_multimodal_input.parse_attachments json in
-      let user_blocks_result = Keeper_multimodal_input.parse_user_blocks json in
-      let message_of_blocks user_blocks =
-        match raw_message with
-        | "" ->
-            Keeper_multimodal_input.fallback_message ~attachments user_blocks
-        | message -> message
-      in
-      if name = "" then
-        Error "name is required"
-      else if has_connector_context
-              && (channel = "" || channel_workspace_id = "")
-      then
-        Error
-          "channel and channel_workspace_id are required when connector context is supplied"
-      else
-        match
-          Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" json
-        with
-        | Error err -> Error err
-        | Ok () -> (
-          match
-            Keeper_config.reject_removed_keeper_msg_input_keys
-              ~tool_name:"masc_keeper_msg"
-              json
-          with
-          | Error err -> Error err
-          | Ok () -> (
-            match user_blocks_result with
-            | Error err -> Error err
-            | Ok user_blocks ->
-              let message = message_of_blocks user_blocks in
-              if message = "" then
-                Error "message is required"
-              else
-              Ok
-                {
-                  name;
-                  message;
-                  user_blocks;
-                  turn_instructions;
-                  surface_context;
-                  channel;
-                  channel_user_id;
-                  channel_user_name;
-                  channel_workspace_id;
-                  attachments;
-                }
-          ))
+      Ok
+        { name
+        ; message
+        ; user_blocks
+        ; turn_instructions
+        ; surface_context
+        ; channel
+        ; channel_user_id
+        ; channel_user_name
+        ; channel_workspace_id
+        ; attachments
+        ; direct_message
+        }
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
 
@@ -721,7 +723,7 @@ let execute_keeper_stream_tool_streaming
       ?on_admitted
       state
       ~agent_name
-      ~arguments
+      ~message
       ~continuation_channel
       ~on_text_delta
   =
@@ -750,7 +752,7 @@ let execute_keeper_stream_tool_streaming
           ?on_admitted
           keeper_ctx
           ~continuation_channel
-          ~args:arguments
+          ~message
       with
       | Some result ->
           let body = Tool_result.message result in
@@ -832,7 +834,7 @@ let execute_keeper_stream_tool_streaming_if_free
       ?on_event
       state
       ~agent_name
-      ~arguments
+      ~message
       ~continuation_channel
       ~on_text_delta
   =
@@ -859,7 +861,7 @@ let execute_keeper_stream_tool_streaming_if_free
           ?on_event
           ~continuation_channel
           keeper_ctx
-          arguments
+          message
       with
       | `Busy rejection -> `Busy rejection
       | `Ran result ->
@@ -1429,7 +1431,7 @@ let process_single_turn ~user_row_origin ~submission
     ; Keeper_chat_store.Run_error
     ]
   in
-  let args = args_of_request payload in
+  let direct_message = direct_message_of_request payload in
   (* Stream model text deltas live with per-delta redaction. The typed OAS
      bridge owns per-provider-message state so only the final provider
      message controls terminal resend suppression; canonical terminal content
@@ -1982,7 +1984,7 @@ let process_single_turn ~user_row_origin ~submission
               match
                 execute_keeper_stream_tool_streaming_if_free ~sw:request_sw ~clock
                   ?auth_token
-                  state ~agent_name ~arguments:args ~on_event
+                  state ~agent_name ~message:direct_message ~on_event
                   ~continuation_channel
                   ~on_text_delta:(fun _ -> ())
               with
@@ -2007,7 +2009,7 @@ let process_single_turn ~user_row_origin ~submission
                    ~sw:request_sw
                    ~clock
                    ?auth_token
-                   state ~agent_name ~arguments:args ~on_event
+                   state ~agent_name ~message:direct_message ~on_event
                    ~continuation_channel ~on_text_delta:(fun _ -> ())
                    ?on_admitted
                with
@@ -3240,7 +3242,7 @@ module For_testing = struct
   let chat_surface_of_request = chat_surface_of_request
   let chat_speaker_of_request = chat_speaker_of_request
   let turn_instructions_for_request = turn_instructions_for_request
-  let args_of_request = args_of_request
+  let direct_message_of_request = direct_message_of_request
   let defer_dashboard_payload_if_busy_evidence
         ~base_path
         ~clock

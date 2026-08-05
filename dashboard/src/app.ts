@@ -6,7 +6,7 @@
 // existing `DashboardMain` surface dispatcher, so every surface keeps
 // rendering while it is migrated to the prototype DOM in stacked follow-ups.
 //
-// All lifecycle wiring (router, WS, SSE reaction, periodic refresh, dev-token,
+// All lifecycle wiring (router, WS push reaction, periodic refresh, dev-token,
 // config thresholds, cleanup, volt/theme sync) is preserved verbatim from the
 // previous shell — only the rendered DOM changed.
 
@@ -17,7 +17,7 @@ import { signal } from '@preact/signals'
 import { persistentSignal } from './lib/persistent-signal'
 import { route, initRouter } from './router'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
-import { cancelPendingSSERefreshes, registerGateRefresh, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
+import { cancelPendingServerPushRefreshes, registerGateRefresh, registerMissionRefresh, setupServerPushReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { initNotificationDelivery } from './notifications'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
@@ -214,7 +214,7 @@ export function App() {
     refreshGateLazy()
 
 
-    const unsubSSE = setupSSEReaction()
+    const unsubscribeServerPush = setupServerPushReaction()
     const unsubNotify = initNotificationDelivery()
     startPeriodicRefresh()
     startErrorCleanup()
@@ -223,7 +223,7 @@ export function App() {
     return () => {
       cancelled = true
       disconnectDashboardWS()
-      unsubSSE()
+      unsubscribeServerPush()
       unsubNotify()
       stopPeriodicRefresh()
       stopErrorCleanup()
@@ -243,7 +243,7 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    cancelPendingSSERefreshes()
+    cancelPendingServerPushRefreshes()
     subscribeDashboardRoute(route.value).catch(err => {
       console.warn('[dashboard] subscribeDashboardRoute failed', err)
     })

@@ -270,10 +270,6 @@ let record_task_metric_fn
      unit) Atomic.t
   = Atomic.make (fun _config ~agent_id:_ ~task_id:_ ~started_at:_ ~completed_at:_ ~success:_ ~error_message:_ ~collaborators:_ ~handoff_from:_ ~handoff_to:_ -> ())
 
-let record_thompson_result_fn
-  : (agent_name:string -> success:bool -> reason:string option -> unit) Atomic.t
-  = Atomic.make (fun ~agent_name:_ ~success:_ ~reason:_ -> ())
-
 let push_task_event_fn
   : (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t
   = Atomic.make (fun ~event_type:_ ~details:_ -> ())

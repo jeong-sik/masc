@@ -33,10 +33,8 @@ let receipt_duration_ms receipt =
    classify a receipt and falls through to the catch-all
    [(Disp_unknown, Reason_unmapped_runtime_state)].
 
-   This counter alerts operators if a future refactor reintroduces a
-   silent path — a non-zero rate is a regression signal.  Companion
-   to the existing PR #11651 narrative documented at the fall-through
-   case below ([match outcome_kind_of_string ...] catch-all). *)
+   This counter alerts operators if a future refactor leaves a receipt
+   tuple outside the typed classification below. *)
 let () =
   Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string ReceiptUnmappedDisposition)

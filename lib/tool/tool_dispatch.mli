@@ -178,20 +178,13 @@ val tag_registry_count : unit -> int
 val mark_tag_registry_initialized : unit -> unit
 val is_tag_registry_initialized : unit -> bool
 
-(** {1 Did-you-mean Suggestions (#9784)} *)
+(** {1 Registry Enumeration} *)
 
 val all_registered_names : unit -> string list
 (** Every tool name registered in the tag registry. Handler-only
-    registrations are intentionally invisible. Iteration order is
-    unspecified. *)
+    registrations have no tag entry, so they never appear here. Iteration
+    order is unspecified. *)
 
 val all_schema_names : unit -> string list
 (** Every tool name registered in the schema registry. Iteration order is
     unspecified. *)
-
-val find_similar_names :
-  ?limit:int -> ?min_score:float -> query:string -> unit -> string list
-(** Return up to [limit] (default 3) tool names from the registries with
-    [Text_similarity.jaccard_similarity] to [query] >= [min_score]
-    (default 0.4), sorted by similarity descending. Used to enrich
-    Unknown tool errors with self-correction hints for LLM clients. *)

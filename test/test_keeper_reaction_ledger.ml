@@ -252,15 +252,9 @@ let test_current_rows_require_complete_writer_shape () =
     (List.mem "missing_reaction_post_id" reasons)
 ;;
 
-(* The durable board-cursor-ack write path ([record_board_cursor_ack]) was
-   removed: it wrote rows nobody restored a cursor from (producer without a
-   restore-side consumer). Historical stores may still carry
-   [record_kind = "cursor_ack"] rows from before the removal; the classifier's
-   [_ -> Error Unknown_record_kind] fallback must quarantine them per-row
-   rather than fail the whole read. *)
-let test_legacy_cursor_ack_row_is_quarantined_not_fatal () =
+let test_unknown_record_kind_is_quarantined_not_fatal () =
   with_temp_base @@ fun base_path ->
-  let keeper_name = "legacy-cursor-ack-keeper" in
+  let keeper_name = "unknown-record-kind-keeper" in
   let stimulus = board_stimulus ~post_id:"post-99" () in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
   Keeper_reaction_ledger.record_event_queue_stimulus
@@ -271,23 +265,11 @@ let test_legacy_cursor_ack_row_is_quarantined_not_fatal () =
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
         [ "schema", `String "keeper.reaction_ledger.v5"
-        ; "record_kind", `String "cursor_ack"
-        ; "event_id", `String "krl:legacy-cursor-ack-fixture"
+        ; "record_kind", `String "unexpected"
+        ; "event_id", `String "krl:unknown-record-kind-fixture"
         ; "keeper_name", `String keeper_name
         ; "recorded_at_unix", `Float 5678.25
         ; "stimulus_id", `String stimulus_id
-        ; ( "cursor"
-          , `Assoc
-              [ "scope", `String "board"
-              ; "cursor_ts", `Float 5678.25
-              ; "post_id", `String "post-99"
-              ] )
-        ; ( "reaction"
-          , `Assoc
-              [ "kind", `String "cursor_ack"
-              ; "source", `String "keeper_world_observation.board_cursor"
-              ; "cursor_acked", `Bool true
-              ] )
         ]);
   match
     Keeper_reaction_ledger.event_queue_reaction_evidence_result
@@ -297,19 +279,19 @@ let test_legacy_cursor_ack_row_is_quarantined_not_fatal () =
   with
   | Error error ->
     failf
-      "legacy cursor_ack row must not surface a fatal evidence read error: %s"
+      "unknown record kind must not surface a fatal evidence read error: %s"
       (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
   | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
-    fail "legacy cursor_ack row must be quarantined, not silently accepted"
+    fail "unknown record kind must be quarantined, not silently accepted"
   | Ok
       (Keeper_reaction_ledger.Evidence_quarantined
         { evidence; first_reason }) ->
     check bool "normal stimulus row still matches" true evidence.stimulus_seen;
     check int "one row matches (the stimulus)" 1 evidence.matched_record_count;
-    check int "legacy cursor_ack row is quarantined" 1
+    check int "unknown record kind is quarantined" 1
       evidence.quarantined_record_count;
     check string
-      "legacy cursor_ack row is an unknown record kind"
+      "quarantine reason is unknown record kind"
       "unknown_record_kind"
       (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
 ;;
@@ -1053,9 +1035,9 @@ let () =
             `Quick
             test_current_rows_require_complete_writer_shape
         ; test_case
-            "legacy cursor_ack row is quarantined, not fatal"
+            "unknown record kind is quarantined, not fatal"
             `Quick
-            test_legacy_cursor_ack_row_is_quarantined_not_fatal
+            test_unknown_record_kind_is_quarantined_not_fatal
         ; test_case
             "summary marks unreacted and reacted stimuli"
             `Quick

@@ -77,7 +77,7 @@ board·task 등의 기능이 **두 소비자(MCP 클라이언트 / keeper 모델
 
 ### 3.2 기본 동사 + 발견 (측정으로 재정의됨, 2026-08-04)
 
-> **거짓 전제 정정**: 이 절의 초안은 "`keeper_tool_search` 는 **이미 표면에 존재**한다 (인프라 있음, 정리만 안 됨)"고 적었다. **실측 결과 거짓.** `keeper_tool_search` 는 발견 도구가 아니라 **이번 턴에 이미 노출된 집합(`keeper_tools`)을 Jaccard 유사도로 re-rank 하던 visible-set 필터**였다 — 핸들러가 모든 결과에 `"already_visible": true` 를 하드코딩했다. 8월 keeper 호출 **0회**. 랭킹은 `Text_similarity.jaccard_similarity` = 하드코딩 휴리스틱(교리 위반).
+> **거짓 전제 정정**: 이 절의 초안은 "`keeper_tool_search` 는 **이미 표면에 존재**한다 (인프라 있음, 정리만 안 됨)"고 적었다. **실측 결과 거짓.** `keeper_tool_search` 는 발견 도구가 아니라 **이번 턴에 이미 노출된 집합(`keeper_tools`)을 Jaccard 유사도로 re-rank 하던 visible-set 필터**였다 — 핸들러가 모든 결과에 `"already_visible": true` 를 하드코딩했다. 8월 keeper 호출 **0회**. 랭킹은 `Text_similarity.jaccard_similarity` = 하드코딩 휴리스틱(교리 위반)이었다.
 >
 > **현재 상태 (2026-08-04)**: 이 vestige 는 **#26785 (`3ac0b0b87e`) 로 이미 제거되어 main 에 없다.** `already_visible` / `rank_tool_schemas` / `ranked_tool_schema` / `keeper_tool_search_schema` / `Tool_tool_search` 전부 `origin/main` 기준 0건. 따라서 아래 3개 신규 능력은 "고칠 것"이 아니라 **처음부터 만들 것**이다.
 
@@ -111,7 +111,7 @@ board·task 등의 기능이 **두 소비자(MCP 클라이언트 / keeper 모델
 1. **명명 SSOT 도입 + 중복쌍 수렴**: 12 변주쌍이 하나의 레지스트리 엔트리를 투영하게. 삭제는 소비자 전수 이관 **후**에만. (실측: 각 쌍은 keeper 기준 한쪽만 라이브지만 코드 소비자는 양쪽 다 라이브 → 삭제-먼저 금지)
 2. **`masc_keeper_*` 이중 접두어 15개 정리**: `keeper_*` 또는 도메인 규칙으로.
 3. **tool_profile → surfaces 투영**: variant + 배관 제거 (별도 PR, execute/call_tool/protocol).
-4. ~~**`keeper_tool_search` vestige 제거**~~ — **완료: #26785 (`3ac0b0b87e`)**. 랭커(`rank_tool_schemas`/`ranked_tool_schema`/`keeper_tool_search_schema`) + `Tool_tool_search` variant + `search_fn` 배관 제거됨. `find_similar_names`(`tool_dispatch.ml:316`, unknown-tool 오타 제안)와 `Text_similarity.jaccard_similarity` 는 별개 정당 용도로 **유지됨**(main 4파일 라이브).
+4. ~~**`keeper_tool_search` vestige 제거**~~ — **완료: #26785 (`3ac0b0b87e`)**. 랭커(`rank_tool_schemas`/`ranked_tool_schema`/`keeper_tool_search_schema`) + `Tool_tool_search` variant + `search_fn` 배관 제거됨. `find_similar_names` 와 `Text_similarity` 도 함께 제거됨: 유사도 랭킹은 unknown-tool 오타 제안에서도 같은 하드코딩 휴리스틱이었고, `min_score = 0.4` 를 정당화한 `12c4ec83b3` 의 예시 2건 중 하나(`masc_post` → `masc_board_post` = 0.2222)가 자기 임계값 아래였다. Unknown tool 에러는 제안 없이 단일 형식으로 축소.
    - **잔여 (미완)**: 제거 후 소비자 스윕이 끝나지 않았다. `scripts/harness_tool_call_quality.sh` 의 벤치마크 케이스 3개(`read_search_prompt_fingerprint`, `recovery_after_failed_read`, `multi_step_board_update`)가 `tool_name == "keeper_tool_search"` 호출 유무로 `completed` 를 판정한다(`derive_final_result` :471/:507/:520 → `task_success_from_final_result`). 도구가 없으므로 keeper 는 그 호출을 낼 수 없고 세 케이스는 **품질과 무관하게 영구 실패**한다. 4케이스 중 남는 건 `text_only_triage`(도구 0회 요구) 하나. 이 스크립트는 `docs/BENCHMARK-RUNBOOK.md` / `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` 가 지목하는 라이브 경로다. → **#26811**.
 5. **(조건부) base+search 실발견 빌드**: §3.2 의 3개 신규 능력 구현. **선행 게이트**: per-turn 스키마 토큰 비용 측정이 빌드를 정당화할 때만. 아니면 drop.
 

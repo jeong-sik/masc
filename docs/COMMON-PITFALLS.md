@@ -172,11 +172,10 @@ Keeper system prompts are cached in checkpoints. After changing prompts:
 
 ## 8. Feature Flag Registry Duplicates (ADR-003)
 
-Feature flags는 `lib/config/feature_flag_registry.ml`에 중앙 등록되어야 한다. 최근 발견된 문제:
+Feature flags는 `lib/config/feature_flag_registry.ml`에 중앙 등록되어야 한다.
 
 **Common Pattern: Concurrent Merge로 인한 중복 등록**
 ```bash
-# PR #3793: MASC_KEEPER_WORK_AS_HEARTBEAT가 3번 등록됨 (lines 95, 130, 140)
 # 두 feature branch가 독립적으로 같은 플래그를 추가 → merge conflict 없이 통과
 ```
 
@@ -203,7 +202,6 @@ rg "get_bool.*MASC_YOUR_FLAG" lib/config/
 - [ ] env_name이 unique한가?
 - [ ] config module의 default가 registry와 일치하는가?
 - [ ] lifecycle 상태가 올바른가?
-- [ ] since version이 정확한가?
 
 상세: `docs/ADR-003-FEATURE-FLAG-REGISTRY-MANAGEMENT.md`
 

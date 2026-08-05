@@ -14,7 +14,6 @@
     - [keeper_lifecycle] — heartbeat / supervisor / restart limits
     - [keeper_handoff] — handoff threshold / cooldown / pressure
     - [keeper_diagnostics] — snapshot / hb tuning / profiling ring
-    - [drift_guard] — handoff drift classification thresholds
     - [keeper_turn] / [keeper_proactive] / [keeper_rules] — keeper LLM tuning surfaces
     - [dashboard] — display-only thresholds + truncation lengths
 
@@ -61,22 +60,6 @@ val keeper_work_as_hb_max_silence_sec : float Runtime_params.param
 val keeper_stage_timing_ring_size : int Runtime_params.param
 (** Stage-timing ring buffer size.  Applied on fiber restart only —
     runtime mutation requires keeper restart.  Range \[10, 1000]. *)
-
-(** {1 Drift guard (uncalibrated)} *)
-
-val drift_factual_coverage_floor : float Runtime_params.param
-(** Token-coverage floor — handoffs below this are flagged as
-    factual drift.  Range \[0.0, 1.0].  Default 0.55.  Initial
-    estimate; not corpus-calibrated. *)
-
-val drift_factual_size_ratio_floor : float Runtime_params.param
-(** Size-ratio floor (handoff/original) — captures
-    "content replaced" vs "content edited".  Range \[0.0, 1.0].
-    Default 0.6. *)
-
-val drift_structural_divergence_threshold : float Runtime_params.param
-(** Cosine-jaccard divergence threshold for structural drift.
-    Range \[0.0, 1.0].  Default 0.18. *)
 
 (** {1 Dashboard rendering} *)
 

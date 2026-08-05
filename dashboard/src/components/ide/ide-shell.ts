@@ -38,7 +38,7 @@ import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeMemoryPanel } from './ide-memory-panel'
 import { routeLinksForContext } from './ide-context-lens'
 import {
-  connectKeeperCursorStream,
+  connectKeeperCursorPush,
   cursorOverlaySignal,
   getKeeperColor,
   type KeeperCursor,
@@ -51,11 +51,9 @@ import { showToast } from '../common/toast'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
-import { connected } from '../../sse'
 import { dashboardBearerToken } from '../../api/core'
 import { devTokenBootstrapStatus } from '../../api/dev-token'
-import { dashboardWsOnlyEnabled } from '../../dashboard-ws-cutover'
-import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../../dashboard-ws-state'
+import { dashboardWsReady } from '../../dashboard-ws-state'
 import type { Repository } from '../../api/repositories'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import { KeeperBadge } from '../keeper-badge'
@@ -332,10 +330,7 @@ function statusbarWorkspaceLabel(
 }
 
 function dashboardRuntimeConnected(): boolean {
-  if (dashboardWsOnlyEnabled()) {
-    return dashboardWsConnected.value || dashboardWsSseFallbackActive.value
-  }
-  return connected.value
+  return dashboardWsReady.value
 }
 
 /**
@@ -943,7 +938,7 @@ export function IdeShell() {
       }
       return
     }
-    return connectKeeperCursorStream('', (overlay) => {
+    return connectKeeperCursorPush((overlay) => {
       cursorOverlaySignal.value = { ...overlay, stream: cursorOverlaySignal.value.stream }
     }, {
       repoId,

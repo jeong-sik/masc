@@ -5,7 +5,7 @@ module Types = Masc_domain
     Tests for the standardized API response envelope:
     - Basic success/error responses
     - Recovery hints formatting
-    - Domain-specific responses (drift, lock, task)
+    - Domain-specific responses (lock, task)
     - JSON serialization
 *)
 
@@ -263,71 +263,6 @@ let test_timeout () =
    6. Domain-Specific Response Tests
    ======================================== *)
 
-let test_drift_detected () =
-  let resp = Response.drift_detected
-    ~similarity:0.72
-    ~drift_type:"factual"
-    ~threshold:0.85
-    ~details:"Content mismatch detected" in
-  (* Verify success is false *)
-  assert_true "success is false" (not resp.success);
-
-  (* Verify ACTUAL VALUES in data, not just presence *)
-  assert_float_equal "similarity value" ~epsilon:0.001 0.72 (json_get_float resp.data "similarity");
-  assert_equal_string "drift_type value" "factual" (json_get_string resp.data "drift_type");
-  assert_float_equal "threshold value" ~epsilon:0.001 0.85 (json_get_float resp.data "threshold");
-
-  (* Verify error structure *)
-  let err = List.hd resp.errors in
-  assert_equal_string "code" "DRIFT_DETECTED" err.code;
-  assert_true "severity is Warning" (err.severity = Response.Warning);
-  assert_equal_string "error message" "Content mismatch detected" err.message;
-
-  (* Verify factual-specific hints contain expected content *)
-  assert_true "has >= 2 hints" (List.length err.recovery_hints >= 2);
-  let hints_concat = String.concat " " err.recovery_hints in
-  assert_true "factual hint mentions 'source agent'" (
-    try Str.search_forward (Str.regexp_case_fold "source agent") hints_concat 0 >= 0
-    with Not_found -> false);
-  Printf.printf "  test_drift_detected passed\n"
-
-let test_drift_detected_semantic () =
-  let resp = Response.drift_detected
-    ~similarity:0.80
-    ~drift_type:"semantic"
-    ~threshold:0.85
-    ~details:"Meaning diverged" in
-
-  (* Verify actual values *)
-  assert_float_equal "similarity" ~epsilon:0.001 0.80 (json_get_float resp.data "similarity");
-  assert_equal_string "drift_type" "semantic" (json_get_string resp.data "drift_type");
-
-  let err = List.hd resp.errors in
-  (* Semantic drift should have specific hints *)
-  assert_true "has >= 2 semantic hints" (List.length err.recovery_hints >= 2);
-
-  (* Verify threshold is mentioned with actual value in hints *)
-  let hints_concat = String.concat " " err.recovery_hints in
-  assert_true "hint mentions 'threshold'" (
-    try Str.search_forward (Str.regexp "threshold") hints_concat 0 >= 0
-    with Not_found -> false);
-  assert_true "hint contains threshold value 0.85" (
-    try Str.search_forward (Str.regexp "0\\.85") hints_concat 0 >= 0
-    with Not_found -> false);
-  Printf.printf "  test_drift_detected_semantic passed\n"
-
-let test_handoff_verified () =
-  let resp = Response.handoff_verified ~similarity:0.95 in
-  assert_true "success is true" resp.success;
-  (* Verify ACTUAL values *)
-  assert_float_equal "similarity value" ~epsilon:0.001 0.95 (json_get_float resp.data "similarity");
-  assert_true "verified is true" (json_get_bool_value resp.data "verified");
-  (* Verify message contains percentage *)
-  assert_true "message contains 95%" (
-    try Str.search_forward (Str.regexp "95") resp.message 0 >= 0
-    with Not_found -> false);
-  Printf.printf "  test_handoff_verified passed\n"
-
 let test_task_claimed () =
   let resp = Response.task_claimed ~task_id:"task-001" ~agent:"claude" in
   assert_true "success is true" resp.success;
@@ -393,22 +328,6 @@ let test_error_vs_ok_are_distinct () =
   assert_true "ok has no errors" (List.length ok_resp.errors = 0);
   assert_true "err has errors" (List.length err_resp.errors > 0);
   Printf.printf "  test_error_vs_ok_are_distinct passed\n"
-
-let test_different_drift_types_have_different_hints () =
-  let factual = Response.drift_detected ~similarity:0.7 ~drift_type:"factual" ~threshold:0.85 ~details:"d" in
-  let semantic = Response.drift_detected ~similarity:0.7 ~drift_type:"semantic" ~threshold:0.85 ~details:"d" in
-  let structural = Response.drift_detected ~similarity:0.7 ~drift_type:"structural" ~threshold:0.85 ~details:"d" in
-
-  let get_hints resp = (List.hd resp.Response.errors).recovery_hints in
-  let factual_hints = get_hints factual in
-  let semantic_hints = get_hints semantic in
-  let structural_hints = get_hints structural in
-
-  (* Each type should have DIFFERENT hints *)
-  assert_true "factual != semantic hints" (factual_hints <> semantic_hints);
-  assert_true "semantic != structural hints" (semantic_hints <> structural_hints);
-  assert_true "factual != structural hints" (factual_hints <> structural_hints);
-  Printf.printf "  test_different_drift_types_have_different_hints passed\n"
 
 let test_severity_of_string_rejects_invalid () =
   (* Invalid strings MUST return Error, not silently pass *)
@@ -487,16 +406,12 @@ let () =
   test_timeout ();
 
   Printf.printf "\n--- 6. Domain-Specific Response Tests ---\n";
-  test_drift_detected ();
-  test_drift_detected_semantic ();
-  test_handoff_verified ();
   test_task_claimed ();
   test_task_already_claimed ();
   test_task_completed ();
 
   Printf.printf "\n--- 7. Negative Tests ---\n";
   test_error_vs_ok_are_distinct ();
-  test_different_drift_types_have_different_hints ();
   test_severity_of_string_rejects_invalid ();
 
   Printf.printf "\n--- 8. Edge Case Tests ---\n";

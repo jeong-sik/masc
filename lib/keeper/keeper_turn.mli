@@ -22,8 +22,8 @@ val handle_keeper_up : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_r
     @since 2.110.0 *)
 val preflight_keeper_msg :
   _ Keeper_types_profile.context ->
-  Yojson.Safe.t ->
-  (Keeper_invocation_contract.request, string) result
+  Keeper_invocation_contract.direct_message ->
+  (Keeper_invocation_contract.direct_message, string) result
 (** Run synchronous validation for [handle_keeper_msg] before an async wrapper
     accepts the turn for later execution. *)
 
@@ -139,7 +139,9 @@ val handle_keeper_msg :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?on_admission_rejected:(Keeper_turn_admission.rejection -> unit) ->
   ?on_admitted:(unit -> (unit, string) result) ->
-  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
+  _ Keeper_types_profile.context ->
+  Keeper_invocation_contract.direct_message ->
+  tool_result
 (** [event_bus] is captured at the handler boundary and reused by the admitted
     turn body. Callers that omit it keep the process/domain fallback, but
     async wrappers should pass an explicit value captured before submitting the
@@ -163,7 +165,7 @@ val handle_keeper_msg_if_free :
   ?event_bus:Agent_sdk.Event_bus.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   _ Keeper_types_profile.context ->
-  Yojson.Safe.t ->
+  Keeper_invocation_contract.direct_message ->
   [ `Ran of tool_result | `Busy of Keeper_turn_admission.rejection ]
 (** Non-blocking chat entrypoint for direct dashboard streaming. It runs the
     same admitted turn body as [handle_keeper_msg] only when the keeper slot is

@@ -167,8 +167,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_surface.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface_ops.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_visibility_projection.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_visibility_projection.mli` - tool-surface-policy
 - `lib/keeper/keeper_tools_oas_bundle.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_bundle.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_exec.ml` - oas-tool-bridge

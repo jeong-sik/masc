@@ -1,14 +1,11 @@
 (** Structured attribution envelope for gate decisions.
 
-    Carries "who/where/what/why" for each pass/fail decision emitted
+    Carries "who/where/what/why" for each pass/fail decision produced
     by the verification gates (verification,
     accountability, keeper_fsm, oas_completion, agent_lifecycle,
-    task_transition, exec_policy). Propagates through SSE as an
-    optional field on every event so the dashboard can trace causality.
-
-    The existing [reason] / [reason_code] SSE fields remain untouched
-    for backward compatibility. Emitters MAY additionally attach this
-    typed envelope; consumers that don't understand it skip the field.
+    task_transition, exec_policy). Producers record the typed envelope in
+    {!Dashboard_attribution}; the attribution HTTP route projects it with
+    {!to_yojson}.
 
     Design note — sum types over products:
     The outcome is a proper sum. Each case carries exactly the fields
@@ -17,7 +14,7 @@
     the from/to states. Illegal states are unrepresentable. See MEMORY
     `parse-dont-validate`.
 
-    @since 2.261.0 *)
+    *)
 
 type origin = Det | NonDet
 (** Decision nature. [Det] is rule-based logic whose verdict follows
@@ -81,16 +78,6 @@ val to_yojson : t -> Yojson.Safe.t
                                "from_state":"...","to_state":"...","reason":"..."}]
     - [Partial_pass]       → [{"kind":"partial_pass",
                                "score":0.85,"rationale":"..."}] *)
-
-val of_yojson : Yojson.Safe.t -> (t, string) result
-(** Deserialize a current attribution envelope from JSON. Inverse of
-    {!to_yojson}; rejects envelopes that omit required fields, including
-    [evidence]. *)
-
-val of_legacy_yojson : Yojson.Safe.t -> (t, string) result
-(** Explicit compatibility decoder for historical attribution rows that
-    predate the required [evidence] field. Missing [evidence] is decoded as
-    JSON null only through this legacy entry point. *)
 
 val show : t -> string
 (** Concise debug representation. Long fields (evidence, reason,

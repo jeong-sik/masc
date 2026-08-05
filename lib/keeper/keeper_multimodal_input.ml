@@ -23,42 +23,85 @@ let attachment_to_yojson (att : Keeper_chat_store.attachment) =
 let attachments_to_yojson attachments =
   `List (List.map attachment_to_yojson attachments)
 
-let parse_attachment json =
-  match json with
-  | `Assoc _ ->
-      let id =
-        Json_util.get_string_with_default json ~key:"id" ~default:""
-        |> String.trim
-      in
-      let att_type =
-        Json_util.get_string_with_default json ~key:"type" ~default:""
-        |> String.trim
-      in
-      let name =
-        Json_util.get_string_with_default json ~key:"name" ~default:""
-        |> String.trim
-      in
-      let size =
-        match Json_util.assoc_member_opt "size" json with
-        | Some (`Int n) when n >= 0 -> n
-        | _ -> 0
-      in
-      let mime_type =
-        Json_util.get_string_with_default json ~key:"mime_type" ~default:""
-        |> String.trim
-      in
-      let data =
-        Json_util.get_string_with_default json ~key:"data" ~default:""
-      in
-      if id = "" || data = "" then None
-      else
-        Some { Keeper_chat_store.id; att_type; name; size; mime_type; data }
-  | _ -> None
+let ( let* ) = Result.bind
+
+let exact_object_fields ~field ~allowed = function
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    if List.length keys <> List.length (List.sort_uniq String.compare keys)
+    then Error (field ^ " must contain unique fields")
+    else
+      (match List.find_opt (fun key -> not (List.mem key allowed)) keys with
+       | Some key ->
+         Error
+           (Printf.sprintf
+              "%s.%s is undeclared; accepted fields: %s"
+              field
+              key
+              (String.concat ", " allowed))
+       | None -> Ok fields)
+  | _ -> Error (field ^ " must be a JSON object")
+;;
+
+let required_string ~field key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> Ok value
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a string" field key)
+  | None -> Error (Printf.sprintf "%s.%s is required" field key)
+;;
+
+let optional_string ~field key fields =
+  match List.assoc_opt key fields with
+  | None -> Ok ""
+  | Some (`String value) -> Ok value
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a string" field key)
+;;
+
+let parse_attachment ~index json =
+  let field = Printf.sprintf "attachments[%d]" index in
+  let* fields =
+    exact_object_fields
+      ~field
+      ~allowed:[ "id"; "type"; "name"; "size"; "mime_type"; "data" ]
+      json
+  in
+  let* id = required_string ~field "id" fields in
+  let* att_type = optional_string ~field "type" fields in
+  let* name = optional_string ~field "name" fields in
+  let* mime_type = optional_string ~field "mime_type" fields in
+  let* data = required_string ~field "data" fields in
+  let* size =
+    match List.assoc_opt "size" fields with
+    | None -> Ok 0
+    | Some (`Int size) when size >= 0 -> Ok size
+    | Some (`Int _) -> Error (field ^ ".size must be non-negative")
+    | Some _ -> Error (field ^ ".size must be an integer")
+  in
+  let id = String.trim id in
+  if String.equal id "" then Error (field ^ ".id must be non-empty")
+  else if String.equal data "" then Error (field ^ ".data must be non-empty")
+  else
+    Ok
+      { Keeper_chat_store.id
+      ; att_type = String.trim att_type
+      ; name = String.trim name
+      ; size
+      ; mime_type = String.trim mime_type
+      ; data
+      }
 
 let parse_attachments json =
   match Json_util.assoc_member_opt "attachments" json with
-  | Some (`List attachments) -> List.filter_map parse_attachment attachments
-  | _ -> []
+  | None | Some `Null -> Ok []
+  | Some (`List attachments) ->
+    let rec loop index acc = function
+      | [] -> Ok (List.rev acc)
+      | attachment :: rest ->
+        let* attachment = parse_attachment ~index attachment in
+        loop (index + 1) (attachment :: acc) rest
+    in
+    loop 0 [] attachments
+  | Some _ -> Error "attachments must be an array"
 
 let user_media_block_to_yojson kind (media : user_media_block) =
   let fields =
@@ -83,69 +126,70 @@ let user_block_to_yojson = function
 let user_blocks_to_yojson blocks =
   `List (List.map user_block_to_yojson blocks)
 
-let parse_user_media_block ~(kind : string) json =
-  let attachment_id =
-    Json_util.get_string_with_default json ~key:"attachment_id" ~default:""
-    |> String.trim
-  in
-  let name =
-    Json_util.get_string_with_default json ~key:"name" ~default:""
-    |> String.trim
-  in
-  let mime_type =
-    Json_util.get_string_with_default json ~key:"mime_type" ~default:""
-    |> String.trim
-  in
+let parse_user_media_block ~(kind : string) fields =
+  let field = "user_blocks " ^ kind ^ " block" in
+  let* attachment_id = required_string ~field "attachment_id" fields in
+  let* name = optional_string ~field "name" fields in
+  let* mime_type = optional_string ~field "mime_type" fields in
   let size =
-    match Json_util.assoc_member_opt "size" json with
-    | None | Some `Null -> Ok None
+    match List.assoc_opt "size" fields with
+    | None -> Ok None
     | Some (`Int size) when size >= 0 -> Ok (Some size)
-    | Some (`Int _) -> Error "user_blocks media size must be non-negative"
-    | Some _ -> Error "user_blocks media size must be an integer"
+    | Some (`Int _) -> Error (field ^ ".size must be non-negative")
+    | Some _ -> Error (field ^ ".size must be an integer")
   in
+  let attachment_id = String.trim attachment_id in
   if attachment_id = "" then
     Error (Printf.sprintf "user_blocks %s block requires attachment_id" kind)
   else
     match size with
     | Error err -> Error err
-    | Ok size -> Ok { attachment_id; name; mime_type; size }
+    | Ok size ->
+      Ok
+        { attachment_id
+        ; name = String.trim name
+        ; mime_type = String.trim mime_type
+        ; size
+        }
 
 let parse_user_input_block json =
-  match json with
-  | `Assoc _ ->
-      let block_type =
-        Json_util.get_string_with_default json ~key:"type" ~default:""
-        |> String.trim
-        |> String.lowercase_ascii
-      in
-      (match block_type with
-       | "text" ->
-           let text =
-             Json_util.get_string_with_default json ~key:"text" ~default:""
-             |> String.trim
-           in
-           if text = "" then
-             Error "user_blocks text block requires non-empty text"
-           else Ok (User_text text)
-       | "image" ->
-           Result.map
-             (fun media -> User_image media)
-             (parse_user_media_block ~kind:"image" json)
-       | "document" ->
-           Result.map
-             (fun media -> User_document media)
-             (parse_user_media_block ~kind:"document" json)
-       | "audio" ->
-           Result.map
-             (fun media -> User_audio media)
-             (parse_user_media_block ~kind:"audio" json)
-       | "" -> Error "user_blocks block requires type"
-       | other ->
-           Error
-             (Printf.sprintf
-                "unsupported user_blocks type %S: expected text, image, document, or audio"
-                other))
-  | _ -> Error "user_blocks entries must be JSON objects"
+  let* base_fields =
+    exact_object_fields
+      ~field:"user_blocks entry"
+      ~allowed:[ "type"; "text"; "attachment_id"; "name"; "mime_type"; "size" ]
+      json
+  in
+  let* block_type = required_string ~field:"user_blocks entry" "type" base_fields in
+  let block_type = String.trim block_type |> String.lowercase_ascii in
+  match block_type with
+  | "text" ->
+    let* fields =
+      exact_object_fields ~field:"user_blocks text block" ~allowed:[ "type"; "text" ] json
+    in
+    let* text = required_string ~field:"user_blocks text block" "text" fields in
+    let text = String.trim text in
+    if text = "" then Error "user_blocks text block requires non-empty text"
+    else Ok (User_text text)
+  | ("image" | "document" | "audio") as kind ->
+    let* fields =
+      exact_object_fields
+        ~field:("user_blocks " ^ kind ^ " block")
+        ~allowed:[ "type"; "attachment_id"; "name"; "mime_type"; "size" ]
+        json
+    in
+    let* media = parse_user_media_block ~kind fields in
+    Ok
+      (match kind with
+       | "image" -> User_image media
+       | "document" -> User_document media
+       | "audio" -> User_audio media
+       | _ -> assert false)
+  | "" -> Error "user_blocks block requires type"
+  | other ->
+    Error
+      (Printf.sprintf
+         "unsupported user_blocks type %S: expected text, image, document, or audio"
+         other)
 
 let parse_user_blocks json =
   match Json_util.assoc_member_opt "user_blocks" json with

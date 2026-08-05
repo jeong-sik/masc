@@ -29,7 +29,6 @@ val prompt_render_max_bytes : int
 (* ── Removed / rejected keeper input keys ───────────────────── *)
 
 val removed_keeper_input_key_names : string list
-val removed_keeper_msg_input_key_names : string list
 
 val present_json_keys : string list -> Yojson.Safe.t -> string list
 
@@ -38,9 +37,6 @@ val reject_removed_keeper_input_keys :
   tool_name:string ->
   Yojson.Safe.t ->
   (unit, string) result
-
-val reject_removed_keeper_msg_input_keys :
-  tool_name:string -> Yojson.Safe.t -> (unit, string) result
 
 (* ── UTF-8 string processing ────────────────────────────────── *)
 

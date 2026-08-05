@@ -69,7 +69,7 @@ export function resetTransportHealthState(): void {
   transportHealthResource.reset()
 }
 
-/** Hydrate transport health from SSE payload — zero HTTP fetch. */
+/** Hydrate transport health from a server-push payload — zero HTTP fetch. */
 export function hydrateTransportHealthFromSSE(data: unknown): void {
   const decoded = decodeTransportHealthData(data)
   if (!decoded) return

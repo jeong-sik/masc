@@ -657,7 +657,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                      ~now_ts
               in
               (* Trust Observatory — raw signals side-by-side, no synthesis.
-                 Reputation (accountability + v2 dimensions), Thompson (alpha/beta). *)
+                 Reputation (accountability + v2 dimensions). *)
               let trust_observatory =
                 if compact
                 then `Null
@@ -673,17 +673,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                          m.name (Printexc.to_string exn);
                        `Null)
                   in
-                  let thompson =
-                    let stats = Thompson_sampling.get_stats m.name in
-                    `Assoc [
-                      ("alpha", `Float stats.Thompson_sampling.alpha);
-                      ("beta", `Float stats.Thompson_sampling.beta);
-                      ("score", `Float (stats.alpha /. (stats.alpha +. stats.beta)));
-                      ("selections", `Int stats.selections);
-                      ("votes_up", `Int stats.total_votes_up);
-                      ("votes_down", `Int stats.total_votes_down);
-                    ]
-                  in
                   let accountability =
                     accountability_summary ~keeper_name:m.name
                       ~agent_name:m.agent_name
@@ -691,7 +680,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   `Assoc [
                     ("reputation", reputation);
                     ("accountability", accountability);
-                    ("thompson", thompson);
                   ]
               in
               let runtime_trust =

@@ -1152,6 +1152,11 @@ let add_routes router =
                               ()
                           with
                           | Ok () ->
+                            Sse.broadcast
+                              (`Assoc
+                                 [ "type", `String "ide_cursor_changed"
+                                 ; "keeper_id", `String keeper_id
+                                 ]);
                             Http.Response.json_value
                               ~status:`Created
                               ~request
@@ -1169,125 +1174,6 @@ let add_routes router =
                   ~request
                   (json_error "Missing required fields: file_path, line (>=1)")
                   reqd)))
-      request
-      reqd)
-  |> Http.Router.get "/api/v1/ide/presence/stream" (fun request reqd ->
-    with_public_read
-      (fun state _req inner_reqd ->
-         let origin = get_origin request in
-         let headers =
-           Httpun.Headers.of_list
-             ([ "content-type", "text/event-stream"
-              ; "cache-control", "no-cache"
-              ; "connection", "keep-alive"
-              ; "x-accel-buffering", "no"
-              ]
-              @ cors_headers origin)
-         in
-         let response = Httpun.Response.create ~headers `OK in
-         let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
-         let write_snapshot () =
-           let snapshot_json = Yojson.Safe.to_string (build_presence_snapshot state) in
-           let event = Printf.sprintf "data: %s\n\n" snapshot_json in
-           Httpun.Body.Writer.write_string writer event
-         in
-         write_snapshot ();
-         match state.Mcp_server.sw, state.Mcp_server.clock with
-         | Some sw, Some clock ->
-           Eio.Fiber.fork ~sw (fun () ->
-             let rec loop () =
-               (try
-                  Eio.Time.sleep clock 30.0;
-                  write_snapshot ();
-                  loop ()
-                with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | exn ->
-                  Log.Server.debug
-                    "IDE presence SSE ping loop error: %s"
-                    (Printexc.to_string exn));
-               Httpun.Body.Writer.close writer
-             in
-             try loop () with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Server.error
-                 "IDE presence SSE loop exited: %s"
-                 (Printexc.to_string exn);
-               Httpun.Body.Writer.close writer)
-         | _ -> Httpun.Body.Writer.close writer)
-      request
-      reqd)
-  |> Http.Router.get "/api/v1/ide/cursors/stream" (fun request reqd ->
-    Server_auth.with_observer_sse_read_auth
-      (fun state _req inner_reqd ->
-         let uri = Uri.of_string request.target in
-         match parse_pagination_query ~max_limit:200 uri with
-         | Error msg ->
-           Http.Response.json_value
-             ~status:`Bad_request
-             ~request
-             (json_error msg)
-             inner_reqd
-         | Ok (limit, offset) ->
-           (match resolve_ide_scope_for_query ~state ~uri with
-            | Error err -> respond_ide_error ~status:`Bad_request ~request err inner_reqd
-            | Ok scope ->
-              (match
-                 keeper_filter_for_scope
-                   ~scope
-                   ~requested_keeper_id:(keeper_id_param uri)
-               with
-               | Error err ->
-                 respond_ide_error ~status:`Bad_request ~request err inner_reqd
-               | Ok keeper_id ->
-              with_keeper_lane_read_auth ~state ~request ~reqd:inner_reqd ~scope (fun () ->
-              let partition = partition_of_ide_scope scope in
-              let origin = get_origin request in
-              let headers =
-                Httpun.Headers.of_list
-                  ([ "content-type", "text/event-stream"
-                   ; "cache-control", "no-cache"
-                   ; "connection", "keep-alive"
-                   ; "x-accel-buffering", "no"
-                   ]
-                   @ cors_headers origin)
-              in
-              let response = Httpun.Response.create ~headers `OK in
-              let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
-              let write_snapshot () =
-                let snapshot_json =
-                  Yojson.Safe.to_string
-                    (build_cursor_snapshot state uri ~partition ~keeper_id ~limit ~offset)
-                in
-                let event = Printf.sprintf "data: %s\n\n" snapshot_json in
-                Httpun.Body.Writer.write_string writer event
-              in
-              write_snapshot ();
-              (match state.Mcp_server.sw, state.Mcp_server.clock with
-               | Some sw, Some clock ->
-                 Eio.Fiber.fork ~sw (fun () ->
-                   let rec loop () =
-                     (try
-                        Eio.Time.sleep clock 30.0;
-                        write_snapshot ();
-                        loop ()
-                      with
-                      | Eio.Cancel.Cancelled _ as e -> raise e
-                      | exn ->
-                        Log.Server.debug
-                          "IDE cursor SSE ping loop error: %s"
-                          (Printexc.to_string exn));
-                     Httpun.Body.Writer.close writer
-                   in
-                   try loop () with
-                   | Eio.Cancel.Cancelled _ as e -> raise e
-                   | exn ->
-                     Log.Server.error
-                       "IDE cursor SSE loop exited: %s"
-                       (Printexc.to_string exn);
-                     Httpun.Body.Writer.close writer)
-               | _ -> Httpun.Body.Writer.close writer)))))
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/memory" (fun request reqd ->

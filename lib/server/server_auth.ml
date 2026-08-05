@@ -135,8 +135,7 @@ let observer_sse_query_credential_from_request request =
   match request.Httpun.Request.meth with
   | `GET
     when (observer_stream_requested && String.equal path "/mcp")
-         || String.equal path "/events/presence"
-         || String.equal path "/api/v1/ide/cursors/stream" ->
+         || String.equal path "/events/presence" ->
       (match query_param request "token" with
        | None -> Absent_credential
        | Some raw ->

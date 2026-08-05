@@ -59,7 +59,6 @@ let get_global_switch = Keeper_process_switch.get
 let set_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.set
 let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enabled
 let with_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.with_noop
-let domain_pool_ignored_warning_emitted = Atomic.make false
 
 let launch_supervised_fiber_body
       ~proactive_warmup_sec
@@ -82,39 +81,7 @@ let launch_supervised_fiber_body
       }
     in
     Keeper_registry_event_queue.enqueue ~base_path meta.name bootstrap_signal;
-    (* RFC-0059 PR-7-pilot originally routed the whole keepalive body through
-       a Domain_pool worker.  Live recovery proved that unsafe: the body is
-       an Eio fiber loop that uses the server switch, clock, turn timeouts, and
-       provider streaming.  Moving it to an Executor_pool domain can touch an
-       Eio switch from the wrong domain and tear down keepers at boot.  Keep
-       the flag observable, but run the supervisor fiber on the owning Eio
-       domain.  Only pure/blocking sub-work should use [Domain_pool]. *)
-    let domain_pool_flag = Env_config.KeeperSupervisor.domain_pool_enabled in
-    let bump_fork_outcome outcome =
-      (* Label order mirrors the other [keeper_supervisor.ml] inc_counter
-         call sites ([keeper] first, then the discriminator).  Otel_metric_store
-         label-set keys are order-sensitive, so a single per-metric
-         convention prevents accidental time-series splitting when new
-         call sites add the same labels in a different order. *)
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string DomainPoolFork)
-        ~labels:[ "keeper", meta.name; "outcome", outcome ]
-        ()
-    in
     let fork_body body =
-      bump_fork_outcome
-        (if domain_pool_flag then "inline_eio_context" else "inline_disabled");
-      if
-        domain_pool_flag
-        && Atomic.compare_and_set
-             domain_pool_ignored_warning_emitted
-             false
-             true
-      then
-        Log.Keeper.warn
-          "keeper supervise domain pool ignored: keepalive body requires the owning \
-           Eio domain (first_keeper=%s)"
-          meta.name;
       match
         Keeper_lane.fork
           ~sw:ctx.sw
@@ -243,29 +210,15 @@ let launch_supervised_fiber_body
       Eio_guard.protect
         (fun () ->
            try
-             (* Ambient Board judgment is a sibling worker on this exact Keeper
-                lifecycle switch. It drains durable candidates as singleton
-                exact flows: MASC owns the input and durable callbacks, while
-                OAS owns target admission, dispatch, and advancement.
-                Cancellation joins the worker with the Keeper lane. *)
-             Eio.Fiber.fork ~sw:lane_sw (fun () ->
-               match Eio.Fiber.first
-                 (fun () ->
-                    `Worker
-                      (Keeper_board_attention_worker.run
-                         ~sw:lane_sw
-                         ~clock:ctx.clock
-                         ~net:ctx.net
-                         ~base_path
-                         ~keeper_name:meta.name))
-                 (fun () ->
-                    Eio.Promise.await board_worker_stop;
-                    `Stopped)
-               with
-               | `Stopped | `Worker (Ok ()) -> ()
-               | `Worker (Error fatal) ->
-                 failwith
-                   (Keeper_board_attention_worker.fatal_error_to_string fatal));
+             (* MASC owns the worker's input and durable callbacks, while OAS
+                owns target admission, dispatch, and advancement. The fork
+                itself lives in [Keeper_keepalive] so both lane-start paths
+                produce the same lane. *)
+             Keeper_keepalive.fork_board_attention_worker
+               ~sw:lane_sw
+               ~ctx
+               ~keeper_name:meta.name
+               ~stop:board_worker_stop;
              (* Keeper lifetime, idle duration, and progress age are
                 observations only. The supervisor runs the lane directly;
                 configured provider/tool boundaries and explicit operator

@@ -1,7 +1,7 @@
 (* Tests for dashboard Copilot Dock -> keeper chat stream wiring.
 
    Verifies the shared contract from the HTTP parser down to the
-   private direct-message args that the direct-delivery stream
+   typed direct message that the direct-delivery stream
    receives:
    - copilot channel label + operator workspace id parse without requiring
      an external user id;
@@ -25,23 +25,6 @@ let parse_ok body =
   match Stream.For_testing.parse_request body with
   | Ok payload -> payload
   | Error err -> fail ("expected parse to succeed: " ^ err)
-
-let args_assoc args =
-  match args with
-  | `Assoc fields -> fields
-  | _ -> fail "expected args to be a JSON object"
-
-let get_string_field key args =
-  match List.assoc_opt key (args_assoc args) with
-  | Some (`String s) -> s
-  | _ -> ""
-
-let get_bool_field key args =
-  match List.assoc_opt key (args_assoc args) with
-  | Some (`Bool b) -> b
-  | _ -> false
-
-let has_field key args = Option.is_some (List.assoc_opt key (args_assoc args))
 
 let contains needle haystack = Astring.String.is_infix ~affix:needle haystack
 
@@ -88,22 +71,22 @@ let test_copilot_message_is_not_contextualized () =
     (contains "[External channel context]" message);
   check string "message verbatim" "hello" message
 
-let test_copilot_args_carry_turn_instructions () =
+let test_copilot_direct_message_carries_turn_contract () =
   let payload =
     parse_ok
       {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus on overview"}|}
   in
-  let args = Stream.For_testing.args_of_request payload in
-  check string "name" "luna" (get_string_field "name" args);
-  check string "message" "hello" (get_string_field "message" args);
-  check bool "direct_reply" true (get_bool_field "direct_reply" args);
-  check string "turn_instructions" "focus on overview"
-    (get_string_field "turn_instructions" args);
-  check string "channel" "copilot" (get_string_field "channel" args);
-  check string "channel_workspace_id" "session-7"
-    (get_string_field "channel_workspace_id" args);
-  check bool "no channel_user_id" false (has_field "channel_user_id" args);
-  check bool "no channel_user_name" false (has_field "channel_user_name" args)
+  let message = Stream.For_testing.direct_message_of_request payload in
+  check string "name" "luna"
+    (Keeper_invocation_contract.direct_message_target_name message);
+  check string "message" "hello"
+    (Keeper_invocation_contract.direct_message_prompt message);
+  check bool "direct_reply" true
+    (Keeper_invocation_contract.direct_message_direct_reply message);
+  check (option string) "turn_instructions" (Some "focus on overview")
+    (Keeper_invocation_contract.direct_message_turn_instructions message);
+  check string "channel" "copilot"
+    (Keeper_invocation_contract.direct_message_channel message)
 
 let test_surface_context_is_formatted_as_turn_instructions () =
   let payload =
@@ -117,8 +100,10 @@ let test_surface_context_is_formatted_as_turn_instructions () =
   check bool "contains route" true (contains "Route: /overview" text);
   check bool "contains scene" true (contains "Scene: fleet view" text);
   check bool "contains field" true (contains "run: 2/5" text);
-  let args = Stream.For_testing.args_of_request payload in
-  check bool "turn_instructions in args" true (has_field "turn_instructions" args)
+  let message = Stream.For_testing.direct_message_of_request payload in
+  check bool "turn_instructions in direct message" true
+    (Option.is_some
+       (Keeper_invocation_contract.direct_message_turn_instructions message))
 
 let test_turn_instructions_and_surface_context_combine () =
   let payload =
@@ -154,11 +139,12 @@ let test_external_connector_still_contextualized () =
   let message = Stream.For_testing.message_for_request payload in
   check bool "context envelope present" true
     (contains "[External channel context]" message);
-  let args = Stream.For_testing.args_of_request payload in
-  check string "channel_user_id" "user-42"
-    (get_string_field "channel_user_id" args);
-  check string "channel_user_name" "Alice"
-    (get_string_field "channel_user_name" args)
+  let direct_message = Stream.For_testing.direct_message_of_request payload in
+  check bool "direct message is contextualized" true
+    (contains "[External channel context]"
+       (Keeper_invocation_contract.direct_message_prompt direct_message));
+  check string "channel" "discord"
+    (Keeper_invocation_contract.direct_message_channel direct_message)
 
 let test_dashboard_without_channel_is_owner () =
   let payload = parse_ok {|{"name":"luna","message":"hello"}|} in
@@ -169,8 +155,9 @@ let test_dashboard_without_channel_is_owner () =
   let speaker = Stream.For_testing.chat_speaker_of_request payload in
   check string "authority" "owner"
     (Keeper_chat_store.authority_label speaker.speaker_authority);
-  let args = Stream.For_testing.args_of_request payload in
-  check bool "no channel in args" false (has_field "channel" args)
+  let message = Stream.For_testing.direct_message_of_request payload in
+  check string "empty channel" ""
+    (Keeper_invocation_contract.direct_message_channel message)
 
 let () =
   run "copilot_dock_channel_wiring"
@@ -193,8 +180,8 @@ let () =
         [
           test_case "copilot message is not contextualized" `Quick
             test_copilot_message_is_not_contextualized;
-          test_case "turn_instructions forwarded to args" `Quick
-            test_copilot_args_carry_turn_instructions;
+          test_case "turn contract is typed at the HTTP boundary" `Quick
+            test_copilot_direct_message_carries_turn_contract;
           test_case "surface_context formatted as turn instructions" `Quick
             test_surface_context_is_formatted_as_turn_instructions;
           test_case "turn_instructions and surface_context combine" `Quick

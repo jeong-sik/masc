@@ -143,18 +143,12 @@ masc already forgets by **typed origin, deterministically — no score, no decay
 
 ---
 
-## 8. Measured baseline (the eval now exists — §7 step 4 executed)
+## 8. Measured baseline (§7 step 4 executed)
 
-The Harness-First gate (§7 step 4) is satisfied: `test/memory_quality_eval.ml` is an
-offline, deterministic, read-only eval. Self-test 10/10; two runs over the same store
-are byte-identical. Reproduce:
-
-```
-dune exec test/memory_quality_eval.exe                # self-test only (CI-safe)
-dune exec test/memory_quality_eval.exe -- \
-  --recall-dir <base-path>/.masc/recall_injections \
-  --keepers-dir <base-path>/.masc/keepers            # live baseline
-```
+Measured 2026-06-23 by an offline, deterministic, read-only eval over the live
+recall-injection ledger. The numbers below are that measurement; they are not
+reproducible from the current tree, which carries neither the ledger nor the
+eval.
 
 Baseline over the live store (recall-injection ledger, 2026-06; measured 2026-06-23):
 

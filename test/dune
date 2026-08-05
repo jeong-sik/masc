@@ -1351,28 +1351,10 @@
 
 ; Typed JSON field extraction helper (RFC-0142 Phase 1).
 
-; Memory-quality eval harness (Harness-First). Offline, deterministic, read-only.
-; No args  -> runs synthetic self-tests (pass/fail), CI-safe.
-; --recall-dir <dir> [--keepers-dir <dir>] [--top N] [--json] -> live baseline
-;   report of echo rate / churn / near-duplicate slots / fact composition.
-;   dune exec test/memory_quality_eval.exe -- --recall-dir <base>/.masc/recall_injections
-
-(test
- (name memory_quality_eval)
- (modules memory_quality_eval)
- (libraries masc_test_deps))
-
 (test
  (name test_json_field)
  (modules test_json_field)
  (libraries alcotest masc.json_field yojson))
-
-; RFC-0264 P2: recall-injection ledger record serialiser unit tests.
-
-(test
- (name test_keeper_recall_injection_ledger)
- (modules test_keeper_recall_injection_ledger)
- (libraries masc_test_deps yojson))
 
 ; Lock-free atomic CAS helper leaf.
 

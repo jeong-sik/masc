@@ -7,8 +7,8 @@
     case is task-136 — the judge approved an uncommitted working tree and had
     no way to observe that the work was not committed anywhere.
 
-    These tools let the judge look at the producer's tree itself. They are
-    read-only by construction. A judge that can write would repair what it
+    This tool lets the judge look at the producer's tree itself. It is read-only
+    by construction. A judge that can write would repair what it
     should reject, and nothing verifies that repair.
 
     {1 Containment}
@@ -55,6 +55,3 @@ val dispatch : t -> name:string -> args:Yojson.Safe.t -> (string, string) result
     an unknown tool name, a malformed argument, or a containment rejection.
     Every outcome is one of those two constructors — a call never resolves to
     a plausible-looking empty result. *)
-
-val max_directory_entries : int
-(** Entry cap for [verification_list_dir]. Exposed for tests. *)

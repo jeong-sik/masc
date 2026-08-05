@@ -1,23 +1,14 @@
 (** See [verification_authority_tools.mli]. *)
 
-(* How many entries one listing may return. A bound on the answer, not on what
-   the judge may look at: deeper paths are reached by naming a subdirectory. *)
-let max_directory_entries = 200
-
 (* The tool names the evaluator may call. Parsed once at the dispatch boundary
    so the rest of this module matches on a constructor: a name that is not one
    of these cannot reach an implementation, and adding a tool without wiring it
    fails to compile. *)
-type tool =
-  | Read_file
-  | List_dir
+type tool = Read_file
 
-let tool_name = function
-  | Read_file -> "verification_read_file"
-  | List_dir -> "verification_list_dir"
-;;
+let tool_name Read_file = "verification_read_file"
 
-let all_tools = [ Read_file; List_dir ]
+let all_tools = [ Read_file ]
 
 let tool_of_name name =
   List.find_opt (fun tool -> String.equal (tool_name tool) name) all_tools
@@ -47,15 +38,6 @@ let absolute_of_relative t relative =
   String.split_on_char '/' relative
   |> List.filter (fun segment -> not (String.equal segment ""))
   |> List.fold_left Filename.concat t.ownership_root
-;;
-
-let relative_of_absolute t absolute =
-  let root_length = String.length t.ownership_root in
-  if
-    String.length absolute > root_length
-    && String.equal (String.sub absolute 0 root_length) t.ownership_root
-  then String.sub absolute (root_length + 1) (String.length absolute - root_length - 1)
-  else absolute
 ;;
 
 (* ================================================================ *)
@@ -88,24 +70,6 @@ let schema_of_tool tool : Types_core.tool_schema =
           ; "required", `List [ `String "path" ]
           ]
     }
-  | List_dir ->
-    { name = tool_name List_dir
-    ; description =
-        Printf.sprintf
-          "List one directory in the producer's tree. Returns at most %d entries, \
-           each marked as a file or a directory. Use \"\" for the producer's root."
-          max_directory_entries
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ path_property
-                    "Producer-relative directory path. \"\" is the producer's root."
-                ] )
-          ; "required", `List [ `String "path" ]
-          ]
-    }
 ;;
 
 let schemas _t = List.map schema_of_tool all_tools
@@ -126,49 +90,6 @@ let read_file t ~relative =
       (Printf.sprintf "%s (%d bytes%s)\n%s" relative bytes
          (if truncated then ", truncated" else "")
          content)
-;;
-
-let entry_line t ~directory ~name =
-  let absolute = Filename.concat directory name in
-  let kind =
-    match Unix.lstat absolute with
-    | stat -> Fs_compat.file_kind_to_string stat.Unix.st_kind
-    | exception Unix.Unix_error (error, _, _) ->
-      Printf.sprintf "unreadable(%s)" (Unix.error_message error)
-  in
-  Printf.sprintf "%s\t%s" kind (relative_of_absolute t absolute)
-;;
-
-let list_dir t ~relative =
-  let target = absolute_of_relative t relative in
-  match
-    Fs_compat.inspect_owned_directory_chain ~ownership_root:t.ownership_root target
-  with
-  | Error rejection ->
-    Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
-  | Ok Fs_compat.Owned_directory_missing ->
-    Error (Printf.sprintf "%s: directory does not exist" relative)
-  | Ok (Fs_compat.Owned_directory _) ->
-    (* The chain check and the read are two syscalls, so the directory can
-       become unreadable in between, and a subdirectory the producer created
-       unreadable fails here too. Either way the judge gets a tool error it can
-       route around; letting the exception out would abort the whole review
-       over one unreadable directory. *)
-    (match Fs_compat.read_dir target with
-     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-     | exception exn ->
-       Error (Printf.sprintf "%s: %s" relative (Printexc.to_string exn))
-     | entries ->
-    let total = List.length entries in
-    let shown = List.filteri (fun index _ -> index < max_directory_entries) entries in
-    let lines = List.map (fun name -> entry_line t ~directory:target ~name) shown in
-    let header =
-      if total > max_directory_entries
-      then
-        Printf.sprintf "%d entries, showing the first %d" total max_directory_entries
-      else Printf.sprintf "%d entries" total
-    in
-    Ok (String.concat "\n" (header :: lines)))
 ;;
 
 (* ================================================================ *)
@@ -222,9 +143,9 @@ let dispatch t ~name ~args =
     log_lookup t ~name ~argument:"" ~outcome:Unknown_tool;
     Error detail
   | Some tool ->
-    (* Both tools address the producer's tree by the same [path] argument. The
-       match on [tool] stays exhaustive, so a tool that takes something else
-       fails to compile here rather than silently reading a missing key. *)
+    (* The tool addresses the producer's tree by a [path] argument. The match
+       on [tool] stays exhaustive, so a new tool with a different input fails
+       to compile here rather than silently reading a missing key. *)
     (match Json_util.require_string args "path" with
      | Error detail ->
        log_lookup t ~name ~argument:"" ~outcome:Invalid_argument;
@@ -233,7 +154,6 @@ let dispatch t ~name ~args =
        let result =
          match tool with
          | Read_file -> read_file t ~relative
-         | List_dir -> list_dir t ~relative
        in
        log_lookup t ~name ~argument:relative
          ~outcome:(match result with Ok _ -> Resolved | Error _ -> Rejected);

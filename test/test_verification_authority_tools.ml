@@ -73,58 +73,6 @@ let test_read_file_outside_root_is_rejected () =
     | Error _ -> ())
 ;;
 
-let test_list_dir_lists_the_root () =
-  with_surface [ "a.txt", "a"; "nested/b.txt", "b" ] (fun surface _root ->
-    match
-      dispatch_result surface ~name:"verification_list_dir"
-        ~args:(`Assoc [ "path", `String "" ])
-    with
-    | Error detail -> Alcotest.failf "expected a listing, got error: %s" detail
-    | Ok output ->
-      Alcotest.(check bool)
-        "file entry present" true (Astring.String.is_infix ~affix:"a.txt" output);
-      Alcotest.(check bool)
-        "directory entry present"
-        true
-        (Astring.String.is_infix ~affix:"nested" output);
-      Alcotest.(check bool)
-        "directory kind is named"
-        true
-        (Astring.String.is_infix ~affix:"directory" output))
-;;
-
-let test_list_dir_missing_directory_is_an_error () =
-  with_surface [] (fun surface _root ->
-    match
-      dispatch_result surface ~name:"verification_list_dir"
-        ~args:(`Assoc [ "path", `String "no/such/dir" ])
-    with
-    | Ok output -> Alcotest.failf "missing directory should not list; got %s" output
-    | Error _ -> ())
-;;
-
-(* An unreadable directory must come back as a result, not as an exception.
-   The dispatcher's caller aborts the whole review on a raise, so one
-   subdirectory the producer left unreadable would cost the verdict rather than
-   the tool call. Both outcomes are accepted here — a privileged runner can
-   read mode 0 — because the property is that the call returns at all. *)
-let test_unreadable_directory_does_not_raise () =
-  with_surface [] (fun surface root ->
-    let locked = Filename.concat root "locked" in
-    Unix.mkdir locked 0o000;
-    Fun.protect
-      ~finally:(fun () -> Unix.chmod locked 0o700)
-      (fun () ->
-         match
-           dispatch_result surface ~name:"verification_list_dir"
-             ~args:(`Assoc [ "path", `String "locked" ])
-         with
-         | Ok _ | Error _ -> ()
-         | exception exn ->
-           Alcotest.failf "list_dir raised instead of returning: %s"
-             (Printexc.to_string exn)))
-;;
-
 (* A judge that calls a name this surface does not offer must be told so. A
    dropped call would read to the model as a tool that returned nothing. *)
 let test_unknown_tool_name_is_an_error () =
@@ -209,11 +157,6 @@ let () =
             test_read_file_returns_content
         ; Alcotest.test_case "read outside root is rejected" `Quick
             test_read_file_outside_root_is_rejected
-        ; Alcotest.test_case "list dir lists the root" `Quick test_list_dir_lists_the_root
-        ; Alcotest.test_case "missing directory is an error" `Quick
-            test_list_dir_missing_directory_is_an_error
-        ; Alcotest.test_case "unreadable directory does not raise" `Quick
-            test_unreadable_directory_does_not_raise
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case "unknown tool name is an error" `Quick

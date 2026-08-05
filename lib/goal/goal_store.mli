@@ -46,6 +46,9 @@ type goal = {
   parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
+  (** RFC-0362: the keeper responsible for turning this Goal into Tasks.
+      [None] is the default and is legitimate. *)
+  owner : string option;
   created_at : string;
   updated_at : string;
 }

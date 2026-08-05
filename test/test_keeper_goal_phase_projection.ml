@@ -51,6 +51,7 @@ let goal_in phase id title =
   ; parent_goal_id = None
   ; last_review_note = None
   ; last_review_at = None
+  ; owner = None
   ; created_at = ts
   ; updated_at = ts
   }

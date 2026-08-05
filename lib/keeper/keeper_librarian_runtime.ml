@@ -114,15 +114,8 @@ type extraction_error =
   | Domain_output_invalid of string
   | Memory_snapshot_write_failed of string
 
-type extraction_error_kind =
-  | Prompt_render_failure
-  | Execution_clock_unavailable
-  | Exact_setup_failure
-  | Exact_execution_failure
-  | Domain_output_invalid
-  | Memory_snapshot_write_failure
-
-let extraction_error_kind = function
+let extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
+  = function
   | Prompt_render_failed _ -> Prompt_render_failure
   | Execution_clock_unavailable -> Execution_clock_unavailable
   | Exact_setup_failed _ -> Exact_setup_failure
@@ -406,23 +399,40 @@ let extract_and_commit_with_exact_output_classified
    recall and the failure only stales it. Both the classified [Error] path
    and the exception catch in [run_best_effort] route through this rule so
    an exception cannot demote a starving keeper's failure back to WARN. *)
-let log_failure_with_snapshot_severity ~keepers_dir ~keeper_id detail =
-  let snapshot_absent =
-    match
-      Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
-    with
-    | Ok (Some _) -> false
-    | Ok None | Error _ -> true
-  in
+let snapshot_absent ~keepers_dir ~keeper_id =
+  match
+    Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
+  with
+  | Ok (Some _) -> false
+  | Ok None | Error _ -> true
+;;
+
+(* A failed pass leaves no snapshot, so the commit journal line never runs and
+   the attempt would otherwise exist only as a log line and an in-memory
+   counter — neither survives a process restart, which is what made #26729
+   undiagnosable from disk afterwards. Every failure path routes here so the
+   log severity and the recorded line resolve snapshot presence from the same
+   read and cannot disagree about one instant. *)
+let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail ~cadence_deferred =
+  let absent = snapshot_absent ~keepers_dir ~keeper_id in
   let message =
     Printf.sprintf
       "%s current_snapshot=%s"
       detail
-      (if snapshot_absent then "absent" else "present")
+      (if absent then "absent" else "present")
   in
-  if snapshot_absent
+  if absent
   then Log.Keeper.error ~keeper_name:keeper_id "%s" message
-  else Log.Keeper.warn ~keeper_name:keeper_id "%s" message
+  else Log.Keeper.warn ~keeper_name:keeper_id "%s" message;
+  Keeper_memory_os_current.append_librarian_failure
+    ~keepers_dir
+    ~keeper_id
+    ~now:(Time_compat.now ())
+    ~trace_id
+    ~kind
+    ~detail
+    ~snapshot_present:(not absent)
+    ~cadence_deferred
 ;;
 
 let run_best_effort
@@ -462,19 +472,33 @@ let run_best_effort
              ();
            let deferred = should_record_cadence_backoff_after_error error in
            if deferred then cadence_record_attempt ~keeper_id ~trace_id;
-           log_failure_with_snapshot_severity
+           record_failure
              ~keepers_dir
              ~keeper_id
-             (Printf.sprintf
-                "memory os librarian failed lane=%s: %s; cadence deferred=%b"
-                exact_lane_id
-                (extraction_error_to_string error)
-                deferred))
+             ~trace_id
+             ~kind:(extraction_error_kind error)
+             ~detail:
+               (Printf.sprintf
+                  "memory os librarian failed lane=%s: %s; cadence deferred=%b"
+                  exact_lane_id
+                  (extraction_error_to_string error)
+                  deferred)
+             ~cadence_deferred:deferred)
+      (* Missing Eio context is a failed pass like any other: the keeper's
+         memory does not advance. It was previously a bare WARN with no record,
+         which hid a restart-shaped outage behind the same silence as a healthy
+         idle turn. *)
       | _ ->
-        Log.Keeper.warn
-          ~keeper_name:keeper_id
-          "memory os librarian skipped: Eio net/clock context unavailable lane=%s"
-          exact_lane_id
+        record_failure
+          ~keepers_dir
+          ~keeper_id
+          ~trace_id
+          ~kind:Keeper_memory_os_current.Runtime_context_unavailable
+          ~detail:
+            (Printf.sprintf
+               "memory os librarian skipped: Eio net/clock context unavailable lane=%s"
+               exact_lane_id)
+          ~cadence_deferred:false
     with
     | Eio.Cancel.Cancelled _ as error -> raise error
     | exn ->
@@ -482,11 +506,15 @@ let run_best_effort
         Keeper_metrics.(to_string MemoryOsLibrarianFailures)
         ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
         ();
-      log_failure_with_snapshot_severity
+      record_failure
         ~keepers_dir
         ~keeper_id
-        (Printf.sprintf
-           "memory os librarian failed lane=%s: %s"
-           exact_lane_id
-           (Printexc.to_string exn)))
+        ~trace_id
+        ~kind:Keeper_memory_os_current.Unhandled_exception
+        ~detail:
+          (Printf.sprintf
+             "memory os librarian failed lane=%s: %s"
+             exact_lane_id
+             (Printexc.to_string exn))
+        ~cadence_deferred:false)
 ;;

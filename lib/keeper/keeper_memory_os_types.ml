@@ -52,6 +52,24 @@ let dropped_statement_to_json (d : dropped_statement) =
     ]
 ;;
 
+(* The inverse of [dropped_statement_to_json], kept beside it so the pair
+   cannot drift. Field-exact: a statement carrying anything beyond
+   memory_id/reason is a shape this build does not know and is rejected
+   rather than read past. *)
+let dropped_statement_of_json = function
+  | `Assoc fields
+    when closed_fields (wire_field_set wire_librarian_dropped_fields) fields
+         && List.length fields = List.length wire_librarian_dropped_fields ->
+    (match
+       List.assoc_opt wire_field_memory_id fields
+       , List.assoc_opt wire_field_reason fields
+     with
+     | Some (`String memory_id), Some (`String reason) ->
+       Some { memory_id; reason }
+     | _ -> None)
+  | _ -> None
+;;
+
 (* The librarian taxonomy as a closed sum. The LLM emits one exact category
    token; anything outside this vocabulary is rejected. Categories are model
    context only: no variant grants retention, expiry, or promotion authority. *)

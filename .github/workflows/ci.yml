@@ -832,6 +832,16 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_keeper_keepalive_launch_order_ast
 
+      - name: Run memory journal suite
+        # The journal is the only disk record of a librarian pass that produced
+        # no snapshot. @check compiles this suite but does not run it, and an
+        # unrun decoder guard is not a guard: the cases that matter here assert
+        # that an unknown outcome or kind rejects rather than folding into a
+        # permissive default, which compiles either way.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_librarian_journal_failures
+
       - name: Run paused-work transfer and source-ACK suites
         id: paused_work_transfer_and_operator_suites
         if: ${{ always() && steps.build_step.outcome == 'success' }}

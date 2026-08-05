@@ -15,7 +15,7 @@ module Inputs = Masc.Keeper_world_observation_inputs
    longer exists makes [repo_root] fall back to the dune sandbox cwd, so
    [with_repo_prompt_config] points the registry at an empty directory. *)
 let has_repo_prompts root =
-  Sys.file_exists (Filename.concat root "config/prompts/keeper.system.md")
+  Sys.file_exists (Filename.concat root "config/prompts/keeper.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -320,7 +320,7 @@ let test_profile_defaults_feed_identity_prompt () =
    by #26123, which stopped the runtime from prescribing the agent's next tool.
    The assertion outlived the text by asserting bytes no prompt emits any more,
    and stayed invisible because no prompt suite ran in CI. The surviving,
-   non-prescriptive statement of the same concern lives in keeper.system.md
+   non-prescriptive statement of the same concern lives in keeper.md
    ("When the board is genuinely empty, that is a fact about supply, not a
    conclusion that there is nothing to do") and is covered by the assembled
    prompt golden. *)

@@ -9,11 +9,10 @@ val system : string
     [world], [capabilities], and [core_behavior] keys, which each restated
     the same rule families in a different wording. *)
 
-val board_attention_judgment_batch : string
-val gate_judgment : string
-val verification_anti_rationalization : string
-val memory_os_recall_context : string
+val judge_board : string
+val judge_effect : string
+val verification : string
 (** The only recall asset. A turn whose recall is empty or failed injects no
     block at all — there is no counterpart key naming the absence. *)
 
-val librarian_current_selection : string
+val librarian : string

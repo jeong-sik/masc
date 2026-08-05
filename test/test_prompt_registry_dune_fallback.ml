@@ -21,7 +21,7 @@ open Alcotest
 
 (* A prompt file that ships in config/prompts/ and is rendered on the live
    completion-review path — the exact key the CI failures named. *)
-let known_prompt_key = "verification.anti_rationalization"
+let known_prompt_key = "verification"
 
 let test_fallback_engages_when_unpinned () =
   Prompt_registry.clear ();

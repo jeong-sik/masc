@@ -11,7 +11,6 @@ type keeper_status =
   | Warn
   | Dead
 
-val keeper_status_of_yojson : Yojson.Safe.t -> keeper_status Ppx_deriving_yojson_runtime.error_or
 val keeper_status_to_yojson : keeper_status -> Yojson.Safe.t
 
 (** One tool-span in a keeper's cycle, positioned as a percentage of the
@@ -23,7 +22,6 @@ type keeper_lane_frame = {
   label : string;
 }
 
-val keeper_lane_frame_of_yojson : Yojson.Safe.t -> keeper_lane_frame Ppx_deriving_yojson_runtime.error_or
 val keeper_lane_frame_to_yojson : keeper_lane_frame -> Yojson.Safe.t
 
 (** One sample on the 60-min context-pressure polyline. *)
@@ -32,7 +30,6 @@ type keeper_ctx_sample = {
   ctx_pct : int;       (** 0..100 *)
 }
 
-val keeper_ctx_sample_of_yojson : Yojson.Safe.t -> keeper_ctx_sample Ppx_deriving_yojson_runtime.error_or
 val keeper_ctx_sample_to_yojson : keeper_ctx_sample -> Yojson.Safe.t
 
 (** Total run-state classification (#16, 38-bug campaign PR-5). Mirrors
@@ -45,7 +42,6 @@ type keeper_run_state_kind =
   | Waiting
   | Suspended
 
-val keeper_run_state_kind_of_yojson : Yojson.Safe.t -> keeper_run_state_kind Ppx_deriving_yojson_runtime.error_or
 val keeper_run_state_kind_to_yojson : keeper_run_state_kind -> Yojson.Safe.t
 
 (** Per-kind fields are [None] / [[]] when not applicable to [kind] — e.g.
@@ -61,7 +57,6 @@ type keeper_run_state = {
   phase : string option;
 }
 
-val keeper_run_state_of_yojson : Yojson.Safe.t -> keeper_run_state Ppx_deriving_yojson_runtime.error_or
 val keeper_run_state_to_yojson : keeper_run_state -> Yojson.Safe.t
 
 (** Per-keeper summary. *)
@@ -80,7 +75,6 @@ type keeper = {
   run_state : keeper_run_state;
 }
 
-val keeper_of_yojson : Yojson.Safe.t -> keeper Ppx_deriving_yojson_runtime.error_or
 val keeper_to_yojson : keeper -> Yojson.Safe.t
 
 (** Top-level response. *)
@@ -91,5 +85,4 @@ type response = {
   generated_at : string;       (** ISO-8601 UTC *)
 }
 
-val response_of_yojson : Yojson.Safe.t -> response Ppx_deriving_yojson_runtime.error_or
 val response_to_yojson : response -> Yojson.Safe.t

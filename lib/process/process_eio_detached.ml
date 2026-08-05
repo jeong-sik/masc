@@ -41,7 +41,7 @@ external posix_spawn_detached :
 let spawn_detached ~argv ~env ~cwd =
   match argv with
   | [] -> Error "spawn_detached: empty argv"
-  | _ ->
+  | program :: _ ->
       let out_r_ref = ref None in
       let out_w_ref = ref None in
       let err_r_ref = ref None in
@@ -92,6 +92,8 @@ let spawn_detached ~argv ~env ~cwd =
              pgid = pid;
              stdout_fd = out_r;
              stderr_fd = err_r;
+             (* NDT-OK: detached process lifecycle telemetry records wall-clock
+                start time; command behavior remains process-boundary driven. *)
              started_at = Unix.gettimeofday ();
            }
        with
@@ -99,17 +101,17 @@ let spawn_detached ~argv ~env ~cwd =
            cleanup_setup_fds ();
            Error
              (Printf.sprintf "spawn_detached %s: %s (%s %s)"
-                (List.hd argv) (Unix.error_message err) fn arg)
+                program (Unix.error_message err) fn arg)
        | exn ->
            cleanup_setup_fds ();
            Error
-             (Printf.sprintf "spawn_detached %s: %s" (List.hd argv)
+             (Printf.sprintf "spawn_detached %s: %s" program
                 (Printexc.to_string exn)))
 
 let spawn_detached_devnull ~argv ~env ~cwd =
   match argv with
   | [] -> Error "spawn_detached_devnull: empty argv"
-  | _ ->
+  | program :: _ ->
       let devnull_ref = ref None in
       let cleanup_setup_fds () =
         match !devnull_ref with
@@ -144,11 +146,11 @@ let spawn_detached_devnull ~argv ~env ~cwd =
            cleanup_setup_fds ();
            Error
              (Printf.sprintf "spawn_detached_devnull %s: %s (%s %s)"
-                (List.hd argv) (Unix.error_message err) fn arg)
+                program (Unix.error_message err) fn arg)
        | exn ->
            cleanup_setup_fds ();
            Error
-             (Printf.sprintf "spawn_detached_devnull %s: %s" (List.hd argv)
+             (Printf.sprintf "spawn_detached_devnull %s: %s" program
                 (Printexc.to_string exn)))
 
 let is_pgid_alive ~pgid =

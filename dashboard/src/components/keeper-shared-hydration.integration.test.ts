@@ -27,8 +27,9 @@ const {
   streamKeeperMessage: vi.fn(),
 }))
 
-const { fetchKeeperToolCalls } = vi.hoisted(() => ({
+const { fetchKeeperToolCalls, fetchKeeperWaitingInventory } = vi.hoisted(() => ({
   fetchKeeperToolCalls: vi.fn(async (): Promise<{ entries: ToolCallEntry[] }> => ({ entries: [] })),
+  fetchKeeperWaitingInventory: vi.fn(async () => ({ keepers: [] })),
 }))
 
 vi.mock('../api/keeper', () => ({
@@ -41,7 +42,10 @@ vi.mock('../api/keeper', () => ({
   streamKeeperMessage,
 }))
 
-vi.mock('../api/dashboard', () => ({ fetchKeeperToolCalls }))
+vi.mock('../api/dashboard', () => ({
+  fetchKeeperToolCalls,
+  fetchKeeperWaitingInventory,
+}))
 vi.mock('../api/mcp', () => ({ callMcpTool: vi.fn() }))
 vi.mock('../api/core', () => ({ runOperatorAction: vi.fn() }))
 vi.mock('../store', async () => {

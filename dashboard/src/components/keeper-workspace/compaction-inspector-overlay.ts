@@ -19,6 +19,7 @@ import {
   keeperCompactionSnapshots,
   type CompactionSnapshot,
 } from './compaction-snapshots'
+import { registerKeeperCompactionRefresh } from '../../sse-store'
 
 type CompactionReadError = {
   readonly scope: string
@@ -27,6 +28,7 @@ type CompactionReadError = {
 
 type CompactionSnapshotLoadState = {
   readonly loading: boolean
+  readonly hydrationStatus: 'warming' | 'ready' | 'failed' | null
   readonly error: string | null
   readonly payloadCount: number | null
   readonly decodedCount: number | null
@@ -308,6 +310,7 @@ export function CompactionInspectorOverlay({
   const [idx, setIdx] = useState(0)
   const [loadState, setLoadState] = useState<CompactionSnapshotLoadState>({
     loading: true,
+    hydrationStatus: null,
     error: null,
     payloadCount: null,
     decodedCount: null,
@@ -340,58 +343,67 @@ export function CompactionInspectorOverlay({
   }, [onClose])
 
   useEffect(() => {
-    const controller = new AbortController()
+    let controller: AbortController | null = null
     let active = true
-    setLoadState({
-      loading: true,
-      error: null,
-      payloadCount: null,
-      decodedCount: null,
-      payloadSource: null,
-      payloadProducer: null,
-      payloadLimit: null,
-      readErrorCount: 0,
-      readErrors: [],
-      scanTruncated: false,
-    })
     setHydratedState({ keeperName: keeper.name, events: [] })
-    void fetchKeeperCompactionSnapshots(keeper.name, undefined, { signal: controller.signal })
-      .then((payload) => {
-        if (!active) return
-        const next = hydrateCompactionSnapshots(keeper.name, payload.items)
-        setHydratedState({ keeperName: keeper.name, events: next })
-        setLoadState({
-          loading: false,
-          error: null,
-          payloadCount: payload.count,
-          decodedCount: payload.items.length,
-          payloadSource: payload.source,
-          payloadProducer: payload.producer,
-          payloadLimit: payload.limit,
-          readErrorCount: payload.read_error_count,
-          readErrors: payload.read_errors,
-          scanTruncated: payload.scan_truncated,
-        })
+    const load = (forceRefresh: boolean) => {
+      controller?.abort()
+      const requestController = new AbortController()
+      controller = requestController
+      setLoadState(previous => ({ ...previous, loading: true, error: null }))
+      void fetchKeeperCompactionSnapshots(keeper.name, undefined, {
+        signal: requestController.signal,
+        refresh: forceRefresh,
       })
-      .catch((err: unknown) => {
-        if (!active) return
-        if (err instanceof DOMException && err.name === 'AbortError') return
-        setLoadState({
-          loading: false,
-          error: err instanceof Error ? err.message : String(err),
-          payloadCount: null,
-          decodedCount: null,
-          payloadSource: null,
-          payloadProducer: null,
-          payloadLimit: null,
-          readErrorCount: 0,
-          readErrors: [],
-          scanTruncated: false,
+        .then((payload) => {
+          if (!active || requestController.signal.aborted) return
+          if (payload.hydration_status === 'ready') {
+            const next = hydrateCompactionSnapshots(keeper.name, payload.items)
+            setHydratedState({ keeperName: keeper.name, events: next })
+          }
+          const failure = payload.hydration_status === 'failed'
+            ? payload.read_errors[0]?.error ?? '백그라운드 hydration 실패'
+            : null
+          setLoadState({
+            loading: payload.hydration_status === 'warming',
+            hydrationStatus: payload.hydration_status,
+            error: failure,
+            payloadCount: payload.count,
+            decodedCount: payload.items.length,
+            payloadSource: payload.source,
+            payloadProducer: payload.producer,
+            payloadLimit: payload.limit,
+            readErrorCount: payload.read_error_count,
+            readErrors: payload.read_errors,
+            scanTruncated: payload.scan_truncated,
+          })
         })
-      })
+        .catch((err: unknown) => {
+          if (!active || requestController.signal.aborted) return
+          if (err instanceof DOMException && err.name === 'AbortError') return
+          setLoadState({
+            loading: false,
+            hydrationStatus: 'failed',
+            error: err instanceof Error ? err.message : String(err),
+            payloadCount: null,
+            decodedCount: null,
+            payloadSource: null,
+            payloadProducer: null,
+            payloadLimit: null,
+            readErrorCount: 0,
+            readErrors: [],
+            scanTruncated: false,
+          })
+        })
+    }
+    load(true)
+    const unregister = registerKeeperCompactionRefresh((changedKeeper, reason) => {
+      if (changedKeeper === keeper.name) load(reason === 'source_changed')
+    })
     return () => {
       active = false
-      controller.abort()
+      controller?.abort()
+      unregister()
     }
   }, [keeper.name])
 

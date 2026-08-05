@@ -10,15 +10,23 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+(* Whether the final returned line was newline-terminated in the file.
+   [Partial_last_line] means an append was in flight when the read happened,
+   which is the difference between a truncated write and real corruption at
+   the tail of an append-only log. *)
+type tail_completion =
+  | Complete
+  | Partial_last_line
+
 (* RFC-0149 §3.1 — typed Result entry point.  Distinguishes "no memory"
    ([Ok []] for missing file or zero-line request) from "IO/parse fault"
    ([Error class]).  The catch-all classifies the exception through the
    closed sum {!Keeper_memory_recall_exn_class.t} so the caller can
    branch on a bounded label instead of a free-form string. *)
-let read_file_tail_lines_result path ~max_bytes ~max_lines :
-    (string list, Keeper_memory_recall_exn_class.t) result =
-  if max_lines <= 0 then Ok []
-  else if not (Fs_compat.file_exists path) then Ok []
+let read_file_tail_lines_with_completion path ~max_bytes ~max_lines :
+    (string list * tail_completion, Keeper_memory_recall_exn_class.t) result =
+  if max_lines <= 0 then Ok ([], Complete)
+  else if not (Fs_compat.file_exists path) then Ok ([], Complete)
   else
     try
       let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
@@ -70,14 +78,37 @@ let read_file_tail_lines_result path ~max_bytes ~max_lines :
                then (match lines with _ :: rest -> rest | [] -> [])
                else lines
              in
+             (* The read always ends at end-of-file, so the last byte of
+                [content] tells whether the final line was terminated. A file
+                whose last line is still being appended has no trailing
+                newline yet. The symmetric case at the other end -- a first
+                line cut by the [max_bytes] window -- is already handled above
+                by dropping it when [!pos > 0]. *)
+             let completion =
+               if String.length content > 0
+                  && content.[String.length content - 1] = '\n'
+               then Complete
+               else Partial_last_line
+             in
              let n = List.length lines in
-             if n <= max_lines then lines
-             else
-               let drop = n - max_lines in
-               List.filteri (fun i _ -> i >= drop) lines))
+             let lines =
+               if n <= max_lines then lines
+               else
+                 let drop = n - max_lines in
+                 List.filteri (fun i _ -> i >= drop) lines
+             in
+             (lines, completion)))
     with
     | (Sys_error _ | Unix.Unix_error _ | End_of_file) as exn ->
         Error (Keeper_memory_recall_exn_class.classify exn)
+
+(* The completion flag matters to exactly one caller (the decision-log reader,
+   which must tell an in-flight append from corruption). Everyone else keeps
+   the original shape through this wrapper, so there is one implementation
+   rather than two readers to keep in step. *)
+let read_file_tail_lines_result path ~max_bytes ~max_lines :
+    (string list, Keeper_memory_recall_exn_class.t) result =
+  Result.map fst (read_file_tail_lines_with_completion path ~max_bytes ~max_lines)
 
 let record_memory_recall_read_error ~site path exn_class =
   let exn_label = Keeper_memory_recall_exn_class.to_label exn_class in

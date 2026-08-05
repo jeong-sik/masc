@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Read-only deployment gate for the event-queue v14 -> v15 hard cut.
+# Read-only runtime deployment preflight.
 #
 # Usage:
-#   scripts/check-keeper-event-queue-v15-cutover.sh --base-path /path/to/workspace
-#   scripts/check-keeper-event-queue-v15-cutover.sh --base-path /path/to/new-workspace --allow-empty-workspace
-#   scripts/check-keeper-event-queue-v15-cutover.sh --self-test
+#   scripts/check-runtime-deployment-preflight.sh --base-path /path/to/workspace
+#   scripts/check-runtime-deployment-preflight.sh --base-path /path/to/new-workspace --allow-empty-workspace
+#   scripts/check-runtime-deployment-preflight.sh --self-test
 
 set -euo pipefail
 
@@ -14,14 +14,14 @@ RUNTIME_ABSENT_BEFORE_LEASE=0
 SELF_TEST=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CUTOVER_HELPER="${MASC_EVENT_QUEUE_V15_CUTOVER_HELPER:-}"
+PREFLIGHT_HELPER="${MASC_DEPLOYMENT_PREFLIGHT_HELPER:-}"
 
 usage() {
   sed -n '2,/^$/p' "$0"
 }
 
 fail() {
-  printf '[event-queue-v15-cutover] FAIL: %s\n' "$*" >&2
+  printf '[runtime-deployment-preflight] FAIL: %s\n' "$*" >&2
   exit 1
 }
 
@@ -65,23 +65,23 @@ done
 
 command -v jq >/dev/null 2>&1 || fail "jq is required"
 
-if [[ -z "$CUTOVER_HELPER" ]]; then
-  if [[ -x "$SCRIPT_DIR/masc-keeper-event-queue-v15-cutover-helper" ]]; then
-    CUTOVER_HELPER="$SCRIPT_DIR/masc-keeper-event-queue-v15-cutover-helper"
-  elif [[ "${BASH_SOURCE[0]##*/}" == masc-check-keeper-event-queue-v15-cutover-* ]]; then
+if [[ -z "$PREFLIGHT_HELPER" ]]; then
+  if [[ -x "$SCRIPT_DIR/masc-deployment-preflight-helper" ]]; then
+    PREFLIGHT_HELPER="$SCRIPT_DIR/masc-deployment-preflight-helper"
+  elif [[ "${BASH_SOURCE[0]##*/}" == masc-check-runtime-deployment-preflight-* ]]; then
     release_suffix="${BASH_SOURCE[0]##*/}"
-    release_suffix="${release_suffix#masc-check-keeper-event-queue-v15-cutover-}"
-    release_helper="$SCRIPT_DIR/masc-keeper-event-queue-v15-cutover-helper-$release_suffix"
+    release_suffix="${release_suffix#masc-check-runtime-deployment-preflight-}"
+    release_helper="$SCRIPT_DIR/masc-deployment-preflight-helper-$release_suffix"
     [[ -x "$release_helper" ]] \
-      || fail "paired release cutover helper is missing or not executable: $release_helper"
-    CUTOVER_HELPER="$release_helper"
-  elif [[ -x "$REPO_ROOT/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe" ]]; then
-    CUTOVER_HELPER="$REPO_ROOT/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe"
+      || fail "paired release preflight helper is missing or not executable: $release_helper"
+    PREFLIGHT_HELPER="$release_helper"
+  elif [[ -x "$REPO_ROOT/_build/default/bin/deployment_preflight_helper.exe" ]]; then
+    PREFLIGHT_HELPER="$REPO_ROOT/_build/default/bin/deployment_preflight_helper.exe"
   else
-    fail "typed cutover helper is required beside this gate, in the build tree, or via MASC_EVENT_QUEUE_V15_CUTOVER_HELPER"
+    fail "typed deployment preflight helper is required beside this gate, in the build tree, or via MASC_DEPLOYMENT_PREFLIGHT_HELPER"
   fi
 fi
-[[ -x "$CUTOVER_HELPER" ]] || fail "typed cutover helper is not executable: $CUTOVER_HELPER"
+[[ -x "$PREFLIGHT_HELPER" ]] || fail "typed deployment preflight helper is not executable: $PREFLIGHT_HELPER"
 
 run_gate() {
   local runtime_root="$BASE_PATH/.masc"
@@ -94,16 +94,9 @@ run_gate() {
   local signal_row_count=0
   local signal_path
   local rows_in_file
-  local cutover_required=0
   local current_owner_count=0
-  local legacy_wal_count=0
-  local queue_count=0
   local queue_path
-  local current_queue_path
   local keeper_name
-  local pending_count
-  local outbox_count
-  local accepted_count
   local in_progress_count_total=0
 
   [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
@@ -114,7 +107,7 @@ run_gate() {
   fi
   if [[ ! -e "$runtime_root" && ! -L "$runtime_root" ]]; then
     if [[ "$ALLOW_EMPTY_WORKSPACE" -eq 1 ]]; then
-      printf '[event-queue-v15-cutover] OK: base_path=%s empty_workspace=allowed\n' \
+      printf '[runtime-deployment-preflight] OK: base_path=%s empty_workspace=allowed\n' \
         "$BASE_PATH"
       return
     fi
@@ -128,63 +121,32 @@ run_gate() {
       || fail "Keeper runtime root is not an exact directory: $keepers_root"
     reject_symlinks_below "$keepers_root" "Keeper runtime root"
     while IFS= read -r -d '' queue_path; do
-      legacy_wal_count=$((legacy_wal_count + 1))
       [[ -f "$queue_path" && ! -L "$queue_path" ]] \
-        || fail "v4 transition WAL is not an exact regular file: $queue_path"
-      [[ ! -s "$queue_path" ]] \
-        || fail "v4 transition WAL still contains committed evidence: $queue_path"
-      current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
-      if [[ ! -e "$current_queue_path" && ! -L "$current_queue_path" ]]; then
-        cutover_required=1
-      fi
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v4.jsonl' -print0)
-
-    while IFS= read -r -d '' queue_path; do
-      legacy_wal_count=$((legacy_wal_count + 1))
-      [[ -f "$queue_path" && ! -L "$queue_path" ]] \
-        || fail "v5 transition WAL is not an exact regular file: $queue_path"
-      [[ ! -s "$queue_path" ]] \
-        || fail "v5 transition WAL still contains committed evidence: $queue_path"
-      current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
-      if [[ ! -e "$current_queue_path" && ! -L "$current_queue_path" ]]; then
-        cutover_required=1
-      fi
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v5.jsonl' -print0)
-
-    while IFS= read -r -d '' current_queue_path; do
-      [[ -f "$current_queue_path" && ! -L "$current_queue_path" ]] \
-        || fail "v15 queue snapshot is not an exact regular file: $current_queue_path"
-      keeper_name="${current_queue_path%/*}"
+        || fail "current queue snapshot is not an exact regular file: $queue_path"
+      keeper_name="${queue_path%/*}"
       keeper_name="${keeper_name##*/}"
-      "$CUTOVER_HELPER" validate-current-queue \
+      "$PREFLIGHT_HELPER" validate-current-queue \
         --base-path "$BASE_PATH" \
         --keeper-name "$keeper_name" \
-        || fail "v15 queue snapshot or v6 transition WAL is invalid: $current_queue_path"
+        || fail "current queue snapshot or transition WAL is invalid: $queue_path"
       current_owner_count=$((current_owner_count + 1))
     done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v15.json' -print0)
 
     while IFS= read -r -d '' queue_path; do
       [[ -f "$queue_path" && ! -L "$queue_path" ]] \
-        || fail "v6 transition WAL is not an exact regular file: $queue_path"
-      current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
-      if [[ -e "$current_queue_path" || -L "$current_queue_path" ]]; then
+        || fail "current transition WAL is not an exact regular file: $queue_path"
+      if [[ -e "$(dirname "$queue_path")/event-queue-v15.json" \
+            || -L "$(dirname "$queue_path")/event-queue-v15.json" ]]; then
         continue
       fi
       keeper_name="${queue_path%/*}"
       keeper_name="${keeper_name##*/}"
-      "$CUTOVER_HELPER" validate-current-wal \
+      "$PREFLIGHT_HELPER" validate-current-wal \
         --base-path "$BASE_PATH" \
         --keeper-name "$keeper_name" \
-        || fail "v6 transition WAL is invalid: $queue_path"
+        || fail "current transition WAL is invalid: $queue_path"
       current_owner_count=$((current_owner_count + 1))
     done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v6.jsonl' -print0)
-
-    while IFS= read -r -d '' queue_path; do
-      current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
-      if [[ ! -e "$current_queue_path" && ! -L "$current_queue_path" ]]; then
-        cutover_required=1
-      fi
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v14.json' -print0)
   fi
 
   for schedules_path in \
@@ -196,19 +158,12 @@ run_gate() {
     schedule_ledger_count=$((schedule_ledger_count + 1))
     [[ -f "$schedules_path" && ! -L "$schedules_path" ]] \
       || fail "schedule ledger is not an exact regular file: $schedules_path"
-    schedule_report="$("$CUTOVER_HELPER" validate-schedule-ledger "$schedules_path")" \
+    schedule_report="$("$PREFLIGHT_HELPER" validate-schedule-ledger "$schedules_path")" \
       || fail "schedule ledger contract is invalid: $schedules_path"
     local in_progress_count
     in_progress_count="$(jq -er '.in_progress_count' <<<"$schedule_report")" \
       || fail "typed schedule validator returned an invalid result: $schedules_path"
     in_progress_count_total=$((in_progress_count_total + in_progress_count))
-    if [[ "$cutover_required" -eq 1 && "$in_progress_count" -ne 0 ]]; then
-      jq -r '
-        .in_progress[]
-        | "  schedule_instance_id=\(.schedule_instance_id) schedule_id=\(.schedule_id) due_at=\(.due_at) status=\(.status)"
-      ' <<<"$schedule_report" >&2
-      fail "schedule ledger still has $in_progress_count wake delivery attempt(s) in progress"
-    fi
   done
 
   if [[ -e "$signals_root" || -L "$signals_root" ]]; then
@@ -219,52 +174,21 @@ run_gate() {
       signal_file_count=$((signal_file_count + 1))
       [[ -f "$signal_path" && ! -L "$signal_path" ]] \
         || fail "schedule signal segment is not an exact regular file: $signal_path"
-      rows_in_file="$("$CUTOVER_HELPER" validate-signals "$signal_path")" \
-        || fail "schedule signal segment contains malformed or pre-cut rows: $signal_path"
+      rows_in_file="$("$PREFLIGHT_HELPER" validate-signals "$signal_path")" \
+        || fail "schedule signal segment violates the current contract: $signal_path"
       [[ "$rows_in_file" =~ ^[0-9]+$ ]] \
         || fail "typed signal validator returned an invalid row count: $rows_in_file"
       signal_row_count=$((signal_row_count + rows_in_file))
     done < <(find "$signals_root" -name '*.jsonl' -print0)
   fi
 
-  if [[ -e "$keepers_root" || -L "$keepers_root" ]]; then
-    [[ -d "$keepers_root" && ! -L "$keepers_root" ]] \
-      || fail "Keeper runtime root is not an exact directory: $keepers_root"
-    reject_symlinks_below "$keepers_root" "Keeper runtime root"
-    while IFS= read -r -d '' queue_path; do
-      current_queue_path="$(dirname "$queue_path")/event-queue-v15.json"
-      if [[ -e "$current_queue_path" || -L "$current_queue_path" ]]; then
-        continue
-      fi
-      queue_count=$((queue_count + 1))
-      [[ -f "$queue_path" && ! -L "$queue_path" ]] \
-        || fail "v14 queue snapshot is not an exact regular file: $queue_path"
-      jq -e '
-        type == "object"
-        and .schema == "keeper.event_queue.state.v14"
-        and (.pending | type == "array")
-        and (.transition_outbox | type == "array")
-        and (.accepted_transfer_projections | type == "array")
-        and (.projected_dispositions | type == "array")
-      ' "$queue_path" >/dev/null \
-        || fail "v14 queue snapshot shape is invalid: $queue_path"
-      pending_count="$(jq '.pending | length' "$queue_path")"
-      outbox_count="$(jq '.transition_outbox | length' "$queue_path")"
-      accepted_count="$(jq '.accepted_transfer_projections | length' "$queue_path")"
-      if [[ "$pending_count" -ne 0 || "$outbox_count" -ne 0 || "$accepted_count" -ne 0 ]]; then
-        fail "v14 queue is not drained: $queue_path pending=$pending_count transition_outbox=$outbox_count accepted_transfer_projections=$accepted_count"
-      fi
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v14.json' -print0)
-  fi
-
-  printf '[event-queue-v15-cutover] OK: base_path=%s cutover_required=%d schedule_ledgers=%d signal_files=%d signal_rows=%d v14_owners=%d current_owners=%d legacy_wals=%d in_progress=%d\n' \
-    "$BASE_PATH" "$cutover_required" "$schedule_ledger_count" \
-    "$signal_file_count" "$signal_row_count" "$queue_count" \
-    "$current_owner_count" "$legacy_wal_count" "$in_progress_count_total"
+  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d in_progress=%d\n' \
+    "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
+    "$signal_row_count" "$current_owner_count" "$in_progress_count_total"
 }
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
-  fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/event-queue-v15-cutover.XXXXXX")"
+  fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/runtime-deployment-preflight.XXXXXX")"
   trap 'if [[ -n "${handoff_pid:-}" ]]; then kill "$handoff_pid" 2>/dev/null || true; fi; if [[ -n "${cancel_handoff_pid:-}" ]]; then kill "$cancel_handoff_pid" 2>/dev/null || true; fi; rm -rf "$fixture_root"' EXIT
 
   write_schedules() {
@@ -303,26 +227,6 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     ' >"$signal_dir/04.jsonl"
   }
 
-  write_queue() {
-    local target_root="$1"
-    local pending="$2"
-    local outbox="$3"
-    local accepted="$4"
-    local queue_dir="$target_root/.masc/keepers/fixture"
-    mkdir -p "$queue_dir"
-    jq -n \
-      --argjson pending "$pending" \
-      --argjson outbox "$outbox" \
-      --argjson accepted "$accepted" '
-      {schema: "keeper.event_queue.state.v14", revision: 1,
-       pending: (if $pending == 0 then [] else [{}] end),
-       last_transition: {operation_id: "terminal-evidence"},
-       projected_dispositions: [{operation_id: "terminal-evidence"}],
-       transition_outbox: (if $outbox == 0 then [] else [{}] end),
-       accepted_transfer_projections: (if $accepted == 0 then [] else [{}] end)}
-    ' >"$queue_dir/event-queue-v14.json"
-  }
-
   write_current_queue() {
     local target_root="$1"
     local queue_dir="$target_root/.masc/keepers/fixture"
@@ -348,76 +252,44 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   write_signal "$safe_root" true
   cp "$safe_root/.masc/schedules.json" \
     "$safe_root/.masc/schedules.json.last-good"
-  write_queue "$safe_root" 0 0 0
+  write_current_queue "$safe_root"
   "$0" --base-path "$safe_root" >/dev/null
   # Expansion belongs to the nested shell.
   # shellcheck disable=SC2016
-  "$CUTOVER_HELPER" \
+  "$PREFLIGHT_HELPER" \
     lease-run \
     --base-path "$safe_root" \
     -- \
     /bin/sh -c '"$1" --base-path "$2"' nested-lease-check "$0" "$safe_root" \
     >/dev/null
-  if MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID="$$" \
+  if MASC_DEPLOYMENT_LEASE_OWNER_PID="$$" \
       "$0" --base-path "$safe_root" >/dev/null 2>&1
   then
     fail "self-test accepted a forged BasePath lease owner without a held lease"
   fi
-  if "$CUTOVER_HELPER" \
+  if "$PREFLIGHT_HELPER" \
       lease-run \
       --base-path "$safe_root" \
       -- \
-      env -u MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID \
+      env -u MASC_DEPLOYMENT_LEASE_OWNER_PID \
       "$0" --base-path "$safe_root" \
       >/dev/null 2>&1
   then
-    fail "self-test expected an active BasePath writer lease to block cutover"
+    fail "self-test expected an active BasePath writer lease to block preflight"
   fi
 
   running_root="$fixture_root/running"
   write_schedules "$running_root" running
-  write_queue "$running_root" 0 0 0
-  expect_failure running_wake "$running_root"
-
-  pending_root="$fixture_root/pending"
-  write_schedules "$pending_root" none
-  write_queue "$pending_root" 1 0 0
-  expect_failure pending_work "$pending_root"
-
-  outbox_root="$fixture_root/outbox"
-  write_schedules "$outbox_root" none
-  write_queue "$outbox_root" 0 1 0
-  expect_failure transition_outbox "$outbox_root"
-
-  accepted_root="$fixture_root/accepted"
-  write_schedules "$accepted_root" none
-  write_queue "$accepted_root" 0 0 1
-  expect_failure accepted_transfer "$accepted_root"
-
-  legacy_wal_root="$fixture_root/legacy-wal"
-  write_schedules "$legacy_wal_root" none
-  write_queue "$legacy_wal_root" 0 0 0
-  printf '{"committed":"transition"}\n' \
-    >"$legacy_wal_root/.masc/keepers/fixture/event-queue-transitions-v4.jsonl"
-  expect_failure nonempty_v4_transition_wal "$legacy_wal_root"
-
-  legacy_v5_wal_root="$fixture_root/legacy-v5-wal"
-  write_schedules "$legacy_v5_wal_root" none
-  write_queue "$legacy_v5_wal_root" 0 0 0
-  printf '{"schema":"masc.keeper_event_queue.transition.v5"}\n' \
-    >"$legacy_v5_wal_root/.masc/keepers/fixture/event-queue-transitions-v5.jsonl"
-  expect_failure nonempty_v5_transition_wal "$legacy_v5_wal_root"
+  write_current_queue "$running_root"
+  "$0" --base-path "$running_root" >/dev/null
 
   current_root="$fixture_root/current"
   write_schedules "$current_root" running
-  write_queue "$current_root" 1 1 1
   write_current_queue "$current_root"
-  : >"$current_root/.masc/keepers/fixture/event-queue-transitions-v4.jsonl"
   "$0" --base-path "$current_root" >/dev/null
 
   malformed_current_root="$fixture_root/malformed-current"
   write_schedules "$malformed_current_root" running
-  write_queue "$malformed_current_root" 1 1 1
   printf '{not-json\n' \
     >"$malformed_current_root/.masc/keepers/fixture/event-queue-v15.json"
   expect_failure malformed_current_queue "$malformed_current_root"
@@ -453,43 +325,36 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     >"$incomplete_contract_root/.masc/schedules.json"
   expect_failure incomplete_schedule_contract "$incomplete_contract_root"
 
-  malformed_queue_root="$fixture_root/malformed-queue"
-  write_schedules "$malformed_queue_root" none
-  mkdir -p "$malformed_queue_root/.masc/keepers/fixture"
-  printf '{not-json\n' \
-    >"$malformed_queue_root/.masc/keepers/fixture/event-queue-v14.json"
-  expect_failure malformed_queue "$malformed_queue_root"
-
   symlinked_keepers_root="$fixture_root/symlinked-keepers"
   symlinked_keepers_target="$fixture_root/symlinked-keepers-target"
   write_schedules "$symlinked_keepers_root" none
-  write_queue "$symlinked_keepers_target" 1 0 0
+  write_current_queue "$symlinked_keepers_target"
   ln -s "$symlinked_keepers_target/.masc/keepers" \
     "$symlinked_keepers_root/.masc/keepers"
   expect_failure symlinked_keepers_root "$symlinked_keepers_root"
 
-  pre_cut_root="$fixture_root/pre-cut-schedule"
-  mkdir -p "$pre_cut_root/.masc"
+  incomplete_schedule_root="$fixture_root/incomplete-schedule"
+  mkdir -p "$incomplete_schedule_root/.masc"
   jq -n '
     {version: 1, updated_at: 1,
-     schedules: [{schedule_id: "legacy-schedule"}],
+     schedules: [{schedule_id: "incomplete-schedule"}],
      wakes: []}
-  ' >"$pre_cut_root/.masc/schedules.json"
-  expect_failure pre_cut_schedule "$pre_cut_root"
+  ' >"$incomplete_schedule_root/.masc/schedules.json"
+  expect_failure incomplete_schedule "$incomplete_schedule_root"
 
-  pre_cut_recovery_root="$fixture_root/pre-cut-recovery"
-  write_schedules "$pre_cut_recovery_root" succeeded
+  incomplete_recovery_root="$fixture_root/incomplete-recovery"
+  write_schedules "$incomplete_recovery_root" succeeded
   jq -n '
     {version: 1, updated_at: 1,
-     schedules: [{schedule_id: "pre-cut-schedule"}],
+     schedules: [{schedule_id: "incomplete-recovery-schedule"}],
      wakes: []}
-  ' >"$pre_cut_recovery_root/.masc/schedules.json.last-good"
-  expect_failure pre_cut_recovery "$pre_cut_recovery_root"
+  ' >"$incomplete_recovery_root/.masc/schedules.json.last-good"
+  expect_failure incomplete_recovery "$incomplete_recovery_root"
 
-  pre_cut_signal_root="$fixture_root/pre-cut-signal"
-  write_schedules "$pre_cut_signal_root" succeeded
-  write_signal "$pre_cut_signal_root" false
-  expect_failure pre_cut_signal "$pre_cut_signal_root"
+  incomplete_signal_root="$fixture_root/incomplete-signal"
+  write_schedules "$incomplete_signal_root" succeeded
+  write_signal "$incomplete_signal_root" false
+  expect_failure incomplete_signal "$incomplete_signal_root"
 
   stale_occurrence_signal_root="$fixture_root/stale-occurrence-signal"
   write_schedules "$stale_occurrence_signal_root" succeeded
@@ -537,11 +402,11 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
 
   leased_empty_root="$fixture_root/leased-empty"
   mkdir -p "$leased_empty_root"
-  if "$CUTOVER_HELPER" \
+  if "$PREFLIGHT_HELPER" \
       lease-run \
       --base-path "$leased_empty_root" \
       -- \
-      env -u MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID \
+      env -u MASC_DEPLOYMENT_LEASE_OWNER_PID \
       "$0" \
       --base-path "$leased_empty_root" \
       --allow-empty-workspace \
@@ -552,7 +417,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
 
   failed_handoff_root="$fixture_root/failed-handoff"
   mkdir -p "$failed_handoff_root"
-  if "$CUTOVER_HELPER" \
+  if "$PREFLIGHT_HELPER" \
       lease-handoff \
       --base-path "$failed_handoff_root" \
       --next-executable /usr/bin/true \
@@ -562,7 +427,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   then
     fail "self-test expected a failed preparation to abort handoff"
   fi
-  "$CUTOVER_HELPER" \
+  "$PREFLIGHT_HELPER" \
     lease-run \
     --base-path "$failed_handoff_root" \
     -- \
@@ -578,16 +443,16 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   # shellcheck disable=SC2016
   printf '%s\n' \
     '#!/bin/sh' \
-    'printf "%s\n" "$$" >"$MASC_CUTOVER_CHILD_PID"' \
+    'printf "%s\n" "$$" >"$MASC_DEPLOYMENT_CHILD_PID"' \
     'trap "exit 143" TERM INT' \
     'sleep 30 &' \
-    'printf "%s\n" "$!" >"$MASC_CUTOVER_GRANDCHILD_PID"' \
+    'printf "%s\n" "$!" >"$MASC_DEPLOYMENT_GRANDCHILD_PID"' \
     'wait' \
     >"$cancel_prepare"
   chmod 700 "$cancel_prepare"
-  MASC_CUTOVER_CHILD_PID="$cancel_child_file" \
-  MASC_CUTOVER_GRANDCHILD_PID="$cancel_grandchild_file" \
-    "$CUTOVER_HELPER" \
+  MASC_DEPLOYMENT_CHILD_PID="$cancel_child_file" \
+  MASC_DEPLOYMENT_GRANDCHILD_PID="$cancel_grandchild_file" \
+    "$PREFLIGHT_HELPER" \
       lease-handoff \
       --base-path "$cancel_handoff_root" \
       --next-executable /usr/bin/true \
@@ -621,7 +486,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   if kill -0 "$cancel_grandchild_pid" 2>/dev/null; then
     fail "self-test preparation grandchild survived lease-helper termination"
   fi
-  "$CUTOVER_HELPER" \
+  "$PREFLIGHT_HELPER" \
     lease-run \
     --base-path "$cancel_handoff_root" \
     -- \
@@ -637,15 +502,15 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   # shellcheck disable=SC2016
   printf '%s\n' \
     '#!/bin/sh' \
-    'printf ready >"$MASC_CUTOVER_HANDOFF_READY"' \
+    'printf ready >"$MASC_DEPLOYMENT_HANDOFF_READY"' \
     'sleep 10' \
     >"$handoff_next"
   chmod 700 "$handoff_next"
-  MASC_CUTOVER_HANDOFF_READY="$handoff_ready" \
-    "$CUTOVER_HELPER" \
+  MASC_DEPLOYMENT_HANDOFF_READY="$handoff_ready" \
+    "$PREFLIGHT_HELPER" \
       lease-handoff \
       --base-path "$handoff_root" \
-      --next-executable "$CUTOVER_HELPER" \
+      --next-executable "$PREFLIGHT_HELPER" \
       --next-argument=lease-run \
       --next-argument=--base-path \
       --next-argument="$handoff_root" \
@@ -666,7 +531,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     || fail "self-test handoff runtime did not become ready"
   [[ -e "$handoff_prepared" ]] \
     || fail "self-test handoff did not publish preparation completion"
-  if "$CUTOVER_HELPER" \
+  if "$PREFLIGHT_HELPER" \
       lease-run \
       --base-path "$handoff_root" \
       -- \
@@ -679,15 +544,15 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   wait "$handoff_pid" 2>/dev/null || true
   handoff_pid=""
 
-  printf '[event-queue-v15-cutover] self-test OK\n'
+  printf '[runtime-deployment-preflight] self-test OK\n'
   exit 0
 fi
 
-if [[ -n "${MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID:-}" ]]; then
-  "$CUTOVER_HELPER" \
+if [[ -n "${MASC_DEPLOYMENT_LEASE_OWNER_PID:-}" ]]; then
+  "$PREFLIGHT_HELPER" \
     verify-lease-owner \
     --base-path "$BASE_PATH" \
-    --owner-pid "$MASC_EVENT_QUEUE_V15_CUTOVER_LEASE_OWNER_PID" \
+    --owner-pid "$MASC_DEPLOYMENT_LEASE_OWNER_PID" \
     || fail "inherited BasePath lease proof is invalid"
 else
   runtime_root="$BASE_PATH/.masc"
@@ -708,7 +573,7 @@ else
   if [[ "$runtime_absent_before_lease" -eq 1 ]]; then
     helper_args+=(--runtime-absent-before-lease)
   fi
-  exec "$CUTOVER_HELPER" "${helper_args[@]}"
+  exec "$PREFLIGHT_HELPER" "${helper_args[@]}"
 fi
 
 run_gate

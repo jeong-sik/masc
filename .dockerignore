@@ -16,7 +16,7 @@ logs
 *.exe
 masc-linux-x64
 !masc-linux-x64
-!masc-keeper-event-queue-v15-cutover-helper
+!masc-deployment-preflight-helper
 a.out
 *.native
 dashboard/dist/

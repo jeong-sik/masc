@@ -31,7 +31,7 @@ used as evidence.
 | `.mli` interfaces under `lib/` | 401 |
 | MCP tool modules (`tool_*.ml`) | 109 |
 | Test files (`test/*.ml`) | 449 |
-| Executables | 9 public (`masc`, `masc-stdio`, `masc-cost`, `masc-compaction-audit`, `masc-keeper-feature-proof`, `masc-trace`, `masc-tui`, `masc-worker-run`, `masc-fusion-run`) + 4 internal (`public_tool_manifest`, `env_knob_catalog`, `gen_tool_descriptors`, `keeper_event_queue_v15_cutover_helper`) |
+| Executables | 9 public (`masc`, `masc-stdio`, `masc-cost`, `masc-compaction-audit`, `masc-keeper-feature-proof`, `masc-trace`, `masc-tui`, `masc-worker-run`, `masc-fusion-run`) + 4 internal (`public_tool_manifest`, `env_knob_catalog`, `gen_tool_descriptors`, `deployment_preflight_helper`) |
 
 숫자는 2026-04-23 repo snapshot 기준. `rg --files lib/ test/ bin/` 및 `wc -l`로 재계산. 최신 truth는 다시 계산해야 한다.
 

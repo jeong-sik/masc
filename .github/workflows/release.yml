@@ -92,7 +92,7 @@ jobs:
         run: |
           opam exec -- dune build --release \
             bin/main_eio.exe \
-            bin/keeper_event_queue_v15_cutover_helper.exe
+            bin/deployment_preflight_helper.exe
 
       - name: Release binary smoke (boot + README drift)
         run: |
@@ -111,14 +111,14 @@ jobs:
         run: |
           mkdir -p dist
           cp _build/default/bin/main_eio.exe dist/masc-${{ matrix.arch }}
-          cp _build/default/bin/keeper_event_queue_v15_cutover_helper.exe \
-            dist/masc-keeper-event-queue-v15-cutover-helper-${{ matrix.arch }}
-          cp scripts/check-keeper-event-queue-v15-cutover.sh \
-            dist/masc-check-keeper-event-queue-v15-cutover-${{ matrix.arch }}
+          cp _build/default/bin/deployment_preflight_helper.exe \
+            dist/masc-deployment-preflight-helper-${{ matrix.arch }}
+          cp scripts/check-runtime-deployment-preflight.sh \
+            dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
           chmod +x dist/masc-${{ matrix.arch }}
           chmod +x \
-            dist/masc-keeper-event-queue-v15-cutover-helper-${{ matrix.arch }} \
-            dist/masc-check-keeper-event-queue-v15-cutover-${{ matrix.arch }}
+            dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
+            dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -147,8 +147,8 @@ jobs:
           for arch in macos-arm64 linux-x64; do
             for asset in \
               "masc-$arch" \
-              "masc-keeper-event-queue-v15-cutover-helper-$arch" \
-              "masc-check-keeper-event-queue-v15-cutover-$arch"; do
+              "masc-deployment-preflight-helper-$arch" \
+              "masc-check-runtime-deployment-preflight-$arch"; do
               if [ ! -f "dist/$asset" ]; then
                 echo "required release asset missing: $asset"
                 exit 1

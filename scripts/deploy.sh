@@ -33,7 +33,7 @@ LAUNCHD_LABEL="com.jeong-sik.masc-prod"
 
 SKIP_BUILD=false
 RESTART_TUNNEL=false
-PREPARE_UNDER_CUTOVER_LEASE=false
+PREPARE_UNDER_DEPLOYMENT_LEASE=false
 
 preserve_env_override() {
     local name="$1"
@@ -58,7 +58,7 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --skip-build) SKIP_BUILD=true; shift ;;
         --restart-tunnel) RESTART_TUNNEL=true; shift ;;
-        --prepare-under-cutover-lease) PREPARE_UNDER_CUTOVER_LEASE=true; shift ;;
+        --prepare-under-deployment-lease) PREPARE_UNDER_DEPLOYMENT_LEASE=true; shift ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -76,25 +76,25 @@ if [ "$SKIP_BUILD" = false ]; then
     cd "$REPO_DIR"
     "$REPO_DIR/scripts/dune-local.sh" build \
         bin/main_eio.exe \
-        bin/keeper_event_queue_v15_cutover_helper.exe \
+        bin/deployment_preflight_helper.exe \
         2>&1
     echo "    Build complete." >&2
 fi
 
 BUILD_EXE="$REPO_DIR/_build/default/bin/main_eio.exe"
-BUILD_CUTOVER_HELPER="$REPO_DIR/_build/default/bin/keeper_event_queue_v15_cutover_helper.exe"
+BUILD_PREFLIGHT_HELPER="$REPO_DIR/_build/default/bin/deployment_preflight_helper.exe"
 if [ ! -x "$BUILD_EXE" ]; then
     echo "Error: Build artifact not found at $BUILD_EXE" >&2
     exit 1
 fi
-if [ ! -x "$BUILD_CUTOVER_HELPER" ]; then
-    echo "Error: Event-queue cutover helper not found at $BUILD_CUTOVER_HELPER" >&2
+if [ ! -x "$BUILD_PREFLIGHT_HELPER" ]; then
+    echo "Error: Deployment preflight helper not found at $BUILD_PREFLIGHT_HELPER" >&2
     exit 1
 fi
 
-prepare_release_under_cutover_lease() {
-    MASC_EVENT_QUEUE_V15_CUTOVER_HELPER="$BUILD_CUTOVER_HELPER" \
-        "$SCRIPT_DIR/check-keeper-event-queue-v15-cutover.sh" \
+prepare_release_under_deployment_lease() {
+    MASC_DEPLOYMENT_PREFLIGHT_HELPER="$BUILD_PREFLIGHT_HELPER" \
+        "$SCRIPT_DIR/check-runtime-deployment-preflight.sh" \
         --base-path "$BASE_PATH"
 
     mkdir -p "$RELEASE_DIR"
@@ -111,8 +111,8 @@ mkdir -p "$RELEASE_DIR"
 RELEASE_EXE="$RELEASE_DIR/main_eio.exe"
 BACKUP_EXE="$RELEASE_DIR/main_eio.exe.prev"
 
-if [ "$PREPARE_UNDER_CUTOVER_LEASE" = true ]; then
-    prepare_release_under_cutover_lease
+if [ "$PREPARE_UNDER_DEPLOYMENT_LEASE" = true ]; then
+    prepare_release_under_deployment_lease
     exit 0
 fi
 
@@ -125,7 +125,7 @@ fi
 KEEPER_ENV="$REPO_DIR/config/keeper.env"
 readonly SCRIPT_DIR REPO_DIR RELEASE_DIR PROD_PORT HEALTH_URL BASE_PATH \
     RUNTIME_ROOT PID_FILE LOG_DIR LAUNCHD_LABEL SKIP_BUILD RESTART_TUNNEL \
-    PREPARE_UNDER_CUTOVER_LEASE BUILD_EXE BUILD_CUTOVER_HELPER RELEASE_EXE \
+    PREPARE_UNDER_DEPLOYMENT_LEASE BUILD_EXE BUILD_PREFLIGHT_HELPER RELEASE_EXE \
     BACKUP_EXE KEEPER_ENV
 preserve_env_override MASC_CONFIG_DIR
 preserve_env_override MASC_PERSONAS_DIR
@@ -179,7 +179,7 @@ fi
 # The helper keeps the POSIX process lock while its preparation child validates
 # and installs the release, then execs the new runtime in that same process.
 # There is no unlock/reacquire window in which an older writer can enter.
-echo "==> Starting prod on :$PROD_PORT with atomic cutover lease handoff..." >&2
+echo "==> Starting prod on :$PROD_PORT with atomic deployment lease handoff..." >&2
 
 HANDOFF_DIR="$(mktemp -d "$RUNTIME_ROOT/deploy-handoff.XXXXXX")"
 PREPARED_FILE="$HANDOFF_DIR/prepared"
@@ -204,8 +204,8 @@ trap 'exit 143' TERM
 MASC_BASE_PATH="$BASE_PATH" \
 MASC_ORCHESTRATOR_ENABLED=0 \
 MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$BASE_PATH/.masc/config}" \
-MASC_EVENT_QUEUE_V15_CUTOVER_HELPER="$BUILD_CUTOVER_HELPER" \
-    nohup "$BUILD_CUTOVER_HELPER" \
+MASC_DEPLOYMENT_PREFLIGHT_HELPER="$BUILD_PREFLIGHT_HELPER" \
+    nohup "$BUILD_PREFLIGHT_HELPER" \
         lease-handoff \
         --base-path "$BASE_PATH" \
         --next-executable "$RELEASE_EXE" \
@@ -215,7 +215,7 @@ MASC_EVENT_QUEUE_V15_CUTOVER_HELPER="$BUILD_CUTOVER_HELPER" \
         -- \
         "$SCRIPT_DIR/deploy.sh" \
         --skip-build \
-        --prepare-under-cutover-lease \
+        --prepare-under-deployment-lease \
     >> "$LOG_DIR/masc-prod.out.log" \
     2>> "$LOG_DIR/masc-prod.err.log" &
 
@@ -226,7 +226,7 @@ echo "    Handoff started with PID $PROD_PID" >&2
 # Validation and installation are intentionally unbounded: the health deadline
 # starts only after the helper proves preparation completed. A failed helper is
 # reaped here, and the EXIT trap terminates its preparation child if interrupted.
-echo "==> Waiting for cutover preparation..." >&2
+echo "==> Waiting for deployment preparation..." >&2
 while [ ! -f "$PREPARED_FILE" ]; do
     if ! kill -0 "$PROD_PID" 2>/dev/null; then
         if wait "$PROD_PID"; then
@@ -234,7 +234,7 @@ while [ ! -f "$PREPARED_FILE" ]; do
         else
             HANDOFF_STATUS=$?
         fi
-        echo "Error: Cutover preparation exited with status $HANDOFF_STATUS" >&2
+        echo "Error: Deployment preparation exited with status $HANDOFF_STATUS" >&2
         exit 1
     fi
     sleep 0.1

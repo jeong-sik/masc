@@ -293,10 +293,10 @@ let boundary_moves_only_with_the_raw_cut () =
     demoted
 ;;
 
-(* The production pipeline first compares original/demoted messages, then
-   measures the planned list again to place the byte window. A per-projection
-   identity cache must reuse every candidate measurement without retaining
-   structurally equal but independently allocated messages. *)
+(* The production pipeline measures the raw history, rewrites only atoms below
+   that cut, then measures the planned list. This fixture makes every atom
+   eligible so the per-projection identity cache must reuse every candidate
+   measurement without retaining independently allocated equal messages. *)
 let projection_reuses_candidate_measurements () =
   let bodies = List.init 20 (fun _ -> String.make 4000 'a') in
   let messages = history_with_tool_bodies bodies in
@@ -309,7 +309,9 @@ let projection_reuses_candidate_measurements () =
     Masc.Keeper_turn_driver_try_provider.For_testing
     .memoize_message_measurement measured
   in
-  let planned = Demotion.plan ~measure_message_bytes messages in
+  let planned =
+    Demotion.plan ~measure_message_bytes ~demote_before:max_int messages
+  in
   Alcotest.(check int)
     "fixture creates one candidate per aged tool result"
     20
@@ -321,12 +323,16 @@ let projection_reuses_candidate_measurements () =
        ~reserved_bytes:0
        planned.Demotion.messages
    with
-   | Error error ->
+  | Error error ->
      Alcotest.fail (Window.budget_error_to_string error)
    | Ok _ -> ());
+  let expected_unique_measurements =
+    List.length messages + List.length planned.Demotion.pending + 1
+    (* The window's synthetic preamble. *)
+  in
   Alcotest.(check int)
     "each original, candidate, and preamble identity is encoded once"
-    122
+    expected_unique_measurements
     !raw_measurements
 ;;
 

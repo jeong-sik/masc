@@ -93,4 +93,6 @@ module For_testing : sig
 
   val memoize_message_measurement :
     (Agent_sdk.Types.message -> int) -> Agent_sdk.Types.message -> int
+
+  val offload_model_input_cpu : (unit -> 'a) -> 'a
 end

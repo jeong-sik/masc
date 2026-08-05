@@ -319,6 +319,14 @@ let memoize_message_measurement measure =
       bytes
 ;;
 
+(* Model-input projection walks the durable message history and encodes every
+   candidate it measures. Live Keeper checkpoints carry tens of thousands of
+   messages, so doing that work on the main Eio domain starves unrelated HTTP
+   fibers even though no provider call has started yet. The server installs a
+   shared CPU-weighted [Domain_pool]; non-Eio/unit callers retain the typed
+   inline fallback owned by [Domain_pool_ref]. *)
+let offload_model_input_cpu f = Domain_pool_ref.submit_cpu_or_inline f
+
 let declared_request_reserve_bytes ~capacity_bytes ~system_prompt ~tools =
   let tool_schema_bytes =
     List.fold_left
@@ -348,73 +356,92 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
   : Agent_sdk.Agent.model_input_projection
   =
   let reserved_bytes =
-    declared_request_reserve_bytes
-      ~capacity_bytes:ctx.max_request_body_bytes
-      ~system_prompt:ctx.system_prompt
-      ~tools:ctx.tools
+    offload_model_input_cpu (fun () ->
+      declared_request_reserve_bytes
+        ~capacity_bytes:ctx.max_request_body_bytes
+        ~system_prompt:ctx.system_prompt
+        ~tools:ctx.tools)
   in
   fun messages ->
-    (* The raw cut and demotion plan both measure immutable message records.
-       Cache only for this projection call so repeated candidates are encoded
-       once without retaining a long-lived Keeper's historical message graph. *)
-    let measure_message_bytes =
-      memoize_message_measurement measure_message_bytes
-    in
-    let raw_cut candidate =
-      Runtime_model_input_tail_window.project_with_drop
-        ~measure_message_bytes
-        ~capacity_bytes:ctx.max_request_body_bytes
-        ~reserved_bytes
-        candidate
-    in
-    let cut candidate =
-      Result.map
-        (fun projection -> projection.Runtime_model_input_tail_window.messages)
-        (raw_cut candidate)
-    in
-    (* RFC-0363: the unmodified history chooses the authoritative cut first.
-       Demotion may rewrite only atoms that cut already omitted, so appending a
-       turn cannot move the rewrite boundary unless the raw cut itself moves.
-       Markers can then buy some of those omitted atoms back without causing a
-       per-turn prompt-cache miss. *)
-    let windowed =
-      match raw_cut messages with
-      | Error error ->
-        Error (Runtime_model_input_tail_window.budget_error_to_string error)
-      | Ok raw_projection ->
-        let planned =
-          if String.equal ctx.base_path "" || raw_projection.dropped_atoms = 0
-          then { Keeper_model_input_demotion.messages; pending = [] }
-          else
-            Keeper_model_input_demotion.plan
-              ~measure_message_bytes
-              ~demote_before:raw_projection.dropped_atoms
-              messages
+    let planned_and_windowed =
+      offload_model_input_cpu (fun () ->
+        (* The raw cut and demotion plan both measure immutable message records.
+           Cache only for this worker-domain job so repeated candidates are
+           encoded once without retaining a long-lived Keeper's history. *)
+        let measure_message_bytes =
+          memoize_message_measurement measure_message_bytes
         in
+        let raw_cut candidate =
+          Runtime_model_input_tail_window.project_with_drop
+            ~measure_message_bytes
+            ~capacity_bytes:ctx.max_request_body_bytes
+            ~reserved_bytes
+            candidate
+        in
+        let cut candidate =
+          Result.map
+            (fun projection ->
+               projection.Runtime_model_input_tail_window.messages)
+            (raw_cut candidate)
+        in
+        (* RFC-0363: the unmodified history chooses the authoritative cut first.
+           Demotion rewrites only atoms omitted by that cut, so appending a turn
+           cannot move the rewrite boundary unless the raw cut itself moves. *)
+        match raw_cut messages with
+        | Error error ->
+          Error (Runtime_model_input_tail_window.budget_error_to_string error)
+        | Ok raw_projection ->
+          let planned =
+            if String.equal ctx.base_path "" || raw_projection.dropped_atoms = 0
+            then { Keeper_model_input_demotion.messages; pending = [] }
+            else
+              Keeper_model_input_demotion.plan
+                ~measure_message_bytes
+                ~demote_before:raw_projection.dropped_atoms
+                messages
+          in
+          (match planned.Keeper_model_input_demotion.pending with
+           | [] -> Ok (planned, raw_projection.messages)
+           | _ ->
+             (match cut planned.Keeper_model_input_demotion.messages with
+              | Error error ->
+                Error
+                  (Runtime_model_input_tail_window.budget_error_to_string error)
+              | Ok windowed -> Ok (planned, windowed))))
+    in
+    let windowed =
+      match planned_and_windowed with
+      | Error _ as error -> error
+      | Ok (planned, windowed) ->
         (match planned.Keeper_model_input_demotion.pending with
-         | [] -> Ok raw_projection.messages
+         | [] -> Ok windowed
          | pending ->
-           (match cut planned.Keeper_model_input_demotion.messages with
-            | Error error ->
-              Error (Runtime_model_input_tail_window.budget_error_to_string error)
-            | Ok windowed ->
-              let outcome =
-                Keeper_model_input_demotion.materialize
-                  ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
-                  ~pending
-                  windowed
-              in
-              if outcome.Keeper_model_input_demotion.reverted = 0
-              then Ok outcome.Keeper_model_input_demotion.messages
-              else
-                (* A restored body is larger than the placeholder the cut was
-                   measured against, so the cut is no longer known to fit.
-                   Choose it again against what will actually be sent. *)
-                (match cut outcome.Keeper_model_input_demotion.messages with
-                 | Ok recut -> Ok recut
-                 | Error error ->
-                   Error
-                     (Runtime_model_input_tail_window.budget_error_to_string error))))
+           (* Blob materialization performs filesystem I/O and therefore stays
+              on the owning Eio fiber rather than in the CPU domain pool. *)
+           let outcome =
+             Keeper_model_input_demotion.materialize
+               ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
+               ~pending
+               windowed
+           in
+           if outcome.Keeper_model_input_demotion.reverted = 0
+           then Ok outcome.Keeper_model_input_demotion.messages
+           else
+             (* A restored body is larger than the measured placeholder, so the
+                final cut must be selected again against the actual payload. *)
+             (match
+                offload_model_input_cpu (fun () ->
+                  Runtime_model_input_tail_window.project
+                    ~measure_message_bytes:
+                      (memoize_message_measurement measure_message_bytes)
+                    ~capacity_bytes:ctx.max_request_body_bytes
+                    ~reserved_bytes
+                    outcome.Keeper_model_input_demotion.messages)
+              with
+              | Ok recut -> Ok recut
+              | Error error ->
+                Error
+                  (Runtime_model_input_tail_window.budget_error_to_string error)))
     in
     match windowed with
     | Error _ as error -> error
@@ -608,4 +635,5 @@ module For_testing = struct
   let apply_accept = apply_accept
   let observe_request_wire_error = observe_request_wire_error
   let memoize_message_measurement = memoize_message_measurement
+  let offload_model_input_cpu = offload_model_input_cpu
 end

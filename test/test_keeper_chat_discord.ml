@@ -190,6 +190,26 @@ let test_adapter_empty_terminal_is_local_error () =
       (contains message "contained no text")
   | _ -> fail "empty terminal settles once with a local delivery error"
 
+let test_completed_external_effect_settles_without_duplicate_send () =
+  let sends = ref 0 in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.External_effect_completed
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-effect" }
+      ]
+      ~post_message:(fun ~content:_ ->
+        incr sends;
+        Ok "unexpected-stream-message")
+      ~edit_message:(fun ~message_id:_ ~content:_ ->
+        incr sends;
+        Ok ())
+      ~send_message:(fun ~content:_ ->
+        incr sends;
+        Ok ())
+  in
+  check int "completed effect makes no Discord call" 0 !sends;
+  check_single_ok "completed effect settles the receipt" outcomes
+
 let test_terminal_callback_reports_final_patch_failure () =
   let patch_calls = ref 0 in
   let outcomes =
@@ -305,6 +325,8 @@ let () =
             test_terminal_callback_once_for_fallback_post
         ; test_case "empty terminal is local-only" `Quick
             test_adapter_empty_terminal_is_local_error
+        ; test_case "completed effect sends no duplicate reply" `Quick
+            test_completed_external_effect_settles_without_duplicate_send
         ; test_case "callback reports final PATCH failure" `Quick
             test_terminal_callback_reports_final_patch_failure
         ; test_case "callback reports overflow failure" `Quick

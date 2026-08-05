@@ -274,6 +274,7 @@ let result_contract_of_status = function
      | Error _ -> Failed
      | Ok Keeper_turn_outcome.Continuation_checkpoint -> Yielded
      | Ok Keeper_turn_outcome.External_effect_pending -> Yielded
+     | Ok Keeper_turn_outcome.External_effect_completed
      | Ok Keeper_turn_outcome.Visible_reply
      | Ok Keeper_turn_outcome.No_visible_reply -> Completed)
 ;;

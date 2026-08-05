@@ -26,6 +26,7 @@ type operator_disposition =
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
+  ; turn_outcome : Keeper_turn_outcome.t
   ; model_used : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; ctx_composition : Keeper_agent_prompt_metrics.ctx_composition_metrics

@@ -2,7 +2,8 @@
 
     Decision layer behind the [keeper_surface_post] tool: resolve which
     lane a post goes to, purely from the requested surface label, the
-    optional channel id, and the keeper's current Discord/Slack bindings.
+    optional channel id, the typed continuation channel, and the keeper's
+    current Discord/Slack bindings.
     Posting to a surface the keeper is not bound to is an error, not a
     no-op (RFC-0223 §4 P4). All transport I/O stays in the runtime
     handler. *)
@@ -26,6 +27,7 @@ val slack_label : string
 val resolve_target :
   surface:string ->
   channel_id:string option ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   ?bound_discord_channels:string list ->
   ?bound_slack_channels:string list ->
   unit ->
@@ -35,10 +37,12 @@ val resolve_target :
       function only routes.
     - ["dashboard"] → [To_dashboard].
     - ["discord"] → the bound channel when exactly one exists; the
-      given [channel_id] when it is among the bindings; an error
+      given [channel_id], or the exact matching typed continuation channel,
+      when it is among the bindings; an error
       naming the bound channels when ambiguous, unbound, or the id is
       not bound.
     - ["slack"] → same semantics against [bound_slack_channels].
+      A continuation for another connector never supplies an id.
     - any other label → error: P4 ships discord + dashboard + slack
       (generic gate connectors have no send surface yet). *)
 

@@ -385,6 +385,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     | Some b -> Some (Masc_network_defaults.normalize_loopback_base_url b)
     | None -> None
   in
+  let external_effect_completed = ref false in
   (* Streaming state:
      - msg_id: Some once the initial POST succeeds
      - last_edit_time: wall-clock of last PATCH (rate limiting)
@@ -474,6 +475,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     | Run_finished { run_id = _ } ->
         let final_result =
           match msg_id with
+          | None when !external_effect_completed -> Ok ()
           | None ->
               (* No stable streaming segment was posted. The terminal fallback
                  is the primary delivery and its result owns the receipt. *)
@@ -498,6 +500,10 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         send_text_rich_embeds ?clock ~token ~channel_id acc_text;
         (* Loop exits after one turn. *)
         ()
+    | External_effect_completed ->
+        external_effect_completed := true;
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url
+          ~tool_msgs
     | Event_error { message } ->
         on_send_result (send_message ~content:("Keeper error: " ^ message));
         (* Loop exits after error. *)

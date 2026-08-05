@@ -44,8 +44,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   (* Visible-output preview follows the typed result surface. *)
   let is_visible_reply =
     Keeper_turn_outcome.equal
-      (Keeper_turn_outcome.of_result_surface
-         ~response_text:result.response_text result.stop_reason)
+      result.turn_outcome
       Keeper_turn_outcome.Visible_reply
   in
   let validated_evidence = visible_run_validation result in

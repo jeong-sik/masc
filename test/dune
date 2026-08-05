@@ -2551,3 +2551,16 @@
   %{workspace_root}/benchmarks/data/tool_call_quality_cases.json
   %{workspace_root}/test/fixtures/tool_call_quality_benchmark/evidence_runs.json)
  (libraries alcotest masc_test_deps))
+
+; The assembled keeper system prompt is built from registry text plus in-code
+; XML structure; substring assertions cannot see block order, separator bytes,
+; or a block that resolved to the empty string. This golden pins the whole
+; string, and declaring the prompt sources as deps is what makes an edit under
+; config/prompts re-run it instead of returning a cached pass.
+(test
+ (name test_keeper_system_prompt_bytes)
+ (modules test_keeper_system_prompt_bytes)
+ (deps
+  (source_tree %{workspace_root}/config/prompts)
+  %{workspace_root}/test/fixtures/keeper_system_prompt/assembled_prompt.golden)
+ (libraries alcotest masc_test_deps))

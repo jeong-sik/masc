@@ -1045,8 +1045,12 @@ jobs:
       # a projection that drops the pointer is a silent capability loss with no
       # compile-time signal. @check cannot see it: the wake type still compiles
       # either way.
-      - name: Run keeper unified prompt surface suite
-        id: keeper_unified_prompt_surface_suite
+      # Named for what it runs: the targets below are the unified verification
+      # surface and schedule tool wiring, not a prompt suite. The previous name
+      # ("keeper unified prompt surface suite") read as prompt coverage in the
+      # job log while no prompt assertion executed anywhere in CI.
+      - name: Run keeper unified verification surface and schedule wiring suites
+        id: keeper_unified_verification_surface_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
           ME_ROOT: /tmp/me
@@ -1056,6 +1060,24 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_unified_verification_surface @test/runtest-test_schedule_tool_wiring"
+
+      # Every keeper turn is built from the assembled system prompt, and until
+      # now no prompt assertion ran in CI: these suites existed in test/dune but
+      # appeared in no runtest target, so they were compile-only under @check.
+      # The golden target pins the assembled bytes, which is what makes a
+      # prompt-assembly refactor provable rather than eyeballed.
+      - name: Run keeper prompt assembly suites
+        id: keeper_prompt_assembly_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          prompt_targets="@test/runtest-test_keeper_system_prompt_bytes @test/runtest-test_keeper_prompt_metrics @test/runtest-test_keeper_prompt_external @test/runtest-test_keeper_surface_presence_prompt"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${prompt_targets}"
 
       - name: Run tool blob retention suite
         id: tool_blob_retention_suite

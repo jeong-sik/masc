@@ -28,8 +28,32 @@ let rec remove_tree path =
     else Sys.remove path
 ;;
 
+(* Completing a partition projects it onto the keeper's registry entry
+   (keeper_board_attention_worker.ml:637); without one the projection fails
+   with "exact completion lost its registered owner" before any assertion in
+   the test body is reached. The registry is process-local, so a fresh temp
+   base_path starts with no owner. test_keeper_board_attention_exact_flow.ml:75
+   carries the same helper for the same reason. *)
+let register_owner ~base_path keeper_name =
+  match Masc.Keeper_registry.get ~base_path keeper_name with
+  | Some _ -> ()
+  | None ->
+    let meta =
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String ("trace-" ^ keeper_name)
+          ])
+      |> Result.get_ok
+    in
+    ignore
+      (Masc.Keeper_registry.register_offline ~base_path keeper_name meta
+       : Masc.Keeper_registry.registry_entry)
+;;
+
 let with_temp_base name f =
   let base_path = Filename.temp_dir name "" in
+  register_owner ~base_path "sangsu";
   Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
 ;;
 
@@ -345,6 +369,75 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
   match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
   | A.Consumed { delivery = A.Not_relevant; _ }, P.Settled _ -> ()
   | _ -> Alcotest.fail "owner settlement did not consume and settle the judgment"
+;;
+
+(* The owner slot rations admission into the Keeper, and only a Relevant
+   verdict admits anything. A Not_relevant completion writes one consumed
+   record and enqueues nothing, so holding the slot for it puts every relevant
+   verdict behind however many irrelevant ones precede it in created_at order
+   (#26863: 48 relevant behind 459 discards, worst at position 202). *)
+let test_discards_do_not_hold_the_owner_delivery_slot () =
+  with_temp_base "board-attention-worker-discard-drain" @@ fun base_path ->
+  let discarded =
+    record ~base_path (candidate ~id:"candidate-discarded" ~recorded_at:1.0 ())
+  in
+  let admitted =
+    record ~base_path (candidate ~id:"candidate-admitted" ~recorded_at:2.0 ())
+  in
+  let judge_next decision =
+    let execute ~before_dispatch ~before_advance prepared =
+      let attempt = provenance ("attempt-" ^ A.(prepared.candidate_id)) in
+      ok "bind" (before_dispatch attempt);
+      ignore before_advance;
+      Ok (judgment attempt decision)
+    in
+    match
+      ok
+        "judge next pending"
+        (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+    with
+    | W.Judgment_completed { candidate_id; _ } -> candidate_id
+    | W.Idle
+    | W.Contended _
+    | W.Rescan_later _
+    | W.Candidate_already_consumed _
+    | W.Partition_blocked _ -> Alcotest.fail "fixture did not complete a judgment"
+  in
+  let first = judge_next J.Not_relevant in
+  let second = judge_next J.Relevant in
+  Alcotest.(check string)
+    "the discard is judged first"
+    discarded.candidate_id
+    first;
+  Alcotest.(check string)
+    "the admission is judged second"
+    admitted.candidate_id
+    second;
+  (match
+     ok "owner settlement" (W.settle_one_completed ~base_path ~keeper_name:"sangsu")
+   with
+   | W.Partition_settled { candidate_id; _ } ->
+     Alcotest.(check string)
+       "one call reaches the relevant verdict behind the discard"
+       admitted.candidate_id
+       candidate_id
+   | W.No_completed_partition -> Alcotest.fail "no completion was settled");
+  Alcotest.(check int)
+    "the relevant verdict reached the Keeper queue"
+    1
+    (relevant_delivery_count ~base_path ~candidate_id:admitted.candidate_id);
+  List.iter
+    (fun (candidate : A.candidate) ->
+       match
+         List.find_opt
+           (fun (c : A.candidate) ->
+              String.equal c.candidate_id candidate.candidate_id)
+           (ok "load" (A.load_candidates ~base_path ~keeper_name:"sangsu"))
+       with
+       | Some { status = A.Consumed _; _ } -> ()
+       | Some _ | None ->
+         Alcotest.failf "candidate %s was left unsettled" candidate.candidate_id)
+    [ discarded; admitted ]
 ;;
 
 let test_setup_error_stops_before_claim_without_hot_retry () =
@@ -2262,6 +2355,10 @@ let () =
             "undrained outcomes are not routine"
             `Quick
             test_undrained_outcomes_are_not_routine
+        ; Alcotest.test_case
+            "discards do not hold the owner delivery slot"
+            `Quick
+            test_discards_do_not_hold_the_owner_delivery_slot
         ; Alcotest.test_case
             "drain outcome labels stay distinct"
             `Quick

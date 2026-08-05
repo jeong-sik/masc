@@ -496,7 +496,10 @@ module Dashboard = struct
       WORKAROUND: This is a cap raise (§4 anti-pattern signature) accepted
       as bridge until structural RFC lands (per-component health cache so
       make_health_json no longer fans 17 sync calls per refresh).
-      Removal target: per-component health cache RFC (TBD). *)
+      Removal target: issue #26875 — the replacement RFC does not exist yet,
+      so the issue is what carries the obligation. A cap raise whose removal
+      target is unnamed does not expire, and the next one cites it as
+      precedent. *)
   let full_health_refresh_timeout_sec =
     Float.max 1.0
       (get_float ~default:20.0 "MASC_FULL_HEALTH_REFRESH_TIMEOUT_SEC")

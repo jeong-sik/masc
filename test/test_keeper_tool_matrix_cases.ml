@@ -100,7 +100,7 @@ let init_keeper_bridge =
   fun () ->
     if not !initialized then (
       initialized := true;
-      Masc_test_deps.init_keeper_tool_registry ();
+      Masc_test_deps.init_unified_tool_registry ();
       ignore (Masc.Mcp_server_eio.get_clock_opt ());
       (* Use find_project_root — the test cwd is _build/default/test/ which
          does not contain dune-project, so Sys.getcwd fails the
@@ -121,8 +121,7 @@ let init_keeper_bridge =
       (match Runtime.init_default ~config_path with
        | Ok () -> ()
        | Error err -> Printf.eprintf "[WARN] Runtime.init_default failed: %s\n" err);
-      Masc.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc.Keeper_tag_dispatch.dispatch;
-      KET.inject_masc_schemas Masc.Config.raw_all_tool_schemas)
+      Masc.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc.Keeper_tag_dispatch.dispatch)
 
 let keeper_matrix_owner = "keeper-tool-matrix"
 

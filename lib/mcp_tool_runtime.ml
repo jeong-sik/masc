@@ -80,40 +80,31 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 (* Tool_spec registration (RFC-0182 §3.2)                           *)
 (* ================================================================ *)
 
-(* Migrates MCP server-local workspace tools from the legacy
-   register_module_tag bootstrap (mcp_server_eio.ml) to the Tool_spec
-   single-call SSOT.
+(* MCP server-local workspace tools register through Tool_spec.
 
-   Excluded (deferred, semantic-widening would be required):
+   Excluded (semantic widening would be required):
    - [masc_set_param], [channel_gate] —
      no Masc_domain.tool_schema record exists. They are dispatched via
      HTTP routes / MCP runtime arms but never advertised to MCP. Promoting
      them to Tool_spec.register requires authoring new input schemas
-     and deciding visibility semantics for MCP exposure. Tracked as
-     RFC-0182 follow-up scope.
-   The retired [masc_tool_*] shard-management tools are intentionally absent
-   from this list and from the MCP ToolSpec surface. *)
+     and deciding visibility semantics for MCP exposure. *)
 
-let runtime_register_targets =
-  [ "masc_broadcast"; "masc_messages" ]
-
-let runtime_tool_read_only =
-  [ "masc_messages" ]
-
-let runtime_tool_mcp_context_required =
-  [ "masc_broadcast"; "masc_messages" ]
+let runtime_tool_specs =
+  [ "masc_start", false, true
+  ; "masc_broadcast", false, true
+  ; "masc_messages", true, true
+  ]
 
 let () =
-  runtime_register_targets
-  |> List.iter (fun name ->
+  runtime_tool_specs
+  |> List.iter (fun (name, is_read_only, mcp_context_required) ->
     match
       List.find_opt
         (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
         Tool_schemas_inline.schemas
     with
-    | None -> ()
+    | None -> invalid_arg ("missing inline MCP schema: " ^ name)
     | Some (schema : Masc_domain.tool_schema) ->
-      let is_read_only = List.mem name runtime_tool_read_only in
       Tool_spec.register
         (Tool_spec.create
            ~name:schema.name
@@ -122,5 +113,5 @@ let () =
            ~input_schema:schema.input_schema
            ~handler_binding:Tag_dispatch
            ~is_read_only
-           ~mcp_context_required:(List.mem name runtime_tool_mcp_context_required)
+           ~mcp_context_required
            ()))

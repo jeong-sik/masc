@@ -17,8 +17,3 @@ type t =
 val to_string : t -> string
 val of_string : string -> t option
 val pp : Format.formatter -> t -> unit
-
-(** Public MCP names intentionally served outside the keeper descriptor spine.
-    Keep this exact allowlist on the keeper side so prefix canonicalisation
-    does not depend on the MCP catalog hand-list. *)
-val public_mcp_non_descriptor_names : string list

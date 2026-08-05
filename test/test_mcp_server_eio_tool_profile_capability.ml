@@ -75,7 +75,7 @@ let test_annotations_use_catalog_capabilities () =
        (annotation_field "idempotentHint" "tool_read_file"))
 ;;
 
-let test_annotations_use_descriptor_public_alias_capabilities () =
+let test_annotations_use_descriptor_public_capabilities () =
   check
     bool
     "ReadFile readOnlyHint from descriptor"
@@ -88,17 +88,12 @@ let test_annotations_use_descriptor_public_alias_capabilities () =
     (bool_annotation "readOnlyHint" "Grep");
   check
     bool
-    "Search secondary alias readOnlyHint from descriptor"
-    true
-    (bool_annotation "readOnlyHint" "Search");
-  check
-    bool
     "WriteFile readOnlyHint false from descriptor"
     false
     (bool_annotation "readOnlyHint" "Write")
 ;;
 
-let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
+let test_tool_json_projects_descriptor_metadata_for_public_names () =
   let read_file = tool_json "Read" in
   check
     string
@@ -122,16 +117,10 @@ let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
     string
     "SearchFiles canonical descriptor name"
     "tool_search_files"
-    (json_string_field "descriptorCanonicalName" search_files);
-  let search_alias = tool_json "Search" in
-  check
-    string
-    "Search alias canonical descriptor name"
-    "tool_search_files"
-    (json_string_field "descriptorCanonicalName" search_alias)
+    (json_string_field "descriptorCanonicalName" search_files)
 ;;
 
-let test_descriptor_resolution_capabilities_for_public_aliases () =
+let test_descriptor_resolution_capabilities_for_public_names () =
   let capability_has =
     Masc.Keeper_tool_descriptor_resolution.capability_has
   in
@@ -145,11 +134,6 @@ let test_descriptor_resolution_capabilities_for_public_aliases () =
     "SearchFiles read-only via descriptor resolution"
     true
     (capability_has Tool_capability.Read_only "Grep");
-  check
-    bool
-    "Search secondary alias read-only via descriptor resolution"
-    true
-    (capability_has Tool_capability.Read_only "Search");
   check
     bool
     "mcp-prefixed SearchFiles read-only via descriptor resolution"
@@ -195,17 +179,17 @@ let () =
             `Quick
             test_annotations_use_catalog_capabilities
         ; test_case
-            "use-descriptor-public-alias-capabilities"
+            "use-descriptor-public-capabilities"
             `Quick
-            test_annotations_use_descriptor_public_alias_capabilities
+            test_annotations_use_descriptor_public_capabilities
         ; test_case
-            "tool-json-projects-descriptor-metadata-for-public-aliases"
+            "tool-json-projects-descriptor-metadata-for-public-names"
             `Quick
-            test_tool_json_projects_descriptor_metadata_for_public_aliases
+            test_tool_json_projects_descriptor_metadata_for_public_names
         ; test_case
-            "descriptor-resolution-capabilities-for-public-aliases"
+            "descriptor-resolution-capabilities-for-public-names"
             `Quick
-            test_descriptor_resolution_capabilities_for_public_aliases
+            test_descriptor_resolution_capabilities_for_public_names
         ; test_case
             "default-instructions-pin-start-transition-workflow"
             `Quick

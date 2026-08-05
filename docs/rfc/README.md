@@ -83,7 +83,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0050 | Dashboard Component Ownership Decomposition | Active | - |
 | 0051 | run_named closure decomposition | Active | - |
 | 0052 | Boot-time Required Invariants (typed) | Implemented | - |
-| 0053 | Tool Dispatch Session-Local Handles | Implemented | - |
 | 0054 | Withdraw code generation for command-policy GADTs | Withdrawn | - |
 | 0056 | Incremental Sub-Library Extraction from Flat masc Library | Active | - |
 | 0057 | Tool Descriptor Codegen — `[@@deriving tool]` via Build-Time Generation | Draft | - |
@@ -224,7 +223,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0215 | Keeper sub-library extraction campaign — sequence and per-PR gates | Draft | - |
 | 0216 | Per-Keeper Decline Memory (orphan-task churn root fix) | Draft | - |
 | 0217 | Telemetry Backend Otel 단일화 (Retired Backend Purge) | Draft | - |
-| 0218 | Keeper tool-surface coherence + web-tooling roadmap — phases and per-phase gates | Draft | - |
 | 0219 | Remove Sandbox Repo Patrol Gates | Draft | - |
 | 0220 | Withdraw cross-Keeper verification scheduling | Withdrawn | - |
 | 0221 | Atomic verification submission — task_status as the sole outcome authority | Implemented (steps 1-3 merged #20613/#20617; steps 4-5 measured then dropped, §3.3/§3.4) | - |

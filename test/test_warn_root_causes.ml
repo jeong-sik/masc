@@ -6,7 +6,7 @@ open Masc
 (* ── Helpers ──────────────────────────────────────────────────── *)
 
 let init_registry () =
-  Masc_test_deps.init_keeper_tool_registry ()
+  Masc_test_deps.init_unified_tool_registry ()
 
 let file_contains_pattern file_rel pattern =
   let source_root =
@@ -73,9 +73,8 @@ let make_meta ?(name = "test-keeper") () : Keeper_meta_contract.keeper_meta =
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
 
-let test_web_alias_bundle_visible_without_injected_masc_schema () =
+let test_web_tools_are_bundle_visible () =
   ignore (init_registry ());
-  let prior_masc_schemas = Keeper_tool_dispatch_runtime.masc_schemas_snapshot () in
   let dir =
     Filename.concat
       (Filename.get_temp_dir_name ())
@@ -83,13 +82,10 @@ let test_web_alias_bundle_visible_without_injected_masc_schema () =
   in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   Fun.protect
-    ~finally:(fun () ->
-      Keeper_tool_dispatch_runtime.set_masc_schemas prior_masc_schemas;
-      try Unix.rmdir dir with _ -> ())
+    ~finally:(fun () -> try Unix.rmdir dir with _ -> ())
     (fun () ->
-      Keeper_tool_dispatch_runtime.set_masc_schemas [];
       let config = Workspace.default_config dir in
-      let meta = make_meta ~name:"test-web-alias-no-injected-schema" () in
+      let meta = make_meta ~name:"test-web-tools-visible" () in
       let ctx_snapshot =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
       in
@@ -117,10 +113,6 @@ let test_web_alias_bundle_visible_without_injected_masc_schema () =
             (List.mem "WebFetch" names);
           check bool "Grep preferred projection is bundle-visible" true
             (List.mem "Grep" names);
-          check bool "Search compatibility alias is not model-visible" false
-            (List.mem "Search" names);
-          check bool "search_files compatibility alias is not model-visible" false
-            (List.mem "search_files" names);
           check bool "Grep internal route is not model-visible" false
             (List.mem "tool_search_files" names);
           check int
@@ -418,8 +410,8 @@ let () =
     [
       ( "complete_tool_surface",
         [
-          test_case "web aliases survive missing injected masc schema" `Quick
-            test_web_alias_bundle_visible_without_injected_masc_schema;
+          test_case "web tools are bundle visible" `Quick
+            test_web_tools_are_bundle_visible;
           test_case "fusion default descriptor reaches OAS bundle" `Quick
             test_fusion_default_descriptor_is_bundle_visible;
           test_case "bundle exactly matches model-visible descriptors" `Quick

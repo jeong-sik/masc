@@ -46,7 +46,7 @@ let register_full ?schema ~tool_name ~handler () =
   Tool_dispatch.register_module_tag ~schemas:[schema] ~tag:Mod_misc
 
 let () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   let open Alcotest in
   run "Tool_dispatch"
     [

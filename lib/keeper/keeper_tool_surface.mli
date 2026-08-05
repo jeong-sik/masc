@@ -1,5 +1,5 @@
 
-(** Public facade for keeper MCP tools. *)
+(** Public keeper MCP tools. *)
 
 type 'a context = 'a Keeper_types_profile.context = {
   config : Workspace.config;

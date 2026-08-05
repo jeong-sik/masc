@@ -311,31 +311,14 @@ let test_web_tools_owned_by_keeper_descriptors () =
 ;;
 
 let test_web_backends_are_in_complete_model_surface () =
-  let prior = Masc.Keeper_tool_dispatch_runtime.masc_schemas_snapshot () in
-  Fun.protect
-    ~finally:(fun () -> Masc.Keeper_tool_dispatch_runtime.set_masc_schemas prior)
-    (fun () ->
-      (* Simulate startup: lib/mcp_server_eio.ml feeds exactly this substrate. *)
-      Masc.Keeper_tool_dispatch_runtime.inject_masc_schemas
-        Masc.Config.raw_all_tool_schemas;
-      let injected =
-        Masc.Keeper_tool_dispatch_runtime.injected_masc_tool_names ()
-      in
-      List.iter
-        (fun name ->
-          Alcotest.(check bool)
-            (name ^ " injected from raw_all_tool_schemas substrate")
-            true
-            (List.mem name injected))
-        [ "masc_web_search"; "masc_web_fetch" ];
-      let model_names = Masc.Keeper_tool_dispatch_runtime.keeper_model_tool_names () in
-      List.iter
-        (fun public_name ->
-          Alcotest.(check bool)
-            (public_name ^ " present in complete model surface")
-            true
-            (List.mem public_name model_names))
-        [ "WebSearch"; "WebFetch" ])
+  let model_names = Masc.Keeper_tool_dispatch_runtime.keeper_model_tool_names () in
+  List.iter
+    (fun public_name ->
+      Alcotest.(check bool)
+        (public_name ^ " present in complete model surface")
+        true
+        (List.mem public_name model_names))
+    [ "WebSearch"; "WebFetch" ]
 ;;
 
 let () =

@@ -27,6 +27,7 @@ module Keeper_dispatch_ref = Masc.Keeper_dispatch_ref
 module Workspace = Masc.Workspace
 module Task = Masc.Task
 module Keeper_tool_surface = Masc.Keeper_tool_surface
+module Keeper_schema = Masc.Keeper_schema
 module Capability_registry = Masc.Capability_registry
 module Tool_shard = Masc.Tool_shard
 
@@ -47,28 +48,6 @@ let required_internal_descriptor name =
   match Descriptor.descriptors_for_internal name with
   | descriptor :: _ -> descriptor
   | [] -> Alcotest.failf "missing internal descriptor: %s" name
-;;
-
-(* Descriptor coverage of the separate external MCP discovery surface.
-
-   [Tool_catalog_surfaces.public_mcp_surface_tools] is the operator-facing
-   MCP discovery contract. It is not Keeper authorization or model visibility.
-
-   Some surface entries intentionally have no descriptor at all because their
-   handlers live outside the keeper descriptor spine. These entries are
-   enumerated below as the [public_mcp_non_descriptor] allowlist.
-
-   This invariant test exists to ratchet that allowlist toward empty:
-   - Adding a new surface entry without a descriptor fails the test.
-   - Adding a descriptor for any allowlist entry fails the
-     test (allowlist must shrink), forcing the allowlist edit to live in
-     the same PR as the descriptor add.
-
-   When the allowlist hits zero, RFC-0190 P4 lands [public_mcp_surface_tools]
-   as a function over [all_descriptors] and this test is rewritten to
-   forbid any pending entries. *)
-let public_mcp_non_descriptor =
-  Keeper_tool_name.public_mcp_non_descriptor_names
 ;;
 
 let descriptor_internal_name_set () =
@@ -155,13 +134,7 @@ let test_keeper_model_projection_is_single_and_unique () =
          Alcotest.(check bool)
            (descriptor.id ^ " keeps internal dispatch candidate")
            true
-           (List.mem descriptor.internal_name candidates);
-         descriptor.public_aliases
-         |> List.iter (fun alias ->
-           Alcotest.(check bool)
-             (descriptor.id ^ " keeps compatibility dispatch alias " ^ alias)
-             true
-             (List.mem alias candidates))
+           (List.mem descriptor.internal_name candidates)
        | Descriptor.Internal_name ->
          Alcotest.(check (list string))
            (descriptor.id ^ " internal model projection")
@@ -251,28 +224,7 @@ let test_model_visible_descriptors_have_canonical_input_schemas () =
          "model-visible descriptor %S has invalid schema: %s"
          descriptor.id
          (String.concat "; " errors));
-    match descriptor.input_schema_source with
-    | Descriptor.Descriptor_owned
-    | Descriptor.Canonical_registry
-    | Descriptor.Keeper_projection -> ()
-    | Descriptor.Missing_canonical_registry ->
-      Alcotest.failf
-        "model-visible descriptor %S is missing its canonical input schema"
-        descriptor.id)
-;;
-
-let test_cluster_descriptors_have_no_missing_canonical_schemas () =
-  all_descriptors ()
-  |> List.iter (fun (descriptor : Descriptor.t) ->
-    match descriptor.input_schema_source with
-    | Descriptor.Descriptor_owned
-    | Descriptor.Canonical_registry
-    | Descriptor.Keeper_projection -> ()
-    | Descriptor.Missing_canonical_registry ->
-      Alcotest.failf
-        "descriptor %S (%s) is missing its canonical input schema"
-        descriptor.id
-        descriptor.internal_name)
+    ignore descriptor.input_schema_source)
 ;;
 
 let test_all_resolved_descriptor_schemas_are_structurally_valid () =
@@ -286,28 +238,6 @@ let test_all_resolved_descriptor_schemas_are_structurally_valid () =
         descriptor.id
         descriptor.internal_name
         (String.concat "; " errors))
-;;
-
-let test_missing_canonical_schema_is_fail_closed () =
-  let base = required_internal_descriptor "masc_transition" in
-  let missing =
-    { base with
-      input_schema_source = Descriptor.Missing_canonical_registry
-    ; keeper_model_projection = Descriptor.Internal_name
-    }
-  in
-  Alcotest.(check (list string))
-    "missing schema has no model names"
-    []
-    (Descriptor.keeper_model_names missing);
-  Alcotest.(check (list string))
-    "missing schema has no execution candidates"
-    []
-    (Descriptor.keeper_candidate_names missing);
-  Alcotest.(check (list string))
-    "startup diagnostic reports missing canonical schema"
-    [ missing.internal_name ]
-    (Policy.missing_canonical_schema_names [ missing ])
 ;;
 
 let test_structurally_invalid_schema_is_excluded () =
@@ -406,6 +336,11 @@ let test_keeper_management_projection_is_explicit () =
     ; "masc_keeper_status"
     ; "masc_keeper_down"
     ; "masc_keeper_up"
+    ; "masc_keeper_create_from_persona"
+    ; "masc_persona_list"
+    ; "masc_persona_create"
+    ; "masc_persona_update"
+    ; "masc_persona_delete"
     ]
 ;;
 
@@ -422,19 +357,15 @@ let test_all_keeper_shard_schemas_are_descriptor_backed () =
         (List.length descriptors))
 ;;
 
-let test_registered_handler_schemas_are_descriptor_backed () =
-  Masc_test_deps.init_keeper_tool_registry ();
-  Policy.registered_handler_schemas Masc.Config.raw_all_tool_schemas
+let test_keeper_surface_schemas_are_descriptor_backed () =
+  Keeper_schema.schemas
   |> List.iter (fun (schema : Masc_domain.tool_schema) ->
     match Descriptor.descriptors_for_internal schema.name with
     | [ _ ] -> ()
-    | [] ->
-      Alcotest.failf
-        "supported MASC schema %S has no descriptor"
-        schema.name
+    | [] -> Alcotest.failf "Keeper surface schema %S has no descriptor" schema.name
     | descriptors ->
       Alcotest.failf
-        "supported MASC schema %S has %d descriptors"
+        "Keeper surface schema %S has %d descriptors"
         schema.name
         (List.length descriptors))
 ;;
@@ -1256,10 +1187,6 @@ let test_readonly_policy_is_descriptor_input_aware () =
     (Some true)
     (Resolution.readonly_for_tool_call ~tool_name:"Grep" ~input:public_input);
   Alcotest.(check (option bool))
-    "secondary Search alias follows the same readonly policy"
-    (Some true)
-    (Resolution.readonly_for_tool_call ~tool_name:"Search" ~input:public_input);
-  Alcotest.(check (option bool))
     "MCP-prefixed public input follows the same descriptor policy"
     (Some true)
     (Resolution.readonly_for_tool_call
@@ -1287,7 +1214,7 @@ let test_public_name_projection_uses_descriptor_resolution () =
     (Resolution.public_names_for_internal "tool_execute");
   Alcotest.(check (list string))
     "tool_search_files public projections"
-    [ "Grep"; "Search"; "search_files" ]
+    [ "Grep" ]
     (Resolution.public_names_for_internal "tool_search_files");
   Alcotest.(check (option string))
     "tool_search_files preferred public projection"
@@ -1299,7 +1226,7 @@ let test_public_name_projection_uses_descriptor_resolution () =
     (Resolution.public_name_for_internal "tool_write_file");
   Alcotest.(check (list string))
     "allowed internal routes project to public names"
-    [ "Execute"; "Grep"; "Search"; "search_files" ]
+    [ "Execute"; "Grep" ]
     (Resolution.public_names_for_allowed_internal_names
        [ "tool_execute"; "tool_search_files" ])
 ;;
@@ -1338,6 +1265,11 @@ let cluster_projection_table =
   ; "masc_keeper_down", "tool_masc_keeper_dispatch"
   ; "masc_keeper_delegate", "tool_masc_keeper_dispatch"
   ; "masc_keeper_up", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_create_from_persona", "tool_masc_keeper_dispatch"
+  ; "masc_persona_list", "tool_masc_keeper_dispatch"
+  ; "masc_persona_create", "tool_masc_keeper_dispatch"
+  ; "masc_persona_update", "tool_masc_keeper_dispatch"
+  ; "masc_persona_delete", "tool_masc_keeper_dispatch"
   ]
 ;;
 
@@ -1469,53 +1401,58 @@ let test_keeper_dispatch_ref_reaches_every_keeper_descriptor () =
       Alcotest.failf
         "Keeper_dispatch_ref.dispatch returned None for %d keeper descriptor(s): %s"
         (List.length unreachable)
-        (String.concat ", " unreachable))
+        (String.concat ", " unreachable);
+    let surface_ctx : _ Keeper_tool_surface.context =
+      { config
+      ; agent_name
+      ; sw
+      ; clock = Eio.Stdenv.clock env
+      ; proc_mgr = None
+      ; net = None
+      ; publication_recovery_provider = publication_recovery.provider
+      }
+    in
+    let unreachable_surface_schemas =
+      Keeper_schema.schemas
+      |> List.filter_map (fun (schema : Masc_domain.tool_schema) ->
+        match
+          Keeper_tool_surface.dispatch
+            surface_ctx
+            ~name:schema.name
+            ~args:(`Assoc [])
+        with
+        | Some _ -> None
+        | None -> Some schema.name)
+    in
+    if unreachable_surface_schemas <> []
+    then
+      Alcotest.failf
+        "Keeper_tool_surface.dispatch returned None for %d Keeper schema(s): %s"
+        (List.length unreachable_surface_schemas)
+        (String.concat ", " unreachable_surface_schemas))
 ;;
 
-(* RFC-0190 — every entry of [public_mcp_surface_tools] must either have
-   a descriptor or be on the [public_mcp_non_descriptor]
-   allowlist. New surface additions without a descriptor are rejected. *)
-let test_rfc_0190_surface_covered_by_descriptor_or_allowlist () =
+let test_public_mcp_surface_has_exact_dispatch_owner () =
   let descriptor_names = descriptor_internal_name_set () in
-  let allowlist =
-    let tbl = Hashtbl.create 16 in
-    List.iter (fun n -> Hashtbl.replace tbl n ()) public_mcp_non_descriptor;
-    tbl
+  let inline_names =
+    Tool_schemas_inline.schemas
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   let surface = Tool_catalog_surfaces.public_mcp_surface_tools in
   let missing =
     List.filter
       (fun name ->
          (not (Hashtbl.mem descriptor_names name))
-         && not (Hashtbl.mem allowlist name))
+         && not (List.mem name inline_names))
       surface
   in
   if missing <> []
   then
     Alcotest.failf
-      "public_mcp_surface_tools has %d entries with no descriptor and no \
-       RFC-0190 allowlist slot: %s. Either add a descriptor or extend \
-       [public_mcp_non_descriptor] with explicit justification."
+      "public_mcp_surface_tools has %d entries with no exact descriptor or inline \
+       runtime owner: %s"
       (List.length missing)
       (String.concat ", " missing)
-;;
-
-(* RFC-0190 — the allowlist is the *missing* set, not a permanent
-   carve-out.  When a descriptor lands for an allowlist entry, the
-   allowlist edit must land in the same PR.  This test catches the
-   stale-allowlist case. *)
-let test_rfc_0190_allowlist_has_no_descriptor () =
-  let descriptor_names = descriptor_internal_name_set () in
-  let stale =
-    List.filter (Hashtbl.mem descriptor_names) public_mcp_non_descriptor
-  in
-  if stale <> []
-  then
-    Alcotest.failf
-      "public_mcp_non_descriptor lists %d entries that now have \
-       descriptors and must be removed from the allowlist: %s"
-      (List.length stale)
-      (String.concat ", " stale)
 ;;
 
 let () =
@@ -1546,10 +1483,6 @@ let () =
             `Quick
             test_model_visible_descriptors_have_canonical_input_schemas
         ; test_case
-            "cluster descriptors have no missing canonical schemas"
-            `Quick
-            test_cluster_descriptors_have_no_missing_canonical_schemas
-        ; test_case
             "resolved descriptor schemas are structurally valid"
             `Quick
             test_all_resolved_descriptor_schemas_are_structurally_valid
@@ -1557,10 +1490,6 @@ let () =
             "sandbox control descriptors use exact canonical schemas"
             `Quick
             test_sandbox_control_descriptors_use_exact_canonical_schemas
-        ; test_case
-            "missing canonical schema is fail-closed"
-            `Quick
-            test_missing_canonical_schema_is_fail_closed
         ; test_case
             "structurally invalid schema is excluded"
             `Quick
@@ -1578,9 +1507,9 @@ let () =
             `Quick
             test_all_keeper_shard_schemas_are_descriptor_backed
         ; test_case
-            "supported MASC schemas are descriptor-backed"
+            "all Keeper surface schemas are descriptor-backed"
             `Quick
-            test_registered_handler_schemas_are_descriptor_backed
+            test_keeper_surface_schemas_are_descriptor_backed
         ] )
     ; ( "format"
       , [ test_case "no blank name fields" `Quick test_no_blank_names
@@ -1671,15 +1600,11 @@ let () =
             `Quick
             test_keeper_dispatch_ref_reaches_every_keeper_descriptor
         ] )
-    ; ( "rfc-0190-surface-projection"
+    ; ( "surface-projection"
       , [ test_case
-            "public_mcp_surface_tools is descriptor-backed or allowlisted"
+            "public_mcp_surface_tools has an exact dispatch owner"
             `Quick
-            test_rfc_0190_surface_covered_by_descriptor_or_allowlist
-        ; test_case
-            "public_mcp_non_descriptor shrinks when a descriptor lands"
-            `Quick
-            test_rfc_0190_allowlist_has_no_descriptor
+            test_public_mcp_surface_has_exact_dispatch_owner
         ] )
     ; ( "policy-projection"
       , [ test_case

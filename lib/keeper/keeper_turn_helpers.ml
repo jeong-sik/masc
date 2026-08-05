@@ -139,19 +139,17 @@ let record_execution_receipt_gap
       (Printexc.to_string exn)
 ;;
 
-(* -- KeeperTaskAcquisition.tla spec-action runtime guards (Cycle 44) ---
+(* -- Task-acquisition runtime guards ------------------------------------
 
-   Identity helpers carrying [@@fsm_guard] payloads that mirror the
-   honest actions of [specs/keeper-state-machine/KeeperTaskAcquisition.tla].
-   Each helper is wrapped at the call site by
+   Identity helpers carrying [@@fsm_guard] payloads, one per honest
+   task-acquisition action. Each helper is wrapped at the call site by
    [Keeper_fsm_guard_runtime.wrap_unit] so an [Assert_failure] from a
    PPX-injected guard increments the Otel_metric_store violation counter and
-   re-raises. Bug-action [TaskRejected] is NOT
-   instrumented -- it is the failure mode these guards are designed to
-   detect.
+   re-raises. [TaskRejected] is NOT instrumented -- it is the failure mode
+   these guards are designed to detect.
 
-   This pattern follows PR #11696 (Cycle 43, KeeperHeartbeat closeout)
-   which introduced [Keeper_fsm_guard_runtime]. *)
+   This pattern follows PR #11696, which introduced
+   [Keeper_fsm_guard_runtime]. *)
 
 (* AssignTask: the typed channel decision is the authority. Reactive stimuli
    include event-queue triggers that need not appear in the observation. *)
@@ -166,8 +164,8 @@ let post_empty_queue_sleep ~(channel : string) =
 [@@fsm_guard "channel = \"scheduled_autonomous\""]
 ;;
 
-(* TurnComplete (KeeperTaskAcquisition.tla, Cycle 45 follow-up to
-   PR #11716): the [run_keeper_cycle] body has produced an [Ok meta]
+(* TurnComplete (follow-up to PR #11716): the [run_keeper_cycle] body has
+   produced an [Ok meta]
    for this cycle. The post-action invariant pins that
    [cycle_completed] is true before the result is returned -- catches
    a regression where a future refactor splits the bottom of

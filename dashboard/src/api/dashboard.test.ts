@@ -561,6 +561,7 @@ describe('keeper tool telemetry fetchers', () => {
         read_error_count: 1,
         read_errors: [{ scope: 'runtime_manifest_row:/tmp/bad.jsonl:1', error: 'bad row' }],
         scan_truncated: false,
+        hydration_status: 'ready',
         items: [
           {
             id: 'manifest:trace-a:context_compacted:2026-06-26T03:03:00Z',
@@ -713,6 +714,11 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.items[2]?.cause).toBe('lifecycle cleanup failed')
     expect(result.items).toHaveLength(3)
     expect(result.items.some(item => item.trace_id === 'trace-contradictory')).toBe(false)
+
+    await fetchKeeperCompactionSnapshots('keeper-alpha', 2, { refresh: true })
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      '/api/v1/keepers/keeper-alpha/compaction-snapshots?limit=2&refresh=true',
+    )
   })
 })
 

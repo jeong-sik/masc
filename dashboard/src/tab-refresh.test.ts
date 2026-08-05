@@ -58,7 +58,17 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'overview',
       params: {},
-    })).toEqual(['shell', 'namespaceTruth', 'missionSnapshot', 'execution'])
+    })).toEqual(['shell', 'namespaceTruth', 'missionSnapshot', 'execution', 'goals'])
+  })
+
+  // The overview 작업·목표 card reads the flat `goals` signal. Only the `goals`
+  // refresher populates it, so leaving it out of the overview plan made a fresh
+  // #overview load print "활성 목표 없음" against a live 15-goal planning store.
+  it('includes the goals refresher so the overview goal card has a source', () => {
+    expect(refreshPlanForRoute({
+      tab: 'overview',
+      params: {},
+    })).toContain('goals')
   })
 
   it('hydrates the top-level keepers workspace from live execution state', () => {

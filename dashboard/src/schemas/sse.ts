@@ -59,6 +59,8 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_composite_changed',
   'keeper_chat_appended',
   'keeper_waiting_inventory_changed',
+  'keeper_compaction_snapshots_changed',
+  'oas_telemetry_sample',
   'ide_cursor_changed',
   'keeper_tool_call',
   'masc/keeper_tool_call',
@@ -151,6 +153,8 @@ const STRING_FIELDS = new Set([
   'actor',
   'changed_at',
   'kind',
+  'provider_id',
+  'model_id',
 ])
 
 const NUMBER_FIELDS = new Set([
@@ -346,6 +350,36 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     }
     if (value.queue_kind !== 'chat_queue' && value.queue_kind !== 'event_queue') {
       return fail('queue_kind', 'Expected chat_queue or event_queue queue_kind')
+    }
+  }
+
+  if (value.type === 'keeper_compaction_snapshots_changed') {
+    if (typeof value.keeper_name !== 'string' || value.keeper_name.trim() === '') {
+      return fail('keeper_name', 'Expected non-empty keeper_name')
+    }
+    if (value.status !== 'ready' && value.status !== 'failed') {
+      return fail('status', 'Expected ready or failed compaction snapshot status')
+    }
+  }
+
+  if (value.type === 'oas_telemetry_sample') {
+    if (typeof value.provider_id !== 'string' || value.provider_id.trim() === '') {
+      return fail('provider_id', 'Expected non-empty provider_id')
+    }
+    if (typeof value.model_id !== 'string' || value.model_id.trim() === '') {
+      return fail('model_id', 'Expected non-empty model_id')
+    }
+    if (!isRecord(value.payload)) {
+      return fail('payload', 'Expected telemetry payload object')
+    }
+    if (!isRecord(value.payload.sample)) {
+      return fail('payload.sample', 'Expected telemetry sample object')
+    }
+    if (
+      typeof value.payload.recorded_at !== 'number'
+      || !Number.isFinite(value.payload.recorded_at)
+    ) {
+      return fail('payload.recorded_at', 'Expected finite recorded_at')
     }
   }
 

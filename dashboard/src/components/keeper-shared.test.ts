@@ -61,14 +61,12 @@ const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
   refreshDashboard: vi.fn(async () => undefined),
 }))
 
-// Mutable handle for the `tools/tool-state` module mock. `vi.mock` is hoisted
+// Mutable handle for the keeper-scoped inventory mock. `vi.mock` is hoisted
 // above `let` declarations, so the shared state must itself be created inside
-// `vi.hoisted` to avoid the temporal dead zone. Tests inject a
-// `keeper_waiting_inventory` by setting `mockedToolsData.value` before render.
-const { mockedToolsData, mockedToolsError, subscribeToolsAutoRefresh } = vi.hoisted(() => ({
+// `vi.hoisted` to avoid the temporal dead zone.
+const { mockedToolsData, mockedToolsError } = vi.hoisted(() => ({
   mockedToolsData: { value: null as unknown },
   mockedToolsError: { value: null as string | null },
-  subscribeToolsAutoRefresh: vi.fn(() => vi.fn()),
 }))
 
 vi.mock('../keeper-actions', () => ({
@@ -148,17 +146,17 @@ vi.mock('../store', async (importOriginal) => {
   }
 })
 
-// Mock the shared tools resource so the busy chip can be driven by an injected
-// `keeper_waiting_inventory` and so `KeeperConversationPanel`'s mount-time
-// `loadTools()` does not perform a real fetch. `toolsData` mirrors the signal
-// shape (`{ value }`) the component reads via `toolsData.value?.keeper_waiting_inventory`.
-vi.mock('../components/tools/tool-state', () => ({
-  toolsData: mockedToolsData,
-  toolsLoading: { value: false },
-  toolsError: mockedToolsError,
-  KEEPER_WAITING_INVENTORY_REFRESH_MS: 15_000,
-  subscribeToolsAutoRefresh,
-  loadTools: vi.fn(),
+vi.mock('../keeper-waiting-inventory-store', () => ({
+  keeperWaitingInventoryState: () => ({
+    inventory: (mockedToolsData.value as {
+      keeper_waiting_inventory?: unknown
+    } | null)?.keeper_waiting_inventory ?? null,
+    ready: mockedToolsData.value !== null,
+    loading: false,
+    error: mockedToolsError.value,
+  }),
+  subscribeKeeperWaitingInventory: vi.fn(() => vi.fn()),
+  refreshKeeperWaitingInventory: vi.fn(async () => undefined),
 }))
 
 vi.mock('./common/toast', () => ({
@@ -263,7 +261,6 @@ describe('KeeperConversationPanel', () => {
     shellAuthSummary.value = null
     mockedToolsData.value = null
     mockedToolsError.value = null
-    subscribeToolsAutoRefresh.mockClear()
     _resetChatStoreForTests()
     vi.mocked(sendKeeperThreadMessage).mockReset()
     vi.mocked(sendKeeperThreadMessage).mockResolvedValue(undefined)

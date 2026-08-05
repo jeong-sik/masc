@@ -8,17 +8,21 @@ let tool_type_of_name name =
   match Tool_name.Board_name.of_string name with
   | Some _ -> "board"
   | None ->
+    (* Five arms used to sit here and none of them could match. Run over the
+       99 names [Keeper_tool_policy.keeper_model_tool_names] returns and the
+       counts are: masc_ 67, Board_name 21, grep/read/write/edit/execute 1
+       each, and mcp__masc__ / board_ / memory_ / library_ / surface_ zero.
+
+       The last three were aimed at tools that exist under different names.
+       keeper_memory_search, keeper_memory_write, keeper_library_search,
+       keeper_library_read, keeper_surface_read and keeper_surface_post all
+       carry a keeper_ prefix now, so they fall through to "other" alongside
+       WebSearch and the voice tools. Fixing the prefixes would change the
+       tool_type dimension for six tools, which is a metric contract call and
+       not made here — the arms that cannot fire are removed, the mislabelling
+       is left visible. *)
     if String.starts_with ~prefix:"masc_" name
     then "mcp"
-    else if String.starts_with ~prefix:"mcp__masc__" name
-    then "mcp"
-    else if String.starts_with ~prefix:"board_" name
-    then "board"
-    else if String.starts_with ~prefix:"memory_" name
-    then "memory"
-    else if String.starts_with ~prefix:"library_" name
-            || String.starts_with ~prefix:"surface_" name
-    then "read"
     else if name = "grep"
     then "read"
     else if String.starts_with ~prefix:"read" name

@@ -9,11 +9,10 @@
     Plus the 4-helper string bijection bundle. Pure types + total
     [to_string] + parse-don't-validate [of_string] (unknown -> None).
 
-    Verbatim extract from the head of [Keeper_accountability]; the
-    parent retains transparent variant aliases so existing
-    exhaustive matches and external [Keeper_accountability.Pending]
-    / [.Task_commitment] etc. constructor references continue to
-    resolve. *)
+    Extracted from the head of [Keeper_accountability]. Consumers
+    reach these variants through [Keeper_accountability_types_codec],
+    whose signature keeps the type equation back to this module, so
+    its [claim_kind] and the one declared here are the same type. *)
 
 type claim_kind =
   | Task_commitment

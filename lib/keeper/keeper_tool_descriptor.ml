@@ -39,7 +39,6 @@ type input_schema_source =
   | Descriptor_owned
   | Canonical_registry
   | Keeper_projection
-  | Missing_canonical_registry
 
 type readonly_of_input = Yojson.Safe.t -> bool option
 
@@ -113,7 +112,6 @@ type t =
   ; keeper_tool_group : keeper_tool_group
   ; input_schema_source : input_schema_source
   ; public_name : string
-  ; public_aliases : string list
   ; internal_name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
@@ -175,7 +173,6 @@ let input_schema_source_to_string = function
   | Descriptor_owned -> "descriptor_owned"
   | Canonical_registry -> "canonical_registry"
   | Keeper_projection -> "keeper_projection"
-  | Missing_canonical_registry -> "missing_canonical_registry"
 ;;
 
 let runtime_handler_to_string = function
@@ -307,16 +304,6 @@ let closed_object_schema ?(required = []) properties =
   match object_schema ~required properties with
   | `Assoc fields -> `Assoc (fields @ [ "additionalProperties", `Bool false ])
   | schema -> schema
-;;
-
-let unavailable_input_schema reason =
-  `Assoc
-    [ "type", `String "object"
-    ; "description", `String reason
-    ; "properties", `Assoc []
-    ; "required", `List [ `String "__masc_unavailable_schema" ]
-    ; "additionalProperties", `Bool false
-    ]
 ;;
 
 let execute_schema = Tool_shard_types.tool_execute_schema.input_schema
@@ -568,12 +555,11 @@ let capability_id_of_identity ~internal_name = function
   | Named_capability capability_id -> capability_id
 ;;
 
-let descriptor_with_public_aliases
+let descriptor
       ?(examples = [])
       ~capability_identity
       ~keeper_model_projection
       ~input_schema_source
-      ~public_aliases
       ~id
       ~public_name
       ~internal_name
@@ -618,7 +604,6 @@ let descriptor_with_public_aliases
   ; keeper_tool_group = keeper_tool_group_of_runtime_handler runtime_handler
   ; input_schema_source
   ; public_name
-  ; public_aliases
   ; internal_name
   ; description
   ; input_schema
@@ -633,44 +618,6 @@ let descriptor_with_public_aliases
   ; eval_tags = []
   ; examples
   }
-;;
-
-let descriptor
-      ?(examples = [])
-      ~capability_identity
-      ~keeper_model_projection
-      ~input_schema_source
-      ~id
-      ~public_name
-      ~internal_name
-      ~description
-      ~input_schema
-      ~policy
-      ~executor
-      ~backend
-      ~sandbox
-      ~runtime_handler
-      ~input_translation
-      ()
-  =
-  descriptor_with_public_aliases
-    ~examples
-    ~capability_identity
-    ~keeper_model_projection
-    ~input_schema_source
-    ~public_aliases:[]
-    ~id
-    ~public_name
-    ~internal_name
-    ~description
-    ~input_schema
-    ~policy
-    ~executor
-    ~backend
-    ~sandbox
-    ~runtime_handler
-    ~input_translation
-    ()
 ;;
 
 let with_eval_tags eval_tags descriptor =
@@ -716,13 +663,12 @@ let public_descriptors =
         ]
       ~input_translation:(Identity Validate_once_before_translation)
       ()
-  ; descriptor_with_public_aliases
+  ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
       ~input_schema_source:Descriptor_owned
       ~id:"agent.search_files"
       ~public_name:"Grep"
-      ~public_aliases:[ "Search"; "search_files" ]
       ~internal_name:"tool_search_files"
       ~description:
         "Search file contents with ripgrep: provide a regex `pattern` (and \
@@ -887,16 +833,7 @@ let public_descriptors =
   ]
 ;;
 
-(* RFC-0179 list bifurcation. [internal_descriptors] hosts descriptor-backed
-   workspace tools (keeper_* / masc_* clusters). Each cluster migration PR
-   adds entries here. The LLM-native [public_descriptors] contract (RFC-0064
-   hard-cut) is preserved as preferred public descriptors; secondary aliases
-   reuse an existing descriptor instead of duplicating runtime ownership.
-
-   RFC-0179 PR-3 (full keeper_* coverage). Every legacy match arm in
-   [Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] is now backed by
-   a descriptor entry below. After this PR the legacy chain is empty modulo
-   the trailing remote-MCP fallback. *)
+(** Descriptor-backed workspace tools that are not public model names. *)
 
 let empty_object_schema =
   `Assoc
@@ -989,9 +926,7 @@ let find_cluster_schema_opt name =
 let base_schema_input name =
   match find_base_schema_opt name with
   | Some schema -> Canonical_registry, schema
-  | None ->
-    ( Missing_canonical_registry
-    , unavailable_input_schema ("missing base tool schema for " ^ name) )
+  | None -> invalid_arg ("missing base tool schema for " ^ name)
 
 let artifact_read_schema =
   `Assoc
@@ -1295,9 +1230,7 @@ let cluster_descriptor ?(polling_read = false) ~capability_identity
   let input_schema_source, input_schema =
     match find_cluster_schema_opt name with
     | Some schema -> Canonical_registry, schema
-    | None ->
-      ( Missing_canonical_registry
-      , unavailable_input_schema ("missing canonical registry schema for " ^ name) )
+    | None -> invalid_arg ("missing canonical registry schema for " ^ name)
   in
   cluster_descriptor_with_schema_source
     ~polling_read
@@ -1534,15 +1467,25 @@ let masc_keeper_descriptor
     ~keeper_model_projection
     id
     name
-    description
     ~readonly =
-  cluster_descriptor
+  let schema =
+    match
+      List.find_opt
+        (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
+        (Keeper_schema.schemas @ Tool_schemas_misc.schemas)
+    with
+    | Some schema -> schema
+    | None -> invalid_arg ("missing Keeper surface schema for " ^ name)
+  in
+  cluster_descriptor_with_schema_source
     ~polling_read
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
     ~id:("masc.keeper." ^ id)
     ~name
-    ~description
+    ~description:schema.description
     ~handler:Tool_masc_keeper_dispatch
     ~readonly
     ~inline_safe:false
@@ -1997,35 +1940,44 @@ let internal_descriptors : t list =
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
     masc_keeper_descriptor ~keeper_model_projection:Operator_only "list" "masc_keeper_list"
-      "List configured keepers with optional detailed metadata." ~readonly:true
+      ~readonly:true
   ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_status" "masc_keeper_delegate_status"
-      "Read one Keeper invocation by exact typed run_ref." ~readonly:true
+      ~readonly:true
       ~polling_read:true
   ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_cancel" "masc_keeper_delegate_cancel"
-      "Request cancellation of one Keeper invocation by exact typed run_ref." ~readonly:false
+      ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "delegate_list" "masc_keeper_delegate_list"
-      "List non-terminal Keeper invocations with an optional typed target filter." ~readonly:true
+      ~readonly:true
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "compact" "masc_keeper_compact"
-      "Run operator-requested context compaction on a keeper." ~readonly:false
+      ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "clear" "masc_keeper_clear"
-      "Last-resort context clear (drops conversation, requires reason)." ~readonly:false
+      ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_start" "masc_keeper_sandbox_start"
-      "Start the managed sandbox container for a keeper." ~readonly:false
+      ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_stop" "masc_keeper_sandbox_stop"
-      "Stop the managed sandbox container(s) for a keeper or fleet." ~readonly:false
+      ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "reset" "masc_keeper_reset"
-      "Reset a keeper's runtime state (usage counters, last_model_used)." ~readonly:false
+      ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "persona_audit" "masc_keeper_persona_audit"
-      "Audit configured keepers vs personas." ~readonly:true
+      ~readonly:true
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "status" "masc_keeper_status"
-      "Detailed single-keeper status (defaults to self when name is empty)." ~readonly:true
+      ~readonly:true
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "down" "masc_keeper_down"
-      "Stop keeper keepalive, optionally remove meta and session directory." ~readonly:false
-  (* RFC-0182 Phase 5 PR-B: Eio-bound keeper tools (require sw + clock). *)
+      ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate" "masc_keeper_delegate"
-      "Submit a typed non-blocking Keeper invocation and return its durable run_ref." ~readonly:false
+      ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "up" "masc_keeper_up"
-      "Bring a keeper online (create new or update existing)." ~readonly:false
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "create_from_persona" "masc_keeper_create_from_persona"
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "persona_list" "masc_persona_list"
+      ~readonly:true
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "persona_create" "masc_persona_create"
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "persona_update" "masc_persona_update"
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "persona_delete" "masc_persona_delete"
+      ~readonly:false
   ]
   @ masc_board_descriptors
   @ masc_library_descriptors
@@ -2036,8 +1988,6 @@ let all_descriptors () = public_descriptors @ internal_descriptors
 
 let model_schema_errors descriptor =
   match descriptor.input_schema_source, descriptor.input_schema with
-  | Missing_canonical_registry, _ ->
-    [ "missing canonical input schema for " ^ descriptor.internal_name ]
   | (Descriptor_owned | Canonical_registry | Keeper_projection), `Assoc _ ->
     (Tool_input_validation.schema_shape descriptor.input_schema).errors
   | (Descriptor_owned | Canonical_registry | Keeper_projection), other ->
@@ -2062,7 +2012,7 @@ let keeper_candidate_names descriptor =
   match model_schema_errors descriptor, descriptor.keeper_model_projection with
   | _ :: _, _ -> []
   | [], Preferred_public_name ->
-    descriptor.public_name :: descriptor.internal_name :: descriptor.public_aliases
+    [ descriptor.public_name; descriptor.internal_name ]
     |> List.sort_uniq String.compare
   | [], Internal_name ->
     [ descriptor.internal_name ]
@@ -2070,7 +2020,7 @@ let keeper_candidate_names descriptor =
 ;;
 
 let registered_names descriptor =
-  descriptor.internal_name :: descriptor.public_name :: descriptor.public_aliases
+  [ descriptor.internal_name; descriptor.public_name ]
   |> List.sort_uniq String.compare
 ;;
 
@@ -2093,7 +2043,7 @@ let model_visible_schemas () =
       }))
 ;;
 
-let public_names_of_descriptor d = d.public_name :: d.public_aliases
+let public_names_of_descriptor d = [ d.public_name ]
 
 let public_names () = List.concat_map public_names_of_descriptor public_descriptors
 
@@ -2219,7 +2169,6 @@ let discovery_fields d =
     ; "keeper_tool_group", `String (keeper_tool_group_to_string d.keeper_tool_group)
    ; "input_schema_source", `String (input_schema_source_to_string d.input_schema_source)
    ; "public_name", `String d.public_name
-   ; "public_aliases", Json_util.json_string_list d.public_aliases
    ; "internal_name", `String d.internal_name
    ; "description", `String d.description
    ; "executor", `String (executor_to_string d.executor)

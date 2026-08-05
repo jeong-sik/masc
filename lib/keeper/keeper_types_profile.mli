@@ -35,7 +35,6 @@ val tool_result_with_tool_name : tool_name:string -> tool_result -> tool_result
 val tool_result_body : tool_result -> string
 val tool_result_success : tool_result -> bool
 
-val schemas : Masc_domain.tool_schema list
 val short_preview : ?max_len:int -> string -> string
 val take : int -> 'a list -> 'a list
 val ensure_dir : string -> string

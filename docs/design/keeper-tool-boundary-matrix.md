@@ -158,8 +158,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_policy.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_progress_identity.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_progress_identity.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_registry.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_registry.mli` - tool-surface-policy
 - `lib/keeper_tool_response/keeper_tool_response.ml` - tool-surface-policy
 - `lib/keeper_tool_response/keeper_tool_response.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_resolution.ml` - tool-surface-policy

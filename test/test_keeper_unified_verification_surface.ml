@@ -201,7 +201,7 @@ let contains_sub sub s =
 ;;
 
 let test_board_authors_share_one_neutral_observation_boundary () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   let peer_event =
     {
       sample_board_event with
@@ -257,7 +257,7 @@ let test_board_authors_share_one_neutral_observation_boundary () =
 ;;
 
 let test_board_reaction_event_renders_reaction_context () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   let reaction_event =
     {
       sample_board_event with
@@ -287,7 +287,7 @@ let test_board_reaction_event_renders_reaction_context () =
    diagnostic token must survive prompt assembly verbatim; the instruction
    token scanner is intentionally not allowed to rewrite this surface. *)
 let test_observation_tool_names_are_preserved () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   let event =
     {
       sample_board_event with
@@ -362,7 +362,7 @@ let test_scheduled_automation_triggers_and_affordances () =
     (List.mem "schedule_dispatch_monitor" affordances)
 
 let test_scheduled_automation_prompt_section () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let obs =
     { base_observation with scheduled_automation = scheduled_automation_observation }
@@ -376,7 +376,7 @@ let test_scheduled_automation_prompt_section () =
     (contains_sub "schedule_id=\"sched-ready\"" user_msg)
 
 let test_schedule_rows_escape_every_field_and_use_typed_wake_payload () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let wake : Keeper_event_queue.scheduled_wake =
     { schedule_instance_id = "instance-forged-wake"
@@ -436,7 +436,7 @@ let test_schedule_rows_escape_every_field_and_use_typed_wake_payload () =
     fields
 
 let test_scheduled_wake_is_not_rendered_as_board_activity () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let obs =
     { base_observation with
@@ -538,7 +538,7 @@ let test_schedule_row_omits_absent_title_without_fabricating_one () =
     (List.assoc_opt "title" fields)
 
 let test_scheduled_wake_renders_schedule_pointer () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let obs =
     { base_observation with pending_board_events = [ sample_scheduled_wake ] }
@@ -650,7 +650,7 @@ let sample_task_cancellation : WO.pending_board_event =
 ;;
 
 let test_task_cancellation_has_own_prompt_layer () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let obs =
     { base_observation with
@@ -684,7 +684,7 @@ let test_task_cancellation_has_own_prompt_layer () =
    [None] into it would tell the author two different things in one row. The
    row must also never leak an OCaml option or a JSON "null". *)
 let test_task_cancellation_without_reason_omits_the_field () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let render tc_reason =
     let cancellation : Keeper_event_queue.task_cancellation =
@@ -720,7 +720,7 @@ let test_task_cancellation_without_reason_omits_the_field () =
 ;;
 
 let test_completion_authority_rejection_has_own_prompt_layer () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let obs =
     { base_observation with
@@ -759,7 +759,7 @@ let test_completion_authority_rejection_has_own_prompt_layer () =
 ;;
 
 let test_completion_authority_rejection_preserves_human_provenance () =
-  Masc_test_deps.init_keeper_tool_registry ();
+  Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let rejection : Keeper_event_queue.completion_authority_rejection =
     { car_task_id = "task-human-rejected"

@@ -488,6 +488,16 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
          ~tool_name:name
          (handle_keeper_compact ?invocation_ref ctx args))
   | "masc_keeper_clear" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_clear ctx args))
+  | "masc_keeper_sandbox_start" ->
+    Some
+      (tool_result_with_tool_name
+         ~tool_name:name
+         (handle_keeper_sandbox_start ctx args))
+  | "masc_keeper_sandbox_stop" ->
+    Some
+      (tool_result_with_tool_name
+         ~tool_name:name
+         (handle_keeper_sandbox_stop ctx args))
   | _ -> None
 
 let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~message : tool_result =
@@ -614,7 +624,57 @@ let () =
       | None -> continue ()
       | Some authorize -> authorize ~operation:name ~input:args ~continue
     in
+    let with_eio_context continue =
+      match sw, clock with
+      | Some sw, Some clock ->
+        let ctx : _ Keeper_types_profile.context =
+          { config
+          ; agent_name
+          ; sw
+          ; clock
+          ; proc_mgr
+          ; net
+          ; publication_recovery_provider
+          }
+        in
+        continue ctx
+      | _ -> eio_context_missing name
+    in
     match name with
+    | "masc_persona_list" ->
+      with_eio_context (fun ctx ->
+        Some
+          (tool_result_with_tool_name
+             ~tool_name:name
+             (Persona.handle_persona_list ctx args)))
+    | "masc_persona_create" ->
+      with_eio_context (fun ctx ->
+        run_external_effect (fun () ->
+          Some
+            (tool_result_with_tool_name
+               ~tool_name:name
+               (Keeper_tool_persona_crud.handle_persona_create ctx args))))
+    | "masc_persona_update" ->
+      with_eio_context (fun ctx ->
+        run_external_effect (fun () ->
+          Some
+            (tool_result_with_tool_name
+               ~tool_name:name
+               (Keeper_tool_persona_crud.handle_persona_update ctx args))))
+    | "masc_persona_delete" ->
+      with_eio_context (fun ctx ->
+        run_external_effect (fun () ->
+          Some
+            (tool_result_with_tool_name
+               ~tool_name:name
+               (Keeper_tool_persona_crud.handle_persona_delete ctx args))))
+    | "masc_keeper_create_from_persona" ->
+      with_eio_context (fun ctx ->
+        run_external_effect (fun () ->
+          Some
+            (tool_result_with_tool_name
+               ~tool_name:name
+               (handle_keeper_create_from_persona ctx args))))
     | "masc_keeper_list" ->
       Some (tool_result_with_tool_name ~tool_name:name (keeper_list_body ~config args))
     | "masc_keeper_delegate_status" ->
@@ -671,36 +731,20 @@ let () =
              ~tool_name:name
              (keeper_sandbox_stop_body ~config args)))
     | "masc_keeper_down" ->
-      (match sw, clock with
-       | Some sw, Some clock ->
-         let ctx : _ Keeper_types_profile.context =
-           { config
-           ; agent_name
-           ; sw
-           ; clock
-           ; proc_mgr
-           ; net
-           ; publication_recovery_provider
-           }
-         in
+      with_eio_context (fun ctx ->
          run_external_effect (fun () ->
            Keeper_tool_surface_ops.invalidate_keeper_list_cache ();
            Some
              (tool_result_with_tool_name
                 ~tool_name:name
-                (Keeper_turn_lifecycle.handle_keeper_down ctx args)))
-       | _ -> eio_context_missing name)
-    (* RFC-0182 Phase 5 PR-B: Eio-bound keeper tools.  Require both
-       sw and clock from caller; gracefully fail when invoked from a
-       path without Eio context. *)
+                (Keeper_turn_lifecycle.handle_keeper_down ctx args))))
     | "masc_keeper_delegate" ->
-      (match sw, clock with
-       | Some sw, Some clock ->
-         let ctx : _ Keeper_types_profile.context =
-           { config; agent_name; sw; clock; proc_mgr; net; publication_recovery_provider }
-         in
-         Some (Keeper_tool_surface_ops.handle_keeper_delegate ~submitted_by:agent_name ctx args)
-       | _ -> eio_context_missing "masc_keeper_delegate")
+      with_eio_context (fun ctx ->
+        Some
+          (Keeper_tool_surface_ops.handle_keeper_delegate
+             ~submitted_by:agent_name
+             ctx
+             args))
     | "masc_keeper_up" ->
       (match sw, clock with
        | Some sw, Some clock ->

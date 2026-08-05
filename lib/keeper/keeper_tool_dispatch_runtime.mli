@@ -5,20 +5,6 @@ open Keeper_types_profile
 val keeper_model_tool_names : unit -> string list
 val keeper_model_tool_schemas : unit -> Masc_domain.tool_schema list
 
-(** Replace injected MASC tool schemas.
-    Startup calls this through [inject_masc_schemas]; runtime readers should
-    use [masc_schemas_snapshot] rather than holding mutable state. *)
-val set_masc_schemas : Masc_domain.tool_schema list -> unit
-
-(** Immutable snapshot of injected MASC tool schemas. *)
-val masc_schemas_snapshot : unit -> Masc_domain.tool_schema list
-
-(** Injected masc_* tool names (populated at startup by [inject_masc_schemas]). *)
-val injected_masc_tool_names : unit -> string list
-
-(** Deduplicate tool names, preserving order. *)
-val dedupe_tool_names : string list -> string list
-
 (** Test-only hooks for the global tool-call recorder and descriptor routing. *)
 module For_testing : sig
   type descriptor_route_kind =
@@ -37,22 +23,9 @@ module For_testing : sig
     -> descriptor_route_kind
 end
 
-(** Inject all masc_* schemas for keeper descriptor/registry surface filtering.
-    Must be called once during server initialization. *)
-val inject_masc_schemas : Masc_domain.tool_schema list -> unit
-
 (** The dispatch result is the producer result itself.  No bridge-facing
     outcome enum is introduced between Keeper execution and {!Tool_result}. *)
 type executed_tool_result = Keeper_tool_execution.t
-
-(** Tag-based dispatch callback for masc_* tools without handler registry entries.
-    Set at server init to [Keeper_tag_dispatch.dispatch]. Default: returns None.
-    See #4579. *)
-
-val registered_handler_schema_names : unit -> string list
-
-(** Compute the keeper's sender identity for broadcasts.
-    Guards against double "keeper-" prefix. See #5104. *)
 
 val execute_keeper_tool_call_with_outcome
   :  config:Workspace.config

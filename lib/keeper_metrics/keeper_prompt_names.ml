@@ -5,10 +5,8 @@
     instead of string literals. *)
 
 let system = "keeper.system"
-let reply_guidelines = "keeper.reply_guidelines"
 let board_attention_judgment_batch = "keeper.board_attention_judgment_batch"
 let gate_judgment = "keeper.gate_judgment"
-let librarian_system = "keeper.librarian.system"
-let librarian_current_selection = "keeper.librarian.current_selection"
 let memory_os_recall_context = "keeper.memory_os_recall.context"
 let memory_os_recall_unavailable = "keeper.memory_os_recall.unavailable"
+let librarian_current_selection = "keeper.librarian.current_selection"

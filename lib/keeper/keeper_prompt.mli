@@ -17,10 +17,6 @@ val build_keeper_system_prompt :
 (** Repository identity and checkout freshness are obtained from the typed
     context projection rather than inferred from prompt prose. *)
 
-val append_direct_reply_mode_prompt :
-  base_prompt:string ->
-  string
-
 val append_trait_clause : base:string -> clause:string -> string
 
 (** {1 Text Processing}

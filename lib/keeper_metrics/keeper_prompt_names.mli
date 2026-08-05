@@ -9,10 +9,8 @@ val system : string
     [world], [capabilities], and [core_behavior] keys, which each restated
     the same rule families in a different wording. *)
 
-val reply_guidelines : string
 val board_attention_judgment_batch : string
 val gate_judgment : string
-val librarian_system : string
-val librarian_current_selection : string
 val memory_os_recall_context : string
 val memory_os_recall_unavailable : string
+val librarian_current_selection : string

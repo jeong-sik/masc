@@ -9,8 +9,7 @@
    [`Skipped] corresponds to TLA+ "receipt_skipped" produced by the
    [PhaseGateSkip] action: the turn reached terminal [Done] without
    dispatching, so it is a successful no-op rather than a failure or
-   cancellation. The receipt record still stores the legacy string for
-   JSON compatibility; consumers must go through these helpers so that
+   cancellation. JSON projection goes through the typed helpers so that
    Skipped/Cancelled/Error are not silently folded into one another. *)
 type outcome_kind = Keeper_execution_receipt_outcome_kind.outcome_kind
 
@@ -18,8 +17,6 @@ let outcome_kind_to_string =
   Keeper_execution_receipt_outcome_kind.outcome_kind_to_string
 let outcome_kind_to_tla_receipt =
   Keeper_execution_receipt_outcome_kind.outcome_kind_to_tla_receipt
-let outcome_kind_of_string =
-  Keeper_execution_receipt_outcome_kind.outcome_kind_of_string
 let outcome_kind_is_terminal_success =
   Keeper_execution_receipt_outcome_kind.outcome_kind_is_terminal_success
 

@@ -362,8 +362,10 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
   })
 
-  it('forces execution refresh on keeper turn complete for live roster status', async () => {
+  it('refreshes only the scoped Keeper status on turn complete', async () => {
     const { sseStore } = await loadSseStore()
+    const refreshKeeperTurn = vi.fn<(keeperName: string) => void>()
+    sseStore.registerKeeperTurnRefresh(refreshKeeperTurn)
     route.value = { tab: 'keepers', params: { keeper: 'qa-king' }, postId: null }
 
     sseStore.routeServerPushEvent({
@@ -374,8 +376,12 @@ describe('setupServerPushReaction reconnect hydration', () => {
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshExecution).toHaveBeenCalledTimes(1)
-    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
+    // The SDK hook precedes durable commit, so rebuilding the global execution
+    // snapshot here is both premature and expensive. The registered
+    // keeper-scoped status reader remains the authoritative immediate refresh.
+    expect(refreshExecution).not.toHaveBeenCalled()
+    expect(refreshKeeperTurn).toHaveBeenCalledTimes(1)
+    expect(refreshKeeperTurn).toHaveBeenCalledWith('qa-king')
   })
 
   it('normalizes MASC broadcast aliases before route-scoped execution refresh', async () => {
@@ -470,6 +476,35 @@ describe('setupServerPushReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshFusionRuns).not.toHaveBeenCalled()
+  })
+
+  it('refreshes the mounted internal-agent registry immediately from websocket invalidation', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'internal-agents' }, postId: null }
+    const refresh = vi.fn()
+    const unregister = sseStore.registerInternalAgentRefresh(refresh)
+
+    sseStore.routeServerPushEvent({ type: 'internal_agent_runs_changed' })
+    vi.advanceTimersByTime(1)
+    await flushAsyncWork()
+
+    expect(refresh).toHaveBeenCalledTimes(1)
+    unregister()
+  })
+
+  it('refreshes Fusion rows inside Internal Agents from the existing Fusion websocket event', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'internal-agents' }, postId: null }
+    const refresh = vi.fn()
+    const unregister = sseStore.registerInternalAgentRefresh(refresh)
+
+    sseStore.routeServerPushEvent({ type: 'fusion_run_status' })
+    vi.advanceTimersByTime(1)
+    await flushAsyncWork()
+
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(refreshFusionRuns).not.toHaveBeenCalled()
+    unregister()
   })
 
   it('routes keeper_tool_call to the IDE workspace refresh while on the code surface', async () => {

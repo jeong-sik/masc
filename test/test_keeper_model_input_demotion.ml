@@ -293,6 +293,49 @@ let boundary_moves_only_with_the_raw_cut () =
     demoted
 ;;
 
+(* The production pipeline measures the raw history, rewrites only atoms below
+   that cut, then measures the planned list. This fixture makes every atom
+   eligible so the per-projection identity cache must reuse every candidate
+   measurement without retaining independently allocated equal messages. *)
+let projection_reuses_candidate_measurements () =
+  let bodies = List.init 20 (fun _ -> String.make 4000 'a') in
+  let messages = history_with_tool_bodies bodies in
+  let raw_measurements = ref 0 in
+  let measured message =
+    incr raw_measurements;
+    measure_message_bytes message
+  in
+  let measure_message_bytes =
+    Masc.Keeper_turn_driver_try_provider.For_testing
+    .memoize_message_measurement measured
+  in
+  let planned =
+    Demotion.plan ~measure_message_bytes ~demote_before:max_int messages
+  in
+  Alcotest.(check int)
+    "fixture creates one candidate per aged tool result"
+    20
+    (List.length planned.Demotion.pending);
+  (match
+     Window.project
+       ~measure_message_bytes
+       ~capacity_bytes:max_int
+       ~reserved_bytes:0
+       planned.Demotion.messages
+   with
+  | Error error ->
+     Alcotest.fail (Window.budget_error_to_string error)
+   | Ok _ -> ());
+  let expected_unique_measurements =
+    List.length messages + List.length planned.Demotion.pending + 1
+    (* The window's synthetic preamble. *)
+  in
+  Alcotest.(check int)
+    "each original, candidate, and preamble identity is encoded once"
+    expected_unique_measurements
+    !raw_measurements
+;;
+
 let () =
   Alcotest.run
     "keeper_model_input_demotion"
@@ -326,6 +369,10 @@ let () =
             "demotion boundary moves only with the raw cut"
             `Quick
             boundary_moves_only_with_the_raw_cut
-        ] )
+        ; Alcotest.test_case
+            "projection reuses candidate measurements"
+            `Quick
+            projection_reuses_candidate_measurements
+         ] )
     ]
 ;;

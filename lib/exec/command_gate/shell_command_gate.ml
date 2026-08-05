@@ -217,40 +217,41 @@ let too_complex_reason_tag = function
 let log_verdict ~source = function
   | Allow _ -> ()
   | Reject { context; reason; diagnostic } ->
-    Logs.warn (fun m ->
-      m
-        "Shell_command_gate.reject source=%s verdict=%s reason=%s diagnostic=%s stage_bins=%s"
-        source
-        (verdict_tag (Reject { context; reason; diagnostic }))
-        (reject_reason_tag reason)
-        diagnostic
-        (String.concat "," context.stage_bins))
+    Log.Gate.warn
+      "Shell_command_gate.reject source=%s verdict=%s reason=%s diagnostic=%s stage_bins=%s"
+      source
+      (verdict_tag (Reject { context; reason; diagnostic }))
+      (reject_reason_tag reason)
+      diagnostic
+      (String.concat "," context.stage_bins)
   | Cannot_parse { reason } ->
-    Logs.warn (fun m ->
-      m
-        "Shell_command_gate.cannot_parse source=%s verdict=%s reason=%s"
-        source
-        (verdict_tag (Cannot_parse { reason }))
-        (parse_reason_tag reason))
+    Log.Gate.warn
+      "Shell_command_gate.cannot_parse source=%s verdict=%s reason=%s"
+      source
+      (verdict_tag (Cannot_parse { reason }))
+      (parse_reason_tag reason)
   | Too_complex { reason } ->
-    Logs.warn (fun m ->
-      m
-        "Shell_command_gate.too_complex source=%s verdict=%s reason=%s"
-        source
-        (verdict_tag (Too_complex { reason }))
-        (too_complex_reason_tag reason))
+    Log.Gate.warn
+      "Shell_command_gate.too_complex source=%s verdict=%s reason=%s"
+      source
+      (verdict_tag (Too_complex { reason }))
+      (too_complex_reason_tag reason)
+;;
+
+(* The verdict with no logging. [gate_raw] reaches the policy through here
+   rather than through [gate_typed], so one call reports one source. *)
+let decide_typed ~ir ~syntax_policy ~sandbox =
+  match parse_only_to_stages (PD.Parsed ir) with
+  | Error (`Cannot_parse reason) -> Cannot_parse { reason }
+  | Error (`Too_complex reason) -> Too_complex { reason }
+  | Ok stages -> apply_policy ~syntax_policy ~sandbox ~stages
 ;;
 
 let gate_typed ~ir ~syntax_policy ~sandbox () : verdict =
   (* Typed callers have already crossed their schema boundary, so this
      entrypoint intentionally skips raw-string parsing while preserving
      the same policy and verdict surface as [gate_raw]. *)
-  let verdict =
-    match parse_only_to_stages (PD.Parsed ir) with
-    | Error (`Cannot_parse reason) -> Cannot_parse { reason }
-    | Error (`Too_complex reason) -> Too_complex { reason }
-    | Ok stages -> apply_policy ~syntax_policy ~sandbox ~stages
-  in
+  let verdict = decide_typed ~ir ~syntax_policy ~sandbox in
   log_verdict ~source:"typed" verdict;
   verdict
 ;;
@@ -258,7 +259,7 @@ let gate_typed ~ir ~syntax_policy ~sandbox () : verdict =
 let gate_raw ~text ~syntax_policy ~sandbox () : verdict =
   let verdict =
     match Masc_exec_bash_parser.Bash.parse_string text with
-    | PD.Parsed ir -> gate_typed ~ir ~syntax_policy ~sandbox ()
+    | PD.Parsed ir -> decide_typed ~ir ~syntax_policy ~sandbox
     | PD.Parse_error _ -> Cannot_parse { reason = Parse_error }
     | PD.Parse_aborted reason -> Cannot_parse { reason = Parse_aborted reason }
     | PD.Too_complex reason ->

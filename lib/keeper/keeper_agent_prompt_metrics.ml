@@ -82,8 +82,7 @@ let provider_content_messages
 let empty_prompt_segment_metrics =
   { bytes = 0; fingerprint = None }
 
-let prompt_segment_metrics_of_text (text : string) : prompt_segment_metrics =
-  let text = Inference_utils.sanitize_text_utf8 text in
+let prompt_segment_metrics_of_sanitized_text (text : string) : prompt_segment_metrics =
   {
     bytes = String.length text;
     fingerprint =
@@ -92,14 +91,28 @@ let prompt_segment_metrics_of_text (text : string) : prompt_segment_metrics =
        else Some Digestif.SHA256.(digest_string text |> to_hex));
   }
 
-let build_prompt_metrics ~(system_prompt : string) ~(dynamic_context : string)
+let prompt_segment_metrics_of_text (text : string) : prompt_segment_metrics =
+  prompt_segment_metrics_of_sanitized_text
+    (Inference_utils.sanitize_text_utf8 text)
+
+let build_prompt_metrics_with_sanitizer ~sanitize
+    ~(system_prompt : string) ~(dynamic_context : string)
     ~(user_message : string) : prompt_metrics =
-  let system_prompt = Inference_utils.sanitize_text_utf8 system_prompt in
-  let dynamic_context = Inference_utils.sanitize_text_utf8 dynamic_context in
-  let user_message = Inference_utils.sanitize_text_utf8 user_message in
-  let system_prompt_metrics = prompt_segment_metrics_of_text system_prompt in
-  let dynamic_context_metrics = prompt_segment_metrics_of_text dynamic_context in
-  let user_message_metrics = prompt_segment_metrics_of_text user_message in
+  let system_prompt = sanitize system_prompt in
+  let dynamic_context = sanitize dynamic_context in
+  let user_message = sanitize user_message in
+  (* These values were sanitized above for the fingerprint input. Reusing that
+     exact text avoids scanning every prompt segment a second time merely to
+     compute byte lengths and per-segment digests. *)
+  let system_prompt_metrics =
+    prompt_segment_metrics_of_sanitized_text system_prompt
+  in
+  let dynamic_context_metrics =
+    prompt_segment_metrics_of_sanitized_text dynamic_context
+  in
+  let user_message_metrics =
+    prompt_segment_metrics_of_sanitized_text user_message
+  in
   let fingerprint_input =
     `Assoc
       [
@@ -120,6 +133,17 @@ let build_prompt_metrics ~(system_prompt : string) ~(dynamic_context : string)
     dynamic_context_segment = dynamic_context_metrics;
     user_message_segment = user_message_metrics;
   }
+
+let build_prompt_metrics ~system_prompt ~dynamic_context ~user_message =
+  build_prompt_metrics_with_sanitizer
+    ~sanitize:Inference_utils.sanitize_text_utf8
+    ~system_prompt
+    ~dynamic_context
+    ~user_message
+
+module For_testing = struct
+  let build_prompt_metrics_with_sanitizer = build_prompt_metrics_with_sanitizer
+end
 
 let prompt_segment_metrics_to_json (segment : prompt_segment_metrics) :
     Yojson.Safe.t =

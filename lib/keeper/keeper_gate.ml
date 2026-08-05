@@ -278,7 +278,7 @@ let decision_to_yojson = function
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
   Keeper_approval_queue.audit_approval_event
     ~base_path:request.base_path
-    ~event_type:"gate_allowed"
+    ~event_type:Keeper_approval_queue.Gate_allowed
     ~id:
       (match source with
        | One_shot_resolution approval_id -> approval_id
@@ -1117,9 +1117,11 @@ let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval)
   let event_type, outcome =
     match kind with
     | `Activate_worker ->
-      "auto_judge_restart_worker_recovered", "restart_worker_recovered"
+      ( Keeper_approval_queue.Auto_judge_restart_worker_recovered
+      , "restart_worker_recovered" )
     | `Finalize_judgment ->
-      "auto_judge_restart_judgment_recovered", "restart_judgment_recovered"
+      ( Keeper_approval_queue.Auto_judge_restart_judgment_recovered
+      , "restart_judgment_recovered" )
   in
   Log.Keeper.warn
     ~keeper_name:entry.keeper_name
@@ -1194,7 +1196,7 @@ let retry_blocked_auto_judge
             ();
        Keeper_approval_queue.audit_approval_event
          ~base_path:entry.audit_base_path
-         ~event_type:"auto_judge_operator_retry_started"
+         ~event_type:Keeper_approval_queue.Auto_judge_operator_retry_started
          ~id:entry.id
          ~keeper_name:entry.keeper_name
          ~tool_name:entry.tool_name
@@ -1428,7 +1430,7 @@ let defer request reason =
          | Error (Keeper_approval_queue.Exact_attempt_rejected rejection) ->
            Keeper_approval_queue.audit_approval_event
              ~base_path:request.base_path
-             ~event_type:"auto_judge_block_observation_superseded"
+             ~event_type:Keeper_approval_queue.Auto_judge_block_observation_superseded
              ~id:approval_id
              ~keeper_name:request.keeper_name
              ~tool_name:request.operation
@@ -1480,7 +1482,7 @@ let observe_exact_rule_store_degraded (request : request) error =
     ();
   Keeper_approval_queue.audit_approval_event
     ~base_path:request.base_path
-    ~event_type:"gate_exact_rule_store_degraded"
+    ~event_type:Keeper_approval_queue.Gate_exact_rule_store_degraded
     ~id:(Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
@@ -1501,7 +1503,7 @@ let observe_exact_rule_expired
     request.operation;
   Keeper_approval_queue.audit_approval_event
     ~base_path:request.base_path
-    ~event_type:"gate_exact_rule_expired"
+    ~event_type:Keeper_approval_queue.Gate_exact_rule_expired
     ~id:(Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
@@ -1592,7 +1594,7 @@ let decide ?cycle_grant ~keeper_always_allow request =
       (unavailable_reason_to_string reason);
     Keeper_approval_queue.audit_approval_event
       ~base_path:request.base_path
-      ~event_type:"gate_grant_unavailable"
+      ~event_type:Keeper_approval_queue.Gate_grant_unavailable
       ~id:approval_id
       ~keeper_name:request.keeper_name
       ~tool_name:request.operation

@@ -274,7 +274,10 @@ mcp_jsonrpc_call() {
     body_file="$(mcp_mktemp_file "masc-jsonrpc-body" ".json")"
     stderr_file="$(mcp_mktemp_file "masc-jsonrpc-stderr" ".log")"
     resp_file="$(mcp_mktemp_file "masc-jsonrpc-resp" ".json")"
-    trap 'rm -f "$body_file" "$stderr_file" "$resp_file" "$auth_header_file"' RETURN
+    # No RETURN trap here: a RETURN trap armed inside this function keeps
+    # firing on later caller-function returns (e.g. mcp_call_tool), where
+    # these locals are unbound under `set -u`. Cleanup is done explicitly
+    # after each attempt below.
     printf '%s' "$request_body" >"$body_file"
 
     local -a cmd=(

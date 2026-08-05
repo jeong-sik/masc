@@ -27,7 +27,10 @@ current_body() {
 
 post_request() {
   local label="$1" accept="$2" method="$3" params="$4" auth="$5"
-  local protocol_header="${6:-2026-07-28}"
+  # ${6-...} (not ${6:-...}): an explicitly empty 6th argument must stay empty
+  # so case [5/7] can omit the Mcp-Protocol-Version header entirely; only an
+  # unset argument falls back to the default version.
+  local protocol_header="${6-2026-07-28}"
   local body header_file body_file request_name
   header_file="$tmpdir/${label}.headers"
   body_file="$tmpdir/${label}.body"

@@ -312,12 +312,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
        (match Goal_phase.decide_transition ~phase:goal.phase ~action with
         | Error msg ->
           error_result_typed ~tool_name ~start_time ~code:Conflict msg
-        | Ok outcome ->
-          let phase =
-            match outcome with
-            | Goal_phase.Complete -> Goal_phase.Completed
-            | Goal_phase.Move_to phase -> phase
-          in
+        | Ok phase ->
           (match update_goal_phase ctx goal ~phase ?note () with
            | Error msg ->
              error_result_typed ~tool_name ~start_time ~code:Internal_error msg

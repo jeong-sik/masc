@@ -133,6 +133,51 @@ let override_restore_failure_count () =
     ~labels:[ ("prompt", "override_restore") ]
     ()
 
+
+(* Every managed asset must have a name constant, and every constant must name
+   a managed asset. The two sides drifting is how a literal key appears: before
+   this pairing existed, [verification.anti_rationalization] had an asset and no
+   constant, so lib/task/anti_rationalization.ml passed the string inline --
+   the constants lived in keeper_metrics, which lib/task cannot depend on. A new
+   asset added without its constant reproduces exactly that. *)
+let managed_asset_keys () =
+  let root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some r -> r
+    | None -> Sys.getcwd ()
+  in
+  let path = Filename.concat root "config/prompts/managed-assets.json" in
+  match Yojson.Safe.from_file path with
+  | `Assoc fields ->
+    (match List.assoc_opt "paths" fields with
+     | Some (`List items) ->
+       List.filter_map
+         (function
+           | `String p when Filename.check_suffix p ".md" ->
+             Some (Filename.chop_suffix (Filename.basename p) ".md")
+           | _ -> None)
+         items
+     | _ -> failwith "managed-assets.json: paths is not a list")
+  | _ -> failwith "managed-assets.json: not an object"
+
+let declared_prompt_names =
+  let open Keeper_prompt_names in
+  [ system
+  ; librarian_current_selection
+  ; memory_os_recall_context
+  ; memory_os_recall_unavailable
+  ; board_attention_judgment_batch
+  ; gate_judgment
+  ; verification_anti_rationalization
+  ]
+
+let test_every_managed_asset_has_a_name_constant () =
+  let assets = List.sort compare (managed_asset_keys ()) in
+  let names = List.sort compare declared_prompt_names in
+  Alcotest.(check (list string))
+    "managed assets and name constants are the same set"
+    assets names
+
 let () =
   let open Alcotest in
   run "Prompt_registry_defaults"
@@ -571,6 +616,11 @@ let () =
               check string "system_prompt_body ignores the rejected override"
                 (fixture "keeper.system")
                 (Lib.Keeper_prompt.system_prompt_body ()));
+        ] );
+      ( "asset/name pairing",
+        [
+          test_case "every managed asset has a name constant" `Quick
+            test_every_managed_asset_has_a_name_constant;
         ] );
       ( "prompts_json",
         [

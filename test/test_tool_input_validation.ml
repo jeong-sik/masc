@@ -636,6 +636,25 @@ let test_validate_args_masc_board_search_accepts_compact () =
       "expected masc_board_search compact arg to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
+let test_validate_args_masc_board_post_get_accepts_comment_page () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_model_board_post_get_schema
+      ~name:"masc_board_post_get"
+      ~args:
+        (`Assoc
+          [ "post_id", `String "p-1234"
+          ; "comment_offset", `Int 50
+          ; "comment_limit", `Int 25
+          ])
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected masc_board_post_get comment page to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
 (* Guard the other direction: a genuinely unknown field must still be
    rejected (additionalProperties:false not loosened). *)
 let test_validate_args_masc_board_list_rejects_unknown_field () =
@@ -2174,6 +2193,8 @@ let () =
         test_validate_args_masc_board_list_accepts_compact;
       Alcotest.test_case "masc_board_search accepts compact" `Quick
         test_validate_args_masc_board_search_accepts_compact;
+      Alcotest.test_case "masc_board_post_get accepts comment page" `Quick
+        test_validate_args_masc_board_post_get_accepts_comment_page;
       Alcotest.test_case "masc_board_list still rejects unknown field" `Quick
         test_validate_args_masc_board_list_rejects_unknown_field;
       Alcotest.test_case "keeper_memory_search rejects removed kind" `Quick

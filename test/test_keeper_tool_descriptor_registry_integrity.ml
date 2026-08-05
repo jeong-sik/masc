@@ -999,7 +999,7 @@ let test_board_descriptions_disambiguate_post_id_flow () =
   in
   check_contains
     "board_post_get descriptor points to list/search first"
-    ~sub:"Use masc_board_list or masc_board_search first"
+    ~sub:"masc_board_list or masc_board_search first"
     get_descriptor.description;
   check_contains
     "board_post_get schema forbids empty args"

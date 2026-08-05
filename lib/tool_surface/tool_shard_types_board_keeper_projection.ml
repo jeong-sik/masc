@@ -7,35 +7,7 @@
 open Tool_shard_types_enum_mirrors
 
 let schemas : Masc_domain.tool_schema list =
-  [ { name = "masc_board_post_get"
-    ; description =
-        "Read one existing board post by exact post_id, including comments and votes. \
-         Use only after you already have a post_id from masc_board_list, \
-         masc_board_search, or the current board activity context. If no post_id is \
-         visible, call masc_board_list or masc_board_search first; never call this \
-         tool with empty arguments. Returns post content, author, timestamp, vote_count, \
-         and comment thread."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "post_id"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Required exact board post ID (format: p-xxxx). Get it \
-                             from masc_board_list, masc_board_search, or visible \
-                             board activity context before calling masc_board_post_get."
-                        )
-                      ] )
-                ] )
-          ; "required", `List [ `String "post_id" ]
-          ; "additionalProperties", `Bool false
-          ]
-    }
-  ; { name = "masc_board_post"
+  [ { name = "masc_board_post"
     ; description =
         "Create a new board post. Author is auto-filled from keeper identity. Use \
          hearth to target a topic channel (e.g. 'code-review', 'research', 'ops'); \

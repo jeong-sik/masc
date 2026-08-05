@@ -61,24 +61,34 @@ rules that narrow their own scope (#26862).
 - **`masc_goal_upsert`** accepts `id, title, metric, target_value, due_date,
   priority, parent_goal_id`. No owner.
 - **`masc_goal_list`**, **`masc_goal_transition`** — read and phase change.
-- **`keeper_meta.active_goal_ids`** — a keeper-side list. Its consumers are
-  `dashboard_briefing_assembly.ml:221`, `dashboard_execution_builders.ml:247`
-  and `:318`, `dashboard_http_keeper.ml:92` and `:744`, plus a test fixture.
-  **Every one of them renders it.** No scheduler, turn assembly, or claim path
-  reads it.
+- **`keeper_meta.active_goal_ids`** — a keeper-side list, and **not a dead
+  field**. 113 files carry 360 references. Beyond the dashboard renderers it
+  drives behavior: `Keeper_goal_assignment_wake` (RFC-0315 P3 W0) enqueues a
+  `Keeper_event_queue.Goal_assigned` stimulus for each id that newly enters the
+  list and signals the keeper's Running lane, with edge semantics that fire only
+  on additions; `Keeper_goal_reconciliation_wake` is its sibling. It is also
+  read by `keeper_unified_prompt` (`<available_goals>` and `### Active Goals`),
+  `keeper_world_observation`, the board-attention `keeper_context`, the TOML
+  parser, and the four `keeper_turn_up` modules.
+
+  Its emptiness on the live workspace (0 of 8 keepers) means **nobody assigns**,
+  not that nobody reads.
 - **Task↔Goal linkage** is solved and shipped (RFC-0267, PRs #21704/#21722):
   `masc_task_set_goal`, `POST /api/v1/dashboard/tasks/assign-goal`, and the
   `goal_id` projection on `/execution`. This RFC does not revisit that axis.
 
 ## 3. The failure this RFC must not repeat
 
-`active_goal_ids` is the precedent. The field exists, the dashboard draws it,
-and no behavior depends on it — so a Goal being "held" by a keeper changes
-nothing, and today the field is empty everywhere without anyone noticing.
-
-**Adding `goal.owner` without a consumer produces a second `active_goal_ids`.**
 A field is not a contract. The contract is the sentence some code path says to
-the owner, and the evidence that the path runs.
+the owner, and the evidence that the path runs. `goal.owner` shipped without a
+consumer would be a value the dashboard draws and nothing acts on.
+
+The first draft of this section named `active_goal_ids` as that precedent and
+was wrong: it reads behavior, not just pixels (§2). The correction does not
+weaken the rule, it sharpens what the rule is about — **a field earns its place
+from the path that reads it, and the claim that no such path exists has to be
+measured, not assumed.** The measurement that produced the false claim was a
+single grep whose hits happened to be dashboard files.
 
 ## 4. Proposal
 
@@ -141,8 +151,10 @@ removed rather than kept as decoration.
 ## 6. Open questions
 
 1. Does the owner projection replace `keeper_meta.active_goal_ids`, or coexist?
-   The measurement says the field is empty everywhere and read only by the
-   dashboard; deriving it from `goal.owner` on read would remove a second
-   source of truth.
+   They are not duplicates: `active_goal_ids` is keeper -> goals and **fires a
+   wake on assignment**; `goal.owner` is goal -> keeper and states a fact. A
+   replacement is only sound if changing `owner` produces the same
+   `Goal_assigned` stimulus, and it costs 360 references across 113 files. Not
+   attempted here.
 2. Should `phase = executing` with `owner = None` be surfaced to the operator?
    It is the exact state of all ten live Goals and nothing reports it today.

@@ -1,7 +1,6 @@
 (** Durable keeper stimulus -> reaction ledger.
 
-    This is the runtime mirror for the KeeperReactionLiveness L1/L5
-    contract: queue-visible stimuli and queue transition reactions are
+    Queue-visible stimuli and queue transition reactions are
     written to a replayable JSONL store under
     [.masc/keepers/<keeper>/reaction-ledger/v5/YYYY-MM/DD.jsonl].  The
     generation namespace is a hard boundary: older stores are neither read nor

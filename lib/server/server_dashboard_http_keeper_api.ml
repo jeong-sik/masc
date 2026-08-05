@@ -2118,8 +2118,7 @@ let handle_keeper_get_subroutes state req request reqd =
         state_diagram_runtime_fsm_mermaid runtime_projection
       in
       (* Compaction sub-FSM: only emit a diagram when the keeper is in
-         the [Compacting] phase. The three nodes mirror
-         [specs/bug-models/MemoryCompaction.tla]. *)
+         the [Compacting] phase. *)
       let compaction_submachine_mermaid =
         match current with
         | Keeper_state_machine.Compacting ->

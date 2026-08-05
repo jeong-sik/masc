@@ -938,8 +938,10 @@ let add_delete_action_routes router =
                                       | Error e ->
                                           Some (Board_tool.board_error_to_string e))
                                  | Board_moderation.Target_comment ->
-                                     (* Comment removal not yet backed by dispatch; note only *)
-                                     None)
+                                     (match Board_dispatch.delete_comment ~comment_id:target_id with
+                                      | Ok () -> None
+                                      | Error e ->
+                                          Some (Board_tool.board_error_to_string e)))
                               else
                                 None
                             in

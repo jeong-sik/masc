@@ -15,7 +15,7 @@ import { SectionCap } from './common/section-cap'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { KpiStripView, type KpiStripViewData } from './kpi-strip-view'
 
-type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'
+type FeatureStatus = 'healthy' | 'warning' | 'inactive'
 type StatusFilter = FeatureStatus | 'all'
 
 interface FeatureHealthItem {
@@ -26,7 +26,6 @@ interface FeatureHealthItem {
   is_enabled: boolean
   source: string
   status: FeatureStatus
-  since: string
 }
 
 interface FeatureHealthOverview {
@@ -34,7 +33,6 @@ interface FeatureHealthOverview {
   healthy_count: number
   warning_count: number
   inactive_count: number
-  deprecated_count: number
   enabled_count: number
   overridden_count: number
 }
@@ -63,7 +61,6 @@ const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'healthy', label: '정상' },
   { value: 'warning', label: '실험적' },
   { value: 'inactive', label: '비활성' },
-  { value: 'deprecated', label: '폐기 예정' },
 ]
 
 // Pure filter helpers — exported for isolated testing.
@@ -109,8 +106,8 @@ export async function refreshFeatureHealth(): Promise<void> {
  * Feature-health-domain status → 한국어 라벨.
  *
  * Distinct from `statusLabel` in `lib/status-label.ts` (which handles every
- * runtime/agent status enum). FeatureStatus is a closed 4-enum
- * (`'healthy' | 'warning' | 'inactive' | 'deprecated'`) with feature-flag
+ * runtime/agent status enum). FeatureStatus is a closed enum
+ * (`'healthy' | 'warning' | 'inactive'`) with feature-flag
  * semantics — 'warning' here means "실험적 (experimental)", not "경고"
  * which is what lib/status-label maps it to.
  *
@@ -126,9 +123,6 @@ export function featureStatusLabel(status: FeatureStatus): string {
       return '실험적'
     case 'inactive':
       return '비활성'
-    case 'deprecated':
-    default:
-      return '폐기 예정'
   }
 }
 
@@ -142,9 +136,6 @@ function statusChipTone(status: FeatureStatus): FeatureHealthTone {
       return 'warn'
     case 'inactive':
       return 'neutral'
-    case 'deprecated':
-    default:
-      return 'bad'
   }
 }
 
@@ -167,7 +158,6 @@ function FeatureItem({ item }: { item: FeatureHealthItem }) {
           <div class="mt-1.5 text-sm text-[var(--color-fg-secondary)]">${item.description}</div>
           <div class="mt-1 flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
             <span>source: ${item.source}</span>
-            <span>since: v${item.since}</span>
           </div>
         </div>
       </div>
@@ -245,7 +235,6 @@ export function FeatureHealth() {
                         { variant: 'stacked', label: '정상', value: overview.healthy_count, kind: 'ok' },
                         { variant: 'stacked', label: '실험적', value: overview.warning_count, kind: 'warn' },
                         { variant: 'stacked', label: '비활성', value: overview.inactive_count },
-                        { variant: 'stacked', label: '폐기 예정', value: overview.deprecated_count, kind: 'err' },
                       ] satisfies KpiStripViewData['cells']}
                     />
                   </div>

@@ -243,29 +243,15 @@ let launch_supervised_fiber_body
       Eio_guard.protect
         (fun () ->
            try
-             (* Ambient Board judgment is a sibling worker on this exact Keeper
-                lifecycle switch. It drains durable candidates as singleton
-                exact flows: MASC owns the input and durable callbacks, while
-                OAS owns target admission, dispatch, and advancement.
-                Cancellation joins the worker with the Keeper lane. *)
-             Eio.Fiber.fork ~sw:lane_sw (fun () ->
-               match Eio.Fiber.first
-                 (fun () ->
-                    `Worker
-                      (Keeper_board_attention_worker.run
-                         ~sw:lane_sw
-                         ~clock:ctx.clock
-                         ~net:ctx.net
-                         ~base_path
-                         ~keeper_name:meta.name))
-                 (fun () ->
-                    Eio.Promise.await board_worker_stop;
-                    `Stopped)
-               with
-               | `Stopped | `Worker (Ok ()) -> ()
-               | `Worker (Error fatal) ->
-                 failwith
-                   (Keeper_board_attention_worker.fatal_error_to_string fatal));
+             (* MASC owns the worker's input and durable callbacks, while OAS
+                owns target admission, dispatch, and advancement. The fork
+                itself lives in [Keeper_keepalive] so both lane-start paths
+                produce the same lane. *)
+             Keeper_keepalive.fork_board_attention_worker
+               ~sw:lane_sw
+               ~ctx
+               ~keeper_name:meta.name
+               ~stop:board_worker_stop;
              (* Keeper lifetime, idle duration, and progress age are
                 observations only. The supervisor runs the lane directly;
                 configured provider/tool boundaries and explicit operator

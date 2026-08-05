@@ -70,6 +70,22 @@ val effective_keepalive_meta :
 val wakeup_relevant_keeper_for_board_signal :
   config:Workspace.config -> Board_dispatch.addressed_board_signal -> unit
 
+(** Fork the Board-attention judgment worker as a sibling of the heartbeat
+    loop on the same Keeper lane switch. Both lane-start paths call this, so
+    the lane's sidecar set has one definition: a lane reached through
+    [start_keepalive] recovery judges Board candidates exactly as a supervised
+    one does. Resolve [stop] when the lane's heartbeat ends.
+
+    A worker fatal stops the worker and is recorded; the lane continues
+    (RFC-0341: tool/persistence/resource failures are observations and never
+    produce an implicit lifecycle transition). *)
+val fork_board_attention_worker :
+  sw:Eio.Switch.t ->
+  ctx:'a context ->
+  keeper_name:string ->
+  stop:unit Eio.Promise.t ->
+  unit
+
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)
 val run_heartbeat_loop :

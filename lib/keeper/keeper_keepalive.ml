@@ -465,6 +465,47 @@ let start_keeper_grpc_heartbeat
 ;;
 ;;
 
+(* Ambient Board judgment is a sibling worker on the Keeper lifecycle switch:
+   it drains durable candidates as singleton exact flows, and cancellation
+   joins it with the lane. It belongs to the lane, not to one launch path --
+   forking it from a single place is what keeps that true. A lane started by
+   [start_keepalive] recovery used to get no worker at all, so its Board
+   candidates were recorded and never judged, with no failure anywhere to
+   read.
+
+   RFC-0341 (Accepted): tool, persistence and resource failures are
+   observations and never produce an implicit lifecycle transition. A worker
+   fatal therefore stops the worker and is recorded; the lane continues. *)
+let fork_board_attention_worker
+      ~(sw : Eio.Switch.t)
+      ~(ctx : _ context)
+      ~(keeper_name : string)
+      ~(stop : unit Eio.Promise.t)
+  : unit
+  =
+  Eio.Fiber.fork ~sw (fun () ->
+    match
+      Eio.Fiber.first
+        (fun () ->
+           `Worker
+             (Keeper_board_attention_worker.run
+                ~sw
+                ~clock:ctx.clock
+                ~net:ctx.net
+                ~base_path:ctx.config.base_path
+                ~keeper_name))
+        (fun () ->
+           Eio.Promise.await stop;
+           `Stopped)
+    with
+    | `Stopped | `Worker (Ok ()) -> ()
+    | `Worker (Error fatal) ->
+      Log.Keeper.error
+        "board attention worker stopped keeper=%s: %s (lane continues)"
+        keeper_name
+        (Keeper_board_attention_worker.fatal_error_to_string fatal))
+;;
+
 (* ── Lifecycle bootstrap / publish helpers ── *)
 
 let bootstrap_live_keeper_meta ?lifecycle_token ~(ctx : _ context) (m : keeper_meta)
@@ -1166,14 +1207,25 @@ let start_keepalive
              reg.lane
              ~run:(fun lane_sw ->
         let ctx = { ctx with sw = lane_sw } in
-        (* The sidecar is part of this Keeper lane. It cannot outlive the
-           lane's structured-concurrency scope. *)
+        (* The sidecars are part of this Keeper lane. They cannot outlive the
+           lane's structured-concurrency scope, and a lane reached through
+           recovery carries the same set as a supervised one. *)
         let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
         (match grpc_close with
          | Some _ ->
            Atomic.set reg.grpc_close grpc_close
          | None -> ());
-        run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup)
+        let board_stop, resolve_board_stop = Eio.Promise.create () in
+        fork_board_attention_worker
+          ~sw:lane_sw
+          ~ctx
+          ~keeper_name:live_meta.name
+          ~stop:board_stop;
+        Eio_guard.protect
+          (fun () ->
+             run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup)
+          ~finally:(fun () ->
+            ignore (Eio.Promise.try_resolve resolve_board_stop () : bool)))
              ~cleanup:cleanup_tracking
          with
          | Ok () -> Keepalive_started reg

@@ -814,6 +814,15 @@ jobs:
             @test/runtest-test_tool_registry_consistency \
             @test/runtest-test_tool_spec
 
+      - name: Run keeper lane launch-order AST suite
+        # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
+        # it. It sat outside every target list while one of its counts was
+        # already wrong, which is how the two lane-start paths drifted into
+        # forking different sidecar sets.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_keepalive_launch_order_ast
+
       - name: Run paused-work transfer and source-ACK suites
         id: paused_work_transfer_and_operator_suites
         if: ${{ always() && steps.build_step.outcome == 'success' }}

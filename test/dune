@@ -956,6 +956,7 @@
   test_with_process_coverage
   test_process_eio_detached
   test_voice_runtime_overlay
+  test_voice_bridge_retry
   test_worker_container_coverage
   test_resilience
   test_common
@@ -1108,6 +1109,7 @@
   test_with_process_coverage
   test_process_eio_detached
   test_voice_runtime_overlay
+  test_voice_bridge_retry
   test_worker_container_coverage
   test_resilience
   test_common

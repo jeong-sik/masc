@@ -911,6 +911,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_persona_name
   test_dashboard_briefing_sections
   test_dashboard_cache
   test_dashboard_http_core
@@ -1064,6 +1065,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_persona_name
   test_dashboard_briefing_sections
   test_dashboard_cache
   test_dashboard_http_core
@@ -1927,6 +1929,8 @@
 (include stanzas/test_keeper_approval_queue_rules.inc)
 
 (include stanzas/test_keeper_approval_queue.inc)
+
+(include stanzas/test_tool_type_label.inc)
 
 (include stanzas/test_assertion_kind_mirror.inc)
 

@@ -1,4 +1,4 @@
-# RFC-0363 — keeper 당 체크아웃 하나 (`repos/` 중간 디렉터리 폐기)
+# RFC-0364 — keeper 당 체크아웃 하나 (`repos/` 중간 디렉터리 폐기)
 
 - Status: Draft
 - Updated: 2026-08-05

@@ -600,15 +600,23 @@ let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
   | None -> meta.instructions
 ;;
 
+(* Titles for the goals the world observation already narrowed to the ones a
+   keeper can still progress. [meta.active_goal_ids] records assignment and is
+   never cleared when a goal reaches a terminal phase, so this resolves the
+   same phase question the observation does — a keeper must not be handed a
+   Completed goal under a heading that calls it available. *)
 let active_goal_summaries
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
   =
-  List.map
+  List.filter_map
     (fun goal_id ->
        match Goal_store.get_goal config ~goal_id with
-       | Some { Goal_store.title; _ } -> (goal_id, title)
-       | None -> (goal_id, ""))
+       | Some { Goal_store.title; phase; _ } ->
+         if Goal_phase.admits_self_directed_progress phase
+         then Some (goal_id, title)
+         else None
+       | None -> Some (goal_id, ""))
     meta.active_goal_ids
 ;;
 

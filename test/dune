@@ -915,6 +915,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_persona_name
   test_dashboard_briefing_sections
   test_dashboard_cache
   test_dashboard_http_core
@@ -1068,6 +1069,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_persona_name
   test_dashboard_briefing_sections
   test_dashboard_cache
   test_dashboard_http_core

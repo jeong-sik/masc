@@ -89,20 +89,19 @@ type agent_profile = {
 }
 
 (** Extract persona name from MASC agent name.
-    "keeper-sangsu-agent" -> "sangsu", "claude-agent-abc" -> "claude-agent-abc" *)
+    "keeper-sangsu-agent" -> "sangsu", "claude-agent-abc" -> "claude-agent-abc"
+
+    [Keeper_identity] owns this parse. It enumerates the four accepted
+    spellings — keeper-/-agent, keeper_/_agent, and the two mixed forms — and
+    its own comment records what happens when a spelling is known in one place
+    and not another. This function used to hand-roll the first pair with
+    [String.sub s 7] and [String.sub s (len - 6) 6], so an agent named
+    keeper_sangsu_agent kept its affixes and the persona lookup below searched
+    for a directory of that name. *)
 let extract_persona_name (agent_name : string) : string =
-  let s = agent_name in
-  let s =
-    if String.length s > 7 && String.starts_with ~prefix:"keeper-" s then
-      String.sub s 7 (String.length s - 7)
-    else s
-  in
-  let s =
-    if String.length s > 6 && String.sub s (String.length s - 6) 6 = "-agent" then
-      String.sub s 0 (String.length s - 6)
-    else s
-  in
-  s
+  match Keeper_identity.keeper_name_of_agent_alias agent_name with
+  | Some keeper_name -> keeper_name
+  | None -> agent_name
 
 (** Try loading agent profile from local persona profile.json.
     Path: resolved personas root / <persona_name> / profile.json *)

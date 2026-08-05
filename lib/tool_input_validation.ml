@@ -406,29 +406,39 @@ type numeric_value =
 
 let numeric_of_json : Yojson.Safe.t -> numeric_value option = function
   | `Int value -> Some (Numeric_int value)
-  | `Float value -> Some (Numeric_float value)
+  | `Float value when Float.is_finite value -> Some (Numeric_float value)
   | `Intlit literal ->
     (match int_of_string_opt literal with
      | Some value -> Some (Numeric_int value)
-     | None ->
-       (match float_of_string_opt literal with
-        | Some value -> Some (Numeric_float value)
-        | None -> None))
-  | `Null | `Bool _ | `String _ | `Assoc _ | `List _ -> None
+     | None -> None)
+  | `Float _ | `Null | `Bool _ | `String _ | `Assoc _ | `List _ -> None
 ;;
 
-let numeric_to_float = function
-  | Numeric_int value -> Float.of_int value
-  | Numeric_float value -> value
+(* Compare one native integer with one finite float without first rounding
+   the integer to IEEE-754. [float_of_int] loses units above 2^53, which can
+   otherwise make [maximum=9007199254740992.0] accept the integer one above
+   it. OCaml ints occupy [Sys.int_size - 1] value bits; the positive limit is
+   not itself representable as an int, while the negative limit is [min_int]. *)
+let compare_int_float integer floating =
+  let integer_magnitude_limit = Float.ldexp 1.0 (Sys.int_size - 1) in
+  if floating >= integer_magnitude_limit
+  then -1
+  else if floating < -.integer_magnitude_limit
+  then 1
+  else
+    let integral_part = int_of_float floating in
+    let comparison = Int.compare integer integral_part in
+    if comparison <> 0
+    then comparison
+    else Float.compare (Float.of_int integer) floating
 ;;
 
-(* Two ints compare exactly; anything else goes through float, which is
-   the widest common representation the wire can carry. *)
 let numeric_compare left right =
   match left, right with
   | Numeric_int left, Numeric_int right -> Int.compare left right
-  | (Numeric_int _ | Numeric_float _), (Numeric_int _ | Numeric_float _) ->
-    Float.compare (numeric_to_float left) (numeric_to_float right)
+  | Numeric_int left, Numeric_float right -> compare_int_float left right
+  | Numeric_float left, Numeric_int right -> -(compare_int_float right left)
+  | Numeric_float left, Numeric_float right -> Float.compare left right
 ;;
 
 let numeric_to_string = function
@@ -472,13 +482,23 @@ let count_bound_of_json : Yojson.Safe.t -> int option = function
   -> None
 ;;
 
+let schema_value_to_diagnostic_string = function
+  | `Float value when not (Float.is_finite value) ->
+    (match classify_float value with
+     | FP_nan -> "NaN"
+     | FP_infinite when value > 0.0 -> "Infinity"
+     | FP_infinite -> "-Infinity"
+     | FP_normal | FP_subnormal | FP_zero -> Printf.sprintf "%g" value)
+  | value -> Yojson.Safe.to_string value
+;;
+
 let malformed_bound ~path ~keyword ~declared =
   Schema_bound_malformed
     (Printf.sprintf
        "schema declares an unreadable %s for %s: %s"
        keyword
        path
-       (Yojson.Safe.to_string declared))
+       (schema_value_to_diagnostic_string declared))
 ;;
 
 (* A value whose JSON kind the keyword does not apply to is left alone:
@@ -487,17 +507,31 @@ let malformed_bound ~path ~keyword ~declared =
    incompatible type. [test_tool_input_validation] pins that no masc
    schema does. *)
 let numeric_constraint_failure ~path ~keyword ~declared value =
-  match numeric_of_json value with
-  | None -> None
-  | Some actual ->
-    (match numeric_of_json declared with
+  match numeric_of_json declared with
+  | None ->
+    Some
+      (malformed_bound
+         ~path
+         ~keyword:(numeric_keyword_json_name keyword)
+         ~declared)
+  | Some bound ->
+    (match numeric_of_json value with
      | None ->
-       Some
-         (malformed_bound
-            ~path
-            ~keyword:(numeric_keyword_json_name keyword)
-            ~declared)
-     | Some bound ->
+       (match value with
+        | `Float value when not (Float.is_finite value) ->
+          Some
+            (Argument_out_of_range
+               (Printf.sprintf "%s must be a finite number" path))
+        | `Intlit literal ->
+          Some
+            (Argument_out_of_range
+               (Printf.sprintf
+                  "%s integer literal %s is outside the native exact-comparison range"
+                  path
+                  literal))
+        | `Int _ | `Float _ | `Null | `Bool _ | `String _ | `Assoc _ | `List _ ->
+          None)
+     | Some actual ->
        let comparison = numeric_compare actual bound in
        let violated =
          match keyword with
@@ -651,20 +685,76 @@ let rec constraint_failures ~path schema value =
   | _ -> []
 ;;
 
+(** Malformed declarations are schema defects independently of whether the
+    corresponding optional argument was supplied. Checking them in a separate
+    schema-only walk keeps an omitted field from turning fail-closed validation
+    into a silent pass. *)
+let rec malformed_schema_bound_failures ~path schema =
+  match schema with
+  | `Assoc schema_fields ->
+    let declared_here =
+      List.filter_map
+        (fun keyword ->
+           match
+             List.assoc_opt (numeric_keyword_json_name keyword) schema_fields
+           with
+           | None -> None
+           | Some declared ->
+             (match numeric_of_json declared with
+              | Some _ -> None
+              | None ->
+                Some
+                  (malformed_bound
+                     ~path
+                     ~keyword:(numeric_keyword_json_name keyword)
+                     ~declared)))
+        numeric_keywords
+      @ List.filter_map
+          (fun keyword ->
+             match
+               List.assoc_opt (count_keyword_json_name keyword) schema_fields
+             with
+             | None -> None
+             | Some declared ->
+               (match count_bound_of_json declared with
+                | Some _ -> None
+                | None ->
+                  Some
+                    (malformed_bound
+                       ~path
+                       ~keyword:(count_keyword_json_name keyword)
+                       ~declared)))
+          count_keywords
+    in
+    let nested_properties =
+      match List.assoc_opt "properties" schema_fields with
+      | Some (`Assoc property_schemas) ->
+        List.concat_map
+          (fun (property_name, property_schema) ->
+             malformed_schema_bound_failures
+               ~path:(child_property_path path property_name)
+               property_schema)
+          property_schemas
+      | _ -> []
+    in
+    let nested_items =
+      match List.assoc_opt "items" schema_fields with
+      | Some (`Assoc _ as item_schema) ->
+        malformed_schema_bound_failures ~path:(path ^ "[]") item_schema
+      | _ -> []
+    in
+    declared_here @ nested_properties @ nested_items
+  | _ -> []
+;;
+
 (** First declared-constraint failure for [args], or [None]. A malformed
     bound is reported ahead of an out-of-range argument: masc's own schema
     defect must not be blamed on the caller. *)
 let schema_constraint_failure schema args =
-  let failures = constraint_failures ~path:"" schema args in
-  match
-    List.find_opt
-      (function
-        | Schema_bound_malformed _ -> true
-        | Argument_out_of_range _ -> false)
-      failures
-  with
-  | Some malformed -> Some malformed
-  | None ->
+  match malformed_schema_bound_failures ~path:"" schema with
+  | malformed :: _ -> Some malformed
+  | [] ->
+    let failures = constraint_failures ~path:"" schema args in
     (match failures with
      | [] -> None
      | first :: _ -> Some first)

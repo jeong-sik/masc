@@ -256,6 +256,45 @@ let test_exclusive_maximum_rejects_the_bound_itself () =
   check_names ~label:"ratio at exclusiveMaximum" ~message [ "ratio"; "exclusiveMaximum" ]
 ;;
 
+let large_integer_maximum_schema =
+  object_schema
+    [ ( "value"
+      , `Assoc
+          [ "type", `String "number"
+          ; "maximum", `Float 9_007_199_254_740_992.0
+          ] )
+    ]
+;;
+
+let test_mixed_int_float_comparison_keeps_integer_precision () =
+  let message =
+    expect_rejected
+      ~label:"integer one above a large float maximum"
+      ~schema:large_integer_maximum_schema
+      ~name:"__constraint_large_mixed_number"
+      ~args:(`Assoc [ "value", `Int 9_007_199_254_740_993 ])
+  in
+  check_names
+    ~label:"integer one above a large float maximum"
+    ~message
+    [ "value"; "maximum" ]
+;;
+
+let test_oversized_integer_literal_fails_closed () =
+  let literal = "999999999999999999999999999999999999" in
+  let message =
+    expect_rejected
+      ~label:"integer literal outside exact comparison range"
+      ~schema:count_schema
+      ~name:"__constraint_oversized_intlit"
+      ~args:(`Assoc [ "count", `Intlit literal ])
+  in
+  check_names
+    ~label:"integer literal outside exact comparison range"
+    ~message
+    [ "count"; literal; "exact-comparison range" ]
+;;
+
 let title_schema =
   object_schema
     [ ( "title"
@@ -504,6 +543,28 @@ let test_unreadable_count_bound_fails_closed_as_a_schema_defect () =
     [ "title"; "maxLength" ]
 ;;
 
+let test_unreadable_optional_bound_fails_closed_when_field_is_absent () =
+  check_unreadable_bound_fails_closed
+    ~schema:malformed_numeric_bound_schema
+    ~args:(`Assoc [])
+    ~label:"unreadable optional maximum"
+    [ "count"; "maximum" ]
+;;
+
+let test_non_finite_numeric_bound_fails_closed () =
+  let schema =
+    object_schema
+      [ ( "ratio"
+        , `Assoc [ "type", `String "number"; "maximum", `Float Float.nan ] )
+      ]
+  in
+  check_unreadable_bound_fails_closed
+    ~schema
+    ~args:(`Assoc [])
+    ~label:"non-finite maximum"
+    [ "ratio"; "maximum" ]
+;;
+
 (* --- Every masc declaration must be reachable and readable ---------- *)
 
 let constraint_keyword_names =
@@ -563,13 +624,15 @@ let test_every_declared_bound_is_readable () =
               match keyword, value with
               | ("minimum" | "maximum" | "exclusiveMinimum" | "exclusiveMaximum"), _ ->
                 (match value with
-                 | `Int _ | `Float _ -> true
+                 | `Int _ -> true
+                 | `Float bound -> Float.is_finite bound
                  | `Intlit literal -> Option.is_some (int_of_string_opt literal)
                  | _ -> false)
               | ("minLength" | "maxLength" | "minItems" | "maxItems"), _ ->
                 (match value with
                  | `Int bound -> bound >= 0
-                 | `Float bound -> Float.is_integer bound && bound >= 0.0
+                 | `Float bound ->
+                   Float.is_finite bound && Float.is_integer bound && bound >= 0.0
                  | `Intlit literal ->
                    (match int_of_string_opt literal with
                     | Some bound -> bound >= 0
@@ -613,6 +676,10 @@ let () =
             test_exclusive_minimum_accepts_above_the_bound
         ; Alcotest.test_case "exclusiveMaximum rejects its bound" `Quick
             test_exclusive_maximum_rejects_the_bound_itself
+        ; Alcotest.test_case "mixed int/float comparison keeps integer precision" `Quick
+            test_mixed_int_float_comparison_keeps_integer_precision
+        ; Alcotest.test_case "oversized integer literal fails closed" `Quick
+            test_oversized_integer_literal_fails_closed
         ; Alcotest.test_case "minLength" `Quick test_min_length_rejects_and_names_the_field
         ; Alcotest.test_case "maxLength" `Quick test_max_length_rejects_and_names_the_field
         ; Alcotest.test_case "length counts characters, not bytes" `Quick
@@ -637,6 +704,10 @@ let () =
             test_unreadable_numeric_bound_fails_closed_as_a_schema_defect
         ; Alcotest.test_case "an unreadable count bound fails closed" `Quick
             test_unreadable_count_bound_fails_closed_as_a_schema_defect
+        ; Alcotest.test_case "an unreadable optional bound fails when omitted" `Quick
+            test_unreadable_optional_bound_fails_closed_when_field_is_absent
+        ; Alcotest.test_case "a non-finite numeric bound fails closed" `Quick
+            test_non_finite_numeric_bound_fails_closed
         ; Alcotest.test_case "every masc declaration is reachable" `Quick
             test_every_declaration_is_reachable_by_enforcement
         ; Alcotest.test_case "every masc bound is readable" `Quick

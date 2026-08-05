@@ -16,7 +16,19 @@ vi.mock('./core', () => ({
 import {
   fetchVerificationRuns,
   parseVerificationRunsResponse,
+  type DashboardVerificationRunsResponse,
+  type VerificationRunRecord,
 } from './dashboard-verification-runs'
+
+// Indexing straight into `runs` reads as possibly-undefined under the
+// dashboard's strict config. Asserting the count first and binding the row
+// keeps the cases type-safe and makes each one state how many rows it expects.
+function onlyRun(parsed: DashboardVerificationRunsResponse): VerificationRunRecord {
+  expect(parsed.runs).toHaveLength(1)
+  const [run] = parsed.runs
+  if (!run) throw new Error('expected exactly one run')
+  return run
+}
 
 afterEach(() => {
   getMock.mockReset()
@@ -46,7 +58,7 @@ describe('parseVerificationRunsResponse', () => {
     })
     expect(parsed.count).toBe(1)
     expect(parsed.generatedAt).toBe('2026-08-05T00:00:00Z')
-    expect(parsed.runs[0]).toMatchObject({
+    expect(onlyRun(parsed)).toMatchObject({
       verificationId: 'vrf-24b43c36',
       taskId: 'task-136',
       producer: 'keeper-kidsnote-agent',
@@ -61,8 +73,8 @@ describe('parseVerificationRunsResponse', () => {
     const parsed = parseVerificationRunsResponse({
       runs: [row({ status: 'rejected', reason: 'aria attributes are not committed' })],
     })
-    expect(parsed.runs[0].status).toBe('rejected')
-    expect(parsed.runs[0].cause).toBe('aria attributes are not committed')
+    expect(onlyRun(parsed).status).toBe('rejected')
+    expect(onlyRun(parsed).cause).toBe('aria attributes are not committed')
   })
 
   it('reads a failure cause from `detail` and keeps the gate', () => {
@@ -71,9 +83,9 @@ describe('parseVerificationRunsResponse', () => {
         row({ status: 'not_reviewed', gate: 'evaluator_unavailable', detail: 'no runtime' }),
       ],
     })
-    expect(parsed.runs[0].status).toBe('not_reviewed')
-    expect(parsed.runs[0].cause).toBe('no runtime')
-    expect(parsed.runs[0].gate).toBe('evaluator_unavailable')
+    expect(onlyRun(parsed).status).toBe('not_reviewed')
+    expect(onlyRun(parsed).cause).toBe('no runtime')
+    expect(onlyRun(parsed).gate).toBe('evaluator_unavailable')
   })
 
   it('maps an unrecognized status to `unknown` rather than a real outcome', () => {
@@ -83,7 +95,7 @@ describe('parseVerificationRunsResponse', () => {
     const parsed = parseVerificationRunsResponse({
       runs: [row({ status: 'probably_fine' })],
     })
-    expect(parsed.runs[0].status).toBe('unknown')
+    expect(onlyRun(parsed).status).toBe('unknown')
   })
 
   it('drops rows with no verification id', () => {

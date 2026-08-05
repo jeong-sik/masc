@@ -241,12 +241,51 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
+  it('accepts the exact runtime telemetry sample envelope', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'oas_telemetry_sample',
+      payload: {
+        sample: { provider_id: 'private', model_id: 'private', status: 'ok' },
+        recorded_at: 1_712_000_000,
+      },
+      provider_id: 'runtime',
+      model_id: 'runtime',
+      ts_unix: 1_712_000_000,
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it.each([
+    { payload: { sample: {}, recorded_at: 1 }, provider_id: 'runtime' },
+    { payload: { sample: {}, recorded_at: 'bad' }, provider_id: 'runtime', model_id: 'runtime' },
+    { payload: { recorded_at: 1 }, provider_id: 'runtime', model_id: 'runtime' },
+  ])('rejects malformed runtime telemetry sample envelopes: %o', value => {
+    expect(SSEMessageSchema.safeParse({ type: 'oas_telemetry_sample', ...value }).success).toBe(false)
+  })
+
   it.each([
     { type: 'keeper_waiting_inventory_changed', queue_kind: 'chat_queue' },
     { type: 'keeper_waiting_inventory_changed', keeper_name: 'keeper-1' },
     { type: 'keeper_waiting_inventory_changed', keeper_name: 'keeper-1', queue_kind: 'unknown' },
   ])('rejects an incomplete Keeper waiting-inventory invalidation: %o', value => {
     expect(SSEMessageSchema.safeParse(value).success).toBe(false)
+  })
+
+  it('accepts a typed compaction snapshot cache completion', () => {
+    expect(SSEMessageSchema.safeParse({
+      type: 'keeper_compaction_snapshots_changed',
+      keeper_name: 'keeper-1',
+      status: 'ready',
+      ts_unix: 1_712_000_000,
+    }).success).toBe(true)
+  })
+
+  it('rejects compaction snapshot cache completion without a closed status', () => {
+    expect(SSEMessageSchema.safeParse({
+      type: 'keeper_compaction_snapshots_changed',
+      keeper_name: 'keeper-1',
+      status: 'warming',
+    }).success).toBe(false)
   })
 
   it('accepts a gate_mode_changed event with a null previous_mode', () => {

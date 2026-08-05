@@ -30,8 +30,7 @@
     - {b dashboard JSON-RPC handlers}
       ({!dashboard_hello}, {!dashboard_subscribe},
       {!dashboard_unsubscribe}, {!dashboard_ping},
-      {!dashboard_ack},
-      {!set_dashboard_snapshot_provider}).
+      {!dashboard_ack}).
     - {b outbound delivery}
       ({!send_to_session_result},
       {!send_dashboard_or_raw_sse},
@@ -51,9 +50,8 @@
     [dashboard_session_result], [find_session],
     [detach_session_for_close] / [close_detached_session_wsd] /
     [update_ws_session_count_metric],
-    [dashboard_snapshot_provider] cell,
     [dashboard_auth_success_payload],
-    [verify_dashboard_token], [dashboard_snapshot],
+    [verify_dashboard_token],
     [parse_cache] / [sse_data_prefix] /
     [extract_sse_data_*],
     [dashboard_delta_payload_text_cache] /
@@ -346,12 +344,6 @@ val parse_sse_dashboard_event :
 
 (** {1 Dashboard JSON-RPC handlers} *)
 
-val set_dashboard_snapshot_provider :
-  (string -> Yojson.Safe.t option) -> unit
-(** Installs the per-slice snapshot lookup used by
-    {!dashboard_subscribe} when seeding initial state.
-    Called once at server bootstrap. *)
-
 val dashboard_hello :
   base_path:string ->
   session_id:string ->
@@ -359,8 +351,8 @@ val dashboard_hello :
   unit ->
   (Yojson.Safe.t, string) result
 (** Authenticates the dashboard session.  [Ok payload]
-    on success carries the protocol version + per-slice
-    snapshot; [Error msg] otherwise (unknown session,
+    on success carries the protocol version + capabilities;
+    [Error msg] otherwise (unknown session,
     bad token, etc). *)
 
 val dashboard_subscribe :

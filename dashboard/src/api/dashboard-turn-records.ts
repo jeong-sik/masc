@@ -304,6 +304,7 @@ export type KeeperCompactionSnapshotsResponse = {
   readonly read_error_count: number
   readonly read_errors: { scope: string; error: string }[]
   readonly scan_truncated: boolean
+  readonly hydration_status: 'warming' | 'ready' | 'failed'
   readonly items: KeeperCompactionSnapshot[]
 }
 
@@ -1113,7 +1114,13 @@ function decodeKeeperCompactionSnapshotsResponse(raw: unknown): KeeperCompaction
   const keeper = asString(raw.keeper)
   const source = asString(raw.source)
   const producer = asString(raw.producer)
-  if (!schema || !keeper || !source || !producer) return null
+  const hydration_status =
+    raw.hydration_status === 'warming'
+    || raw.hydration_status === 'ready'
+    || raw.hydration_status === 'failed'
+      ? raw.hydration_status
+      : null
+  if (!schema || !keeper || !source || !producer || !hydration_status) return null
   return {
     schema,
     keeper,
@@ -1124,6 +1131,7 @@ function decodeKeeperCompactionSnapshotsResponse(raw: unknown): KeeperCompaction
     read_error_count: asNumber(raw.read_error_count, 0) ?? 0,
     read_errors: decodeReadErrors(raw.read_errors),
     scan_truncated: asBoolean(raw.scan_truncated) ?? false,
+    hydration_status,
     items: asRecordArray(raw.items)
       .map(decodeKeeperCompactionSnapshot)
       .filter((item): item is KeeperCompactionSnapshot => item !== null),
@@ -1157,9 +1165,13 @@ export async function fetchKeeperTurnRecords(
 export async function fetchKeeperCompactionSnapshots(
   name: string,
   limit?: number,
-  opts?: AbortableRequestOptions,
+  opts?: AbortableRequestOptions & { refresh?: boolean },
 ): Promise<KeeperCompactionSnapshotsResponse> {
-  const params = limitQueryString(limit)
+  const query = new URLSearchParams()
+  if (limit != null) query.set('limit', String(limit))
+  if (opts?.refresh === true) query.set('refresh', 'true')
+  const encoded = query.toString()
+  const params = encoded ? `?${encoded}` : ''
   await ensureDevToken()
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/compaction-snapshots${params}`,

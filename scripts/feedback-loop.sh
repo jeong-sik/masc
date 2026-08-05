@@ -52,16 +52,18 @@ for i in $(seq 1 "$ITERATIONS"); do
   BUILD_START=$(now_ms)
   # time -v (Linux) / time -l (macOS) captures peak RSS + CPU time. Its report
   # is merged into the captured output so we can extract metrics without losing
-  # build logs. `|| true` keeps the build's own exit status in BUILD_STATUS.
+  # build logs. The command substitution's exit status is the build's own.
   if [ "$IS_DARWIN" = "1" ]; then
-    BUILD_TIME_REPORT=$(/usr/bin/time -l "$REPO_DIR/scripts/dune-local.sh" build "$DUNE_BUILD_TARGET" 2>&1 || true)
+    BUILD_TIME_REPORT=$(/usr/bin/time -l "$REPO_DIR/scripts/dune-local.sh" build "$DUNE_BUILD_TARGET" 2>&1) && BUILD_STATUS=0 || BUILD_STATUS=$?
   else
-    BUILD_TIME_REPORT=$(/usr/bin/time -v "$REPO_DIR/scripts/dune-local.sh" build "$DUNE_BUILD_TARGET" 2>&1 || true)
+    BUILD_TIME_REPORT=$(/usr/bin/time -v "$REPO_DIR/scripts/dune-local.sh" build "$DUNE_BUILD_TARGET" 2>&1) && BUILD_STATUS=0 || BUILD_STATUS=$?
   fi
-  BUILD_STATUS=$?
   BUILD_END=$(now_ms)
   BUILD_DURATION=$((BUILD_END - BUILD_START))
-  BUILD_MEM_KB=$(echo "$BUILD_TIME_REPORT" | grep "maximum resident set size" | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/) {print $i; exit}}' || echo "0")
+  # GNU time -v prints "Maximum resident set size (kbytes): N" (capital M),
+  # BSD time -l prints "  N  maximum resident set size" (lowercase) — match
+  # case-insensitively and take the first numeric field on the line.
+  BUILD_MEM_KB=$(echo "$BUILD_TIME_REPORT" | grep -i "maximum resident set size" | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/) {print $i; exit}}')
   if [ "$BUILD_STATUS" -ne 0 ]; then
     echo "$BUILD_TIME_REPORT"
     echo "{\"iteration\":$i,\"phase\":\"build\",\"status\":\"failed\"}" >> "$LOG_FILE"

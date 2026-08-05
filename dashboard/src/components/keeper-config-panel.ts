@@ -1196,9 +1196,7 @@ export function buildKcfAssemblySegments(c: KeeperConfig): KcfAssemblySegment[] 
   const segments: KcfAssemblySegment[] = []
   const blocks = c.prompt.system_prompt_blocks
   const baseBlocks: readonly (readonly [string, { key: string; source: string; text: string }])[] = [
-    ['헌법', blocks.constitution],
-    ['세계관', blocks.world],
-    ['능력', blocks.capabilities],
+    ['공유 시스템', blocks.system],
   ]
   for (const [label, block] of baseBlocks) {
     if (block.text.trim() !== '') {
@@ -1824,9 +1822,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     </div>
     ${promptPreviewTab.value === 'blocks'
       ? html`
-          <${PromptBlock} title="헌법" block=${c.prompt.system_prompt_blocks.constitution} />
-          <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
-          <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
+          <${PromptBlock} title="공유 시스템" block=${c.prompt.system_prompt_blocks.system} />
         `
       : promptPreviewTab.value === 'system'
         ? html`<${LongText} text=${c.prompt.assembled_system_prompt || c.prompt.effective_system_prompt} truncateAt=${null} />`

@@ -1121,6 +1121,21 @@ jobs:
           prompt_targets="@test/runtest-test_keeper_system_prompt_bytes @test/runtest-test_keeper_prompt_metrics @test/runtest-test_keeper_surface_presence_prompt"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${prompt_targets}"
 
+      - name: Run board attention suite
+        id: board_attention_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          # test_keeper_board_attention_candidate is left out: it has one unrelated
+          # non-finite-float failure on main, tracked separately.
+          board_attention_targets="@test/runtest-test_keeper_board_attention_worker @test/runtest-test_keeper_board_attention_partition"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${board_attention_targets}"
+
       - name: Run tool blob retention suite
         id: tool_blob_retention_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

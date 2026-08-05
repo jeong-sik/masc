@@ -165,9 +165,8 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'model_input',
     messageSlot: 'final',
     summary: 'Memory and tool hints added at the end.',
-    promptKeys: [
-      'keeper.memory_os_recall.context',
-    ],
+    promptKeys: [],
+    computedRows: [{ id: 'memory-os-recall', promptKey: '(computed:memory_os_recall)' }],
   },
   {
     id: 'manifest-edge',

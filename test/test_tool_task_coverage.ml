@@ -11,7 +11,7 @@ let () = Workspace_metric_hooks.install ()
 let () = Keeper_task_owner_backend.install_hooks ()
 
 (* The completion-review path renders the registry prompt
-   [verification.anti_rationalization]. This executable never pinned a
+   [verification]. This executable never pinned a
    markdown dir, so prompt resolution depended on whatever the host/dune
    context happened to expose — green on developer machines, "Prompt ...
    is missing" inside the CI dune sandbox, which failed every
@@ -21,7 +21,7 @@ let () = Keeper_task_owner_backend.install_hooks ()
    inside the CI sandbox, so the mechanism is CI-proven. *)
 let has_prompt_root path =
   Sys.file_exists
-    (Filename.concat path "config/prompts/verification.anti_rationalization.md")
+    (Filename.concat path "config/prompts/verification.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -99,7 +99,7 @@ let install_test_hooks () =
     (Filename.concat (repo_root ()) "config/prompts");
   Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
-    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () ->
        Ok (Some Task.Anti_rationalization.Approve))
 
 let with_env name value_opt f =
@@ -1394,7 +1394,7 @@ let () = test "handle_transition_force_is_not_a_done_action" (fun () ->
             String.equal agent_name "admin-agent");
        let reviewer_called = ref false in
        Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
-         (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+         (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () ->
             reviewer_called := true;
             Ok (Some Task.Anti_rationalization.Approve));
        let result =

@@ -1,12 +1,5 @@
 (** See [keeper_model_input_demotion.mli] for the contract (RFC-0363). *)
 
-(* Not derived from [Runtime_model_input_tail_window.atoms_per_window] even
-   though it currently shares its value: that quantum bounds how often the cut
-   moves the head of the list, this one is how much recent tool output stays
-   readable without a fetch. They answer different questions and are free to
-   diverge once RFC-0363 §6 measures this one. *)
-let retain_atoms = 60
-
 (* Every demoted body is stored and previewed as opaque text. The provider
    never sees these bytes again — it sees the marker — so the media type only
    has to be the one [materialize] and the placeholder agree on, or the
@@ -83,9 +76,8 @@ let saturating_marker ~bytes =
     None
 ;;
 
-let plan ~measure_message_bytes messages =
-  let labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
-  let demote_before = atom_count - retain_atoms in
+let plan ~measure_message_bytes ~demote_before messages =
+  let labelled, _atom_count = Runtime_model_input_tail_window.annotate messages in
   if demote_before <= 0
   then { messages; pending = [] }
   else (

@@ -6,6 +6,7 @@ import {
   appendAssistantToolTraceStep,
   appendAssistantThinkingDelta,
   appendThreadEntry,
+  applyKeeperTurnProgress,
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
   finalizeAssistantEntry,
@@ -1534,5 +1535,105 @@ describe('RFC-0235 audio clip normalization', () => {
     })
     expect(attached).toBe(false)
     expect(keeperThreads.value.echo?.[0]?.audio).toBeUndefined()
+  })
+})
+
+describe('applyKeeperTurnProgress (keeper_chat_turn_progress broadcast)', () => {
+  beforeEach(() => {
+    keeperThreads.value = {}
+  })
+
+  function progress(partial: Partial<Parameters<typeof applyKeeperTurnProgress>[1]>) {
+    return {
+      runId: 'run-1',
+      kind: 'tool_call_start' as const,
+      toolCallId: 'tc-1',
+      toolName: 'Grep',
+      receiptIds: ['chatq-1'],
+      ...partial,
+    }
+  }
+
+  it('creates a synthetic placeholder with a pending step when no in-flight entry exists', () => {
+    applyKeeperTurnProgress('taskmaster', progress({}))
+    const entries = keeperThreads.value.taskmaster ?? []
+    expect(entries).toHaveLength(1)
+    const placeholder = entries[0]!
+    expect(placeholder.id).toBe('turn-progress-run-1')
+    expect(placeholder.role).toBe('assistant')
+    expect(placeholder.delivery).toBe('streaming')
+    expect(placeholder.queueReceiptIds).toEqual(['chatq-1'])
+    expect(placeholder.traceSteps).toEqual([
+      expect.objectContaining({ kind: 'tool', toolCallId: 'tc-1', name: 'Grep', status: 'pending' }),
+    ])
+  })
+
+  it('marks the step ok on tool_call_end', () => {
+    applyKeeperTurnProgress('taskmaster', progress({}))
+    applyKeeperTurnProgress('taskmaster', progress({ kind: 'tool_call_end', toolName: null }))
+    const step = keeperThreads.value.taskmaster?.[0]?.traceSteps?.[0]
+    expect(step?.kind).toBe('tool')
+    expect(step?.kind === 'tool' && step.status).toBe('ok')
+  })
+
+  it('is idempotent per tool call id', () => {
+    applyKeeperTurnProgress('taskmaster', progress({}))
+    applyKeeperTurnProgress('taskmaster', progress({}))
+    const placeholder = keeperThreads.value.taskmaster?.[0]
+    expect(keeperThreads.value.taskmaster).toHaveLength(1)
+    expect(placeholder?.traceSteps).toHaveLength(1)
+  })
+
+  it('attaches to an existing in-flight assistant entry instead of creating a placeholder', () => {
+    appendThreadEntry('taskmaster', {
+      id: 'queued-reply',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'taskmaster',
+      text: '',
+      rawText: null,
+      timestamp: null,
+      delivery: 'queued',
+      streamState: 'opening',
+      details: null,
+    })
+    applyKeeperTurnProgress('taskmaster', progress({}))
+    const entries = keeperThreads.value.taskmaster ?? []
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.id).toBe('queued-reply')
+    expect(entries[0]!.traceSteps).toHaveLength(1)
+  })
+
+  it('ignores tool_call_end for a step this client never saw start', () => {
+    applyKeeperTurnProgress('taskmaster', progress({ kind: 'tool_call_end', toolName: null }))
+    const entries = keeperThreads.value.taskmaster ?? []
+    // Placeholder may exist but must not gain an unnamed step.
+    expect(entries[0]?.traceSteps ?? []).toHaveLength(0)
+  })
+
+  it('converges: history merge folds the trace and drops the placeholder', () => {
+    applyKeeperTurnProgress('taskmaster', progress({}))
+    applyKeeperTurnProgress('taskmaster', progress({ kind: 'tool_call_end', toolName: null }))
+    mergeServerHistoryEntries('taskmaster', [
+      {
+        id: 'hist-assistant-1',
+        role: 'assistant',
+        source: 'direct_assistant',
+        label: 'taskmaster',
+        text: '코드 탐색 완료',
+        rawText: '코드 탐색 완료',
+        timestamp: '2026-08-05T06:40:00.000Z',
+        delivery: 'history',
+        streamState: null,
+        details: null,
+        queueReceiptIds: ['chatq-1'],
+      },
+    ])
+    const entries = keeperThreads.value.taskmaster ?? []
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.id).toBe('hist-assistant-1')
+    expect(entries[0]!.traceSteps).toEqual([
+      expect.objectContaining({ kind: 'tool', toolCallId: 'tc-1', name: 'Grep', status: 'ok' }),
+    ])
   })
 })

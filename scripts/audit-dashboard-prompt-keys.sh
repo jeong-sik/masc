@@ -5,7 +5,7 @@
 # prompt asset is a server-side change that leaves those strings syntactically
 # valid, so a panel keeps rendering a block that resolves to empty instead of
 # failing. That happened after #26823 folded keeper.world / keeper.capabilities
-# / keeper.constitution into keeper.system: the config panel decoded three
+# / keeper.constitution into keeper: the config panel decoded three
 # blocks the server no longer sends and rendered nothing, and the assembly
 # panel described six stages whose keys were gone.
 #
@@ -16,7 +16,7 @@
 # synthetic key to exercise the missing-block path.
 #
 # Authority: config/prompts/*.md basenames plus the keys declared in
-# lib/keeper_metrics/keeper_prompt_names.ml.
+# lib/prompt_registry/prompt_names.ml.
 set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -28,7 +28,14 @@ trap 'rm -f "$existing" "$referenced"' EXIT
 find config/prompts -name '*.md' -print0 \
   | xargs -0 -n1 basename \
   | sed 's/\.md$//' > "$existing"
-grep -oE '"[a-z_]+\.[a-z_.]+"' lib/keeper_metrics/keeper_prompt_names.ml \
+# Fail rather than contribute nothing if the constants file moves again: a
+# silent miss here is how the file sat at a stale path across two renames.
+names_file=lib/prompt_registry/prompt_names.ml
+if [ ! -f "$names_file" ]; then
+  echo "[dashboard-prompt-keys] FAIL - prompt-name constants not at $names_file"
+  exit 2
+fi
+grep -oE '"[a-z_][a-z_.]*"' "$names_file" \
   | tr -d '"' >> "$existing"
 sort -u -o "$existing" "$existing"
 
@@ -41,8 +48,12 @@ SINKS='normalizePromptBlock|promptKeys?|system_prompt_blocks'
 # like prompt.system_prompt_blocks is not mistaken for a prompt key.
 ns="$(sed 's/\..*//' "$existing" | sort -u | paste -sd'|' -)"
 
-grep -rn --include='*.ts' --exclude='*.test.ts' -E "$SINKS" dashboard/src 2>/dev/null \
-  | grep -oE "'(${ns})\.[a-z_.]+'" \
+# -A5 so a key inside a multi-line promptKeys array is seen. Without it the
+# sink line holds only "promptKeys: [" and every key on a following line goes
+# unchecked, which is how a removed dotted prompt key survived its own
+# asset being deleted.
+grep -rn -A5 --include='*.ts' --exclude='*.test.ts' -E "$SINKS" dashboard/src 2>/dev/null \
+  | grep -oE "'(${ns})(\.[a-z_.]+)?'" \
   | tr -d "'" \
   | sort -u > "$referenced"
 

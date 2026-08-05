@@ -1500,6 +1500,130 @@ let test_dashboard_proof_route_registered_in_http_routers () =
   check bool "HTTP/2 dashboard proof route registered" true
     (contains_substring h2 "\"/api/v1/dashboard/proof\"")
 
+let config_sync_runtime_toml =
+  {|[runtime]
+default = "test_provider.test_model"
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let execution_trust_keeper_row_keys =
+  [ "active_goal_ids"
+  ; "agent_name"
+  ; "current_task_id"
+  ; "generation"
+  ; "keeper_id"
+  ; "name"
+  ; "phase"
+  ; "pipeline_stage"
+  ; "status"
+  ; "trace_id"
+  ; "trust"
+  ]
+
+let test_execution_trust_uses_narrow_keeper_projection () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let runtime_path = Filename.concat config.Workspace.base_path "runtime.toml" in
+  write_file runtime_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error error -> failf "runtime init: %s" error);
+  let name = "execution-trust-narrow-projection" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
+          ; "trace_id", `String "execution-trust-narrow-trace"
+          ])
+    with
+    | Ok meta ->
+      { meta with
+        runtime = { meta.runtime with nonce = 17 }
+      ; active_goal_ids = [ "goal-narrow-1" ]
+      }
+    | Error error -> failf "meta fixture: %s" error
+  in
+  (match Masc.Keeper_meta_store.write_meta config meta with
+   | Ok () -> ()
+   | Error error -> failf "write meta: %s" error);
+  let json = Dashboard_http_keeper.execution_trust_dashboard_json config in
+  let open Yojson.Safe.Util in
+  let row =
+    match json |> member "keepers" |> to_list with
+    | [ row ] -> row
+    | rows -> failf "expected one execution-trust row, got %d" (List.length rows)
+  in
+  let full_row =
+    match
+      Dashboard_http_keeper.keepers_dashboard_json ~compact:true config
+      |> member "keepers"
+      |> to_list
+    with
+    | [ full_row ] -> full_row
+    | rows -> failf "expected one full Keeper row, got %d" (List.length rows)
+  in
+  let full_row_field key =
+    Option.value ~default:`Null (Json_util.assoc_member_opt key full_row)
+  in
+  let expected_row =
+    `Assoc
+      (List.map
+         (fun key -> key, full_row_field key)
+         [ "name"
+         ; "agent_name"
+         ; "keeper_id"
+         ; "phase"
+         ; "pipeline_stage"
+         ; "status"
+         ; "trace_id"
+         ; "generation"
+         ; "current_task_id"
+         ; "active_goal_ids"
+         ; "trust"
+         ])
+  in
+  check bool "narrow row preserves the full projection wire values" true
+    (Yojson.Safe.equal expected_row row);
+  let keys =
+    match row with
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "execution-trust keeper row must be an object"
+  in
+  check (list string) "wire field set remains exact"
+    execution_trust_keeper_row_keys keys;
+  check string "name" name (row |> member "name" |> to_string);
+  check string "agent name" (Masc.Keeper_identity.keeper_agent_name name)
+    (row |> member "agent_name" |> to_string);
+  check string "trace id" "execution-trust-narrow-trace"
+    (row |> member "trace_id" |> to_string);
+  check int "generation" 17 (row |> member "generation" |> to_int);
+  check (list string) "active goals" [ "goal-narrow-1" ]
+    (row |> member "active_goal_ids" |> to_list |> List.map to_string);
+  check bool "trust summary remains populated" true
+    (match row |> member "trust" with `Assoc _ -> true | _ -> false)
+
+let test_execution_trust_does_not_call_full_keeper_projection () =
+  let source = read_file "lib/dashboard/dashboard_http_keeper.ml" in
+  check bool
+    "execution-trust refresh cannot reintroduce the full compact projection"
+    false
+    (contains_substring
+       source
+       "keepers_dashboard_json ~compact:true")
+
 let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
   let open Yojson.Safe.Util in
   let change : Masc.Keeper_gate_mode.change =
@@ -2932,23 +3056,6 @@ let test_context_shrink_detection () =
     (shrink (with_max_override base (Some 1000)) [ ("name", `String "shrink-fixture") ])
 ;;
 
-let config_sync_runtime_toml =
-  {|[runtime]
-default = "test_provider.test_model"
-[providers.test_provider]
-display-name = "Test Provider"
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:1"
-[models.test_model]
-api-name = "test-model"
-max-context = 8192
-tools-support = true
-streaming = true
-[test_provider.test_model]
-is-default = true
-max-concurrent = 1
-|}
-
 let prepare_config_sync_keeper config name =
   let runtime_path = Filename.concat config.Workspace.base_path "runtime.toml" in
   write_file runtime_path config_sync_runtime_toml;
@@ -3020,6 +3127,75 @@ let post_config ~sw ~clock ~state ~name body =
     | [] -> fail "HTTP response has no body"
   in
   raw, Yojson.Safe.from_string body
+
+let post_catchup_judge ~state ~name body =
+  let output = Buffer.create 512 in
+  let connection =
+    Httpun.Server_connection.create (fun reqd ->
+      Keeper_config_post.handle_keeper_catchup_judge_post
+        state
+        (Httpun.Reqd.request reqd)
+        reqd
+        body)
+  in
+  let request =
+    Printf.sprintf
+      "POST /api/v1/keepers/%s/catchup-judge HTTP/1.1\r\nHost: x\r\n\r\n"
+      name
+  in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
+  ignore
+    (Httpun.Server_connection.read_eof
+       connection
+       input
+       ~off:0
+       ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let bytes =
+        List.fold_left
+          (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+            Buffer.add_string output
+              (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+            total + iov.len)
+          0
+          iovecs
+      in
+      Httpun.Server_connection.report_write_result connection (`Ok bytes);
+      drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  Buffer.contents output
+;;
+
+let test_catchup_judge_prompt_failure_is_server_error () =
+  let base_path = test_dir () in
+  let empty_prompts = Filename.concat base_path "empty-prompts" in
+  Unix.mkdir empty_prompts 0o755;
+  let previous_prompt_dir = Prompt_registry.get_markdown_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Option.iter Prompt_registry.set_markdown_dir previous_prompt_dir;
+      cleanup_dir base_path)
+    (fun () ->
+      Prompt_registry.set_markdown_dir empty_prompts;
+      let raw =
+        post_catchup_judge
+          ~state:(Lib.Mcp_server.For_testing.create_state ~base_path)
+          ~name:"catchup-prompt-fixture"
+          {|{"since_unix":0}|}
+      in
+      check bool
+        "missing server-owned prompt is HTTP 500"
+        true
+        (String.starts_with ~prefix:"HTTP/1.1 500" raw);
+      check bool
+        "response identifies the unavailable prompt"
+        true
+        (contains_substring raw "judge.catchup prompt unavailable"))
+;;
 
 let test_config_post_restarts_from_atomic_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -3242,8 +3418,14 @@ let () =
       ( "dashboard behavior contracts",
         [ test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
+          test_case "catch-up prompt failure is a server error" `Quick
+            test_catchup_judge_prompt_failure_is_server_error;
           test_case "proof payload exposes submission index" `Quick
             test_dashboard_proof_http_json_surfaces_submission_index;
+          test_case "execution trust uses narrow Keeper projection" `Quick
+            test_execution_trust_uses_narrow_keeper_projection;
+          test_case "execution trust cannot call full Keeper projection" `Quick
+            test_execution_trust_does_not_call_full_keeper_projection;
           test_case "offline keeper composite exposes secret projection" `Quick
             test_offline_keeper_composite_exposes_secret_projection;
           test_case "state diagram runtime projection redacts live evidence" `Quick

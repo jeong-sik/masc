@@ -8,7 +8,7 @@ let summary_version = current_hitl_context_summary_version
 let lane_id = "hitl_auto_judge"
 
 let system_prompt () =
-  Prompt_registry.render_prompt_template Keeper_prompt_names.gate_judgment []
+  Prompt_registry.render_prompt_template Prompt_names.judge_effect []
 ;;
 
 let ( let* ) = Result.bind

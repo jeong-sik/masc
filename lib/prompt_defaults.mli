@@ -29,7 +29,7 @@ type sync_result = {
   failed : (string * string) list;
 }
 (** Outcome of one prompt asset sync pass. Entries are embedded asset
-    paths (e.g. [prompts/keeper.system.md]); [removed] contains distribution
+    paths (e.g. [prompts/keeper.md]); [removed] contains distribution
     assets deleted from the runtime directory, and [failed]
     pairs the path with the error message. *)
 

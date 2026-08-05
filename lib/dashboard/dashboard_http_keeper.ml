@@ -970,32 +970,150 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
     ("total", `Int (List.length summaries));
   ]
 
-let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
-  let keepers =
-    match keepers_dashboard_json ~compact:true config with
-    | `Assoc fields -> (
-        match List.assoc_opt "keepers" fields with
-        | Some (`List rows) ->
-          rows
-          |> List.map (fun row ->
-                 `Assoc
-                   [
-                     ("name", Option.value ~default:`Null (Json_util.assoc_member_opt "name" row));
-                     ("agent_name", Option.value ~default:`Null (Json_util.assoc_member_opt "agent_name" row));
-                     ("keeper_id", Option.value ~default:`Null (Json_util.assoc_member_opt "keeper_id" row));
-                     ("phase", Option.value ~default:`Null (Json_util.assoc_member_opt "phase" row));
-                     ( "pipeline_stage",
-                       Option.value ~default:`Null (Json_util.assoc_member_opt "pipeline_stage" row) );
-                     ("status", Option.value ~default:`Null (Json_util.assoc_member_opt "status" row));
-                     ("trace_id", Option.value ~default:`Null (Json_util.assoc_member_opt "trace_id" row));
-                     ("generation", Option.value ~default:`Null (Json_util.assoc_member_opt "generation" row));
-                     ("current_task_id", Option.value ~default:`Null (Json_util.assoc_member_opt "current_task_id" row));
-                     ("active_goal_ids", Option.value ~default:`Null (Json_util.assoc_member_opt "active_goal_ids" row));
-                     ("trust", Option.value ~default:`Null (Json_util.assoc_member_opt "trust" row));
-                   ])
-        | _ -> [])
-    | _ -> []
+let execution_trust_row_of_dashboard_row row =
+  let field key =
+    (* sound-partial: invalid-profile and degraded rows intentionally omit
+       inapplicable fields; the established execution-trust wire value for
+       those absent fields is JSON null. *)
+    match Json_util.assoc_member_opt key row with
+    | Some value -> value
+    | None -> `Null
   in
+  `Assoc
+    [ ("name", field "name")
+    ; ("agent_name", field "agent_name")
+    ; ("keeper_id", field "keeper_id")
+    ; ("phase", field "phase")
+    ; ("pipeline_stage", field "pipeline_stage")
+    ; ("status", field "status")
+    ; ("trace_id", field "trace_id")
+    ; ("generation", field "generation")
+    ; ("current_task_id", field "current_task_id")
+    ; ("active_goal_ids", field "active_goal_ids")
+    ; ("trust", field "trust")
+    ]
+
+let execution_trust_row_of_meta
+      ~(now_ts : float)
+      (config : Workspace.config)
+      (m : Keeper_meta_contract.keeper_meta)
+  =
+  let agent =
+    Keeper_status_runtime.parse_agent_status config ~agent_name:m.agent_name
+  in
+  let keepalive_running = runtime_keepalive_running config m in
+  let registry_entry =
+    Keeper_registry.get ~base_path:config.base_path m.name
+  in
+  let phase, pipeline_stage =
+    match registry_entry with
+    | Some entry ->
+      ( `String (Keeper_state_machine.phase_to_string entry.phase)
+      , Keeper_status_runtime.pipeline_stage_of_phase entry.phase )
+    | None -> `Null, "offline"
+  in
+  (* [keeper_surface_status] depends only on the diagnostic health state. The
+     reply-history fields in [keeper_diagnostic_json] do not participate in
+     that state, so the trust surface must not read the conversation log. *)
+  let diagnostic =
+    Keeper_status_runtime.keeper_diagnostic_json
+      ~meta:m
+      ~agent_status:agent
+      ~keepalive_running
+      ~history_items:[]
+      ~now_ts
+  in
+  `Assoc
+    [ ("name", `String m.name)
+    ; ("agent_name", `String m.agent_name)
+    ; ( "keeper_id"
+      , match m.keeper_id with
+        | Some keeper_id -> `String (Keeper_id.Uid.to_string keeper_id)
+        | None -> `Null )
+    ; ("phase", phase)
+    ; ("pipeline_stage", `String pipeline_stage)
+    ; ( "status"
+      , `String
+          (Keeper_status_runtime.keeper_surface_status
+             ~agent_status:agent
+             ~diagnostic) )
+    ; ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id))
+    ; ("generation", `Int m.runtime.nonce)
+    ; ( "current_task_id"
+      , Json_util.string_opt_to_json
+          (Option.map Keeper_id.Task_id.to_string m.current_task_id) )
+    ; ( "active_goal_ids"
+      , `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids) )
+    ; ("trust", keeper_trust_json ~include_receipt:false config m)
+    ]
+
+let execution_trust_keeper_rows (config : Workspace.config) =
+  let names =
+    keeper_names config @ Keeper_meta_store.configured_keeper_names config
+    |> List.sort_uniq String.compare
+  in
+  let now_ts = Time_compat.now () in
+  let results = Array.make (List.length names) None in
+  Eio.Fiber.all
+    (List.mapi
+       (fun idx name () ->
+         let row =
+           try
+             match
+               Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+                 ~base_path:config.base_path
+                 name
+             with
+             | Error error ->
+               Some
+                 (invalid_profile_dashboard_row ~keeper_name:name error
+                  |> execution_trust_row_of_dashboard_row)
+             | Ok _ ->
+               (match Keeper_meta_store.read_meta config name with
+                | Error _ | Ok None -> None
+                | Ok (Some meta) ->
+                  Some (execution_trust_row_of_meta ~now_ts config meta))
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn ->
+             let error = Printexc.to_string exn in
+             Keeper_fd_pressure.note_exception
+               ~site:"keeper_dashboard.worker"
+               exn;
+             Log.Dashboard.error
+               "keeper dashboard worker error (%s): %s"
+               name
+               error;
+             (try
+                match Keeper_meta_store.read_meta config name with
+                | Ok (Some meta) ->
+                  Some
+                    (degraded_keeper_dashboard_row
+                       ~site:"keeper_dashboard_worker_exception"
+                       ~error
+                       meta
+                     |> execution_trust_row_of_dashboard_row)
+                | Error _ | Ok None -> None
+              with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | fallback_exn ->
+                Log.Dashboard.error
+                  "keeper dashboard degraded fallback failed (%s): %s"
+                  name
+                  (Printexc.to_string fallback_exn);
+                None)
+         in
+         results.(idx) <- row)
+       names);
+  Array.to_list results |> List.filter_map Fun.id
+
+let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
+  (* This surface is refreshed every minute. Building it from the generalized
+     Keeper dashboard projection used to scan metrics, histories, goals,
+     profiles, crash logs, and runtime contracts only to discard all but these
+     eleven fields. Keep the producer specialized so refresh work stays
+     proportional to execution-trust evidence. *)
+  let keepers = execution_trust_keeper_rows config in
   let now = Unix.gettimeofday () in
   let keeper_names = keeper_names config in
   let keepers_root = Workspace.keepers_runtime_dir config in

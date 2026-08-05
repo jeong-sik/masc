@@ -43,11 +43,6 @@ type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
   }
 
 let freeze = Keeper_run_tools_hook_accumulator.freeze
-let record_requested_tool_names = Keeper_run_tools_hook_accumulator.record_requested_tool_names
-
-let task_scope_tool_names = Keeper_run_tools_task_scope.task_scope_tool_names
-let task_id_scope_of_tool_input = Keeper_run_tools_task_scope.task_id_scope_of_tool_input
-let task_id_scope_of_tool_call = Keeper_run_tools_task_scope.task_id_scope_of_tool_call
 
 (** Agent setup produced by Step 7.
 
@@ -71,6 +66,5 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
   }
-
 
 let prepare_agent_setup = Keeper_run_tools_setup.prepare_agent_setup

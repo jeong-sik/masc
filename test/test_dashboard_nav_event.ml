@@ -30,11 +30,16 @@ let test_parse_schedule_surface_only () =
   check (option string) "redirected_from" None event.redirected_from
 ;;
 
-let test_parse_lab_memory_subsystems () =
-  let event = parse_ok {|{"surface":"lab","section":"memory-subsystems"}|} in
-  check string "surface" "lab" event.surface;
-  check (option string) "section" (Some "memory-subsystems") event.section;
-  check (option string) "redirected_from" None event.redirected_from
+(* #26826 removed the memory-subsystems component and dropped the section from
+   the lab allowlist in the same commit. The section is retired everywhere, so
+   lab rejects it exactly as monitoring does below. *)
+let test_reject_retired_memory_subsystems_on_lab () =
+  let msg = parse_err {|{"surface":"lab","section":"memory-subsystems"}|} in
+  check
+    bool
+    "mentions section"
+    true
+    (Astring.String.is_infix ~affix:"unknown section" msg)
 ;;
 
 let test_parse_settings_runtime_section () =
@@ -214,7 +219,10 @@ let () =
     [ ( "parse_event_json"
       , [ test_case "minimal surface only" `Quick test_parse_minimal_surface_only
         ; test_case "schedule surface only" `Quick test_parse_schedule_surface_only
-        ; test_case "lab memory-subsystems section" `Quick test_parse_lab_memory_subsystems
+        ; test_case
+            "retired memory-subsystems is rejected on lab"
+            `Quick
+            test_reject_retired_memory_subsystems_on_lab
         ; test_case "settings runtime section" `Quick test_parse_settings_runtime_section
         ; test_case
             "rejects settings account section"

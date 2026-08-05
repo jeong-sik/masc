@@ -1382,6 +1382,71 @@ export function markAssistantToolTraceErrored(
   if (!found) warnMissingToolTrace('error patch', name, entryId, id)
 }
 
+/** Live tool-call progress broadcast ([keeper_chat_turn_progress]) for
+ *  queued/consumer-side turns, whose chat body otherwise stays silent until
+ *  the terminal transcript commit. Attaches trace steps to the newest
+ *  in-flight assistant entry (the queue placeholder, which already carries
+ *  the receipt identity that converges with history); when no in-flight
+ *  entry exists (e.g. a second browser), a synthetic placeholder keyed by
+ *  run id is created carrying the same receipt ids so the standard
+ *  history-convergence path folds its trace into the canonical transcript
+ *  row at turn end. Idempotent per tool call via [toolCallId] upsert. */
+export interface KeeperTurnProgress {
+  runId: string
+  kind: 'tool_call_start' | 'tool_call_end'
+  toolCallId: string
+  toolName?: string | null
+  receiptIds?: string[]
+}
+
+export function applyKeeperTurnProgress(name: string, progress: KeeperTurnProgress): void {
+  const toolCallId = nonBlankToolCallId(progress.toolCallId)
+  const runId = progress.runId.trim()
+  if (!toolCallId || !runId) return
+  const entries = keeperThreads.value[name] ?? []
+  const inFlight = [...entries].reverse().find(
+    entry => entry.role === 'assistant' && isInFlightDelivery(entry.delivery),
+  )
+  let entryId = inFlight?.id
+  if (!entryId) {
+    entryId = `turn-progress-${runId}`
+    if (!entries.some(entry => entry.id === entryId)) {
+      const receiptIds = (progress.receiptIds ?? [])
+        .map(receiptId => receiptId.trim())
+        .filter(receiptId => receiptId.length > 0)
+      appendThreadEntry(name, withoutUndefined({
+        id: entryId,
+        role: 'assistant' as const,
+        source: 'direct_assistant' as const,
+        label: name,
+        text: '',
+        rawText: null,
+        timestamp: null,
+        delivery: 'streaming' as const,
+        streamState: 'streaming' as const,
+        streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', {
+          eventName: 'keeper_chat_turn_progress',
+        }),
+        queueReceiptIds: receiptIds.length > 0 ? receiptIds : undefined,
+        details: null,
+      }))
+    }
+  }
+  if (progress.kind === 'tool_call_start') {
+    const toolName = progress.toolName?.trim()
+    if (!toolName) return
+    appendAssistantToolTraceStep(name, entryId, { toolCallId, name: toolName })
+    return
+  }
+  // tool_call_end carries no tool name, so only close a step this client saw
+  // start; an unnamed step cannot be rendered for a mid-turn attach.
+  const entry = (keeperThreads.value[name] ?? []).find(candidate => candidate.id === entryId)
+  const hasStep = entry?.traceSteps?.some(
+    step => step.kind === 'tool' && step.toolCallId === toolCallId,
+  ) ?? false
+  if (hasStep) markAssistantToolTraceEnded(name, entryId, toolCallId)
+}
+
 export function finalizeAssistantEntry(
   name: string,
   entryId: string,

@@ -23,6 +23,13 @@ type review_request =
   ; evidence_refs : string list
   }
 
+type lookup_surface =
+  | No_lookup_surface
+  | Lookup_tools of
+      { schemas : Types_core.tool_schema list
+      ; dispatch : name:string -> args:Yojson.Safe.t -> (string, string) result
+      }
+
 type verdict =
   | Approve
   | Reject of string
@@ -37,8 +44,9 @@ let run_llm_reviewer_fn
      evaluator_runtime:string ->
      prompt:string ->
      report_tool_schema:Types_core.tool_schema ->
+     lookup:lookup_surface ->
      unit -> (verdict option, Agent_sdk.Error.sdk_error) result) Atomic.t
-  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () ->
       Error (Agent_sdk.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
 (** Issue #8436: schema enum used to be hand-rolled as a 2-element
@@ -129,8 +137,41 @@ let evidence_section ~required_evidence ~verify_gate_evidence =
       (items |> List.mapi render_item |> String.concat "\n")
 ;;
 
+(* What the evaluator is told it can see. The two branches are different claims
+   about the same review, and stating the wrong one is not cosmetic: telling a
+   toolless evaluator to go look produces an approval justified by a check it
+   never ran, and telling a tool-carrying one that the snapshot is all there is
+   reproduces the gap this surface was added to close. *)
+let lookup_section = function
+  | No_lookup_surface ->
+    "\n\
+     Inspectable proof exists only in the typed `submitted_evidence_access` \
+     snapshot inside `completion_notes`. You have no tool that opens anything \
+     else, so a reference you cannot read there is a reference you cannot \
+     verify.\n"
+  | Lookup_tools { schemas; dispatch = _ } ->
+    sprintf
+      "\n\
+       <live_lookup>\n\
+       You can read the producer's tree directly with these read-only tools: %s. \
+       They are confined to that producer's root and cannot change anything.\n\n\
+       The snapshot is what was true when the work was submitted. A lookup is what \
+       is true now. Both are evidence, and disagreement between them is also \
+       evidence: work the snapshot shows but `verification_git_status` reports as \
+       uncommitted lives only in a working tree.\n\n\
+       A note claiming a path, a commit, or a command result is still not proof by \
+       itself. The difference is that you can now check the claims that name \
+       something in the producer's tree, so approving without checking an \
+       available one is your omission rather than the submitter's.\n\
+       </live_lookup>\n"
+      (schemas
+       |> List.map (fun (schema : Types_core.tool_schema) -> schema.name)
+       |> String.concat ", ")
+;;
+
 let build_prompt ?(few_shot_block = "") ?completion_contract
       ?(required_evidence = []) ?(verify_gate_evidence = [])
+      ~(lookup : lookup_surface)
       (req : review_request) : (string, string) result =
   let desc = req.task_description in
   let calibration_section =
@@ -153,6 +194,7 @@ let build_prompt ?(few_shot_block = "") ?completion_contract
     ; "verification_contract_section", verification_contract_section
     ; "evidence_section", required_evidence_section
     ; "evidence_refs", evidence_refs_json
+    ; "lookup_section", lookup_section lookup
     ; "calibration_section", calibration_section
     ]
   in
@@ -288,6 +330,7 @@ let review
       ?(on_verdict : review_result -> unit = fun _ -> ())
       ?(few_shot_block = "")
       ?(sw : Eio.Switch.t option = None)
+      ~(lookup : lookup_surface)
       ~base_path
       (req : review_request)
   : review_result
@@ -326,6 +369,7 @@ let review
          ?completion_contract
          ~required_evidence
          ~verify_gate_evidence
+         ~lookup
          req
      with
      | Error detail ->
@@ -358,6 +402,7 @@ let review
              ~evaluator_runtime
              ~prompt
              ~report_tool_schema:report_review_verdict_schema
+             ~lookup
              ()
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn

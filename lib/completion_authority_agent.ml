@@ -462,10 +462,25 @@ let process_task_once
         ~notes:rejection_reason
         ~verdict_label:"rejected_contract"
     | Ok prepared ->
+      (* The lookup surface is bound to the producer under review, so the same
+         judge gets a different root on the next task. [assignee] is the worker
+         the evidence snapshot was materialized against — [prepare_review]
+         rejects the request when it disagrees with [request.worker], so the
+         two cannot name different trees. *)
+      let lookup_tools =
+        Verification_authority_tools.create
+          ~base_path:runtime.config.base_path
+          ~producer:assignee
+      in
       let result =
         Task.Anti_rationalization.review
           ~base_path:runtime.config.base_path
           ~sw:(Some runtime.sw)
+          ~lookup:
+            (Task.Anti_rationalization.Lookup_tools
+               { schemas = Verification_authority_tools.schemas lookup_tools
+               ; dispatch = Verification_authority_tools.dispatch lookup_tools
+               })
           ?completion_contract:prepared.completion_contract
           ~required_evidence:prepared.required_artifacts
           ~verify_gate_evidence:[]

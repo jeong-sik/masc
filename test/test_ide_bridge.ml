@@ -265,6 +265,55 @@ let test_cursor_from_hook_notifies_after_persist () =
           (List.length (Ide_bridge.list_cursors ~base_path:base_dir ()))))
 ;;
 
+let test_cursor_notifications_reraise_cancellation () =
+  with_temp_dir (fun base_dir ->
+    Ide_bridge.register_cursor_changed_sink (fun ~keeper_id:_ ->
+      raise (Eio.Cancel.Cancelled (Failure "synthetic cursor cancellation")));
+    Fun.protect
+      ~finally:(fun () ->
+        Ide_bridge.register_cursor_changed_sink (fun ~keeper_id:_ -> ()))
+      (fun () ->
+        let raises_cancel f =
+          match f () with
+          | exception Eio.Cancel.Cancelled _ -> true
+          | exception exn ->
+            failf "expected cancellation, got %s" (Printexc.to_string exn)
+          | _ -> false
+        in
+        let hook_cancelled =
+          raises_cancel (fun () ->
+            Ide_bridge.ingest_tool_event_from_hook
+              ~base_path:base_dir
+              ~partition:Ide_paths.Legacy_default
+              ~tool_name:"keeper_ide_annotate"
+              ~keeper_id:"k1"
+              ~turn_id:"turn-7"
+              ~outcome:"ok"
+              ~typed_outcome_str:"progress"
+              ~duration_ms:10.0
+              ~output_text:"annotated"
+              ~input:
+                (`Assoc
+                   [ "file_path", `String "lib/test.ml"
+                   ; "line_start", `Int 12
+                   ; "focus_mode", `String "editing"
+                   ]))
+        in
+        check bool "tool hook cancellation is re-raised" true hook_cancelled;
+        let explicit_cancelled =
+          raises_cancel (fun () ->
+            Ide_bridge.ingest_cursor_event
+              ~base_path:base_dir
+              ~keeper_id:"k1"
+              ~file_path:"lib/test.ml"
+              ~line:13
+              ~source:"test"
+              ())
+        in
+        check bool "explicit cursor cancellation is re-raised" true
+          explicit_cancelled))
+;;
+
 let test_cursor_from_hook_skips_missing_line () =
   with_temp_dir (fun base_dir ->
     let input = `Assoc [ "file_path", `String "lib/test.ml" ] in
@@ -934,6 +983,10 @@ let () =
             "from hook notifies after persist"
             `Quick
             test_cursor_from_hook_notifies_after_persist
+        ; test_case
+            "notifications re-raise cancellation"
+            `Quick
+            test_cursor_notifications_reraise_cancellation
         ; test_case "from hook skips missing line" `Quick test_cursor_from_hook_skips_missing_line
         ; test_case
             "from hook skips missing focus mode"

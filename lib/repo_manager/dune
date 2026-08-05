@@ -6,7 +6,6 @@
  (modules
   field_resolution
   repo_manager_types
-  repo_store_lookup
   repo_store
   repo_git
   keeper_repo_mapping

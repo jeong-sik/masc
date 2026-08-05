@@ -400,7 +400,7 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 
   | per-keeper 개념 | 정의 위치(전부) | SSOT? | drift 위험 |
   |---|---|---|---|
-  | **repo identity**(id/name/url/aliases) | `repositories.toml`(`Repo_store.find_url_by_identity`) | **YES** | 낮음 |
+  | **repo identity**(id/name/url/aliases) | `repositories.toml`(`Repo_store.load_all`) | **YES** | 낮음 |
   | **repo location**(keeper에게 repo가 어디 있나) | (a) `repositories.toml local_path`(기본 `.masc/repos/<id>`, **operator 작업트리**; `repo_sync.ml`·`server_ide_http.ml:45`만 소비) (b) `.masc/playground/<keeper>/repos/<repo_name>`(per-keeper clone, `clone_path`=`Keeper_sandbox.host_root_abs_of_meta+"repos"+repo_name`, `local_path` 안 읽음) (c) 조인 `parse_playground_repo_path`+`find_url_by_id` | **NO** — 2 권위 + 역파싱 | **높음** — RFC-0324 B-1/RFC-0128 §4.5 "playground clone path는 repositories.toml에 opaque". 과거 "모든 id가 `repos/<name>/`로 resolve" 주장→379 `path_not_found`/24h(2026-07-08 감사) |
   | ~~clone의 default_branch/aliases~~ **[삭제됨 #24558]** | `clone_sandbox_repo`의 `default_branch="main"` 하드코딩은 **죽은 코드**였음(`Repo_git.clone`이 default_branch 미사용, `playground_repo_readiness` 모듈 caller 0 → 삭제). repo_sync(등록 트리)만 catalog default_branch 준수. | n/a | 해소(삭제) |
   | **instructions**(system-prompt) | profile.json(persona base) → keeper.toml(overlay, wins) = authored SSOT; keeper.json은 derived render snapshot(`keeper_meta_json.ml:24`) | **YES(TOML/persona 계층)** — json은 projection | 중 — authored 권위는 profile.json→keeper.toml overlay. json snapshot이 reconcile 전 stale일 수 있음(render-only) |

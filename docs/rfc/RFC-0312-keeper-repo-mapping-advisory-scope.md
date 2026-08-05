@@ -98,5 +98,3 @@ PR #23359 implements this decision with regression coverage:
   unregistered repositories remain fail-closed.
 - `test/test_playground_repo_readiness.ml` covers registered repository policy
   and mapping-load-error behavior in playground readiness.
-- `docs/repo-migration-guide.md` documents the operator-facing migration
-  semantics.

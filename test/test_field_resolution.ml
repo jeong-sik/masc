@@ -1,11 +1,5 @@
-(** test_field_resolution — Unit tests for [Field_resolution].
-
-    Verifies the three-way [Present | Missing | Type_mismatch]
-    discrimination and the [or_default] / [require] helpers. The
-    load-bearing case is [Type_mismatch] — the legacy
-    `| Error _ -> Ok default` shape flattens it into a success
-    with a default value, and these tests confirm the new module
-    preserves the diagnostic. *)
+(** Unit tests for the three-way [Present | Missing | Type_mismatch]
+    discrimination in [Field_resolution]. *)
 
 module F = Field_resolution
 
@@ -104,48 +98,6 @@ let test_nested_path_scalar_parent_is_type_mismatch () =
      | Type_mismatch { path = [ "repository" ]; expected = "table"; _ } -> true
      | Present _ | Missing | Type_mismatch _ -> false)
 
-(* ── or_default / require ───────────────────────────────────── *)
-
-let test_or_default_present () =
-  let toml = toml_of_string {|name = "alice"|} in
-  Alcotest.(check (result string string)) "Present passes through"
-    (Ok "alice")
-    (F.or_default ~default:"bob" (F.resolve_string toml [ "name" ]))
-
-let test_or_default_missing () =
-  let toml = toml_of_string {|other = "value"|} in
-  Alcotest.(check (result string string)) "Missing → default"
-    (Ok "bob")
-    (F.or_default ~default:"bob" (F.resolve_string toml [ "name" ]))
-
-let test_or_default_type_mismatch_propagates () =
-  (* The load-bearing case. Legacy [Error _ -> Ok default] silently
-     substituted "bob" here; or_default must Error instead. *)
-  let toml = toml_of_string {|name = 42|} in
-  let r = F.or_default ~default:"bob" (F.resolve_string toml [ "name" ]) in
-  Alcotest.(check bool) "Type_mismatch → Error (not default)" true
-    (match r with Error _ -> true | _ -> false)
-
-let test_require_present () =
-  let toml = toml_of_string {|url = "https://example.com"|} in
-  Alcotest.(check (result string string)) "require Present"
-    (Ok "https://example.com")
-    (F.require (F.resolve_string toml [ "url" ]))
-
-let test_require_missing_errors () =
-  let toml = toml_of_string {|other = "value"|} in
-  Alcotest.(check bool) "require Missing → Error" true
-    (match F.require (F.resolve_string toml [ "url" ]) with
-     | Error _ -> true
-     | _ -> false)
-
-let test_require_type_mismatch_errors () =
-  let toml = toml_of_string {|url = 42|} in
-  Alcotest.(check bool) "require Type_mismatch → Error" true
-    (match F.require (F.resolve_string toml [ "url" ]) with
-     | Error _ -> true
-     | _ -> false)
-
 let () =
   Alcotest.run "field_resolution"
     [
@@ -175,20 +127,5 @@ let () =
             test_nested_path_missing;
           Alcotest.test_case "scalar parent is type_mismatch" `Quick
             test_nested_path_scalar_parent_is_type_mismatch;
-        ] );
-      ( "or_default"
-      , [
-          Alcotest.test_case "present" `Quick test_or_default_present;
-          Alcotest.test_case "missing returns default" `Quick
-            test_or_default_missing;
-          Alcotest.test_case "type_mismatch errors" `Quick
-            test_or_default_type_mismatch_propagates;
-        ] );
-      ( "require"
-      , [
-          Alcotest.test_case "present" `Quick test_require_present;
-          Alcotest.test_case "missing errors" `Quick test_require_missing_errors;
-          Alcotest.test_case "type_mismatch errors" `Quick
-            test_require_type_mismatch_errors;
         ] );
     ]

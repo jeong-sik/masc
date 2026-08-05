@@ -115,8 +115,10 @@ let resolve_ide_scope_for_query ~state ~uri =
      | None -> Error (ide_error "invalid_canonical_url" "canonical_url is invalid"))
   | None, Some repo_id, None ->
     (match Repo_store.find_url_by_id ~base_path:project_base repo_id with
-     | None -> Error (ide_error "unmatched_repo_id" "repo_id does not match a configured repository")
-     | Some url ->
+     | Error message ->
+       Error (ide_error "repository_catalog_unavailable" message)
+     | Ok None -> Error (ide_error "unmatched_repo_id" "repo_id does not match a configured repository")
+     | Ok (Some url) ->
        (match Ide_paths.canonical_url_of_remote url with
         | Some slug -> Ok (Scope_repo_id { repo_id; slug })
         | None ->
@@ -189,16 +191,19 @@ let with_keeper_lane_read_auth ~state ~request ~reqd ~scope continue =
 type annotation_scope_error =
   | File_path_repo_id_mismatch
   | File_path_canonical_url_mismatch
+  | Repository_catalog_unavailable of string
 
 let annotation_scope_error_message = function
   | File_path_repo_id_mismatch -> "file_path does not belong to requested repo_id"
   | File_path_canonical_url_mismatch ->
     "file_path does not belong to requested canonical_url"
+  | Repository_catalog_unavailable message -> message
 ;;
 
 let annotation_scope_error_code = function
   | File_path_repo_id_mismatch -> "repo_mismatch"
   | File_path_canonical_url_mismatch -> "canonical_url_mismatch"
+  | Repository_catalog_unavailable _ -> "repository_catalog_unavailable"
 ;;
 
 let validate_annotation_post_scope ~state ~uri ~file_path =
@@ -211,21 +216,31 @@ let validate_annotation_post_scope ~state ~uri ~file_path =
        | None -> Ok ()
        | Some requested_slug ->
          (match Repo_store.find_repo_by_path_prefix ~base_path:project_base file_path with
-          | Some (repo, _) ->
+          | Error message -> Error (Repository_catalog_unavailable message)
+          | Ok (Some (repo, _)) ->
             (match Ide_paths.canonical_url_of_remote repo.url with
              | Some actual_slug when String.equal actual_slug requested_slug -> Ok ()
              | Some _ | None -> Error File_path_canonical_url_mismatch)
-          | None -> Error File_path_canonical_url_mismatch))
+          | Ok None -> Error File_path_canonical_url_mismatch))
     | None ->
       (match nonempty_query_param uri "repo_id" with
        | None -> Ok ()
        | Some requested_repo_id ->
-         (match Repo_store.find ~base_path:project_base requested_repo_id with
-          | Error _ -> Ok ()
-          | Ok _ ->
+         (match Repo_store.load_all ~base_path:project_base with
+          | Error message -> Error (Repository_catalog_unavailable message)
+          | Ok repositories ->
+            if
+              not
+                (List.exists
+                   (fun (repository : Repo_manager_types.repository) ->
+                     String.equal repository.id requested_repo_id)
+                   repositories)
+            then Ok ()
+            else
             (match Repo_store.find_repo_by_path_prefix ~base_path:project_base file_path with
-             | Some (repo, _) when String.equal repo.id requested_repo_id -> Ok ()
-             | Some _ | None -> Error File_path_repo_id_mismatch))))
+             | Error message -> Error (Repository_catalog_unavailable message)
+             | Ok (Some (repo, _)) when String.equal repo.id requested_repo_id -> Ok ()
+             | Ok (Some _) | Ok None -> Error File_path_repo_id_mismatch))))
 ;;
 
 let resolve_partition_for_annotation_post ~state ~uri ~file_path =

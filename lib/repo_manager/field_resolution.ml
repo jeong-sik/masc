@@ -7,8 +7,6 @@ type 'a t =
       message : string;
     }
 
-let path_to_string path = String.concat "." path
-
 (* [resolve_with accessor expected toml path] applies [accessor] to
    the value at [path]. Three outcomes:
    - the key is not present in the TOML object → [Missing];
@@ -61,28 +59,4 @@ let resolve_int toml path = resolve_with Otoml.get_integer "int" toml path
    wrapper picks them up uniformly. *)
 let resolve_strings toml path =
   resolve_with (Otoml.get_array Otoml.get_string) "string list" toml path
-;;
-
-let or_default ~default = function
-  | Present v -> Ok v
-  | Missing -> Ok default
-  | Type_mismatch { path; expected; message } ->
-    Error
-      (Printf.sprintf
-         "field_resolution: %s has wrong type (expected %s): %s"
-         (path_to_string path)
-         expected
-         message)
-;;
-
-let require = function
-  | Present v -> Ok v
-  | Missing -> Error "field_resolution: required field is absent"
-  | Type_mismatch { path; expected; message } ->
-    Error
-      (Printf.sprintf
-         "field_resolution: required %s has wrong type (expected %s): %s"
-         (path_to_string path)
-         expected
-         message)
 ;;

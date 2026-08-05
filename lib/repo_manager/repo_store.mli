@@ -26,9 +26,8 @@ val update_status :
 val update :
   base_path:string -> repository_id -> repository -> (repository, string) result
 (** [update ~base_path id repo] replaces the repository with the given [id]
-    with [repo], applying the same field normalization as {!add} (default
-    [local_path] when blank) and forcing [repo.id = id].
-    Preserves the original [created_at] and stamps a fresh [updated_at].
+    with [repo] and forces [repo.id = id]. Preserves the original [created_at]
+    and stamps a fresh [updated_at].
     Returns the persisted repository record. *)
 
 val list_branches :
@@ -61,25 +60,19 @@ val register_discovered : base_path:string -> (repository list, string) result
     are returned to the caller as [Error _]. On success, returns the list of
     newly registered repositories.
 
-    This is the Week 8 migration helper: existing users with git
-    repositories under their base path can call this once to populate
-    [repositories.toml] without manual registration. *)
+    This is the operator-facing bulk registration path used by the repository
+    discovery HTTP API. *)
 
-val find_url_by_id : base_path:string -> repository_id -> string option
+val find_url_by_id :
+  base_path:string -> repository_id -> (string option, string) result
 (** RFC-0128 §4.5. [find_url_by_id ~base_path id] returns the raw [url]
     field for the given repository, or [None] when the repository is
     not registered or has an empty URL. *)
 
-val find_url_by_identity : base_path:string -> string -> string option
-(** [find_url_by_identity ~base_path token] returns the raw [url] field for a
-    unique registered repository id, name, or explicit alias. It returns
-    [None] when the token is absent, ambiguous, or the matched repository has
-    an empty URL. *)
-
 val find_repo_by_path_prefix
   :  base_path:string
   -> string
-  -> (repository * string) option
+  -> ((repository * string) option, string) result
 (** RFC-0128 §4.5. [find_repo_by_path_prefix ~base_path abs_path]
     returns the repository whose resolved {!local_path} is a directory
     ancestor of [abs_path], along with the repo-relative remainder. *)

@@ -462,11 +462,7 @@ let telemetry_entries =
 let tempo_entries =
   [
     entry ~default:"300.0" "MASC_TEMPO_DEFAULT_INTERVAL_SEC"
-      "Default polling interval (seconds)";
-    entry ~default:"600.0" "MASC_TEMPO_MAX_INTERVAL_SEC"
-      "Maximum polling interval for idle tempo (seconds)";
-    entry ~default:"60.0" "MASC_TEMPO_MIN_INTERVAL_SEC"
-      "Minimum polling interval for urgent tempo (seconds)";
+      "Polling interval published to operator surfaces (seconds)";
   ]
 
 let test_entries =

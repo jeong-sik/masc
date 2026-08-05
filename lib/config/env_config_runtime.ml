@@ -16,15 +16,7 @@ end
 (** {1 Tempo (Polling Interval) Configuration} *)
 
 module Tempo = struct
-  (** Minimum polling interval (seconds) - for urgent tempo *)
-  let min_interval_seconds =
-    get_float ~default:60.0 "MASC_TEMPO_MIN_INTERVAL_SEC"
-
-  (** Maximum polling interval (seconds) - for idle tempo *)
-  let max_interval_seconds =
-    get_float ~default:600.0 "MASC_TEMPO_MAX_INTERVAL_SEC"
-
-  (** Default polling interval (seconds) *)
+  (** Polling interval (seconds) published to operator surfaces *)
   let default_interval_seconds =
     get_float ~default:300.0 "MASC_TEMPO_DEFAULT_INTERVAL_SEC"
 end

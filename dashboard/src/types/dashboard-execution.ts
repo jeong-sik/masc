@@ -463,8 +463,10 @@ type DashboardExecutionContinuityState = 'healthy' | 'warning' | 'critical'
 type DashboardExecutionQueueKind = 'operation' | 'keeper'
 
 export interface DashboardExecutionSummary {
-  active_sessions?: number
-  blocked_sessions?: number
+  // `active_sessions` / `blocked_sessions` were the session-era pair, replaced
+  // by the `*_operations` fields below. Their producers went with the team
+  // session surfaces in #6363, so both had been permanently absent from every
+  // response since — declared, normalized, and never populated.
   active_operations?: number
   blocked_operations?: number
   runtime_pressure?: number

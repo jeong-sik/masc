@@ -534,7 +534,6 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
        ~started:shutdown_started
        ~examined:
          (List.length restored.operations
-          + List.length restored.retired_terminal_records
           + List.length restored.corrupt_records)
        ~failures:(List.length restored.corrupt_records)
    | Error _ ->
@@ -1200,14 +1199,6 @@ let start_keeper_loops_owned
   fork_subsystem "keeper_shutdown_recovery" (fun () ->
     let restored = claimed_persistence.claimed_report.shutdown in
       List.iter
-        (fun terminal ->
-           Log.Keeper.info
-             "retired terminal shutdown operation recognized without an admission fence: keeper=%s operation=%s path=%s"
-             terminal.Keeper_shutdown_store.keeper_name
-             (Keeper_shutdown_types.Operation_id.to_string terminal.operation_id)
-             terminal.path)
-        restored.retired_terminal_records;
-      List.iter
         (fun (corrupt : Keeper_shutdown_store.corrupt_record) ->
            Log.Keeper.error
              "corrupt shutdown operation retained under an exact Keeper admission fence: keeper=%s operation=%s path=%s error=%s"
@@ -1228,7 +1219,20 @@ let start_keeper_loops_owned
                    (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
                    (Printexc.to_string exn))
                (fun () ->
-                 match Keeper_shutdown_runtime.recover_operation ~config operation with
+                 let corrupt_owner_fence =
+                   List.find_opt
+                     (fun fence ->
+                        String.equal
+                          fence.Keeper_shutdown_runtime.keeper_name
+                          operation.Keeper_shutdown_types.keeper_name)
+                     restored.corrupt_owner_fences
+                 in
+                 match
+                   Keeper_shutdown_runtime.recover_operation_with_corrupt_owner_fence
+                     ~config
+                     ~corrupt_owner_fence
+                     operation
+                 with
                  | Ok recovered ->
                    Log.Keeper.info
                      "recovered shutdown operation keeper=%s operation=%s"

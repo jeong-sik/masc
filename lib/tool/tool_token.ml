@@ -19,11 +19,11 @@ module Float = Stdlib.Float
 
     See [tool_token.mli] for API documentation. *)
 
-type t = { name : string; minted_at : float }
+type t = { name : string }
 
 let mint_with ~validate ~name =
   if validate name then
-    Ok { name; minted_at = Unix.gettimeofday () }
+    Ok { name }
   else
     Error (Printf.sprintf "not in current tool set: %s" name)
 

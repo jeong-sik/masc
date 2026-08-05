@@ -19,8 +19,6 @@ end
 (** {1 Tempo (polling interval)} *)
 
 module Tempo : sig
-  val min_interval_seconds : float
-  val max_interval_seconds : float
   val default_interval_seconds : float
 end
 

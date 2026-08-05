@@ -1,5 +1,7 @@
 open Keeper_shutdown_types
 
+module String_map = Map.Make (String)
+
 type error =
   | Already_exists of string
   | Not_found of string
@@ -51,24 +53,32 @@ type corrupt_record =
   ; error : error
   }
 
-type retired_terminal_kind =
-  | Stale_paused_prune_completed of
-      { meta_version : int
-      ; last_updated : string
-      ; latched_reason : Keeper_latched_reason.t option
-      }
-
-type retired_terminal_record =
-  { keeper_name : string
-  ; operation_id : Operation_id.t
-  ; path : string
-  ; kind : retired_terminal_kind
-  }
-
 type inventory_entry =
   | Operation of Keeper_shutdown_types.t
-  | Retired_terminal of retired_terminal_record
   | Corrupt_record of corrupt_record
+
+let canonical_corrupt_operation_ids inventory =
+  inventory
+  |> List.fold_left
+       (fun selected -> function
+          | Operation _ -> selected
+          | Corrupt_record corrupt ->
+            let operation_id =
+              match String_map.find_opt corrupt.keeper_name selected with
+              | None -> corrupt.operation_id
+              | Some existing ->
+                if
+                  String.compare
+                    (Operation_id.to_string corrupt.operation_id)
+                    (Operation_id.to_string existing)
+                  < 0
+                then corrupt.operation_id
+                else existing
+            in
+            String_map.add corrupt.keeper_name operation_id selected)
+       String_map.empty
+  |> String_map.bindings
+;;
 
 let error_to_string = function
   | Already_exists path -> Printf.sprintf "shutdown operation already exists: %s" path
@@ -555,76 +565,15 @@ let completion_receipt_of_json json =
          (Printf.sprintf "unknown shutdown completion receipt: %S" value))
 ;;
 
-type wire_schema =
-  | Current_schema
-  | Shutdown_schema_v6
-  | Shutdown_schema_v5
-  | Lifecycle_schema_v4
-  | Shutdown_schema_v3
-
-let shutdown_schema_v6 = 6
-let shutdown_schema_v5 = 5
-let lifecycle_schema_v4 = 4
-let shutdown_schema_v3 = 3
-
-let wire_schema_of_version = function
-  | version when Int.equal version schema_version -> Ok Current_schema
-  | version when Int.equal version shutdown_schema_v6 -> Ok Shutdown_schema_v6
-  | version when Int.equal version shutdown_schema_v5 -> Ok Shutdown_schema_v5
-  | version when Int.equal version lifecycle_schema_v4 -> Ok Lifecycle_schema_v4
-  | version when Int.equal version shutdown_schema_v3 -> Ok Shutdown_schema_v3
-  | version ->
-    Error
-      (Decode_error
-         (Printf.sprintf "unsupported shutdown schema version: %d" version))
-;;
-
-let completion_action_supported_by_wire_schema wire_schema action =
-  match wire_schema, action with
-  | (Current_schema | Shutdown_schema_v6 | Shutdown_schema_v5),
-    (Dead_tombstone_reaped | Dashboard_keeper_purged) ->
-    true
-  | Lifecycle_schema_v4, Dead_tombstone_reaped -> true
-  | Shutdown_schema_v3, Dead_tombstone_reaped -> true
-  | Lifecycle_schema_v4, Dashboard_keeper_purged
-  | Shutdown_schema_v3, Dashboard_keeper_purged -> false
-;;
-
-let validate_completion_receipt_wire_schema wire_schema = function
-  | Completion_not_requested -> Ok ()
-  | Completion_pending action
-  | Completion_delivered action ->
-    if completion_action_supported_by_wire_schema wire_schema action
-    then Ok ()
-    else
-      Error
-        (Decode_error
-           (Printf.sprintf
-              "shutdown completion action %S is not valid in the persisted wire schema"
-              (completion_action_to_string action)))
-;;
-
-let finalization_evidence_of_json ~wire_schema json =
+let finalization_evidence_of_json json =
   let* cleanup_json = assoc "cleanup" json in
   let* cleanup = cleanup_evidence_of_json cleanup_json in
   let* meta_removed = bool "meta_removed" json in
   let* session_removed = bool "session_removed" json in
   let* registry_unregistered = bool "registry_unregistered" json in
-  let* accumulator_dropped =
-    match wire_schema with
-    | Current_schema
-    | Shutdown_schema_v6
-    | Shutdown_schema_v5
-    | Lifecycle_schema_v4 -> bool "accumulator_dropped" json
-    | Shutdown_schema_v3 ->
-      (* Schema 3 dropped the in-memory accumulator exactly when its
-         registered lane was unregistered. The old receipt persisted that
-         lane effect but had no duplicate accumulator field. *)
-      Ok registry_unregistered
-  in
+  let* accumulator_dropped = bool "accumulator_dropped" json in
   let* completion_json = assoc "completion" json in
   let* completion = completion_receipt_of_json completion_json in
-  let* () = validate_completion_receipt_wire_schema wire_schema completion in
   Ok
     { cleanup
     ; meta_removed
@@ -635,34 +584,24 @@ let finalization_evidence_of_json ~wire_schema json =
     }
 ;;
 
-let supersession_of_json ~wire_schema json =
+let supersession_of_json json =
   let* kind = string "kind" json in
   match kind with
   | "operator_metadata_update" ->
     let* actor = string "actor" json in
     Ok (Operator_metadata_update { actor })
   | "operator_reconciliation_accepted" ->
-    (match wire_schema with
-     | Current_schema ->
-       let* actor = string "actor" json in
-       let* turn_json = assoc "unreconciled_turn" json in
-       let* unreconciled_turn = active_turn_of_json turn_json in
-       Ok (Operator_reconciliation_accepted { actor; unreconciled_turn })
-     | Shutdown_schema_v6
-     | Shutdown_schema_v5
-     | Lifecycle_schema_v4
-     | Shutdown_schema_v3 ->
-       Error
-         (Decode_error
-            "shutdown reconciliation supersession is not valid before shutdown \
-             schema 7"))
+    let* actor = string "actor" json in
+    let* turn_json = assoc "unreconciled_turn" json in
+    let* unreconciled_turn = active_turn_of_json turn_json in
+    Ok (Operator_reconciliation_accepted { actor; unreconciled_turn })
   | value ->
     Error
       (Decode_error
          (Printf.sprintf "unknown shutdown supersession: %S" value))
 ;;
 
-let phase_of_json ~wire_schema json =
+let phase_of_json json =
   let* kind = string "kind" json in
   match kind with
   | "prepared" -> Ok Prepared
@@ -680,27 +619,16 @@ let phase_of_json ~wire_schema json =
     Ok (Reconciliation_required turn)
   | "finalized" ->
     let* evidence_json = assoc "evidence" json in
-    let* evidence =
-      finalization_evidence_of_json ~wire_schema evidence_json
-    in
+    let* evidence = finalization_evidence_of_json evidence_json in
     Ok (Finalized evidence)
   | "blocked" ->
     let* failure_json = assoc "failure" json in
     let* failure = failure_of_json failure_json in
     Ok (Blocked failure)
   | "superseded" ->
-    (match wire_schema with
-     | Current_schema
-     | Shutdown_schema_v6 ->
-       let* supersession_json = assoc "supersession" json in
-       let* supersession = supersession_of_json ~wire_schema supersession_json in
-       Ok (Superseded supersession)
-     | Shutdown_schema_v5
-     | Lifecycle_schema_v4
-     | Shutdown_schema_v3 ->
-       Error
-         (Decode_error
-            "shutdown supersession is not valid before shutdown schema 6"))
+    let* supersession_json = assoc "supersession" json in
+    let* supersession = supersession_of_json supersession_json in
+    Ok (Superseded supersession)
   | value -> Error (Decode_error (Printf.sprintf "unknown shutdown phase: %S" value))
 ;;
 
@@ -744,100 +672,6 @@ let optional_join_evidence_of_json json =
   | Error _ as error -> error
 ;;
 
-let retired_stale_paused_terminal_payload_of_json
-    ~operation_path
-    ~keeper_name:path_keeper_name
-    ~operation_id:path_operation_id
-    json
-  =
-  let* schema = int "schema_version" json in
-  let* () =
-    if Int.equal schema shutdown_schema_v5
-    then Ok ()
-    else Error (Decode_error "retired shutdown terminal must use schema 5")
-  in
-  let* keeper_name = string "keeper_name" json in
-  let* operation_id_wire = string "operation_id" json in
-  let* operation_id =
-    Operation_id.of_string operation_id_wire
-    |> Result.map_error (fun detail -> Decode_error detail)
-  in
-  let* () =
-    if
-      String.equal keeper_name path_keeper_name
-      && Operation_id.equal operation_id path_operation_id
-    then Ok ()
-    else
-      Error
-        (Identity_mismatch
-           (Printf.sprintf
-              "%s: path owner=%s operation=%s, payload owner=%s operation=%s"
-              operation_path
-              path_keeper_name
-              (Operation_id.to_string path_operation_id)
-              keeper_name
-              (Operation_id.to_string operation_id)))
-  in
-  let* cleanup_intent = assoc "cleanup_intent" json in
-  let* remove_session = bool "remove_session" cleanup_intent in
-  let* reason = assoc "reason" cleanup_intent in
-  let* reason_kind = string "kind" reason in
-  let* () =
-    if String.equal reason_kind "stale_paused_prune"
-    then Ok ()
-    else Error (Decode_error "shutdown terminal is not a retired stale paused prune")
-  in
-  let* meta_version = int "meta_version" reason in
-  let* last_updated = string "last_updated" reason in
-  let* latched_reason =
-    match assoc "latched_reason" reason with
-    | Ok `Null -> Ok None
-    | Ok reason_json ->
-      Keeper_latched_reason.Stable.of_yojson reason_json
-      |> Result.map Option.some
-      |> Result.map_error (fun detail -> Decode_error detail)
-    | Error _ as error -> error
-  in
-  let* phase = assoc "phase" json in
-  let* phase_kind = string "kind" phase in
-  let* () =
-    if String.equal phase_kind "finalized"
-    then Ok ()
-    else Error (Decode_error "retired stale paused prune is not finalized")
-  in
-  let* evidence = assoc "evidence" phase in
-  let* cleanup = assoc "cleanup" evidence in
-  let* (_settled_task_ids : Keeper_id.Task_id.t list) =
-    task_ids_field_of_json "settled_task_ids" cleanup
-  in
-  let* (_pending_confirms_removed : int) = int "pending_confirms_removed" cleanup in
-  let* meta_removed = bool "meta_removed" evidence in
-  let* session_removed = bool "session_removed" evidence in
-  let* (_registry_unregistered : bool) = bool "registry_unregistered" evidence in
-  let* accumulator_dropped = bool "accumulator_dropped" evidence in
-  let* () =
-    if meta_removed && Bool.equal session_removed remove_session && accumulator_dropped
-    then Ok ()
-    else Error (Decode_error "retired stale paused prune has invalid terminal evidence")
-  in
-  let* completion = assoc "completion" evidence in
-  let* completion_kind = string "kind" completion in
-  let* completion_action = string "action" completion in
-  let* () =
-    if
-      String.equal completion_kind "delivered"
-      && String.equal completion_action "paused_meta_pruned"
-    then Ok ()
-    else Error (Decode_error "retired stale paused prune lacks its delivered receipt")
-  in
-  Ok
-    { keeper_name
-    ; operation_id
-    ; path = operation_path
-    ; kind = Stale_paused_prune_completed { meta_version; last_updated; latched_reason }
-    }
-;;
-
 let lane_ownership_of_json json =
   let* kind = string "kind" json in
   match kind with
@@ -869,98 +703,18 @@ let cleanup_reason_of_json json =
       (Decode_error (Printf.sprintf "unknown shutdown cleanup reason: %S" value))
 ;;
 
-let lane_ownership_of_versioned_json ~wire_schema json =
-  match wire_schema with
-  | Current_schema
-  | Shutdown_schema_v6
-  | Shutdown_schema_v5
-  | Lifecycle_schema_v4 ->
-    let* lane_ownership_json = assoc "lane_ownership" json in
-    lane_ownership_of_json lane_ownership_json
-  | Shutdown_schema_v3 ->
-    let* lane_id_wire = string "lane_id" json in
-    Keeper_lane.Id.of_string lane_id_wire
-    |> Result.map (fun lane_id -> Registered_lane lane_id)
-    |> Result.map_error (fun detail -> Decode_error detail)
-;;
-
-let retired_stale_paused_terminal_of_json
-    ~operation_path
-    ~keeper_name
-    ~operation_id
-    json
-  =
-  let* terminal =
-    retired_stale_paused_terminal_payload_of_json
-      ~operation_path
-      ~keeper_name
-      ~operation_id
-      json
-  in
-  (* A retired terminal may bypass the current cleanup-reason decoder only
-     after every other schema-5 field has passed the same typed decoders as a
-     current operation. This keeps the compatibility boundary fail-closed: a
-     damaged common field remains [Corrupt_record] and retains its exact
-     admission fence. *)
-  let* (_revision : int) = int "revision" json in
-  let* (_lane_ownership : lane_ownership) =
-    lane_ownership_of_versioned_json ~wire_schema:Shutdown_schema_v5 json
-  in
-  let* trace_id_wire = string "trace_id" json in
-  let* (_trace_id : Keeper_id.Trace_id.t) =
-    Keeper_id.Trace_id.of_string trace_id_wire
-    |> Result.map_error (fun detail -> Decode_error detail)
-  in
-  let* (_generation : int) = int "generation" json in
-  let* (_actor : string) = string "actor" json in
-  let* turn_json = assoc "turn_disposition" json in
-  let* (_turn_disposition : turn_disposition) =
-    turn_disposition_of_json turn_json
-  in
-  let* (_expected_backlog_version : int) = int "expected_backlog_version" json in
-  let* (_owned_task_ids : Keeper_id.Task_id.t list) =
-    task_ids_field_of_json "owned_task_ids" json
-  in
-  let* (_join_evidence : join_evidence option) = optional_join_evidence_of_json json in
-  let* (_created_at : string) = string "created_at" json in
-  let* (_updated_at : string) = string "updated_at" json in
-  Ok terminal
-;;
-
-let cleanup_reason_of_versioned_json ~wire_schema cleanup_json =
-  match wire_schema with
-  | Current_schema
-  | Shutdown_schema_v6
-  | Shutdown_schema_v5 ->
-    let* cleanup_reason_json = assoc "reason" cleanup_json in
-    cleanup_reason_of_json cleanup_reason_json
-  | Lifecycle_schema_v4 ->
-    let* cleanup_reason_json = assoc "reason" cleanup_json in
-    let* reason = cleanup_reason_of_json cleanup_reason_json in
-    (match reason with
-     | Operator_stop_retain_meta
-     | Operator_stop_remove_meta
-     | Dead_tombstone_cleanup -> Ok reason
-     | Dashboard_keeper_purge _ ->
-       Error
-         (Decode_error
-            "dashboard Keeper purge cleanup is not valid in shutdown schema 4"))
-  | Shutdown_schema_v3 ->
-    let* disposition_wire = string "meta_disposition" cleanup_json in
-    let* disposition =
-      meta_disposition_of_string disposition_wire
-      |> Result.map_error (fun detail -> Decode_error detail)
-    in
-    Ok
-      (match disposition with
-       | Retain_operator_pause -> Operator_stop_retain_meta
-       | Retain_dead_tombstone -> Dead_tombstone_cleanup
-       | Remove_meta -> Operator_stop_remove_meta)
-;;
-
 let of_json json =
   let* decoded_schema_version = int "schema_version" json in
-  let* wire_schema = wire_schema_of_version decoded_schema_version in
+  let* () =
+    if Int.equal decoded_schema_version schema_version
+    then Ok ()
+    else
+      Error
+        (Decode_error
+           (Printf.sprintf
+              "unsupported shutdown schema version: %d"
+              decoded_schema_version))
+  in
     let* operation_id_wire = string "operation_id" json in
     let* revision = int "revision" json in
     let* operation_id =
@@ -968,9 +722,8 @@ let of_json json =
       |> Result.map_error (fun e -> Decode_error e)
     in
     let* keeper_name = string "keeper_name" json in
-    let* lane_ownership =
-      lane_ownership_of_versioned_json ~wire_schema json
-    in
+    let* lane_ownership_json = assoc "lane_ownership" json in
+    let* lane_ownership = lane_ownership_of_json lane_ownership_json in
     let* trace_id_wire = string "trace_id" json in
     let* trace_id =
       Keeper_id.Trace_id.of_string trace_id_wire
@@ -979,9 +732,8 @@ let of_json json =
     let* generation = int "generation" json in
     let* actor = string "actor" json in
     let* cleanup_json = assoc "cleanup_intent" json in
-    let* reason =
-      cleanup_reason_of_versioned_json ~wire_schema cleanup_json
-    in
+    let* reason_json = assoc "reason" cleanup_json in
+    let* reason = cleanup_reason_of_json reason_json in
     let* remove_session = bool "remove_session" cleanup_json in
     let* turn_json = assoc "turn_disposition" json in
     let* turn_disposition = turn_disposition_of_json turn_json in
@@ -989,7 +741,7 @@ let of_json json =
     let* owned_task_ids = task_ids_field_of_json "owned_task_ids" json in
     let* join_evidence = optional_join_evidence_of_json json in
     let* phase_json = assoc "phase" json in
-    let* phase = phase_of_json ~wire_schema phase_json in
+    let* phase = phase_of_json phase_json in
     let* created_at = string "created_at" json in
     let* updated_at = string "updated_at" json in
     let operation =
@@ -1056,28 +808,6 @@ let load_path_unlocked ~operation_path ~keeper_name ~operation_id =
                 (Operation_id.to_string operation_id)
                 operation.keeper_name
                 (Operation_id.to_string operation.operation_id)))
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Yojson.Json_error detail ->
-      Error (Decode_error (Printf.sprintf "%s: %s" operation_path detail))
-    | exn ->
-      Error
-        (Io_error
-           (Printf.sprintf "%s: %s" operation_path (Printexc.to_string exn)))
-;;
-
-let load_retired_terminal_path_unlocked ~operation_path ~keeper_name ~operation_id =
-  if not (Fs_compat.file_exists operation_path)
-  then Error (Not_found operation_path)
-  else
-    try
-      Fs_compat.load_file operation_path
-      |> Yojson.Safe.from_string
-      |> retired_stale_paused_terminal_of_json
-           ~operation_path
-           ~keeper_name
-           ~operation_id
-      |> Result.map_error (contextualize_error operation_path)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Yojson.Json_error detail ->
@@ -1371,16 +1101,8 @@ let scan_keeper_dir ~config ~keeper_name =
                     with
                     | Ok operation -> Operation operation
                     | Error error ->
-                      (match
-                         load_retired_terminal_path_unlocked
-                           ~operation_path
-                           ~keeper_name
-                           ~operation_id
-                       with
-                       | Ok terminal -> Retired_terminal terminal
-                       | Error _ ->
-                         Corrupt_record
-                           { keeper_name; operation_id; path = operation_path; error }))
+                      Corrupt_record
+                        { keeper_name; operation_id; path = operation_path; error })
                 in
                 Ok (entry :: entries))
            (Ok [])
@@ -1388,6 +1110,13 @@ let scan_keeper_dir ~config ~keeper_name =
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Io_error (Printexc.to_string exn))))
+;;
+
+let corrupt_operation_id_for_keeper ~config ~keeper_name =
+  let* inventory = scan_keeper_dir ~config ~keeper_name in
+  Ok
+    (canonical_corrupt_operation_ids inventory
+     |> List.assoc_opt keeper_name)
 ;;
 
 let scan_inventory ~config =
@@ -1435,7 +1164,6 @@ let list_for_keeper ~config ~keeper_name =
           let* operations = result in
           match entry with
           | Operation operation -> Ok (operation :: operations)
-          | Retired_terminal _ -> Ok operations
           | Corrupt_record corrupt -> Error corrupt.error)
        (Ok [])
   |> Result.map List.rev

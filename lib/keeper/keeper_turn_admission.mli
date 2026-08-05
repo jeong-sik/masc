@@ -76,6 +76,11 @@ type restore_shutdown_result =
   | Shutdown_already_restored
   | Shutdown_restore_conflict of Keeper_shutdown_types.Operation_id.t
 
+type transition_shutdown_result =
+  | Shutdown_transition_applied
+  | Shutdown_transition_already_applied
+  | Shutdown_transition_reserved_by_other of Keeper_shutdown_types.Operation_id.t
+
 type 'a registration_commit_result =
   | Registration_committed of 'a
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
@@ -250,6 +255,17 @@ val restore_shutdown :
   keeper_name:string ->
   operation_id:Keeper_shutdown_types.Operation_id.t ->
   restore_shutdown_result
+
+(** Atomically release [from_operation_id], or transfer its reservation to
+    [to_operation_id]. A missing slot is an already-applied release; when a
+    durable successor is supplied, a missing reservation is restored to that
+    successor. A different live owner is never overwritten. *)
+val transition_shutdown :
+  base_path:string ->
+  keeper_name:string ->
+  from_operation_id:Keeper_shutdown_types.Operation_id.t ->
+  to_operation_id:Keeper_shutdown_types.Operation_id.t option ->
+  transition_shutdown_result
 
 (** Run the registry [commit] only while no shutdown operation owns the Keeper
     admission fence. Shutdown reservation and same-name lane installation are

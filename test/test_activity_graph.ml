@@ -413,20 +413,6 @@ let test_graph_json_tracks_runtime_activity_kinds () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_config (fun config ->
       ignore
-        (Activity_graph.emit config           ~kind:"operation.started"
-           ~actor:(Activity_graph.entity ~kind:"agent" "mission-agent")
-           ~subject:(Activity_graph.entity ~kind:"operation" "sess-001")
-           ~tags:[ "operation"; "operation.started" ]
-           ~payload:(`Assoc [ ("session_id", `String "sess-001") ])
-           ());
-      ignore
-        (Activity_graph.emit config ~kind:"team.turn"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~subject:(Activity_graph.entity ~kind:"operation" "sess-001")
-           ~tags:[ "operation"; "team.turn" ]
-           ~payload:(`Assoc [ ("kind", `String "broadcast") ])
-           ());
-      ignore
         (Activity_graph.emit config ~kind:"task.started"
            ~actor:(Activity_graph.entity ~kind:"agent" "claude")
            ~subject:(Activity_graph.entity ~kind:"task" "task-777")
@@ -466,12 +452,8 @@ let test_graph_json_tracks_runtime_activity_kinds () =
           (fun edge -> member "kind" edge = `String kind)
           edges
       in
-      check bool "operation node marked running" true
-        (has_node "operation:sess-001" "running");
       check bool "task node marked in progress" true
         (has_node "task:task-777" "in_progress");
-      check bool "team turn edge captured" true
-        (has_edge "participates_in");
       check bool "board post edge captured" true
         (has_edge "posts");
       check bool "board vote edge captured" true

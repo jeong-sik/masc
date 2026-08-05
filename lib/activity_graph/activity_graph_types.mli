@@ -4,23 +4,16 @@
 
     Type-safe variant replacing stringly-typed status. The [node kind]
     field already carries the category, so this is a flat variant
-    spanning agent / task / board / decision / policy / operation.
+    spanning agent / task / board.
 
     @since 7182 *)
 type node_status =
   (* Agent lifecycle *)
-  | Active | Offline | Spawned | Retired | Compacting | Handoff
-  | Autonomy | Guardrail
+  | Active | Compacting
   (* Task lifecycle *)
   | Todo | Claimed | In_progress | Done | Cancelled
   (* Board *)
   | Posted | Discussed
-  (* Decision *)
-  | Open | Resolved
-  (* Policy *)
-  | Approved | Denied
-  (* Operation lifecycle *)
-  | Running | Paused | Stopped | Finalized
   (* Generic / fallback *)
   | Observed | Workspace | Unset
 
@@ -33,7 +26,7 @@ val node_status_to_string : node_status -> string
     @since 7182 *)
 type span_status =
   | Span_open | Span_completed | Span_released | Span_cancelled
-  | Span_left | Span_retired | Span_finalized | Span_stopped | Span_ended
+  | Span_ended
 
 val span_status_to_string : span_status -> string
 

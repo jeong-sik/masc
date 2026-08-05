@@ -40,8 +40,7 @@ let register_test_tool ~tool_name ~handler =
 let test_mint_success () =
   match Tool_token.mint_with ~validate:(Hashtbl.mem full_tbl) ~name:"masc_status" with
   | Ok token ->
-    check string "name preserved" "masc_status" token.name;
-    check bool "minted_at > 0" true (token.minted_at > 0.0)
+    check string "name preserved" "masc_status" token.name
   | Error e -> fail e
 
 let test_mint_failure () =
@@ -80,16 +79,13 @@ let test_token_name_readable () =
   match Tool_token.mint_with ~validate:(Hashtbl.mem full_tbl) ~name:"masc_heartbeat" with
   | Ok token ->
     (* Private type: fields are readable *)
-    check string "name field" "masc_heartbeat" token.name;
-    check bool "minted_at is recent" true
-      (token.minted_at > 0.0 && token.minted_at <= Unix.gettimeofday () +. 1.0)
+    check string "name field" "masc_heartbeat" token.name
   | Error e -> fail e
 
-(* Private type: { name = "fake"; minted_at = 0. } would be a compile error.
-   This is a structural guarantee, not a runtime test.
-   Uncomment below to verify:
+(* Private type: { name = "fake" } would be a compile error. This is a
+   structural guarantee, not a runtime test. Uncomment below to verify:
 
-   let _compile_error = { Tool_token.name = "fake"; minted_at = 0. }
+   let _compile_error = { Tool_token.name = "fake" }
 *)
 
 (* ================================================================ *)

@@ -11,6 +11,7 @@ val system : string
 
 val board_attention_judgment_batch : string
 val gate_judgment : string
+val verification_anti_rationalization : string
 val memory_os_recall_context : string
 val memory_os_recall_unavailable : string
 val librarian_current_selection : string

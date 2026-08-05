@@ -156,7 +156,9 @@ let build_prompt ?(few_shot_block = "") ?completion_contract
     ; "calibration_section", calibration_section
     ]
   in
-  Prompt_registry.render_prompt_template "verification.anti_rationalization" vars
+  Prompt_registry.render_prompt_template
+    Keeper_prompt_names.verification_anti_rationalization
+    vars
 ;;
 
 (* ================================================================ *)

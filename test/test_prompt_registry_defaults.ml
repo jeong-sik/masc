@@ -515,7 +515,7 @@ let () =
                      template_variables are declared");
           test_case
             "set_override rejects placeholder syntax on any zero-variable \
-             prompt, not just keeper.system"
+             prompt, not just keeper"
             `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               match

@@ -116,7 +116,7 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'source_prep',
     messageSlot: 'not sent',
     summary: 'MASC picks the active text from defaults, files, or saved edits.',
-    promptKeys: ['keeper.system'],
+    promptKeys: ['keeper'],
   },
   {
     id: 'base-system',
@@ -126,7 +126,7 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'model_input',
     messageSlot: 'system',
     summary: 'Identity, rules, and safety boundaries.',
-    promptKeys: ['keeper.system'],
+    promptKeys: ['keeper'],
   },
   {
     id: 'unified-world',

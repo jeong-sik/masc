@@ -8,30 +8,16 @@
     Surfaces (groups of related params published as a single
     runtime settings group, see {!surface}):
 
-    - [board_policy] — message retention cap
-    - [inference_config] — default model
-    - [cost_policy] — per-session cost reporting threshold
     - [keeper_lifecycle] — heartbeat / supervisor / restart limits
     - [keeper_handoff] — handoff threshold / cooldown / pressure
     - [keeper_diagnostics] — snapshot / hb tuning / profiling ring
     - [keeper_turn] / [keeper_proactive] / [keeper_rules] — keeper LLM tuning surfaces
     - [dashboard] — display-only thresholds + truncation lengths
 
-    Internal: 6 deserialization / validation helpers stay
-    private — \[validate_float_range], \[validate_int_range],
-    \[deserialize_float], \[deserialize_int],
-    \[deserialize_string], \[deserialize_bool].  Plus 25+
-    keeper.turn / keeper.proactive / keeper.rule param handles +
-    \[message_max_count] +
-    \[_cost_max_session_usd] are
-    intentionally unexported — these are reachable only via
-    {!Runtime_params.get_by_key} (runtime settings UI) and are pinned
-    in the {!surfaces} catalog by string key. *)
-
-(** {1 Inference} *)
-
-val inference_default_model : string Runtime_params.param
-(** Default LLM model label.  Validation: 1-100 chars. *)
+    Internal: the deserialization / validation helpers stay private,
+    as do the 25+ keeper.turn / keeper.proactive / keeper.rule param
+    handles — those are reachable through the runtime settings UI by
+    string key and are pinned in the {!surfaces} catalog. *)
 
 (** {1 Keeper lifecycle} *)
 

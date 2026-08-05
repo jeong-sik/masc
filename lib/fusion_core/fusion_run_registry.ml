@@ -93,7 +93,9 @@ let register_running t ~run_id ~keeper ~preset ~started_at =
 ;;
 
 let mark_completed t ~run_id ~outcome =
-  ignore (Store.complete t ~id:run_id ~completion:outcome : [ `Completed | `Unknown ])
+  match Store.complete t ~id:run_id ~completion:outcome with
+  | `Completed -> ()
+  | `Unknown -> ()
 ;;
 
 let run_of_entry (entry : Store.entry) =

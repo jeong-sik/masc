@@ -4,12 +4,9 @@
     constants used by keeper sandbox and docker playground execution
     paths — one typed surface so:
 
-    1. Operators can read every effective sandbox setting + its
-       provenance from a single JSON dump
-       ({!effective_config_json}).
-    2. Tests pin the default table once; drift is a compile or test
+    1. Tests pin the default table once; drift is a compile or test
        failure rather than a silent budget shift.
-    3. The {!Shell_timeout} sub-module exposes the typed-bucket
+    2. The {!Shell_timeout} sub-module exposes the typed-bucket
        pattern for shell timeout buckets. *)
 
 (** {1 Hardening — security policy and resource limits} *)
@@ -146,14 +143,3 @@ end
 
 (** {1 Diagnostics / observability surface} *)
 
-val effective_config_json : unit -> Yojson.Safe.t
-(** Returns a snapshot of every sandbox setting under two top-level
-    keys:
-
-    - [raw.<section>.<key>] = [\{ value, source, env_var | null \}]
-      where [source] is one of ["env"], ["default"], or ["hardcoded"]
-      and [env_var] is [null] for non-overridable values.
-    - [derived.<key>] = effective values after cross-cutting rules.
-
-    Operators read [raw] to confirm "did my env override take?" and
-    [derived] to see "what will Docker actually see?". *)

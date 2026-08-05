@@ -24,7 +24,7 @@ let handle_ide_annotate_with_outcome
   let file_path = Safe_ops.json_string ~default:"" "file_path" args in
   let line_start = Safe_ops.json_int ~default:1 "line_start" args in
   let line_end = Safe_ops.json_int ~default:line_start "line_end" args in
-  let kind_str = Safe_ops.json_string ~default:"Comment" "kind" args in
+  let kind_member = Safe_ops.safe_member "kind" args in
   let content = Safe_ops.json_string ~default:"" "content" args in
   let goal_id = Safe_ops.json_string_opt "goal_id" args in
   let task_id = Safe_ops.json_string_opt "task_id" args in
@@ -45,11 +45,29 @@ let handle_ide_annotate_with_outcome
     match references_result with
     | Error msg -> reject msg
     | Ok references ->
-    let kind =
-      match Agent_observation.annotation_kind_of_string kind_str with
-      | Some k -> k
-      | None -> Agent_observation.Comment
+    (* The schema declares kind as an enum of the four constructors and
+       documents the default, so absence is Comment and anything else is a
+       client error. The previous shape defaulted twice — once for a missing or
+       non-string member, once for an unrecognised string — and both landed on
+       Comment, so {"kind":"decision"} (the casing an LLM reaches for) was
+       silently filed as a comment with no rejection and no log. *)
+    let kind_result =
+      match kind_member with
+      | `Null -> Ok Agent_observation.Comment
+      | `String raw ->
+        (match Agent_observation.annotation_kind_of_string raw with
+         | Some k -> Ok k
+         | None -> Error raw)
+      | other -> Error (Yojson.Safe.to_string other)
     in
+    match kind_result with
+    | Error raw ->
+      reject
+        (Printf.sprintf
+           "kind must be one of [%s], got %S."
+           (String.concat ", " Agent_observation.valid_annotation_kind_strings)
+           raw)
+    | Ok kind ->
     (* #23469 (task-1733): the keeper hands us a path relative to its own
        working root — the playground sandbox — so anchor it there before
        partition resolution, exactly like the file tools resolve it. The

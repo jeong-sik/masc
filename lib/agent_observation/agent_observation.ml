@@ -172,6 +172,12 @@ let annotation_kind_to_string = function
   | Bookmark -> "Bookmark"
 ;;
 
+let all_annotation_kinds = [ Comment; Decision; Question; Bookmark ]
+
+let valid_annotation_kind_strings =
+  List.map annotation_kind_to_string all_annotation_kinds
+;;
+
 let annotation_kind_of_string = function
   | "Comment" -> Some Comment
   | "Decision" -> Some Decision

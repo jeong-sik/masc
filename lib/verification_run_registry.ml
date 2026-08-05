@@ -179,9 +179,9 @@ let register_running
 
 let mark_completed t ~verification_id ~outcome ?evaluator_runtime ~elapsed_s () =
   let completion = { Payload.outcome; evaluator_runtime; elapsed_s } in
-  ignore
-    (Store.complete t ~id:verification_id ~completion
-      : [ `Completed | `Unknown ])
+  match Store.complete t ~id:verification_id ~completion with
+  | `Completed -> ()
+  | `Unknown -> ()
 ;;
 
 let run_of_entry (entry : Store.entry) =

@@ -38,9 +38,6 @@ val max_pending_codes : unit -> int
 val pkce_s256 : string -> string
 (** RFC 7636 S256 transform using unpadded base64url. *)
 
-val valid_pkce_value : string -> bool
-(** RFC 7636 verifier/challenge character and length check (43..128). *)
-
 val parse_scopes : string option -> (scope list, error) result
 (** Parse a space-delimited scope request.  Missing/blank means
     [[Mcp_tools]]. Duplicate scopes are collapsed in declaration order, and
@@ -53,8 +50,6 @@ val effective_role :
   scope list ->
   (Masc_domain.agent_role, error) result
 (** OAuth scopes may preserve or reduce the bootstrap role, never increase it. *)
-
-val validate_loopback_redirect_uri : string -> (unit, error) result
 
 type client = {
   client_id : string;

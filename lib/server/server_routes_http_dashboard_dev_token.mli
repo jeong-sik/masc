@@ -23,7 +23,6 @@ type dashboard_dev_token =
 
 val dashboard_dev_token_path : string -> string
 val dashboard_dev_token_pending_path : string -> string
-val token_error_code : token_error -> string
 val token_error_to_string : token_error -> string
 val request_error_status : request_error -> Httpun.Status.t
 val request_error_code : request_error -> string

@@ -266,13 +266,6 @@ val durable_state_result :
     Absence of both the current snapshot and transition WAL is the valid empty
     state used before the first durable enqueue. *)
 
-val existing_durable_state_result :
-  base_path:string -> string -> (Keeper_event_queue_state.t, string) result
-(** Read the same durable state when the caller is interpreting the absence of
-    prior work. A snapshot or transition WAL proves the owner exists; absence
-    of both is an explicit error and therefore cannot become evidence that an
-    occurrence was lost. *)
-
 val reprioritize_pending_result :
   base_path:string ->
   string ->

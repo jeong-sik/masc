@@ -155,7 +155,6 @@ type masc_internal_error =
       detail : string;
     }
 
-val gate_replay_repair_stage_to_string : gate_replay_repair_stage -> string
 val masc_internal_error_prefix : string
 
 val runtime_runner_execute_site : string

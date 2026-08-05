@@ -24,8 +24,6 @@ val ensure_optional_string_subset :
   string list ->
   (unit, Auth_oauth.error) result
 
-val oauth_error_description : Auth_oauth.error -> string
-
 val oauth_error_status :
   Auth_oauth.error ->
   [ `Bad_request | `Internal_server_error | `Service_unavailable | `Unauthorized ]

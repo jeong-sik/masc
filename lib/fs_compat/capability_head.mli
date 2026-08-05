@@ -47,9 +47,6 @@ type snapshot
 
 val snapshot_row : snapshot -> string option
 val snapshot_cursor : snapshot -> cursor
-val cursor_equal : cursor -> cursor -> bool
-val snapshot_settlement_warnings : snapshot -> settlement_warning list
-
 type error =
   | Invalid_leaf of string
   | Invalid_row of string

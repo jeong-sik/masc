@@ -5,9 +5,6 @@
 val base_url : Server_request_authority.authority -> string
 val resource : Server_request_authority.authority -> string
 val protected_resource_metadata_url : Server_request_authority.authority -> string
-val authorization_endpoint : Server_request_authority.authority -> string
-val token_endpoint : Server_request_authority.authority -> string
-val registration_endpoint : Server_request_authority.authority -> string
 val challenge : Server_request_authority.authority -> string
 val challenge_for_authority : Server_request_authority.authority -> string
 (** OAuth discovery challenge when built-in OAuth is enabled on loopback;

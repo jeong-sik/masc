@@ -1640,6 +1640,7 @@
 ; sorted alphabetically.
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
+(include stanzas/test_jsonl_retention_window.inc)
 (include stanzas/test_verification_authority_tools.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 (include stanzas/test_keeper_compaction_persist_gate.inc)

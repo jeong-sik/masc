@@ -371,13 +371,8 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
     in
     try
       let argv = argv @ [ "--data-binary"; "@-" ] in
-      let raw_source = String.concat " " (List.map Filename.quote argv) in
       let status, raw_body =
-        Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-          ~actor:(Masc_exec.Agent_id.of_string "system/worker_container_types")
-          ~raw_source
-          ~summary:"worker container curl fallback"
-
+        Process_eio.run_argv_with_stdin_and_status
           ~stdin_content:request_body
           argv
       in

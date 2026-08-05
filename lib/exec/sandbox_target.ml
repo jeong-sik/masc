@@ -21,7 +21,7 @@
 
    [t] is a variant rather than a record so that the [Host] case needs
    no runner closure.  [Exec_dispatch] routes [Host] directly to
-   [Exec_gate], and [Docker] via the carried [runner]. *)
+   [Process_eio], and [Docker] via the carried [runner]. *)
 
 type runner =
   on_stdout_chunk:(string -> unit) option ->

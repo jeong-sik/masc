@@ -167,11 +167,11 @@ let local_playback_argvs ?path_value ~audio_file () =
     | Some path -> Some (path :: args @ [ audio_file ])
     | None -> None)
 
-(* Playback subprocess timeout. The Exec_gate default (60s) used to kill any
-   player mid-play on audio longer than a minute; Process_eio reports the
-   kill as WEXITED 124 and the candidate loop then replayed the SAME file
-   from 0:00 through the fallback player — the audible-repeat amplifier in
-   the 2026-06-10 voice incident. Derive the budget from the probed audio
+(* Playback subprocess timeout. A fixed 60s budget used to kill any player
+   mid-play on audio longer than a minute; Process_eio reports the kill as
+   WEXITED 124 and the candidate loop then replayed the SAME file from 0:00
+   through the fallback player — the audible-repeat amplifier in the
+   2026-06-10 voice incident. Derive the budget from the probed audio
    duration instead. *)
 let playback_timeout_margin_sec = 30.0
 let unknown_duration_playback_timeout_sec = 300.0
@@ -210,12 +210,8 @@ let playback_timeout_sec_for ~duration_sec =
 
 let audio_duration_seconds ~audio_file =
   let probe argv parse =
-    let raw_source = String.concat " " (List.map Filename.quote argv) in
     match
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:(Masc_exec.Agent_id.of_string "voice/bridge_core")
-        ~raw_source
-        ~summary:"voice audio duration probe"
+      Process_eio.run_argv_with_status
         ~timeout_sec:duration_probe_timeout_sec
         argv
     with
@@ -311,18 +307,12 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
                 `Failed reason
               | argv :: rest ->
                 let t0 = Unix.gettimeofday () in
-                let raw_source =
-                  String.concat " " (List.map Filename.quote argv)
-                in
                 let executable =
                   match argv with h :: _ -> h | [] -> "unknown"
                 in
                 try
                   match
-                    Masc_exec.Exec_gate.run_argv_with_status
-                      ~actor:(Masc_exec.Agent_id.of_string "voice/bridge_core")
-                      ~raw_source
-                      ~summary:"voice local playback"
+                    Process_eio.run_argv_with_status
                       ~timeout_sec:playback_timeout_sec
                       argv
                   with

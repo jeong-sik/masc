@@ -265,12 +265,8 @@ let git_rev_parse_short_probe dir =
   | Some hook -> hook dir
   | None ->
     let argv = git_rev_parse_short_probe_argv dir in
-    let raw_source = String.concat " " (List.map Filename.quote argv) in
     (match
-       Masc_exec.Exec_gate.run_argv_with_status
-         ~actor:(Masc_exec.Agent_id.of_string "system/runtime_info")
-         ~raw_source
-         ~summary:"dashboard runtime git probe"
+       Process_eio.run_argv_with_status
          ~timeout_sec:git_rev_parse_short_probe_timeout_sec
          argv
      with
@@ -363,12 +359,8 @@ let clear_git_upstream_status_probe_hook_for_tests =
 
 let git_probe_trimmed dir args =
   let argv = [ "git"; "-C"; dir; "--no-optional-locks" ] @ args in
-  let raw_source = String.concat " " (List.map Filename.quote argv) in
   match
-    Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:(Masc_exec.Agent_id.of_string "system/runtime_info")
-      ~raw_source
-      ~summary:"dashboard runtime git upstream probe"
+    Process_eio.run_argv_with_status
       ~timeout_sec:git_rev_parse_short_probe_timeout_sec
       argv
   with

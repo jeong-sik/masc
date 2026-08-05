@@ -12,7 +12,6 @@
       must always propagate.  Tap must not break production. *)
 
 type call_kind =
-  | Exec_gate_decision
   | Process_eio_run_argv
   | Process_eio_run_argv_with_stdin
   | Process_eio_run_argv_with_stdin_and_status
@@ -23,7 +22,6 @@ type call_kind =
   | Unix_open_process_args_full
 
 let kind_to_string = function
-  | Exec_gate_decision -> "Exec_gate.decision"
   | Process_eio_run_argv -> "Process_eio.run_argv"
   | Process_eio_run_argv_with_stdin -> "Process_eio.run_argv_with_stdin"
   | Process_eio_run_argv_with_stdin_and_status ->
@@ -237,18 +235,6 @@ let write_line ~kind ~argv ?env ?cwd (extras : extra_field list) =
 
 let record ~kind ~argv ?env ?cwd () =
   write_line ~kind ~argv ?env ?cwd []
-
-let record_gate_decision ~actor ~raw_source ~summary ~gate_mode
-    ~gate_verdict ~gate_enforced ~argv ?env ?cwd () =
-  write_line ~kind:Exec_gate_decision ~argv ?env ?cwd
-    [
-      `String ("actor", actor);
-      `String ("raw_source", raw_source);
-      `String ("summary", summary);
-      `String ("gate_mode", gate_mode);
-      `String ("gate_verdict", gate_verdict);
-      `Bool ("gate_enforced", gate_enforced);
-    ]
 
 (* ── install_from_env ─────────────────────────────────────────────── *)
 

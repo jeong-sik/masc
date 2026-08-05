@@ -52,14 +52,8 @@ let executable_dir () = Filename.dirname (executable_path ())
 
 let git_capture_output_result ~repo_root args =
   let argv = [ "git"; "-C"; repo_root ] @ args in
-  let raw_source = String.concat " " (List.map Filename.quote argv) in
   match
-    Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:(Masc_exec.Agent_id.of_string "system/build_identity")
-      ~raw_source
-      ~summary:"build identity git probe"
-
-      argv
+    Process_eio.run_argv_with_status argv
   with
   | Unix.WEXITED 0, output -> Ok output
   | status, _ -> Error status

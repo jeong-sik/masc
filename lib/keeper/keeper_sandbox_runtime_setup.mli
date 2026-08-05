@@ -3,7 +3,6 @@ val docker_command_argv : unit -> string list
 val docker_run_pull_never_args : unit -> string list
 val docker_image_inspect_next_action : string
 val run_docker_argv_with_status :
-  summary:string ->
   ?timeout_sec:float -> string list -> Unix.process_status * string
 type classified_error = {
   message : string;

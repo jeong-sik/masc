@@ -1,5 +1,5 @@
 (* P7: Pipeline-Native Dispatch
-   Execute Shell_ir.t directly via Exec_gate without going through
+   Execute Shell_ir.t directly via Process_eio without going through
    /bin/bash. Simple commands use argv-based spawn. Redirect-free host
    and Docker pipelines use streaming process pipes; unsupported shapes
    fall back to deterministic stdout->stdin chaining. *)
@@ -9,8 +9,6 @@ type dispatch_result = {
   stdout : string;
   stderr : string;
 }
-
-let dispatch_actor = Agent_id.of_string "exec/dispatch"
 
 let ( let* ) = Result.bind
 
@@ -184,13 +182,10 @@ let resolve_host_env ?base_host_env = function
 
 (* Dispatch a simple command via the IR-carried Sandbox_target.
 
-   Prior to PR-2 (2026-04-28 root-fix family 3/3) this function called
-   [Process_eio.run_argv_with_status_split] directly, which short-
-   circuited every command to a host fork/exec regardless of the
-   keeper's [sandbox_profile].  The host case now routes through
-   [Exec_gate] (no behavior change for non-keeper callers); the Docker
-   case is wired up by [lib/keeper] using a closure over
-   [Keeper_turn_sandbox_runtime]. *)
+   The [Host] case forks/execs through [Process_eio]; the [Docker] case
+   is wired up by [lib/keeper] using a closure over
+   [Keeper_turn_sandbox_runtime].  Which one runs is decided by the
+   keeper's [sandbox_profile] carried on the IR, not by this function. *)
 let process_spec_of_simple (s : Shell_ir.simple) =
   let bin = Exec_program.to_string s.bin in
   let argv = bin :: List.map resolve_arg s.args in
@@ -215,26 +210,19 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
       in
       match s.sandbox with
       | Host ->
-        let raw_source = String.concat " " argv in
         let host_env = resolve_host_env ?base_host_env s.env in
         let run () =
           match stdin_content with
           | None ->
             (match child_on_output_chunk with
              | None ->
-               Exec_gate.run_argv_with_status_split
-                 ~actor:dispatch_actor
-                 ~raw_source
-                 ~summary:"exec dispatch simple"
+               Process_eio.run_argv_with_status_split
                  ?timeout_sec
                  ?env:host_env
                  ?cwd
                  argv
              | Some on_chunk ->
-               Exec_gate.run_argv_with_status_split_streaming
-                 ~actor:dispatch_actor
-                 ~raw_source
-                 ~summary:"exec dispatch simple streaming"
+               Process_eio.run_argv_with_status_split_streaming
                  ?timeout_sec
                  ?env:host_env
                  ?cwd
@@ -244,20 +232,14 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
           | Some stdin_content ->
             (match child_on_output_chunk with
              | None ->
-               Exec_gate.run_argv_with_stdin_and_status_split
-                 ~actor:dispatch_actor
-                 ~raw_source
-                 ~summary:"exec dispatch simple stdin"
+               Process_eio.run_argv_with_stdin_and_status_split
                  ?timeout_sec
                  ?env:host_env
                  ?cwd
                  ~stdin_content
                  argv
              | Some on_chunk ->
-               Exec_gate.run_argv_with_stdin_and_status_split
-                 ~actor:dispatch_actor
-                 ~raw_source
-                 ~summary:"exec dispatch simple stdin streaming"
+               Process_eio.run_argv_with_stdin_and_status_split
                  ?timeout_sec
                  ?env:host_env
                  ?cwd
@@ -369,25 +351,14 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
     | _ ->
         (match host_pipeline_specs ?base_host_env stages with
          | Some specs ->
-             let raw_source =
-               specs
-               |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
-               |> String.concat " | "
-             in
              let status, stdout, stderr =
                match on_output_chunk with
                | None ->
-                   Exec_gate.run_argv_pipeline_with_status_split
-                     ~actor:dispatch_actor
-                     ~raw_source
-                     ~summary:"exec dispatch pipeline"
+                   Process_eio.run_argv_pipeline_with_status_split
                      ?timeout_sec
                      specs
                | Some on_chunk ->
-                   Exec_gate.run_argv_pipeline_with_status_split
-                     ~actor:dispatch_actor
-                     ~raw_source
-                     ~summary:"exec dispatch pipeline streaming"
+                   Process_eio.run_argv_pipeline_with_status_split
                      ?timeout_sec
                      ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
                      ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))

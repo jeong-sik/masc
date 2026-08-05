@@ -171,10 +171,7 @@ let http_get_text_response_with_headers ?(timeout_sec = default_timeout_sec)
   in
   let status, body =
     Fd_accountant.observe ~kind:Sandbox_exec (fun () ->
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
-        ~raw_source:(String.concat " " (List.map Filename.quote argv))
-        ~summary:"tool local runtime http get"
+      Process_eio.run_argv_with_status
         ~timeout_sec:(Stdlib.Float.of_int timeout_sec)
         argv)
   in
@@ -214,10 +211,7 @@ let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~u
   let argv = curl_post_json_argv ~timeout_sec ~headers ~url ~body_json () in
   let status, body =
     Fd_accountant.observe ~kind:Sandbox_exec (fun () ->
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
-        ~raw_source:(String.concat " " (List.map Filename.quote argv))
-        ~summary:"tool local runtime http post"
+      Process_eio.run_argv_with_status
         ~timeout_sec:(Stdlib.Float.of_int timeout_sec)
         argv)
   in

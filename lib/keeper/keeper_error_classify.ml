@@ -13,17 +13,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
-(** {1 Static ADT Classification}
-    RFC-0314 / task-1854: Replace heuristic string-matching predicates with
-    a static ADT that the compiler can exhaustively match. *)
-type error_classification =
-  | Transient_network
-  | Transient_internal_runner
-  | Transient_rate_limit
-  | Transient_capacity
-  | Non_transient
-  | Unclassified
-
 (** Detect transient network errors that warrant retry with short backoff.
     Uses structured [Agent_sdk.Error.sdk_error] pattern matching instead of
     substring matching on stringified error messages. *)
@@ -58,66 +47,6 @@ let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Receipt_persistence_failed _
       | Keeper_turn_driver.Gate_replay_repair_required _ )
   | None -> false
-
-(** Classify an [sdk_error] into a static [error_classification] variant.
-    Replaces the individual heuristic predicate functions with a single
-    exhaustive match. *)
-let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
-  if is_transient_internal_runner_error err
-  then Transient_internal_runner
-  else match err with
-  | Agent_sdk.Error.Api (NetworkError _) -> Transient_network
-  | Agent_sdk.Error.Api (Timeout _) -> Transient_network
-  | Agent_sdk.Error.Api (Overloaded _) -> Transient_capacity
-  | Agent_sdk.Error.Api (RateLimited _) -> Transient_rate_limit
-  | Agent_sdk.Error.Provider
-      (Llm_provider.Error.NetworkError
-         { kind =
-             Llm_provider.Http_client.Tls_error
-           | Llm_provider.Http_client.Local_resource_exhaustion
-         ; _
-         }) ->
-      Non_transient
-  | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError _) -> Transient_network
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Transient_network
-  | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
-      if transient then Transient_network else Non_transient
-  | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit _) -> Transient_rate_limit
-  | Agent_sdk.Error.Provider
-      (Llm_provider.Error.AuthError _ | Llm_provider.Error.AuthorizationError _) ->
-      Non_transient
-  | Agent_sdk.Error.Provider
-      ( Llm_provider.Error.ParseError _
-      | Llm_provider.Error.ProviderWireError _
-      | Llm_provider.Error.ProviderReportedError _ ) ->
-      Non_transient
-  | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidRequest _) -> Non_transient
-  | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) -> Transient_capacity
-  | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) -> Non_transient
-  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> Non_transient
-  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderTerminal _) -> Non_transient
-  | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) -> Non_transient
-  | Agent_sdk.Error.Provider (Llm_provider.Error.MissingApiKey _) -> Non_transient
-  | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidConfig _) -> Non_transient
-  | Agent_sdk.Error.Provider (Llm_provider.Error.UnknownVariant _) -> Unclassified
-  | Agent_sdk.Error.Api (InvalidRequest _ | ServerError _ | AuthError _
-    | AuthorizationError _
-    | NotFound _ | PaymentRequired _ | ContextOverflow _ | InputCapacity _) ->
-    Non_transient
-  | Agent_sdk.Error.Agent
-      ( HookExecutionFailed _
-      | TerminalToolEffectFailed _
-      | TerminalToolDurabilityFailed _ ) ->
-    Non_transient
-  | Agent_sdk.Error.Agent
-      ( UnrecognizedStopReason _
-      | GuardrailViolation _
-      | TripwireViolation _
-      | InputRequired _ )
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _ | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _ | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ -> Unclassified
 
 (** {1 Typed retry classification} *)
 

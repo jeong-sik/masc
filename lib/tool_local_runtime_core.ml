@@ -123,12 +123,7 @@ let process_matches_runtime_ports ports (process : llama_process) =
 let discover_processes () =
   let argv = [ "ps"; "-ax"; "-o"; "pid=,command=" ] in
   let status, body =
-    Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
-      ~raw_source:(String.concat " " (List.map Filename.quote argv))
-      ~summary:"tool local runtime process discovery"
-
-      argv
+    Process_eio.run_argv_with_status argv
   in
   match status with
   | Unix.WEXITED 0 ->
@@ -185,12 +180,7 @@ let fetch_models_at base_url =
   in
   let argv = [ "curl"; "-sS"; "--max-time"; "10"; url ] in
   let status, body =
-    Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
-      ~raw_source:(String.concat " " (List.map Filename.quote argv))
-      ~summary:"tool local runtime fetch models"
-
-      argv
+    Process_eio.run_argv_with_status argv
   in
   match status with
   | Unix.WEXITED 0 -> (

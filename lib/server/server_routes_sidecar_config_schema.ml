@@ -37,10 +37,7 @@ let fetch_schema ?base_path id =
      | Ok sidecar_dir ->
        let argv = python_argv_for sidecar_dir in
        let status, stdout =
-         Masc_exec.Exec_gate.run_argv_with_status
-           ~actor:(Masc_exec.Agent_id.of_string "system/spawn")
-           ~raw_source:(String.concat " " argv)
-           ~summary:"python schema dump"
+         Process_eio.run_argv_with_status
            ~timeout_sec:Env_config_runtime.Sidecar.schema_generation_timeout_sec
            ~cwd:sidecar_dir
            argv

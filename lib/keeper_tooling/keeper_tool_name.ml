@@ -43,7 +43,6 @@ let public_mcp_non_descriptor_names =
   [ "masc_start"
   ; "masc_broadcast"
   ; "masc_messages"
-  ; "masc_keeper_sandbox_status"
   ; "masc_keeper_create_from_persona"
   ; "masc_persona_list"
   (* Persona CRUD (#23664) lives with masc_persona_list outside the keeper

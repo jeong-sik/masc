@@ -245,7 +245,7 @@ Rollback: revert is a single PR revert. RFC-0179 set the precedent — squash me
 | Step | PR | Scope |
 |---|---|---|
 | 1 | RFC-0182 body | PR #18726 (merged 2026-05-26 11:39 UTC as RFC-0181) + #18731 (renumber 0181→0182, merged 2026-05-26 11:46 UTC). |
-| 1a | RFC-0182 scope update (this document) | Post-body audit results (§2a) folded in. §3.1/§3.2/§3.3/§3.4/§3.5 reflect 113+10+8+3-deferred+Match_chain scope. |
+| 1a | RFC-0182 scope update (this document) | Post-body audit results (§2a) folded in. §3.1/§3.2/§3.3/§3.4/§3.5 reflect 113+9+8+3-deferred+Match_chain scope. |
 | 2 | Single big-bang implementation PR | 113 descriptor entries + ~39 runtime_handler variants + 10 Tool_spec.register migrations + 8 dead-tool metadata deletes (including `masc_spawn` test fixture cleanup) + Match_chain removal + invariant tests |
 | 3 | Closeout: flip RFC-0182 status from Draft → Implemented, add the implementation PR number to `implementation_prs:` frontmatter, audit `scripts/audit-rfc-closeout-lag.sh`. |
 | 4 (separate) | RFC-0183 candidate: portal trio descriptor model (protocol-level dispatch layer). |
@@ -260,9 +260,9 @@ The original §11 had three open architectural questions. The post-merge audit (
 - **Q2 (`channel_gate` rename)** — *resolved*: keep as-is. The audit (§2a) confirmed `channel_gate` is live with HTTP subsystem dispatch (`server_routes_http_routes_channel_gate.ml`). Renaming would force prompt/persona/config updates with no architectural benefit; the unconventional name is preserved for backward compatibility. Migration is to `Tool_spec.register` only.
 - **Q3 (`masc_set_param` visibility)** — *resolved*: keep `Hidden`. The audit confirmed live HTTP dispatch with admin auth (`server_routes_http_routes_activity.ml:with_tool_auth`). Visibility-level isolation reflects the original design intent (internal HTTP runtime-parameter mutation route). Registered as `Tool_spec.create ~visibility:Hidden ~required_permission:(Some CanAdmin)`.
 
-## 12. Phase 5 — Eio plumbing for remaining 10 tools (post-#18823)
+## 12. Phase 5 — Eio plumbing for remaining 9 tools (post-#18823)
 
-After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverage), the remaining 10 unprojected tools all require Eio resources (`sw`, `clock`, `proc_mgr`, `net`, `mcp_session_id`) that are not present in the current `Keeper_dispatch_ref.dispatch` / `Workspace_dispatch_ref.dispatch` / `Persona_dispatch_ref.dispatch` signatures.
+After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverage), the remaining 9 unprojected tools all require Eio resources (`sw`, `clock`, `proc_mgr`, `net`, `mcp_session_id`) that are not present in the current `Keeper_dispatch_ref.dispatch` / `Workspace_dispatch_ref.dispatch` / `Persona_dispatch_ref.dispatch` signatures.
 
 ### 12.1 Tools blocked on Eio context
 
@@ -270,7 +270,6 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
 |---|---|---|
 | `masc_keeper_up` | `start_keepalive ~sw ~clock` | `Keeper_keepalive.start_keepalive` (lib/keeper/keeper_keepalive.ml:451) |
 | `masc_keeper_msg` | `Keeper_msg_async.submit ~clock ~sw` + Turn dispatch | `Tool_keeper_ops.handle_keeper_msg` (lib/tool_keeper_ops.ml:438) |
-| `masc_keeper_sandbox_status` | `load_or_materialize_boot_meta` (clock-aware) | `Tool_keeper.handle_keeper_sandbox_status` |
 | `masc_keeper_create_from_persona` | `execute_keeper_up` → Turn lifecycle | `Tool_keeper_ops.handle_keeper_create_from_persona` |
 | `masc_persona_generate` | retired on main | no backing function |
 | `masc_operator_snapshot` | `Operator_control.context` (sw/clock/proc_mgr/net/mcp_session_id) | `Tool_operator.dispatch` |
@@ -307,7 +306,7 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
 
 | Cluster | Mechanism | Notes |
 |---|---|---|
-| `masc_keeper_{up,msg,sandbox_status,create_from_persona}` | Keeper_dispatch_ref signature extension (Tool_keeper-side registration) | Same dispatch-ref pattern; ref signature adds `~sw ~clock ~proc_mgr ~net` |
+| `masc_keeper_{up,msg,create_from_persona}` | Keeper_dispatch_ref signature extension (Tool_keeper-side registration) | Same dispatch-ref pattern; ref signature adds `~sw ~clock ~proc_mgr ~net` |
 | `masc_operator_*` (5) | New `Operator_dispatch_ref` OR direct `Tool_operator.dispatch` import | Tool_operator is in lib/, sits LATE.  Direct import from Agent_tool_in_process_runtime closes cycle (Tool_operator → Operator_control → Keeper_runtime → ...).  Use dispatch-ref. |
 
 ### 12.4 Estimated PR sizes
@@ -315,7 +314,7 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
 | Phase 5 sub-PR | LoC estimate | Files | Risk |
 |---|---|---|---|
 | PR-A: ctx Eio extension | ~50 | 2 (agent_tool_runtime.ml/.mli + Agent_tool_dispatch_runtime caller) | low (compile-error-driven ripple) |
-| PR-B: keeper Eio cluster (4 tools) | ~150 | 4 (Keeper_dispatch_ref sig extend + Tool_keeper register + handler + descriptor) | medium |
+| PR-B: keeper Eio cluster (3 tools) | ~150 | 4 (Keeper_dispatch_ref sig extend + Tool_keeper register + handler + descriptor) | medium |
 | PR-C: operator cluster (5 tools) | ~200 | 4 (Operator_dispatch_ref new + Tool_operator register + handler + 5 descriptors) | medium |
 
 Each sub-PR independently mergeable, gated by PR-A.

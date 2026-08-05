@@ -60,8 +60,6 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_list ctx args : tool_result =
   keeper_list_body ~config:ctx.config args
 
-let dedupe_sorted_strings = Persona_audit.dedupe_sorted_strings
-
 let handle_keeper_persona_audit ctx args =
   Persona_audit.handle ~config:ctx.config args
 
@@ -78,177 +76,6 @@ let validation_error_data message =
     [ "error_code", `String (error_code_to_string Validation_error)
     ; "message", `String message
     ]
-
-let keeper_sandbox_status_fleet_names ctx =
-  let registry_names =
-    Keeper_registry.all ~base_path:ctx.config.base_path ()
-    |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
-  in
-  registry_names @ configured_keeper_names ctx.config @ keeper_names ctx.config
-  |> dedupe_sorted_strings
-
-type sandbox_status_fleet_item =
-  | Sandbox_status_meta of keeper_meta
-  | Sandbox_status_error of { name : string; error : string }
-
-let keeper_sandbox_status_error_item_json config ~name ~error =
-  let persisted_meta =
-    match read_meta config name with
-    | Ok (Some meta) -> Some meta
-    | Ok None | Error _ -> None
-  in
-  let keepalive_running =
-    match persisted_meta with
-    | Some meta -> Keeper_status_bridge.runtime_keepalive_running config meta
-    | None -> false
-  in
-  let persisted_fields =
-    match persisted_meta with
-    | Some meta ->
-        [
-          ("persisted_meta", keeper_brief_meta_json meta);
-          ("agent_name", `String meta.agent_name);
-          ( "persisted_sandbox_profile",
-            `String (sandbox_profile_to_string meta.sandbox_profile) );
-          ( "persisted_network_mode",
-            `String (network_mode_to_string meta.network_mode) );
-        ]
-    | None ->
-        [
-          ("persisted_meta", `Null);
-          ("agent_name", `Null);
-          ("persisted_sandbox_profile", `Null);
-          ("persisted_network_mode", `Null);
-        ]
-  in
-  error_assoc
-    ([
-       ("keeper", `String name);
-       ("sandbox_profile", `Null);
-       ("configured_network_mode", `Null);
-       ("effective_mode", `String "unknown");
-       ("managed_container_kind", `String Keeper_sandbox_control.managed_kind);
-       ("container_count", `Int 0);
-       ("containers", `List []);
-       ("preflight", `Null);
-       ("container_error", `Null);
-       ("why_no_container", `String "effective_meta_read_failed");
-       ( "recommendation",
-         `String "Fix keeper TOML/persona profile and retry sandbox status." );
-       ("keepalive_running", `Bool keepalive_running);
-       ("effective_meta_error", keeper_list_effective_meta_error_json name error);
-     ]
-     @ persisted_fields)
-
-let handle_keeper_sandbox_status ctx args : tool_result =
-  let verbose = get_bool args "verbose" false in
-  let include_preflight = get_bool args "include_preflight" true in
-  let timeout_sec = Stdlib.Float.min 20.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 5.0)) in
-  match String.trim (get_string args "name" "") with
-  | "" ->
-      let configured_names = configured_keeper_names ctx.config in
-      let candidate_names = keeper_sandbox_status_fleet_names ctx in
-      let resolved =
-        candidate_names
-        |> List.filter_map (fun name ->
-             match read_effective_meta ctx.config name with
-             | Ok (Some meta) -> Some (Sandbox_status_meta meta)
-             | Ok None when List.mem name configured_names -> (
-                 match load_or_materialize_boot_meta ctx name with
-                 | Ok { meta; _ } -> (
-                     match
-                       Keeper_meta_contract.effective_meta_result
-                         ~base_path:ctx.config.base_path
-                         meta
-                     with
-                     | Ok effective_meta -> Some (Sandbox_status_meta effective_meta)
-                     | Error msg ->
-                         Log.Keeper.warn
-                           "keeper_sandbox_status fleet: failed to overlay effective meta for materialized keeper %s: %s"
-                           name msg;
-                         Some (Sandbox_status_error { name; error = msg }))
-                 | Error msg ->
-                     Log.Keeper.warn
-                       "keeper_sandbox_status fleet: failed to materialize configured keeper %s: %s"
-                       name msg;
-                     Some (Sandbox_status_error { name; error = msg }))
-             | Ok None -> None
-             | Error msg ->
-                 Log.Keeper.warn
-                   "keeper_sandbox_status fleet: failed to read effective meta for %s: %s"
-                   name msg;
-                 Some (Sandbox_status_error { name; error = msg }))
-      in
-      let seen = Hashtbl.create 16 in
-      let unique_items =
-        List.filter_map
-          (fun item ->
-            let name =
-              match item with
-              | Sandbox_status_meta meta -> meta.name
-              | Sandbox_status_error { name; _ } -> name
-            in
-            if Hashtbl.mem seen name then None
-            else (
-              Hashtbl.add seen name ();
-              Some item))
-          resolved
-      in
-      let any_docker =
-        List.exists
-          (function
-            | Sandbox_status_meta (m : keeper_meta) -> m.sandbox_profile = Docker
-            | Sandbox_status_error _ -> false)
-          unique_items
-      in
-      let cached_preflight =
-        if include_preflight && any_docker then
-          Keeper_sandbox_control.preflight_status_json ~timeout_sec
-        else
-          None
-      in
-      let render_item (meta : keeper_meta) =
-        let preflight_override =
-          if meta.sandbox_profile = Docker then Some cached_preflight
-          else None
-        in
-        Keeper_sandbox_control.live_status_json
-          ~include_preflight ~include_repository_checkouts:false ?preflight_override
-          ~config:ctx.config ~meta ~timeout_sec ~verbose ()
-      in
-      let items =
-        List.map
-          (function
-            | Sandbox_status_meta meta -> render_item meta
-            | Sandbox_status_error { name; error } ->
-                keeper_sandbox_status_error_item_json ctx.config ~name ~error)
-          unique_items
-      in
-      tool_result_ok_data
-        (`Assoc
-           [
-             ("count", `Int (List.length items));
-             ("items", `List items);
-           ])
-  | _ ->
-      (match prepare_passive_keeper_identity ctx args with
-       | Error err -> tool_result_error err
-       | Ok (prepared_args, identity_reseed) -> (
-           match resolve_keeper_meta ctx prepared_args with
-           | Error err -> tool_result_error err
-           | Ok meta ->
-               let json =
-                 `Assoc
-                   [
-                     ("keeper", `String meta.name);
-                     ( "sandbox",
-                       Keeper_sandbox_control.live_status_json
-                         ~include_preflight ~config:ctx.config ~meta
-                         ~timeout_sec ~verbose () );
-                 ]
-                 |> attach_identity_reseed ?identity_reseed
-               in
-               tool_result_ok_data json))
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_sandbox_start_body ~(config : Workspace.config) args : tool_result =
@@ -654,11 +481,6 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
   | "masc_keeper_down" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
   | "masc_keeper_list" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_list ctx args))
   | "masc_keeper_persona_audit" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_persona_audit ctx args))
-  | "masc_keeper_sandbox_status" ->
-      Some
-        (tool_result_with_tool_name
-           ~tool_name:name
-           (handle_keeper_sandbox_status ctx args))
   | "masc_keeper_reset" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_reset ctx args))
   | "masc_keeper_compact" ->
     Some
@@ -836,24 +658,6 @@ let () =
         (tool_result_with_tool_name
            ~tool_name:name
            (Keeper_tool_surface_ops.keeper_status_body ~config ~agent_name args))
-    | "masc_keeper_sandbox_status" ->
-      (match sw, clock with
-       | Some sw, Some clock ->
-         let ctx : _ Keeper_types_profile.context =
-           { config
-           ; agent_name
-           ; sw
-           ; clock
-           ; proc_mgr
-           ; net
-           ; publication_recovery_provider
-           }
-         in
-         Some
-           (tool_result_with_tool_name
-              ~tool_name:name
-              (handle_keeper_sandbox_status ctx args))
-       | _ -> eio_context_missing name)
     | "masc_keeper_sandbox_start" ->
       run_external_effect (fun () ->
         Some

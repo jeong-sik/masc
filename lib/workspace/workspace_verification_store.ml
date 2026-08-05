@@ -23,7 +23,6 @@ type submitted_evidence_item =
       ; content : string
       ; bytes : int
       ; truncated : bool
-      ; content_sha256 : string
       }
   | Evidence_invalid_reference
   | Evidence_artifact_unreadable of
@@ -85,21 +84,16 @@ let evidence_read_failure_of_yojson = function
      | _ -> Error "submitted evidence snapshot has an invalid unreadable reason")
   | _ -> Error "submitted evidence snapshot unreadable reason must be an object"
 
-let content_sha256 content =
-  Digestif.SHA256.(digest_string content |> to_hex)
-
 let submitted_evidence_item_to_yojson = function
   | Evidence_note note ->
     `Assoc [ "kind", `String "note"; "content", `String note ]
-  | Evidence_artifact
-      { reference; content; bytes; truncated; content_sha256 } ->
+  | Evidence_artifact { reference; content; bytes; truncated } ->
     `Assoc
       [ "kind", `String "artifact"
       ; "reference", `String reference
       ; "content", `String content
       ; "bytes", `Int bytes
       ; "truncated", `Bool truncated
-      ; "content_sha256", `String content_sha256
       ]
   | Evidence_invalid_reference ->
     `Assoc
@@ -169,18 +163,13 @@ let submitted_evidence_access_to_yojson = function
 
 let submitted_evidence_item_metadata_to_yojson = function
   | Evidence_note note ->
-    `Assoc
-      [ "kind", `String "note"
-      ; "bytes", `Int (String.length note)
-      ; "content_sha256", `String (content_sha256 note)
-      ]
-  | Evidence_artifact { reference; bytes; truncated; content_sha256; _ } ->
+    `Assoc [ "kind", `String "note"; "bytes", `Int (String.length note) ]
+  | Evidence_artifact { reference; bytes; truncated; _ } ->
     `Assoc
       [ "kind", `String "artifact"
       ; "reference", `String reference
       ; "bytes", `Int bytes
       ; "truncated", `Bool truncated
-      ; "content_sha256", `String content_sha256
       ]
   | Evidence_invalid_reference ->
     `Assoc
@@ -239,7 +228,6 @@ let submitted_evidence_item_of_yojson = function
        let open Result.Syntax in
        let* reference = string_field "reference" in
        let* content = string_field "content" in
-       let* expected_content_sha256 = string_field "content_sha256" in
        let* bytes =
          match List.assoc_opt "bytes" fields with
          | Some (`Int value) when value >= 0 -> Ok value
@@ -261,15 +249,7 @@ let submitted_evidence_item_of_yojson = function
          | None -> Error "submitted evidence snapshot is missing truncated"
        in
        let content_bytes = String.length content in
-       if
-         not
-           (String.equal
-              expected_content_sha256
-              (content_sha256 content))
-       then
-         Error
-           "submitted evidence snapshot content_sha256 does not match persisted content"
-       else if truncated && bytes <= content_bytes
+       if truncated && bytes <= content_bytes
        then
          Error
            "truncated submitted evidence snapshot must report more source bytes than persisted content"
@@ -277,15 +257,7 @@ let submitted_evidence_item_of_yojson = function
        then
          Error
            "non-truncated submitted evidence snapshot bytes must equal persisted content length"
-       else
-         Ok
-           (Evidence_artifact
-              { reference
-              ; content
-              ; bytes
-              ; truncated
-              ; content_sha256 = expected_content_sha256
-              })
+       else Ok (Evidence_artifact { reference; content; bytes; truncated })
      | Some (`String "artifact_unreadable") ->
        let open Result.Syntax in
        let field_names =
@@ -573,13 +545,7 @@ let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_pa
     | Error reason ->
       Evidence_artifact_unreadable { reference; reason }
     | Ok (content, bytes, truncated) ->
-      Evidence_artifact
-        { reference
-        ; content
-        ; bytes
-        ; truncated
-        ; content_sha256 = content_sha256 content
-        }
+      Evidence_artifact { reference; content; bytes; truncated }
 
 let snapshot_submitted_evidence_item ~base_path ~worker reference =
   match strip_prefix ~prefix:artifact_reference_prefix reference with

@@ -21,7 +21,6 @@ type submitted_evidence_item =
       ; content : string
       ; bytes : int
       ; truncated : bool
-      ; content_sha256 : string
       }
   | Evidence_invalid_reference
   | Evidence_artifact_unreadable of
@@ -70,10 +69,10 @@ val snapshot_submitted_evidence_json :
   Yojson.Safe.t
 (** Materialize submitted evidence once at the producer's submit boundary.
     ["artifact:<relative-path>"] is rooted at the producer's declared sandbox;
-    ["note:<text>"] preserves non-file evidence explicitly.
-    [content_sha256] covers the bounded UTF-8 content persisted in the
-    snapshot, not bytes omitted beyond the projection cap. Bare and absolute
-    references are persisted as a payload-free typed invalid-reference item. *)
+    ["note:<text>"] preserves non-file evidence explicitly. [bytes] reports the
+    source size, which exceeds the persisted [content] length when [truncated]
+    is set by the projection cap. Bare and absolute references are persisted as
+    a payload-free typed invalid-reference item. *)
 val inspect_submitted_evidence_for_authority :
   base_path:string ->
   request_id:string ->

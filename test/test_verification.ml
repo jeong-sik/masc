@@ -249,7 +249,6 @@ let test_system_llm_review_notes_are_metadata_only () =
               ; content = "secret artifact content must not be duplicated"
               ; bytes = 42
               ; truncated = true
-              ; content_sha256 = "sha256-proof"
               }
           ; VS.Evidence_artifact_unreadable
               { reference = "artifact:missing.txt"; reason = VS.Evidence_missing }
@@ -295,15 +294,9 @@ let test_system_llm_review_notes_are_metadata_only () =
     false
     (contains_substring notes "secret criterion should stay in the audit store");
   Alcotest.(check bool)
-    "artifact hash remains observable"
+    "artifact reference remains observable"
     true
-    (contains_substring notes "sha256-proof");
-  Alcotest.(check bool)
-    "note hash remains observable"
-    true
-    (contains_substring
-       notes
-       (Digestif.SHA256.(digest_string "secret narrative must not be duplicated" |> to_hex)));
+    (contains_substring notes "artifact:proof.txt");
   Alcotest.(check bool)
     "truncation remains observable"
     true
@@ -1365,19 +1358,15 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
     | VS.Evidence_available
         { items =
             VS.Evidence_artifact
-              { reference = "artifact:artifacts/proof.txt"
-              ; content = "docker-relative-proof"
-              ; content_sha256
-              ; _
-              }
+              { reference = "artifact:artifacts/proof.txt"; content; _ }
             :: VS.Evidence_note "executor summary"
             :: []
         ; _
         } ->
       Alcotest.(check string)
-        "snapshot hash covers persisted bounded content"
-        Digestif.SHA256.(digest_string "docker-relative-proof" |> to_hex)
-        content_sha256
+        "snapshot persists the bounded artifact content"
+        "docker-relative-proof"
+        content
     | _ ->
       (match
          inspect_evidence
@@ -1611,6 +1600,72 @@ let test_submitted_evidence_inspection_rejects_cross_playground_path () =
         } ->
       ()
     | _ -> Alcotest.fail "cross-playground artifact must remain unreadable")
+
+(* Records written before [content_sha256] was dropped still carry it: 58
+   evidence items in the live store are shaped this way. The artifact branch
+   must ignore the extra field rather than reject the record, and it must no
+   longer validate it — the hash below is deliberately wrong, so this decodes
+   only because the check is gone. *)
+let test_submitted_evidence_decodes_legacy_content_sha256 () =
+  with_eio_temp_dir (fun base_path ->
+    let profile_path =
+      Keeper_sandbox_config.keeper_toml_path
+        ~base_path
+        ~agent_name:"keeper-executor-agent"
+    in
+    Fs_compat.mkdir_p (Filename.dirname profile_path);
+    Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\n";
+    let request_id = "vrf-legacy-content-sha256" in
+    let content = "legacy artifact body" in
+    let legacy_snapshot =
+      `List
+        [ `Assoc
+            [ "kind", `String "artifact"
+            ; "reference", `String "artifact:artifacts/legacy.txt"
+            ; "content", `String content
+            ; "bytes", `Int (String.length content)
+            ; "truncated", `Bool false
+            ; ( "content_sha256"
+              , `String (String.make 64 '0') )
+            ]
+        ; `Assoc [ "kind", `String "note"; "content", `String "executor summary" ]
+        ]
+    in
+    (match
+       V.create_request
+         ~base_path
+         ~request_id
+         ~task_id:"task-001"
+         ~output:(`Assoc [ "submitted_evidence", legacy_snapshot ])
+         ~criteria:[ V.Custom "inspect artifact" ]
+         ~worker:"keeper-executor-agent"
+         ()
+     with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    match inspect_evidence ~base_path ~request_id () with
+    | VS.Evidence_available
+        { items =
+            VS.Evidence_artifact
+              { reference; content = decoded; truncated = false; _ }
+            :: VS.Evidence_note "executor summary"
+            :: []
+        ; _
+        } ->
+      Alcotest.(check string)
+        "legacy record keeps its artifact reference"
+        "artifact:artifacts/legacy.txt"
+        reference;
+      Alcotest.(check string)
+        "legacy record keeps its persisted content"
+        content
+        decoded
+    | VS.Evidence_unavailable { reason; _ } ->
+      Alcotest.failf
+        "legacy record was rejected: %s"
+        (VS.evidence_access_failure_to_string ~request_id reason)
+    | VS.Evidence_available _ ->
+      Alcotest.fail "expected the legacy record to decode as artifact + note")
 
 let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
   with_eio_temp_dir (fun base_path ->
@@ -1973,6 +2028,8 @@ let () =
         test_submitted_evidence_inspection_rejects_cross_playground_path;
       Alcotest.test_case "submitted evidence bounded UTF-8" `Quick
         test_submitted_evidence_inspection_is_bounded_and_utf8_safe;
+      Alcotest.test_case "submitted evidence decodes legacy content_sha256" `Quick
+        test_submitted_evidence_decodes_legacy_content_sha256;
       Alcotest.test_case "submitted evidence rejects malformed UTF-8" `Quick
         test_submitted_evidence_rejects_malformed_utf8;
       Alcotest.test_case "submitted evidence rejects symlink and FIFO" `Quick

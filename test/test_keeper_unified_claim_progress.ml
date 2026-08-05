@@ -57,11 +57,10 @@ let test_empty_no_tool_response_is_no_visible_output () =
     (result ~response_text_present:true)
 ;;
 
-let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
+let tool_call_detail ?(outcome = Tool_result.Ok) tool_name : KAR.tool_call_detail =
   { tool_name
   ; provider = "test"
-  ; outcome
-  ; execution_outcome = Tool_result.Ok
+  ; execution_outcome = outcome
   ; typed_outcome = None
   ; latency_ms = 1.0
   ; task_id = None
@@ -71,9 +70,17 @@ let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
   }
 ;;
 
+(* This used to pass ~outcome:"ok_no_progress", a third spelling the producer
+   never emits -- it sets Ok or Error from one success bool. The filter keeps
+   Ok, so any string but "ok" excluded the call, and the test read as though a
+   successful claim could be held back from contract progress. It cannot: on
+   this axis a successful claim is Ok and counts. What the name describes lives
+   on [typed_outcome] ([Keeper_tool_outcome.No_progress]), which this filter
+   does not consult. The cases below use the outcome that genuinely is not
+   progress. *)
 let test_contract_progress_filters_no_progress_tool_results () =
   let no_progress_only =
-    [ tool_call_detail ~outcome:"ok_no_progress" "keeper_task_claim" ]
+    [ tool_call_detail ~outcome:Tool_result.Error "keeper_task_claim" ]
   in
   check
     (list string)
@@ -89,7 +96,7 @@ let test_contract_progress_filters_no_progress_tool_results () =
     (KAR.For_testing.progress_keeper_tool_names_for_contract
        ~actual_keeper_tool_names:[ "keeper_task_claim"; "tool_execute" ]
        ~tool_calls:
-         [ tool_call_detail ~outcome:"ok_no_progress" "keeper_task_claim"
+         [ tool_call_detail ~outcome:Tool_result.Error "keeper_task_claim"
          ; tool_call_detail "tool_execute"
          ])
 ;;

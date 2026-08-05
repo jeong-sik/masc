@@ -200,7 +200,6 @@ let tool_call ?(input = Some "input") ?(output = Some "output") tool_name
     : Masc.Keeper_agent_result.tool_call_detail =
   { tool_name
   ; provider = "test"
-  ; outcome = "ok"
   ; execution_outcome = Tool_result.Ok
   ; typed_outcome = None
   ; latency_ms = 1.

@@ -205,7 +205,6 @@ let tool_call_detail_of_execution tool_name
   in
   { tool_name
   ; provider = "test"
-  ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
   ; execution_outcome
   ; typed_outcome = None
   ; latency_ms = 1.0

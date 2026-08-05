@@ -2,7 +2,7 @@
 
 This file is populated by `scripts/exec_corpus_report.py --write` after a
 5-cal-day observation window with `MASC_EXEC_TAP=1` enabled on a running
-server (`server_runtime_bootstrap.ml`) or worker (`masc_worker_run.ml`).
+server (`server_runtime_bootstrap.ml`).
 
 ## Observation setup
 

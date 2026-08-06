@@ -614,7 +614,17 @@ let judgment_write_schema =
                     ] );
                 ("target_id", `Assoc [ ("type", `String "string") ]);
                 ("summary", `Assoc [ ("type", `String "string") ]);
-                ("confidence", `Assoc [ ("type", `String "number") ]);
+                ( "confidence",
+                  `Assoc
+                    [
+                      ("type", `String "number");
+                      ("minimum", `Float 0.0);
+                      ("maximum", `Float 1.0);
+                      ( "description",
+                        `String
+                          "How sure the judge is, 0.0-1.0. Shown to the \
+                           operator; no code compares it." );
+                    ] );
                 ("fresh_ttl_sec", `Assoc [ ("type", `String "integer") ]);
                 ("keeper_name", `Assoc [ ("type", `String "string") ]);
                 ("model_name", `Assoc [ ("type", `String "string") ]);
@@ -629,7 +639,10 @@ let judgment_write_schema =
                 ("fallback_used", `Assoc [ ("type", `String "boolean") ]);
                 ("disagreement_with_truth", `Assoc [ ("type", `String "boolean") ]);
               ] );
-          ("required", `List [ `String "surface"; `String "target_type"; `String "summary" ]);
+          ("required",
+           `List
+             [ `String "surface"; `String "target_type"; `String "summary";
+               `String "confidence" ]);
         ];
   }
 

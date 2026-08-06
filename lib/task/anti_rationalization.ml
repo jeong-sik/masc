@@ -154,8 +154,9 @@ let lookup_section = function
     sprintf
       "\n\
        <live_lookup>\n\
-       You can read the producer's tree directly with these read-only tools: %s. \
-       They are confined to that producer's root and cannot change anything.\n\n\
+       You hold the producer's own tools, pointed at the producer's tree: %s. \
+       They run inside that producer's sandbox — the same jail the producer \
+       worked in — and they are not restricted to reading.\n\n\
        The snapshot is what was true when the work was submitted. A lookup is what \
        is true now. Both are evidence, and disagreement between them is also \
        evidence: a file the snapshot shows and the tree no longer contains was \
@@ -165,6 +166,14 @@ let lookup_section = function
        and reading the file cannot tell you which of the two you are looking at. \
        Ask what differs from the last commit before treating a file's contents as \
        the completed work.\n\n\
+       A claim about behaviour is not settled by reading the code that makes it. \
+       If the submitter says a build succeeds or a test passes, run it. You are \
+       judging the work, not the description of the work.\n\n\
+       Because these tools can change the tree, one rule binds you: do not repair \
+       what you are judging. If a build fails, that is a finding, not a task. \
+       Fixing it and then approving produces work no one verified — yours. Every \
+       call you make is recorded against this review, so a verdict reached after \
+       you changed the tree is visible as exactly that.\n\n\
        A note claiming a path, a commit, or a command result is still not proof by \
        itself. The difference is that you can now check the claims that name \
        something in the producer's tree, so approving without checking an \

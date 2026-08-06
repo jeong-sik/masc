@@ -30,7 +30,6 @@ function trajectory(): TrajectoryResponse {
         gate: { status: 'pass' },
         result: 'old result',
         duration_ms: 120,
-        cost_usd: 0.002,
       },
     ],
   }

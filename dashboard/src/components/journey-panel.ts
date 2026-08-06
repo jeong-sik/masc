@@ -11,7 +11,7 @@ import {
   fetchKeeperRuntimeTrace,
   type KeeperRuntimeTraceResponse,
 } from '../api/keeper'
-import { formatCost, formatMsCompact } from '../lib/format-number'
+import { formatMsCompact } from '../lib/format-number'
 import { errorToString } from '../lib/format-string'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { keepers } from '../store'
@@ -296,7 +296,6 @@ function WaterfallEntryRow({
               <span class="font-mono text-3xs ${entry.durationMs != null ? durationColor(entry.durationMs) : 'text-[var(--color-fg-disabled)]'}">
                 ${formatMaybeDuration(entry.durationMs)}
               </span>
-              <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${formatCost(entry.costUsd, '$0')}</span>
             </div>
             ${entry.toolArgs
               ? html`<div class="truncate font-mono text-3xs text-[var(--color-fg-muted)]">${formatArgs(entry.toolArgs)}</div>`
@@ -354,9 +353,6 @@ function WaterfallTurnRow({
           <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
             tool time ${formatMaybeDuration(turn.totalDurationMs)}
           </span>
-          <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
-            cost ${formatCost(turn.totalCostUsd, '$0')}
-          </span>
         </div>
       </div>
 
@@ -407,7 +403,6 @@ function WaterfallBody({
         <${MetricCell} label="tools" value=${summary.toolCallCount} tone="ok" />
         <${MetricCell} label="failures" value=${summary.failureCount} tone=${summary.failureCount > 0 ? 'bad' : 'ok'} />
         <${MetricCell} label="tool time" value=${formatMaybeDuration(summary.totalDurationMs)} />
-        <${MetricCell} label="cost" value=${formatCost(summary.totalCostUsd, '$0')} />
       </div>
 
       <div class="flex flex-wrap items-center justify-between gap-2 text-3xs text-[var(--color-fg-muted)]">

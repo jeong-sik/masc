@@ -44,9 +44,6 @@ type context = {
 let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 
-let text_ok ~tool_name ~start_time body : Tool_result.result =
-  Tool_result.ok ~tool_name ~start_time body
-
 let workflow_err_envelope ~tool_name ~start_time ~code msg : Tool_result.result =
   let data =
     Tool_args.error_assoc
@@ -61,20 +58,10 @@ let workflow_err_envelope ~tool_name ~start_time ~code msg : Tool_result.result 
     ~data
     (Yojson.Safe.to_string data)
 
-let workflow_err_plain ~tool_name ~start_time msg : Tool_result.result =
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Workflow_rejection
-    ~start_time
-    msg
-
-let result_to_response ~tool_name ~start_time = function
-  | Ok msg -> text_ok ~tool_name ~start_time msg
-  | Error e ->
-      workflow_err_plain ~tool_name ~start_time
-        (Masc_domain.masc_error_to_string e)
-
-let dedupe_keep_order values =
+(* Not [Json_util.dedupe_keep_order]: that one keeps [""] as a value like
+   any other, and this one drops it. The name says which, so a reader who
+   knows the shared function does not assume this is it. *)
+let dedupe_nonblank_keep_order values =
   let seen = Hashtbl.create (List.length values) in
   List.filter
     (fun value ->
@@ -136,7 +123,8 @@ let agent_name_lookup_candidates raw =
     | None ->
       if String.equal trimmed "" then None else Some (canonical_keeper_agent_name trimmed)
   in
-  dedupe_keep_order ([ trimmed ] @ Option.to_list canonical @ Option.to_list agent_alias)
+  dedupe_nonblank_keep_order
+    ([ trimmed ] @ Option.to_list canonical @ Option.to_list agent_alias)
 
 let metrics_json_with_resolution ~requested ~resolved json =
   match json with

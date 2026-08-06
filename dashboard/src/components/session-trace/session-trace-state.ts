@@ -245,7 +245,6 @@ export function getTraceSummary(agent: string): TraceSummary {
     switch (e.kind) {
       case 'tool_call':
         tool_call_count++
-        total_cost_usd += e.cost_usd ?? 0
         break
       case 'oas_tool':
         oas_tool_count++
@@ -738,7 +737,6 @@ function trajectoryEntryToTrace(
     gate: entry.gate,
     turn: entry.turn,
     round: entry.round,
-    cost_usd: entry.cost_usd,
     executionId: entry.execution_id,
     error: entry.error,
   }

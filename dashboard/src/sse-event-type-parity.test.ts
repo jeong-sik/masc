@@ -51,6 +51,7 @@ const BACKEND_EMITTED: Record<string, string> = {
   post_created: '../lib/keeper_runtime/keeper_event_queue.ml',
   project_snapshot: '../lib/server/server_mcp_transport_ws.ml',
   transport_health_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
+  fusion_run_status: '../lib/fusion/fusion_sink.ml',
 }
 
 // event-type -> why it has no masc backend literal to bind to. Keep short and

@@ -23,7 +23,6 @@ let targets =
   ; "project_transition_outbox_result"
   ; "run_after_ledger_append_hook"
   ; "transition_outbox_result"
-  ; "with_after_ledger_append"
   ]
 ;;
 
@@ -672,8 +671,6 @@ let run () =
       , [ persistence_ml, "project_transition_outbox_result" ] )
     ; "run_after_ledger_append_hook", []
     ; "transition_outbox_result", []
-    ; ( "with_after_ledger_append"
-      , [ ledger_ml, "For_testing.with_after_ledger_append" ] )
     ]
   in
   let declaration_expectations =
@@ -686,8 +683,6 @@ let run () =
       , [ persistence_mli, "project_transition_outbox_result" ] )
     ; "run_after_ledger_append_hook", []
     ; "transition_outbox_result", []
-    ; ( "with_after_ledger_append"
-      , [ ledger_mli, "For_testing.with_after_ledger_append" ] )
     ]
   in
   run_pattern_fixture_tests ();
@@ -716,7 +711,6 @@ let run () =
       , [ ledger_ml, "project_event_queue_transition_outbox_result" ] )
     ; "run_after_ledger_append_hook", []
     ; "transition_outbox_result", []
-    ; "with_after_ledger_append", []
     ];
   List.iter
     (fun (name, expected) ->

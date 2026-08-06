@@ -83,7 +83,6 @@ type graph_node = {
   label : string;
   status : node_status;
   weight : int;
-  semantic_weight : float;
   last_event_at : string;
   meta : Yojson.Safe.t;
 }
@@ -324,7 +323,6 @@ let graph_node_to_yojson (value : graph_node) =
       ("label", `String value.label);
       ("status", `String (node_status_to_string value.status));
       ("weight", `Int value.weight);
-      ("semantic_weight", `Float value.semantic_weight);
       ("last_event_at", `String value.last_event_at);
       ("meta", value.meta);
     ]

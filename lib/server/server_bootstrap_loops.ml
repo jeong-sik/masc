@@ -287,14 +287,10 @@ module Projection_for_testing = struct
 end
 
 let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
-let log_server_fiber_crash =
-  Server_bootstrap_loops_fiber.log_server_fiber_crash
 let log_dashboard_fiber_crash =
   Server_bootstrap_loops_fiber.log_dashboard_fiber_crash
 let filteri_with_fair_yield =
   Server_bootstrap_loops_fiber.filteri_with_fair_yield
-let iteri_with_fair_yield = Server_bootstrap_loops_fiber.iteri_with_fair_yield
-
 type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
   ; queue : Keeper_chat_queue.configure_report

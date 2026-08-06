@@ -370,8 +370,6 @@ let assoc_string_list name json =
       | _ -> None)
   | _ -> []
 
-let health_status_rank = Health_status.rank_string
-
 let max_health_status = Health_status.max_string
 
 let full_health_operator_summary ~keeper_fleet_safety

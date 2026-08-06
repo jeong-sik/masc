@@ -667,6 +667,40 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  (* RFC-0361 D4: read-only snapshot of the completion-authority review registry
+     (in-progress + recently completed). Sibling of the fusion route above and
+     shaped identically; each run serializes through the shared
+     Verification_run_registry.run_to_yojson so the panel and any later SSE delta
+     read one shape. Registry reads are O(runs) in-memory, so no Dashboard_cache
+     layer. *)
+  |> Http.Router.get "/api/v1/dashboard/verification-runs" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let runs =
+           Verification_run_registry.list_runs (Verification_run_registry.global ())
+         in
+         let json =
+           `Assoc
+             [ ("generated_at", `String (Masc_domain.now_iso ()))
+             ; ("count", `Int (List.length runs))
+             ; ("runs", `List (List.map Verification_run_registry.run_to_yojson runs))
+             ]
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/exact-lane-runs" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let runs =
+           Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
+         in
+         let json =
+           `Assoc
+             [ ("generated_at", `String (Masc_domain.now_iso ()))
+             ; ("count", `Int (List.length runs))
+             ; ("runs", `List (List.map Exact_lane_run_registry.run_to_yojson runs))
+             ]
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/workspace" (fun request reqd ->
        with_public_read handle_dashboard_workspace request reqd)
   (* Dev-only Worker bearer for the dashboard UI. Served exclusively when the

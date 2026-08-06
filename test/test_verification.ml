@@ -659,24 +659,60 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
       Atomic.get Workspace_hooks.verification_notify_verdict_fn
     in
     let previous_submitted = Atomic.get Workspace_hooks.verification_submitted_fn in
+    let previous_change_observer =
+      Atomic.get Masc.Verification_run_registry.change_observer_fn
+    in
     Fun.protect
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
-        Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted)
+        Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted;
+        Atomic.set
+          Masc.Verification_run_registry.change_observer_fn
+          previous_change_observer)
       (fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
+          let run_completed, resolve_run_completed = Eio.Promise.create () in
+          let committed_verification_id = ref None in
+          (* The verdict notification fires inside Workspace.commit_verdict_r,
+             which the authority evaluates as an argument to its own [complete]
+             -- so mark_completed necessarily runs after it. That order is not
+             incidental: a failed commit becomes the Commit_failed outcome, so
+             the outcome cannot be known before the commit is attempted. Waiting
+             on the notification and then reading the registry therefore always
+             observes Running. Wait for the registry's own change instead. *)
+          Atomic.set Masc.Verification_run_registry.change_observer_fn (fun () ->
+            previous_change_observer ();
+            match !committed_verification_id with
+            | None -> ()
+            | Some verification_id ->
+              (match
+                 Masc.Verification_run_registry.get
+                   (Masc.Verification_run_registry.global ())
+                   ~verification_id
+               with
+               | Some { status = Masc.Verification_run_registry.Completed _; _ }
+                 when not (Eio.Promise.is_resolved run_completed) ->
+                 Eio.Promise.resolve resolve_run_completed ()
+               | _ -> ()));
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result () ->
+               on_tool_result
+                 ~input:(`Assoc [ "path", `String "evidence.md" ])
+                 (Tool_result.ok
+                    ~tool_name:"verification_read_file"
+                    ~start_time:0.0
+                    "verified evidence");
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some Masc.Task.Anti_rationalization.Approve));
           Atomic.set Workspace_hooks.verification_notify_verdict_fn
             (fun ~task_id ~authority ~verification_id ~decision ->
+               committed_verification_id := Some verification_id;
                previous_notification
                  ~task_id
                  ~authority
@@ -710,6 +746,33 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
           Eio.Promise.await reviewer_called;
           Eio.Promise.await verdict_committed;
+          Eio.Promise.await run_completed;
+          let verification_id =
+            match !committed_verification_id with
+            | Some verification_id -> verification_id
+            | None -> Alcotest.fail "completion notification omitted verification id"
+          in
+          (match
+             Masc.Verification_run_registry.get
+               (Masc.Verification_run_registry.global ())
+               ~verification_id
+           with
+           | Some
+               { status = Masc.Verification_run_registry.Completed { tools = [ tool ]; _ }
+               ; _
+               } ->
+             Alcotest.(check string)
+               "lookup evidence tool"
+               "verification_read_file"
+               tool.tool_name
+           | Some
+               { status = Masc.Verification_run_registry.Completed { tools; _ }
+               ; _
+               } ->
+             Alcotest.failf "expected one lookup observation, got %d" (List.length tools)
+           | Some { status = Masc.Verification_run_registry.Running; _ } ->
+             Alcotest.fail "verification run stayed running after verdict commit"
+           | None -> Alcotest.fail "verification run record was not persisted");
           match W.get_tasks_raw config with
           | [ { task_status = Masc_domain.Done _; _ } ] -> ()
           | [ task ] ->
@@ -829,7 +892,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
           let captured_prompt = ref None in
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ ~lookup:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
                captured_prompt := Some prompt;
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some Masc.Task.Anti_rationalization.Approve));
@@ -998,6 +1061,82 @@ let test_rejected_verdict_audit_preserves_reason () =
         "audit keeps the system authority boundary"
         "system_llm_agent"
         (json |> member "authority_kind" |> to_string))
+
+(* The judging runtime is the only axis a verdict history can be grouped on:
+   [authority_actor] is minted fresh per review, so 74 verdicts carry 74 distinct
+   actors. The runtime was already computed and carried inside the review notes
+   blob, but every structured projection dropped it. *)
+let test_verdict_audit_names_the_judging_runtime () =
+  with_eio_temp_dir (fun base_path ->
+    let config = W.default_config base_path in
+    ignore (W.init config ~agent_name:(Some "runtime-producer"));
+    ignore
+      (W.add_task
+         config
+         ~title:"name the judging runtime"
+         ~priority:1
+         ~description:"the durable audit must say which runtime judged");
+    let backlog = W.read_backlog config in
+    let tasks =
+      List.map
+        (fun (task : Masc_domain.task) ->
+           if String.equal task.id "task-001"
+           then
+             { task with
+               task_status =
+                 Masc_domain.AwaitingVerification
+                   { assignee = "runtime-producer"
+                   ; started_at = "2026-08-05T00:00:00Z"
+                   ; submitted_at = Masc_domain.now_iso ()
+                   ; verification_id = "vrf-runtime-named"
+                   }
+             }
+           else task)
+        backlog.tasks
+    in
+    W.write_backlog config { backlog with tasks };
+    (match
+       W.commit_verdict_r
+         config
+         ~authority:
+           (Masc_domain.System_llm_agent { agent_run_id = "system-runtime-agent" })
+         ~verdict:Masc_domain.Verdict_approved
+         ~task_id:"task-001"
+         ~verification_id:"vrf-runtime-named"
+         ~evaluator_runtime:"cross-verifier-model"
+         ()
+     with
+     | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+     | Ok _ -> ());
+    let open Unix in
+    let tm = gmtime (gettimeofday ()) in
+    let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
+    let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
+    let events_dir = Filename.concat (CU.masc_dir_from_base_path ~base_path) "events" in
+    let event_path = Filename.concat (Filename.concat events_dir month) day in
+    let event =
+      Fs_compat.load_jsonl event_path
+      |> List.find_opt (fun json ->
+        match json with
+        | `Assoc fields ->
+          (match List.assoc_opt "type" fields with
+           | Some (`String value) -> String.equal value "task_completion_verdict"
+           | _ -> false)
+        | _ -> false)
+    in
+    match event with
+    | None -> Alcotest.fail "verdict audit event was not persisted"
+    | Some json ->
+      let open Yojson.Safe.Util in
+      Alcotest.(check string)
+        "audit names the runtime that judged"
+        "cross-verifier-model"
+        (json |> member "evaluator_runtime" |> to_string);
+      Alcotest.(check string)
+        "audit still carries the run-scoped actor"
+        "system-runtime-agent"
+        (json |> member "authority_actor" |> to_string))
+;;
 
 let test_raw_workspace_submission_notifies_once () =
   with_eio_temp_dir (fun base_path ->
@@ -1985,6 +2124,8 @@ let () =
         test_system_llm_agent_uses_persisted_request_contract_snapshot;
       Alcotest.test_case "rejected verdict audit keeps reason" `Quick
         test_rejected_verdict_audit_preserves_reason;
+      Alcotest.test_case "verdict audit names the judging runtime" `Quick
+        test_verdict_audit_names_the_judging_runtime;
     ];
     "workspace_boundary", [
       Alcotest.test_case "raw submit notifies once" `Quick

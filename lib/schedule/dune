@@ -16,6 +16,8 @@
   schedule_service
   schedule_runner
   schedule_runner_status)
+ (flags
+  (:standard -w +4 -w +32))
  (libraries
   digestif
   masc_workspace

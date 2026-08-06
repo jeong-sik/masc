@@ -437,39 +437,93 @@ let run_best_effort
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
       | Some net, Some clock ->
-        (match
-           extract_and_commit_with_exact_output_classified
-             ~clock
-             ~net
-             ~keepers_dir
-             ~keeper_id
-             ~expected_revision
-             inp
+        let registry = Exact_lane_run_registry.global () in
+        let run_id = Random_id.prefixed ~prefix:"exact-librarian-" ~bytes:16 in
+        let started_at = Eio.Time.now clock in
+        let current_fact_count =
+          match inp.current with
+          | None -> 0
+          | Some current -> List.length current.facts
+        in
+        Exact_lane_run_registry.register_running
+          registry
+          ~run_id
+          ~lane:Exact_lane_run_registry.Librarian
+          ~subject_id:trace_id
+          ~actor:keeper_id
+          ~started_at
+          ~input:
+            (`Assoc
+               [ "generation", `Int inp.generation
+               ; "message_count", `Int (List.length inp.messages)
+               ; "current_fact_count", `Int current_fact_count
+               ; "max_recall_fact_bytes", `Int inp.max_recall_fact_bytes
+               ]);
+        let complete outcome output =
+          Exact_lane_run_registry.mark_completed
+            registry
+            ~run_id
+            ~outcome
+            ~elapsed_s:(Eio.Time.now clock -. started_at)
+            ~output
+        in
+        (try
+           match
+             extract_and_commit_with_exact_output_classified
+               ~clock
+               ~net
+               ~keepers_dir
+               ~keeper_id
+               ~expected_revision
+               inp
+           with
+           | Ok snapshot ->
+             complete
+               Exact_lane_run_registry.Succeeded
+               (`Assoc
+                  [ "revision", `Int snapshot.revision
+                  ; "fact_count", `Int (List.length snapshot.facts)
+                  ; "added_count", `Int (List.length snapshot.change.added)
+                  ; "removed_count", `Int (List.length snapshot.change.removed)
+                  ]);
+             cadence_record_success ~keeper_id ~trace_id;
+             Log.Keeper.info
+               ~keeper_name:keeper_id
+               "memory os librarian committed current snapshot revision=%d facts=%d added=%d removed=%d"
+               snapshot.revision
+               (List.length snapshot.facts)
+               (List.length snapshot.change.added)
+               (List.length snapshot.change.removed)
+           | Error error ->
+             let detail = extraction_error_to_string error in
+             complete
+               (Exact_lane_run_registry.Failed
+                  { code = "librarian_failed"; detail })
+               `Null;
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string MemoryOsLibrarianFailures)
+               ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
+               ();
+             let deferred = should_record_cadence_backoff_after_error error in
+             if deferred then cadence_record_attempt ~keeper_id ~trace_id;
+             log_failure_with_snapshot_severity
+               ~keepers_dir
+               ~keeper_id
+               (Printf.sprintf
+                  "memory os librarian failed lane=%s: %s; cadence deferred=%b"
+                  exact_lane_id
+                  detail
+                  deferred)
          with
-         | Ok snapshot ->
-           cadence_record_success ~keeper_id ~trace_id;
-           Log.Keeper.info
-             ~keeper_name:keeper_id
-             "memory os librarian committed current snapshot revision=%d facts=%d added=%d removed=%d"
-             snapshot.revision
-             (List.length snapshot.facts)
-             (List.length snapshot.change.added)
-             (List.length snapshot.change.removed)
-         | Error error ->
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string MemoryOsLibrarianFailures)
-             ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
-             ();
-           let deferred = should_record_cadence_backoff_after_error error in
-           if deferred then cadence_record_attempt ~keeper_id ~trace_id;
-           log_failure_with_snapshot_severity
-             ~keepers_dir
-             ~keeper_id
-             (Printf.sprintf
-                "memory os librarian failed lane=%s: %s; cadence deferred=%b"
-                exact_lane_id
-                (extraction_error_to_string error)
-                deferred))
+         | Eio.Cancel.Cancelled _ as exn ->
+           complete Exact_lane_run_registry.Cancelled `Null;
+           raise exn
+         | exn ->
+           complete
+             (Exact_lane_run_registry.Failed
+                { code = "librarian_raised"; detail = Printexc.to_string exn })
+             `Null;
+           raise exn)
       | _ ->
         Log.Keeper.warn
           ~keeper_name:keeper_id

@@ -520,7 +520,7 @@ let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
      | Ok deleted ->
          Keeper_approval_queue.audit_rule_event
            ~base_path
-           ~event_type:"rule_deleted"
+           ~event_type:Keeper_approval_queue.Rule_deleted
            deleted;
          Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
        | Error error ->

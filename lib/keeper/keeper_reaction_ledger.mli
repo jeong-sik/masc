@@ -154,5 +154,11 @@ module For_testing : sig
     (unit -> 'a) ->
     'a
   (** Scoped post-append fault seam. The callback must invoke the canonical
-      recovery projector; this seam cannot read or retire an outbox itself. *)
+      recovery projector; this seam cannot read or retire an outbox itself.
+
+      This declaration is part of the projection boundary contract that
+      [scripts/keeper_event_queue_projection_boundary_check.ml] enforces: the
+      seam must exist exactly once as a definition and once as a declaration,
+      so the fault path cannot acquire a second entry point. No test calls it,
+      which is why an unused-declaration sweep read it as dead. *)
 end

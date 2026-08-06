@@ -763,7 +763,7 @@ export interface GoalTreeTaskProjection {
 }
 
 export interface GoalTreeActivityProjection {
-  timeline_events: unknown[]
+  timeline_events: GoalDetailTimelineEvent[]
   last_activity_at: string
   stagnation_seconds: number | null
   activity_observation: GoalFsmProjection['activity_observation']

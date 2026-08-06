@@ -315,7 +315,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     (Yojson.Safe.t, string) result =
   let config = ctx.config in
   if not (Workspace.is_initialized config) then
-    let recent_reviews = Operator_review_state.recent_review_decisions_json ~limit:12 config in
     Ok
       (`Assoc
         [
@@ -336,7 +335,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           ("active_summary", summary_of_recommendations ~actor:"dashboard" []);
           ("active_recommended_actions", `List []);
           ("active_recommendation_summary", summary_of_recommendations ~actor:"dashboard" []);
-          ("recent_reviews", recent_reviews);
         ])
   else
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -367,9 +365,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
             ~fallback_observation_summary
             ~empty_recommendation_summary
         in
-        let recent_reviews =
-          Operator_review_state.recent_review_decisions_json ~limit:12 config
-        in
         Ok
           (`Assoc
             ([
@@ -385,7 +380,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
               ("recommendation_summary", active_guidance.recommendation_summary);
               ("workspace", workspace_state_json);
             ]
-            @ [ ("recent_reviews", recent_reviews) ]
             @ active_guidance.fields))
     | Some Operator_action_constants.Keeper
     | Some Operator_action_constants.Goal

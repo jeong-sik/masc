@@ -1,6 +1,5 @@
 (** Runtime-lens clock-edge projection from existing manifest rows. *)
 
-open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 

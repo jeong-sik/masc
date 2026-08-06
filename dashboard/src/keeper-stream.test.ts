@@ -372,6 +372,46 @@ describe('applyKeeperStreamEvent', () => {
     expect(activeStreamRequestId('sangsu')).toBeNull()
   })
 
+  it('finalizes a connector-delivered turn as a terminal status, not a hang', () => {
+    assistantEntry()
+    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: {
+        request_id: 'kmsg_current',
+        reply: 'posted the answer to #ops on Slack',
+        turn_outcome: 'external_effect_completed',
+      },
+    })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_EXTERNAL_EFFECT_COMPLETED',
+      value: null,
+    })).toBeNull()
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        request_id: 'kmsg_current',
+        status: 'done',
+        ok: true,
+      },
+    })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_END',
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('')
+    expect(entry?.rawText).toBe('posted the answer to #ops on Slack')
+    expect(entry?.delivery).toBe('delivered')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.details?.turnOutcome).toBe('external_effect_completed')
+    expect(activeStreamRequestId('sangsu')).toBeNull()
+  })
+
   it('does not leave successful terminal events in a live thinking state without reply details', () => {
     assistantEntry()
     setActiveStreamRequestId('sangsu', 'kmsg_current')

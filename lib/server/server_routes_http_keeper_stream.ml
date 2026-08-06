@@ -3330,7 +3330,6 @@ module For_testing = struct
     queued_delivery_outcome_of_turn_ref
   let committed_delivery_outcome = committed_delivery_outcome
   let empty_reply_delivery_plan = empty_reply_delivery_plan
-  let format_surface_context = format_surface_context
   let surface_context_to_instructions = surface_context_to_instructions
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details
   let keeper_chat_stream_headers = keeper_chat_stream_headers

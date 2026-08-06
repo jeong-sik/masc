@@ -17,4 +17,6 @@
   keeper_tool_outcome)
  (preprocess
   (pps ppx_enumerate))
+ (flags
+  (:standard -w +32))
  (libraries masc_core otel_metric_store time_compat unix yojson))

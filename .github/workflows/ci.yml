@@ -888,7 +888,9 @@ jobs:
             @test/runtest-test_error_body_wire_shape \
             @test/runtest-test_tool_registry_consistency \
             @test/runtest-test_tool_spec \
-            @test/runtest-test_tool_shard_coverage
+            @test/runtest-test_tool_shard_coverage \
+            @test/runtest-test_tool_board_coverage \
+            @test/runtest-test_tool_task_coverage
 
       - name: Run completion-authority lookup surface suite
         # The judge's lookup tools reach the filesystem and Git inside a
@@ -978,6 +980,33 @@ jobs:
         run: |
           opam exec -- dune build --root . \
             @test/runtest-test_jsonl_day_key
+
+      - name: Run operator note lifetime suite
+        # RFC-0366. A note that renders twice is a standing rule the operator
+        # never wrote — the #26729 shape. @check compiles "renders once then
+        # never again" whether or not it holds, so the suite has to run.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_operator_note
+
+      - name: Run prompt capture round-trip suite
+        # The assembled extra system context reaches disk as text here. @check
+        # compiles the cases but does not run them, and "an unknown block id
+        # must not decode short" compiles whether or not it holds. The write
+        # path also degrades to a warning by design, so a broken capture is
+        # silent unless a test exercises it.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_prompt_capture
+
+      - name: Run raw-trace reader containment suite
+        # This surface takes a caller-supplied file name and reads inside a
+        # keeper's directory. @check compiles the containment cases but does not
+        # run them, and "../secret.jsonl must not resolve" compiles whether or
+        # not it holds.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_raw_trace_reader
 
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
@@ -1117,6 +1146,18 @@ jobs:
       # suite asserts routed identities and stored payloads, never source
       # text or log wording. It stayed compile-only under @check, so
       # regression tests added there (#26625, #26657) never ran.
+      - name: Run channel-gate content-length knob suite
+        id: channel_gate_content_length_knob_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_channel_gate_content_length_knob"
+
       - name: Run verification behavior suite
         id: verification_behavior_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

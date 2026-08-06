@@ -23,7 +23,6 @@ import type {
   OperatorGuidanceSummary,
   OperatorJudgment,
   OperatorKeeperSnapshot,
-  OperatorReviewDecision,
   OperatorRecommendedAction,
   OperatorSnapshot,
   OperatorNamespaceSnapshot,
@@ -77,11 +76,6 @@ function normalizeGuidanceSummary(raw: unknown): OperatorGuidanceSummary | null 
   }
 }
 
-function normalizeOperatorReviewDecisionValue(raw: unknown): OperatorReviewDecision['decision'] | null {
-  const decision = asString(raw)?.trim().toLowerCase()
-  return decision === 'resolved' || decision === 'deferred' ? decision : null
-}
-
 function normalizeOperatorDigestTargetType(raw: unknown): OperatorDigest['target_type'] {
   const targetType = asString(raw)?.trim().toLowerCase()
   switch (targetType) {
@@ -92,29 +86,6 @@ function normalizeOperatorDigestTargetType(raw: unknown): OperatorDigest['target
       return targetType
     default:
       return 'root'
-  }
-}
-
-function normalizeReviewDecision(raw: unknown): OperatorReviewDecision | null {
-  if (!isRecord(raw)) return null
-  const itemId = asString(raw.item_id)
-  const fingerprint = asString(raw.fingerprint)
-  const decision = normalizeOperatorReviewDecisionValue(raw.decision)
-  const actor = asString(raw.actor)
-  const reason = asString(raw.reason)
-  const at = asString(raw.at)
-  const targetType = asString(raw.target_type)
-  if (!itemId || !fingerprint || !decision || !actor || !reason || !at || !targetType) return null
-  return {
-    item_id: itemId,
-    fingerprint,
-    decision,
-    actor,
-    reason,
-    at,
-    target_type: targetType,
-    target_id: asString(raw.target_id) ?? null,
-    recommended_action_type: asString(raw.recommended_action_type) ?? null,
   }
 }
 
@@ -170,9 +141,6 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
     recommended_actions: extractArray(root.recommended_actions)
       .map(normalizeRecommendedAction)
       .filter((item): item is OperatorRecommendedAction => item !== null),
-    recent_reviews: extractArray(root.recent_reviews)
-      .map(normalizeReviewDecision)
-      .filter((item): item is OperatorReviewDecision => item !== null),
   }
 }
 

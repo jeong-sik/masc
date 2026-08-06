@@ -7,8 +7,6 @@
 open Masc_domain
 include Workspace_utils
 include Workspace_state
-open Workspace_backlog
-open Workspace_task_id
 include Workspace_broadcast
 open Workspace_backlog
 open Workspace_task_id

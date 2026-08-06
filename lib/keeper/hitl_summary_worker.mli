@@ -55,11 +55,6 @@ module For_testing : sig
     :  entry:Keeper_approval_queue.pending_approval
     -> Yojson.Safe.t
 
-  val messages_for_summary
-    :  system_prompt:string
-    -> context_bundle:Yojson.Safe.t
-    -> Agent_sdk.Types.message list
-
   val parse_summary
     :  generated_at:float
     -> model_run_id:string
@@ -151,7 +146,7 @@ module For_testing : sig
       production [spawn]; the worker does not depend on test-only queue APIs. *)
 
   val flow_evidence : prepared_flow -> Agent_sdk.Exact_output.flow_evidence
-  val success_provenance_matches : Agent_sdk.Exact_output.flow_success -> bool
+
   val summary_version : int
   val lane_id : string
 end

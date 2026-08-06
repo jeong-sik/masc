@@ -151,13 +151,7 @@ module For_testing : sig
   (** Clears the [(path, mtime) -> event list] past-day cache. *)
 
   val current_day_parsed_line_count : unit -> int
-  (** Number of non-blank lines folded through the *incremental delta*
-      path since the last reset (excludes the initial cold-miss full
-      parse and the invalid-UTF-8 / shrink fallback rescans). Lets a
-      test prove that appending [n] lines behind a warm cache parses
-      exactly [n] lines, not the whole file. *)
 
-  val current_day_cache_entry_count : unit -> int
   val past_day_cache_entry_count : unit -> int
 
   val current_day_path : Workspace_utils.config -> string

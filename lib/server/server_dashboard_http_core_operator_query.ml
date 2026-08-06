@@ -4,7 +4,6 @@
     (retention metadata, query echo, surface wrapping, default queries).
     No side effects, no I/O. *)
 
-open Masc_domain
 
 (* Sibling dependencies — already extracted in earlier godfile decomp PRs. *)
 let operator_generated_at_iso = Server_dashboard_http_core_json.operator_generated_at_iso

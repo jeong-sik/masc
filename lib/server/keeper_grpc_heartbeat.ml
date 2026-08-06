@@ -1,6 +1,4 @@
-open Keeper_types
 open Keeper_meta_contract
-open Keeper_keepalive
 
 let grpc_client_ref : Masc_grpc_client.t option Atomic.t = Atomic.make None
 let grpc_env_ref : Eio_unix.Stdenv.base option Atomic.t = Atomic.make None

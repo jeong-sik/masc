@@ -560,13 +560,6 @@ let finalize_spawned_proc ~clock proc status flows =
       else
         reap_proc_with_clock clock proc)
 
-(** Spawn a process with explicit pipes and drain stdout/stderr into buffers
-    before returning.  This avoids a race where [Eio.Process.await] returns
-    (process exited) but the internal copy-fiber that moves pipe data into
-    [buffer_sink] has not finished yet, resulting in truncated/empty output.
-
-    The fix mirrors [Eio.Process.parse_out]: create pipes, close write ends
-    after spawn, read to EOF in parallel fibers, then await the exit status. *)
 let invoke_output_chunk_callback f s =
   try f s with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -600,6 +593,14 @@ let drain_to_eof r acc ~on_chunk =
 
 let ignore_chunk (_ : string) = ()
 
+(** Spawn a process with explicit pipes and drain stdout into [stdout_buf]
+    before returning.  Draining inline (rather than handing the pipe to a
+    background copier) avoids a race where [Eio.Process.await] returns —
+    process exited — while data still sits unread in the pipe, which
+    surfaced as truncated or empty output.
+
+    The shape mirrors [Eio.Process.parse_out]: create pipes, close write ends
+    after spawn, read to EOF, then await the exit status. *)
 let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv stdout_buf =
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
   let proc =
@@ -629,8 +630,11 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
 
 (** Like [spawn_and_drain_stdout] but captures both stdout and stderr into
     separate buffers and returns the process exit status.
-    Drain happens in parallel via [Fiber.both]; [await] is called after
-    both pipes reach EOF, so buffers are guaranteed complete. *)
+    Drain happens in parallel via [Fiber.both]; [await] is called after both
+    pipes reach EOF, so each buffer has seen the whole stream — retaining as
+    much of it as its head/tail caps allow. Each buffer has exactly one
+    draining fiber, which is what [Exec_buffer]'s single-producer contract
+    requires. *)
 let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv stdout_buf
     stderr_buf =
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in

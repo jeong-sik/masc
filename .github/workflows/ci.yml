@@ -955,6 +955,16 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_metric_zero_cell_declaration
 
+      - name: Run library resource topic resolution suite
+        # The topic comes from the client's URI. Before the fix it was
+        # concatenated onto docs/library and read, so library/../<name>
+        # reached a file outside that directory, and the bare "library"
+        # prefix plus a fixed offset of 8 read libraryfoo as topic "oo".
+        # Both cases fail on the pre-fix tree.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_library_resource_topic
+
       - name: Run connector observability label contract
         # These strings are metric label values, so a rename is a wire change
         # that compiles. @check cannot catch that, and test_discord_observability

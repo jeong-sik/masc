@@ -936,6 +936,7 @@
   test_tool_agent_timeline_build
   test_masc_log
   test_dashboard_namespace_truth
+  test_library_resource_topic
   test_dashboard_snapshot
   test_server_runtime_startup_maintenance
   test_server_hibernation
@@ -1088,6 +1089,7 @@
   test_tool_agent_timeline_build
   test_masc_log
   test_dashboard_namespace_truth
+  test_library_resource_topic
   test_dashboard_snapshot
   test_server_runtime_startup_maintenance
   test_server_hibernation

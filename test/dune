@@ -1865,6 +1865,8 @@
 
 (include stanzas/test_keeper_cwd_response.inc)
 
+(include stanzas/test_channel_gate_content_length_knob.inc)
+
 (include stanzas/test_keeper_terminal_reason_typed.inc)
 
 (include stanzas/test_keeper_tool_name.inc)

@@ -46,8 +46,6 @@ let maybe_string_override = Keeper_status_bridge_override.maybe_string_override
 let maybe_bool_override = Keeper_status_bridge_override.maybe_bool_override
 let nonempty_string_list_override =
   Keeper_status_bridge_override.nonempty_string_list_override
-let maybe_string_option_override =
-  Keeper_status_bridge_override.maybe_string_option_override
 
 let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaults)
   : override_field_detail list
@@ -310,11 +308,6 @@ let attention_fields_with_runtime_trust attention_fields runtime_trust =
       (Json_util.string_opt_to_json next_human_action))
 ;;
 
-let trimmed_string_json value =
-  let trimmed = String.trim value in
-  if trimmed = "" then `Null else `String trimmed
-;;
-
 let runtime_surface_json config (meta : keeper_meta) =
   let keepalive_running = runtime_keepalive_running config meta in
   let fiber_health =
@@ -359,13 +352,6 @@ let optional_existing_path_json ?source = function
    dropped from the status payload because there is no runtime JSON
    sibling to point at. Source identity is now fully described by the
    TOML path + the single-arm [source_kind]. *)
-let runtime_catalog_source_fields (resolution : Config_dir_resolver.resolution) =
-  [ ( "runtime_catalog_source_kind"
-    , `String "runtime" )
-  ; "runtime_catalog_source_path", `String resolution.config_root.path
-  ]
-;;
-
 let override_field_source_json ~default_source_kind ~default_manifest_path detail =
   let default_missing =
     match detail.default_value with

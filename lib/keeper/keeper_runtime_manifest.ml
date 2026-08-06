@@ -157,22 +157,6 @@ let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
          int_field_opt "logical_seq" logical_seq;
        ])
 
-let extract_string_field key json =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-    | Some (`String value) -> Some value
-    | _ -> None)
-  | _ -> None
-
-let extract_int_field key json =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-    | Some (`Int value) -> Some value
-    | _ -> None)
-  | _ -> None
-
 let extract_clock_refs decision =
   match decision with
   | `Assoc fields -> List.assoc_opt "clock_refs" fields

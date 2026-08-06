@@ -26,7 +26,18 @@ let normalized_actor ~context_actor = function
       let trimmed = String.trim context_actor in
       if trimmed = "" || String.equal trimmed "unknown" then "unknown" else trimmed
 
-type pending_confirm = Workspace_hooks.operator_pending_confirm_request
+type pending_confirm = Workspace_hooks.operator_pending_confirm_request = {
+  token : string;
+  trace_id : string;
+  actor : string;
+  action_type : string;
+  target_type : string;
+  target_id : string option;
+  payload : Yojson.Safe.t;
+  delegated_tool : string;
+  created_at : string;
+  expires_at : string option;
+}
 
 type pending_confirm_scope = {
   actor_filter : string option;

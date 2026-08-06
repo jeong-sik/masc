@@ -298,11 +298,6 @@ let child_item (root : path_item) name =
   let exists = root.exists && existing_dir path in
   { path; exists; source = root.source }
 
-let file_item (root : path_item) name =
-  let path = Filename.concat root.path name in
-  let exists = root.exists && existing_file path in
-  { path; exists; source = root.source }
-
 let personas_item (inputs : inputs) root =
   match trim_opt inputs.env_personas_dir with
   | Some raw ->

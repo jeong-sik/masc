@@ -232,8 +232,6 @@ let keeper_shard_permission required_permission =
 let keeper_shard_read = keeper_shard_permission Masc_domain.CanReadState
 let keeper_shard_write = keeper_shard_permission Masc_domain.CanBroadcast
 let keeper_shard_add_task = keeper_shard_permission Masc_domain.CanAddTask
-let keeper_shard_vote = keeper_shard_permission Masc_domain.CanVote
-
 (* ================================================================ *)
 (* Explicit metadata registry                                       *)
 (* ================================================================ *)

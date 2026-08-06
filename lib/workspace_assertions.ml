@@ -66,14 +66,6 @@ let check_assertion st assertion =
       ]
 ;;
 
-let state_to_json st =
-  `Assoc
-    [ "task_claimed", `Bool st.task_claimed
-    ; "current_task_set", `Bool st.current_task_set
-    ; "session_active", `Bool false
-    ]
-;;
-
 let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_time ctx args
   =
   let st = inspect_state ctx in

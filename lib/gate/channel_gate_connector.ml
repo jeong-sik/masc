@@ -1,4 +1,4 @@
-(** Channel_gate_connector -- connector interface and registry.
+(** Channel_gate_connector -- connector interface and registry. *)
 
 type ready_info = {
   ready_bot_user_id : string;

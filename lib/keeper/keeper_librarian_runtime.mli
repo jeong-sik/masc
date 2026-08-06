@@ -31,15 +31,14 @@ val exact_lane_id : string
 
 type extraction_error
 
-type extraction_error_kind =
-  | Prompt_render_failure
-  | Execution_clock_unavailable
-  | Exact_setup_failure
-  | Exact_execution_failure
-  | Domain_output_invalid
-  | Memory_snapshot_write_failure
-
-val extraction_error_kind : extraction_error -> extraction_error_kind
+(** Which failure kind this error records in the memory journal. The vocabulary
+    is owned by {!Keeper_memory_os_current} because the journal is the only
+    place it reaches disk; this function is the one place the classification
+    happens, so adding an [extraction_error] case fails to compile until it
+    names its journal kind. *)
+val extraction_error_kind
+  :  extraction_error
+  -> Keeper_memory_os_current.librarian_failure_kind
 val extraction_error_to_string : extraction_error -> string
 val should_record_cadence_backoff_after_error : extraction_error -> bool
 

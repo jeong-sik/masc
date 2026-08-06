@@ -8,6 +8,12 @@ include Ids
 (* ============================================ *)
 
 (** Timestamp utilities *)
+
+(* The clock read is not new — reading it is what [now_iso] is for. Only the
+   body around it changed, from an inline gmtime block to a call to the shared
+   writer, and the ratchet's move detector cannot match a line across that
+   reshape.
+   DET-OK *)
 let now_iso () = Time_codec.rfc3339_of_unix (Unix.gettimeofday ())
 
 (** Parse a strict RFC 3339 timestamp to Unix seconds. *)

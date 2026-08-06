@@ -337,13 +337,25 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
         }
         = options
       in
-      let max_context_resolution =
-        Keeper_context_runtime.resolve_max_context_resolution_of_meta m
-      in
       let context_budget =
-        Keeper_context_runtime.context_budget_json_of_resolution
-          ~runtime_id:(runtime_id_of_meta m)
-          max_context_resolution
+        let runtime_id = runtime_id_of_meta m in
+        match
+          Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+            ~requested_override:m.max_context_override
+            ~runtime_id
+        with
+        | Ok max_context_resolution ->
+            Keeper_context_runtime.context_budget_json_of_resolution
+              ~runtime_id
+              max_context_resolution
+        | Error error ->
+            `Assoc
+              [ ( "runtime_id", `String runtime_id )
+              ; ( "capacity_error"
+                , `String
+                    (Keeper_context_runtime.max_context_resolution_error_to_string
+                       error) )
+              ]
       in
       let base_dir = session_base_dir config in
          let ctx_opt =

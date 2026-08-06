@@ -986,21 +986,28 @@ let test_runtime_budget_source_survives_to_status_json () =
        | _ -> Alcotest.fail "context budget JSON must be an object"))
 ;;
 
-(* Remaining projection path: [resolve_max_context_resolution_of_meta] must
-   prefer the keeper's routed runtime (openai.gpt = 64000), NOT
-   [runtime].default (runpod_mtp.qwen = 128000). Actual turn admission is
-   exercised separately through the strict runtime-ID resolver. *)
+(* The keeper's routed runtime (openai.gpt = 64000) must be preferred over
+   [runtime].default (runpod_mtp.qwen = 128000) through the strict runtime-ID
+   resolver, which is the only remaining capacity path. *)
 let test_of_meta_projection_budgets_against_routed_runtime () =
   with_runtime_initialized (fun () ->
     (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
-    let res =
-      Keeper_context_runtime.resolve_max_context_resolution_of_meta
-        (make_meta "budgettest")
-    in
-    Alcotest.(check int)
-      "of_meta budgets against routed runtime (openai.gpt=64000), not default (128000)"
-      64000
-      res.Keeper_context_runtime.effective_budget)
+    let m = make_meta "budgettest" in
+    let runtime_id = KMC.runtime_id_of_meta m in
+    match
+      Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+        ~requested_override:m.max_context_override
+        ~runtime_id
+    with
+    | Error error ->
+        Alcotest.failf
+          "budgettest routed runtime must resolve: %s"
+          (Keeper_context_runtime.max_context_resolution_error_to_string error)
+    | Ok res ->
+        Alcotest.(check int)
+          "of_meta budgets against routed runtime (openai.gpt=64000), not default (128000)"
+          64000
+          res.Keeper_context_runtime.effective_budget)
 ;;
 
 (* ---- per-model thinking gate: runtime.toml [thinking-support] drives the

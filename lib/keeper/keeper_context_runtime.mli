@@ -177,8 +177,6 @@ val resolve_max_context_resolution
   -> string list
   -> max_context_resolution
 
-val resolve_max_context_resolution_of_meta : keeper_meta -> max_context_resolution
-
 val resolve_max_context_resolution_for_runtime_id
   :  requested_override:int option
   -> runtime_id:string

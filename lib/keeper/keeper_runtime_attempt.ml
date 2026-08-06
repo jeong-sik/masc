@@ -156,7 +156,9 @@ let sdk_error_to_runtime_outcome err =
               what this arm exists to stop. *)
            Llm_provider.Http_client.TimeoutError
              { message
-             ; phase =
+             ; (* DET-OK: see the block above — [Unknown_timeout] is the SDK's
+                  unattributed-timeout constructor, not a stand-in default. *)
+               phase =
                  Option.value phase ~default:Llm_provider.Http_client.Unknown_timeout
              }
        in

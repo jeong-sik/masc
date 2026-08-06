@@ -254,7 +254,6 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
           supports_seed_with_images: true,
           supports_code_execution: true,
         },
-        match_prefixes: [`${modelName}-`],
       },
       binding: {
         provider_id: runtimeId.split('.')[0],

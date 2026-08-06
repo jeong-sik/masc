@@ -3238,7 +3238,6 @@ describe('fetchRuntimeProviders', () => {
                   supports_computer_use: false,
                   supports_code_execution: true,
                 },
-                match_prefixes: ['Qwen/'],
               },
               binding: {
                 provider_id: 'runpod_mtp',

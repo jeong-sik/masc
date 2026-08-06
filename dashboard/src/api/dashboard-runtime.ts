@@ -134,7 +134,6 @@ export interface DashboardRuntimeDeclaredModelSpec {
   top_k?: number | null
   min_p?: number | null
   capabilities?: DashboardRuntimeDeclaredModelCapabilities | null
-  match_prefixes: string[]
 }
 
 export interface DashboardRuntimeDeclaredBindingSpec {
@@ -600,7 +599,6 @@ function decodeRuntimeDeclaredModelSpec(raw: unknown): DashboardRuntimeDeclaredM
     top_k: asNumber(raw.top_k) ?? null,
     min_p: asNumber(raw.min_p) ?? null,
     capabilities: decodeRuntimeDeclaredModelCapabilities(raw.capabilities),
-    match_prefixes: asStringArray(raw.match_prefixes),
   }
 }
 

@@ -196,19 +196,6 @@ let save_worker_meta ~base_path ~worker_name
     Error
       (sprintf "failed to save worker meta for %s: %s" worker_name msg)
 
-let worker_container_state ~base_path ~worker_name =
-  let meta_exists =
-    Sys.file_exists (worker_meta_path ~base_path ~worker_name)
-  in
-  let checkpoint_exists =
-    Sys.file_exists
-      (worker_checkpoint_path ~base_path ~worker_name)
-  in
-  match meta_exists, checkpoint_exists with
-  | false, false -> Worker_missing
-  | _, true -> Worker_ready
-  | true, false -> Worker_pending
-
 let load_worker_checkpoint ~base_path ~worker_name =
   let path =
     worker_checkpoint_path ~base_path ~worker_name
@@ -288,37 +275,6 @@ let resolved_mcp_session_id ~base_path ~worker_name =
   match load_worker_meta ~base_path ~worker_name with
   | Some meta when String.trim meta.mcp_session_id <> "" -> meta.mcp_session_id
   | _ -> stable_worker_session_id worker_name
-
-let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
-    ~worker_name =
-  let interval = local_worker_heartbeat_interval_sec () in
-  match (interval, Eio_context.get_clock_opt ()) with
-  | interval, _ when interval <= 0 -> fun () -> ()
-  | _, None -> fun () -> ()
-  | interval, Some clock ->
-      let active = ref true in
-      Eio.Fiber.fork ~sw (fun () ->
-          let rec loop () =
-            if !active then (
-              Eio.Time.sleep clock (float_of_int interval);
-              if !active then (
-                match
-                  call_masc_tool ~sw ~auth_token ~session_id
-                    ~tool_name:"masc_heartbeat" ~args:(`Assoc [])
-                with
-                | Ok _ -> ()
-                | Error e ->
-                    Log.LocalWorker.warn "heartbeat error for %s: %s"
-                      worker_name e;
-                loop ()))
-          in
-          try loop ()
-          with
-          | Eio.Cancel.Cancelled _ as ex -> raise ex
-          | exn ->
-            Log.LocalWorker.error "heartbeat loop error for %s: %s"
-              worker_name (Printexc.to_string exn));
-      fun () -> active := false
 
 let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
   let allowed_names = session_min_tool_names in

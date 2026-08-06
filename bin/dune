@@ -242,40 +242,6 @@
   agent_sdk
   agent_sdk.llm_provider))
 
-(executable
- (name masc_worker_run)
- (modules masc_worker_run)
- (public_name masc-worker-run)
- (package masc)
- (libraries
-  masc
-  masc.crypto_rng
-  masc.dashboard
-  masc.server
-  masc.worker_execution_spec
-  yojson
-  unix
-  eio_main
-  eio
-  masc_core
-  masc_types
-  fs_compat
-  time_compat
-  masc_log
-  masc_workspace
-  masc_backend
-  masc_process
-  masc_eio_context
-  fmt
-  str
-  httpun
-  cohttp
-  cohttp-eio
-  masc.prompt_registry
-  masc.mcp_transport_protocol
-  agent_sdk
-  agent_sdk.llm_provider))
-
 ; RFC-0057 Phase 2 — tool descriptor codegen for lib/tool_schemas/.
 ; Depends on tool_schemas_specs (types-only sibling library) to share
 ; spec records with future schema-lint / doc-gen tooling. The cycle is

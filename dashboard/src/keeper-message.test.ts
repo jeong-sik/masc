@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   formatKeeperVisibleReply,
+  keeperTurnOutcomeSuppressesReply,
   normalizeKeeperConversationDetails,
   normalizeKeeperToolResponse,
 } from './keeper-message'
@@ -211,6 +212,34 @@ describe('normalizeKeeperConversationDetails', () => {
     })
     expect(result?.turnOutcome).toBe('external_effect_pending')
     expect(result?.replyText).toBeNull()
+  })
+
+  it('decodes the typed connector delivery without reply prose', () => {
+    const result = normalizeKeeperConversationDetails({
+      reply: '',
+      turn_outcome: 'external_effect_completed',
+    })
+    expect(result?.turnOutcome).toBe('external_effect_completed')
+    expect(result?.replyText).toBeNull()
+  })
+})
+
+// ================================================================
+// keeperTurnOutcomeSuppressesReply
+// ================================================================
+
+describe('keeperTurnOutcomeSuppressesReply', () => {
+  it('suppresses terminal control outcomes, including connector delivery', () => {
+    expect(keeperTurnOutcomeSuppressesReply('continuation_checkpoint')).toBe(true)
+    expect(keeperTurnOutcomeSuppressesReply('external_effect_pending')).toBe(true)
+    expect(keeperTurnOutcomeSuppressesReply('external_effect_completed')).toBe(true)
+    expect(keeperTurnOutcomeSuppressesReply('no_visible_reply')).toBe(true)
+  })
+
+  it('does not suppress a visible reply or a missing outcome', () => {
+    expect(keeperTurnOutcomeSuppressesReply('visible_reply')).toBe(false)
+    expect(keeperTurnOutcomeSuppressesReply(null)).toBe(false)
+    expect(keeperTurnOutcomeSuppressesReply(undefined)).toBe(false)
   })
 })
 

@@ -34,7 +34,6 @@ lib/keeper/keeper_tool_memory_runtime.ml:34
 lib/keeper/keeper_tool_persona_runtime.ml::optional_resolved_string
 lib/keeper/keeper_lifecycle_hooks.ml:56
 lib/keeper/keeper_meta_contract.ml:231
-lib/local/worker_container_types.ml:153
 lib/mcp_prompt_surface.ml:63
 lib/metrics_store_eio.ml:221
 lib/multimodal/multimodal_keeper_bridge.ml:18
@@ -48,6 +47,3 @@ lib/server/server_routes_http_routes_attribution.ml:19
 lib/tool_call_quality_benchmark/tool_call_quality_benchmark_scoring.ml:54
 lib/tool_library.ml:69
 lib/transport.ml:57
-lib/worker_execution_backend/worker_execution_backend.ml:13
-lib/worker_execution_spec/worker_execution_spec.ml:33
-lib/worker_runtime_helper_protocol.ml:24

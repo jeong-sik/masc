@@ -1,7 +1,6 @@
 (** IDE Bridge — collects Keeper activity events and surfaces them in
     the [.masc-ide/] partition structure for IDE consumption. *)
 
-open Ide_event_types
 
 type event_kind =
   | Tool

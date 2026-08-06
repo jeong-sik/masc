@@ -185,8 +185,13 @@ let sdk_api_error_fields = function
     ; "message", `String message
     ; "network_kind", `String (Keeper_agent_error.network_error_kind_to_wire kind)
     ]
-  | Agent_sdk.Retry.Timeout { message } ->
-    [ "variant", `String "timeout"; "message", `String message ]
+  | Agent_sdk.Retry.Timeout { message; phase } ->
+    [ "variant", `String "timeout"
+    ; "message", `String message
+    ; ( "timeout_phase"
+      , Json_util.string_opt_to_json
+          (Option.map Llm_provider.Http_client.timeout_phase_to_label phase) )
+    ]
 ;;
 
 let sdk_agent_error_fields = function

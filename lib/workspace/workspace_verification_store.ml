@@ -515,6 +515,32 @@ let strip_prefix ~prefix value =
          (String.length value - String.length prefix))
   else None
 
+(* The shape this store can read, decided without touching the filesystem.
+   [snapshot_submitted_evidence_item] below is the only producer of evidence
+   snapshots and answers [Evidence_invalid_reference] for anything else, so the
+   submit boundaries ask this instead of restating the prefixes: a reference
+   form added here reaches every caller, and one cannot be accepted at submit
+   and then be unreadable at review. *)
+type reference_form =
+  | Artifact_reference of string
+  | Note_reference of string
+  | Unresolvable_reference
+
+let classify_evidence_reference reference =
+  match strip_prefix ~prefix:artifact_reference_prefix reference with
+  | Some relative_path -> Artifact_reference relative_path
+  | None ->
+    (match strip_prefix ~prefix:note_reference_prefix reference with
+     | Some note when not (String.equal (String.trim note) "") ->
+       Note_reference note
+     | Some _ | None -> Unresolvable_reference)
+;;
+
+let resolvable_reference_forms =
+  [ artifact_reference_prefix ^ "<producer-root-relative-path>"
+  ; note_reference_prefix ^ "<text>"
+  ]
+
 let valid_producer_relative_path path =
   Filename.is_relative path
   && not (String.equal path "")
@@ -544,18 +570,15 @@ let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_pa
       Evidence_artifact { reference; content; bytes; truncated }
 
 let snapshot_submitted_evidence_item ~base_path ~worker reference =
-  match strip_prefix ~prefix:artifact_reference_prefix reference with
-  | Some relative_path ->
+  match classify_evidence_reference reference with
+  | Artifact_reference relative_path ->
     inspect_producer_relative_artifact
       ~base_path
       ~worker
       ~reference
       relative_path
-  | None ->
-    (match strip_prefix ~prefix:note_reference_prefix reference with
-     | Some note when not (String.equal (String.trim note) "") ->
-       Evidence_note note
-     | Some _ | None -> Evidence_invalid_reference)
+  | Note_reference note -> Evidence_note note
+  | Unresolvable_reference -> Evidence_invalid_reference
 
 let snapshot_submitted_evidence_json ~base_path ~worker references =
   `List

@@ -159,12 +159,17 @@ let taskboard_tools : Masc_domain.tool_schema list =
                       ; "minItems", `Int 1
                       ; ( "description"
                         , `String
-                            "Trusted references substantiating completion. At least \
-                             one reference must validate against local state: an \
-                             existing base-path file/file:// URI, local git commit \
-                             hash, or .masc trace/turn/receipt ref that resolves on \
-                             disk. Result text, URLs, PR numbers, and trace-shaped \
-                             labels alone do not satisfy the task-completion gate." )
+                            "Trusted references substantiating completion. Every \
+                             entry must be artifact:<producer-root-relative-path> \
+                             or note:<text>; nothing else can be read back at \
+                             review, so this tool refuses it here rather than \
+                             letting the reviewer see missing evidence. An \
+                             artifact: path is opened and snapshotted, and that \
+                             is what satisfies the completion gate. A Board post \
+                             id, a commit, a PR number, or a file:// URI is \
+                             narrative until something opens it: pass it as \
+                             note:<text> next to an artifact: entry, never on \
+                             its own." )
                       ] )
                 ; ( "notes"
                   , `Assoc

@@ -11,7 +11,7 @@
     cardinality counts + token/cost rollups.
 
     Internal: 11 helpers + 1 type stay private —
-    \[parse_iso_timestamp] (shared RFC 3339 codec adapter),
+    [parse_iso_timestamp] (shared RFC 3339 codec adapter),
     [timeline_event] type + [event_to_json], the 5 source
     extractors ([agent_events], [task_events], [message_events],
     [tool_call_events],

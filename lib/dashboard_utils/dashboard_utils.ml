@@ -41,12 +41,6 @@ let list_field key json =
   | `List items -> items
   | _ -> []
 
-let severity_rank s =
-  match String.lowercase_ascii s with
-  | "bad" | "risk" | "critical" -> 2
-  | "warn" | "watch" | "interrupted" | "degraded" -> 1
-  | _ -> 0
-
 let status_rank = function
   | "busy" -> 4
   | "active" -> 3

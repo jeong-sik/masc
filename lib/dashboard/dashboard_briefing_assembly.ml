@@ -247,7 +247,7 @@ let build_internal_signals incidents actions =
     |> List.map (fun incident ->
            let action = List.find_opt (action_matches_incident incident) actions in
            {
-             pressure_rank = severity_rank (string_field ~default:"warn" "severity" incident);
+             pressure_rank = Operator_digest_types.severity_rank_of_string (string_field ~default:"warn" "severity" incident);
              last_seen_ts = 0.0;
              json =
                `Assoc
@@ -277,7 +277,7 @@ let build_internal_signals incidents actions =
            not (List.mem (action_identity action) matched_internal_action_keys))
     |> List.map (fun action ->
            {
-             pressure_rank = severity_rank (string_field ~default:"warn" "severity" action);
+             pressure_rank = Operator_digest_types.severity_rank_of_string (string_field ~default:"warn" "severity" action);
              last_seen_ts = 0.0;
              json =
                `Assoc

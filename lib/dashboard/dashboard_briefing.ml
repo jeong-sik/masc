@@ -97,7 +97,11 @@ let build_attention_queue incidents actions =
                    ];
              })
   |> List.sort (fun left right ->
-         let by_severity = Int.compare (severity_rank right.severity) (severity_rank left.severity) in
+         let by_severity =
+           Int.compare
+             (Operator_digest_types.severity_rank_of_string right.severity)
+             (Operator_digest_types.severity_rank_of_string left.severity)
+         in
          if by_severity <> 0 then by_severity
          else Bool.compare right.has_action left.has_action)
 
@@ -167,8 +171,10 @@ let build_projection ?actor ~config ~sw ~clock
     list_field "attention_items" digest_json
     |> List.sort (fun left right ->
            Int.compare
-             (severity_rank (string_field ~default:"ok" "severity" right))
-             (severity_rank (string_field ~default:"ok" "severity" left)))
+             (Operator_digest_types.severity_rank_of_string
+                (string_field ~default:"ok" "severity" right))
+             (Operator_digest_types.severity_rank_of_string
+                (string_field ~default:"ok" "severity" left)))
   in
   let recommended_actions = list_field "recommended_actions" digest_json in
   let attention_queue = build_attention_queue incidents recommended_actions in

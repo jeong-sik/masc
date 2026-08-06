@@ -298,6 +298,34 @@ let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidenc
       check bool "no observed tools without evidence" true
         ((brief |> member "latest_tool_names" |> to_list) = []))
 
+(* A serialized severity is ranked by decoding it back to [operator_severity].
+   The string ranker this replaced mapped "critical" and "bad" to the same
+   value, so a critical attention item sorted no higher than a bad one — while
+   the typed [Operator_digest_types.severity_rank] has always separated them
+   (3 vs 2). *)
+let test_internal_signals_rank_critical_above_bad () =
+  let workspace = Lib.Operator_action_constants.workspace_target_type in
+  let incident kind severity =
+    `Assoc
+      [ ("kind", `String kind)
+      ; ("severity", `String severity)
+      ; ("summary", `String (kind ^ " summary"))
+      ; ("target_type", `String workspace)
+      ; ("target_id", `Null)
+      ]
+  in
+  let signals =
+    Dashboard_briefing_assembly.build_internal_signals
+      [ incident "warn_one" "warn"; incident "bad_one" "bad"; incident "critical_one" "critical" ]
+      []
+  in
+  let open Yojson.Safe.Util in
+  let order = signals |> List.map (fun row -> to_string (member "summary" row)) in
+  Alcotest.(check (list string))
+    "critical sorts above bad, bad above warn"
+    [ "critical_one summary"; "bad_one summary"; "warn_one summary" ]
+    order
+
 let test_dashboard_keeper_unknown_context_is_informational () =
   let dir = test_dir () in
   Fun.protect
@@ -413,5 +441,7 @@ let () =
             test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidence;
           Alcotest.test_case "unknown keeper context is informational" `Quick
             test_dashboard_keeper_unknown_context_is_informational;
+          Alcotest.test_case "internal signals rank critical above bad" `Quick
+            test_internal_signals_rank_critical_above_bad;
         ] );
     ]

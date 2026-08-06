@@ -744,9 +744,26 @@ let client_matches_target target ~jsonrpc_payload (client : client) =
     are called synchronously after SSE fan-out completes, receiving the
     formatted SSE event string. *)
 
+type external_event = {
+  ext_frame : string;
+      (** The SSE wire framing of this event. Kept for subscribers that
+          forward the frame verbatim; a subscriber that wants the data
+          should read {!ext_payload} instead of parsing this back out. *)
+  ext_payload : Yojson.Safe.t;
+      (** The value passed to [broadcast], before framing. Handing this over
+          is what keeps a non-SSE transport off the serialize→parse→serialize
+          round trip: the WebSocket relay used to recover this by scanning
+          [ext_frame] for its [data:] field and calling
+          [Yojson.Safe.from_string] once per broadcast. *)
+  ext_event_id : int;
+  ext_emitted_at : float;
+      (** Broadcast time, so every transport stamps one logical emission
+          moment rather than its own arrival time. *)
+}
+
 type external_subscriber = {
   sub_id: string;
-  callback: string -> unit;
+  callback: external_event -> unit;
   is_alive: unit -> bool;
   (** Returns false if the subscriber should be removed.
       Called before each broadcast delivery. *)
@@ -857,7 +874,7 @@ let remove_external_subscribers ids =
           result = (removed_ids, next_count);
         })
 
-(** Fan out an event string to all external subscribers.
+(** Fan out an event to all external subscribers.
     Dead subscribers (where [is_alive] returns [false]) are automatically
     removed during iteration, preventing resource leaks. *)
 let notify_external_subscribers event =
@@ -949,8 +966,33 @@ let reap_dead_external_subscribers () =
 
     After SSE fan-out, external subscribers (gRPC streams, etc.) are
     notified with the delivery's formatted frame. *)
-let broadcast_impl ?(buffer = true) ?(notify_external = true)
-    ?(event_type = "message") target json =
+(* A broadcast that buffers nothing, notifies no external subscriber, and has
+   no session of its target kind is unobservable — yet it still paid for a full
+   [format_event_yojson] under the global fanout mutex before discovering that.
+
+   Presence is the live shape of this. It is bufferless by construction and
+   [notify_external:false], so a fleet with no presence session is serializing
+   for nobody. Measured on the live fleet 2026-08-06: broadcast_count 15,928
+   against external_fanout_count 10,905, with sessions_presence = 0.
+
+   The [count = 0] test is O(1) and covers a fleet with no SSE session at all;
+   the [SMap.exists] fallback short-circuits on the first presence session, so
+   a fleet that does have one pays a scan only until it finds it. *)
+let broadcast_is_unobservable target ~buffer ~notify_external =
+  (not buffer)
+  && (not notify_external)
+  &&
+  match target with
+  | Presence_only ->
+    let state = Atomic.get clients in
+    state.count = 0
+    || not
+         (SMap.exists
+            (fun _ (client : client) -> client.kind = Presence)
+            state.entries)
+  | All | Observers | Agent_streams -> false
+
+let broadcast_deliver ~buffer ~notify_external ~event_type target json =
   let t0 = Time_compat.now () in
   let jsonrpc_payload =
     Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream json
@@ -1045,7 +1087,18 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
   (* Notify external subscribers (gRPC streams, etc.) for durable broadcast
      traffic only. Presence is intentionally live-only and bufferless. *)
   if notify_external then
-    notify_external_subscribers delivery.frame
+    notify_external_subscribers
+      { ext_frame = delivery.frame
+      ; ext_payload = delivery.payload
+      ; ext_event_id = delivery.event_id
+      ; ext_emitted_at = delivery.emitted_at
+      }
+
+let broadcast_impl ?(buffer = true) ?(notify_external = true)
+    ?(event_type = "message") target json =
+  if broadcast_is_unobservable target ~buffer ~notify_external
+  then Transport_metrics.inc_sse_broadcast_skipped_no_observer ()
+  else broadcast_deliver ~buffer ~notify_external ~event_type target json
 
 (** Broadcast event to all connected clients (backward-compatible). *)
 let broadcast json = broadcast_impl All json

@@ -64,6 +64,11 @@ val inc_broadcast_failure : ?target:string -> unit -> unit
     Counter is intentionally unlabelled because subscriber id is
     high-cardinality (gRPC stream id); operators correlate via
     the warn log line. *)
+val inc_sse_broadcast_skipped_no_observer : unit -> unit
+(** A broadcast was skipped because nothing could observe it: bufferless, no
+    external subscriber, and no session of the target kind. Non-zero here is
+    the amount of serialization the fanout mutex no longer performs. *)
+
 val inc_external_subscriber_callback_failure : unit -> unit
 
 (** Records the synchronous duration of

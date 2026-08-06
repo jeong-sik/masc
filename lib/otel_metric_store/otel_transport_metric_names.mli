@@ -8,6 +8,10 @@ val metric_sse_sessions : string
 val metric_sse_broadcast_duration : string
 val metric_sse_broadcast_events : string
 val metric_sse_broadcast_failures : string
+val metric_sse_broadcast_skipped_no_observer : string
+(** Broadcasts short-circuited because nothing could observe them: bufferless,
+    no external subscriber, and no session of the target kind. *)
+
 val metric_sse_external_subscriber_callback_failures : string
 val metric_sse_external_fanout_duration_seconds : string
 val metric_oas_sse_relay_drop_marker_failures : string

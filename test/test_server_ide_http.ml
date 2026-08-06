@@ -542,7 +542,8 @@ let test_post_cursors_broadcasts_ws_invalidation () =
     let subscriber_id = "test-ide-cursor-ws-invalidation" in
     let received = ref [] in
     Sse.subscribe_external ~id:subscriber_id
-      ~callback:(fun frame -> received := frame :: !received)
+      ~callback:(fun (ev : Sse.external_event) ->
+        received := ev.Sse.ext_frame :: !received)
       ();
     Fun.protect
       ~finally:(fun () -> Sse.unsubscribe_external subscriber_id)
@@ -576,7 +577,8 @@ let test_hook_cursors_broadcast_ws_invalidation () =
     let subscriber_id = "test-hook-cursor-ws-invalidation" in
     let received = ref [] in
     Sse.subscribe_external ~id:subscriber_id
-      ~callback:(fun frame -> received := frame :: !received)
+      ~callback:(fun (ev : Sse.external_event) ->
+        received := ev.Sse.ext_frame :: !received)
       ();
     Fun.protect
       ~finally:(fun () -> Sse.unsubscribe_external subscriber_id)

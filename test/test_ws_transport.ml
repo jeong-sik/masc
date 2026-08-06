@@ -270,180 +270,91 @@ let test_dashboard_route_scoped_slices_are_valid () =
    cover correctness of the parse output — the cache is transparent and
    must never produce a different logical result. *)
 
-let test_parse_sse_dashboard_event_known_type () =
-  let event_str =
-    Yojson.Safe.to_string
-      (`Assoc [
-        ("type", `String "execution_snapshot");
-        ("payload", `Assoc [("keepers", `Int 3)]);
-      ])
-    |> sse_frame
-  in
-  match Ws.parse_sse_dashboard_event event_str with
+(* The bus hands the broadcast value over directly, so what used to be
+   "parse an SSE frame" is now "read the payload". The frame-shaped cases that
+   lived here — malformed JSON in a data: line, a missing data: line, multi-line
+   frame assembly — tested a round trip this transport no longer performs, and
+   the two cache cases tested a cache that no longer exists. *)
+(* One bus emission, shared by every subscriber in a fanout: the payload cache
+   is keyed by the physical frame reference, so reusing this value across two
+   calls is what lets a test observe the cache rather than a re-serialization. *)
+let external_event_of_payload payload : Masc.Sse.external_event =
+  { ext_frame = Yojson.Safe.to_string payload
+  ; ext_payload = payload
+  ; ext_event_id = 1
+  ; ext_emitted_at = 0.
+  }
+
+let dashboard_event payload =
+  Ws.dashboard_event_of_external (external_event_of_payload payload)
+
+let test_dashboard_event_known_type () =
+  match
+    dashboard_event
+      (`Assoc
+        [ ("type", `String "execution_snapshot")
+        ; ("payload", `Assoc [ ("keepers", `Int 3) ])
+        ])
+  with
   | Some parsed ->
       Alcotest.(check string) "event_type preserved"
-        "execution_snapshot" parsed.event_type;
+        "execution_snapshot" parsed.Ws.event_type;
       Alcotest.(check (option string)) "execution_snapshot maps to execution"
-        (Some "execution") parsed.slice
-  | None -> Alcotest.fail "expected parsed event"
+        (Some "execution") parsed.Ws.slice
+  | None -> Alcotest.fail "expected derived event"
 
-let test_parse_sse_dashboard_event_composite_change_maps_to_composite () =
-  let event_str =
-    Yojson.Safe.to_string
-      (`Assoc [
-        ("type", `String "keeper_composite_changed");
-        ("name", `String "qa-king");
-        ("ts_unix", `Float 1_774_000_000.0);
-      ])
-    |> sse_frame
-  in
-  match Ws.parse_sse_dashboard_event event_str with
+let test_dashboard_event_composite_change_maps_to_composite () =
+  match
+    dashboard_event
+      (`Assoc
+        [ ("type", `String "keeper_composite_changed")
+        ; ("name", `String "qa-king")
+        ; ("ts_unix", `Float 1_774_000_000.0)
+        ])
+  with
   | Some parsed ->
-      Alcotest.(check string) "event_type preserved"
-        "keeper_composite_changed" parsed.event_type;
-      Alcotest.(check (option string)) "composite change maps to composite"
-        (Some "composite") parsed.slice
-  | None -> Alcotest.fail "expected parsed composite event"
+      Alcotest.(check (option string)) "composite slice"
+        (Some "composite") parsed.Ws.slice
+  | None -> Alcotest.fail "expected derived composite event"
 
-let test_parse_sse_dashboard_event_unknown_type () =
-  let event_str =
-    Yojson.Safe.to_string
-      (`Assoc [("type", `String "not.a.real.event"); ("payload", `Null)])
-    |> sse_frame
-  in
-  match Ws.parse_sse_dashboard_event event_str with
+let test_dashboard_event_unknown_type () =
+  match
+    dashboard_event
+      (`Assoc [ ("type", `String "not.a.real.event"); ("payload", `Null) ])
+  with
   | Some parsed ->
       Alcotest.(check (option string)) "no slice for unknown type"
-        None parsed.slice
+        None parsed.Ws.slice
   | None -> Alcotest.fail "expected Some with slice=None, not outright None"
 
-let test_parse_sse_dashboard_event_malformed () =
-  let result = Ws.parse_sse_dashboard_event "data: not-valid-json{\n\n" in
-  Alcotest.(check bool) "malformed yields None"
-    true (Option.is_none result)
+(* A payload that is not a typed dashboard object yields None rather than a
+   half-built delta. *)
+let test_dashboard_event_untyped_payload () =
+  Alcotest.(check bool) "no type field yields None" true
+    (Option.is_none (dashboard_event (`Assoc [ ("payload", `Int 1) ])));
+  Alcotest.(check bool) "non-object yields None" true
+    (Option.is_none (dashboard_event (`String "not an object")))
 
-let test_parse_sse_dashboard_event_stable_on_repeat () =
-  let event_str =
-    Yojson.Safe.to_string
-      (`Assoc [("type", `String "execution_snapshot"); ("payload", `Int 1)])
-    |> sse_frame
+(* The delta stamps the bus emission time, so two sessions handled at different
+   moments in one fanout still agree. The old code called Time_compat.now () at
+   parse time and depended on the cache to keep them equal. *)
+let test_dashboard_event_uses_bus_emission_time () =
+  let ev : Masc.Sse.external_event =
+    { ext_frame = ""
+    ; ext_payload = `Assoc [ ("type", `String "execution_snapshot") ]
+    ; ext_event_id = 7
+    ; ext_emitted_at = 1_774_000_000.5
+    }
   in
-  let extract = function
-    | Some (p : Ws.parsed_sse_event) -> Some (p.event_type, p.slice)
-    | None -> None
-  in
-  let a = extract (Ws.parse_sse_dashboard_event event_str) in
-  let b = extract (Ws.parse_sse_dashboard_event event_str) in
-  Alcotest.(check (option (pair string (option string))))
-    "repeat returns same shape" a b
-
-let test_parse_sse_dashboard_event_invalidated_on_new_ref () =
-  let e1 =
-    Yojson.Safe.to_string
-      (`Assoc [("type", `String "execution_snapshot")])
-    |> sse_frame
-  in
-  let e2 =
-    Yojson.Safe.to_string
-      (`Assoc [("type", `String "transport_health_snapshot")])
-    |> sse_frame
-  in
-  let et = function
-    | Some (p : Ws.parsed_sse_event) -> Some p.event_type
-    | None -> None
-  in
-  let r1 = Ws.parse_sse_dashboard_event e1 in
-  let r2 = Ws.parse_sse_dashboard_event e2 in
-  Alcotest.(check (option string)) "first parse"
-    (Some "execution_snapshot") (et r1);
-  Alcotest.(check (option string)) "second parse distinct"
-    (Some "transport_health_snapshot") (et r2)
-
-(* The production wire format is SSE — Sse.format_event emits
-   "id: N\nevent: message\ndata: <json>\n\n".  parse_sse_dashboard_event
-   must extract the data line before parsing or every production parse
-   fails (pre-fix behaviour, mistakenly hidden by unit tests that fed
-   pure JSON). *)
-let test_parse_sse_dashboard_event_handles_sse_format () =
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc [
-        ("type", `String "execution_snapshot");
-        ("payload", `Assoc [("keepers", `Int 7)]);
-      ])
-  in
-  let sse_formatted =
-    Printf.sprintf "id: 42\nevent: message\ndata: %s\n\n" body
-  in
-  match Ws.parse_sse_dashboard_event sse_formatted with
+  match Ws.dashboard_event_of_external ev with
   | Some parsed ->
-      Alcotest.(check string) "event_type extracted from SSE wrapper"
-        "execution_snapshot" parsed.event_type;
-      Alcotest.(check (option string)) "slice resolved past the wrapper"
-        (Some "execution") parsed.slice
-  | None -> Alcotest.fail "expected parse to succeed on SSE-formatted input"
+      Alcotest.(check (float 0.0)) "broadcast_ts is the bus timestamp"
+        1_774_000_000.5 parsed.Ws.broadcast_ts
+  | None -> Alcotest.fail "expected derived event"
 
-let test_parse_sse_dashboard_event_finds_data_line () =
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc [
-        ("type", `String "transport_health_snapshot");
-        ("payload", `Assoc [("ok", `Bool true)]);
-      ])
-  in
-  let sse_formatted =
-    Printf.sprintf "id: 42\n: keepalive\nevent: message\ndata:%s\n\n" body
-  in
-  match Ws.parse_sse_dashboard_event sse_formatted with
-  | Some parsed ->
-      Alcotest.(check string) "event_type extracted without positional match"
-        "transport_health_snapshot" parsed.event_type;
-      Alcotest.(check (option string)) "slice resolved from data line"
-        (Some "transport") parsed.slice
-  | None -> Alcotest.fail "expected parse to find data line"
-
-(* Counter observability: reuse of the same event string reference
-   must register as a hit, distinct strings must register as misses.
-   Read counter deltas because the global state is shared across tests. *)
+(* Read counter deltas because the global state is shared across tests. *)
 let read_counter name =
   Masc.Otel_metric_store.metric_value_or_zero name ()
-
-let test_parse_cache_counters () =
-  let hits_name = Masc.Otel_metric_store.metric_ws_parse_cache_hits in
-  let misses_name = Masc.Otel_metric_store.metric_ws_parse_cache_misses in
-  let hits0 = read_counter hits_name in
-  let misses0 = read_counter misses_name in
-  let e =
-    Yojson.Safe.to_string
-      (`Assoc [("type", `String "execution_snapshot")])
-    |> sse_frame
-  in
-  let (_ : _ option) = Ws.parse_sse_dashboard_event e in (* miss *)
-  let (_ : _ option) = Ws.parse_sse_dashboard_event e in (* hit *)
-  let (_ : _ option) = Ws.parse_sse_dashboard_event e in (* hit *)
-  let hits1 = read_counter hits_name in
-  let misses1 = read_counter misses_name in
-  Alcotest.(check (float 0.001)) "two hits observed"
-    2.0 (hits1 -. hits0);
-  Alcotest.(check (float 0.001)) "one miss observed"
-    1.0 (misses1 -. misses0);
-  (* A fresh string with the same content forces a reparse (physical
-     inequality) — proves the cache key is not structural equality. *)
-  let e2 =
-    Yojson.Safe.to_string
-      (`Assoc [("type", `String "execution_snapshot")])
-    |> sse_frame
-  in
-  let (_ : _ option) = Ws.parse_sse_dashboard_event e2 in (* miss *)
-  let misses2 = read_counter misses_name in
-  Alcotest.(check (float 0.001)) "fresh allocation forces miss"
-    1.0 (misses2 -. misses1)
-
-(* ====== Bigstring cache for broadcast fanout ====== *)
-
-(* Sse.notify_external_subscribers delivers the same event string reference
-   to every WS session.  The bigstring cache collapses N identical payload
-   encodings into one per unique string reference. *)
 
 let test_bigstring_of_shared_text_reuses_same_ref () =
   let text = String.make 32 'x' in
@@ -550,14 +461,14 @@ let test_bytes_cache_counters () =
 
 let test_dashboard_delta_payload_text_excludes_seq () =
   let event =
-    Yojson.Safe.to_string
+    external_event_of_payload
       (`Assoc
         [
           ("type", `String "goal_loop_status");
           ("payload", `Assoc [ ("status", `String "running") ]);
         ])
   in
-  match Ws.__test_dashboard_delta_payload_text_for_sse event with
+  match Ws.__test_dashboard_delta_payload_text_for_event event with
   | None -> Alcotest.fail "expected shared dashboard delta payload"
   | Some frame ->
       Alcotest.(check string) "slice" "goals" frame.slice;
@@ -587,15 +498,15 @@ let test_dashboard_delta_payload_serializes_once_per_broadcast_ref () =
   in
   let before = read_counter metric_name in
   let event =
-    Yojson.Safe.to_string
+    external_event_of_payload
       (`Assoc
         [
           ("type", `String "execution_snapshot");
           ("payload", `Assoc [ ("agents", `List []) ]);
         ])
   in
-  let first = Ws.__test_dashboard_delta_payload_text_for_sse event in
-  let second = Ws.__test_dashboard_delta_payload_text_for_sse event in
+  let first = Ws.__test_dashboard_delta_payload_text_for_event event in
+  let second = Ws.__test_dashboard_delta_payload_text_for_event event in
   let after = read_counter metric_name in
   Alcotest.(check bool) "payload frame exists" true (Option.is_some first);
   Alcotest.(check bool) "same broadcast ref reuses same text"
@@ -754,7 +665,11 @@ let test_backpressure_gate_stale_ack_throttles_delivery () =
     Alcotest.(check bool) "stale ack skips send without closing session"
       true
       (Ws.send_dashboard_or_raw_sse session
-         "{\"type\":\"execution_snapshot\",\"payload\":{}}");
+         (external_event_of_payload
+            (`Assoc
+              [ ("type", `String "execution_snapshot")
+              ; ("payload", `Assoc [])
+              ])));
     Alcotest.(check bool) "session remains open after throttle"
       false
       (Atomic.get session.closed));
@@ -844,7 +759,8 @@ let test_ws_external_subscriber_receives_broadcast () =
     let received = ref [] in
     let sub_id = "ws-test-single" in
     Sse.subscribe_external ~id:sub_id
-      ~callback:(fun event -> received := event :: !received) ();
+      ~callback:(fun (ev : Sse.external_event) ->
+        received := ev.Sse.ext_frame :: !received) ();
     Alcotest.(check int) "empty before broadcast" 0 (List.length !received);
     Sse.broadcast (`Assoc [("type", `String "test_event")]);
     Alcotest.(check int) "1 event after broadcast" 1 (List.length !received);
@@ -856,11 +772,14 @@ let test_ws_multi_session_broadcast () =
   Eio_main.run (fun _env ->
     let r1 = ref [] and r2 = ref [] and r3 = ref [] in
     Sse.subscribe_external ~id:"ws-multi-1"
-      ~callback:(fun ev -> r1 := ev :: !r1) ();
+      ~callback:(fun (ev : Sse.external_event) ->
+        r1 := ev.Sse.ext_frame :: !r1) ();
     Sse.subscribe_external ~id:"ws-multi-2"
-      ~callback:(fun ev -> r2 := ev :: !r2) ();
+      ~callback:(fun (ev : Sse.external_event) ->
+        r2 := ev.Sse.ext_frame :: !r2) ();
     Sse.subscribe_external ~id:"ws-multi-3"
-      ~callback:(fun ev -> r3 := ev :: !r3) ();
+      ~callback:(fun (ev : Sse.external_event) ->
+        r3 := ev.Sse.ext_frame :: !r3) ();
     Sse.broadcast (`Assoc [("n", `Int 1)]);
     Sse.broadcast (`Assoc [("n", `Int 2)]);
     Alcotest.(check int) "sub1 got 2" 2 (List.length !r1);
@@ -875,7 +794,8 @@ let test_ws_unsubscribe_stops_delivery () =
     let received = ref [] in
     let sub_id = "ws-test-unsub" in
     Sse.subscribe_external ~id:sub_id
-      ~callback:(fun ev -> received := ev :: !received) ();
+      ~callback:(fun (ev : Sse.external_event) ->
+        received := ev.Sse.ext_frame :: !received) ();
     Sse.broadcast (`Assoc [("msg", `String "before")]);
     Alcotest.(check int) "1 before unsub" 1 (List.length !received);
     Sse.unsubscribe_external sub_id;
@@ -888,7 +808,8 @@ let test_ws_dead_subscriber_auto_removed () =
     let alive = ref true in
     let sub_id = "ws-test-dead" in
     Sse.subscribe_external ~id:sub_id
-      ~callback:(fun ev -> received := ev :: !received)
+      ~callback:(fun (ev : Sse.external_event) ->
+        received := ev.Sse.ext_frame :: !received)
       ~is_alive:(fun () -> !alive) ();
     Sse.broadcast (`Assoc [("msg", `String "alive")]);
     Alcotest.(check int) "1 while alive" 1 (List.length !received);
@@ -1237,25 +1158,17 @@ let () =
       Alcotest.test_case "route scoped slices are valid" `Quick
         test_dashboard_route_scoped_slices_are_valid;
     ]);
-    ("parse_cache", [
+    ("dashboard_event", [
       Alcotest.test_case "known type maps to slice" `Quick
-        test_parse_sse_dashboard_event_known_type;
+        test_dashboard_event_known_type;
       Alcotest.test_case "composite change maps to composite slice" `Quick
-        test_parse_sse_dashboard_event_composite_change_maps_to_composite;
+        test_dashboard_event_composite_change_maps_to_composite;
       Alcotest.test_case "unknown type yields None slice" `Quick
-        test_parse_sse_dashboard_event_unknown_type;
-      Alcotest.test_case "malformed input returns None" `Quick
-        test_parse_sse_dashboard_event_malformed;
-      Alcotest.test_case "repeated calls stable" `Quick
-        test_parse_sse_dashboard_event_stable_on_repeat;
-      Alcotest.test_case "cache invalidates on new ref" `Quick
-        test_parse_sse_dashboard_event_invalidated_on_new_ref;
-      Alcotest.test_case "handles production SSE wire format" `Quick
-        test_parse_sse_dashboard_event_handles_sse_format;
-      Alcotest.test_case "finds SSE data line without fixed position" `Quick
-        test_parse_sse_dashboard_event_finds_data_line;
-      Alcotest.test_case "hit/miss counters track reuse" `Quick
-        test_parse_cache_counters;
+        test_dashboard_event_unknown_type;
+      Alcotest.test_case "untyped payload yields None" `Quick
+        test_dashboard_event_untyped_payload;
+      Alcotest.test_case "delta carries the bus emission time" `Quick
+        test_dashboard_event_uses_bus_emission_time;
     ]);
     ("bytes_cache", [
       Alcotest.test_case "same string ref returns same Bigstringaf.t" `Quick

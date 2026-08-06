@@ -9,6 +9,9 @@ let metric_sse_broadcast_duration = "masc_sse_broadcast_duration_seconds"
 let metric_sse_broadcast_events = Otel_metric_store_core.declare_counter "masc_sse_broadcast_events_total"
 let metric_sse_broadcast_failures = Otel_metric_store_core.declare_counter "masc_sse_broadcast_failures_total"
 
+let metric_sse_broadcast_skipped_no_observer =
+  Otel_metric_store_core.declare_counter "masc_sse_broadcast_skipped_no_observer_total"
+
 let metric_sse_external_subscriber_callback_failures =
   Otel_metric_store_core.declare_counter "masc_sse_external_subscriber_callback_failures_total"
 ;;

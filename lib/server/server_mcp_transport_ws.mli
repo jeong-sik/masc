@@ -34,7 +34,7 @@
     - {b outbound delivery}
       ({!send_to_session_result},
       {!send_dashboard_or_raw_sse},
-      {!parse_sse_dashboard_event}).
+      {!dashboard_event_of_external}).
 
     Internal helpers stay private at this boundary
     ([sha1], [sessions_mutex], [slice_index] +
@@ -144,7 +144,7 @@ type parsed_sse_event = {
   payload : Yojson.Safe.t;
   broadcast_ts : float;
 }
-(** Result of {!parse_sse_dashboard_event}.  Exposed for
+(** Result of {!dashboard_event_of_external}.  Exposed for
     the [#10194] regression test which pattern-matches on
     [parsed.event_type] / [parsed.slice]. *)
 
@@ -325,7 +325,7 @@ val send_to_session_result : string -> string -> send_outcome
 (** Sends [text] to the session named by id.  Returns
     {!Sent} / {!Session_gone} / {!Send_failed}. *)
 
-val send_dashboard_or_raw_sse : ws_session -> string -> bool
+val send_dashboard_or_raw_sse : ws_session -> Sse.external_event -> bool
 (** Pushes an SSE event payload to a dashboard-subscribed
     WS session — gates on {!session_is_backpressured}
     and per-slice subscription set.  Returns [true] if
@@ -333,16 +333,14 @@ val send_dashboard_or_raw_sse : ws_session -> string -> bool
     / slice mismatch — both keep the wire alive); [false]
     on a hard send failure. *)
 
-val parse_sse_dashboard_event :
-  string -> parsed_sse_event option
-(** Parses an SSE-formatted broadcast string into
-    {!parsed_sse_event}, or [None] when the wire format
-    does not match the expected ["data:" + JSON]
-    convention.  Internal cache collapses repeated parses
-    of the same physical buffer across the per-broadcast
-    fanout. *)
-
-(** {1 Dashboard JSON-RPC handlers} *)
+val dashboard_event_of_external :
+  Sse.external_event -> parsed_sse_event option
+(** Derives {!parsed_sse_event} from the bus payload
+    ({!Sse.external_event.ext_payload}), or [None] when
+    the event is not a dashboard-shaped object.  Reads the
+    broadcast value directly, so no SSE frame is parsed and
+    no cache is needed.  [broadcast_ts] is the bus emission
+    time, so every delta from one broadcast agrees. *)
 
 val dashboard_hello :
   base_path:string ->
@@ -492,9 +490,9 @@ val __test_dashboard_seq_value : ws_session -> int
     cross-domain gate can assert the final value equals the total number of
     allocations (no lost updates under true parallelism). *)
 
-val __test_dashboard_delta_payload_text_for_sse :
-  string -> dashboard_delta_payload_frame option
+val __test_dashboard_delta_payload_text_for_event :
+  Sse.external_event -> dashboard_delta_payload_frame option
 (** Test-only seam: serializes the shared dashboard/delta payload frame for
-    one SSE broadcast.  The returned text deliberately excludes the
+    one broadcast.  The returned text deliberately excludes the
     per-session seq so tests can prove payload serialization is cached by
     physical broadcast reference rather than multiplied by session count. *)

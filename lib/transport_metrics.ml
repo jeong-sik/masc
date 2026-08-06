@@ -74,6 +74,11 @@ let inc_broadcast_failure ?target () =
    flapping invisible to dashboards.  Counter is unlabelled because
    the subscriber identity is high-cardinality (sub_id is gRPC stream
    id); operators can correlate via the warn log line if needed. *)
+let inc_sse_broadcast_skipped_no_observer () =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_sse_broadcast_skipped_no_observer ()
+;;
+
 let inc_external_subscriber_callback_failure () =
   Otel_metric_store.inc_counter Otel_metric_store.metric_sse_external_subscriber_callback_failures ()
 ;;

@@ -2592,3 +2592,5 @@
   (source_tree %{workspace_root}/config/prompts)
   %{workspace_root}/test/fixtures/keeper_system_prompt/assembled_prompt.golden)
  (libraries alcotest masc_test_deps))
+
+(include stanzas/test_librarian_journal_failures.inc)

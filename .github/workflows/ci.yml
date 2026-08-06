@@ -946,6 +946,16 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_keeper_keepalive_launch_order_ast
 
+      - name: Run memory journal suite
+        # The journal is the only disk record of a librarian pass that produced
+        # no snapshot. @check compiles this suite but does not run it, and an
+        # unrun decoder guard is not a guard: the cases that matter here assert
+        # that an unknown outcome or kind rejects rather than folding into a
+        # permissive default, which compiles either way.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_librarian_journal_failures
+
       - name: Run enum mirror sync guard
         # This PR exists because the enum mirrors claimed a sync regression
         # test that no file implemented. Wiring the guard into a run step is

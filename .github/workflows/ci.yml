@@ -1146,6 +1146,7 @@ jobs:
       # suite asserts routed identities and stored payloads, never source
       # text or log wording. It stayed compile-only under @check, so
       # regression tests added there (#26625, #26657) never ran.
+<<<<<<< HEAD
       - name: Run channel-gate content-length knob suite
         id: channel_gate_content_length_knob_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
@@ -1158,6 +1159,21 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_channel_gate_content_length_knob"
 
+||||||| parent of 6b06fa5156 (ci: run the decision-audit dated-store suite instead of only compiling it)
+=======
+      - name: Run keeper decision-audit dated-store suite
+        id: decision_audit_dated_store_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_decision_audit_dated_store"
+
+>>>>>>> 6b06fa5156 (ci: run the decision-audit dated-store suite instead of only compiling it)
       - name: Run verification behavior suite
         id: verification_behavior_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

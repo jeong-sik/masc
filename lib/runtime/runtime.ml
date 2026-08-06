@@ -653,18 +653,6 @@ let validate_keeper_dispatch_request_caps
    provider-qualified catalog rows are considered before bare model rows; this
    keeps overlapping ids such as native Kimi vs Ollama Cloud Kimi from requiring
    bare-id manifest workarounds. *)
-let validate_runtime_model_capabilities ~(config_path : string) (runtimes : t list)
-  : (unit, string) result
-  =
-  decide_capability_gate
-    ~config_path
-    (List.map
-       (fun (r : t) ->
-          ( Printf.sprintf "%s (model=%s)" r.id r.provider_config.model_id
-          , Option.is_some (capabilities_for_runtime r) ))
-       runtimes)
-;;
-
 let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t list)
   : missing_catalog_report option
   =
@@ -1661,13 +1649,6 @@ let materialize_runtime_config_text ~config_path content =
         (runtime_parse_errors_to_string errs))
   in
   materialize_config ~config_path cfg
-;;
-
-let validate_runtime_config_text ~config_path content =
-  let* loaded, _exact_output_lanes =
-    materialize_runtime_config_text ~config_path content
-  in
-  validate_keeper_dispatch_request_caps ~config_path loaded
 ;;
 
 let runtime_config_write_mutex = Mutex.create ()

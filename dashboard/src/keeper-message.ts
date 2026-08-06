@@ -25,6 +25,8 @@ function normalizeKeeperTurnOutcome(value: unknown): KeeperTurnOutcome | null {
       return 'visible_reply'
     case 'continuation_checkpoint':
       return 'continuation_checkpoint'
+    case 'external_effect_completed':
+      return 'external_effect_completed'
     case 'external_effect_pending':
       return 'external_effect_pending'
     case 'no_visible_reply':
@@ -58,6 +60,7 @@ export function keeperTurnOutcomeSuppressesReply(
   outcome: KeeperTurnOutcome | null | undefined,
 ): boolean {
   return outcome === 'continuation_checkpoint'
+    || outcome === 'external_effect_completed'
     || outcome === 'external_effect_pending'
     || outcome === 'no_visible_reply'
 }

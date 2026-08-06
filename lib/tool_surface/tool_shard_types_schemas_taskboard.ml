@@ -125,9 +125,12 @@ let taskboard_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_task_done"
     ; description =
-        "Mark your claimed task as complete with a result summary and trusted \
-         evidence_refs. The task must be claimed by you. The completion gate \
-         accepts task completion only when evidence_refs contains a \
+        "Submit your claimed task for verification with a result summary and \
+         trusted evidence_refs. The task must be claimed by you. This does not \
+         make the task done: it moves to awaiting_verification and waits for a \
+         completion authority's verdict, which no Keeper can produce. It also \
+         does not hold your next claim while it waits. The completion gate \
+         accepts the submission only when evidence_refs contains a \
          reviewer-inspectable PR, commit, trace, receipt, or URL reference; \
          pure-placeholder results ('done', 'ok', etc.) are rejected."
     ; input_schema =

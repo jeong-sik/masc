@@ -150,23 +150,24 @@ let manual_help_entry name =
         {
           name;
           short_description =
-            "Mark your owned task done with a result summary and evidence_refs.";
+            "Submit your owned task for verification with a result summary and evidence_refs.";
           when_to_use =
             "Use when the current keeper has finished an owned task and can cite concrete evidence_refs.";
           key_constraints =
             [
-              "Caller must own the task unless using a force tool.";
-              "evidence_refs must include at least one locally validated base-path artifact, local git commit, or .masc trace/turn/receipt artifact when marking work done.";
+              "Caller must own the task; no tool overrides task ownership.";
+              "evidence_refs must include at least one locally validated base-path artifact, local git commit, or .masc trace/turn/receipt artifact.";
+              "The task moves to awaiting_verification, not done. Only a completion authority commits the verdict.";
             ];
           details_markdown =
-            "Completes the task directly. For PR-bearing work, include the PR URL or artifact reference in evidence_refs instead of using a separate verification-evidence wrapper.";
+            "Issues submit_for_verification. The task waits for an operator or auto-judge verdict, which no Keeper can produce; it does not hold your next claim while it waits, and cancelling it discards the evidence you just submitted. For PR-bearing work, include the PR URL or artifact reference in evidence_refs.";
           doc_refs = [];
-          prompt_hints = [ "Prefer this over retired task verification wrapper tools." ];
+          prompt_hints = [];
           examples =
             [
               "task_id='task-123' result='Implemented the task; checks passed.' evidence_refs=['artifact:review-42']";
             ];
-          alternatives = [];
+          alternatives = [ "masc_transition" ];
         }
   | "keeper_memory_write" ->
       Some

@@ -53,8 +53,8 @@ scan_entries() {
   rg --line-number --no-heading \
     --glob '*.sh' \
     --glob '!guard-scan-targets-exist.sh' \
-    '^[[:space:]]*"((lib|dashboard|bin)/[A-Za-z0-9/_.-]+\.[a-z]+)"[[:space:]]*$' \
-    -r '$1' \
+    '(^|[[:space:]])"((lib|dashboard|bin)/[A-Za-z0-9/_.-]+\.[a-z]+)"[[:space:]]*\\?[[:space:]]*$' \
+    -r '$2' \
     "$tree/scripts" 2>/dev/null || true
 }
 
@@ -64,6 +64,9 @@ report() {
     [ -n "$row" ] || continue
     file="${row%%:*}"
     path="${row##*:}"
+    # rg -r keeps whatever preceded the match on the line, so an entry passed as
+    # a continued argument arrives indented.
+    path="${path#"${path%%[![:space:]]*}"}"
     [ -e "$tree/$path" ] || echo "${file#"$tree/"}|$path"
   done < <(scan_entries "$tree")
 }

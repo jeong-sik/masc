@@ -6,7 +6,6 @@
     no-ops; the runtime overrides each ref via the wiring in
     [lib/workspace.ml]. *)
 
-open Masc_domain
 
 type activity_entity = { kind: string; id: string }
 

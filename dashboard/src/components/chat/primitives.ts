@@ -2572,7 +2572,7 @@ const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
   'status',
 ])
 
-type ChatControlStatus = 'continuation_checkpoint' | 'external_effect_pending'
+type ChatControlStatus = 'continuation_checkpoint' | 'external_effect_pending' | 'external_effect_completed'
 
 function chatControlStatus(entry: KeeperConversationEntry): ChatControlStatus | null {
   const persistedStatus = (entry.blocks ?? []).find(
@@ -2580,7 +2580,9 @@ function chatControlStatus(entry: KeeperConversationEntry): ChatControlStatus | 
   )
   if (persistedStatus) return persistedStatus.kind
   const turnOutcome = entry.details?.turnOutcome
-  return turnOutcome === 'continuation_checkpoint' || turnOutcome === 'external_effect_pending'
+  return turnOutcome === 'continuation_checkpoint'
+    || turnOutcome === 'external_effect_pending'
+    || turnOutcome === 'external_effect_completed'
     ? turnOutcome
     : null
 }
@@ -2626,6 +2628,45 @@ function ChatControlStatusCard({
             </p>
             <p class="mt-0.5 text-xs leading-paragraph text-[var(--color-fg-muted)]">
               Keeper가 다음 주기에 이어서 처리합니다.
+            </p>
+          </div>
+        </div>
+        ${supportingBlocks.length > 0
+          ? html`<div class="mt-3"><${ChatBlocks} blocks=${supportingBlocks} fallbackText="" /></div>`
+          : null}
+      </article>
+    `
+  }
+
+  if (status === 'external_effect_completed') {
+    return html`
+      <article
+        class="w-full rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-subtle)] px-4 py-3.5"
+        role="status"
+        aria-live="polite"
+        data-chat-control-status="external_effect_completed"
+        data-chat-entry-id=${entry.id}
+        data-chat-turn-ref=${entry.turnRef ?? undefined}
+      >
+        <div class="flex items-start gap-3">
+          <div
+            class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-secondary)]"
+            aria-hidden="true"
+          >
+            <${ExternalLink} size=${18} />
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">커넥터로 답변 완료</strong>
+              ${timestamp
+                ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
+                : null}
+            </div>
+            <p class="mt-1 text-sm leading-paragraph text-[var(--color-fg-secondary)]">
+              Keeper의 답변이 외부 커넥터(Slack/Discord)로 전송되었습니다.
+            </p>
+            <p class="mt-0.5 text-xs leading-paragraph text-[var(--color-fg-muted)]">
+              답변 내용은 해당 채널에서 확인할 수 있습니다.
             </p>
           </div>
         </div>

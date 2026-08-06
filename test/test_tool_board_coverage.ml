@@ -92,7 +92,11 @@ let make_keeper_meta ?(name = "judge-keeper") () : Keeper_meta_contract.keeper_m
       (`Assoc
          [
            ("name", `String name);
-           ("agent_name", `String name);
+           (* The decoder requires the derived form, not the raw name
+              (keeper_meta_json_parse.ml:367). Passing [name] here made every
+              fixture in this file fail construction, which is why five of its
+              assertions have never run. *)
+           ("agent_name", `String (Masc.Keeper_identity.keeper_agent_name name));
            ("trace_id", `String "test-trace-board");
          ])
   with

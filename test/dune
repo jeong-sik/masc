@@ -954,7 +954,6 @@
   test_keeper_personality_io_compare
   test_keeper_personality_io_render
   test_keeper_identity_outcome_label
-  test_worker_runtime
   test_capability_registry
   test_tool_misc_web_fetch
   test_tool_local_runtime_probe
@@ -972,7 +971,6 @@
   test_process_eio_detached
   test_voice_runtime_overlay
   test_voice_bridge_retry
-  test_worker_container_coverage
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -1108,7 +1106,6 @@
   test_keeper_personality_io_compare
   test_keeper_personality_io_render
   test_keeper_identity_outcome_label
-  test_worker_runtime
   test_capability_registry
   test_tool_misc_web_fetch
   test_tool_local_runtime_probe
@@ -1126,7 +1123,6 @@
   test_process_eio_detached
   test_voice_runtime_overlay
   test_voice_bridge_retry
-  test_worker_container_coverage
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -1864,6 +1860,8 @@
 (include stanzas/test_keeper_turn_up_args.inc)
 
 (include stanzas/test_keeper_cwd_response.inc)
+
+(include stanzas/test_channel_gate_content_length_knob.inc)
 
 (include stanzas/test_keeper_terminal_reason_typed.inc)
 

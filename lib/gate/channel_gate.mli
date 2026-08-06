@@ -150,7 +150,7 @@ val error_json : string -> Yojson.Safe.t
 (** {1 Configuration} *)
 
 val max_content_length : unit -> int
-(** [MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH], default 4000. *)
+(** [MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH], default 4000, floored at 1. *)
 
 val dedup_ttl_sec : unit -> float
 (** [MASC_CHANNEL_GATE_DEDUP_TTL_SEC], default 3600.0. *)

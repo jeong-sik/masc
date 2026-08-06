@@ -23,8 +23,5 @@ val public_schedule_surface_tools : string list
 val spawned_agent_surface_tools : string list
 (** Tools visible to spawned worker agents. *)
 
-val local_worker_surface_tools : string list
-(** Local worker container tools. *)
-
 val session_min_surface_tools : string list
 (** Minimum session tools (initialization only). *)

@@ -34,12 +34,6 @@ type protocol =
 val protocol_to_string : protocol -> string
 val protocol_of_string : string -> protocol option
 
-(** Transport binding configuration *)
-type binding = {
-  protocol: protocol;
-  url: string;
-  options: (string * string) list;
-}
 
 (** {1 Error Codes} *)
 
@@ -92,11 +86,6 @@ module Rest : sig
   val operation_catalog_entry :
     string -> Masc_domain.tool_schema -> Yojson.Safe.t
 end
-
-(** {1 Bindings} *)
-
-val get_bindings : host:string -> port:int -> binding list
-val bindings_to_json : binding list -> Yojson.Safe.t
 
 (** {1 Statistics} *)
 

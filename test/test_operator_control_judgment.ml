@@ -300,6 +300,48 @@ let test_confirm_consumes_pending_token_before_delegated_action_fails () =
       in
       Alcotest.(check int) "pending confirm consumed" 0 (List.length pending_confirms))
 
+(* [confidence] used to default to 0.5 when omitted and was clamped into range
+   on the way to disk. Both spellings put a number the judge never stated into
+   the operator digest, next to ["authoritative": true]. No code compares the
+   value, so a fabricated one is indistinguishable from a stated one — the
+   operator is the only reader, and they cannot tell. *)
+let test_operator_judgment_requires_stated_confidence () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator-judge"));
+      let ctx = operator_ctx env sw config "operator-judge" in
+      let write confidence_fields =
+        Operator_control.judgment_write_json ctx
+          (`Assoc
+            ([ ("surface", `String "command.namespace");
+               ("target_type", `String "workspace");
+               ("summary", `String "Judgment without a stated confidence.") ]
+             @ confidence_fields))
+      in
+      List.iter
+        (fun (label, fields) ->
+          match write fields with
+          | Error message ->
+            Alcotest.(check bool)
+              (label ^ " names the field") true
+              (Astring.String.is_infix ~affix:"confidence" message)
+          | Ok _ -> Alcotest.failf "%s must be rejected, got Ok" label)
+        [ ("omitted confidence", []);
+          ("string confidence", [ ("confidence", `String "0.9") ]);
+          ("null confidence", [ ("confidence", `Null) ]);
+          ("negative confidence", [ ("confidence", `Float (-0.1)) ]);
+          ("confidence above one", [ ("confidence", `Float 1.1) ]) ];
+      (* An integer 1 is a number a JSON encoder may emit for 1.0. *)
+      match write [ ("confidence", `Int 1) ] with
+      | Ok _ -> ()
+      | Error message -> Alcotest.failf "integer confidence must be accepted: %s" message)
+
+
 let tests =
   [
     Alcotest.test_case "digest prefers fresh operator judgment" `Quick
@@ -314,6 +356,8 @@ let tests =
       test_operator_judgment_rejects_retired_target_type_aliases;
     Alcotest.test_case "requires numeric timestamps" `Quick
       test_operator_judgment_requires_numeric_timestamps;
+    Alcotest.test_case "requires a stated confidence" `Quick
+      test_operator_judgment_requires_stated_confidence;
     Alcotest.test_case "confirm consumes token before delegated action failure" `Quick
       test_confirm_consumes_pending_token_before_delegated_action_fails;
   ]

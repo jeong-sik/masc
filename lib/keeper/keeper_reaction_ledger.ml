@@ -361,6 +361,8 @@ let after_ledger_append_hook :
 ;;
 
 
+let after_ledger_append_hook_mutex = Stdlib.Mutex.create ()
+
 let project_event_queue_transition_outbox_result
       ~base_path
       ~keeper_name
@@ -1708,3 +1710,18 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "keepers", `List summaries
     ]
 ;;
+
+module For_testing = struct
+  let with_after_ledger_append ~after_ledger_append f =
+    Stdlib.Mutex.lock after_ledger_append_hook_mutex;
+    let previous =
+      Atomic.exchange after_ledger_append_hook (Some after_ledger_append)
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set after_ledger_append_hook previous;
+        Stdlib.Mutex.unlock after_ledger_append_hook_mutex)
+      f
+  ;;
+end
+

@@ -6,7 +6,7 @@
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
  ; Warning 32 used to be switched off here to grandfather pre-existing
  ; unused values; the sweep finds none, so the exemption is gone and the
- ; root dune's -w +32 applies. Both flags live in the single (flags ...)
+ ; root dune's applies. Both flags live in the single (flags ...)
  ; stanza so the effective warning mask is not split across
  ; (flags)/(ocamlc_flags)/(ocamlopt_flags).
  (flags

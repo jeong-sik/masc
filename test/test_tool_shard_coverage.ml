@@ -210,6 +210,24 @@ let test_masc_board_post_schema_supports_judgment () =
       (List.mem_assoc "quantitative_evidence" properties)
 ;;
 
+(* The Board is majority machine-authored (task verdict receipts, heartbeats).
+   The handler reads exclude_system / exclude_automation straight from args and
+   Board_dispatch.list_posts implements both, but the Keeper projection is a
+   closed schema: a knob it omits is not merely unadvertised, it is rejected. *)
+let test_keeper_board_list_can_exclude_machine_posts () =
+  let schema = required_keeper_board_schema Tool_name.Board_name.Board_list in
+  match get_json_assoc "properties" schema.input_schema with
+  | None -> Alcotest.fail "masc_board_list missing properties"
+  | Some properties ->
+    List.iter
+      (fun field ->
+         Alcotest.(check bool)
+           (field ^ " reaches the Keeper model")
+           true
+           (List.mem_assoc field properties))
+      [ "exclude_system"; "exclude_automation" ]
+;;
+
 let test_ide_annotation_schema_uses_opaque_references () =
   let schema =
     schema_by_name "keeper_ide_annotate" Tool_shard_types.filesystem_tools
@@ -286,6 +304,10 @@ let () =
             "board post judgment"
             `Quick
             test_masc_board_post_schema_supports_judgment
+        ; Alcotest.test_case
+            "board list can exclude machine posts"
+            `Quick
+            test_keeper_board_list_can_exclude_machine_posts
         ; Alcotest.test_case
             "IDE opaque references"
             `Quick

@@ -160,6 +160,22 @@ let schemas : Masc_domain.tool_schema list =
                              match). Pass your own keeper name to avoid self-referential \
                              loops when reading the board." )
                   ] )
+                ; ( "exclude_system"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; ( "description"
+                        , `String
+                            "Exclude system posts such as task verdict receipts and \
+                             Activity Reports (default: false)." )
+                      ] )
+                ; ( "exclude_automation"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; ( "description"
+                        , `String
+                            "Exclude automation posts such as heartbeats and probes \
+                             (default: false)." )
+                      ] )
                 ; ( "if_revision"
                   , `Assoc
                       [ "type", `String "string"

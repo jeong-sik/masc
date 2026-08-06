@@ -162,6 +162,24 @@ let test_prompt_metrics_use_exact_utf8_bytes () =
         (List.mem_assoc "estimated_total_tokens" fields)
   | _ -> fail "prompt metrics must serialize as an object"
 
+let test_prompt_metrics_sanitizes_each_segment_once () =
+  let calls = ref [] in
+  let sanitize text =
+    calls := text :: !calls;
+    text
+  in
+  let _metrics =
+    KAPM.For_testing.build_prompt_metrics_with_sanitizer
+      ~sanitize
+      ~system_prompt:"system"
+      ~dynamic_context:"dynamic"
+      ~user_message:"user"
+  in
+  check (list string)
+    "one sanitizer pass per prompt segment"
+    [ "system"; "dynamic"; "user" ]
+    (List.rev !calls)
+
 let test_hard_constraints_in_system_only () =
   let tp = build_separated () in
   let has_in sys s =
@@ -685,6 +703,8 @@ let () =
             test_total_bytes_preserved;
           test_case "exact UTF-8 byte metrics" `Quick
             test_prompt_metrics_use_exact_utf8_bytes;
+          test_case "sanitizes each segment once" `Quick
+            test_prompt_metrics_sanitizes_each_segment_once;
         ] );
       ( "separation_harness",
         [

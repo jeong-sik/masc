@@ -647,7 +647,7 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
       keeper_msg_recovery.unreadable
       keeper_msg_recovery.failed;
   let fusion_delivery_recovery =
-    Fusion_delivery_projector.recover_startup ~base_path
+    Fusion_delivery_projector.recover_startup ~base_path ()
   in
   (match fusion_delivery_recovery with
    | Error error ->

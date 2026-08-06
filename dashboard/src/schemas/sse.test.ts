@@ -385,6 +385,14 @@ describe('parseSSEMessage', () => {
     warnSpy.mockRestore()
   })
 
+  it('keeps internal agent invalidations at the websocket parse boundary', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const msg = parseSSEMessage({ type: 'internal_agent_runs_changed' })
+    expect(msg?.type).toBe('internal_agent_runs_changed')
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
   it('keeps gate_mode_changed events instead of dropping them as schema drift', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const msg = parseSSEMessage({

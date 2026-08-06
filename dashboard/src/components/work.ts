@@ -15,6 +15,7 @@ import { BoardSurface } from './board/board-surface'
 import { SubBoardSurface } from './board/sub-board-surface'
 import { PlanningPanel } from './planning-panel'
 import { VerificationRequestsPanel } from './verification-requests-panel'
+import { VerificationRunsPanel } from './verification-runs-panel'
 import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
 import { VirtualList } from './common/virtual-list'
@@ -1626,7 +1627,12 @@ export function Work() {
               <${LazyRepositoryManagement} />
             <//>
           `
-          : html`<${VerificationRequestsPanel} />`
+          : html`
+            <div class="flex flex-col gap-4">
+              <${VerificationRequestsPanel} />
+              <${VerificationRunsPanel} />
+            </div>
+          `
         }
       <//>
     </div>

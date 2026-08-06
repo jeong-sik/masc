@@ -45,8 +45,9 @@ let run_llm_reviewer_fn
      prompt:string ->
      report_tool_schema:Types_core.tool_schema ->
      lookup:lookup_surface ->
+     on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
      unit -> (verdict option, Agent_sdk.Error.sdk_error) result) Atomic.t
-  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () ->
+  = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
       Error (Agent_sdk.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
 (** Issue #8436: schema enum used to be hand-rolled as a 2-element
@@ -328,6 +329,7 @@ let review
       ?(required_evidence = [])
       ?(verify_gate_evidence = [])
       ?(on_verdict : review_result -> unit = fun _ -> ())
+      ?(on_tool_result : input:Yojson.Safe.t -> Tool_result.result -> unit = fun ~input:_ _ -> ())
       ?(few_shot_block = "")
       ?(sw : Eio.Switch.t option = None)
       ~(lookup : lookup_surface)
@@ -403,6 +405,7 @@ let review
              ~prompt
              ~report_tool_schema:report_review_verdict_schema
              ~lookup
+             ~on_tool_result
              ()
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn

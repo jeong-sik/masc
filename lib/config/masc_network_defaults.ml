@@ -127,6 +127,18 @@ let is_loopback_host_opt = function
   | Some host -> is_loopback_host host
   | None -> false
 
+(* Sole owner of URL-shaped trailing-slash trimming. This is the lowest
+   layer that needs it ([Env_config_core] depends on this module, not the
+   other way round), so callers above reach it here instead of keeping a
+   copy.
+
+   [""] and ["/"] both become [""]. Paths, where ["/"] is the root and must
+   survive, use [Env_config_core.strip_path_trailing_slashes] instead — a
+   different function because it is a different rule, not a variant of this
+   one.
+
+   Scans the index once and calls [String.sub] at most once, so a value
+   ending in many slashes does not allocate one string per slash. *)
 let trim_trailing_slashes value =
   let len = String.length value in
   let rec last_non_slash i =

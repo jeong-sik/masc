@@ -2,14 +2,6 @@
 
 open Masc_domain
 
-(** Issue #8592: hand-mirrored from [Dashboard.valid_scope_strings].
-    Cycle constraint — Tool_schemas_misc is upstream of Dashboard.
-    The test [test_types.ml :: dashboard_scope_ssot] asserts this
-    mirror stays in sync with the SSOT so adding a 3rd scope
-    constructor fails compilation in [scope_to_string] AND fails the
-    test here, instead of silently dropping from the JSON Schema. *)
-let dashboard_scope_enum_strings = [ "all"; "current" ]
-
 type control_operation =
   | Pause
   | Resume

@@ -2223,6 +2223,18 @@ let () =
         ] )
     ; ( "precondition_layer"
       , [ test_case
+            "every event constructor has a witness"
+            `Quick
+            KSP.test_event_witnesses_cover_the_variant
+        ; test_case
+            "no precondition fires from healthy Running"
+            `Quick
+            KSP.test_no_precondition_fires_from_healthy_running
+        ; test_case
+            "only Operator_compact_requested reacts to buffer-op flags"
+            `Quick
+            KSP.test_only_operator_compact_reacts_to_buffer_flags
+        ; test_case
             "Operator_compact_requested requires ~compaction_active"
             `Quick
             KSP.test_pre_operator_compact_during_compaction

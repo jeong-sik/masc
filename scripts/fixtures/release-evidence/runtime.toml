@@ -14,7 +14,8 @@
 
 [runtime]
 # The default model id must be known to the OAS capability catalog, or the
-# startup capability gate (validate_runtime_model_capabilities, RFC-0206)
+# startup capability gate (missing_runtime_model_capabilities ->
+# Missing_catalog_models, RFC-0206)
 # refuses to boot (a fixture model named "smoke" is absent from the catalog and
 # was rejected, breaking this evidence step on every OCaml push to main).
 # deepseek-v4-flash is the catalog-known fleet default; the provider endpoint

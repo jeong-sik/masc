@@ -75,9 +75,8 @@ let test_l1_returns_canonical_for_permanent_handoff () =
 
 let test_l2_downgrades_retry_to_fallback () =
   match D.apply_level_to_strategy D.L2 (transient_mode ()) with
-  | R.Fallback { fallback_value; degrade_confidence_by } ->
-      assert (fallback_value = "<degraded:L2>");
-      assert (Float.abs (degrade_confidence_by -. 0.3) < 1e-9)
+  | R.Fallback { fallback_value } ->
+      assert (fallback_value = "<degraded:L2>")
   | _ -> assert false
 
 let test_l2_preserves_handoff_for_permanent () =

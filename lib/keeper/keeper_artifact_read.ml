@@ -22,41 +22,124 @@ type page =
   ; content : string
   }
 
+let minimum_offset = 0
+
+(** Why an integer-typed request field could not be read. [Yojson.Safe]
+    parses an integer literal that does not fit a native [int] into
+    [`Intlit], which this parser has always rejected — naming that case
+    keeps it distinguishable from "not an integer at all". *)
+type invalid_integer_field =
+  | Not_an_integer of { kind : string }
+  | Literal_out_of_int_range of { literal : string }
+  | Literal_not_a_json_integer of { literal : string }
+  | Below_minimum of
+      { value : int
+      ; minimum : int
+      }
+  | Above_maximum of
+      { value : int
+      ; maximum : int
+      }
+
+(** Which field of an artifact-read request failed, and why. Every
+    rejection carries its own field so the caller is never told to fix
+    [sha256] when [sha256] was correct. *)
+type invalid_request =
+  | Not_an_object of { kind : string }
+  | Sha256_missing
+  | Sha256_not_a_string of { kind : string }
+  | Sha256_malformed of Tool_output.invalid_sha256
+  | Offset_invalid of invalid_integer_field
+  | Max_bytes_invalid of invalid_integer_field
+
+let invalid_integer_field_to_string ~field = function
+  | Not_an_integer { kind } ->
+    Printf.sprintf "%s must be an integer, got %s" field kind
+  | Literal_out_of_int_range { literal } ->
+    Printf.sprintf
+      "%s integer literal %s is outside the native integer range"
+      field
+      literal
+  | Literal_not_a_json_integer { literal } ->
+    Printf.sprintf
+      "%s must be a JSON integer, got the unparsed integer literal %s"
+      field
+      literal
+  | Below_minimum { value; minimum } ->
+    Printf.sprintf "%s %d is below minimum %d" field value minimum
+  | Above_maximum { value; maximum } ->
+    Printf.sprintf "%s %d exceeds maximum %d" field value maximum
+;;
+
+let invalid_request_to_string = function
+  | Not_an_object { kind } -> Printf.sprintf "expected an object, got %s" kind
+  | Sha256_missing -> "sha256 is required"
+  | Sha256_not_a_string { kind } ->
+    Printf.sprintf "sha256 must be a string, got %s" kind
+  | Sha256_malformed invalid ->
+    Printf.sprintf
+      "sha256 is malformed: %s"
+      (Tool_output.invalid_sha256_to_string invalid)
+  | Offset_invalid detail -> invalid_integer_field_to_string ~field:"offset" detail
+  | Max_bytes_invalid detail ->
+    invalid_integer_field_to_string ~field:"max_bytes" detail
+;;
+
+let sha256_of_fields fields =
+  match List.assoc_opt "sha256" fields with
+  | None -> Error Sha256_missing
+  | Some (`String value) ->
+    (match Tool_output.validate_sha256 value with
+     | Ok () -> Ok value
+     | Error invalid -> Error (Sha256_malformed invalid))
+  | Some other -> Error (Sha256_not_a_string { kind = Json_util.kind_name other })
+;;
+
+(** Read one bounded integer field. [`Intlit] is matched explicitly rather
+    than swept into a wildcard: it is a distinct condition (an integer the
+    wire carried but OCaml cannot hold natively), and it stays rejected. *)
+let bounded_integer_of_fields fields ~field ~default ~minimum ~maximum =
+  let bounded value =
+    if value < minimum
+    then Error (Below_minimum { value; minimum })
+    else if value > maximum
+    then Error (Above_maximum { value; maximum })
+    else Ok value
+  in
+  match List.assoc_opt field fields with
+  | None -> Ok default
+  | Some (`Int value) -> bounded value
+  | Some (`Intlit literal) ->
+    (match int_of_string_opt literal with
+     | None -> Error (Literal_out_of_int_range { literal })
+     | Some _ -> Error (Literal_not_a_json_integer { literal }))
+  | Some other -> Error (Not_an_integer { kind = Json_util.kind_name other })
+;;
+
 let request_of_json = function
   | `Assoc fields ->
-    let sha256 =
-      match List.assoc_opt "sha256" fields with
-      | Some (`String value) -> Some value
-      | _ -> None
+    let ( let* ) = Result.bind in
+    let* sha256 = sha256_of_fields fields in
+    let* offset =
+      bounded_integer_of_fields
+        fields
+        ~field:"offset"
+        ~default:minimum_offset
+        ~minimum:minimum_offset
+        ~maximum:max_int
+      |> Result.map_error (fun detail -> Offset_invalid detail)
     in
-    let offset =
-      match List.assoc_opt "offset" fields with
-      | None -> Some 0
-      | Some (`Int value) -> Some value
-      | _ -> None
+    let* max_bytes =
+      bounded_integer_of_fields
+        fields
+        ~field:"max_bytes"
+        ~default:default_max_bytes
+        ~minimum:minimum_max_bytes
+        ~maximum:maximum_max_bytes
+      |> Result.map_error (fun detail -> Max_bytes_invalid detail)
     in
-    let max_bytes =
-      match List.assoc_opt "max_bytes" fields with
-      | None -> Some default_max_bytes
-      | Some (`Int value) -> Some value
-      | _ -> None
-    in
-    (match sha256, offset, max_bytes with
-     | Some sha256, Some offset, Some max_bytes
-       when offset >= 0
-            && max_bytes >= minimum_max_bytes
-            && max_bytes <= maximum_max_bytes ->
-       (match Tool_output.validate_sha256 sha256 with
-        | Ok () -> Ok { sha256; offset; max_bytes }
-        | Error invalid ->
-          Error (Tool_output.invalid_sha256_to_string invalid))
-     | _ ->
-       Error
-         (Printf.sprintf
-            "expected sha256, non-negative offset, and max_bytes %d..%d"
-            minimum_max_bytes
-            maximum_max_bytes))
-  | _ -> Error "expected an object"
+    Ok { sha256; offset; max_bytes }
+  | other -> Error (Not_an_object { kind = Json_util.kind_name other })
 ;;
 
 let invalid_input message =
@@ -191,7 +274,7 @@ let page (request : request) bytes =
 
 let handle ~base_path ~args =
   match request_of_json args with
-  | Error message -> invalid_input message
+  | Error invalid -> invalid_input (invalid_request_to_string invalid)
   | Ok request ->
     let store = Tool_blob_store.create ~base_path in
     (match

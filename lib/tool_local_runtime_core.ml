@@ -90,16 +90,6 @@ let find_flag_value tokens flag =
 
 let has_flag tokens flag = List.exists (String.equal flag) tokens
 
-let server_port_of_url url =
-  let trimmed = String.trim url in
-  match String.rindex_opt trimmed ':' with
-  | None -> None
-  | Some idx ->
-      let port =
-        String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
-      in
-      parse_int_opt port
-
 let process_to_yojson (process : llama_process) =
   `Assoc
     [

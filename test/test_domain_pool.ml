@@ -173,6 +173,26 @@ let test_ref_submits_to_shared_pool () =
         (worker_domain <> main_domain);
       R.clear_for_tests ()))
 
+let test_keeper_model_input_projection_uses_shared_pool () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let previous = R.get () in
+      Eio.Switch.on_release sw (fun () ->
+        match previous with
+        | None -> R.clear_for_tests ()
+        | Some pool -> R.set pool);
+      let pool =
+        D.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
+      in
+      R.set pool;
+      let caller_domain = Domain.self () in
+      let projection_domain =
+        Masc.Keeper_turn_driver_try_provider.For_testing
+        .offload_model_input_cpu Domain.self
+      in
+      check bool "Keeper model-input CPU work leaves the Eio domain" true
+        (projection_domain <> caller_domain)))
+
 let test_ref_inline_from_raw_domain_with_pool () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -233,6 +253,8 @@ let () =
     "ref", [
       test_case "inline when absent" `Quick test_ref_runs_inline_when_absent;
       test_case "submits to shared pool" `Quick test_ref_submits_to_shared_pool;
+      test_case "Keeper model-input projection uses shared pool" `Quick
+        test_keeper_model_input_projection_uses_shared_pool;
       test_case "inline from raw domain with pool installed" `Quick
         test_ref_inline_from_raw_domain_with_pool;
     ];

@@ -1,14 +1,3 @@
-type claim_kind =
-  | Task_commitment
-  | Completion_claim
-
-type claim_status =
-  | Pending
-  | Supported
-  | Unsupported
-  | Expired
-  | Partial
-
 val accountability_emit_skip_metric : string
 (** #10314: Otel_metric_store counter name surfaced for tests and dashboards.
     Labels:

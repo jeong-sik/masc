@@ -21,8 +21,6 @@ let error_kind_of_yojson = function
 let pp_error_kind fmt kind =
   Format.pp_print_string fmt (error_kind_to_string kind)
 
-let show_error_kind = error_kind_to_string
-
 (** Telemetry event types *)
 type event =
   | Agent_session_bound of { agent_id: string; capabilities: string list }

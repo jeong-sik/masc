@@ -101,6 +101,25 @@ let of_yojson json =
     in
     let* generated_at_unix = required_unix "generated_at_unix" in
     let* fresh_until_unix = required_unix "fresh_until_unix" in
+    (* [confidence] is the judge's own statement about a judgment an operator
+       reads. An absent or malformed value is not 0.0 — that spelling would put
+       "no opinion recorded" and "certain this is wrong" on the same number in
+       the digest a human decides from. Every record this module writes carries
+       the field, so a record without one is a corrupt record, not an old one. *)
+    let* confidence =
+      match Json_util.assoc_member_opt "confidence" json with
+      | Some (`Float value) -> Ok value
+      | Some (`Int value) -> Ok (float_of_int value)
+      | Some _ -> Error "invalid confidence"
+      | None -> Error "missing confidence"
+    in
+    let* confidence =
+      if Float.is_finite confidence
+         && Float.compare confidence 0.0 >= 0
+         && Float.compare confidence 1.0 <= 0
+      then Ok confidence
+      else Error "confidence out of range"
+    in
     Ok
       {
         judgment_id = (match Json_util.assoc_member_opt "judgment_id" json with Some (`String s) -> s | _ -> "");
@@ -111,11 +130,7 @@ let of_yojson json =
           Json_util.get_string json "status"
           |> Option.value ~default:"active";
         summary = (match Json_util.assoc_member_opt "summary" json with Some (`String s) -> s | _ -> "");
-        confidence =
-          (match Json_util.assoc_member_opt "confidence" json with
-          | Some (`Float value) -> value
-          | Some (`Int value) -> float_of_int value
-          | _ -> 0.0);
+        confidence;
         generated_at = (match Json_util.assoc_member_opt "generated_at" json with Some (`String s) -> s | _ -> "");
         generated_at_unix;
         fresh_until = (match Json_util.assoc_member_opt "fresh_until" json with Some (`String s) -> s | _ -> "");
@@ -212,7 +227,7 @@ let record config ~surface ~target_type ~target_id ~summary ~confidence
       target_id;
       status = "active";
       summary = String.trim summary;
-      confidence = max 0.0 (min 1.0 confidence);
+      confidence;
       generated_at;
       generated_at_unix;
       fresh_until;

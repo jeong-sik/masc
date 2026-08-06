@@ -5,12 +5,10 @@
     summary helpers used by the eval CLI and dashboard. METR Task
     Standard / OpenAI Harness inspired.
 
-    Internal helpers (the [match_mode_to_string] /
-    [grader_result_to_json] / [eval_run_to_json] /
-    [eval_result_to_json] / [suite_result_to_json] /
-    [scenario_to_json] write-side encoders that callers consume only
-    via {!report_to_string} / {!write_results_jsonl}, and the
-    [score_std_dev] / [weighted_score] internal aggregators) are
+    Internal helpers (the [grader_result_to_json] / [eval_run_to_json] /
+    [eval_result_to_json] / [suite_result_to_json] write-side encoders
+    that callers consume only via {!report_to_string} /
+    {!write_results_jsonl}, and the [score_std_dev] aggregator) are
     hidden — callers consume the typed records, the deterministic
     grader / tool-expectation runners, the pass@k / summary
     builders, and the IO entry points only.

@@ -551,14 +551,6 @@ let inspect_state ctx =
   { task_claimed; current_task_set }
 ;;
 
-let state_to_json st =
-  `Assoc
-    [ "task_claimed", `Bool st.task_claimed
-    ; "current_task_set", `Bool st.current_task_set
-    ; "session_active", `Bool false
-    ]
-;;
-
 (* ── State check (assertion-based verification) ────────────────── *)
 
 (** Issue #8636: SSOT for [masc_check] assertion vocabulary. Schema

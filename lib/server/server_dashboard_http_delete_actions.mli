@@ -30,7 +30,3 @@ val handle_keeper_lifecycle_completion :
   Keeper_shutdown_types.t ->
   Keeper_shutdown_types.completion_action ->
   (unit, string) result
-
-module For_testing : sig
-
-end

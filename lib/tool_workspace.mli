@@ -46,14 +46,14 @@ type assertion_kind = Workspace_assertions.assertion_kind =
 
 (** [assertion_kind_to_string k] returns the canonical lowercase
     label for [k].  Re-export of
-    {!Workspace_assertions.assertion_kind_to_string}; pinned for
-    behaviour-tests under {!test/test_types}. *)
+    {!Workspace_assertions.assertion_kind_to_string}.  No suite pins
+    this label set today. *)
 val assertion_kind_to_string : assertion_kind -> string
 
 (** [all_assertion_kinds] is the canonical witness list — one
     entry per {!assertion_kind} constructor.  Re-export of
-    {!Workspace_assertions.all_assertion_kinds}; pinned for
-    behaviour-tests under {!test/test_types}. *)
+    {!Workspace_assertions.all_assertion_kinds}.  No suite pins the
+    witness list against the constructor set today. *)
 val all_assertion_kinds : assertion_kind list
 
 (** [valid_assertion_strings] is the canonical list of

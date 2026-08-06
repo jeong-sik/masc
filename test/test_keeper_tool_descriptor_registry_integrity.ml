@@ -270,9 +270,7 @@ let test_registered_cluster_model_projections_are_explicit () =
   let keeper_model_names = Policy.keeper_model_tool_names () in
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
-    [ "masc_runtime_verify"
-    ; "masc_runtime_ollama_probe"
-    ];
+    [ "masc_runtime_verify" ];
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
     [ "keeper_library_read"
@@ -297,6 +295,14 @@ let test_registered_cluster_model_projections_are_explicit () =
       "masc_status"
     ; "masc_pause"
     ; "masc_resume"
+      (* Native Ollama timing probe. Its output is load/prompt-eval timings and
+         a prefix-reuse inference — operator diagnostics, read through
+         /api/v1/dashboard/runtime-probe. It carried 1,219 bytes of schema into
+         every Keeper turn and was called 0 times in the 6 days to 2026-08-06.
+         Registration is unchanged: that dashboard route authorizes with
+         [with_tool_auth ~tool_name:"masc_runtime_ollama_probe"], and
+         [Auth.authorize_tool_for_role] refuses any unregistered name. *)
+    ; "masc_runtime_ollama_probe"
     ];
   List.iter
     (fun (name, projected_by) ->

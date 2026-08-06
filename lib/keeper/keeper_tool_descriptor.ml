@@ -1530,7 +1530,11 @@ let masc_local_runtime_descriptor
   let schema = definition.schema in
   cluster_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection:
+      (Tool_schemas_local_runtime.keeper_model_exposure definition.operation
+       |> function
+       | Tool_schemas_local_runtime.Keeper_callable -> Internal_name
+       | Tool_schemas_local_runtime.Operator_diagnostic -> Operator_only)
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
     ~id:

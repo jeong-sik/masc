@@ -67,7 +67,7 @@ let test_artifact_page_makes_progress () =
            ])
     with
     | Ok request -> request
-    | Error error -> Alcotest.fail error
+    | Error error -> Alcotest.fail (R.invalid_request_to_string error)
   in
   let emoji = "\240\159\152\128x" in
   let incident_sized_payload = String.make 2_500 'w' in
@@ -77,7 +77,7 @@ let test_artifact_page_makes_progress () =
         (`Assoc [ "sha256", `String (String.make 64 'a') ])
     with
     | Ok request -> request
-    | Error error -> Alcotest.fail error
+    | Error error -> Alcotest.fail (R.invalid_request_to_string error)
   in
   let incident_page =
     match R.For_testing.page default_request incident_sized_payload with

@@ -13,7 +13,6 @@
   - RFC 0020 (Layered Overlay System — LAYERS toggle framework)
   - RFC 0021 (Anchored Thread Rail — CONVERSATION rail data model)
 - **Blocks**: RFC 0023, 0025, 0026 (모두 본 RFC 의 application)
-- **Sister RFC**: repo `docs/rfc/RFC-0033-worktree-status-sse.md` (server side)
 - **SSOT audit**: `dashboard/design-system/audits/2026-04-30-ide-mockup-vs-v0.4-mapping.md`
 - **GitHub Issues**: #13197 (P0-A) · #13198 (P0-B) · #13199 (P1-A) · #13200 (P1-B) · #13201 (P2)
 

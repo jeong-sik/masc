@@ -228,6 +228,21 @@ let test_keeper_board_list_can_exclude_machine_posts () =
       [ "exclude_system"; "exclude_automation" ]
 ;;
 
+(* Same class: the handler reads parent_id (board_tool_post.ml:404) and the
+   renderer already builds the reply tree from it (board_tool_format.ml:183),
+   but the projection dropped it -- so a Keeper could reply to a post and never
+   to another Keeper's comment. *)
+let test_keeper_board_comment_can_reply_to_a_comment () =
+  let schema = required_keeper_board_schema Tool_name.Board_name.Board_comment in
+  match get_json_assoc "properties" schema.input_schema with
+  | None -> Alcotest.fail "masc_board_comment missing properties"
+  | Some properties ->
+    Alcotest.(check bool)
+      "parent_id reaches the Keeper model"
+      true
+      (List.mem_assoc "parent_id" properties)
+;;
+
 let test_ide_annotation_schema_uses_opaque_references () =
   let schema =
     schema_by_name "keeper_ide_annotate" Tool_shard_types.filesystem_tools
@@ -308,6 +323,10 @@ let () =
             "board list can exclude machine posts"
             `Quick
             test_keeper_board_list_can_exclude_machine_posts
+        ; Alcotest.test_case
+            "board comment can reply to a comment"
+            `Quick
+            test_keeper_board_comment_can_reply_to_a_comment
         ; Alcotest.test_case
             "IDE opaque references"
             `Quick

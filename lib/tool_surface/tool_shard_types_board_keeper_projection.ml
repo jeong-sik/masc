@@ -212,6 +212,14 @@ let schemas : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; "description", `String "Comment content"
                       ] )
+                ; ( "parent_id"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Optional comment ID to reply under, threading this comment \
+                             beneath another Keeper's instead of flat on the post." )
+                      ] )
                 ] )
           ; "required", `List [ `String "post_id"; `String "content" ]
           ; "additionalProperties", `Bool false

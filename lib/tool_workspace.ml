@@ -150,33 +150,6 @@ let safe_get_agents (ctx : context) =
     []
 ;;
 
-let todo_task_has_completed_deliverable_conflict (ctx : context) (task : Masc_domain.task)
-  =
-  match task.task_status with
-  | Masc_domain.Todo ->
-    (match Planning_eio.load ctx.config ~task_id:task.id with
-     | Ok plan_ctx ->
-       Task_completion_claim.deliverable_claims_completion
-         ~task_id:task.id
-         plan_ctx.deliverable
-     | Error _ -> false)
-  | Masc_domain.Claimed _
-  | Masc_domain.InProgress _
-  | Masc_domain.AwaitingVerification _
-  | Masc_domain.Done _
-  | Masc_domain.Cancelled _ -> false
-;;
-
-let todo_completed_deliverable_conflicts (ctx : context) tasks =
-  List.filter_map
-    (fun (task : Masc_domain.task) ->
-       Workspace_query.safe_yield ();
-       if todo_task_has_completed_deliverable_conflict ctx task
-       then Some task.id
-       else None)
-    tasks
-;;
-
 let resolve_current_binding ~assigned_task_ids ~planning_current =
   let primary_owned =
     match assigned_task_ids with
@@ -228,25 +201,13 @@ let planning_context_state
       (active_tasks : Masc_domain.task list)
   =
   match binding.primary_owned with
-  | None -> { planning_missing_task = None; deliverable_conflict_task = None }
+  | None -> { planning_missing_task = None }
   | Some task_id ->
     (match Planning_eio.load ctx.config ~task_id with
      | Error _ ->
-       { planning_missing_task = Some task_id; deliverable_conflict_task = None }
+       { planning_missing_task = Some task_id }
      | Ok plan_ctx ->
-       let deliverable_conflict_task =
-         match
-           List.find_opt
-             (fun (task : Masc_domain.task) -> String.equal task.id task_id)
-             active_tasks
-         with
-         | Some { task_status = Masc_domain.Claimed _ | Masc_domain.InProgress _; _ }
-           when Task_completion_claim.deliverable_claims_completion
-                  ~task_id
-                  plan_ctx.deliverable -> Some task_id
-         | Some _ | None -> None
-       in
-       { planning_missing_task = None; deliverable_conflict_task })
+       { planning_missing_task = None })
 ;;
 
 let status_summary_string (ctx : context) =
@@ -349,9 +310,6 @@ let status_summary_string (ctx : context) =
       backlog.tasks
   in
   let active_tasks = List.rev active_tasks in
-  let todo_conflict_task_ids = todo_completed_deliverable_conflicts ctx active_tasks in
-  let todo_conflict_count = List.length todo_conflict_task_ids in
-  let fresh_todo_count = max 0 (todo_count - todo_conflict_count) in
   let matches_you assignee =
     String.equal assignee ctx.agent_name || String.equal assignee actual_name
   in
@@ -390,17 +348,6 @@ let status_summary_string (ctx : context) =
       | None -> items
     in
     let items =
-      match planning_state.deliverable_conflict_task with
-      | Some task_id ->
-        items
-        @ [ Printf.sprintf
-              "Owned task %s already has a completed-looking deliverable while the task \
-               is still active."
-              task_id
-          ]
-      | None -> items
-    in
-    let items =
       if Option.is_some binding.primary_owned && not binding.current_task_set
       then
         items
@@ -420,20 +367,10 @@ let status_summary_string (ctx : context) =
         @ [ "Planning current_task is set but no active task is assigned to you." ]
       | Some _ | None -> items
     in
-    let items =
-      if todo_conflict_count > 0
-      then
-        items
-        @ [ Printf.sprintf
-              "%d todo task(s) have completed-looking planning deliverables."
-              todo_conflict_count
-          ]
-      else items
-    in
-    if fresh_todo_count > 0 && Stdlib.List.length binding.assigned_task_ids = 0
+    if todo_count > 0 && Stdlib.List.length binding.assigned_task_ids = 0
     then
       items
-      @ [ Printf.sprintf "%d unclaimed task(s) are available right now." fresh_todo_count
+      @ [ Printf.sprintf "%d unclaimed task(s) are available right now." todo_count
         ]
     else items
   in
@@ -453,7 +390,6 @@ let status_summary_string (ctx : context) =
        ~in_progress_count
        ~done_count
        ~cancelled_count
-       ~todo_conflict_task_ids
        ~binding
        ~planning_state
        ~attention_items

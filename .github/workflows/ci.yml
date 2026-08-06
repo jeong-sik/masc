@@ -971,6 +971,14 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_repos_relative_path
 
+      - name: Run JSONL day-key suite
+        # The key and the writer's path have to name the same day. A reader
+        # that drifts does not error -- it filters a layout the writer does
+        # not produce and comes back empty, which @check cannot see.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_jsonl_day_key
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was

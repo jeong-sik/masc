@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { formatPct1 } from '../lib/format-number'
 import { unixSecondsToDate } from '../lib/format-time'
 import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
@@ -14,12 +13,7 @@ import {
 } from '../api/keeper'
 import { TextInput } from './common/input'
 import { Checkbox } from './common/checkbox'
-import { TimeAgo } from './common/time-ago'
-import { keeperStatusDetails } from '../keeper-state'
-import { isRecord } from './common/normalize'
 import { showToast } from './common/toast'
-import { PanelCard } from './common/panel-card'
-import { SectionHeader } from './common/section-header'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
 
 function SnapshotBadge({ tone, children }: { tone: 'accent' | 'neutral' | 'ok' | 'warn' | 'bad'; children: unknown }) {

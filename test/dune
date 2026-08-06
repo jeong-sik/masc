@@ -1709,6 +1709,8 @@
 (include stanzas/test_discord_observability.inc)
 (include stanzas/test_gate_connector_observability.inc)
 
+(include stanzas/test_jsonl_day_key.inc)
+
 (include stanzas/test_discord_rest_client.inc)
 
 (include stanzas/test_slack_rest_client.inc)

@@ -119,7 +119,6 @@ const namespaceTruthResponse: DashboardNamespaceTruthResponse = {
   },
   readiness: {
     status: 'warn',
-    score: 0.67,
     decision_required_count: 1,
     blocking_count: 2,
     pillars: [
@@ -127,7 +126,6 @@ const namespaceTruthResponse: DashboardNamespaceTruthResponse = {
         key: 'execution_safety',
         label: 'Execution Safety',
         status: 'ok',
-        score: 1,
         summary: 'Sandbox and approval posture are visible.',
         blocking_reasons: [],
         metrics: { keeper_count: 2 },
@@ -136,7 +134,6 @@ const namespaceTruthResponse: DashboardNamespaceTruthResponse = {
         key: 'autonomy_reliability',
         label: 'Autonomy Reliability',
         status: 'warn',
-        score: 0.5,
         summary: 'One keeper is asking for intervention.',
         blocking_reasons: ['1 keeper has a pending Gate request.'],
         metrics: { decision_required: 1 },
@@ -919,7 +916,6 @@ describe('FleetTelemetryPanel', () => {
       attention_events: [],
       readiness: {
         ...namespaceTruthResponse.readiness!,
-        score: 0.9,
         status: 'ok',
       },
     })

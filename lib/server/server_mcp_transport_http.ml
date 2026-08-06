@@ -109,8 +109,6 @@ let body_tools_call_name body_str =
     | _ -> None
   with Yojson.Json_error _ -> None
 
-let session_cookie_header = Server_mcp_transport_http_headers.session_cookie_header
-
 let session_cookie_headers = Server_mcp_transport_http_headers.session_cookie_headers
 
 let sse_headers = Server_mcp_transport_http_headers.sse_headers

@@ -374,7 +374,6 @@ export interface DashboardReadinessPillar {
   key: string
   label: string
   status: 'ok' | 'warn' | 'bad' | string
-  score: number
   summary: string
   blocking_reasons: string[]
   metrics?: Record<string, number>
@@ -382,7 +381,6 @@ export interface DashboardReadinessPillar {
 
 export interface DashboardReadinessSummary {
   status: 'ok' | 'warn' | 'bad' | string
-  score: number
   decision_required_count: number
   blocking_count: number
   pillars: DashboardReadinessPillar[]

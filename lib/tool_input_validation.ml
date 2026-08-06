@@ -839,11 +839,17 @@ let pass_reason ~schema ~args ~prepared_args =
 ;;
 
 let validation_schema_of_json ~name json_schema : Agent_sdk.Types.tool_schema =
-  { name
-  ; description = ""
-  ; parameters = Tool_bridge.params_of_json_schema json_schema
-  ; strict = None
-  }
+  let params = Tool_bridge.params_of_json_schema json_schema in
+  let json =
+    `Assoc
+      [ ("name", `String name)
+      ; ("description", `String "")
+      ; ("parameters", `List (List.map Agent_sdk.Types.tool_param_to_json params))
+      ]
+  in
+  match Agent_sdk.Types.tool_schema_of_json json with
+  | Ok schema -> schema
+  | Error err -> failwith ("validation_schema_of_json: " ^ err)
 ;;
 
 let reject_validation ~name ~reason ~message =

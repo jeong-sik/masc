@@ -102,11 +102,4 @@ module For_testing : sig
     config:Workspace.config ->
     Yojson.Safe.t
 
-  val goal_detail_json_with_pending_reader :
-    read_pending:
-      (base_path:string ->
-      (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result) ->
-    config:Workspace.config ->
-    goal_id:string ->
-    (Yojson.Safe.t, string) result
 end

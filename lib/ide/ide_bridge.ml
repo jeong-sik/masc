@@ -841,8 +841,6 @@ let install_agent_observation_sinks () =
    small thresholds without writing multi-megabyte segments. Not part of
    the production surface. *)
 module For_testing = struct
-  let default_max_segment_bytes = default_max_segment_bytes
-  let default_max_retained_segments = default_max_retained_segments
   let append_rotating = append_rotating
   let tail_read_lines = tail_read_lines
   let segment_paths_newest_first = segment_paths_newest_first

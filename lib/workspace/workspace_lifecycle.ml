@@ -6,7 +6,6 @@
 open Masc_domain
 open Workspace_utils
 open Workspace_state
-open Workspace_identity
 open Workspace_broadcast
 open Workspace_identity
 

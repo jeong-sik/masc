@@ -23,6 +23,46 @@ let test_should_retry_unix_fallback_on_cancelled_bind_error () =
   check bool "retry cancelled bind eaddrinuse" true
     (Process_eio.should_retry_unix_fallback exn)
 
+(* A child that emits past the capture ceiling must yield a bounded result
+   that names what it elided, not the whole stream. Before the ceiling the
+   drainers copied every byte into an unbounded buffer: one `rg` over
+   single-line multi-MB JSON retained 590MB inside a keeper turn. *)
+let test_capture_bounds_oversized_stdout () =
+  Process_eio.reset_for_testing ();
+  let emitted = 9 * 1024 * 1024 in
+  let ceiling =
+    Common.max_process_capture_head_bytes
+    + Common.max_process_capture_tail_bytes
+  in
+  (* [ceiling] must sit strictly inside what the child writes, otherwise the
+     assertions below hold trivially and prove nothing. *)
+  check bool "child out-writes the ceiling" true (emitted > ceiling);
+  let output =
+    Process_eio.run_argv
+      [ "/bin/sh";
+        "-c";
+        Printf.sprintf "yes %s | head -c %d" (String.make 64 'a') emitted ]
+  in
+  (* Pinned to the ceiling plus the truncation marker, not merely "smaller
+     than the child wrote": a bound that only shaved a few bytes would still
+     satisfy the loose form. *)
+  let len = String.length output in
+  check bool "capture stays under what the child emitted" true (len < emitted);
+  check bool "capture lands at the ceiling plus a short marker" true
+    (len >= ceiling && len <= ceiling + 128);
+  check bool "elided bytes are reported, not dropped silently" true
+    (contains output "(truncated ")
+
+(* Output that fits is byte-identical: the ceiling must not perturb the
+   overwhelmingly common short-output call. *)
+let test_capture_leaves_small_stdout_untouched () =
+  Process_eio.reset_for_testing ();
+  let output = Process_eio.run_argv [ "/bin/sh"; "-c"; "printf 'small-exact'" ] in
+  check bool "no truncation marker on a short capture" false
+    (contains output "(truncated ");
+  check bool "short capture passes through verbatim" true
+    (contains output "small-exact")
+
 let test_run_argv_fallback_preserves_env () =
   let output =
     Process_eio.run_argv ~env:[| "PROCESS_EIO_TEST_VAR=ok" |] [ "/usr/bin/env" ]
@@ -604,5 +644,9 @@ let () =
              test_run_argv_pipeline_timeout_reaps_all_stages;
            test_case "reset_for_testing-clears-runtime" `Quick
              test_reset_for_testing_clears_runtime;
+           test_case "capture-bounds-oversized-stdout" `Quick
+             test_capture_bounds_oversized_stdout;
+           test_case "capture-leaves-small-stdout-untouched" `Quick
+             test_capture_leaves_small_stdout_untouched;
          ] );
     ]

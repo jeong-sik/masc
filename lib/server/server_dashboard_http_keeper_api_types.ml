@@ -15,6 +15,7 @@ let keeper_suffix_runtime_trace = "/runtime-trace"
 let keeper_suffix_directive = "/directive"
 let keeper_suffix_paused_work = "/paused-work"
 let keeper_suffix_catchup_judge = "/catchup-judge"
+let keeper_suffix_operator_note = "/operator-note"
 
 let keeper_chat_receipt_state_json = Keeper_chat_receipt_projection.state_json
 let keeper_chat_receipt_json = Keeper_chat_receipt_projection.receipt_json
@@ -80,6 +81,7 @@ type keeper_post_route_kind =
   | Keeper_post_directive
   | Keeper_post_paused_work
   | Keeper_post_catchup_judge
+  | Keeper_post_operator_note
   | Keeper_post_chat_recovery of keeper_chat_recovery_route
   | Keeper_post_board_attention_quarantine_recovery of
       keeper_board_attention_quarantine_route
@@ -151,6 +153,7 @@ let classify_keeper_post_route req_path =
     else if ends_with keeper_suffix_clear then Keeper_post_clear
     else if ends_with keeper_suffix_checkpoints then Keeper_post_checkpoints
     else if ends_with keeper_suffix_directive then Keeper_post_directive
+    else if ends_with keeper_suffix_operator_note then Keeper_post_operator_note
     else if ends_with keeper_suffix_paused_work then Keeper_post_paused_work
     else if ends_with keeper_suffix_catchup_judge then Keeper_post_catchup_judge
     else Keeper_post_unknown

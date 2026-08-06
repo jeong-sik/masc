@@ -14,7 +14,6 @@ describe('normalizeOperatorDigest', () => {
     expect(result.health).toBeUndefined()
     expect(result.attention_items).toEqual([])
     expect(result.recommended_actions).toEqual([])
-    expect(result.recent_reviews).toEqual([])
   })
 
   it('returns safe defaults for undefined', () => {

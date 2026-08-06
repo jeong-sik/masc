@@ -3,8 +3,6 @@
    Contains keeper reaction ledger, FD accountant, fleet resolution,
    runtime truth, and contract-verification health JSON renderers. *)
 
-open Server_utils
-open Server_auth
 open Server_routes_http_common
 open Server_routes_http_runtime_fleet_scan
 

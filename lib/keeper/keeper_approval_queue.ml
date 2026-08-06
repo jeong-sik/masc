@@ -1972,19 +1972,12 @@ let resolved_approval_json_of_audit_event json =
     ]
 ;;
 
-(* Day key for the [YYYY-MM/DD.jsonl] layout. Must stay UTC: the write path
-   ([Jsonl_writer.dated_path]) picks the day file with [Unix.gmtime], so a
-   local-time key here would look in the wrong file for the hours where the
-   two calendars disagree. Pinned by
-   [test_keeper_approval_resolved_history.ml]. *)
-let audit_day_string_of_ts ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf
-    "%04d-%02d-%02d"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-;;
+(* Day key for the [YYYY-MM/DD.jsonl] layout. The reasoning this comment used
+   to carry -- must stay UTC, because the write path picks the day file with
+   [Unix.gmtime] and a local-time key would look in the wrong file -- now lives
+   where it can be enforced: both come from one [Unix.gmtime] call inside
+   [Jsonl_writer]. Still pinned by [test_keeper_approval_resolved_history.ml]. *)
+let audit_day_string_of_ts ts = Jsonl_writer.day_key ~ts
 
 let clamp_int value ~low ~high = max low (min high value)
 

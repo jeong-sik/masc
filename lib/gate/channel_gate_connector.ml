@@ -1,5 +1,7 @@
 (** Channel_gate_connector -- connector interface and registry.
 
+    @since 2.260.0 *)
+
 type ready_info = {
   ready_bot_user_id : string;
   ready_at : string;

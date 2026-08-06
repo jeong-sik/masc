@@ -745,10 +745,6 @@ let send_dashboard_delta_for_parsed session sse_event parsed =
   | Some frame -> send_dashboard_delta_frame session frame
   | None -> false
 
-let send_dashboard_delta_for_sse session sse_event =
-  send_dashboard_delta_for_parsed session sse_event
-    (parse_sse_dashboard_event sse_event)
-
 (** TTL cache for env-var reads on the fan-out hot path.
 
     [client_buffer_limit_bytes], [dashboard_ack_stale_threshold_s],
@@ -1278,29 +1274,6 @@ let send_to_session_result session_id text =
         cleanup_session session_id;
         Send_failed
       end
-
-(** Send a text frame to a specific session by ID.
-    Returns [false] if the session is not found or the send fails.
-    Prefer {!send_to_session_result} when the caller needs to
-    distinguish "session gone" (expected) from "send failed" (bug). *)
-let send_to_session session_id text =
-  match send_to_session_result session_id text with
-  | Sent -> true
-  | Session_gone | Send_failed -> false
-
-(** Broadcast a JSON string to all WebSocket sessions.
-    Independent of SSE -- for WS-only messages. *)
-let broadcast_ws json_str =
-  let snapshot =
-    with_sessions_rw (fun () ->
-      Hashtbl.fold (fun _ s acc -> s :: acc) sessions [])
-  in
-  let failed = ref [] in
-  List.iter (fun session ->
-    if not (send_text_checked ~context:"broadcast" session json_str) then
-      failed := session.id :: !failed
-  ) snapshot;
-  List.iter cleanup_session !failed
 
 (** Close all WebSocket sessions (for graceful shutdown). *)
 let close_all () =

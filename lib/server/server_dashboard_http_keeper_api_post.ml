@@ -1591,4 +1591,62 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
         Http.Response.json_value ~status:`Internal_server_error ~compress:true
           ~request:req response reqd
 
+(* RFC-0366. One sentence for one turn. The store rejects an oversized note
+   rather than truncating it, and this boundary passes that refusal through
+   with the caller's own byte count so an operator can see what was rejected
+   instead of guessing which half arrived. *)
+let handle_keeper_operator_note_post state agent_name req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_post req_path keeper_suffix_operator_note in
+  if String.length name = 0 then respond_error reqd "keeper name is required"
+  else
+    let parsed =
+      match Yojson.Safe.from_string body_str with
+      | `Assoc fields ->
+        (match List.assoc_opt "text" fields with
+         | Some (`String text) -> Ok text
+         | Some _ -> Error "text must be a string"
+         | None -> Error "text is required")
+      | _ -> Error "body must be a JSON object"
+      | exception Yojson.Json_error message ->
+        Error (Printf.sprintf "invalid json: %s" message)
+    in
+    match parsed with
+    | Error message -> respond_error ~ok:false reqd message
+    | Ok text ->
+      let config = Mcp_server.workspace_config state in
+      (match
+         Keeper_operator_note.write ~config ~keeper:name ~text ~created_by:agent_name
+       with
+       | Ok note ->
+         Log.Keeper.info
+           "operator note stored for %s by %s bytes=%d"
+           name
+           agent_name
+           (String.length text);
+         Http.Response.json_value ~compress:true ~request:req
+           (`Assoc
+              [ "ok", `Bool true
+              ; "keeper", `String name
+              ; "pending", `Bool true
+              ; "note", Keeper_operator_note.to_json note
+              ])
+           reqd
+       | Error error ->
+         let status =
+           match error with
+           | Keeper_operator_note.Write_failed _ -> `Internal_server_error
+           | Keeper_operator_note.Unknown_keeper _
+           | Keeper_operator_note.Empty_text
+           | Keeper_operator_note.Too_large _ -> `Bad_request
+         in
+         Http.Response.json_value ~status ~request:req
+           (`Assoc
+              [ "ok", `Bool false
+              ; "keeper", `String name
+              ; ( "error"
+                , `String (Keeper_operator_note.write_error_to_string error) )
+              ])
+           reqd)
+
 (** Keeper GET sub-routes handler: /config, /chat/history, /trajectory. *)

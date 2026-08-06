@@ -981,6 +981,33 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_jsonl_day_key
 
+      - name: Run operator note lifetime suite
+        # RFC-0366. A note that renders twice is a standing rule the operator
+        # never wrote — the #26729 shape. @check compiles "renders once then
+        # never again" whether or not it holds, so the suite has to run.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_operator_note
+
+      - name: Run prompt capture round-trip suite
+        # The assembled extra system context reaches disk as text here. @check
+        # compiles the cases but does not run them, and "an unknown block id
+        # must not decode short" compiles whether or not it holds. The write
+        # path also degrades to a warning by design, so a broken capture is
+        # silent unless a test exercises it.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_prompt_capture
+
+      - name: Run raw-trace reader containment suite
+        # This surface takes a caller-supplied file name and reads inside a
+        # keeper's directory. @check compiles the containment cases but does not
+        # run them, and "../secret.jsonl must not resolve" compiles whether or
+        # not it holds.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_raw_trace_reader
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was

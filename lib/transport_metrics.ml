@@ -95,13 +95,6 @@ let inc_relay_drop_marker_failure () =
   Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_drop_marker_failures ()
 ;;
 
-let set_sse_queue_depth ~session_id depth =
-  Otel_metric_store.set_gauge
-    Otel_metric_store.metric_sse_stream_queue_depth
-    ~labels:[ "session_id", session_id ]
-    (float_of_int depth)
-;;
-
 let set_sse_queue_snapshot ~avg_depth ~max_depth ~hot_sessions =
   Otel_metric_store.set_gauge Otel_metric_store.metric_sse_queue_depth_avg avg_depth;
   Otel_metric_store.set_gauge Otel_metric_store.metric_sse_queue_depth_max (float_of_int max_depth);

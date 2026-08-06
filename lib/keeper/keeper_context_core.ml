@@ -280,14 +280,36 @@ let patch_checkpoint_last_assistant
       | Agent_sdk.Types.Text _ :: rest -> patch_content replaced acc rest
       | block :: rest -> patch_content replaced (block :: acc) rest
     in
-    Agent_sdk.Types.make_message
-      ~role:Agent_sdk.Types.Assistant
-      (patch_content false [] msg.Agent_sdk.Types.content)
+    let content = patch_content false [] msg.Agent_sdk.Types.content in
+    let rec content_unchanged left right =
+      match left, right with
+      | [], [] -> true
+      | Agent_sdk.Types.Text left :: left_rest,
+        Agent_sdk.Types.Text right :: right_rest
+        when String.equal left right ->
+        content_unchanged left_rest right_rest
+      | left_block :: left_rest, right_block :: right_rest
+        when left_block == right_block ->
+        content_unchanged left_rest right_rest
+      | _ -> false
+    in
+    if content_unchanged content msg.Agent_sdk.Types.content
+       && Option.is_none msg.name
+       && Option.is_none msg.tool_call_id
+       && msg.metadata = []
+    then msg
+    else
+      Agent_sdk.Types.make_message
+        ~role:Agent_sdk.Types.Assistant
+        content
   in
   let rec patch_last_assistant suffix_rev = function
     | [] -> cp.messages
     | msg :: older_rev when msg.Agent_sdk.Types.role = Agent_sdk.Types.Assistant ->
-        List.rev_append older_rev (patch_assistant_message msg :: suffix_rev)
+        let patched = patch_assistant_message msg in
+        if patched == msg
+        then cp.messages
+        else List.rev_append older_rev (patched :: suffix_rev)
     | msg :: older_rev -> patch_last_assistant (msg :: suffix_rev) older_rev
   in
   let messages =

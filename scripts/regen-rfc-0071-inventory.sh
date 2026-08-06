@@ -23,6 +23,22 @@ cd "$REPO_ROOT"
 
 OUTPUT="${OUTPUT:-docs/rfc/RFC-0071-inventory.csv}"
 
+# --check regenerates into a temp file and diffs, leaving the tracked file
+# untouched.
+#
+# Deliberately not a CI gate. The rows carry line numbers, so any edit to a
+# file containing one shifts them: gating exact equality would fail every PR
+# that touches lib/, which is the same failure mode that retired the catch-all
+# `dune test` step (see .github/workflows/ci.yml). This inventory is a
+# migration work list, not a contract between two artifacts.
+#
+# Use it when working on RFC-0071, or to see how far the committed snapshot has
+# drifted — it was 85 rows stale when this flag was added.
+CHECK_ONLY=0
+if [ "${1:-}" = "--check" ]; then
+  CHECK_ONLY=1
+fi
+
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
@@ -53,8 +69,21 @@ trap 'rm -f "$tmp"' EXIT
     | sort -t, -k1,1 -k2,2n
 } > "$tmp"
 
+rows=$(( $(wc -l < "$tmp") - 1 ))
+
+if [ "$CHECK_ONLY" = "1" ]; then
+  if diff -q "$OUTPUT" "$tmp" >/dev/null 2>&1; then
+    echo "[rfc-0071-inventory] OK - $rows data rows, matches lib/" >&2
+    exit 0
+  fi
+  echo "[rfc-0071-inventory] FAIL - $OUTPUT is stale relative to lib/" >&2
+  echo >&2
+  diff "$OUTPUT" "$tmp" | head -40 >&2
+  echo >&2
+  echo "Run scripts/regen-rfc-0071-inventory.sh and commit the result." >&2
+  exit 2
+fi
+
 mv "$tmp" "$OUTPUT"
 trap - EXIT
-
-rows=$(( $(wc -l < "$OUTPUT") - 1 ))
 echo "Regenerated $OUTPUT: $rows data rows." >&2

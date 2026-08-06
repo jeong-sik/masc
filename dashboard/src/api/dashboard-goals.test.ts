@@ -164,6 +164,22 @@ describe('fetchDashboardGoalsTree decoding', () => {
     expect(result.tree[0]!.children[0]!.id).toBe('goal-child')
   })
 
+  it('decodes goal owner from the tree node payload', async () => {
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      tree: [
+        validNode('goal-owned', 'Owned goal', { owner: 'dancer' }),
+        validNode('goal-unowned', 'Unowned goal'),
+      ],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
+    })
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.tree[0]!.owner).toBe('dancer')
+    expect(result.tree[1]!.owner).toBeNull()
+  })
+
   it('backfills missing attainment metric_evaluation from metric presence', async () => {
     getMock.mockResolvedValue({
       ...readyApprovalQueue,

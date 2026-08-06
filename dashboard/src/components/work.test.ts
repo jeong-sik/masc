@@ -113,6 +113,7 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
     target_value: null,
     due_date: null,
     parent_goal_id: null,
+    owner: null,
     attainment: {
       state: 'unmeasured',
       basis: 'unmeasured',
@@ -1552,6 +1553,7 @@ describe('Work', () => {
               stagnation_seconds: 3600,
               linked_keeper_names: ['sangsu'],
               pending_approval_count: 2,
+              owner: 'dancer',
               latest_keeper_ref: 'sangsu',
               latest_turn_ref: 42,
             }),
@@ -1572,6 +1574,7 @@ describe('Work', () => {
         expect(dossier.textContent).toContain('request completion')
         expect(dossier.textContent).toContain('state in_progress')
         expect(dossier.textContent).toContain('tasks 3/4')
+        expect(dossier.textContent).toContain('owner dancer')
         expect(dossier.textContent).toContain('keeper sangsu')
         expect(dossier.textContent).toContain('turn 42')
         expect(dossier.textContent).toContain('approvals 2')

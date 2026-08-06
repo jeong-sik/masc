@@ -392,7 +392,6 @@ let record_runtime_mcp_keeper_trajectory
       result = Some safe_output;
       duration_ms;
       error;
-      cost_usd = Trajectory.tool_cost_estimate tool_name;
       execution_id = Some (Ids.Execution_id.to_string execution_id);
     }
   in

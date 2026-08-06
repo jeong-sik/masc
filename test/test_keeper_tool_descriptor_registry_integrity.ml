@@ -279,7 +279,6 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "keeper_library_search"
     ; "masc_library_add"
     ; "masc_library_list"
-    ; "masc_library_promote"
     ; "masc_heartbeat"
     ; "masc_gc"
     ; "masc_get_metrics"

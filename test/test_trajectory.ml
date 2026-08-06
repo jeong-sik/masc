@@ -7,22 +7,6 @@ let () =
   ignore (Unix.gettimeofday ())
 
 (* ================================================================ *)
-(* Test: tool_cost_estimate returns expected values                   *)
-(* ================================================================ *)
-
-let test_tool_cost_known () =
-  let cost = Trajectory.tool_cost_estimate "masc_board_post" in
-  Alcotest.(check (float 0.001)) "board_post cost" 0.002 cost
-
-let test_tool_cost_unknown () =
-  let cost = Trajectory.tool_cost_estimate "nonexistent_tool" in
-  Alcotest.(check (float 0.0001)) "unknown tool default cost" 0.0 cost
-
-let test_tool_cost_bash () =
-  let cost = Trajectory.tool_cost_estimate "tool_execute" in
-  Alcotest.(check (float 0.0001)) "bash cost" 0.0001 cost
-
-(* ================================================================ *)
 (* Test: gate_decision types                                         *)
 (* ================================================================ *)
 
@@ -56,7 +40,6 @@ let test_create_accumulator () =
       ~masc_root:dir ~keeper_name:"test-keeper"
       ~trace_id:"trace-001" ~generation:0 () in
     Alcotest.(check int) "initial turn" 0 acc.Trajectory.turn;
-    Alcotest.(check (float 0.0001)) "initial cost" 0.0 acc.Trajectory.total_cost;
     Alcotest.(check int) "initial entries" 0 (List.length acc.Trajectory.entries))
 
 (* ================================================================ *)
@@ -79,12 +62,11 @@ let test_record_entry () =
       result = Some "/home/test";
       duration_ms = 50;
       error = None;
-      cost_usd = 0.0001;
       execution_id = Some "exec-1000-0001";
     } in
     Trajectory.record_entry acc entry;
     Alcotest.(check int) "entries count" 1 (List.length acc.Trajectory.entries);
-    Alcotest.(check (float 0.0001)) "total cost" 0.0001 acc.Trajectory.total_cost)
+    ())
 
 (* ================================================================ *)
 (* Test: increment_turn                                              *)
@@ -136,14 +118,13 @@ let test_finalize () =
       tool_name = "tool_execute"; args_json = "{}";
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 100;
-      error = None; cost_usd = 0.0001;
+      error = None;
       execution_id = None;
     } in
     Trajectory.record_entry acc entry;
     let traj = Trajectory.finalize acc Trajectory.Completed in
     Alcotest.(check int) "total turns" 1 traj.Trajectory.total_turns;
     Alcotest.(check int) "total calls" 1 traj.Trajectory.total_tool_calls;
-    Alcotest.(check (float 0.0001)) "total cost" 0.0001 traj.Trajectory.total_cost_usd;
     Alcotest.(check string) "trace_id" "trace-006" traj.Trajectory.trace_id)
 
 (* ================================================================ *)
@@ -175,7 +156,7 @@ let test_calls_in_current_turn () =
       tool_name = tool; args_json = "{}";
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
-      error = None; cost_usd = 0.001;
+      error = None;
       execution_id = None;
     } in
     Trajectory.record_entry acc (mk "tool_execute");
@@ -251,29 +232,26 @@ let test_task_id_null_when_none () =
     | `Null -> ()
     | _ -> Alcotest.fail "Expected task_id to be null when not set")
 
-(* model_pricing tests removed — model_token_pricing / estimate_turn_cost
-   deleted from Trajectory (#3029). Pricing belongs to OAS runtime. *)
-
 (* ================================================================ *)
 (* Test: aggregate_tool_stats                                        *)
 (* ================================================================ *)
 
-let mk_entry ?(ts = 1000.0) ?(error = None) ?(gate = Trajectory.Pass) name dur cost ts_iso =
+let mk_entry ?(ts = 1000.0) ?(error = None) ?(gate = Trajectory.Pass) name dur ts_iso =
   { Trajectory.
     ts; ts_iso; turn = 1; round = 0;
     tool_name = name; args_json = "{}";
     gate_decision = gate;
     result = Some "ok"; duration_ms = dur;
-    error; cost_usd = cost;
+    error;
     execution_id = None;
   }
 
 let test_aggregate_basic () =
   let entries = [
-    mk_entry "tool_execute" 100 0.001 "2026-04-06T10:00:00Z";
-    mk_entry "tool_execute" 200 0.002 "2026-04-06T10:01:00Z";
-    mk_entry "tool_execute" 300 0.001 "2026-04-06T10:02:00Z";
-    mk_entry "tool_read_file" 50 0.0 "2026-04-06T10:03:00Z";
+    mk_entry "tool_execute" 100 "2026-04-06T10:00:00Z";
+    mk_entry "tool_execute" 200 "2026-04-06T10:01:00Z";
+    mk_entry "tool_execute" 300 "2026-04-06T10:02:00Z";
+    mk_entry "tool_read_file" 50 "2026-04-06T10:03:00Z";
   ] in
   let stats = Trajectory.aggregate_tool_stats entries in
   Alcotest.(check int) "tool count" 2 (List.length stats);
@@ -288,9 +266,9 @@ let test_aggregate_basic () =
 
 let test_aggregate_with_errors () =
   let entries = [
-    mk_entry "tool_execute" 100 0.001 "2026-04-06T10:00:00Z";
-    mk_entry ~error:(Some "timeout") "tool_execute" 5000 0.001 "2026-04-06T10:01:00Z";
-    mk_entry ~gate:(Trajectory.Reject "denied") "tool_execute" 0 0.0 "2026-04-06T10:02:00Z";
+    mk_entry "tool_execute" 100 "2026-04-06T10:00:00Z";
+    mk_entry ~error:(Some "timeout") "tool_execute" 5000 "2026-04-06T10:01:00Z";
+    mk_entry ~gate:(Trajectory.Reject "denied") "tool_execute" 0 "2026-04-06T10:02:00Z";
   ] in
   let stats = Trajectory.aggregate_tool_stats entries in
   Alcotest.(check int) "tool count" 1 (List.length stats);
@@ -306,7 +284,7 @@ let test_aggregate_empty () =
 let test_aggregate_p95 () =
   (* 20 entries: durations 100, 200, ..., 2000. p95 index = round(20 * 0.95) = 19 -> 2000 *)
   let entries = List.init 20 (fun i ->
-    mk_entry "tool_execute" ((i + 1) * 100) 0.0
+    mk_entry "tool_execute" ((i + 1) * 100)
       (Printf.sprintf "2026-04-06T10:%02d:00Z" i)
   ) in
   let stats = Trajectory.aggregate_tool_stats entries in
@@ -320,8 +298,8 @@ let test_aggregate_p95 () =
 
 let test_hourly_single_bucket () =
   let entries = [
-    { (mk_entry "tool_execute" 100 0.0 "2026-04-06T10:05:00Z") with Trajectory.ts = 1743937500.0 };
-    { (mk_entry "tool_execute" 100 0.0 "2026-04-06T10:30:00Z") with Trajectory.ts = 1743939000.0 };
+    { (mk_entry "tool_execute" 100 "2026-04-06T10:05:00Z") with Trajectory.ts = 1743937500.0 };
+    { (mk_entry "tool_execute" 100 "2026-04-06T10:30:00Z") with Trajectory.ts = 1743939000.0 };
   ] in
   let timeline = Trajectory.hourly_timeline entries in
   (* Both entries fall in the same hour bucket (25 min apart) *)
@@ -332,8 +310,8 @@ let test_hourly_single_bucket () =
 
 let test_hourly_with_errors () =
   let entries = [
-    { (mk_entry "tool_execute" 100 0.0 "2026-04-06T10:05:00Z") with Trajectory.ts = 1743937500.0 };
-    { (mk_entry ~error:(Some "fail") "tool_execute" 100 0.0 "2026-04-06T10:30:00Z") with Trajectory.ts = 1743939000.0 };
+    { (mk_entry "tool_execute" 100 "2026-04-06T10:05:00Z") with Trajectory.ts = 1743937500.0 };
+    { (mk_entry ~error:(Some "fail") "tool_execute" 100 "2026-04-06T10:30:00Z") with Trajectory.ts = 1743939000.0 };
   ] in
   let timeline = Trajectory.hourly_timeline entries in
   let b = List.hd timeline in
@@ -356,7 +334,6 @@ let test_tool_stat_json_roundtrip () =
     avg_duration_ms = 150;
     p95_duration_ms = 500;
     max_duration_ms = 800;
-    total_cost_usd = 0.01;
     last_used_at = "2026-04-06T12:00:00Z";
   } in
   let json = Trajectory.tool_stat_to_json stat in
@@ -390,7 +367,6 @@ let test_entry_to_json_includes_contract_and_radius () =
     result = Some "/tmp/work";
     duration_ms = 25;
     error = None;
-    cost_usd = 0.0001;
     execution_id = Some "exec-1000-0001";
   } in
   let runtime_contract =
@@ -431,7 +407,7 @@ let test_execution_id_roundtrip () =
     ts = 1000.0; ts_iso = "2026-06-12T00:00:00Z"; turn = 3; round = 1;
     tool_name = "tool_execute"; args_json = "{}";
     gate_decision = Trajectory.Pass;
-    result = Some "ok"; duration_ms = 10; error = None; cost_usd = 0.0;
+    result = Some "ok"; duration_ms = 10; error = None;
     execution_id = Some "exec-1718150400000-0001";
   } in
   (match Trajectory.tool_call_entry_of_json (Trajectory.entry_to_json entry) with
@@ -501,7 +477,7 @@ let test_read_entries_since () =
     Fs_compat.mkdir_p traj_dir;
     let path = Filename.concat traj_dir "trace-100.jsonl" in
     let entry_json ts = Printf.sprintf
-      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":100,"error":null,"cost_usd":0.001}|}
+      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":100,"error":null}|}
       ts
     in
     let oc = open_out path in
@@ -525,9 +501,9 @@ let test_read_entries_since_result_parses_gate_summary () =
     let path = Filename.concat traj_dir "trace-101.jsonl" in
     let rows =
       [
-        {|{"ts":1000.0,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":1,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null,"cost_usd":0.001}|};
-        {|{"ts":2000.0,"ts_iso":"2026-04-06T10:01:00Z","turn":1,"round":2,"tool_name":"tool_execute","args":{},"gate":{"status":"reject","reason":"blocked"},"result":null,"duration_ms":0,"error":"blocked","cost_usd":0.0}|};
-        {|{"ts":3000.0,"ts_iso":"2026-04-06T10:02:00Z","turn":1,"round":3,"tool_name":"tool_execute","args":{},"result":"legacy","duration_ms":10,"error":null,"cost_usd":0.001}|};
+        {|{"ts":1000.0,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":1,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null}|};
+        {|{"ts":2000.0,"ts_iso":"2026-04-06T10:01:00Z","turn":1,"round":2,"tool_name":"tool_execute","args":{},"gate":{"status":"reject","reason":"blocked"},"result":null,"duration_ms":0,"error":"blocked"}|};
+        {|{"ts":3000.0,"ts_iso":"2026-04-06T10:02:00Z","turn":1,"round":3,"tool_name":"tool_execute","args":{},"result":"legacy","duration_ms":10,"error":null}|};
       ]
     in
     let oc = open_out path in
@@ -576,7 +552,7 @@ let test_read_recent_lines_skips_malformed_rows () =
         ~generation:0 ()
     in
     Trajectory.record_entry acc
-      (mk_entry "tool_execute" 10 0.0 "2026-07-01T00:00:00Z");
+      (mk_entry "tool_execute" 10 "2026-07-01T00:00:00Z");
     Trajectory.flush_pending acc;
     write_raw_line ~masc_root:dir ~keeper_name:"test-keeper"
       ~trace_id:"trace-malformed" "{not valid json";
@@ -603,8 +579,8 @@ let test_read_recent_lines_skips_malformed_rows () =
 let test_summary_row_not_counted_as_malformed () =
   let lines =
     [
-      {|{"ts":1000.0,"ts_iso":"2026-07-01T00:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":10,"error":null,"cost_usd":0.0}|}
-    ; {|{"type":"trajectory_summary","keeper_name":"k","trace_id":"t","generation":0,"total_cost_usd":0.0,"total_turns":0,"total_tool_calls":0,"outcome":{"status":"completed"},"task_id":null,"started_at":0.0,"ended_at":0.0}|}
+      {|{"ts":1000.0,"ts_iso":"2026-07-01T00:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":10,"error":null}|}
+    ; {|{"type":"trajectory_summary","keeper_name":"k","trace_id":"t","generation":0,"total_turns":0,"total_tool_calls":0,"outcome":{"status":"completed"},"task_id":null,"started_at":0.0,"ended_at":0.0}|}
     ; "{not valid json"
     ]
   in
@@ -633,7 +609,6 @@ let next_round_row ~turn ~round : Yojson.Safe.t =
       ("result", `String "ok");
       ("duration_ms", `Int 1);
       ("error", `Null);
-      ("cost_usd", `Float 0.0);
     ]
 
 let next_round_summary_row : Yojson.Safe.t =
@@ -832,7 +807,7 @@ let check_tool_call label expected = function
 let test_dedupe_thinking_lines_uses_structural_key () =
   let tool_call =
     Trajectory.Tool_call
-      (mk_entry ~ts:1000.5 "tool_execute" 20 0.0 "2026-06-29T00:00:00Z")
+      (mk_entry ~ts:1000.5 "tool_execute" 20 "2026-06-29T00:00:00Z")
   in
   let lines =
     [
@@ -923,11 +898,6 @@ let test_persist_response_content_per_turn_full () =
 
 let () =
   Alcotest.run "Trajectory" [
-    ("tool_cost", [
-      Alcotest.test_case "known tool cost" `Quick test_tool_cost_known;
-      Alcotest.test_case "unknown tool cost" `Quick test_tool_cost_unknown;
-      Alcotest.test_case "bash tool cost" `Quick test_tool_cost_bash;
-    ]);
     ("gate_decision", [
       Alcotest.test_case "pass" `Quick test_gate_decision_pass;
       Alcotest.test_case "reject" `Quick test_gate_decision_reject;

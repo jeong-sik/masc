@@ -23,7 +23,6 @@ export type TrajectoryEntry = {
   result?: string | null
   duration_ms?: number
   error?: string | null
-  cost_usd?: number
   // Thinking-specific fields
   content?: string
   content_length?: number

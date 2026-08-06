@@ -10,8 +10,7 @@
     catalogue ({!prompt_defs}), the per-prompt JSON projection
     ({!prompt_json}), and the {!get_json} entry point that the
     JSON-RPC dispatcher invokes for [prompts/get].  All internal
-    helpers ([lookup], [assoc_string], [message_json], [tool_help_text],
-    [list_json]) stay private — they are stable contract-internal
+    helpers ([lookup], [assoc_string], [message_json], [tool_help_text]) stay private — they are stable contract-internal
     pieces but exposing them would invite duplicate-rendering paths
     that drift from the canonical {!get_json}. *)
 

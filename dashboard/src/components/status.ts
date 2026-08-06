@@ -11,6 +11,7 @@ import { SurfaceHeader } from './common/surface-header'
 
 export type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime'
+  | 'internal-agents'
   | 'fleet-health' | 'transport-health'
   | 'feature-health'
 
@@ -37,6 +38,9 @@ const LazyAgentsUnified = lazy(async () => ({
 }))
 const LazyRuntimePanel = lazy(async () => ({
   default: (await import('./runtime-panel')).RuntimePanel,
+}))
+const LazyInternalAgentsMonitor = lazy(async () => ({
+  default: (await import('./internal-agents-monitor')).InternalAgentsMonitor,
 }))
 const LazyFleetHealthPanel = lazy(async () => ({
   default: (await import('./fleet-health-panel')).FleetHealthPanel,
@@ -70,6 +74,8 @@ function renderSection(section: StatusSection) {
       return html`<${LazyJourneyPanel} />`
     case 'runtime':
       return html`<${LazyRuntimePanel} />`
+    case 'internal-agents':
+      return html`<${LazyInternalAgentsMonitor} />`
     case 'fleet-health':
       return html`<${LazyFleetHealthPanel} />`
     case 'transport-health':

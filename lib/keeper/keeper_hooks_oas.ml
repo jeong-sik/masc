@@ -575,7 +575,6 @@ let make_hooks
                result = Some safe_output;
                duration_ms = trajectory_duration_ms duration_ms;
                error = (if outcome = Tool_result.Ok then None else Some safe_output);
-               cost_usd = Trajectory.tool_cost_estimate tool_name;
                execution_id =
                  Some (Ids.Execution_id.to_string execution_id);
              }

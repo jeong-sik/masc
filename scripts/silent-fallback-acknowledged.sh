@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# silent-fallback-acknowledged.sh — RFC-0109 Phase 2 P0 infrastructure.
+# silent-fallback-acknowledged.sh — RFC-0126 Phase 2b staging.
 #
 # Lists every [@@silent_fallback_acknowledged "..."] attribute occurrence
 # in the OCaml codebase.  Currently 0 sites — the attribute name is
-# reserved for the Phase 2 ppxlib lint described in
-# docs/rfc/RFC-0109-silent-fallback-discipline.md §6.2.
+# reserved for the Phase 2b ppxlib lint described in
+# docs/rfc/RFC-0126-silent-fallback-discipline.md. Phase 2a landed as
+# scripts/lint/no-unknown-permissive-default.sh; 2b is not started and
+# is blocked on RFC-0106.
 #
 # Until Phase 2 is implemented, this script gives a baseline count and a
 # `rg`-style table that PR review can quote.  When Phase 2 lints, the
@@ -23,7 +25,7 @@
 #   - cannot enforce attribute *placement* on a wildcard arm.
 #
 # These limitations are intentional: a regex baseline gives operators a
-# count today without paying the ppxlib build cost.  Phase 2 supersedes.
+# count today without paying the ppxlib build cost.  Phase 2b supersedes.
 
 set -euo pipefail
 
@@ -52,4 +54,4 @@ rm -f /tmp/silent_fallback_hits.$$
 echo "---"
 echo "total: ${count}"
 echo "attribute_name: ${ATTR_NAME}"
-echo "rfc: docs/rfc/RFC-0109-silent-fallback-discipline.md §6.2"
+echo "rfc: docs/rfc/RFC-0126-silent-fallback-discipline.md"

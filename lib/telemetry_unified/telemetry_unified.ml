@@ -302,6 +302,26 @@ let keeper_tool_called_signature json =
          ~ts:(extract_ts json) ()
      | _ -> None)
 
+(* WORKAROUND: the two sources report the same physical tool call with no
+   shared identifier, so sameness is inferred from proximity.
+
+   A [tool_call_io] row carries ts / keeper / tool / input / output / success /
+   duration_ms / runtime_contract / action_radius. The [Tool_called] agent
+   event carries agent_id / tool_name / success / duration_ms plus session_id,
+   operation_id and worker_run_id. Nothing is common to both that identifies a
+   call, so matching on actor + tool + outcome within a window is what the
+   schemas allow.
+
+   Where it is wrong: two genuinely distinct calls of the same tool by the same
+   actor with the same outcome, closer together than the window, look like one
+   report of one call — and [suppress_shadow_keeper_tool_events] drops the
+   agent-side event for the second.
+
+   Root fix: give the durable tool-call row a call identifier that the agent
+   event also carries, and key on that. That is a schema change to a durable
+   store and both producers, so it is not done here. *)
+let shadow_dedup_window_sec = 5.0
+
 let same_tool_call_signature left right =
   String.equal left.actor right.actor
   && String.equal left.tool right.tool
@@ -310,7 +330,7 @@ let same_tool_call_signature left right =
    | Some a, Some b -> Bool.equal a b
    | None, None -> true
    | Some _, None | None, Some _ -> false)
-  && abs_float (left.ts -. right.ts) <= 5.0
+  && abs_float (left.ts -. right.ts) <= shadow_dedup_window_sec
 
 let suppress_shadow_keeper_tool_events entries =
   let tool_call_io =

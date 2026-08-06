@@ -470,6 +470,36 @@ let () = test "web_search_simulate_for_test_reports_all_failures" (fun () ->
     (str_contains (Tool_result.message result) "bing_rss: rss unavailable")
 )
 
+let () = test "web_search_provider_error_to_string_renders_typed_variants" (fun () ->
+  assert
+    (Tool_misc.web_search_provider_error_to_string
+       (Masc.Tool_misc_web_search.Transport "connection reset")
+     = "transport: connection reset");
+  assert
+    (Tool_misc.web_search_provider_error_to_string
+       (Masc.Tool_misc_web_search.Server "HTTP 503")
+     = "server: HTTP 503");
+  assert
+    (Tool_misc.web_search_provider_error_to_string
+       (Masc.Tool_misc_web_search.Config "missing API key")
+     = "config: missing API key");
+  assert
+    (Tool_misc.web_search_provider_error_to_string
+       (Masc.Tool_misc_web_search.Parse "invalid JSON")
+     = "parse: invalid JSON")
+)
+
+let () = test "web_search_simulate_for_test_typed_error_renders_prefix" (fun () ->
+  let result =
+    Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
+      [ ("brave", `Error "connection reset") ]
+  in
+  assert (not (Tool_result.is_success result));
+  assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+  assert
+    (str_contains (Tool_result.message result) "brave: connection reset")
+)
+
 let () = test "dispatch_web_search_include_content_enriches_results" (fun () ->
   let ctx = make_test_ctx () in
   let query = "include content enrichment regression" in

@@ -25,6 +25,7 @@ val parse_tavily_json : string -> (string * string * string) list
 val parse_exa_json : string -> (string * string * string) list
 val parse_bing_search_json : string -> (string * string * string) list
 val redact_transport_error_detail : string -> string
+val web_search_provider_error_to_string : Tool_misc_web_search.provider_error -> string
 val web_search_provider_plan : unit -> string list
 val web_search_simulate_for_test :
   query:string ->

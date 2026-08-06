@@ -67,6 +67,22 @@ val redact_transport_error_detail : string -> string
     URL payloads in operator logs.  Pinned at the contract
     seam: drift would re-leak query content. *)
 
+(** {1 Typed provider error (RFC-0189 PR-2)} *)
+
+type provider_error =
+  | Transport of string  (** network / transport-level failure *)
+  | Server of string     (** endpoint returned a non-200 status or no status *)
+  | Config of string     (** missing credentials / invalid configuration *)
+  | Parse of string      (** payload could not be parsed into hits *)
+
+val provider_error_to_string : provider_error -> string
+(** [provider_error_to_string err] renders a typed per-provider
+    failure as a human-readable, query-safe string with a
+    [transport:] / [server:] / [config:] / [parse:] prefix.
+    Used by {!search_impl}'s aggregate boundary so the fallback
+    chain preserves the per-provider failure class instead of
+    collapsing it into an opaque string. *)
+
 (** {1 Provider parsers}
 
     Each parser returns [(title, url, snippet)] triples filtered

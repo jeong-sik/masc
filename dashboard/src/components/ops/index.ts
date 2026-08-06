@@ -9,7 +9,6 @@ import {
   operatorActionLog,
   operatorDigestError,
   operatorError,
-  operatorWorkspaceDigest,
   operatorSnapshot,
 } from '../../operator-store'
 import {
@@ -21,7 +20,6 @@ import type {
   OperatorActionLogEntry,
   OperatorContextMetricsUnavailable,
   OperatorKeeperSnapshot,
-  OperatorReviewDecision,
   OperatorSnapshot,
 } from '../../types'
 import { ComposerV2 } from '../board/composer-v2'
@@ -111,28 +109,6 @@ function parseTimestamp(value?: string | null): number {
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
-function reviewDecisionLabel(value?: string | null): string {
-  switch ((value ?? '').trim().toLowerCase()) {
-    case 'resolved':
-      return 'Review Resolved'
-    case 'deferred':
-      return 'Review Deferred'
-    default:
-      return value?.trim() || 'Review Action'
-  }
-}
-
-function reviewDecisionTone(value?: string | null): ActivityTone {
-  switch ((value ?? '').trim().toLowerCase()) {
-    case 'resolved':
-      return 'ok'
-    case 'deferred':
-      return 'warn'
-    default:
-      return 'accent'
-  }
-}
-
 function actionLogTone(entry: OperatorActionLogEntry): ActivityTone {
   switch (entry.outcome) {
     case 'error':
@@ -146,10 +122,6 @@ function actionLogTone(entry: OperatorActionLogEntry): ActivityTone {
   }
 }
 
-function targetSummary(targetType?: string | null, targetId?: string | null): string {
-  return `${targetTypeLabel(targetType)}${targetId ? ` · ${targetId}` : ''}`
-}
-
 function prettyTargetLabel(label?: string | null): string {
   const value = label?.trim()
   if (!value) return 'No target'
@@ -161,17 +133,6 @@ function prettyTargetLabel(label?: string | null): string {
 }
 
 function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
-  const reviews = (operatorWorkspaceDigest.value?.recent_reviews ?? []).map((item: OperatorReviewDecision) => ({
-    key: `review:${item.item_id}:${item.at}`,
-    kind: 'review' as const,
-    at: item.at,
-    actor: item.actor || 'unknown',
-    label: reviewDecisionLabel(item.decision),
-    target: targetSummary(item.target_type, item.target_id),
-    detail: item.reason || 'No reason recorded',
-    tone: reviewDecisionTone(item.decision),
-  }))
-
   const interventions = operatorActionLog.value.map((entry: OperatorActionLogEntry) => ({
     key: `intervention:${entry.id}`,
     kind: 'intervention' as const,
@@ -184,7 +145,7 @@ function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
   }))
 
   const cutoff = Date.now() - ACTIVITY_MAX_AGE_MS
-  return [...reviews, ...interventions]
+  return interventions
     .filter(entry => parseTimestamp(entry.at) >= cutoff)
     .sort((left, right) => parseTimestamp(right.at) - parseTimestamp(left.at))
     .slice(0, limit)

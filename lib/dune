@@ -69,6 +69,7 @@
   masc.lockfree_atomic
   masc.run_registry_core
   masc.json_field
+  masc.jsonl_writer
   masc.pool_metrics
   masc.otel_metric_store
   masc.otel_spans
@@ -83,8 +84,6 @@
   masc.voice_bridge_core
   masc.discovery_cache
   masc.local_runtime_pool
-  masc.worker_execution_backend
-  masc.worker_execution_spec
   ;; RFC-0056 Phase 1L — Attribution envelope extracted to lib/attribution/.
   ;; Pure Attribution + phantom-tagged helpers, deps: stdlib + Yojson only.
   masc.attribution

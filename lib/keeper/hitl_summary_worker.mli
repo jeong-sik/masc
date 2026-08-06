@@ -45,16 +45,15 @@ val spawn
     [Conclusive_terminalization] permits the caller to drain later owner work. *)
 
 module For_testing : sig
+  val run_outcome_of_observed_summary
+    :  Keeper_approval_queue.hitl_context_summary option
+    -> Exact_lane_run_registry.outcome * Yojson.Safe.t
+
   val system_prompt : unit -> (string, string) result
 
   val build_context_bundle
     :  entry:Keeper_approval_queue.pending_approval
     -> Yojson.Safe.t
-
-  val messages_for_summary
-    :  system_prompt:string
-    -> context_bundle:Yojson.Safe.t
-    -> Agent_sdk.Types.message list
 
   val parse_summary
     :  generated_at:float
@@ -147,7 +146,7 @@ module For_testing : sig
       production [spawn]; the worker does not depend on test-only queue APIs. *)
 
   val flow_evidence : prepared_flow -> Agent_sdk.Exact_output.flow_evidence
-  val success_provenance_matches : Agent_sdk.Exact_output.flow_success -> bool
+
   val summary_version : int
   val lane_id : string
 end

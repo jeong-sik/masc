@@ -1,7 +1,6 @@
 (* Autonomous phase taxonomy HTTP surface — Cycle 27 / Tier D2.
    See server_routes_http_routes_autonomous.mli for design. *)
 
-open Server_utils
 open Server_auth
 module Http = Http_server_eio
 module P = Autonomous.Autonomous_phase

@@ -1,6 +1,5 @@
 open Server_auth
 open Server_utils
-open Server_routes_http_pages
 
 module Http = Http_server_eio
 

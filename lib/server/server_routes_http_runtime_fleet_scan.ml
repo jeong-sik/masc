@@ -4,7 +4,6 @@
    Extracted from server_routes_http_runtime.ml during godfile decomposition.
    Depends on: Keeper_types, Keeper_types_profile, Keeper_meta_store, etc. *)
 
-open Server_utils
 open Server_routes_http_common
 
 module String_set = Set.Make (String)
@@ -22,13 +21,6 @@ let empty_paused_keeper_scan =
 let sorted_unique_strings values = List.sort_uniq String.compare values
 
 let effective_autoboot_enabled = Keeper_meta_store.effective_autoboot_enabled
-
-let blocker_class_string (info : Keeper_meta_contract.blocker_info option) =
-  Option.map (fun (info : Keeper_meta_contract.blocker_info) ->
-    Keeper_meta_contract.blocker_class_to_string info.klass) info
-
-let blocker_detail (info : Keeper_meta_contract.blocker_info option) =
-  Option.map (fun (info : Keeper_meta_contract.blocker_info) -> info.detail) info
 
 let pause_elapsed_sec now (meta : Keeper_meta_contract.keeper_meta) =
   match Workspace_resilience.Time.parse_iso8601_opt meta.updated_at with

@@ -6,7 +6,7 @@
 # blocks regression: any *new* inline "runtime" literal in those files
 # must go through the SSOT module.
 #
-# Scope: the 21 OCaml files PR-2 touched. NOT a repo-wide grep — many
+# Scope: the 20 OCaml files PR-2 touched that still exist. NOT a repo-wide grep — many
 # "runtime" strings elsewhere are JSON schema keys, feature-flag category
 # labels, or internal observability and are out of RFC-0132 scope.
 #
@@ -56,7 +56,6 @@ SCAN_FILES=(
   "lib/keeper/keeper_agent_result.ml"
   "lib/keeper/keeper_agent_run.ml"
   "lib/keeper/keeper_status_runtime.ml"
-  "lib/keeper/keeper_generation_lineage.ml"
   "lib/keeper/keeper_hooks_oas.ml"
   "lib/keeper_hooks_oas_types/keeper_hooks_oas_types.ml"
   "lib/keeper/keeper_oas_checkpoint.ml"

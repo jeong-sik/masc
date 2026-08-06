@@ -641,7 +641,6 @@ let graph_json config ?(kinds = []) ?(limit = 500)
             label = node.label;
             status = node.status;
             weight = node.weight;
-            semantic_weight = node.semantic_weight;
             last_event_at = node.last_event_at;
             meta = node.meta;
           }
@@ -893,8 +892,6 @@ module For_testing = struct
   let reset_current_day_cache_for_testing = reset_current_day_cache_for_testing
   let reset_past_day_cache_for_testing = reset_past_day_cache_for_testing
   let current_day_parsed_line_count () = Atomic.get current_day_parse_counter
-  let current_day_cache_entry_count () =
-    Stdlib.Mutex.protect current_day_cache_mu (fun () -> Hashtbl.length current_day_cache)
   let past_day_cache_entry_count () =
     Past_day_path_map.cardinal (Atomic.get past_day_cache)
   let current_day_path = day_path

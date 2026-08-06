@@ -131,7 +131,7 @@ let repos_in_playground host_root =
     with
     | Sys_error _ -> [])
 
-let rec skip_worktree_prefix = function
+let skip_worktree_prefix = function
   | ".worktrees" :: _branch :: rest -> rest
   | "./.worktrees" :: _branch :: rest -> rest
   | other -> other

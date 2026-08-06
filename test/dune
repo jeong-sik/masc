@@ -182,6 +182,7 @@
   test_lsp_process_manager
   test_ide_annotations
   test_agent_observation_bridge
+  test_enum_mirror_sync
   test_ide_bridge
   test_server_ide_lsp_proxy
   test_server_ide_http
@@ -199,7 +200,6 @@
   test_accountability_emit_skip_10314
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
-  test_keeper_generation_lineage
   test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
@@ -262,6 +262,8 @@
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
   test_tool_input_validation
+  test_tool_schema_constraint_enforcement
+  test_keeper_artifact_read_request
   test_tool_schema_oas_boundary
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
@@ -479,6 +481,7 @@
   test_lsp_process_manager
   test_ide_annotations
   test_agent_observation_bridge
+  test_enum_mirror_sync
   test_ide_bridge
   test_server_ide_lsp_proxy
   test_server_ide_http
@@ -496,7 +499,6 @@
   test_accountability_emit_skip_10314
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
-  test_keeper_generation_lineage
   test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
@@ -559,6 +561,8 @@
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
   test_tool_input_validation
+  test_tool_schema_constraint_enforcement
+  test_keeper_artifact_read_request
   test_tool_schema_oas_boundary
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
@@ -950,7 +954,6 @@
   test_keeper_personality_io_compare
   test_keeper_personality_io_render
   test_keeper_identity_outcome_label
-  test_worker_runtime
   test_capability_registry
   test_tool_misc_web_fetch
   test_tool_local_runtime_probe
@@ -968,7 +971,6 @@
   test_process_eio_detached
   test_voice_runtime_overlay
   test_voice_bridge_retry
-  test_worker_container_coverage
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -1104,7 +1106,6 @@
   test_keeper_personality_io_compare
   test_keeper_personality_io_render
   test_keeper_identity_outcome_label
-  test_worker_runtime
   test_capability_registry
   test_tool_misc_web_fetch
   test_tool_local_runtime_probe
@@ -1122,7 +1123,6 @@
   test_process_eio_detached
   test_voice_runtime_overlay
   test_voice_bridge_retry
-  test_worker_container_coverage
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -1642,7 +1642,10 @@
 ; sorted alphabetically.
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
+(include stanzas/test_dedup_rules.inc)
 (include stanzas/test_trailing_slash_rules.inc)
+(include stanzas/test_repos_relative_path.inc)
+(include stanzas/test_metric_zero_cell_declaration.inc)
 (include stanzas/test_env_snapshot_reports_applied_default.inc)
 (include stanzas/test_verification_authority_tools.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
@@ -1701,6 +1704,9 @@
 (include stanzas/test_discord_presence_bridge.inc)
 
 (include stanzas/test_discord_observability.inc)
+(include stanzas/test_gate_connector_observability.inc)
+
+(include stanzas/test_jsonl_day_key.inc)
 
 (include stanzas/test_discord_rest_client.inc)
 
@@ -1856,6 +1862,8 @@
 
 (include stanzas/test_keeper_cwd_response.inc)
 
+(include stanzas/test_channel_gate_content_length_knob.inc)
+
 (include stanzas/test_keeper_terminal_reason_typed.inc)
 
 (include stanzas/test_keeper_tool_name.inc)
@@ -1970,13 +1978,19 @@
 
 (include stanzas/test_assertion_kind_mirror.inc)
 
+(include stanzas/test_agent_card_action_mirror.inc)
+
 (include stanzas/test_workspace_heartbeat_outcome.inc)
+
+(include stanzas/test_http_auth_strict_flag.inc)
 
 (include stanzas/test_keeper_approval_resolved_history.inc)
 
 (include stanzas/test_keeper_toml_parser.inc)
 
 (include stanzas/test_keeper_toml_loader.inc)
+
+(include stanzas/test_keeper_toml_accessor_matrix.inc)
 
 (include stanzas/test_keeper_runtime_config_leaf.inc)
 
@@ -2580,3 +2594,11 @@
   (source_tree %{workspace_root}/config/prompts)
   %{workspace_root}/test/fixtures/keeper_system_prompt/assembled_prompt.golden)
  (libraries alcotest masc_test_deps))
+
+(include stanzas/test_librarian_journal_failures.inc)
+
+(include stanzas/test_keeper_raw_trace_reader.inc)
+
+(include stanzas/test_keeper_prompt_capture.inc)
+
+(include stanzas/test_keeper_operator_note.inc)

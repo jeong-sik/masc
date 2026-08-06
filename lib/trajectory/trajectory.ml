@@ -30,7 +30,6 @@ type tool_call_entry = {
   result : string option;           (** None if gated/pending, Some output *)
   duration_ms : int;                (** Wall-clock execution time *)
   error : string option;            (** Exception message if failed *)
-  cost_usd : float;                 (** Estimated cost of this call *)
   execution_id : string option;
       (** RFC-0233 canonical join key minted at the dispatch boundary; the
           tool_calls JSONL row for the same execution carries the identical
@@ -64,7 +63,6 @@ type trajectory = {
   started_at : float;
   ended_at : float;
   entries : tool_call_entry list;
-  total_cost_usd : float;
   total_turns : int;
   total_tool_calls : int;
   outcome : trajectory_outcome;
@@ -91,26 +89,6 @@ type thinking_entry = {
 type trajectory_line =
   | Tool_call of tool_call_entry
   | Thinking of thinking_entry
-
-(* ================================================================ *)
-(* Cost estimation                                                  *)
-(* ================================================================ *)
-
-(* model_token_pricing and estimate_turn_cost removed (#3029).
-   Pricing belongs to OAS runtime, not MASC.
-   MASC records cost_usd from OAS responses via emit_cost_event. *)
-
-(** Rough per-call cost estimates for keeper tools.
-    Most are local/free; only MODEL-calling tools have cost. *)
-let tool_cost_estimate (tool_name : string) : float =
-  match tool_name with
-  (* MODEL-intensive tools *)
-  | "masc_board_post" -> 0.002
-  | "masc_board_comment" -> 0.001
-  | "tool_execute" -> 0.0001
-  | "tool_edit_file" | "tool_write_file" -> 0.0001
-  (* Read-only tools are essentially free *)
-  | _ -> 0.0
 
 (* ================================================================ *)
 (* JSON serialization                                               *)
@@ -174,7 +152,6 @@ let entry_to_json ?(result_max_len = default_result_truncation)
               else `String r) );
        ("duration_ms", `Int e.duration_ms);
        ("error", Json_util.string_opt_to_json e.error);
-       ("cost_usd", `Float e.cost_usd);
      ]
     @ (match e.execution_id with
        | Some id -> [ ("execution_id", `String id) ]
@@ -214,7 +191,6 @@ let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
     ("generation", `Int t.generation);
     ("started_at", `Float t.started_at);
     ("ended_at", `Float t.ended_at);
-    ("total_cost_usd", `Float t.total_cost_usd);
     ("total_turns", `Int t.total_turns);
     ("total_tool_calls", `Int t.total_tool_calls);
     ("outcome", outcome_to_json t.outcome);
@@ -275,7 +251,6 @@ let tool_call_entry_of_json (json : Yojson.Safe.t) :
                  | None | Some `Null -> None
                  | Some (`String s) -> Some s
                  | Some _ -> None);
-              cost_usd = (match Json_util.assoc_member_opt "cost_usd" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
               execution_id =
                 (match Json_util.assoc_member_opt "execution_id" json with
                  | Some (`String s) -> Some s
@@ -519,7 +494,6 @@ let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     ("keeper_name", `String traj.keeper_name);
     ("trace_id", `String traj.trace_id);
     ("generation", `Int traj.generation);
-    ("total_cost_usd", `Float traj.total_cost_usd);
     ("total_turns", `Int traj.total_turns);
     ("total_tool_calls", `Int traj.total_tool_calls);
     ("outcome", outcome_to_json traj.outcome);
@@ -548,7 +522,6 @@ type pending_entry = {
 
 type accumulator = {
   mutable entries : tool_call_entry list;
-  mutable total_cost : float;
   mutable total_calls : int;
   mutable turn : int;
   keeper_name : string;
@@ -582,7 +555,6 @@ let unregister_accumulator (acc : accumulator) =
 let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id ~generation () : accumulator =
   let acc = {
     entries = [];
-    total_cost = 0.0;
     total_calls = 0;
     turn = 0;
     keeper_name;
@@ -616,7 +588,6 @@ let set_turn (acc : accumulator) (turn : int) : unit =
 let record_entry ?runtime_contract ?action_radius ?on_persist_error
     (acc : accumulator) (entry : tool_call_entry) : unit =
   acc.entries <- entry :: acc.entries;
-  acc.total_cost <- acc.total_cost +. entry.cost_usd;
   acc.total_calls <- acc.total_calls + 1;
   (* Store on_persist_error for use during batch flush *)
   (match on_persist_error, acc.on_flush_error with
@@ -684,7 +655,6 @@ let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
     started_at = acc.started_at;
     ended_at = Time_compat.now ();
     entries = List.rev acc.entries;
-    total_cost_usd = acc.total_cost;
     total_turns = acc.turn;
     total_tool_calls = acc.total_calls;
     outcome;
@@ -711,7 +681,6 @@ type tool_stat = {
   avg_duration_ms : int;
   p95_duration_ms : int;
   max_duration_ms : int;
-  total_cost_usd : float;
   last_used_at : string;
 }
 
@@ -730,7 +699,7 @@ let p95_of_sorted (durations : int array) : int =
     durations.(idx)
 
 let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
-  let tbl : (string, int list * int * int * float * float * string) Hashtbl.t =
+  let tbl : (string, int list * int * int * float * string) Hashtbl.t =
     Hashtbl.create 32
   in
   List.iter (fun (e : tool_call_entry) ->
@@ -740,15 +709,15 @@ let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
       let succ = if is_failure then 0 else 1 in
       let fail = if is_failure then 1 else 0 in
       Hashtbl.replace tbl e.tool_name
-        ([e.duration_ms], succ, fail, e.cost_usd, e.ts, e.ts_iso)
-    | Some (durations, succ, fail, cost, max_ts, max_iso) ->
+        ([e.duration_ms], succ, fail, e.ts, e.ts_iso)
+    | Some (durations, succ, fail, max_ts, max_iso) ->
       let succ' = if is_failure then succ else succ + 1 in
       let fail' = if is_failure then fail + 1 else fail in
       let (ts', iso') = if e.ts > max_ts then (e.ts, e.ts_iso) else (max_ts, max_iso) in
       Hashtbl.replace tbl e.tool_name
-        (e.duration_ms :: durations, succ', fail', cost +. e.cost_usd, ts', iso')
+        (e.duration_ms :: durations, succ', fail', ts', iso')
   ) entries;
-  let stats = Hashtbl.fold (fun name (durations, succ, fail, cost, _max_ts, last_iso) acc ->
+  let stats = Hashtbl.fold (fun name (durations, succ, fail, _max_ts, last_iso) acc ->
     let count = succ + fail in
     let total_dur = List.fold_left (+) 0 durations in
     let avg = if count > 0 then total_dur / count else 0 in
@@ -762,7 +731,6 @@ let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
       avg_duration_ms = avg;
       p95_duration_ms = p95_of_sorted sorted;
       max_duration_ms = max_d;
-      total_cost_usd = cost;
       last_used_at = last_iso;
     } :: acc
   ) tbl [] in
@@ -797,7 +765,6 @@ let tool_stat_to_json (s : tool_stat) : Yojson.Safe.t =
     ("avg_duration_ms", `Int s.avg_duration_ms);
     ("p95_duration_ms", `Int s.p95_duration_ms);
     ("max_duration_ms", `Int s.max_duration_ms);
-    ("total_cost_usd", `Float s.total_cost_usd);
     ("last_used_at", `String s.last_used_at);
   ]
 

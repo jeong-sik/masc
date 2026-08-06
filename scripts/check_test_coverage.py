@@ -61,6 +61,13 @@ def load_non_code_suffixes(path=NON_CODE_SUFFIXES_PATH):
 
 NON_CODE_SUFFIXES = load_non_code_suffixes()
 
+# Build configuration under covered paths. These have no suffix, so the
+# suffix policy in .ci/test-coverage-non-code-suffixes.txt cannot express
+# them, and they are exactly what is_covered_code_file's docstring excludes:
+# no unit test can exercise a dune stanza. Without this, a PR that adds a
+# compiler flag to four libraries' dune files is asked for tests.
+BUILD_CONFIG_NAMES = frozenset({"dune", "dune-project", "dune-workspace"})
+
 DEPENDENCY_LOCKFILE_NAMES = frozenset(
     {"bun.lock", "bun.lockb", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"}
 )
@@ -222,12 +229,15 @@ def is_covered_code_file(path):
     """Return true for executable code files, filtering out non-code assets.
 
     Symmetric counterpart to is_test_file: that positively identifies test
-    files; this negatively filters non-executable assets (CSS/HTML/MD/images)
-    that no unit test can exercise, so they do not trigger the "added covered
-    lines with no test" rule. See #23083.
+    files; this negatively filters non-executable assets (CSS/HTML/MD/images,
+    and build configuration such as dune) that no unit test can exercise, so
+    they do not trigger the "added covered lines with no test" rule.
+    See #23083.
     """
-    suffix = PurePosixPath(path).suffix.lower()
-    return suffix not in NON_CODE_SUFFIXES
+    normalized = PurePosixPath(path.replace("\\", "/"))
+    if normalized.name in BUILD_CONFIG_NAMES:
+        return False
+    return normalized.suffix.lower() not in NON_CODE_SUFFIXES
 
 
 def get_changed_test_files():
@@ -240,14 +250,89 @@ def get_changed_test_files():
     return [f for f in stdout.strip().split("\n") if f and is_test_file(f)]
 
 
+OCAML_SUFFIXES = {".ml", ".mli"}
+SLASH_COMMENT_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".css", ".scss"}
+
+
+def comment_line_numbers(text, suffix):
+    """1-indexed lines of [text] that hold nothing but comment.
+
+    A line counts only when every non-blank character on it is inside a
+    comment, so `let x = 1 (* note *)` stays code. OCaml block comments nest,
+    which a regex cannot track — the depth counter is why this reads the file
+    rather than the diff hunk: a continuation line in the middle of a block
+    carries no marker of its own, and those are most of a docstring.
+    """
+    if suffix in OCAML_SUFFIXES:
+        openers, closers, line_comment = ["(*"], ["*)"], None
+    elif suffix in SLASH_COMMENT_SUFFIXES:
+        openers, closers, line_comment = ["/*"], ["*/"], "//"
+    else:
+        return set()
+
+    comment_only = set()
+    depth = 0
+    for lineno, line in enumerate(text.split("\n"), 1):
+        saw_code = False
+        i = 0
+        while i < len(line):
+            two = line[i : i + 2]
+            if depth == 0 and line_comment and two == line_comment:
+                break  # rest of the line is comment
+            if two in openers:
+                depth += 1
+                i += 2
+                continue
+            if depth > 0 and two in closers:
+                depth -= 1
+                i += 2
+                continue
+            if depth == 0 and not line[i].isspace():
+                saw_code = True
+            i += 1
+        if not saw_code:
+            comment_only.add(lineno)
+    return comment_only
+
+
+def added_line_numbers(path):
+    """1-indexed new-file line numbers this PR added to [path]."""
+    stdout = run_diff_or_fail(["git", "diff", "-U0", pr_diff_range(), "--", path])
+    added, cursor = [], 0
+    for line in stdout.split("\n"):
+        if line.startswith("@@"):
+            try:
+                cursor = int(line.split("+", 1)[1].split(",", 1)[0].split(" ", 1)[0])
+            except (IndexError, ValueError):
+                cursor = 0
+            continue
+        if cursor and line.startswith("+") and not line.startswith("+++"):
+            added.append(cursor)
+            cursor += 1
+    return added
+
+
 def get_added_lines_count(files):
-    """Count added lines in changed files."""
+    """Count added lines that are not comment.
+
+    A documentation-only change to an .mli is entirely comment, so counting raw
+    `+` lines made this rule unsatisfiable for it: the only way out was the
+    manual opt-out marker, used once in the last 200 commits. A gate that fires
+    on changes it cannot be satisfied by teaches readers to merge past it.
+    """
     total = 0
     for f in files:
-        stdout = run_diff_or_fail(["git", "diff", pr_diff_range(), "--", f])
-        for line in stdout.split("\n"):
-            if line.startswith("+") and not line.startswith("+++"):
-                total += 1
+        try:
+            content = subprocess.run(
+                ["git", "show", f"HEAD:{f}"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        except subprocess.CalledProcessError:
+            content = ""
+        comments = comment_line_numbers(content, PurePosixPath(f).suffix.lower())
+        total += sum(1 for n in added_line_numbers(f) if n not in comments)
     return total
 
 

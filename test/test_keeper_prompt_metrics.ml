@@ -378,20 +378,47 @@ let test_system_block_states_the_collaboration_surface () =
      without telling it the limit produces runs of refusals, so both belong in
      the same paragraph. *)
   check bool "the one-task-at-a-time limit is stated" true
-    (has_in prompt "You hold one Task at a time");
+    (has_in prompt "You work one Task at a time");
+  check bool "the limit names the two statuses that hold a claim" true
+    (has_in prompt "a Task you claimed or started is still yours");
   check bool "the refusal is described, not just the limit" true
-    (has_in prompt "a claim on another is refused and names the one you are holding");
+    (has_in prompt "a claim on another is refused and names both the Task you hold");
   check bool "walking the candidate list is named as the wrong move" true
     (has_in prompt "trying each candidate in turn only produces a run of refusals");
-  (* Release exists, but under the other namespace: keeper_task_claim /
+  (* That limit is narrower than it reads, and the prompt used to overstate it.
+     [active_owned_task_ids_for_agent] matches Claimed and InProgress only and
+     answers None for AwaitingVerification, so a submitted Task does not refuse
+     the next claim. Everything a keeper can see says otherwise: the world frame
+     renders it under "Current Task (held by you)", and the lifecycle refuses
+     Release from AwaitingVerification while admitting Cancel by the assignee,
+     so the only exit in view is the one that discards its own evidence. Live
+     workspace: of 56 cancelled tasks 10 had already written a verification
+     record, and task-128 states the belief in words -- "awaiting_verification
+     blocks claim". It does not. Pin the correction against silent widening. *)
+  check bool "a submitted Task is stated not to hold the next claim" true
+    (has_in prompt "A Task you submitted for verification is not one of those");
+  check bool "claiming while a verdict is pending is stated as available" true
+    (has_in prompt "you claim the next work while it waits");
+  check bool "cancelling submitted work is named as evidence loss" true
+    (has_in prompt "cancels the evidence you already submitted");
+  (* Release exists under the other namespace: keeper_task_claim /
      keeper_task_done / keeper_task_create sit on the keeper_* surface while
-     handing a task back is masc_transition with action "release" (101 live
-     calls). The refusal names the held task and nothing else, so a keeper that
-     only knows the keeper_task_* family has no route out of it. *)
-  check bool "handing back is located outside the task tool family" true
-    (has_in prompt "a status transition, not a Task-specific tool");
-  check bool "the refusal's silence about the way out is stated" true
-    (has_in prompt "names the Task you hold but not the way out")
+     handing a task back is masc_transition with action "release".
+
+     This used to be spelled out in the prompt, in two sentences pinned here
+     ("a status transition, not a Task-specific tool" and "names the Task you
+     hold but not the way out"), because the refusal message named the held
+     task and nothing else. The message now names masc_transition
+     action=release and the required handoff_context.summary, so the prompt no
+     longer restates it and these two assertions would pin prose that is gone.
+
+     The contract did not disappear, it moved. Its test moved with it:
+     test_workspace_coverage / claim_next "single-claim refusal names the
+     release path", which fails if the message drops any of the three tokens.
+     Asserting the prompt still describes the route would re-create the
+     duplication this removed. *)
+  check bool "the prompt points at the refusal instead of restating the route" true
+    (has_in prompt "names both the Task you hold and how to hand it back")
 
 let test_repository_checkout_authority_prompt () =
   let prompt =

@@ -73,6 +73,12 @@ class CheckTestCoverageTest(unittest.TestCase):
         self.assertTrue(coverage.is_covered_code_file("dashboard/app.ts"))
         self.assertTrue(coverage.is_covered_code_file("config/runtime.toml"))
         self.assertTrue(coverage.is_covered_code_file("dashboard/package-lock.json"))
+        # Build configuration has no suffix, so the suffix policy cannot
+        # express it; no unit test can exercise a dune stanza.
+        self.assertFalse(coverage.is_covered_code_file("lib/board/dune"))
+        self.assertFalse(coverage.is_covered_code_file("dune-project"))
+        # A file merely named like one stays covered.
+        self.assertTrue(coverage.is_covered_code_file("lib/dune_helpers.ml"))
 
     def test_non_code_suffixes_come_from_repo_policy_file(self):
         self.assertEqual(
@@ -248,6 +254,73 @@ class CheckTestCoverageTest(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 1)
         self.assertIn("Changed 4 files", out.getvalue())
+
+
+class CommentLineNumbersTest(unittest.TestCase):
+    """A docstring is not code the gate can ask for a test of.
+
+    Every `+` line used to count, so a documentation-only change to an .mli
+    could not satisfy this rule at all — the only way past was the manual
+    `# ci:skip-test-coverage` marker, used once in the last 200 commits.
+
+    These are the cases a line-oriented regex gets wrong: most of a docstring
+    is continuation lines carrying no marker, and OCaml block comments nest.
+    """
+
+    def assert_comment_lines(self, suffix, text, expected, label):
+        self.assertEqual(
+            coverage.comment_line_numbers(text, suffix), expected, msg=label
+        )
+
+    def test_block_continuation_lines_are_comment(self):
+        self.assert_comment_lines(
+            ".mli",
+            "(** doc\n    more doc\n    still doc *)\nval f : int",
+            {1, 2, 3},
+            "continuation lines carry no marker of their own",
+        )
+
+    def test_trailing_comment_does_not_make_the_line_comment(self):
+        self.assert_comment_lines(
+            ".ml",
+            "let x = 1 (* note *)\n(* pure *)\nlet y = 2",
+            {2},
+            "code with a trailing comment is still code",
+        )
+
+    def test_ocaml_block_comments_nest(self):
+        self.assert_comment_lines(
+            ".ml",
+            "(* outer (* inner *) still outer *)\nlet z = 3",
+            {1},
+            "the inner close must not end the outer comment",
+        )
+
+    def test_code_shaped_text_inside_a_comment_is_comment(self):
+        self.assert_comment_lines(
+            ".ml",
+            "(* a\nlet fake = 1\n*)\nlet real = 2",
+            {1, 2, 3},
+            "a commented-out binding is not an added code line",
+        )
+
+    def test_typescript_line_and_block_comments(self):
+        self.assert_comment_lines(
+            ".ts",
+            "// line\nconst a = 1\n/* b\n c */\nconst d = 2",
+            {1, 3, 4},
+            "both comment forms",
+        )
+
+    def test_typescript_trailing_line_comment_is_code(self):
+        self.assert_comment_lines(
+            ".ts", "const a = 1 // trailing", set(), "trailing // is not comment-only"
+        )
+
+    def test_suffix_without_comment_syntax_counts_every_line(self):
+        self.assert_comment_lines(
+            ".json", '{"a": 1}', set(), "unknown suffix stays conservative"
+        )
 
 
 if __name__ == "__main__":

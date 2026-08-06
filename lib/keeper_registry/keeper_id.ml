@@ -101,18 +101,6 @@ module Uid = struct
   let to_string s = s
   let equal = String.equal
   let compare = String.compare
-
-  let to_json s = `String s
-
-  let of_json = function
-    | `String s ->
-        (match of_string s with
-         | Ok t -> Ok t
-         | Error e -> Error e)
-    | other ->
-        Error
-          (Printf.sprintf "Expected string for Keeper_id.Uid (received %s)"
-             (Json_util.kind_name other))
 end
 
 module For_testing = struct

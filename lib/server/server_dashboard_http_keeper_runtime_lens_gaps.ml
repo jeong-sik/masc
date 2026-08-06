@@ -3,7 +3,6 @@
     Split from {!Server_dashboard_http_keeper_api}; this module derives
     runtime-lens diagnostic gaps from the manifest scan and summary JSONs. *)
 
-open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 

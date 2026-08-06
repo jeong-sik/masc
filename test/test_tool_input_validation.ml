@@ -39,8 +39,17 @@ let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t
   let parameters = Tool_bridge.params_of_json_schema schema in
   if parameters = [] then Pass
   else
+    let json =
+      `Assoc
+        [ ("name", `String tool_name)
+        ; ("description", `String "")
+        ; ("parameters", `List (List.map Agent_sdk.Types.tool_param_to_json parameters))
+        ]
+    in
     let oas_schema : Agent_sdk.Types.tool_schema =
-      { name = tool_name; description = ""; parameters; strict = None }
+      match Agent_sdk.Types.tool_schema_of_json json with
+      | Ok s -> s
+      | Error err -> failwith ("test_tool_input_validation: " ^ err)
     in
     match Agent_sdk.Tool_input_validation.validate oas_schema args with
     | Agent_sdk.Tool_input_validation.Valid coerced ->

@@ -374,7 +374,6 @@ export interface DashboardReadinessPillar {
   key: string
   label: string
   status: 'ok' | 'warn' | 'bad' | string
-  score: number
   summary: string
   blocking_reasons: string[]
   metrics?: Record<string, number>
@@ -382,7 +381,6 @@ export interface DashboardReadinessPillar {
 
 export interface DashboardReadinessSummary {
   status: 'ok' | 'warn' | 'bad' | string
-  score: number
   decision_required_count: number
   blocking_count: number
   pillars: DashboardReadinessPillar[]
@@ -765,7 +763,7 @@ export interface GoalTreeTaskProjection {
 }
 
 export interface GoalTreeActivityProjection {
-  timeline_events: unknown[]
+  timeline_events: GoalDetailTimelineEvent[]
   last_activity_at: string
   stagnation_seconds: number | null
   activity_observation: GoalFsmProjection['activity_observation']

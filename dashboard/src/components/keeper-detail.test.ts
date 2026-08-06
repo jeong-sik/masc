@@ -97,7 +97,6 @@ vi.mock('./keeper-detail-history', async () => {
   const actual = await vi.importActual<typeof import('./keeper-detail-history')>('./keeper-detail-history')
   return {
     ...actual,
-    GenerationLineagePanel: () => null,
     KeeperCheckpointPanel: () => null,
   }
 })
@@ -161,7 +160,6 @@ import {
   closeKeeperDetail,
   filterCheckpointHistory,
   keeperMobilePane,
-  lineageTransitionLabel,
   openKeeperDetail,
   selectedKeeper,
 } from './keeper-detail'
@@ -517,15 +515,5 @@ describe('filterCheckpointHistory', () => {
   it('preserves the original order of matching rows', () => {
     const result = filterCheckpointHistory(rows, 'snap-')
     expect(result.map(r => r.snapshot_id)).toEqual(['snap-abc123', 'snap-def456', 'snap-ghi789'])
-  })
-})
-
-describe('lineageTransitionLabel', () => {
-  it('uses root when the parent generation is absent', () => {
-    expect(lineageTransitionLabel(null, 3)).toBe('root -> gen 3')
-  })
-
-  it('renders explicit generation-to-generation transitions', () => {
-    expect(lineageTransitionLabel(4, 5)).toBe('gen 4 -> gen 5')
   })
 })

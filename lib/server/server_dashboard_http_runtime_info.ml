@@ -1,7 +1,6 @@
 (** Runtime-resolution and dashboard tools projections extracted from the
     dashboard HTTP facade. *)
 
-open Dashboard_http_helpers
 
 let take = Server_dashboard_http_runtime_info_json.take
 type dashboard_runtime_probe_cache_entry =

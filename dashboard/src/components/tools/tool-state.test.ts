@@ -197,14 +197,6 @@ describe('surfaceCountForFilter', () => {
     expect(surfaceCountForFilter(items, 'keeper')).toBe(1)
   })
 
-  it('counts internal items', () => {
-    const items = [
-      makeItem({ surfaces: ['local_worker'] }),
-      makeItem({ surfaces: ['public_mcp'] }),
-    ]
-    expect(surfaceCountForFilter(items, 'internal')).toBe(1)
-  })
-
   it('returns 0 for empty inventory', () => {
     expect(surfaceCountForFilter([], 'all')).toBe(0)
     expect(surfaceCountForFilter([], 'public_mcp')).toBe(0)

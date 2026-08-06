@@ -680,24 +680,6 @@ let signal_completion = function
          { candidate_id = completed.candidate_id; owner_wake })
 ;;
 
-let complete_and_signal
-      ~now
-      ~worker_epoch
-      ~base_path
-      latest_partition
-      judgment
-  =
-  let* projection =
-    complete_projection
-      ~now
-      ~worker_epoch
-      ~base_path
-      latest_partition
-      judgment
-  in
-  signal_completion projection
-;;
-
 let partition_provenance
       (provenance : Exact_flow.attempt_provenance)
       : Partition.exact_provenance

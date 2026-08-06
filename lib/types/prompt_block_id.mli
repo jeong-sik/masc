@@ -19,6 +19,7 @@ type t =
   | Dynamic_context
   | Temporal_summary
   | Memory_os_recall
+  | Operator_note
 
 val equal : t -> t -> bool
 val to_string : t -> string

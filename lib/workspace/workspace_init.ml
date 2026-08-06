@@ -6,7 +6,6 @@
 open Masc_domain
 open Workspace_utils
 open Workspace_state
-open Workspace_backlog
 open Workspace_broadcast
 
 (** Initialize MASC workspace state *)

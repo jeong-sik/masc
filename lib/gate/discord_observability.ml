@@ -1,9 +1,6 @@
 (** Discord connector observability helpers. *)
 
-type gateway_route =
-  | Control
-  | Triggered
-  | Ambient
+include Gate_connector_observability
 
 type gateway_event =
   | Ready
@@ -20,57 +17,12 @@ type reconnect_outcome =
   | Reconnect_succeeded
   | Reconnect_failed
 
-type inbound_outcome =
-  | Dropped_unbound
-  | Dispatch_unavailable
-  | Gate_error
-  | Empty_reply
-  | Reply_sent
-  | Reply_send_error
-
-type ambient_outcome =
-  | Ambient_recorded
-  | Ambient_binding_store_error
-  | Ambient_dropped_unbound
-  | Ambient_dropped_empty
-  | Ambient_dropped_too_long
-
-type reply_outcome =
-  | Reply_empty
-  | Reply_send_ok
-  | Reply_send_failed
-
-let gateway_route_label = function
-  | Control -> "control"
-  | Triggered -> "triggered"
-  | Ambient -> "ambient"
-
 let gateway_event_label = function
   | Ready -> "ready"
   | Message_create -> "message_create"
   | Reaction_add -> "reaction_add"
   | Ignored -> "ignored"
   | Open_wss -> "open_wss"
-
-let inbound_outcome_label = function
-  | Dropped_unbound -> "dropped_unbound"
-  | Dispatch_unavailable -> "dispatch_unavailable"
-  | Gate_error -> "gate_error"
-  | Empty_reply -> "empty_reply"
-  | Reply_sent -> "reply_sent"
-  | Reply_send_error -> "reply_send_error"
-
-let ambient_outcome_label = function
-  | Ambient_recorded -> "recorded"
-  | Ambient_binding_store_error -> "binding_store_error"
-  | Ambient_dropped_unbound -> "dropped_unbound"
-  | Ambient_dropped_empty -> "dropped_empty"
-  | Ambient_dropped_too_long -> "dropped_too_long"
-
-let reply_outcome_label = function
-  | Reply_empty -> "empty"
-  | Reply_send_ok -> "sent"
-  | Reply_send_failed -> "send_error"
 
 let reconnect_method_label = function
   | Resume -> "resume"

@@ -8,11 +8,8 @@
 open Masc_domain
 include Workspace_utils
 include Workspace_state
-open Workspace_backlog
-open Workspace_identity
 include Workspace_broadcast
 open Workspace_backlog
-open Workspace_identity
 
 (* activity_workspace_id removed — namespace retired (#unify-namespace). *)
 

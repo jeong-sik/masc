@@ -57,11 +57,8 @@ let is_http_error_response = function
    (godfile decomp). *)
 
 let server_start_time = Server_routes_http_runtime_health_helpers.server_start_time
-let configured_http_port () =
-  Env_config_core.masc_http_port_int ()
-
-let configured_http_host () =
-  Env_config_core.masc_host ()
+let configured_http_port = Transport_read_model.configured_http_port
+let configured_http_host = Transport_read_model.configured_http_host
 
 let authority_host host =
   match Ipaddr.of_string host with
@@ -369,8 +366,6 @@ let assoc_string_list name json =
       | `String value -> Some value
       | _ -> None)
   | _ -> []
-
-let health_status_rank = Health_status.rank_string
 
 let max_health_status = Health_status.max_string
 

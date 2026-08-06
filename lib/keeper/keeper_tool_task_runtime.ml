@@ -3,25 +3,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
 
-let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t option)) result =
-  match result with
-  | Ok msg ->
-    let typed_fields =
-      match typed_outcome with
-      | Some t -> [ "typed_outcome", Keeper_tool_outcome.to_json t ]
-      | None -> []
-    in
-    Yojson.Safe.to_string (`Assoc ([ "ok", `Bool true; "result", `String msg ] @ typed_fields))
-  | Error e ->
-    let typed_fields =
-      match typed_outcome with
-      | Some t -> [ "typed_outcome", Keeper_tool_outcome.to_json t ]
-      | None -> []
-    in
-    Yojson.Safe.to_string
-      (`Assoc ([ "ok", `Bool false; "error", `String (Masc_domain.masc_error_to_string e) ] @ typed_fields))
-;;
-
 let workflow_rejection_error_json
       ?(rule_id = "keeper_task_argument_rejected")
       ?(typed_outcome : Keeper_tool_outcome.t option)
@@ -232,7 +213,13 @@ let no_eligible_exclusion_summary =
 
 let find_task_goal_id config task_id =
   let index = Workspace_goal_index.build_task_goal_index_for_config config in
-  try Some (List.hd (Hashtbl.find index task_id)) with Not_found -> None
+  (* [Not_found] only covers the missing-key case. [List.hd] raises
+     [Failure "hd"], which this arm would not catch, so match the list
+     instead: the builder appends every goal id, but that invariant lives in
+     Workspace_goal_index and is not visible in the type here. *)
+  match Hashtbl.find_opt index task_id with
+  | Some (goal_id :: _) -> Some goal_id
+  | Some [] | None -> None
 ;;
 
 let merge_current_task_id ~(latest : keeper_meta) ~(caller : keeper_meta) =

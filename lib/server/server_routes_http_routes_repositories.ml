@@ -236,8 +236,11 @@ let parse_repository_json body_str =
                 url;
                 local_path =
                   (* New repository requests may omit the managed checkout
-                     location; the HTTP constructor owns that choice. *)
-                  Option.value ~default:(Filename.concat ".masc/repos" id)
+                     location; the HTTP constructor owns that choice. The
+                     default is base-path-relative because Repo_store.local_path
+                     concats it onto the base path. *)
+                  Option.value
+                    ~default:(Config_dir_resolver.repos_relative_path ~id)
                     raw_local_path;
                 aliases;
                 default_branch = Option.value ~default:"main" raw_default_branch;

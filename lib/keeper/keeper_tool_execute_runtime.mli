@@ -53,12 +53,7 @@ module For_testing : sig
     args:Yojson.Safe.t ->
     cwd:string ->
     (string * Yojson.Safe.t) list
-  val execute_gate_input :
-    input:Yojson.Safe.t ->
-    cwd:string ->
-    sandbox_profile:string ->
-    sandbox_target:string ->
-    Yojson.Safe.t
+
   val redact_execute_output :
     base_path:string ->
     keeper_name:string ->

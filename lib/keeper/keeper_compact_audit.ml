@@ -253,11 +253,7 @@ let prune_older_than ~base_path ~retention_days =
 
 (* ── Read ──────────────────────────────────────────────────────── *)
 
-let iso_of_unix ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02d"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-
+let iso_of_unix ts = Jsonl_writer.day_key ~ts
 let read_events ~base_path ~since ~until ?keeper () :
   (row list, write_error) result =
   let filter_keeper rec_keeper =

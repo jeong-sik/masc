@@ -3,7 +3,6 @@
     Split from {!Server_dashboard_http_keeper_api}; gap construction stays in
     the facade while repeated JSON rendering helpers live here. *)
 
-open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 
 type runtime_lens_gap =

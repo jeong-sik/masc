@@ -103,18 +103,7 @@ module For_testing : sig
     | Claim_acquired of 'a
     | Claim_already_held
 
-  val with_owner_claim :
-    base_path:string ->
-    keeper_name:string ->
-    (unit -> 'a) ->
-    ('a claim_outcome, projection_error) result
-  (** Hold the canonical process-local owner claim while running the callback.
-      The claim-table mutex is not held while the callback runs. *)
 
-  val pending_transition_count_result :
-    base_path:string ->
-    keeper_name:string ->
-    (int, projection_error) result
   (** Read-only observation of the canonical durable outbox. No raw entry or
       transition-retirement capability crosses this testing boundary. *)
 end

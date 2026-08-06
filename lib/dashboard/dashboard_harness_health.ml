@@ -20,7 +20,7 @@ type harness_verdict_item =
   ; fallback_reason : string option
   }
 
-type pre_compact_event =
+type pre_compact_event = Keeper_compact_policy.pre_compact_event =
   { timestamp : float
   ; keeper_name : string
   ; checkpoint_bytes : int
@@ -343,13 +343,6 @@ let required_float fields key =
   else Error (Printf.sprintf "field %S must be finite" key)
 ;;
 
-let required_bool fields key =
-  let* value = required_member fields key in
-  match value with
-  | `Bool value -> Ok value
-  | _ -> Error (Printf.sprintf "field %S must be a boolean" key)
-;;
-
 let required_role_counts fields =
   let* value = required_member fields "role_counts" in
   match value with
@@ -373,22 +366,6 @@ let wake_payload_record_json (event : wake_payload_event) =
   `Assoc
     [ "record_type", `String wake_payload_record_type
     ; "timestamp", `Float event.timestamp
-    ; "keeper_name", `String event.keeper_name
-    ; "trace_id", `String event.trace_id
-    ; "turn_index", `Int event.turn_index
-    ; "context_window", `Int event.context_window
-    ; "system_prompt_bytes", `Int event.system_prompt_bytes
-    ; "tool_schema_json_bytes", `Int event.tool_schema_json_bytes
-    ; "message_content_bytes", `Int event.message_content_bytes
-    ; "message_count", `Int event.message_count
-    ; "role_counts", role_counts_to_json event.role_counts
-    ; "tool_count", `Int event.tool_count
-    ]
-;;
-
-let wake_payload_event_json (event : wake_payload_event) =
-  `Assoc
-    [ "timestamp", `Float event.timestamp
     ; "keeper_name", `String event.keeper_name
     ; "trace_id", `String event.trace_id
     ; "turn_index", `Int event.turn_index
@@ -855,10 +832,6 @@ let record_wake_payload
     ~message_count
     ~role_counts
     ~tool_count
-;;
-
-let recent_verdicts_json ?since ?until () =
-  `List (List.map verdict_item_json (read_recent_verdicts ?since ?until ()))
 ;;
 
 let recent_pre_compact_json

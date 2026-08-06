@@ -1,4 +1,3 @@
-open Dashboard_http_keeper_types
 
 let keeper_trust_json ?(include_receipt = false)
     (config : Workspace.config) (meta : Keeper_meta_contract.keeper_meta) =

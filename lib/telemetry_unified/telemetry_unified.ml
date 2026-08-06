@@ -222,10 +222,6 @@ let coverage_gap_status_fields gaps source ~latest_ts =
 
 (* ── Semantic duplicate suppression ───────────────── *)
 
-let assoc_field name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-
 let string_field name json =
   match Json_field.string json name |> Json_field.to_option with
   | None -> None

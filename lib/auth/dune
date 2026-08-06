@@ -5,6 +5,8 @@
  (public_name masc.auth)
  (wrapped false)
  (private_modules auth_credential_base auth_metric_store)
+ (flags
+  (:standard -w +32))
  (libraries
   yojson
   base64

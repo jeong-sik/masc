@@ -61,6 +61,13 @@ def load_non_code_suffixes(path=NON_CODE_SUFFIXES_PATH):
 
 NON_CODE_SUFFIXES = load_non_code_suffixes()
 
+# Build configuration under covered paths. These have no suffix, so the
+# suffix policy in .ci/test-coverage-non-code-suffixes.txt cannot express
+# them, and they are exactly what is_covered_code_file's docstring excludes:
+# no unit test can exercise a dune stanza. Without this, a PR that adds a
+# compiler flag to four libraries' dune files is asked for tests.
+BUILD_CONFIG_NAMES = frozenset({"dune", "dune-project", "dune-workspace"})
+
 DEPENDENCY_LOCKFILE_NAMES = frozenset(
     {"bun.lock", "bun.lockb", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"}
 )
@@ -222,12 +229,15 @@ def is_covered_code_file(path):
     """Return true for executable code files, filtering out non-code assets.
 
     Symmetric counterpart to is_test_file: that positively identifies test
-    files; this negatively filters non-executable assets (CSS/HTML/MD/images)
-    that no unit test can exercise, so they do not trigger the "added covered
-    lines with no test" rule. See #23083.
+    files; this negatively filters non-executable assets (CSS/HTML/MD/images,
+    and build configuration such as dune) that no unit test can exercise, so
+    they do not trigger the "added covered lines with no test" rule.
+    See #23083.
     """
-    suffix = PurePosixPath(path).suffix.lower()
-    return suffix not in NON_CODE_SUFFIXES
+    normalized = PurePosixPath(path.replace("\\", "/"))
+    if normalized.name in BUILD_CONFIG_NAMES:
+        return False
+    return normalized.suffix.lower() not in NON_CODE_SUFFIXES
 
 
 def get_changed_test_files():

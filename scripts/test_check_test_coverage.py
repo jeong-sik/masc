@@ -73,6 +73,12 @@ class CheckTestCoverageTest(unittest.TestCase):
         self.assertTrue(coverage.is_covered_code_file("dashboard/app.ts"))
         self.assertTrue(coverage.is_covered_code_file("config/runtime.toml"))
         self.assertTrue(coverage.is_covered_code_file("dashboard/package-lock.json"))
+        # Build configuration has no suffix, so the suffix policy cannot
+        # express it; no unit test can exercise a dune stanza.
+        self.assertFalse(coverage.is_covered_code_file("lib/board/dune"))
+        self.assertFalse(coverage.is_covered_code_file("dune-project"))
+        # A file merely named like one stays covered.
+        self.assertTrue(coverage.is_covered_code_file("lib/dune_helpers.ml"))
 
     def test_non_code_suffixes_come_from_repo_policy_file(self):
         self.assertEqual(

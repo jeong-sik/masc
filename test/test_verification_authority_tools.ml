@@ -148,6 +148,107 @@ let test_prompt_states_the_available_surface () =
          with_tools))
 ;;
 
+let git_in dir args =
+  let quoted = List.map Filename.quote args |> String.concat " " in
+  let command =
+    Printf.sprintf
+      "cd %s && git %s >/dev/null 2>&1"
+      (Filename.quote dir)
+      quoted
+  in
+  match Sys.command command with
+  | 0 -> ()
+  | code -> Alcotest.failf "git %s failed with %d" quoted code
+;;
+
+(* A checkout with one committed file, so a later edit is the only thing that
+   can differ from the commit. *)
+let init_repo dir =
+  mkdir_p dir;
+  git_in dir [ "init"; "--quiet" ];
+  git_in dir [ "config"; "user.email"; "test@example.invalid" ];
+  git_in dir [ "config"; "user.name"; "test" ];
+  write_file (Filename.concat dir "committed.ml") "let committed = true\n";
+  git_in dir [ "add"; "committed.ml" ];
+  git_in dir [ "commit"; "--quiet"; "-m"; "initial" ]
+;;
+
+let git_status_of surface ~path =
+  dispatch_result surface ~name:"verification_git_status"
+    ~args:(`Assoc [ "path", `String path ])
+;;
+
+(* The task-136 shape: the work is present in the tree and reads back exactly
+   as submitted, but nothing committed it, so the next task's cleanup discards
+   it. Reading the file cannot distinguish this from finished work. *)
+let test_uncommitted_work_is_named () =
+  with_surface [] (fun surface root ->
+    let repo = Filename.concat root "checkout" in
+    init_repo repo;
+    write_file (Filename.concat repo "aria.ml") "let aria_label = \"close\"\n";
+    match git_status_of surface ~path:"checkout" with
+    | Error detail -> Alcotest.failf "expected a status, got error: %s" detail
+    | Ok output ->
+      Alcotest.(check bool)
+        "the uncommitted file is named"
+        true
+        (Astring.String.is_infix ~affix:"aria.ml" output);
+      Alcotest.(check bool)
+        "the answer does not claim the tree is clean"
+        false
+        (Astring.String.is_infix ~affix:"working tree clean" output))
+;;
+
+let test_committed_work_reports_clean () =
+  with_surface [] (fun surface root ->
+    let repo = Filename.concat root "checkout" in
+    init_repo repo;
+    match git_status_of surface ~path:"checkout" with
+    | Error detail -> Alcotest.failf "expected a status, got error: %s" detail
+    | Ok output ->
+      Alcotest.(check bool)
+        "a committed tree reports clean"
+        true
+        (Astring.String.is_infix ~affix:"working tree clean" output))
+;;
+
+let test_git_status_outside_root_is_rejected () =
+  with_surface [] (fun surface root ->
+    let outside = Filename.concat (Filename.dirname root) "outside-repo" in
+    init_repo outside;
+    match git_status_of surface ~path:"../outside-repo" with
+    | Ok output -> Alcotest.failf "escape should not report status; got %s" output
+    | Error detail ->
+      Alcotest.(check bool)
+        "the rejection names the boundary"
+        true
+        (Astring.String.is_infix ~affix:"outside" (String.lowercase_ascii detail)))
+;;
+
+let test_git_status_on_a_missing_directory_is_an_error () =
+  with_surface [] (fun surface _root ->
+    match git_status_of surface ~path:"no-such-checkout" with
+    | Ok output ->
+      Alcotest.failf "a missing directory must not read as clean; got %s" output
+    | Error detail ->
+      Alcotest.(check bool)
+        "the error says the directory is absent rather than clean"
+        false
+        (Astring.String.is_infix ~affix:"clean" detail))
+;;
+
+let test_git_status_on_a_non_repository_is_an_error () =
+  with_surface [ "plain/file.txt", "not a repo\n" ] (fun surface _root ->
+    match git_status_of surface ~path:"plain" with
+    | Ok output ->
+      Alcotest.failf "a non-repository must not read as clean; got %s" output
+    | Error detail ->
+      Alcotest.(check bool)
+        "a Git failure is not reported as a clean tree"
+        false
+        (Astring.String.is_infix ~affix:"clean" detail))
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -157,6 +258,18 @@ let () =
             test_read_file_returns_content
         ; Alcotest.test_case "read outside root is rejected" `Quick
             test_read_file_outside_root_is_rejected
+        ; Alcotest.test_case "git status outside root is rejected" `Quick
+            test_git_status_outside_root_is_rejected
+        ] )
+    ; ( "durability"
+      , [ Alcotest.test_case "uncommitted work is named" `Quick
+            test_uncommitted_work_is_named
+        ; Alcotest.test_case "committed work reports clean" `Quick
+            test_committed_work_reports_clean
+        ; Alcotest.test_case "missing directory is an error" `Quick
+            test_git_status_on_a_missing_directory_is_an_error
+        ; Alcotest.test_case "non-repository is an error" `Quick
+            test_git_status_on_a_non_repository_is_an_error
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case "unknown tool name is an error" `Quick

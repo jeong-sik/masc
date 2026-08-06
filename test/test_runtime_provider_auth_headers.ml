@@ -176,6 +176,54 @@ let test_runtime_toml_threads_provider_connect_timeout () =
          (List.length providers)
          (List.length bindings))
 
+(* A declared credential header must not survive into Provider_config.headers:
+   auth travels as [api_key] and OAS merges it at request time, so a copy here
+   duplicates the secret. The strip used to know only authorization and
+   x-api-key, while the dashboard's separate list also knew api-key and
+   x-auth-token — so the dashboard hid exactly the header the adapter kept
+   forwarding. *)
+let test_declared_credential_headers_never_reach_provider_config () =
+  let content =
+    runtime_toml_with_credentials
+      ~provider_extra:
+        {|[providers.runpod_mtp.headers]
+"api-key" = "sk-declared-secret"
+"x-auth-token" = "tok-declared-secret"
+"x-trace-hint" = "keep-me"
+|}
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    failf
+      "expected runtime TOML provider headers to parse: %s"
+      (String.concat "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error msg -> failf "unexpected adapter error: %s" msg
+        | Ok provider_cfg ->
+          let keys =
+            List.map
+              (fun (key, _) -> String.lowercase_ascii (String.trim key))
+              provider_cfg.headers
+          in
+          List.iter
+            (fun secret_key ->
+               check bool
+                 (Printf.sprintf "%s is stripped from provider config" secret_key)
+                 false
+                 (List.exists (String.equal secret_key) keys))
+            [ "api-key"; "x-auth-token" ];
+          check bool "a non-credential header survives" true
+            (List.exists (String.equal "x-trace-hint") keys))
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
 let test_runtime_toml_threads_model_sampling_config () =
   let content =
     runtime_toml_with_credentials
@@ -1862,6 +1910,10 @@ let () =
             "runtime TOML threads model sampling config"
             `Quick
             test_runtime_toml_threads_model_sampling_config
+        ; test_case
+            "declared credential headers never reach provider config"
+            `Quick
+            test_declared_credential_headers_never_reach_provider_config
         ; test_case
             "runtime TOML rejects non-positive provider connect timeout"
             `Quick

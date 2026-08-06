@@ -804,11 +804,10 @@ let dashboard_runtime_provider_auth_kind = function
   | Some (Runtime_schema.Inline _) -> "inline"
 ;;
 
-let dashboard_runtime_header_is_auth name =
-  match String.lowercase_ascii (String.trim name) with
-  | "authorization" | "x-api-key" | "api-key" | "x-auth-token" -> true
-  | _ -> false
-;;
+(* One list, owned by [Runtime_adapter] — the module that strips these from
+   [Provider_config.headers]. A separate copy here meant the dashboard could
+   hide a header the adapter still forwarded. *)
+let dashboard_runtime_header_is_auth = Runtime_adapter.is_auth_header_key
 
 let dashboard_runtime_non_auth_headers (provider : Runtime_schema.provider) =
   match provider.headers with

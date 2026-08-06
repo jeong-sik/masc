@@ -19,10 +19,5 @@ let finalize ~(outcome : Dispatch_outcome.t) (r : Tool_result.result option)
 ;;
 
 let finalize_from_handler (r : Tool_result.result option) : Tool_result.result option =
-  let outcome : Dispatch_outcome.t =
-    match r with
-    | Some _ -> Handled
-    | None -> No_handler
-  in
-  finalize ~outcome r
+  finalize ~outcome:(Dispatch_outcome.of_result_option r) r
 ;;

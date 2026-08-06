@@ -20,7 +20,7 @@
     - {b Vote-direction normaliser}: [all_vote_directions],
       [vote_direction_of_string_opt].
     - {b Vote log persistence}: [append_vote_log],
-      [rewrite_vote_log].
+      [save_vote_log_jsonl].
     - {b Internal vote outcome}: the [vote_outcome] record
       carries the score delta and post-lock vote log / feedback
       side effects.

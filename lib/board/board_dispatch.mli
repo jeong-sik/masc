@@ -13,7 +13,7 @@
     [emit_board_signal], [backend], [sort_posts_in_memory],
     [normalize_author_filter], [agent_matches_author_filter],
     [matching_post_ids_for_comment_author_filter], the
-    [all_sort_orders] convenience list, [is_initialized])
+    [all_sort_orders] convenience list)
     are hidden — callers consume the typed
     sort-order helpers, lifecycle entry points, post / comment /
     vote operations, and the JSON projection / hook setters

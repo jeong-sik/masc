@@ -84,11 +84,8 @@ let save_vote_log_jsonl content =
     let path = vote_log_path () in
     (match Fs_compat.save_file_atomic path content with
      | Ok () -> ()
-     | Error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg)
-  with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg
-
-let rewrite_vote_log store =
-  save_vote_log_jsonl (vote_log_jsonl store)
+     | Error msg -> Log.BoardLog.error "persist error (save_vote_log_jsonl): %s" msg)
+  with Sys_error msg -> Log.BoardLog.error "persist error (save_vote_log_jsonl): %s" msg
 
 let persisted_vote_direction_of_string_opt = function
   | "up" -> Some Up

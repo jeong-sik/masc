@@ -273,11 +273,6 @@ let emit_board_sse_event event =
   | Some hook -> Safe_ops.protect ~default:() (fun () -> hook event)
   | None -> ()
 
-let is_initialized () =
-  match Atomic.get backend_state with
-  | Active _ -> true
-  | Uninitialized -> false
-
 let init_jsonl () =
   if match Atomic.get backend_state with Active _ -> true | Uninitialized -> false then
     Log.BoardLog.warn "already initialized, ignoring init_jsonl"

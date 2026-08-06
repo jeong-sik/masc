@@ -458,27 +458,6 @@ let rollback_fresh_post store (post : post) =
     | Some _ -> ())
 ;;
 
-let rollback_rolled_up_post store ~(previous : post) ~(rolled_up : post) =
-  let rollback =
-    with_lock store (fun () ->
-      let key = Post_id.to_string previous.id in
-      match Hashtbl.find_opt store.posts key with
-      | Some current when current = rolled_up ->
-        Hashtbl.replace store.posts key previous;
-        mark_dirty_post store key;
-        invalidate_post_caches store;
-        Ok (posts_jsonl_unlocked store)
-      | Some _ -> Error "rollup target changed before rollback"
-      | None -> Error "rollup target missing before rollback")
-  in
-  match rollback with
-  | Error _ as e -> e
-  | Ok posts_jsonl ->
-    (match with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl) with
-     | Ok () -> Ok ()
-     | Error e -> Error (Board_types.show_board_error e))
-;;
-
 let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
 let sub_board_access_of_string_opt = Board_sub_board_json.sub_board_access_of_string_opt
 let sub_board_post_counts_unlocked store =

@@ -45,6 +45,10 @@ val spawn
     [Conclusive_terminalization] permits the caller to drain later owner work. *)
 
 module For_testing : sig
+  val run_outcome_of_observed_summary
+    :  Keeper_approval_queue.hitl_context_summary option
+    -> Exact_lane_run_registry.outcome * Yojson.Safe.t
+
   val system_prompt : unit -> (string, string) result
 
   val build_context_bundle

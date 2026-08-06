@@ -269,6 +269,9 @@ let goal_event_timeline_json event =
         in
         let owner = payload_field "owner" |> json_to_string_opt in
         let actor = payload_field "actor" |> json_to_string_opt in
+        (* DET-OK: [owner]/[previous_owner] are persisted goal_owner payload
+           fields; [Null] is the typed unassigned state, not unknown input.
+           The default only renders that state as "<unassigned>". *)
         let side value = Option.value ~default:"<unassigned>" value in
         ( "Goal Owner",
           (match actor with

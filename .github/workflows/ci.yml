@@ -959,6 +959,13 @@ jobs:
             @test/runtest-test_gate_connector_observability \
             @test/runtest-test_discord_observability
 
+      - name: Run repos relative-path suite
+        # The stored default must stay relative: Repo_store.local_path concats
+        # it onto the base path, so an absolute value resolves twice.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_repos_relative_path
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was

@@ -195,21 +195,21 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_KEEPER_DOCKER_PLAYGROUND` | feature_flag | n/a | n/a | 79 |  |
-| `MASC_KEEPER_DOCKER_PLAYGROUND_ROOT` | typed:string | Sandbox | operator | 85 | @category Sandbox @ops_class operator |
-| `MASC_KEEPER_SANDBOX_CLEANUP_ENABLED` | typed:bool | unclassified | unclassified | 58 |  |
-| `MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC` | typed:int | unclassified | unclassified | 63 |  |
-| `MASC_KEEPER_SANDBOX_DOCKER_IMAGE` | typed:string | unclassified | unclassified | 76 |  |
-| `MASC_KEEPER_SANDBOX_MEMORY` | typed:string | unclassified | unclassified | 26 |  |
-| `MASC_KEEPER_SANDBOX_NOFILE_LIMIT` | typed:int | unclassified | unclassified | 23 |  |
-| `MASC_KEEPER_SANDBOX_PIDS_LIMIT` | typed:int | unclassified | unclassified | 20 |  |
-| `MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED` | typed:bool | unclassified | unclassified | 94 |  |
-| `MASC_KEEPER_SANDBOX_RELAX_FS` | typed:bool | unclassified | unclassified | 32 |  |
-| `MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS` | typed:bool | unclassified | unclassified | 46 |  |
-| `MASC_KEEPER_SANDBOX_REQUIRE_USERNS` | typed:bool | unclassified | unclassified | 49 |  |
-| `MASC_KEEPER_SANDBOX_SECCOMP_PROFILE` | typed:string | unclassified | unclassified | 43 |  |
-| `MASC_KEEPER_SANDBOX_TMPFS_SIZE` | typed:string | unclassified | unclassified | 29 |  |
-| `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 141 |  |
+| `MASC_KEEPER_DOCKER_PLAYGROUND` | feature_flag | n/a | n/a | 76 |  |
+| `MASC_KEEPER_DOCKER_PLAYGROUND_ROOT` | typed:string | Sandbox | operator | 82 | @category Sandbox @ops_class operator |
+| `MASC_KEEPER_SANDBOX_CLEANUP_ENABLED` | typed:bool | unclassified | unclassified | 57 |  |
+| `MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC` | typed:int | unclassified | unclassified | 62 |  |
+| `MASC_KEEPER_SANDBOX_DOCKER_IMAGE` | typed:string | unclassified | unclassified | 73 |  |
+| `MASC_KEEPER_SANDBOX_MEMORY` | typed:string | unclassified | unclassified | 25 |  |
+| `MASC_KEEPER_SANDBOX_NOFILE_LIMIT` | typed:int | unclassified | unclassified | 22 |  |
+| `MASC_KEEPER_SANDBOX_PIDS_LIMIT` | typed:int | unclassified | unclassified | 19 |  |
+| `MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED` | typed:bool | unclassified | unclassified | 91 |  |
+| `MASC_KEEPER_SANDBOX_RELAX_FS` | typed:bool | unclassified | unclassified | 31 |  |
+| `MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS` | typed:bool | unclassified | unclassified | 45 |  |
+| `MASC_KEEPER_SANDBOX_REQUIRE_USERNS` | typed:bool | unclassified | unclassified | 48 |  |
+| `MASC_KEEPER_SANDBOX_SECCOMP_PROFILE` | typed:string | unclassified | unclassified | 42 |  |
+| `MASC_KEEPER_SANDBOX_TMPFS_SIZE` | typed:string | unclassified | unclassified | 28 |  |
+| `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 138 |  |
 
 ## Env_config_slack (1 knobs; typed classification 0/0)
 

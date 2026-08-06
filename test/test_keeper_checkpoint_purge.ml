@@ -290,7 +290,7 @@ let test_checkpoint_fields_pass_through () =
       checkpoint.turn_count
       purged.Agent_sdk.Checkpoint.turn_count
 
-(* ── RFC-0364 retention cap ───────────────────────────────────── *)
+(* ── RFC-0367 retention cap ───────────────────────────────────── *)
 
 let run_cap ~cap messages =
   match Purge.cap_tool_results_in_messages ~cap messages with

@@ -291,7 +291,7 @@ let purge ~config (ckpt : Agent_sdk.Checkpoint.t) =
     Ok ({ ckpt with Agent_sdk.Checkpoint.messages }, report)
 ;;
 
-(* R4 (RFC-0364): retention cap. The newest [cap] non-marker ToolResult
+(* R4 (RFC-0367): retention cap. The newest [cap] non-marker ToolResult
    payloads in the closed prefix stay byte-exact; older ones are replaced by
    the R3 marker. Substitution only — no message is added, dropped, or
    reordered — so pairing and indices are preserved, and the open tail

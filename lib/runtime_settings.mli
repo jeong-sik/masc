@@ -11,7 +11,7 @@
     - [keeper_lifecycle] — heartbeat / supervisor / restart limits
     - [keeper_handoff] — handoff threshold / cooldown / pressure
     - [keeper_diagnostics] — snapshot / hb tuning / profiling ring
-    - [keeper_session] — session checkpoint retention cap (RFC-0364)
+    - [keeper_session] — session checkpoint retention cap (RFC-0367)
     - [keeper_turn] / [keeper_proactive] / [keeper_rules] — keeper LLM tuning surfaces
     - [dashboard] — display-only thresholds + truncation lengths
 
@@ -52,7 +52,7 @@ val keeper_stage_timing_ring_size : int Runtime_params.param
 
 val keeper_session_tool_result_cap : int Runtime_params.param
 (** Number of newest tool results kept byte-exact in session checkpoints
-    (RFC-0364). 0 disables the cap. Range \[0, 100_000]. Default 1000. *)
+    (RFC-0367). 0 disables the cap. Range \[0, 100_000]. Default 1000. *)
 
 (** {1 Dashboard rendering} *)
 

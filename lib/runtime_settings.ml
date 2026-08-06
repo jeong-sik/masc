@@ -275,7 +275,7 @@ let keeper_session_tool_result_cap =
     ~default:(fun () -> 1000)
     ~min:0 ~max:100_000
     ~meta:{ description =
-              "체크포인트에 원문으로 유지할 최신 tool 결과 개수 (0=비활성, RFC-0364)";
+              "체크포인트에 원문으로 유지할 최신 tool 결과 개수 (0=비활성, RFC-0367)";
             value_type = "int";
             min_value = Some (`Int 0); max_value = Some (`Int 100_000) }
     ()
@@ -311,7 +311,7 @@ let surfaces =
     };
     {
       id = "keeper_session";
-      description = "Keeper session checkpoint retention (RFC-0364)";
+      description = "Keeper session checkpoint retention (RFC-0367)";
       param_keys = [ "keeper.session_tool_result_cap" ];
     };
     {

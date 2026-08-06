@@ -879,7 +879,7 @@ let run_turn
                        | None -> snapshot.checkpoint.working_context)
                   }
                 in
-                (* RFC-0364: demote tool results beyond the retention cap in
+                (* RFC-0367: demote tool results beyond the retention cap in
                    the persisted copy only. The OAS in-memory session is never
                    touched; the cap takes effect from the next turn's load. A
                    structural rejection must not break persistence, so the

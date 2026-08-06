@@ -9,7 +9,7 @@ relates_to:
   - RFC-0351 (memory-first context management, compaction sunset — S1 이 checkpoint purge R1–R3 와 `cleared_tool_result_content` 마커를 도입)
 ---
 
-# RFC-0364 — Durable tool-result retention cap in keeper session checkpoints
+# RFC-0367 — Durable tool-result retention cap in keeper session checkpoints
 
 ## 0. 한 줄 요약
 

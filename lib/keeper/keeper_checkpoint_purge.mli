@@ -82,7 +82,7 @@ val purge
 (** Apply {!purge_messages} to [ckpt.messages], leaving every other field
     unchanged. *)
 
-(** {1 Retention cap (RFC-0364)} *)
+(** {1 Retention cap (RFC-0367)} *)
 
 val cap_tool_results_in_messages
   :  cap:int

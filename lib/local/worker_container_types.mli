@@ -17,15 +17,12 @@
     the 15 entries below.  Internal helpers
     ([next_jsonrpc_id], [strip_mcp_prefix],
     [has_agent_name_field], [inject_default_agent_name],
-    [extract_prompt_block], [masc_http_base_url],
-    [request_id_matches], [normalize_mcp_body],
-    [extract_tool_text], [extract_jsonrpc_error_detail],
-    [post_json_via_eio], [call_jsonrpc],
-    [tool_schema_of_name], [tool_defs_of_schemas],
-    [followup_prompt], [split_top_level],
-    [find_top_level_char], [parse_text_tool_args],
-    [parse_text_tool_calls], [make_usage],
-    [worker_session_id], [worker_auth_token]) stay private.
+    [masc_http_base_url], [request_id_matches],
+    [normalize_mcp_body], [extract_tool_text],
+    [extract_jsonrpc_error_detail], [post_json_via_eio],
+    [call_jsonrpc], [split_top_level], [find_top_level_char],
+    [parse_text_tool_args], [parse_text_tool_calls],
+    [worker_auth_token]) stay private.
 
     {!Worker_container} does [include Worker_container_types]
     and reaches a few additional helpers unqualified

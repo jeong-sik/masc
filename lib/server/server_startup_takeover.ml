@@ -263,13 +263,16 @@ let wait_for_pid_exit ?(poll_interval_sec = 0.1) ~timeout_sec pid =
   loop ()
 ;;
 
-let rec write_all fd payload off len =
-  if len > 0
-  then (
-    let written = Unix.write_substring fd payload off len in
-    if written = 0
-    then raise End_of_file
-    else write_all fd payload (off + written) (len - written))
+let write_all fd content =
+  let rec loop offset =
+    if offset < String.length content
+    then
+      let written =
+        Unix.write_substring fd content offset (String.length content - offset)
+      in
+      if written = 0 then raise End_of_file else loop (offset + written)
+  in
+  loop 0
 ;;
 
 let status_line_from_buffer buf =
@@ -348,7 +351,7 @@ let probe_liveness ?(timeout_sec = 3.0) ?(path = Server_health_paths.liveness) p
              path
              port
          in
-         write_all socket request 0 (String.length request);
+         write_all socket request;
          match read_status_line socket ~timeout_sec with
          | Some line -> status_line_is_healthy line
          | None -> false))
@@ -588,18 +591,6 @@ let acquire_pid_lock
   |> function
   | Already_running _ as result -> result
   | Acquired -> claim_pid_file path
-;;
-
-let write_all fd content =
-  let rec loop offset =
-    if offset < String.length content
-    then
-      let written =
-        Unix.write_substring fd content offset (String.length content - offset)
-      in
-      if written = 0 then raise End_of_file else loop (offset + written)
-  in
-  loop 0
 ;;
 
 let release_base_path_lease lease =

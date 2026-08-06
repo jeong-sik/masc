@@ -23,12 +23,12 @@ let with_knob value f =
 
 let test_default_when_unset () =
   with_knob "" (fun () ->
-    check int "unset keeps the documented 4000" 4000 (Masc.Channel_gate.max_content_length ()))
+    check int "unset keeps the documented 4000" 4000 (Channel_gate.max_content_length ()))
 ;;
 
 let test_knob_raises_the_ceiling () =
   with_knob "8000" (fun () ->
-    check int "the setting is applied" 8000 (Masc.Channel_gate.max_content_length ()))
+    check int "the setting is applied" 8000 (Channel_gate.max_content_length ()))
 ;;
 
 (* The caller compares [String.length trimmed > max_content_length ()], so a
@@ -37,9 +37,9 @@ let test_knob_raises_the_ceiling () =
    total block. *)
 let test_non_positive_is_floored () =
   with_knob "0" (fun () ->
-    check int "zero cannot silence the channel" 1 (Masc.Channel_gate.max_content_length ()));
+    check int "zero cannot silence the channel" 1 (Channel_gate.max_content_length ()));
   with_knob "-1" (fun () ->
-    check int "negative cannot silence the channel" 1 (Masc.Channel_gate.max_content_length ()))
+    check int "negative cannot silence the channel" 1 (Channel_gate.max_content_length ()))
 ;;
 
 (* A value the parser rejects must fall back to the default, not to zero.
@@ -54,7 +54,7 @@ let test_malformed_falls_back_to_default () =
       Unix.putenv "MASC_PARSE_WARN" (Option.value previous ~default:""))
     (fun () ->
       with_knob "not-a-number" (fun () ->
-        check int "malformed keeps the default" 4000 (Masc.Channel_gate.max_content_length ())))
+        check int "malformed keeps the default" 4000 (Channel_gate.max_content_length ())))
 ;;
 
 let () =

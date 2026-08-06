@@ -4,7 +4,7 @@
  (name masc_runtime)
  (public_name masc.runtime)
  (wrapped false)
- (flags :standard)
+ (flags :standard -w +32)
  (libraries
   yojson
   otoml

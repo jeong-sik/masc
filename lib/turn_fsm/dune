@@ -8,6 +8,7 @@
 
 (library
  (name masc_turn)
+ (flags :standard -w +32)
  (public_name masc.masc_turn)
  (wrapped false)
  (preprocess

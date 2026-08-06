@@ -1931,6 +1931,45 @@ let handle_keeper_get_subroutes state req request reqd =
        | Error (`Io msg) ->
          Http.Response.json_value ~status:`Internal_server_error
            (`Assoc [ ("error", `String msg) ]) reqd)
+  else if ends_with "/memory-journal" then
+    (* Why this keeper's memory looks the way it does. The librarian's passes
+       reach disk here — committed and failed alike since RFC-0361 Part 5 — and
+       the internal-agents monitor could show that a pass ran but not what it
+       decided. A failed pass is the case an operator actually opens. *)
+    let name = extract_name "/memory-journal" in
+    if not (Keeper_config.validate_name name)
+    then
+      Http.Response.json_value ~status:`Bad_request
+        (`Assoc
+           [ "error", `String (Printf.sprintf "invalid keeper name: %s" name) ])
+        reqd
+    else (
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:50 |> max 1 |> min 500
+      in
+      let config = Mcp_server.workspace_config state in
+      let keepers_dir = Keeper_types_support.keeper_dir_ config in
+      let lines =
+        Keeper_memory_os_current.read_journal_tail
+          ~keepers_dir
+          ~keeper_id:name
+          ~limit
+      in
+      let undecodable =
+        List.length (List.filter (function Error _ -> true | Ok _ -> false) lines)
+      in
+      Http.Response.json_value ~compress:true ~request:req
+        (`Assoc
+           [ "keeper", `String name
+           ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-journal"
+           ; "returned", `Int (List.length lines)
+           ; (* Reported rather than hidden: a journal this build cannot fully
+                read is a different observation from a shorter one. *)
+             "undecodable_lines", `Int undecodable
+           ; ( "entries"
+             , `List (List.map Keeper_memory_os_current.journal_line_to_json lines) )
+           ])
+        reqd)
   else if ends_with "/operator-note" then
     (* RFC-0366. Read-only here: the operator asks whether a note is pending or
        which turn consumed it. The write surface belongs to the operator control

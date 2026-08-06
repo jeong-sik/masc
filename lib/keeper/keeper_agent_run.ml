@@ -344,7 +344,6 @@ module For_testing = struct
   let prune_raw_traces_after_turn_record = prune_raw_traces_after_turn_record
   let runtime_yield_reason = runtime_yield_reason
   let repeated_exact_tool_call = repeated_exact_tool_call
-  let provider_transcript_admission = provider_transcript_admission
   let dispatch_after_provider_transcript_admission =
     dispatch_after_provider_transcript_admission
   let turn_record_raw_trace_run_ref = turn_record_raw_trace_run_ref

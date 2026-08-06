@@ -9,7 +9,7 @@
 
     Internal helpers (the [Tool_schema_dsl] [string_prop] /
     [object_schema] re-binds, [task_item_schema] /
-    [assoc_field] / [json_string], [dedupe_strings],
+    [assoc_field] / [dedupe_strings],
     [find_property] / [assoc_members] / [int_member],
     [schema_type] / [label_or_default],
     [validate_json_value] / [validate_input_json], and

@@ -9,7 +9,7 @@
     [include Tool_local_runtime_core], so this module's surface
     propagates as a re-export through every consumer.  The
     cmdline-flag-parsing helpers ([parse_pid_and_command],
-    [find_flag_value], [has_flag], [server_port_of_url]) stay
+    [find_flag_value], [has_flag]) stay
     private — they are stable but exposing them would invite
     duplicate-discovery paths that drift from
     {!discover_processes}'s field-by-field cmdline parser. *)

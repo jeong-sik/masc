@@ -318,28 +318,6 @@ let log_auto_resolution_error ~keeper_name ~approval_id reason =
     reason
 ;;
 
-let log_summary_state_error ~keeper_name ~approval_id ~operation error =
-  let detail = Keeper_approval_queue.summary_transition_error_to_string error in
-  Log.Keeper.error
-    ~keeper_name
-    "auto judge summary transition rejected operation=%s approval=%s: %s"
-    operation
-    approval_id
-    detail;
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string ApprovalQueueFailures)
-    ~labels:[ "keeper", keeper_name; "site", "auto_judge_summary_transition" ]
-    ()
-;;
-
-let log_summary_transition_miss ~keeper_name ~approval_id ~operation =
-  Log.Keeper.warn
-    ~keeper_name
-    "auto judge summary state not changed operation=%s approval=%s"
-    operation
-    approval_id
-;;
-
 type judgment_finalize_outcome =
   | Judgment_finalized
   | Judgment_skipped

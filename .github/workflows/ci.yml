@@ -867,8 +867,13 @@ jobs:
         # #26445) that predate this PR. Alcotest exits non-zero when
         # the name matches no suite, so a suite rename cannot silently
         # unwire this step.
+        # claim_next is wired for the same reason: the single-claim refusal
+        # carries its own correction hint (masc_transition action=release),
+        # which keeper.md no longer restates. An unrun assertion would let
+        # that hint rot back out of the message.
         run: |
           opam exec -- dune exec --root . test/test_workspace_coverage.exe -- test revision
+          opam exec -- dune exec --root . test/test_workspace_coverage.exe -- test claim_next
 
       - name: Run MCP authentication contract suites
         # @check compiles these suites but never runs them. Exercise both the

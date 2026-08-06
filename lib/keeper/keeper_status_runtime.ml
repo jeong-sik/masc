@@ -156,13 +156,6 @@ let agent_runtime_has_live_signal agent_status =
       agent_last_seen_ago_s agent_status <= agent_staleness_threshold_s
   | Some Masc_domain.Inactive | None -> false
 
-let agent_runtime_has_live_work agent_status =
-  match agent_runtime_status_opt agent_status with
-  | Some (Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening) ->
-      agent_last_seen_ago_s agent_status <= agent_staleness_threshold_s
-  | Some Masc_domain.Inactive | None -> false
-
-
 let quiet_hours_active ~now_ts =
   let current_hour =
     let tm = Unix.gmtime now_ts in

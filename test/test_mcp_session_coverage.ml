@@ -14,7 +14,7 @@ open Alcotest
 
 module Http_transport = Server_mcp_transport_http
 module Actor_injection = Server_mcp_actor_injection
-module Auth = Masc.Auth
+module Auth = Auth
 
 let setup_test_workspace () =
   let unique_id =

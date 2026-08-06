@@ -111,8 +111,7 @@ val ingest_tool_event_from_hook :
     reaches these through [append_event]/[list_events] with the default
     thresholds. *)
 module For_testing : sig
-  val default_max_segment_bytes : int
-  val default_max_retained_segments : int
+
 
   (** Rotation-aware append: rotate the live segment out when it reaches
       [max_segment_bytes], append the row, then prune archives beyond

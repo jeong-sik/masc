@@ -14,6 +14,8 @@
  (name masc_runtime_model)
  (public_name masc.runtime_model)
  (wrapped false)
+ (flags
+  (:standard -w +32))
  (libraries
   agent_sdk
   agent_sdk.llm_provider

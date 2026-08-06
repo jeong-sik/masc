@@ -2,7 +2,6 @@
 status: reference
 last_verified: 2026-07-17
 code_refs:
-  - lib/worker_oas.ml
   - lib/keeper/keeper_compact_policy.ml
   - lib/keeper/keeper_manual_compaction.ml
   - lib/keeper/keeper_context_runtime.ml
@@ -86,7 +85,6 @@ OAS  ──does not know──→ MASC
 
 | Module / Surface | Classification | Why |
 |------------------|----------------|-----|
-| `lib/oas_worker*.ml`, `lib/worker_oas.ml` | Correct | OAS is consumed as the runtime contract; MASC chooses prompts, tools, and product judgment usage |
 | `lib/keeper/keeper_compact_policy.ml`, `keeper_manual_compaction.ml` | MASC product owner | Configured LLM planning and checkpoint mutation stay in MASC; OAS supplies only generic model/runtime execution. |
 | `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Correct boundary | Keeper recovery reads canonical OAS checkpoints. MASC does not parse assistant replies into continuity state; owner-specific typed adapter metadata remains separate from the transcript. |
 
@@ -265,7 +263,7 @@ Use this checklist when reviewing boundary-touching PRs:
 
 ## Boundary Rules for Future Work
 
-1. If the problem is “single agent execution contract”, prefer fixing `oas_worker` / `worker_oas` / OAS-facing adapters.
+1. If the problem is “single agent execution contract”, prefer fixing the OAS-facing adapters.
 2. If the problem is “Workspace, Task, Goal, Board, Keeper, Gate, Connector semantics”, keep it in MASC.
 3. If a bridge is lossy, fix the MASC-side adapter first before proposing OAS API expansion.
 4. Do not claim a subsystem is “migrated” if the runtime path works but key semantics are still dropped.

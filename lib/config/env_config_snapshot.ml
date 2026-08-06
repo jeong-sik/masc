@@ -505,8 +505,6 @@ let worker_entries =
       "Local runtime cooldown (seconds); None when unset";
     entry ~default:"(none)" "MASC_LOCAL_RUNTIME_DEBUG"
       "Local runtime debug logging (feature flag)";
-    entry ~default:"60" "MASC_LOCAL_WORKER_HEARTBEAT_SEC"
-      "Local worker heartbeat interval (seconds, clamped >=1)";
   ]
 
 let all_categories () =

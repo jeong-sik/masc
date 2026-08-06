@@ -245,10 +245,6 @@ val media_degrade_note :
 module For_testing : sig
   val with_oas_tool_of_masc_hook_unset : (unit -> 'a) -> 'a
 
-  val provider_http_observation_transport :
-    Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
-
-  val runtime_id_of_config : config -> string
 
   val stop_reason_of_cooperative_yield :
     turns_used:int -> cooperative_yield_reason -> stop_reason
@@ -264,8 +260,6 @@ module For_testing : sig
   val required_modalities_of_content_blocks :
     Agent_sdk.Types.content_block list -> string list
 
-  val content_blocks_of_messages :
-    Agent_sdk.Types.message list -> Agent_sdk.Types.content_block list
 
   val messages_for_run_with_checkpoint :
     checkpoint_messages:Agent_sdk.Types.message list ->
@@ -277,11 +271,6 @@ module For_testing : sig
     goal_blocks:Agent_sdk.Types.content_block list ->
     Agent_sdk.Types.content_block list
 
-  val content_blocks_for_run_with_checkpoint :
-    checkpoint_messages:Agent_sdk.Types.message list ->
-    initial_messages:Agent_sdk.Types.message list ->
-    goal_blocks:Agent_sdk.Types.content_block list ->
-    Agent_sdk.Types.content_block list
 
   val required_modalities_of_messages :
     Agent_sdk.Types.message list -> string list

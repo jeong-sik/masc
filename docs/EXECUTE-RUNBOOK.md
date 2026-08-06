@@ -2,7 +2,7 @@
 status: runbook
 last_verified: 2026-06-11
 code_refs:
-  - lib/exec/exec_buffer.ml
+  - lib/core/exec_buffer.ml
   - lib/exec_core.ml
   - lib/exec/exec_dispatch.ml
   - lib/process/process_eio.ml

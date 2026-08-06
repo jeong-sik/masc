@@ -930,6 +930,13 @@ jobs:
             @test/runtest-test_tool_contract_truth \
             @test/runtest-test_voice_command_descriptor_parity
 
+      - name: Run metric zero-cell declaration suite
+        # A counter emitted as a bare string still compiles and still counts;
+        # what it loses is the 0-cell, and only a running store shows that.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_metric_zero_cell_declaration
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was

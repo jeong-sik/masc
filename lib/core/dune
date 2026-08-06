@@ -16,6 +16,7 @@
   json_util
   safe_ops
   common
+  exec_buffer
   validation
   failure_observation
   cross_context_mutex

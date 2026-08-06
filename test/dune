@@ -1649,6 +1649,7 @@
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
 (include stanzas/test_trailing_slash_rules.inc)
+(include stanzas/test_metric_zero_cell_declaration.inc)
 (include stanzas/test_verification_authority_tools.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 (include stanzas/test_keeper_compaction_persist_gate.inc)
@@ -1706,6 +1707,7 @@
 (include stanzas/test_discord_presence_bridge.inc)
 
 (include stanzas/test_discord_observability.inc)
+(include stanzas/test_gate_connector_observability.inc)
 
 (include stanzas/test_discord_rest_client.inc)
 
@@ -1979,11 +1981,15 @@
 
 (include stanzas/test_workspace_heartbeat_outcome.inc)
 
+(include stanzas/test_http_auth_strict_flag.inc)
+
 (include stanzas/test_keeper_approval_resolved_history.inc)
 
 (include stanzas/test_keeper_toml_parser.inc)
 
 (include stanzas/test_keeper_toml_loader.inc)
+
+(include stanzas/test_keeper_toml_accessor_matrix.inc)
 
 (include stanzas/test_keeper_runtime_config_leaf.inc)
 
@@ -2587,3 +2593,5 @@
   (source_tree %{workspace_root}/config/prompts)
   %{workspace_root}/test/fixtures/keeper_system_prompt/assembled_prompt.golden)
  (libraries alcotest masc_test_deps))
+
+(include stanzas/test_librarian_journal_failures.inc)

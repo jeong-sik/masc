@@ -82,10 +82,11 @@ let keeper_meta name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
+          (* [runtime_id] left JSON meta before 28ef484a39 closed the schema
+             against unknown fields; [agent_name] is derived canonically by
+             Masc_test_deps. Spelling either here failed the decoder. *)
           ("name", `String name);
-          ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
-          ("runtime_id", `String Masc.(Keeper_config.default_runtime_id ()));
         ])
   with
   | Ok meta -> meta

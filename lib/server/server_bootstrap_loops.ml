@@ -1272,7 +1272,7 @@ let start_keeper_loops_owned
                         ~event
                     | None ->
                       Otel_metric_store.inc_counter
-                        "masc_keeper_lifecycle_malformed_total"
+                        Otel_metric_store.metric_keeper_lifecycle_malformed
                         ())
                  | None, _ | Some _, None ->
                    (* P3 cleanup: previously malformed lifecycle events
@@ -1283,7 +1283,9 @@ let start_keeper_loops_owned
                        lets `rate(...)` alerts catch the regression
                        even though the dashboard cache continues to
                        degrade gracefully (just stale, not broken). *)
-                   Otel_metric_store.inc_counter "masc_keeper_lifecycle_malformed_total" ())
+                   Otel_metric_store.inc_counter
+                     Otel_metric_store.metric_keeper_lifecycle_malformed
+                     ())
               | _ -> Log.Dashboard.debug "ignored non-lifecycle event")
            events;
          if events <> []

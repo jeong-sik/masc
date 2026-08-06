@@ -24,7 +24,7 @@ let cleanup_dir dir =
 
 let create_admin_token ?(agent_name = "stable-admin") base_path =
   match
-    Masc.Auth.create_token base_path ~agent_name ~role:Masc_domain.Admin
+    Auth.create_token base_path ~agent_name ~role:Masc_domain.Admin
   with
   | Ok (token, _cred) -> token
   | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)

@@ -8,7 +8,7 @@
 
 open Alcotest
 
-module Auth = Masc.Auth
+module Auth = Auth
 module Http = Masc.Http_server_eio
 module Json = Yojson.Safe.Util
 module Sse = Masc.Sse

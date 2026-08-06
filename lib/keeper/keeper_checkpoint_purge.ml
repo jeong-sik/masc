@@ -109,6 +109,18 @@ let clear_tool_result_blocks (message : Agent_sdk.Types.message) =
   { message with Agent_sdk.Types.content }, !cleared_count
 ;;
 
+(* A ToolResult block still carrying its payload. Blocks already replaced by
+   the R3 marker do not consume the retention budget — this is what makes the
+   cap idempotent. *)
+let is_uncleared_tool_result = function
+  | Agent_sdk.Types.ToolResult { content; json; content_blocks; _ } ->
+    not
+      (String.equal content cleared_tool_result_content
+       && Option.is_none json
+       && Option.is_none content_blocks)
+  | _ -> false
+;;
+
 (* An item after R2/R3: its surviving messages ([] when R2 emptied and
    dropped it) and, when it is an unprotected text-only ordinary message, the
    R1 grouping key over its full derived representation. *)
@@ -277,4 +289,91 @@ let purge ~config (ckpt : Agent_sdk.Checkpoint.t) =
   | Error error -> Error error
   | Ok (messages, report) ->
     Ok ({ ckpt with Agent_sdk.Checkpoint.messages }, report)
+;;
+
+(* R4 (RFC-0364): retention cap. The newest [cap] non-marker ToolResult
+   payloads in the closed prefix stay byte-exact; older ones are replaced by
+   the R3 marker. Substitution only — no message is added, dropped, or
+   reordered — so pairing and indices are preserved, and the open tail
+   (in-flight tool cycle) is structurally untouched. *)
+let cap_tool_results_in_messages ~cap messages =
+  if cap < 0
+  then Error (Invalid_config (Printf.sprintf "cap must be >= 0 (got %d)" cap))
+  else if cap = 0
+  then Ok (messages, 0)
+  else (
+    match Keeper_compaction_unit.partition messages with
+    | Error structural -> Error (Invalid_input_structure structural)
+    | Ok { closed_prefix; protected_suffix } ->
+      let count_uncleared unit_ =
+        List.fold_left
+          (fun acc (message : Agent_sdk.Types.message) ->
+             List.fold_left
+               (fun acc block ->
+                  if is_uncleared_tool_result block then acc + 1 else acc)
+               acc
+               message.Agent_sdk.Types.content)
+          0
+          (Keeper_compaction_unit.messages_of_closed_unit unit_)
+      in
+      let total =
+        List.fold_left
+          (fun acc unit_ -> acc + count_uncleared unit_)
+          0
+          closed_prefix
+      in
+      let budget_to_clear = max 0 (total - cap) in
+      if budget_to_clear = 0
+      then Ok (messages, 0)
+      else (
+        (* Clearing the first [budget_to_clear] payloads in traversal order
+           clears exactly the oldest ones. *)
+        let remaining = ref budget_to_clear in
+        let clear_block block =
+          match block with
+          | Agent_sdk.Types.ToolResult result
+            when !remaining > 0 && is_uncleared_tool_result block ->
+            decr remaining;
+            Agent_sdk.Types.ToolResult
+              { result with
+                content = cleared_tool_result_content
+              ; json = None
+              ; content_blocks = None
+              }
+          | _ -> block
+        in
+        let cap_message (message : Agent_sdk.Types.message) =
+          if !remaining <= 0
+          then message
+          else
+            { message with
+              Agent_sdk.Types.content = List.map clear_block message.content
+            }
+        in
+        let cap_unit unit_ =
+          match unit_ with
+          | Keeper_compaction_unit.Ordinary_message _ -> unit_
+          | Keeper_compaction_unit.Closed_tool_cycle cycle_messages ->
+            Keeper_compaction_unit.Closed_tool_cycle
+              (List.map cap_message cycle_messages)
+        in
+        let purged =
+          List.concat_map
+            (fun unit_ ->
+               Keeper_compaction_unit.messages_of_closed_unit (cap_unit unit_))
+            closed_prefix
+          @ protected_suffix
+        in
+        (match Keeper_compaction_unit.validate purged with
+         | Error structural -> Error (Invalid_output_structure structural)
+         | Ok () -> Ok (purged, budget_to_clear - !remaining))))
+;;
+
+let cap_tool_results ~cap (ckpt : Agent_sdk.Checkpoint.t) =
+  match
+    cap_tool_results_in_messages ~cap ckpt.Agent_sdk.Checkpoint.messages
+  with
+  | Error error -> Error error
+  | Ok (messages, cleared) ->
+    Ok ({ ckpt with Agent_sdk.Checkpoint.messages }, cleared)
 ;;

@@ -290,6 +290,150 @@ let test_checkpoint_fields_pass_through () =
       checkpoint.turn_count
       purged.Agent_sdk.Checkpoint.turn_count
 
+(* ── RFC-0364 retention cap ───────────────────────────────────── *)
+
+let run_cap ~cap messages =
+  match Purge.cap_tool_results_in_messages ~cap messages with
+  | Ok result -> result
+  | Error _ -> Alcotest.fail "cap rejected a structurally valid fixture"
+
+let test_cap_keeps_newest_tool_results () =
+  let messages = cycle "a" @ cycle "b" @ cycle "c" in
+  let capped, cleared = run_cap ~cap:1 messages in
+  Alcotest.(check int) "two older results cleared" 2 cleared;
+  Alcotest.(check (list string))
+    "oldest replaced by marker, newest byte-exact"
+    [ "use:a"
+    ; "result:a:" ^ Purge.cleared_tool_result_content
+    ; "use:b"
+    ; "result:b:" ^ Purge.cleared_tool_result_content
+    ; "use:c"
+    ; "result:c:raw tool output"
+    ]
+    (message_texts capped)
+
+let test_cap_zero_is_disabled () =
+  let messages = cycle "a" @ cycle "b" in
+  let capped, cleared = run_cap ~cap:0 messages in
+  Alcotest.(check int) "nothing cleared" 0 cleared;
+  Alcotest.(check (list string))
+    "byte identical"
+    (message_texts messages)
+    (message_texts capped)
+
+let test_cap_is_idempotent () =
+  let messages = cycle "a" @ cycle "b" @ cycle "c" in
+  let once, _ = run_cap ~cap:1 messages in
+  let twice, cleared = run_cap ~cap:1 once in
+  Alcotest.(check int) "second pass clears nothing" 0 cleared;
+  Alcotest.(check (list string))
+    "second pass is the identity"
+    (message_texts once)
+    (message_texts twice)
+
+let test_cap_preserves_open_tail () =
+  (* The trailing tool_use has no result yet: partition moves it to the
+     protected suffix, which the cap must never touch. *)
+  let messages =
+    cycle "a" @ cycle "b" @ [ block_message Types.Assistant [ tool_use "z" ] ]
+  in
+  let capped, cleared = run_cap ~cap:1 messages in
+  Alcotest.(check int) "one older result cleared" 1 cleared;
+  Alcotest.(check (list string))
+    "open tail survives, newest closed result kept"
+    [ "use:a"
+    ; "result:a:" ^ Purge.cleared_tool_result_content
+    ; "use:b"
+    ; "result:b:raw tool output"
+    ; "use:z"
+    ]
+    (message_texts capped)
+
+let cleared_cycle id =
+  [ block_message Types.Assistant [ tool_use id ]
+  ; { (block_message
+         Types.Tool
+         [ Types.ToolResult
+             { tool_use_id = id
+             ; content = Purge.cleared_tool_result_content
+             ; outcome = Types.Tool_succeeded
+             ; json = None
+             ; content_blocks = None
+             }
+         ])
+      with
+      tool_call_id = Some id
+    }
+  ]
+
+let test_cap_ignores_existing_markers () =
+  (* "a" is already a marker: it must not consume the budget, so with cap=2
+     the two live results both survive untouched. *)
+  let messages = cleared_cycle "a" @ cycle "b" @ cycle "c" in
+  let capped, cleared = run_cap ~cap:2 messages in
+  Alcotest.(check int) "markers do not consume the budget" 0 cleared;
+  Alcotest.(check (list string))
+    "unchanged"
+    (message_texts messages)
+    (message_texts capped)
+
+let test_cap_negative_is_rejected () =
+  match
+    Purge.cap_tool_results_in_messages ~cap:(-1) [ text_message Types.User "x" ]
+  with
+  | Error (Purge.Invalid_config _) -> ()
+  | Ok _ -> Alcotest.fail "negative cap was accepted"
+  | Error _ -> Alcotest.fail "negative cap misclassified"
+
+let test_cap_checkpoint_fields_pass_through () =
+  let checkpoint =
+    Agent_sdk.Checkpoint.
+      { version = checkpoint_version
+      ; session_id = "trace-cap-fixture"
+      ; agent_name = "cap-fixture"
+      ; model = "test-model"
+      ; system_prompt = None
+      ; messages = cycle "a" @ cycle "b"
+      ; usage = Types.empty_usage
+      ; turn_count = 7
+      ; created_at = 1_700_000_000.0
+      ; tools = []
+      ; tool_choice = None
+      ; disable_parallel_tool_use = false
+      ; temperature = None
+      ; top_p = None
+      ; top_k = None
+      ; min_p = None
+      ; enable_thinking = None
+      ; preserve_thinking = None
+      ; response_format = Types.Off
+      ; thinking_budget = None
+      ; reasoning_effort = None
+      ; cache_system_prompt = false
+      ; context = Agent_sdk.Context.create_sync ()
+      ; mcp_sessions = []
+      ; working_context = None
+      }
+  in
+  match Purge.cap_tool_results ~cap:1 checkpoint with
+  | Error _ -> Alcotest.fail "checkpoint cap failed"
+  | Ok (capped, cleared) ->
+    Alcotest.(check int) "one older result cleared" 1 cleared;
+    Alcotest.(check string)
+      "session identity unchanged"
+      checkpoint.session_id
+      capped.Agent_sdk.Checkpoint.session_id;
+    Alcotest.(check int)
+      "turn watermark unchanged"
+      checkpoint.turn_count
+      capped.Agent_sdk.Checkpoint.turn_count;
+    (match
+       Masc.Keeper_compaction_unit.validate
+         capped.Agent_sdk.Checkpoint.messages
+     with
+     | Ok () -> ()
+     | Error _ -> Alcotest.fail "capped checkpoint no longer validates")
+
 let () =
   Alcotest.run
     "keeper checkpoint purge"
@@ -342,5 +486,29 @@ let () =
             "checkpoint fields pass through"
             `Quick
             test_checkpoint_fields_pass_through
+        ] )
+    ; ( "retention cap"
+      , [ Alcotest.test_case
+            "keeps newest tool results"
+            `Quick
+            test_cap_keeps_newest_tool_results
+        ; Alcotest.test_case "zero disables" `Quick test_cap_zero_is_disabled
+        ; Alcotest.test_case "idempotent" `Quick test_cap_is_idempotent
+        ; Alcotest.test_case
+            "open tail preserved"
+            `Quick
+            test_cap_preserves_open_tail
+        ; Alcotest.test_case
+            "existing markers ignored"
+            `Quick
+            test_cap_ignores_existing_markers
+        ; Alcotest.test_case
+            "negative cap rejected"
+            `Quick
+            test_cap_negative_is_rejected
+        ; Alcotest.test_case
+            "checkpoint fields pass through"
+            `Quick
+            test_cap_checkpoint_fields_pass_through
         ] )
     ]

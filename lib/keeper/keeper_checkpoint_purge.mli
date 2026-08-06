@@ -81,3 +81,23 @@ val purge
   -> (Agent_sdk.Checkpoint.t * report, purge_error) result
 (** Apply {!purge_messages} to [ckpt.messages], leaving every other field
     unchanged. *)
+
+(** {1 Retention cap (RFC-0364)} *)
+
+val cap_tool_results_in_messages
+  :  cap:int
+  -> Agent_sdk.Types.message list
+  -> (Agent_sdk.Types.message list * int, purge_error) result
+(** Keep the newest [cap] non-marker [ToolResult] payloads of the closed
+    prefix byte-exact and replace older ones with
+    {!cleared_tool_result_content}. Substitution only: no message is added,
+    dropped, or reordered, so tool_use/tool_result pairing and indices are
+    preserved. The open tail is structurally untouched. [cap = 0] disables
+    the rule. Returns the cleared block count. Idempotent: marker blocks do
+    not consume the budget. *)
+
+val cap_tool_results
+  :  cap:int
+  -> Agent_sdk.Checkpoint.t
+  -> (Agent_sdk.Checkpoint.t * int, purge_error) result
+(** Checkpoint-level wrapper of {!cap_tool_results_in_messages}. *)

@@ -20,14 +20,7 @@ type harness_verdict_item =
   ; fallback_reason : string option
   }
 
-type pre_compact_event =
-  { timestamp : float
-  ; keeper_name : string
-  ; checkpoint_bytes : int
-  ; message_count : int
-  ; strategies : string list
-  ; trigger : Compaction_trigger.t
-  }
+type pre_compact_event = Keeper_compact_policy.pre_compact_event
 
 (** Wake-time payload observation.
 

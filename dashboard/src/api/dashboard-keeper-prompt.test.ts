@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchKeeperLastPrompt,
+  putKeeperOperatorNote,
   fetchKeeperOperatorNote,
   fetchKeeperRawTrace,
   fetchKeeperRawTraces,
@@ -169,5 +170,42 @@ describe('operator note', () => {
       },
     })
     await expect(fetchKeeperOperatorNote('kidsnote')).rejects.toThrow('operator note')
+  })
+})
+
+describe('writing an operator note', () => {
+  it('returns the stored note as pending', async () => {
+    stubFetch({
+      ok: true,
+      keeper: 'kidsnote',
+      pending: true,
+      note: {
+        text: 'resume task-195',
+        created_at: 1786000000,
+        created_by: 'operator',
+        consumed_at: null,
+        consumed_turn: null,
+      },
+    })
+    const note = await putKeeperOperatorNote('kidsnote', 'resume task-195')
+    expect(note.pending).toBe(true)
+    expect(note.text).toBe('resume task-195')
+  })
+
+  // The server refuses oversized text rather than truncating it. That refusal
+  // has to reach the operator, because a silently shortened instruction is a
+  // different instruction and they would not know which one arrived.
+  it('surfaces the server refusal instead of resolving', async () => {
+    stubFetch(
+      {
+        ok: false,
+        keeper: 'kidsnote',
+        error: 'operator note is 8192 bytes; the cap is 4096.',
+      },
+      400,
+    )
+    await expect(putKeeperOperatorNote('kidsnote', 'x'.repeat(8192))).rejects.toThrow(
+      /8192 bytes/,
+    )
   })
 })

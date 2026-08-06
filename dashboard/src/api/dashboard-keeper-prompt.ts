@@ -10,7 +10,7 @@
 // if it were complete — the whole point of these surfaces is that an operator
 // can trust what they are looking at.
 
-import { get, type AbortableRequestOptions } from './core'
+import { get, post, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
 import { isRecord, asNumber, asString } from '../components/common/normalize'
 import { type TurnPromptBlockId } from './dashboard-turn-records'
@@ -200,6 +200,50 @@ export type OperatorNote = {
   readonly consumedTurn: number | null
 }
 
+// Replaces this keeper's pending note. The server rejects oversized text
+// rather than truncating it, and the rejection reaches the caller as a thrown
+// error carrying the server's own byte counts — a silently shortened
+// instruction is a different instruction.
+export async function putKeeperOperatorNote(
+  name: string,
+  text: string,
+): Promise<OperatorNote> {
+  await ensureDevToken()
+  const raw = await post<Record<string, unknown>>(
+    `/api/v1/keepers/${encodeURIComponent(name)}/operator-note`,
+    { text },
+  )
+  if (!isRecord(raw) || raw.ok !== true || !isRecord(raw.note)) {
+    const message = isRecord(raw) && typeof raw.error === 'string' ? raw.error : '운영자 노트 저장 실패'
+    throw new Error(message)
+  }
+  return decodeNoteResponse(raw)
+}
+
+function decodeNoteResponse(raw: Record<string, unknown>): OperatorNote {
+  if (!isRecord(raw.note)) throw new Error('유효하지 않은 operator note payload')
+  const keeper = asString(raw.keeper)
+  const pending = raw.pending === true ? true : raw.pending === false ? false : null
+  const text = asString(raw.note.text)
+  const createdBy = asString(raw.note.created_by)
+  const createdAt = asNumber(raw.note.created_at)
+  if (keeper == null || pending === null || text == null || createdBy == null || createdAt == null) {
+    throw new Error('유효하지 않은 operator note payload')
+  }
+  const consumedTurnRaw = raw.note.consumed_turn
+  let consumedTurn: number | null
+  if (consumedTurnRaw === null || consumedTurnRaw === undefined) {
+    consumedTurn = null
+  } else {
+    const parsed = asNumber(consumedTurnRaw)
+    if (parsed == null || !Number.isSafeInteger(parsed)) {
+      throw new Error('유효하지 않은 operator note payload')
+    }
+    consumedTurn = parsed
+  }
+  return { keeper, pending, text, createdBy, createdAt, consumedTurn }
+}
+
 export async function fetchKeeperOperatorNote(
   name: string,
   opts?: AbortableRequestOptions,
@@ -209,29 +253,7 @@ export async function fetchKeeperOperatorNote(
     `/api/v1/keepers/${encodeURIComponent(name)}/operator-note`,
     { signal: opts?.signal },
   ).then((raw) => {
-    if (!isRecord(raw) || !isRecord(raw.note)) throw new Error('유효하지 않은 operator note payload')
-    const keeper = asString(raw.keeper)
-    const pending = raw.pending === true ? true : raw.pending === false ? false : null
-    const text = asString(raw.note.text)
-    const createdBy = asString(raw.note.created_by)
-    const createdAt = asNumber(raw.note.created_at)
-    if (keeper == null || pending === null || text == null || createdBy == null || createdAt == null) {
-      throw new Error('유효하지 않은 operator note payload')
-    }
-    // consumed_turn is null until a turn renders the note. A missing or
-    // non-numeric value is a payload this build cannot read, not a note that
-    // was never delivered — those are different answers.
-    const consumedTurnRaw = raw.note.consumed_turn
-    let consumedTurn: number | null
-    if (consumedTurnRaw === null) {
-      consumedTurn = null
-    } else {
-      const parsed = asNumber(consumedTurnRaw)
-      if (parsed == null || !Number.isSafeInteger(parsed)) {
-        throw new Error('유효하지 않은 operator note payload')
-      }
-      consumedTurn = parsed
-    }
-    return { keeper, pending, text, createdBy, createdAt, consumedTurn }
+    if (!isRecord(raw)) throw new Error('유효하지 않은 operator note payload')
+    return decodeNoteResponse(raw)
   })
 }

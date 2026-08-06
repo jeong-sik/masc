@@ -32,7 +32,6 @@ export interface JourneyWaterfallEntry {
   thinkingContent: string | null
   thinkingRedacted: boolean
   durationMs: number | null
-  costUsd: number | null
   gateReason: string | null
   error: string | null
   sessionId: string | null
@@ -68,7 +67,6 @@ export interface JourneyWaterfallTurn {
   failureCount: number
   gateRejectedCount: number
   totalDurationMs: number
-  totalCostUsd: number
   runtimeEvidence: JourneyWaterfallRuntimeEvidence | null
 }
 
@@ -80,7 +78,6 @@ export interface JourneyWaterfallSummary {
   failureCount: number
   gateRejectedCount: number
   totalDurationMs: number
-  totalCostUsd: number
   timelineStartTs: number | null
   timelineEndTs: number | null
   runtimeEvidence: JourneyWaterfallRuntimeEvidence | null
@@ -158,7 +155,6 @@ function entryFromTraceEvent(event: UnifiedTraceEvent): JourneyWaterfallEntry | 
     thinkingContent: event.thinkingContent ?? null,
     thinkingRedacted: event.thinkingRedacted === true,
     durationMs: event.duration_ms ?? null,
-    costUsd: event.cost_usd ?? null,
     gateReason: event.gate?.reason ?? null,
     error: event.error ?? null,
     sessionId: event.sessionId ?? null,
@@ -228,7 +224,6 @@ function buildTurn(
     failureCount: sortedEntries.filter(entry => entry.status === 'failure').length,
     gateRejectedCount: sortedEntries.filter(entry => entry.status === 'gate_rejected').length,
     totalDurationMs: toolEntries.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0),
-    totalCostUsd: toolEntries.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0),
     runtimeEvidence,
   }
 }
@@ -286,7 +281,6 @@ export function buildJourneyWaterfall(input: JourneyWaterfallInput): JourneyWate
       failureCount: allTurnEntries.filter(entry => entry.status === 'failure').length,
       gateRejectedCount: allTurnEntries.filter(entry => entry.status === 'gate_rejected').length,
       totalDurationMs: turns.reduce((sum, turn) => sum + turn.totalDurationMs, 0),
-      totalCostUsd: turns.reduce((sum, turn) => sum + turn.totalCostUsd, 0),
       timelineStartTs: allTurnEntries[0]?.ts ?? null,
       timelineEndTs: allTurnEntries.at(-1)?.ts ?? null,
       runtimeEvidence,

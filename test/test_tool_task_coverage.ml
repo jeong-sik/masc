@@ -1060,7 +1060,12 @@ let () = test "handle_transition_submit_rejects_registered_keeper_alias"
            ])
     in
     assert (not (Tool_result.is_success result));
-    assert (str_contains (Tool_result.message result) "requires owning the task");
+    (* Pin the fact, not the phrasing: the refusal has to name the identity that
+       actually owns the task, so a reader can tell an ownership rejection from
+       an incidental FSM one. The old assertion pinned the literal "requires
+       owning the task", which the message stopped using while still rejecting
+       for exactly this reason. *)
+    assert (str_contains (Tool_result.message result) "keeper-executor-agent");
     assert_task_claimed_by ctx "keeper-executor-agent"))
 
 let () = test "keeper_reconciliation_ignores_prefix_matched_agent"

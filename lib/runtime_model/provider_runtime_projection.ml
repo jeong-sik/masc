@@ -119,25 +119,11 @@ let profile_of_binding (binding : Runtime_binding.t) =
 
 let all_profiles () = Runtime_binding.all () |> List.map profile_of_binding
 
-let find_profile_by_alias label =
-  let normalized = normalize_label label in
-  match Runtime_binding.find normalized with
-  | Some binding -> Some (profile_of_binding binding)
-  | None ->
-    all_profiles ()
-    |> List.find_opt (fun profile ->
-      List.exists (fun alias -> String.equal alias normalized) profile.aliases)
-;;
-
 let find_profile_by_runtime_prefix label =
   let normalized = normalize_label label in
   all_profiles ()
   |> List.find_opt (fun profile ->
     String.equal (normalize_label profile.runtime_prefix) normalized)
-;;
-
-let runtime_prefix_of_provider_label label =
-  find_profile_by_alias label |> Option.map (fun profile -> profile.runtime_prefix)
 ;;
 
 let provider_profile_for_runtime_prefix = find_profile_by_runtime_prefix

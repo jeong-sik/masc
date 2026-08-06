@@ -6,8 +6,6 @@
 
     @since 2.95.0 *)
 
-let trim_opt = Env_config_core.trim_opt
-
 let resolved_base_path_opt () =
   match (Host_config.from_env ()).base_path with
   | Some path -> Some path

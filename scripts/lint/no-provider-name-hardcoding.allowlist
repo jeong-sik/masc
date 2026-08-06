@@ -4,5 +4,5 @@
 #
 # Format: path:line:literal
 lib/runtime_model/provider_runtime_projection.ml:100:auto
-lib/runtime_model/provider_runtime_projection.ml:198:auto
-lib/runtime_model/provider_runtime_projection.ml:239:openrouter
+lib/runtime_model/provider_runtime_projection.ml:184:auto
+lib/runtime_model/provider_runtime_projection.ml:225:openrouter

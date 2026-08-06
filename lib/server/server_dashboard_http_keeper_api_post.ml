@@ -138,13 +138,9 @@ include Server_dashboard_http_keeper_runtime_manifest_scan
 (* Runtime-manifest receipt + scan-summary helpers in Server_dashboard_http_keeper_api_scan_summary. *)
 module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
 
-let receipt_row_matches = Scan_summary.receipt_row_matches
 let read_receipt_rows = Scan_summary.read_receipt_rows
-let unique_ints = Scan_summary.unique_ints
-let json_int_list = Scan_summary.json_int_list
 let event_bus_summary_json = Scan_summary.event_bus_summary_json
 
-let max_int_list_opt = Scan_summary.max_int_list_opt
 let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
 let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_turn
 

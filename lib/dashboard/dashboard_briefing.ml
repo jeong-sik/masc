@@ -12,19 +12,6 @@ let top_item items =
   | item :: _ -> item
   | [] -> `Null
 
-let matching_action target_type target_id actions =
-  List.find_opt
-    (fun action ->
-      let action_target_type = string_field "target_type" action in
-      let action_target_id = String_util.trim_to_option (string_field "target_id" action) in
-      String.equal action_target_type target_type
-      &&
-      match target_id, action_target_id with
-      | Some left, Some right -> String.equal left right
-      | None, None -> true
-      | _ -> false)
-    actions
-
 let matching_action_for_incident incident actions =
   let target_type = string_field "target_type" incident in
   let target_id = String_util.trim_to_option (string_field "target_id" incident) in

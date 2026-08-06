@@ -235,12 +235,6 @@ let string_opt_present value =
   | None -> false
 ;;
 
-let string_opt_has_prefix value ~prefix =
-  match lower_string_opt value with
-  | Some value -> string_has_prefix ~prefix value
-  | None -> false
-;;
-
 let json_string_eq key json expected =
   match json_string key json with
   | Some value -> String.equal value expected

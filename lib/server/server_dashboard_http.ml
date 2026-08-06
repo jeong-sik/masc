@@ -48,10 +48,6 @@ let handle_repository_observation_snapshot ~sw:_ ~clock request reqd =
    add/transition so the dashboard serves fresh backlog data. *)
 let () = Atomic.set Workspace_hooks.on_task_mutation_fn invalidate_execution_cache
 
-let dashboard_namespace_truth_focus_json =
-  Server_dashboard_http_namespace_truth_support.dashboard_namespace_truth_focus_json
-;;
-
 let dashboard_namespace_truth_http_json =
   Server_dashboard_http_namespace_truth.dashboard_namespace_truth_http_json
 ;;

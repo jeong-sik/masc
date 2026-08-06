@@ -824,6 +824,14 @@ jobs:
             @test/runtest-test_tool_registry_consistency \
             @test/runtest-test_tool_spec
 
+      - name: Run env snapshot applied-default suite
+        # Asserts through the JSON operators actually receive. The script gate
+        # cannot cover this knob any more -- the fix removed the literals it
+        # compares -- so the property moved here.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_env_snapshot_reports_applied_default
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was

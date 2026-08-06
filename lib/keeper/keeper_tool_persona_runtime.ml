@@ -193,14 +193,6 @@ let append_optional_bool_field acc key json =
   | Some value -> append_bool_field acc key value
   | None -> acc
 
-let append_int_field acc key value =
-  (Printf.sprintf "%s = %d" key value) :: acc
-
-let append_optional_int_field acc key json =
-  match Safe_ops.json_int_opt key json with
-  | Some value -> append_int_field acc key value
-  | None -> acc
-
 let append_string_list_field acc key values =
   (Printf.sprintf "%s = %s" key (toml_string_array values)) :: acc
 

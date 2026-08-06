@@ -541,10 +541,6 @@ let format_own_board_post_text (post : Board.post) : string =
     ]
 ;;
 
-let line_block label value =
-  if value = "" then ""
-  else Printf.sprintf "%s: %s\n" label value
-
 let autonomous_trigger_lines
     ~(decision : Keeper_world_observation.keeper_cycle_decision) : string list =
   match decision.channel, decision.should_run with

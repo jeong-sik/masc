@@ -306,7 +306,6 @@ let chat_queue_status_to_json observation =
       ; "durable_replay_enabled", `Bool durable_replay_enabled
       ]
 
-let nonempty_trimmed = Keeper_status_detail_observability.nonempty_trimmed
 let json_string_opt_member = Json_util.get_string_nonempty
 let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
 let model_observability_json = Keeper_status_detail_observability.model_observability_json

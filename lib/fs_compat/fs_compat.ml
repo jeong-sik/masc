@@ -198,19 +198,10 @@ let get_append_path_mutex path =
 
 let append_file_unix (path : string) (content : string) : unit =
   let mu = get_append_path_mutex path in
-  Stdlib.Mutex.lock mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock mu)
-    (fun () ->
-      let oc =
-        Stdlib.open_out_gen
-          [ Stdlib.Open_append; Stdlib.Open_creat; Stdlib.Open_wronly ]
-          0o644
-          path
-      in
-      Fun.protect
-        ~finally:(fun () -> Stdlib.close_out_noerr oc)
-        (fun () -> Stdlib.output_string oc content))
+  Stdlib.Mutex.protect mu (fun () ->
+    Fd_cache.with_writer path (fun oc ->
+      Stdlib.output_string oc content;
+      Stdlib.flush oc))
 ;;
 
 let mkdir_p_unix (path : string) : unit =

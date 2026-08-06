@@ -215,6 +215,35 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.chat-bubble')).toBeNull()
   })
 
+  it('renders a connector-delivered outcome as a terminal status, not assistant prose', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'connector-done-live',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            details: { turnOutcome: 'external_effect_completed' },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.textContent).toContain('커넥터로 답변 완료')
+    expect(status?.textContent).toContain('해당 채널에서 확인')
+    expect(container.querySelector('.chat-bubble')).toBeNull()
+  })
+
   it('renders a typed continuation checkpoint as durable status, not assistant prose', () => {
     render(
       html`<${ChatTranscript}

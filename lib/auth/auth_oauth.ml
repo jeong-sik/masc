@@ -319,12 +319,6 @@ let json_float fields name =
   | _ -> Error (Store_error (Printf.sprintf "invalid OAuth store field %s" name))
 ;;
 
-let json_nonnegative_int fields name =
-  match List.assoc_opt name fields with
-  | Some (`Int value) when value >= 0 -> Ok value
-  | _ -> Error (Store_error (Printf.sprintf "invalid OAuth store field %s" name))
-;;
-
 let json_string_list fields name =
   match List.assoc_opt name fields with
   | Some (`List values) ->

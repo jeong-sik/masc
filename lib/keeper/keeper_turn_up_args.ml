@@ -246,17 +246,6 @@ let resolve_network_mode ~sandbox_profile ~fallback =
   |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
 
 
-let private_workspace_root_rel ~sandbox_profile keeper_name =
-  Keeper_sandbox.host_root_rel_of_profile sandbox_profile keeper_name
-  |> Keeper_alerting_path.strip_trailing_slashes
-
-let private_workspace_root_abs ~(config : Workspace.config) ~sandbox_profile keeper_name =
-  Filename.concat
-    (Keeper_alerting_path.project_root_of_config config)
-    (private_workspace_root_rel ~sandbox_profile keeper_name)
-  |> Keeper_alerting_path.normalize_path_for_check
-  |> Keeper_alerting_path.strip_trailing_slashes
-
 let sandbox_allowed_path_has_forbidden_segments path =
   let has_glob =
     String.exists (function

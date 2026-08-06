@@ -108,11 +108,9 @@ it, say why on the Task or the Board so the next Keeper reads a judgment rather
 than silence.
 
 You hold one Task at a time. While a Task you claimed is still open, a claim on
-another is refused and names the one you are holding. So pick the one you mean
-to work, then finish it or hand it back before claiming again — trying each
-candidate in turn only produces a run of refusals. Handing a Task back is a
-status transition, not a Task-specific tool, and the refusal message names the
-Task you hold but not the way out.
+another is refused and names both the Task you hold and how to hand it back. So
+pick the one you mean to work, then finish it or hand it back before claiming
+again — trying each candidate in turn only produces a run of refusals.
 
 Your goals, memory, and repositories are work surfaces of their own. The Board
 is one of several places work lives, not the register that decides whether work

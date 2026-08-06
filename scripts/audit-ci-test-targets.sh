@@ -105,9 +105,13 @@ if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then
   exit 2
 fi
 
+# Below the baseline is an improvement, not a defect, so it reports and passes.
+# Failing here made every suite-wiring PR turn main red until someone edited
+# this number: 748 went red, #27181 set 747, and 746 was red again within the
+# hour. scripts/ocaml-structure-ratchet.sh already treats its own drift-down
+# this way ("baseline can be lowered", exit 0); this now matches it.
 if [ "$unwired" -lt "$UNWIRED_BASELINE" ]; then
-  echo "[ci-test-targets] unwired suites ${unwired} < baseline ${UNWIRED_BASELINE} — lower UNWIRED_BASELINE in $0 to hold the gain"
-  exit 2
+  echo "[ci-test-targets] OK - ${unwired} suites unwired, ${UNWIRED_BASELINE} baseline — lower UNWIRED_BASELINE in $0 to hold the gain"
+else
+  echo "[ci-test-targets] OK - ${unwired} suites unwired, at baseline"
 fi
-
-echo "[ci-test-targets] OK - ${unwired} suites unwired, at baseline"

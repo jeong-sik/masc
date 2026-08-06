@@ -367,7 +367,8 @@ let delivery_key_of_run_id run_id =
     Printf.sprintf "invalid Fusion run delivery identity: %s" detail)
 ;;
 
-let emit ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges ~judge_usage :
+let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges
+      ~judge_usage :
     (unit, string) result =
   let ( let* ) = Result.bind in
   let* delivery_key = delivery_key_of_run_id run_id in
@@ -538,17 +539,19 @@ let emit ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges ~jud
        let wake_result =
          match judge with
          | Ok j ->
-           Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-             ~ok:true ();
-           broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
+           Fusion_run_registry.mark_completed registry ~run_id
+             ~outcome:Fusion_run_registry.Succeeded;
+           broadcast_run_status ~registry ~run_id;
            wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel ~ok:true
              ~resolved_answer:j.Fusion_types.resolved_answer ~board_post_id
          | Error e ->
-           Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-             ~failure:(Fusion_types.judge_failure_text e)
-             ~failure_code:(Fusion_types.judge_failure_tag e)
-             ~ok:false ();
-           broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
+           Fusion_run_registry.mark_completed registry ~run_id
+             ~outcome:
+               (Fusion_run_registry.Failed
+                  { reason = Fusion_types.judge_failure_text e
+                  ; code = Fusion_types.judge_failure_tag e
+                  });
+           broadcast_run_status ~registry ~run_id;
            wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel ~ok:false
              ~resolved_answer:
                (Printf.sprintf "fusion run failed — %s" (render_failure e))
@@ -569,7 +572,7 @@ let emit ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges ~jud
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 
-let emit_failure ~base_dir ~keeper ~run_id ~channel ~failure_code ~detail =
+let emit_failure ~registry ~base_dir ~keeper ~run_id ~channel ~failure_code ~detail =
   let ( let* ) = Result.bind in
   let* delivery_key = delivery_key_of_run_id run_id in
   let content =
@@ -587,8 +590,8 @@ let emit_failure ~base_dir ~keeper ~run_id ~channel ~failure_code ~detail =
     | Ok (Keeper_chat_store.Already_present _) -> Ok ()
     | Error _ as error -> error
   in
-  Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-    ~failure:detail ~failure_code ~ok:false ();
-  broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
+  Fusion_run_registry.mark_completed registry ~run_id
+    ~outcome:(Fusion_run_registry.Failed { reason = detail; code = failure_code });
+  broadcast_run_status ~registry ~run_id;
   wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel ~ok:false
     ~resolved_answer:content ~board_post_id:""

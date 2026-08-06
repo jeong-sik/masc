@@ -140,6 +140,14 @@ export function registerActivityRefresh(fn: () => void): () => void {
   }
 }
 
+const _refreshInternalAgentFns = new Set<() => void>()
+export function registerInternalAgentRefresh(fn: () => void): () => void {
+  _refreshInternalAgentFns.add(fn)
+  return () => {
+    _refreshInternalAgentFns.delete(fn)
+  }
+}
+
 // IDE workspace live-refresh subscribers. The app-lifetime workspace-store
 // singleton registers here so a keeper's file edits / tool runs refresh the
 // tree/diff/file view without a re-navigation. A Set (not a single slot)
@@ -216,7 +224,10 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   keeper_compaction:    { target: 'execution', force: true },
   keeper_guardrail:     { target: 'execution', force: true },
   keeper_phase_changed: { target: 'execution', force: true },
-  keeper_turn_complete: { target: 'execution', force: true },
+  // A turn-complete hook precedes the durable TurnRecord commit and does not
+  // mutate the execution cache. The selected Keeper is refreshed through the
+  // scoped status reader in [handleKeeperLifecycle]; the proactive canonical
+  // execution snapshot updates the roster without a per-turn global rebuild.
   // Board content — emitted by lib/mcp_tool_runtime_board.ml
   board_post:          { target: 'board' },
   'masc/board_post':    { target: 'board' },
@@ -237,6 +248,7 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   // Without this entry the live WS router dropped the event and the run-status
   // panel only refreshed on the ~120s periodic poll / route revisit (RFC-0266 Phase 4).
   fusion_run_status:    { target: 'fusion' },
+  internal_agent_runs_changed: { target: 'internalAgents', debounceMs: 0 },
 }
 
 const BOARD_HEARTH_REFRESH_EVENTS = new Set([
@@ -262,6 +274,9 @@ const REFRESH_FNS: Record<RefreshTarget, () => void> = {
     for (const fn of _refreshActivityFns) fn()
   },
   fusion:    () => { void refreshFusionRuns() },
+  internalAgents: () => {
+    for (const fn of _refreshInternalAgentFns) fn()
+  },
   ide:       () => {
     for (const fn of _refreshIdeFns) fn()
   },
@@ -610,6 +625,9 @@ export function routeServerPushEvent(event: SSEEvent): void {
     if (BOARD_HEARTH_REFRESH_EVENTS.has(routedType)) {
       scheduleBoardHearthsRefresh(simpleRoute.debounceMs)
     }
+  }
+  if (routedType === 'fusion_run_status') {
+    scheduleTargetRefresh('internalAgents', REFRESH_FNS.internalAgents, 0)
   }
 
   for (const { prefix, target } of PREFIX_ROUTES) {

@@ -357,6 +357,25 @@ let observe_terminal prepared result =
 ;;
 
 let execute_current ?clock ~before_dispatch ~before_advance prepared =
+  let registry = Exact_lane_run_registry.global () in
+  let run_id = Random_id.prefixed ~prefix:"exact-board-attention-" ~bytes:16 in
+  let started_at = Time_compat.now () in
+  Exact_lane_run_registry.register_running
+    registry
+    ~run_id
+    ~lane:Exact_lane_run_registry.Board_attention
+    ~subject_id:prepared.candidate.candidate_id
+    ~actor:prepared.candidate.keeper_name
+    ~started_at
+    ~input:prepared.candidate.judgment_request;
+  let complete outcome output =
+    Exact_lane_run_registry.mark_completed
+      registry
+      ~run_id
+      ~outcome
+      ~elapsed_s:(Time_compat.now () -. started_at)
+      ~output
+  in
   let bound = ref None in
   let oas_before_dispatch receipt =
     let current = attempt_provenance receipt in
@@ -415,30 +434,51 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
       Error (Exact_execution_failed (evidence_provenance evidence))
   in
   let result =
-    match
-      Exact_output.execute_flow_once
-        ~net:prepared.net
-        ?clock
-        ~before_measurement_dispatch:(fun _ -> Ok ())
-        ~on_measurement_terminal:(fun _ -> Ok ())
-        ~before_dispatch:oas_before_dispatch
-        ~before_advance:oas_before_advance
-        ~validate
-        prepared.attempt
+    try
+      match
+        Exact_output.execute_flow_once
+          ~net:prepared.net
+          ?clock
+          ~before_measurement_dispatch:(fun _ -> Ok ())
+          ~on_measurement_terminal:(fun _ -> Ok ())
+          ~before_dispatch:oas_before_dispatch
+          ~before_advance:oas_before_advance
+          ~validate
+          prepared.attempt
+      with
+      | Ok success -> Ok success.accepted
+      | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
+        terminal_error cause
+      | Error
+          (Exact_output.Flow_semantic_candidates_exhausted { rejections; _ }) ->
+        let rejection =
+          List.fold_left
+            (fun _ rejection -> rejection)
+            rejections.first
+            rejections.rest
+        in
+        Error rejection.rejection
     with
-    | Ok success -> Ok success.accepted
-    | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
-      terminal_error cause
-    | Error
-        (Exact_output.Flow_semantic_candidates_exhausted { rejections; _ }) ->
-      let rejection =
-        List.fold_left
-          (fun _ rejection -> rejection)
-          rejections.first
-          rejections.rest
-      in
-      Error rejection.rejection
+    | Eio.Cancel.Cancelled _ as exn ->
+      complete Exact_lane_run_registry.Cancelled `Null;
+      raise exn
+    | exn ->
+      complete
+        (Exact_lane_run_registry.Failed
+           { code = "board_attention_raised"; detail = Printexc.to_string exn })
+        `Null;
+      raise exn
   in
+  (match result with
+   | Ok judgment ->
+     complete
+       Exact_lane_run_registry.Succeeded
+       (Keeper_board_attention_candidate.judgment_to_yojson judgment)
+   | Error _ ->
+     let code = result |> terminal_outcome |> terminal_outcome_to_string in
+     complete
+       (Exact_lane_run_registry.Failed { code; detail = code })
+       (`Assoc [ "terminal_outcome", `String code ]));
   observe_terminal prepared result;
   result
 ;;

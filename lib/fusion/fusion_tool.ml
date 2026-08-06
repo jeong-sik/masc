@@ -51,7 +51,7 @@ let submit_error_result ~tool_name error =
 ;;
 
 let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
-      ~policy ?continuation_channel ~args () =
+      ~policy ?continuation_channel ?(registry = Fusion_run_registry.global ()) ~args () =
   let tool_name = "masc_fusion" in
   let prompt = Tool_args.get_string args "prompt" "" in
   let preset = Tool_args.get_string args "preset" policy.Fusion_policy.default_preset in
@@ -107,15 +107,15 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
               let run_id =
                 Keeper_chat_delivery_identity.Request_id.to_string obligation.request_id
               in
-              Fusion_run_registry.register_running (Fusion_run_registry.global ())
-                ~run_id ~keeper ~preset ~started_at:obligation.accepted_at;
-              Fusion_sink.broadcast_run_status
-                ~registry:(Fusion_run_registry.global ()) ~run_id;
+              Fusion_run_registry.register_running registry ~run_id ~keeper ~preset
+                ~started_at:obligation.accepted_at;
+              Fusion_sink.broadcast_run_status ~registry ~run_id;
               Ok ())
        in
        match
          Keeper_msg_async.submit_with_request_id ~on_accepted
-           ~on_worker_settled:(Fusion_delivery_projector.on_worker_settled ~base_path:base_dir)
+           ~on_worker_settled:
+             (Fusion_delivery_projector.on_worker_settled ~registry ~base_path:base_dir)
            ~background_sw:sw ~base_path:base_dir ~caller:keeper ~keeper_name:keeper
            ~f:(fun ~request_id request_sw ->
              worker_result ~compute ~net ~policy ~topology ~request_id ~keeper
@@ -148,7 +148,11 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
            ])
 ;;
 
-let handle_result = handle_with_compute_result ~compute:Fusion_orchestrator.compute
+let handle_result ~sw ~net ~base_dir ~keeper ~now_unix ~policy ?continuation_channel
+      ~args () =
+  handle_with_compute_result ~compute:Fusion_orchestrator.compute ~sw ~net ~base_dir
+    ~keeper ~now_unix ~policy ?continuation_channel ~args ()
+;;
 
 let handle ~sw ~net ~base_dir ~keeper ~now_unix ~policy ?continuation_channel
       ~args () =
@@ -161,9 +165,9 @@ module For_test = struct
   type nonrec compute_runner = compute_runner
 
   let handle_with_compute ~compute ~sw ~net ~base_dir ~keeper ~now_unix ~policy
-        ?continuation_channel ~args () =
+        ?continuation_channel ?registry ~args () =
     Tool_result.message
       (handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
-         ~policy ?continuation_channel ~args ())
+         ~policy ?continuation_channel ?registry ~args ())
   ;;
 end

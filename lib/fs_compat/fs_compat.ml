@@ -2203,14 +2203,7 @@ let rec private_jsonl_transaction_error_to_string = function
   | Unexpected_transaction_file_kind kind ->
     Printf.sprintf
       "private JSONL transaction target has unexpected file kind: %s"
-      (match kind with
-       | Unix.S_REG -> "regular"
-       | Unix.S_DIR -> "directory"
-       | Unix.S_CHR -> "character-device"
-       | Unix.S_BLK -> "block-device"
-       | Unix.S_LNK -> "symbolic-link"
-       | Unix.S_FIFO -> "fifo"
-       | Unix.S_SOCK -> "socket")
+      (file_kind_to_string kind)
   | Ambiguous_transaction_file_identity { path; link_count } ->
     Printf.sprintf
       "private JSONL transaction path has ambiguous hard-link identity: %s (links=%d)"

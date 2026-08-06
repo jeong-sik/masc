@@ -4,16 +4,7 @@ type http_context =
   ; include_configured : bool
   }
 
-let trim_trailing_slashes value =
-  (* Single-pass scan + at-most-one [String.sub], instead of recursing
-     once per trailing '/'.  base_url normalization runs on every
-     binding/handshake so even the small-N case adds up. *)
-  let len = String.length value in
-  let rec last_non_slash i =
-    if i < 0 || value.[i] <> '/' then i else last_non_slash (i - 1)
-  in
-  let last = last_non_slash (len - 1) in
-  if last = len - 1 then value else String.sub value 0 (last + 1)
+let trim_trailing_slashes = Masc_network_defaults.trim_trailing_slashes
 ;;
 
 ;;

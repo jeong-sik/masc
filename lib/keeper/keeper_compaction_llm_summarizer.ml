@@ -870,6 +870,20 @@ let summarization_failure_of_callback = function
   | Authority_rejected -> Exact_execution_authority_rejected
 ;;
 
+let summarization_failure_detail = function
+  | Exact_lane_unconfigured -> "exact_lane_unconfigured"
+  | Exact_target_selection_failed -> "exact_target_selection_failed"
+  | Exact_admission_failed -> "exact_admission_failed"
+  | Exact_attempt_start_failed -> "exact_attempt_start_failed"
+  | Exact_execution_context_unavailable -> "exact_execution_context_unavailable"
+  | Exact_execution_authority_absent -> "exact_execution_authority_absent"
+  | Exact_execution_authority_rejected -> "exact_execution_authority_rejected"
+  | Exact_flow_already_started -> "exact_flow_already_started"
+  | Exact_execution_terminal terminal ->
+    Keeper_compaction_outcome.exact_execution_terminal_to_string terminal
+  | Invalid_plan -> "invalid_plan"
+;;
+
 let execute_prepared_lane_current
       ~keeper_name
       ~net
@@ -877,6 +891,30 @@ let execute_prepared_lane_current
       ?before_dispatch_authority
       prepared_lane
   =
+  let registry = Exact_lane_run_registry.global () in
+  let run_id = Random_id.prefixed ~prefix:"exact-compaction-" ~bytes:16 in
+  let started_at = Time_compat.now () in
+  Exact_lane_run_registry.register_running
+    registry
+    ~run_id
+    ~lane:Exact_lane_run_registry.Compaction
+    ~subject_id:(Int64.to_string prepared_lane.registry_generation)
+    ~actor:keeper_name
+    ~started_at
+    ~input:
+      (`Assoc
+         [ "registry_generation", `Intlit (Int64.to_string prepared_lane.registry_generation)
+         ; "slot_ids", `List (List.map (fun id -> `String id) prepared_lane.ordered_slot_ids)
+         ; "source_unit_count", `Int (List.length prepared_lane.window.source_units)
+         ]);
+  let complete outcome output =
+    Exact_lane_run_registry.mark_completed
+      registry
+      ~run_id
+      ~outcome
+      ~elapsed_s:(Time_compat.now () -. started_at)
+      ~output
+  in
   (* Process-local derived state only. It identifies the exact OAS candidate
      whose dispatch callback passed, so cancellation can retain that source.
      It is not persisted and does not compete with OAS execution ownership. *)
@@ -967,7 +1005,14 @@ let execute_prepared_lane_current
              observation.slot_id
              observation.call_id)
         !authorized_observation;
+      complete Exact_lane_run_registry.Cancelled `Null;
       Printexc.raise_with_backtrace cancellation raw_bt
+    | exn ->
+      complete
+        (Exact_lane_run_registry.Failed
+           { code = "compaction_raised"; detail = Printexc.to_string exn })
+        `Null;
+      raise exn
   in
   let project_execution () =
   match execution with
@@ -1056,7 +1101,34 @@ let execute_prepared_lane_current
       ; exact_execution_evidence = exact_execution_evidence flow_success
       }
   in
-  project_execution ()
+  let result = project_execution () in
+  (match result with
+   | Ok completed ->
+     let evidence = completed.exact_execution_evidence in
+     complete
+       Exact_lane_run_registry.Succeeded
+       (`Assoc
+          [ ( "summary_excerpt"
+            , `String
+                (Observability_redact.redact_preview
+                   ~max_len:512
+                   completed.plan.summary) )
+          ; "summary_bytes", `Int (String.length completed.plan.summary)
+          ; "keep_from_unit_index", `Int completed.plan.keep_from_unit_index
+          ; "slot_id", `String evidence.slot_id
+          ; "call_id", `String evidence.call_id
+          ; "target_identity_fingerprint", `String evidence.target_identity_fingerprint
+          ; "catalog_generation_fingerprint", `String evidence.catalog_generation_fingerprint
+          ; "catalog_evidence_sha256", `String evidence.catalog_evidence_sha256
+          ; "plan_fingerprint", `String evidence.plan_fingerprint
+          ; "request_body_sha256", `String evidence.receipt_request_body_sha256
+          ])
+   | Error failure ->
+     let detail = summarization_failure_detail failure in
+     complete
+       (Exact_lane_run_registry.Failed { code = "compaction_failed"; detail })
+       `Null);
+  result
 ;;
 
 let execute_prepared_lane

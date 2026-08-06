@@ -458,14 +458,6 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   Runtime_params.initialize ~base_path;
   Fs_compat.set_fs fs;
-  (* RFC-0266 §7 Phase D: replay persisted fusion run history into the
-     process-wide registry so in-progress + recently-completed runs survive
-     server restart. Missing files yield an empty registry; malformed replay
-     lines are logged and skipped. *)
-  let registry_path =
-    Filename.concat (Common.masc_dir_from_base_path ~base_path) "fusion-runs.jsonl"
-  in
-  Fusion_run_registry.set_global (Fusion_run_registry.replay registry_path);
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
   Eio_context.set_switch sw;
@@ -642,6 +634,7 @@ let startup_failure_disposition ~state_ready =
 
 type owner_initialization_error =
   | Runtime_config_path_unavailable
+  | Run_registry_already_installed of [ `Exact_lane | `Fusion | `Verification ]
   | Runtime_default_initialization_failed of Runtime.strict_init_error
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error
@@ -674,6 +667,12 @@ type activated_owner_state =
 let owner_initialization_error_to_string = function
   | Runtime_config_path_unavailable ->
     "no runtime config path; cannot initialize the default Runtime"
+  | Run_registry_already_installed `Fusion ->
+    "Fusion run registry already has a process owner"
+  | Run_registry_already_installed `Verification ->
+    "Verification run registry already has a process owner"
+  | Run_registry_already_installed `Exact_lane ->
+    "Exact lane run registry already has a process owner"
   | Runtime_default_initialization_failed error ->
     "Runtime.init_default_degraded failed: "
     ^ Runtime.strict_init_error_to_string error
@@ -749,6 +748,46 @@ let initialize_owner_state_blocking
     raise
       (Owner_initialization_failed
          (Startup_path_guard_rejected path_diagnostics));
+  Fs_compat.set_fs fs;
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
+  let fusion_registry =
+    Filename.concat masc_dir "fusion-runs.jsonl" |> Fusion_run_registry.replay
+  in
+  (match Fusion_run_registry.install_global fusion_registry with
+   | Ok () -> ()
+   | Error Fusion_run_registry.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          (Run_registry_already_installed `Fusion)));
+  let verification_registry =
+    Filename.concat masc_dir "verification-runs.jsonl"
+    |> Verification_run_registry.replay
+  in
+  (match Verification_run_registry.install_global verification_registry with
+   | Ok () -> ()
+   | Error Verification_run_registry.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          (Run_registry_already_installed `Verification)));
+  let exact_lane_registry =
+    Filename.concat masc_dir "exact-lane-runs.jsonl"
+    |> Exact_lane_run_registry.replay
+  in
+  (match Exact_lane_run_registry.install_global exact_lane_registry with
+   | Ok () -> ()
+   | Error Exact_lane_run_registry.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          (Run_registry_already_installed `Exact_lane)));
+  let broadcast_internal_agent_runs_changed () =
+    Sse.broadcast (`Assoc [ "type", `String "internal_agent_runs_changed" ])
+  in
+  Atomic.set
+    Verification_run_registry.change_observer_fn
+    broadcast_internal_agent_runs_changed;
+  Atomic.set
+    Exact_lane_run_registry.change_observer_fn
+    broadcast_internal_agent_runs_changed;
   (* [main_eio] caches the normalized operator input before entering Eio.
      Replace that preflight value with the canonical owner identity before
      [Workspace.default_config_uncached] constructs its backend, otherwise the

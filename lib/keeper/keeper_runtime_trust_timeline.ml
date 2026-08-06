@@ -17,11 +17,6 @@ let assoc_bool_default key ~default fields =
   | Some (`Bool value) -> value
   | _ -> default
 
-let json_list_member key json =
-  match json_member key json with
-  | `List items -> items
-  | _ -> []
-
 let json_string_list_member = Json_util.json_string_list_member
 
 let assoc_string_opt key fields =

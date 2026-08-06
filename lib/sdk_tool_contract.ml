@@ -13,8 +13,6 @@ type sdk_tool_binding = {
 
 let assoc_field name value = (name, value)
 
-let json_string value = `String value
-
 let string_prop = Tool_schema_dsl.string_prop
 let object_schema = Tool_schema_dsl.object_schema
 

@@ -226,14 +226,6 @@ let check_tool_expectations expectations actual_calls =
 (* Score computation                                                 *)
 (* ================================================================ *)
 
-(** Compute weighted average score from grader results. *)
-let weighted_score (results : grader_result list) : float =
-  let total_weight = List.fold_left (fun acc r -> acc +. r.weight) 0.0 results in
-  if total_weight = 0.0 then 0.0
-  else
-    let weighted_sum = List.fold_left (fun acc r -> acc +. (r.score *. r.weight)) 0.0 results in
-    weighted_sum /. total_weight
-
 (** Compute pass@k: probability that at least one of k runs passes.
     Formula: 1 - C(n-c, k) / C(n, k)
     where n = total runs, c = passing runs, k = sample size.
@@ -342,12 +334,6 @@ let summarize_runs ~(scenario : scenario) ~(k : int) (runs : eval_run list) : ev
 (* JSON serialization                                                *)
 (* ================================================================ *)
 
-let match_mode_to_string = function
-  | Exact -> "exact"
-  | Contains -> "contains"
-  | Regex p -> Printf.sprintf "regex(%s)" p
-  | NotContains -> "not_contains"
-
 let grader_result_to_json (r : grader_result) : Yojson.Safe.t =
   `Assoc [
     ("grader", `String r.grader_desc);
@@ -398,19 +384,6 @@ let suite_result_to_json (r : eval_suite_result) : Yojson.Safe.t =
     ("total_cost_usd", Json_util.float_opt_to_json r.total_cost_usd);
     ("total_runs", `Int r.total_runs);
     ("results", `List (List.map eval_result_to_json r.results));
-  ]
-
-let scenario_to_json (s : scenario) : Yojson.Safe.t =
-  `Assoc [
-    ("id", `String s.id);
-    ("name", `String s.name);
-    ("description", `String s.description);
-    ("category", `String s.category);
-    ("goal", `String s.goal);
-    ("tags", `List (List.map (fun s -> `String s) s.tags));
-    ("ownership", `String (ownership_to_string s.ownership));
-    ("graders", `Int (List.length s.graders));
-    ("tool_expectations", `Int (List.length s.tool_expectations));
   ]
 
 (* ================================================================ *)

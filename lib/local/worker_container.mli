@@ -33,8 +33,7 @@
     [oas_worker_evidence_session_id],
     [worker_meta_allowed_fields],
     [validate_worker_meta_fields], [worker_meta_to_yojson],
-    [worker_meta_of_yojson], [worker_container_state],
-    [append_worker_turn_log], [start_worker_heartbeat]). *)
+    [worker_meta_of_yojson], [append_worker_turn_log]). *)
 
 include module type of struct
   include Worker_container_types

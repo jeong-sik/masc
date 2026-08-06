@@ -104,20 +104,6 @@ let with_test_span_emitter ~enabled:enabled_value ~emit_span:emit f =
     f
 ;;
 
-(** PR-0.2.C: process startup timestamp captured at module load. Used to
-    classify tool calls into [phase=cold] (within first
-    [cold_phase_seconds] after startup) or [phase=warm] (after).
-    Cold/warm split lets dashboards distinguish first-call overhead
-    (provider warmup, JIT, prefix-cache miss) from steady-state cost
-    without changing the histogram's underlying observation. *)
-let startup_time = Unix.gettimeofday ()
-
-let cold_phase_seconds = 60.0
-
-let cold_warm_phase () =
-  if Unix.gettimeofday () -. startup_time < cold_phase_seconds then "cold" else "warm"
-;;
-
 let tool_call_span_name ~tool_name =
   Otel_genai.Mcp_value.tools_call_method ^ " " ^ tool_name
 ;;

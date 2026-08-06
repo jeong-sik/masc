@@ -13,4 +13,6 @@
  (name masc_config_dir_resolver)
  (public_name masc.config_dir_resolver)
  (wrapped false)
+ (flags
+  (:standard -w +32))
  (libraries masc_core masc.config masc.host_config masc_log yojson))

@@ -127,5 +127,5 @@ module For_testing : sig
   val notify_transition : keeper_name:string -> unit
   val take_wake_nonblocking : unit -> string option
   val reset_wake_inbox : unit -> unit
-  val reset_persistence_blocked : unit -> unit
+
 end

@@ -122,10 +122,6 @@ module For_testing : sig
     -> tool_call_detail list
     -> (string * int) option
 
-  val provider_transcript_admission
-    :  Agent_sdk.Types.message list
-    -> (unit, Agent_sdk.Error.sdk_error) result
-
   val dispatch_after_provider_transcript_admission
     :  messages:Agent_sdk.Types.message list
     -> dispatch:(unit -> ('a, Agent_sdk.Error.sdk_error) result)

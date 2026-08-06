@@ -27,6 +27,8 @@
   tool_shard_types_schemas_search_files
   tool_shard_types_schemas_taskboard
   tool_shard_types_schemas_voice)
+ (flags
+  (:standard -w +32))
  (libraries
   masc_types
   masc_core

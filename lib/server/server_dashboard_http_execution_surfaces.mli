@@ -7,10 +7,9 @@
     [module Execution_surfaces = ...] alias and reaches
     {!execution_cache} +
     {!broadcast_namespace_truth_ref} through it.  Plus
-    direct dotted callers and a
-    [let module S = ...] inline alias in
-    [test/test_types.ml] for the
-    lifecycle-event patcher family.
+    direct dotted callers.  A [let module S = ...] inline alias for
+    the lifecycle-event patcher family was cited in
+    [test/test_types.ml], which does not exist.
 
     External surface (22 entries):
     - {b cache cells} ({!execution_cache},

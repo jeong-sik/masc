@@ -54,8 +54,8 @@ val all_vote_directions : vote_direction list
 val vote_direction_of_string_opt : string -> vote_direction option
 (** Sound partial parser: case-insensitive, trims whitespace, and
     accepts only ["up"] / ["down"].  Empty or unknown input returns
-    [None] (no silent permissive fallback).  Pinned for
-    behaviour-tests under {!test/test_types}. *)
+    [None] (no silent permissive fallback).  No suite pins this
+    parser today. *)
 
 (** {1 Vote log path} *)
 

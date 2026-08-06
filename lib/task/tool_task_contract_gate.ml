@@ -30,16 +30,14 @@ let completion_state_error ~(task_id : string) ~(agent_name : string)
       Some
         (Masc_domain.Task (Masc_domain.Task_error.InvalidState
            (Printf.sprintf
-              "task %s is already done by %s; to re-run it, create a new task \
-               with predecessor_task_id set to %s"
-              task_id assignee task_id)))
+              "task %s is already done by %s"
+              task_id assignee)))
     | Masc_domain.Cancelled { cancelled_by; _ } ->
       Some
         (Masc_domain.Task (Masc_domain.Task_error.InvalidState
            (Printf.sprintf
-              "task %s was cancelled by %s; to re-run it, create a new task \
-               with predecessor_task_id set to %s"
-              task_id cancelled_by task_id)))
+              "task %s was cancelled by %s"
+              task_id cancelled_by)))
     | Masc_domain.AwaitingVerification { assignee; _ } ->
       Some
         (Masc_domain.Task (Masc_domain.Task_error.InvalidState

@@ -2,8 +2,11 @@
 
 open Masc_domain
 
-let schema_inventory = Tools.all_schemas_extended
-let registered_schema_inventory = Masc.Config.raw_all_tool_schemas
+(* One inventory: the registry the server actually serves. [Tools] used to
+   expose a separate [all_schemas_extended] list that no production code read,
+   and these tests validated that list instead of this one. *)
+let schema_inventory = Masc.Config.raw_all_tool_schemas
+let registered_schema_inventory = schema_inventory
 
 let find_schema_in schemas name =
   List.find_opt
@@ -81,12 +84,18 @@ let test_all_schemas_not_empty () =
   Alcotest.(check bool) "all_schemas is not empty"
     true (List.length schema_inventory > 0)
 
+(* A floor on the tool count pins nothing: it breaks whenever tools are
+   consolidated and says nothing about which tool is wrong. The invariants
+   worth holding are the ones below -- every schema names itself, describes
+   itself, and no two share a name. *)
 let test_all_schemas_count () =
-  (* Verify we have at least 50 tools defined (post-pruning floor) *)
-  let count = List.length schema_inventory in
-  Alcotest.(check bool) "at least 50 tools defined"
-    true (count >= 50);
-  Printf.printf "Total tool schemas: %d\n" count
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s has a description" schema.name)
+        true
+        (String.trim schema.description <> ""))
+    schema_inventory
 
 let test_schema_has_required_fields () =
   List.iter (fun schema ->
@@ -108,11 +117,25 @@ let test_schema_names_are_unique () =
   Alcotest.(check int) "all schema names are unique"
     (List.length names) (List.length unique_names)
 
+(* The registry uses three namespaces, not one: [masc_] for coordination,
+   [keeper_] for keeper-scoped surfaces, [tool_] for exec/file primitives.
+   Pinning the set is what catches an unprefixed or typo'd tool name; the
+   earlier single-[masc_] rule held only because these tests ran against a
+   47-schema list the server never served. *)
+let tool_name_namespaces = [ "masc_"; "keeper_"; "tool_" ]
+
 let test_all_names_start_with_masc () =
-  List.iter (fun schema ->
-    Alcotest.(check bool) (Printf.sprintf "%s starts with masc_" schema.name)
-      true (String.length schema.name >= 5 && String.sub schema.name 0 5 = "masc_")
-  ) schema_inventory
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s uses a known namespace" schema.name)
+        true
+        (List.exists
+           (fun prefix ->
+             String.length schema.name >= String.length prefix
+             && String.equal (String.sub schema.name 0 (String.length prefix)) prefix)
+           tool_name_namespaces))
+    schema_inventory
 
 (* ============================================================ *)
 (* 2. Schema Inventory Lookup Tests                              *)

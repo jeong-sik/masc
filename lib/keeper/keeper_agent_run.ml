@@ -860,6 +860,7 @@ let run_turn
          let checkpoint_sidecar =
                 ctx_work.checkpoint.Agent_sdk.Checkpoint.working_context
          in
+         let last_persisted_checkpoint_ref = ref None in
          let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
                 Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
                 (* OAS's per-turn pipeline builds checkpoints with an empty
@@ -883,7 +884,10 @@ let run_turn
                     ~session_dir:session.session_dir
                     checkpoint
                 with
-                | Ok _ -> Ok ()
+                | Ok (Keeper_checkpoint_store.Saved _) ->
+                  last_persisted_checkpoint_ref := Some checkpoint;
+                  Ok ()
+                | Ok (Keeper_checkpoint_store.Stale_noop _) -> Ok ()
                 | Error _ as error -> error
          in
          let call_run_named ?raw_trace ~initial_messages () =
@@ -1081,7 +1085,10 @@ let run_turn
                              ~session ~append_manifest ~model
                              ~acc
                              ~actual_keeper_tool_names
-                             ~result ~final_oas_turn_ordinal
+                             ~result
+                             ~last_persisted_checkpoint:
+                               !last_persisted_checkpoint_ref
+                             ~final_oas_turn_ordinal
                              ~checkpoint_persistence_error
                              ~post_turn_t0 ~runtime_id_string
                              ~history_messages

@@ -248,9 +248,46 @@ val find_matching_rule :
 
 (** {1 Audit log} *)
 
+(** The vocabulary of the [event] field in the approval audit log. Every writer
+    goes through [audit_event_to_string], so this is the whole of it, and
+    [Keeper_runtime_trust_timeline] — the reader that renders these records for
+    the operator — matches on it exhaustively. *)
+type audit_event =
+  | Pending
+  | Resolved
+  | Summary_updated
+  | Rule_created
+  | Rule_deleted
+  | Grant_consumed
+  | Gate_allowed
+  | Gate_exact_rule_expired
+  | Gate_exact_rule_store_degraded
+  | Gate_grant_unavailable
+  | Auto_judge_operator_retry_started
+  | Auto_judge_block_observation_superseded
+  | Auto_judge_restart_worker_recovered
+  | Auto_judge_restart_judgment_recovered
+
+val audit_event_to_string : audit_event -> string
+
+(** The [decision_kind] axis of a resolved approval record, derived from the
+    decision itself. A reader asking whether an approval was rejected parses
+    this back rather than scanning the rendered decision text for the word. *)
+type decision_kind =
+  | Decision_approve
+  | Decision_reject
+  | Decision_edit
+
+val decision_kind_to_string : decision_kind -> string
+val decision_kind_of_string : string -> decision_kind option
+
+(** [None] for a spelling this build does not know — records already on disk
+    were written by earlier builds, so the parse is partial by necessity. *)
+val audit_event_of_string : string -> audit_event option
+
 val audit_approval_event :
   base_path:string ->
-  event_type:string ->
+  event_type:audit_event ->
   id:string ->
   keeper_name:string ->
   tool_name:string ->
@@ -269,7 +306,7 @@ val audit_approval_event :
   unit
 
 val audit_rule_event :
-  base_path:string -> event_type:string -> approval_rule -> unit
+  base_path:string -> event_type:audit_event -> approval_rule -> unit
 
 val generate_id : unit -> string
 val recent_resolved_history_limit : int

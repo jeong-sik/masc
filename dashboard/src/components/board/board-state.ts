@@ -24,7 +24,6 @@ import {
   fetchSubBoards,
   fetchBoardPost,
   commentPost,
-  createPost,
   type BoardHearth,
   type BoardFlair,
 } from '../../api'
@@ -84,14 +83,6 @@ let boardHearthsRequestId = 0
 export const commentText = signal('')
 export const commentSubmitting = signal(false)
 export const replyingTo = signal<string | null>(null)
-
-// ── Signals: new post form ─────────────────────────────────────────
-export const showNewPostForm = signal(false)
-export const newPostTitle = signal('')
-export const newPostContent = signal('')
-export const newPostHearth = signal('')
-export const newPostFlair = signal('')
-export const newPostSubmitting = signal(false)
 
 // ── Signals: v2 board surface chrome ───────────────────────────────
 export const selectedBoardPostId = signal<string | null>(null)
@@ -441,34 +432,6 @@ export async function submitComment(postId: string, parentId?: string) {
     showToast('댓글 등록에 실패했습니다', 'error')
   } finally {
     commentSubmitting.value = false
-  }
-}
-
-export async function submitNewPost() {
-  const title = newPostTitle.value.trim()
-  const content = newPostContent.value.trim()
-  const hearth = newPostHearth.value.trim()
-  const flair = newPostFlair.value.trim()
-  if (!title || !content) return
-  newPostSubmitting.value = true
-  try {
-    const contentWithFlair = flair
-      ? `[flair:${flair}]\n${content.replace(/^\[flair:[a-z]+\]\s*/i, '')}`
-      : content
-    await createPost(title, contentWithFlair, commentAuthor.value, { hearth: hearth || undefined })
-    newPostTitle.value = ''
-    newPostContent.value = ''
-    newPostHearth.value = ''
-    newPostFlair.value = ''
-    showNewPostForm.value = false
-    showToast('글을 등록했습니다', 'success')
-    refreshBoard()
-    void refreshBoardHearths()
-  } catch (err) {
-    console.warn('[board] post submit failed', err instanceof Error ? err.message : err)
-    showToast('글 등록에 실패했습니다', 'error')
-  } finally {
-    newPostSubmitting.value = false
   }
 }
 

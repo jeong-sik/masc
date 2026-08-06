@@ -979,6 +979,15 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_jsonl_day_key
 
+      - name: Run raw-trace reader containment suite
+        # This surface takes a caller-supplied file name and reads inside a
+        # keeper's directory. @check compiles the containment cases but does not
+        # run them, and "../secret.jsonl must not resolve" compiles whether or
+        # not it holds.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_raw_trace_reader
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was

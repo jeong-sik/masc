@@ -1946,6 +1946,72 @@ let handle_keeper_get_subroutes state req request reqd =
        | Error (`Io msg) ->
          Http.Response.json_value ~status:`Internal_server_error
            (`Assoc [ ("error", `String msg) ]) reqd)
+  else if ends_with "/raw-traces" then
+    (* The turn record already carries a raw_trace_run_ref naming this file;
+       until now nothing served it, so the pointer reached the dashboard type
+       and the content had no route. Listing is separate from reading because a
+       turn file runs to hundreds of records and an operator picks one first. *)
+    let name = extract_name "/raw-traces" in
+    let limit =
+      Server_utils.int_query_param req "limit" ~default:25 |> max 1 |> min 200
+    in
+    (match Keeper_raw_trace_reader.list_turns
+             ~config:(Mcp_server.workspace_config state)
+             ~keeper:name
+             ~limit
+     with
+     | Error error ->
+       Http.Response.json_value ~status:`Bad_request
+         (`Assoc
+            [ "error", `String (Keeper_raw_trace_reader.read_error_to_string error) ])
+         reqd
+     | Ok turns ->
+       Http.Response.json_value ~compress:true ~request:req
+         (`Assoc
+            [ "keeper", `String name
+            ; "count", `Int (List.length turns)
+            ; ( "turns"
+              , `List (List.map Keeper_raw_trace_reader.turn_summary_to_json turns) )
+            ; "dashboard_surface", `String "/api/v1/keepers/:name/raw-traces"
+            ])
+         reqd)
+  else if ends_with "/raw-trace" then
+    (* One turn's records. [file] is a handle from the listing, never a path;
+       the reader rejects anything that could leave the keeper's directory
+       rather than normalizing it. *)
+    let name = extract_name "/raw-trace" in
+    let file = Option.value ~default:"" (Server_utils.query_param req "file") in
+    let offset = Server_utils.int_query_param req "offset" ~default:0 |> max 0 in
+    let limit =
+      Server_utils.int_query_param req "limit" ~default:200 |> max 1 |> min 2000
+    in
+    (match Keeper_raw_trace_reader.read_turn
+             ~config:(Mcp_server.workspace_config state)
+             ~keeper:name
+             ~file
+             ~offset
+             ~limit
+     with
+     | Error (Keeper_raw_trace_reader.No_such_turn _ as error) ->
+       Http.Response.json_value ~status:`Not_found
+         (`Assoc
+            [ "error", `String (Keeper_raw_trace_reader.read_error_to_string error) ])
+         reqd
+     | Error error ->
+       Http.Response.json_value ~status:`Bad_request
+         (`Assoc
+            [ "error", `String (Keeper_raw_trace_reader.read_error_to_string error) ])
+         reqd
+     | Ok records ->
+       Http.Response.json_value ~compress:true ~request:req
+         (match Keeper_raw_trace_reader.turn_records_to_json records with
+          | `Assoc fields ->
+            `Assoc
+              (("keeper", `String name)
+               :: ("dashboard_surface", `String "/api/v1/keepers/:name/raw-trace")
+               :: fields)
+          | json -> json)
+         reqd)
   else if ends_with "/compaction-snapshots" then
     let name = extract_name "/compaction-snapshots" in
     if String.length name = 0 then

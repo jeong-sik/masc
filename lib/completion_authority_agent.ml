@@ -505,25 +505,40 @@ let process_task_once
                 this verdict has no judging runtime to name. *)
            ~evaluator_runtime:None)
     | Ok prepared ->
-      (* The lookup surface is bound to the producer under review, so the same
-         judge gets a different root on the next task. [assignee] is the worker
-         the evidence snapshot was materialized against — [prepare_review]
+      (* The lookup surface borrows the producer's own keeper meta, so the same
+         judge reaches a different tree on the next task. [assignee] is the
+         worker the evidence snapshot was materialized against — [prepare_review]
          rejects the request when it disagrees with [request.worker], so the
-         two cannot name different trees. *)
-      let lookup_tools =
-        Verification_authority_tools.create
-          ~base_path:runtime.config.base_path
-          ~producer:assignee
+         two cannot name different trees.
+
+         A producer with no readable meta leaves the judge on the snapshot
+         alone. The prompt says so in that case rather than advertising tools
+         whose every call would fail, and the reason is logged: a review that
+         could not reach the tree is a different event from one that chose not
+         to look. *)
+      let lookup =
+        match
+          Verification_authority_tools.create
+            ~config:runtime.config
+            ~producer:assignee
+        with
+        | Ok lookup_tools ->
+          Task.Anti_rationalization.Lookup_tools
+            { schemas = Verification_authority_tools.schemas lookup_tools
+            ; dispatch = Verification_authority_tools.dispatch lookup_tools
+            }
+        | Error reason ->
+          Log.Task.warn
+            "[verification-lookup] surface unavailable producer=%s: %s"
+            assignee
+            reason;
+          Task.Anti_rationalization.No_lookup_surface
       in
       let result =
         Task.Anti_rationalization.review
           ~base_path:runtime.config.base_path
           ~sw:(Some runtime.sw)
-          ~lookup:
-            (Task.Anti_rationalization.Lookup_tools
-               { schemas = Verification_authority_tools.schemas lookup_tools
-               ; dispatch = Verification_authority_tools.dispatch lookup_tools
-               })
+          ~lookup
           ?completion_contract:prepared.completion_contract
           ~required_evidence:prepared.required_artifacts
           ~verify_gate_evidence:[]

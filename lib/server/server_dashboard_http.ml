@@ -48,10 +48,6 @@ let handle_repository_observation_snapshot ~sw:_ ~clock request reqd =
    add/transition so the dashboard serves fresh backlog data. *)
 let () = Atomic.set Workspace_hooks.on_task_mutation_fn invalidate_execution_cache
 
-let dashboard_namespace_truth_focus_json =
-  Server_dashboard_http_namespace_truth_support.dashboard_namespace_truth_focus_json
-;;
-
 let dashboard_namespace_truth_http_json =
   Server_dashboard_http_namespace_truth.dashboard_namespace_truth_http_json
 ;;
@@ -520,7 +516,7 @@ let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
      | Ok deleted ->
          Keeper_approval_queue.audit_rule_event
            ~base_path
-           ~event_type:"rule_deleted"
+           ~event_type:Keeper_approval_queue.Rule_deleted
            deleted;
          Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
        | Error error ->

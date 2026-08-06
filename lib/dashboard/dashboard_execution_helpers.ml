@@ -59,14 +59,6 @@ let cap_string_list ?(limit = execution_tool_preview_limit) values =
 
 let dedup_strings = Dashboard_utils.dedup_strings
 
-(** severity_rank works on raw JSON strings — broader matching than Dashboard_utils.tone_rank.
-    Used by dashboard_briefing / dashboard_briefing_assembly for external JSON data. *)
-let severity_rank = function
-  | "bad" | "critical" | "failed" -> 2
-  | "warn" | "blocked" | "paused" | "interrupted" -> 1
-  | _ -> 0
-
-
 let dashboard_fixture_name ?fixture () =
   let fixtures_enabled = Env_config.Dashboard_config.fixtures_enabled () in
   if not fixtures_enabled then None
@@ -83,21 +75,20 @@ type agent_profile = {
   korean_name : string;
 }
 
-(** Extract Keeper name from a MASC agent name.
-    "keeper-sangsu-agent" -> "sangsu", "claude-agent-abc" -> "claude-agent-abc" *)
+(** Extract the Keeper name from a MASC agent name.
+    "keeper-sangsu-agent" -> "sangsu", "claude-agent-abc" -> "claude-agent-abc"
+
+    [Keeper_identity] owns this parse. It enumerates the four accepted
+    spellings — keeper-/-agent, keeper_/_agent, and the two mixed forms — and
+    its own comment records what happens when a spelling is known in one place
+    and not another. This function used to hand-roll the first pair with
+    [String.sub s 7] and [String.sub s (len - 6) 6], so an agent named
+    keeper_sangsu_agent kept its affixes and the profile lookup below searched
+    for a directory of that name. *)
 let extract_keeper_name (agent_name : string) : string =
-  let s = agent_name in
-  let s =
-    if String.length s > 7 && String.starts_with ~prefix:"keeper-" s then
-      String.sub s 7 (String.length s - 7)
-    else s
-  in
-  let s =
-    if String.length s > 6 && String.sub s (String.length s - 6) 6 = "-agent" then
-      String.sub s 0 (String.length s - 6)
-    else s
-  in
-  s
+  match Keeper_identity.keeper_name_of_agent_alias agent_name with
+  | Some keeper_name -> keeper_name
+  | None -> agent_name
 
 (** Neo4j agent identity cache.  Loaded lazily on first lookup; once
     populated the Hashtbl is read-only.

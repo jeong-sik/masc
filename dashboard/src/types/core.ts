@@ -687,6 +687,7 @@ interface KeeperConversationUsage {
 export type KeeperTurnOutcome =
   | 'visible_reply'
   | 'continuation_checkpoint'
+  | 'external_effect_completed'
   | 'external_effect_pending'
   | 'no_visible_reply'
 
@@ -1373,7 +1374,7 @@ interface KeeperSupervisorDiagnostics {
 interface KeeperConfigPrompt {
   instructions: string
   // The server emits exactly one shared block. keeper.constitution,
-  // keeper.world and keeper.capabilities were folded into keeper.system by
+  // keeper.world and keeper.capabilities were folded into keeper by
   // #26823; decoding them produced three empty blocks and the panel rendered
   // nothing for the shared prompt.
   system_prompt_blocks: {

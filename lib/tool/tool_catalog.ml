@@ -232,8 +232,6 @@ let keeper_shard_permission required_permission =
 let keeper_shard_read = keeper_shard_permission Masc_domain.CanReadState
 let keeper_shard_write = keeper_shard_permission Masc_domain.CanBroadcast
 let keeper_shard_add_task = keeper_shard_permission Masc_domain.CanAddTask
-let keeper_shard_vote = keeper_shard_permission Masc_domain.CanVote
-
 (* ================================================================ *)
 (* Explicit metadata registry                                       *)
 (* ================================================================ *)
@@ -390,7 +388,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_library_list", read_state_tool);
     ("masc_library_read", read_state_tool);
     ("masc_library_add", broadcast_tool);
-    ("masc_library_promote", broadcast_tool);
     ("masc_library_search", read_state_tool);
     ( "keeper_tasks_list",
       hidden_runtime_tool

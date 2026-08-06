@@ -52,6 +52,7 @@ type SurfaceSectionId =
   // monitoring
   | 'observatory'
   | 'agents'
+  | 'internal-agents'
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + Gate monitoring
   | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
@@ -329,6 +330,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Keeper Fleet',
       description: 'Live and configured keeper roster.',
       params: { section: 'agents' },
+    },
+    {
+      id: 'internal-agents',
+      label: 'Internal Agents',
+      description: 'Nondeterministic runs and tool evidence.',
+      params: { section: 'internal-agents' },
     },
     {
       id: 'fleet-health',

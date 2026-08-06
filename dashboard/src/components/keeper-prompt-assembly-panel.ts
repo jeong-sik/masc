@@ -95,8 +95,13 @@ export interface KeeperPromptAssemblyReport {
     missingRows: number
     warningCount: number
     criticalCount: number
-    promptBytes: number
-    estimatedTokens: number
+    // Only rows whose stage actually reaches the model. Two stages carry
+    // messageSlot 'not sent' — 'registry-bootstrap' (source preparation, which
+    // re-lists keeper) and 'manifest-edge' (the post-assembly audit record).
+    // Summing every row double-counted keeper and reported
+    // 3,920 tok against a real model input of 1,985 tok on the live fleet.
+    sentPromptBytes: number
+    sentEstimatedTokens: number
   }
 }
 
@@ -116,7 +121,7 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'source_prep',
     messageSlot: 'not sent',
     summary: 'MASC picks the active text from defaults, files, or saved edits.',
-    promptKeys: ['keeper.system'],
+    promptKeys: ['keeper'],
   },
   {
     id: 'base-system',
@@ -126,7 +131,7 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'model_input',
     messageSlot: 'system',
     summary: 'Identity, rules, and safety boundaries.',
-    promptKeys: ['keeper.system'],
+    promptKeys: ['keeper'],
   },
   {
     id: 'unified-world',
@@ -160,9 +165,8 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'model_input',
     messageSlot: 'final',
     summary: 'Memory and tool hints added at the end.',
-    promptKeys: [
-      'keeper.memory_os_recall.context',
-    ],
+    promptKeys: [],
+    computedRows: [{ id: 'memory-os-recall', promptKey: '(computed:memory_os_recall)' }],
   },
   {
     id: 'manifest-edge',
@@ -495,7 +499,9 @@ export function buildKeeperPromptAssemblyReport(
   }
 
   const keeperPrompts = prompts.filter(prompt =>
-    prompt.key.startsWith('keeper.') || prompt.key.startsWith('behavior.'),
+    prompt.key === 'keeper'
+    || prompt.key.startsWith('keeper.')
+    || prompt.key.startsWith('behavior.'),
   )
   const warnings: KeeperPromptAssemblyWarning[] = []
 
@@ -539,10 +545,11 @@ export function buildKeeperPromptAssemblyReport(
     ),
   ).sort()
 
-  const promptBytes = rows.reduce((sum, row) => sum + row.bytes, 0)
-  const estimatedTokens = rows.reduce((sum, row) => sum + row.estimatedTokens, 0)
   const criticalCount = warnings.filter(warning => warning.severity === 'critical').length
   const stages = buildStages(rows)
+  const sentStages = stages.filter(stage => stage.messageSlot !== 'not sent')
+  const sentPromptBytes = sentStages.reduce((sum, stage) => sum + stage.bytes, 0)
+  const sentEstimatedTokens = sentStages.reduce((sum, stage) => sum + stage.estimatedTokens, 0)
 
   return {
     rows,
@@ -555,8 +562,8 @@ export function buildKeeperPromptAssemblyReport(
       missingRows: rows.filter(row => row.missing).length,
       warningCount: warnings.length,
       criticalCount,
-      promptBytes,
-      estimatedTokens,
+      sentPromptBytes,
+      sentEstimatedTokens,
     },
   }
 }
@@ -901,7 +908,7 @@ function PromptCodexDocument({
       <div class="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_270px]">
         <article class="min-w-0 rounded-[var(--r-1)] border border-[#b58e48]/55 bg-[#ead9b5] p-4 text-[#2b2015] shadow-[0_1px_0_rgba(255,255,255,0.55)_inset,0_18px_46px_rgba(0,0,0,0.28)]">
           <div class="mb-4 grid gap-2 md:grid-cols-4">
-            <${CodexMetric} label="Total size" value=${`${formatBytes(report.stats.promptBytes)} · ${report.stats.estimatedTokens.toLocaleString()} tok`} detail="all" tone="neutral" />
+            <${CodexMetric} label="Total size" value=${`${formatBytes(report.stats.sentPromptBytes)} · ${report.stats.sentEstimatedTokens.toLocaleString()} tok`} detail="model input" tone="neutral" />
             <${CodexMetric} label="Preset size" value=${`${formatBytes(visible.bytes)} · ${visible.estimatedTokens.toLocaleString()} tok`} detail=${activePresetLabel} tone="info" />
             <${CodexMetric} label="Sources" value=${`${visible.rows.length.toLocaleString()} rows`} detail=${`${modelStages.length} model parts`} tone="ok" />
             <${CodexMetric} label="Attention" value=${`${visible.overrides} edited · ${visible.missing} missing`} detail="audit" tone=${visible.missing > 0 ? 'bad' : visible.overrides > 0 ? 'warn' : 'neutral'} />

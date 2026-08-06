@@ -10,7 +10,7 @@ module Budget = Masc.Keeper_memory_os_budget
    (same pattern as test_keeper_prompt_metrics). *)
 let has_prompt_root path =
   Sys.file_exists
-    (Filename.concat path "config/prompts/keeper.librarian.current_selection.md")
+    (Filename.concat path "config/prompts/librarian.current_selection.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with

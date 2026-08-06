@@ -55,27 +55,7 @@ let retention_days () =
      | _ -> None)
   | None -> None
 
-let numeric_ts_field fields name =
-  match List.assoc_opt name fields with
-  | Some (`Float ts) -> Some ts
-  | Some (`Int ts) -> Some (Float.of_int ts)
-  | _ -> None
-
-let ts_of_record = function
-  | `Assoc fields -> (
-      match numeric_ts_field fields "ts_unix" with
-      | Some ts -> Some ts
-      | None -> (
-          match numeric_ts_field fields "ts" with
-          | Some ts -> Some ts
-          | None -> (
-              match numeric_ts_field fields "timestamp" with
-              | Some ts -> Some ts
-              | None -> (
-                  match List.assoc_opt "ts_iso" fields with
-                  | Some (`String iso) -> Masc_domain.parse_iso8601_opt iso
-                  | _ -> None))))
-  | _ -> None
+let ts_of_record = Dashboard_tool_source_freshness.latest_ts_of_record
 
 let latest_ts_of_entries entries =
   List.fold_left
@@ -85,20 +65,7 @@ let latest_ts_of_entries entries =
       | _ -> acc)
     None entries
 
-let freshness_fields ~now latest_ts =
-  match latest_ts with
-  | Some ts ->
-    [
-      ("latest_ts_unix", `Float ts);
-      ("latest_ts_iso", `String (Masc_domain.iso8601_of_unix_seconds ts));
-      ("latest_age_s", `Float (Stdlib.Float.max 0.0 (now -. ts)));
-    ]
-  | None ->
-    [
-      ("latest_ts_unix", `Null);
-      ("latest_ts_iso", `Null);
-      ("latest_age_s", `Null);
-    ]
+let freshness_fields = Dashboard_tool_source_freshness.freshness_fields
 
 let source_health_fields ~now ~exists ~entry_count ~latest_ts ?coverage_gap () =
   let health, stale_reason =

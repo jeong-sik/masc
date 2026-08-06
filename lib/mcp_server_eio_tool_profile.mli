@@ -22,9 +22,7 @@
     (consumed by {!tool_title_of_name}), [tool_icons_for_name]
     (consumed by {!tool_json_for_profile}), the parsing helpers
     [strict_assoc_params] / [cursor_param] / [bool_param] /
-    [decode_cursor_offset] / [drop_list] / [take_list] /
-    [paginate_json_items] / [cursor_only_params] /
-    [validate_optional_meta], and the raw cursor codec
+    [take_list] / [validate_optional_meta], and the raw cursor codec
     [encode_cursor] / [decode_cursor] (callers go through
     {!page_items_with_cursor}). *)
 

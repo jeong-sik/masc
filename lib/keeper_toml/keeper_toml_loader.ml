@@ -19,32 +19,52 @@ include Keeper_toml_parser
 let toml_string_opt (doc : toml_doc) (key : string) : string option =
   match List.assoc_opt key doc with
   | Some (Toml_string s) -> Some s
-  | _ -> None
+  | Some
+      ( Toml_int _ | Toml_float _ | Toml_bool _ | Toml_string_array _ | Toml_array _
+      | Toml_table _ | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+      | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ )
+  | None -> None
 ;;
 
 let toml_int_opt (doc : toml_doc) (key : string) : int option =
   match List.assoc_opt key doc with
   | Some (Toml_int i) -> Some i
-  | _ -> None
+  | Some
+      ( Toml_string _ | Toml_float _ | Toml_bool _ | Toml_string_array _ | Toml_array _
+      | Toml_table _ | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+      | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ )
+  | None -> None
 ;;
 
 let toml_float_opt (doc : toml_doc) (key : string) : float option =
   match List.assoc_opt key doc with
   | Some (Toml_float f) -> Some f
   | Some (Toml_int i) -> Some (float_of_int i)
-  | _ -> None
+  | Some
+      ( Toml_string _ | Toml_bool _ | Toml_string_array _ | Toml_array _ | Toml_table _
+      | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+      | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ )
+  | None -> None
 ;;
 
 let toml_bool_opt (doc : toml_doc) (key : string) : bool option =
   match List.assoc_opt key doc with
   | Some (Toml_bool b) -> Some b
-  | _ -> None
+  | Some
+      ( Toml_string _ | Toml_int _ | Toml_float _ | Toml_string_array _ | Toml_array _
+      | Toml_table _ | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+      | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ )
+  | None -> None
 ;;
 
 let toml_string_list (doc : toml_doc) (key : string) : string list =
   match List.assoc_opt key doc with
   | Some (Toml_string_array xs) -> xs
-  | _ -> []
+  | Some
+      ( Toml_string _ | Toml_int _ | Toml_float _ | Toml_bool _ | Toml_array _
+      | Toml_table _ | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+      | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ )
+  | None -> []
 ;;
 
 (* ================================================================ *)
@@ -311,7 +331,9 @@ let rec otoml_value_of_toml_value = function
 let render_toml_value = function
   | Toml_table _ | Toml_table_array _ ->
     Error "standard tables and table arrays cannot be rendered as key assignments"
-  | value ->
+  | ( Toml_string _ | Toml_int _ | Toml_float _ | Toml_bool _ | Toml_string_array _
+    | Toml_array _ | Toml_inline_table _ | Toml_offset_datetime _ | Toml_local_datetime _
+    | Toml_local_date _ | Toml_local_time _ ) as value ->
     Result.map
       (fun value -> Otoml.Printer.to_string value |> String.trim)
       (otoml_value_of_toml_value value)

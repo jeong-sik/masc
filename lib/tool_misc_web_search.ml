@@ -40,6 +40,24 @@ type provider_response = {
   hits : normalized_hit list;
 }
 
+(* RFC-0189 PR-2 — per-provider errors are lifted to typed variants so the
+   fallback chain can distinguish transport vs server vs config vs parse
+   failures instead of collapsing them into one aggregate string. The
+   aggregate boundary at [search_impl] remains [Runtime_failure] for now
+   (blind-retry is not guaranteed safe), but each provider's failure is
+   preserved as a typed variant. *)
+type provider_error =
+  | Transport of string  (* network / transport-level failure *)
+  | Server of string     (* endpoint returned a non-200 status or no status *)
+  | Config of string     (* missing credentials / invalid configuration *)
+  | Parse of string      (* payload could not be parsed into hits *)
+
+let provider_error_to_string = function
+  | Transport msg -> "transport: " ^ msg
+  | Server msg -> "server: " ^ msg
+  | Config msg -> "config: " ^ msg
+  | Parse msg -> "parse: " ^ msg
+
 type simulated_provider_outcome =
   [ `Error of string
   | `Empty
@@ -358,7 +376,7 @@ let searxng_base_url () =
 
 let fetch_searxng ~timeout_sec ~query =
   match searxng_base_url () with
-  | Error msg -> Error msg
+  | Error msg -> Error (Config msg)
   | Ok base ->
       let search_url =
         base ^ "/search?q=" ^ Uri.pct_encode query ^ "&format=json"
@@ -367,11 +385,11 @@ let fetch_searxng ~timeout_sec ~query =
         Tool_local_runtime_http.http_get_text_with_status ~timeout_sec search_url
       with
       | Error detail ->
-          Error (endpoint_error ~fallback:"search endpoint unavailable" detail)
+          Error (Transport (endpoint_error ~fallback:"search endpoint unavailable" detail))
       | Ok (Some 200, payload) -> Ok (search_url, payload)
       | Ok (Some status, _) ->
-          Error (Printf.sprintf "search endpoint returned HTTP %d" status)
-      | Ok (None, _) -> Error "search endpoint returned no HTTP status"
+          Error (Server (Printf.sprintf "search endpoint returned HTTP %d" status))
+      | Ok (None, _) -> Error (Server "search endpoint returned no HTTP status")
 
 let fetch_ddg_html ~timeout_sec ~query =
   let search_url =
@@ -381,11 +399,11 @@ let fetch_ddg_html ~timeout_sec ~query =
     Tool_local_runtime_http.http_get_text_with_status ~timeout_sec search_url
   with
   | Error detail ->
-      Error (endpoint_error ~fallback:"search endpoint unavailable" detail)
+      Error (Transport (endpoint_error ~fallback:"search endpoint unavailable" detail))
   | Ok (Some 200, payload) -> Ok (search_url, payload)
   | Ok (Some status, _) ->
-      Error (Printf.sprintf "search endpoint returned HTTP %d" status)
-  | Ok (None, _) -> Error "search endpoint returned no HTTP status"
+      Error (Server (Printf.sprintf "search endpoint returned HTTP %d" status))
+  | Ok (None, _) -> Error (Server "search endpoint returned no HTTP status")
 
 let fetch_bing_rss ~timeout_sec ~query =
   let search_url =
@@ -395,15 +413,15 @@ let fetch_bing_rss ~timeout_sec ~query =
     Tool_local_runtime_http.http_get_text_with_status ~timeout_sec search_url
   with
   | Error detail ->
-      Error (endpoint_error ~fallback:"search endpoint unavailable" detail)
+      Error (Transport (endpoint_error ~fallback:"search endpoint unavailable" detail))
   | Ok (Some 200, payload) -> Ok (search_url, payload)
   | Ok (Some status, _) ->
-      Error (Printf.sprintf "search endpoint returned HTTP %d" status)
-  | Ok (None, _) -> Error "search endpoint returned no HTTP status"
+      Error (Server (Printf.sprintf "search endpoint returned HTTP %d" status))
+  | Ok (None, _) -> Error (Server "search endpoint returned no HTTP status")
 
 let fetch_brave ~timeout_sec ~query ~limit =
   match Sys.getenv_opt "BRAVE_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty with
-  | None -> Error "missing BRAVE_SEARCH_API_KEY"
+  | None -> Error (Config "missing BRAVE_SEARCH_API_KEY")
   | Some api_key ->
       let search_url =
         Printf.sprintf
@@ -418,10 +436,10 @@ let fetch_brave ~timeout_sec ~query ~limit =
           search_url
       with
       | Error detail ->
-          Error (endpoint_error ~fallback:"provider request failed" detail)
+          Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
       | Ok (Some 200, payload) ->
           Safe_ops.protect
-            ~default:(Error "provider returned invalid JSON")
+            ~default:(Error (Parse "provider returned invalid JSON"))
             (fun () ->
               let hits =
                 parse_brave_json payload
@@ -429,12 +447,12 @@ let fetch_brave ~timeout_sec ~query ~limit =
                 |> normalize_hits ~source:(provider_to_string Brave)
               in
               Ok { engine = provider_to_string Brave; search_url; hits })
-      | Ok (Some status, _) -> Error (Printf.sprintf "provider returned HTTP %d" status)
-      | Ok (None, _) -> Error "provider returned no HTTP status"
+      | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
+      | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
 let fetch_tavily ~timeout_sec ~query ~limit =
   match Sys.getenv_opt "TAVILY_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty with
-  | None -> Error "missing TAVILY_API_KEY"
+  | None -> Error (Config "missing TAVILY_API_KEY")
   | Some api_key ->
       let search_url = "https://api.tavily.com/search" in
       let body_json =
@@ -458,10 +476,10 @@ let fetch_tavily ~timeout_sec ~query ~limit =
           ~body_json ()
       with
       | Error detail ->
-          Error (endpoint_error ~fallback:"provider request failed" detail)
+          Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
       | Ok (Some 200, payload) ->
           Safe_ops.protect
-            ~default:(Error "provider returned invalid JSON")
+            ~default:(Error (Parse "provider returned invalid JSON"))
             (fun () ->
               let hits =
                 parse_tavily_json payload
@@ -469,12 +487,12 @@ let fetch_tavily ~timeout_sec ~query ~limit =
                 |> normalize_hits ~source:(provider_to_string Tavily)
               in
               Ok { engine = provider_to_string Tavily; search_url; hits })
-      | Ok (Some status, _) -> Error (Printf.sprintf "provider returned HTTP %d" status)
-      | Ok (None, _) -> Error "provider returned no HTTP status"
+      | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
+      | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
 let fetch_exa ~timeout_sec ~query ~limit =
   match Sys.getenv_opt "EXA_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty with
-  | None -> Error "missing EXA_API_KEY"
+  | None -> Error (Config "missing EXA_API_KEY")
   | Some api_key ->
       let search_url = "https://api.exa.ai/search" in
       let body_json =
@@ -495,10 +513,10 @@ let fetch_exa ~timeout_sec ~query ~limit =
           ~body_json ()
       with
       | Error detail ->
-          Error (endpoint_error ~fallback:"provider request failed" detail)
+          Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
       | Ok (Some 200, payload) ->
           Safe_ops.protect
-            ~default:(Error "provider returned invalid JSON")
+            ~default:(Error (Parse "provider returned invalid JSON"))
             (fun () ->
               let hits =
                 parse_exa_json payload
@@ -506,8 +524,8 @@ let fetch_exa ~timeout_sec ~query ~limit =
                 |> normalize_hits ~source:(provider_to_string Exa)
               in
               Ok { engine = provider_to_string Exa; search_url; hits })
-      | Ok (Some status, _) -> Error (Printf.sprintf "provider returned HTTP %d" status)
-      | Ok (None, _) -> Error "provider returned no HTTP status"
+      | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
+      | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
 let fetch_bing_api ~timeout_sec ~query ~limit =
   let api_key =
@@ -516,7 +534,7 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
     | None -> Sys.getenv_opt "AZURE_BING_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty
   in
   match api_key with
-  | None -> Error "missing BING_SEARCH_API_KEY or AZURE_BING_SEARCH_API_KEY"
+  | None -> Error (Config "missing BING_SEARCH_API_KEY or AZURE_BING_SEARCH_API_KEY")
   | Some key ->
       let search_url =
         Printf.sprintf
@@ -534,10 +552,10 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
           search_url
       with
       | Error detail ->
-          Error (endpoint_error ~fallback:"provider request failed" detail)
+          Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
       | Ok (Some 200, payload) ->
           Safe_ops.protect
-            ~default:(Error "provider returned invalid JSON")
+            ~default:(Error (Parse "provider returned invalid JSON"))
             (fun () ->
               let hits =
                 parse_bing_search_json payload
@@ -545,15 +563,15 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
                 |> normalize_hits ~source:(provider_to_string Bing_api)
               in
               Ok { engine = provider_to_string Bing_api; search_url; hits })
-      | Ok (Some status, _) -> Error (Printf.sprintf "provider returned HTTP %d" status)
-      | Ok (None, _) -> Error "provider returned no HTTP status"
+      | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
+      | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
 let fetch_provider ~query ~limit provider =
   let timeout_sec = Env_config.Tools.web_search_timeout_sec () in
   match provider with
   | Searxng -> (
       match fetch_searxng ~timeout_sec ~query with
-      | Error msg -> Error msg
+      | Error err -> Error err
       | Ok (search_url, payload) ->
           let hits =
             parse_searxng_json payload
@@ -567,7 +585,7 @@ let fetch_provider ~query ~limit provider =
   | Bing_api -> fetch_bing_api ~timeout_sec ~query ~limit
   | Ddg -> (
       match fetch_ddg_html ~timeout_sec ~query with
-      | Error msg -> Error msg
+      | Error err -> Error err
       | Ok (search_url, payload) ->
           let hits =
             parse_ddg_html payload
@@ -577,7 +595,7 @@ let fetch_provider ~query ~limit provider =
           Ok { engine = provider_to_string Ddg; search_url; hits })
   | Bing_rss -> (
       match fetch_bing_rss ~timeout_sec ~query with
-      | Error msg -> Error msg
+      | Error err -> Error err
       | Ok (search_url, payload) when looks_like_rss_payload payload ->
           let hits =
             parse_bing_rss_items payload
@@ -585,7 +603,7 @@ let fetch_provider ~query ~limit provider =
             |> normalize_hits ~source:(provider_to_string Bing_rss)
           in
           Ok { engine = provider_to_string Bing_rss; search_url; hits }
-      | Ok _ -> Error "provider returned invalid RSS")
+      | Ok _ -> Error (Parse "provider returned invalid RSS"))
 
 let cache_key ~query ~limit =
   String.concat "|"
@@ -630,8 +648,13 @@ let search_impl ~query ~limit =
     | provider :: rest -> (
         match fetch_provider ~query ~limit provider with
         | Ok ({ hits = _ :: _; _ } as response) -> Ok response
-        | Ok _ -> loop (provider_error provider "no results" :: errors) rest
-        | Error message -> loop (provider_error provider message :: errors) rest)
+        | Ok _ ->
+            loop
+              (provider_error provider (provider_error_to_string (Parse "no results"))
+               :: errors)
+              rest
+        | Error err ->
+            loop (provider_error provider (provider_error_to_string err) :: errors) rest)
   in
   loop [] (provider_order ())
 
@@ -681,7 +704,7 @@ let simulated_search_impl ~outcomes ~query ~limit =
 let with_simulated_search_for_test ~outcomes f =
   with_search_impl_for_test (simulated_search_impl ~outcomes) f
 
-(* RFC-0189 PR-1b.9 — typed result. Failure-class mapping at the
+(* RFC-0189 PR-1b.9 / PR-2 — typed result. Failure-class mapping at the
    handle boundary (source-typed at each construction site; no
    substring matching):
 
@@ -689,12 +712,12 @@ let with_simulated_search_for_test ~outcomes f =
    - [Runtime_failure]:    [search_impl] aggregate ("all web
      search providers failed: ..."). The 7-provider fallback
      chain exhausted; per-provider transport vs server
-     distinction is collapsed in the aggregate string today.
-     Lifting fetch_provider / per-fetcher errors to typed
-     variants is the natural PR-2 follow-up — the aggregate
-     boundary remains [Runtime_failure] for now because
-     blind-retry is not guaranteed safe (some providers may
-     have returned 4xx).
+     distinction is preserved as typed [provider_error] variants
+     ([Transport] / [Server] / [Config] / [Parse]) and rendered
+     into the aggregate string via [provider_error_to_string].
+     The aggregate boundary remains [Runtime_failure] for now
+     because blind-retry is not guaranteed safe (some providers
+     may have returned 4xx).
 
    [simulate_for_test] uses the same boundary: empty outcomes
    list or aggregate failure → [Runtime_failure]. *)

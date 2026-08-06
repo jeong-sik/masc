@@ -1814,12 +1814,59 @@ let test_require_human_head_does_not_stop_owner_drain () =
        check int "same-owner successor judged once" 1 (F.post_count successor_server))
 ;;
 
-let test_gate_judgment_prompt_comes_from_registry () =
+let test_judge_effect_prompt_comes_from_registry () =
   Prompt_registry.set_markdown_dir
     (Masc_test_deps.source_path "config/prompts");
   match Worker.For_testing.system_prompt () with
   | Error detail -> fail ("Gate judgment prompt unavailable: " ^ detail)
   | Ok prompt -> check bool "prompt is non-empty" true (String.trim prompt <> "")
+;;
+
+
+(* {1 Run-registry outcome}
+
+   A finished exact run reached [Exact_lane_run_registry.Succeeded] whether or
+   not it produced a summary: [Flow_semantic_candidates_exhausted] quarantines
+   the candidate, returns [Executed] like a judged run, and the caller
+   synthesised an output for the missing summary. A run that judged nothing was
+   indistinguishable from one that did.
+
+   Both arms are pinned here because the decision is now a named function and
+   the outcome type has a variant for each. *)
+
+let summary_fixture () : Q.hitl_context_summary =
+  { summary_version = Q.current_hitl_context_summary_version
+  ; generated_at = 1000.0
+  ; model_run_id = "run-fixture"
+  ; context_summary = "context"
+  ; key_questions = [ "q1" ]
+  ; judgment = Q.Approve
+  ; rationale = "because"
+  }
+;;
+
+let test_observed_summary_earns_succeeded () =
+  let outcome, output =
+    Worker.For_testing.run_outcome_of_observed_summary (Some (summary_fixture ()))
+  in
+  (match outcome with
+   | Masc.Exact_lane_run_registry.Succeeded -> ()
+   | Masc.Exact_lane_run_registry.Cancelled -> Alcotest.fail "expected Succeeded, got Cancelled"
+   | Masc.Exact_lane_run_registry.Failed { code; _ } ->
+     Alcotest.failf "expected Succeeded, got Failed %s" code);
+  Alcotest.(check bool) "output carries the summary" true (output <> `Null)
+;;
+
+let test_missing_summary_earns_failed () =
+  let outcome, output = Worker.For_testing.run_outcome_of_observed_summary None in
+  (match outcome with
+   | Masc.Exact_lane_run_registry.Failed { code; detail } ->
+     Alcotest.(check string) "code names the missing summary" "no_summary_produced" code;
+     Alcotest.(check bool) "detail is not empty" true (String.trim detail <> "")
+   | Masc.Exact_lane_run_registry.Succeeded ->
+     Alcotest.fail "a run that produced no summary was recorded as Succeeded"
+   | Masc.Exact_lane_run_registry.Cancelled -> Alcotest.fail "expected Failed, got Cancelled");
+  Alcotest.(check bool) "no output is synthesised" true (output = `Null)
 ;;
 
 let () =
@@ -1848,7 +1895,7 @@ let () =
         ; test_case
             "prompt is registry-owned"
             `Quick
-            test_gate_judgment_prompt_comes_from_registry
+            test_judge_effect_prompt_comes_from_registry
         ] )
     ; ( "production exact flow"
       , [ test_case
@@ -1923,6 +1970,16 @@ let () =
             "Require_human head does not stop owner drain"
             `Quick
             test_require_human_head_does_not_stop_owner_drain
+        ] )
+    ; ( "run_registry_outcome"
+      , [ test_case
+            "an observed summary earns Succeeded"
+            `Quick
+            test_observed_summary_earns_succeeded
+        ; test_case
+            "a missing summary earns Failed"
+            `Quick
+            test_missing_summary_earns_failed
         ] )
     ]
 ;;

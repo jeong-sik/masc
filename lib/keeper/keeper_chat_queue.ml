@@ -1223,14 +1223,6 @@ type regular_path_observation =
   | Path_absent
   | Regular_path of Unix.stats
 
-let unix_file_kind_to_string = function
-  | Unix.S_REG -> "regular"
-  | Unix.S_DIR -> "directory"
-  | Unix.S_CHR -> "character_device"
-  | Unix.S_BLK -> "block_device"
-  | Unix.S_LNK -> "symbolic_link"
-  | Unix.S_FIFO -> "fifo"
-  | Unix.S_SOCK -> "socket"
 
 let inspect_regular_or_absent path =
   match Unix.lstat path with
@@ -1247,7 +1239,7 @@ let inspect_regular_or_absent path =
       (Printf.sprintf
          "owned chat queue path is not a regular file: path=%s kind=%s"
          path
-         (unix_file_kind_to_string st_kind))
+         (Fs_compat.file_kind_to_string st_kind))
 
 let same_regular_identity left right =
   left.Unix.st_kind = Unix.S_REG
@@ -4128,7 +4120,7 @@ let classify_keeper_directory_entries_blocking entries_path entries =
              , load_error Invalid_path ~path:entry_path
                  (Printf.sprintf
                     "Keeper chat queue inventory entry has unsupported kind %s"
-                    (unix_file_kind_to_string st_kind)) )
+                    (Fs_compat.file_kind_to_string st_kind)) )
              :: inventory.rejected_entries
          ; observed_entries = (entry_name, stats) :: inventory.observed_entries
          }

@@ -57,12 +57,9 @@ val raw_trace_file_extension : string
     turn (see [Keeper_agent_run.raw_trace_sink_outcome]). *)
 val keeper_raw_trace_turn_path : Workspace.config -> string -> string
 
-val keeper_generation_index_path : Workspace.config -> string -> string
-
 (** Per-trace session directory under [.masc/traces/<trace_id>]. *)
 val keeper_session_dir : Workspace.config -> string -> string
 
-val keeper_generation_manifest_path : Workspace.config -> string -> string
 val keeper_history_path : Workspace.config -> string -> string
 val keeper_internal_history_path : Workspace.config -> string -> string
 

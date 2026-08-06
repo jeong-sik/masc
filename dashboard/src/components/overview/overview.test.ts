@@ -29,7 +29,7 @@ import type {
   TelemetryEntry,
   TelemetrySourceSummary,
 } from '../../api/dashboard'
-import { keepers } from '../../store'
+import { keepers, boardPosts, boardTotal, lastBoardRefreshAt } from '../../store'
 import type { Goal } from '../../types/core'
 
 const overviewMocks = vi.hoisted(() => ({
@@ -1206,5 +1206,66 @@ describe('Overview prototype surface', () => {
     } finally {
       keepers.value = previousKeepers
     }
+  })
+})
+
+// The overview route subscribes to GLOBAL + `execution` slices only and never
+// calls refreshBoard, so `boardPosts` is empty on every fresh load of #overview.
+// The card used to render that empty length as "전체 포스트 0" while #board and
+// the post store both held posts, so an operator reading the home screen saw a
+// fabricated zero rather than "not loaded".
+describe('Overview board domain card', () => {
+  afterEach(() => {
+    cleanup()
+    boardPosts.value = []
+    boardTotal.value = null
+    lastBoardRefreshAt.value = null
+  })
+
+  function boardCardText(container: Element): string {
+    return container.querySelector('[data-testid="domain-board"] .ov-dcard-body')?.textContent?.trim() ?? ''
+  }
+
+  it('reports not-loaded instead of 0 when the board store was never hydrated', () => {
+    boardPosts.value = []
+    boardTotal.value = null
+    lastBoardRefreshAt.value = null
+
+    const { container } = render(h(Overview, null))
+    const body = container.querySelector('[data-testid="domain-board"] .ov-dcard-body')
+
+    expect(body?.querySelector('.ov-empty')).not.toBeNull()
+    expect(boardCardText(container)).not.toContain('0')
+    expect(container.querySelector('[data-testid="domain-board"] .ov-stat-row')).toBeNull()
+  })
+
+  it('labels the loaded rows as loaded, not total, while the server pages the result', () => {
+    boardPosts.value = [
+      { id: 'p-1', author: 'a', title: 't1', content: 'c1', created_at: '2026-08-05T00:00:00Z' },
+      { id: 'p-2', author: 'b', title: 't2', content: 'c2', created_at: '2026-08-05T00:00:01Z' },
+    ] as unknown as typeof boardPosts.value
+    boardTotal.value = null
+    lastBoardRefreshAt.value = '2026-08-05T00:00:02Z'
+
+    const { container } = render(h(Overview, null))
+    const text = boardCardText(container)
+
+    expect(text).toContain('불러온 포스트')
+    expect(text).toContain('2')
+    expect(text).not.toContain('전체 포스트')
+  })
+
+  it('shows the server total when the response carried one', () => {
+    boardPosts.value = [
+      { id: 'p-1', author: 'a', title: 't1', content: 'c1', created_at: '2026-08-05T00:00:00Z' },
+    ] as unknown as typeof boardPosts.value
+    boardTotal.value = 441
+    lastBoardRefreshAt.value = '2026-08-05T00:00:02Z'
+
+    const { container } = render(h(Overview, null))
+    const text = boardCardText(container)
+
+    expect(text).toContain('전체 포스트')
+    expect(text).toContain('441')
   })
 })

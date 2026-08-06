@@ -24,56 +24,45 @@ function makePrompt(overrides: Partial<DashboardPromptItem> & { key: string }): 
   }
 }
 
-// Fixtures modelled on the real registry: keeper-turn md files plus several
-// non-keeper-turn families. Includes keeper.recovery_block.md — a file the
-// removed BLOCK_SPEC had mapped to the dynamic retry_nudge/temporal_summary
-// runtime blocks — to guard it now appears only as a catalog file, never as a
-// Prompt_block_id block body.
+// Exact current managed assets. Category comes from each file's frontmatter and
+// is the sole family SSOT; key/file-name substrings never classify a prompt.
 const PROMPTS: DashboardPromptItem[] = [
   makePrompt({
-    key: 'keeper.core_behavior',
+    key: 'keeper',
     category: 'keeper',
-    description: '이름·역할·능력·담당',
-    file_path: 'config/prompts/keeper.core_behavior.md',
+    description: 'Keeper standing rules',
+    file_path: 'config/prompts/keeper.md',
     effective: 'Inspect current typed state and act on justified work.',
     char_count: 120,
     template_variables: [],
   }),
   makePrompt({
-    key: 'keeper.recovery_block',
-    category: 'keeper',
-    description: 'recovery block',
-    file_path: 'config/prompts/keeper.recovery_block.md',
-    effective: 'recovery guard body',
+    key: 'judge.board',
+    category: 'judge',
+    description: 'Board relevance judge',
+    file_path: 'config/prompts/judge.board.md',
     char_count: 80,
   }),
   makePrompt({
-    key: 'keeper.librarian.system',
-    category: 'keeper',
-    description: 'librarian system',
-    file_path: 'config/prompts/keeper.librarian.system.md',
+    key: 'librarian',
+    category: 'librarian',
+    description: 'Current-memory selector',
+    file_path: 'config/prompts/librarian.md',
     char_count: 60,
   }),
   makePrompt({
-    key: 'verification.anti_rationalization',
+    key: 'verification',
     category: 'verification',
     description: 'anti-rationalization guidance',
-    file_path: 'config/prompts/verification.anti_rationalization.md',
+    file_path: 'config/prompts/verification.md',
     char_count: 50,
   }),
   makePrompt({
-    key: 'dashboard.gate_judge',
-    category: 'dashboard',
-    description: 'gate judge',
-    file_path: 'config/prompts/dashboard.gate_judge.md',
+    key: 'worker',
+    category: 'worker',
+    description: 'Local worker standing rules',
+    file_path: 'config/prompts/worker.md',
     char_count: 70,
-  }),
-  makePrompt({
-    key: 'system.orchestrator',
-    category: 'system',
-    description: 'orchestrator',
-    file_path: 'config/prompts/system.orchestrator.md',
-    char_count: 30,
   }),
 ]
 
@@ -105,23 +94,46 @@ describe('PromptBookPanel', () => {
     expect(keeperFam?.classList.contains('feeds')).toBe(true)
     expect(keeperFam?.querySelector('.pb-cat-tag')?.textContent).toContain('keeper 턴')
 
-    // separate (non-feeding) subsystems are classified before the generic keeper family
+    // Separate subsystem categories never feed the Keeper turn.
     const libFam = families.find(fam => fam.textContent?.includes('Librarian'))
     expect(libFam?.classList.contains('feeds')).toBe(false)
     expect(libFam?.textContent).toContain('별도 계열')
     expect(families.some(fam => fam.textContent?.includes('Verification'))).toBe(true)
     expect(families.some(fam => fam.textContent?.includes('Judge'))).toBe(true)
-    expect(families.some(fam => fam.textContent?.includes('Orchestrator'))).toBe(true)
+    expect(families.some(fam => fam.textContent?.includes('Worker'))).toBe(true)
 
     // keeper turn family is displayed first (order 1)
     expect(families[0]?.textContent).toContain('keeper 턴 · 계열')
   })
 
-  it('does not present any Prompt_block_id block provenance or a markdown-file block body', () => {
-    // Regression guard (review #23052): the removed BLOCK_SPEC mapped dynamic
-    // runtime blocks (retry_nudge / temporal_summary) to keeper.recovery_block.md
-    // and rendered that md as the block body — fabricated provenance. The library
-    // must present that file only as a catalog chip, never as a block with a body.
+  // Every asset config/prompts actually ships must land in the family named by
+  // its frontmatter category.
+  it('classifies every shipped prompt asset into a named family', () => {
+    const SHIPPED = [
+      { key: 'keeper', category: 'keeper' },
+      { key: 'judge.board', category: 'judge' },
+      { key: 'judge.effect', category: 'judge' },
+      { key: 'judge.catchup', category: 'judge' },
+      { key: 'librarian', category: 'librarian' },
+      { key: 'verification', category: 'verification' },
+      { key: 'worker', category: 'worker' },
+    ]
+    render(
+      html`<${PromptBookPanel}
+        prompts=${SHIPPED.map(({ key, category }) =>
+          makePrompt({ key, category, file_path: `config/prompts/${key}.md`, char_count: 10 }),
+        )}
+      />`,
+      container,
+    )
+    const catalog = container.querySelector('[data-testid="prompt-book-catalog"]')
+    const families = Array.from(catalog?.querySelectorAll('.pb-cat-fam') ?? [])
+    expect(families.some(fam => fam.textContent?.includes('Other'))).toBe(false)
+    expect(families.some(fam => fam.textContent?.includes('Worker'))).toBe(true)
+    expect(families.some(fam => fam.textContent?.includes('keeper 턴'))).toBe(true)
+  })
+
+  it('does not present Prompt_block_id assembly provenance', () => {
     render(html`<${PromptBookPanel} prompts=${PROMPTS} />`, container)
 
     expect(container.querySelector('[data-testid="prompt-book-assembly"]')).toBeNull()
@@ -130,13 +142,19 @@ describe('PromptBookPanel', () => {
     // no Prompt_block_id assembly-order / block-count product copy
     expect(container.textContent).not.toContain('Prompt_block_id')
     expect(container.textContent).not.toContain('조립 블록')
-    // the recovery-block md still appears, but only as a catalog file chip
-    const chip = Array.from(container.querySelectorAll('.pb-src-chip')).find(el =>
-      el.textContent?.includes('keeper.recovery_block.md'),
-    )
-    expect(chip).toBeTruthy()
-    // and its body text is never surfaced as a rendered block
-    expect(container.textContent).not.toContain('recovery guard body')
+  })
+
+  it('does not infer a family from key or file-name substrings', () => {
+    render(html`<${PromptBookPanel} prompts=${[
+      makePrompt({
+        key: 'housekeeper.worker-lookalike',
+        category: 'protocol-drift',
+        file_path: 'config/prompts/judge-but-not-category.md',
+      }),
+    ]} />`, container)
+    expect(container.textContent).toContain('Other · 기타')
+    expect(container.textContent).not.toContain('Worker · 로컬 워커')
+    expect(container.textContent).not.toContain('keeper 턴 · 계열')
   })
 
   it('renders an empty state when no prompts are loaded', () => {

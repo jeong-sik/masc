@@ -322,11 +322,13 @@ check_forbidden_active "V7s-retired-runtime-tool-family-authorization" \
   "config/"
 
 # V7t: the withdrawn completion-trust hierarchy must not return as a public
-# fixed-threshold CLI or its dedicated deterministic corpus.
+# fixed-threshold CLI or its dedicated deterministic corpus. "data/" was
+# dropped from the scan paths when #27091 deleted the orphaned data/prompts
+# store — a missing path fails the guard, and re-adding the directory
+# restores its coverage automatically.
 check_forbidden_active "V7t-retired-completion-trust-cli" \
   'masc_completion_trust_eval|masc-completion-trust-eval|data/eval/completion_trust' \
   "bin/" \
-  "data/" \
   "lib/" \
   "test/"
 

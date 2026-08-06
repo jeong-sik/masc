@@ -154,35 +154,6 @@ let save_json_atomic_with ~strict_parent_sync path json =
 let save_json_atomic = save_json_atomic_with ~strict_parent_sync:false
 let save_json_atomic_strict = save_json_atomic_with ~strict_parent_sync:true
 
-let save_json_atomic_strict_staged_with ~save path json =
-  match
-    try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
-  with
-  | Error _ as error -> error
-  | Ok () ->
-    let content =
-      json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
-    in
-    (match save path content with
-     | Ok () -> Ok Fsync_completed
-     | Error (failure : Fs_compat.atomic_replace_failure) ->
-       let detail = Fs_compat.atomic_replace_failure_to_string failure in
-       (match failure.stage with
-        | Fs_compat.Before_rename ->
-          (match failure.exception_ with
-           | Eio.Cancel.Cancelled _ ->
-             Printexc.raise_with_backtrace failure.exception_ failure.backtrace
-           | _ -> Error detail)
-        | Fs_compat.After_rename ->
-          Ok (Visible_sync_unconfirmed detail)))
-;;
-
-let save_json_atomic_strict_staged =
-  save_json_atomic_strict_staged_with ~save:Fs_compat.save_file_atomic_strict_staged
-;;
-
 let save_state_unlocked_with ~strict_parent_sync owner state =
   let keeper_name = keeper_name_of_owner owner in
   let path = snapshot_path_of_owner owner in
@@ -200,25 +171,6 @@ let save_state_unlocked_with ~strict_parent_sync owner state =
 
 let save_state_unlocked = save_state_unlocked_with ~strict_parent_sync:false
 let save_state_unlocked_strict = save_state_unlocked_with ~strict_parent_sync:true
-
-let save_state_unlocked_strict_staged_with ~save owner state =
-  let keeper_name = keeper_name_of_owner owner in
-  let path = snapshot_path_of_owner owner in
-  match save_json_atomic_strict_staged_with ~save path (State.to_yojson state) with
-  | Ok outcome -> Ok outcome
-  | Error message ->
-    Error
-      (Printf.sprintf
-         "failed to persist keeper=%s path=%s: %s"
-         keeper_name
-         path
-         message)
-;;
-
-let save_state_unlocked_strict_staged =
-  save_state_unlocked_strict_staged_with
-    ~save:Fs_compat.save_file_atomic_strict_staged
-;;
 
 type snapshot_read_error_kind =
   | Invalid_path
@@ -598,10 +550,6 @@ let validate_existing_state_read_only_result ~base_path ~keeper_name =
 ;;
 
 
-let queue_of_stimuli stimuli =
-  List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
-;;
-
 let load_with_projection ~projection ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map projection
 ;;
@@ -781,55 +729,6 @@ let commit_transform
        Error
          (Printf.sprintf
             "event queue transaction raised keeper=%s path=%s: %s"
-            (keeper_name_of_owner owner)
-            (snapshot_path_of_owner owner)
-            (Printexc.to_string exn)))
-;;
-
-let commit_exact_transform_unlocked
-      ?(save_state = save_state_unlocked_strict_staged)
-      owner
-      ~after_commit
-      transform
-  =
-  match load_state_unlocked owner with
-  | Error _ as error -> error
-  | Ok current ->
-    (match transform current with
-     | Error _ as error -> error
-     | Ok (next, value) ->
-       let next =
-         if next == current then Ok next else bump_revision next
-       in
-       (match next with
-        | Error _ as error -> error
-        | Ok next ->
-          (match save_state owner next with
-           | Error _ as error -> error
-           | Ok outcome ->
-             after_commit (State.pending next);
-             Ok (value, outcome))))
-;;
-
-let commit_exact_transform
-      ?save_state
-      ~base_path
-      ~keeper_name
-      ~after_commit
-      transform
-  =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         commit_exact_transform_unlocked ?save_state owner ~after_commit transform)
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue exact transaction raised keeper=%s path=%s: %s"
             (keeper_name_of_owner owner)
             (snapshot_path_of_owner owner)
             (Printexc.to_string exn)))

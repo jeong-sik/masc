@@ -43,7 +43,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     prompt: {
       instructions: 'Prefer direct remediation',
       system_prompt_blocks: {
-        system: { key: 'keeper.system', source: 'file', text: 'system text' },
+        system: { key: 'keeper', source: 'file', text: 'system text' },
       },
       effective_system_prompt: 'full prompt',
       assembled_system_prompt: 'assembled prompt',

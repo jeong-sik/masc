@@ -287,14 +287,10 @@ module Projection_for_testing = struct
 end
 
 let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
-let log_server_fiber_crash =
-  Server_bootstrap_loops_fiber.log_server_fiber_crash
 let log_dashboard_fiber_crash =
   Server_bootstrap_loops_fiber.log_dashboard_fiber_crash
 let filteri_with_fair_yield =
   Server_bootstrap_loops_fiber.filteri_with_fair_yield
-let iteri_with_fair_yield = Server_bootstrap_loops_fiber.iteri_with_fair_yield
-
 type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
   ; queue : Keeper_chat_queue.configure_report
@@ -647,7 +643,7 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
       keeper_msg_recovery.unreadable
       keeper_msg_recovery.failed;
   let fusion_delivery_recovery =
-    Fusion_delivery_projector.recover_startup ~base_path
+    Fusion_delivery_projector.recover_startup ~base_path ()
   in
   (match fusion_delivery_recovery with
    | Error error ->
@@ -1272,7 +1268,7 @@ let start_keeper_loops_owned
                         ~event
                     | None ->
                       Otel_metric_store.inc_counter
-                        "masc_keeper_lifecycle_malformed_total"
+                        Otel_metric_store.metric_keeper_lifecycle_malformed
                         ())
                  | None, _ | Some _, None ->
                    (* P3 cleanup: previously malformed lifecycle events
@@ -1283,7 +1279,9 @@ let start_keeper_loops_owned
                        lets `rate(...)` alerts catch the regression
                        even though the dashboard cache continues to
                        degrade gracefully (just stale, not broken). *)
-                   Otel_metric_store.inc_counter "masc_keeper_lifecycle_malformed_total" ())
+                   Otel_metric_store.inc_counter
+                     Otel_metric_store.metric_keeper_lifecycle_malformed
+                     ())
               | _ -> Log.Dashboard.debug "ignored non-lifecycle event")
            events;
          if events <> []

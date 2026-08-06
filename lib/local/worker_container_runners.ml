@@ -80,7 +80,7 @@ let run_worker_oas ~sw ?net
           ~meta ~provider_config ~checkpoint ~prompt:spec.prompt ~tools ~raw_trace
           ?worker_run_id:spec.worker_run_id ()
     | None ->
-        let system_prompt =
+        let* system_prompt =
           default_system_prompt ~worker_name ~model_id
             ?role:spec.role
             ?selection_note:spec.selection_note ()

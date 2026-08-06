@@ -297,55 +297,6 @@ let bool_param payload key =
         (Printf.sprintf "Invalid params: %s must be a boolean (received %s)"
            key (Json_util.kind_name other))
 
-let decode_cursor_offset = function
-  | None -> Ok 0
-  | Some raw -> (
-      match int_of_string_opt raw with
-      | Some offset when offset >= 0 -> Ok offset
-      | Some offset ->
-          Error
-            (Printf.sprintf
-               "Invalid params: cursor offset must be non-negative \
-                (parsed %d from %S)"
-               offset raw)
-      | None ->
-          Error
-            (Printf.sprintf
-               "Invalid params: cursor must be a non-negative integer \
-                string (could not parse %S as an integer)"
-               raw))
-
-let rec drop_list n = function
-  | xs when n <= 0 -> xs
-  | [] -> []
-  | _ :: rest -> drop_list (n - 1) rest
-
-let paginate_json_items ?(page_size = 128) ~field_name items cursor =
-  match decode_cursor_offset cursor with
-  | Error msg -> Error msg
-  | Ok offset ->
-      let total = List.length items in
-      let page = items |> drop_list offset |> List_util.take_first page_size in
-      let next_offset = offset + List.length page in
-      let fields =
-        [ (field_name, `List page) ]
-        @
-        if next_offset < total then
-          [ ("nextCursor", `String (string_of_int next_offset)) ]
-        else
-          []
-      in
-      Ok (`Assoc fields)
-
-let cursor_only_params params =
-  match params with
-  | None -> Ok None
-  | Some (`Assoc _ as payload) -> cursor_param payload
-  | Some other ->
-      Error
-        (Printf.sprintf "Invalid params: expected object (received %s)"
-           (Json_util.kind_name other))
-
 let validate_optional_meta payload =
   match Json_util.assoc_member_opt "_meta" payload with
   | None

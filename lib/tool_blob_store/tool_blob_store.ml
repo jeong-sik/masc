@@ -96,8 +96,14 @@ let fetch_error_to_string = function
         expected
         actual
 
+(* Exported (see the .mli): a caller bounding a marker it has not stored yet
+   builds a saturating preview from this, so a copy of the number at that call
+   site would silently become an underestimate if this changed. *)
 let preview_max = 200
 
+(* Adds exactly one character per source byte and stops at [preview_max], so
+   the result length is a hard ceiling rather than an approximation. The
+   exported bound depends on that. *)
 let make_preview bytes =
   let len = min (String.length bytes) preview_max in
   let buf = Buffer.create len in

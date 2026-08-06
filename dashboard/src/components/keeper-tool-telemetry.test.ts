@@ -14,7 +14,6 @@ function mkStat(name: string, overrides: Partial<ToolStat> = {}): ToolStat {
     avg_duration_ms: 10,
     p95_duration_ms: 20,
     max_duration_ms: 30,
-    total_cost_usd: 0,
     last_used_at: '2026-04-17T00:00:00Z',
     ...overrides,
   }

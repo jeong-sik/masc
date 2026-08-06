@@ -55,7 +55,13 @@ val transition_task_outcome_r :
     Separate from {!transition_task_outcome_r} because a verdict is not an agent
     action. The caller must authenticate or otherwise validate the authority
     before constructing its provenance value. This is the only path that
-    resolves an [AwaitingVerification] obligation. *)
+    resolves an [AwaitingVerification] obligation.
+
+    [evaluator_runtime] names the configured runtime that produced the verdict,
+    and lands in every structured projection alongside the authority identity.
+    The authority actor is a fresh id per review and so groups nothing; the
+    runtime key is what a verdict history can be aggregated on. Omit it for a
+    human operator verdict, where no evaluator ran. *)
 val commit_verdict_r :
   config ->
   authority:Masc_domain.completion_authority ->
@@ -63,6 +69,7 @@ val commit_verdict_r :
   task_id:string ->
   verification_id:string ->
   ?notes:string ->
+  ?evaluator_runtime:string ->
   unit ->
   transition_outcome Masc_domain.masc_result
 

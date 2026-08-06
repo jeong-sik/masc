@@ -198,19 +198,10 @@ let get_append_path_mutex path =
 
 let append_file_unix (path : string) (content : string) : unit =
   let mu = get_append_path_mutex path in
-  Stdlib.Mutex.lock mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock mu)
-    (fun () ->
-      let oc =
-        Stdlib.open_out_gen
-          [ Stdlib.Open_append; Stdlib.Open_creat; Stdlib.Open_wronly ]
-          0o644
-          path
-      in
-      Fun.protect
-        ~finally:(fun () -> Stdlib.close_out_noerr oc)
-        (fun () -> Stdlib.output_string oc content))
+  Stdlib.Mutex.protect mu (fun () ->
+    Fd_cache.with_writer path (fun oc ->
+      Stdlib.output_string oc content;
+      Stdlib.flush oc))
 ;;
 
 let mkdir_p_unix (path : string) : unit =
@@ -2203,14 +2194,7 @@ let rec private_jsonl_transaction_error_to_string = function
   | Unexpected_transaction_file_kind kind ->
     Printf.sprintf
       "private JSONL transaction target has unexpected file kind: %s"
-      (match kind with
-       | Unix.S_REG -> "regular"
-       | Unix.S_DIR -> "directory"
-       | Unix.S_CHR -> "character-device"
-       | Unix.S_BLK -> "block-device"
-       | Unix.S_LNK -> "symbolic-link"
-       | Unix.S_FIFO -> "fifo"
-       | Unix.S_SOCK -> "socket")
+      (file_kind_to_string kind)
   | Ambiguous_transaction_file_identity { path; link_count } ->
     Printf.sprintf
       "private JSONL transaction path has ambiguous hard-link identity: %s (links=%d)"

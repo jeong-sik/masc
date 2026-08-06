@@ -7,8 +7,7 @@
     Hashtbl-backed accumulators on every refresh.
 
     Internal: [entity_node_id], [payload_string], [is_generic_status],
-    [semantic_multiplier], [ensure_node], [ensure_entity_node],
-    [ensure_edge].  All consumed only inside {!reduce_event}.  Future
+    [ensure_node], [ensure_entity_node], [ensure_edge].  All consumed only inside {!reduce_event}.  Future
     "expose lower-level reducers" PR can reopen explicitly. *)
 
 (** {1 Accumulator types} *)
@@ -19,7 +18,6 @@ type node_acc = {
   mutable label : string;
   mutable status : Activity_graph_types.node_status;
   mutable weight : int;
-  mutable semantic_weight : float;
   mutable last_event_at : string;
   mutable meta : Yojson.Safe.t;
 }
@@ -62,10 +60,4 @@ val reduce_event :
     + If [value.subject = Some subject], same with fallback status
       [Observed].
     + Apply event-kind-specific edges between actor / subject /
-      workspace (e.g. [task.assigned] -> actor->subject [assigned] edge).
-
-    Semantic weight delta applied to nodes:
-    {!Activity_graph_types}-tagged kinds map to fixed multipliers
-    (completion = 5.0, lifecycle = 3.0, routine = 1.0, default 1.0).
-    Pinned at the contract seam — operators see [semantic_weight]
-    in dashboards as the "importance" axis. *)
+      workspace (e.g. [task.assigned] -> actor->subject [assigned] edge). *)

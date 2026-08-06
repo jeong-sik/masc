@@ -28,6 +28,13 @@
     [cap_string_list] / [execution_tool_preview_limit] /
     [string_list_of_field]). *)
 
+val extract_keeper_name : string -> string
+(** Strip a keeper-agent alias down to the keeper name, or return the input
+    unchanged when it is not one. Delegates to
+    [Keeper_identity.keeper_name_of_agent_alias], which owns the four accepted
+    spellings; exported so a test can pin all four rather than only the pair
+    this module used to hand-roll. *)
+
 (** {1 Tone} *)
 
 type tone = Dashboard_utils.tone =
@@ -86,7 +93,6 @@ val take : int -> 'a list -> 'a list
 val latest_iso_timestamp : string option list -> string option
 val compact_text : ?max_len:int -> string -> string
 val dedup_strings : string list -> string list
-val severity_rank : string -> int
 val dashboard_fixture_name : ?fixture:string -> unit -> string option
 val execution_tool_preview_limit : int
 val cap_string_list : ?limit:int -> string list -> string list

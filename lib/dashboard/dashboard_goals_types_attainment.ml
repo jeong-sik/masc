@@ -325,8 +325,6 @@ let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
               unmeasured "absent"
                 "No target value or linked task evidence is available." ))
 
-let assoc_member_opt = Json_util.assoc_member_opt
-
 let assoc_string_opt = Json_util.assoc_string_opt
 
 let assoc_int_opt = Json_util.assoc_int_opt

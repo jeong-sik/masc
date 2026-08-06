@@ -62,6 +62,23 @@ val evidence_access_failure_to_string :
   request_id:string -> evidence_access_failure -> string
 val evidence_read_failure_of_owned_read_failure :
   Fs_compat.owned_regular_file_read_failure -> evidence_read_failure
+
+val project_root_of_base_path : string -> string
+(** The project root a BasePath names, whether the caller passed the project
+    root itself or its [.masc] directory. Exposed so a producer's ownership
+    root is derived by this function everywhere rather than re-derived beside
+    it. *)
+
+val read_regular_file_prefix :
+  ownership_root:string ->
+  string ->
+  (string * int * bool, evidence_read_failure) result
+(** Read a bounded UTF-8 prefix of an owned regular file, returning
+    [(content, file_size, truncated)]. This is the reader that materializes an
+    [artifact:] evidence reference. {!Verification_authority_tools} reuses it so
+    a live read and its snapshot cannot disagree about the same file: one byte
+    cap, one policy for a multi-byte sequence cut by that cap, one failure
+    vocabulary. *)
 val snapshot_submitted_evidence_json :
   base_path:string ->
   worker:string ->

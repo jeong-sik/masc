@@ -7,13 +7,10 @@
 
     Internal helpers ([StringSet] / [StringMap], [require_unique_schemas],
     [require_unique_projections], [prefixed_tool_names],
-    [canonical_capability_id],
-    [audience_to_string], [projection_to_schema], [make_seed],
+    [canonical_capability_id], [projection_to_schema], [make_seed],
     [public_projection_seeds_from],
     [keeper_projection_seeds], [surface_tool_schemas_from],
-    [surface_tool_names_from], [public_raw_tool_schemas_from],
-    [capability_to_json],
-    [oauth_login_stage], the surface-name lists
+    [surface_tool_names_from], [oauth_login_stage], the surface-name lists
     [spawned_agent_public_tool_names],
     [local_worker_public_tool_names]) are hidden — callers consume the
     typed projections, the [from] entry points, and the snapshot /

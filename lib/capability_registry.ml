@@ -104,12 +104,6 @@ let surface_to_string = function
   | Local_worker -> "local_worker"
   | Keeper -> "keeper"
 
-let audience_to_string = function
-  | External_mcp_client -> "external_mcp_client"
-  | Spawned_managed_agent -> "spawned_managed_agent"
-  | Local_worker_agent -> "local_worker_agent"
-  | Keeper_agent -> "keeper_agent"
-
 let projection_to_schema (projection : projection) : Masc_domain.tool_schema =
   {
     Masc_domain.name = projection.tool_name;
@@ -280,10 +274,6 @@ let surface_tool_names_from (public_tool_source_schemas : Masc_domain.tool_schem
   surface_tool_schemas_from public_tool_source_schemas surface
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
-let public_raw_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
-    Masc_domain.tool_schema list =
-  require_unique_schemas ~label:"public raw tool catalog" public_tool_source_schemas
-
 (* Surface filtering at this layer removed in #1961 — all registered tools pass
    through here unchanged. The public MCP surface is now filtered at the profile
    level: [Mcp_server_eio_tool_profile.tool_schemas_for_profile] applies
@@ -332,27 +322,3 @@ let surface_snapshot_json
       ("keeper", surface_json Keeper);
     ]
 
-let capability_to_json (capability : capability_def) =
-  `Assoc
-    [
-      ("capability_id", `String capability.capability_id);
-      ( "audiences",
-        `List
-          (List.map
-             (fun audience -> `String (audience_to_string audience))
-             capability.audiences) );
-      ("supports_audit_evidence", `Bool capability.supports_audit_evidence);
-      ( "supports_direct_user_discovery",
-        `Bool capability.supports_direct_user_discovery );
-      ( "projections",
-        `List
-          (List.map
-             (fun (projection : projection) ->
-               `Assoc
-                 [
-                   ("surface", `String (surface_to_string projection.surface));
-                   ("tool_name", `String projection.tool_name);
-                   ("backend_tool_name", `String projection.backend_tool_name);
-                 ])
-             capability.projections) );
-    ]

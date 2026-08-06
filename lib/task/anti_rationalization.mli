@@ -12,6 +12,22 @@ type review_request =
   ; evidence_refs : string list
   }
 
+(** What the evaluator may look at besides the submitted evidence snapshot
+    (RFC-0361 D1).
+
+    Stated per review rather than defaulted, because the two cases differ in
+    what a verdict means. With [No_lookup_surface] the submitter's references
+    are the upper bound of what could be checked, and an approval says only
+    that the submitted excerpt reads as real work. This module deliberately
+    does not build the surface itself: the tools that read a producer's tree
+    belong above the containment primitives, not inside the review protocol. *)
+type lookup_surface =
+  | No_lookup_surface
+  | Lookup_tools of
+      { schemas : Types_core.tool_schema list
+      ; dispatch : name:string -> args:Yojson.Safe.t -> (string, string) result
+      }
+
 type verdict =
   | Approve
   | Reject of string
@@ -41,8 +57,10 @@ val review
   -> ?required_evidence:string list
   -> ?verify_gate_evidence:string list
   -> ?on_verdict:(review_result -> unit)
+  -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?few_shot_block:string
   -> ?sw:Eio.Switch.t option
+  -> lookup:lookup_surface
   -> base_path:string
   -> review_request
   -> review_result
@@ -56,6 +74,7 @@ val build_prompt
   -> ?completion_contract:string list
   -> ?required_evidence:string list
   -> ?verify_gate_evidence:string list
+  -> lookup:lookup_surface
   -> review_request
   -> (string, string) result
 
@@ -69,6 +88,8 @@ val run_llm_reviewer_fn
       -> evaluator_runtime:string
       -> prompt:string
       -> report_tool_schema:Types_core.tool_schema
+      -> lookup:lookup_surface
+      -> on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
       -> unit
       -> (verdict option, Agent_sdk.Error.sdk_error) result)
        Atomic.t

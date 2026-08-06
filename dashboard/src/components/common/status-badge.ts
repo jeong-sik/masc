@@ -5,7 +5,10 @@ import type { ComponentChildren } from 'preact'
 import { statusLabel } from '../../lib/status-label'
 import { PHASE_TONE, type FleetTone, type KeeperPhaseToken } from '../../lib/fleet-tone'
 
-type StatusBadgeTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral'
+// Exported so a caller mapping its own closed status vocabulary onto these
+// tones names this type instead of restating the union — one definition of the
+// tone set, not one per panel.
+export type StatusBadgeTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral'
 
 interface StatusBadgeProps {
   status?: string

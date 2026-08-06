@@ -67,7 +67,12 @@ const HIDDEN_DIAGNOSTIC_FALLBACK_PLAN: readonly RefreshTask[] = ['namespaceTruth
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
   switch (routeState.tab) {
     case 'overview':
-      return ['shell', 'namespaceTruth', 'missionSnapshot', 'execution']
+      // The overview 작업·목표 card renders the flat `goals` signal, which only
+      // the `goals` (planning fetch) refresher populates — the same gap the
+      // `workspace` branch below already documents. Without it a fresh
+      // #overview load printed "활성 목표 없음" while masc_goal_list returned
+      // 15 goals with executing phases.
+      return ['shell', 'namespaceTruth', 'missionSnapshot', 'execution', 'goals']
     case 'keepers':
       // 'activeKeeperChat' re-hydrates the open conversation panel's transcript
       // (guard-respecting no-op when already loaded). It matters on SSE

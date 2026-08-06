@@ -34,12 +34,25 @@ val create : base_path:string -> t
 val root_dir : t -> string
 (** Absolute path of the store root. Mainly for diagnostics/testing. *)
 
+val preview_max : int
+(** Hard ceiling on the preview length {!put} produces, in characters.
+
+    Exported because a caller that must bound the size of a marker it has not
+    stored yet has to build a saturating candidate, and the only alternative
+    is to hardcode this number at that call site. A hardcoded copy would turn
+    a later increase here into a silent underestimate at the caller — the
+    marker would grow past the bound the caller measured against. Nothing
+    outside this module may restate the value; {!Tool_output.make_artifact_ref}
+    does not enforce it, so it is a property of {!put}, not of
+    {!Tool_output.artifact_ref}. *)
+
 val put : t -> bytes:string -> mime:string -> Tool_output.t
 (** Store [bytes] under its sha256 digest.
 
     Returns [Tool_output.Stored {sha256; bytes; preview; mime}] where
-    [preview] is the first ~200 sanitized chars of [bytes] (control bytes
-    replaced with [?], whitespace collapsed to spaces).
+    [preview] is the leading sanitized run of [bytes], at most
+    {!preview_max} characters (control bytes replaced with [?], whitespace
+    collapsed to spaces).
 
     Idempotent: re-putting the same bytes atomically rewrites the same content
     address, repairing any corrupt prior bytes without a duplicate read/hash.

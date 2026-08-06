@@ -13,19 +13,17 @@
     - Usage / cost helpers ({!merge_usage}) plus the heartbeat
       interval reader {!local_worker_heartbeat_interval_sec}.
 
-    The .ml has ~38 toplevels but external callers reach only
-    the 15 entries below.  Internal helpers
+    The .ml has 35 toplevel bindings; this interface exports 12 of
+    them.  Internal helpers
     ([next_jsonrpc_id], [strip_mcp_prefix],
     [has_agent_name_field], [inject_default_agent_name],
-    [extract_prompt_block], [masc_http_base_url],
+    [masc_http_base_url],
     [request_id_matches], [normalize_mcp_body],
     [extract_tool_text], [extract_jsonrpc_error_detail],
     [post_json_via_eio], [call_jsonrpc],
-    [tool_schema_of_name], [tool_defs_of_schemas],
-    [followup_prompt], [split_top_level],
+    [split_top_level],
     [find_top_level_char], [parse_text_tool_args],
-    [parse_text_tool_calls], [make_usage],
-    [worker_session_id], [worker_auth_token]) stay private.
+    [parse_text_tool_calls], [worker_auth_token]) stay private.
 
     {!Worker_container} does [include Worker_container_types]
     and reaches a few additional helpers unqualified
@@ -160,7 +158,7 @@ val default_system_prompt :
   ?role:string ->
   ?selection_note:string ->
   unit ->
-  string
+  (string, string) result
 (** Builds the canonical system prompt seeded into a freshly
     spawned local worker.  [role] and [selection_note] are
     optional contextual hints (the leader-selected model

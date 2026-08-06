@@ -42,6 +42,14 @@ val handle_keeper_catchup_judge_post :
 (** Handle [POST /catchup-judge] by recomputing the keeper catch-up digest
     and starting an out-of-band Fusion judge run. *)
 
+val handle_keeper_operator_note_post :
+  Mcp_server.server_state ->
+  string ->
+  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+(** Handle [POST /operator-note] by replacing this keeper's pending note
+    (RFC-0366). The note renders on the next turn that assembles and is then
+    stamped consumed; oversized text is rejected rather than truncated. *)
+
 val handle_keeper_chat_recovery_post :
   Mcp_server.server_state ->
   string ->

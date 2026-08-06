@@ -535,10 +535,6 @@ let keeper_purge_submit_status = function
   | Existing_operation_intent_mismatch _ -> `Conflict
 ;;
 
-module For_testing = struct
-  let purge_dashboard_keeper_artifacts = purge_dashboard_keeper_artifacts
-end
-
 let respond_keeper_purge_operation_accepted ~request reqd operation =
   match operation.Keeper_shutdown_types.cleanup_intent.reason with
   | Keeper_shutdown_types.Dashboard_keeper_purge context ->

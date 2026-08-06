@@ -83,7 +83,7 @@ echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, al
 # 765 -> 748 when the declaration parser above was fixed. The first check
 # exited before this one could run, so the baseline had gone stale by 17 while
 # suites were being wired.
-UNWIRED_BASELINE=748
+UNWIRED_BASELINE=745
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

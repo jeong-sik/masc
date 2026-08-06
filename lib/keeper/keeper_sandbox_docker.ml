@@ -131,9 +131,6 @@ type docker_shell_result =
   ; cwd : string
   }
 
-(** Normalize a Docker invocation result into the common [(status, output)]
-    pair used by shell-op handlers.  [Error] maps to a synthetic
-    [WEXITED 127] so callers can treat both branches uniformly. *)
 (* docker run --rm wall-clock covers spawn + container
    cold start + actual cmd + drain. The floor is hardcoded at 20s because
    the hang modes (docker daemon stall, container start stall, command

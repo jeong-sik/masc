@@ -168,9 +168,6 @@ type rollup = {
 
 type upsert_kind = [ `created | `updated ]
 
-let normalize_lower s =
-  String.trim s |> String.lowercase_ascii
-
 let parse_goal_phase = function
   | Some s -> Goal_phase.parse s
   | None -> None
@@ -585,5 +582,3 @@ let compute_rollup goals =
     dropped_count = count (fun goal -> goal.phase = Goal_phase.Dropped);
   }
 
-let active_goals config =
-  list_goals config ~phase:Goal_phase.Executing ()

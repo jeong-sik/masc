@@ -216,7 +216,7 @@ let cache_entries =
 
 let channel_gate_entries =
   [
-    entry ~default:"(none)" "MASC_CHANNEL_GATE_DEDUP_TTL_SEC"
+    entry ~default:"3600" "MASC_CHANNEL_GATE_DEDUP_TTL_SEC"
       "Dedup TTL (seconds, clamped 10-3600)";
     entry ~default:"(none)" "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
       "Max content length (clamped 100-16000)";
@@ -253,7 +253,7 @@ let keeper_sandbox_entries =
       "Writable /tmp tmpfs size for hardened keeper containers";
     entry ~default:"false" "MASC_KEEPER_SANDBOX_RELAX_FS"
       "Relax Docker sandbox filesystem hardening (writable rootfs + exec /tmp)";
-    entry ~default:"(none)" "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
+    entry ~default:"" "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
       "Optional seccomp profile path for hardened keeper containers";
     entry ~default:"false" "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
       "Fail closed unless Docker reports rootless mode";
@@ -301,7 +301,7 @@ let keeper_keepalive_entries =
 
 let keeper_metrics_entries =
   [
-    entry ~default:"(none)" "MASC_KEEPER_METRICS_MAX_BYTES"
+    entry ~default:"10485760" "MASC_KEEPER_METRICS_MAX_BYTES"
       "Max metrics file size before rotation (10MB)";
     entry ~default:"1" "MASC_KEEPER_METRICS_MAX_ROTATED"
       "Number of rotated files to keep";
@@ -456,7 +456,7 @@ let telemetry_entries =
       "Routine telemetry level (debug|info|warn|error|off)";
     entry ~default:"false" Env_config_core.parse_warn_env_key
       "Whether malformed env parses fail fast";
-    entry ~default:"(none)" "MASC_OTEL_ENABLED"
+    entry ~default:"true" "MASC_OTEL_ENABLED"
       "Enable OpenTelemetry span collection";
   ]
 

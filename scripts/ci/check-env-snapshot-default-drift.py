@@ -44,6 +44,11 @@ def boolean(value: str) -> bool | None:
     return {"true": True, "false": False}.get(value)
 
 
+# The snapshot writes this when a knob has no default at all: unset means the
+# feature stays off, or the reader hands back an option the caller decides on.
+NO_DEFAULT = "(none)"
+
+
 def comparable(declared: str, actual: str) -> tuple[object, object] | None:
     """Return the pair to compare, or None when the two are not comparable."""
     dn, an = numeric(declared), numeric(actual)
@@ -52,6 +57,13 @@ def comparable(declared: str, actual: str) -> tuple[object, object] | None:
     db, ab = boolean(declared), boolean(actual)
     if db is not None and ab is not None:
         return db, ab
+    # A reader whose default is itself a quoted literal states its text
+    # directly, so the snapshot has to match that text — this is what keeps an
+    # empty-string default comparable at all. A reader that names a constant
+    # instead resolves at compile time and cannot be read here, so it is left
+    # to the OCaml test that pins the two together.
+    if actual.startswith('"') and actual.endswith('"') and len(actual) >= 2:
+        return declared, actual[1:-1]
     return None
 
 
@@ -74,6 +86,17 @@ def main() -> int:
     compared = 0
     for var, declared_default in declared.items():
         for actual, path, lineno in readers.get(var, []):
+            # A reader only lands in `readers` because it declares ~default:, so
+            # the snapshot claiming the knob has none is a statement about this
+            # very call site and is false. This is the case the type-directed
+            # comparison below cannot see — "(none)" is neither numeric nor
+            # boolean, so `comparable` returns None and the pair is dropped —
+            # and it is also the most misleading one to leave on the operator
+            # surface: it reads as "unset does nothing".
+            if declared_default == NO_DEFAULT:
+                compared += 1
+                drift.append((var, declared_default, actual, path, lineno))
+                continue
             pair = comparable(declared_default, actual)
             if pair is None:
                 continue

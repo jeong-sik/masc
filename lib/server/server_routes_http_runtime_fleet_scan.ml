@@ -23,13 +23,6 @@ let sorted_unique_strings values = List.sort_uniq String.compare values
 
 let effective_autoboot_enabled = Keeper_meta_store.effective_autoboot_enabled
 
-let blocker_class_string (info : Keeper_meta_contract.blocker_info option) =
-  Option.map (fun (info : Keeper_meta_contract.blocker_info) ->
-    Keeper_meta_contract.blocker_class_to_string info.klass) info
-
-let blocker_detail (info : Keeper_meta_contract.blocker_info option) =
-  Option.map (fun (info : Keeper_meta_contract.blocker_info) -> info.detail) info
-
 let pause_elapsed_sec now (meta : Keeper_meta_contract.keeper_meta) =
   match Workspace_resilience.Time.parse_iso8601_opt meta.updated_at with
   | Some updated_ts when updated_ts > 0.0 -> Some (max 0.0 (now -. updated_ts))

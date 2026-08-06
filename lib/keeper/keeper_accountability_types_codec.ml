@@ -205,14 +205,7 @@ let resolution_event_to_json (event : resolution_event) =
      @ option_string_field "reason" event.reason)
 ;;
 
-let event_date_string ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf
-    "%04d-%02d-%02d"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-;;
+let event_date_string ts = Jsonl_writer.day_key ~ts
 
 let claim_event_of_json json =
   match json_string_opt "event_type" json with

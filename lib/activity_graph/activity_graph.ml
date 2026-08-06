@@ -641,7 +641,6 @@ let graph_json config ?(kinds = []) ?(limit = 500)
             label = node.label;
             status = node.status;
             weight = node.weight;
-            semantic_weight = node.semantic_weight;
             last_event_at = node.last_event_at;
             meta = node.meta;
           }

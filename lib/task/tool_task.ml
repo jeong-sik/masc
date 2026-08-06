@@ -6,11 +6,6 @@ include Tool_task_handlers
 
 module Workspace = Workspace_core
 
-let task_log_info ~task_id fmt =
-  Stdlib.Format.ksprintf
-    (fun message -> Log.Task.info "task_id=%s %s" task_id message)
-    fmt
-
 let workflow_rejection_result
       ~tool_name
       ~start_time

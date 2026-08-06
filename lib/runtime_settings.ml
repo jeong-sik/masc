@@ -54,14 +54,6 @@ let deserialize_int json =
            "deserialize_int: expected JSON integer (`Int or whole-valued `Float), got %s"
            (Json_util.kind_name other))
 
-let deserialize_string json =
-  match json with
-  | `String s -> Ok s
-  | other ->
-      Error
-        (Printf.sprintf "deserialize_string: expected JSON string, got %s"
-           (Json_util.kind_name other))
-
 let deserialize_bool json =
   match json with
   | `Bool b -> Ok b

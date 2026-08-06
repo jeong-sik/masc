@@ -31,10 +31,7 @@ import {
   KeeperDetailSectionRail,
   KeeperDetailSection,
 } from './keeper-detail-shell'
-import {
-  GenerationLineagePanel,
-  KeeperCheckpointPanel,
-} from './keeper-detail-history'
+import { KeeperCheckpointPanel } from './keeper-detail-history'
 import {
   KeeperDiagnosticSummary,
   KeeperRuntimeActions,
@@ -269,7 +266,6 @@ export function KeeperDetailBody({
             `
             : null}
 
-          <${GenerationLineagePanel} keeperName=${keeper.name} />
             </div>
 
           <${CollapsibleSection} title="Checkpoint & Snapshots">

@@ -203,8 +203,6 @@ let approval_queue_summary ~now_ts ~base_path ()
 
 (* ── JSON projection ─────────────────────────────────────── *)
 
-let json_of_float_opt = Json_util.float_opt_to_json
-
 let tool_rejections_json ?(top_n = 20)
     ~window_minutes ~now_ts () : Yojson.Safe.t list =
   tool_rejection_counts ~now_ts ~window_minutes ()

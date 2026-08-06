@@ -145,7 +145,6 @@ describe('buildJourneyWaterfall', () => {
           gate: { status: 'pass' },
           result: 'old result',
           duration_ms: 250,
-          cost_usd: 0.001,
         },
       ]),
       toolCalls: toolCalls([
@@ -169,7 +168,6 @@ describe('buildJourneyWaterfall', () => {
     expect(model.turns[0]?.thinkingCount).toBe(1)
     expect(model.turns[0]?.toolCallCount).toBe(1)
     expect(model.turns[0]?.runtimeEvidence?.maxOasTurnCount).toBe(4)
-    expect(model.summary.totalCostUsd).toBe(0.001)
     const toolEntry = model.turns[0]?.entries.find(entry => entry.kind === 'tool_call')
     expect(toolEntry?.source).toBe('trajectory+tool_call_log')
     expect(toolEntry?.toolArgs).toEqual({ file_path: '/tmp/current' })

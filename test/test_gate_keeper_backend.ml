@@ -969,7 +969,6 @@ let trajectory_entry_of_provider_call ~ts ~turn ~round
   ; result = Some {|{"ok":true}|}
   ; duration_ms = 1
   ; error = None
-  ; cost_usd = Trajectory.tool_cost_estimate call.name
   ; execution_id = Some ("exec-" ^ call.call_id)
   }
 

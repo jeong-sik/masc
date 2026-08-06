@@ -156,10 +156,7 @@ let gateway_state_label = function
 (* Bot identity captured from the gateway's READY dispatch. The legacy
    sidecar wrote this to status.json; the in-process gateway (RFC-0203)
    keeps it in memory — nothing writes that file anymore. *)
-type ready_info = {
-  ready_bot_user_id : string;
-  ready_at : string;
-}
+type ready_info = Channel_gate_connector.ready_info
 
 let last_ready : ready_info option Atomic.t = Atomic.make None
 

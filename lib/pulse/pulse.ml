@@ -316,4 +316,11 @@ let remove_consumer t name =
 module For_testing = struct
   let is_quiet_hour_at = is_quiet_hour_at
   let effective_interval_at = effective_interval_at
+
+  (* The clock-taking wrapper the beat loop actually calls. Exposed so a test
+     can pin the delegation itself, which neither pure function reaches: a
+     wrapper that stopped consulting the rhythm, or read the hour from the
+     wrong place, would leave both of them passing. *)
+  let effective_interval_for_clock clock rhythm =
+    effective_interval (Clock clock) rhythm
 end

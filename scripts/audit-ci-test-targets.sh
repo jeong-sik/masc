@@ -25,7 +25,18 @@ referenced="$(mktemp)"
 trap 'rm -f "$declared" "$referenced"' EXIT
 
 # Test executables: every module listed in a (names ...) block or a (name X).
-grep -oE '^\s+test_[a-z_0-9]+' test/dune | tr -d ' ' > "$declared"
+# Field-wise, not one match per line: test/dune puts two names on a line in
+# two places, and `grep -o` with a `^` anchor only ever reports the first. That
+# is how this check came to report test_task_cache_invariant_13397 as missing
+# while (names ...) declared it. The trailing `)` closing a (names ...) list is
+# stripped so the last entry in each block still counts.
+awk '/^[[:space:]]+test_[a-z_0-9]+/ {
+       for (i = 1; i <= NF; i++) {
+         name = $i
+         sub(/\)+$/, "", name)
+         if (name ~ /^test_[a-z_0-9]+$/) print name
+       }
+     }' test/dune > "$declared"
 grep -oE '\(name test_[a-z_0-9]+\)' test/dune | sed 's/(name //;s/)//' >> "$declared"
 # Explicitly named aliases, e.g. (alias runtest-dashboard-http-behavior-contracts).
 grep -oE '\(alias runtest-[a-z_0-9-]+\)' test/dune \
@@ -66,9 +77,13 @@ echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, al
 # assert deleted text for months. Three were found this way in one day
 # (#26811 benchmark, the prompt suites, test_keeper_wake_turn_context).
 #
-# Frozen as a ratchet rather than a hard zero: 765 is where it stands, and a
+# Frozen as a ratchet rather than a hard zero: this is where it stands, and a
 # PR that adds a suite without wiring it makes that number grow.
-UNWIRED_BASELINE=765
+#
+# 765 -> 748 when the declaration parser above was fixed. The first check
+# exited before this one could run, so the baseline had gone stale by 17 while
+# suites were being wired.
+UNWIRED_BASELINE=748
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

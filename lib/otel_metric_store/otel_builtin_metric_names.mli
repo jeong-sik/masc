@@ -133,3 +133,9 @@ val metric_telemetry_cache_rescans : string
 (** #20677: bytes folded by incremental telemetry readers.  Labels:
     [store]. *)
 val metric_telemetry_scanned_bytes : string
+
+(** A keeper lifecycle event reached the dashboard cache patcher without a
+    decodable [event]/[keeper_name] pair, so the cache invalidation it carried
+    was dropped. Declared rather than emitted bare so the 0-cell exports while
+    the fleet is healthy. *)
+val metric_keeper_lifecycle_malformed : string

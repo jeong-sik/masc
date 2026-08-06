@@ -572,6 +572,7 @@ jobs:
           echo "=== Running meta bug-class gates (see #9516 #9517 #9519 #9521) ==="
           bash scripts/ci/check-ssot-spawn-drift.sh
           bash scripts/check-spec-truth.sh
+          python3 scripts/ci/check-spec-file-refs.py
           bash scripts/ci/check-silent-failure-patterns.sh
           bash scripts/ci/check-enum-string-safety.sh
           bash scripts/ci/check-masc-oas-boundary.sh
@@ -881,7 +882,18 @@ jobs:
             @test/runtest-test_server_auth_dashboard_actor_resolution \
             @test/runtest-test_error_body_wire_shape \
             @test/runtest-test_tool_registry_consistency \
-            @test/runtest-test_tool_spec
+            @test/runtest-test_tool_spec \
+            @test/runtest-test_tool_shard_coverage
+
+      - name: Run completion-authority lookup surface suite
+        # The judge's lookup tools reach the filesystem and Git inside a
+        # producer's root. @check compiles the containment cases but does not
+        # run them, so "cannot read outside the root" and "a dirty tree is not
+        # reported as clean" were assertions nothing executed — both compile
+        # whether or not they hold.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_verification_authority_tools
 
       - name: Run invariant and SSOT guard suites
         # These assert on repository shape -- baselines, mirrors, vocabulary
@@ -929,6 +941,24 @@ jobs:
             @test/runtest-test_tool_contract_truth \
             @test/runtest-test_voice_command_descriptor_parity
 
+      - name: Run metric zero-cell declaration suite
+        # A counter emitted as a bare string still compiles and still counts;
+        # what it loses is the 0-cell, and only a running store shows that.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_metric_zero_cell_declaration
+
+      - name: Run connector observability label contract
+        # These strings are metric label values, so a rename is a wire change
+        # that compiles. @check cannot catch that, and test_discord_observability
+        # was never wired into any target list, so nothing was running here at
+        # all. It passes 8/8 on this branch, so it joins rather than staying in
+        # the #26075 inventory.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_gate_connector_observability \
+            @test/runtest-test_discord_observability
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was
@@ -937,6 +967,16 @@ jobs:
         run: |
           opam exec -- dune build --root . \
             @test/runtest-test_keeper_keepalive_launch_order_ast
+
+      - name: Run memory journal suite
+        # The journal is the only disk record of a librarian pass that produced
+        # no snapshot. @check compiles this suite but does not run it, and an
+        # unrun decoder guard is not a guard: the cases that matter here assert
+        # that an unknown outcome or kind rejects rather than folding into a
+        # permissive default, which compiles either way.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_librarian_journal_failures
 
       - name: Run enum mirror sync guard
         # This PR exists because the enum mirrors claimed a sync regression

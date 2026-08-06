@@ -2,7 +2,6 @@
 
 (library
  (name otel_dispatch_hook)
- (flags :standard -w +32)
  (public_name masc.otel_dispatch_hook)
  (wrapped false)
  (modules otel_dispatch_hook)

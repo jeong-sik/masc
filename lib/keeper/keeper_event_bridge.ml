@@ -419,7 +419,6 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
 ;;
 
 let relay_max_attempts = 3
-let relay_max_queue_depth = 256
 
 type relay_stage =
   | Append
@@ -658,7 +657,6 @@ let oas_event_store ~config =
     ()
 ;;
 
-let deliver_pending_with_impl = deliver_pending_with
 
 module For_testing = struct
   type pending_relay =
@@ -675,17 +673,8 @@ module For_testing = struct
     | Delivered
     | Retryable_failure of pending_relay * relay_stage * exn
 
-  let make_pending json = { json; attempts = 0; appended = false }
-  let relay_max_queue_depth = relay_max_queue_depth
-  let resolve_oas_event_retention_days = resolve_oas_event_retention_days
 
-  let to_pending (pending : pending_relay) : bridge_pending_relay =
-    { json = pending.json; attempts = pending.attempts; appended = pending.appended }
-  ;;
 
-  let of_pending (pending : bridge_pending_relay) : pending_relay =
-    { json = pending.json; attempts = pending.attempts; appended = pending.appended }
-  ;;
 
   (* Issue #8676: convert directly between the outer [relay_stage] and the
      [For_testing.relay_stage] mirror. The previous string-roundtrip carried
@@ -693,26 +682,9 @@ module For_testing = struct
      any future outer constructor as [Broadcast] in test stage assertions
      (#8605 anti-pattern). Direct match makes adding a constructor a
      compile error here, forcing the test mirror to stay in sync. *)
-  let of_stage : bridge_relay_stage -> relay_stage = function
-    | Append -> Append
-    | Broadcast -> Broadcast
-  ;;
 
-  let of_result (result : bridge_relay_result) =
-    match result with
-    | Delivered -> Delivered
-    | Retryable_failure (pending, stage, exn) ->
-      Retryable_failure (of_pending pending, of_stage stage, exn)
-  ;;
 
-  let deliver_pending_with ~append_json ~broadcast_json pending =
-    deliver_pending_with_impl ~append_json ~broadcast_json (to_pending pending)
-    |> of_result
-  ;;
 
-  let should_drain_subscription pending =
-    should_drain_subscription (List.map to_pending pending)
-  ;;
 end
 
 let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =

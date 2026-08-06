@@ -2,7 +2,6 @@
 
 (library
  (name masc_auth)
- (flags :standard -w +32)
  (public_name masc.auth)
  (wrapped false)
  (private_modules auth_credential_base auth_metric_store)

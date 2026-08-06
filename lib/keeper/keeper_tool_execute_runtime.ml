@@ -105,7 +105,6 @@ let redact_execute_output redaction ~stdout ~stderr =
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let model_execute_location_fields = model_execute_location_fields
-  let execute_gate_input = execute_gate_input
   let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
     let redaction = execute_secret_redaction ~base_path ~keeper_name in
     redact_execute_output redaction ~stdout ~stderr

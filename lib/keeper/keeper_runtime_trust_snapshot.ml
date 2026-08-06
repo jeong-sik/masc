@@ -33,8 +33,6 @@ module Snapshot_cache = struct
     in
     List.iter (Hashtbl.remove tbl) expired
 
-  let clear () =
-    Stdlib.Mutex.protect mu (fun () -> Hashtbl.clear tbl)
 
   let get ~now key =
     Stdlib.Mutex.protect mu (fun () ->
@@ -1066,7 +1064,6 @@ let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
       value
 
 module For_testing = struct
-  let clear_snapshot_cache = Snapshot_cache.clear
   let snapshot_json_inner_with_pending_reader =
     snapshot_json_inner_with_pending_reader
 end

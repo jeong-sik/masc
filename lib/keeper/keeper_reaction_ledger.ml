@@ -360,7 +360,6 @@ let after_ledger_append_hook :
   Atomic.make None
 ;;
 
-let after_ledger_append_hook_mutex = Stdlib.Mutex.create ()
 
 let project_event_queue_transition_outbox_result
       ~base_path
@@ -426,20 +425,6 @@ let project_event_queue_transition_outbox_result
          | Some hook -> hook ()))
     ~base_path
     ~keeper_name
-
-module For_testing = struct
-  let with_after_ledger_append ~after_ledger_append f =
-    Stdlib.Mutex.lock after_ledger_append_hook_mutex;
-    let previous =
-      Atomic.exchange after_ledger_append_hook (Some after_ledger_append)
-    in
-    Fun.protect
-      ~finally:(fun () ->
-        Atomic.set after_ledger_append_hook previous;
-        Stdlib.Mutex.unlock after_ledger_append_hook_mutex)
-      f
-  ;;
-end
 
 let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields

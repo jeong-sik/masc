@@ -2,7 +2,6 @@
 
 (library
  (name keeper_metrics)
- (flags :standard -w +32)
  (public_name masc.keeper_metrics)
  (wrapped false)
  (modules

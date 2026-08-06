@@ -8,15 +8,6 @@ import { ensureDevToken } from './dev-token'
 import type { RuntimeDefaultsResponse } from './schemas/runtime-defaults'
 import type { RuntimeResolvedResponse } from './schemas/runtime-resolved'
 
-interface DashboardRuntimeProviderDiscovery {
-  healthy?: boolean
-  discovered_model?: string | null
-  ctx_size?: number | null
-  total_slots?: number | null
-  busy_slots?: number | null
-  idle_slots?: number | null
-}
-
 export interface DashboardRuntimeParameterPolicy {
   reasoning_toggle_wire?: string | null
   reasoning_replay_policy?: string | null
@@ -266,7 +257,6 @@ export interface DashboardRuntimeProviderSnapshot {
   source?: string | null
   endpoint_url?: string | null
   note?: string | null
-  discovery?: DashboardRuntimeProviderDiscovery | null
 }
 
 export interface DashboardRuntimeAssignment {
@@ -693,18 +683,6 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
   }
 }
 
-function decodeRuntimeProviderDiscovery(raw: unknown): DashboardRuntimeProviderDiscovery | null {
-  if (!isRecord(raw)) return null
-  return {
-    healthy: asBoolean(raw.healthy),
-    discovered_model: asNullableString(raw.discovered_model),
-    ctx_size: asNumber(raw.ctx_size) ?? null,
-    total_slots: asNumber(raw.total_slots) ?? null,
-    busy_slots: asNumber(raw.busy_slots) ?? null,
-    idle_slots: asNumber(raw.idle_slots) ?? null,
-  }
-}
-
 function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSnapshot | null {
   if (!isRecord(raw)) return null
   const provider = asString(raw.provider)
@@ -767,7 +745,6 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     source: asNullableString(raw.source),
     endpoint_url: asNullableString(raw.endpoint_url),
     note: asNullableString(raw.note),
-    discovery: decodeRuntimeProviderDiscovery(raw.discovery),
   }
 }
 

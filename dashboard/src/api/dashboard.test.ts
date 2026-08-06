@@ -3252,11 +3252,6 @@ describe('fetchRuntimeProviders', () => {
               },
             },
             source: 'runtime.toml',
-            discovery: {
-              healthy: true,
-              discovered_model: 'Qwen/Qwen3-32B',
-              ctx_size: 200000,
-            },
           },
           {
             provider: 'openai.gpt',
@@ -3399,8 +3394,6 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.declared_spec?.model?.min_p).toBe(0.07)
     expect(result.providers[0]?.declared_spec?.binding?.max_concurrent).toBe(4)
     expect(result.providers[1]?.temperature).toBeNull()
-    expect(result.providers[0]?.discovery?.discovered_model).toBe('Qwen/Qwen3-32B')
-    expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
     expect(result.assignment_status?.status).toBe('degraded')
     expect(result.assignment_status?.assignment_count).toBe(2)
     expect(result.assignment_status?.assigned_runtimes).toEqual(['openai.gpt'])

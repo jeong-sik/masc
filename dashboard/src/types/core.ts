@@ -692,6 +692,7 @@ interface KeeperConversationUsage {
 export type KeeperTurnOutcome =
   | 'visible_reply'
   | 'continuation_checkpoint'
+  | 'external_effect_completed'
   | 'external_effect_pending'
   | 'no_visible_reply'
 

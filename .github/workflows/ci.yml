@@ -1906,6 +1906,12 @@ jobs:
           #     execution is HARD REQUIRED as well. Each test step lacks
           #     continue-on-error, so a test failure fails the Build and Test
           #     job and blocks merge.
+          # A cancelled job did not fail — it did not run. Both block, because
+          # a check that never ran cannot be evidence of anything, but they are
+          # printed apart: over the last 20 CI runs the job conclusions were 110
+          # success, 45 cancelled and 4 failure, so "FAIL dashboard cancelled"
+          # was the line a reader met eleven times more often than a real
+          # failure, and it sends them looking for a defect in the diff.
           check() {
             local name=$1
             local result=$2
@@ -1914,6 +1920,9 @@ jobs:
               printf 'PASS  %-20s %s\n' "$name" "$result"
             elif [[ "$mode" == "advisory" ]]; then
               printf 'WARN  %-20s %s (advisory, not blocking)\n' "$name" "$result"
+            elif [[ "$result" == "cancelled" ]]; then
+              printf 'STOP  %-20s cancelled — never ran, re-run to decide\n' "$name"
+              fail=1
             else
               printf 'FAIL  %-20s %s\n' "$name" "$result"
               fail=1

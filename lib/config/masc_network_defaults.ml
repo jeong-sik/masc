@@ -104,6 +104,18 @@ let masc_http_default_port_s =
 (** Default host for the MASC HTTP server. *)
 let masc_http_default_host = "127.0.0.1"
 
+(* Lives here rather than at the reader so [Env_config_snapshot] can name it
+   instead of restating the number. Restating is how the operator surface came
+   to report 128 while the server accepted 512 (#14143 raised the reader and
+   left the snapshot). [Masc_network_defaults] is in the config layer, which
+   the snapshot can reference and [Http_server_eio] cannot be. *)
+
+(** Default concurrent-connection ceiling for the MASC HTTP server. *)
+let masc_http_default_max_connections = 512
+
+(** String form of {!masc_http_default_max_connections} for the env snapshot. *)
+let masc_http_default_max_connections_s = string_of_int masc_http_default_max_connections
+
 (** [is_loopback_host host] returns [true] when [host] resolves to any
     IPv4/IPv6 loopback address (via {!Ipaddr}).  Treats the literal
     "localhost" (after trim + lowercase) as loopback.  Malformed

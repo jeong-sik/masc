@@ -78,6 +78,17 @@ val masc_http_default_port_s : string
 
 val masc_http_default_host : string
 
+val masc_http_default_max_connections : int
+(** Default concurrent-connection ceiling for the MASC HTTP server.
+
+    Named here so the reader ({!Http_server_eio}) and the operator snapshot
+    ({!Env_config_snapshot}) can share one number. They restated it
+    independently until #14143 raised the reader to 512 and left the snapshot
+    on 128. *)
+
+(** String form of {!masc_http_default_max_connections} for the env snapshot. *)
+val masc_http_default_max_connections_s : string
+
 (** {1 Loopback detection} *)
 
 (** Treats ["localhost"] (case-insensitive, trimmed) and any IPv4/IPv6

@@ -19,7 +19,8 @@ let server_entries =
     entry ~default:"(none)" "MASC_BUILD_GIT_COMMIT" "Build git commit hash";
     entry ~default:Masc_network_defaults.masc_http_default_host
       "MASC_HTTP_HOST" "HTTP server listen host";
-    entry ~default:"128" "MASC_HTTP_MAX_CONNECTIONS" "HTTP server max connections";
+    entry ~default:Masc_network_defaults.masc_http_default_max_connections_s
+      "MASC_HTTP_MAX_CONNECTIONS" "HTTP server max connections";
   ]
 
 let auth_entries =

@@ -825,12 +825,14 @@ jobs:
 
       - name: Run connector observability label contract
         # These strings are metric label values, so a rename is a wire change
-        # that compiles. @check cannot catch that, and the pre-existing
-        # test_discord_observability is itself unwired (part of the inventory
-        # in #26075), so nothing was running here at all.
+        # that compiles. @check cannot catch that, and test_discord_observability
+        # was never wired into any target list, so nothing was running here at
+        # all. It passes 8/8 on this branch, so it joins rather than staying in
+        # the #26075 inventory.
         run: |
           opam exec -- dune build --root . \
-            @test/runtest-test_gate_connector_observability
+            @test/runtest-test_gate_connector_observability \
+            @test/runtest-test_discord_observability
 
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run

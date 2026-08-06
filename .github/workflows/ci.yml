@@ -1158,6 +1158,24 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_channel_gate_content_length_knob"
 
+      # Redaction is the last thing every observability payload passes through,
+      # so a defect here is not scoped to one field: a preview truncated inside
+      # a multibyte character makes the whole JSON response undecodable and the
+      # panel that reads it renders nothing. test_observability_redact carried a
+      # max-length case from the start and compiled on every run, but was never
+      # named here, so it never executed and the byte-indexed cut survived.
+      - name: Run observability redaction suite
+        id: observability_redaction_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_observability_redact"
+
       - name: Run verification behavior suite
         id: verification_behavior_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

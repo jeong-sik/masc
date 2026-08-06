@@ -307,6 +307,40 @@ let () = test "quiet_hour_wrap_around" (fun () ->
   assert (not (q ~hour:21 ~quiet_range:range))
 )
 
+(* ── Test: the clock wrapper delegates to the pure form ──────── *)
+
+(* The two tests above drive the hour-parameterised functions directly. This
+   one drives the wrapper the beat loop calls, so the delegation is covered
+   too: a wrapper that ignored rhythm.quiet, or fed the pure form a constant,
+   would pass both of the others. Windows of (0,24) and (0,0) make the
+   expected answer independent of what hour the clock actually reports. *)
+let () = test "effective_interval_for_clock honours the quiet window" (fun () ->
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let base = { Pulse.base_s = 10.0; min_s = 1.0; max_s = 100.0; quiet = (0, 0) } in
+  let always_quiet = { base with Pulse.quiet = (0, 24) } in
+  let f = Pulse.For_testing.effective_interval_for_clock in
+  (* (0,0) is empty under qs <= qe, so no hour is quiet: plain base. *)
+  assert (Float.abs (f clock base -. 10.0) < 1e-9);
+  (* (0,24) covers every hour: base * 3, still inside [min_s, max_s]. *)
+  assert (Float.abs (f clock always_quiet -. 30.0) < 1e-9)
+)
+
+(* The clamp has to survive the wrapper as well, not just the pure form. *)
+let () = test "effective_interval_for_clock clamps the stretched interval" (fun () ->
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let capped =
+    { Pulse.base_s = 10.0; min_s = 1.0; max_s = 12.0; quiet = (0, 24) }
+  in
+  let floored =
+    { Pulse.base_s = 10.0; min_s = 40.0; max_s = 100.0; quiet = (0, 0) }
+  in
+  let f = Pulse.For_testing.effective_interval_for_clock in
+  assert (Float.abs (f clock capped -. 12.0) < 1e-9);
+  assert (Float.abs (f clock floored -. 40.0) < 1e-9)
+)
+
 (* ── Test: quiet hour — boundary cases ───────────────────────── *)
 
 let () = test "quiet_hour_boundary" (fun () ->

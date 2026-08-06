@@ -823,6 +823,16 @@ jobs:
             @test/runtest-test_tool_registry_consistency \
             @test/runtest-test_tool_spec
 
+      - name: Run completion-authority lookup surface suite
+        # The judge's lookup tools reach the filesystem and Git inside a
+        # producer's root. @check compiles the containment cases but does not
+        # run them, so "cannot read outside the root" and "a dirty tree is not
+        # reported as clean" were assertions nothing executed — both compile
+        # whether or not they hold.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_verification_authority_tools
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was

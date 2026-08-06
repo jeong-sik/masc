@@ -160,6 +160,11 @@ let lookup_section = function
        is true now. Both are evidence, and disagreement between them is also \
        evidence: a file the snapshot shows and the tree no longer contains was \
        not durable.\n\n\
+       Present is not the same as durable. Work that exists only as an \
+       uncommitted change survives until the next task cleans that working tree, \
+       and reading the file cannot tell you which of the two you are looking at. \
+       Ask what differs from the last commit before treating a file's contents as \
+       the completed work.\n\n\
        A note claiming a path, a commit, or a command result is still not proof by \
        itself. The difference is that you can now check the claims that name \
        something in the producer's tree, so approving without checking an \

@@ -10,7 +10,6 @@
 
 (library
  (name board_tool_adapter)
- (flags :standard -w +32)
  (public_name masc.board_tool_adapter)
  (wrapped false)
  (private_modules

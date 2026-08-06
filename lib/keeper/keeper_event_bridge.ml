@@ -419,6 +419,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
 ;;
 
 let relay_max_attempts = 3
+
 type relay_stage =
   | Append
   | Broadcast

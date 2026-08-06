@@ -2,7 +2,6 @@
 
 (library
  (name voice_bridge_core)
- (flags :standard -w +32)
  (public_name masc.voice_bridge_core)
  (wrapped false)
  (modules voice_bridge_core voice_bridge_transport)

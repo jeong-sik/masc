@@ -437,9 +437,7 @@ let log_exact_error (entry : pending_approval) operation detail =
 (* The renderers themselves moved to [Keeper_exact_flow_detail] so the
    librarian runtime and this worker print slot provenance identically. *)
 let flow_evidence_detail = Keeper_exact_flow_detail.flow_evidence_detail
-let rejection_disposition_detail = Keeper_exact_flow_detail.rejection_disposition_detail
 let candidate_rejection_detail = Keeper_exact_flow_detail.candidate_rejection_detail
-let execution_cause_detail = Keeper_exact_flow_detail.execution_cause_detail
 
 let exact_attempt_source_resolved (entry : pending_approval) = function
   | Exact_attempt_rejected (Exact_attempt_not_found approval_id) ->

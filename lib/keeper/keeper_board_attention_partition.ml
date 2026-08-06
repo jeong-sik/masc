@@ -1301,26 +1301,6 @@ let claim_ready_exact
       | Some _ -> Ok None))
 ;;
 
-let transition_running ~base_path ~partition ~worker_epoch decide =
-  update ~base_path ~keeper_name:partition.keeper_name (fun view ->
-    match Id_map.find_opt partition.partition_id view.by_id with
-    | None -> Error ("Board attention partition not found: " ^ partition.partition_id)
-    | Some current ->
-      (match current.state with
-       | Running running when Worker_epoch.equal running.worker_epoch worker_epoch ->
-         let* state = decide running in
-         let* updated = advance_state current state in
-         if updated = current then Ok ([], current) else Ok ([ updated ], updated)
-       | Running running ->
-         Error
-           (Printf.sprintf
-              "partition %s is owned by worker %s"
-              partition.partition_id
-              (Worker_epoch.to_string running.worker_epoch))
-       | Ready | Completed _ | Settled _ | Blocked _ ->
-         Error ("partition is not Running: " ^ partition.partition_id)))
-;;
-
 let transition_running_exact ~base_path ~partition ~worker_epoch decide =
   let* (partition, changed), write_outcome =
     update_exact ~base_path ~keeper_name:partition.keeper_name (fun view ->

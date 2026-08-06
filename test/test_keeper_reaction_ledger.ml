@@ -1006,6 +1006,33 @@ let test_missing_identity_does_not_claim_an_occurrence_identity () =
   check_member_string "identity quarantine reason" "missing_stimulus_id" "reason" reason
 ;;
 
+
+(* The post-append fault seam is declared in the .mli as a boundary contract:
+   it must exist exactly once as a definition and once as a declaration, so the
+   fault path cannot acquire a second entry point.
+   [scripts/keeper_event_queue_projection_boundary_check.ml] asserts that shape
+   from outside the compiler, which is why an unused-declaration sweep read the
+   declaration as dead and removed it (#27230), turning main red.
+
+   This case holds the declaration from inside the compiler. It calls the seam
+   with a callback that does nothing but record that it ran, so removing the
+   declaration again is a compile error here rather than a red main later. *)
+let test_after_ledger_append_seam_is_reachable_through_the_interface () =
+  let ran = ref false in
+  let result =
+    Keeper_reaction_ledger.For_testing.with_after_ledger_append
+      ~after_ledger_append:(fun () ->
+        ran := true;
+        Ok ())
+      (fun () -> "body ran")
+  in
+  check string "the scoped body's value is returned" "body ran" result;
+  (* The seam installs the hook for the scope; whether this body triggers an
+     append is not this case's claim. What is claimed is that the declaration
+     exists and its type is the one the boundary check names. *)
+  ignore !ran
+;;
+
 let () =
   run
     "keeper_reaction_ledger"
@@ -1082,6 +1109,10 @@ let () =
             "reaction_kind string round-trip drift guard"
             `Quick
             test_reaction_kind_string_roundtrip
+        ; test_case
+            "after_ledger_append seam is reachable through the interface"
+            `Quick
+            test_after_ledger_append_seam_is_reachable_through_the_interface
         ] )
     ]
 ;;

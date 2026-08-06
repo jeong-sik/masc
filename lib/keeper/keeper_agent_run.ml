@@ -879,6 +879,38 @@ let run_turn
                        | None -> snapshot.checkpoint.working_context)
                   }
                 in
+                (* RFC-0364: demote tool results beyond the retention cap in
+                   the persisted copy only. The OAS in-memory session is never
+                   touched; the cap takes effect from the next turn's load. A
+                   structural rejection must not break persistence, so the
+                   uncapped checkpoint is saved with a warning. *)
+                let checkpoint =
+                  let cap =
+                    Runtime_params.get
+                      Runtime_settings.keeper_session_tool_result_cap
+                  in
+                  if cap <= 0
+                  then checkpoint
+                  else (
+                    match
+                      Keeper_checkpoint_purge.cap_tool_results ~cap checkpoint
+                    with
+                    | Ok (capped, _cleared) -> capped
+                    | Error error ->
+                      Log.Keeper.warn
+                        ~keeper_name:meta.name
+                        "checkpoint tool-result cap skipped: %s"
+                        (match error with
+                         | Keeper_checkpoint_purge.Invalid_config detail ->
+                           detail
+                         | Keeper_checkpoint_purge.Invalid_input_structure
+                             structural
+                         | Keeper_checkpoint_purge.Invalid_output_structure
+                             structural ->
+                           Keeper_compaction_unit.show_structural_error
+                             structural);
+                      checkpoint)
+                in
                 match
                   Keeper_checkpoint_store.save_oas_classified
                     ~session_dir:session.session_dir

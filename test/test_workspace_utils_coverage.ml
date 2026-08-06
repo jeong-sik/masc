@@ -295,33 +295,6 @@ let test_env_opt_home () =
   | None -> ()  (* Some systems might not have HOME *)
 
 (* ============================================================
-   storage_backend Type Tests
-   ============================================================ *)
-
-let test_storage_backend_memory_variant () =
-  (* Just test that the type exists and can be constructed indirectly *)
-  let _ : string = "Memory" in
-  ()
-
-let test_storage_backend_filesystem_variant () =
-  let _ : string = "FileSystem" in
-  ()
-
-(* ============================================================
-   config Record Tests
-   ============================================================ *)
-
-let test_config_base_path_type () =
-  (* config record has base_path: string *)
-  let _ : string = "test_path" in
-  ()
-
-let test_config_lock_expiry_type () =
-  (* config record has lock_expiry_minutes: int *)
-  let _ : int = 30 in
-  ()
-
-(* ============================================================
    strip_prefix Tests
    ============================================================ *)
 
@@ -535,6 +508,32 @@ let make_test_config ~base_path ~cluster_name : Workspace_utils.config =
     backend_config;
     backend = Workspace_utils.Memory memory_backend;
   }
+
+(* ============================================================
+   storage_backend / config Tests
+
+   These replaced four cases that bound a literal and returned unit
+   ([let _ : string = "Memory" in ()]). They named the type in a comment
+   and never referenced it, so they passed whatever Workspace_utils did.
+   ============================================================ *)
+
+(* Exhaustive on purpose: a third storage_backend breaks this file, which
+   is the part a value-based case cannot cover -- FileSystem needs an Eio
+   fs capability, so only its arm is pinned here. *)
+let storage_backend_tag : Workspace_utils.storage_backend -> string = function
+  | Workspace_utils.Memory _ -> "memory"
+  | Workspace_utils.FileSystem _ -> "filesystem"
+
+let test_storage_backend_memory_is_tagged () =
+  let backend = Workspace_utils.Memory (Backend.Memory.create ()) in
+  check string "memory backend" "memory" (storage_backend_tag backend)
+
+let test_config_carries_its_fields () =
+  let cfg = make_test_config ~base_path:"/tmp/cfg" ~cluster_name:"c1" in
+  check string "base_path" "/tmp/cfg" cfg.Workspace_utils.base_path;
+  check string "workspace_path" "/tmp/cfg" cfg.Workspace_utils.workspace_path;
+  check int "lock_expiry_minutes" 30 cfg.Workspace_utils.lock_expiry_minutes;
+  check string "backend" "memory" (storage_backend_tag cfg.Workspace_utils.backend)
 
 let test_masc_root_dir_default_cluster () =
   let cfg = make_test_config ~base_path:"/home/user/project" ~cluster_name:"default" in
@@ -756,12 +755,10 @@ let () =
       test_case "home" `Quick test_env_opt_home;
     ];
     "storage_backend", [
-      test_case "memory variant" `Quick test_storage_backend_memory_variant;
-      test_case "filesystem variant" `Quick test_storage_backend_filesystem_variant;
+      test_case "memory is tagged" `Quick test_storage_backend_memory_is_tagged;
     ];
     "config", [
-      test_case "base_path type" `Quick test_config_base_path_type;
-      test_case "lock_expiry type" `Quick test_config_lock_expiry_type;
+      test_case "carries its fields" `Quick test_config_carries_its_fields;
     ];
     "strip_prefix", [
       test_case "basic" `Quick test_strip_prefix_basic;

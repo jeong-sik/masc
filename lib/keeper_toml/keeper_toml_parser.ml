@@ -38,7 +38,11 @@ let rec toml_value_of_otoml = function
          (fun value strings ->
            match value, strings with
            | Toml_string string, Some strings -> Some (string :: strings)
-           | _, _ -> None)
+           | Toml_string _, None -> None
+           | ( Toml_int _ | Toml_float _ | Toml_bool _ | Toml_string_array _
+             | Toml_array _ | Toml_table _ | Toml_inline_table _ | Toml_table_array _
+             | Toml_offset_datetime _ | Toml_local_datetime _ | Toml_local_date _
+             | Toml_local_time _ ), _ -> None)
          values
          (Some [])
      with

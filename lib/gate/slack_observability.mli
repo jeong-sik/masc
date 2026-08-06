@@ -1,12 +1,19 @@
 (** Slack connector observability helpers (RFC-0317).
 
-    Mirrors {!Discord_observability} for the Slack in-process gateway. Closed
-    sums so a new event/outcome forces a label decision at compile time. *)
+    The outcome vocabularies and their labels come from
+    {!Gate_connector_observability}, shared with the Discord connector — the
+    counters differ, the [outcome] values do not. Only the gateway event
+    vocabulary is Slack's own. Closed sums so a new event/outcome forces a
+    label decision at compile time.
 
-type gateway_route =
-  | Control
-  | Triggered
-  | Ambient
+    The [struct include] form is what carries the type equations out; without
+    it this signature would re-declare the variants and seal them, so
+    [Slack_observability.Reply_sent] would stop being the shared
+    constructor. *)
+
+include module type of struct
+  include Gate_connector_observability
+end
 
 type gateway_event =
   | Hello
@@ -15,31 +22,7 @@ type gateway_event =
   | Reaction_added
   | Ignored
 
-type inbound_outcome =
-  | Dropped_unbound
-  | Dispatch_unavailable
-  | Gate_error
-  | Empty_reply
-  | Reply_sent
-  | Reply_send_error
-
-type ambient_outcome =
-  | Ambient_recorded
-  | Ambient_binding_store_error
-  | Ambient_dropped_unbound
-  | Ambient_dropped_empty
-  | Ambient_dropped_too_long
-
-type reply_outcome =
-  | Reply_empty
-  | Reply_send_ok
-  | Reply_send_failed
-
-val gateway_route_label : gateway_route -> string
 val gateway_event_label : gateway_event -> string
-val inbound_outcome_label : inbound_outcome -> string
-val ambient_outcome_label : ambient_outcome -> string
-val reply_outcome_label : reply_outcome -> string
 
 val record_gateway_event : route:gateway_route -> gateway_event -> unit
 (** Increment [masc_slack_gateway_events_total] with [event] and [route]

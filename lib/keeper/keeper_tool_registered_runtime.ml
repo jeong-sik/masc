@@ -64,12 +64,7 @@ let handle_masc_tool_with_outcome
                        ~name
                        ~args
                    in
-                   let outcome =
-                     match result with
-                     | Some _ -> "handled"
-                     | None -> "no_handler"
-                   in
-                   result, outcome)
+                   result, Dispatch_outcome.(to_string (of_result_option result)))
             in
             (match result with
              | Some tr -> Keeper_tool_execution.of_tool_result tr

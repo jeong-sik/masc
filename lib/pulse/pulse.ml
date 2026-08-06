@@ -87,27 +87,33 @@ let kst_hour clock =
   let t = Unix.gmtime (now clock) in
   (t.tm_hour + 9) mod 24
 
-(** Is the current hour within the quiet window? *)
-let is_quiet_hour clock rhythm =
-  let h = kst_hour clock in
-  let (qs, qe) = rhythm.quiet in
+(** Is [hour] within the quiet window?  Takes the hour rather than a clock so
+    the decision itself is a pure function of its inputs: the clock reading is
+    the caller's, and [For_testing] hands these out unchanged instead of
+    keeping a second copy that tests could pass while production drifted. *)
+let is_quiet_hour_at ~hour ~quiet_range =
+  let (qs, qe) = quiet_range in
   if qs <= qe then
     (* e.g., 1..6 *)
-    h >= qs && h < qe
+    hour >= qs && hour < qe
   else
     (* wrap-around, e.g., 22..6 *)
-    h >= qs || h < qe
+    hour >= qs || hour < qe
 
-(** Compute the effective interval for the next beat.
+(** Effective interval for a beat landing on [hour].
     Quiet hours stretch the base interval by 3x, clamped to [min, max]. *)
-let effective_interval clock rhythm =
+let effective_interval_at ~hour rhythm =
   let base =
-    if is_quiet_hour clock rhythm then
+    if is_quiet_hour_at ~hour ~quiet_range:rhythm.quiet then
       rhythm.base_s *. 3.0
     else
       rhythm.base_s
   in
   Float.max rhythm.min_s (Float.min rhythm.max_s base)
+
+(** Compute the effective interval for the next beat. *)
+let effective_interval clock rhythm =
+  effective_interval_at ~hour:(kst_hour clock) rhythm
 
 (* ── Consumer dispatch ───────────────────────────────────────── *)
 
@@ -305,17 +311,9 @@ let remove_consumer t name =
 
 (* ── Testing helpers ───────────────────────────────────────────── *)
 
+(* Re-exports, not copies: [test_pulse.ml] drives these names, so they have to
+   be the same functions [effective_interval] runs on every beat. *)
 module For_testing = struct
-  let is_quiet_hour_at ~hour ~quiet_range =
-    let (qs, qe) = quiet_range in
-    if qs <= qe then hour >= qs && hour < qe
-    else hour >= qs || hour < qe
-
-  let effective_interval_at ~hour rhythm =
-    let quiet = is_quiet_hour_at ~hour ~quiet_range:rhythm.quiet in
-    let base =
-      if quiet then rhythm.base_s *. 3.0
-      else rhythm.base_s
-    in
-    Float.max rhythm.min_s (Float.min rhythm.max_s base)
+  let is_quiet_hour_at = is_quiet_hour_at
+  let effective_interval_at = effective_interval_at
 end

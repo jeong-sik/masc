@@ -418,6 +418,14 @@ function thinkingChipLabel(record: TurnRecordEntry): string {
   return '—'
 }
 
+// lib/types/turn_record.ml:127-135 — the exact-run reference into the keeper's
+// raw-trace store. Display only: the run id plus the seq window within it.
+function rawTraceRunRefLabel(record: TurnRecordEntry): string {
+  const ref = record.raw_trace_run_ref
+  if (!ref) return 'n/a'
+  return `${ref.worker_run_id} · seq ${ref.start_seq}-${ref.end_seq}`
+}
+
 // RFC-0233 §8 — compact "NNNK" form of the runtime's context window, or
 // "미상" when the record has no context_window (render absence, not 200K).
 function formatCtxWindowK(cw: number | null | undefined): string {
@@ -977,6 +985,7 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
         <span class="k">measured phase duration</span><span class="v">${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : 'none'}</span>
         <span class="k">est. cost${record.price_input_per_million != null ? '' : ' · 가격 미구성'}</span><span class="v">${t.cost != null ? `$${t.cost.toFixed(3)}` : '미상'}</span>
         <span class="k">finish_reason</span><span class="v">${record.finish_reason ?? 'n/a'}</span>
+        <span class="k">raw trace</span><span class="v" title=${record.raw_trace_run_ref?.path ?? undefined}>${rawTraceRunRefLabel(record)}</span>
         <span class="k">source</span><span class="v">${source}</span>
       </div>
     </div>

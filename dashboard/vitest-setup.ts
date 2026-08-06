@@ -1,6 +1,15 @@
 import { expect, vi } from 'vitest'
 import { html } from 'htm/preact'
+import { configure } from '@testing-library/preact'
 import { toHaveNoViolations } from 'jest-axe'
+
+// testing-library polls findBy*/waitFor for 1000ms by default, a budget that
+// assumes the render has the machine to itself. Bisecting keeper-detail's
+// failure showed a count threshold, not a poisoning file: every 44-file subset
+// passed (taken from either end, so no file in the remainder is the cause) and
+// the 48-file set failed. Vitest's own per-test limit stays at its 5s default;
+// this raises only the poll budget.
+configure({ asyncUtilTimeout: 5000 })
 
 // Wire jest-axe's `toHaveNoViolations` matcher into Vitest's `expect`.
 // Lets `*.a11y.test.ts` files call `expect(await axe(node)).toHaveNoViolations()`.

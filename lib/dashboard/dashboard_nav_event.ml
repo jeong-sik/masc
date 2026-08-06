@@ -36,6 +36,7 @@ let valid_sections =
     , [ "observatory"
       ; "agents"
       ; "runtime"
+      ; "internal-agents"
       ; "fleet-health"
       ; "transport-health"
       ; "feature-health"

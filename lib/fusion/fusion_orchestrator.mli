@@ -25,7 +25,8 @@ val compute
 
 (** Project one already-computed deliberation to the existing sink. *)
 val project
-  :  base_dir:string
+  :  registry:Fusion_run_registry.t
+  -> base_dir:string
   -> topology:Fusion_types.fusion_topology
   -> channel:Keeper_continuation_channel.t
   -> request:Fusion_types.fusion_request

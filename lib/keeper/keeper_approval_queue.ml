@@ -1624,9 +1624,99 @@ let read_recent_audit_raw store limit =
     rows
 ;;
 
-let approval_audit_pending_event = "pending"
-let approval_audit_resolved_event = "resolved"
-let approval_audit_summary_event = "summary_updated"
+(* The vocabulary of the [event] field in the approval audit log. Every writer
+   of that log goes through [audit_event_to_string], so this list is the whole
+   of it.
+
+   It is a variant rather than a set of string constants because the log has a
+   reader in another module — the runtime trust timeline renders each record for
+   the operator — and the two drifted. The timeline carried arms for five
+   spellings ("expired", "approval_timeout", "cancelled",
+   "auto_approved_rule_match", "auto_approved_always") that no writer emits, and
+   had no arm for ten that it does, so a successful gate pass and a degraded
+   rule store both reached the dashboard as an unlabelled warning. *)
+type audit_event =
+  | Pending
+  | Resolved
+  | Summary_updated
+  | Rule_created
+  | Rule_deleted
+  | Grant_consumed
+  | Gate_allowed
+  | Gate_exact_rule_expired
+  | Gate_exact_rule_store_degraded
+  | Gate_grant_unavailable
+  | Auto_judge_operator_retry_started
+  | Auto_judge_block_observation_superseded
+  | Auto_judge_restart_worker_recovered
+  | Auto_judge_restart_judgment_recovered
+
+let audit_event_to_string = function
+  | Pending -> "pending"
+  | Resolved -> "resolved"
+  | Summary_updated -> "summary_updated"
+  | Rule_created -> "rule_created"
+  | Rule_deleted -> "rule_deleted"
+  | Grant_consumed -> "grant_consumed"
+  | Gate_allowed -> "gate_allowed"
+  | Gate_exact_rule_expired -> "gate_exact_rule_expired"
+  | Gate_exact_rule_store_degraded -> "gate_exact_rule_store_degraded"
+  | Gate_grant_unavailable -> "gate_grant_unavailable"
+  | Auto_judge_operator_retry_started -> "auto_judge_operator_retry_started"
+  | Auto_judge_block_observation_superseded ->
+    "auto_judge_block_observation_superseded"
+  | Auto_judge_restart_worker_recovered -> "auto_judge_restart_worker_recovered"
+  | Auto_judge_restart_judgment_recovered ->
+    "auto_judge_restart_judgment_recovered"
+;;
+
+(* Records already on disk were written by earlier builds, so the parse is
+   partial by necessity. Readers get [None] and must say what they do with a
+   spelling this build does not know. *)
+let audit_event_of_string = function
+  | "pending" -> Some Pending
+  | "resolved" -> Some Resolved
+  | "summary_updated" -> Some Summary_updated
+  | "rule_created" -> Some Rule_created
+  | "rule_deleted" -> Some Rule_deleted
+  | "grant_consumed" -> Some Grant_consumed
+  | "gate_allowed" -> Some Gate_allowed
+  | "gate_exact_rule_expired" -> Some Gate_exact_rule_expired
+  | "gate_exact_rule_store_degraded" -> Some Gate_exact_rule_store_degraded
+  | "gate_grant_unavailable" -> Some Gate_grant_unavailable
+  | "auto_judge_operator_retry_started" -> Some Auto_judge_operator_retry_started
+  | "auto_judge_block_observation_superseded" ->
+    Some Auto_judge_block_observation_superseded
+  | "auto_judge_restart_worker_recovered" ->
+    Some Auto_judge_restart_worker_recovered
+  | "auto_judge_restart_judgment_recovered" ->
+    Some Auto_judge_restart_judgment_recovered
+  | _ -> None
+;;
+
+(* The [decision_kind] axis of a resolved approval record. The queue derives it
+   from the decision itself, so a reader that wants to know whether an approval
+   was rejected parses this back instead of scanning the rendered decision text
+   for the word. *)
+type decision_kind =
+  | Decision_approve
+  | Decision_reject
+  | Decision_edit
+
+let decision_kind_to_string = function
+  | Decision_approve -> "approve"
+  | Decision_reject -> "reject"
+  | Decision_edit -> "edit"
+;;
+
+let decision_kind_of_string value =
+  match String.trim value with
+  | "approve" -> Some Decision_approve
+  | "reject" -> Some Decision_reject
+  | "edit" -> Some Decision_edit
+  | _ -> None
+;;
+
 let approval_sse_pending_event = "approval:pending"
 let approval_sse_resolved_event = "approval:resolved"
 let approval_sse_summary_event = "approval:summary_updated"
@@ -1637,9 +1727,9 @@ let non_empty_reason reason =
 ;;
 
 let approval_decision_kind_and_reason = function
-  | Decision.Approve -> "approve", None
-  | Decision.Reject reason -> "reject", non_empty_reason reason
-  | Decision.Edit _ -> "edit", None
+  | Decision.Approve -> Decision_approve, None
+  | Decision.Reject reason -> Decision_reject, non_empty_reason reason
+  | Decision.Edit _ -> Decision_edit, None
 ;;
 
 let keeper_audit_metric_label = function
@@ -1731,7 +1821,7 @@ let audit_approval_event
     let json =
       `Assoc
         ([ "ts", `Float (Unix.gettimeofday ())
-         ; "event", `String event_type
+         ; "event", `String (audit_event_to_string event_type)
          ; "id", `String id
          ; "keeper", `String keeper_name
          ; "tool", `String tool_name
@@ -1753,7 +1843,8 @@ let audit_approval_event
             | Some approval_id -> [ "source_approval_id", `String approval_id ]
             | None -> [])
          @ (match decision_kind with
-            | Some kind -> [ "decision_kind", `String kind ]
+            | Some kind ->
+              [ "decision_kind", `String (decision_kind_to_string kind) ]
             | None -> [])
          @ (match decision_reason with
             | Some reason -> [ "decision_reason", `String reason ]
@@ -1773,7 +1864,8 @@ let audit_approval_event
         invalidate_recent_audit_cache_for_store store
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id ~event_type exn)
+      | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id
+          ~event_type:(audit_event_to_string event_type) exn)
 ;;
 
 let audit_rule_event ~base_path ~event_type (rule : approval_rule) =
@@ -1842,23 +1934,15 @@ let json_member_or_null key json =
   | None -> `Null
 ;;
 
-let closed_decision_kind_of_string value =
-  match String.trim value with
-  | "approve" -> Some "approve"
-  | "reject" -> Some "reject"
-  | "edit" -> Some "edit"
-  | _ -> None
-;;
-
 let resolved_approval_decision_kind json =
   Option.bind
     (Safe_ops.json_string_opt "decision_kind" json)
-    closed_decision_kind_of_string
+    decision_kind_of_string
 ;;
 
 let resolved_history_event json =
   match Safe_ops.json_string_opt "event" json with
-  | Some event -> String.equal event approval_audit_resolved_event
+  | Some event -> String.equal event (audit_event_to_string Resolved)
   | None -> false
 ;;
 
@@ -1870,7 +1954,8 @@ let resolved_approval_json_of_audit_event json =
     ; "keeper_name", `String (Safe_ops.json_string ~default:"" "keeper" json)
     ; "tool_name", `String (Safe_ops.json_string ~default:"" "tool" json)
     ; "decision", Json_util.string_opt_to_json_trimmed (Safe_ops.json_string_opt "decision" json)
-    ; "decision_kind", Json_util.string_opt_to_json_trimmed (resolved_approval_decision_kind json)
+    ; "decision_kind", Json_util.string_opt_to_json_trimmed
+        (Option.map decision_kind_to_string (resolved_approval_decision_kind json))
     ; "decision_reason", json_member_or_null "decision_reason" json
     ; "resolved_at", Json_util.float_opt_to_json resolved_at
     ; "turn_id", json_member_or_null "turn_id" json
@@ -2213,7 +2298,7 @@ let consume_approved_resolution
     let entry = delivery.entry in
     audit_approval_event
       ~base_path
-      ~event_type:"grant_consumed"
+      ~event_type:Grant_consumed
       ~id
       ~keeper_name:entry.keeper_name
       ~tool_name:entry.tool_name
@@ -2324,7 +2409,7 @@ let broadcast_pending entry =
       ~keeper_name:entry.keeper_name
       ~site:"broadcast_pending"
       ~id:entry.id
-      ~event_type:approval_audit_pending_event
+      ~event_type:(audit_event_to_string Pending)
       exn
 ;;
 
@@ -2337,7 +2422,7 @@ let record_pending (entry : pending_approval) =
     entry.tool_name;
   audit_approval_event
     ~base_path:entry.audit_base_path
-    ~event_type:approval_audit_pending_event
+    ~event_type:Pending
     ~id:entry.id
     ~keeper_name:entry.keeper_name
     ~tool_name:entry.tool_name
@@ -2369,7 +2454,7 @@ let record_summary_updated ~now (entry : pending_approval) =
        let json =
          `Assoc
            ([ "ts", `Float event_ts
-            ; "event", `String approval_audit_summary_event
+            ; "event", `String (audit_event_to_string Summary_updated)
              ; "id", `String entry.id
              ; "summary_status", summary_status_to_yojson entry.summary_status
              ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
@@ -2389,7 +2474,7 @@ let record_summary_updated ~now (entry : pending_approval) =
        ~keeper_name:entry.keeper_name
        ~site:"audit_summary"
        ~id:entry.id
-       ~event_type:approval_audit_summary_event
+       ~event_type:(audit_event_to_string Summary_updated)
        exn);
   try
     Sse.broadcast
@@ -3338,7 +3423,7 @@ let resolve_entry
     decision_str;
   audit_approval_event
     ~base_path:base_path
-    ~event_type:approval_audit_resolved_event
+    ~event_type:Resolved
     ~id:entry.id
     ~keeper_name:entry.keeper_name
     ~tool_name:entry.tool_name
@@ -3371,7 +3456,7 @@ let resolve_entry
       ~keeper_name:entry.keeper_name
       ~site:"broadcast_resolved"
       ~id:entry.id
-      ~event_type:approval_audit_resolved_event
+      ~event_type:(audit_event_to_string Resolved)
       exn
 ;;
 
@@ -3669,7 +3754,7 @@ let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pen
         ()
     with
     | Ok (rule, created) ->
-      if created then audit_rule_event ~base_path ~event_type:"rule_created" rule;
+      if created then audit_rule_event ~base_path ~event_type:Rule_created rule;
       Ok rule
     | Error reason -> Error reason
   with

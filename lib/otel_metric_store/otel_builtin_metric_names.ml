@@ -140,3 +140,12 @@ let metric_telemetry_cache_rescans =
   Otel_metric_store_core.declare_counter "masc_telemetry_summary_cache_rescans_total"
 let metric_telemetry_scanned_bytes =
   Otel_metric_store_core.declare_counter "masc_telemetry_snapshot_scanned_bytes_total"
+
+(* The dashboard cache patcher drops a lifecycle event it cannot decode and
+   bumps this so `rate(...)` sees the encoding regression. It was emitted with
+   a bare string at both of its call sites, which is the one thing
+   [declare_counter] exists to prevent: an unfired counter that is never
+   registered is absent from /metrics rather than 0, so an alert written
+   against it cannot be validated until the failure it watches for happens. *)
+let metric_keeper_lifecycle_malformed =
+  Otel_metric_store_core.declare_counter "masc_keeper_lifecycle_malformed_total"

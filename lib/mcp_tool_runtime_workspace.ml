@@ -55,9 +55,6 @@ let masc_add_task_name =
 let arg_get_string ctx key default =
   Safe_ops.json_string ~default key ctx.arguments
 
-let arg_get_string_list ctx key =
-  Safe_ops.json_string_list key ctx.arguments
-
 let expand_start_path_home ~path_syntax ~suffix =
   match Config_dir_resolver.initial_env_home with
   | Some home ->

@@ -223,7 +223,7 @@ let make_executor
     ?(run_retry_attempt = fun ~attempt:_ -> R.Retry_success)
     ?(sleep = fun _ -> ())
     ?(on_event = fun _ -> ())
-    ?(apply_fallback = fun ~value:_ ~confidence_delta:_ -> Ok ())
+    ?(apply_fallback = fun ~value:_ -> Ok ())
     ?(request_handoff = fun ~message:_ ~preserve_state:_ -> Ok ())
     ?(abort = fun ~reason:_ -> Ok ())
     () =
@@ -276,18 +276,17 @@ let test_execute_fallback_applies_value () =
   let applied = ref None in
   let executor =
     make_executor
-      ~apply_fallback:(fun ~value ~confidence_delta ->
-        applied := Some (value, confidence_delta);
+      ~apply_fallback:(fun ~value ->
+        applied := Some value;
         Ok ())
       ()
   in
   let strategy =
-    R.Fallback { fallback_value = "cached"; degrade_confidence_by = 0.25 }
+    R.Fallback { fallback_value = "cached" }
   in
   match R.execute_strategy executor strategy with
-  | Ok (R.FallbackApplied { value = "cached"; confidence_delta }) ->
-      assert (Float.abs (confidence_delta -. 0.25) < 1e-9);
-      assert (!applied = Some ("cached", 0.25))
+  | Ok (R.FallbackApplied { value = "cached" }) ->
+      assert (!applied = Some "cached")
   | _ -> assert false
 
 let test_execute_handoff_requests_operator () =

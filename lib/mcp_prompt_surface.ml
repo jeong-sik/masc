@@ -49,9 +49,6 @@ let prompt_json (prompt : prompt_def) =
              prompt.arguments) );
     ]
 
-let list_json () =
-  `Assoc [ ("prompts", `List (List.map prompt_json prompt_defs)) ]
-
 let lookup name =
   List.find_opt (fun (prompt : prompt_def) -> String.equal prompt.name name) prompt_defs
 

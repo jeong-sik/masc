@@ -57,6 +57,7 @@ val review
   -> ?required_evidence:string list
   -> ?verify_gate_evidence:string list
   -> ?on_verdict:(review_result -> unit)
+  -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?few_shot_block:string
   -> ?sw:Eio.Switch.t option
   -> lookup:lookup_surface
@@ -88,6 +89,7 @@ val run_llm_reviewer_fn
       -> prompt:string
       -> report_tool_schema:Types_core.tool_schema
       -> lookup:lookup_surface
+      -> on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
       -> unit
       -> (verdict option, Agent_sdk.Error.sdk_error) result)
        Atomic.t

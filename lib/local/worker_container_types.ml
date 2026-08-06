@@ -69,20 +69,6 @@ let inject_default_agent_name ~(worker_name : string)
       `Assoc (("agent_name", `String worker_name) :: fields)
   | _ -> args
 
-let extract_prompt_block ~start_marker ~end_marker (text : string) =
-  (* Markers are caller-supplied so we can't hoist; but they're literal
-     bytes, so a byte-wise [find_substring] is cheaper than building a
-     fresh DFA per call. *)
-  match String_util.find_substring text start_marker with
-  | None -> None
-  | Some marker_pos ->
-    let start_idx = marker_pos + String.length start_marker in
-    (match String_util.find_substring ~pos:start_idx text end_marker with
-    | None -> None
-    | Some end_idx ->
-      let raw = String.sub text start_idx (end_idx - start_idx) |> String.trim in
-      if raw = "" then None else Some raw)
-
 let masc_http_base_url () =
   Env_config.masc_http_base_url ()
 
@@ -446,40 +432,10 @@ let list_masc_tools ~sw:_sw ~(auth_token : string option) ~session_id
   ignore (_sw, auth_token, session_id);
   Keeper_tool_surfaces.local_worker_tool_schemas ?names ()
 
-let tool_schema_of_name schemas tool_name =
-  List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name tool_name) schemas
-
-let tool_defs_of_schemas (schemas : Masc_domain.tool_schema list) : Masc_domain.tool_schema list =
-  schemas
-
 let safe_text_for_followup text =
   let trimmed = String.trim text in
   if String.length trimmed <= 1200 then trimmed
   else String.sub trimmed 0 1200 ^ "...[truncated]"
-
-let followup_prompt ~original_prompt ~tool_outputs ~already_used =
-  let tool_lines =
-    tool_outputs
-    |> List.mapi (fun idx (name, input, output) ->
-           sprintf "%d. %s(%s)\n%s" (idx + 1) name
-             (Yojson.Safe.to_string input)
-             (safe_text_for_followup output))
-    |> String.concat "\n\n"
-  in
-  sprintf
-    {|Continue the same worker task.
-
-Original task:
-%s
-
-Tool results:
-%s
-
-Already used tools: %s
-
-If more tools are required, call them. Otherwise return the final result.|}
-    original_prompt tool_lines
-    (if already_used = [] then "none" else String.concat ", " already_used)
 
 let split_top_level delimiter (text : string) =
   let len = String.length text in
@@ -669,13 +625,6 @@ let parse_text_tool_calls (content : string) : Agent_sdk.Types.content_block lis
   in
   collect 0 1 []
 
-let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () : Agent_sdk.Types.api_usage =
-  { Agent_sdk.Types.input_tokens;
-    output_tokens;
-    cache_creation_input_tokens = 0;
-    cache_read_input_tokens = 0;
-    cost_usd = None }
-
 let merge_usage (a : Agent_sdk.Types.api_usage) (b : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage =
   { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
     output_tokens = a.output_tokens + b.output_tokens;
@@ -715,12 +664,6 @@ let default_system_prompt ~worker_name ~model_id ?role
     ; "role_line", role_line
     ; "selection_line", selection_line
     ]
-
-let worker_session_id worker_name =
-  let digest =
-    Digest.string (worker_name ^ string_of_float (Time_compat.now ())) |> Digest.to_hex
-  in
-  sprintf "local-%s" (String.sub digest 0 12)
 
 let worker_auth_token ~base_path ~worker_name =
   let auth_cfg = Auth.load_auth_config base_path in

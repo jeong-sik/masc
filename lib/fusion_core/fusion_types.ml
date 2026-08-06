@@ -293,18 +293,6 @@ let result_of_yojson ok_of_yojson error_of_yojson = function
          (Yojson.Safe.to_string json))
 ;;
 
-let equal_result equal_ok equal_error left right =
-  match left, right with
-  | Ok left, Ok right -> equal_ok left right
-  | Error left, Error right -> equal_error left right
-  | Ok _, Error _ | Error _, Ok _ -> false
-;;
-
-let pp_result pp_ok pp_error formatter = function
-  | Ok value -> Format.fprintf formatter "(Ok %a)" pp_ok value
-  | Error error -> Format.fprintf formatter "(Error %a)" pp_error error
-;;
-
 type deliberation_evidence =
   { question : string
   ; panel : panel_outcome list

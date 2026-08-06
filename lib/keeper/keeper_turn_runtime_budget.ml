@@ -562,9 +562,8 @@ let resilience_execution_event_to_string = function
   | Resilience.Recovery.RetryBackoff { attempt; delay_s; error } ->
       Printf.sprintf "retry_backoff(attempt=%d,delay_s=%.3f,error=%s)"
         attempt delay_s (short_resilience_detail error)
-  | Resilience.Recovery.FallbackApply { value; confidence_delta } ->
-      Printf.sprintf "fallback_apply(value=%s,confidence_delta=%.3f)"
-        (short_resilience_detail value) confidence_delta
+  | Resilience.Recovery.FallbackApply { value } ->
+      Printf.sprintf "fallback_apply(value=%s)" (short_resilience_detail value)
   | Resilience.Recovery.HandoffRequest { message; preserve_state } ->
       Printf.sprintf "handoff_request(preserve_state=%b,message=%s)"
         preserve_state (short_resilience_detail message)
@@ -617,12 +616,11 @@ let make_post_turn_resilience_executor
         Log.Keeper.warn ~keeper_name:meta.name "post-turn resilience event: %s"
           (resilience_execution_event_to_string event));
     apply_fallback =
-      (fun ~value ~confidence_delta ->
+      (fun ~value ->
         let detail =
           Printf.sprintf
-            "post-turn resilience fallback has no typed target \
-             (value=%s confidence_delta=%.3f)"
-            (short_resilience_detail value) confidence_delta
+            "post-turn resilience fallback has no typed target (value=%s)"
+            (short_resilience_detail value)
         in
         Error
           (fail_with_observation ~code:"resilience_fallback_unbound" ~detail));

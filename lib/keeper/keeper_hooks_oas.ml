@@ -27,8 +27,6 @@ include Keeper_hooks_oas_types
     RFC-0132 PR-2: telemetry lane label = external boundary; redact via SSOT. *)
 let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime_lane_label
 
-let runtime_lane_of_model (_model : string) : string = runtime_lane_label
-
 let trajectory_duration_ms duration_ms =
   if (not (Float.is_finite duration_ms)) || Float.compare duration_ms 0.0 <= 0
   then 0

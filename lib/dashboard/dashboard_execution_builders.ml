@@ -286,9 +286,10 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
       | Some ratio when ratio >= ctx_preparing -> Lc_preparing
       | Some ratio when ratio >= ctx_compacting -> Lc_compacting
       | Some _ | None ->
-          if last_action_ts > 0.0 then Lc_active
-          else if last_signal_ts > 0.0 then Lc_idle
-          else Lc_idle
+          (* Both outcomes of the signal test were Lc_idle, so the test
+             distinguished nothing. last_signal_ts still feeds last_signal_at
+             and signal_age_s; only this branch is gone. *)
+          if last_action_ts > 0.0 then Lc_active else Lc_idle
   in
   let (state, tone, note) =
     match liveness with

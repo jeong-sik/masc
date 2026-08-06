@@ -94,10 +94,28 @@ type budget_error =
           would separate a tool result from its call, so the request is
           refused instead. *)
 
+type projection =
+  { messages : Agent_sdk.Types.message list
+  ; dropped_atoms : int
+        (** Exact raw-history cut chosen for [messages]. Projection stages that
+            rewrite historical bytes use this as their cache-stable anchor: the
+            rewrite boundary moves only when the authoritative cut moves. *)
+  }
+
 val budget_error_to_string : budget_error -> string
 (** Diagnostic rendering carrying the measured values. Suitable as the
     [Error] payload of an [Agent_sdk.Agent.model_input_projection], which
     aborts the turn before request measurement or dispatch. *)
+
+val project_with_drop
+  :  measure_message_bytes:(Agent_sdk.Types.message -> int)
+  -> capacity_bytes:int
+  -> reserved_bytes:int
+  -> Agent_sdk.Types.message list
+  -> (projection, budget_error) result
+(** The canonical projection result, including the exact atom cut selected
+    from the unmodified input. [messages] is physically the input list when
+    [dropped_atoms = 0]. *)
 
 val project
   :  measure_message_bytes:(Agent_sdk.Types.message -> int)

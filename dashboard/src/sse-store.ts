@@ -63,6 +63,7 @@ import {
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
+import { hydrateOasTelemetrySample } from './oas-telemetry-store'
 import {
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
@@ -136,6 +137,14 @@ export function registerActivityRefresh(fn: () => void): () => void {
   _refreshActivityFns.add(fn)
   return () => {
     _refreshActivityFns.delete(fn)
+  }
+}
+
+const _refreshInternalAgentFns = new Set<() => void>()
+export function registerInternalAgentRefresh(fn: () => void): () => void {
+  _refreshInternalAgentFns.add(fn)
+  return () => {
+    _refreshInternalAgentFns.delete(fn)
   }
 }
 
@@ -215,7 +224,10 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   keeper_compaction:    { target: 'execution', force: true },
   keeper_guardrail:     { target: 'execution', force: true },
   keeper_phase_changed: { target: 'execution', force: true },
-  keeper_turn_complete: { target: 'execution', force: true },
+  // A turn-complete hook precedes the durable TurnRecord commit and does not
+  // mutate the execution cache. The selected Keeper is refreshed through the
+  // scoped status reader in [handleKeeperLifecycle]; the proactive canonical
+  // execution snapshot updates the roster without a per-turn global rebuild.
   // Board content — emitted by lib/mcp_tool_runtime_board.ml
   board_post:          { target: 'board' },
   'masc/board_post':    { target: 'board' },
@@ -236,6 +248,7 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   // Without this entry the live WS router dropped the event and the run-status
   // panel only refreshed on the ~120s periodic poll / route revisit (RFC-0266 Phase 4).
   fusion_run_status:    { target: 'fusion' },
+  internal_agent_runs_changed: { target: 'internalAgents', debounceMs: 0 },
 }
 
 const BOARD_HEARTH_REFRESH_EVENTS = new Set([
@@ -261,6 +274,9 @@ const REFRESH_FNS: Record<RefreshTarget, () => void> = {
     for (const fn of _refreshActivityFns) fn()
   },
   fusion:    () => { void refreshFusionRuns() },
+  internalAgents: () => {
+    for (const fn of _refreshInternalAgentFns) fn()
+  },
   ide:       () => {
     for (const fn of _refreshIdeFns) fn()
   },
@@ -610,6 +626,9 @@ export function routeServerPushEvent(event: SSEEvent): void {
       scheduleBoardHearthsRefresh(simpleRoute.debounceMs)
     }
   }
+  if (routedType === 'fusion_run_status') {
+    scheduleTargetRefresh('internalAgents', REFRESH_FNS.internalAgents, 0)
+  }
 
   for (const { prefix, target } of PREFIX_ROUTES) {
     if (routedType.startsWith(prefix)) {
@@ -780,6 +799,14 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
 
   if (event.type === 'keeper_heartbeat') {
     handleKeeperHeartbeat(event)
+    return true
+  }
+
+  // The payload is the sample itself (schema-validated at the boundary), so
+  // the read model hydrates from the push directly — zero HTTP fetch. The
+  // runtime monitor renders latestOasTelemetrySample; nothing to refresh.
+  if (event.type === 'oas_telemetry_sample') {
+    hydrateOasTelemetrySample(event)
     return true
   }
 

@@ -308,7 +308,8 @@ let test_executable_relative_config_is_seed_only_not_fallback () =
   check string "status" "missing"
     (Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "missing"
-    (Config_dir_resolver.source_to_string resolution.config_root.source);
+    (Config_dir_resolver.source_to_string resolution.config_root.source)
+
 let test_external_config_is_not_a_fallback () =
   with_temp_dir "config-dir-external" @@ fun external_root ->
   let external_config_root = Filename.concat external_root Common.masc_dirname in

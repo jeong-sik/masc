@@ -394,6 +394,20 @@ let assemble_hooks
                 let recorded_blocks_for_receipt =
                   extra_system_context_assembly.blocks
                 in
+                (* The assembled text exists only here. The turn record keeps
+                   each block's bytes and digest, which answers "how much" but
+                   never "what", so an operator asking what this keeper is being
+                   told had no answer short of the provider's wire log. Capture
+                   overwrites one file per keeper: the blocks are stable turn to
+                   turn, so the turn that just assembled is what the next one
+                   will assemble, and keeping only the last bounds the store. *)
+                Keeper_prompt_capture.write
+                  ~config
+                  ~keeper:meta.name
+                  ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                  ~absolute_turn:turn
+                  ~blocks:recorded_blocks_for_receipt
+                  ~assembled:ctx;
                 (* OAS treats [None] in AdjustParams as "keep the base
                    config", so strict choices must be explicitly relaxed.
                    Tools remain available, but the model may finish without

@@ -1946,6 +1946,34 @@ let handle_keeper_get_subroutes state req request reqd =
        | Error (`Io msg) ->
          Http.Response.json_value ~status:`Internal_server_error
            (`Assoc [ ("error", `String msg) ]) reqd)
+  else if ends_with "/last-prompt" then
+    (* What this keeper was actually told, as text. The turn record keeps each
+       block's bytes and digest — how much, never what. The blocks are stable
+       turn to turn, so the last assembly is also the preview of the next. *)
+    let name = extract_name "/last-prompt" in
+    (match
+       Keeper_prompt_capture.read ~config:(Mcp_server.workspace_config state) ~keeper:name
+     with
+     | Ok capture ->
+       Http.Response.json_value ~compress:true ~request:req
+         (match Keeper_prompt_capture.to_json capture with
+          | `Assoc fields ->
+            `Assoc
+              (("keeper", `String name)
+               :: ("dashboard_surface", `String "/api/v1/keepers/:name/last-prompt")
+               :: fields)
+          | json -> json)
+         reqd
+     | Error (Keeper_prompt_capture.Not_captured as error) ->
+       Http.Response.json_value ~status:`Not_found
+         (`Assoc
+            [ "error", `String (Keeper_prompt_capture.read_error_to_string error) ])
+         reqd
+     | Error error ->
+       Http.Response.json_value ~status:`Bad_request
+         (`Assoc
+            [ "error", `String (Keeper_prompt_capture.read_error_to_string error) ])
+         reqd)
   else if ends_with "/raw-traces" then
     (* The turn record already carries a raw_trace_run_ref naming this file;
        until now nothing served it, so the pointer reached the dashboard type

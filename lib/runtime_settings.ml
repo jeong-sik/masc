@@ -267,6 +267,19 @@ let keeper_stage_timing_ring_size =
             min_value = Some (`Int 10); max_value = Some (`Int 1000) }
     ()
 
+(* ── keeper_session surface ───────────────────────────────────── *)
+
+let keeper_session_tool_result_cap =
+  register_int
+    ~key:"keeper.session_tool_result_cap"
+    ~default:(fun () -> 1000)
+    ~min:0 ~max:100_000
+    ~meta:{ description =
+              "체크포인트에 원문으로 유지할 최신 tool 결과 개수 (0=비활성, RFC-0364)";
+            value_type = "int";
+            min_value = Some (`Int 0); max_value = Some (`Int 100_000) }
+    ()
+
 (* ── surface catalog ─────────────────────────────────────────── *)
 
 type surface = {
@@ -295,6 +308,11 @@ let surfaces =
         "keeper.work_as_hb_max_silence_sec";
         "keeper.stage_timing_ring_size";
       ];
+    };
+    {
+      id = "keeper_session";
+      description = "Keeper session checkpoint retention (RFC-0364)";
+      param_keys = [ "keeper.session_tool_result_cap" ];
     };
     {
       id = "keeper_turn";

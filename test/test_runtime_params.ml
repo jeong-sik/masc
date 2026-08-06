@@ -414,6 +414,22 @@ let () =
           true (List.mem "keeper.stage_timing_ring_size" s.param_keys)
   in
 
+  let test_keeper_session_surface () =
+    Runtime_settings.ensure_init ();
+    let surfaces = Runtime_settings.surfaces in
+    let session_surface =
+      List.find_opt
+        (fun (s : Runtime_settings.surface) -> s.id = "keeper_session")
+        surfaces
+    in
+    match session_surface with
+    | None -> Alcotest.fail "keeper_session surface not found"
+    | Some s ->
+        Alcotest.(check int) "param count" 1 (List.length s.param_keys);
+        Alcotest.(check bool) "has session_tool_result_cap"
+          true (List.mem "keeper.session_tool_result_cap" s.param_keys)
+  in
+
   let test_keeper_params_meta_shape () =
     Runtime_settings.ensure_init ();
     let entries = Runtime_params.registry () in
@@ -540,6 +556,8 @@ let () =
             test_keeper_param_override_persist_restore;
           Alcotest.test_case "keeper_diagnostics surface" `Quick
             test_keeper_diagnostics_surface;
+          Alcotest.test_case "keeper_session surface" `Quick
+            test_keeper_session_surface;
         ] );
       ( "crash_persistence",
         [

@@ -512,11 +512,6 @@ export function TransportHealthPanel() {
                 <${MetricRow} label="모드" value=${data.websocket.mode} />
                 <${MetricRow} label="릴레이 소스" value=${data.websocket.relay_source} />
                 <${MetricRow}
-                  label="파싱 캐시"
-                  value=${formatHitRate(data.websocket.delivery.parse_cache_hits, data.websocket.delivery.parse_cache_misses)}
-                  sub=${`${data.websocket.delivery.parse_cache_hits} 히트 / ${data.websocket.delivery.parse_cache_misses} 미스`}
-                />
-                <${MetricRow}
                   label="바이트 캐시"
                   value=${formatHitRate(data.websocket.delivery.bytes_cache_hits, data.websocket.delivery.bytes_cache_misses)}
                   sub=${`${data.websocket.delivery.bytes_cache_hits} 히트 / ${data.websocket.delivery.bytes_cache_misses} 미스`}

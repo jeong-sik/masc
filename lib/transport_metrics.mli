@@ -191,12 +191,6 @@ val http_listener_json : ?now:float -> unit -> Yojson.Safe.t
 (** Sets [masc_ws_sessions] gauge. *)
 val set_ws_sessions : int -> unit
 
-(** Increments [masc_ws_parse_cache_hits_total]. *)
-val inc_ws_parse_cache_hit : unit -> unit
-
-(** Increments [masc_ws_parse_cache_misses_total]. *)
-val inc_ws_parse_cache_miss : unit -> unit
-
 type ws_frame_json_parse_error_kind =
   | Yojson_parse_error
   | Other_ws_frame_json_parse_error

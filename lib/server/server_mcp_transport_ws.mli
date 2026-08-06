@@ -52,8 +52,6 @@
     [update_ws_session_count_metric],
     [dashboard_auth_success_payload],
     [verify_dashboard_token],
-    [parse_cache] / [sse_data_prefix] /
-    [extract_sse_data_*],
     [dashboard_delta_payload_text_cache] /
     [dashboard_delta_payload_text_for_parsed] /
     [dashboard_delta_seq_notification] /

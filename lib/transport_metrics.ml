@@ -155,14 +155,6 @@ let set_ws_sessions count =
   Otel_metric_store.set_gauge Otel_metric_store.metric_ws_sessions (float_of_int count)
 ;;
 
-let inc_ws_parse_cache_hit () =
-  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_parse_cache_hits ()
-;;
-
-let inc_ws_parse_cache_miss () =
-  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_parse_cache_misses ()
-;;
-
 (** Iter 28 visibility fix — counter for previously-silent JSON parse
     drops in parse_sse_dashboard_event. Closed 2-value error_kind
     vocab keeps Otel_metric_store label cardinality bounded. *)
@@ -487,9 +479,7 @@ let hot_session_json (session : hot_queue_session) =
 ;;
 
 type ws_delivery_metric_names =
-  { parse_cache_hits : string
-  ; parse_cache_misses : string
-  ; bytes_cache_hits : string
+  { bytes_cache_hits : string
   ; bytes_cache_misses : string
   ; client_acks : string
   ; throttled_deliveries : string
@@ -501,9 +491,7 @@ type ws_delivery_metric_names =
   }
 
 let ws_delivery_metric_names =
-  { parse_cache_hits = "masc_ws_parse_cache_hits_total"
-  ; parse_cache_misses = "masc_ws_parse_cache_misses_total"
-  ; bytes_cache_hits = "masc_ws_bytes_cache_hits_total"
+  { bytes_cache_hits = "masc_ws_bytes_cache_hits_total"
   ; bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
   ; client_acks = "masc_ws_client_acks_total"
   ; throttled_deliveries = "masc_ws_throttled_deliveries_total"
@@ -563,6 +551,9 @@ let transport_health_json ~config =
   in
   let external_fanout_sum =
     v Otel_metric_store.metric_sse_external_fanout_duration_seconds ()
+  in
+  let broadcast_skipped_no_observer =
+    v Otel_metric_store.metric_sse_broadcast_skipped_no_observer ()
   in
   let external_fanout_count =
     v (Otel_metric_store.metric_sse_external_fanout_duration_seconds ^ "_count") ()
@@ -645,6 +636,8 @@ let transport_health_json ~config =
           ; "external_subscribers", `Int sse_external_subscribers
           ; "broadcast_avg_seconds", `Float broadcast_avg
           ; "broadcast_count", `Int (int_of_float broadcast_count)
+          ; ( "broadcast_skipped_no_observer"
+            , `Int (int_of_float broadcast_skipped_no_observer) )
           ; "external_fanout_avg_seconds", `Float external_fanout_avg
           ; "external_fanout_count", `Int (int_of_float external_fanout_count)
           ; "external_fanout_sum_seconds", `Float external_fanout_sum
@@ -693,11 +686,7 @@ let transport_health_json ~config =
          returns 0.0, which reads naturally as "nothing has happened". *)
             ( "delivery"
             , `Assoc
-                [ ( "parse_cache_hits"
-                  , `Int (int_of_float (v ws_delivery_metrics.parse_cache_hits ())) )
-                ; ( "parse_cache_misses"
-                  , `Int (int_of_float (v ws_delivery_metrics.parse_cache_misses ())) )
-                ; ( "bytes_cache_hits"
+                [ ( "bytes_cache_hits"
                   , `Int (int_of_float (v ws_delivery_metrics.bytes_cache_hits ())) )
                 ; ( "bytes_cache_misses"
                   , `Int (int_of_float (v ws_delivery_metrics.bytes_cache_misses ())) )

@@ -114,8 +114,6 @@ const GrpcSchema = object({
 // pointed at an older build should not surface schema errors, it
 // should show zeroes and let the operator know the metric is absent).
 const WebsocketDeliverySchema = object({
-  parse_cache_hits: fallback(number(), 0),
-  parse_cache_misses: fallback(number(), 0),
   bytes_cache_hits: fallback(number(), 0),
   bytes_cache_misses: fallback(number(), 0),
   client_acks: fallback(number(), 0),
@@ -133,8 +131,6 @@ const WebsocketSchema = object({
   sessions: fallback(number(), 0),
   relay_source: fallback(string(), 'unknown'),
   delivery: fallback(WebsocketDeliverySchema, {
-    parse_cache_hits: 0,
-    parse_cache_misses: 0,
     bytes_cache_hits: 0,
     bytes_cache_misses: 0,
     client_acks: 0,

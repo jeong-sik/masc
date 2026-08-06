@@ -630,6 +630,31 @@ let test_claim_next_r_preserves_current_task () =
     | _ -> Alcotest.fail "second claim should succeed")
 ;;
 
+(** The single-claim refusal has to carry its own correction hint: the prompt
+    used to spell out the escape route in prose because the message named the
+    held Task but not the way out. *)
+let test_claim_next_refusal_names_the_release_path () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Alpha" ~priority:1 ~description:"" in
+    let _ = Workspace.add_task config ~title:"Beta" ~priority:2 ~description:"" in
+    let _ = Workspace.claim_next_r config ~agent_name:"claude" () in
+    match Workspace.claim_next_r config ~agent_name:"claude" () with
+    | Workspace.Claim_next_claimed { message; _ } ->
+      Alcotest.(check bool)
+        "names the transition tool"
+        true
+        (str_contains message "masc_transition");
+      Alcotest.(check bool)
+        "names the release action"
+        true
+        (str_contains message "action=release");
+      Alcotest.(check bool)
+        "names the required handoff summary"
+        true
+        (str_contains message "handoff_context.summary")
+    | _ -> Alcotest.fail "second claim should be refused with the held task")
+;;
+
 let test_release_hard_stop_todo_stays_claimable () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
@@ -2798,6 +2823,10 @@ let () =
             "#10421: preserved task result"
             `Quick
             test_claim_next_r_preserves_current_task
+        ; Alcotest.test_case
+            "single-claim refusal names the release path"
+            `Quick
+            test_claim_next_refusal_names_the_release_path
         ; Alcotest.test_case
             "release hard-stop persists policy, todo stays claimable"
             `Quick

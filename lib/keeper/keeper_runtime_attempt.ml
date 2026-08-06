@@ -147,18 +147,12 @@ let sdk_error_to_runtime_outcome err =
            (* [Http_client.Timeout] is the ETIMEDOUT transport kind, but
               [Retry.Timeout] also covers Admission, Queue, First_token and
               Capacity_backpressure waits that never touched a socket.
-              [TimeoutError] carries the phase, so route there and keep it.
-
-              DET-OK: [TimeoutError.phase] is not an option, so [None] needs a
-              value. [Unknown_timeout] is the SDK's own constructor for an
-              unattributed timeout, not a default standing in for a real
-              phase — the alternative, collapsing back to a network kind, is
-              what this arm exists to stop. *)
+              [TimeoutError] carries the phase, so route there and keep it. *)
            Llm_provider.Http_client.TimeoutError
              { message
-             ; (* DET-OK: see the block above — [Unknown_timeout] is the SDK's
-                  unattributed-timeout constructor, not a stand-in default. *)
-               phase =
+             ; phase =
+                 (* DET-OK: [Unknown_timeout] is the SDK's own constructor for an
+                    unattributed timeout — it names the absence, not a real phase. *)
                  Option.value phase ~default:Llm_provider.Http_client.Unknown_timeout
              }
        in

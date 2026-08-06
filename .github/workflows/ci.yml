@@ -981,6 +981,14 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_jsonl_day_key
 
+      - name: Run memory journal projection suite
+        # The librarian's failed passes reach the dashboard through this
+        # projection. A torn line presented as a commit would make a damaged
+        # journal read as a healthy shorter one, and that compiles either way.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_memory_journal_projection
+
       - name: Run operator note lifetime suite
         # RFC-0366. A note that renders twice is a standing rule the operator
         # never wrote — the #26729 shape. @check compiles "renders once then

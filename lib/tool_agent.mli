@@ -24,6 +24,11 @@ val json_ok :
 
 val schemas : Masc_domain.tool_schema list
 
+(** JSON success result with [~data:json], consolidated here so sibling
+    [Tool_*] modules share one construction path. *)
+val json_ok :
+  tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.result
+
 (** Handle masc_get_metrics *)
 val handle_get_metrics :
   ?tool_name:string -> ?start_time:float ->

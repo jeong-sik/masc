@@ -9,7 +9,8 @@
 
     All hostname / IP / URI manipulation helpers stay private —
     operator-visible surface is the {!http_context} record + its
-    constructors + the two JSON projections. *)
+    constructors + the two JSON projections + the configured
+    host/port env readers. *)
 
 (** {1 HTTP context} *)
 
@@ -87,6 +88,16 @@ val context_from_env :
        [base_url] so a custom env-var URL like
        [http://example.com:8000/] propagates correctly into
        JSON output. *)
+
+(** {1 Configured endpoint readers} *)
+
+val configured_http_port : unit -> int
+(** [configured_http_port ()] returns the configured HTTP port from the
+    runtime environment ({!Env_config_core.masc_http_port_int}). *)
+
+val configured_http_host : unit -> string
+(** [configured_http_host ()] returns the configured HTTP host from the
+    runtime environment ({!Env_config_core.masc_host}). *)
 
 (** {1 JSON projections} *)
 

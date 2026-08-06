@@ -22,9 +22,9 @@
     and access record fields ([.id], [.phase],
     [.updated_at], [.title], …) directly.
 
-    Internal helpers that stay private: [normalize_lower], [now_ms],
+    Internal helpers that stay private: [now_ms],
     [gen_goal_id], [find_goal], [replace_goal], [update_state],
-    [sort_goals], [active_goals], [ensure_dirs],
+    [sort_goals], [ensure_dirs],
     [default_state], [clamp_priority]. *)
 
 (** {1 Parsers (string → variant option)} *)

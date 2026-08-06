@@ -438,7 +438,6 @@ let log_exact_error (entry : pending_approval) operation detail =
    librarian runtime and this worker print slot provenance identically. *)
 let flow_evidence_detail = Keeper_exact_flow_detail.flow_evidence_detail
 let candidate_rejection_detail = Keeper_exact_flow_detail.candidate_rejection_detail
-
 let exact_attempt_source_resolved (entry : pending_approval) = function
   | Exact_attempt_rejected (Exact_attempt_not_found approval_id) ->
     String.equal approval_id entry.id

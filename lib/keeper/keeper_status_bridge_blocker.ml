@@ -102,20 +102,6 @@ let is_fiber_unresolved_blocker_class blocker_class =
   String.equal blocker_class (blocker_class_to_string Fiber_unresolved)
 ;;
 
-let runtime_blocker_surface_of_masc_internal_error = function
-  | Keeper_turn_driver.Accept_rejected _
-  | Keeper_turn_driver.Runtime_exhausted _
-  | Keeper_turn_driver.Capacity_backpressure _
-  | Keeper_turn_driver.Resumable_cli_session _
-  | Keeper_turn_driver.Internal_unhandled_exception _
-  | Keeper_turn_driver.Internal_bridge_exception _
-  | Keeper_turn_driver.Internal_contract_rejected _
-  | Keeper_turn_driver.Incomplete_tool_transcript _
-  | Keeper_turn_driver.Terminal_effect_failed _
-  | Keeper_turn_driver.Receipt_persistence_failed _
-  | Keeper_turn_driver.Gate_replay_repair_required _ ->
-    None
-
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
   =

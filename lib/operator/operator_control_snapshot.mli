@@ -16,8 +16,8 @@
       [server_dashboard_http_keeper_api]).
     - {!valid_snapshot_view_strings},
       {!snapshot_view_of_string_opt}, {!snapshot_view}
-      (consumed by [tool_operator] tool schema +
-      [test/test_types]).
+      (consumed by the [tool_operator] tool schema; no suite pins
+      the view vocabulary today).
     - {!align_keeper_runtime_status}
       (test-only direct caller).
     - {!get_payload} (runtime-include

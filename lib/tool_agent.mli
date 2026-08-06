@@ -19,9 +19,6 @@ val valid_agent_card_action_strings : string list
 (** Dispatch handler. Returns Some Tool_result.result if handled, None otherwise *)
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
-val json_ok :
-  tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.result
-
 val schemas : Masc_domain.tool_schema list
 
 (** JSON success result with [~data:json], consolidated here so sibling

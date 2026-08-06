@@ -5,7 +5,7 @@
 #   The repo today has cleanup-stale-worktrees.sh and
 #   cleanup-merged-worktrees.sh for git, but no equivalent for Docker
 #   resources. On hosts that build the image (`Dockerfile`,
-#   `Dockerfile.worker-runtime`, `Dockerfile.keeper-sandbox`) and run
+#   `Dockerfile.keeper-sandbox`) and run
 #   keeper-docker smoke tests (`scripts/keeper-docker-multikeeper-isolation-smoke.sh`)
 #   repeatedly, dangling images / stopped containers / builder cache
 #   accumulate and eat disk.

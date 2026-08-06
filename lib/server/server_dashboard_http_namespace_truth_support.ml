@@ -128,16 +128,10 @@ let execution_summary_json execution_json =
     | Some (`List items) -> items
     | _ -> []
   in
-  let execution_operation_briefs =
-    json_list_field "operation_briefs" execution_json |> take_n 20
-  in
-  let execution_worker_support =
-    json_list_field "worker_support_briefs" execution_json |> take_n 10
-  in
-  let execution_continuity =
-    json_list_field "continuity_briefs" execution_json |> take_n 10
-  in
-  let execution_keepers = json_list_field "keepers" execution_json |> take_n 20 in
+  let execution_operation_briefs = json_list_field "operation_briefs" execution_json in
+  let execution_worker_support = json_list_field "worker_support_briefs" execution_json in
+  let execution_continuity = json_list_field "continuity_briefs" execution_json in
+  let execution_keepers = json_list_field "keepers" execution_json in
   let has_text key json = json_string_field_opt key json |> Option.is_some in
   (* This summary is always derived here. A pass-through arm used to return an
      upstream [summary] whose [blocked_sessions] count was already an int, but

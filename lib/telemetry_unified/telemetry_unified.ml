@@ -77,11 +77,7 @@ let extract_ts (json : Yojson.Safe.t) : float =
        |> Option.value ~default:0.0)
   | _ -> 0.0
 
-let day_string_of_unix_seconds ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02d"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-
+let day_string_of_unix_seconds ts = Jsonl_writer.day_key ~ts
 let effective_day_window ?since_ts ?until_ts () =
   match since_ts, until_ts with
   | None, None -> None

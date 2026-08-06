@@ -40,6 +40,7 @@ vi.mock('../lib/dashboard-actor', () => ({
 vi.mock('./common/toast', () => ({ showToast: vi.fn() }))
 
 import { AuthStatus, __resetForTests } from './auth-status'
+import { shellAuthSummary } from '../store'
 
 const flushUi = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 30))
@@ -134,5 +135,83 @@ describe('AuthStatus popover behavior (Iter 2)', () => {
       expect(container.querySelector('[role="dialog"]')).toBeNull()
     })
     expect(document.activeElement).toBe(trigger)
+  })
+})
+
+// The badge is the first thing an operator reads when a panel looks empty, so
+// it has to separate "you have not signed in" from "the system rejected you".
+// A red "Auth error" on a dashboard whose data is loading fine sends people
+// looking for an outage that is not there — observed on a live fleet where
+// every HTTP surface returned 200 and the badge still read Auth error.
+describe('AuthStatus badge distinguishes absent credentials from rejected ones', () => {
+  let container: HTMLElement
+
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    __resetForTests()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    document.body.innerHTML = ''
+    ;(shellAuthSummary as { value: unknown }).value = null
+    __resetForTests()
+  })
+
+  function renderWith(summary: Record<string, unknown>): string {
+    ;(shellAuthSummary as { value: unknown }).value = summary
+    render(html`<${AuthStatus} />`, container)
+    return container.textContent ?? ''
+  }
+
+  it('reads "Login required" when no token was ever sent', () => {
+    const text = renderWith({
+      enabled: true,
+      require_token: true,
+      token_present: false,
+      token_valid: false,
+      auth_error_code: 'missing_token',
+    })
+    expect(text).toContain('Login required')
+    expect(text).not.toContain('Auth error')
+  })
+
+  it('reads "Auth error" when a token was sent and rejected', () => {
+    const text = renderWith({
+      enabled: true,
+      require_token: true,
+      token_present: true,
+      token_valid: false,
+      auth_error_code: 'invalid_token',
+    })
+    expect(text).toContain('Auth error')
+    expect(text).not.toContain('Login required')
+  })
+
+  it('treats an actor mismatch as a rejection, not a missing credential', () => {
+    const text = renderWith({
+      enabled: true,
+      require_token: true,
+      token_present: true,
+      token_valid: false,
+      auth_error_code: 'actor_mismatch',
+    })
+    expect(text).toContain('Auth error')
+  })
+
+  it('reads verified when the token checks out', () => {
+    const text = renderWith({
+      enabled: true,
+      require_token: true,
+      token_present: true,
+      token_valid: true,
+      effective_agent: 'dashboard',
+      effective_role: 'worker',
+    })
+    expect(text).toContain('Verified')
+    expect(text).not.toContain('Auth error')
+    expect(text).not.toContain('Login required')
   })
 })

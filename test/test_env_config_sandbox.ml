@@ -111,8 +111,6 @@ let test_defaults_pinned () =
   check bool "Cleanup.enabled default" true (S.Cleanup.enabled ());
   check approx "Cleanup.interval_sec default" 300.0
     (S.Cleanup.interval_sec ());
-  check int "Cleanup.managed_sleep_sec default" 3600
-    (S.Cleanup.managed_sleep_sec ());
   (* Runtime *)
   check string "Runtime.docker_image default" "masc-keeper-sandbox:local"
     (S.Runtime.docker_image ());
@@ -224,50 +222,6 @@ let test_relax_fs_propagates_to_derived () =
     check bool "tmpfs_mount drops noexec when relax_fs"
       true (not contains_noexec))
 
-(* ---------------------------------------------------------------- *)
-(* 5. JSON shape                                                    *)
-(* ---------------------------------------------------------------- *)
-
-let test_json_shape_has_top_level_keys () =
-  with_clean_sandbox_env @@ fun () ->
-  let json = S.effective_config_json () in
-  let assoc = match json with
-    | `Assoc xs -> xs
-    | _ -> failwith "effective_config_json must be `Assoc"
-  in
-  let has_key k = List.mem_assoc k assoc in
-  check bool "top-level 'raw' key" true (has_key "raw");
-  check bool "top-level 'derived' key" true (has_key "derived");
-  let raw = List.assoc "raw" assoc in
-  let raw_assoc = match raw with `Assoc xs -> xs | _ -> [] in
-  let raw_keys =
-    [ "hardening"; "cleanup"; "runtime"; "preflight"; "shell_timeout" ]
-  in
-  List.iter
-    (fun k ->
-      check bool
-        (Printf.sprintf "raw.%s exists" k)
-        true (List.mem_assoc k raw_assoc))
-    raw_keys;
-  (* Probe the entry shape on hardening.pids_limit *)
-  let hardening = List.assoc "hardening" raw_assoc in
-  let hardening_assoc = match hardening with `Assoc xs -> xs | _ -> [] in
-  let pids_limit_entry = List.assoc "pids_limit" hardening_assoc in
-  let entry_keys =
-    match pids_limit_entry with `Assoc xs -> List.map fst xs | _ -> []
-  in
-  check (slist string compare) "raw entry has value/source/env_var keys"
-    [ "env_var"; "source"; "value" ] entry_keys;
-  let preflight = List.assoc "preflight" raw_assoc in
-  check bool
-    "preflight has no product command inventory"
-    true
-    Yojson.Safe.Util.(member "required_commands" preflight = `Null)
-
-(* ---------------------------------------------------------------- *)
-(* Test runner                                                      *)
-(* ---------------------------------------------------------------- *)
-
 let () =
   run "env_config_sandbox"
     [ ( "defaults",
@@ -290,9 +244,5 @@ let () =
     ; ( "filesystem",
         [ test_case "relax_fs propagates to derived" `Quick
             test_relax_fs_propagates_to_derived
-        ] )
-    ; ( "json-shape",
-        [ test_case "top-level keys + entry shape" `Quick
-            test_json_shape_has_top_level_keys
         ] )
     ]

@@ -19,7 +19,9 @@ val rfc3339_of_unix : float -> string
     behave badly and did so identically at all eight former copies; #27131
     owns the decision about changing the type:
 
-    - [nan] renders as the epoch ["1970-01-01T00:00:00Z"]
+    - [nan] is bad in a platform-dependent way: Darwin's [gmtime] accepts it
+      and yields the epoch, so it becomes indistinguishable from a genuine
+      1970 timestamp, while glibc raises [EOVERFLOW]
     - past year 9999 it emits a five-digit year that {!parse_rfc3339}
       rejects, so the value cannot be read back
     - past roughly [1e18] the platform's [gmtime] gives up; on Darwin and

@@ -81,11 +81,18 @@ let test_now_iso_is_readable () =
 
 (* ---- documented failure modes (#27131) ---- *)
 
-let test_nan_becomes_the_epoch () =
-  check_string
-    "nan is indistinguishable from a genuine epoch timestamp"
-    "1970-01-01T00:00:00Z"
-    (Time_codec.rfc3339_of_unix Float.nan)
+(* nan is bad in two different ways depending on the C library. Darwin's
+   gmtime accepts it and yields the epoch, so the value becomes
+   indistinguishable from a genuine 1970 timestamp. glibc raises EOVERFLOW, so
+   it escapes as an exception from a signature that promises a string. This
+   suite ran green on Darwin and red on the Linux runner until it stopped
+   asserting one platform's answer. A third behaviour fails the test. *)
+let test_nan_does_not_survive_as_itself () =
+  match Time_codec.rfc3339_of_unix Float.nan with
+  | exception Unix.Unix_error (_, "gmtime", _) -> ()
+  | "1970-01-01T00:00:00Z" -> ()
+  | other ->
+    Alcotest.failf "nan rendered as %S, which neither platform did; #27131 needs revisiting" other
 ;;
 
 let test_past_year_9999_is_unreadable () =
@@ -129,7 +136,10 @@ let () =
         ; Alcotest.test_case "now_iso stays readable" `Quick test_now_iso_is_readable
         ] )
     ; ( "documented failure modes"
-      , [ Alcotest.test_case "nan renders as the epoch" `Quick test_nan_becomes_the_epoch
+      , [ Alcotest.test_case
+            "nan does not survive as itself"
+            `Quick
+            test_nan_does_not_survive_as_itself
         ; Alcotest.test_case
             "past year 9999 the reader rejects it"
             `Quick

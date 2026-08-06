@@ -986,7 +986,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                None)
       in
       row)
-      names);
+      names
+  in
   let summaries = List.filter_map Fun.id rows in
   `Assoc [
     ("keepers", `List summaries);

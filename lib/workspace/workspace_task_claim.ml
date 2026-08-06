@@ -7,11 +7,8 @@
 open Masc_domain
 include Workspace_utils
 include Workspace_state
-open Workspace_backlog
-open Workspace_identity
 include Workspace_broadcast
 open Workspace_backlog
-open Workspace_identity
 
 let clear_reclaim_decision (task : Masc_domain.task) =
   match task.reclaim_policy with

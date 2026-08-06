@@ -117,8 +117,6 @@ module Lease = struct
 
   module Held = Hashtbl.Make (Key)
 
-  type token = Key.t
-
   let mutex = Mutex.create ()
   let held = Held.create 32
 

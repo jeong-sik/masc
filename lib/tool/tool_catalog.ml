@@ -395,7 +395,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_library_list", read_state_tool);
     ("masc_library_read", read_state_tool);
     ("masc_library_add", broadcast_tool);
-    ("masc_library_promote", broadcast_tool);
     ("masc_library_search", read_state_tool);
     ( "keeper_tasks_list",
       hidden_runtime_tool

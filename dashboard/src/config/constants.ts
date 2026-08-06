@@ -19,9 +19,6 @@ export const DEFAULT_GET_TIMEOUT_MS = 35_000
 export const DEFAULT_POST_TIMEOUT_MS = 30_000
 export const DEFAULT_MCP_TIMEOUT_MS = 60_000
 export const NAMESPACE_TRUTH_GET_TIMEOUT_MS = 30_000
-export const MCP_INITIALIZE_TIMEOUT_MS = 10_000
-export const MCP_INITIALIZED_NOTIFY_TIMEOUT_MS = 5_000
-export const MCP_INIT_COOLDOWN_MS = 2_000
 // Dashboard WS JSON-RPC timeout. Matches the backend dashboard handler budget
 // so a slow first response under Executor_pool contention is not turned into
 // a reconnect by the client side.
@@ -42,11 +39,10 @@ export const TRANSPORT_RETRY_MAX_MS = 30_000
 export const TRANSPORT_RETRY_JITTER_MS = 1_000
 export const TRANSPORT_RETRY_MAX_ATTEMPTS = 10
 
-// --- Reconnect backoff (shared by SSE and dashboard WS) ---
+// --- Reconnect backoff (dashboard WS) ---
 // Cap at 60s with plus/minus 1s jitter to break reconnect storms when the server is
 // degraded; fleets of dashboards retrying every 15s synchronously was
 // observed to amplify Executor_pool starvation on cold start.
-export const RECONNECT_BASE_MS = 1_000
 export const RECONNECT_MAX_MS = 60_000
 export const RECONNECT_JITTER_MS = 1_000
 
@@ -74,7 +70,6 @@ export const CONTEXT_RATIO_COMPACTING = 0.50 // compacting
 
 // --- Keeper UI/runtime limits ---
 export const KEEPER_HISTORY_TAIL_MESSAGES = 200
-export const KEEPER_STREAM_IDLE_POLL_MS = 5_000
 export const STREAMING_THINKING_PREVIEW_CHARS = 6_000
 
 // --- Keeper catch-up digest ---

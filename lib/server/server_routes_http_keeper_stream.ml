@@ -2676,6 +2676,17 @@ let process_single_turn ~user_row_origin ~submission
                   | `Stream_event of Agent_sdk.Types.sse_event
                   ])))
   in
+  (* Queue-lane producer identity shared with the persisted transcript row;
+     lets the dashboard fold a live progress placeholder into the canonical
+     history entry at turn end. *)
+  let progress_receipt_ids =
+    match submission with
+    | Queued_receipt { receipt_ids; _ } ->
+        List.map
+          Keeper_chat_delivery_identity.Receipt_id.to_string
+          (Keeper_chat_delivery_identity.Receipt_ids.to_list receipt_ids)
+    | Direct_request -> []
+  in
   let rec consume_worker_events bridge_state =
     match next_worker_projection () with
     | `Client_disconnected -> None
@@ -2684,7 +2695,27 @@ let process_single_turn ~user_row_origin ~submission
           translate_oas_stream_event ~redact_text
             ~base_dir:base_path bridge_state evt
         in
-        List.iter (Keeper_chat_events.publish events) translated.chat_events;
+        List.iter
+          (fun event ->
+            Keeper_chat_events.publish events event;
+            (* Tap tool-call progress for dashboard clients watching a
+               queued/consumer-side turn: their chat body stays silent until
+               the terminal transcript commit otherwise. Idempotent on the
+               dashboard keyed by [tool_call_id], so direct-stream turns may
+               broadcast as well. *)
+            (match event with
+             | Keeper_chat_events.Tool_call_start
+                 { tool_call_id; tool_call_name } ->
+                 Keeper_chat_broadcast.turn_progress ~keeper_name:agent_name
+                   ~run_id ~kind:Keeper_chat_broadcast.Tool_call_started
+                   ~tool_call_id ~tool_name:tool_call_name
+                   ~receipt_ids:progress_receipt_ids ()
+             | Keeper_chat_events.Tool_call_end { tool_call_id } ->
+                 Keeper_chat_broadcast.turn_progress ~keeper_name:agent_name
+                   ~run_id ~kind:Keeper_chat_broadcast.Tool_call_ended
+                   ~tool_call_id ~receipt_ids:progress_receipt_ids ()
+             | _ -> ()))
+          translated.chat_events;
         consume_worker_events translated.bridge_state
     | `Completion (Completion_queued_turn_deferred rejection) ->
         let message =

@@ -1,5 +1,9 @@
 (** Filesystem runtime handlers for descriptor-backed Read/Edit/Write tools. *)
 
+val valid_fs_write_mode_strings : string list
+(** The canonical enum [Tool_shard_types_enum_mirrors.fs_write_mode_enum_strings]
+    hand-copies. Exported so test_enum_mirror_sync can compare the copy against
+    it; the mirror module names this value as the owner. *)
 val resolve_partition_for_write
   :  base_dir:string
   -> kind:string

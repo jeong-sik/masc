@@ -115,6 +115,80 @@ let test_patch_last_assistant_preserves_typed_reasoning () =
     (has_content (function Thinking _ -> true | _ -> false) patched.messages)
 ;;
 
+let test_finalization_reuses_matching_pipeline_checkpoint () =
+  let open Agent_sdk.Types in
+  let history = [ message User [ Text "question" ] ] in
+  let messages = history @ [ message Assistant [ Text "final" ] ] in
+  let persisted =
+    { (checkpoint ~working_context:None messages) with
+      session_id = "new-session"
+    }
+  in
+  let rebuilt =
+    { persisted with
+      messages = List.map Fun.id persisted.messages
+    ; created_at = persisted.created_at +. 1.0
+    ; context = Agent_sdk.Context.copy persisted.context
+    }
+  in
+  let selected, source_already_persisted =
+    Finalize.select_finalization_checkpoint
+      ~last_persisted_checkpoint:(Some persisted)
+      rebuilt
+  in
+  Alcotest.(check bool)
+    "matching pipeline checkpoint selected"
+    true
+    (source_already_persisted && selected == persisted);
+  let patched, replay_suffix_pruned =
+    Finalize.checkpoint_for_replay_persistence
+      ~history_messages:history
+      ~session_id:"new-session"
+      ~response_text:"final"
+      selected
+    |> expect_ok
+  in
+  Alcotest.(check bool)
+    "canonical no-op preserves the durable message spine"
+    true
+    (patched.messages == persisted.messages);
+  Alcotest.(check bool)
+    "final duplicate persistence is unnecessary"
+    true
+    (Finalize.finalization_checkpoint_already_persisted
+       ~source_already_persisted
+       ~source:selected
+       ~patched
+       ~replay_suffix_pruned)
+;;
+
+let test_finalization_does_not_reuse_distinct_message_state () =
+  let open Agent_sdk.Types in
+  let persisted =
+    checkpoint ~working_context:None
+      [ message User [ Text "question" ]; message Assistant [ Text "old" ] ]
+  in
+  let rebuilt =
+    match persisted.messages with
+    | [] -> Alcotest.fail "test checkpoint must contain messages"
+    | first :: rest ->
+      let copied_first = { first with metadata = first.metadata } in
+      { persisted with
+        messages = copied_first :: rest
+      ; created_at = persisted.created_at +. 1.0
+      }
+  in
+  let selected, source_already_persisted =
+    Finalize.select_finalization_checkpoint
+      ~last_persisted_checkpoint:(Some persisted)
+      rebuilt
+  in
+  Alcotest.(check bool)
+    "distinct message spine keeps the rebuilt checkpoint"
+    true
+    ((not source_already_persisted) && selected == rebuilt)
+;;
+
 let test_contract_observation_preserves_current_turn_suffix () =
   let open Agent_sdk.Types in
   let history =
@@ -570,6 +644,14 @@ let () =
             "contract observation preserves current turn"
             `Quick
             test_contract_observation_preserves_current_turn_suffix
+        ; Alcotest.test_case
+            "finalization reuses matching pipeline checkpoint"
+            `Quick
+            test_finalization_reuses_matching_pipeline_checkpoint
+        ; Alcotest.test_case
+            "finalization rejects distinct message state"
+            `Quick
+            test_finalization_does_not_reuse_distinct_message_state
         ; Alcotest.test_case
             "contract observation rejects prefix mismatch"
             `Quick

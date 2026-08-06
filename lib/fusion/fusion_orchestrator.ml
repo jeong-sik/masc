@@ -374,6 +374,7 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
             })
 
 let project
+    ~registry
     ~base_dir
     ~topology
     ~channel
@@ -381,8 +382,8 @@ let project
     (deliberation : Fusion_types.deliberation_evidence)
   =
   match
-    Fusion_sink.emit ~base_dir ~keeper:request.keeper ~run_id:request.run_id ~channel
-      ~question:deliberation.question ~panel:deliberation.panel
+    Fusion_sink.emit ~registry ~base_dir ~keeper:request.keeper ~run_id:request.run_id
+      ~channel ~question:deliberation.question ~panel:deliberation.panel
       ~judge:deliberation.judge ~judges:deliberation.judges
       ~judge_usage:deliberation.judge_usage
   with

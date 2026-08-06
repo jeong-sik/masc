@@ -2,7 +2,6 @@ type operation =
   | List_documents
   | Read_document
   | Add_document
-  | Promote_document
   | Search_documents
 
 type definition =

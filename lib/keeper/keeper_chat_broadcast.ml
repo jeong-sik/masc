@@ -105,3 +105,48 @@ let chat_appended ~keeper_name ~source ?content () =
     event, mirroring {!chat_appended}. *)
 let chat_appended_with_audio ~keeper_name ~source ~audio ?content () =
   do_broadcast ~keeper_name ~source ~audio:(Some audio) ?content ()
+
+type turn_progress_kind =
+  | Tool_call_started
+  | Tool_call_ended
+
+let turn_progress_kind_to_string = function
+  | Tool_call_started -> "tool_call_start"
+  | Tool_call_ended -> "tool_call_end"
+
+let turn_progress_to_json ~keeper_name ~run_id ~kind ~tool_call_id ~tool_name
+    ~receipt_ids =
+  `Assoc
+    ([ ("type", `String "keeper_chat_turn_progress")
+     ; ("name", `String keeper_name)
+     ; ("run_id", `String run_id)
+     ; ("kind", `String (turn_progress_kind_to_string kind))
+     ; ("tool_call_id", `String tool_call_id)
+     ; ("ts_unix", `Float (Time_compat.now ()))
+     ]
+     @ (match tool_name with
+        | None -> []
+        | Some tool_name -> [ ("tool_name", `String tool_name) ])
+     @
+     match receipt_ids with
+     | [] -> []
+     | receipt_ids ->
+       [ ("receipt_ids", `List (List.map (fun id -> `String id) receipt_ids)) ])
+
+let turn_progress ~keeper_name ~run_id ~kind ~tool_call_id ?tool_name
+    ?(receipt_ids = []) () =
+  try
+    Sse.broadcast
+      (turn_progress_to_json ~keeper_name ~run_id ~kind ~tool_call_id ~tool_name
+         ~receipt_ids)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string SseBroadcastFailures)
+      ~labels:[ ("keeper", keeper_name); ("site", "chat_turn_progress") ]
+      ();
+    Log.Keeper.warn
+      "keeper_chat_broadcast: turn_progress name=%s failed: %s"
+      keeper_name
+      (Printexc.to_string exn)

@@ -9,37 +9,6 @@
     See: mcp_server_eio_execute.ml dispatch_by_tag for the MCP server version.
     Issue: #4579 *)
 
-(** Helper: require Eio.Switch.t, return error if unavailable. *)
-let require_sw () =
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Ok sw
-  | None -> Error "requires Eio switch (not available in keeper context)"
-;;
-
-(** Helper: require Eio clock, return error if unavailable. *)
-let require_clock () =
-  match Eio_context.get_clock_opt () with
-  | Some clock -> Ok clock
-  | None -> Error "requires Eio clock (not available in keeper context)"
-;;
-
-(** Helper: get optional proc_mgr via Process_eio fallback. *)
-let get_proc_mgr_opt () =
-  match Process_eio.get_proc_mgr () with
-  | Ok pm -> Some pm
-  | Error _ -> None
-;;
-
-(** Helper: require Eio net, return error if unavailable. *)
-let require_net () =
-  match Eio_context.get_net_opt () with
-  | Some net -> Ok net
-  | None -> Error "requires Eio net (not available in keeper context)"
-;;
-
-(** Helper: get optional net. *)
-let get_net_opt () = Eio_context.get_net_opt ()
-
 (** Stable string label for Otel_metric_store bucketing — keeps the
     metric [tag] dimension separated from per-tool [name]. *)
 let string_of_tag (tag : Tool_dispatch.module_tag) : string =
@@ -61,9 +30,6 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_operator -> "operator"
   | Mod_compact -> "compact"
 ;;
-
-(** Helper: get optional fs. *)
-let get_fs_opt () = Fs_compat.get_fs_opt ()
 
 (** Dispatch a tool by its module tag using keeper-available context.
 

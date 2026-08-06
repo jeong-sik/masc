@@ -832,6 +832,14 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_keeper_keepalive_launch_order_ast
 
+      - name: Run enum mirror sync guard
+        # This PR exists because the enum mirrors claimed a sync regression
+        # test that no file implemented. Wiring the guard into a run step is
+        # what makes it a guard instead of another compile-only citation.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_enum_mirror_sync
+
       - name: Run paused-work transfer and source-ACK suites
         id: paused_work_transfer_and_operator_suites
         if: ${{ always() && steps.build_step.outcome == 'success' }}

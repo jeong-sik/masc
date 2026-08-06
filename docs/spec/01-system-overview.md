@@ -123,7 +123,6 @@ MASC는 단일 public library(`masc`)로 구성된다. `lib/` 아래 기능별 �
 | `masc_cost` | `masc-cost` | `bin/masc_cost.ml` | Token 사용량 집계, 비용 계산 CLI. |
 | `masc_compaction_audit` | `masc-compaction-audit` | `bin/masc_compaction_audit.ml` | Compaction audit CLI. `.masc/data/harness-compact/` JSONL 검사. |
 | `masc_tui` | `masc-tui` | `bin/masc_tui.ml` | Terminal UI. Keeper 목록, 상태, 연결 인터페이스. |
-| `masc_worker_run` | `masc-worker-run` | `bin/masc_worker_run.ml` | MASC worker 실행 CLI. |
 
 낮부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행):
 

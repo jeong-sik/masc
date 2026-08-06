@@ -342,13 +342,6 @@ type fetch_response =
   ; body : string
   }
 
-type http_fetch =
-  timeout_sec:int ->
-  headers:(string * string) list ->
-  max_response_bytes:int ->
-  string ->
-  (fetch_response, fetch_failure) Result.t
-
 let resolve_redirect_url ~base_url target =
   Uri.resolve "" (Uri.of_string base_url) (Uri.of_string target) |> Uri.to_string
 

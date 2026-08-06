@@ -11,4 +11,6 @@
  (flags :standard -w +32)
  (public_name masc.otel_metrics)
  (wrapped false)
+ (flags
+  (:standard -w +32))
  (libraries opentelemetry opentelemetry.client))

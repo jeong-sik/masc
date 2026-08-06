@@ -1,8 +1,6 @@
 (** Workspace broadcast — emit workspace-wide messages and the
     accompanying message-activity event. *)
 
-open Masc_domain
-open Workspace_utils
 
 (** RFC-0061: closed variants for broadcast envelope observability. *)
 type rewrite_reason =

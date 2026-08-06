@@ -432,7 +432,7 @@ let decision_child_scope scope key =
   then Compaction_evidence
   else scope
 
-let rec public_projection_of_decision decision =
+let public_projection_of_decision decision =
   let rec project scope path = function
     | `Assoc fields ->
         let allowlist = decision_allowlist scope in

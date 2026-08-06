@@ -1459,9 +1459,5 @@ module For_testing = struct
     Option.map lsp_method_classification (lsp_method_of_string method_)
   ;;
 
-  type lang = resolved_lang =
-    | Known_lang of string
-    | Unknown_lang
-
   let resolve_lang = resolve_lang
 end

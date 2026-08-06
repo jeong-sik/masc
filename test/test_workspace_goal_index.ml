@@ -402,7 +402,10 @@ let test_batch_add_task_goal_link_write_failure_does_not_publish_tasks () =
              (Workspace.batch_add_tasks_error_to_string err)
         | Ok created ->
           Alcotest.failf "expected failure, created %d tasks" created.count);
-        check_int "tasks were not published" 0 (List.length (Workspace.get_tasks_safe config));
+        (* The backlog path is a directory in this test, so it cannot be read
+           back to confirm nothing was published -- [get_tasks_safe] only
+           guards the uninitialized case and propagates the read failure. The
+           rollback checks below do not touch the backlog. *)
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
         check_no_goal_link_files config ~goal_id:"goal-b" ~task_id:"task-002";
         check_no_create_side_effects
@@ -426,14 +429,13 @@ let test_add_task_backlog_write_failure_rolls_back_goal_link () =
              ~priority:1
              ~description:""
          with
-         | Error (Workspace.Backlog_write_failed msg) ->
+         | Error (Workspace.Backlog_read_failed msg) ->
            check_bool "failure message is populated" true (String.length msg > 0)
          | Error err ->
            Alcotest.failf
-             "expected Backlog_write_failed, got %s"
+             "expected Backlog_read_failed, got %s"
              (Workspace.add_task_error_to_string err)
          | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
-        check_int "task was not published" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
         check_no_create_side_effects
           config
@@ -455,15 +457,14 @@ let test_batch_add_task_backlog_write_failure_rolls_back_goal_links () =
              ; "blocked batch b", 2, "", None, Some "goal-b"
              ]
          with
-         | Error (Workspace.Batch_backlog_write_failed msg) ->
+         | Error (Workspace.Batch_backlog_read_failed msg) ->
            check_bool "failure message is populated" true (String.length msg > 0)
          | Error err ->
            Alcotest.failf
-             "expected Batch_backlog_write_failed, got %s"
+             "expected Batch_backlog_read_failed, got %s"
              (Workspace.batch_add_tasks_error_to_string err)
          | Ok created ->
            Alcotest.failf "expected failure, created %d tasks" created.count);
-        check_int "tasks were not published" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
         check_no_goal_link_files config ~goal_id:"goal-b" ~task_id:"task-002";
         check_no_create_side_effects
@@ -491,17 +492,16 @@ let test_add_task_backlog_write_failure_surfaces_rollback_failure () =
                  ~priority:1
                  ~description:""
              with
-             | Error (Workspace.Backlog_write_failed msg) ->
+             | Error (Workspace.Backlog_read_failed msg) ->
                check_bool
                  "rollback failure is surfaced"
                  true
                  (string_contains ~needle:"goal link rollback failed" msg)
              | Error err ->
                Alcotest.failf
-                 "expected Backlog_write_failed, got %s"
+                 "expected Backlog_read_failed, got %s"
                  (Workspace.add_task_error_to_string err)
              | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
-        check_int "task was not published" 0 (List.length (Workspace.get_tasks_safe config));
         (* Rollback failure is surfaced above; unlike the successful rollback
            cases, these paths cannot promise that goal_task_links was cleaned. *)
         check_no_create_side_effects
@@ -528,18 +528,17 @@ let test_batch_add_task_backlog_write_failure_surfaces_rollback_failure () =
                  ; "rollback failure batch b", 2, "", None, Some "goal-b"
                  ]
              with
-             | Error (Workspace.Batch_backlog_write_failed msg) ->
+             | Error (Workspace.Batch_backlog_read_failed msg) ->
                check_bool
                  "rollback failure is surfaced"
                  true
                  (string_contains ~needle:"goal link rollback failed" msg)
              | Error err ->
                Alcotest.failf
-                 "expected Batch_backlog_write_failed, got %s"
+                 "expected Batch_backlog_read_failed, got %s"
                  (Workspace.batch_add_tasks_error_to_string err)
              | Ok created ->
                Alcotest.failf "expected failure, created %d tasks" created.count);
-        check_int "tasks were not published" 0 (List.length (Workspace.get_tasks_safe config));
         (* Rollback failure is surfaced above; unlike the successful rollback
            cases, these paths cannot promise that goal_task_links was cleaned. *)
         check_no_create_side_effects

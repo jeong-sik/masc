@@ -18,7 +18,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Server |
-| Maps to | `lib/server/`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/http_server_h2.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
+| Maps to | `lib/server/`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
 | Dependencies | 02-types-and-invariants |
 | Modules | 61 |
 | LOC | ~17,700 |
@@ -865,7 +865,6 @@ sequenceDiagram
 | `oas_event_bridge.ml` | 56 | OAS -> SSE 이벤트 브릿지 |
 | `transport.ml` | 674 | 프로토콜 바인딩 추상화 + OpenAPI 생성 |
 | `http_server_eio.ml` | 675 | httpun-eio 래퍼 (Router, Compression) |
-| `http_server_h2.ml` | 325 | h2-eio 래퍼 |
 | `auth.ml` | 435 | 인증/인가 코어 |
 
 ### 18.2 Server Sub-library (lib/server/)

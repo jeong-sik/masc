@@ -14,7 +14,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Foundation |
-| Maps to | `test/`, `lib/keeper/keeper_gate.ml`, `lib/keeper/keeper_approval_queue.ml`, `lib/eval_harness.ml`, `lib/trajectory.ml` |
+| Maps to | `test/`, `lib/keeper/keeper_gate.ml`, `lib/keeper/keeper_approval_queue.ml`, `lib/eval_harness.ml`, `lib/trajectory/trajectory.ml` |
 | Dependencies | (all subsystem specs) |
 | Test Files | `test/dune`와 포함 stanza가 SSOT |
 
@@ -85,7 +85,6 @@ Correctness gate가 아닌 orchestration/benchmark/behavior 실험. Runbook과 �
 |------|---------|----------|
 | Keeper fleet proof | `scripts/harness/workload/agent_swarm_live.sh` | `docs/BENCHMARK-RUNBOOK.md` |
 | Supervised delivery | - | `docs/SUPERVISOR-MODE.md` |
-| TRPG smoke | `scripts/run_trpg_grimland_smoke.sh` | - |
 | Local runtime capacity | `scripts/llama-runtime-pool.sh` | `docs/PERFORMANCE-SLO.md` |
 
 규칙: proof artifact, report, runtime 전제, 모델 선택 근거를 함께 남긴다.
@@ -159,13 +158,7 @@ type scenario = {
 - `Deterministic`: 필드(result/tool_name/error)에 대한 Exact/Contains/Regex/NotContains 매칭. 0 지연.
 - `ModelBased`: LLM에 rubric과 결과를 제출하여 0.0-1.0 점수 산출. 비용 발생.
 
-### 5.3 Anti-Fake (RETIRED)
-
-`lib/anti_fake.ml`는 허위 테스트 패턴 감지(`assert true`, `let _ =`, `(* TODO *)` 등에 대한 자동 감점 + `score_result`/`audit_summary` 집계)를 제공하던 모듈이었고, #2848 dead-code sweep에서 `lib/agent_ecosystem`/`lib/agent_neo4j`와 함께 제거됐다 (`grep -rn anti_fake lib/ test/` → 0 hits).
-
-현재는 `scripts/check-test-quality.sh`와 `eval_harness`의 trajectory-level assertion 검증이 그 역할을 부분 승계하며, 전용 테스트 품질 게이트는 노출되지 않는다.
-
-### 5.4 Trajectory (lib/trajectory.ml)
+### 5.4 Trajectory (`lib/trajectory/trajectory.ml`)
 
 Keeper tool call의 JSONL 기반 궤적 로깅. 결정적 재생, 비용 누적, 엔트로피 탐지, eval_harness 연동을 지원한다.
 
@@ -202,12 +195,6 @@ Task completion claim -> configured LLM verification
 
 cost / token / turn -> observation and aggregation only
 ```
-
-### 5.6 Keeper Contract (RETIRED)
-
-`lib/keeper/keeper_contract.ml`는 keeper 정책/런타임 enum의 typed 표현(예: workspace-targeting enum legacy variant)을 제공했고, single-workspace 통합 과정에서 해당 타입이 제거됐다 (`grep -rn 'type .*scope' lib/keeper` 기준 legacy scope enum hit 없음).
-
-Keeper 관련 enum의 현재 typed boundary는 05-keeper-agent 스펙의 §2 module table을 따른다.
 
 ---
 
@@ -264,7 +251,7 @@ bisect-ppx-report html --coverage-path _coverage
 
 ### 7.2 Coverage 파일 분포
 
-100개의 `*_coverage.ml` 파일이 커버리지 보강 목적으로 존재한다. 이 파일들은 기존 테스트에서 누락된 경로를 보완하며, anti_fake 검증을 통과해야 한다.
+100개의 `*_coverage.ml` 파일이 커버리지 보강 목적으로 존재한다. 이 파일들은 기존 테스트에서 누락된 경로를 보완한다.
 
 ---
 
@@ -289,7 +276,6 @@ bisect-ppx-report html --coverage-path _coverage
 - **INV-T2**: Env-gated 테스트는 필수 환경변수 부재 시 skip 또는 not run으로 처리한다. 실패가 아니다.
 - **INV-T3**: 구조 경계 테스트는 명령 문자열이나 도구 이름에서 권한 의미를 추론하지 않는다.
 - **INV-T4**: 한 Gate 요청의 pending/HITL 상태는 다른 Keeper 또는 같은 Keeper의 독립 작업 lane을 중단시키지 않는다.
-- **INV-T5**: `anti_fake` penalty 패턴에 매칭되는 테스트 파일은 `quality_tier`에서 경고 또는 위험으로 분류된다.
 - **INV-T6**: Contract harness는 외부 서버에 의존하지 않는다. Hermetic bootstrap 경로만 사용한다.
 
 ---

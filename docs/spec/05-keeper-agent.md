@@ -40,20 +40,16 @@ Keeper는 외부 세계를 관찰(`world_observation`)하고, 프롬프트를 �
 graph LR
   subgraph Types
     KT[keeper_types] --> KC[keeper_config]
-    KT --> KCT[keeper_contract]
   end
   subgraph Context
-    KWC[working_context] --> KEC[exec_context] --> KCS[checkpoint_store]
+    KCC[context_core] --> KCR[context_runtime] --> KCS[checkpoint_store]
   end
   subgraph Memory
-    KMO[memory_os_io] --> KMR[memory_recall]
+    KMO[memory_os_current] --> KMR[memory_os_recall]
   end
   subgraph Turn
     KUT[unified_turn] --> KAR[agent_run] --> KTO[tools_oas]
     KAR --> KHO[hooks_oas]
-  end
-  subgraph Decision
-    KD --> KL[learning]
   end
   subgraph Completion Authority
     CA[system LLM agent] --> CV[typed verdict]
@@ -74,9 +70,8 @@ graph LR
 | Config | `keeper_config.ml`, `keeper_toml_loader.ml` | 2 |
 | Context | `keeper_context_core.ml`, `keeper_context_runtime.ml`, `keeper_checkpoint_store.ml` | 3 |
 | Memory | `keeper_memory*.ml` (bank, policy, recall) | 4 |
-| Prompt / Skill | `keeper_prompt.ml`, `keeper_unified_prompt.ml`, `keeper_skill_routing.ml` | 3 |
+| Prompt | `keeper_prompt.ml`, `keeper_unified_prompt.ml` | 2 |
 | Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_oas.ml`, `keeper_hooks_oas.ml` | 4 |
-| Decision | `keeper_deliberation.ml` | 1 |
 | Supervision | `keeper_supervisor.ml`, `keeper_keepalive.ml`, `keeper_world_observation.ml` | 3 |
 | MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_persona.ml`, `keeper_schema.ml` | 4 |
 | Alerting / Metrics | `keeper_alerting*.ml`, `keeper_status_runtime*.ml`, `keeper_status_detail.ml` | 6+ |
@@ -87,7 +82,7 @@ graph LR
 
 ### 3.1 keeper_meta
 
-Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정의되며, 약 100개 필드를 가진다.
+Keeper의 전체 상태를 담는 레코드. `lib/keeper_types/keeper_types.ml`에 정의되며, 약 100개 필드를 가진다.
 
 **소스**: `keeper_types.ml` (lines 9-106)
 
@@ -344,11 +339,7 @@ turn, and latency values remain observations.
 
 시나리오 기반 행동 평가. `scenario`(goal + graders + tool expectations) -> `Deterministic`(Exact/Contains/Regex) 또는 `ModelBased`(MODEL 채점) grader -> weight 합산 점수.
 
-### 7.3 Anti-Fake (retired)
-
-테스트 코드 품질 점수화 모듈(`lib/anti_fake.ml`)은 #2848 dead-code sweep에서 제거됐다. 테스트 품질은 현재 alcotest + QCheck assertion 및 CI의 `test_ci_hardening_source.ml` contract test가 담당한다.
-
-### 7.4 Trajectory (`lib/trajectory.ml`)
+### 7.3 Trajectory (`lib/trajectory/trajectory.ml`)
 
 Tool call을 `.masc/trajectories/{name}/{trace_id}.jsonl`에 JSONL 기록. 용도: replay, cost 추적, eval 입력.
 
@@ -459,25 +450,6 @@ Keeper는 idle 상태에서 주기적으로 자발적 행동을 생성한다.
 
 ---
 
-## 12. Learning System (retired)
-
-전용 learning 모듈(`lib/keeper/keeper_learning.ml`, `keeper_feedback_tool.ml`)은 #2589 dead-module sweep에서 제거됐다. decision_record JSONL 스키마와 `record_decision`/`record_outcome`/`record_feedback` 파이프라인도 runtime에서 사라졌다. 심의 기록은 현재 `keeper_deliberation.ml` + trajectory(`lib/trajectory.ml`) + procedural memory(`lib/procedural_memory.ml`)가 나눠 담당한다.
-
----
-
-## 13. Skill Routing
-
-**소스**: `lib/keeper/keeper_skill_routing.ml`
-
-Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
-
-허용 skill 목록: `masc-heartbeat`, `masc-keeper-autonomy`
-
-선택 모드:
-- `SkillSelectAgent`: MODEL에 skill 선택을 위임하는 단일 모드
-
----
-
 ## 14. Invariants
 
 ### INV-KEEPER-001: keeper_meta.name 유효성
@@ -563,18 +535,16 @@ External memory projection은 제거됐다. 남은 경계 이슈는 keeper conte
 
 | 문서 | 경로 |
 |------|------|
-| Keeper Types | `lib/keeper/keeper_types.ml` |
+| Keeper Types | `lib/keeper_types/keeper_types.ml` |
 | Context Core | `lib/keeper/keeper_context_core.ml` (구 `keeper_working_context.ml` 흡수) |
 | Execution Context | `lib/keeper/keeper_context_runtime.ml` |
 | Agent Run | `lib/keeper/keeper_agent_run.ml` |
 | Unified Turn | `lib/keeper/keeper_unified_turn.ml` |
-| Deliberation | `lib/keeper/keeper_deliberation.ml` |
 | Task verification evidence | `lib/workspace/workspace_task_verification.ml` |
 | OAS hook observations | `lib/keeper/keeper_hooks_oas.ml` |
 | Eval Harness | `lib/eval_harness.ml` |
-| Trajectory | `lib/trajectory.ml` |
+| Trajectory | `lib/trajectory/trajectory.ml` |
 | Supervisor | `lib/keeper/keeper_supervisor.ml` |
 | Config | `lib/keeper/keeper_config.ml` |
 | TOML Example | `config/keepers/janitor.toml` |
-| Memory facade | `lib/memory.mli` |
 | Memory: keeper 재설계 | `memory/project_dashboard-keeper-detail-redesign.md` |

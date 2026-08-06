@@ -1812,7 +1812,12 @@ let internal_descriptors : t list =
       ~capability_identity:Internal_name_identity
       "done"
       "keeper_task_done"
-      "Mark the claimed MASC task as done."
+      (* The name says done; the handler issues submit_for_verification
+         (keeper_tool_task_runtime.ml:806). Saying "done" here left the model
+         expecting a terminal state and finding AwaitingVerification. *)
+      "Submit the claimed MASC task for verification with evidence. The task \
+       waits for a completion authority's verdict; it does not become done \
+       here, and it does not hold your next claim while it waits."
       ~readonly:false
   (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)
   ; masc_task_descriptor "add" "masc_add_task"

@@ -33,7 +33,7 @@ let keeper_model_exposure = function
        load/prompt-eval timings and a prefix-reuse inference. That is operator
        diagnostics, and the operator reads it through the dashboard route. It
        cost every Keeper turn 1,219 bytes of tool schema and was called 0 times
-       in the 6 days to 2026-08-06 (~/.masc/tool_usage/2026-08/). *)
+       in the 6 days to 2026-08-06 (the workspace tool_usage store). *)
     Operator_diagnostic
 ;;
 

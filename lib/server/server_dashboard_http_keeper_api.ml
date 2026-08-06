@@ -47,21 +47,6 @@ let cached_assoc_body_or_self cached fields =
   | None -> cached
 ;;
 
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-;;
-
-let json_float_opt = function
-  | Some value -> `Float value
-  | None -> `Null
-;;
-
-let json_time_iso_opt = function
-  | Some value -> `String (Masc_domain.iso8601_of_unix_seconds value)
-  | None -> `Null
-;;
-
 type state_diagram_runtime_projection =
   { runtime_models : string list
   ; last_provider_result : string option

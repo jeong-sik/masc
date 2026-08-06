@@ -5,7 +5,6 @@
 
 type keeper_artifact =
   | Metadata
-  | Generation_index_log
   | Decision_log
   | Feedback_log
   | Tla_trace_log

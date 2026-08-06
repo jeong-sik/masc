@@ -135,18 +135,8 @@ let keeper_raw_trace_turn_path config name =
   in
   fresh 0
 
-let keeper_generation_index_path config name =
-  Filename.concat
-    (keeper_dir_ config)
-    (Keeper_runtime_root_entry.keeper_basename
-       ~keeper_name:name
-       Keeper_runtime_root_entry.Generation_index_log)
-
 let keeper_session_dir config trace_id =
   Filename.concat (session_base_dir_ config) trace_id
-
-let keeper_generation_manifest_path config trace_id =
-  Filename.concat (keeper_session_dir config trace_id) "generation_manifest.json"
 
 let keeper_history_path config trace_id =
   Filename.concat (keeper_session_dir config trace_id) "history.jsonl"

@@ -381,12 +381,21 @@ let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
   in
   Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result)
 
+(* Instructions live in [keepers/<name>/AGENT.md], not in the TOML: the loader
+   rejects [keeper.instructions] as an unknown key, and a rejected document
+   leaves the whole profile unloaded. *)
+let write_keeper_instructions keepers_dir name body =
+  let dir = Filename.concat keepers_dir name in
+  mkdir_p dir;
+  write_file (Filename.concat dir "AGENT.md") body
+
 let write_config_root_keeper_toml config_root name =
+  let keepers_dir = Filename.concat config_root "keepers" in
   write_file
-    (Filename.concat (Filename.concat config_root "keepers") (name ^ ".toml"))
-    (Printf.sprintf
-       "[keeper]\ninstructions = \"instructions-%s\"\nautoboot_enabled = true\nsandbox_profile = \"local\"\n"
-       name)
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    "[keeper]\nautoboot_enabled = true\nsandbox_profile = \"local\"\n";
+  write_keeper_instructions keepers_dir name
+    (Printf.sprintf "instructions-%s\n" name)
 
 let fixture_runtime_id () =
   match Runtime.get_default_runtime () with
@@ -402,10 +411,10 @@ let write_basepath_keeper_toml base_path name =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
 {|[keeper]
-instructions = "example"
 proactive_enabled = false
 autoboot_enabled = true
-|}
+|};
+  write_keeper_instructions keepers_dir name "example\n"
 let find_free_port_from start =
   let rec loop attempts port =
     if attempts <= 0 then
@@ -1706,7 +1715,11 @@ let test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "base.toml")
-      "[keeper]\nautoboot_enabled = true\ninstructions = \"default keeper\"\n";
+      "[keeper]\nautoboot_enabled = true\n";
+    write_keeper_instructions
+      (Filename.concat config_root "keepers")
+      "base"
+      "default keeper\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
     Config_dir_resolver.reset ();

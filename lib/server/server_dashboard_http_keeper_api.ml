@@ -2035,18 +2035,27 @@ let handle_keeper_get_subroutes state req request reqd =
        the reader rejects anything that could leave the keeper's directory
        rather than normalizing it. *)
     let name = extract_name "/raw-trace" in
-    let file = Option.value ~default:"" (Server_utils.query_param req "file") in
     let offset = Server_utils.int_query_param req "offset" ~default:0 |> max 0 in
     let limit =
       Server_utils.int_query_param req "limit" ~default:200 |> max 1 |> min 2000
     in
-    (match Keeper_raw_trace_reader.read_turn
-             ~config:(Mcp_server.workspace_config state)
-             ~keeper:name
-             ~file
-             ~offset
-             ~limit
-     with
+    (* A missing [file] is a caller that named no turn. Defaulting it to the
+       empty string would route that request into the reader's file-name
+       validation and report it as an invalid name, which describes a different
+       mistake than the one made. *)
+    (match Server_utils.query_param req "file" with
+     | None ->
+       Http.Response.json_value ~status:`Bad_request
+         (`Assoc [ "error", `String "file is required; list turns at /raw-traces" ])
+         reqd
+     | Some file ->
+       (match Keeper_raw_trace_reader.read_turn
+                ~config:(Mcp_server.workspace_config state)
+                ~keeper:name
+                ~file
+                ~offset
+                ~limit
+        with
      | Error (Keeper_raw_trace_reader.No_such_turn _ as error) ->
        Http.Response.json_value ~status:`Not_found
          (`Assoc
@@ -2066,7 +2075,7 @@ let handle_keeper_get_subroutes state req request reqd =
                :: ("dashboard_surface", `String "/api/v1/keepers/:name/raw-trace")
                :: fields)
           | json -> json)
-         reqd)
+         reqd))
   else if ends_with "/compaction-snapshots" then
     let name = extract_name "/compaction-snapshots" in
     if String.length name = 0 then

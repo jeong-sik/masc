@@ -70,7 +70,6 @@ val merge_json_objects :
 
 (** {1 Snapshot cache} *)
 
-val invalidate_snapshot_cache : unit -> unit
 (** Drops every cached operator snapshot entry.  Called
     automatically by the keeper-mutation routes
     ([server_dashboard_http_keeper_api]) so the next

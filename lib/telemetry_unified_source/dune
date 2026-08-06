@@ -2,6 +2,7 @@
 
 (library
  (name telemetry_unified_source)
+ (flags :standard -w +32)
  (public_name masc.telemetry_unified_source)
  (wrapped false)
  (modules telemetry_unified_source telemetry_unified_source_meta)

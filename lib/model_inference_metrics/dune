@@ -13,6 +13,7 @@
 
 (library
  (name masc_model_inference_metrics)
+ (flags :standard -w +32)
  (public_name masc.model_inference_metrics)
  (wrapped false)
  (libraries

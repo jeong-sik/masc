@@ -9,7 +9,6 @@
     - Per-connection Eio.Switch.run for scoped lifecycle *)
 
 open Server_auth
-open Server_utils
 module Http = Http_server_eio
 module Ws_endpoint = Ws_direct_core.Endpoint
 module Ws_wsd = Ws_direct_core.Endpoint.Wsd
@@ -158,8 +157,6 @@ module Lsp_method_catalog = struct
     ]
   ;;
 
-  let handled_methods = List.map (fun (e : entry) -> e.method_) entries
-
   let of_string method_ =
     List.find_map
       (fun entry ->
@@ -217,11 +214,6 @@ type conn_state =
   }
 
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
-
-let process_snapshot cs =
-  Eio.Mutex.use_ro cs.process_mutex (fun () ->
-    Hashtbl.fold (fun lang_id proc acc -> (lang_id, proc) :: acc) cs.processes [])
-;;
 
 let find_process cs lang_id =
   Eio.Mutex.use_ro cs.process_mutex (fun () -> Hashtbl.find_opt cs.processes lang_id)

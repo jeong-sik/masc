@@ -23,11 +23,6 @@ val dedupe_thinking_lines :
   Trajectory.trajectory_line list
 (** Collapse consecutive identical "thinking" lines to one entry. *)
 
-val internal_history_json_to_trajectory_line :
-  Yojson.Safe.t -> Trajectory.trajectory_line option
-(** Parse a single internal-history JSON entry into a trajectory line;
-    [None] for malformed entries. *)
-
 val read_internal_history_lines :
   config:Workspace.config ->
   trace_id:string -> Trajectory.trajectory_line list

@@ -39,3 +39,14 @@ val schema_shape : Yojson.Safe.t -> schema_shape
 val schema_shape_json : Yojson.Safe.t -> Yojson.Safe.t
 (** JSON form of {!schema_shape}. Omits [one_of_required] and [schema_errors]
     when empty. *)
+
+val constraint_declaration_paths : Yojson.Safe.t -> string list
+(** Every declared range/length constraint that pre-dispatch validation can
+    reach, as ["<field path>:<keyword>"] — [minimum], [maximum],
+    [exclusiveMinimum], [exclusiveMaximum], [minLength], [maxLength],
+    [minItems], [maxItems].
+
+    Enforcement descends through [properties] and object-form [items] only.
+    A declaration placed anywhere else (a [oneOf] branch, a tuple-form
+    [items]) would never be enforced, so tests compare this list against a
+    raw scan of the whole schema. *)

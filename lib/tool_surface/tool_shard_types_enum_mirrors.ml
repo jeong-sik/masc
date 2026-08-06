@@ -4,7 +4,7 @@
     These lists each mirror a [valid_*_strings] SSOT owned by a
     downstream keeper/board module. The schema layer remains a leaf, so each
     value is hand-kept in lock-step and protected by a sync regression test in
-    [test/test_types.ml].
+    [test/test_enum_mirror_sync.ml].
 
     Canonical owners (single source of truth per enum):
       - [sort_order_enum_strings]
@@ -17,7 +17,8 @@
           mirrors [Board_votes.valid_vote_direction_strings] (#8506)
 
     Adding a new enum value MUST be done in the canonical owner first;
-    the test suite then forces a sync edit here.
+    the sync test then forces the edit here — it compares each owner's list
+    against the [enum] arrays the schemas actually publish.
 
     Stage 11 (docs/audit/2026-05-18-godfile-decomposition-build-plan.html)
     consolidated these mirrors into this single module so future

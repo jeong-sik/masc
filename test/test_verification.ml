@@ -659,19 +659,47 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
       Atomic.get Workspace_hooks.verification_notify_verdict_fn
     in
     let previous_submitted = Atomic.get Workspace_hooks.verification_submitted_fn in
+    let previous_change_observer =
+      Atomic.get Masc.Verification_run_registry.change_observer_fn
+    in
     Fun.protect
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
-        Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted)
+        Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted;
+        Atomic.set
+          Masc.Verification_run_registry.change_observer_fn
+          previous_change_observer)
       (fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
+          let run_completed, resolve_run_completed = Eio.Promise.create () in
           let committed_verification_id = ref None in
+          (* The verdict notification fires inside Workspace.commit_verdict_r,
+             which the authority evaluates as an argument to its own [complete]
+             -- so mark_completed necessarily runs after it. That order is not
+             incidental: a failed commit becomes the Commit_failed outcome, so
+             the outcome cannot be known before the commit is attempted. Waiting
+             on the notification and then reading the registry therefore always
+             observes Running. Wait for the registry's own change instead. *)
+          Atomic.set Masc.Verification_run_registry.change_observer_fn (fun () ->
+            previous_change_observer ();
+            match !committed_verification_id with
+            | None -> ()
+            | Some verification_id ->
+              (match
+                 Masc.Verification_run_registry.get
+                   (Masc.Verification_run_registry.global ())
+                   ~verification_id
+               with
+               | Some { status = Masc.Verification_run_registry.Completed _; _ }
+                 when not (Eio.Promise.is_resolved run_completed) ->
+                 Eio.Promise.resolve resolve_run_completed ()
+               | _ -> ()));
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
             (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result () ->
                on_tool_result
@@ -718,6 +746,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
           Eio.Promise.await reviewer_called;
           Eio.Promise.await verdict_committed;
+          Eio.Promise.await run_completed;
           let verification_id =
             match !committed_verification_id with
             | Some verification_id -> verification_id

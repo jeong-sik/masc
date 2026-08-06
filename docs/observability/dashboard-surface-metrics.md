@@ -63,7 +63,6 @@ redirect sources, neither of which is in flight.
 ## Related
 
 - RFC-0049 — `docs/rfc/RFC-0049-surface-telemetry-foundation.md`
-- RFC-0048 — `docs/rfc/RFC-0048-dashboard-ia-phase-2.md` (primary consumer)
 - PR-1 #14245 — telemetry foundation
 - PR-1.1 #14251 — ocamlformat follow-up
 - RFC-0217 — single OTel backend; local scrape reports removed

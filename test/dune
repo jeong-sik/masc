@@ -182,6 +182,7 @@
   test_lsp_process_manager
   test_ide_annotations
   test_agent_observation_bridge
+  test_enum_mirror_sync
   test_ide_bridge
   test_server_ide_lsp_proxy
   test_server_ide_http
@@ -262,6 +263,8 @@
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
   test_tool_input_validation
+  test_tool_schema_constraint_enforcement
+  test_keeper_artifact_read_request
   test_tool_schema_oas_boundary
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
@@ -479,6 +482,7 @@
   test_lsp_process_manager
   test_ide_annotations
   test_agent_observation_bridge
+  test_enum_mirror_sync
   test_ide_bridge
   test_server_ide_lsp_proxy
   test_server_ide_http
@@ -559,6 +563,8 @@
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
   test_tool_input_validation
+  test_tool_schema_constraint_enforcement
+  test_keeper_artifact_read_request
   test_tool_schema_oas_boundary
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
@@ -1968,6 +1974,8 @@
 (include stanzas/test_tool_type_label.inc)
 
 (include stanzas/test_assertion_kind_mirror.inc)
+
+(include stanzas/test_agent_card_action_mirror.inc)
 
 (include stanzas/test_workspace_heartbeat_outcome.inc)
 

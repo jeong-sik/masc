@@ -70,6 +70,7 @@ blocking_lints() {
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "Branch protection 401 counter fixture" bash scripts/test-main-branch-protection-counter.sh
+  run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
   run_lint "audit-path-ssot" bash scripts/audit-path-ssot.sh
 }
 

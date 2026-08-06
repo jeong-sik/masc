@@ -1527,6 +1527,23 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_persona_name @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_verification_authority_tools"
 
+      # Subprocess capture is bounded head+tail; without a runtest target the
+      # assertions that a 9MiB child gets truncated — and that a short one does
+      # not — would only ever be compiled. Unbounded capture is what retained
+      # 590MB in a single Execute call and stalled a keeper for 115 minutes, so
+      # this is the suite that has to actually run.
+      - name: Run subprocess capture bound suite
+        id: process_capture_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_process_eio_coverage @test/runtest-test_keeper_secret_redaction"
+
       - name: Run transport harness suite
         id: transport_harness_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

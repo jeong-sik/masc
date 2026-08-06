@@ -335,6 +335,13 @@ let running_keeper_count (config : Workspace.config) : int =
          | _ -> count)
        0
 
+(* #10710: bounded fiber pool for per-keeper dashboard enrichment. Each
+   keeper's metadata + metrics JSONL reads are independent, so the work is
+   embarrassingly parallel; the cap keeps us from burning more file
+   descriptors / scheduler slots than the render needs. Mirrors
+   [Dashboard_execution.dashboard_enrich_max_fibers]. *)
+let dashboard_keeper_max_fibers = 8
+
 let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojson.Safe.t =
   let include_goals = true in
   let history_fragment_filter_enabled =
@@ -354,11 +361,15 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
     else
       Keeper_status_metrics.accountability_summary_lookup config
   in
-  (* Parallel keeper I/O: each keeper's metadata + metrics reads run concurrently.
-     Results are collected into a shared ref array, then filter_map'd. *)
-  let results = Array.make (List.length names) None in
-  Eio.Fiber.all
-    (List.mapi (fun idx name -> fun () ->
+  (* #10710: fiber-batched keeper I/O. Each keeper's metadata + metrics reads
+     run concurrently across a bounded fiber pool ([dashboard_keeper_max_fibers])
+     instead of an unbounded [Eio.Fiber.all] fan-out. The enrich body has no
+     shared mutable state, so results are collected positionally by
+     [Eio.Fiber.List.map] and filter_map'd below. *)
+  let rows =
+    Eio.Fiber.List.map
+      ~max_fibers:dashboard_keeper_max_fibers
+      (fun name ->
       let row =
       try
       match
@@ -974,9 +985,9 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                  (Printexc.to_string fallback_exn);
                None)
       in
-      results.(idx) <- row)
-     names);
-  let summaries = Array.to_list results |> List.filter_map Fun.id in
+      row)
+      names);
+  let summaries = List.filter_map Fun.id rows in
   `Assoc [
     ("keepers", `List summaries);
     ("total", `Int (List.length summaries));

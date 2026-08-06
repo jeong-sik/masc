@@ -33,9 +33,6 @@ type http_context = {
       [transport_status_json] output (operator-only flag — UI
       never sets it). *)
 
-val configured_http_port : unit -> int
-val configured_http_host : unit -> string
-
 val normalize_advertised_host : string -> string
 (** [normalize_advertised_host host] returns the trimmed
     [host], unless it is one of the loopback aliases — in

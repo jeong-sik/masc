@@ -384,6 +384,21 @@ let assemble_hooks
                  with
                  | None -> ()
                  | Some block -> record_block Prompt_block_id.Memory_os_recall block);
+                (* RFC-0366: last in assembly order. It is the most recent fact
+                   the keeper has, and when it disagrees with an earlier block
+                   the later text is the one that reads as current. Stamped
+                   consumed only after the block is assembled, so a turn that
+                   fails before this point does not burn the note. *)
+                let consumed_operator_note =
+                  match Keeper_operator_note.pending ~config ~keeper:meta.name with
+                  | None -> false
+                  | Some note ->
+                    (match Keeper_operator_note.render note with
+                     | None -> false
+                     | Some block ->
+                       record_block Prompt_block_id.Operator_note block;
+                       true)
+                in
                 let extra_system_context_assembly =
                   Keeper_run_prompt.assemble_extra_system_context
                     ~existing_extra_system_context:
@@ -408,6 +423,12 @@ let assemble_hooks
                   ~absolute_turn:turn
                   ~blocks:recorded_blocks_for_receipt
                   ~assembled:ctx;
+                if consumed_operator_note
+                then
+                  Keeper_operator_note.mark_consumed
+                    ~config
+                    ~keeper:meta.name
+                    ~absolute_turn:turn;
                 (* OAS treats [None] in AdjustParams as "keep the base
                    config", so strict choices must be explicitly relaxed.
                    Tools remain available, but the model may finish without

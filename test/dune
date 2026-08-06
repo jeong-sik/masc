@@ -2601,3 +2601,5 @@
 (include stanzas/test_keeper_raw_trace_reader.inc)
 
 (include stanzas/test_keeper_prompt_capture.inc)
+
+(include stanzas/test_keeper_operator_note.inc)

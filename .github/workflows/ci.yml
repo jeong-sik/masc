@@ -979,6 +979,14 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_jsonl_day_key
 
+      - name: Run operator note lifetime suite
+        # RFC-0366. A note that renders twice is a standing rule the operator
+        # never wrote — the #26729 shape. @check compiles "renders once then
+        # never again" whether or not it holds, so the suite has to run.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_operator_note
+
       - name: Run prompt capture round-trip suite
         # The assembled extra system context reaches disk as text here. @check
         # compiles the cases but does not run them, and "an unknown block id

@@ -1946,6 +1946,33 @@ let handle_keeper_get_subroutes state req request reqd =
        | Error (`Io msg) ->
          Http.Response.json_value ~status:`Internal_server_error
            (`Assoc [ ("error", `String msg) ]) reqd)
+  else if ends_with "/operator-note" then
+    (* RFC-0366. Read-only here: the operator asks whether a note is pending or
+       which turn consumed it. The write surface belongs to the operator control
+       plane and is a separate change. *)
+    let name = extract_name "/operator-note" in
+    (match
+       Keeper_operator_note.read ~config:(Mcp_server.workspace_config state) ~keeper:name
+     with
+     | Ok note ->
+       Http.Response.json_value ~compress:true ~request:req
+         (`Assoc
+            [ "keeper", `String name
+            ; "dashboard_surface", `String "/api/v1/keepers/:name/operator-note"
+            ; "pending", `Bool (Option.is_none note.consumed_at)
+            ; "note", Keeper_operator_note.to_json note
+            ])
+         reqd
+     | Error (Keeper_operator_note.No_note as error) ->
+       Http.Response.json_value ~status:`Not_found
+         (`Assoc
+            [ "error", `String (Keeper_operator_note.read_error_to_string error) ])
+         reqd
+     | Error error ->
+       Http.Response.json_value ~status:`Bad_request
+         (`Assoc
+            [ "error", `String (Keeper_operator_note.read_error_to_string error) ])
+         reqd)
   else if ends_with "/last-prompt" then
     (* What this keeper was actually told, as text. The turn record keeps each
        block's bytes and digest — how much, never what. The blocks are stable

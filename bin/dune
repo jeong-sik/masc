@@ -145,7 +145,17 @@
  (modules masc_compaction_audit)
  (public_name masc-compaction-audit)
  (package masc)
- (libraries masc masc_core masc.config_dir_resolver unix eio eio_main))
+ ; masc.time_codec is a direct dep because dune does not expose a transitive
+ ; library's modules; masc depending on it is not enough to name Time_codec
+ ; here. The library itself pulls in only ptime and unix.
+ (libraries
+  masc
+  masc_core
+  masc.config_dir_resolver
+  masc.time_codec
+  unix
+  eio
+  eio_main))
 
 ;; Offline deterministic checkpoint purge CLI (RFC-0351 S1): duplicate
 ;; collapse, unsigned reasoning strip, tool-result content clear. Dry-run by

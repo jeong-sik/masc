@@ -350,6 +350,39 @@ let test_tree_task_without_cancellation_carries_no_cancellation_fields () =
   check bool "no reason on a completed task" false
     (Option.is_some (tree_field "reason" json))
 
+(* RFC-0362 — the goal's [owner] reaches the dashboard only through this tree
+   projection: the store serializes it (goal_store.ml) and goal_owner events
+   carry it, but the tree JSON is what the goals surface decodes.
+   [Dashboard_goals.tree_node] is a nominal copy of [Acc.tree_node], so the
+   node is built against the renderer's own type. *)
+let make_dashboard_tree_node goal : Dashboard_goals.tree_node =
+  {
+    goal;
+    children = [];
+    tasks = [];
+    last_activity_at = iso_now ();
+    stagnation_seconds = Some 0;
+    linked_keeper_names = [];
+    pending_approval_count = 0;
+    latest_keeper_ref = None;
+    latest_turn_ref = None;
+    activity_observation = "none";
+  }
+
+let test_tree_node_projects_owner () =
+  let goal = { (make_goal "goal-owned" "Owned goal") with owner = Some "dancer" } in
+  let json = Dashboard_goals.tree_node_to_json (make_dashboard_tree_node goal) in
+  check (option string) "the owner is projected" (Some "dancer")
+    (match tree_field "owner" json with Some (`String v) -> Some v | _ -> None)
+
+let test_tree_node_projects_an_absent_owner_as_null () =
+  let json =
+    Dashboard_goals.tree_node_to_json
+      (make_dashboard_tree_node (make_goal "goal-plain" "Plain goal"))
+  in
+  check bool "an absent owner is explicit null" true
+    (tree_field "owner" json = Some `Null)
+
 let () =
   run "goal metric unevaluated"
     [
@@ -383,5 +416,9 @@ let () =
             test_tree_task_omits_an_absent_cancellation_reason;
           test_case "non-cancelled tree task carries no cancellation fields" `Quick
             test_tree_task_without_cancellation_carries_no_cancellation_fields;
+          test_case "tree node projects the goal owner" `Quick
+            test_tree_node_projects_owner;
+          test_case "tree node projects an absent owner as null" `Quick
+            test_tree_node_projects_an_absent_owner_as_null;
         ] );
     ]

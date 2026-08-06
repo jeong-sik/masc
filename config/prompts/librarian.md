@@ -1,6 +1,6 @@
 ---
 description: Memory OS librarian current-memory selection prompt
-category: keeper
+category: librarian
 template_variables: [current_memory, conversation_history, persona, max_recall_fact_bytes]
 ---
 

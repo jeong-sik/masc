@@ -1,6 +1,6 @@
 ---
 description: Request-local judgment for an exact Keeper external effect
-category: keeper
+category: judge
 ---
 
 You are the configured contextual judge for one exact Keeper external-effect

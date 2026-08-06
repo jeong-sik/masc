@@ -4,12 +4,10 @@ open Keeper_memory_os_types
 
 type unavailable_reason =
   | Read_error
-  | Prompt_render_error
   | Fact_budget_exceeded
 
 let unavailable_reason_to_label = function
   | Read_error -> "read_error"
-  | Prompt_render_error -> "prompt_render_error"
   | Fact_budget_exceeded -> "fact_budget_exceeded"
 ;;
 
@@ -20,10 +18,18 @@ let record_unavailable reason =
     ()
 ;;
 
-let render_prompt_template key variables =
-  match Prompt_registry.render_prompt_template key variables with
-  | Ok text -> Ok (String.trim text)
-  | Error message -> Error (Printf.sprintf "%s: %s" key message)
+(* The block frames stored facts for the turn; it states no rule of its own.
+   How a Keeper is to treat memory — context rather than instruction, and
+   time-sensitive claims verified against live state — is one sentence in
+   config/prompts/keeper.md, where the Keeper's other standing rules are.
+   Leaving a second asset here meant the same reader was addressed from two
+   files, and it could fail to render. *)
+let recall_block ~revision ~updated_at ~facts =
+  Printf.sprintf
+    "--- Memory OS Recall ---\nLLM-selected current memory, revision %d, updated %s.\n%s"
+    revision
+    updated_at
+    facts
 ;;
 
 type render_result =
@@ -58,25 +64,15 @@ let render_snapshot ~now:_ snapshot =
          max_bytes;
        omit ~reason:Fact_budget_exceeded ~n_facts_in_store:(List.length facts) ()
      | Fits _ ->
-       (match
-       render_prompt_template
-         Keeper_prompt_names.memory_os_recall_context
-         [ "revision", string_of_int snapshot.revision
-         ; "updated_at", Masc_domain.iso8601_of_unix_seconds snapshot.updated_at
-         ; "facts", Keeper_memory_os_budget.render_facts facts
-         ]
-     with
-     | Ok block ->
-       { block
+       { block =
+           recall_block
+             ~revision:snapshot.revision
+             ~updated_at:(Masc_domain.iso8601_of_unix_seconds snapshot.updated_at)
+             ~facts:(Keeper_memory_os_budget.render_facts facts)
        ; injected_fact_keys = List.map memory_id facts
        ; n_facts_in_store = List.length facts
        ; failure_reason = None
-       }
-     | Error message ->
-       Log.Keeper.warn
-         "memory os recall prompt unavailable: %s"
-         message;
-       omit ~reason:Prompt_render_error ~n_facts_in_store:(List.length facts) ()))
+       })
 ;;
 
 let render_context_result ~keepers_dir ~keeper_id ~now =

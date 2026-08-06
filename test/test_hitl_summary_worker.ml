@@ -1814,7 +1814,7 @@ let test_require_human_head_does_not_stop_owner_drain () =
        check int "same-owner successor judged once" 1 (F.post_count successor_server))
 ;;
 
-let test_gate_judgment_prompt_comes_from_registry () =
+let test_judge_effect_prompt_comes_from_registry () =
   Prompt_registry.set_markdown_dir
     (Masc_test_deps.source_path "config/prompts");
   match Worker.For_testing.system_prompt () with
@@ -1848,7 +1848,7 @@ let () =
         ; test_case
             "prompt is registry-owned"
             `Quick
-            test_gate_judgment_prompt_comes_from_registry
+            test_judge_effect_prompt_comes_from_registry
         ] )
     ; ( "production exact flow"
       , [ test_case

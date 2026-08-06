@@ -20,6 +20,7 @@ import { appendLiveToolCall } from './components/session-trace/session-trace-liv
 import { scheduleSessionTraceReload } from './components/session-trace/session-trace-state'
 import { recordSseCompaction } from './components/keeper-workspace/compaction-snapshots'
 import { appendAuditEntry } from './live-store'
+import { applyKeeperTurnProgress } from './keeper-state'
 import { isCrashedPhase } from './lib/keeper-predicates'
 import {
   parseOasPayload,
@@ -595,6 +596,25 @@ function handleEvent(event: SSEEvent): void {
           toolIoRedacted: event.tool_io_redacted === true,
         })
       }
+      break
+    }
+    case 'keeper_chat_turn_progress': {
+      // Live tool-call progress for queued/consumer-side turns — no journal
+      // entry (keeper_tool_call already journals completions); this feeds the
+      // chat thread directly.
+      const keeperName = event.name ?? agent
+      const runId = event.run_id?.trim()
+      const toolCallId = event.tool_call_id
+      const kind = event.kind
+      if (!keeperName || !runId || !toolCallId) break
+      if (kind !== 'tool_call_start' && kind !== 'tool_call_end') break
+      applyKeeperTurnProgress(keeperName, {
+        runId,
+        kind,
+        toolCallId,
+        toolName: event.tool_name ?? null,
+        receiptIds: event.receipt_ids,
+      })
       break
     }
     case 'keeper_tool_skipped': {

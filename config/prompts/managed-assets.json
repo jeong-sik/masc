@@ -2,11 +2,12 @@
   "managed_by": "MASC",
   "schema": "masc.prompt-managed-assets.v1",
   "paths": [
-    "keeper.board_attention_judgment_batch.md",
-    "keeper.gate_judgment.md",
-    "keeper.librarian.current_selection.md",
-    "keeper.memory_os_recall.context.md",
-    "keeper.system.md",
-    "verification.anti_rationalization.md"
+    "judge.board.md",
+    "judge.catchup.md",
+    "judge.effect.md",
+    "keeper.md",
+    "librarian.md",
+    "verification.md",
+    "worker.md"
   ]
 }

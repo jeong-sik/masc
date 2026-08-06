@@ -97,8 +97,8 @@ export interface KeeperPromptAssemblyReport {
     criticalCount: number
     // Only rows whose stage actually reaches the model. Two stages carry
     // messageSlot 'not sent' — 'registry-bootstrap' (source preparation, which
-    // re-lists keeper.system) and 'manifest-edge' (the post-assembly audit
-    // record). Summing every row double-counted keeper.system and reported
+    // re-lists keeper) and 'manifest-edge' (the post-assembly audit record).
+    // Summing every row double-counted keeper and reported
     // 3,920 tok against a real model input of 1,985 tok on the live fleet.
     sentPromptBytes: number
     sentEstimatedTokens: number
@@ -121,7 +121,7 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'source_prep',
     messageSlot: 'not sent',
     summary: 'MASC picks the active text from defaults, files, or saved edits.',
-    promptKeys: ['keeper.system'],
+    promptKeys: ['keeper'],
   },
   {
     id: 'base-system',
@@ -131,7 +131,7 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'model_input',
     messageSlot: 'system',
     summary: 'Identity, rules, and safety boundaries.',
-    promptKeys: ['keeper.system'],
+    promptKeys: ['keeper'],
   },
   {
     id: 'unified-world',
@@ -165,9 +165,8 @@ const STAGES: AssemblyStageSpec[] = [
     role: 'model_input',
     messageSlot: 'final',
     summary: 'Memory and tool hints added at the end.',
-    promptKeys: [
-      'keeper.memory_os_recall.context',
-    ],
+    promptKeys: [],
+    computedRows: [{ id: 'memory-os-recall', promptKey: '(computed:memory_os_recall)' }],
   },
   {
     id: 'manifest-edge',
@@ -500,7 +499,9 @@ export function buildKeeperPromptAssemblyReport(
   }
 
   const keeperPrompts = prompts.filter(prompt =>
-    prompt.key.startsWith('keeper.') || prompt.key.startsWith('behavior.'),
+    prompt.key === 'keeper'
+    || prompt.key.startsWith('keeper.')
+    || prompt.key.startsWith('behavior.'),
   )
   const warnings: KeeperPromptAssemblyWarning[] = []
 

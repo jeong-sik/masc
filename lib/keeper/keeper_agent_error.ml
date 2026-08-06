@@ -219,15 +219,7 @@ let agent_error_terminal_reason_code = function
     Printf.sprintf "agent_error_input_required:request_id=%s" request_id
 ;;
 
-let network_error_kind_to_wire = function
-  | Llm_provider.Http_client.Connection_refused -> "connection_refused"
-  | Llm_provider.Http_client.Dns_failure -> "dns_failure"
-  | Llm_provider.Http_client.Tls_error -> "tls_error"
-  | Llm_provider.Http_client.Timeout -> "timeout"
-  | Llm_provider.Http_client.Local_resource_exhaustion -> "local_resource_exhaustion"
-  | Llm_provider.Http_client.End_of_file -> "end_of_file"
-  | Llm_provider.Http_client.Unknown -> "unknown"
-;;
+let network_error_kind_to_wire = Keeper_internal_error.network_error_kind_to_string
 
 let provider_timeout_suffix = function
   | None -> ""

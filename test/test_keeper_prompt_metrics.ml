@@ -46,7 +46,7 @@ let has_in s needle =
    sandbox cwd, the registry loads zero prompts, and every content assertion
    below reads an empty shared block instead of the real one. *)
 let has_prompt_root path =
-  Sys.file_exists (Filename.concat path "config/prompts/keeper.system.md")
+  Sys.file_exists (Filename.concat path "config/prompts/keeper.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -162,6 +162,24 @@ let test_prompt_metrics_use_exact_utf8_bytes () =
         (List.mem_assoc "estimated_total_tokens" fields)
   | _ -> fail "prompt metrics must serialize as an object"
 
+let test_prompt_metrics_sanitizes_each_segment_once () =
+  let calls = ref [] in
+  let sanitize text =
+    calls := text :: !calls;
+    text
+  in
+  let _metrics =
+    KAPM.For_testing.build_prompt_metrics_with_sanitizer
+      ~sanitize
+      ~system_prompt:"system"
+      ~dynamic_context:"dynamic"
+      ~user_message:"user"
+  in
+  check (list string)
+    "one sanitizer pass per prompt segment"
+    [ "system"; "dynamic"; "user" ]
+    (List.rev !calls)
+
 let test_hard_constraints_in_system_only () =
   let tp = build_separated () in
   let has_in sys s =
@@ -254,7 +272,7 @@ let test_merged_system_block_keeps_every_rule_family () =
 
 (* [keeper.turn_intent] used to be appended to every system prompt as a second
    asset with its own render path, fallback and metrics. Its permanent rules
-   moved into [keeper.system]; each is pinned so the migration cannot silently
+   moved into [keeper]; each is pinned so the migration cannot silently
    lose one. The last two sentences existed only in the in-binary fallback and
    had already drifted out of the asset itself, so a keeper was told them only
    when prompt config was degraded. *)
@@ -382,7 +400,7 @@ let test_repository_checkout_authority_prompt () =
       ()
   in
   (* The in-code [<repository_checkouts>] block was folded into the shared
-     [keeper.system] body; the authority statements it carried are pinned
+     [keeper] body; the authority statements it carried are pinned
      here at their new location, not at the retired tag. *)
   check bool "catalog owns identity" true
     (has_in prompt "The repository catalog owns repository identity");
@@ -685,6 +703,8 @@ let () =
             test_total_bytes_preserved;
           test_case "exact UTF-8 byte metrics" `Quick
             test_prompt_metrics_use_exact_utf8_bytes;
+          test_case "sanitizes each segment once" `Quick
+            test_prompt_metrics_sanitizes_each_segment_once;
         ] );
       ( "separation_harness",
         [

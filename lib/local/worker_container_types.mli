@@ -160,7 +160,7 @@ val default_system_prompt :
   ?role:string ->
   ?selection_note:string ->
   unit ->
-  string
+  (string, string) result
 (** Builds the canonical system prompt seeded into a freshly
     spawned local worker.  [role] and [selection_note] are
     optional contextual hints (the leader-selected model

@@ -358,13 +358,20 @@ let commit_partition_ready ~base_path command partition =
   | Partition.Blocked _ ->
     (match Partition.requeue_blocked ~base_path ~partition with
      | Error detail -> Error (Partition_state_conflict detail)
-     | Ok (Partition.Cursor_conflict _) ->
+     (* Both conflicts say the same thing — the partition moved under this
+        command between the read and the write. A cursor conflict re-read and
+        decided; a generation conflict did not, so an identical concurrent
+        command whose winner already produced the exact Ready this one wanted
+        was reported as a failure. [reload_same_generation_ready] is what
+        makes that judgement: it converges only on Ready at the direct
+        successor of the observed Blocked generation, and still errors when
+        the partition really did advance to Running, Completed, or Settled. *)
+     | Ok (Partition.Cursor_conflict _)
+     | Ok (Partition.Generation_conflict _) ->
        reload_same_generation_ready
          ~base_path
          ~expected_blocked:partition
          command
-     | Ok (Partition.Generation_conflict detail) ->
-       Error (Partition_state_conflict detail)
      | Ok (Partition.Requeued transition) ->
        confirm_requeue ~base_path transition)
   | Partition.Ready -> confirm_ready_partition ~base_path partition

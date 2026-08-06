@@ -23,6 +23,7 @@ import { TextInput } from './common/input'
 import { Table, type TableColumn } from './common/table'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
+import { latestOasTelemetrySample } from '../oas-telemetry-store'
 import { formatCost, formatNumber, formatPct1 } from '../lib/format-number'
 import { errorToString, MISSING_DATA_DASH } from '../lib/format-string'
 import { formatTimeHms } from '../lib/format-time'
@@ -820,6 +821,7 @@ export function RuntimeMonitor() {
   const probe = current.data?.probe ?? null
   const probeError = current.data?.probeError ?? null
   const providerProbes = providerProbeMap(probe)
+  const oasLatest = latestOasTelemetrySample.value
 
   // filterModelMetrics was called twice per render (no-results check + the
   // sorted list) with identical args. Memoize once and reuse so it runs at most
@@ -1007,6 +1009,11 @@ export function RuntimeMonitor() {
             delta=${{ direction: 'flat', text: `${formatNumber(metrics?.models.reduce((sum, m) => sum + (m.total_tool_calls ?? 0), 0))} tool calls` }}
           />
         </div>
+        ${oasLatest
+          ? html`<div class="mb-3 text-2xs text-[var(--color-fg-muted)]" data-testid="oas-latest-telemetry-sample">
+              oas latest · ${oasLatest.provider_id} · ttfb ${formatNumber(oasLatest.ttfb_ms, 0)}ms · total ${formatNumber(oasLatest.total_duration_ms, 0)}ms${oasLatest.throughput_tokens_per_s != null ? ` · ${formatNumber(oasLatest.throughput_tokens_per_s, 1)} tok/s` : ''}${oasLatest.cost_usd != null ? ` · ${formatCost(oasLatest.cost_usd)}` : ''} · ${oasLatest.status_kind}
+            </div>`
+          : null}
         <div class="flex items-center justify-end mb-2">
           <${TextInput}
             type="search"

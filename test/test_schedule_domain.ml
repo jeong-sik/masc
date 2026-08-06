@@ -286,6 +286,66 @@ let test_wake_record_roundtrip () =
       decoded.payload_digest
 ;;
 
+
+(* {1 mark_due transition matrix}
+
+   [mark_due] decided the pass-through case with [| _ -> request], so a new
+   schedule_status silently stayed put -- the FSM Sparse Match shape from
+   CLAUDE.md. It now enumerates, and these cases pin what each status does
+   under the three inputs the guards distinguish. Iterating
+   [all_schedule_statuses] means a new status joins the matrix on its own. *)
+
+let with_status status (request : schedule_request) = { request with status }
+
+let mark_due_matrix ~label ~now ~expires_at ~expected =
+  List.iter
+    (fun status ->
+      let before = with_status status (request ?expires_at ()) in
+      let after = mark_due ~now before in
+      check_status
+        (Printf.sprintf "%s: %s" label (schedule_status_to_string status))
+        (expected status)
+        after.status)
+    all_schedule_statuses
+;;
+
+(* A matrix over an empty status list would pass by testing nothing. *)
+let test_all_statuses_is_populated () =
+  check int "every schedule_status is in all_schedule_statuses" 7
+    (List.length all_schedule_statuses)
+;;
+
+(* Expiry wins over becoming due: now is past both due_at and expires_at. *)
+let test_mark_due_expiry_precedes_due () =
+  mark_due_matrix ~label:"expired" ~now:300.0 ~expires_at:(Some 150.0)
+    ~expected:(function
+      | Scheduled | Due -> Expired
+      | (Running | Succeeded | Failed | Cancelled | Expired) as s -> s)
+;;
+
+(* Past due_at, no expiry: only Scheduled advances. *)
+let test_mark_due_advances_scheduled_only () =
+  mark_due_matrix ~label:"due" ~now:250.0 ~expires_at:None
+    ~expected:(function
+      | Scheduled -> Due
+      | (Due | Running | Succeeded | Failed | Cancelled | Expired) as s -> s)
+;;
+
+(* Before due_at: nothing moves. *)
+let test_mark_due_leaves_early_requests_alone () =
+  mark_due_matrix ~label:"not yet due" ~now:150.0 ~expires_at:None
+    ~expected:(fun s -> s)
+;;
+
+(* The record is returned untouched for pass-through statuses. *)
+let test_mark_due_preserves_other_fields () =
+  let before = with_status Running (request ~expires_at:150.0 ()) in
+  let after = mark_due ~now:300.0 before in
+  check string "schedule instance id" before.schedule_instance_id
+    after.schedule_instance_id;
+  check (float 0.0001) "due_at" before.due_at after.due_at
+;;
+
 let () =
   run "Schedule_domain"
     [
@@ -319,6 +379,19 @@ let () =
             test_cron_recurrence_finds_occurrence_beyond_five_years;
           test_case "cron recurrence rejects impossible calendar date" `Quick
             test_cron_recurrence_rejects_impossible_calendar_date;
+        ] );
+      ( "mark_due",
+        [
+          test_case "all_schedule_statuses is populated" `Quick
+            test_all_statuses_is_populated;
+          test_case "expiry precedes becoming due" `Quick
+            test_mark_due_expiry_precedes_due;
+          test_case "only Scheduled advances to Due" `Quick
+            test_mark_due_advances_scheduled_only;
+          test_case "requests before due_at are untouched" `Quick
+            test_mark_due_leaves_early_requests_alone;
+          test_case "pass-through preserves other fields" `Quick
+            test_mark_due_preserves_other_fields;
         ] );
       ( "codec",
         [

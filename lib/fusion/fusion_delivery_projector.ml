@@ -70,17 +70,17 @@ let validate_identity
   else Ok ()
 ;;
 
-let ensure_registry_entry obligation =
+let ensure_registry_entry ~registry obligation =
   let run_id =
     Keeper_chat_delivery_identity.Request_id.to_string obligation.Fusion_delivery_obligation.request_id
   in
-  match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+  match Fusion_run_registry.get registry ~run_id with
   | Some _ -> ()
   | None ->
-    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    Fusion_run_registry.register_running registry ~run_id
       ~keeper:obligation.payload.keeper_name ~preset:obligation.payload.preset
       ~started_at:obligation.accepted_at;
-    Fusion_sink.broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id
+    Fusion_sink.broadcast_run_status ~registry ~run_id
 ;;
 
 let failure_of_status = function
@@ -99,14 +99,14 @@ let failure_of_status = function
   | Keeper_msg_async.Cancelling _ -> None
 ;;
 
-let project_entry ~base_path (entry : Keeper_msg_async.entry) =
+let project_entry ~registry ~base_path (entry : Keeper_msg_async.entry) =
   let* request_id = request_id_of_entry entry in
   let* obligation =
     Fusion_delivery_obligation.load ~base_path ~request_id
     |> Result.map_error (fun error -> Obligation_unavailable error)
   in
   let* () = validate_identity entry obligation in
-  ensure_registry_entry obligation;
+  ensure_registry_entry ~registry obligation;
   let payload = obligation.payload in
   let request : Fusion_types.fusion_request =
     { run_id = entry.request_id
@@ -128,8 +128,8 @@ let project_entry ~base_path (entry : Keeper_msg_async.entry) =
       if not (String.equal evidence.question payload.prompt)
       then Error (Identity_mismatch "evidence question differs from accepted prompt")
       else
-        Fusion_orchestrator.project ~base_dir:base_path ~topology:payload.topology
-          ~channel:payload.channel ~request evidence
+        Fusion_orchestrator.project ~registry ~base_dir:base_path
+          ~topology:payload.topology ~channel:payload.channel ~request evidence
         |> Result.map_error (fun detail -> Projection_failed detail)
     | Keeper_msg_async.Done { ok = true; data = None; _ } ->
       (* A durably canonical [Done] without deliberation evidence can never
@@ -139,16 +139,17 @@ let project_entry ~base_path (entry : Keeper_msg_async.entry) =
          sink and then clearing the obligation (a failed failure-projection
          still retains it). *)
       let error = Evidence_unavailable in
-      Fusion_sink.emit_failure ~base_dir:base_path ~keeper:payload.keeper_name
-        ~run_id:entry.request_id ~channel:payload.channel
+      Fusion_sink.emit_failure ~registry ~base_dir:base_path
+        ~keeper:payload.keeper_name ~run_id:entry.request_id ~channel:payload.channel
         ~failure_code:(projection_error_failure_code error)
         ~detail:(projection_error_to_string error)
       |> Result.map_error (fun detail -> Projection_failed detail)
     | status ->
       (match failure_of_status status with
        | Some (failure_code, detail) ->
-         Fusion_sink.emit_failure ~base_dir:base_path ~keeper:payload.keeper_name
-           ~run_id:entry.request_id ~channel:payload.channel ~failure_code ~detail
+         Fusion_sink.emit_failure ~registry ~base_dir:base_path
+           ~keeper:payload.keeper_name ~run_id:entry.request_id
+           ~channel:payload.channel ~failure_code ~detail
          |> Result.map_error (fun detail -> Projection_failed detail)
        | None -> Error (Nonterminal_status status))
   in
@@ -156,10 +157,10 @@ let project_entry ~base_path (entry : Keeper_msg_async.entry) =
   |> Result.map_error (fun error -> Obligation_removal_failed error)
 ;;
 
-let on_worker_settled ~base_path = function
+let on_worker_settled ?(registry = Fusion_run_registry.global ()) ~base_path = function
   | Keeper_msg_async.Status_settlement
       { entry; durability = Keeper_msg_async.Durable; _ } ->
-    (match project_entry ~base_path entry with
+    (match project_entry ~registry ~base_path entry with
      | Ok () -> ()
      | Error error ->
        Log.Keeper.error ~keeper_name:entry.keeper_name
@@ -189,7 +190,10 @@ type recovery_report =
   ; staging_cleanup : Fs_compat.atomic_orphan_cleanup_report
   }
 
-let recover_startup ~base_path =
+(* [()] closes the argument list so [?registry] can be erased: OCaml only
+   drops an optional when a positional argument follows it, and every other
+   parameter here is labelled. *)
+let recover_startup ?(registry = Fusion_run_registry.global ()) ~base_path () =
   let* staging_cleanup =
     Fusion_delivery_obligation.cleanup_staging_for_startup ~base_path
   in
@@ -218,7 +222,7 @@ let recover_startup ~base_path =
     with
     | Ok proof ->
       let entry = Keeper_msg_async.durable_terminal_entry proof in
-      (match project_entry ~base_path entry with
+      (match project_entry ~registry ~base_path entry with
        | Ok () -> projected + 1, pending, errors
        | Error error ->
          ( projected

@@ -73,5 +73,4 @@ let digest_tool_io ~tool_name ~input ~output_text =
 ;;
 
 module For_testing = struct
-  let normalize_json = normalize_json
 end

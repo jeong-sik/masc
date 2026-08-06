@@ -1345,7 +1345,6 @@ module For_testing = struct
   type nonrec exact_queue_ops = exact_queue_ops
 
   let build_context_bundle = build_context_bundle
-  let messages_for_summary = messages_for_summary
   let parse_summary = parse_summary
   let prepare_flow = prepare_flow
   let execute_prepared_flow = execute_prepared_flow
@@ -1401,7 +1400,6 @@ module For_testing = struct
   ;;
 
   let flow_evidence prepared = Exact_output.flow_attempt_evidence prepared.attempt
-  let success_provenance_matches = success_provenance_matches
   let system_prompt = system_prompt
   let summary_version = summary_version
   let lane_id = lane_id

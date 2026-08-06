@@ -504,8 +504,6 @@ module For_testing = struct
     | Terminal_checkpoint
     | Terminal_input_required
 
-  let terminal_outcome_of_result = terminal_outcome_of_result
-
   let persist_terminal_turn_meta_for_outcome
         ~config
         ~original_meta
@@ -518,8 +516,6 @@ module For_testing = struct
       ~updated_meta
 
   let reset_turn_failures_for_stop_reason = reset_turn_failures_for_stop_reason
-  let acknowledge_pending_messages = acknowledge_pending_messages
-
   type nonrec cycle_post_action = cycle_post_action =
     | Assign_task
     | Empty_queue_sleep

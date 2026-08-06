@@ -160,6 +160,22 @@ let schemas : Masc_domain.tool_schema list =
                              match). Pass your own keeper name to avoid self-referential \
                              loops when reading the board." )
                   ] )
+                ; ( "exclude_system"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; ( "description"
+                        , `String
+                            "Exclude system posts such as task verdict receipts and \
+                             Activity Reports (default: false)." )
+                      ] )
+                ; ( "exclude_automation"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; ( "description"
+                        , `String
+                            "Exclude automation posts such as heartbeats and probes \
+                             (default: false)." )
+                      ] )
                 ; ( "if_revision"
                   , `Assoc
                       [ "type", `String "string"
@@ -195,6 +211,14 @@ let schemas : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; "description", `String "Comment content"
+                      ] )
+                ; ( "parent_id"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Optional comment ID to reply under, threading this comment \
+                             beneath another Keeper's instead of flat on the post." )
                       ] )
                 ] )
           ; "required", `List [ `String "post_id"; `String "content" ]

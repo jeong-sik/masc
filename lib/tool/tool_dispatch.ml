@@ -220,18 +220,9 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
       (* Finalization is done inline because [Tool_dispatch] cannot depend on
          [Tool_dispatch_emit] without creating a dependency cycle.  Observers
          receive the exact handler result and cannot mutate it. *)
-      let typed_outcome : Dispatch_outcome.t =
-        match r with
-        | Some _ -> Handled
-        | None -> No_handler
-      in
+      let typed_outcome = Dispatch_outcome.of_result_option r in
       run_dispatch_observers typed_outcome r;
-      let outcome =
-        match r with
-        | Some _ -> "handled"
-        | None -> "no_handler"
-      in
-      r, outcome)
+      r, Dispatch_outcome.to_string typed_outcome)
   in
   result
 ;;

@@ -51,6 +51,10 @@ val runtime_source : flag -> string
     registered. *)
 val get_bool : string -> bool
 
+(** Like {!get_bool}, but raises {!Env_config_core.Config_error} when the
+    selected env or boot-override value is present, non-empty, and malformed. *)
+val get_bool_strict : string -> bool
+
 (** {1 Serialisation} *)
 
 val lifecycle_to_string : lifecycle -> string

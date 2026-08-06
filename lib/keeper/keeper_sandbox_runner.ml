@@ -120,8 +120,6 @@ end
 
 include Make (Docker_backend)
 
-let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
-
 let uses_backend ~config:_ ~meta ~cwd:_ =
   match effective_sandbox_profile ~meta with
   | Keeper_types_profile_sandbox.Docker, _ -> true

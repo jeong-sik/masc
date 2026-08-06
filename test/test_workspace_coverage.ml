@@ -22,21 +22,6 @@ let () = Workspace_metric_hooks.install ()
 (* Test Helpers                                                  *)
 (* ============================================================ *)
 
-(** Check for success emoji *)
-let contains_check result =
-  String.length result >= 3 && String.sub result 0 3 = "\xE2\x9C\x85" (* ✅ *)
-;;
-
-(** Check for warning emoji *)
-let contains_warning result =
-  String.length result >= 3 && String.sub result 0 3 = "\xE2\x9A\xA0" (* ⚠ *)
-;;
-
-(** Check for error emoji *)
-let contains_error result =
-  String.length result >= 3 && String.sub result 0 3 = "\xE2\x9D\x8C" (* ❌ *)
-;;
-
 (** Check for cancel emoji *)
 let _contains_cancel result =
   String.length result >= 4 && String.sub result 0 4 = "\xF0\x9F\x9A\xAB" (* 🚫 *)

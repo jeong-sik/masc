@@ -436,6 +436,66 @@ jobs:
       - name: Check dashboard prompt keys
         run: bash scripts/audit-dashboard-prompt-keys.sh
 
+      # Both directions of the hand-maintained CI test allowlist. A target
+      # whose suite was deleted makes dune hard-fail after a full build
+      # (#24352, and again today when config/prompts/behavior emptied), and a
+      # suite nobody wired never executes at all, so its assertions can outlive
+      # the code they pin. Seconds, and the deleting PR sees it.
+      - name: Check CI test targets
+        run: bash scripts/audit-ci-test-targets.sh
+
+      # Eleven repo-scanning audits that existed and never ran. scripts/ holds
+      # 182 scripts and ci.yml called 63 of them; these are the audit/check
+      # ones that read only tracked files, so CI can run them as-is. The rest
+      # of the unwired set either reads a live .masc runtime (credential and
+      # fleet audits, meaningless on a runner) or needs a tool the image lacks
+      # (valgrind), and stays out.
+      - name: Run repo audit scripts
+        run: |
+          set -e
+          for s in \
+            audit-unwired-audits.sh \
+            verify-test-registration.py \
+            audit-catchall.sh \
+            audit-cross-module-exhaustive-match.sh \
+            audit-path-ssot.sh \
+            audit-tla-cfg-orphan.sh \
+            check_silent_failure.sh \
+            check-board-attention-exact-flow-boundary.sh \
+            check-compaction-exact-flow-boundary.sh \
+            check-doc-code-refs.sh \
+            check-keeper-turn-content-boundary.sh \
+            check-tool-error-format.sh \
+            check-variants.sh
+          do
+            echo "::group::$s"
+            case "$s" in
+              *.py) python3 "scripts/$s" ;;
+              *)    bash "scripts/$s" ;;
+            esac
+            echo "::endgroup::"
+          done
+
+      # SSOT and distribution-contract guards that existed but never ran.
+      # test_prompt_asset_sync is the merge-time half of the managed-assets
+      # manifest contract: a mismatch between the manifest and the embedded
+      # prompt set fails the whole boot-time prompt sync, so until now the
+      # first place anyone learned about it was a server that would not
+      # converge its prompt directory. The dirname ratchet had already been
+      # violated in lib/config/playground_paths.ml.
+      - name: Run SSOT and asset contract suites
+        id: ssot_contract_suites
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          ssot_targets="@test/runtest-test_prompt_asset_sync @test/runtest-test_prompt_registry_defaults @test/runtest-test_tool_contract_truth @test/runtest-test_masc_dirname_ssot @test/runtest-test_otel_port_ssot @test/runtest-test_nickname_words_ssot"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${ssot_targets}"
+
       - name: Check doc truth
         if: needs.changes.outputs.doc_truth == 'true'
         run: |
@@ -1241,6 +1301,36 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_wake_turn_context @test/runtest-test_warn_root_causes"
+
+      # Mirror guards and the workspace heartbeat outcome suite landed without
+      # a runtest target, so the ci-test-targets ratchet counted them as
+      # compile-only. Run them.
+      - name: Run mirror guard and workspace heartbeat suites
+        id: mirror_guard_suites
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_assertion_kind_mirror @test/runtest-test_workspace_heartbeat_outcome"
+
+      # Four more suites landed on main without a runtest target (persona name
+      # via #26962, tool-result demotion via #27013, verification authority
+      # tools via #26994, tool type label). Same ratchet class as above.
+      - name: Run persona, demotion, verification, and tool-label suites
+        id: recent_unwired_suites
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_persona_name @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_verification_authority_tools"
 
       - name: Run transport harness suite
         id: transport_harness_suite

@@ -156,13 +156,7 @@ let trim_opt = function
       if trimmed = "" then None else Some trimmed
   | None -> None
 
-let strip_trailing_slashes value =
-  let rec loop idx =
-    if idx <= 0 then ""
-    else if value.[idx - 1] = '/' then loop (idx - 1)
-    else String.sub value 0 idx
-  in
-  loop (String.length value)
+let strip_trailing_slashes = Masc_network_defaults.trim_trailing_slashes
 
 let strip_path_trailing_slashes value =
   let trimmed = String.trim value in

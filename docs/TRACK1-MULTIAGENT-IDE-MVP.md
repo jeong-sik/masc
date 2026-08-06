@@ -30,8 +30,6 @@ ids, keeper slots, board semantics, or branch-visualization policy.
 
 ## Layer Model
 
-Track 1 follows `docs/rfc/RFC-0017-ocaml-crdt-boundary.md`.
-
 | Layer | Writer | Dashboard contract |
 |-------|--------|--------------------|
 | Authority | OCaml runtime | Existing RPC/REST/CAS transitions only |

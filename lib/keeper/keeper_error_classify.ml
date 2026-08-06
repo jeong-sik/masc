@@ -251,29 +251,6 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
   | None ->
       false
 
-let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Resumable_cli_session _) -> true
-  | Some (Keeper_turn_driver.Runtime_exhausted _)
-  | Some (Keeper_turn_driver.Capacity_backpressure _)
-  | Some (Keeper_turn_driver.Accept_rejected _)
-  (* RFC-0159 Phase A: opaque internal failures. *)
-  | Some (Keeper_turn_driver.Internal_unhandled_exception _)
-  | Some (Keeper_turn_driver.Internal_bridge_exception _)
-  | Some (Keeper_turn_driver.Internal_contract_rejected _)
-  | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
-  | Some (Keeper_turn_driver.Terminal_effect_failed _)
-  | Some (Keeper_turn_driver.Receipt_persistence_failed _)
-  | Some (Keeper_turn_driver.Gate_replay_repair_required _)
-  | None ->
-      false
-
-let is_auto_recoverable_runtime_fail_open_error
-    (err : Agent_sdk.Error.sdk_error) : bool =
-  Keeper_runtime_failure_route.sdk_error_is_hard_quota err
-  || is_resumable_cli_session_error err
-  || is_auto_recoverable_runtime_exhausted_error err
-
 let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
@@ -336,13 +313,6 @@ let accept_rejection_degraded_retry_reason err =
      | None -> None)
   | None -> None
 
-let is_recoverable_no_progress_accept_rejection
-    (err : Agent_sdk.Error.sdk_error) : bool =
-  match accept_rejection_degraded_retry_reason err with
-  | Some (Empty_no_progress | Thinking_only_no_progress) ->
-    true
-  | Some _ | None -> false
-
 type degraded_retry =
   { next_runtime : string
   ; fallback_reason : degraded_retry_reason
@@ -362,9 +332,7 @@ let fallback_runtime_for_unavailable_profile
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
-  else if
-    String.equal normalized_effective (Keeper_config.default_runtime_id ())
-    || String.equal normalized_effective (Keeper_config.default_runtime_id ())
+  else if String.equal normalized_effective (Keeper_config.default_runtime_id ())
   then None
   else Some (Keeper_config.default_runtime_id ())
 
@@ -391,7 +359,6 @@ let degraded_retry_after_recoverable_error
   in
   if effective_is_declared_phase_buffer
      || effective_is_declared_phase_recovery
-     || String.equal normalized_effective (Keeper_config.default_runtime_id ())
      || String.equal normalized_effective (Keeper_config.default_runtime_id ())
   then None
   else if Keeper_runtime_failure_route.sdk_error_is_hard_quota err then
@@ -555,12 +522,9 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
 let normalized_runtime_id ~catalog_names name =
   let trimmed = String.trim name in
   if List.exists (String.equal trimmed) catalog_names then trimmed
-  else if
-    String.equal trimmed (Keeper_config.default_runtime_id ())
-    || String.equal trimmed (Keeper_config.default_runtime_id ())
-    || String.equal trimmed (Keeper_config.default_runtime_id ())
+  else if String.equal trimmed (Keeper_config.default_runtime_id ())
   then trimmed
-  else String.trim trimmed
+  else trimmed
 
 let runtime_catalog_names () =
   match Runtime.get_runtime_ids () with
@@ -615,14 +579,6 @@ let default_degraded_rotation_candidates
   | Some (Hard_quota | Rate_limit)
   | None ->
     default_candidates
-
-let normalize_rotation_candidates ~catalog_names candidates =
-  candidates
-  |> List.filter_map (fun candidate ->
-         let trimmed = String.trim candidate in
-         if String.equal trimmed "" then None
-         else Some (normalized_runtime_id ~catalog_names trimmed))
-  |> dedupe_keep_order
 
 let degraded_rotation_candidates
     ~catalog_names

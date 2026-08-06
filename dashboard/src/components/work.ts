@@ -15,6 +15,7 @@ import { BoardSurface } from './board/board-surface'
 import { SubBoardSurface } from './board/sub-board-surface'
 import { PlanningPanel } from './planning-panel'
 import { VerificationRequestsPanel } from './verification-requests-panel'
+import { VerificationRunsPanel } from './verification-runs-panel'
 import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
 import { VirtualList } from './common/virtual-list'
@@ -491,6 +492,7 @@ function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined
         `}
         <span class="wk-dossier-chip mono">events ${node.timeline_events.length}</span>
         <span class="wk-dossier-chip mono">stagnation ${node.stagnation_seconds == null ? 'unavailable' : `${node.stagnation_seconds}s`}</span>
+        ${node.owner ? html`<span class="wk-dossier-chip mono">owner ${node.owner}</span>` : null}
         ${node.latest_keeper_ref ? html`<span class="wk-dossier-chip mono">keeper ${node.latest_keeper_ref}</span>` : null}
         ${node.latest_turn_ref != null ? html`<span class="wk-dossier-chip mono">turn ${node.latest_turn_ref}</span>` : null}
         ${node.linked_keeper_names.map((name) => html`
@@ -1625,7 +1627,12 @@ export function Work() {
               <${LazyRepositoryManagement} />
             <//>
           `
-          : html`<${VerificationRequestsPanel} />`
+          : html`
+            <div class="flex flex-col gap-4">
+              <${VerificationRequestsPanel} />
+              <${VerificationRunsPanel} />
+            </div>
+          `
         }
       <//>
     </div>

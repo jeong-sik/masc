@@ -40,6 +40,7 @@ const requestNamespaceTruthNow = vi.fn<() => void>()
 const requestNamespaceTruth = vi.fn<() => void>()
 const showToast = vi.fn<(message: string, kind?: string, durationMs?: number) => void>()
 const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
+const hydrateOasTelemetrySample = vi.fn<(event: unknown) => void>()
 const compositeTick = signal({ name: '', ts_unix: 0 })
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
@@ -90,6 +91,9 @@ async function loadSseStore() {
     replayOasRuntimeTelemetry,
     applyOasRuntimeEvent: vi.fn(),
   }))
+  vi.doMock('./oas-telemetry-store', () => ({
+    hydrateOasTelemetrySample,
+  }))
   vi.doMock('./composite-signals', () => ({
     compositeTick,
     hydrateFleetCompositeSnapshot,
@@ -131,6 +135,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     showToast.mockClear()
     replayOasRuntimeTelemetry.mockClear()
     replayOasRuntimeTelemetry.mockResolvedValue(undefined)
+    hydrateOasTelemetrySample.mockClear()
     refreshActiveKeeperChatHistory.mockReset()
     reconcileKeeperChatReceipts.mockReset()
     reconcileKeeperChatReceipts.mockResolvedValue(undefined)
@@ -159,6 +164,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     vi.doUnmock('./tab-refresh')
     vi.doUnmock('./components/common/toast')
     vi.doUnmock('./oas-runtime-store')
+    vi.doUnmock('./oas-telemetry-store')
     vi.doUnmock('./composite-signals')
     vi.doUnmock('./goal-tree-state')
     vi.doUnmock('./router')
@@ -356,8 +362,10 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
   })
 
-  it('forces execution refresh on keeper turn complete for live roster status', async () => {
+  it('refreshes only the scoped Keeper status on turn complete', async () => {
     const { sseStore } = await loadSseStore()
+    const refreshKeeperTurn = vi.fn<(keeperName: string) => void>()
+    sseStore.registerKeeperTurnRefresh(refreshKeeperTurn)
     route.value = { tab: 'keepers', params: { keeper: 'qa-king' }, postId: null }
 
     sseStore.routeServerPushEvent({
@@ -368,8 +376,12 @@ describe('setupServerPushReaction reconnect hydration', () => {
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshExecution).toHaveBeenCalledTimes(1)
-    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
+    // The SDK hook precedes durable commit, so rebuilding the global execution
+    // snapshot here is both premature and expensive. The registered
+    // keeper-scoped status reader remains the authoritative immediate refresh.
+    expect(refreshExecution).not.toHaveBeenCalled()
+    expect(refreshKeeperTurn).toHaveBeenCalledTimes(1)
+    expect(refreshKeeperTurn).toHaveBeenCalledWith('qa-king')
   })
 
   it('normalizes MASC broadcast aliases before route-scoped execution refresh', async () => {
@@ -464,6 +476,35 @@ describe('setupServerPushReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshFusionRuns).not.toHaveBeenCalled()
+  })
+
+  it('refreshes the mounted internal-agent registry immediately from websocket invalidation', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'internal-agents' }, postId: null }
+    const refresh = vi.fn()
+    const unregister = sseStore.registerInternalAgentRefresh(refresh)
+
+    sseStore.routeServerPushEvent({ type: 'internal_agent_runs_changed' })
+    vi.advanceTimersByTime(1)
+    await flushAsyncWork()
+
+    expect(refresh).toHaveBeenCalledTimes(1)
+    unregister()
+  })
+
+  it('refreshes Fusion rows inside Internal Agents from the existing Fusion websocket event', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'internal-agents' }, postId: null }
+    const refresh = vi.fn()
+    const unregister = sseStore.registerInternalAgentRefresh(refresh)
+
+    sseStore.routeServerPushEvent({ type: 'fusion_run_status' })
+    vi.advanceTimersByTime(1)
+    await flushAsyncWork()
+
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(refreshFusionRuns).not.toHaveBeenCalled()
+    unregister()
   })
 
   it('routes keeper_tool_call to the IDE workspace refresh while on the code surface', async () => {
@@ -664,6 +705,27 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
     expect(compositeTick.value).toEqual({ name: 'qa-king', ts_unix: 1710000000.123 })
     expect(hydrateFleetCompositeSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('routes oas_telemetry_sample to the telemetry read model without an HTTP refresh', async () => {
+    const { sseStore } = await loadSseStore()
+
+    // The push payload carries the sample itself (schemas/sse.ts validates the
+    // envelope), so the read model hydrates directly — nothing to re-fetch.
+    sseStore.routeServerPushEvent({
+      type: 'oas_telemetry_sample',
+      provider_id: 'runtime',
+      model_id: 'runtime',
+      payload: {
+        sample: { ttfb_ms: 120.5, total_duration_ms: 845.2, status: { kind: 'success' } },
+        recorded_at: 1_712_000_000,
+      },
+      ts_unix: 1_712_000_000,
+    })
+    await flushAsyncWork()
+
+    expect(hydrateOasTelemetrySample).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).not.toHaveBeenCalled()
   })
 
   it('routes board reaction changes through the board refresh budget', async () => {

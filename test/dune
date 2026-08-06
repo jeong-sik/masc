@@ -182,6 +182,7 @@
   test_lsp_process_manager
   test_ide_annotations
   test_agent_observation_bridge
+  test_enum_mirror_sync
   test_ide_bridge
   test_server_ide_lsp_proxy
   test_server_ide_http
@@ -262,6 +263,8 @@
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
   test_tool_input_validation
+  test_tool_schema_constraint_enforcement
+  test_keeper_artifact_read_request
   test_tool_schema_oas_boundary
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
@@ -318,7 +321,8 @@
   test_board_context_inference_resolution
   test_runtime_model_input_tail_window
   test_keeper_model_input_demotion
-  test_workspace_handoff_boundary)
+  test_workspace_handoff_boundary
+  test_exec_command_gate_log_sink)
  (modules
   test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
@@ -478,6 +482,7 @@
   test_lsp_process_manager
   test_ide_annotations
   test_agent_observation_bridge
+  test_enum_mirror_sync
   test_ide_bridge
   test_server_ide_lsp_proxy
   test_server_ide_http
@@ -558,6 +563,8 @@
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
   test_tool_input_validation
+  test_tool_schema_constraint_enforcement
+  test_keeper_artifact_read_request
   test_tool_schema_oas_boundary
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
@@ -615,7 +622,8 @@
   test_board_context_inference_resolution
   test_runtime_model_input_tail_window
   test_keeper_model_input_demotion
-  test_workspace_handoff_boundary)
+  test_workspace_handoff_boundary
+  test_exec_command_gate_log_sink)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref))
 
@@ -1640,6 +1648,7 @@
 ; sorted alphabetically.
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
+(include stanzas/test_trailing_slash_rules.inc)
 (include stanzas/test_verification_authority_tools.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 (include stanzas/test_keeper_compaction_persist_gate.inc)
@@ -1713,6 +1722,11 @@
 (test
  (name test_keeper_chat_slack)
  (modules test_keeper_chat_slack)
+ (libraries alcotest masc_test_deps))
+
+(test
+ (name test_keeper_chat_broadcast)
+ (modules test_keeper_chat_broadcast)
  (libraries alcotest masc_test_deps))
 
 (include stanzas/test_ci_run_tests_script.inc)
@@ -1955,9 +1969,13 @@
 
 (include stanzas/test_keeper_approval_queue.inc)
 
+(include stanzas/test_keeper_approval_audit_timeline.inc)
+
 (include stanzas/test_tool_type_label.inc)
 
 (include stanzas/test_assertion_kind_mirror.inc)
+
+(include stanzas/test_agent_card_action_mirror.inc)
 
 (include stanzas/test_workspace_heartbeat_outcome.inc)
 
@@ -2525,6 +2543,8 @@
 (include stanzas/test_keeper_hitl_resolution_prompt.inc)
 (include stanzas/test_fs_compat_capability_write.inc)
 
+(include stanzas/test_file_kind_vocabulary.inc)
+
 (test
  (name test_fs_compat_capability_head)
  (modules test_fs_compat_capability_head)
@@ -2536,6 +2556,9 @@
 (include stanzas/test_keeper_chat_admission_contention.inc)
 
 (include stanzas/test_dashboard_continuity_briefs.inc)
+
+(include stanzas/test_verification_run_registry.inc)
+(include stanzas/test_exact_lane_run_registry.inc)
 
 ; The tool-call quality benchmark reads its case set and evidence fixture from
 ; repo-root JSON (benchmarks/data, test/fixtures) rather than from sandbox
@@ -2564,4 +2587,3 @@
   (source_tree %{workspace_root}/config/prompts)
   %{workspace_root}/test/fixtures/keeper_system_prompt/assembled_prompt.golden)
  (libraries alcotest masc_test_deps))
-

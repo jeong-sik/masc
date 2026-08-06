@@ -88,13 +88,9 @@ let execution_outcome_to_json
           ("attempt", `Int attempt);
           ("error", `String error);
         ]
-  | Recovery.FallbackApplied { value; confidence_delta } ->
+  | Recovery.FallbackApplied { value } ->
       `Assoc
-        [
-          ("outcome", `String "fallback_applied");
-          ("value", `String value);
-          ("confidence_delta", `Float confidence_delta);
-        ]
+        [ ("outcome", `String "fallback_applied"); ("value", `String value) ]
   | Recovery.HandoffRequested { message; preserve_state } ->
       `Assoc
         [

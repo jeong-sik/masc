@@ -623,4 +623,45 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('no-usage')
     expect(container.textContent).not.toContain('no-usage/no-usage')
   })
+
+  it('renders the latest oas telemetry sample from the push-fed read model', async () => {
+    const { latestOasTelemetrySample } = await import('../oas-telemetry-store')
+    latestOasTelemetrySample.value = {
+      provider_id: 'runtime',
+      model_id: 'runtime',
+      ttfb_ms: 121.4,
+      total_duration_ms: 845.2,
+      throughput_tokens_per_s: 42.1,
+      cost_usd: 0.003,
+      status_kind: 'success',
+      recorded_at: 1_712_000_000.5,
+    }
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.querySelector('[data-testid="oas-latest-telemetry-sample"]') != null,
+      'oas latest telemetry sample line',
+    )
+
+    const line = container.querySelector('[data-testid="oas-latest-telemetry-sample"]')?.textContent ?? ''
+    expect(line).toContain('oas latest · runtime')
+    expect(line).toContain('ttfb 121ms')
+    expect(line).toContain('total 845ms')
+    expect(line).toContain('42.1 tok/s')
+    expect(line).toContain('success')
+    latestOasTelemetrySample.value = null
+  })
+
+  it('omits the oas telemetry sample line before any push arrives', async () => {
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime binding',
+    )
+
+    expect(container.querySelector('[data-testid="oas-latest-telemetry-sample"]')).toBeNull()
+  })
 })

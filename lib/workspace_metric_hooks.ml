@@ -314,7 +314,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ~report_tool_schema ~lookup () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ~report_tool_schema ~lookup ~on_tool_result () ->
     let verdict_ref = ref None in
     let protocol_error_ref = ref None in
     let lookup_schemas, lookup_dispatch =
@@ -341,7 +341,7 @@ let install () =
     in
     let dispatch_verdict ~name ~args =
       let start_time = Time_compat.now () in
-      match !verdict_ref with
+      let result = match !verdict_ref with
       | Some verdict ->
         let detail =
           Printf.sprintf
@@ -372,11 +372,17 @@ let install () =
              ~tool_name:name
              ~start_time
              (Printf.sprintf "Invalid verdict format: %s" msg))
+      in
+      result
     in
     let dispatch ~name ~args =
-      if String.equal name report_tool_schema.Masc_domain.name
-      then dispatch_verdict ~name ~args
-      else dispatch_lookup ~name ~args
+      let result =
+        if String.equal name report_tool_schema.Masc_domain.name
+        then dispatch_verdict ~name ~args
+        else dispatch_lookup ~name ~args
+      in
+      on_tool_result ~input:args result;
+      result
     in
     let apply_review_verdict_output_contract provider_cfg =
       Ok

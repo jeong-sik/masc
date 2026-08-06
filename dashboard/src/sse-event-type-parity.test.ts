@@ -44,12 +44,14 @@ const BACKEND_EMITTED: Record<string, string> = {
   keeper_composite_changed: '../lib/server/server_mcp_transport_ws.ml',
   keeper_heartbeat: '../lib/keeper/keeper_heartbeat_snapshot.ml',
   keeper_turn_complete: '../lib/keeper/keeper_hooks_oas.ml',
+  oas_telemetry_sample: '../lib/runtime/dashboard_oas_bridge.ml',
   namespace_truth_snapshot: '../lib/server/server_mcp_transport_ws.ml',
   operator_digest: '../lib/server/server_dashboard_http_core_digest_refresh.ml',
   operator_snapshot: '../lib/server/server_mcp_transport_ws.ml',
   post_created: '../lib/keeper_runtime/keeper_event_queue.ml',
   project_snapshot: '../lib/server/server_mcp_transport_ws.ml',
   transport_health_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
+  fusion_run_status: '../lib/fusion/fusion_sink.ml',
 }
 
 // event-type -> why it has no masc backend literal to bind to. Keep short and

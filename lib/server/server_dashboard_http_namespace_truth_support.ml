@@ -231,11 +231,6 @@ let task_is_active task =
   | Some ("todo" | "claimed" | "in_progress" | "awaiting_verification") -> true
   | _ -> false
 
-let readiness_score_of_status = function
-  | "bad" -> 40
-  | "warn" -> 72
-  | _ -> 100
-
 let summary_of_reasons ~ok_message reasons =
   match reasons with
   | [] -> ok_message
@@ -245,13 +240,11 @@ let metrics_json entries =
   `Assoc (List.map (fun (key, value) -> (key, `Int value)) entries)
 
 let readiness_pillar_json ~key ~label ~status ~ok_message ~reasons ~metrics =
-  let score = readiness_score_of_status status in
   `Assoc
     [
       ("key", `String key);
       ("label", `String label);
       ("status", `String status);
-      ("score", `Int score);
       ("summary", `String (summary_of_reasons ~ok_message reasons));
       ("blocking_reasons", `List (List.map (fun reason -> `String reason) reasons));
       ("metrics", metrics_json metrics);
@@ -478,15 +471,6 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
     then "warn"
     else "ok"
   in
-  let overall_score =
-    match pillars with
-    | [] -> 100
-    | _ ->
-        List.fold_left
-          (fun acc pillar -> acc + json_int_field "score" pillar ~default:100)
-          0 pillars
-        / List.length pillars
-  in
   let blocking_count =
     pending_visible + runtime_blocker_count + unassigned_active_tasks
     + missing_audit_live_count
@@ -546,7 +530,6 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
   ( `Assoc
       [
         ("status", `String overall_status);
-        ("score", `Int overall_score);
         ("decision_required_count", `Int pending_visible);
         ("blocking_count", `Int blocking_count);
         ("pillars", `List pillars);

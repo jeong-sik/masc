@@ -306,7 +306,6 @@ let chat_queue_status_to_json observation =
       ; "durable_replay_enabled", `Bool durable_replay_enabled
       ]
 
-let nonempty_trimmed = Keeper_status_detail_observability.nonempty_trimmed
 let json_string_opt_member = Json_util.get_string_nonempty
 let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
 let model_observability_json = Keeper_status_detail_observability.model_observability_json
@@ -401,16 +400,9 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          in
 
          let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
-         let generation_index_path =
-           Keeper_types_support.keeper_generation_index_path config m.name
-         in
          let session_dir =
            Keeper_types_support.keeper_session_dir
              config
-             (Keeper_id.Trace_id.to_string m.runtime.trace_id)
-         in
-         let generation_manifest_path =
-           Keeper_types_support.keeper_generation_manifest_path config
              (Keeper_id.Trace_id.to_string m.runtime.trace_id)
          in
          let history_path =
@@ -422,10 +414,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            Keeper_types_support.keeper_internal_history_path config
              (Keeper_id.Trace_id.to_string m.runtime.trace_id)
          in
-         let generation_lineage =
-           Keeper_generation_lineage.surface_json config m ~recent_limit:6
-         in
-
          let metrics_tail =
            let lines =
              Dated_jsonl.read_recent_lines metrics_store tail_turns
@@ -758,7 +746,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("sources", source_provenance_json config m);
            ("context", ctx_stats);
            ("metrics_overview", metrics_summary_to_json metrics_overview);
-           ("generation_lineage", generation_lineage);
            ("metrics_tail", metrics_tail);
            ("history_tail", history_tail);
            ("history_tail_count",
@@ -772,13 +759,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path config m.name));
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));
-           ("generation_index", `String generation_index_path);
            ( "decisions"
            , `String (Keeper_types_support.keeper_decision_log_path config m.name) );
              ( "feedback"
              , `String (Keeper_types_support.keeper_feedback_log_path config m.name) );
            ("session_dir", `String session_dir);
-             ("generation_manifest", `String generation_manifest_path);
              ("history", `String history_path);
              ("history_internal", `String internal_history_path);
              ("evidence_dir", `String

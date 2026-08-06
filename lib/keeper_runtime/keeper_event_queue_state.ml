@@ -479,16 +479,6 @@ let apply_pending_transition ~applied_at ~transition ~source ~pending state =
       , Transition_applied receipt )
 ;;
 
-let find_prior_receipt transition_id state =
-  match state.transition_outbox with
-  | [ entry ] when String.equal entry.receipt.transition_id transition_id -> Some entry.receipt
-  | [] | [ _ ] ->
-    List.find_opt
-      (fun receipt -> String.equal receipt.transition_id transition_id)
-      (projected_transition_receipts state)
-  | _ :: _ :: _ -> None
-;;
-
 let prior_disposition_by_operation_id operation_id state =
   let is_same_operation receipt =
     String.equal

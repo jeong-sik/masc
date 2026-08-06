@@ -56,12 +56,6 @@ end
 
 module Completion_contract_result = Keeper_completion_contract_result_label
 
-let completion_contract_result_from_receipt receipt =
-  match json_string_opt_member "completion_contract_result" receipt with
-  | Some raw -> Completion_contract_result.of_string raw
-  | None -> None
-;;
-
 let terminal_reason_from_decision json =
   match json_member "terminal_reason" json with
   | `Assoc _ as terminal_reason -> Keeper_turn_terminal.of_json terminal_reason
@@ -380,32 +374,6 @@ let next_human_action_or_terminal ~needs_attention ~latest_next_action
   | Some _ as value -> value
   | None when needs_attention -> latest_next_action
   | None -> None
-
-let disposition_fields_json ~(config : Workspace.config) ~(meta : keeper_meta) :
-    Yojson.Safe.t =
-  let pending_approval_projection =
-    pending_approval_projection ~base_path:config.base_path
-      ~keeper_name:meta.name
-  in
-  let runtime_blocker_fields =
-    Keeper_status_bridge.runtime_blocker_fields_json config meta
-  in
-  let disposition, disposition_reason =
-    disposition_of_snapshot ~pending_approval_projection
-      ~runtime_blocker_fields
-  in
-  let latest_receipt = Keeper_execution_receipt.latest_json config meta.name in
-  let disposition, disposition_reason, _, _ =
-    effective_disposition_fields
-      ~approval_queue_available:(Option.is_none pending_approval_projection.error)
-      ~fallback_disposition:disposition
-      ~fallback_reason:disposition_reason latest_receipt
-  in
-  `Assoc
-    [
-      ("disposition", `String disposition);
-      ("disposition_reason", `String disposition_reason);
-    ]
 
 let decision_log_persistence_surface = "keeper_runtime_trust_decision_log"
 

@@ -284,7 +284,6 @@ describe('buildTraceEvents', () => {
           result: 'file contents',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
         }],
       },
@@ -353,7 +352,6 @@ describe('buildTraceEvents', () => {
           result: 'trajectory result',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
         }],
       },
@@ -409,7 +407,6 @@ describe('buildTraceEvents', () => {
           result: 'trajectory result',
           duration_ms: 812,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
           execution_id: 'exec-1712397700000-duration',
         }],
@@ -507,7 +504,6 @@ describe('buildTraceEvents', () => {
           result: 'trajectory result',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
           execution_id: 'exec-1712397700000-002a',
         }],
@@ -568,7 +564,6 @@ describe('buildTraceEvents', () => {
           result: 'a',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
           execution_id: 'exec-1712397700000-0001',
         }],
@@ -621,7 +616,6 @@ describe('buildTraceEvents', () => {
           result: 'legacy',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
         }],
       },
@@ -686,12 +680,15 @@ describe('buildTraceEvents', () => {
 })
 
 describe('getTraceSummary', () => {
-  it('counts tool_call events and accumulates cost', () => {
+  // Trajectory-sourced tool calls carry no cost. The dollar figure in the trace
+  // summary comes from OAS lifecycle events, which are the only events that
+  // report a cost the provider actually charged.
+  it('counts tool_call events; the dollar total comes from OAS events only', () => {
     traceSlots.value = {
       'keeper-a': {
         events: [
-          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read', detail: {}, cost_usd: 0.01 },
-          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'edit', detail: {}, cost_usd: 0.02 },
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read', detail: {} },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'edit', detail: {} },
           { id: '3', ts: 3000, ts_iso: '', kind: 'broadcast', sourceLane: 'masc', summary: 'hello', detail: {} },
         ],
         loading: false,
@@ -706,7 +703,7 @@ describe('getTraceSummary', () => {
     const summary = getTraceSummary('keeper-a')
     expect(summary.tool_call_count).toBe(2)
     expect(summary.broadcast_count).toBe(1)
-    expect(summary.total_cost_usd).toBeCloseTo(0.03)
+    expect(summary.total_cost_usd).toBe(0)
   })
 
   it('accumulates OAS tokens and cost from lifecycle events', () => {

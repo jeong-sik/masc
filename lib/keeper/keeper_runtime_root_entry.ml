@@ -1,6 +1,5 @@
 type keeper_artifact =
   | Metadata
-  | Generation_index_log
   | Decision_log
   | Feedback_log
   | Tla_trace_log
@@ -14,7 +13,6 @@ type t =
 
 let keeper_suffix = function
   | Metadata -> ".json"
-  | Generation_index_log -> ".generation_index.jsonl"
   | Decision_log -> ".decisions.jsonl"
   | Feedback_log -> ".feedback.jsonl"
   | Tla_trace_log -> ".tla-trace.jsonl"
@@ -37,8 +35,7 @@ type descriptor =
 (* Longest Keeper suffixes precede [.json], preserving dotted Keeper names
    while keeping classification total and deterministic. *)
 let descriptors =
-  [ Keeper_descriptor { artifact = Generation_index_log; rotatable = true }
-  ; Keeper_descriptor { artifact = Decision_log; rotatable = true }
+  [ Keeper_descriptor { artifact = Decision_log; rotatable = true }
   ; Keeper_descriptor { artifact = Feedback_log; rotatable = true }
   ; Keeper_descriptor { artifact = Tla_trace_log; rotatable = true }
   ; Keeper_descriptor { artifact = Metadata; rotatable = false }

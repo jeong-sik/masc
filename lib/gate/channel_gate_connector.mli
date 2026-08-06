@@ -10,9 +10,13 @@
     Relationship to other modules:
     - {!Channel_gate} handles message routing (inbound/outbound).
     - {!Channel_gate_connector} handles connector state (status/bind/unbind).
-    - {!Channel_gate_metrics} tracks per-channel traffic metrics.
-
     @since 2.260.0 *)
+
+(** Common connector ready status info. *)
+type ready_info = {
+  ready_bot_user_id : string;
+  ready_at : string;
+}
 
 (** {1 Connector Module Type} *)
 

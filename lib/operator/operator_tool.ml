@@ -72,8 +72,7 @@ let result_of_json ~tool_name ~start_time = function
         ~data
         (Yojson.Safe.to_string data)
 
-let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
-  Tool_result.make_ok ~tool_name ~start_time ~data:json ()
+let json_ok = Tool_agent.json_ok
 
 let schema_properties entries = `Assoc entries
 

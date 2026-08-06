@@ -20,7 +20,6 @@ type tool_call_entry = {
   result : string option;
   duration_ms : int;
   error : string option;
-  cost_usd : float;
   execution_id : string option;
       (** RFC-0233 canonical join key shared with the tool_calls JSONL row
           for the same execution. [None] only for rows written by paths
@@ -52,7 +51,6 @@ type trajectory = {
   started_at : float;
   ended_at : float;
   entries : tool_call_entry list;
-  total_cost_usd : float;
   total_turns : int;
   total_tool_calls : int;
   outcome : trajectory_outcome;
@@ -80,7 +78,6 @@ type trajectory_line =
 
 (** {1 Cost estimation} *)
 
-val tool_cost_estimate : string -> float
 (** Rough per-call cost estimate for keeper tools. *)
 
 (** {1 JSON serialization} *)
@@ -172,7 +169,6 @@ type pending_entry = {
 
 type accumulator = {
   mutable entries : tool_call_entry list;
-  mutable total_cost : float;
   mutable total_calls : int;
   mutable turn : int;
   keeper_name : string;
@@ -236,7 +232,6 @@ type tool_stat = {
   avg_duration_ms : int;
   p95_duration_ms : int;
   max_duration_ms : int;
-  total_cost_usd : float;
   last_used_at : string;
 }
 

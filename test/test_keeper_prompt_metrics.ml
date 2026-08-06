@@ -380,18 +380,27 @@ let test_system_block_states_the_collaboration_surface () =
   check bool "the one-task-at-a-time limit is stated" true
     (has_in prompt "You hold one Task at a time");
   check bool "the refusal is described, not just the limit" true
-    (has_in prompt "a claim on another is refused and names the one you are holding");
+    (has_in prompt "a claim on another is refused and names both the Task you hold");
   check bool "walking the candidate list is named as the wrong move" true
     (has_in prompt "trying each candidate in turn only produces a run of refusals");
-  (* Release exists, but under the other namespace: keeper_task_claim /
+  (* Release exists under the other namespace: keeper_task_claim /
      keeper_task_done / keeper_task_create sit on the keeper_* surface while
-     handing a task back is masc_transition with action "release" (101 live
-     calls). The refusal names the held task and nothing else, so a keeper that
-     only knows the keeper_task_* family has no route out of it. *)
-  check bool "handing back is located outside the task tool family" true
-    (has_in prompt "a status transition, not a Task-specific tool");
-  check bool "the refusal's silence about the way out is stated" true
-    (has_in prompt "names the Task you hold but not the way out")
+     handing a task back is masc_transition with action "release".
+
+     This used to be spelled out in the prompt, in two sentences pinned here
+     ("a status transition, not a Task-specific tool" and "names the Task you
+     hold but not the way out"), because the refusal message named the held
+     task and nothing else. The message now names masc_transition
+     action=release and the required handoff_context.summary, so the prompt no
+     longer restates it and these two assertions would pin prose that is gone.
+
+     The contract did not disappear, it moved. Its test moved with it:
+     test_workspace_coverage / claim_next "single-claim refusal names the
+     release path", which fails if the message drops any of the three tokens.
+     Asserting the prompt still describes the route would re-create the
+     duplication this removed. *)
+  check bool "the prompt points at the refusal instead of restating the route" true
+    (has_in prompt "names both the Task you hold and how to hand it back")
 
 let test_repository_checkout_authority_prompt () =
   let prompt =

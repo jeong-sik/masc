@@ -6,7 +6,6 @@ import { html } from "htm/preact"
 import {
   filterCheckpointHistory,
   KeeperCheckpointPanel,
-  lineageTransitionLabel,
   MonoBadge,
 } from "./keeper-detail-history"
 import type { KeeperCheckpointSummary } from "../api/keeper"
@@ -77,24 +76,6 @@ describe("MonoBadge", () => {
     expect(chip?.getAttribute("data-status-chip-tone")).toBe("info")
     expect(chip?.getAttribute("data-status-chip-uppercase")).toBe("false")
     expect(chip?.classList.contains("font-mono")).toBe(true)
-  })
-})
-
-describe("lineageTransitionLabel", () => {
-  it("shows root for null parent", () => {
-    expect(lineageTransitionLabel(null, 1)).toBe("root -> gen 1")
-  })
-
-  it("shows root for undefined parent", () => {
-    expect(lineageTransitionLabel(undefined, 2)).toBe("root -> gen 2")
-  })
-
-  it("shows parent generation when present", () => {
-    expect(lineageTransitionLabel(3, 4)).toBe("gen 3 -> gen 4")
-  })
-
-  it("handles zero parent generation", () => {
-    expect(lineageTransitionLabel(0, 1)).toBe("gen 0 -> gen 1")
   })
 })
 

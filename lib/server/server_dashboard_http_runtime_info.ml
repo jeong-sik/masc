@@ -1395,16 +1395,32 @@ let runtime_http_transport_is_loopback url =
   Uri.of_string url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
 ;;
 
+(* Closed over the transports a runtime can have. The dashboard label used to
+   be derived from the serialized name with a wildcard, so "http" reached
+   "cloud" implicitly and a fourth transport kind would have joined it in
+   silence. Both mappings are exhaustive now; the wire strings are unchanged. *)
+type runtime_transport_kind =
+  | Kind_cli
+  | Kind_local
+  | Kind_http
+
 let runtime_kind_of_transport = function
-  | Runtime_schema.Cli _ -> "cli"
-  | Runtime_schema.Http url when runtime_http_transport_is_loopback url -> "local"
-  | Runtime_schema.Http _ -> "http"
+  | Runtime_schema.Cli _ -> Kind_cli
+  | Runtime_schema.Http url when runtime_http_transport_is_loopback url -> Kind_local
+  | Runtime_schema.Http _ -> Kind_http
 ;;
 
+let runtime_kind_to_string = function
+  | Kind_cli -> "cli"
+  | Kind_local -> "local"
+  | Kind_http -> "http"
+;;
+
+(* The operator-facing bucket: a non-loopback HTTP endpoint is remote. *)
 let runtime_dashboard_kind_of_runtime_kind = function
-  | "local" -> "local"
-  | "cli" -> "cli"
-  | _ -> "cloud"
+  | Kind_local -> "local"
+  | Kind_cli -> "cli"
+  | Kind_http -> "cloud"
 ;;
 
 let runtime_auth_kind_of_credential = function
@@ -1774,7 +1790,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "protocol", `String rt.provider.protocol
     ; "transport", `String (runtime_transport_string rt.provider.transport)
     ; "kind", `String (runtime_dashboard_kind_of_runtime_kind runtime_kind)
-    ; "runtime_kind", `String runtime_kind
+    ; "runtime_kind", `String (runtime_kind_to_string runtime_kind)
     ; "auth_kind", `String (runtime_auth_kind_of_credential rt.provider.credentials)
     ; "status", `String "configured"
     ; "available", `Bool true

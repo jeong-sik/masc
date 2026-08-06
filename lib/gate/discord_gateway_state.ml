@@ -10,8 +10,6 @@
    incomplete transition surfaces as an explicit, named failure
    rather than a silent no-op or catch-all swallow. *)
 
-let protocol_version = 10
-
 (* ── Opcodes ────────────────────────────────────────────────────── *)
 
 type opcode =
@@ -256,7 +254,12 @@ let trigger_policy_to_string = function
 
 (* ── Opaque state ──────────────────────────────────────────────── *)
 
-let gateway_url = "wss://gateway.discord.gg/?v=10&encoding=json"
+(* [v] is the API version, per the gateway docs' query-parameter table, so
+   it comes from the one place that number is defined. *)
+let gateway_url =
+  Printf.sprintf
+    "wss://gateway.discord.gg/?v=%d&encoding=json"
+    Discord_api_version.current
 
 module StringMap = Map.Make (String)
 

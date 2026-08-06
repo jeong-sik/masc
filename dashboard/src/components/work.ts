@@ -443,6 +443,7 @@ function TaskEvidenceLedger({ rows }: { rows: readonly TaskEvidenceLedgerRow[] }
 }
 
 function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined }) {
+  const [timelineOpen, setTimelineOpen] = useState(false)
   if (!node) return null
 
   const completion = node.completion_summary ?? null
@@ -491,6 +492,18 @@ function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined
           <span class="wk-dossier-chip mono">last unavailable</span>
         `}
         <span class="wk-dossier-chip mono">events ${node.timeline_events.length}</span>
+        ${node.timeline_events.length > 0 ? html`
+          <button
+            type="button"
+            class="wk-dossier-chip mono"
+            style="cursor: pointer"
+            onClick=${() => setTimelineOpen(open => !open)}
+            aria-expanded=${timelineOpen}
+            data-goal-dossier-timeline-toggle=${node.id}
+          >
+            ${timelineOpen ? 'hide timeline' : 'show timeline'}
+          </button>
+        ` : null}
         <span class="wk-dossier-chip mono">stagnation ${node.stagnation_seconds == null ? 'unavailable' : `${node.stagnation_seconds}s`}</span>
         ${node.owner ? html`<span class="wk-dossier-chip mono">owner ${node.owner}</span>` : null}
         ${node.latest_keeper_ref ? html`<span class="wk-dossier-chip mono">keeper ${node.latest_keeper_ref}</span>` : null}
@@ -502,6 +515,20 @@ function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined
           <span class="wk-dossier-chip warn mono">approvals ${node.pending_approval_count}</span>
         ` : null}
       </div>
+
+      ${timelineOpen
+        ? node.timeline_events.map(event => html`
+          <div
+            key=${`${event.kind}:${event.lane}:${event.ts}`}
+            class="wk-dossier-row"
+            data-goal-dossier-timeline-event
+          >
+            <span class="wk-dossier-k">${event.kind}</span>
+            <span class="wk-dossier-chip mono">${event.ts}</span>
+            <span class=${`wk-dossier-chip ${event.severity} mono`}>${event.summary}</span>
+          </div>
+        `)
+        : null}
     </div>
   `
 }

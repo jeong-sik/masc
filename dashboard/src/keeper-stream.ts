@@ -772,6 +772,26 @@ export function applyKeeperStreamEvent(
         }))
         return null
       }
+      if (event.name === 'KEEPER_EXTERNAL_EFFECT_COMPLETED') {
+        // The reply went out through an external connector (Slack/Discord), so
+        // there is no assistant text — finalize as a terminal control status
+        // instead of leaving the entry streaming.
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({
+          ...entry,
+          details: {
+            ...(entry.details ?? {}),
+            turnOutcome: 'external_effect_completed',
+          },
+          text: '',
+          delivery: 'delivered',
+          streamState: null,
+          streamContract: keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', {
+            eventName: 'KEEPER_EXTERNAL_EFFECT_COMPLETED',
+          }),
+        }))
+        return null
+      }
       if (event.name === 'KEEPER_REQUEST_TERMINAL') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const terminal = isRecord(event.value) ? event.value : null

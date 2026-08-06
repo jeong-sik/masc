@@ -308,7 +308,9 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
       tasks,
     }),
     completion_summary: decodeGoalCompletionSummary(raw.completion_summary),
-    timeline_events: Array.isArray(raw.timeline_events) ? raw.timeline_events : [],
+    timeline_events: asRecordArray(raw.timeline_events)
+      .map(decodeGoalDetailTimelineEvent)
+      .filter((event): event is GoalDetailTimelineEvent => event !== null),
     children,
     child_count: asInt(raw.child_count) ?? children.length,
     last_activity_at: asString(raw.last_activity_at, ''),

@@ -74,15 +74,7 @@ let validate_timeout_sec value =
       (Printf.sprintf "timeout_sec must be a positive integer (got %d)" value)
 
 let normalize_ollama_server_url raw =
-  let trimmed = String.trim raw in
-  let rec strip_trailing_slashes value =
-    let len = String.length value in
-    if len > 0 && Char.equal value.[len - 1] '/' then
-      strip_trailing_slashes (String.sub value 0 (len - 1))
-    else
-      value
-  in
-  strip_trailing_slashes trimmed
+  String.trim raw |> Masc_network_defaults.trim_trailing_slashes
 
 let ollama_ps_url server_url =
   normalize_ollama_server_url server_url

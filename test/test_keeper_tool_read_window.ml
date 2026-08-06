@@ -72,13 +72,13 @@ let write_file path content =
 let make_meta name =
   let json =
     `Assoc
+      (* [sandbox_profile] left JSON meta in 5e151702c4 (TOML=config SSOT,
+         JSON=runtime-only) and 28ef484a39 started rejecting fields outside
+         the declared schema, so passing it killed this suite in the decoder.
+         [agent_name] is omitted for the same reason the other fixtures omit
+         it: Masc_test_deps derives the canonical [keeper-<name>-agent]. *)
       [ "name", `String name
-      ; "agent_name", `String ("agent-" ^ name)
       ; "trace_id", `String ("trace-" ^ name)
-      ; ( "sandbox_profile"
-        , `String
-            (Keeper_types_profile_sandbox.sandbox_profile_to_string
-               Keeper_types_profile_sandbox.Local) )
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

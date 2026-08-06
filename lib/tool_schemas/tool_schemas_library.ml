@@ -8,7 +8,6 @@ type operation =
   | List_documents
   | Read_document
   | Add_document
-  | Promote_document
   | Search_documents
 
 type definition =
@@ -21,7 +20,6 @@ let operation_id = function
   | List_documents -> "list"
   | Read_document -> "read"
   | Add_document -> "add"
-  | Promote_document -> "promote"
   | Search_documents -> "search"
 ;;
 
@@ -29,17 +27,12 @@ let definitions : definition list = [
   (* masc_library_list *)
   { operation = List_documents; read_only = true; schema = {
     name = "masc_library_list";
-    description = "List all documents in the agent knowledge library with title, confidence, source, and tags. \
+    description = "List all documents in the agent knowledge library with title, source, author, created date, and tags. \
 Use when browsing available knowledge or checking if a topic is already documented. \
 Pair with masc_library_read to fetch a specific document or masc_library_search to query by content.";
     input_schema = `Assoc [
       ("type", `String "object");
-      ("properties", `Assoc [
-        ("include_candidates", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include candidate documents awaiting verification");
-        ]);
-      ]);
+      ("properties", `Assoc []);
     ];
   } };
 
@@ -64,9 +57,8 @@ After masc_library_list or masc_library_search to find the topic name.";
   (* masc_library_add *)
   { operation = Add_document; read_only = false; schema = {
     name = "masc_library_add";
-    description = "Add a new document to the agent knowledge library (confidence < 0.5 goes to candidates/ for review). \
-Use when recording a new finding, experiment result, or pattern that other agents should know about. \
-Follow up with masc_library_promote to move candidates to the main library after verification.";
+    description = "Add a new document to the agent knowledge library. \
+Use when recording a new finding, experiment result, or pattern that other agents should know about.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -82,10 +74,6 @@ Follow up with masc_library_promote to move candidates to the main library after
           ("enum",
            `List (List.map (fun s -> `String s) valid_source_strings));
         ]);
-        ("confidence", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Confidence score 0.0-1.0");
-        ]);
         ("tags", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -96,29 +84,7 @@ Follow up with masc_library_promote to move candidates to the main library after
           ("description", `String "Document body content (markdown)");
         ]);
       ]);
-      ("required", `List [`String "title"; `String "source"; `String "confidence"; `String "content"]);
-    ];
-  } };
-
-  (* masc_library_promote *)
-  { operation = Promote_document; read_only = false; schema = {
-    name = "masc_library_promote";
-    description = "Promote a candidate document to the main library after verification (new confidence must be >= 0.5). \
-Use when a candidate document has been reviewed and confirmed as accurate. \
-After masc_library_add placed the document in candidates/.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("topic", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Topic name to promote");
-        ]);
-        ("confidence", `Assoc [
-          ("type", `String "number");
-          ("description", `String "New confidence score (must be >= 0.5)");
-        ]);
-      ]);
-      ("required", `List [`String "topic"; `String "confidence"]);
+      ("required", `List [`String "title"; `String "source"; `String "content"]);
     ];
   } };
 

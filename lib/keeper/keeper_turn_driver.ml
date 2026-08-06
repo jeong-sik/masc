@@ -19,15 +19,6 @@ include Keeper_turn_driver_helpers
 include Keeper_turn_driver_provider_attempt
 include Keeper_turn_driver_backpressure
 
-let release_client_capacity_quietly =
-  Keeper_turn_driver_admission.release_client_capacity_quietly
-
-let provider_config_identity_key =
-  Keeper_turn_driver_admission.provider_config_identity_key
-
-let runtime_candidates_of_providers =
-  Keeper_turn_driver_admission.runtime_candidates_of_providers
-
 let positive_modality_counts counts =
   counts
   |> List.filter (fun (_, n) -> n > 0)

@@ -10,6 +10,7 @@
 
 module Demotion = Masc.Keeper_model_input_demotion
 module Types = Agent_sdk.Types
+module Window = Runtime_model_input_tail_window
 
 (* The production encoder, not a test-local one: the bound is only meaningful
    against the encoder the window will use, and a simplified stand-in would
@@ -45,24 +46,14 @@ let assistant text : Types.message =
   }
 ;;
 
-(* One atom is an assistant turn plus the tool messages answering it, so a
-   history of [n] atoms needs [n] assistant messages to age the earliest ones
-   past [retain_atoms]. *)
 let history_with_tool_bodies bodies =
-  let aged =
-    List.concat
-      (List.mapi
-         (fun i body ->
-            [ assistant (Printf.sprintf "call %d" i)
-            ; tool_message ~id:(Printf.sprintf "call-%d" i) body
-            ])
-         bodies)
-  in
-  let recent =
-    List.init (Demotion.retain_atoms + 1) (fun i ->
-      assistant (Printf.sprintf "recent %d" i))
-  in
-  aged @ recent
+  List.concat
+    (List.mapi
+       (fun i body ->
+          [ assistant (Printf.sprintf "call %d" i)
+          ; tool_message ~id:(Printf.sprintf "call-%d" i) body
+          ])
+       bodies)
 ;;
 
 let content_of (m : Types.message) =
@@ -86,7 +77,7 @@ let markers messages = List.concat_map content_of messages
 let bound_holds_for body_label body =
   let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
   let messages = history_with_tool_bodies [ body ] in
-  let planned = Demotion.plan ~measure_message_bytes messages in
+  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
   match planned.Demotion.pending with
   | [] ->
     (* Not demoted: the only admissible reason is that the placeholder did not
@@ -131,7 +122,7 @@ let bound_holds_for body_label body =
 let demotion_actually_happens () =
   let body = String.make 4000 'a' in
   let messages = history_with_tool_bodies [ body ] in
-  let planned = Demotion.plan ~measure_message_bytes messages in
+  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
   Alcotest.(check int)
     "a 4KB ASCII tool body is demoted"
     1
@@ -173,14 +164,8 @@ let bound_is_sound () =
 let structured_results_are_not_demoted () =
   let body = String.make 4000 'a' in
   let blocks = Some [ Types.Text "structured" ] in
-  let messages =
-    List.concat
-      [ [ assistant "call"; tool_message ~content_blocks:blocks ~id:"c0" body ]
-      ; List.init (Demotion.retain_atoms + 1) (fun i ->
-          assistant (Printf.sprintf "recent %d" i))
-      ]
-  in
-  let planned = Demotion.plan ~measure_message_bytes messages in
+  let messages = [ assistant "call"; tool_message ~content_blocks:blocks ~id:"c0" body ] in
+  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
   Alcotest.(check int)
     "structured tool result yields no pending demotion"
     0
@@ -207,7 +192,7 @@ let invalid_markers_are_not_demoted () =
    | Tool_output.Not_marker | Tool_output.Decoded _ ->
      Alcotest.fail "fixture must decode as Invalid_marker");
   let messages = history_with_tool_bodies [ corrupt ] in
-  let planned = Demotion.plan ~measure_message_bytes messages in
+  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
   Alcotest.(check int)
     "corrupt marker yields no pending demotion"
     0
@@ -223,43 +208,35 @@ let stored_results_are_not_demoted_again () =
       (Tool_blob_store.put store ~bytes:(String.make 4000 'a') ~mime:"text/plain")
   in
   let messages = history_with_tool_bodies [ marker ] in
-  let planned = Demotion.plan ~measure_message_bytes messages in
+  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
   Alcotest.(check int)
     "an existing marker is not demoted again"
     0
     (List.length planned.Demotion.pending)
 ;;
 
-(* --- 5. Recent atoms keep their bodies --------------------------------- *)
+(* --- 5. Atoms retained by the raw cut keep their bodies ---------------- *)
 
-let recent_atoms_are_verbatim () =
-  let body = String.make 4000 'a' in
-  let messages =
-    List.concat
-      (List.init (Demotion.retain_atoms - 1) (fun i ->
-         [ assistant (Printf.sprintf "call %d" i)
-         ; tool_message ~id:(Printf.sprintf "c%d" i) body
-         ]))
-  in
-  let planned = Demotion.plan ~measure_message_bytes messages in
+let raw_cut_retained_atoms_are_verbatim () =
+  let old_body = String.make 4000 'a' in
+  let retained_body = String.make 4000 'b' in
+  let messages = history_with_tool_bodies [ old_body; retained_body ] in
+  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
   Alcotest.(check int)
-    "a history inside the retain window demotes nothing"
-    0
+    "only the atom below the raw cut is demoted"
+    1
     (List.length planned.Demotion.pending);
   Alcotest.(check bool)
-    "and the list is returned unchanged"
+    "the raw-cut-retained body stays verbatim"
     true
-    (planned.Demotion.messages == messages)
+    (List.exists
+       (fun content -> String.equal content retained_body)
+       (markers planned.Demotion.messages))
 ;;
 
-(* --- 6. The demotion boundary does not move the transmitted head ------- *)
+(* --- 6. The demotion boundary moves only with the raw cut -------------- *)
 
-(* RFC-0363 §3.4: the cut moves at the head of the transmitted list and the
-   demotion boundary at its tail, so growing the history by one atom must not
-   rewrite an older message that the cut still keeps. The first draft
-   quantized the boundary on atom_count, which flipped the oldest 60 atoms to
-   markers with no window jump — a full prompt-cache miss. *)
-let boundary_moves_at_the_tail () =
+let boundary_moves_only_with_the_raw_cut () =
   let body = String.make 4000 'a' in
   let build atoms =
     List.concat
@@ -268,20 +245,95 @@ let boundary_moves_at_the_tail () =
          ; tool_message ~id:(Printf.sprintf "c%d" i) body
          ]))
   in
-  let head_of atoms =
-    let planned = Demotion.plan ~measure_message_bytes (build atoms) in
-    (* The oldest tool body, which no growth in the tail should disturb. *)
-    List.nth_opt (markers planned.Demotion.messages) 0
+  let bytes messages =
+    List.fold_left (fun total message -> total + measure_message_bytes message) 0 messages
   in
-  let base = Demotion.retain_atoms + 10 in
-  let first = head_of base in
+  (* Sixty atoms plus slack for the fixed preamble fit; a sixty-first 4KB
+     result does not. The authoritative cut must therefore stay at 60 while
+     the raw suffix grows from 10 through 60 atoms, then jump to 120. *)
+  let capacity_bytes = bytes (build Window.atoms_per_window) + 1024 in
+  let projected atoms =
+    let messages = build atoms in
+    match
+      Window.project_with_drop
+        ~measure_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes:0
+        messages
+    with
+    | Error error ->
+      Alcotest.fail (Window.budget_error_to_string error)
+    | Ok raw ->
+      let planned =
+        Demotion.plan
+          ~measure_message_bytes
+          ~demote_before:raw.dropped_atoms
+          messages
+      in
+      raw.dropped_atoms, List.length planned.Demotion.pending
+  in
+  let first_cut = Window.atoms_per_window in
   List.iter
-    (fun step ->
-       Alcotest.(check (option string))
-         (Printf.sprintf "oldest body is stable at +%d atoms" step)
-         first
-         (head_of (base + step)))
-    [ 1; 2; 3; 17; 59; 60; 61 ]
+    (fun atoms ->
+       let dropped, demoted = projected atoms in
+       Alcotest.(check int)
+         (Printf.sprintf "raw cut stays fixed at %d atoms" atoms)
+         first_cut
+         dropped;
+       Alcotest.(check int)
+         (Printf.sprintf "demotion stays anchored at %d atoms" atoms)
+         first_cut
+         demoted)
+    [ first_cut + 10; first_cut + 11; first_cut + 27; first_cut * 2 ];
+  let dropped, demoted = projected ((first_cut * 2) + 1) in
+  Alcotest.(check int) "raw cut advances by one window" (first_cut * 2) dropped;
+  Alcotest.(check int)
+    "demotion advances only with that raw cut"
+    (first_cut * 2)
+    demoted
+;;
+
+(* The production pipeline measures the raw history, rewrites only atoms below
+   that cut, then measures the planned list. This fixture makes every atom
+   eligible so the per-projection identity cache must reuse every candidate
+   measurement without retaining independently allocated equal messages. *)
+let projection_reuses_candidate_measurements () =
+  let bodies = List.init 20 (fun _ -> String.make 4000 'a') in
+  let messages = history_with_tool_bodies bodies in
+  let raw_measurements = ref 0 in
+  let measured message =
+    incr raw_measurements;
+    measure_message_bytes message
+  in
+  let measure_message_bytes =
+    Masc.Keeper_turn_driver_try_provider.For_testing
+    .memoize_message_measurement measured
+  in
+  let planned =
+    Demotion.plan ~measure_message_bytes ~demote_before:max_int messages
+  in
+  Alcotest.(check int)
+    "fixture creates one candidate per aged tool result"
+    20
+    (List.length planned.Demotion.pending);
+  (match
+     Window.project
+       ~measure_message_bytes
+       ~capacity_bytes:max_int
+       ~reserved_bytes:0
+       planned.Demotion.messages
+   with
+  | Error error ->
+     Alcotest.fail (Window.budget_error_to_string error)
+   | Ok _ -> ());
+  let expected_unique_measurements =
+    List.length messages + List.length planned.Demotion.pending + 1
+    (* The window's synthetic preamble. *)
+  in
+  Alcotest.(check int)
+    "each original, candidate, and preamble identity is encoded once"
+    expected_unique_measurements
+    !raw_measurements
 ;;
 
 let () =
@@ -308,15 +360,19 @@ let () =
             `Quick
             stored_results_are_not_demoted_again
         ; Alcotest.test_case
-            "recent atoms keep their bodies"
+            "raw-cut-retained atoms keep their bodies"
             `Quick
-            recent_atoms_are_verbatim
+            raw_cut_retained_atoms_are_verbatim
         ] )
     ; ( "stability"
       , [ Alcotest.test_case
-            "demotion boundary moves at the tail"
+            "demotion boundary moves only with the raw cut"
             `Quick
-            boundary_moves_at_the_tail
-        ] )
+            boundary_moves_only_with_the_raw_cut
+        ; Alcotest.test_case
+            "projection reuses candidate measurements"
+            `Quick
+            projection_reuses_candidate_measurements
+         ] )
     ]
 ;;

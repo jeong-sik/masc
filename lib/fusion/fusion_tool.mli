@@ -43,6 +43,7 @@ module For_test : sig
     now_unix:float ->
     policy:Fusion_policy.t ->
     ?continuation_channel:Keeper_continuation_channel.t ->
+    ?registry:Fusion_run_registry.t ->
     args:Yojson.Safe.t ->
     unit ->
     string

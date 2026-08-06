@@ -142,13 +142,6 @@ let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
 let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
   Printf.sprintf "%s:%s" (display_provider_name_of_config cfg) cfg.model_id
 
-let strip_latest_suffix s =
-  let trimmed = String.trim s in
-  if String.length trimmed > 7
-     && String.sub trimmed (String.length trimmed - 7) 7 = ":latest"
-  then String.sub trimmed 0 (String.length trimmed - 7)
-  else trimmed
-
 (* ================================================================ *)
 (* Observation building                                              *)
 (* ================================================================ *)

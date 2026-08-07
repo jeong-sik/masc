@@ -547,7 +547,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # merged tree after main's batch-1..3 landed, not computed from the batch
 # size -- the merge also dropped should_use_dict, which lost its last
 # caller when batch 1 removed the dictionary helpers around it.
-DEAD_EXPORT_BASELINE = 566
+# 573 -> 564: this PR narrows keeper_board_attention_candidate by 9. Measured on
+# the merged tree with --exports every time main moved while this branch was
+# open (585 -> 583 -> 575 -> 573, as #27461 and #27460 landed). The 566 this
+# branch carried was correct against main at 575 and stale one merge later.
+DEAD_EXPORT_BASELINE = 564
 
 
 def run_ratchet(count: int) -> int:

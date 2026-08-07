@@ -39,8 +39,6 @@ let operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref =
   ref (fun (_json : Yojson.Safe.t) -> ())
 ;;
 
-let _operator_digest_broadcast_ref = operator_digest_broadcast_ref
-
 let operator_snapshot_cache =
   let initializing_json () =
     `Assoc
@@ -276,8 +274,6 @@ let operator_digest_cache =
         ; "generated_at", `String (Masc_domain.now_iso ())
         ])
 ;;
-
-let _operator_digest_cache = operator_digest_cache
 
 let operator_refresh_interval_s =
   float_of_env_default

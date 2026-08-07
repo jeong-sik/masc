@@ -7,7 +7,23 @@ open Alcotest
     refs/atomics/caches — actively used at runtime, so the [_xxx]
     convention misled readers.  Shipped without test; pin now. *)
 
-let file = "lib/server/server_dashboard_http_core.ml"
+(* Scan the whole [server_dashboard_http_core*] family, not a single path.
+   The original guard pinned [server_dashboard_http_core.ml] alone. That file
+   was later split into [_cache.ml] / [_operator.ml] / ... and the underscore
+   aliases reappeared in the split files, where this test could not see them —
+   it stayed green with 5 of the 7 forbidden names alive. Globbing the prefix
+   keeps the guard honest across the next split too. *)
+let dir = "lib/server"
+
+let files =
+  Sys.readdir dir
+  |> Array.to_list
+  |> List.filter (fun name ->
+       String.starts_with ~prefix:"server_dashboard_http_core" name
+       && Filename.check_suffix name ".ml")
+  |> List.sort String.compare
+  |> List.map (Filename.concat dir)
+;;
 
 let renamed_identifiers =
   [ "_shell_warmed", "shell_warmed"
@@ -21,18 +37,30 @@ let renamed_identifiers =
 ;;
 
 let test_old_underscore_names_gone () =
+  check bool "the module family must not be empty" true (files <> []);
   List.iter
     (fun (old_name, _) ->
-      let n = Ast_grep.count_value_bindings ~module_path:file ~name:old_name in
-      let msg = Printf.sprintf "old underscore name %s should be removed" old_name in
-      check int msg 0 n)
+      List.iter
+        (fun file ->
+          let n = Ast_grep.count_value_bindings ~module_path:file ~name:old_name in
+          let msg =
+            Printf.sprintf "old underscore name %s should be removed from %s"
+              old_name file
+          in
+          check int msg 0 n)
+        files)
     renamed_identifiers
 ;;
 
 let test_new_names_present () =
   List.iter
     (fun (_, new_name) ->
-      let n = Ast_grep.count_value_bindings ~module_path:file ~name:new_name in
+      let n =
+        List.fold_left
+          (fun acc file ->
+            acc + Ast_grep.count_value_bindings ~module_path:file ~name:new_name)
+          0 files
+      in
       let msg = Printf.sprintf "renamed binding %s must exist" new_name in
       if n < 1 then failf "%s — count=%d" msg n)
     renamed_identifiers

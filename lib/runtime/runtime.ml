@@ -1319,18 +1319,6 @@ let top_p_of_runtime_id (id : string) : float option =
   | None -> None
 ;;
 
-let top_k_of_runtime_id (id : string) : int option =
-  match get_runtime_by_id id with
-  | Some rt -> rt.provider_config.top_k
-  | None -> None
-;;
-
-let min_p_of_runtime_id (id : string) : float option =
-  match get_runtime_by_id id with
-  | Some rt -> rt.provider_config.min_p
-  | None -> None
-;;
-
 let default_preserve_thinking_for_model (_rt : t) : bool option =
   (* OAS owns provider/model capability truth and can preserve reasoning when
      the provider contract requires it. MASC must not turn "request-side
@@ -1897,8 +1885,3 @@ let default_max_context () : int =
    labels and returned the model-id substring. Under single-binding the model
    name sent to the runtime endpoint is the default runtime's [model.api_name].
    Falls back to ["auto"] before {!init_default} runs. *)
-let default_model_api_name () : string =
-  match get_default_runtime () with
-  | Some rt -> rt.model.api_name
-  | None -> "auto"
-;;

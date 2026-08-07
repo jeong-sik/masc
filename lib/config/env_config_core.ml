@@ -238,9 +238,6 @@ let existing_file path =
 let home_dir_opt () =
   raw_value_opt "HOME" |> trim_opt
 
-let default_http_port = Masc_network_defaults.masc_http_default_port_s
-let default_http_port_int = Masc_network_defaults.masc_http_default_port
-
 (** SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352).
     Defined here so in-process readers and out-of-process callers
     (snapshot, provider_adapter presence check, bootstrap putenv)
@@ -497,9 +494,6 @@ let config_dir_env_key = "MASC_CONFIG_DIR"
 let data_dir_env_key = "MASC_DATA_DIR"
 
 (** Data directory override. *)
-let data_dir_opt () =
-  raw_value_opt data_dir_env_key |> trim_opt
-
 (** {1 Auth} *)
 
 (** SSOT for auth env-var names (issue 8352). *)
@@ -534,9 +528,6 @@ let telemetry_enabled_env_key = "MASC_TELEMETRY_ENABLED"
    malformed handler that consumes it). *)
 
 (** Log level string (e.g. "debug", "info", "warn", "error"). *)
-let log_level_opt () =
-  raw_value_opt log_level_env_key |> trim_opt
-
 (** Whether telemetry tracking is enabled. Default: true. *)
 let telemetry_enabled () =
   get_bool ~default:true telemetry_enabled_env_key
@@ -544,8 +535,6 @@ let telemetry_enabled () =
 (** Whether malformed env parses are escalated to a hard [Config_error]
     (fail-fast boot) instead of a warn + default. Controlled by
     [MASC_PARSE_WARN]. Default: false (warn + use default). *)
-let parse_warn_enabled () = parse_strict_mode ()
-
 (** {1 Build Identity} *)
 
 (** Git commit hash override for build identity. *)

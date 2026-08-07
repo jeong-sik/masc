@@ -15,7 +15,6 @@ include Keeper_unified_metrics_json_support
 let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
     ?(is_autonomous_turn = true)
-    ?(update_proactive_rt = true)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let tool_names = Keeper_agent_result.tool_names result in
@@ -67,7 +66,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   in
   let rt = meta.runtime in
   (* #10474: proactive outcome counter for successful cycles. *)
-  if update_proactive_rt && is_scheduled_autonomous_cycle then begin
+  if is_scheduled_autonomous_cycle then begin
     let outcome =
       if has_substantive_tools then "tool_called"
       else if is_noop_cycle ~has_text ~tools_used:tool_names
@@ -106,35 +105,31 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       proactive_rt = {
         count_total =
           rt.proactive_rt.count_total
-          + (if update_proactive_rt && is_scheduled_autonomous_cycle then 1 else 0);
+          + (if is_scheduled_autonomous_cycle then 1 else 0);
         last_ts =
-          (if update_proactive_rt
-              && (is_scheduled_autonomous_cycle
-                  || ((is_board_reactive || is_mention_reactive)
-                      && has_meaningful_work))
+          (if is_scheduled_autonomous_cycle
+              || ((is_board_reactive || is_mention_reactive)
+                  && has_meaningful_work)
            then now_ts
            else rt.proactive_rt.last_ts);
         visible_count_total =
           rt.proactive_rt.visible_count_total
-          + (if update_proactive_rt
-               && is_scheduled_autonomous_cycle
+          + (if is_scheduled_autonomous_cycle
                && (has_text || visible_tool_signal_present)
              then 1
              else 0);
         last_visible_ts =
-          (if update_proactive_rt
-              && is_scheduled_autonomous_cycle
+          (if is_scheduled_autonomous_cycle
               && (has_text || visible_tool_signal_present)
            then now_ts
            else rt.proactive_rt.last_visible_ts);
         last_outcome =
-          (if update_proactive_rt && is_scheduled_autonomous_cycle then
+          (if is_scheduled_autonomous_cycle then
              scheduled_autonomous_outcome_of_result ~has_text
                ~has_tool_calls:visible_tool_signal_present
            else rt.proactive_rt.last_outcome);
         last_reason =
-          (if not update_proactive_rt then rt.proactive_rt.last_reason
-           else if is_scheduled_autonomous_cycle then
+          (if is_scheduled_autonomous_cycle then
              (if has_substantive_tools then
                 Printf.sprintf "unified:tools=[%s]"
                   (String.concat "," tool_names)
@@ -160,7 +155,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
              | Proactive_tool_use
              | Proactive_mixed_response -> rt.proactive_rt.last_reason);
         last_preview =
-          (if not update_proactive_rt || not is_scheduled_autonomous_cycle
+          (if not is_scheduled_autonomous_cycle
            then rt.proactive_rt.last_preview
            else
              select_proactive_preview
@@ -173,7 +168,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
                ~validated_evidence_preview:
                  (Option.map validated_evidence_preview validated_evidence));
         consecutive_noop_count =
-          (if update_proactive_rt && is_scheduled_autonomous_cycle then
+          (if is_scheduled_autonomous_cycle then
              if is_noop_cycle ~has_text ~tools_used:tool_names
              then rt.proactive_rt.consecutive_noop_count + 1
              else 0

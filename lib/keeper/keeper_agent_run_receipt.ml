@@ -10,7 +10,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
 
-let degraded_retry_runtime_of_wire ?(log_invalid = true) ~keeper_name raw =
+let degraded_retry_runtime_of_wire ~keeper_name raw =
   let trimmed = String.trim raw in
   if String.equal trimmed "" then None
   else
@@ -35,8 +35,7 @@ let degraded_retry_runtime_of_wire ?(log_invalid = true) ~keeper_name raw =
     match first_valid candidates with
     | Some _ as parsed -> parsed
     | None ->
-      if log_invalid then
-        Log.Keeper.warn ~keeper_name:keeper_name
+      Log.Keeper.warn ~keeper_name:keeper_name
           "execution_receipt degraded_retry_runtime %S is not a \
            qualified or re-qualifiable runtime name; dropping receipt field"
           raw;

@@ -17,7 +17,6 @@ val bind_session :
   string
 
 val end_session :
-  ?stop_heartbeats:bool ->
   Workspace_utils_backend_setup.config ->
   agent_name:string ->
   string

@@ -163,15 +163,11 @@ val with_projection_diagnostics :
     diagnostic block prepended.  The convenience wrapper most
     dashboard handlers use. *)
 
-val initialized_json_opt :
-  ?allow_initializing:bool -> Yojson.Safe.t -> Yojson.Safe.t option
-(** [initialized_json_opt ?allow_initializing json] returns
-    [Some json] when [json] is an [`Assoc] with no
-    [status: "initializing"] field (or when
-    [allow_initializing = true], even with that field).  Returns
-    [None] for non-objects or initializing payloads.
+val initialized_json_opt : Yojson.Safe.t -> Yojson.Safe.t option
+(** [initialized_json_opt json] returns [Some json] when [json] is an
+    [`Assoc] with no [status: "initializing"] field.  Returns [None]
+    for non-objects and for initializing payloads.
 
-    Used to defer rendering an "initializing" envelope while the
-    cache is still warming up.  [allow_initializing] defaults to
-    [false] — the safe choice for callers that want to surface
-    "no data yet" as a 404 rather than an empty card. *)
+    Used to defer rendering an "initializing" envelope while the cache
+    is still warming up: callers surface "no data yet" as a 404 rather
+    than an empty card. *)

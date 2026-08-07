@@ -46,9 +46,9 @@ let boolean_prop ?description name =
   name, `Assoc fields
 ;;
 
-let object_prop ?description ?(additional_properties = true) name =
+let object_prop ?description name =
   let fields =
-    [ "type", `String "object"; "additionalProperties", `Bool additional_properties ]
+    [ "type", `String "object"; "additionalProperties", `Bool true ]
     @
     match description with
     | None -> []

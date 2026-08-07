@@ -142,10 +142,10 @@ let with_projection_diagnostics ~surface ~started_at ~extra json =
     (projection_diagnostics_json ~surface ~started_at ~extra json)
 ;;
 
-let initialized_json_opt ?(allow_initializing = false) = function
+let initialized_json_opt = function
   | `Assoc fields as json ->
     (match List.assoc_opt "status" fields with
-     | Some (`String "initializing") when not allow_initializing -> None
+     | Some (`String "initializing") -> None
      | _ -> Some json)
   | _ -> None
 ;;

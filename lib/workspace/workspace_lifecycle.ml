@@ -204,7 +204,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
   end
 
 (** End agent session *)
-let end_session ?(stop_heartbeats = true) config ~agent_name =
+let end_session config ~agent_name =
   ensure_initialized config;
 
   (* Support both exact nickname match and agent_type prefix match *)
@@ -212,7 +212,7 @@ let end_session ?(stop_heartbeats = true) config ~agent_name =
 
   (* Stop any heartbeats owned by this agent *)
   let _stopped =
-    if stop_heartbeats then Heartbeat.stop_by_agent ~agent_name:actual_name else 0
+    Heartbeat.stop_by_agent ~agent_name:actual_name
   in
 
   let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in

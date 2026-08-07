@@ -2370,9 +2370,6 @@ let handle_keeper_get_subroutes state req request reqd =
                  ("trace_id", `String trace_id);
                  ("generation", `Int m.runtime.nonce);
                  ("total_entries", `Int total);
-                 ("total_entries_scope", `String "tail");
-                 ("total_entries_exact", `Bool false);
-                 ("tail_scan_lines", `Int tail_scan_lines);
                  ("showing", `Int (List.length recent));
                  ("entries", `List (List.map
                    (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) recent));

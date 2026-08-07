@@ -115,8 +115,8 @@ preferred over both Base and raw Stdlib when they already exist.
 | Counter | What it measures |
 |---|---|
 | `mli_open_base` | `.mli` files in `lib/` containing the `open Base` directive (anchored: `^[[:space:]]*open[[:space:]]+Base([^[:alnum:]_]|$)`, excludes comments/docstrings) |
-| `ml_base_stdlib_shadow` | `.ml` files in `lib/` that contain both the `open Base` directive and a Stdlib-shadow block (`^[[:space:]]*module[[:space:]]+List[[:space:]]*=[[:space:]]*Stdlib\.List([^[:alnum:]_]|$)`) |
-| `bin_ml_base_stdlib_shadow` | `.ml` files in `bin/` that contain both the `open Base` directive and the same Stdlib-shadow block |
+| `ml_base_stdlib_shadow` | `.ml` files in `lib/` containing a Stdlib-shadow block (`^[[:space:]]*module[[:space:]]+List[[:space:]]*=[[:space:]]*Stdlib\.List([^[:alnum:]_]|$)`), whether or not the file still opens Base |
+| `bin_ml_base_stdlib_shadow` | `.ml` files in `bin/` containing the same Stdlib-shadow block, on the same terms |
 
 These counters are recorded in `.ci/health-baseline.json` and reported
 by `scripts/health_snapshot.sh`.  A PR that increases any counter
@@ -126,6 +126,11 @@ CI also includes them in the `health_snapshot.sh --fail-on-lib-regression`
 ratchet.  When a baseline ref predates these counters, the audit treats
 the first measured value as the bootstrap baseline rather than a
 regression.
+
+The two shadow counters used to require the `open Base` directive in the
+same file. Once the opens were gone the counters read zero while 82 files
+kept the shadow block, so the audit passed over exactly the residue it
+exists to catch. They now match the block on its own.
 
 As of the 2026-05-05 ratchet, all three tracked counters are zero in
 current `main`; `.ci/health-baseline.json` records zero so any

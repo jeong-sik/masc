@@ -62,10 +62,6 @@ type outcome =
   | Move_to of t
   | Already of t
 
-val outcome_phase : outcome -> t
-(** The phase the goal is in once the outcome is applied — the destination for
-    [Move_to], the unchanged current phase for [Already]. *)
-
 val decide_transition :
   phase:t ->
   action:action ->

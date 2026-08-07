@@ -99,9 +99,6 @@ type outcome =
   | Move_to of t
   | Already of t
 
-let outcome_phase = function
-  | Move_to phase | Already phase -> phase
-;;
 
 (* Every (phase, action) pair is stated. The catch-all this replaces absorbed
    22 of the 35 pairs, so adding a phase or an action compiled cleanly and the

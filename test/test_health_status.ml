@@ -38,6 +38,22 @@ let test_max_string_canonicalizes_through_ssot () =
   check string "tie keeps left canonical" "blocked" (Health_status.max_string "blocked" "error");
   check string "unknown beats ok" "unknown" (Health_status.max_string "ok" "new_status")
 
+
+(* A serialized agent_status is ranked by decoding it. The string ranker this
+   replaced had an arm for "idle" — a spelling agent_status_to_string never
+   emits — while [Inactive] fell through to the catch-all and ranked 0, the
+   same as garbage. *)
+let test_serialized_agent_status_ranks_through_the_wire () =
+  List.iter
+    (fun status ->
+       let raw = Masc_domain.agent_status_to_string status in
+       check int
+         (Printf.sprintf "%s ranks the same through the wire" raw)
+         (Masc_domain.agent_status_rank status)
+         (Dashboard_utils.status_rank raw))
+    Masc_domain.all_agent_statuses;
+  check int "a non-status string ranks 0" 0 (Dashboard_utils.status_rank "idle")
+
 let () =
   run "Health_status"
     [
@@ -50,5 +66,10 @@ let () =
         [
           test_case "dashboard wrappers use SSOT" `Quick test_dashboard_compat_uses_health_status_ssot;
           test_case "legacy synonyms" `Quick test_legacy_dashboard_synonyms_map_to_shared_statuses;
+        ] );
+      ( "agent_status rank",
+        [
+          test_case "serialized status ranks through the wire" `Quick
+            test_serialized_agent_status_ranks_through_the_wire;
         ] );
     ]

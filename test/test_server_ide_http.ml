@@ -645,6 +645,70 @@ let test_post_cursors_honors_canonical_url_scope () =
     | [] -> fail "expected scoped cursor")
 ;;
 
+let test_post_cursors_resolves_partition_from_file_path () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let masc_path, _oas_path = seed_annotation_scope_repos base_path in
+    let token = create_worker_token base_path "alice" in
+    (* POST cursor with a file_path that belongs to the scoped repo: the
+       server must resolve the write partition from the posted file_path
+       (task-1733) and scope it to the repo the file actually belongs to. *)
+    let file_path = Filename.concat masc_path "lib/a.ml" in
+    let body =
+      Yojson.Safe.to_string
+        (`Assoc [ "file_path", `String file_path; "line", `Int 9 ])
+    in
+    let scoped_path =
+      "/api/v1/ide/cursors?canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git"
+    in
+    let post_request =
+      http_request ~meth:`POST ~path:scoped_path ~body ~token:(Some token) ()
+    in
+    let post_response = dispatch router post_request in
+    check_status "POST cursor with matching file_path returns 201" 201 post_response;
+    let get_request = http_request ~meth:`GET ~path:scoped_path () in
+    let get_response = dispatch router get_request in
+    check_status "GET scoped cursors after file_path-resolved POST succeeds" 200 get_response;
+    let json = get_response |> response_body |> Yojson.Safe.from_string in
+    let data = Json.member "data" json in
+    match json_list_member "scoped cursor snapshot" "cursors" data with
+    | cursor :: _ ->
+      check string "scoped cursor file" "lib/a.ml"
+        (json_string_member "cursor" "file_path" cursor)
+    | [] -> fail "expected file_path-resolved cursor")
+;;
+
+let test_post_cursors_rejects_file_path_scope_mismatch () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let _masc_path, oas_path = seed_annotation_scope_repos base_path in
+    let token = create_worker_token base_path "alice" in
+    (* POST cursor with a file_path that belongs to a different repo than the
+       requested canonical_url scope: the server must reject it (task-1733)
+       instead of silently writing to the wrong partition. *)
+    let file_path = Filename.concat oas_path "lib/a.ml" in
+    let body =
+      Yojson.Safe.to_string
+        (`Assoc [ "file_path", `String file_path; "line", `Int 9 ])
+    in
+    let scoped_path =
+      "/api/v1/ide/cursors?canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git"
+    in
+    let post_request =
+      http_request ~meth:`POST ~path:scoped_path ~body ~token:(Some token) ()
+    in
+    let post_response = dispatch router post_request in
+    check_status "POST cursor with mismatched file_path returns 400" 400 post_response;
+    check
+      string
+      "file_path scope mismatch error"
+      "file_path does not belong to requested canonical_url"
+      (error_message_of_response post_response);
+    check
+      string
+      "file_path scope mismatch code"
+      "canonical_url_mismatch"
+      (error_code_of_response post_response))
+;;
+
 let test_post_annotations_accepts_matching_repo_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let masc_path, _oas_path = seed_annotation_scope_repos base_path in

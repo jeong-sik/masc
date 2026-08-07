@@ -114,54 +114,6 @@ let is_internal_action action =
   Operator_digest_types.is_workspace_target_type
     (string_field "target_type" action)
 
-let incident_action_types kind =
-  match kind with
-  | "spawn_failure_present" -> [ "task_inject" ]
-  | "detached_actor_present"
-  | "empty_note_turn_present"
-  | "low_confidence_routing"
-  | "routing_escalation_present" -> [ "broadcast" ]
-  | "planned_worker_without_turn" -> [ "task_inject"; "broadcast" ]
-  | "local64_role_gap" -> [ "task_inject" ]
-  | "stalled_session" -> [ "namespace_pause" ]
-  | "command_issue_pressure"
-  | "command_routing_confidence"
-  | "command_quality_per_token"
-  | "command_verification_gate_failures"
-  | "command_rework_rate"
-  | "command_artifact_scope_drift"
-  | "command_cache_contention"
-  | "command_speculative_posture"
-  | "intent_blocked"
-  | "intent_handoff_ready" -> [ "broadcast" ]
-  | _ -> []
-
-let action_matches_incident incident action =
-  let target_type = string_field "target_type" incident in
-  let target_id = String_util.trim_to_option (string_field "target_id" incident) in
-  let action_target_type = string_field "target_type" action in
-  let action_target_id = String_util.trim_to_option (string_field "target_id" action) in
-  let same_target =
-    String.equal action_target_type target_type
-    &&
-    match target_id, action_target_id with
-    | Some left, Some right -> String.equal left right
-    | None, None -> true
-    | _ -> false
-  in
-  if not same_target then false
-  else
-    let incident_summary = normalized_text_key (string_field "summary" incident) in
-    let action_reason = normalized_text_key (string_field "reason" action) in
-    let reason_matches =
-      incident_summary <> "" && action_reason <> ""
-      && String.equal incident_summary action_reason
-    in
-    if reason_matches then true
-    else
-      let action_type = string_field "action_type" action in
-      List.mem action_type (incident_action_types (string_field "kind" incident))
-
 let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t list) =
   let all_entries = Keeper_registry.all ~base_path:config.base_path () in
   let registry_lookup name =
@@ -240,12 +192,20 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
          else Float.compare right.last_seen_ts left.last_seen_ts)
   |> List.map (fun (row : keeper_context) -> row.json)
 
+(* An attention row and an action row are separate signals. The operator
+   digest gives no link between them: [recommended_action] is free-form JSON
+   an operator judgment wrote, and an attention item is a read-model
+   observation, so nothing in either says which one answers which. This used
+   to guess -- normalized-prose equality of the incident summary against the
+   action reason, else a hand-written kind -> action_type table -- and stamp
+   the single workspace recommendation onto every incident whose kind the
+   table happened to list. Both rows are still emitted; neither claims the
+   other. *)
 let build_internal_signals incidents actions =
   let internal_incidents =
     incidents
     |> List.filter is_internal_attention
     |> List.map (fun incident ->
-           let action = List.find_opt (action_matches_incident incident) actions in
            {
              pressure_rank = Operator_digest_types.severity_rank_of_string (string_field ~default:"warn" "severity" incident);
              last_seen_ts = 0.0;
@@ -259,22 +219,13 @@ let build_internal_signals incidents actions =
                    ("target_type", member_assoc "target_type" incident);
                    ("target_id", member_assoc "target_id" incident);
                    ("attention", incident);
-                   ("action", Json_util.option_to_yojson (fun value -> value) action);
+                   ("action", `Null);
                  ];
            })
-  in
-  let matched_internal_action_keys =
-    internal_incidents
-    |> List.filter_map (fun row ->
-           match member_assoc "action" row.json with
-           | `Assoc _ as action -> Some (action_identity action)
-           | _ -> None)
   in
   let internal_actions =
     actions
     |> List.filter is_internal_action
-    |> List.filter (fun action ->
-           not (List.mem (action_identity action) matched_internal_action_keys))
     |> List.map (fun action ->
            {
              pressure_rank = Operator_digest_types.severity_rank_of_string (string_field ~default:"warn" "severity" action);

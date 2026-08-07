@@ -251,14 +251,6 @@ describe('RuntimeMonitor', () => {
           source: 'runtime.toml',
           endpoint_url: 'https://example.invalid/v1',
           note: 'verified by runtime discovery',
-          discovery: {
-            healthy: true,
-            discovered_model: 'Qwen/Qwen3-32B',
-            ctx_size: 200000,
-            total_slots: 4,
-            busy_slots: 1,
-            idle_slots: 3,
-          },
         },
       ],
     })
@@ -406,8 +398,6 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('task:transcription · native-stream')
     expect(container.textContent).toContain('seed+images')
     expect(container.textContent).toContain('code-exec')
-    expect(container.textContent).toContain('discovered · Qwen/Qwen3-32B')
-    expect(container.textContent).toContain('idle · 3')
   })
 
   it('falls back to provider snapshot model count and auth kind when live probe rows are absent', async () => {

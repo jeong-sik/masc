@@ -116,11 +116,9 @@ module For_testing = struct
   (* Enqueue mode without the OS thread, so tests drain deterministically. *)
   let set_enqueue_active v = Atomic.set enqueue_active v
 
-  let queued_count () =
-    Mutex.lock mu;
-    let n = Queue.length queue in
-    Mutex.unlock mu;
-    n
+  (* The gauge in [Otel_runtime_observables] reads [queue_depth]; tests must
+     read that same function, not a second copy of its body. *)
+  let queued_count = queue_depth
 
   let drain_now () =
     Mutex.lock mu;

@@ -34,7 +34,10 @@ let key_to_env =
     (* #27416: the provider-call deadline lived only in restart-command env,
        and 2 of 3 restarts on 2026-08-07 silently dropped it (a wedge recurred
        in the unprotected window). TOML makes the knob survive whoever
-       restarts the server; env remains the CI/operator override. *)
+       restarts the server; env remains the CI/operator override.
+       Effective range at the reader is [30, 3600] seconds — a positive value
+       below 30 passes boot validation and is then silently raised to 30 by
+       the reader's clamp (#27355 contract, unchanged here). *)
     "turn.provider_call_deadline_sec",  "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC";
     "turn.cli_subprocess_idle_sec",     "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC";
     "turn.capacity_limit",              "MASC_KEEPER_TURN_CAPACITY_LIMIT";

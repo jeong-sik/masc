@@ -547,11 +547,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # merged tree after main's batch-1..3 landed, not computed from the batch
 # size -- the merge also dropped should_use_dict, which lost its last
 # caller when batch 1 removed the dictionary helpers around it.
-# 564 -> 563: this PR drops extract_checkin_text and the
-# proactive_has_terminal_korean_ending val. Measured with --exports on the
-# merged tree; main moved 575 -> 573 -> 564 while this branch was open
-# (#27460 and #27456), so every earlier value here was stale by the next merge.
-DEAD_EXPORT_BASELINE = 563
+# 563 -> 561: this PR drops concrete_verification_evidence_refs, which had no
+# caller. Measured with --exports on the merged tree after #27478 landed; the
+# drop is 2, not the 1 this PR removes on its own, because #27478 emptied two
+# modules out of the count. Arithmetic on the previous value would have been
+# wrong here -- this line moved 585 -> 583 -> 575 -> 573 -> 564 -> 563 today.
+DEAD_EXPORT_BASELINE = 561
 
 
 def run_ratchet(count: int) -> int:

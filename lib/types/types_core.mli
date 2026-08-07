@@ -18,6 +18,11 @@ val agent_status_to_string : agent_status -> string
 val string_of_agent_status : agent_status -> string
 val all_agent_statuses : agent_status list
 val valid_agent_status_strings : string list
+(** Presence ordering for operator surfaces: [Busy] 4, [Active] 3,
+    [Listening] 2, [Inactive] 1. Descending-rank comparators sort a working
+    agent above an idle one. *)
+val agent_status_rank : agent_status -> int
+
 val agent_status_of_string_opt : string -> agent_status option
 val agent_status_of_string_r : string -> (agent_status, string) result
 val agent_status_to_yojson : agent_status -> Yojson.Safe.t

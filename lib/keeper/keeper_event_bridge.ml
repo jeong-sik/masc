@@ -419,6 +419,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
 ;;
 
 let relay_max_attempts = 3
+
 type relay_stage =
   | Append
   | Broadcast
@@ -644,10 +645,6 @@ let rec process_pending ?store_ref acc = function
          process_pending ?store_ref ({ pending with attempts = attempt } :: acc) rest))
 ;;
 
-type bridge_pending_relay = pending_relay
-type bridge_relay_stage = relay_stage
-type bridge_relay_result = relay_result
-
 let oas_event_store ~config =
   let retention_days = oas_event_retention_days () in
   Dated_jsonl.create
@@ -655,29 +652,6 @@ let oas_event_store ~config =
     ?retention_days
     ()
 ;;
-
-module For_testing = struct
-  type pending_relay =
-    { json : Yojson.Safe.t
-    ; attempts : int
-    ; appended : bool
-    }
-
-  type relay_stage =
-    | Append
-    | Broadcast
-
-  type relay_result =
-    | Delivered
-    | Retryable_failure of pending_relay * relay_stage * exn
-
-  (* Issue #8676: convert directly between the outer [relay_stage] and the
-     [For_testing.relay_stage] mirror. The previous string-roundtrip carried
-     a permissive [_ -> Broadcast] catch-all that would silently misclassify
-     any future outer constructor as [Broadcast] in test stage assertions
-     (#8605 anti-pattern). Direct match makes adding a constructor a
-     compile error here, forcing the test mirror to stay in sync. *)
-end
 
 let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
   let store = ref (oas_event_store ~config) in

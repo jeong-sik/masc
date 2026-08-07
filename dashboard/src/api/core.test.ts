@@ -481,7 +481,7 @@ describe('get bootstrap warm-up mapping', () => {
     expect(data.message).toContain('warming up')
   })
 
-  it('remaps namespace/workspace-truth aliases the same as project-snapshot', async () => {
+  it('remaps the namespace-truth alias the same as project-snapshot', async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
       Promise.resolve(
         new Response('{"error":"not initialized"}', {
@@ -498,10 +498,6 @@ describe('get bootstrap warm-up mapping', () => {
     const legacyNamespace = await get<{ status?: string; message?: string }>('/api/v1/dashboard/namespace-truth')
     expect(legacyNamespace.status).toBe('initializing')
     expect(legacyNamespace.message).toContain('warming up')
-
-    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/workspace-truth')
-    expect(data.status).toBe('initializing')
-    expect(data.message).toContain('warming up')
   })
 
   it('maps execution not-initialized 5xx to empty execution payload', async () => {

@@ -37,6 +37,7 @@ type librarian_failure_kind =
   | Domain_output_invalid
   | Memory_snapshot_write_failure
   | Runtime_context_unavailable
+  | Lane_cancelled
   | Unhandled_exception
 
 type journal_entry =
@@ -329,6 +330,7 @@ let librarian_failure_kind_to_string = function
   | Domain_output_invalid -> "domain_output_invalid"
   | Memory_snapshot_write_failure -> "memory_snapshot_write_failure"
   | Runtime_context_unavailable -> "runtime_context_unavailable"
+  | Lane_cancelled -> "lane_cancelled"
   | Unhandled_exception -> "unhandled_exception"
 ;;
 
@@ -340,6 +342,7 @@ let librarian_failure_kind_of_string = function
   | "domain_output_invalid" -> Some Domain_output_invalid
   | "memory_snapshot_write_failure" -> Some Memory_snapshot_write_failure
   | "runtime_context_unavailable" -> Some Runtime_context_unavailable
+  | "lane_cancelled" -> Some Lane_cancelled
   | "unhandled_exception" -> Some Unhandled_exception
   | _ -> None
 ;;

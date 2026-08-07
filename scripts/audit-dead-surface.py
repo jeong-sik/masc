@@ -527,9 +527,56 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         help=f"Skip export names shorter than this (default {DEFAULT_MIN_NAME_LEN}).")
     parser.add_argument("--stanzas", action="store_true",
                         help="Report test/stanzas/*.inc files that test/dune never includes.")
+    parser.add_argument("--ratchet", action="store_true",
+                        help="With --exports, fail when the count exceeds DEAD_EXPORT_BASELINE.")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
     parser.add_argument("--self-test", action="store_true", help="Run the regression guard and exit.")
     return parser.parse_args(argv)
+
+
+# The count `--exports` reports, frozen so it can only fall. Not a target of
+# zero: the docstring above lists five categories where unreachable is not
+# removable, so some of this number is load-bearing and the audit cannot tell
+# which. What the ratchet buys is that the number stops growing while nobody is
+# looking.
+#
+# Lower it in the PR that earns the reduction. Raising it needs a reason in the
+# PR body -- a new export with no caller is usually a surface someone meant to
+# wire and did not.
+# 817 -> 800: this PR removes 17 exports nothing referenced. Measured on
+# the merged tree, not assumed -- the ratchet reported the slack and this
+# holds it, which is what its own message asks the earning PR to do.
+DEAD_EXPORT_BASELINE = 800
+
+
+def run_ratchet(count: int) -> int:
+    """Compare the dead-export count against the frozen baseline.
+
+    Below the baseline passes and says by how much, rather than failing until
+    someone edits the number. audit-ci-test-targets.sh carries the note about
+    why the other direction is wrong: failing on your own improvement turned
+    main red three times in an hour while people wired suites.
+    """
+    if count > DEAD_EXPORT_BASELINE:
+        print(
+            f"[dead-surface] FAIL - {count} dead exports, over the "
+            f"{DEAD_EXPORT_BASELINE} baseline by {count - DEAD_EXPORT_BASELINE}.\n"
+            "\n"
+            "An export with no caller anywhere in the tree is usually a surface\n"
+            "someone meant to wire and did not. Remove it, wire it, or raise\n"
+            f"DEAD_EXPORT_BASELINE in {Path(__file__).name} with the reason.",
+            file=sys.stderr,
+        )
+        return 1
+    if count < DEAD_EXPORT_BASELINE:
+        print(
+            f"[dead-surface] OK - {count} dead exports, {DEAD_EXPORT_BASELINE} "
+            f"baseline - lower DEAD_EXPORT_BASELINE to hold the "
+            f"{DEAD_EXPORT_BASELINE - count} you removed"
+        )
+        return 0
+    print(f"[dead-surface] OK - {count} dead exports, at baseline")
+    return 0
 
 
 def main(argv: list[str]) -> int:
@@ -541,6 +588,7 @@ def main(argv: list[str]) -> int:
         return 2
 
     payload: dict[str, object] = {}
+    dead_export_count: int | None = None
     if args.modules:
         dead_modules = find_dead_modules(ROOT)
         payload["dead_modules"] = dead_modules
@@ -550,6 +598,7 @@ def main(argv: list[str]) -> int:
                 print(f"  {entry['loc']:6d} LoC  {entry['module']}  {entry['ml']}")
     if args.exports:
         dead_exports = find_dead_exports(ROOT, args.min_name_len)
+        dead_export_count = len(dead_exports)
         per_module: dict[str, int] = defaultdict(int)
         for entry in dead_exports:
             per_module[entry["module"]] += 1
@@ -578,6 +627,11 @@ def main(argv: list[str]) -> int:
                 print(f"  {orphan}")
     if args.json:
         print(json.dumps(payload, indent=2))
+    if args.ratchet:
+        if dead_export_count is None:
+            print("--ratchet needs --exports", file=sys.stderr)
+            return 2
+        return run_ratchet(dead_export_count)
     return 0
 
 

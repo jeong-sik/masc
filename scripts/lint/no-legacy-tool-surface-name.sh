@@ -54,16 +54,14 @@ SCAN_GLOBS=(
   "lib/keeper/keeper_tool_runtime.mli"
   "lib/keeper/keeper_tool_alias.ml"
   "lib/keeper/keeper_tool_alias.mli"
-  "lib/keeper/keeper_tool_registry.ml"
-  "lib/keeper/keeper_tool_registry.mli"
   "lib/keeper/keeper_tool_policy.ml"
   "lib/keeper/keeper_tool_policy.mli"
   "lib/keeper_tool_call_log_route_evidence.ml"
   "lib/keeper_tool_call_log_route_evidence.mli"
-  "lib/tool_catalog.ml"
-  "lib/tool_catalog.mli"
-  "lib/tool_catalog_surfaces.ml"
-  "lib/tool_catalog_surfaces.mli"
+  "lib/tool/tool_catalog.ml"
+  "lib/tool/tool_catalog.mli"
+  "lib/tool_catalog_surfaces/tool_catalog_surfaces.ml"
+  "lib/tool_catalog_surfaces/tool_catalog_surfaces.mli"
 )
 
 PROMPT_SCAN_FILES=("docs/KEEPER-CAPABILITY-MATRIX.md")

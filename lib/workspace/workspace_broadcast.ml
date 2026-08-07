@@ -6,23 +6,6 @@
 open Masc_domain
 open Workspace_utils
 
-(** RFC-0061: closed variants for broadcast envelope observability.
-    rewrite_reason tracks why the original content was rewritten.
-    msg_type_typed is an internal closed variant; the external [msg_type]
-    field remains [string] for backward compatibility. *)
-type rewrite_reason =
-  | Cache_invalidated of { task_id : string; status : string }
-  | Task_cache_rewrite
-
-type rewrite_event = {
-  reason : rewrite_reason;
-  module_name : string;
-}
-
-type msg_type_typed =
-  | Broadcast
-  | Cache_invalidated of { task_id : string; status : string }
-
 type broadcast_delivery =
   { rendered : string
   ; from_agent : string
@@ -30,10 +13,6 @@ type broadcast_delivery =
   ; mention : string option
   ; msg_type : string
   }
-
-let string_of_msg_type_typed = function
-  | Broadcast -> "broadcast"
-  | Cache_invalidated _ -> "cache_invalidated"
 
 let emit_message_activity config ~from_agent ~content ~mention
     ?session_id ?operation_id ?worker_run_id ?(evidence_refs = []) () =
@@ -97,7 +76,7 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
      terminal in the backlog, replace the original broadcast with a single
      cache_invalidated notice and clear the stale state (issue #13397).
      Only applied to regular "broadcast" messages to avoid recursion. *)
-  let content, msg_type, _rewrites =
+  let content, msg_type =
     if String.equal msg_type "broadcast" then
       let agent_file =
         Filename.concat (agents_dir config) (safe_filename from_agent ^ ".json")
@@ -118,60 +97,26 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
                          — stale broadcast suppressed"
                         task_id (Masc_domain.task_status_to_string status)
                     in
-                    ( inv_content,
-                      "cache_invalidated",
-                      [
-                        {
-                          reason =
-                            Cache_invalidated
-                              {
-                                task_id;
-                                status =
-                                  Masc_domain.task_status_to_string status;
-                              };
-                          module_name = "workspace_broadcast";
-                        };
-                      ] )
+                    (inv_content, "cache_invalidated")
                 | _ ->
                     ( Workspace_task_cache_invariant.rewrite_broadcast_content
                         ~config ~from_agent ~module_name:"workspace_broadcast"
                         ~content,
-                      msg_type,
-                      [
-                        {
-                          reason = Task_cache_rewrite;
-                          module_name = "workspace_broadcast";
-                        };
-                      ] ))
+                      msg_type ))
             | None ->
                 ( Workspace_task_cache_invariant.rewrite_broadcast_content
                     ~config ~from_agent ~module_name:"workspace_broadcast"
                     ~content,
-                  msg_type,
-                  [
-                    {
-                      reason = Task_cache_rewrite;
-                      module_name = "workspace_broadcast";
-                    };
-                  ] ))
+                  msg_type ))
         | Error _ ->
             ( Workspace_task_cache_invariant.rewrite_broadcast_content
                 ~config ~from_agent ~module_name:"workspace_broadcast" ~content,
-              msg_type,
-              [
-                {
-                  reason = Task_cache_rewrite;
-                  module_name = "workspace_broadcast";
-                };
-              ] )
+              msg_type )
       else
         ( Workspace_task_cache_invariant.rewrite_broadcast_content
             ~config ~from_agent ~module_name:"workspace_broadcast" ~content,
-          msg_type,
-          [
-            { reason = Task_cache_rewrite; module_name = "workspace_broadcast" };
-          ] )
-    else (content, msg_type, [])
+          msg_type )
+    else (content, msg_type)
   in
   let seq = Workspace_state.next_seq config in
   let mention = pre_extract_mention in

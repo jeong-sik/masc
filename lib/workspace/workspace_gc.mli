@@ -31,7 +31,7 @@ val heartbeat_message : heartbeat_outcome -> string
 
 (** Update the agent's [last_seen] timestamp on disk.
 
-    [agent_name] is resolved through {!Workspace_utils.resolve_agent_name}
+    [agent_name] is resolved through {!Workspace_identity.resolve_agent_name}
     so canonical/alias forms both work. The agent file is mutated under
     [with_file_lock]. *)
 val heartbeat :

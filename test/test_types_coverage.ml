@@ -1527,6 +1527,23 @@ let test_task_claim_next_action_todo_policy_block_still_claims () =
    Test Runners
    ============================================================ *)
 
+(* Every agent_status must rank, and the ranks must be distinct — a
+   serialized status is ranked by decoding it, so an unranked constructor
+   would sort as if it were garbage. The string ranker this replaced had an
+   arm for "idle" (never produced) and none for "inactive" (the real fourth
+   constructor). *)
+let test_agent_status_rank_covers_every_constructor () =
+  let ranks =
+    List.map Masc_domain.agent_status_rank Masc_domain.all_agent_statuses
+  in
+  Alcotest.(check int) "one rank per constructor"
+    (List.length Masc_domain.all_agent_statuses) (List.length ranks);
+  let sorted = List.sort_uniq Int.compare ranks in
+  Alcotest.(check int) "ranks are distinct" (List.length ranks)
+    (List.length sorted);
+  Alcotest.(check bool) "no constructor ranks 0" true
+    (not (List.exists (Int.equal 0) ranks))
+
 let () =
   run "Types Coverage" [
     "agent_id", [
@@ -1788,5 +1805,9 @@ let () =
     "task_claim", [
       test_case "awaiting verification waits for verdict" `Quick
         test_task_claim_awaiting_verification_is_pending_verdict;
+    ];
+    "agent_status_rank", [
+      test_case "every constructor ranks distinctly" `Quick
+        test_agent_status_rank_covers_every_constructor;
     ];
   ]

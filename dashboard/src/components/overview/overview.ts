@@ -1441,7 +1441,7 @@ function OverviewDomainSection({
         ${lastBoardRefreshAt.value === null
           ? html`<div class="ov-mini-list"><div class="ov-mini-empty ov-empty">보드 데이터 미연결</div></div>`
           : boardTotal.value !== null
-            ? html`<div class="ov-stat-row"><span class="k">전체 포스트</span><span class="v mono">${boardTotal.value}</span></div>`
+            ? html`<div class="ov-stat-row"><span class="k">포스트</span><span class="v mono">${boardTotal.value}</span></div>`
             : html`<div class="ov-stat-row"><span class="k">불러온 포스트</span><span class="v mono">${boardPosts.value.length}</span></div>`}
       <//>
 

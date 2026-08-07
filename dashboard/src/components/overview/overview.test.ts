@@ -1265,7 +1265,8 @@ describe('Overview board domain card', () => {
     const { container } = render(h(Overview, null))
     const text = boardCardText(container)
 
-    expect(text).toContain('전체 포스트')
+    expect(text).toContain('포스트')
     expect(text).toContain('441')
+    expect(text).not.toContain('전체 포스트')
   })
 })

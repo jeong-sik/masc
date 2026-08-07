@@ -185,6 +185,71 @@ let test_compute_metrics_partial_failure () =
     check (float 0.0001) "execution_reliability" (2.0 /. 3.0)
       m.execution_reliability)
 
+(* A goal_completion record that does not carry completed_within_budget /
+   on_topic. The codec always writes both, so this is a record it did not
+   write -- an older schema, a truncated append, or a hand edit. The parser
+   defaulted both to true, which credited adherence nobody recorded. The
+   sibling branch in the same function already defaults tool_outcome's
+   [success] to false. *)
+let strip_adherence_fields config =
+  let dir =
+    Filename.concat
+      (Filename.concat config.Workspace.base_path ".masc")
+      "reputation_v2"
+  in
+  (* Dated_jsonl stores under dated subdirectories, so walk rather than
+     listing one level. *)
+  let rec jsonl_files root =
+    Sys.readdir root
+    |> Array.to_list
+    |> List.sort String.compare
+    |> List.concat_map (fun name ->
+         let path = Filename.concat root name in
+         if Sys.is_directory path then jsonl_files path
+         else if Filename.check_suffix path ".jsonl" then [ path ]
+         else [])
+  in
+  let files = jsonl_files dir in
+  List.iter
+    (fun path ->
+      let lines =
+        In_channel.with_open_text path In_channel.input_all
+        |> String.split_on_char '\n'
+        |> List.filter (fun l -> String.trim l <> "")
+      in
+      let rewritten =
+        List.map
+          (fun line ->
+            match Yojson.Safe.from_string line with
+            | `Assoc fields ->
+              `Assoc
+                (List.filter
+                   (fun (k, _) ->
+                     k <> "completed_within_budget" && k <> "on_topic")
+                   fields)
+              |> Yojson.Safe.to_string
+            | _ -> line)
+          lines
+      in
+      Out_channel.with_open_text path (fun oc ->
+        List.iter (fun l -> Out_channel.output_string oc (l ^ "\n")) rewritten))
+    files
+
+let test_missing_adherence_fields_do_not_credit_adherence () =
+  with_workspace (fun config ->
+    Reputation_ledger_v2.emit_goal_completion config
+      ~agent_id:"unrecorded-agent" ~task_id:"t1" ~task_title:"Goal"
+      ~completed_within_budget:true ~on_topic:true ();
+    strip_adherence_fields config;
+    let m =
+      Reputation_ledger_v2.compute_ledger_metrics config
+        ~agent_id:"unrecorded-agent" ~window_days:30
+    in
+    check int "the completion itself still counts" 1 m.goal_completions;
+    check int "adherence nobody recorded is not credited" 0
+      m.goal_adherent_completions;
+    check (float 0.0001) "goal_adherence" 0.0 m.goal_adherence)
+
 let test_safety_compliance_penalty () =
   with_workspace (fun config ->
     Reputation_ledger_v2.emit_safety_violation config
@@ -237,5 +302,7 @@ let () =
             test_safety_compliance_penalty
         ; test_case "safety compliance floors at zero" `Quick
             test_safety_compliance_floors_at_zero
+        ; test_case "missing adherence fields are not credited" `Quick
+            test_missing_adherence_fields_do_not_credit_adherence
         ] )
     ]

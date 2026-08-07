@@ -217,14 +217,11 @@ let classify_owner_execution_with
           (match runtime with
            | Owner_unregistered -> Recoverable
            | Owner_registered
-               { phase = (Keeper_state_machine.Paused | Keeper_state_machine.Dead)
+               { phase =
+                   (Keeper_state_machine.Paused | Keeper_state_machine.Dead) as phase
                ; _
                } ->
-             Paused_dead
-               (Runtime_terminal
-                  (match runtime with
-                   | Owner_registered { phase; _ } -> phase
-                   | Owner_unregistered -> assert false))
+             Paused_dead (Runtime_terminal phase)
            | Owner_registered { live_fiber = true; _ } -> Executable
            | Owner_registered { live_fiber = false; _ } -> Recoverable)))
 ;;

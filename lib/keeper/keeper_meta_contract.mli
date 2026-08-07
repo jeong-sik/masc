@@ -7,9 +7,9 @@
     ({!Keeper_meta_json}) and store I/O.
 
     Internal: ~3 helpers stay private —
-    \[blocker_class_of_serialized_string] (deserializer used
-    only by JSON parsing), \[map_compaction_rt] /
-    \[map_proactive_rt]
+    [blocker_class_of_serialized_string] (deserializer used
+    only by JSON parsing), [map_compaction_rt] /
+    [map_proactive_rt]
     (nested-record updaters that callers reach via the higher-level
     {!map_runtime} / {!map_usage}).  All consumed only via the runtime
     contract or the JSON pipeline. *)

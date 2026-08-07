@@ -1,6 +1,6 @@
 (** Workspace_gc — heartbeat and explicit garbage collection.
 
-    Public surface for {!Workspace_gc.ml}.  Extracted from [workspace.ml] for
+    Public surface for [workspace_gc.ml].  Extracted from [workspace.ml] for
     modularity (#4638).  See issue #10751 for the broader [workspace/]
     [.mli] coverage push.
 
@@ -31,7 +31,7 @@ val heartbeat_message : heartbeat_outcome -> string
 
 (** Update the agent's [last_seen] timestamp on disk.
 
-    [agent_name] is resolved through {!Workspace_utils.resolve_agent_name}
+    [agent_name] is resolved through {!Workspace_identity.resolve_agent_name}
     so canonical/alias forms both work. The agent file is mutated under
     [with_file_lock]. *)
 val heartbeat :

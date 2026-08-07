@@ -234,18 +234,36 @@ let check_tool_expectations expectations actual_calls =
 (* Score computation                                                 *)
 (* ================================================================ *)
 
-(** Compute pass@k: probability that at least one of k runs passes.
-    Formula: 1 - C(n-c, k) / C(n, k)
-    where n = total runs, c = passing runs, k = sample size.
+(** Compute pass@k: the chance that a [k]-run sample drawn from [n] recorded
+    runs, [c] of which passed, contains at least one pass.
 
-    Simplified: if all k runs available, pass@k = 1 - (1-p)^k
-    where p = c/n (empirical pass rate). *)
+    [1 - C(n-c, k) / C(n, k)] — the sample is drawn without replacement, so
+    the failing runs are chosen from a shrinking pool.
+
+    Evaluated as the running product [(n-c-i) / (n-i)] for [i] in [0, k), which
+    is the same ratio with no binomial materialised, so nothing overflows at
+    the run counts a suite produces.
+
+    [1 - (1 - c/n)^k] is the with-replacement reading and understates this:
+    it lets the same failing run be drawn [k] times. At n=5, c=1, k=3 it
+    reports 0.488 against a true 0.6, and at n=5, c=4, k=3 it reports 0.992
+    when the answer is exactly 1 — a single failing run cannot fill a 3-run
+    sample. *)
 let compute_pass_at_k ~(k : int) ~(n : int) ~(c : int) : float =
-  if n = 0 || k = 0 then 0.0
+  if n <= 0 || k <= 0 then 0.0
   else if c >= n then 1.0
   else
-    let p = float_of_int c /. float_of_int n in
-    1.0 -. (1.0 -. p) ** float_of_int (min k n)
+    let k = min k n in
+    let failing = n - c in
+    if failing < k then 1.0
+    else
+      let rec ratio i acc =
+        if i >= k then acc
+        else
+          ratio (i + 1)
+            (acc *. float_of_int (failing - i) /. float_of_int (n - i))
+      in
+      1.0 -. ratio 0 1.0
 
 (** Compute standard deviation of scores (consistency metric). *)
 let score_std_dev (scores : float list) : float =

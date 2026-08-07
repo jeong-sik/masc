@@ -7,25 +7,25 @@
     response caching.
 
     Internal: ~50+ helpers + 5 internal types stay private —
-    \[normalized_hit] / \[provider] (7-variant) /
-    \[provider_response] / \[cache_entry] (cache + provider data
+    [normalized_hit] / [provider] (7-variant) /
+    [provider_response] / [cache_entry] (cache + provider data
     types kept internal so callers cannot construct half-formed
     state),
     the pre-compiled whitespace normalizer,
-    text cleaning helpers (\[normalize_spaces],
-    \[clean_search_text], \[trim_nonempty]),
-    \[valid_search_result_url],
-    \[parse_json_search_results] (the generic JSON parser
-    behind the per-provider parsers), \[provider_to_string] /
-    \[provider_of_string] / \[parse_provider_csv] /
-    \[default_provider_order] / \[provider_order],
-    \[take_results], \[normalize_hits], \[provider_error],
-    \[result_data], all 7 \[fetch_*] HTTP fetchers,
-    \[fetch_provider], the cache state cells
-    (\[initial_cache_capacity = 32], \[cache_entries] hashtable,
-    \[cache_mutex]),
-    \[cache_key], \[cache_lookup], \[cache_store],
-    and \[search_impl].  All consumed
+    text cleaning helpers ([normalize_spaces],
+    [clean_search_text], [trim_nonempty]),
+    [valid_search_result_url],
+    [parse_json_search_results] (the generic JSON parser
+    behind the per-provider parsers), [provider_to_string] /
+    [provider_of_string] / [parse_provider_csv] /
+    [default_provider_order] / [provider_order],
+    [take_results], [normalize_hits], [provider_error],
+    [result_data], all 7 \[fetch_*\] HTTP fetchers,
+    [fetch_provider], the cache state cells
+    (\[initial_cache_capacity = 32\], [cache_entries] hashtable,
+    [cache_mutex]),
+    [cache_key], [cache_lookup], [cache_store],
+    and [search_impl].  All consumed
     only inside {!handle} / {!simulate_for_test} pipelines. *)
 
 (** {1 Simulation outcome (test-only)} *)

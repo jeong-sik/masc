@@ -1,6 +1,6 @@
 (** Mention_inbox — JSONL-based persistent mention inbox
 
-    Stores @mention events in `.masc/mention_inbox.jsonl`.
+    Stores [@mention] events in `.masc/mention_inbox.jsonl`.
     Each mention is an append-only record with read/unread tracking.
 
     @since Phase 3A — Keeper Deliberation Engine

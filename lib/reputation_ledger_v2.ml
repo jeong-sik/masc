@@ -142,8 +142,14 @@ let ledger_event_of_json json : ledger_event option =
         agent_id;
         task_id;
         task_title = Safe_ops.json_string ~default:"" "task_title" json;
-        completed_within_budget = Safe_ops.json_bool ~default:true "completed_within_budget" json;
-        on_topic = Safe_ops.json_bool ~default:true "on_topic" json;
+        (* Absent means the record does not say, and both feed
+           [goal_adherent_completions]. Defaulting to [true] credited
+           adherence nobody recorded and raised the agent's
+           [goal_adherence] rate. [false] matches the [tool_outcome] branch
+           above, which already reads a missing [success] as not a success. *)
+        completed_within_budget =
+          Safe_ops.json_bool ~default:false "completed_within_budget" json;
+        on_topic = Safe_ops.json_bool ~default:false "on_topic" json;
         raw_trace_run_id = Safe_ops.json_string_opt "raw_trace_run_id" json;
         timestamp = ts;
       })

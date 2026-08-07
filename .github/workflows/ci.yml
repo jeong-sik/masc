@@ -970,6 +970,16 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_metric_zero_cell_declaration
 
+      - name: Run library resource topic resolution suite
+        # The topic comes from the client's URI. Before the fix it was
+        # concatenated onto docs/library and read, so library/../<name>
+        # reached a file outside that directory, and the bare "library"
+        # prefix plus a fixed offset of 8 read libraryfoo as topic "oo".
+        # Both cases fail on the pre-fix tree.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_library_resource_topic
+
       - name: Run transport metrics snapshot suite
         # The health snapshot reads counters through metric_value_or_zero, so a
         # field naming a metric that does not exist is emitted as 0 rather than
@@ -1249,6 +1259,18 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_channel_gate_content_length_knob"
+
+      - name: Run keeper decision-audit dated-store suite
+        id: decision_audit_dated_store_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_decision_audit_dated_store"
 
       # Redaction is the last thing every observability payload passes through,
       # so a defect here is not scoped to one field: a preview truncated inside

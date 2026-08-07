@@ -56,7 +56,6 @@ let qwen_model =
   ; top_k = None
   ; min_p = None
   ; capabilities = None
-  ; match_prefixes = []
   }
 
 let runpod_binding =

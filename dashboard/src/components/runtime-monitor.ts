@@ -469,7 +469,6 @@ function runtimeParameterDetailRows(
     detailRow('declared model', 'format', declaredFormat),
     detailRow('declared model', 'inputs', runtimeDeclaredInputText(provider)),
     detailRow('declared model', 'controls', runtimeDeclaredModelControlText(provider)),
-    detailRow('declared model', 'match prefixes', stringArrayText(declaredModel?.match_prefixes)),
     detailRow('binding', 'provider.model', textList([binding?.provider_id, binding?.model_id])),
     detailRow('binding', 'default', boolText(binding?.is_default)),
     detailRow('binding', 'concurrency', numberText(binding?.max_concurrent)),

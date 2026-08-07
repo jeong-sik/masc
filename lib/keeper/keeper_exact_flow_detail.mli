@@ -8,15 +8,6 @@
 
 (** Attempts and advances recorded in the flow evidence, one clause per
     candidate visit ("slot=... call_id=..."; "advance=a->b kind=..."). *)
-(** Failed slot id and the rendered failure kind for one advance. An execution
-    failure carries its typed cause and raw-response digest so eleven distinct
-    outcomes stay distinguishable instead of collapsing to "execution_failed".
-    Exposed because [flow_evidence] is a private SDK type with no constructor,
-    so this is the largest part of the assembled line a test can reach. *)
-val advance_failure_kind
-  :  Agent_sdk.Exact_output.flow_advance_failure_snapshot
-  -> string * string
-
 val flow_evidence_detail : Agent_sdk.Exact_output.flow_evidence -> string
 
 (** Typed reason a candidate slot was refused before dispatch, including the

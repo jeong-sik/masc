@@ -92,7 +92,7 @@ let test_raw_response_excerpt_cuts_on_utf8_boundary () =
 
 (* The eleven distinct execution causes reach the advance line through
    [execution_cause_detail]. The execution-failed branch of
-   [advance_failure_kind] cannot be built here — [flow_attempt_snapshot] is a
+   the execution-failed branch cannot be built here — [flow_attempt_snapshot] is a
    private SDK type with no constructor — so what is pinned is that every
    cause the renderer can receive still renders apart from every other. A
    single shared label is what made the eleven indistinguishable in the log,

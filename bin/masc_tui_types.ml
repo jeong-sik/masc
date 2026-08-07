@@ -10,6 +10,16 @@ type agent = Tui_decode.agent
 type task = Tui_decode.task
 
 (** Event for the event log *)
+(* The five states the refresh loop can put the TUI in. It was a string
+   with a catch-all at each of the five render sites, so a typo rendered
+   as [disconnected] and a new state would have too. *)
+type connection_status =
+  | Disconnected
+  | Connecting
+  | Reconnecting
+  | Degraded
+  | Connected
+
 type event = {
   timestamp: string;
   event_type: string;
@@ -205,7 +215,7 @@ type state = {
   mutable tasks: task list;
   mutable events: event list;
   mutable keepers: keeper list;
-  mutable connection_status: string;
+  mutable connection_status: connection_status;
   mutable last_refresh: float;
   mutable view: view_mode;
   mutable keeper_cursor: int;
@@ -245,7 +255,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   tasks = [];
   events = [];
   keepers = [];
-  connection_status = "disconnected";
+  connection_status = Disconnected;
   last_refresh = 0.0;
   view = Overview;
   keeper_cursor = 0;

@@ -243,6 +243,84 @@ let test_classify_uses_stuck_threshold_override () =
   Alcotest.(check bool) "active can classify as Stuck via override" true
     (Dashboard_labels.equal_agent_group group Dashboard_labels.Stuck)
 
+(* An agent that claims to be Active or Busy while carrying a last_seen the
+   codec cannot parse has produced no liveness evidence. #9751 settled the
+   direction for the missing-field case ("a corrupt record read as 'seen just
+   now' satisfied every downstream liveness check"), and
+   keeper_status_runtime.ml applies the same rule to the derived age. These
+   pin it for the classifier: unparseable is infinitely stale, not fresh. *)
+let unparseable_last_seen = "not-a-timestamp"
+
+let test_classify_unparseable_last_seen_is_stuck () =
+  let now = Unix.gettimeofday () in
+  let agent : Masc_domain.agent =
+    {
+      id = None;
+      name = "test-agent";
+      agent_type = "test";
+      status = Masc_domain.Active;
+      capabilities = [];
+      current_task = None;
+      session_bound_at = "2026-01-01T00:00:00Z";
+      last_seen = unparseable_last_seen;
+      meta = None;
+    }
+  in
+  let group = Dashboard_labels.classify_agent ~now agent in
+  Alcotest.(check bool) "active with unparseable last_seen = Stuck" true
+    (Dashboard_labels.equal_agent_group group Dashboard_labels.Stuck)
+
+let test_classify_unparseable_last_seen_busy_is_stuck () =
+  let now = Unix.gettimeofday () in
+  let agent : Masc_domain.agent =
+    {
+      id = None;
+      name = "test-agent";
+      agent_type = "test";
+      status = Masc_domain.Busy;
+      capabilities = [];
+      current_task = None;
+      session_bound_at = "2026-01-01T00:00:00Z";
+      last_seen = unparseable_last_seen;
+      meta = None;
+    }
+  in
+  let group = Dashboard_labels.classify_agent ~now agent in
+  Alcotest.(check bool) "busy with unparseable last_seen = Stuck" true
+    (Dashboard_labels.equal_agent_group group Dashboard_labels.Stuck)
+
+(* Offline and Idle do not claim liveness, so an unparseable timestamp must
+   not promote them out of their status-derived group. *)
+let test_classify_unparseable_last_seen_keeps_offline () =
+  let now = Unix.gettimeofday () in
+  let agent : Masc_domain.agent =
+    {
+      id = None;
+      name = "test-agent";
+      agent_type = "test";
+      status = Masc_domain.Inactive;
+      capabilities = [];
+      current_task = None;
+      session_bound_at = "2026-01-01T00:00:00Z";
+      last_seen = unparseable_last_seen;
+      meta = None;
+    }
+  in
+  let group = Dashboard_labels.classify_agent ~now agent in
+  Alcotest.(check bool) "inactive stays Offline" true
+    (Dashboard_labels.equal_agent_group group Dashboard_labels.Offline)
+
+let test_translate_unparseable_last_seen_does_not_read_working () =
+  let now = Unix.gettimeofday () in
+  let label =
+    Dashboard_labels.translate_agent_status ~now Masc_domain.Active
+      unparseable_last_seen
+  in
+  Alcotest.(check bool) "label must not claim the agent is working" false
+    (label = "working");
+  Alcotest.(check bool) "label names the missing evidence" true
+    (label = "STUCK (no liveness evidence)")
+
 (* ===== Attention Items ===== *)
 
 let test_attention_empty () =
@@ -288,6 +366,14 @@ let () =
           ("inactive is Offline", `Quick, test_classify_inactive_is_offline);
           ("listening is Idle", `Quick, test_classify_listening_is_idle);
           ("stuck override applied", `Quick, test_classify_uses_stuck_threshold_override);
+          ( "unparseable last_seen (active) is Stuck"
+          , `Quick, test_classify_unparseable_last_seen_is_stuck );
+          ( "unparseable last_seen (busy) is Stuck"
+          , `Quick, test_classify_unparseable_last_seen_busy_is_stuck );
+          ( "unparseable last_seen keeps Offline"
+          , `Quick, test_classify_unparseable_last_seen_keeps_offline );
+          ( "unparseable last_seen label does not read working"
+          , `Quick, test_translate_unparseable_last_seen_does_not_read_working );
         ] );
       ( "Attention",
         [

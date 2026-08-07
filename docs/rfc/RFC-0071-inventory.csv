@@ -183,9 +183,9 @@ lib/gate/slack_socket_client.ml,118,false,unclassified
 lib/goal/goal_phase.ml,21,None,unclassified
 lib/goal/goal_phase.ml,92,None,unclassified
 lib/http_response_payload.ml,11,false,unclassified
-lib/http_server_eio.ml,59,None,unclassified
-lib/http_server_eio.ml,267,None,unclassified
-lib/http_server_eio.ml,530,None,unclassified
+lib/http_server_eio.ml,62,None,unclassified
+lib/http_server_eio.ml,270,None,unclassified
+lib/http_server_eio.ml,533,None,unclassified
 lib/ide/ide_annotation_types.ml,39,None,unclassified
 lib/ide/ide_annotation_types.ml,172,None,unclassified
 lib/ide/ide_annotations.ml,81,None,unclassified
@@ -199,8 +199,8 @@ lib/ide/ide_bridge.ml,601,None,unclassified
 lib/ide/ide_bridge.ml,626,(),unclassified
 lib/json_field/json_field.ml,19,None,unclassified
 lib/keeper_benchmark_canary.ml,36,None,unclassified
-lib/keeper_catchup_digest.ml,177,None,unclassified
-lib/keeper_catchup_digest.ml,284,None,unclassified
+lib/keeper_catchup_digest.ml,171,None,unclassified
+lib/keeper_catchup_digest.ml,278,None,unclassified
 lib/keeper_chat_delivery_identity/keeper_chat_delivery_identity.ml,16,false,unclassified
 lib/keeper_contract/keeper_accountability_claim_types.ml,36,None,unclassified
 lib/keeper_contract/keeper_accountability_claim_types.ml,53,None,unclassified
@@ -317,7 +317,7 @@ lib/keeper/keeper_external_attention.ml,178,None,unclassified
 lib/keeper/keeper_gate_mode.ml,27,None,unclassified
 lib/keeper/keeper_gate.ml,490,false,unclassified
 lib/keeper/keeper_gate.ml,952,None,unclassified
-lib/keeper/keeper_heartbeat_loop_in_turn_pulse.ml,108,(),unclassified
+lib/keeper/keeper_heartbeat_loop_in_turn_pulse.ml,169,(),unclassified
 lib/keeper/keeper_hooks_oas_response_metrics.ml,266,None,unclassified
 lib/keeper/keeper_hooks_oas.ml,251,None,unclassified
 lib/keeper/keeper_lifecycle_hooks.ml,56,(),unclassified
@@ -418,7 +418,7 @@ lib/keeper/keeper_tool_voice_runtime.ml,320,None,unclassified
 lib/keeper/keeper_tools_oas_bundle.ml,127,None,unclassified
 lib/keeper/keeper_trace_emit.ml,23,false,unclassified
 lib/keeper/keeper_transition_audit.ml,67,None,unclassified
-lib/keeper/keeper_turn_driver_try_provider.ml,131,(),unclassified
+lib/keeper/keeper_turn_driver_try_provider.ml,139,(),unclassified
 lib/keeper/keeper_turn_driver.ml,452,(),unclassified
 lib/keeper/keeper_turn_outcome.ml,40,None,unclassified
 lib/keeper/keeper_turn_runtime_budget.ml,169,false,unclassified
@@ -426,7 +426,7 @@ lib/keeper/keeper_turn_terminal_code.ml,39,None,unclassified
 lib/keeper/keeper_turn_terminal.ml,128,None,unclassified
 lib/keeper/keeper_turn_up_args.ml,35,false,unclassified
 lib/keeper/keeper_turn.ml,193,None,unclassified
-lib/keeper/keeper_types_profile.ml,425,false,unclassified
+lib/keeper/keeper_types_profile.ml,433,false,unclassified
 lib/keeper/keeper_types_support.ml,156,false,unclassified
 lib/keeper/keeper_unified_metrics_broadcast.ml,72,(),unclassified
 lib/keeper/keeper_unified_metrics_decision.ml,41,None,unclassified
@@ -698,7 +698,7 @@ lib/server/session_lifecycle_event.ml,56,None,unclassified
 lib/server/session_lifecycle_event.ml,69,None,unclassified
 lib/shutdown.ml,384,false,unclassified
 lib/sse_jsonrpc_filter.ml,15,false,unclassified
-lib/task/tool_task_args.ml,53,None,unclassified
+lib/task/tool_task_args.ml,68,None,unclassified
 lib/task/tool_task_contract_gate.ml,8,false,unclassified
 lib/task/tool_task_handlers.ml,169,None,unclassified
 lib/task/tool_task_handlers.ml,177,None,unclassified
@@ -776,7 +776,7 @@ lib/tool/tool_name.ml,165,None,unclassified
 lib/tool/tool_name.ml,201,None,unclassified
 lib/transport.ml,57,None,unclassified
 lib/transport.ml,198,None,unclassified
-lib/turn_fsm/turn_fsm.ml,292,None,unclassified
+lib/turn_fsm/turn_fsm.ml,316,None,unclassified
 lib/turn_mode_codec.ml,26,None,unclassified
 lib/types/ids.ml,257,false,unclassified
 lib/types/masc_error.ml,73,None,unclassified

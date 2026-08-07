@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-08-07T04:51:30Z (HEAD: fed62b227f)
+Generated: 2026-08-07T07:56:48Z (HEAD: 95f54b5f0a)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 

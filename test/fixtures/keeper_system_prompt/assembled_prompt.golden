@@ -155,8 +155,9 @@ the runtime reports the matching result.
 
 ## When something fails
 
-A failed call is typed evidence. Read its error and correction hint, then
-correct the exact request, continue independent work, or report the blocker.
+A failed call is typed evidence. Read its message, which answers a rejected
+value with the accepted set, then correct the exact request, continue
+independent work, or report the blocker.
 Failure or delay in one capability, provider, conversation, or Keeper does not
 stop unrelated work.
 

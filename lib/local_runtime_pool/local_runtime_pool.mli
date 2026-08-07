@@ -37,7 +37,6 @@ type runtime = {
   max_concurrency : int;
   active_slots : int;
   queue_depth : int;
-  latency_ema_ms : float option;
   failure_streak : int;
   cooldown_until : float option;
   last_error : string option;
@@ -45,12 +44,10 @@ type runtime = {
   total_success : int;
   total_failure : int;
 }
-(** Per-endpoint runtime entry.  [latency_ema_ms] is the
-    exponential moving average of release-reported latency
-    (alpha = 0.2).  [failure_streak] tracks consecutive
-    failures; >= 3 triggers a [cooldown_until] window so
-    the selector skips the runtime until the window
-    elapses. *)
+(** Per-endpoint runtime entry.  [failure_streak] is 1 when the latest
+    discovery pass marked the endpoint unhealthy (else 0); unhealthy
+    endpoints also get a [cooldown_until] window so the selector skips
+    the runtime until the window elapses. *)
 
 type runtime_snapshot = {
   id : string;
@@ -59,7 +56,6 @@ type runtime_snapshot = {
   max_concurrency : int;
   active_slots : int;
   queue_depth : int;
-  latency_ema_ms : float option;
   failure_streak : int;
   cooldown_until : float option;
   last_error : string option;

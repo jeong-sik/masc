@@ -70,7 +70,6 @@ let scrubbed_env_names =
       "MASC_BASE_PATH_INPUT";
       "MASC_BASE_PATH_RESOLUTION_SOURCE";
       "MASC_CONFIG_DIR";
-      "MASC_PERSONAS_DIR";
       "MASC_WS_ENABLED";
       "MASC_WEBRTC_ENABLED";
     ]
@@ -146,7 +145,6 @@ let make_config_root root =
   let config = Filename.concat root "config" in
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
-  mkdir_p (Filename.concat config "personas");
   write_file (Filename.concat config "runtime.toml") "# repo runtime seed\n";
   config
 
@@ -705,9 +703,8 @@ let test_explicit_base_path_does_not_load_config_from_zshenv () =
       ignore (make_config_root repo);
       write_file (Filename.concat home_dir ".zshenv")
         (Printf.sprintf
-           "export MASC_CONFIG_DIR=%s\nexport MASC_PERSONAS_DIR=%s\n"
-           (Filename.concat repo "config")
-           (Filename.concat repo "config/personas"));
+           "export MASC_CONFIG_DIR=%s\n"
+           (Filename.concat repo "config"));
       let script = Filename.concat repo "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe repo;
@@ -731,9 +728,6 @@ let test_explicit_base_path_does_not_load_config_from_zshenv () =
            ("MASC_CONFIG_DIR=" ^ Filename.concat expected_parent ".masc/config"));
       check bool "zshenv config was not imported" false
         (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat repo "config"));
-      check bool "zshenv personas were not imported" false
-        (contains_substring captured
-           ("MASC_PERSONAS_DIR=" ^ Filename.concat repo "config/personas"));
       ignore stderr)
 
 let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
@@ -752,7 +746,6 @@ let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("MASC_CONFIG_DIR", Filename.concat repo "config");
-              ("MASC_PERSONAS_DIR", Filename.concat repo "config/personas");
             ]
           [ "--http"; "--port"; "9968"; "--base-path"; parent ]
       in

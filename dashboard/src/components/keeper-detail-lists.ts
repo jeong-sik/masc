@@ -35,18 +35,3 @@ export function RelationshipList({ rels }: { rels: Record<string, string> }) {
     </div>
   `
 }
-
-// ── Traits List ──────────────────────────────────────────
-
-export function TraitsList({ traits, label }: { traits: string[]; label: string }) {
-  if (traits.length === 0) return null
-
-  return html`
-    <div class="mb-3 v2-monitoring-panel">
-      <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider font-semibold mb-2">${label}</div>
-      <div class="flex flex-wrap gap-1.5 v2-monitoring-row">
-        ${traits.map(t => html`<${StatusChip} tone="info" uppercase=${false} class="text-2xs font-medium">${t}<//>`)}
-      </div>
-    </div>
-  `
-}

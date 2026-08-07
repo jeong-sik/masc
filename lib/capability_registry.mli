@@ -3,10 +3,10 @@
     Public MCP tools and internal agent-facing tool surfaces are
     projections over one capability inventory. Some surfaces
     intentionally reuse the same tool name with a narrower schema
-    (e.g. local worker projections).
+    (e.g. spawned-agent projections).
 
-    Internal helpers ([StringSet] / [StringMap], [dedupe_schemas],
-    [dedupe_projections], [prefixed_tool_names],
+    Internal helpers ([StringSet] / [StringMap], [require_unique_schemas],
+    [require_unique_projections], [prefixed_tool_names],
     [canonical_capability_id], [projection_to_schema], [make_seed],
     [public_projection_seeds_from],
     [keeper_projection_seeds], [surface_tool_schemas_from],
@@ -61,21 +61,20 @@ type capability_seed = {
 
 val all_projection_seeds_from :
   Masc_domain.tool_schema list -> capability_seed list
-(** Combine public, local-worker-internal, and keeper seeds into one
-    flat list keyed off [public_tool_source_schemas] (the canonical
-    public schema list owned by [Tool_help_registry]). *)
+(** Combine public and keeper seeds into one flat list keyed off
+    [public_tool_source_schemas] (the canonical public schema list
+    owned by [Tool_help_registry]). *)
 
 val all_capabilities_from :
   Masc_domain.tool_schema list -> capability_def list
-(** Group {!all_projection_seeds_from} by [capability_id] into a
-    deduplicated capability inventory. [audiences] / [projections] are
-    union'd preserving order. *)
+(** Group {!all_projection_seeds_from} by [capability_id]. Duplicate
+    surface/name projections are rejected. *)
 
 (** {1 Public surface accessors} *)
 
 val public_tool_schemas_from :
   Masc_domain.tool_schema list -> Masc_domain.tool_schema list
-(** Canonicalised + deduped public-MCP schemas. *)
+(** Canonical public-MCP schemas. Duplicate names are rejected. *)
 
 val visible_public_tool_schemas_from :
   ?include_hidden:bool ->

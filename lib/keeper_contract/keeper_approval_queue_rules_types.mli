@@ -131,6 +131,19 @@ type decision_source =
   | Auto_judge
   | Human_operator
 
+(** Which standing authority produced an [Always_allowed] decision.
+    [decision_source] answers who decided; this answers under what. The four
+    are not interchangeable: [Exact_always_rule] and [One_shot_resolution] are
+    an operator acting on one request, while [Keeper_always_allow] and
+    [Workspace_always_allow] are blanket permissions that were granted once and
+    then applied to everything afterwards. Recording only [Always_allowed]
+    leaves an audit reader unable to tell those apart. *)
+type authorization_source =
+  | One_shot_resolution
+  | Exact_always_rule
+  | Keeper_always_allow
+  | Workspace_always_allow
+
 (** An immutable exact Always Allowed rule. Its identity is the workspace-local
     Keeper, opaque operation identity, and complete normalized effect input;
     only JSON object-field order is canonicalized. Match observations belong in
@@ -171,6 +184,8 @@ val advisory_judgment_of_string : string -> advisory_judgment option
 val approval_decision_to_string : decision -> string
 val decision_source_to_string : decision_source -> string
 val decision_source_of_string : string -> decision_source option
+val authorization_source_to_string : authorization_source -> string
+val authorization_source_of_string : string -> authorization_source option
 val string_opt_of_json : Yojson.Safe.t -> string option
 val bool_member : string -> Yojson.Safe.t -> default:bool -> bool
 val rule_match_to_yojson : rule_match -> Yojson.Safe.t

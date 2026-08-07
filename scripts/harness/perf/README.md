@@ -147,17 +147,17 @@ keepers that run **real autonomous turns** against `mock_openai_provider.py` (ne
 probes `/health` while those keepers and optional host hogs contend for the one main Eio domain.
 
 ```bash
-# MASC_PERSONA_SOURCE_ROOT points at a populated MASC root (one with
-# config/personas/<persona>); the gate copies that persona into its ephemeral
-# base path. It is resolved from an explicit path, never home-anchored (SSOT-R6).
-MASC_PERSONA_SOURCE_ROOT=<your-masc-root> \
+# MASC_KEEPER_SOURCE_ROOT points at a populated MASC root containing
+# config/keepers/<keeper>/AGENT.md. The gate copies that Keeper prompt into its
+# ephemeral base path. It is resolved from an explicit path (SSOT-R6).
+MASC_KEEPER_SOURCE_ROOT=<your-masc-root> \
   MOCK_REPLY_BYTES=150000 INJECT_INTERVAL=0.05 WARM_TURNS_SEC=30 \
   scripts/harness/perf/keeper_load_gate.sh --keepers 24 --levels "0 8" --probes 50
 ```
 
-`MASC_PERSONA_SOURCE_ROOT` is the `.masc` dir that holds `config/personas/<persona>` (e.g.
-`<root>/.masc`); the gate copies that persona into its ephemeral base path (resolved from an explicit
-path, never home-anchored — SSOT-R6).
+`MASC_KEEPER_SOURCE_ROOT` is the `.masc` dir that holds
+`config/keepers/<keeper>/AGENT.md` (for example `<root>/.masc`). The gate copies
+that prompt into its ephemeral base path from the explicit root.
 
 `mock_openai_provider.py` serves `POST /v1/chat/completions` in both non-streaming JSON (the
 `backend_openai_request.ml` default `?(stream = false)` path) and SSE `chat.completion.chunk` modes
@@ -179,8 +179,9 @@ path, never home-anchored — SSOT-R6).
    `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`. Boot the exe directly —
    **not** via `harness_start_server`, which hardcodes the bootstrap off. (`MASC_AUTONOMY_ENABLED`
    does not exist in the code; the lib sets it as a harmless no-op.)
-5. A persona directory must exist under `$BASE/.masc/config/personas/<persona_name>/`; the gate
-   copies a real one (`analyst`) to avoid format guessing.
+5. Every generated Keeper has a non-empty
+   `$BASE/.masc/config/keepers/<keeper>/AGENT.md`; the gate copies a checked-in
+   Keeper prompt as the source.
 
 The gate refuses to report numbers if zero provider calls are seen during warmup (the mock wiring
 is then broken), and it records a `turns_during` column per level.

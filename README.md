@@ -12,7 +12,7 @@ share goals, tasks, board posts, repository ownership, and approval state. The
 dashboard and per-turn receipts make agent decisions and failures inspectable.
 
 It is not meant to be the fastest way to get work done. MASC trades speed for
-coordination, observability, and experiments with long-running persona-based
+coordination, observability, and experiments with long-running keeper-based
 agents. Some design choices are practical; some are playful.
 Accidental jokes, odd names, and small bits of fiction are part of the project
 taste; they are there because they make the experiment more fun, not because
@@ -39,7 +39,7 @@ Agents in this environment are called **Keepers**, a nickname borrowed from Bull
 ## What you can do with MASC
 
 - **Run shared Goals and Tasks through MCP tools.** Keep task ownership, status transitions, and verification evidence in one local workspace.
-- **Run and observe resident Keepers.** Give a Keeper its own persona, goal, and instructions, and let it communicate over shared topics or repositories.
+- **Run and observe resident Keepers.** Give a Keeper its own keeper, goal, and instructions, and let it communicate over shared topics or repositories.
 - **Experiment with different agent styles.** Keepers can carry different concerns and instructions, so you can watch what they decide and where they clash.
 - **Attach existing coding agents.** Because MASC is an MCP server, MCP clients such as Claude Code or Codex can connect to `/mcp` and join the same workspace — sharing task claim/transition, board, and goals, and waking Keepers via `masc_broadcast` or @mention. (There is no synchronous external tool for directly invoking a Keeper turn; interaction is through the workspace and mentions.)
 - **Reduce obvious collisions when multiple agents touch the same code.** Turns, locks, and worker ownership can coordinate multiple Keepers working on one repository, but this is not a concurrency-safety guarantee.
@@ -55,7 +55,7 @@ Legend — ✅ working now · 🟡 partially working · ❌ not working. Status 
 
 | Feature | Status | One-line description | Entry point |
 |------|:----:|-----------|--------------|
-| **Keepers** | ✅ | Resident agents with persona, goal, and instructions. Auto-boot when the server starts; state persists to disk | `.masc/config/keepers/*.toml` |
+| **Keepers** | ✅ | Resident agents with keeper, goal, and instructions. Auto-boot when the server starts; state persists to disk | `.masc/config/keepers/*.toml` |
 | **Gate: Always Allow / Auto Judge / HITL** | 🟡 | Product-neutral external-effect boundary with exact one-use grants and per-Keeper wake-up | Dashboard approvals queue |
 | **Board** | ✅ | Keepers collaborate asynchronously via posts, comments, and votes; publishing wakes related Keepers | `masc_board_*` tools / dashboard |
 | **Sandbox (Docker)** | 🟡 | Docker-profile shell execution uses containers, but local profiles and fallback paths mean this is not a security boundary | keeper toml `sandbox_profile` |
@@ -252,8 +252,8 @@ Runtime settings and state live under `.masc/` below `--base-path`. Config files
 | File | Role |
 |------|------|
 | `prompts/keeper.world.md` | The shared **World prompt** injected into every Keeper (common stage and rules, `<world>` block). Editing it changes the whole stage |
-| `keepers/<name>.toml` | Keeper (character) definition — goal, instructions, `persona_name`, `sandbox_profile`. Stacked on top of the World |
-| `personas/<name>/profile.json` | (Optional) Hand-written persona JSON. Referenced by `persona_name` and can be shared by multiple Keepers |
+| `keepers/<name>.toml` | Keeper (character) definition — goal, instructions, `keeper_name`, `sandbox_profile`. Stacked on top of the World |
+| `keepers/<name>/AGENT.md` | Complete Keeper prompt. Referenced by `keeper_name` and shareable by multiple Keepers |
 
 **Only when asking agents to work on repositories**
 
@@ -265,7 +265,7 @@ Runtime settings and state live under `.masc/` below `--base-path`. Config files
 
 > The remaining files under `prompts/` are behavior, analysis, deliberation, verification, and memory system templates. They are loaded by name where needed and work with defaults, so you usually do not edit them. The file to edit when you want to change the "stage" is `keeper.world.md`.
 >
-> The files you hand-author are `keepers/<name>.toml` (Keeper definitions) and `personas/<name>/profile.json` (personas). Runtime state (`.masc/keepers/*.json` + `*.jsonl` logs) is created by the server and should not be edited.
+> The files you hand-author are `keepers/<name>.toml` (Keeper definitions) and `keepers/<name>/AGENT.md` (Keeper prompts). Runtime state (`.masc/keepers/*.json` + `*.jsonl` logs) is created by the server and should not be edited.
 >
 > The active runtime `.masc/` is wherever `--base-path` points. The `masc/.masc/` inside a repository is for locks and scratch only.
 
@@ -274,7 +274,7 @@ Example Keeper definition (`keepers/<name>.toml`):
 ```toml
 [keeper]
 name = "albini"
-persona_name = "albini"
+name = "albini"
 goal = "Call out and chase owners of stalled tasks. Does not write code."
 active_goal_ids = ["goal-pm-flow"]
 sandbox_profile = "docker"     # or "local"

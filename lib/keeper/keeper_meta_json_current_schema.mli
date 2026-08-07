@@ -7,7 +7,6 @@ val validation_error_detail : validation_error -> string
 type field =
   | Name
   | Agent_name
-  | Persona
   | Instructions
   | Trace_id
   | Multimodal_policy

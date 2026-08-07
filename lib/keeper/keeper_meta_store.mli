@@ -76,7 +76,7 @@ val read_meta_resolved :
 val read_meta :
   Workspace.config -> string -> (Keeper_meta_contract.keeper_meta option, string) result
 
-(** Read persisted keeper meta and overlay TOML/persona defaults before
+(** Read persisted keeper meta and overlay Keeper configuration defaults before
     returning it. Status/list/operator surfaces should use this for
     TOML-owned fields such as [sandbox_profile] and [network_mode]. *)
 val read_effective_meta_resolved :

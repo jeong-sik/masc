@@ -6,6 +6,7 @@ module Lib = Masc
 module Auth = Auth
 module Keeper_chat_queue = Masc.Keeper_chat_queue
 module Workspace = Masc.Workspace
+module Dashboard_http_keeper = Dashboard_http_keeper
 
 open Alcotest
 
@@ -2066,7 +2067,7 @@ let test_dashboard_execution_trust_default_route_uses_cached_surface () =
     (json |> member "dashboard_surface_envelope" |> member "cache" |> member "key"
      |> to_string)
 
-let test_dashboard_message_json_surfaces_temporal_decay_fields () =
+let test_dashboard_message_json_surfaces_temporal_fields () =
   let message : Types.message =
     {
       seq = 7;
@@ -2077,7 +2078,6 @@ let test_dashboard_message_json_surfaces_temporal_decay_fields () =
       timestamp = "2026-05-07T00:00:00Z";
       trace_context = Some "traceparent";
       expires_at = Some 1_714_067_200.0;
-      relevance = "critical";
     }
   in
   let json = Server_dashboard_http_core.dashboard_message_json message in
@@ -2086,9 +2086,7 @@ let test_dashboard_message_json_surfaces_temporal_decay_fields () =
   check string "trace_context" "traceparent"
     (json |> member "trace_context" |> to_string);
   check (float 0.001) "expires_at" 1_714_067_200.0
-    (json |> member "expires_at" |> to_float);
-  check string "relevance" "critical"
-    (json |> member "relevance" |> to_string)
+    (json |> member "expires_at" |> to_float)
 
 (* RFC-0138 Phase 3 Step 1 — /shell snapshot wire tests.
 
@@ -2388,15 +2386,21 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   in
   let keepers_dir = Filename.concat config_root "keepers" in
   mkdir_p keepers_dir;
+  List.iter
+    (fun name ->
+      let agent_dir = Filename.concat keepers_dir name in
+      mkdir_p agent_dir;
+      write_file (Filename.concat agent_dir "AGENT.md") ("Keeper " ^ name))
+    [ "base"; "alpha"; "beta" ];
   write_file
     (Filename.concat keepers_dir "base.toml")
     "[keeper]\nautoboot_enabled = false\n";
   write_file
     (Filename.concat keepers_dir "alpha.toml")
-    "[keeper]\nautoboot_enabled = true\npersona_name = \"alpha\"\n";
+    "[keeper]\nautoboot_enabled = true\n";
   write_file
     (Filename.concat keepers_dir "beta.toml")
-    "[keeper]\nautoboot_enabled = true\npersona_name = \"beta\"\n";
+    "[keeper]\nautoboot_enabled = true\n";
   with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
   Config_dir_resolver.reset ();
   Fun.protect
@@ -3076,6 +3080,14 @@ let prepare_config_sync_keeper config name =
       { meta with
         Masc.Keeper_meta_contract.autoboot_enabled = true
       ; proactive = { enabled = false }
+        (* keeper_turn_up_config_persistence.persist requires instructions
+           from somewhere -- explicit instructions_arg, an existing
+           AGENT.md, or here -- before it will materialize a keeper.toml.
+           None of the three config-sync fixtures below supply the first
+           two, so this stands in for "keeper already has instructions
+           from its meta / prior lifecycle" the way a real config-sync
+           target would. *)
+      ; instructions = name ^ " config-sync fixture instructions"
       }
   in
   match Masc.Keeper_meta_store.write_meta config meta with
@@ -3307,6 +3319,62 @@ let test_config_post_prevalidates_mixed_request () =
   check (option bool) "activation was not committed" (Some false)
     (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled")
 
+(* #10710 regression: [keepers_dashboard_json] must aggregate every persisted
+   keeper through the bounded fiber pool. Before the fiber-batch change the
+   per-keeper enrich ran as an unbounded fan-out; this pins that all registered
+   keepers still surface in the envelope (and that the pool cap stays a sane
+   positive bound). *)
+let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let names = [ "fiber-a"; "fiber-b"; "fiber-c" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun name ->
+          Masc.Keeper_registry.For_testing.unregister
+            ~base_path:config.base_path
+            name)
+        names)
+    (fun () ->
+      List.iter
+        (fun name ->
+          let meta =
+            match
+              Masc_test_deps.meta_of_json_fixture
+                (`Assoc
+                  [ "name", `String name
+                  ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
+                  ; "trace_id", `String (name ^ "-trace")
+                  ])
+            with
+            | Ok meta -> meta
+            | Error error -> fail ("meta fixture: " ^ error)
+          in
+          (match Masc.Keeper_meta_store.write_meta config meta with
+           | Ok () -> ()
+           | Error error -> fail ("write meta: " ^ error));
+          ignore
+            (Masc.Keeper_registry.For_testing.register
+               ~base_path:config.base_path
+               name
+               meta))
+        names;
+      let json = Dashboard_http_keeper.keepers_dashboard_json config in
+      let open Yojson.Safe.Util in
+      let keeper_rows = json |> member "keepers" |> to_list in
+      let row_names =
+        keeper_rows
+        |> List.map (fun row -> row |> member "name" |> to_string)
+        |> List.sort String.compare
+      in
+      check (list string) "fiber pool collects every registered keeper"
+        (List.sort String.compare names)
+        row_names;
+      check int "total mirrors collected keeper count"
+        (List.length names)
+        (json |> member "total" |> to_int))
+
 let () =
   run "dashboard_http_core"
     [
@@ -3371,7 +3439,7 @@ let () =
           test_case "execution trust default route uses cached surface" `Quick
             test_dashboard_execution_trust_default_route_uses_cached_surface;
           test_case "message JSON exposes temporal decay fields" `Quick
-            test_dashboard_message_json_surfaces_temporal_decay_fields;
+            test_dashboard_message_json_surfaces_temporal_fields;
           test_case "RFC-0138 shell wire returns snapshot when published" `Quick
             test_shell_snapshot_wire_returns_snapshot_when_published;
           test_case "RFC-0138 shell wire falls back when snapshot empty" `Quick

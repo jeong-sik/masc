@@ -603,7 +603,7 @@ Phases are independently mergeable and revertible. Phase 5 closes the loop by ma
   - Daemon-unreachable response → `Daemon_unreachable` propagates to caller, no silent fail.
   - `ps_query` malformed JSON → `Probe_format_drift` typed error.
   - Cleanup loop with 3-fail-then-success → `Clean_quarantine` → `Clean_partial` → `Clean_success` sequence.
-- **Phase 4**: integration test running a real `Sandbox_executor.run` end-to-end against a local docker daemon, side-by-side with the legacy path for one keeper persona.
+- **Phase 4**: integration test running a real `Sandbox_executor.run` end-to-end against a local docker daemon for one Keeper.
 - **Phase 5**: zero `try ... with _ -> None` (or wildcard-only `with`) catch-alls in `keeper_sandbox_control.ml`, except those that re-raise `Eio.Cancel.Cancelled` first. A single-line `rg "try.*with _ -> None"` misses the multi-line `git_string_opt` form (`| Eio.Cancel.Cancelled _ as e -> raise e | _ -> None`), so the check is an AST / multi-line scan rather than a one-line grep.
 
 ## 6. Risks

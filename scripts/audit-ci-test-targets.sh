@@ -88,7 +88,11 @@ echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, al
 # authority tools, memory journal) without lowering the baseline. A PR that
 # wires a suite must lower this number in the same PR, or this check goes red
 # for everyone.
-UNWIRED_BASELINE=732
+# 719 -> 715: measured on the merged tree. All 4 units come from slack
+# main already banked, none from this branch -- it declares its suite and
+# wires it in the same change, so declared and run both rise by one and the
+# unwired count does not move.
+UNWIRED_BASELINE=715
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

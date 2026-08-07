@@ -119,7 +119,7 @@ check_forbidden_active "V4b-retired-state-protocol-zero-pin" \
   "sidecars/" \
   "viewer/src/" \
   "config/prompts/" \
-  "config/personas/"
+  "config/keepers/"
 
 # V6: OAS lifecycle orchestration from keeper_agent_run
 # Oas_worker.run_named calls should be isolated to a thin bridge.

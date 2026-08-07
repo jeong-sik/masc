@@ -70,7 +70,7 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
             absolute_turn: 12,
             turn_ref: 'trace-cmp#12',
             blocks: [
-              { block: 'persona', bytes: 2048, digest: 'persona-digest-aaaaaaaa' },
+              { block: 'keeper_instructions', bytes: 2048, digest: 'keeper-instructions-digest-aaaaaaaa' },
               { block: 'dynamic_context', bytes: 1024, digest: 'dynamic-digest-bbbbbbbb' },
               { block: 'memory_os_recall', bytes: 512, digest: 'memory-digest-cccccccc' },
             ],

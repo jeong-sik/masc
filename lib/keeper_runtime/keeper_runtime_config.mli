@@ -4,7 +4,7 @@
     Per-base-path config for transport liveness, capacity, WebSearch
     provider selection, and other startup-scoped runtime parameters that
     previously lived only in environment variables. Closes the architectural gap
-    where tools/personas/runtime are per-base-path but selected runtime tuning
+    where tools/Keeper instructions/runtime are per-base-path but selected runtime tuning
     was global.
 
     Precedence (highest first):

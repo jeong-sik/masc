@@ -149,12 +149,12 @@ describe('MCP 2026-07-28 dashboard client', () => {
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(okToolResponse())
     const { callMcpTool } = await import('./mcp')
-    await callMcpTool('masc_keeper_create_from_persona', { persona_name: 'sonsukku' })
+    await callMcpTool('masc_keeper_up', { name: 'sonsukku' })
 
     const [, init] = callsByMethod('tools/call')[0]!
     const body = JSON.parse(init.body as string)
     expect(body.params.arguments).toEqual({
-      persona_name: 'sonsukku',
+      name: 'sonsukku',
       _agent_name: 'dashboard',
     })
   })
@@ -167,7 +167,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
     fetchWithTimeout.mockResolvedValueOnce(okToolResponse())
 
     const { callMcpTool } = await import('./mcp')
-    await callMcpTool('masc_persona_list', {})
+    await callMcpTool('masc_keeper_list', {})
 
     const [, init] = callsByMethod('tools/call')[0]!
     const body = JSON.parse(init.body as string)

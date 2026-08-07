@@ -45,7 +45,7 @@ EXTENDS TLC, Naturals, FiniteSets
 
 CONSTANTS
     ArtifactIds,    \* finite universe of artifact ids
-    Personas        \* finite universe of creator names
+    Creators        \* finite universe of creator names
 
 \* The four kind tags exposed by Multimodal.Artifact.kind_tag.
 Kinds == {"code", "image", "audio", "doc"}
@@ -55,7 +55,7 @@ PayloadKinds == {"lazy", "blob_ref", "streaming"}
 
 Provenance == [
     origin_artifact_ids : SUBSET ArtifactIds,
-    created_by : Personas,
+    created_by : Creators,
     created_at : Nat
 ]
 
@@ -140,12 +140,12 @@ ProvenanceOriginsLive ==
             artifacts[o].present)
 
 \* ── Init / Next ──────────────────────────────────────────────────
-\* Pick an arbitrary persona for the placeholder values; it never
+\* Pick an arbitrary creator for the placeholder values; it never
 \* matters because [present = FALSE] for every Init artifact.
-InitPersona == CHOOSE p \in Personas : TRUE
+InitCreator == CHOOSE p \in Creators : TRUE
 
 Init ==
-    /\ artifacts = [ id \in ArtifactIds |-> DefaultArtifact(id, InitPersona, 0) ]
+    /\ artifacts = [ id \in ArtifactIds |-> DefaultArtifact(id, InitCreator, 0) ]
     /\ dag = {}
 
 CreateArtifact(id, k, pk, origins, p, t) ==
@@ -188,7 +188,7 @@ TerminalStutter ==
 
 Next ==
     \/ \E id \in ArtifactIds, k \in Kinds, pk \in PayloadKinds,
-          origins \in SUBSET ArtifactIds, p \in Personas, t \in 0..0 :
+          origins \in SUBSET ArtifactIds, p \in Creators, t \in 0..0 :
             CreateArtifact(id, k, pk, origins, p, t)
     \/ \E from_id \in ArtifactIds, to_id \in ArtifactIds :
             AddEdge(from_id, to_id)

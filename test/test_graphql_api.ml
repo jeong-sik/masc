@@ -76,7 +76,7 @@ let test_messages_temporal_decay_fields () =
   in
   let json =
     graphql_query config
-      "{ messages(first: 10) { totalCount edges { node { from messageType content mention expiresAt relevance } } } }"
+      "{ messages(first: 10) { totalCount edges { node { from messageType content mention expiresAt } } } }"
   in
   let open Yojson.Safe.Util in
   let total = json |> member "data" |> member "messages" |> member "totalCount" |> to_int in
@@ -96,8 +96,6 @@ let test_messages_temporal_decay_fields () =
     (node |> member "mention" |> to_string);
   Alcotest.(check bool) "expiresAt null" true
     (node |> member "expiresAt" = `Null);
-  Alcotest.(check string) "relevance" "medium"
-    (node |> member "relevance" |> to_string);
   cleanup_dir base_path
 
 let () =

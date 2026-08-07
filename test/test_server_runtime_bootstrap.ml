@@ -190,7 +190,6 @@ let make_config_root root =
   let config = Filename.concat root "config" in
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
-  mkdir_p (Filename.concat config "personas");
   write_file
     (Filename.concat config "oas-models-overlay.toml")
     repo_model_catalog_overlay_toml;
@@ -200,7 +199,6 @@ let make_config_root root =
   write_file
     (Filename.concat config "keepers/example.toml")
     "[keeper]\nautoboot_enabled = true\n";
-  write_file (Filename.concat config "personas/example.txt") "persona";
   config
 
 let test_model_catalog_configuration_installs_explicit_env_override () =
@@ -383,12 +381,21 @@ let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
   in
   Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result)
 
+(* Instructions live in [keepers/<name>/AGENT.md], not in the TOML: the loader
+   rejects [keeper.instructions] as an unknown key, and a rejected document
+   leaves the whole profile unloaded. *)
+let write_keeper_instructions keepers_dir name body =
+  let dir = Filename.concat keepers_dir name in
+  mkdir_p dir;
+  write_file (Filename.concat dir "AGENT.md") body
+
 let write_config_root_keeper_toml config_root name =
+  let keepers_dir = Filename.concat config_root "keepers" in
   write_file
-    (Filename.concat (Filename.concat config_root "keepers") (name ^ ".toml"))
-    (Printf.sprintf
-       "[keeper]\ninstructions = \"instructions-%s\"\nautoboot_enabled = true\nsandbox_profile = \"local\"\n"
-       name)
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    "[keeper]\nautoboot_enabled = true\nsandbox_profile = \"local\"\n";
+  write_keeper_instructions keepers_dir name
+    (Printf.sprintf "instructions-%s\n" name)
 
 let fixture_runtime_id () =
   match Runtime.get_default_runtime () with
@@ -404,10 +411,10 @@ let write_basepath_keeper_toml base_path name =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
 {|[keeper]
-instructions = "example"
 proactive_enabled = false
 autoboot_enabled = true
-|}
+|};
+  write_keeper_instructions keepers_dir name "example\n"
 let find_free_port_from start =
   let rec loop attempts port =
     if attempts <= 0 then
@@ -871,7 +878,6 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay (
       let config_root = Filename.concat base_path ".masc/config" in
       mkdir_p config_root;
       write_file (Filename.concat config_root "runtime.toml") local_runtime_toml;
-      mkdir_p (Filename.concat config_root "personas");
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd repo @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
@@ -896,8 +902,6 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay (
         "legacy full model catalog not backfilled"
         false
         (Sys.file_exists (Filename.concat config_root "oas-models.toml"));
-      Alcotest.(check bool) "versioned persona not resurrected" false
-        (Sys.file_exists (Filename.concat config_root "personas/example.txt"));
       ())
 
 let test_bootstrap_base_path_config_root_skips_explicit_config_override () =
@@ -921,7 +925,6 @@ let test_startup_config_resolution_defaults_to_bootstrapped_root () =
       let config_root = Filename.concat base_path ".masc/config" in
       mkdir_p (Filename.concat config_root "prompts");
       mkdir_p (Filename.concat config_root "keepers");
-      mkdir_p (Filename.concat config_root "personas");
       write_file (Filename.concat config_root "runtime.toml") "";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       let resolution =
@@ -995,8 +998,6 @@ let test_bootstrap_empty_mode_creates_scaffold_without_files () =
       Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
       Alcotest.(check bool) "keepers dir scaffolded" true
         (Sys.is_directory (Filename.concat config_root "keepers"));
-      Alcotest.(check bool) "personas dir scaffolded" true
-        (Sys.is_directory (Filename.concat config_root "personas"));
       Alcotest.(check bool) "prompts dir scaffolded" true
         (Sys.is_directory (Filename.concat config_root "prompts"));
       Alcotest.(check bool) "runtime not copied" false
@@ -1715,7 +1716,11 @@ let test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "base.toml")
-      "[keeper]\nautoboot_enabled = true\ninstructions = \"default keeper\"\n";
+      "[keeper]\nautoboot_enabled = true\n";
+    write_keeper_instructions
+      (Filename.concat config_root "keepers")
+      "base"
+      "default keeper\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
     Config_dir_resolver.reset ();
@@ -4364,7 +4369,6 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
         Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
       in
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
-      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       let expected_config = Filename.concat dir ".masc/config" in
@@ -4516,7 +4520,6 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
         Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
       in
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
-      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       let auth_dir = Filename.concat dir ".masc/auth" in
@@ -4599,7 +4602,6 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
   with_temp_dir "startup-keeper-credential-sync" (fun dir ->
       with_env "OAS_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
-      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       write_basepath_keeper_toml dir "masc-improver";
@@ -4652,7 +4654,6 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
   with_temp_dir "startup-keeper-credential-rotate" (fun dir ->
       with_env "OAS_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
-      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       write_basepath_keeper_toml dir "analyst";
@@ -4728,7 +4729,6 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
         Unix.openfile path [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
       in
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
-      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       let env =
@@ -4812,7 +4812,6 @@ let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
         Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
       in
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
-      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       write_invalid_local_only_runtime dir;
@@ -4884,7 +4883,6 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
         Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
       in
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
-      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       write_partially_invalid_runtime ~base_path:dir
@@ -4956,7 +4954,6 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
         Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
       in
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
-      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       write_partially_invalid_default_runtime ~base_path:dir

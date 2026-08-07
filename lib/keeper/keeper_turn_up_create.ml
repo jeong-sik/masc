@@ -161,18 +161,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                     Keeper_context_runtime.create_session ~session_id:trace_id
                       ~base_dir
                   in
-        let persona_extended =
-          Keeper_types_profile.resolved_persona_name ~keeper_name:p.name
-            p.profile_defaults
-          |> Keeper_types_profile.load_persona_extended
-          |> Option.value ~default:""
-        in
       let nonce = 1 in
       let meta = {
         id = None;
         name = p.name;
         agent_name = Keeper_identity.keeper_agent_name p.name;
-        persona = Some persona_extended;
         instructions;
         sandbox_profile;
         sandbox_image = None;

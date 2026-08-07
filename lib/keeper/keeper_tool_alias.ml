@@ -114,7 +114,7 @@ let known_runtime_names_tbl : (string, unit) Hashtbl.t =
     (Keeper_tool_descriptor.all_descriptors ());
   List.iter
     (fun (schema : Masc_domain.tool_schema) -> Hashtbl.replace t schema.name ())
-    Tool_schemas_inline.schemas;
+    Tool_schemas_misc.mcp_runtime_schemas;
   t
 ;;
 

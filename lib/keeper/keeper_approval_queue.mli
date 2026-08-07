@@ -299,6 +299,7 @@ val audit_approval_event :
   ?source_approval_id:string ->
   ?actor:string ->
   ?decision_source:decision_source ->
+  ?authorization_source:authorization_source ->
   ?decision:decision ->
   ?summary_status:summary_status ->
   ?exact_attempt:exact_attempt_state ->

@@ -131,6 +131,12 @@ type decision_source =
   | Auto_judge
   | Human_operator
 
+type authorization_source =
+  | One_shot_resolution
+  | Exact_always_rule
+  | Keeper_always_allow
+  | Workspace_always_allow
+
 type approval_rule =
   { id : string
   ; keeper_name : string
@@ -191,6 +197,21 @@ let decision_source_of_string = function
   | "always_allowed" -> Some Always_allowed
   | "auto_judge" -> Some Auto_judge
   | "human_operator" -> Some Human_operator
+  | _ -> None
+;;
+
+let authorization_source_to_string = function
+  | One_shot_resolution -> "one_shot_resolution"
+  | Exact_always_rule -> "exact_always_rule"
+  | Keeper_always_allow -> "keeper_always_allow"
+  | Workspace_always_allow -> "workspace_always_allow"
+;;
+
+let authorization_source_of_string = function
+  | "one_shot_resolution" -> Some One_shot_resolution
+  | "exact_always_rule" -> Some Exact_always_rule
+  | "keeper_always_allow" -> Some Keeper_always_allow
+  | "workspace_always_allow" -> Some Workspace_always_allow
   | _ -> None
 ;;
 

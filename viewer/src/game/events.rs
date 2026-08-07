@@ -277,15 +277,11 @@ pub struct ActorData {
     #[serde(default)]
     pub archetype: String,
     #[serde(default)]
-    pub persona: String,
-    #[serde(default)]
     pub hp: Option<i32>,
     #[serde(default)]
     pub max_hp: Option<i32>,
     #[serde(default)]
     pub alive: Option<bool>,
-    #[serde(default)]
-    pub traits: Vec<String>,
     #[serde(default)]
     pub skills: Vec<String>,
     #[serde(default)]
@@ -301,7 +297,7 @@ pub struct ActorLifecyclePayload {
     pub class: String,
     #[serde(default)]
     pub keeper: String,
-    /// Server sends nested actor object with hp, max_hp, traits, etc.
+    /// Server sends nested actor state such as hp and max_hp.
     #[serde(default)]
     pub actor: Option<ActorData>,
 }

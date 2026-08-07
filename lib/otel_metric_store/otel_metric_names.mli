@@ -105,7 +105,7 @@ val metric_backend_mutex_held_sec : string
     surfaced so operators can alert on queue pressure without log
     parsing.  Labels: [keeper, channel]. *)
 
-(** #10125: supervisor sweep liveness counters.  See {!Otel_metric_store.ml}
+(** #10125: supervisor sweep liveness counters.  See [otel_metric_store.ml]
     for the rationale.  Counter increments on each Pulse start;
     gauge advances on every successful beat. *)
 

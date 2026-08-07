@@ -2606,3 +2606,5 @@
 (include stanzas/test_keeper_prompt_capture.inc)
 
 (include stanzas/test_keeper_operator_note.inc)
+
+(include stanzas/test_keeper_memory_journal_projection.inc)

@@ -50,6 +50,54 @@ let test_valid_target_still_parses () =
     Alcotest.failf "expected a kind/name target to parse, got %s"
       (C.request_error_to_string err)
 
+(* The field-name hint above closed the target guesses: in the week measured for
+   this change, 0 of 29 delegate rejections were target shape. All 29 were
+   [capability], which the submitter cannot choose -- its enum has one member.
+   22 said "task_assignment" and 7 said "claim_and_execute", both descriptions
+   of the prompt rather than capabilities the contract offers. *)
+
+let request_json ?capability () =
+  `Assoc
+    ((match capability with
+      | None -> []
+      | Some value -> [ "capability", `String value ])
+     @ [ "target", `Assoc [ "kind", `String "keeper"; "name", `String "analyst" ]
+       ; "prompt", `String "Claim and work on task-154."
+       ])
+
+let test_omitted_capability_is_accepted () =
+  match C.request_of_json (request_json ()) with
+  | Ok _ -> ()
+  | Error err ->
+    Alcotest.failf "expected a request without capability to parse, got %s"
+      (C.request_error_to_string err)
+
+let test_stated_capability_still_parses () =
+  match C.request_of_json (request_json ~capability:"invoke_turn" ()) with
+  | Ok _ -> ()
+  | Error err ->
+    Alcotest.failf "expected capability=invoke_turn to parse, got %s"
+      (C.request_error_to_string err)
+
+(* Omitting is not the same as widening: the two values actually sent are still
+   refused, and the refusal still names what the field accepts. *)
+let test_the_invented_capabilities_are_still_refused () =
+  List.iter
+    (fun value ->
+      match C.request_of_json (request_json ~capability:value ()) with
+      | Ok _ -> Alcotest.failf "expected capability=%s to be refused" value
+      | Error err ->
+        let msg = C.request_error_to_string err in
+        Alcotest.(check bool)
+          (Printf.sprintf "%s rejection names the field" value)
+          true
+          (contains ~needle:"delegate.capability" msg);
+        Alcotest.(check bool)
+          (Printf.sprintf "%s rejection names the accepted value" value)
+          true
+          (contains ~needle:"invoke_turn" msg))
+    [ "task_assignment"; "claim_and_execute" ]
+
 let () =
   Alcotest.run "keeper_invocation_contract_hints"
     [ ( "undeclared_field_hint"
@@ -59,5 +107,13 @@ let () =
             test_other_guessed_names_get_the_same_hint
         ; Alcotest.test_case "a valid target still parses" `Quick
             test_valid_target_still_parses
+        ] )
+    ; ( "single_value_capability"
+      , [ Alcotest.test_case "omitted capability is accepted" `Quick
+            test_omitted_capability_is_accepted
+        ; Alcotest.test_case "stated capability still parses" `Quick
+            test_stated_capability_still_parses
+        ; Alcotest.test_case "the invented values are still refused" `Quick
+            test_the_invented_capabilities_are_still_refused
         ] )
     ]

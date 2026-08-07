@@ -266,7 +266,12 @@ let schemas : tool_schema list = [
   ; description = "Submit one typed, non-blocking Keeper invocation and return its durable run_ref."
   ; input_schema =
       closed_object_schema
-        ~required:[ "target"; "capability"; "prompt" ]
+        (* [capability] is not required: its enum has one member, so demanding it
+           asks the submitter to restate a value it cannot choose. Every
+           delegate rejection in the week before this change was this field,
+           filled in with a description of the prompt instead. Omitting it
+           resolves to [invoke_turn]; an explicit wrong value is still refused. *)
+        ~required:[ "target"; "prompt" ]
         [ "target", keeper_invocation_target_schema
         ; ( "capability"
           , `Assoc

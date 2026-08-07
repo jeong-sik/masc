@@ -445,6 +445,9 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
       let status_str = Masc_domain.string_of_task_status task.task_status in
       Printf.bprintf buf "%s [%d] %s: %s\n" status_icon task.priority task.id task.title;
       Printf.bprintf buf "   └─ %s | %s\n" status_str assignee;
+      (match task.required_repo with
+       | Some repo -> Printf.bprintf buf "   └─ required_repo=%s\n" repo
+       | None -> ());
       match task.task_status with
       | Masc_domain.AwaitingVerification { verification_id; _ } ->
         (* Task listing is metadata-only by construction. Evidence bytes are

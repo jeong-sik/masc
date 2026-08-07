@@ -10,19 +10,65 @@ let primary_goal_id_opt (meta : keeper_meta) =
   | goal_id :: _ -> Some goal_id
   | [] -> None
 
+(* Why a goal id in [meta.active_goal_ids] does not survive the cross-check.
+   The two are different facts about the operator's declaration — an id that
+   resolves to nothing is a typo or a deleted goal, a Completed one was correct
+   when it was written — so they are carried and reported apart instead of
+   collapsing into one "invalid" count that would misname the second. *)
+type pruned_goal =
+  | Not_in_store of string
+  | Terminal_phase of string * Goal_phase.t
+
+let describe_pruned_goal = function
+  | Not_in_store goal_id -> goal_id
+  | Terminal_phase (goal_id, phase) ->
+    Printf.sprintf "%s(%s)" goal_id (Goal_phase.to_string phase)
+
 (** Cross-check [meta.active_goal_ids] against the live MASC goal store.
-    Returns only goal IDs that actually exist. Logs pruned IDs at warn level. *)
+
+    Returns the goal IDs that exist AND still admit self-directed progress.
+    [Goal_phase.admits_self_directed_progress] is the same predicate the world
+    observation and the unified prompt already apply, and applying it here is
+    what makes those consumers read one answer: everything else derives from
+    [meta.active_goal_ids] after this function has replaced it — the claim-scope
+    filter, [primary_goal_id_opt], and the [goal_ids] stamped on the runtime
+    contract — so a Completed goal was scope for them and absent for the prompt
+    at the same instant.
+
+    RFC-0067 §1 names this failure ("G1 is marked completed ... Claim still
+    succeeds ... but the task is now irrelevant") and closed the seconds-wide
+    observe/claim race; its §8 comparison records that the chosen approach
+    "doesn't catch goal property changes (status, phase)", which is the residue
+    this closes. Measured 2026-08-07: sangsu carried goal-request-menu-zero for
+    5,362 tool calls across 2.5 days after it completed, stamped goal-bound the
+    whole time, with an empty Active goals section in every one of those turns. *)
 let validate_active_goal_ids ~(config : Workspace.config) ~(meta : keeper_meta) () =
-  let valid_goal_ids, invalid_goal_ids =
-    List.partition
-      (fun goal_id -> Option.is_some (Goal_store.get_goal config ~goal_id))
+  let valid_goal_ids, pruned =
+    List.partition_map
+      (fun goal_id ->
+        match Goal_store.get_goal config ~goal_id with
+        | None -> Either.Right (Not_in_store goal_id)
+        | Some { Goal_store.phase; _ } ->
+          if Goal_phase.admits_self_directed_progress phase then Either.Left goal_id
+          else Either.Right (Terminal_phase (goal_id, phase)))
       meta.active_goal_ids
   in
-  if invalid_goal_ids <> [] then
-    Log.Keeper.warn ~keeper_name:meta.name
-      "pruned %d invalid goal_ids from active_goal_ids: %s"
-      (List.length invalid_goal_ids)
-      (String.concat ", " invalid_goal_ids);
+  let report label selected =
+    match List.filter selected pruned with
+    | [] -> ()
+    | dropped ->
+      Log.Keeper.warn ~keeper_name:meta.name
+        "pruned %d %s goal_ids from active_goal_ids: %s"
+        (List.length dropped)
+        label
+        (String.concat ", " (List.map describe_pruned_goal dropped))
+  in
+  report "invalid" (function
+    | Not_in_store _ -> true
+    | Terminal_phase _ -> false);
+  report "terminal-phase" (function
+    | Terminal_phase _ -> true
+    | Not_in_store _ -> false);
   valid_goal_ids
 
 let backend_of_meta (meta : keeper_meta) =

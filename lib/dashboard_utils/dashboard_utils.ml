@@ -73,8 +73,14 @@ let severity_rank_of_health_level = Health_status.rank
 (** Status/health classification predicates — single source of truth.
     Used across dashboard, briefing, and operator modules. *)
 
-let is_keeper_offline status =
-  List.mem status [ "offline"; "inactive"; "error" ]
+(* [status] arrives from the operator snapshot, where it is
+   [Keeper_status_runtime.control_plane_status_to_string]'s output:
+   paused / active / busy / listening / inactive / offline / idle. That
+   producer emits no "error", so the arm that used to be here could not
+   match. Compared as strings rather than decoded because this library
+   holds only masc_types and masc_core — reaching the keeper module
+   would invert the dependency. *)
+let is_keeper_offline status = List.mem status [ "offline"; "inactive" ]
 
 let is_health_critical = Health_status.requires_operator_action
 

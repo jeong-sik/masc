@@ -42,6 +42,11 @@ val get_bool_strict : default:bool -> string -> bool
     security-sensitive boundaries where warn-and-default would fail open. *)
 
 val get_int_nonneg : default:int -> string -> int
+(** Like {!get_int} but floors negative parses at [default].  Use
+    for env vars whose call sites treat negatives as nonsensical
+    (retry caps, byte budgets, max counts).  NaN-equivalent for
+    [int] does not exist, so the only extra rejection vs {!get_int}
+    is [v < 0]. *)
 
 val default_jsonl_retention_days : int
 (** The value {!jsonl_retention_days} falls back to.  Exposed because a
@@ -53,11 +58,6 @@ val jsonl_retention_days : unit -> int
 (** [MASC_JSONL_RETENTION_DAYS], default 30.  Day-file retention for the
     JSONL stores under [.masc], shared by the startup prune, the periodic
     maintenance prune, and the catch-up digest look-back clamp. *)
-(** Like {!get_int} but floors negative parses at [default].  Use
-    for env vars whose call sites treat negatives as nonsensical
-    (retry caps, byte budgets, max counts).  NaN-equivalent for
-    [int] does not exist, so the only extra rejection vs {!get_int}
-    is [v < 0]. *)
 
 val get_float_nonneg : default:float -> string -> float
 (** Like {!get_float} but floors all non-finite (NaN, +∞, -∞) and

@@ -12,6 +12,7 @@ import {
   fetchKeeperMemoryJournal,
   type MemoryJournal,
 } from '../api/dashboard-memory-journal'
+import { KeeperTurnInspectorPanel } from './keeper-turn-inspector-panel'
 import { registerInternalAgentRefresh } from '../sse-store'
 import { Btn } from './btn'
 import { EmptyState, ErrorState } from './common/feedback-state'
@@ -276,6 +277,19 @@ export function InternalAgentsMonitor() {
 
   const visible = useMemo(() => rows.filter(row => matches(row, filter)), [rows, filter])
 
+  // The inspector needs a keeper to address, and the observed runs already name
+  // every keeper that has produced one. Fusion rows carry a keeper directly;
+  // exact lanes carry it as the actor. Verification runs are keyed by evaluator
+  // runtime rather than a keeper, so they contribute none.
+  const keepers = useMemo(() => {
+    const names = new Set<string>()
+    for (const row of rows) {
+      if (row.source === 'fusion') names.add(row.run.keeper)
+      else if (row.source === 'exact') names.add(row.run.actor)
+    }
+    return Array.from(names).sort()
+  }, [rows])
+
   return html`
     <section class="v2-monitoring-surface grid gap-3" data-testid="internal-agents-monitor">
       <div class="flex flex-wrap items-center gap-2">
@@ -298,6 +312,7 @@ export function InternalAgentsMonitor() {
         `)}
       </div>
       ${errors.length > 0 ? html`<${ErrorState}>${errors.join(' · ')}<//>` : null}
+      <${KeeperTurnInspectorPanel} keepers=${keepers} />
       ${!loading && visible.length === 0
         ? html`<${EmptyState}>No internal agent runs for this filter.<//>`
         : html`<div class="grid gap-2">

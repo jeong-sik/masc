@@ -1040,6 +1040,15 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_repos_relative_path
 
+      - name: Run RFC 3339 writer suite
+        # @check compiles this one but never runs it, and its whole job is to
+        # catch a silent divergence: a delegate drifting from the owner, or the
+        # writer emitting something Time_codec.parse_rfc3339 cannot read back.
+        # Neither shows up as a compile error.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_rfc3339_format_owner
+
       - name: Run JSONL day-key suite
         # The key and the writer's path have to name the same day. A reader
         # that drifts does not error -- it filters a layout the writer does

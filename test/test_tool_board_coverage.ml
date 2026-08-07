@@ -1964,6 +1964,41 @@ let test_post_update_schema_exposes_new_author () =
 
 (** {1 Test Runner} *)
 
+(* An [@] a keeper name could never be is prose. [Agent_id] accepts 1..64 of
+   [a-zA-Z0-9._-] with one optional colon, so a bare "@", an npm scope and a
+   path all fail that shape -- and used to take the whole post down with them.
+   Each case below is a shape the live board log carried while the post was
+   refused. *)
+let comment_audience content =
+  Masc.Board.audience_for_comment ~content
+
+let post_audience content =
+  Masc.Board.audience_for_post ~visibility:Masc.Board.Public ~title:"t" ~content
+
+let label_of = function
+  | Ok audience -> Masc.Board.audience_label audience
+  | Error _ -> "error"
+
+let test_prose_at_is_not_an_address () =
+  Alcotest.(check string) "bare @ in a comment" "thread_participants"
+    (label_of (comment_audience "ping @ me later"));
+  Alcotest.(check string) "npm scope" "discoverable"
+    (label_of (post_audience "see @internals/libs/errors/asyncErrorHandler."));
+  Alcotest.(check string) "bare @@" "thread_participants"
+    (label_of (comment_audience "the @@ operator"))
+
+let test_a_named_broadcast_selector_is_still_refused () =
+  (* An author who wrote @@something meant to broadcast and named a selector
+     that does not exist. That is worth refusing; the empty one is not. *)
+  Alcotest.(check string) "unknown selector" "error"
+    (label_of (comment_audience "heads up @@everyone"))
+
+let test_a_well_shaped_name_is_still_a_target () =
+  Alcotest.(check string) "plain name" "targets"
+    (label_of (comment_audience "@analyst please look"));
+  Alcotest.(check string) "namespaced name" "targets"
+    (label_of (comment_audience "@keeper:analyst please look"))
+
 let () =
   Eio_main.run @@ fun env ->
   current_eio_env := Some env;
@@ -2108,6 +2143,15 @@ let () =
             test_dispatch_post_update_transfers_author;
           Alcotest.test_case "post update missing id" `Quick
             test_dispatch_post_update_missing_id;
+        ] );
+      ( "board addressing",
+        [
+          Alcotest.test_case "an @ in prose is not an address" `Quick
+            test_prose_at_is_not_an_address;
+          Alcotest.test_case "a named broadcast selector is still refused" `Quick
+            test_a_named_broadcast_selector_is_still_refused;
+          Alcotest.test_case "a well-shaped name is still a target" `Quick
+            test_a_well_shaped_name_is_still_a_target;
         ] );
       ( "schemas",
         [

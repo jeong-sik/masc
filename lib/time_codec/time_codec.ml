@@ -1,5 +1,21 @@
 type parse_error = Invalid_rfc3339
 
+(* Kept on [Unix.gmtime] rather than [Ptime.to_rfc3339] so that collapsing
+   the eight copies changes no output. Ptime cannot represent the whole
+   float range, so a Ptime-backed writer would have to return an option and
+   every caller would have to answer for it — that is #27131, not this. *)
+let rfc3339_of_unix seconds =
+  let tm = Unix.gmtime seconds in
+  Printf.sprintf
+    "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1)
+    tm.Unix.tm_mday
+    tm.Unix.tm_hour
+    tm.Unix.tm_min
+    tm.Unix.tm_sec
+;;
+
 let parse_ptime ?(strict = true) value =
   match Ptime.of_rfc3339 ~strict value with
   | Ok (timestamp, _, _) -> Ok timestamp

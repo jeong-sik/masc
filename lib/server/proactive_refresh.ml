@@ -12,7 +12,6 @@ type config = {
   failure_threshold : int;
   timeout_s : float;
   on_error : (exn -> unit) option;
-  health_check : (unit -> bool) option;
   warm_delay_s : float;
   warn_first_failure : bool;
 }
@@ -25,7 +24,6 @@ let default_config ~label ~interval_s =
     failure_threshold = 3;
     timeout_s = 10.0;
     on_error = None;
-    health_check = None;
     warm_delay_s = 0.0;
     warn_first_failure = true;
   }
@@ -137,27 +135,6 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
     let rec loop () =
       let jitter = Random.float (!current_interval *. 0.25) in
       Eio.Time.sleep clock (!current_interval +. jitter);
-      let health_ok = match config.health_check with
-        | None -> true
-        | Some check -> Safe_ops.protect ~default:false check
-      in
-      if not health_ok then begin
-        incr consecutive_failures;
-        if !consecutive_failures >= config.failure_threshold then
-          current_interval :=
-            min config.max_backoff_s (!current_interval *. 2.0);
-        let message =
-          Printf.sprintf
-            "%s skipped: health gate failed (%d consecutive, next in %.0fs)"
-            config.label !consecutive_failures !current_interval
-        in
-        log_dashboard_refresh_failure message
-          ~warn:
-            (should_warn_refresh_failure
-               ~failure_threshold:config.failure_threshold
-               ~warn_first_failure:config.warn_first_failure
-               !consecutive_failures)
-      end else
       let t0 = Time_compat.now () in
       (try
          match

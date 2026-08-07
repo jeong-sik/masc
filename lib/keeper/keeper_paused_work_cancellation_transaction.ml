@@ -59,13 +59,6 @@ let failure_to_string = function
   | Queue_commit_failed detail -> "accepted cancellation commit failed: " ^ detail
 ;;
 
-let release_outcome_to_string = function
-  | Keeper_lifecycle_reservation.Released -> "released"
-  | Keeper_lifecycle_reservation.Release_missing -> "release_missing"
-  | Keeper_lifecycle_reservation.Release_not_owner owner ->
-    "release_not_owner: " ^ Keeper_lifecycle_reservation.snapshot_to_string owner
-;;
-
 let error_to_string = function
   | Admission_busy block ->
     Printf.sprintf
@@ -81,7 +74,7 @@ let error_to_string = function
        Printf.sprintf
          "%s; reservation_release=%s"
          (failure_to_string cause)
-         (release_outcome_to_string release))
+         (Keeper_lifecycle_reservation.release_outcome_to_string release))
 ;;
 
 let cancellation_of_pending_request (request : pending_request) :
@@ -207,7 +200,7 @@ let cancel_with_lifecycle
             Log.Keeper.error
               "paused cancellation exception release failed keeper=%s outcome=%s"
               keeper_name
-              (release_outcome_to_string release));
+              (Keeper_lifecycle_reservation.release_outcome_to_string release));
          raise exn)
   in
   match replay_committed ~base_path ~keeper_name replay with

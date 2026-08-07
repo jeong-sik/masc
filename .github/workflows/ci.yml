@@ -1832,6 +1832,25 @@ jobs:
       - name: Run dashboard agent-status SSOT lint (RFC-0139 §10)
         run: bash scripts/lint/dashboard-ssot-agent-status.sh
 
+      # 32 scripts live in scripts/lint/; before this step six of them ran.
+      # The other 26 were written, committed, and never executed. They all
+      # pass on the tree as of this change, so wiring them costs nothing now
+      # and makes the next violation fail here instead of landing.
+      #
+      # Globbing rather than listing: a lint added to the directory should
+      # run without a second edit here, which is exactly how the 26 accrued.
+      - name: Run every scripts/lint shell check
+        run: |
+          set -euo pipefail
+          failed=0
+          for f in scripts/lint/*.sh; do
+            if ! bash "$f"; then
+              echo "::error title=lint failed::$f"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
       - name: Check Eio conventions
         run: |
           chmod +x scripts/check-eio-conventions.sh

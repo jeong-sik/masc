@@ -1142,6 +1142,20 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_autoboot_single_owner"
 
+      - name: Run keeper meta current-schema conformance suite
+        # This suite would have caught masc#27393 (fleet-wide autoboot 0/7:
+        # the persona hard-cut's schema change made every real, durable
+        # keeper meta JSON unloadable) before it reached production -- it
+        # was compiling under @check but never executing in CI.
+        id: keeper_meta_current_schema_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_meta_current_schema"
+
       # NOTE: the "Shell IR differential-safety harness gate" step was removed
       # here. #24332 (nonhierarchical Gate refactor) retired the entire
       # shell_ir risk/typed subsystem (Shell_ir_risk, Shell_ir_typed,

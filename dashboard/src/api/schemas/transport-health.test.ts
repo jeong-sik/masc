@@ -202,7 +202,6 @@ describe('parseTransportHealthData', () => {
         observer_stream: '/mcp?sse_kind=observer',
         presence_stream: '/events/presence',
         managed_endpoint: '/mcp/managed',
-        operator_endpoint: '/mcp/operator',
         delete_endpoint: '/mcp',
         default_transport: 'streamable_http',
         supports_post: true,

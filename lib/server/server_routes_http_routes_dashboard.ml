@@ -293,14 +293,12 @@ let runtime_config_path_error_status message =
   else `Internal_server_error
 
 type runtime_config_write_operation =
-  | Runtime_config_reload
   | Runtime_config_raw_save
   | Runtime_config_routing of runtime_route_lane * string option
   | Runtime_config_routing_list of runtime_route_lane * string list
   | Runtime_config_assignment of string * string option
 
 let runtime_config_write_operation_details = function
-  | Runtime_config_reload -> [ ("operation", `String "reload") ]
   | Runtime_config_raw_save -> [ ("operation", `String "raw_save") ]
   | Runtime_config_routing (lane, runtime_id) ->
     [ ("operation", `String "routing")

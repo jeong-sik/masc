@@ -206,6 +206,42 @@ let test_unevaluated_metric_is_display_only_for_completion () =
   check string "executing goal is completion-ready" "ready_for_completion"
     (json_str json "state")
 
+(* The unit comes from the target value, not from English nouns in the metric
+   name. A Korean metric that ends in 수 (count) with a numeric target is
+   measured as a count; the removed word list required one of
+   task/todo/issue/ticket/pr/done to appear as an ASCII token, and this
+   metric tokenizes to ["end"; "to"; "end"], so it reported
+   [unsupported_metric] instead. *)
+let test_korean_count_metric_is_measured () =
+  let g =
+    make_goal ~metric:"end-to-end 설계+구현 완료 서비스 수" ~target_value:"1개 이상"
+      "g-ko" "korean count goal"
+  in
+  let node = make_node ~tasks:[ make_done_task "t1" ] g in
+  let json = A.goal_attainment_to_json g node in
+  check string "count target is measured" "metric_target_count"
+    (json_str json "basis");
+  check string "unit is a count" "count" (json_str json "unit");
+  check string "target parsed" "parseable" (json_str json "target_parse_status")
+
+(* A metric name whose words used to imply a percentage no longer does. Only
+   the target value's own marker selects [Percent]. *)
+let test_metric_word_does_not_select_percent () =
+  let g =
+    make_goal ~metric:"weekly completion rate" ~target_value:"12" "g-rate"
+      "rate-named goal"
+  in
+  let node = make_node ~tasks:[ make_done_task "t1" ] g in
+  let json = A.goal_attainment_to_json g node in
+  check string "unit follows the target value" "count" (json_str json "unit");
+  let pct_goal =
+    make_goal ~metric:"weekly completion rate" ~target_value:"80%" "g-pct"
+      "percent target"
+  in
+  let pct_json = A.goal_attainment_to_json pct_goal (make_node ~tasks:[ make_done_task "t1" ] pct_goal) in
+  check string "an explicit percent target still selects percent" "percent"
+    (json_str pct_json "unit")
+
 let test_keeper_receipt_timeline_missing_runtime_stays_missing () =
   let goal = make_goal "g7" "timeline" in
   let meta = make_keeper_meta "timeline-keeper" in
@@ -467,5 +503,9 @@ let () =
             test_goal_owner_timeline_names_the_transition;
           test_case "goal_owner timeline names unassigned sides" `Quick
             test_goal_owner_timeline_names_unassigned_sides;
+          test_case "korean count metric is measured" `Quick
+            test_korean_count_metric_is_measured;
+          test_case "metric wording does not select percent" `Quick
+            test_metric_word_does_not_select_percent;
         ] );
     ]

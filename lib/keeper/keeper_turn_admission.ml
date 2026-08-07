@@ -146,8 +146,7 @@ type intake_token =
   }
 
 type token =
-  { slot : slot
-  ; mutable active : bool
+  { mutable active : bool
   ; mutable before_dispatch_authority : (unit -> (unit, string) result) option
   }
 
@@ -234,7 +233,7 @@ let peek_shutdown slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.shut
    cancellation cannot leak the slot; the exception arm releases on every
    raise out of [f], including [Eio.Cancel.Cancelled]. *)
 let run_locked_with_token slot ~lane f =
-  let token = { slot; active = true; before_dispatch_authority = None } in
+  let token = { active = true; before_dispatch_authority = None } in
   let admission =
     Stdlib.Mutex.protect slot.state_mu (fun () ->
       match slot.shutdown_operation_id with

@@ -740,7 +740,6 @@ let transport_health_json ~config =
           ; "observer_stream", `String "/mcp?sse_kind=observer"
           ; "presence_stream", `String "/events/presence"
           ; "managed_endpoint", `String "/mcp/managed"
-          ; "operator_endpoint", `String "/mcp/operator"
           ; "delete_endpoint", `String "/mcp"
           ; "default_transport", `String "streamable_http"
           ; "configured", `Bool true

@@ -138,6 +138,7 @@ let test_event_tool_called () =
     session_id = Some "mcp-session-1";
     operation_id = Some "op-1";
     worker_run_id = Some "run-1";
+    execution_id = None;
     error_kind = Some (error_kind "timeout");
     error_message = Some "timed out after 30s";
     exit_code = None;

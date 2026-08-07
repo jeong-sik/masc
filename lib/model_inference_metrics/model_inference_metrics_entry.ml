@@ -143,21 +143,6 @@ type aggregate =
   ; cost_read : cost_read_result
   }
 
-(** Per-provider rollup of {!model_stats} aggregated across every model id
-    whose [provider] matches. *)
-type provider_stats =
-  { ps_provider : string
-  ; ps_entry_count : int
-  ; ps_model_count : int
-  ; ps_avg_tok_per_sec : float option
-  ; ps_avg_prompt_tok_per_sec : float option
-  ; ps_avg_decode_tok_per_sec : float option
-  ; ps_avg_latency_ms : float option
-  ; ps_p50_latency_ms : float option
-  ; ps_p95_latency_ms : float option
-  ; ps_total_cost_usd : float option
-  }
-
 (* ── Internal: in-memory representation of a parsed JSONL row ─────── *)
 
 type raw_entry =

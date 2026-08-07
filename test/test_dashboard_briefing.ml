@@ -468,7 +468,7 @@ let make_message ?mention ~seq ~from_agent ~content () : Types.message =
     timestamp = "";
     trace_context = None;
     expires_at = None;
-    relevance = "medium" }
+    }
 
 (* Regression: a degenerate agent record with an empty/whitespace name must not
    crash latest_message_to (String.get on an empty [lowered]). *)

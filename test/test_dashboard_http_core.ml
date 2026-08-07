@@ -2067,7 +2067,7 @@ let test_dashboard_execution_trust_default_route_uses_cached_surface () =
     (json |> member "dashboard_surface_envelope" |> member "cache" |> member "key"
      |> to_string)
 
-let test_dashboard_message_json_surfaces_temporal_decay_fields () =
+let test_dashboard_message_json_surfaces_temporal_fields () =
   let message : Types.message =
     {
       seq = 7;
@@ -2078,7 +2078,6 @@ let test_dashboard_message_json_surfaces_temporal_decay_fields () =
       timestamp = "2026-05-07T00:00:00Z";
       trace_context = Some "traceparent";
       expires_at = Some 1_714_067_200.0;
-      relevance = "critical";
     }
   in
   let json = Server_dashboard_http_core.dashboard_message_json message in
@@ -2087,9 +2086,7 @@ let test_dashboard_message_json_surfaces_temporal_decay_fields () =
   check string "trace_context" "traceparent"
     (json |> member "trace_context" |> to_string);
   check (float 0.001) "expires_at" 1_714_067_200.0
-    (json |> member "expires_at" |> to_float);
-  check string "relevance" "critical"
-    (json |> member "relevance" |> to_string)
+    (json |> member "expires_at" |> to_float)
 
 (* RFC-0138 Phase 3 Step 1 — /shell snapshot wire tests.
 
@@ -3442,7 +3439,7 @@ let () =
           test_case "execution trust default route uses cached surface" `Quick
             test_dashboard_execution_trust_default_route_uses_cached_surface;
           test_case "message JSON exposes temporal decay fields" `Quick
-            test_dashboard_message_json_surfaces_temporal_decay_fields;
+            test_dashboard_message_json_surfaces_temporal_fields;
           test_case "RFC-0138 shell wire returns snapshot when published" `Quick
             test_shell_snapshot_wire_returns_snapshot_when_published;
           test_case "RFC-0138 shell wire falls back when snapshot empty" `Quick

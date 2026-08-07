@@ -119,21 +119,13 @@ val task_status_to_string : task_status -> string
 val string_of_task_status : task_status -> string
 val task_status_icon : task_status -> string
 val task_display_assignee : task_status -> string
-(** Who acted on a Task, and in what relationship. A bare [string option]
-    records the name and drops the role, which let three separate local
-    [task_assignee] helpers disagree about [Done] and [Cancelled]. Naming the
-    role makes that disagreement unwritable, and a new status must state which
-    role it carries. *)
-type task_actor =
-  | Unassigned
-  | Holder of string
-  | Submitter of string
-  | Completer of string
-  | Canceller of string
-
-val task_actor_of_status : task_status -> task_actor
-
-val task_actor_name : task_actor -> string option
+(* [task_actor] and [task_actor_of_status] stay inside this module. They exist
+   so the three questions below cannot disagree about [Done] and [Cancelled] --
+   each is a total match over the same sum -- and that job is done entirely
+   here. Nothing outside ever named the type or its constructors, so exporting
+   them offered a second vocabulary for "who acted on a Task" beside the three
+   answers that are actually asked for. [task_actor_name] had no caller at all
+   and is gone. *)
 
 (** Who owes work now. [Done] and [Cancelled] owe nothing. *)
 val task_assignee_of_status : task_status -> string option

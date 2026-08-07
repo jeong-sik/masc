@@ -352,10 +352,6 @@ let test_dashboard_event_uses_bus_emission_time () =
         1_774_000_000.5 parsed.Ws.broadcast_ts
   | None -> Alcotest.fail "expected derived event"
 
-(* Read counter deltas because the global state is shared across tests. *)
-let read_counter name =
-  Masc.Otel_metric_store.metric_value_or_zero name ()
-
 let test_bigstring_of_shared_text_reuses_same_ref () =
   let text = String.make 32 'x' in
   let b1 = Ws.bigstring_of_shared_text text in

@@ -363,7 +363,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  Keeper_metrics.(to_string WriteMetaFailures)
                  ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
                  ();
-               tool_result_error e
+               tool_result_error (Keeper_meta_store.write_meta_error_to_string e)
              | Ok () ->
                (match
                   Keeper_shutdown_supersession.commit_after_metadata_update

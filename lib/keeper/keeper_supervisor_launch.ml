@@ -501,7 +501,7 @@ let launch_supervised_fiber_body
                       Log.Keeper.warn
                         "%s: fiber_unresolved meta stamp failed: %s"
                         meta.name
-                        err)
+                        (Keeper_meta_store.write_meta_error_to_string err))
                  | None -> ());
                 let ts = Time_compat.now () in
                 Keeper_registry.record_crash ~base_path meta.name ts reason;

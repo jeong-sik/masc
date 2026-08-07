@@ -21,8 +21,6 @@ let runtime_meta_write_sync_hook config meta =
 let register_runtime_meta_write_sync f =
   Atomic.set runtime_meta_write_sync_hook_atomic f
 
-let version_conflict_re = Re.Pcre.re "meta version conflict" |> Re.compile
-
 let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =
   if not (Fs_compat.file_exists path)
   then Ok None
@@ -424,14 +422,6 @@ let write_meta_deferred_runtime_sync config m =
   |> Result.map_error write_meta_error_to_string
 ;;
 
-let is_version_conflict_error msg =
-  try
-    ignore (Re.exec version_conflict_re msg);
-    true
-  with
-  | Not_found -> false
-;;
-
 (* #9769 root fix: CAS retry with explicit field ownership. The
    turn-failure/cycle path uses [Keeper_meta_merge.heartbeat_fields_from_disk]
    now only carries the disk meta_version forward. *)
@@ -441,15 +431,15 @@ let write_meta_with_merge_internal
       ~(merge : latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta)
       config
       (m : Keeper_meta_contract.keeper_meta)
-  : (unit, string) result
+  : (unit, write_meta_error) result
   =
   let path = keeper_meta_path config m.name in
   let rec attempt n (caller : Keeper_meta_contract.keeper_meta) =
     match write_meta_typed ?lifecycle_token config caller with
     | Ok () -> Ok ()
-    | Error error when n >= max_retries -> Error (write_meta_error_to_string error)
+    | Error error when n >= max_retries -> Error error
     | Error ((Lifecycle_reserved _ | Read_failed _ | Persist_failed _ | Invariant_violation _) as error) ->
-      Error (write_meta_error_to_string error)
+      Error error
     | Error (Version_conflict _) ->
       (match read_meta_file_path path with
        | Ok (Some latest) ->
@@ -469,7 +459,9 @@ let write_meta_with_merge_internal
          (* Disk file vanished between attempts; fall back to fresh write. *)
          attempt (n + 1) { caller with meta_version = 0 }
        | Error read_msg ->
-         Error (Printf.sprintf "write_meta retry: failed to re-read for CAS: %s" read_msg))
+         Error
+           (Read_failed
+              (Printf.sprintf "write_meta retry: failed to re-read for CAS: %s" read_msg)))
   in
   attempt 0 m
 ;;
@@ -485,6 +477,7 @@ let write_meta_with_merge_for_lifecycle token ?max_retries ~merge config m =
     ~merge
     config
     m
+  |> Result.map_error write_meta_error_to_string
 ;;
 
 (* Durable write-through of [compaction_rt.last_decision].
@@ -522,6 +515,7 @@ let persist_compaction_commit_projection config ~keeper_name ~commit_count
       ~merge:(fun ~latest ~caller:_ -> stamp latest)
       config
       (stamp disk_meta)
+    |> Result.map_error write_meta_error_to_string
     |> Result.map (fun () ->
       Log.Keeper.info
         ~keeper_name

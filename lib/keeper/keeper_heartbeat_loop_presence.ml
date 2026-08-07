@@ -131,6 +131,7 @@ let repair_identity_drift_for_keepalive ?lifecycle_token ~(ctx : _ context) (met
              ~merge:Keeper_meta_merge.monotonic_usage_counters
              ctx.config
              repaired
+           |> Result.map_error Keeper_meta_store.write_meta_error_to_string
          | Some token ->
            write_meta_with_merge_for_lifecycle
              token
@@ -219,7 +220,8 @@ let sync_keeper_presence
         Keeper_metrics.(to_string WriteMetaFailures)
         ~labels:[ "keeper", synced.name; "phase", "heartbeat" ]
         ();
-      Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
+      Log.Keeper.warn "write_meta failed (heartbeat): %s"
+        (Keeper_meta_store.write_meta_error_to_string e);
       synced
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

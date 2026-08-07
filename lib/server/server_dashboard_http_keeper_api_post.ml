@@ -1280,7 +1280,7 @@ let persist_directive_pause ~config ~name
     Log.Keeper.warn
       "directive pause: write_meta failed for %s: %s"
       name
-      err;
+      (Keeper_meta_store.write_meta_error_to_string err);
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string PausedStatePersistErrors)
       ~labels:
@@ -1378,7 +1378,8 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
                [ "ok", `Bool false
                ; "action", `String action_str
                ; "name", `String name
-               ; "error", `String error
+               ; ( "error"
+                 , `String (Keeper_meta_store.write_meta_error_to_string error) )
                ])
             reqd
         | Ok () ->
@@ -1534,7 +1535,8 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
                  `Assoc
                    [ "name", `String name
                    ; "ok", `Bool false
-                   ; "error", `String error
+                   ; ( "error"
+                     , `String (Keeper_meta_store.write_meta_error_to_string error) )
                    ]
                | Ok () ->
                  let resolved_agent_name =

@@ -547,7 +547,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # merged tree after main's batch-1..3 landed, not computed from the batch
 # size -- the merge also dropped should_use_dict, which lost its last
 # caller when batch 1 removed the dictionary helpers around it.
-DEAD_EXPORT_BASELINE = 574
+# 573 -> 572: this PR drops extract_checkin_text and the
+# proactive_has_terminal_korean_ending val. Measured on the merged tree with
+# --exports; the 574 this branch carried was derived against main at 575, and
+# #27460 has since taken main to 573, so 574 would have raised the ratchet.
+DEAD_EXPORT_BASELINE = 572
 
 
 def run_ratchet(count: int) -> int:

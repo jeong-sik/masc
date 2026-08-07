@@ -118,7 +118,12 @@ let concrete_verification_evidence ?(notes = "") ?handoff_context
 (* JSON object fields for the typed split, spliced into the verification
    request output / board meta / SSE alongside the unchanged [evidence_refs]
    field. Shares the derived [verification_evidence_to_yojson] so the
-   serialization tested by the roundtrip is the one production emits. *)
+   serialization tested by the roundtrip is the one production emits.
+
+   That roundtrip is [test_verification] / "verification_evidence wire", which
+   states the wire object as a literal and checks this function against it. It
+   is named here because the sentence above claimed a test that did not exist
+   until it was written. *)
 let verification_evidence_fields (evidence : verification_evidence)
   : (string * Yojson.Safe.t) list =
   match verification_evidence_to_yojson evidence with

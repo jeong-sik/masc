@@ -726,6 +726,8 @@ let run_named
             ; model_input_projection
             ; stream_idle_timeout_s
             ; body_timeout_s
+            ; provider_call_deadline_sec =
+                Keeper_runtime_resolved.provider_call_deadline_sec ()
             ; temperature
             ; accept
             ; hooks

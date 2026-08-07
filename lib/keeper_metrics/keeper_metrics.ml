@@ -21,6 +21,8 @@ type t =
   | TurnCompleted
   | FailureRoute
   | IdleSeconds
+  | InFlightElapsedSeconds
+  | SinceLastProgressSeconds
   | StreamProjectionEventCutoff
   | MetricEmitDropped
   | ContextMaxObserved
@@ -224,6 +226,8 @@ let to_string = function
   | TurnCompleted -> "masc_keeper_turn_completed_total"
   | FailureRoute -> "masc_keeper_failure_route_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
+  | InFlightElapsedSeconds -> "masc_keeper_in_flight_elapsed_seconds"
+  | SinceLastProgressSeconds -> "masc_keeper_since_last_progress_seconds"
   | StreamProjectionEventCutoff ->
     "masc_keeper_stream_projection_event_cutoff_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"

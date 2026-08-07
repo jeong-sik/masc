@@ -2353,8 +2353,10 @@ let () = test "transition_submit_for_verification_todo_rejects_instead_of_alias"
          (Tool_result.message result)
          "Invalid transition: todo -> submit_for_verification");
     (* Order follows [Masc_domain.all_task_actions], which the hint is now
-       derived from, rather than the hand-written order it used to restate. *)
-    assert (str_contains (Tool_result.message result) "valid_next_actions=[claim;cancel;release]");
+       derived from, rather than the hand-written order it used to restate.
+       [release] left this list: it is admitted from Todo and returns it
+       unchanged, and the hint lists what moves the Task. *)
+    assert (str_contains (Tool_result.message result) "valid_next_actions=[claim;cancel]");
     assert_task_todo ctx)
 )
 

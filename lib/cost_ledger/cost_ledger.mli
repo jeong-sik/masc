@@ -50,8 +50,5 @@ val to_json :
 val of_json : Yojson.Safe.t -> (t, decode_error) result
 (** Decode only the current row contract. *)
 
-val directory_name : string
-val dir_of_masc_root : string -> string
-val dir_of_base_path : base_path:string -> string
 val store_of_masc_root : string -> Dated_jsonl.t
 val store_of_base_path : base_path:string -> Dated_jsonl.t

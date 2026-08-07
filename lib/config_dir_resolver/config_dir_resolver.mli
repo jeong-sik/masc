@@ -157,7 +157,6 @@ val data_dir : base_path:string -> string
 
 (** {2 Config-rooted file accessors} *)
 
-val repositories_toml_basename : string
 (** ["repositories.toml"]. SSOT basename of the repository catalog file, so
     callers that surface *which* config file gated a decision (e.g. the
     playground repo [policy_source] field) label it from one constant instead
@@ -225,10 +224,6 @@ val sanitize_inherited_test_base_path_opt :
   current:string option ->
   home:string option ->
   string option
-
-val path_from_executable : cwd:string -> string -> string option
-
-val path_from_cwd : string -> string option
 
 (** {1 Warnings and logging} *)
 

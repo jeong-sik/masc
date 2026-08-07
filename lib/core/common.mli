@@ -6,13 +6,9 @@
 (** Boolean environment variable with permissive truthy parsing:
     ["1"], ["true"], ["yes"], ["on"] (case/whitespace insensitive)
     all return [true]; absent, empty, or anything else returns [false]. *)
-val env_true : string -> bool
-
 (** [true] when [MASC_STRICT_FINALIZERS] env is truthy. Callers can
     opt into raising finally-block exceptions instead of swallowing
     them. *)
-val strict_finalizers : unit -> bool
-
 val handle_finalizer_error :
   module_name:string ->
   label:string ->
@@ -66,8 +62,6 @@ type keeper_runtime_store =
 
 val keeper_runtime_store_dirname : keeper_runtime_store -> string
 val keeper_runtime_store_of_dirname : string -> keeper_runtime_store option
-val keeper_runtime_store_dirnames : string list
-
 val auth_dir_from_base_path : base_path:string -> string
 (** [<base_path>/.masc/auth]. SSOT path so {!Auth} and
     {!Keeper_identity} can both compute it without depending on each
@@ -108,11 +102,6 @@ val max_process_capture_tail_bytes : int
     O(output). Elided bytes are reported by {!Exec_buffer.render}'s
     truncation marker rather than dropped silently. *)
 
-val truncate_response :
-  ?max_bytes:int ->
-  total_count:int ->
-  string ->
-  string
 (** [truncate_response ?max_bytes ~total_count s] returns [s] unchanged
     when its length is at most [max_bytes] (default
     {!max_tool_output_bytes}). Otherwise returns the first [max_bytes]

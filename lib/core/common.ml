@@ -84,9 +84,6 @@ let keeper_runtime_stores =
   ; Keeper_trajectories
   ]
 
-let keeper_runtime_store_dirnames =
-  List.map keeper_runtime_store_dirname keeper_runtime_stores
-
 let keeper_runtime_store_of_dirname name =
   List.find_opt
     (fun store -> String.equal name (keeper_runtime_store_dirname store))
@@ -121,10 +118,3 @@ let max_process_capture_tail_bytes = 256 * 1024
 
 (** BUG-016: Truncate large tool responses to prevent MCP transport overload.
     Default max: 64KB. Appends truncation metadata when trimmed. *)
-let truncate_response ?(max_bytes=max_tool_output_bytes) ~total_count response =
-  let len = String.length response in
-  if len <= max_bytes then response
-  else
-    let truncated = String.sub response 0 max_bytes in
-    Printf.sprintf "%s\n\n... [truncated: %d/%d bytes shown, total_count=%d]"
-      truncated max_bytes len total_count

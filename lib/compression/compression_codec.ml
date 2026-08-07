@@ -18,9 +18,6 @@ type compress_result =
   | Compressed of compressed
 
 let min_size = 32
-let should_use_dict (size : int) : bool =
-  size >= min_size
-
 let uses_dict = function
   | Dictionary -> true
   | Standard -> false

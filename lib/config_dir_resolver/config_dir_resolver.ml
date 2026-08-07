@@ -210,24 +210,6 @@ let config_signature_exists config_dir =
   && (existing_file runtime_toml
      || existing_dir prompts || existing_dir keepers)
 
-let rec ancestor_dirs path =
-  let dir = absolute_path path in
-  let parent = Filename.dirname dir in
-  if parent = dir then [ dir ] else dir :: ancestor_dirs parent
-
-let path_from_executable ~cwd executable_name =
-  let exe = absolute_path_from ~cwd executable_name in
-  if not (Sys.file_exists exe) then None
-  else
-    ancestor_dirs (Filename.dirname exe)
-    |> List.find_map (fun dir ->
-           let candidate = Filename.concat dir "config" in
-           if config_signature_exists candidate then Some candidate else None)
-
-let path_from_cwd cwd =
-  let candidate = Filename.concat cwd "config" |> absolute_path_from ~cwd in
-  if config_signature_exists candidate then Some candidate else None
-
 let base_path_config_root ~cwd base_path =
   let base_path =
     base_path

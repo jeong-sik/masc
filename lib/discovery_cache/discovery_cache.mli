@@ -54,18 +54,15 @@ val cache_age_seconds : unit -> float
 
 (** {1 Convenience queries} *)
 
-val idle_slot_count : unit -> int
 (** Sum of [slot.idle] across cached endpoints; endpoints with
     no slot info contribute 0. Implicitly refreshes via
     {!get_cached_or_refresh}. *)
 
-val busy_slot_count : unit -> int
 (** Sum of [slot.busy] across cached endpoints; endpoints with
     no slot info contribute 0. Implicitly refreshes via
     {!get_cached_or_refresh}. *)
 
 (** {1 JSON projections} *)
 
-val endpoint_to_json : endpoint_info -> Yojson.Safe.t
 (** Re-export of [Llm_provider.Discovery.endpoint_status_to_json]
     so dashboard consumers do not have to spell the path. *)

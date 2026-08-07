@@ -18,7 +18,6 @@ type t =
 val id_of_binding : binding -> string
 val of_binding : config -> binding -> t option
 
-val of_binding_result : config -> binding -> (t, string) result
 (** Reason-preserving form of {!of_binding}. [Error reason] when the binding's
     provider/model id is unresolved or the provider transport/protocol cannot be
     materialized into a {!Llm_provider.Provider_config.t} (e.g. a [messages-http]

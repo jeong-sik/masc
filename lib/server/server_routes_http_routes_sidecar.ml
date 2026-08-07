@@ -302,12 +302,6 @@ let read_attempt_record_result ~base_path id =
       Error (Printf.sprintf "malformed attempt state JSON at %s: %s" path msg))
 ;;
 
-let read_attempt_record ~base_path id =
-  match read_attempt_record_result ~base_path id with
-  | Ok record -> record
-  | Error _ -> None
-;;
-
 (** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
     tries to rename into it. *)
 let ensure_parent_dir path =

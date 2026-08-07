@@ -1,8 +1,6 @@
 module Metrics = Llm_provider.Metrics
 
 let http_status_metric = Otel_metric_store.metric_llm_provider_http_status
-let fallback_triggered_metric = Otel_metric_store.metric_fallback_triggered
-
 let provider_cache : (string, string) Hashtbl.t = Hashtbl.create 64
 let provider_cache_mu = Stdlib.Mutex.create ()
 
@@ -390,10 +388,6 @@ let emit_streaming_chunk ~provider ~model_id ~chunk_index ~inter_chunk_ms =
            ; "masc.gen_ai.streaming.inter_chunk_ms", `Float inter_chunk_ms
            ])
       ()
-;;
-
-let emit_fallback_triggered ~kind ~detail =
-  inc_counter fallback_triggered_metric ~labels:[ ("kind", kind); ("detail", detail) ]
 ;;
 
 let make_sink () : Metrics.t =

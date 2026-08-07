@@ -85,8 +85,6 @@ val preset_models : preset -> string list
 (** 그룹 전체에 패널 모델이 하나 이상 있는가.
     {!Validated_preset.of_preset}의 검증 술어. Provider별 cardinality 한계는 이
     MASC-owned preset 타입을 제한하지 않는다. *)
-val preset_has_models : preset -> bool
-
 (** 패널 정체성 (RFC-0278). [label]이 비면 [model] 그대로(legacy byte-identical),
     있으면 ["label (model)"]. agent 카드명·심판 패널 태그·[panel_answer.model]에
     쓰이는 유일 식별자. provider 라우팅은 원 model로 build 시점에 따로 한다. *)
@@ -103,23 +101,13 @@ val preset_duplicate_panelist : preset -> string option
 
 (** 모든 그룹의 패널 system prompt + 심판 system prompt가 비어있지 않은가
     (config 로드 시 fail-fast 검증). *)
-val preset_prompts_present : preset -> bool
-
 (** 심판 모델 id가 비어있지 않은가 (config 로드 시 fail-fast 검증). *)
-val preset_judge_present : preset -> bool
-
 (** JOJ 1차 심판들의 정체성 ({!panelist_id}, [jlabel]/[jmodel]). 입력순 = meta 프롬프트
     attribution 순서. judges=[]면 []. (RFC-0283) *)
-val preset_judge_ids : preset -> string list
-
 (** 두 1차 심판이 같은 정체성을 가지면 그 id ({!preset_duplicate_panelist}와 동형 — meta
     프롬프트 attribution 모호성 방지). 없으면 [None]. judges=[]면 [None]. (RFC-0283) *)
-val preset_duplicate_judge : preset -> string option
-
 (** 모든 1차 심판의 system prompt(lens)가 비어있지 않은가. judges=[]면 vacuously [true]
     (simple/refine/conditional은 judges를 안 쓴다). (RFC-0283) *)
-val preset_judge_prompts_present : preset -> bool
-
 (** Staged JOJ preset grouping validation. This is runtime topology validation
     rather than preset validation because the same preset may be valid for flat
     JOJ while invalid for staged JOJ. *)

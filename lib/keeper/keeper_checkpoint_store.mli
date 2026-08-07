@@ -7,21 +7,13 @@ val oas_checkpoint_path :
   session_dir:string -> session_id:string -> string
 
 (** [oas-snapshot-] prefix on OAS history archive entries. *)
-val oas_history_prefix : string
-
 (** [.json] suffix on OAS history archive entries. *)
-val oas_history_suffix : string
-
 (** [true] iff [filename] is an OAS history archive file. *)
-val is_oas_history_file : string -> bool
-
 (** Sorted-descending list of OAS history archive filenames in
     [session_dir]. *)
 val list_oas_history_files : session_dir:string -> string list
 
 (** Number of OAS history archive entries retained after a save. *)
-val max_oas_history_retained : int
-
 (** Path of an OAS history archive entry within [session_dir]. *)
 val oas_history_path :
   session_dir:string -> snapshot_id:string -> string
@@ -156,9 +148,6 @@ type checkpoint_ref_load_error =
 (** Canonical checkpoint value, exact persisted bytes, and their reference
     derived from one immutable byte snapshot. *)
 type exact_checkpoint_snapshot
-
-val exact_snapshot_checkpoint :
-  exact_checkpoint_snapshot -> Agent_sdk.Checkpoint.t
 
 val exact_snapshot_reference :
   exact_checkpoint_snapshot -> Keeper_checkpoint_ref.t

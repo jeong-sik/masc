@@ -39,15 +39,11 @@ let is_http_error_response = function
              | _ -> None)
         | _ -> None
       in
-      let is_parse_or_invalid = function
-        | Mcp_error_code.Parse_error | Invalid_request -> true
-        | _ -> false
-      in
       id_is_null
       && (match code with
           | Some c ->
               (match Mcp_error_code.of_wire_code c with
-               | Some ec -> is_parse_or_invalid ec
+               | Some ec -> Mcp_error_code.allows_null_request_id ec
                | None -> false)
           | None -> false)
   | _ -> false

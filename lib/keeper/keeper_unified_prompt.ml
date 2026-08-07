@@ -693,25 +693,23 @@ let active_goal_summaries
     meta.active_goal_ids
 ;;
 
-(* RFC-0362 §4.3 — the one consumer of [goal.owner].
+(* RFC-0362 §4.3 — the consumers of [goal.owner].
 
-   A Goal this keeper owns, still executing, with no Task linked to it, is a
-   fact the owner is positioned to act on and nobody else is. It is stated, not
-   demanded: no gate, no cap, no required action, and no empty case is named
-   (#26901 — naming the empty branch is what produced the flood it replaced).
+   A Goal still executing with no Task linked to it is a fact somebody is
+   positioned to act on. Which somebody depends on [owner], and that is the only
+   thing the two callers below disagree about, so the walk is shared: same phase
+   filter, same task index, same empty case.
+
+   It is stated, not demanded: no gate, no cap, no required action, and no empty
+   case is named (#26901 — naming the empty branch is what produced the flood it
+   replaced).
 
    The 0-of-10 measurement in RFC-0362 §1 is exactly this predicate over the
-   live store, so the RFC's acceptance criterion reads off this list moving. *)
-let owned_executing_goals_without_tasks
-      ~(config : Workspace.config)
-      ~(keeper_name : string)
-  =
+   live store, so the RFC's acceptance criterion reads off these lists moving. *)
+let executing_goals_without_tasks ~(config : Workspace.config) ~owner_matches =
   let goals =
     List.filter
-      (fun (g : Goal_store.goal) ->
-         match g.owner with
-         | Some o -> String.equal o keeper_name
-         | None -> false)
+      (fun (g : Goal_store.goal) -> owner_matches g.owner)
       (Goal_store.list_goals config ())
   in
   match goals with
@@ -719,15 +717,53 @@ let owned_executing_goals_without_tasks
   | _ :: _ ->
     let tasks = Workspace.get_tasks_raw config in
     let index = Workspace_goal_index.build_goal_task_index_for_config config tasks in
-    List.filter_map
+    List.filter
       (fun (g : Goal_store.goal) ->
-         if not (Goal_phase.admits_self_directed_progress g.phase)
-         then None
-         else (
-           match Hashtbl.find_opt index g.id with
-           | Some (_ :: _) -> None
-           | None | Some [] -> Some (g.id, g.title)))
+         Goal_phase.admits_self_directed_progress g.phase
+         &&
+         match Hashtbl.find_opt index g.id with
+         | Some (_ :: _) -> false
+         | None | Some [] -> true)
       goals
+;;
+
+let owned_executing_goals_without_tasks
+      ~(config : Workspace.config)
+      ~(keeper_name : string)
+  =
+  executing_goals_without_tasks ~config ~owner_matches:(function
+    | Some owner -> String.equal owner keeper_name
+    | None -> false)
+  |> List.map (fun (g : Goal_store.goal) -> g.id, g.title)
+;;
+
+(* RFC-0362 §6 Q2, which the RFC left open: "Should [phase = executing] with
+   [owner = None] be surfaced? It is the exact state of all ten live Goals and
+   nothing reports it today."
+
+   The Keeper prompt already commits to the policy — "an unowned Goal is intent
+   nobody picked up, not an error, and taking one is a move you can make" — and
+   [handle_goal_assign] carries no ownership check, so any Keeper can in fact
+   take one. What was missing was the sighting: with 15 of 16 live Goals unowned,
+   the owned list above renders for nobody, and [meta.active_goal_ids] carries
+   one stale pointer to a Completed Goal. Both Goal blocks were empty for all
+   eight Keepers while ten executing Goals sat untouched for 6-8 days.
+
+   Same shape as the owned list and the same restraint: it names a fact, and
+   renders nothing when there is nothing to name. It does not pick an owner
+   (RFC-0362 §5) and asks for no action.
+
+   [parent_goal_id] rides along because the flat list without it misreads. On
+   the live store, seven of the ten unowned Goals are children of the eighth,
+   and rendered as peers "take one" cannot distinguish taking the umbrella from
+   taking one service under it -- two Keepers could take both and do the same
+   work twice. The relation is already in the store; only the render dropped
+   it. *)
+let unowned_executing_goals_without_tasks ~(config : Workspace.config) =
+  executing_goals_without_tasks ~config ~owner_matches:(function
+    | Some _ -> false
+    | None -> true)
+  |> List.map (fun (g : Goal_store.goal) -> g.id, g.title, g.parent_goal_id)
 ;;
 
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
@@ -856,9 +892,10 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
             ^ "\n\n")
         else None
       in
-      (* RFC-0362 §4.3. Rendered independently of [active_goal_ids]: that field
-         is a keeper-side pointer nothing writes today, so hanging this off it
-         would show nothing. Ownership lives on the Goal. *)
+      (* RFC-0362 §4.3. Rendered independently of [active_goal_ids]: on the live
+         workspace that keeper-side pointer is set for one Keeper and points at a
+         Completed Goal, which the phase filter above drops, so hanging this off
+         it would show nothing. Ownership lives on the Goal. *)
       let owned_block =
         match owned_executing_goals_without_tasks ~config ~keeper_name:meta.name with
         | [] -> None
@@ -875,11 +912,57 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
                         else Printf.sprintf "- %s — %s" goal_id title)
                      goals)))
       in
-      (match active_block, owned_block with
-       | None, None -> None
-       | Some a, None -> Some a
-       | None, Some o -> Some o
-       | Some a, Some o -> Some (a ^ o))
+      (* RFC-0362 §6 Q2. An unowned executing Goal is addressed to whoever reads
+         it, so it is the same fact for every Keeper and rendered to each.
+
+         A child is indented under its parent when the parent is in this same
+         list, because there taking the parent and taking the child are not two
+         independent moves. A child whose parent is absent -- owned, terminal,
+         or already served by a Task -- is its own invitation and stays at the
+         top level. Depth stops at one: [parent_goal_id] is a single link and
+         nesting further would trade the fact for a shape. *)
+      let unowned_block =
+        match unowned_executing_goals_without_tasks ~config with
+        | [] -> None
+        | goals ->
+          let present = List.map (fun (goal_id, _, _) -> goal_id) goals in
+          let line ~indent (goal_id, title, _) =
+            if String.trim title = ""
+            then Printf.sprintf "%s- %s" indent goal_id
+            else Printf.sprintf "%s- %s — %s" indent goal_id title
+          in
+          let children_of parent_id =
+            List.filter
+              (fun (_, _, parent) ->
+                 match parent with
+                 | Some p -> String.equal p parent_id
+                 | None -> false)
+              goals
+          in
+          let stands_alone (_, _, parent) =
+            match parent with
+            | None -> true
+            | Some p -> not (List.exists (String.equal p) present)
+          in
+          let rendered =
+            List.concat_map
+              (fun ((goal_id, _, _) as goal) ->
+                 if not (stands_alone goal)
+                 then []
+                 else
+                   line ~indent:"" goal
+                   :: List.map (line ~indent:"  ") (children_of goal_id))
+              goals
+          in
+          Some
+            (Printf.sprintf
+               "### Unowned Goals, no Task yet — taking one is a move you can make (%d)\n%s\n\n"
+               (List.length goals)
+               (String.concat "\n" rendered))
+      in
+      (match List.filter_map Fun.id [ active_block; owned_block; unowned_block ] with
+       | [] -> None
+       | blocks -> Some (String.concat "" blocks))
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->

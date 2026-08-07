@@ -1377,6 +1377,12 @@ jobs:
       # declaration masc holds is reachable and readable by that
       # enforcement, and that artifact-read rejections name the field that
       # actually failed without changing which requests are served.
+      #
+      # test_tool_input_validation is the presence half of the same boundary:
+      # a missing required field is rejected, a tool with no registered schema
+      # is refused rather than dispatched, and declared types are coerced or
+      # rejected. It was declared in test/dune and named by no CI step, so
+      # those 86 assertions compiled and never ran.
       - name: Run tool input constraint enforcement suite
         id: tool_input_constraint_enforcement_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
@@ -1387,7 +1393,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          constraint_targets="@test/runtest-test_tool_schema_constraint_enforcement @test/runtest-test_keeper_artifact_read_request"
+          constraint_targets="@test/runtest-test_tool_schema_constraint_enforcement @test/runtest-test_keeper_artifact_read_request @test/runtest-test_tool_input_validation"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${constraint_targets}"
 
       # The tool-call quality benchmark scores keeper runs against selectors

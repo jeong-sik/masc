@@ -67,7 +67,6 @@ export const KEEPER_RUNTIME_MANIFEST_SCAN_DIAGNOSTICS_SCHEMA =
   'keeper.runtime_manifest_scan_diagnostics.v1' as const
 
 const KEEPER_RUNTIME_MANIFEST_SCAN_DIAGNOSTIC_KINDS = [
-  'retired_event',
   'unsupported_event',
   'invalid_manifest_row',
   'invalid_json_row',
@@ -86,8 +85,6 @@ export type KeeperRuntimeManifestScanDiagnostics =
   | {
       state: 'available'
       schema: typeof KEEPER_RUNTIME_MANIFEST_SCAN_DIAGNOSTICS_SCHEMA
-      retired_event_count: number
-      retired_event_counts: KeeperRuntimeManifestEventCount[]
       unsupported_event_count: number
       unsupported_event_counts: KeeperRuntimeManifestEventCount[]
       unsupported_event_unattributed_count: number
@@ -411,16 +408,13 @@ function parseManifestScanDiagnostics(raw: unknown): KeeperRuntimeManifestScanDi
     }
   }
   if (
-    !Array.isArray(raw.retired_event_counts)
-    || !Array.isArray(raw.unsupported_event_counts)
+    !Array.isArray(raw.unsupported_event_counts)
     || !Array.isArray(raw.samples)
   ) {
     return { state: 'unavailable', schema, error: 'malformed manifest scan diagnostics payload' }
   }
-  const retiredEventCounts = raw.retired_event_counts.map(parseManifestEventCount)
   const unsupportedEventCounts = raw.unsupported_event_counts.map(parseManifestEventCount)
   const samples = raw.samples.map(parseManifestScanDiagnostic)
-  const retiredEventCount = nonNegativeInteger(raw.retired_event_count)
   const unsupportedEventCount = nonNegativeInteger(raw.unsupported_event_count)
   const unsupportedEventUnattributedCount = nonNegativeInteger(
     raw.unsupported_event_unattributed_count,
@@ -428,12 +422,10 @@ function parseManifestScanDiagnostics(raw: unknown): KeeperRuntimeManifestScanDi
   const invalidManifestRowCount = nonNegativeInteger(raw.invalid_manifest_row_count)
   const invalidJsonRowCount = nonNegativeInteger(raw.invalid_json_row_count)
   if (
-    retiredEventCount === null
-    || unsupportedEventCount === null
+    unsupportedEventCount === null
     || unsupportedEventUnattributedCount === null
     || invalidManifestRowCount === null
     || invalidJsonRowCount === null
-    || !allParsed(retiredEventCounts)
     || !allParsed(unsupportedEventCounts)
     || !allParsed(samples)
   ) {
@@ -442,8 +434,6 @@ function parseManifestScanDiagnostics(raw: unknown): KeeperRuntimeManifestScanDi
   return {
     state: 'available',
     schema,
-    retired_event_count: retiredEventCount,
-    retired_event_counts: retiredEventCounts,
     unsupported_event_count: unsupportedEventCount,
     unsupported_event_counts: unsupportedEventCounts,
     unsupported_event_unattributed_count: unsupportedEventUnattributedCount,

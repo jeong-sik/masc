@@ -1944,7 +1944,11 @@ let () = test "handle_claim_rejects_when_agent_already_has_active_task" (fun () 
       (`Assoc [ ("task_id", `String "task-002") ])
   in
   assert (not (Tool_result.is_success second));
-  assert (str_contains (Tool_result.message second) "task(s) in progress: task-001");
+  (* This asserted "task(s) in progress: task-001", the wording of the by-id
+     refusal before it shared claim_next's sentence. What it was pinning -- that
+     the refusal names the Task actually held -- is unchanged. *)
+  assert (str_contains (Tool_result.message second) "already holds");
+  assert (str_contains (Tool_result.message second) "task-001");
   let task_001 =
     Workspace.get_tasks_raw ctx.config
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
@@ -2877,6 +2881,73 @@ let () = test "transition action description does not re-list the enum" (fun () 
     List.sort compare enum_actions
     = List.sort compare Masc_domain.valid_task_action_strings))
 ;;
+
+(* [claim_next] and a claim by task_id refuse the same limit. Only [claim_next]
+   named the route; the by-id path said "has task(s) in progress: task-149;
+   task-148 was not claimed." and stopped -- and that is the path Keepers hit,
+   38 of the week's 77 claim rejections. The three tokens asserted here are the
+   same three test_workspace_coverage pins on the [claim_next] message, so the
+   two cannot drift apart again. *)
+let () =
+  test "a claim-by-id refusal names the release route, as claim_next does"
+    (fun () ->
+       let ctx = make_test_ctx_with_agent "worker" in
+       List.iter
+         (fun title ->
+            ignore
+              (Task.Tool.handle_add_task
+                 ~tool_name:"test_tool"
+                 ~start_time:0.0
+                 ctx
+                 (`Assoc [ "title", `String title ])))
+         [ "Held work"; "Tempting other work" ];
+       let held =
+         Task.Tool.handle_claim
+           ~tool_name:"keeper_task_claim"
+           ~start_time:0.0
+           ctx
+           (`Assoc [ "task_id", `String "task-001" ])
+       in
+       if not (Tool_result.is_success held) then failwith (Tool_result.message held);
+       let refused =
+         Task.Tool.handle_claim
+           ~tool_name:"keeper_task_claim"
+           ~start_time:0.0
+           ctx
+           (`Assoc [ "task_id", `String "task-002" ])
+       in
+       assert (not (Tool_result.is_success refused));
+       let message = Tool_result.message refused in
+       assert (str_contains message "task-001");
+       assert (str_contains message "Held work");
+       assert (str_contains message "masc_transition");
+       assert (str_contains message "action=release");
+       assert (str_contains message "handoff_context.summary"))
+
+(* The message tells the assignee to release, so Release has to be admitted from
+   every status that can produce the refusal. [active_owned_task_ids_for_agent]
+   returns exactly Claimed and InProgress, so those are the two to pin: an FSM
+   change that stopped admitting Release would land here rather than as advice
+   Keepers cannot follow. *)
+let () =
+  test "release is admitted from every status that can trigger that refusal"
+    (fun () ->
+       List.iter
+         (fun status ->
+            let actions =
+              Workspace_task_lifecycle.valid_next_actions ~same_agent:true
+                ~task_status:status
+            in
+            if not (List.exists (( = ) Masc_domain.Release) actions)
+            then
+              failwith
+                (Printf.sprintf
+                   "Release must stay admitted from %s, or the ownership refusal \
+                    names an action the assignee cannot take"
+                   (Masc_domain.task_status_to_string status)))
+         [ Masc_domain.Claimed { assignee = "worker"; claimed_at = "t" }
+         ; Masc_domain.InProgress { assignee = "worker"; started_at = "t" }
+         ])
 
 let () =
   ensure_test_runtime ();

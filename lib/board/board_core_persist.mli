@@ -55,7 +55,8 @@ val max_jsonl_bytes : int
 val rotate_if_needed : string -> unit
 
 val posts_jsonl_unlocked : store -> string
-val save_posts_jsonl_result : string -> (unit, board_error) result
+(* [save_posts_jsonl_result] is the result-returning inner form of
+   [save_posts_jsonl] below, which is the door callers use. *)
 val save_posts_jsonl : string -> unit
 val rewrite_posts : store -> unit
 val rewrite_comments : store -> unit
@@ -67,10 +68,16 @@ val append_comment : comment -> (unit, board_error) result
 val sub_board_access_to_string : sub_board_access -> string
 val sub_board_access_of_string_opt : string -> sub_board_access option
 val sub_board_post_counts_unlocked : store -> (string, int) Hashtbl.t
-val sub_board_post_count_from_counts : (string, int) Hashtbl.t -> string -> int
+(* [sub_board_post_count_from_counts] is the lookup both
+   [sub_board_with_post_count] and its _unlocked twin perform on the table
+   [sub_board_post_counts_unlocked] returns; callers take the sub_board, not
+   the count. *)
 val sub_board_with_post_count_unlocked : store -> sub_board -> sub_board
 val sub_board_with_post_count : (string, int) Hashtbl.t -> sub_board -> sub_board
-val sub_board_author_allowed : sub_board -> author_id:Agent_id.t -> bool
+(* [sub_board_author_allowed] is the predicate
+   [validate_sub_board_post_policy_unlocked] applies. A caller outside asks the
+   validator, which answers with the typed board_error, rather than reading the
+   bool and inventing its own refusal. *)
 val validate_sub_board_post_policy_unlocked :
   store -> author_id:Agent_id.t -> hearth:string option -> (unit, board_error) result
 

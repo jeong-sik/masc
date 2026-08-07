@@ -130,7 +130,6 @@
   (re_export masc.pool_metrics)
   (re_export masc.auth)
   (re_export masc.fd_accountant)
-  (re_export masc.response)
   (re_export masc.shared_audit)
   (re_export masc.tool_schemas)
   (re_export masc.tool_schemas_specs)

@@ -442,7 +442,7 @@ let test_discards_do_not_hold_the_owner_delivery_slot () =
 
 let test_discard_settlement_is_bounded_and_continues () =
   with_temp_base "board-attention-worker-discard-bound" @@ fun base_path ->
-  let discard_count = W.max_completed_settlements_per_owner_turn + 1 in
+  let discard_count = W.max_completed_settlements_per_owner_turn () + 1 in
   let discarded =
     List.init discard_count (fun index ->
       record
@@ -495,7 +495,7 @@ let test_discard_settlement_is_bounded_and_continues () =
        "first owner turn stops at the discard bound"
        (Printf.sprintf
           "candidate-discard-%02d"
-          (W.max_completed_settlements_per_owner_turn - 1))
+          (W.max_completed_settlements_per_owner_turn () - 1))
        candidate_id
    | W.Partition_settled { continuation_wake = None; _ } ->
      Alcotest.fail "bounded discard settlement did not request continuation"

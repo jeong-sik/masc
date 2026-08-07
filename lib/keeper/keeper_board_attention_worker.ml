@@ -1600,8 +1600,16 @@ let settles_without_admitting (item : Partition.completed_item) =
    durability operations, then persist a continuation wake for the remainder.
    This is deliberately a settlement bound, not a scan or arrival-window
    heuristic: every successful iteration removes one exact Completed
-   partition. *)
-let max_completed_settlements_per_owner_turn = 8
+   partition.
+
+   This is a batch-size knob, not a workaround cap: continuation_wake
+   re-wakes the owner for exactly one more Completed partition per
+   heartbeat cycle rather than moving remaining work off-turn, so the
+   choice is cycle-count vs per-cycle-blocking-time, not block-vs-don't
+   (masc#27054 adversarial review). See Keeper_config for the runtime_params
+   registration and its value derivation. *)
+let max_completed_settlements_per_owner_turn () =
+  Keeper_config.keeper_board_attention_settlements_per_turn ()
 
 let yield_between_discard_settlements () =
   try Eio.Fiber.yield () with
@@ -1645,7 +1653,7 @@ let settle_one_completed
      the worker adds while this runs, are left for the continuation wake. *)
   let rec settle_until_admission ~last_settled ~discarded = function
     | [] -> Ok (last_settled, discarded)
-    | _ when discarded >= max_completed_settlements_per_owner_turn ->
+    | _ when discarded >= max_completed_settlements_per_owner_turn () ->
       Ok (last_settled, discarded)
     | partition :: rest ->
       let* settled, discarded_only = settle_head partition in

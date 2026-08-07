@@ -743,8 +743,18 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
               [
                 ("summary", `String "blocked on integration fixture");
                 ("next_step", `String "reproduce with real fixture");
+                (* Was ["task-001"; "session:test"]. Neither is a form the
+                   verification store can read, so both were snapshotted as
+                   payload-free invalid references and this case asserted
+                   success on evidence that is invisible at review. The
+                   boundary now refuses them; the case keeps its subject
+                   (strict release requires a handoff) with references that
+                   survive to the reviewer. *)
                 ( "evidence_refs",
-                  `List [ `String "task-001"; `String "session:test" ] );
+                  `List
+                    [ `String "note:task-001"
+                    ; `String "note:session test transcript"
+                    ] );
               ] );
         ])
   in
@@ -788,6 +798,73 @@ let () = test "handle_transition_rejects_blank_evidence_ref_entries" (fun () ->
   assert (not (Tool_result.is_success result));
   assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
   assert (str_contains (Tool_result.message result) "must contain only non-empty strings")
+)
+
+(* The same boundary rule for a reference the verification store cannot read.
+   Accepting it snapshots a payload-free invalid reference, and the reviewer
+   reads that as unavailable evidence — a verdict the submitter cannot act on
+   because nothing names the reference form as the fault. Live: task-174 resent
+   the same `board:p-…` entry and drew 59 rejections in two hours. *)
+let () = test "handle_transition_rejects_unresolvable_evidence_ref_entries" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Unresolvable evidence task") ])
+  in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let reject reference =
+    let result =
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "release");
+            ( "handoff_context",
+              `Assoc
+                [
+                  ("summary", `String "handing off");
+                  ("evidence_refs", `List [ `String reference ]);
+                ] );
+          ])
+    in
+    assert (not (Tool_result.is_success result));
+    assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+    assert (str_contains (Tool_result.message result) "note:<text>")
+  in
+  (* Every form the live workspace actually submitted and had rejected. *)
+  reject "board:p-b8655a197dcf2f5da46655e10b3acbd1";
+  reject "file:///Users/x/repo/out.diff";
+  reject "https://github.com/o/r/pull/1";
+  reject "artifacts/relative/but/unprefixed.md";
+  reject "task-002:approved"
+)
+
+let () = test "handle_transition_accepts_resolvable_evidence_ref_forms" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Resolvable evidence task") ])
+  in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "release");
+          ( "handoff_context",
+            `Assoc
+              [
+                ("summary", `String "handing off");
+                ( "evidence_refs"
+                , `List
+                    [ `String "artifact:out/report.md"
+                    ; `String "note:board post p-b8655a19 carries the rationale"
+                    ] );
+              ] );
+        ])
+  in
+  assert (Tool_result.is_success result)
 )
 
 let () = test "handle_transition_entry_action_rejects_blank_evidence_ref_entries" (fun () ->

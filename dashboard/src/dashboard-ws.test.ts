@@ -260,11 +260,10 @@ describe('dashboardSlicesForRoute', () => {
     }
   })
 
-  it('keeps global shell namespace and transport slices on every route', () => {
+  it('keeps global namespace and transport slices on every route', () => {
     expect(dashboardSlicesForRoute({ tab: 'overview', params: {} })).toEqual([
       'execution',
       'namespace',
-      'shell',
       'transport',
     ])
   })
@@ -280,21 +279,17 @@ describe('dashboardSlicesForRoute', () => {
     })).toContain('execution')
   })
 
-  it('keeps board data HTTP-owned while subscribing goals and fleet FSM slices', () => {
+  it('keeps board data HTTP-owned while subscribing fleet FSM slices', () => {
     expect(dashboardSlicesForRoute({ tab: 'board', params: {} }))
       .toEqual([
         'namespace',
-        'shell',
         'transport',
       ])
     expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'board' } }))
       .toEqual([
         'namespace',
-        'shell',
         'transport',
       ])
-    expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'planning' } }))
-      .toContain('goals')
     expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'agents' } }))
       .toContain('composite')
     expect(dashboardSlicesForRoute({ tab: 'keepers', params: { keeper: 'sangsu' } }))
@@ -302,7 +297,6 @@ describe('dashboardSlicesForRoute', () => {
         'composite',
         'execution',
         'namespace',
-        'shell',
         'transport',
       ])
     expect(dashboardSlicesForRoute({ tab: 'registry', params: {} }))
@@ -310,7 +304,6 @@ describe('dashboardSlicesForRoute', () => {
         'composite',
         'execution',
         'namespace',
-        'shell',
         'transport',
       ])
   })
@@ -908,7 +901,6 @@ describe('dashboard websocket route subscriptions', () => {
     expect(subscribe.params.route).toBe('workspace:board::')
     expect(subscribe.params.slices).toEqual([
       'namespace',
-      'shell',
       'transport',
     ])
 

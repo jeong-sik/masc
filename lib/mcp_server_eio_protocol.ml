@@ -552,7 +552,11 @@ let handle_dashboard_subscribe_eio id ?mcp_session_id params =
   | Some session_id, Some (`Assoc fields) ->
     let route = optional_string_member "route" fields in
     let slices = string_list_member "slices" fields in
-    let slices = if slices = [] then [ "shell"; "namespace"; "transport" ] else slices in
+    (* Server-side copy of the dashboard's GLOBAL_DASHBOARD_PUSH_SLICES, for a
+       caller that subscribes without naming slices. "shell" was here until
+       #27027 deleted the snapshot provider that was its only filler; keeping it
+       would hand such a caller a slice no event can ever be routed to. *)
+    let slices = if slices = [] then [ "namespace"; "transport" ] else slices in
     !dashboard_subscribe_handler ~session_id ?route ~slices ()
     |> dashboard_response_or_error id
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"

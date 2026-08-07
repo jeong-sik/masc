@@ -18,19 +18,13 @@ import {
 import type {
   BoardPost,
   DashboardExecutionResponse,
-  DashboardMemoryResponse,
-  DashboardPlanningResponse,
-  DashboardShellResponse,
   SSEEvent,
 } from './types'
 import type * as TransportHealth from './components/transport-health'
 import {
   keeperHeartbeats,
   invalidateDashboardCache,
-  hydrateBoardSnapshot,
-  hydrateShellSnapshot,
   hydrateExecutionSnapshot,
-  hydratePlanningSnapshot,
   refreshDashboard,
   refreshExecution,
   refreshBoard,
@@ -54,12 +48,8 @@ import {
 import { mergeServerStatus } from './store-normalizers'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
 import { operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
-import { compositeTick, hydrateFleetCompositeSnapshot } from './composite-signals'
+import { compositeTick } from './composite-signals'
 import { isRecord } from './lib/type-guards'
-import {
-  hydrateGoalTreeObservationError,
-  hydrateGoalTreeSnapshot,
-} from './goal-tree-state'
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
@@ -888,7 +878,7 @@ function eventPayloadRecord(payload: unknown): Record<string, unknown> {
   return isRecord(payload) ? payload : { payload }
 }
 
-export function hydrateDashboardSlice(slice: string, payload: unknown, eventType?: string): void {
+export function hydrateDashboardSlice(_slice: string, payload: unknown, eventType?: string): void {
   switch (eventType) {
     case 'project_snapshot':
     case 'namespace_truth_snapshot':
@@ -907,49 +897,14 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
     return
   }
 
-  switch (slice) {
-    case 'shell':
-      hydrateShellSnapshot(payload as DashboardShellResponse, { light: true, preserveAuth: true })
-      return
-    case 'namespace':
-      hydrateServerPushEvent({ type: 'project_snapshot', payload } as SSEEvent)
-      return
-    case 'execution':
-      hydrateServerPushEvent({ type: 'execution_snapshot', payload } as SSEEvent)
-      return
-    case 'operator': {
-      const record = payload as { snapshot?: unknown; digest?: unknown }
-      if (record.snapshot) {
-        hydrateServerPushEvent({ type: 'operator_snapshot', payload: record.snapshot } as SSEEvent)
-      }
-      if (record.digest) {
-        hydrateServerPushEvent({ type: 'operator_digest', payload: record.digest } as SSEEvent)
-      }
-      return
-    }
-    case 'transport':
-      hydrateServerPushEvent({ type: 'transport_health_snapshot', payload } as SSEEvent)
-      return
-    case 'board':
-      hydrateBoardSnapshot(payload as DashboardMemoryResponse)
-      return
-    case 'goals': {
-      if (!payload || typeof payload !== 'object') return
-      const record = payload as { planning?: unknown; tree?: unknown; loop?: unknown }
-      if (record.planning) {
-        hydratePlanningSnapshot(record.planning as DashboardPlanningResponse)
-      }
-      if (record.tree && !hydrateGoalTreeSnapshot(record.tree)) {
-        hydrateGoalTreeObservationError(
-          new Error('Goal Store push tree payload was malformed'),
-        )
-      }
-      return
-    }
-    case 'composite':
-      hydrateFleetCompositeSnapshot(payload)
-      return
-  }
+  // Reaching here means the server sent a delta with a slice but no event_type.
+  // It cannot: dashboard_event_of_external derives the slice from the event type
+  // and server_mcp_transport_ws.ml:674 always writes event_type alongside it.
+  //
+  // The slice-keyed hydrators that used to live here belonged to
+  // dashboard/subscribe's one-shot snapshot, whose provider #27027 deleted when
+  // it made subscribe ACK-only. Every snapshot now arrives as a typed event and
+  // is handled above.
 }
 
 // --- WebSocket server-push reaction setup ---

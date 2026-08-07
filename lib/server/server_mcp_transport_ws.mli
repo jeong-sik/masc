@@ -400,9 +400,17 @@ val dashboard_ack :
 
 val valid_dashboard_slice : string -> bool
 (** Returns [true] for the canonical slice names
-    ([shell] / [execution] / [operator] / [transport] /
-    [namespace] / [composite] / [board] / [goals]).
-    Mirrored into {!dashboard_subscribe}'s validation. *)
+    ([execution] / [operator] / [transport] / [namespace] /
+    [composite]).  Mirrored into {!dashboard_subscribe}'s
+    validation.  Must equal the image of
+    {!dashboard_slice_for_sse_type}: a name accepted here but
+    absent there is a subscription no event can reach. *)
+
+val dashboard_slice_for_sse_type : string -> string option
+(** The slice an SSE event type is delivered on, or [None] to
+    raw-forward.  Exposed so a test can compare its image
+    against {!valid_dashboard_slice}; the two drifted apart
+    for a day after #27027 with nothing to catch it. *)
 
 val client_buffer_limit_bytes : unit -> int
 (** Resolved client-buffer threshold (in bytes) used by

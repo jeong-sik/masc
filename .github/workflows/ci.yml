@@ -1020,6 +1020,17 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_transport_metrics
 
+      - name: Run websocket transport suite
+        # test_ws_transport sat red for 17 days and nothing reported it: #25500
+        # deleted the goal_loop_status -> "goals" mapping the delta-payload test
+        # was written against, and no target list names this suite, so @check
+        # compiled it and nothing ran it. It covers the delta/raw-forward split,
+        # the shared-payload cache, and the slice vocabulary -- the surface
+        # #27285 rewrote. Green on this branch, 64/64.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_ws_transport
+
       - name: Run connector observability label contract
         # These strings are metric label values, so a rename is a wire change
         # that compiles. @check cannot catch that, and test_discord_observability

@@ -228,9 +228,19 @@ Tip: Look for status='todo' tasks to claim.";
           ("type", `String "string");
           ("description", `String "Task ID (e.g., 'task-001')");
         ]);
+        (* The enum below is the list; spelling it out again in prose was a
+           second copy that drifted from what the tool accepts. It presented
+           [done] as one ordinary option among six, and [done] is refused from
+           every status a Keeper can be working: the lifecycle answers
+           [Verification_submission_required] from Claimed and InProgress and
+           [Invalid_transition] from the rest, leaving only the Done->Done
+           no-op. Measured over the live tool log: 111 calls passed
+           action="done", 70 errored and the other 41 were that no-op — no
+           state change, ever. This says what each action does instead of
+           restating their names. *)
         ("action", `Assoc [
           ("type", `String "string");
-          ("description", `String "Agent transition action: claim | start | submit_for_verification | done | cancel | release");
+          ("description", `String "Which transition to apply. claim takes an unclaimed Task; start moves your claim into progress; release hands it back with a required handoff_context.summary; cancel ends it with a reason. Completion goes through submit_for_verification with evidence in notes — done is refused from every working status and cannot complete a Task here.");
           ("enum", `List (List.map (fun action -> `String action) Masc_domain.valid_task_action_strings));
         ]);
         ("expected_version", `Assoc [

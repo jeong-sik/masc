@@ -648,7 +648,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            last_prune := now;
            try
              let days =
-               Safe_ops.get_env_int_logged "MASC_JSONL_RETENTION_DAYS" ~default:30
+               Env_config_core.jsonl_retention_days ()
              in
              let masc = Workspace.masc_dir (Mcp_server.workspace_config state) in
              let prune_dir dir =

@@ -465,6 +465,7 @@ type ws_delivery_metric_names =
   ; client_acks : string
   ; throttled_deliveries : string
   ; delta_payload_serializations : string
+  ; slice_fanout_skipped : string
   ; client_buffered_bytes : string
   ; client_buffered_bytes_count : string
   ; hello_latency : string
@@ -477,6 +478,10 @@ let ws_delivery_metric_names =
   ; client_acks = "masc_ws_client_acks_total"
   ; throttled_deliveries = "masc_ws_throttled_deliveries_total"
   ; delta_payload_serializations = "masc_ws_delta_payload_serializations_total"
+    (* Named by the declaration, not by a literal: [metric_value_or_zero]
+       answers an unknown name with 0, so a typo here would surface as a
+       permanently-zero field instead of a failure. *)
+  ; slice_fanout_skipped = Otel_metric_store.metric_ws_slice_fanout_skipped
   ; client_buffered_bytes = "masc_ws_client_buffered_bytes"
   ; client_buffered_bytes_count = "masc_ws_client_buffered_bytes_count"
   ; hello_latency = Otel_metric_store.metric_ws_dashboard_hello_latency_seconds
@@ -679,6 +684,12 @@ let transport_health_json ~config =
                   , `Int
                       (int_of_float
                          (v ws_delivery_metrics.delta_payload_serializations ())) )
+                ; (* Deliveries the slice gate dropped because the session did
+                     not subscribe to that slice.  Without it the gap between
+                     delivered broadcasts and what reaches the bytes cache is
+                     unattributable. *)
+                  ( "slice_fanout_skipped"
+                  , `Int (int_of_float (v ws_delivery_metrics.slice_fanout_skipped ())) )
                 ; (* Histogram sum + auto _count give operators enough to compute
            average buffered bytes per ack without external telemetry queries. *)
                   ( "client_buffered_bytes_sum"

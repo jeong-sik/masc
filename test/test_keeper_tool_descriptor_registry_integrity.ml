@@ -259,6 +259,75 @@ let test_structurally_invalid_schema_is_excluded () =
     (Descriptor.keeper_candidate_names malformed)
 ;;
 
+(* The description a Keeper reads and the description in the canonical registry
+   used to be two strings. [cluster_descriptor] looked the tool up for its
+   input_schema and then took a second description from an inline argument, and
+   nothing compared them: 66 of 98 model-visible descriptors disagreed, and in
+   57 the model saw the shorter one — including every Goal tool and
+   [masc_transition], whose canonical text is the only place [release] is
+   named.
+
+   That seam is closed: [cluster_descriptor] takes both fields from the one
+   lookup. This pins it. The exceptions below reach the model through other
+   constructors and keep their own text on purpose — the Board projection
+   narrows the canonical schema for the Keeper surface (its description is
+   usually the longer, more specific one), and the shard/library/individual
+   tools are declared with [in_process_descriptor] rather than the cluster
+   path. Adding an inline description back onto a cluster tool fails here. *)
+let descriptions_owned_elsewhere =
+  [ (* Board: [masc_board_descriptor] carries the Keeper projection's own text *)
+    "masc_board_comment"
+  ; "masc_board_curation_read"
+  ; "masc_board_curation_submit"
+  ; "masc_board_list"
+  ; "masc_board_post"
+  ; "masc_board_search"
+  ; "masc_board_vote"
+    (* Shard runtime tools: declared directly, not through the cluster path *)
+  ; "tool_edit_file"
+  ; "tool_execute"
+  ; "tool_read_file"
+  ; "tool_search_files"
+  ; "tool_write_file"
+    (* Library and individually-declared keeper tools *)
+  ; "keeper_library_read"
+  ; "keeper_library_search"
+  ; "masc_library_list"
+  ; "keeper_context_status"
+  ; "keeper_ide_annotate"
+  ; "keeper_memory_search"
+  ; "keeper_memory_write"
+  ; "keeper_person_note_set"
+  ; "keeper_time_now"
+  ; "keeper_tools_list"
+  ]
+;;
+
+let test_cluster_descriptions_come_from_the_registry () =
+  let canonical = Hashtbl.create 512 in
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+       if not (Hashtbl.mem canonical schema.name)
+       then Hashtbl.add canonical schema.name schema.description)
+    Masc.Config.raw_all_tool_schemas;
+  let drifted =
+    Descriptor.model_visible_descriptors ()
+    |> List.filter_map (fun (d : Descriptor.t) ->
+         if List.mem d.internal_name descriptions_owned_elsewhere
+         then None
+         else
+           match Hashtbl.find_opt canonical d.internal_name with
+           | None -> None
+           | Some canon ->
+             if String.equal canon d.description then None else Some d.internal_name)
+    |> List.sort String.compare
+  in
+  Alcotest.(check (list string))
+    "every cluster tool's description is the registry's"
+    []
+    drifted
+;;
+
 let test_registered_cluster_model_projections_are_explicit () =
   let check_projection internal_name expected =
     let descriptor = required_internal_descriptor internal_name in
@@ -1499,6 +1568,10 @@ let () =
             "structurally invalid schema is excluded"
             `Quick
             test_structurally_invalid_schema_is_excluded
+        ; test_case
+            "cluster descriptions come from the registry"
+            `Quick
+            test_cluster_descriptions_come_from_the_registry
         ; test_case
             "registered cluster model projections are explicit"
             `Quick

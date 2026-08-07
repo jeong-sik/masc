@@ -117,14 +117,14 @@ let prune_keeper_scoped_flat_stores ~days ~masc_root =
    ([cost_ledger.ml:250], [keeper_approval_queue.ml:1732]) yet were on no
    prune list since introduction — 74 MB and 22 MB measured. *)
 let top_level_dated_stores =
-  [ "audit"
+  [ Audit_log.store_dirname
   ; "telemetry"
   ; "messages"
   ; "events"
-  ; "activity-events"
+  ; Activity_graph.store_dirname
   ; "voice_sessions"
   ; "tool_calls"
-  ; "transition-audit"
+  ; Keeper_transition_audit.store_dirname
   ; "oas-events"
   ; "costs"
   ; "audit-approvals"

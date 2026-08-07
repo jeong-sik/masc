@@ -44,7 +44,7 @@ let watched_store_dirs =
   ; "telemetry"
   ; "tool_usage"
   ; "trajectories"
-  ; "transition-audit"
+  ; Keeper_transition_audit.store_dirname
   ; "logs"
   ]
 ;;

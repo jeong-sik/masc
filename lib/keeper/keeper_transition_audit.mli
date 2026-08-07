@@ -16,6 +16,10 @@ end
 (** {1 In-memory Ring Buffer} *)
 
 (** Record a transition in the per-keeper ring buffer (last 50). *)
+(** The directory this store occupies under [.masc]. Readers of the same
+    store name it from here instead of spelling the literal. *)
+val store_dirname : string
+
 val record_transition :
   keeper_name:string -> transition_record -> unit
 

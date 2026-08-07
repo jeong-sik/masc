@@ -75,6 +75,10 @@ type audit_entry = {
 
 (** {1 Wire-format} *)
 
+(** The directory this store occupies under [.masc]. Readers of the same
+    store name it from here instead of spelling the literal. *)
+val store_dirname : string
+
 val action_to_string : action -> string
 (** Stable serialisation; round-tripped by {!string_to_action}. The
     parametric variants ([ToolCall] / [GateDecision] /

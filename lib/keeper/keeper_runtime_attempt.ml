@@ -175,8 +175,3 @@ let sdk_error_to_runtime_outcome err =
      | Agent_sdk.Error.Io _
      | Agent_sdk.Error.Orchestration _
      | Agent_sdk.Error.Internal _ -> None)
-
-let sdk_error_is_resumable_cli_session err =
-  match Keeper_internal_error.classify_masc_internal_error err with
-  | Some (Keeper_internal_error.Resumable_cli_session _) -> true
-  | _ -> false

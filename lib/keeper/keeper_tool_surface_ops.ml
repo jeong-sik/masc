@@ -377,11 +377,6 @@ let prepare_passive_keeper_identity_config ~(config : Workspace.config) ~(agent_
         in
         Ok (with_keeper_name args updated_meta.name, identity_reseed)
 
-let prepare_passive_keeper_identity ctx args =
-  prepare_passive_keeper_identity_config
-    ~config:ctx.config
-    ~agent_name:ctx.agent_name
-    args
 let attach_identity_reseed ?identity_reseed json =
   match identity_reseed with
   | None -> json
@@ -904,9 +899,6 @@ let resolve_keeper_meta_config ~(config : Workspace.config) args =
   match resolved with
   | Some (_resolved_name, meta) -> Ok meta
   | None -> Error (Printf.sprintf "keeper not found: %s" name)
-
-let resolve_keeper_meta ctx args =
-  resolve_keeper_meta_config ~config:ctx.config args
 
 let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();

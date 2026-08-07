@@ -46,6 +46,10 @@ type librarian_failure_kind =
   | Domain_output_invalid
   | Memory_snapshot_write_failure
   | Runtime_context_unavailable
+  | Lane_cancelled
+      (** The pass started and was cancelled before it could commit. Recorded
+          because a cancelled pass is otherwise indistinguishable in this
+          journal from a turn on which the librarian never ran. *)
   | Unhandled_exception
 
 (** One decoded journal line. A committed pass carries the revision it wrote;

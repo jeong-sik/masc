@@ -44,6 +44,7 @@ let all_kinds : Current.librarian_failure_kind list =
   ; Domain_output_invalid
   ; Memory_snapshot_write_failure
   ; Runtime_context_unavailable
+  ; Lane_cancelled
   ; Unhandled_exception
   ]
 ;;
@@ -57,6 +58,7 @@ let kind_label (kind : Current.librarian_failure_kind) =
   | Domain_output_invalid -> "Domain_output_invalid"
   | Memory_snapshot_write_failure -> "Memory_snapshot_write_failure"
   | Runtime_context_unavailable -> "Runtime_context_unavailable"
+  | Lane_cancelled -> "Lane_cancelled"
   | Unhandled_exception -> "Unhandled_exception"
 ;;
 

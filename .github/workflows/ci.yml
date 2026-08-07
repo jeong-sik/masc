@@ -450,6 +450,13 @@ jobs:
       # of the unwired set either reads a live .masc runtime (credential and
       # fleet audits, meaningless on a runner) or needs a tool the image lacks
       # (valgrind), and stays out.
+      # Its own step because it takes arguments, which the loop below cannot
+      # pass. The walk used to descend into every worktree and never finish,
+      # which is why an audit this specific sat unwired (#27386); at ~6s it is
+      # cheaper than most steps here.
+      - name: Run dead-surface ratchet
+        run: python3 scripts/audit-dead-surface.py --exports --ratchet
+
       - name: Run repo audit scripts
         run: |
           set -e

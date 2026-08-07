@@ -21,7 +21,7 @@ set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-UNWIRED_BASELINE=11
+UNWIRED_BASELINE=10
 
 all="$(mktemp)"
 called="$(mktemp)"
@@ -48,9 +48,16 @@ if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then
   exit 2
 fi
 
+# Below the baseline is the improvement this check exists to produce, so it
+# reports and passes. Failing here means the PR that wires an audit goes red
+# for doing the thing asked of it, and main stays red until someone edits this
+# number -- the failure mode audit-ci-test-targets.sh recorded when 748 went
+# red, #27181 set 747, and 746 was red again within the hour.
+# ocaml-structure-ratchet.sh and audit-ci-test-targets.sh already treat their
+# own drift-down this way; this now matches them.
 if [ "$unwired" -lt "$UNWIRED_BASELINE" ]; then
-  echo "[unwired-audits] ${unwired} < baseline ${UNWIRED_BASELINE} — lower UNWIRED_BASELINE in $0 to hold the gain"
-  exit 2
+  echo "[unwired-audits] OK - ${unwired} audit scripts unwired, ${UNWIRED_BASELINE} baseline — lower UNWIRED_BASELINE in $0 to hold the gain"
+  exit 0
 fi
 
 echo "[unwired-audits] OK - ${unwired} audit scripts unwired, at baseline"

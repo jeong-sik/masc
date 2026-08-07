@@ -98,6 +98,45 @@ let test_the_invented_capabilities_are_still_refused () =
           (contains ~needle:"invoke_turn" msg))
     [ "task_assignment"; "claim_and_execute" ]
 
+(* #27434 made [capability] optional and that was not enough: measured across
+   the week, all 64 delegate calls sent the field explicitly and none omitted
+   it, so the 29 rejections were unchanged. A field the model can see is a field
+   it fills in. The schema stops offering it; the decoder still takes it, so the
+   dashboard and operator paths that send it keep working. Both halves are
+   pinned here because either one alone is a regression. *)
+
+let delegate_schema () =
+  match
+    List.find_opt
+      (fun (s : Masc_domain.tool_schema) -> String.equal s.name "masc_keeper_delegate")
+      Masc.Keeper_schema.schemas
+  with
+  | Some s -> s
+  | None -> Alcotest.fail "masc_keeper_delegate must be in the keeper schema"
+
+let advertised_properties () =
+  match (delegate_schema ()).input_schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc props) -> List.map fst props
+     | _ -> Alcotest.fail "input_schema must declare an object of properties")
+  | _ -> Alcotest.fail "input_schema must be an object"
+
+let test_capability_is_not_advertised () =
+  let props = List.sort compare (advertised_properties ()) in
+  Alcotest.(check (list string))
+    "the submitter is offered only what it can decide"
+    [ "prompt"; "target" ]
+    props
+
+let test_capability_is_still_accepted_on_the_wire () =
+  match C.request_of_json (request_json ~capability:"invoke_turn" ()) with
+  | Ok _ -> ()
+  | Error err ->
+    Alcotest.failf
+      "an existing sender's capability must still parse, got %s"
+      (C.request_error_to_string err)
+
 let () =
   Alcotest.run "keeper_invocation_contract_hints"
     [ ( "undeclared_field_hint"
@@ -115,5 +154,9 @@ let () =
             test_stated_capability_still_parses
         ; Alcotest.test_case "the invented values are still refused" `Quick
             test_the_invented_capabilities_are_still_refused
+        ; Alcotest.test_case "capability is not advertised" `Quick
+            test_capability_is_not_advertised
+        ; Alcotest.test_case "capability is still accepted on the wire" `Quick
+            test_capability_is_still_accepted_on_the_wire
         ] )
     ]

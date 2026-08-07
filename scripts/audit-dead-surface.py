@@ -547,11 +547,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # merged tree after main's batch-1..3 landed, not computed from the batch
 # size -- the merge also dropped should_use_dict, which lost its last
 # caller when batch 1 removed the dictionary helpers around it.
-# 575 -> 573: the new roundtrip test is the first consumer of
-# verification_evidence_of_yojson and its to_yojson twin, so both stop counting
-# as dead. Measured on the merged tree with --exports -- this branch carried 583
-# from before #27461 landed, which would have raised the ratchet by 8.
-DEAD_EXPORT_BASELINE = 572
+# 564 -> 563: this PR drops concrete_verification_evidence_refs, which had no
+# caller. Measured with --exports on the merged tree after #27456 took main to
+# 564; the 572 this branch carried was derived against main at 573.
+DEAD_EXPORT_BASELINE = 563
 
 
 def run_ratchet(count: int) -> int:

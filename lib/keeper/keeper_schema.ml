@@ -266,16 +266,22 @@ let schemas : tool_schema list = [
   ; description = "Submit one typed, non-blocking Keeper invocation and return its durable run_ref."
   ; input_schema =
       closed_object_schema
-        (* [capability] is not required: its enum has one member, so demanding it
-           asks the submitter to restate a value it cannot choose. Every
-           delegate rejection in the week before this change was this field,
-           filled in with a description of the prompt instead. Omitting it
-           resolves to [invoke_turn]; an explicit wrong value is still refused. *)
+        (* [capability] is not advertised. Its enum has one member, so a
+           submitter cannot choose it -- it can only restate it or get it wrong
+           -- and every delegate rejection in the week before #27434 was this
+           field: 22 said "task_assignment", 7 said "claim_and_execute", both
+           descriptions of the prompt rather than capabilities the contract
+           offers. A field named [capability] reads as a menu.
+
+           #27434 made it optional, which was not enough. Measured across that
+           week, all 64 calls sent the field explicitly and none omitted it: a
+           field the model can see is a field it fills in. The decoder still
+           accepts it, so the dashboard and operator paths that send it are
+           unaffected; it stops being offered.
+
+           A second capability puts it back here, as a real choice. *)
         ~required:[ "target"; "prompt" ]
         [ "target", keeper_invocation_target_schema
-        ; ( "capability"
-          , `Assoc
-              [ "type", `String "string"; "enum", `List [ `String "invoke_turn" ] ] )
         ; "prompt", `Assoc [ "type", `String "string" ]
         ]
   }

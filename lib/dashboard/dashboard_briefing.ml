@@ -73,7 +73,9 @@ let build_attention_queue incidents =
      order. The previous tie-break ranked "has a matching action" first, and
      that flag was a guess (see {!Dashboard_briefing_assembly}). *)
   |> List.stable_sort (fun left right ->
-         Int.compare (severity_rank right.severity) (severity_rank left.severity))
+         Int.compare
+           (Operator_digest_types.severity_rank_of_string right.severity)
+           (Operator_digest_types.severity_rank_of_string left.severity))
 
 
 type briefing_projection = {
@@ -141,8 +143,10 @@ let build_projection ?actor ~config ~sw ~clock
     list_field "attention_items" digest_json
     |> List.sort (fun left right ->
            Int.compare
-             (severity_rank (string_field ~default:"ok" "severity" right))
-             (severity_rank (string_field ~default:"ok" "severity" left)))
+             (Operator_digest_types.severity_rank_of_string
+                (string_field ~default:"ok" "severity" right))
+             (Operator_digest_types.severity_rank_of_string
+                (string_field ~default:"ok" "severity" left)))
   in
   let recommended_actions = list_field "recommended_actions" digest_json in
   let attention_queue = build_attention_queue incidents in

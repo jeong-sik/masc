@@ -207,7 +207,7 @@ let build_internal_signals incidents actions =
     |> List.filter is_internal_attention
     |> List.map (fun incident ->
            {
-             pressure_rank = severity_rank (string_field ~default:"warn" "severity" incident);
+             pressure_rank = Operator_digest_types.severity_rank_of_string (string_field ~default:"warn" "severity" incident);
              last_seen_ts = 0.0;
              json =
                `Assoc
@@ -228,7 +228,7 @@ let build_internal_signals incidents actions =
     |> List.filter is_internal_action
     |> List.map (fun action ->
            {
-             pressure_rank = severity_rank (string_field ~default:"warn" "severity" action);
+             pressure_rank = Operator_digest_types.severity_rank_of_string (string_field ~default:"warn" "severity" action);
              last_seen_ts = 0.0;
              json =
                `Assoc

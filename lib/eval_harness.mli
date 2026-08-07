@@ -167,6 +167,11 @@ val load_scenarios_from_file :
 
 (** {1 Reporting} *)
 
+(** Threshold the human-facing report uses for a scenario's PASS/FAIL badge:
+    a scenario reads PASS when [pass_at_k] reaches this value. Display only —
+    nothing branches on the badge. *)
+val scenario_pass_at_k_threshold : float
+
 val report_to_string : eval_suite_result -> string
 (** Pretty-print a suite result as a human-readable report
     (overall pass rate, per-scenario score breakdown). *)

@@ -41,12 +41,6 @@ let list_field key json =
   | `List items -> items
   | _ -> []
 
-let severity_rank s =
-  match String.lowercase_ascii s with
-  | "bad" | "risk" | "critical" -> 2
-  | "warn" | "watch" | "interrupted" | "degraded" -> 1
-  | _ -> 0
-
 (* The wire carries [agent_status_to_string]'s output, so ranking a serialized
    status means decoding it first. Ranking the raw string instead left an arm
    for "idle" — a spelling this producer never emits — while the real fourth

@@ -46,9 +46,6 @@ val list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list
 
 (** {1 Ranking} *)
 
-val severity_rank : string -> int
-(** Severity score from a free-form status string ([0]–[2]). *)
-
 val status_rank : string -> int
 (** Rank a serialized {!Masc_domain.agent_status}: [Busy] 4, [Active] 3,
     [Listening] 2, [Inactive] 1. Anything that is not an [agent_status]

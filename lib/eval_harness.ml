@@ -87,7 +87,12 @@ type grader_result = {
   grader_desc : string;
   score : float;           (** 0.0-1.0 *)
   weight : float;
-  passed : bool;           (** score >= 0.5 *)
+  passed : bool;
+      (** The grader's own predicate, not a cut on [score]:
+          [apply_deterministic_grader] sets it from the match result and
+          [check_tool_expectations_with_evidence] from
+          [required_ok && max_ok]. [score] is derived from it (1.0 / 0.0),
+          not the other way round. *)
   detail : string;         (** Why this score was given *)
 }
 
@@ -97,7 +102,10 @@ type eval_run = {
   trace_id : string;        (** Trajectory trace_id for this run *)
   scores : grader_result list;
   weighted_score : float;   (** Weighted average of all grader scores *)
-  passed : bool;            (** weighted_score >= pass_threshold *)
+  passed : bool;
+      (** Supplied by whoever builds the run. No [pass_threshold] exists in
+          this module, and nothing here constructs an [eval_run] — the
+          verdict is the runner's, and [summarize_runs] only counts it. *)
   tool_calls_made : string list;
   total_turns : int;
   total_cost_usd : float option;
@@ -568,6 +576,13 @@ let load_scenarios_from_file (path : string) : (scenario list, string) result =
 (* ================================================================ *)
 
 (** Generate a human-readable report from suite results. *)
+(* The scenario badge in the human-facing report says PASS when at least half
+   the runs passed. It is a display cut on [pass_at_k], not a contract: the
+   number it summarises is printed on the next line, and no caller branches on
+   the badge. Named so the rule is reviewable rather than a literal inside a
+   Printf. *)
+let scenario_pass_at_k_threshold = 0.5
+
 let report_to_string (r : eval_suite_result) : string =
   let buf = Buffer.create 2048 in
   let add = Buffer.add_string buf in
@@ -582,7 +597,7 @@ let report_to_string (r : eval_suite_result) : string =
        (cost_to_string r.total_cost_usd));
 
   List.iter (fun (er : eval_result) ->
-    let status = if er.pass_at_k >= 0.5 then "PASS" else "FAIL" in
+    let status = if er.pass_at_k >= scenario_pass_at_k_threshold then "PASS" else "FAIL" in
     add (Printf.sprintf "[%s] %s (%s)\n" status er.scenario.name er.scenario.category);
     add
       (Printf.sprintf "  pass@k=%.2f  mean=%.2f  consistency=%.3f  cost=%s\n"

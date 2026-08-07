@@ -4,6 +4,12 @@
     Handles resources/read JSON-RPC method for MASC resources.
 *)
 
+(* The library resource ids. The topic form carries the separator so a name
+   like [libraryfoo] is not read as the topic [oo]. *)
+let library_index_id = "library"
+let library_index_json_id = "library.json"
+let library_topic_prefix = "library/"
+
 let make_response = Mcp_transport_protocol.make_response
 let make_error = Mcp_transport_protocol.make_error
 
@@ -189,7 +195,10 @@ let handle_read_resource_eio state id params =
                   ]
               in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
-          | s when String.starts_with s ~prefix:"library" ->
+          | s
+            when s = library_index_id
+                 || s = library_index_json_id
+                 || String.starts_with s ~prefix:library_topic_prefix ->
               let library_dir = Filename.concat config.base_path "docs/library" in
               if not (Sys.file_exists library_dir) then
                 ("text/markdown", Some "Library directory not found. Create docs/library/ first.")
@@ -263,10 +272,16 @@ let handle_read_resource_eio state id params =
                   else content
                 in
                 let is_json, topic =
-                  if s = "library.json" then (true, "")
-                  else if s = "library" then (false, "")
+                  if s = library_index_json_id then (true, "")
+                  else if s = library_index_id then (false, "")
                   else
-                    let rest = if String.length s > 8 then String.sub s 8 (String.length s - 8) else "" in
+                    (* Past the prefix, not past a hardcoded 8: the guard above
+                       matched [library_topic_prefix], and the two lengths have
+                       to be the same number. *)
+                    let prefix_len = String.length library_topic_prefix in
+                    let rest =
+                      String.sub s prefix_len (String.length s - prefix_len)
+                    in
                     if Filename.check_suffix rest ".json" then
                       (true, Filename.chop_suffix rest ".json")
                     else (false, rest)
@@ -275,6 +290,16 @@ let handle_read_resource_eio state id params =
                   Sys.readdir library_dir |> Array.to_list
                     |> List.filter (fun f -> Filename.check_suffix f ".md" && f <> "README.md")
                     |> List.sort String.compare
+                in
+                (* [topic] arrives from the client's URI. Resolving it against
+                   the listing rather than concatenating it onto [library_dir]
+                   means a topic like [../../secrets] has nothing to match:
+                   readdir never returns a name with a separator in it. *)
+                let library_doc_path topic =
+                  let want = topic ^ ".md" in
+                  if List.exists (String.equal want) (library_files ()) then
+                    Some (Filename.concat library_dir want)
+                  else None
                 in
                 if topic = "" && not is_json then begin
                   let files = library_files () in
@@ -313,8 +338,8 @@ let handle_read_resource_eio state id params =
                   ] in
                   ("application/json", Some (Yojson.Safe.to_string json))
                 end else if is_json then begin
-                  let path = Filename.concat library_dir (topic ^ ".md") in
-                  if Sys.file_exists path then begin
+                  match library_doc_path topic with
+                  | Some path -> begin
                     let raw = Fs_compat.load_file path in
                     let (title, source, verified_by, date, tags) = parse_frontmatter path topic in
                     let body = strip_frontmatter raw in
@@ -328,14 +353,15 @@ let handle_read_resource_eio state id params =
                       ("content", `String body);
                     ] in
                     ("application/json", Some (Yojson.Safe.to_string json))
-                  end else
+                  end
+                  | None ->
                     ("application/json", Some (Yojson.Safe.to_string (`Assoc [("error", `String (Printf.sprintf "Library document '%s' not found" topic))])))
                 end else begin
-                  let path = Filename.concat library_dir (topic ^ ".md") in
-                  if Sys.file_exists path then
+                  match library_doc_path topic with
+                  | Some path ->
                     let content = Fs_compat.load_file path in
                     ("text/markdown", Some content)
-                  else
+                  | None ->
                     ("text/markdown", Some (Printf.sprintf "Library document '%s' not found." topic))
                 end
               end

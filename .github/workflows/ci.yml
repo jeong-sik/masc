@@ -970,6 +970,16 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_metric_zero_cell_declaration
 
+      - name: Run library resource topic resolution suite
+        # The topic comes from the client's URI. Before the fix it was
+        # concatenated onto docs/library and read, so library/../<name>
+        # reached a file outside that directory, and the bare "library"
+        # prefix plus a fixed offset of 8 read libraryfoo as topic "oo".
+        # Both cases fail on the pre-fix tree.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_library_resource_topic
+
       - name: Run transport metrics snapshot suite
         # The health snapshot reads counters through metric_value_or_zero, so a
         # field naming a metric that does not exist is emitted as 0 rather than

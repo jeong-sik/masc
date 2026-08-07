@@ -490,11 +490,15 @@ let test_discard_settlement_is_bounded_and_continues () =
        (W.settle_one_completed ~base_path ~keeper_name:"sangsu")
    with
    | W.Partition_settled { candidate_id; continuation_wake = Some _ } ->
+     (* Candidate ids are content hashes derived by [candidate], not the
+        human-readable seed passed as [~id]; compare against the recorded
+        candidate at the bound boundary. *)
+     let last_discarded_before_bound =
+       List.nth discarded (W.max_completed_settlements_per_owner_turn () - 1)
+     in
      Alcotest.(check string)
        "first owner turn stops at the discard bound"
-       (Printf.sprintf
-          "candidate-discard-%02d"
-          (W.max_completed_settlements_per_owner_turn () - 1))
+       last_discarded_before_bound.candidate_id
        candidate_id
    | W.Partition_settled { continuation_wake = None; _ } ->
      Alcotest.fail "bounded discard settlement did not request continuation"

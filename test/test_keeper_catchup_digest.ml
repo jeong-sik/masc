@@ -304,16 +304,18 @@ let write_rich_fixture base =
   append_line (ttf (since_unix +. 1100.)) (transition_row ~keeper_name:keeper ~event_type:"operator_resume" ~ts:(since_unix +. 1100.));
   append_line (ttf (since_unix -. 100.)) (transition_row ~keeper_name:keeper ~event_type:"operator_pause" ~ts:(since_unix -. 100.));
   append_line (ttf (since_unix +. 1200.)) (transition_row ~keeper_name:"other" ~event_type:"operator_pause" ~ts:(since_unix +. 1200.));
-  (* meta with paused = true *)
-  write_file
-    (meta_file base)
-    (json_line
-       (`Assoc
-           [ "name", `String keeper
-           ; "agent_name", `String keeper
-           ; "trace_id", `String "digest-test"
-           ; "paused", `Bool true
-           ]))
+  (* meta with paused = true. Built through the shared fixture so every field
+     Keeper_meta_json_parse requires is present and canonical; a hand-written
+     object is rejected and the digest then reports paused_now = false. *)
+  (match
+     Masc_test_deps.meta_of_json_fixture
+       (`Assoc [ "name", `String keeper; "paused", `Bool true ])
+   with
+   | Ok meta ->
+     write_file
+       (meta_file base)
+       (json_line (Masc.Keeper_meta_json.meta_to_json meta))
+   | Error err -> Alcotest.fail ("keeper meta fixture: " ^ err))
 ;;
 
 let with_workspace f =

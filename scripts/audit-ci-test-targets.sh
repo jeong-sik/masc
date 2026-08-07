@@ -76,7 +76,7 @@ echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, al
 # #27433 and #27441 each wired a suite test/dune already declared without
 # lowering this number. Measured on the merged tree after all four, not
 # computed -- #27441 landed between this branch's first push and now.
-UNWIRED_BASELINE=708
+UNWIRED_BASELINE=707
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

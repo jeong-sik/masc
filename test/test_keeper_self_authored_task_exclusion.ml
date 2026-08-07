@@ -1,7 +1,7 @@
 (** A keeper must not be offered its own authored tasks as claimable work.
 
     Without this exclusion the task board runs a closed positive feedback loop:
-    a persona whose response to "an unclaimed task exists" is to create a
+    a Keeper whose response to "an unclaimed task exists" is to create a
     routing or report task emits a new unclaimed Todo authored by itself, which
     re-satisfies the same trigger on the next observation. Observed live on
     2026-07-20: keeper "taskmaster" authored 367 of the active tasks, 272 of

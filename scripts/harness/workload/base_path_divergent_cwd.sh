@@ -68,7 +68,7 @@ command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
 if [[ -z "$CONFIG_DIR" ]]; then
   CONFIG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/masc-divergent-config.${RUN_ID}.XXXXXX")"
   TEMP_CONFIG_DIR="$CONFIG_DIR"
-  mkdir -p "$CONFIG_DIR/prompts" "$CONFIG_DIR/keepers" "$CONFIG_DIR/personas"
+  mkdir -p "$CONFIG_DIR/prompts" "$CONFIG_DIR/keepers"
   if [[ -f "$REPO_ROOT/config/runtime.toml" ]]; then
     cp "$REPO_ROOT/config/runtime.toml" "$CONFIG_DIR/runtime.toml"
   else
@@ -105,7 +105,6 @@ log "port=$PORT"
   cd "$CWD_PATH"
   export MASC_BASE_PATH="$BASE_PATH"
   export MASC_CONFIG_DIR="$CONFIG_DIR"
-  export MASC_PERSONAS_DIR="$CONFIG_DIR/personas"
   export MASC_BASE_PATH_STRICT="1"
   export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
   export MASC_AUTONOMY_ENABLED="0"

@@ -275,10 +275,24 @@ let decision_to_yojson = function
       ]
 ;;
 
+(* The Gate's own [authorization_source] carries the identifier it resolved
+   with; the audit event already records that identifier in its own fields, so
+   what it is missing is the tag. Map to the payload-free contract variant
+   rather than a string, so a new Gate authority cannot reach the audit log
+   without this match being updated. *)
+let audit_authorization_source : authorization_source -> Keeper_approval_queue.authorization_source
+  = function
+  | One_shot_resolution _ -> Keeper_approval_queue.One_shot_resolution
+  | Exact_always_rule _ -> Keeper_approval_queue.Exact_always_rule
+  | Keeper_always_allow -> Keeper_approval_queue.Keeper_always_allow
+  | Workspace_always_allow -> Keeper_approval_queue.Workspace_always_allow
+;;
+
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
   Keeper_approval_queue.audit_approval_event
     ~base_path:request.base_path
     ~event_type:Keeper_approval_queue.Gate_allowed
+    ~authorization_source:(audit_authorization_source source)
     ~id:
       (match source with
        | One_shot_resolution approval_id -> approval_id

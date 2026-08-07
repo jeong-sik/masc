@@ -33,7 +33,7 @@ export type PromptCapture = {
 
 function decodeBlockId(raw: unknown): TurnPromptBlockId | null {
   switch (raw) {
-    case 'persona':
+    case 'keeper_instructions':
     case 'dynamic_context':
     case 'temporal_summary':
     case 'memory_os_recall':

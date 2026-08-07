@@ -123,70 +123,8 @@ let schemas : tool_schema list = [
     ];
   };
   {
-    name = "masc_persona_list";
-    description = "List available persona profiles that can be used to create keepers via masc_keeper_create_from_persona.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("detailed", `Assoc [
-          ("type", `String "boolean");
-          ("default", `Bool true);
-          ("description", `String "If true, return full persona summaries. If false, return names only.");
-        ]);
-      ]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-  {
-    name = "masc_keeper_create_from_persona";
-    description = "Create or dry-run a keeper configuration from a persona profile.json. Keepers are durable and auto-start on server boot.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("persona_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Persona handle resolved from MASC_PERSONAS_DIR or the resolved config root personas/<persona_name>/profile.json");
-        ]);
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional keeper handle. Defaults to persona_name.");
-        ]);
-        ("dry_run", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, return the resolved keeper args without creating the keeper.");
-        ]);
-        ("instructions", `Assoc [("type", `String "string")]);
-        ("mention_targets", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-        ]);
-        ("active_goal_ids", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Goal IDs this keeper is allowed to claim work for. Empty clears goal scoping.");
-        ]);
-        ("autoboot_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If false, persist the keeper but skip auto-start on future server boots.");
-        ]);
-        ("proactive_enabled", `Assoc [("type", `String "boolean")]);
-        ("runtime_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional opaque runtime id. Creation writes the keeper assignment to runtime.toml; persona profiles never own runtime selection.");
-        ]);
-        ("allowed_paths", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-        ]);
-      ]);
-      ("required", `List [`String "persona_name"]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-
-  {
-    name = "masc_keeper_persona_audit";
-    description = "Audit persona-backed keeper materialization across the active config root, durable keeper TOML, live runtime metadata, registry presence, autoboot, and keepalive state.";
+    name = "masc_keeper_audit";
+    description = "Audit keeper config, prompt, live runtime metadata, registry presence, autoboot, and keepalive state.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -224,13 +162,9 @@ let schemas : tool_schema list = [
           ("type", `String "string");
           ("description", `String "Keeper handle (stable). Example: 'keeper-helper'");
         ]);
-        ("persona_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional persona handle recorded in the keeper TOML. Falls back to the resolved profile defaults when omitted.");
-        ]);
         ("instructions", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional: additional system instructions (kept across compaction/handoff).");
+          ("description", `String "Complete Keeper instructions written to keepers/<name>/AGENT.md (kept across compaction/handoff).");
         ]);
         ("mention_targets", `Assoc [
           ("type", `String "array");
@@ -271,10 +205,7 @@ let schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "name"]);
-      (* [network_mode] is deliberately absent: it is accepted only on the
-         dashboard HTTP path, which calls [Keeper_turn_up_args.parse] with
-         [~allow_sandbox_fields:true] and does not validate against this
-         schema. The MCP contract rejects it. *)
+      (* [network_mode] is deliberately absent from the MCP contract. *)
       ("additionalProperties", `Bool false);
     ];
   };
@@ -411,7 +342,7 @@ let schemas : tool_schema list = [
   {
     name = "masc_keeper_reset";
     description = "Reset a keeper's runtime state (usage counters, last_model_used, token stats). \
-Clears stale data from previous sessions. Does not affect configuration, goals, or persona.";
+Clears stale data from previous sessions. Does not affect configuration, goals, or Keeper instructions.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -467,86 +398,6 @@ Requires a reason for the audit trail.";
         ]);
       ]);
       ("required", `List [`String "name"; `String "reason"]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-
-  {
-    name = "masc_persona_create";
-    description = "Create a new persona profile at MASC_PERSONAS_DIR/<name>/profile.json. \
-Persona profiles serve as templates for keeper creation via masc_keeper_create_from_persona. \
-Identity fields (display_name, role, trait) describe the persona; keeper-template fields \
-(goal, instructions, mention_targets, proactive_enabled) become the defaults a \
-keeper spawned from this persona inherits. Required fields: persona_name, display_name.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("persona_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Unique persona handle. Used as the directory name under MASC_PERSONAS_DIR.");
-        ]);
-        ("display_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Human-readable display name for the persona.");
-        ]);
-        ("role", `Assoc [("type", `String "string")]);
-        ("trait", `Assoc [("type", `String "string")]);
-        ("instructions", `Assoc [("type", `String "string")]);
-        ("mention_targets", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-        ]);
-        ("proactive_enabled", `Assoc [("type", `String "boolean")]);
-      ]);
-      ("required", `List [`String "persona_name"; `String "display_name"]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-
-  {
-    name = "masc_persona_update";
-    description = "Update an existing persona profile. Uses partial merge semantics — \
-only the fields present in the request are merged into the existing profile.json. \
-persona_name is immutable (delete and recreate to rename). Returns error if the \
-persona does not exist.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("persona_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Persona handle to update. Must already exist.");
-        ]);
-        ("display_name", `Assoc [("type", `String "string")]);
-        ("role", `Assoc [("type", `String "string")]);
-        ("trait", `Assoc [("type", `String "string")]);
-        ("instructions", `Assoc [("type", `String "string")]);
-        ("mention_targets", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-        ]);
-        ("proactive_enabled", `Assoc [("type", `String "boolean")]);
-      ]);
-      ("required", `List [`String "persona_name"]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-
-  {
-    name = "masc_persona_delete";
-    description = "Delete an existing persona profile and its directory under \
-MASC_PERSONAS_DIR/<name>/ (profile.json plus any sibling files such as AGENT.md). \
-Returns an error if the persona does not exist. Keepers already spawned from the \
-persona are unaffected (their keeper TOML is independent); this only prevents \
-future spawns from the persona.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("persona_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Persona handle to delete. Must already exist.");
-        ]);
-      ]);
-      ("required", `List [`String "persona_name"]);
       ("additionalProperties", `Bool false);
     ];
   };

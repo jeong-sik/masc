@@ -161,7 +161,7 @@ list_runs / get / run_to_yojson / replay / max_completed_retained
 
 새 저장소를 만들지 않고 그 journal을 확장한다:
 1. 실패 경로에도 라인을 쓴다 — `change` 없이 `outcome=failed` + 실패 코드.
-2. `source`에 판단 입력 요약을 추가 — persona id, 입력 message 수, 후보/유지/폐기 건수.
+2. `source`에 판단 입력 요약을 추가 — Keeper instruction digest, 입력 message 수, 후보/유지/폐기 건수.
 
 근거: #26729(librarian constraint가 운영자 지시를 덮음) 진단 시 결과 스냅샷만으로는 "왜 이 constraint가 생겼나"를 역추적할 수 없었다.
 

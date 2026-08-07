@@ -22,7 +22,7 @@ val load_profile_defaults :
      , Agent_sdk.Error.sdk_error )
      result
 (** Load one immutable profile snapshot at the pre-dispatch boundary. Invalid
-    child or inherited base TOML returns [Config InvalidConfig]; persona-only
+    child or inherited base TOML returns [Config InvalidConfig]; prompt-only
     and genuinely absent profiles remain valid empty/default snapshots. *)
 
 val build_runtime_execution

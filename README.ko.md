@@ -12,7 +12,7 @@
 
 **MASC는 agent 작업을 위한 로컬 조율·관찰 레이어입니다.** 저장소 옆에서 MCP 서버로 돌면서 coding agent와 상주 Keeper가 goal, task, board 글, repository ownership, approval state를 같은 workspace에서 공유하게 합니다. 대시보드와 turn receipt로 agent의 결정과 실패를 들여다봅니다.
 
-빠르게 일을 끝내는 도구라기보다, 속도 대신 조율·관찰성·장기 실행 persona 기반 agent 실험을 택한 도구입니다. 어떤 결정은 실용적이었고, 어떤 결정은 그냥 재미로 해본 실험입니다. 우연한 농담, 이상한 이름, 작은 설정놀음도 프로젝트 취향의 일부입니다. 그런 것들은 구조적 필연이라서가 아니라 재미있어서 남아 있습니다.
+빠르게 일을 끝내는 도구라기보다, 속도 대신 조율·관찰성·장기 실행 keeper 기반 agent 실험을 택한 도구입니다. 어떤 결정은 실용적이었고, 어떤 결정은 그냥 재미로 해본 실험입니다. 우연한 농담, 이상한 이름, 작은 설정놀음도 프로젝트 취향의 일부입니다. 그런 것들은 구조적 필연이라서가 아니라 재미있어서 남아 있습니다.
 
 > **개발 상태:** MASC는 아직 pre-1.0 실험입니다. 생산성 도구, production service,
 > 또는 security boundary가 아닙니다. 지금은 로컬 실험과 관찰 용도로만 사용하세요.
@@ -202,8 +202,8 @@ cd dashboard && pnpm install && pnpm dev   # vite가 로컬 서버로 프록시
 | 파일 | 역할 |
 |------|------|
 | `prompts/keeper.world.md` | 모든 Keeper에 공통 주입되는 **World 프롬프트**(공통 무대·규칙, `<world>` 블록). 고치면 전체 무대가 바뀝니다 |
-| `keepers/<name>.toml` | Keeper(등장인물) 정의 — goal·지시문·`persona_name`·`sandbox_profile`. World 위에 stack 됩니다 |
-| `personas/<name>/profile.json` | (선택) 직접 작성하는 페르소나 JSON. `persona_name`으로 참조하며 여러 Keeper가 공유 가능합니다 |
+| `keepers/<name>.toml` | Keeper(등장인물) 정의 — goal·지시문·`keeper_name`·`sandbox_profile`. World 위에 stack 됩니다 |
+| `keepers/<name>/AGENT.md` | 전체 Keeper 프롬프트. `keeper_name`으로 참조하며 여러 Keeper가 공유할 수 있습니다 |
 
 **저장소에 코드 작업을 시킬 때만**
 
@@ -215,7 +215,7 @@ cd dashboard && pnpm install && pnpm dev   # vite가 로컬 서버로 프록시
 
 > `prompts/`의 나머지 `.md`는 행동·거버넌스·검증·메모리용 시스템 템플릿입니다. 이름으로 필요한 자리에서만 불려가고, 기본값으로 동작하므로 보통 건드리지 않습니다. "무대"를 바꾸려고 편집하는 것은 `keeper.world.md`입니다.
 >
-> 직접 작성하는 것은 `keepers/<name>.toml`(Keeper 정의)와 `personas/<name>/profile.json`(페르소나)입니다. 런타임 상태(`.masc/keepers/*.json` + `*.jsonl` 로그)는 서버가 생성하므로 손대지 않습니다.
+> 직접 작성하는 것은 `keepers/<name>.toml`(Keeper 정의)와 `keepers/<name>/AGENT.md`(Keeper 프롬프트)입니다. 런타임 상태(`.masc/keepers/*.json` + `*.jsonl` 로그)는 서버가 생성하므로 손대지 않습니다.
 >
 > 실행 런타임 `.masc/`는 `--base-path`가 가리키는 곳입니다. 저장소 안의 `masc/.masc/`는 lock·scratch용입니다.
 
@@ -224,7 +224,7 @@ Keeper 정의 예시 (`keepers/<name>.toml`):
 ```toml
 [keeper]
 name = "albini"
-persona_name = "albini"
+name = "albini"
 goal = "흐름이 끊긴 task의 owner를 호명해 추궁합니다. 본인은 코드를 만들지 않습니다."
 active_goal_ids = ["goal-pm-flow"]
 sandbox_profile = "docker"     # 또는 "local"

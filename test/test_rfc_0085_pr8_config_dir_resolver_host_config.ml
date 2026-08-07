@@ -5,9 +5,8 @@ open Alcotest
 
     Verifies:
     1. Env_config_core.config_dir_opt has 0 callers (function removed).
-    2. Env_config_core.personas_dir_opt has 0 callers (function removed).
-    3. config_dir_resolver.ml invokes Host_config.from_env at least 4 times
-       (initial bindings + 3 sanitiser current readers). *)
+    2. config_dir_resolver.ml invokes Host_config.from_env at least 4 times
+       (initial bindings + sanitiser current readers). *)
 
 let walk_dirs dirs =
   let rec collect acc = function
@@ -46,21 +45,6 @@ let test_config_dir_opt_callers_zero () =
   check int "Env_config_core.config_dir_opt callers = 0" 0 total
 ;;
 
-let test_personas_dir_opt_callers_zero () =
-  let files = walk_dirs [ "lib"; "bin" ] in
-  let total =
-    List.fold_left
-      (fun acc f ->
-        acc
-        + Ast_grep.count_calls
-            ~module_path:f
-            ~callee:"Env_config_core.personas_dir_opt")
-      0
-      files
-  in
-  check int "Env_config_core.personas_dir_opt callers = 0" 0 total
-;;
-
 let test_config_dir_resolver_uses_host_config_from_env () =
   let n =
     Ast_grep.count_calls
@@ -70,8 +54,7 @@ let test_config_dir_resolver_uses_host_config_from_env () =
   if n < 4
   then
     failf
-      "config_dir_resolver.ml must call Host_config.from_env >= 4 (3 \
-       sanitiser current readers + 3 initial bindings); got %d"
+      "config_dir_resolver.ml must call Host_config.from_env >= 4; got %d"
       n
 ;;
 
@@ -83,10 +66,6 @@ let () =
             "config_dir_opt callers = 0"
             `Quick
             test_config_dir_opt_callers_zero
-        ; test_case
-            "personas_dir_opt callers = 0"
-            `Quick
-            test_personas_dir_opt_callers_zero
         ] )
     ; ( "Host_config.from_env adoption"
       , [ test_case

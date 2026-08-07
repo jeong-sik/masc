@@ -201,7 +201,6 @@
   <section class="finding p2">
     <h3>F-08 · P2 · Unified prompt metadata advertises a deleted template variable</h3>
     <div class="meta">Confidence: High · Owner boundary: MASC prompt catalog SSOT</div>
-    <p>16:30 KST까지 live build <code>61a643565b</code>의 <code>keeper.unified.system</code> metadata에는 <code>trait_lines</code>가 남아 있지만 effective template에는 없어, 같은 drift warning이 677회 발생했다. startup config parser는 정상이며, 이 문제는 prompt schema metadata와 effective template의 SSOT 불일치다.</p>
     <p>대규모 legacy purge PR <a href="https://github.com/jeong-sik/masc/pull/23929">#23929</a>이 16:30:12 KST에 merge commit <code>434a7f5a76</code>으로 해당 placeholder를 삭제했다. 따라서 source remediation은 main에 landed됐지만 live build에는 아직 배포되지 않았다. 중복 수정과 충돌을 만들지 않기 위해 이 후속 PR에는 같은 제거를 넣지 않는다.</p>
     <p><strong>[근거]</strong> System Log exact warning count, live build source, merged PR #23929, 2026-07-10 16:31 KST 확인, 신뢰도 High.</p>
   </section>
@@ -226,7 +225,6 @@
     <tr><td>4</td><td>OAS typed stop outcome</td><td>새 provider terminal reason을 fatal string match 없이 보존; malformed protocol과 분리; MASC fallback receipt가 원인과 함께 관측됨</td></tr>
     <tr><td>5</td><td>Long-turn phase receipts</td><td>provider/tool/approval/stream별 elapsed와 cancellation이 기록되고, 한 lane의 stall이 전체 fleet을 막지 않음</td></tr>
     <tr><td>6</td><td>Terminal task rejection contract</td><td>cancelled task에 대한 release 재호출이 typed terminal result로 끝나고 Keeper가 다른 활동으로 이동</td></tr>
-    <tr><td>7</td><td>Prompt metadata drift deployment proof</td><td>merged #23929의 <code>trait_lines</code> 제거가 live build에 반영되고 warning이 0; 후속 PR에 중복 source 변경 없음</td></tr>
   </table>
 
   <h2>현재 remediation 상태</h2>
@@ -235,7 +233,6 @@
     <p><strong>F-02 1차 수정 landed:</strong> merged PR <a href="https://github.com/jeong-sik/masc/pull/23923">#23923</a>에서 approval queue에 typed blocking/nonblocking boundary를 추가하고 일반 Keeper tool approval을 nonblocking 경로로 연결했다. 명시적 critical continuation gate의 blocking policy는 유지한다.</p>
     <p><strong>F-03 1차 수정 landed:</strong> OAS stop-reason SSOT에 공식 <code>ContentFilter</code>/<code>RepetitionTruncation</code> constructor를 추가하고 pipeline은 두 값만 typed terminal result로 보존한다. 임의 <code>Unknown</code>과 tool block 없는 <code>UnmatchedToolCalls</code>은 fail-closed를 유지한다. <a href="https://github.com/jeong-sik/oas/pull/2506">OAS PR #2506</a>은 merge됐고, 후속 repair를 포함한 current main <code>c4255efe5</code>의 CI run <a href="https://github.com/jeong-sik/oas/actions/runs/29075791219">29075791219</a>가 성공했다.</p>
     <p><strong>F-07 수정 구현:</strong> Draft PR <a href="https://github.com/jeong-sik/masc/pull/23950">#23950</a>에서 heartbeat가 typed Blocking approval을 event intake 전에 분류하고, autonomous run은 exact durable queue가 비어 있지 않으면 첫 provider turn 뒤 typed checkpoint를 만든다. 새 <code>Yielded_to_durable_stimulus</code> stop reason은 receipt, outcome, metric, dashboard cancellation surface까지 exhaustive하게 전파한다. global OAS turn count를 0으로 가정하지 않는 boundary regression과 queue/intake regression을 추가했다.</p>
-    <p><strong>F-08 source 수정 landed:</strong> prompt metadata의 obsolete <code>trait_lines</code> 제거는 merged PR <a href="https://github.com/jeong-sik/masc/pull/23929">#23929</a>이 소유한다. 이번 후속 변경은 같은 영역을 중복 수정하지 않으며 live 배포 후 warning 소멸만 확인한다.</p>
     <p>기존 remediation 검증: MASC approval queue 12개, HITL approval 51개, supervisor 87개, unified verification surface 18개, prompt token integrity 15개, F-06 tool-result 25개, Keeper tool-dispatch runtime 36개 테스트가 성공했다. OAS Types 61개, stop-reason SSOT 4개, OpenAI streaming 40개, pipeline 50개 테스트도 성공했다.</p>
     <p>F-07 current-head 검증: changed OCaml parser, <code>ocamlformat --check</code>, <code>git diff --check</code>, no-actionable-signal policy lint, HTML parse가 성공했다. focused Dune은 unrelated worktree 두 곳이 repo-local lock에서 build 중이어서 대기 프로세스만 중단했고 lock holder를 kill하거나 우회하지 않았다. OCaml 5.4 full build/test proof는 Draft PR #23950 CI authority로 남긴다.</p>
     <p><strong>[근거]</strong> OAS current main CI run 29075791219, 2026-07-10 16:30 KST 확인, 신뢰도 High.</p>

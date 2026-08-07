@@ -31,7 +31,7 @@ observable.
 |---|---|---|
 | provider/model catalog and call features | OAS | generic; imports no MASC concept |
 | runtime id and fallback membership | OAS config, referenced by MASC | MASC stores ids, not vendor branches |
-| Keeper persona/world/runtime | MASC Keeper config | one immutable snapshot per Keeper cycle |
+| Keeper instructions/world/runtime | MASC Keeper config | one immutable snapshot per Keeper cycle |
 | Tool descriptors and schemas | registered tool modules | no parallel policy table |
 | Gate mode and judge runtime | MASC Gate config | generic, no product/tool cases |
 | Scheduler conditions | MASC Scheduler | explicit time/event expressions |

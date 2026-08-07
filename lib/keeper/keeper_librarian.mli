@@ -12,12 +12,11 @@ type current_selection =
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; generation : int
-  ; persona : string
-    (** The same resolved persona text the keeper's own system prompt
-        carries ([Keeper_types_profile.load_resolved_persona_extended]).
+  ; keeper_instructions : string
+    (** The same instructions the keeper's own system prompt carries.
         The librarian curates on the keeper's behalf, so it judges
         importance through this identity; [""] renders as an explicit
-        [no persona] marker. *)
+        [no keeper instructions] marker. *)
   ; current : current_selection option
   ; max_recall_fact_bytes : int
     (** Maximum UTF-8 bytes for the exact rendered fact lines. The prompt states

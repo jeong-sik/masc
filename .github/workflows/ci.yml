@@ -576,6 +576,7 @@ jobs:
           bash scripts/ci/check-silent-failure-patterns.sh
           bash scripts/ci/check-enum-string-safety.sh
           bash scripts/ci/check-masc-oas-boundary.sh
+          python3 scripts/ci/check-env-snapshot-default-drift.py
           bash scripts/check-oas-internals.sh
           bash scripts/ci/check-publication-recovery-test-boundary.sh
           bash scripts/ci/check-tla-variant-sync.sh
@@ -1039,6 +1040,14 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_keeper_raw_trace_reader
 
+      - name: Run env snapshot applied-default suite
+        # Asserts through the JSON operators actually receive. The script gate
+        # cannot cover this knob any more -- the fix removed the literals it
+        # compares -- so the property moved here.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_env_snapshot_reports_applied_default
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was
@@ -1177,6 +1186,18 @@ jobs:
       # suite asserts routed identities and stored payloads, never source
       # text or log wording. It stayed compile-only under @check, so
       # regression tests added there (#26625, #26657) never ran.
+      - name: Run env-snapshot applied-default suite
+        id: env_snapshot_applied_default_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_env_snapshot_reports_applied_default"
+
       - name: Run channel-gate content-length knob suite
         id: channel_gate_content_length_knob_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

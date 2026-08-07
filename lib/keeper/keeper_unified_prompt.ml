@@ -128,8 +128,34 @@ let format_current_task_with_heading ~heading (task : Masc_domain.task) : string
     "\n";
   Buffer.contents buf
 
-let format_current_task task =
-  format_current_task_with_heading ~heading:"Current Task (held by you)" task
+(* "held by you" is true of the two statuses that actually hold a claim slot.
+   [Workspace_task.active_owned_task_ids_for_agent] counts [Claimed] and
+   [InProgress] and returns [None] for [AwaitingVerification]; the scheduler
+   states the same rule outright ("AwaitingVerification is still excluded: it is
+   no longer active implementation work for the claimant").
+
+   Under the old single heading a submitted task read as one the Keeper was
+   still holding, and the only visible way out of holding something is to give
+   it up. 10 of 56 cancellations in the live backlog are finished work cancelled
+   with the deliverable written into the cancel reason -- task-032 says
+   "useYupValidationResolver typed properly, tsc passes. Cancelling to free",
+   naming the belief in the act of acting on it. The claim it was freeing itself
+   for was never blocked.
+
+   The heading is the whole fix: no new field, no new line, and the status was
+   already on the row underneath. *)
+let format_current_task (task : Masc_domain.task) =
+  let heading =
+    match task.Masc_domain.task_status with
+    | Masc_domain.AwaitingVerification _ ->
+      "Current Task (submitted for verification; it does not hold your claim)"
+    | Masc_domain.Claimed _
+    | Masc_domain.InProgress _
+    | Masc_domain.Todo
+    | Masc_domain.Done _
+    | Masc_domain.Cancelled _ -> "Current Task (held by you)"
+  in
+  format_current_task_with_heading ~heading task
 
 (** Format one conversation endpoint presence line. *)
 let format_surface_presence (p : Gate_surface.surface_presence) : string =

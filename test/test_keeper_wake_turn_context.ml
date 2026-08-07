@@ -573,6 +573,52 @@ let test_preview_does_not_invent_wake_reason () =
           ~labels:[ "keeper", preview_meta.name ]
           ()))
 
+(* [Workspace_task.active_owned_task_ids_for_agent] counts Claimed and
+   InProgress and answers None for AwaitingVerification, and the scheduler says
+   so in words ("AwaitingVerification is still excluded"). The heading is the
+   one place a Keeper reads that ownership, so it must not widen the two
+   statuses that hold a claim into all of them.
+
+   Live cost of the old wording: of 56 cancelled tasks 10 had already written a
+   verification record, task-032 among them -- "useYupValidationResolver typed
+   properly, tsc passes. Cancelling to free". The claim it freed itself for was
+   never blocked. *)
+let test_submitted_task_heading_does_not_claim_a_hold () =
+  let task =
+    make_task
+      ~task_status:
+        (Masc_domain.AwaitingVerification
+           { assignee = "wake-context-keeper"
+           ; started_at = "2026-07-07T01:00:00Z"
+           ; submitted_at = "2026-07-07T02:00:00Z"
+           ; verification_id = "vrf-task-42"
+           })
+      ()
+  in
+  let user = user_message ~current_task:task base_observation in
+  check bool "not called held" false
+    (contains ~needle:"Current Task (held by you)" user);
+  check bool "the heading states what it is instead" true
+    (contains
+       ~needle:"### Current Task (submitted for verification; it does not hold your claim)"
+       user);
+  check bool "the row still carries the task" true
+    (contains ~needle:"- task-42 — Wire the wake-turn context" user);
+  check bool "and its status" true
+    (contains ~needle:"awaiting verification (submitted 2026-07-07T02:00:00Z)" user)
+
+let test_in_progress_task_heading_still_says_held () =
+  let task =
+    make_task
+      ~task_status:
+        (Masc_domain.InProgress
+           { assignee = "wake-context-keeper"; started_at = "2026-07-07T01:00:00Z" })
+      ()
+  in
+  let user = user_message ~current_task:task base_observation in
+  check bool "a task actually held is still called held" true
+    (contains ~needle:"### Current Task (held by you)" user)
+
 (* --- 3. Goal titles + self-direction parity --- *)
 
 let test_goal_summaries_render_titles () =
@@ -681,6 +727,13 @@ let () =
             test_bootstrap_stimulus_keeps_reactive_post_action;
           test_case "preview invents no wake reason" `Quick
             test_preview_does_not_invent_wake_reason;
+        ] );
+      ( "current task heading states the status",
+        [
+          test_case "a submitted task is not called held" `Quick
+            test_submitted_task_heading_does_not_claim_a_hold;
+          test_case "an in-progress task is still called held" `Quick
+            test_in_progress_task_heading_still_says_held;
         ] );
       ( "goal titles and parity directive",
         [

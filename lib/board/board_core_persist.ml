@@ -1,11 +1,3 @@
-module Hashtbl = Stdlib.Hashtbl
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module String = Stdlib.String
-
 (** Board Core — JSONL store logic and persistence. Types are in Board_types. *)
 include Board_core_classify
 include Board_core_payload

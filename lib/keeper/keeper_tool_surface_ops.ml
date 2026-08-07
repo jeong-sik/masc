@@ -1,10 +1,3 @@
-module Option = Stdlib.Option
-module Sys = Stdlib.Sys
-module List = Stdlib.List
-module String = Stdlib.String
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Runtime operations used by the keeper MCP tool surface. *)
 open Tool_args
 open Keeper_types

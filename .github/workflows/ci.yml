@@ -1573,7 +1573,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          board_attention_targets="@test/runtest-test_keeper_board_attention_worker @test/runtest-test_keeper_board_attention_partition @test/runtest-test_keeper_board_attention_candidate"
+          board_attention_targets="@test/runtest-test_keeper_board_attention_worker @test/runtest-test_keeper_board_attention_partition @test/runtest-test_keeper_board_attention_candidate @test/runtest-test_keeper_lifecycle_global_gate"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${board_attention_targets}"
 
       - name: Run tool blob retention suite

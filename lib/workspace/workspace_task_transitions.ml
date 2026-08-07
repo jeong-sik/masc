@@ -730,19 +730,35 @@ let transition_task_outcome_r
      (match superseded_verification_id with
       | None -> ()
       | Some superseded ->
-        (match
-           (Atomic.get Workspace_hooks.verification_delete_request_fn) config
-             ~verification_id:superseded
-         with
+        let delete_attempt () =
+          try
+            (Atomic.get Workspace_hooks.verification_delete_request_fn) config
+              ~verification_id:superseded
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        (match delete_attempt () with
          | Ok () -> ()
-         | Error detail ->
-           Log.TaskState.error
-             "verification supersede delete degraded after commit task_id=%s \
-              superseded=%s replaced_by=%s detail=%s"
-             task_id
-             superseded
-             verification_id
-             detail));
+         | Error first_detail ->
+           (match delete_attempt () with
+            | Ok () ->
+              Log.TaskState.error
+                "verification supersede delete retried and recovered after commit \
+                 task_id=%s superseded=%s replaced_by=%s first_detail=%s"
+                task_id
+                superseded
+                verification_id
+                first_detail
+            | Error second_detail ->
+              Log.TaskState.error
+                "verification supersede delete failed after retry after commit \
+                 task_id=%s superseded=%s replaced_by=%s first=%s second=%s"
+                task_id
+                superseded
+                verification_id
+                first_detail
+                second_detail)));
      (try
         (Atomic.get Workspace_hooks.verification_notify_submit_fn)
           config

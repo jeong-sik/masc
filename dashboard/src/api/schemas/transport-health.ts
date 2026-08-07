@@ -161,7 +161,6 @@ const StreamableHttpSchema = object({
   observer_stream: fallback(string(), '/mcp?sse_kind=observer'),
   presence_stream: fallback(string(), '/events/presence'),
   managed_endpoint: fallback(string(), '/mcp/managed'),
-  operator_endpoint: fallback(string(), '/mcp/operator'),
   delete_endpoint: fallback(string(), '/mcp'),
   default_transport: fallback(string(), 'unknown'),
   supports_post: fallback(boolean(), false),

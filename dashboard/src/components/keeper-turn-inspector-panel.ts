@@ -373,13 +373,18 @@ export function KeeperTurnInspectorPanel({ keepers }: { keepers: readonly string
 
       <div class="flex flex-wrap gap-1" role="tablist" aria-label="Turn inspector views">
         ${TABS.map(item => html`
-          <${Btn}
+          <button
             key=${item.id}
+            type="button"
             role="tab"
             aria-selected=${tab === item.id}
-            class=${tab === item.id ? 'v2-monitoring-action is-active' : 'v2-monitoring-action'}
+            class=${`rounded px-2 py-1 text-xs border ${
+              tab === item.id
+                ? 'border-[var(--color-accent)] text-[var(--color-fg-primary)]'
+                : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'
+            }`}
             onClick=${() => setTab(item.id)}
-          >${item.label}<//>
+          >${item.label}</button>
         `)}
       </div>
       <${Muted}>${active.hint}<//>

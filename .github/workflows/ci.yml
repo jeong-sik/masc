@@ -1005,6 +1005,14 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_jsonl_day_key
 
+      - name: Run memory journal projection suite
+        # The librarian's failed passes reach the dashboard through this
+        # projection. A torn line presented as a commit would make a damaged
+        # journal read as a healthy shorter one, and that compiles either way.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_memory_journal_projection
+
       - name: Run operator note lifetime suite
         # RFC-0366. A note that renders twice is a standing rule the operator
         # never wrote — the #26729 shape. @check compiles "renders once then
@@ -1201,6 +1209,24 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_channel_gate_content_length_knob"
+
+      # Redaction is the last thing every observability payload passes through,
+      # so a defect here is not scoped to one field: a preview truncated inside
+      # a multibyte character makes the whole JSON response undecodable and the
+      # panel that reads it renders nothing. test_observability_redact carried a
+      # max-length case from the start and compiled on every run, but was never
+      # named here, so it never executed and the byte-indexed cut survived.
+      - name: Run observability redaction suite
+        id: observability_redaction_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_observability_redact"
 
       - name: Run verification behavior suite
         id: verification_behavior_suite

@@ -1000,7 +1000,7 @@ let () =
 ;;
 
 let () =
-  test "next_hint_awaiting_verification has no agent action" (fun () ->
+  test "next_hint_awaiting_verification offers supersede alongside cancel" (fun () ->
     let h =
       next_hint
         (Masc_domain.AwaitingVerification
@@ -1010,7 +1010,11 @@ let () =
            ; verification_id = "v"
            })
     in
-    assert (String.equal h ""))
+    (* This hint is where an assignee learns the state has an exit other than
+       Cancel: the live log carried 16 refused resubmissions while the hint
+       read "[cancel]". *)
+    assert (str_contains h "submit_for_verification");
+    assert (str_contains h "cancel"))
 ;;
 
 let () =

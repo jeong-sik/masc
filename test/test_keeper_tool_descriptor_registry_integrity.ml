@@ -124,17 +124,21 @@ let test_keeper_model_projection_is_single_and_unique () =
   List.iter
     (fun (descriptor : Descriptor.t) ->
        let projected = Descriptor.keeper_model_names descriptor in
-       let candidates = Descriptor.keeper_candidate_names descriptor in
        match descriptor.keeper_model_projection with
        | Descriptor.Preferred_public_name ->
          Alcotest.(check (list string))
            (descriptor.id ^ " preferred model projection")
            [ descriptor.public_name ]
            projected;
+         (* The internal name stays owned by this descriptor even though the
+            model is never shown it. [registered_names] is the name-integrity
+            axis; [keeper_model_names] is the admission axis. Keeping both here
+            is what stops a rename from freeing the internal name for another
+            descriptor to claim. *)
          Alcotest.(check bool)
-           (descriptor.id ^ " keeps internal dispatch candidate")
+           (descriptor.id ^ " still owns its internal handler route")
            true
-           (List.mem descriptor.internal_name candidates)
+           (List.mem descriptor.internal_name (Descriptor.registered_names descriptor))
        | Descriptor.Internal_name ->
          Alcotest.(check (list string))
            (descriptor.id ^ " internal model projection")
@@ -144,20 +148,12 @@ let test_keeper_model_projection_is_single_and_unique () =
          Alcotest.(check (list string))
            (descriptor.id ^ " operator-only control has no model projection")
            []
-           projected;
-         Alcotest.(check (list string))
-           (descriptor.id ^ " operator-only control has no Keeper candidates")
-           []
-           candidates
+           projected
        | Descriptor.Transport_alias _ ->
          Alcotest.(check (list string))
            (descriptor.id ^ " transport alias has no duplicate model projection")
            []
-           projected;
-         Alcotest.(check (list string))
-           (descriptor.id ^ " has no Keeper candidates")
-           []
-           candidates)
+           projected)
     (all_descriptors ())
 ;;
 
@@ -252,11 +248,7 @@ let test_structurally_invalid_schema_is_excluded () =
   Alcotest.(check (list string))
     "malformed schema has no model names"
     []
-    (Descriptor.keeper_model_names malformed);
-  Alcotest.(check (list string))
-    "malformed schema has no execution candidates"
-    []
-    (Descriptor.keeper_candidate_names malformed)
+    (Descriptor.keeper_model_names malformed)
 ;;
 
 (* The description a Keeper reads and the description in the canonical registry

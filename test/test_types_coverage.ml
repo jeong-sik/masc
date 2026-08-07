@@ -605,7 +605,7 @@ let test_backlog_to_yojson_with_tasks () =
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
     predecessor_task_id = None;
-    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let b : Masc_domain.backlog = { tasks = [task]; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
   let json = Masc_domain.backlog_to_yojson b in
@@ -1361,7 +1361,7 @@ let test_task_to_yojson () =
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
     predecessor_task_id = None;
-    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let json = Masc_domain.task_to_yojson t in
   match json with
@@ -1409,6 +1409,7 @@ let test_task_reclaim_gate_ignores_free_text_without_policy () =
     handoff_context = None;
     cycle_count = 9;
     reclaim_policy = None;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = Some "worktree path not found";
   } in
   match Masc_domain.task_claim_decision t with
@@ -1434,6 +1435,7 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
     handoff_context = None;
     cycle_count = 0;
     reclaim_policy = Some Masc_domain.Block_reclaim;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = Some "operator hard stop";
   } in
   match Masc_domain.task_claim_decision t with
@@ -1464,6 +1466,7 @@ let test_task_claim_awaiting_verification_is_pending_verdict () =
     handoff_context = None;
     cycle_count = 0;
     reclaim_policy = None;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = None;
   } in
   (match Masc_domain.task_claim_decision t with
@@ -1512,6 +1515,7 @@ let test_task_claim_next_action_todo_policy_block_still_claims () =
     handoff_context = None;
     cycle_count = 0;
     reclaim_policy = Some Masc_domain.Block_reclaim;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = Some "operator hard stop";
   } in
   match Masc_domain.task_claim_next_action t with

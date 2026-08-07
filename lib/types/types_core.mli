@@ -152,7 +152,11 @@ type task_execution_links =
   { operation_id : string option [@default None]
   ; session_id : string option [@default None]
   }
-[@@deriving show, yojson { strict = false }]
+[@@deriving show, yojson { strict = true }]
+
+(** No producer has been linked yet. A task starts here and stays here until a
+    runtime records the operation or session that carried it out. *)
+val no_execution_links : task_execution_links
 
 type task_contract =
   { strict : bool [@default false]
@@ -160,8 +164,6 @@ type task_contract =
   ; required_evidence : string list [@default []]
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]
-  ; links : task_execution_links
-        [@default { operation_id = None; session_id = None }]
   }
 [@@deriving show, yojson { strict = false }]
 
@@ -216,6 +218,11 @@ type task =
         (** RFC-0323 W2: write-once lineage pointer to the terminal task this
             one re-runs. Set only at creation; transitions carry it through. *)
   ; contract : task_contract option [@default None]
+  ; execution_links : task_execution_links
+        [@default no_execution_links]
+        (** Runtime identifiers attached after creation by whichever execution
+            picks the task up. Separate from [contract] so linking them never
+            rewrites what counts as done. *)
   ; handoff_context : task_handoff_context option [@default None]
   ; cycle_count : int [@default 0]
   ; reclaim_policy : task_reclaim_policy option [@default None]

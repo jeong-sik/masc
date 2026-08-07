@@ -205,6 +205,7 @@ let make_task ?(handoff_context = None) ~task_status () : Masc_domain.task =
     handoff_context;
     cycle_count = 0;
     reclaim_policy = None;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = None;
   }
 

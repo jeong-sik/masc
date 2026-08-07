@@ -17,6 +17,7 @@ type try_provider_ctx =
   ; model_input_projection : Agent_sdk.Agent.model_input_projection option
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
+  ; provider_call_deadline_sec : float option
   ; temperature : float option
   ; accept : Agent_sdk_response.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option

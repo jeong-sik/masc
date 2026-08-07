@@ -165,6 +165,15 @@ module KeeperKeepalive : sig
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Clamp range: [10, 600] s. *)
 
+  val provider_call_deadline_sec_override : float option
+  (** Total wall-clock deadline for one provider call attempt, independent
+      of streaming progress and covering both streaming and non-streaming
+      calls (#27349). [None] (env unset) means no MASC-side enforcement;
+      deliberately no failsafe floor, unlike {!stream_idle_timeout_sec}'s
+      RFC-0345 fallback.
+
+      Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. Clamp range: [30, 3600] s. *)
+
 end
 
 (** {1 gRPC heartbeat reconnect} *)

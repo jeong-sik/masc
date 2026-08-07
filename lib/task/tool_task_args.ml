@@ -149,7 +149,7 @@ let parse_handoff_context ~(agent_name : string)
                   [\"%s\"]}."
                  Tool_task_completion_review.resolvable_evidence_ref_forms
                  (Masc_domain.task_action_to_string action)
-                 "note:<text>"
+                 Tool_task_completion_review.note_evidence_ref_form
                  handoff_example_evidence_ref)
           else if String.equal summary "" then
             if summary_required then

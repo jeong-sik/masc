@@ -536,10 +536,12 @@ let classify_evidence_reference reference =
      | Some _ | None -> Unresolvable_reference)
 ;;
 
-let resolvable_reference_forms =
-  [ artifact_reference_prefix ^ "<producer-root-relative-path>"
-  ; note_reference_prefix ^ "<text>"
-  ]
+let artifact_reference_form =
+  artifact_reference_prefix ^ "<producer-root-relative-path>"
+;;
+
+let note_reference_form = note_reference_prefix ^ "<text>"
+let resolvable_reference_forms = [ artifact_reference_form; note_reference_form ]
 
 let valid_producer_relative_path path =
   Filename.is_relative path

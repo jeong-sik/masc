@@ -129,10 +129,12 @@ let taskboard_tools : Masc_domain.tool_schema list =
          trusted evidence_refs. The task must be claimed by you. This does not \
          make the task done: it moves to awaiting_verification and waits for a \
          completion authority's verdict, which no Keeper can produce. It also \
-         does not hold your next claim while it waits. The completion gate \
-         accepts the submission only when evidence_refs contains a \
-         reviewer-inspectable PR, commit, trace, receipt, or URL reference; \
-         pure-placeholder results ('done', 'ok', etc.) are rejected."
+         does not hold your next claim while it waits. Every evidence_refs \
+         entry must be artifact:<producer-root-relative-path> or note:<text>; \
+         this tool refuses any other form at submit. Only an artifact: path is \
+         opened and snapshotted for the reviewer — a note: entry is text the \
+         reviewer reads but cannot inspect. Pure-placeholder results ('done', \
+         'ok', etc.) are rejected."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

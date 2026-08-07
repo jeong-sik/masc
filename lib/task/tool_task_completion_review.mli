@@ -16,6 +16,12 @@ val resolvable_evidence_ref_forms : string
 (** The accepted reference forms, joined for an error message that has to tell
     a caller what to write instead. *)
 
+val note_evidence_ref_form : string
+(** The note form alone, for the sentence that tells a caller how to carry
+    narrative. Taken from
+    {!Workspace_verification_store.note_reference_form} so the prose cannot
+    name a prefix the classifier no longer matches. *)
+
 val non_empty_trimmed_strings : string list -> string list
 
 val concrete_verification_evidence_refs :

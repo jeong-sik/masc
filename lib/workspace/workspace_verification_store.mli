@@ -93,6 +93,11 @@ val classify_evidence_reference : string -> reference_form
     a reference cannot be admitted at submit and then be unreadable at review,
     and a new form added here reaches every caller. *)
 
+val artifact_reference_form : string
+val note_reference_form : string
+(** One accepted form each, spelled from the prefix this module matches on, so
+    an error message naming a single form cannot drift from the classifier. *)
+
 val resolvable_reference_forms : string list
 (** The accepted forms, spelled for an error message that has to tell a caller
     what to write instead. *)

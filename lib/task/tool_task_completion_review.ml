@@ -33,6 +33,8 @@ let resolvable_evidence_ref_forms =
   String.concat " or " Workspace_verification_store.resolvable_reference_forms
 ;;
 
+let note_evidence_ref_form = Workspace_verification_store.note_reference_form
+
 let non_empty_trimmed_strings values =
   values
   |> List.filter_map (fun value ->

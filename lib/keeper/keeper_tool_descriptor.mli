@@ -187,10 +187,6 @@ val model_visible_schemas : unit -> Masc_domain.tool_schema list
     schema. *)
 val keeper_model_names : t -> string list
 
-(** Names admitted by the Keeper execution/candidate boundary. A preferred
-    public descriptor admits its public name and internal handler route. *)
-val keeper_candidate_names : t -> string list
-
 (** Every name owned by a descriptor, including transport-alias names. This is
     for name-integrity checks, never Keeper execution admission. *)
 val registered_names : t -> string list

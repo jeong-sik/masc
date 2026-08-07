@@ -363,8 +363,6 @@ describe('RuntimeLensSection', () => {
       manifest_scan_diagnostics: {
         state: 'available',
         schema: 'keeper.runtime_manifest_scan_diagnostics.v1',
-        retired_event_count: 0,
-        retired_event_counts: [],
         unsupported_event_count: 0,
         unsupported_event_counts: [],
         unsupported_event_unattributed_count: 0,
@@ -702,16 +700,11 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
   })
 
-  it('surfaces retired, unsupported, and invalid manifest rows', () => {
+  it('surfaces unsupported and invalid manifest rows', () => {
     const trace = runtimeTraceFixture()
     trace.manifest_scan_diagnostics = {
       state: 'available',
       schema: 'keeper.runtime_manifest_scan_diagnostics.v1',
-      retired_event_count: 2,
-      retired_event_counts: [
-        { event: 'state_snapshot_sidecar_saved', count: 1 },
-        { event: 'working_state_sidecar_saved', count: 1 },
-      ],
       unsupported_event_count: 3,
       unsupported_event_counts: [{ event: 'future_manifest_event', count: 1 }],
       unsupported_event_unattributed_count: 2,
@@ -724,7 +717,7 @@ describe('RuntimeLensSection', () => {
 
     render(h(RuntimeLensSection, { trace }))
 
-    expect(screen.getByText('retired 2 · unsupported 3 · invalid 1')).toBeInTheDocument()
+    expect(screen.getByText('unsupported 3 · invalid 1')).toBeInTheDocument()
     expect(screen.getByText('manifest diagnostics').nextElementSibling).toHaveAttribute(
       'title',
       expect.stringContaining('unsupported rows outside identity detail bound=2'),

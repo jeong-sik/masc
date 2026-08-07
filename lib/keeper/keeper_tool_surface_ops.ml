@@ -181,6 +181,7 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
     let* () =
       Keeper_meta_store.write_meta_with_merge
         ~merge:Keeper_meta_merge.monotonic_usage_counters config updated_meta
+      |> Result.map_error Keeper_meta_store.write_meta_error_to_string
       |> Result.map_error (fun err ->
           Printf.sprintf
             "failed to persist reseeded keeper identity for %s: %s"

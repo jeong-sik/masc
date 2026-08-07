@@ -137,7 +137,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               Log.Keeper.warn
                 "keeper %s pause: write_meta failed: %s"
                 name
-                err;
+                (Keeper_meta_store.write_meta_error_to_string err);
               false)
       (* Issue #8391 HIGH #1: split [Ok None] (meta vanished) from
          [Error _] (IO/parse failure) so lifecycle pause persistence after

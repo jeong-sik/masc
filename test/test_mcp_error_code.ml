@@ -196,6 +196,30 @@ let test_sse_get_registers_before_streaming_response () =
   assert_order "generic SSE GET validates before 200 stream" http;
   assert_order "AG-UI SSE validates before 200 stream" agui
 
+(* JSON-RPC 2.0 §5 allows a null id only when the id could not be read.
+   Asserted over [C.all] rather than a hand-listed set, so a new code
+   that quietly answers true is caught here as well as by the exhaustive
+   match in the module. *)
+let test_allows_null_request_id_only_for_unreadable_id () =
+  let allowed = List.filter C.allows_null_request_id C.all in
+  Alcotest.(check int) "exactly two codes allow a null id" 2 (List.length allowed);
+  Alcotest.(check bool) "Parse_error" true (C.allows_null_request_id C.Parse_error);
+  Alcotest.(check bool) "Invalid_request" true (C.allows_null_request_id C.Invalid_request)
+;;
+
+let test_allows_null_request_id_rejects_answered_requests () =
+  List.iter
+    (fun code ->
+      match code with
+      | C.Parse_error | C.Invalid_request -> ()
+      | other ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s must carry the request id" (Format.asprintf "%a" C.pp other))
+          false
+          (C.allows_null_request_id other))
+    C.all
+;;
+
 let () =
   Alcotest.run "Mcp_error_code"
     [
@@ -208,6 +232,13 @@ let () =
             test_of_wire_unknown_returns_none;
           test_case "Quiet round-trip drops payload" `Quick
             test_quiet_round_trip_loses_payload;
+        ] );
+      ( "null-request-id",
+        [
+          test_case "only unreadable-id codes allow null" `Quick
+            test_allows_null_request_id_only_for_unreadable_id;
+          test_case "every answered request keeps its id" `Quick
+            test_allows_null_request_id_rejects_answered_requests;
         ] );
       ( "messages-and-status",
         [

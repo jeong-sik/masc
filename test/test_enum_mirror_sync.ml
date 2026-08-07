@@ -36,6 +36,60 @@ let all_schemas () =
      lists were unguarded. [schedule_status] is the one with an owner to
      compare against. *)
   @ Tool_schemas_schedule.schemas
+  (* [board_schemas] above is the eight curated Keeper projections. The other
+     thirteen Board tools reach a Keeper through the canonical registry, which
+     was outside this walk, and so were the Task schemas. *)
+  @ Board_tool_registry.tools
+  @ Masc.Task.Schemas.schemas
+;;
+
+(* Every value a schema advertises has to be one the handler takes -- the
+   failure this file's header describes, "the tool would have rejected the value
+   its own documentation advertised". Unlike [check_mirror_in_sync] this needs
+   no enumeration on the owner's side, which is what the two owners below do not
+   export.
+
+   It catches the harmful direction only. A domain value missing from the schema
+   is invisible here; seeing that needs an [all_*] list, and adding one purely so
+   a test could reach it is the surface the dead-export ratchet refuses. *)
+let check_every_advertised_value_decodes ~label ~decodes ~advertised =
+  check bool
+    (Printf.sprintf "%s is advertised somewhere" label)
+    true
+    (advertised <> []);
+  match List.filter (fun value -> not (decodes value)) advertised with
+  | [] -> ()
+  | rejected ->
+    failf
+      "%s: the schema advertises %s, which the handler refuses.\n\
+       Advertised: %s"
+      label
+      (String.concat ", " rejected)
+      (String.concat ", " advertised)
+;;
+
+(* The enum declared for one property name, across every schema that declares
+   it, so a second copy of the same property is compared too. *)
+let advertised_values_for ~property =
+  let rec walk (json : Yojson.Safe.t) =
+    match json with
+    | `Assoc fields ->
+      List.concat_map
+        (fun (key, value) ->
+          match value with
+          | `Assoc inner when String.equal key property ->
+            (match List.assoc_opt "enum" inner with
+             | Some (`List items) ->
+               List.filter_map (function `String v -> Some v | _ -> None) items
+             | _ -> walk value)
+          | _ -> walk value)
+        fields
+    | `List items -> List.concat_map walk items
+    | _ -> []
+  in
+  all_schemas ()
+  |> List.concat_map (fun (t : Masc_domain.tool_schema) -> walk t.input_schema)
+  |> List.sort_uniq String.compare
 ;;
 
 (* Collect every string list that appears under an "enum" key anywhere in a
@@ -92,6 +146,24 @@ let test_schedule_status_mirror () =
          Schedule_domain.schedule_status_to_string
          Schedule_domain.all_schedule_statuses)
     ()
+(* Board sub-board access. [Masc.Board] owns the vocabulary through
+   [sub_board_access_of_string_opt]; the schema writes the three strings by
+   hand, in two places. *)
+let test_sub_board_access_advertised_values_decode () =
+  check_every_advertised_value_decodes
+    ~label:"sub_board access"
+    ~decodes:(fun v ->
+      Option.is_some (Masc.Board.sub_board_access_of_string_opt v))
+    ~advertised:(advertised_values_for ~property:"access")
+;;
+
+(* Task reclaim policy. Same shape: [Masc_domain.task_reclaim_policy_of_string]
+   owns it and the schema writes the two strings by hand. *)
+let test_reclaim_policy_advertised_values_decode () =
+  check_every_advertised_value_decodes
+    ~label:"task reclaim_policy"
+    ~decodes:(fun v -> Result.is_ok (Masc_domain.task_reclaim_policy_of_string v))
+    ~advertised:(advertised_values_for ~property:"reclaim_policy")
 ;;
 
 let test_memory_search_source_mirror () =
@@ -147,6 +219,10 @@ let () =
         ; test_case "board sort order" `Quick test_sort_order_mirror
         ; test_case "board vote direction" `Quick test_vote_direction_mirror
         ; test_case "schedule status" `Quick test_schedule_status_mirror
+        ; test_case "sub_board access values decode" `Quick
+            test_sub_board_access_advertised_values_decode
+        ; test_case "reclaim_policy values decode" `Quick
+            test_reclaim_policy_advertised_values_decode
         ; test_case "owner lists are non-empty" `Quick test_owners_are_non_empty
         ; test_case "schemas publish enums" `Quick test_schema_set_is_non_empty
         ] )

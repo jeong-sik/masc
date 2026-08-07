@@ -86,7 +86,7 @@ describe('keeper prompt byte telemetry', () => {
     expect(container.textContent).toContain('1,160 bytes')
     expect(container.textContent).toContain('provider input')
     expect(container.textContent).toContain('reported separately; not byte-attributed')
-    expect(container.textContent).toContain('페르소나')
+    expect(container.textContent).toContain('Keeper 지침')
     expect(container.textContent).toContain('메시지 · tool result')
     expect(container.textContent).not.toContain('residual')
   })

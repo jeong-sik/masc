@@ -6,6 +6,7 @@ include Keeper_types_profile_oas_env
 
 let keeper_toml_field_names =
   [ "name"
+  ; "instructions"
   ; "autoboot_enabled"
   ; "mention_targets"
   ; "proactive_enabled"
@@ -21,8 +22,23 @@ let keeper_toml_field_names =
   ; "always_allow"
   ]
 
+(** [keeper.persona_name] lost its target when the Persona subsystem was
+    hard-cut -- no persona lookup remains to resolve it against. Pre-release
+    policy tolerates legacy-version data instead of shipping migration code
+    (CLAUDE.md, "레거시 필드... 마이그레이션을 위한 코드나 구현을 하지
+    말라는 이야기임"): every keeper TOML that predates this cut still
+    carries the key, so rejecting it as unknown would fail every one of
+    them at load. Tolerated and discarded -- accepted here, never parsed
+    into [keeper_profile_defaults]. *)
+let legacy_ignored_keeper_toml_keys = [ "persona_name" ]
+
+let known_keeper_toml_key_names =
+  keeper_toml_field_names @ legacy_ignored_keeper_toml_keys
+
 let unknown_keeper_toml_keys doc =
-  let known = List.map (fun key -> "keeper." ^ key) keeper_toml_field_names in
+  let known =
+    List.map (fun key -> "keeper." ^ key) known_keeper_toml_key_names
+  in
   doc
   |> List.map fst
   |> List.filter (fun key ->
@@ -48,7 +64,7 @@ let toml_value_kind = function
 
 let validate_known_keeper_field_types doc =
   let string_fields =
-    [ "name"; "sandbox_profile"
+    [ "name"; "instructions"; "sandbox_profile"
     ; "sandbox_image"; "network_mode"; "multimodal_policy" ]
   in
   let bool_fields =
@@ -180,7 +196,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       {
         id = None;
         manifest_path = None;
-        instructions = None;
+        instructions = str "instructions";
         autoboot_enabled = bool_ "autoboot_enabled";
         mention_targets = strs "mention_targets";
         proactive_enabled = bool_ "proactive_enabled";
@@ -207,18 +223,21 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       max_context_override_result)
 
 (** Fields actually read by [profile_defaults_of_toml] from the [[keeper]]
-    TOML table.  Keep this in sync with the record construction above — the
-    compile-time assertion below will fail if the two lists diverge. *)
+    TOML table.  Keep this a subset of [canonical_keeper_toml_key_names] —
+    the assertion below fails if a field is parsed into the record without
+    being declared known first. *)
 let parsed_field_key_names = keeper_toml_field_names
 
-(** Canonical TOML key names used by the strict parser and config audit.
-    Must be kept in sync with [parsed_field_key_names]. *)
-let canonical_keeper_toml_key_names = keeper_toml_field_names
+(** Canonical TOML key names accepted by the strict parser and config audit:
+    fields parsed into the record, plus [legacy_ignored_keeper_toml_keys]
+    (accepted so old-version data still loads, never parsed into anything). *)
+let canonical_keeper_toml_key_names = known_keeper_toml_key_names
 
 let () =
   assert (
-    List.sort String.compare canonical_keeper_toml_key_names
-    = List.sort String.compare parsed_field_key_names)
+    List.for_all
+      (fun key -> List.mem key canonical_keeper_toml_key_names)
+      parsed_field_key_names)
 
 (** Pure detector used by the strict parser and invalid-config audit. *)
 let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =

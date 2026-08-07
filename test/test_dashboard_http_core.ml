@@ -3082,6 +3082,14 @@ let prepare_config_sync_keeper config name =
       { meta with
         Masc.Keeper_meta_contract.autoboot_enabled = true
       ; proactive = { enabled = false }
+        (* keeper_turn_up_config_persistence.persist requires instructions
+           from somewhere -- explicit instructions_arg, an existing
+           AGENT.md, or here -- before it will materialize a keeper.toml.
+           None of the three config-sync fixtures below supply the first
+           two, so this stands in for "keeper already has instructions
+           from its meta / prior lifecycle" the way a real config-sync
+           target would. *)
+      ; instructions = name ^ " config-sync fixture instructions"
       }
   in
   match Masc.Keeper_meta_store.write_meta config meta with

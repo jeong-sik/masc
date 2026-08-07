@@ -290,7 +290,7 @@ describe('ConfigResolutionPanel', () => {
           warnings: ['Resolved config child is missing: keepers'],
           config_root: { path: '/tmp/runtime/config', exists: true, source: 'env' },
           prompts: { path: '/tmp/runtime/config/prompts', exists: true, source: 'env' },
-          keepers: { path: '/tmp/runtime/config/keepers', exists: false, source: 'env' },
+          keepers: { path: '/tmp/runtime/config/keepers', exists: false, source: 'invalid_env' },
         }}
         runtimeResolution=${{
           status: 'warn',
@@ -431,7 +431,7 @@ describe('ConfigResolutionPanel', () => {
           warnings: [],
           config_root: { path: '/tmp/root', exists: true, source: 'env' },
           prompts: { path: '/tmp/root/prompts', exists: true, source: 'env' },
-          keepers: { path: '/tmp/root/keepers', exists: true, source: 'env' },
+          keepers: { path: '/tmp/root-extra/keepers', exists: true, source: 'env' },
         }}
       />`,
       container,

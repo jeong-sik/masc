@@ -174,22 +174,30 @@ let keeper_instructions_path ~toml_path name =
   Filename.concat (Filename.concat (Filename.dirname toml_path) name) "AGENT.md"
 
 let load_keeper_instructions ~toml_path name defaults =
-  let path = keeper_instructions_path ~toml_path name in
-  let error kind detail =
-    Error { keeper_path = toml_path; failing_path = path; kind; detail }
-  in
-  match Safe_ops.read_file_safe path with
-  | Error detail -> error Read_error detail
-  | Ok content ->
-    let instructions = String.trim content in
-    if instructions = "" then
-      error Parse_error "keeper AGENT.md must not be empty"
-    else if string_has_operator_todo_placeholder instructions then
-      error Parse_error
-        (Printf.sprintf
-           "keeper AGENT.md contains %s placeholder text"
-           operator_todo_placeholder_marker)
-    else Ok { defaults with instructions = Some instructions }
+  match defaults.instructions with
+  | Some _ ->
+    (* keeper.instructions was set inline in the TOML [keeper] table --
+       every keeper TOML that predates the AGENT.md convention still does
+       this. AGENT.md is the fallback for keepers that leave it unset, not
+       an additional file required on top of an inline value. *)
+    Ok defaults
+  | None ->
+    let path = keeper_instructions_path ~toml_path name in
+    let error kind detail =
+      Error { keeper_path = toml_path; failing_path = path; kind; detail }
+    in
+    (match Safe_ops.read_file_safe path with
+     | Error detail -> error Read_error detail
+     | Ok content ->
+       let instructions = String.trim content in
+       if instructions = "" then
+         error Parse_error "keeper AGENT.md must not be empty"
+       else if string_has_operator_todo_placeholder instructions then
+         error Parse_error
+           (Printf.sprintf
+              "keeper AGENT.md contains %s placeholder text"
+              operator_todo_placeholder_marker)
+       else Ok { defaults with instructions = Some instructions })
 
 let load_keeper_profile_defaults_result_uncached_with_paths
     ~keeper_toml_path_opt

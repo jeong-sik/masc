@@ -405,7 +405,12 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.sha }}
         run: |
           chmod +x scripts/check-release-train-guard.sh
-          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=100 --tags
+          # No --depth here. This guard only runs `git show` and `git tag`, so
+          # it never needed one -- but `git fetch --depth=N` writes
+          # .git/shallow, which is repository-global state. It ran first and
+          # left the clone shallow for the hygiene step below, which does walk
+          # ancestry. That is the trigger for #27365 / #26938 / #27384.
+          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --tags
           scripts/check-release-train-guard.sh \
             --base "$BASE_REF" \
             --head "$HEAD_REF"
@@ -417,7 +422,14 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.sha }}
         run: |
           chmod +x scripts/check-pr-hygiene.sh
-          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=100
+          # No --depth. `git fetch --depth=100` grafts origin/<base> at 100
+          # commits, and rev-list then reports everything older than that graft
+          # as reachable only from HEAD -- so a long-lived branch had hundreds
+          # of main's own commits attributed to it (#27365, #26938, #27384).
+          # merge-base still returns a real commit, so the shallow-boundary
+          # recovery added in #27277 never engages. The checkout above already
+          # fetched full history; truncating it here only removed information.
+          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
           scripts/check-pr-hygiene.sh \
             --base "$BASE_REF" \
             --head "$HEAD_REF" \

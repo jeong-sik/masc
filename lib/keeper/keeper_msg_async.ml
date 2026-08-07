@@ -843,6 +843,16 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
   `Assoc fields
 ;;
 
+(* Whole-record equality, next to [same_request_identity]'s five identity
+   fields. The terminal-conflict check used to ask this by serializing both
+   entries and comparing the JSON. That agreed with the record only because
+   [entry_record_to_json] happens to emit every field, in a fixed order, on a
+   single code path — so adding a field to the wire, making one conditional,
+   or reordering the assoc would have quietly changed what counts as an
+   integrity conflict on a durable store. The predicate belongs to the record,
+   not to its rendering. *)
+let same_entry_record (left : entry) (right : entry) = left = right
+
 let same_request_identity (left : entry) (right : entry) =
   String.equal left.request_id right.request_id
   && String.equal left.keeper_name right.keeper_name
@@ -1187,7 +1197,7 @@ let persist_terminal_from_source ~ops ~(entry : entry) ~source_path =
       | Found terminal_entry when not (is_terminal_status terminal_entry.status) ->
         Error (Integrity_failed Terminal_partition_nonterminal)
       | Found terminal_entry ->
-        if entry_record_to_json terminal_entry = entry_record_to_json entry
+        if same_entry_record terminal_entry entry
         then (
           (* See lossless namespace protocol: observed cleanup failure is retried. *)
           ignore (remove_duplicate_source_unlocked ~ops ~entry source_path : bool);
@@ -1497,7 +1507,7 @@ let terminal_destination_state (entry : entry) =
         then Invalid_terminal_destination Terminal_conflict
         else if
           (not (is_terminal_status entry.status))
-          || entry_record_to_json terminal_entry = entry_record_to_json entry
+          || same_entry_record terminal_entry entry
         then Cleanup_source
         else
           Invalid_terminal_destination Terminal_conflict

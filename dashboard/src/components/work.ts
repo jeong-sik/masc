@@ -396,12 +396,6 @@ function taskEvidenceLedgerRows(task: Task): TaskEvidenceLedgerRow[] {
       tone: contract.strict ? 'warn' : undefined,
     })
   }
-  if (contract?.links?.session_id) {
-    rows.push({ key: 'contract:session', label: 'contract session', value: contract.links.session_id })
-  }
-  if (contract?.links?.operation_id) {
-    rows.push({ key: 'contract:operation', label: 'contract operation', value: contract.links.operation_id })
-  }
   appendEvidenceList(rows, 'completion', contract?.completion_contract, 'completion')
   appendEvidenceList(rows, 'required evidence', contract?.required_evidence, 'required')
   appendEvidenceList(rows, 'inspect evidence', contract?.inspect_gate_evidence, 'inspect')

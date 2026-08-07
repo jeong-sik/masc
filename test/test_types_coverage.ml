@@ -605,7 +605,7 @@ let test_backlog_to_yojson_with_tasks () =
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
     predecessor_task_id = None;
-    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let b : Masc_domain.backlog = { tasks = [task]; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
   let json = Masc_domain.backlog_to_yojson b in
@@ -1361,7 +1361,7 @@ let test_task_to_yojson () =
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
     predecessor_task_id = None;
-    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let json = Masc_domain.task_to_yojson t in
   match json with
@@ -1409,6 +1409,7 @@ let test_task_reclaim_gate_ignores_free_text_without_policy () =
     handoff_context = None;
     cycle_count = 9;
     reclaim_policy = None;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = Some "worktree path not found";
   } in
   match Masc_domain.task_claim_decision t with
@@ -1434,6 +1435,7 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
     handoff_context = None;
     cycle_count = 0;
     reclaim_policy = Some Masc_domain.Block_reclaim;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = Some "operator hard stop";
   } in
   match Masc_domain.task_claim_decision t with
@@ -1464,6 +1466,7 @@ let test_task_claim_awaiting_verification_is_pending_verdict () =
     handoff_context = None;
     cycle_count = 0;
     reclaim_policy = None;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = None;
   } in
   (match Masc_domain.task_claim_decision t with
@@ -1512,6 +1515,7 @@ let test_task_claim_next_action_todo_policy_block_still_claims () =
     handoff_context = None;
     cycle_count = 0;
     reclaim_policy = Some Masc_domain.Block_reclaim;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = Some "operator hard stop";
   } in
   match Masc_domain.task_claim_next_action t with
@@ -1526,6 +1530,23 @@ let test_task_claim_next_action_todo_policy_block_still_claims () =
 (* ============================================================
    Test Runners
    ============================================================ *)
+
+(* Every agent_status must rank, and the ranks must be distinct — a
+   serialized status is ranked by decoding it, so an unranked constructor
+   would sort as if it were garbage. The string ranker this replaced had an
+   arm for "idle" (never produced) and none for "inactive" (the real fourth
+   constructor). *)
+let test_agent_status_rank_covers_every_constructor () =
+  let ranks =
+    List.map Masc_domain.agent_status_rank Masc_domain.all_agent_statuses
+  in
+  Alcotest.(check int) "one rank per constructor"
+    (List.length Masc_domain.all_agent_statuses) (List.length ranks);
+  let sorted = List.sort_uniq Int.compare ranks in
+  Alcotest.(check int) "ranks are distinct" (List.length ranks)
+    (List.length sorted);
+  Alcotest.(check bool) "no constructor ranks 0" true
+    (not (List.exists (Int.equal 0) ranks))
 
 let () =
   run "Types Coverage" [
@@ -1788,5 +1809,9 @@ let () =
     "task_claim", [
       test_case "awaiting verification waits for verdict" `Quick
         test_task_claim_awaiting_verification_is_pending_verdict;
+    ];
+    "agent_status_rank", [
+      test_case "every constructor ranks distinctly" `Quick
+        test_agent_status_rank_covers_every_constructor;
     ];
   ]

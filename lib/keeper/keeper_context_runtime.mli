@@ -217,7 +217,3 @@ val append_trait_clause : base:string -> clause:string -> string
 (** {1 Fragment Detection (used by dashboard)} *)
 
 val looks_fragmentary_history_text : string -> bool
-
-(** {1 Memory Check} *)
-
-val memory_check_default_json : unit -> Yojson.Safe.t

@@ -220,7 +220,6 @@ export function normalizeMissionBriefing(raw: unknown): DashboardMissionBriefing
     criteria: asStringArray(root.criteria),
     basis: {
       namespace: asString(basis.namespace) ?? null,
-      crew_count: asNumber(basis.crew_count),
       agent_count: asNumber(basis.agent_count),
       keeper_count: asNumber(basis.keeper_count),
     },

@@ -353,6 +353,51 @@ let test_load_missing_file () =
 (* Test: report_to_string                                            *)
 (* ================================================================ *)
 
+(* The scenario badge is a cut on pass_at_k at
+   [scenario_pass_at_k_threshold]. Only the PASS side was covered, so the
+   literal could have been anything below 0.8 without a test noticing. *)
+let test_report_badge_flips_at_the_threshold () =
+  let scenario : Eval_harness.scenario = {
+    id = "test-002"; name = "Threshold"; description = "";
+    category = "general"; goal = "test";
+    setup_messages = []; expected_outcome = "";
+    tool_expectations = []; graders = [];
+    tags = [];
+    ownership = Eval_harness.Foreign;
+  } in
+  let result_at pass_at_k : Eval_harness.eval_result = {
+    scenario;
+    pass_at_k;
+    mean_score = 0.5;
+    consistency = 1.0;
+    total_cost_usd = None;
+    ci95_low = 0.5;
+    ci95_high = 0.5;
+    min_runs_met = false;
+    runs = [];
+  } in
+  let render pass_at_k =
+    Eval_harness.report_to_string
+      { Eval_harness.suite_name = "threshold";
+        started_at = 0.0;
+        ended_at = 0.0;
+        results = [ result_at pass_at_k ];
+        overall_pass_rate = pass_at_k;
+        total_cost_usd = None;
+        total_runs = 0;
+      }
+  in
+  let contains hay needle =
+    let nl = String.length needle and hl = String.length hay in
+    let rec at i = i + nl <= hl && (String.sub hay i nl = needle || at (i + 1)) in
+    at 0
+  in
+  let t = Eval_harness.scenario_pass_at_k_threshold in
+  Alcotest.(check bool) "at the threshold the badge is PASS" true
+    (contains (render t) "[PASS]");
+  Alcotest.(check bool) "just below the threshold the badge is FAIL" true
+    (contains (render (t -. 0.01)) "[FAIL]")
+
 let test_report_to_string () =
   let scenario : Eval_harness.scenario = {
     id = "test-001"; name = "Test"; description = "";
@@ -437,5 +482,7 @@ let () =
     ]);
     ("report", [
       Alcotest.test_case "report_to_string" `Quick test_report_to_string;
+      Alcotest.test_case "report badge flips at the threshold" `Quick
+        test_report_badge_flips_at_the_threshold;
     ]);
   ]

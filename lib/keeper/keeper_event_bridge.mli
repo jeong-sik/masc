@@ -36,19 +36,3 @@ val start_with_interval :
     Exposed for unit testing. *)
 val native_event_to_json : Agent_sdk.Event_bus.event -> Yojson.Safe.t option
 
-module For_testing : sig
-  type pending_relay = private {
-    json : Yojson.Safe.t;
-    attempts : int;
-    appended : bool;
-  }
-
-  type relay_stage = private
-    | Append
-    | Broadcast
-
-  type relay_result = private
-    | Delivered
-    | Retryable_failure of pending_relay * relay_stage * exn
-
-end

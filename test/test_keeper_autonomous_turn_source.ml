@@ -312,7 +312,8 @@ let test_committed_autonomous_turn_invalidates_live_chat () =
   Eio.Switch.run @@ fun sw ->
   Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external subscriber_id);
   Sse.subscribe_external ~id:subscriber_id
-    ~callback:(fun frame ->
+    ~callback:(fun (ev : Sse.external_event) ->
+      let frame = ev.Sse.ext_frame in
       if keeper_chat_appended_for keeper_name frame
       then
         visible_turns_at_broadcast :=
@@ -344,7 +345,8 @@ let test_direct_turn_does_not_duplicate_chat_invalidation () =
   Eio.Switch.run @@ fun sw ->
   Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external subscriber_id);
   Sse.subscribe_external ~id:subscriber_id
-    ~callback:(fun frame ->
+    ~callback:(fun (ev : Sse.external_event) ->
+      let frame = ev.Sse.ext_frame in
       if keeper_chat_appended_for keeper_name frame then incr invalidations)
     ();
   write_turn_record config ~absolute_turn:47 ~generation:9

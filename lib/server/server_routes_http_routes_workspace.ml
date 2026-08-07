@@ -323,7 +323,6 @@ type path_resolution =
 
 type workspace_file = {
   lexical_path : string;
-  resolved_base : string;
   resolved_path : string;
 }
 
@@ -374,7 +373,6 @@ let resolve_workspace_file base requested =
             Ok
               {
                 lexical_path = full;
-                resolved_base;
                 resolved_path = resolved_full;
               }
 

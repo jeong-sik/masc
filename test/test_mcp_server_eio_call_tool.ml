@@ -56,11 +56,6 @@ let empty_contract : Masc_domain.task_contract =
     required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence = [];
-    links =
-      {
-        operation_id = None;
-        session_id = None;
-      };
   }
 
 let extract_json_from_text text =
@@ -646,7 +641,8 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       in
       Masc.Sse.subscribe_external
         ~id:subscriber_id
-        ~callback:(fun payload -> received_sse := Some payload)
+        ~callback:(fun (ev : Masc.Sse.external_event) ->
+          received_sse := Some ev.Masc.Sse.ext_frame)
         ();
       Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
         ~mcp_session_id:"mcp-session-9"
@@ -660,6 +656,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
             ])
         ~message:"command exited 1"
         ~disposition:(Tool_result.Failed Tool_result.Runtime_failure)
+        ~execution_id:(Ids.Execution_id.generate ())
         ~duration_ms:87;
       let rows =
         Masc.Keeper_tool_call_log.read_recent ~keeper_name ~n:1 ()

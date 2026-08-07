@@ -707,9 +707,8 @@ in
     if elapsed_total > 1.0
     then (
       Log.Dashboard.info
-        "[snapshot_json] total: %.0fms (sessions=%d keepers=%d)"
+        "[snapshot_json] total: %.0fms (keepers=%d)"
         (elapsed_total *. 1000.0)
-        0
         (List.length keeper_names);
       List.iter
         (fun (label, dt) ->

@@ -99,6 +99,7 @@ val record_runtime_mcp_keeper_tool_trace :
   arguments:Yojson.Safe.t ->
   message:string ->
   disposition:('completed, 'deferred, 'failed) Tool_result.disposition ->
+  execution_id:Ids.Execution_id.t ->
   duration_ms:int ->
   unit
 (** Persists a single tool-call trace row for the keeper.

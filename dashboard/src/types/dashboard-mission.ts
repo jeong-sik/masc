@@ -46,7 +46,6 @@ export interface DashboardMissionAttentionQueueItem {
   summary: string
   target_type: string
   target_id?: string | null
-  top_action?: OperatorRecommendedAction | null
   related_agent_names: string[]
   evidence?: unknown
   evidence_preview: string[]
@@ -159,7 +158,6 @@ export interface DashboardMissionBriefingResponse {
   criteria: string[]
   basis?: {
     namespace?: string | null
-    crew_count?: number
     agent_count?: number
     keeper_count?: number
   }

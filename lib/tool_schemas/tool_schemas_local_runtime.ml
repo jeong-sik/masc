@@ -16,6 +16,27 @@ let operation_id = function
   | Ollama_probe -> "ollama_probe"
 ;;
 
+(* Who the tool is for. Both operations stay registered in the catalog — the
+   dashboard route /api/v1/dashboard/runtime-probe authorizes through
+   [with_tool_auth ~tool_name:"masc_runtime_ollama_probe"], and
+   [authorize_tool_for_role] refuses any name it cannot find there. The
+   question this answers is narrower: does the autonomous Keeper model see the
+   schema in its tool list every turn. *)
+type keeper_model_exposure =
+  | Keeper_callable
+  | Operator_diagnostic
+
+let keeper_model_exposure = function
+  | Verify -> Keeper_callable
+  | Ollama_probe ->
+    (* Native Ollama timing probe: repeated /api/generate calls whose output is
+       load/prompt-eval timings and a prefix-reuse inference. That is operator
+       diagnostics, and the operator reads it through the dashboard route. It
+       cost every Keeper turn 1,219 bytes of tool schema and was called 0 times
+       in the 6 days to 2026-08-06 (the workspace tool_usage store). *)
+    Operator_diagnostic
+;;
+
 let definitions : definition list =
   [
     { operation = Verify; schema = {

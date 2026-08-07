@@ -154,7 +154,6 @@ function runtimeProviderTone(provider: DashboardRuntimeProviderSnapshot): string
     return 'warn'
   }
   if (provider.available === false) return 'bad'
-  if (provider.discovery?.healthy === false) return 'warn'
   if (provider.available === true) return 'ok'
   return 'warn'
 }
@@ -166,7 +165,7 @@ function runtimeStatusLabel(provider: DashboardRuntimeProviderSnapshot): string 
   if (advertised === 'offline') return 'offline'
   if (provider.available === true) return 'available'
   if (provider.available === false) return 'unavailable'
-  return provider.discovery?.healthy === false ? 'degraded' : 'unknown'
+  return 'unknown'
 }
 
 function runtimeRequestToolChoiceText(provider: DashboardRuntimeProviderSnapshot): string | null {
@@ -470,7 +469,6 @@ function runtimeParameterDetailRows(
     detailRow('declared model', 'format', declaredFormat),
     detailRow('declared model', 'inputs', runtimeDeclaredInputText(provider)),
     detailRow('declared model', 'controls', runtimeDeclaredModelControlText(provider)),
-    detailRow('declared model', 'match prefixes', stringArrayText(declaredModel?.match_prefixes)),
     detailRow('binding', 'provider.model', textList([binding?.provider_id, binding?.model_id])),
     detailRow('binding', 'default', boolText(binding?.is_default)),
     detailRow('binding', 'concurrency', numberText(binding?.max_concurrent)),
@@ -973,17 +971,6 @@ export function RuntimeMonitor() {
                     : null}
                   ${liveProbe?.error
                     ? html`<div class="text-2xs text-[var(--status-bad)]">${liveProbe.error}</div>`
-                    : null}
-                  ${provider.discovery
-                    ? html`<div class="grid grid-cols-2 gap-3 text-xs text-[var(--color-fg-secondary)] pt-2 border-t border-[var(--color-border-default)]/50">
-                        <div>discovery · ${provider.discovery.healthy ? 'healthy' : 'degraded'}</div>
-                        <div class="min-w-0 truncate" title=${provider.discovery.discovered_model ?? MISSING_DATA_DASH}>
-                          discovered · ${provider.discovery.discovered_model ?? MISSING_DATA_DASH}
-                        </div>
-                        <div>ctx · ${formatNumber(provider.discovery.ctx_size)}</div>
-                        <div>slots · ${formatNumber(provider.discovery.busy_slots)}/${formatNumber(provider.discovery.total_slots)}</div>
-                        <div>idle · ${formatNumber(provider.discovery.idle_slots)}</div>
-                      </div>`
                     : null}
                 </article>
               `})

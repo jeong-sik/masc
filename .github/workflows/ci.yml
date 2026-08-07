@@ -935,6 +935,7 @@ jobs:
             @test/runtest-test_keeper_invocation_contract_hints \
             @test/runtest-test_keeper_path_ssot \
             @test/runtest-test_keeper_phase_drift_contract \
+            @test/runtest-test_keeper_tool_error_text_bounded \
             @test/runtest-test_keeper_turn_fsm_tla_parity \
             @test/runtest-test_keepers_runtime_dir_ssot \
             @test/runtest-test_mcp_h1_h2_admission_parity \
@@ -968,6 +969,18 @@ jobs:
         run: |
           opam exec -- dune build --root . \
             @test/runtest-test_metric_zero_cell_declaration
+
+      - name: Run transport metrics snapshot suite
+        # The health snapshot reads counters through metric_value_or_zero, so a
+        # field naming a metric that does not exist is emitted as 0 rather than
+        # failing. #27285 removed two such fields after they had reported 0/0
+        # for their whole life. The suite asserts the counters advance, which is
+        # what separates a live field from a dead one, and no transport suite
+        # was wired into any target list -- @check compiled this and nothing
+        # ran it. Green on this branch, 26/26.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_transport_metrics
 
       - name: Run connector observability label contract
         # These strings are metric label values, so a rename is a wire change
@@ -1048,6 +1061,18 @@ jobs:
         run: |
           opam exec -- dune build --root . \
             @test/runtest-test_env_snapshot_reports_applied_default
+
+      - name: Run JSONL retention getter contract suite
+        # Pins the digest fallback contract: the getter must report a
+        # non-positive override as-is (that's how "pruning disabled" reaches
+        # the caller) while the exported default stays positive (the bound a
+        # caller substitutes instead). @check compiles this but does not run
+        # it, and the PR that introduced the getter tripped this exact
+        # failure mode once -- the getter silently swallowed the override and
+        # returned the default instead.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_jsonl_retention_window
 
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run

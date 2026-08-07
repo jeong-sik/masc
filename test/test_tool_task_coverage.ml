@@ -2809,6 +2809,75 @@ let () =
     assert (List.mem ("producer", true, []) !metric_events))
 ;;
 
+(* The action list reaches the model twice: as the enum, derived from
+   [Masc_domain.valid_task_action_strings], and as the property description.
+   The description used to spell the same six names out by hand, which put
+   "done" in front of the model as one ordinary option among them.
+
+   It is not one. The lifecycle answers Done_action with
+   Verification_submission_required from Claimed and InProgress, and with
+   Invalid_transition from Todo, AwaitingVerification and Cancelled — every
+   status a Keeper can be working. Only Done->Done succeeds, as a no-op.
+   Measured over the live tool log: 111 calls passed action="done", 70 errored,
+   and the remaining 41 were that no-op.
+
+   Pinned from two sides. The enum must still carry every action the type has,
+   because that is what the dispatcher accepts; the description must not
+   re-list them, because a hand-written copy of a derived list is what drifted. *)
+let () = test "transition action description does not re-list the enum" (fun () ->
+  let schema =
+    List.find
+      (fun (s : Masc_domain.tool_schema) -> String.equal s.name "masc_transition")
+      Masc.Task.Schemas.schemas
+  in
+  let action_description =
+    match schema.input_schema with
+    | `Assoc top ->
+      (match List.assoc "properties" top with
+       | `Assoc props ->
+         (match List.assoc "action" props with
+          | `Assoc action ->
+            (match List.assoc "description" action with
+             | `String d -> d
+             | _ -> failwith "action description is not a string")
+          | _ -> failwith "action property is not an object")
+       | _ -> failwith "properties is not an object")
+    | _ -> failwith "input_schema is not an object"
+  in
+  let contains needle =
+    let n = String.length needle and h = String.length action_description in
+    let rec loop i =
+      i + n <= h && (String.sub action_description i n = needle || loop (i + 1))
+    in
+    loop 0
+  in
+  (* The pipe-separated copy of the enum is gone. *)
+  assert (not (contains "claim | start"));
+  (* done is named, and named as refused rather than offered. *)
+  assert (contains "done is refused");
+  (* The route that does complete a Task is the one stated. *)
+  assert (contains "submit_for_verification");
+  (* The enum keeps every action the dispatcher accepts, done included. *)
+  let enum_actions =
+    match schema.input_schema with
+    | `Assoc top ->
+      (match List.assoc "properties" top with
+       | `Assoc props ->
+         (match List.assoc "action" props with
+          | `Assoc action ->
+            (match List.assoc "enum" action with
+             | `List xs ->
+               List.filter_map (function `String s -> Some s | _ -> None) xs
+             | _ -> failwith "enum is not a list")
+          | _ -> failwith "action property is not an object")
+       | _ -> failwith "properties is not an object")
+    | _ -> failwith "input_schema is not an object"
+  in
+  assert (
+    List.sort compare enum_actions
+    = List.sort compare Masc_domain.valid_task_action_strings))
+;;
+
 let () =
   ensure_test_runtime ();
   Alcotest.run "Task.Tool"

@@ -89,9 +89,9 @@ let test_text_survives_the_round_trip () =
 let test_capture_overwrites_rather_than_accumulates () =
   with_workspace (fun config ->
     Capture.write ~config ~keeper ~trace_id:"trace-a" ~absolute_turn:1
-      ~blocks:[ Block_id.Persona, "first" ] ~assembled:(Some "first");
+      ~blocks:[ Block_id.Keeper_instructions, "first" ] ~assembled:(Some "first");
     Capture.write ~config ~keeper ~trace_id:"trace-b" ~absolute_turn:2
-      ~blocks:[ Block_id.Persona, "second" ] ~assembled:(Some "second");
+      ~blocks:[ Block_id.Keeper_instructions, "second" ] ~assembled:(Some "second");
     match Capture.read ~config ~keeper with
     | Error error -> Alcotest.failf "read failed: %s" (Capture.read_error_to_string error)
     | Ok capture ->
@@ -136,7 +136,7 @@ let test_invalid_keeper_name_is_refused () =
 let test_unknown_block_id_is_malformed_not_dropped () =
   with_workspace (fun config ->
     Capture.write ~config ~keeper ~trace_id:"trace-a" ~absolute_turn:1
-      ~blocks:[ Block_id.Persona, "text" ] ~assembled:(Some "text");
+      ~blocks:[ Block_id.Keeper_instructions, "text" ] ~assembled:(Some "text");
     let path = Capture.path_for config keeper in
     let contents =
       match Fs_compat.load_file_opt path with
@@ -144,7 +144,7 @@ let test_unknown_block_id_is_malformed_not_dropped () =
       | None -> Alcotest.fail "capture was not written"
     in
     let widened =
-      Str.global_replace (Str.regexp_string {|"id":"persona"|}) {|"id":"future_block"|} contents
+      Str.global_replace (Str.regexp_string {|"id":"keeper_instructions"|}) {|"id":"future_block"|} contents
     in
     (match Fs_compat.save_file_atomic path widened with
      | Ok () -> ()

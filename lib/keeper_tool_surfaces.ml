@@ -24,27 +24,6 @@ module Random = Stdlib.Random
 
 open Masc_domain
 
-module SS = Set_util.StringSet
-
-
-let require_unique_schemas ~label (schemas : Masc_domain.tool_schema list) =
-  let duplicates, _ =
-    List.fold_left
-      (fun (duplicates, seen) (schema : Masc_domain.tool_schema) ->
-        if SS.mem schema.name seen
-        then schema.name :: duplicates, seen
-        else duplicates, SS.add schema.name seen)
-      ([], SS.empty)
-      schemas
-  in
-  match duplicates with
-  | [] -> schemas
-  | names ->
-    invalid_arg
-      (Printf.sprintf "%s: duplicate tool schema(s): %s"
-         label
-         (names |> List.sort_uniq String.compare |> String.concat ", "))
-
 let lookup_schemas_by_name_exn ~label all_schemas values =
   let requested =
     values

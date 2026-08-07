@@ -207,6 +207,43 @@ let test_drop_reasons_survive_the_projection () =
        | lines -> Alcotest.failf "expected one line, got %d" (List.length lines)))
 ;;
 
+(* A pass that started and was cancelled before it could commit used to leave
+   nothing here, so the journal read the same for a pass killed mid-flight as
+   for a turn on which the librarian never ran. Measured live on 2026-08-07:
+   11 of 23 completed librarian lane runs cancelled, none of them in the
+   journal. The operator asking why memory stopped advancing is exactly the
+   reader that silence misleads. *)
+let test_cancelled_pass_is_recorded_and_named () =
+  with_keepers_dir (fun keepers_dir ->
+    Current.append_librarian_failure
+      ~keepers_dir
+      ~keeper_id:keeper
+      ~now:1_700_000_000.0
+      ~trace_id:"trace-cancelled"
+      ~kind:Lane_cancelled
+      ~detail:"memory os librarian cancelled lane=librarian_exact before commit"
+      ~snapshot_present:true
+      ~cadence_deferred:false;
+    match read_json ~keepers_dir with
+    | [ line ] ->
+      Alcotest.(check bool) "the pass is on the record" true (U.to_bool (field line "ok"));
+      Alcotest.(check string) "recorded as a failed pass" "failed"
+        (U.to_string (field line "outcome"));
+      (* Naming it apart from the extraction failures is the point: an operator
+         reading `exact_execution_failure` would go looking at the provider. *)
+      Alcotest.(check string) "cancellation names itself" "lane_cancelled"
+        (U.to_string (field line "kind"));
+      Alcotest.(check bool) "and carries no revision" true
+        (field line "revision" = `Null)
+    | lines -> Alcotest.failf "expected one line, got %d" (List.length lines))
+;;
+
+(* The counterfactual this case rests on — that a keeper whose librarian never
+   ran has an empty journal — is held by [test_missing_journal_reads_empty] in
+   test_librarian_journal_failures.ml, and the wire round-trip for every kind
+   is held by the [all_kinds] guard in that same file. What is only true here
+   is the projected spelling the dashboard reads. *)
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -222,6 +259,8 @@ let () =
             test_undecodable_line_keeps_its_position_and_reason
         ; Alcotest.test_case "untagged legacy line is reported, not reinterpreted" `Quick
             test_untagged_legacy_line_is_reported_not_reinterpreted
+        ; Alcotest.test_case "cancelled pass is recorded and named" `Quick
+            test_cancelled_pass_is_recorded_and_named
         ] )
     ; ( "content"
       , [ Alcotest.test_case "drop reasons survive the projection" `Quick

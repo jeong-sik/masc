@@ -80,6 +80,10 @@ let severity_rank_of_health_level = Health_status.rank
    match. Compared as strings rather than decoded because this library
    holds only masc_types and masc_core — reaching the keeper module
    would invert the dependency. *)
+(* STR-OK: JSON boundary comparison. The typed value lives in
+   Keeper_status_runtime, which this library cannot reach without
+   inverting the dependency, so the producer's range is recorded above
+   instead. *)
 let is_keeper_offline status = List.mem status [ "offline"; "inactive" ]
 
 let is_health_critical = Health_status.requires_operator_action

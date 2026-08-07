@@ -73,8 +73,14 @@ let severity_rank_of_health_level = Health_status.rank
 (** Status/health classification predicates — single source of truth.
     Used across dashboard, briefing, and operator modules. *)
 
-let is_keeper_offline status =
-  List.mem status [ "offline"; "inactive"; "error" ]
+(* masc_dashboard_utils cannot depend on the library that owns
+   [Keeper_status_runtime.surface_status], so this vocabulary is hand-mirrored
+   from the strings that type renders. Exposed so a test can compare the two
+   across the boundary -- the same shape [valid_assertion_strings] uses for
+   masc_check's enum. *)
+let keeper_offline_status_strings = [ "offline"; "inactive" ]
+
+let is_keeper_offline status = List.mem status keeper_offline_status_strings
 
 let is_health_critical = Health_status.requires_operator_action
 

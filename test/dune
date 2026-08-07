@@ -900,7 +900,7 @@
 (test
  (name test_health_status)
  (modules test_health_status)
- (libraries alcotest masc.masc_types masc.dashboard_utils))
+ (libraries alcotest masc masc.masc_types masc.dashboard_utils))
 
 (test
  (name test_time_codec)

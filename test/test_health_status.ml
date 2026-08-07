@@ -54,6 +54,47 @@ let test_serialized_agent_status_ranks_through_the_wire () =
     Masc_domain.all_agent_statuses;
   check int "a non-status string ranks 0" 0 (Dashboard_utils.status_rank "idle")
 
+(* [Dashboard_utils.keeper_offline_status_strings] is hand-mirrored: the
+   masc_dashboard_utils library cannot depend on the one that owns
+   [Keeper_status_runtime.surface_status], so the offline vocabulary is a
+   literal list there. This is the mirror test for it, the same role
+   test_assertion_kind_mirror plays for masc_check's enum.
+
+   Subset, not equality — offline-ness is a proper subset of the statuses a
+   producer can emit. What it catches is the other direction: an entry no
+   producer can ever produce, which reads as coverage and is dead. *)
+let producible_keeper_statuses =
+  List.map
+    Masc.Keeper_status_runtime.surface_status_to_string
+    [ Masc.Keeper_status_runtime.Surface_active
+    ; Masc.Keeper_status_runtime.Surface_busy
+    ; Masc.Keeper_status_runtime.Surface_listening
+    ; Masc.Keeper_status_runtime.Surface_inactive
+    ; Masc.Keeper_status_runtime.Surface_offline
+    ; Masc.Keeper_status_runtime.Surface_idle
+    ]
+  @ [ Masc.Keeper_status_runtime.control_plane_status_to_string
+        Masc.Keeper_status_runtime.Cp_paused
+    ]
+
+let test_offline_vocabulary_is_producible () =
+  List.iter
+    (fun entry ->
+      check bool
+        (Printf.sprintf "%S is a status some producer emits" entry)
+        true
+        (List.mem entry producible_keeper_statuses))
+    Dashboard_utils.keeper_offline_status_strings
+
+let test_offline_predicate_agrees_with_its_vocabulary () =
+  List.iter
+    (fun status ->
+      check bool
+        (Printf.sprintf "is_keeper_offline %S" status)
+        (List.mem status Dashboard_utils.keeper_offline_status_strings)
+        (Dashboard_utils.is_keeper_offline status))
+    producible_keeper_statuses
+
 let () =
   run "Health_status"
     [
@@ -71,5 +112,12 @@ let () =
         [
           test_case "serialized status ranks through the wire" `Quick
             test_serialized_agent_status_ranks_through_the_wire;
+        ] );
+      ( "keeper offline vocabulary",
+        [
+          test_case "every entry is producible" `Quick
+            test_offline_vocabulary_is_producible;
+          test_case "predicate agrees with its vocabulary" `Quick
+            test_offline_predicate_agrees_with_its_vocabulary;
         ] );
     ]

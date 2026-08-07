@@ -68,8 +68,14 @@ val severity_rank_of_health_level : health_level -> int
 
 (** {1 Status/health predicates} *)
 
+val keeper_offline_status_strings : string list
+(** The statuses {!is_keeper_offline} treats as offline, hand-mirrored across
+    the library boundary from [Keeper_status_runtime.surface_status_to_string].
+    Exposed so a test can check every entry is a status some producer can
+    actually emit. *)
+
 val is_keeper_offline : string -> bool
-(** Membership in [["offline"; "inactive"; "error"]]. *)
+(** Membership in {!keeper_offline_status_strings}. *)
 
 val is_health_critical : health_level -> bool
 val is_health_warning : health_level -> bool

@@ -576,6 +576,7 @@ jobs:
           bash scripts/ci/check-silent-failure-patterns.sh
           bash scripts/ci/check-enum-string-safety.sh
           bash scripts/ci/check-masc-oas-boundary.sh
+          python3 scripts/ci/check-env-snapshot-default-drift.py
           bash scripts/check-oas-internals.sh
           bash scripts/ci/check-publication-recovery-test-boundary.sh
           bash scripts/ci/check-tla-variant-sync.sh
@@ -934,6 +935,8 @@ jobs:
             @test/runtest-test_keeper_invocation_contract_hints \
             @test/runtest-test_keeper_path_ssot \
             @test/runtest-test_keeper_phase_drift_contract \
+            @test/runtest-test_keeper_tool_error_text_bounded \
+            @test/runtest-test_keeper_turn_fsm_tla_parity \
             @test/runtest-test_keepers_runtime_dir_ssot \
             @test/runtest-test_mcp_h1_h2_admission_parity \
             @test/runtest-test_nickname_words_ssot \
@@ -944,9 +947,21 @@ jobs:
             @test/runtest-test_rfc_0086_keeper_namespace_invariant \
             @test/runtest-test_server_base_path_guard \
             @test/runtest-test_sse_retry_ssot \
+            @test/runtest-test_sse_stream \
             @test/runtest-test_task_cache_invariant_13397 \
+            @test/runtest-test_task_status_vocabulary \
             @test/runtest-test_tool_contract_truth \
             @test/runtest-test_voice_command_descriptor_parity
+
+      - name: Run goal-scope terminal-phase suite
+        # validate_active_goal_ids is where a keeper's declared goal scope meets
+        # the live store, and everything downstream reads the list it returns.
+        # The prompt and the world observation filter the same list by phase, so
+        # a Completed goal left in scope makes the two disagree -- for 2.5 days
+        # on the live workspace before this was closed.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_goal_scope_terminal_phase
 
       - name: Run metric zero-cell declaration suite
         # A counter emitted as a bare string still compiles and still counts;
@@ -954,6 +969,18 @@ jobs:
         run: |
           opam exec -- dune build --root . \
             @test/runtest-test_metric_zero_cell_declaration
+
+      - name: Run transport metrics snapshot suite
+        # The health snapshot reads counters through metric_value_or_zero, so a
+        # field naming a metric that does not exist is emitted as 0 rather than
+        # failing. #27285 removed two such fields after they had reported 0/0
+        # for their whole life. The suite asserts the counters advance, which is
+        # what separates a live field from a dead one, and no transport suite
+        # was wired into any target list -- @check compiled this and nothing
+        # ran it. Green on this branch, 26/26.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_transport_metrics
 
       - name: Run connector observability label contract
         # These strings are metric label values, so a rename is a wire change
@@ -965,6 +992,17 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_gate_connector_observability \
             @test/runtest-test_discord_observability
+
+      - name: Run Discord API version pinning suites
+        # The version now has one definition, and these two suites are what
+        # holds it: test_discord_gateway_state asserts Open_wss carries
+        # ?v=10, test_discord_rest_client asserts the /api/v10 paths. Both
+        # already made those assertions and neither ran in CI, so a bump
+        # could land with the assertions untouched. 33 + 118 pass here.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_discord_gateway_state \
+            @test/runtest-test_discord_rest_client
 
       - name: Run repos relative-path suite
         # The stored default must stay relative: Repo_store.local_path concats
@@ -980,6 +1018,61 @@ jobs:
         run: |
           opam exec -- dune build --root . \
             @test/runtest-test_jsonl_day_key
+
+      - name: Run memory journal projection suite
+        # The librarian's failed passes reach the dashboard through this
+        # projection. A torn line presented as a commit would make a damaged
+        # journal read as a healthy shorter one, and that compiles either way.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_memory_journal_projection
+
+      - name: Run operator note lifetime suite
+        # RFC-0366. A note that renders twice is a standing rule the operator
+        # never wrote — the #26729 shape. @check compiles "renders once then
+        # never again" whether or not it holds, so the suite has to run.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_operator_note
+
+      - name: Run prompt capture round-trip suite
+        # The assembled extra system context reaches disk as text here. @check
+        # compiles the cases but does not run them, and "an unknown block id
+        # must not decode short" compiles whether or not it holds. The write
+        # path also degrades to a warning by design, so a broken capture is
+        # silent unless a test exercises it.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_prompt_capture
+
+      - name: Run raw-trace reader containment suite
+        # This surface takes a caller-supplied file name and reads inside a
+        # keeper's directory. @check compiles the containment cases but does not
+        # run them, and "../secret.jsonl must not resolve" compiles whether or
+        # not it holds.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_raw_trace_reader
+
+      - name: Run env snapshot applied-default suite
+        # Asserts through the JSON operators actually receive. The script gate
+        # cannot cover this knob any more -- the fix removed the literals it
+        # compares -- so the property moved here.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_env_snapshot_reports_applied_default
+
+      - name: Run JSONL retention getter contract suite
+        # Pins the digest fallback contract: the getter must report a
+        # non-positive override as-is (that's how "pruning disabled" reaches
+        # the caller) while the exported default stays positive (the bound a
+        # caller substitutes instead). @check compiles this but does not run
+        # it, and the PR that introduced the getter tripped this exact
+        # failure mode once -- the getter silently swallowed the override and
+        # returned the default instead.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_jsonl_retention_window
 
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
@@ -1119,6 +1212,18 @@ jobs:
       # suite asserts routed identities and stored payloads, never source
       # text or log wording. It stayed compile-only under @check, so
       # regression tests added there (#26625, #26657) never ran.
+      - name: Run env-snapshot applied-default suite
+        id: env_snapshot_applied_default_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_env_snapshot_reports_applied_default"
+
       - name: Run channel-gate content-length knob suite
         id: channel_gate_content_length_knob_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
@@ -1130,6 +1235,24 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_channel_gate_content_length_knob"
+
+      # Redaction is the last thing every observability payload passes through,
+      # so a defect here is not scoped to one field: a preview truncated inside
+      # a multibyte character makes the whole JSON response undecodable and the
+      # panel that reads it renders nothing. test_observability_redact carried a
+      # max-length case from the start and compiled on every run, but was never
+      # named here, so it never executed and the byte-indexed cut survived.
+      - name: Run observability redaction suite
+        id: observability_redaction_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_observability_redact"
 
       - name: Run verification behavior suite
         id: verification_behavior_suite
@@ -1328,7 +1451,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          prompt_targets="@test/runtest-test_keeper_system_prompt_bytes @test/runtest-test_keeper_prompt_metrics @test/runtest-test_keeper_surface_presence_prompt"
+          prompt_targets="@test/runtest-test_keeper_system_prompt_bytes @test/runtest-test_keeper_tool_schema_bytes @test/runtest-test_keeper_prompt_metrics @test/runtest-test_keeper_surface_presence_prompt"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${prompt_targets}"
 
       - name: Run board attention suite
@@ -1390,7 +1513,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          request_cap_targets="@test/runtest-test_runtime_config_validity @test/runtest-test_keeper_turn_driver_failover @test/runtest-test_keeper_vision_tool @test/runtest-test_runtime_modality_reroute @test/runtest-test_runtime_model_input_tail_window"
+          request_cap_targets="@test/runtest-test_runtime_config_validity @test/runtest-test_keeper_turn_driver_failover @test/runtest-test_keeper_turn_driver_accept @test/runtest-test_keeper_vision_tool @test/runtest-test_runtime_modality_reroute @test/runtest-test_runtime_model_input_tail_window @test/runtest-test_keeper_context_overflow_shrink @test/runtest-test_keeper_provider_call_deadline @test/runtest-test_keeper_runtime_resolved_observability"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${request_cap_targets}"
 
       - name: Run operator control suite
@@ -1472,7 +1595,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_persona_name @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_verification_authority_tools"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_persona_name @test/runtest-test_dashboard_briefing @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_telemetry_eio_pbt @test/runtest-test_verification_authority_tools"
 
       - name: Run transport harness suite
         id: transport_harness_suite
@@ -1841,6 +1964,12 @@ jobs:
           #     execution is HARD REQUIRED as well. Each test step lacks
           #     continue-on-error, so a test failure fails the Build and Test
           #     job and blocks merge.
+          # A cancelled job did not fail — it did not run. Both block, because
+          # a check that never ran cannot be evidence of anything, but they are
+          # printed apart: over the last 20 CI runs the job conclusions were 110
+          # success, 45 cancelled and 4 failure, so "FAIL dashboard cancelled"
+          # was the line a reader met eleven times more often than a real
+          # failure, and it sends them looking for a defect in the diff.
           check() {
             local name=$1
             local result=$2
@@ -1849,6 +1978,9 @@ jobs:
               printf 'PASS  %-20s %s\n' "$name" "$result"
             elif [[ "$mode" == "advisory" ]]; then
               printf 'WARN  %-20s %s (advisory, not blocking)\n' "$name" "$result"
+            elif [[ "$result" == "cancelled" ]]; then
+              printf 'STOP  %-20s cancelled — never ran, re-run to decide\n' "$name"
+              fail=1
             else
               printf 'FAIL  %-20s %s\n' "$name" "$result"
               fail=1

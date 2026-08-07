@@ -8,6 +8,10 @@ import {
   type FusionRunRecord,
   type VerificationRunRecord,
 } from '../api/dashboard'
+import {
+  fetchKeeperMemoryJournal,
+  type MemoryJournal,
+} from '../api/dashboard-memory-journal'
 import { registerInternalAgentRefresh } from '../sse-store'
 import { Btn } from './btn'
 import { EmptyState, ErrorState } from './common/feedback-state'
@@ -76,6 +80,83 @@ function formatElapsed(value: number | undefined): string {
   return value < 1 ? `${Math.round(value * 1000)}ms` : `${value.toFixed(1)}s`
 }
 
+function LibrarianJournal({ keeper }: { keeper: string }) {
+  const [journal, setJournal] = useState<MemoryJournal | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchKeeperMemoryJournal(keeper, 20, { signal: controller.signal })
+      .then(setJournal)
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted) return
+        setError(reason instanceof Error ? reason.message : String(reason))
+      })
+    return () => controller.abort()
+  }, [keeper])
+
+  if (error !== null) {
+    return html`<p class="text-xs text-[var(--color-danger)]">기억 저널을 읽지 못했습니다: ${error}</p>`
+  }
+  if (journal === null) {
+    return html`<p class="text-xs text-[var(--color-fg-muted)]">기억 저널 읽는 중…</p>`
+  }
+  if (journal.entries.length === 0) {
+    return html`<p class="text-xs text-[var(--color-fg-muted)]">이 keeper 는 아직 저널 라인이 없습니다.</p>`
+  }
+
+  return html`
+    <div class="grid gap-2">
+      <div class="text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">
+        기억 저널 · 최근 ${journal.entries.length}건
+        ${journal.undecodableLines > 0
+          ? html`<span class="text-[var(--color-danger)]"> · 읽지 못한 줄 ${journal.undecodableLines}</span>`
+          : null}
+      </div>
+      <ol class="grid gap-1">
+        ${journal.entries.map((entry, index) => {
+          if (!entry.ok) {
+            return html`<li key=${index} class="rounded border border-[var(--color-danger)] p-2 text-3xs">
+              <strong class="text-[var(--color-danger)]">읽지 못한 줄</strong>
+              <span class="block text-[var(--color-fg-muted)]">${entry.error}</span>
+            </li>`
+          }
+          if (entry.outcome === 'failed') {
+            return html`<li key=${index} class="rounded border border-[var(--color-danger)] p-2 text-3xs">
+              <div class="flex flex-wrap gap-2">
+                <strong class="text-[var(--color-danger)]">실패</strong>
+                <code>${entry.kind}</code>
+                <span class="text-[var(--color-fg-muted)]">
+                  스냅샷 ${entry.snapshotPresent ? '있음' : '없음'}
+                  ${entry.cadenceDeferred ? ' · 주기 연기' : ''}
+                </span>
+              </div>
+              <span class="block mt-1 text-[var(--color-fg-muted)]">${entry.detail}</span>
+            </li>`
+          }
+          return html`<li key=${index} class="rounded border border-[var(--color-border-default)] p-2 text-3xs">
+            <div class="flex flex-wrap gap-2">
+              <strong>revision ${entry.revision}</strong>
+              <span class="text-[var(--color-fg-muted)]">
+                추가 ${entry.added} · 제거 ${entry.removed} · 유지 ${entry.retained}
+              </span>
+            </div>
+            ${entry.drops.length > 0
+              ? html`<ul class="mt-1 grid gap-0.5">
+                  ${entry.drops.map((drop, dropIndex) => html`
+                    <li key=${dropIndex} class="text-[var(--color-fg-muted)]">
+                      버림 — ${drop.reason}
+                    </li>
+                  `)}
+                </ul>`
+              : null}
+          </li>`
+        })}
+      </ol>
+    </div>
+  `
+}
+
 function pretty(value: unknown): string {
   return JSON.stringify(value, null, 2) ?? 'null'
 }
@@ -124,6 +205,11 @@ function Details({ row }: { row: Row }) {
           <pre class="overflow-auto text-3xs whitespace-pre-wrap">${pretty(row.run.output ?? { code: row.run.code, detail: row.run.detail })}</pre>
         </div>
         <p class="text-xs text-[var(--color-fg-muted)] md:col-span-2">Tools: none. This exact-output lane performs one structured model execution, not MASC tool dispatch.</p>
+        ${row.run.lane === 'librarian_exact'
+          ? html`<div class="md:col-span-2 border-t border-[var(--color-border-default)] pt-3">
+              <${LibrarianJournal} keeper=${row.run.actor} />
+            </div>`
+          : null}
       </div>
     `
   }

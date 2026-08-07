@@ -2,11 +2,6 @@
     extracted from operator_control_snapshot.ml. *)
 
 (* Local copies of trivial helpers to avoid sibling -> parent cycle. *)
-let non_empty_trimmed_string_opt value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
-
-
 let compact_runtime_trust_cache_ttl_sec = 3.0
 
 (* Cache key for the per-keeper runtime-trust projection.

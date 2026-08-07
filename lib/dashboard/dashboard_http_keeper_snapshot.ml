@@ -2,9 +2,7 @@
    Extracted from dashboard_http_keeper.ml during godfile decomposition.
    Contains: full config JSON rendering and K2 feed delegations. *)
 
-open Dashboard_http_helpers
 open Dashboard_http_keeper_types
-open Dashboard_http_helpers
 open Keeper_status_bridge
 
 let keeper_config_field_presence_json config_json =

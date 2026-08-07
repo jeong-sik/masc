@@ -24,7 +24,7 @@
   keeper_continuation_channel)
  (private_modules keeper_event_queue_owner_lock)
  (flags
-  (:standard -w +32))
+  (:standard -w +33))
  (libraries
   agent_sdk
   agent_sdk.llm_provider

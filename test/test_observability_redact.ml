@@ -27,6 +27,72 @@ let test_max_length_enforced () =
   Alcotest.(check bool) "within limit" true
     (String.length preview <= 220)
 
+(* A byte-indexed cut splits a multibyte character and the result is not valid
+   UTF-8. That breaks the whole payload, not the field: the dashboard's
+   exact-lane panel rendered nothing because one Korean board comment crossed
+   the 1024-byte preview boundary and [response.json()] threw. *)
+let is_valid_utf8 (s : string) : bool =
+  let len = String.length s in
+  let rec go i =
+    if i >= len then true
+    else
+      let c = Char.code s.[i] in
+      let width =
+        if c < 0x80 then 1
+        else if c land 0xE0 = 0xC0 then 2
+        else if c land 0xF0 = 0xE0 then 3
+        else if c land 0xF8 = 0xF0 then 4
+        else 0
+      in
+      if width = 0 || i + width > len then false
+      else
+        let rec conts k =
+          k = width || (Char.code s.[i + k] land 0xC0 = 0x80 && conts (k + 1))
+        in
+        conts 1 && go (i + width)
+  in
+  go 0
+
+let truncation_suffix = "...(truncated)"
+
+let test_truncate_keeps_utf8_valid () =
+  (* "\xea\xb0\x80" is 3 bytes, so sweeping max_len exercises every cut
+     position modulo the character width. *)
+  let korean = String.concat "" (List.init 200 (fun _ -> "\xea\xb0\x80")) in
+  for max_len = 1 to 40 do
+    let out = Observability_redact.redact_preview ~max_len korean in
+    Alcotest.(check bool)
+      (Printf.sprintf "valid utf8 at max_len=%d" max_len)
+      true (is_valid_utf8 out);
+    let body =
+      let n = String.length out - String.length truncation_suffix in
+      if n >= 0 && String.sub out n (String.length truncation_suffix) = truncation_suffix
+      then String.sub out 0 n
+      else out
+    in
+    Alcotest.(check bool)
+      (Printf.sprintf "body within budget at max_len=%d" max_len)
+      true
+      (String.length body <= max_len)
+  done
+
+let test_truncate_ascii_cuts_exactly_at_budget () =
+  let ascii = String.make 100 'x' in
+  let out = Observability_redact.redact_preview ~max_len:40 ascii in
+  Alcotest.(check string) "ascii cut is unaffected by the boundary walk"
+    (String.make 40 'x' ^ truncation_suffix)
+    out
+
+let test_preview_json_strings_keeps_utf8_valid () =
+  (* The path the exact-lane registry takes for every run it records. *)
+  let korean = String.concat "" (List.init 600 (fun _ -> "\xec\x88\x98\xec\x9a\xa9")) in
+  let json = `Assoc [ ("content", `String korean) ] in
+  let out =
+    Observability_redact.preview_json_strings ~max_len:1024 json
+    |> Yojson.Safe.to_string
+  in
+  Alcotest.(check bool) "serialized preview is valid utf8" true (is_valid_utf8 out)
+
 let test_short_input_unchanged () =
   let input = "hello world" in
   let preview = Observability_redact.redact_preview input in
@@ -231,6 +297,12 @@ let () =
           Alcotest.test_case "API key redacted" `Quick test_api_key_redacted;
           Alcotest.test_case "URL credential redacted" `Quick test_url_credential_redacted;
           Alcotest.test_case "max length enforced" `Quick test_max_length_enforced;
+          Alcotest.test_case "truncate keeps utf8 valid" `Quick
+            test_truncate_keeps_utf8_valid;
+          Alcotest.test_case "truncate cuts ascii exactly at budget" `Quick
+            test_truncate_ascii_cuts_exactly_at_budget;
+          Alcotest.test_case "preview_json_strings keeps utf8 valid" `Quick
+            test_preview_json_strings_keeps_utf8_valid;
           Alcotest.test_case "short input unchanged" `Quick test_short_input_unchanged;
           Alcotest.test_case "redact_text does not truncate" `Quick
             test_redact_text_does_not_truncate;

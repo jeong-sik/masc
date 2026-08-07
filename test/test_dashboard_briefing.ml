@@ -298,6 +298,96 @@ let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidenc
       check bool "no observed tools without evidence" true
         ((brief |> member "latest_tool_names" |> to_list) = []))
 
+(* A serialized severity is ranked by decoding it back to [operator_severity].
+   The string ranker this replaced mapped "critical" and "bad" to the same
+   value, so a critical attention item sorted no higher than a bad one — while
+   the typed [Operator_digest_types.severity_rank] has always separated them
+   (3 vs 2). *)
+let test_internal_signals_rank_critical_above_bad () =
+  let workspace = Lib.Operator_action_constants.workspace_target_type in
+  let incident kind severity =
+    `Assoc
+      [ ("kind", `String kind)
+      ; ("severity", `String severity)
+      ; ("summary", `String (kind ^ " summary"))
+      ; ("target_type", `String workspace)
+      ; ("target_id", `Null)
+      ]
+  in
+  let signals =
+    Dashboard_briefing_assembly.build_internal_signals
+      [ incident "warn_one" "warn"; incident "bad_one" "bad"; incident "critical_one" "critical" ]
+      []
+  in
+  let open Yojson.Safe.Util in
+  let order = signals |> List.map (fun row -> to_string (member "summary" row)) in
+  Alcotest.(check (list string))
+    "critical sorts above bad, bad above warn"
+    [ "critical_one summary"; "bad_one summary"; "warn_one summary" ]
+    order
+
+(* An internal signal reports one stream. The operator digest records no link
+   between an attention item and a recommended action, so a row must not fill
+   in the other side, and no action may be dropped for having been "matched"
+   to an incident. The removed matcher did both: normalized-prose equality of
+   summary vs reason, else a kind -> action_type table, which attached the one
+   workspace recommendation to every incident whose kind that table listed. *)
+let test_internal_signals_do_not_pair_streams () =
+  let workspace = Lib.Operator_action_constants.workspace_target_type in
+  let incident kind summary =
+    `Assoc
+      [
+        ("kind", `String kind);
+        ("severity", `String "warn");
+        ("summary", `String summary);
+        ("target_type", `String workspace);
+        ("target_id", `Null);
+      ]
+  in
+  let action action_type reason =
+    `Assoc
+      [
+        ("action_type", `String action_type);
+        ("severity", `String "warn");
+        ("reason", `String reason);
+        ("target_type", `String workspace);
+        ("target_id", `Null);
+      ]
+  in
+  let incidents =
+    [
+      (* kind the deleted table mapped to "broadcast" *)
+      incident "intent_blocked" "Namespace intent is blocked";
+      (* reason identical to the action's, which the deleted prose
+         comparison treated as proof of a response *)
+      incident "stalled_session" "Pause the namespace";
+    ]
+  in
+  let actions = [ action "broadcast" "Pause the namespace" ] in
+  let signals =
+    Dashboard_briefing_assembly.build_internal_signals incidents actions
+  in
+  let open Yojson.Safe.Util in
+  let of_type wanted =
+    signals
+    |> List.filter (fun row -> to_string (member "signal_type" row) = wanted)
+  in
+  Alcotest.(check int) "both incidents kept" 2 (List.length (of_type "attention"));
+  Alcotest.(check int) "the action is still its own row" 1
+    (List.length (of_type "action"));
+  List.iter
+    (fun row ->
+      Alcotest.(check bool)
+        "an attention row claims no action" true
+        (member "action" row = `Null))
+    (of_type "attention");
+  List.iter
+    (fun row ->
+      Alcotest.(check bool)
+        "an action row claims no attention" true
+        (member "attention" row = `Null))
+    (of_type "action")
+
 let test_dashboard_keeper_unknown_context_is_informational () =
   let dir = test_dir () in
   Fun.protect
@@ -369,12 +459,12 @@ let test_dashboard_keeper_unknown_context_is_informational () =
          |> member "reason"
          |> to_string))
 
-let make_message ~seq ~from_agent ~content : Types.message =
+let make_message ?mention ~seq ~from_agent ~content () : Types.message =
   { seq;
     from_agent;
     msg_type = "broadcast";
     content;
-    mention = None;
+    mention;
     timestamp = "";
     trace_context = None;
     expires_at = None;
@@ -383,7 +473,7 @@ let make_message ~seq ~from_agent ~content : Types.message =
 (* Regression: a degenerate agent record with an empty/whitespace name must not
    crash latest_message_to (String.get on an empty [lowered]). *)
 let test_latest_message_to_empty_name_safe () =
-  let msgs = [ make_message ~seq:1 ~from_agent:"alice" ~content:"hey @bob ping" ] in
+  let msgs = [ make_message ~seq:1 ~from_agent:"alice" ~content:"hey @bob ping" () ] in
   (match Dashboard_briefing_agents.latest_message_to "" msgs with
    | None -> ()
    | Some _ -> Alcotest.fail "empty name must not match a mention");
@@ -394,6 +484,49 @@ let test_latest_message_to_empty_name_safe () =
   | Some (m : Types.message) -> Alcotest.(check int) "matched seq" 1 m.seq
   | None -> Alcotest.fail "expected @bob mention to match"
 
+(* #27324 regression: the old detector was single-character membership —
+   content contains '@' AND (first or last char of the name anywhere) — so for
+   agent "claude" any message with '@' plus a 'c' or 'e' counted as addressed
+   to claude. These pin real mention semantics. *)
+let test_latest_message_to_requires_real_mention () =
+  (* '@' present, and both 'c' and 'e' appear, but nothing mentions claude. *)
+  let msgs =
+    [ make_message ~seq:1 ~from_agent:"alice" ~content:"meeting @ 3pm — everyone come" () ]
+  in
+  match Dashboard_briefing_agents.latest_message_to "claude" msgs with
+  | None -> ()
+  | Some _ -> Alcotest.fail "'@' plus stray name letters is not a mention"
+
+let test_latest_message_to_longer_handle_is_not_a_mention () =
+  let msgs =
+    [ make_message ~seq:1 ~from_agent:"alice" ~content:"@claude-dev take this" () ]
+  in
+  match Dashboard_briefing_agents.latest_message_to "claude" msgs with
+  | None -> ()
+  | Some _ -> Alcotest.fail "@claude-dev must not read as a mention of claude"
+
+let test_latest_message_to_reads_typed_mention_field () =
+  (* No '@' anywhere in the body: the typed [mention] field alone must carry. *)
+  let msgs =
+    [ make_message ~seq:4 ~from_agent:"alice" ~content:"please review the plan"
+        ~mention:"claude" () ]
+  in
+  match Dashboard_briefing_agents.latest_message_to "claude" msgs with
+  | Some (m : Types.message) -> Alcotest.(check int) "typed mention seq" 4 m.seq
+  | None -> Alcotest.fail "typed mention field must reach the agent"
+
+let test_latest_message_to_prefers_latest_mention () =
+  let msgs =
+    [ make_message ~seq:2 ~from_agent:"alice" ~content:"@claude first ping" ();
+      make_message ~seq:7 ~from_agent:"bob" ~content:"@claude second ping" ();
+      make_message ~seq:9 ~from_agent:"claude" ~content:"@claude talking about myself" () ]
+  in
+  match Dashboard_briefing_agents.latest_message_to "claude" msgs with
+  | Some (m : Types.message) ->
+      (* seq 9 is from claude itself and must be skipped. *)
+      Alcotest.(check int) "latest non-self mention" 7 m.seq
+  | None -> Alcotest.fail "expected a mention to match"
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
@@ -401,6 +534,14 @@ let () =
         [
           Alcotest.test_case "latest_message_to tolerates empty agent name"
             `Quick test_latest_message_to_empty_name_safe;
+          Alcotest.test_case "latest_message_to requires a real mention"
+            `Quick test_latest_message_to_requires_real_mention;
+          Alcotest.test_case "latest_message_to rejects longer handles"
+            `Quick test_latest_message_to_longer_handle_is_not_a_mention;
+          Alcotest.test_case "latest_message_to reads the typed mention field"
+            `Quick test_latest_message_to_reads_typed_mention_field;
+          Alcotest.test_case "latest_message_to prefers the latest non-self mention"
+            `Quick test_latest_message_to_prefers_latest_mention;
           Alcotest.test_case "projection groups root-cause lanes" `Quick
             test_dashboard_briefing_projection;
           Alcotest.test_case "http mission keeps full contract" `Quick
@@ -413,5 +554,9 @@ let () =
             test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidence;
           Alcotest.test_case "unknown keeper context is informational" `Quick
             test_dashboard_keeper_unknown_context_is_informational;
+          Alcotest.test_case "internal signals rank critical above bad" `Quick
+            test_internal_signals_rank_critical_above_bad;
+          Alcotest.test_case "internal signals do not pair the two streams"
+            `Quick test_internal_signals_do_not_pair_streams;
         ] );
     ]

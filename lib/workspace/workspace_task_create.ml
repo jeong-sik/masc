@@ -7,8 +7,6 @@
 open Masc_domain
 include Workspace_utils
 include Workspace_state
-open Workspace_backlog
-open Workspace_task_id
 include Workspace_broadcast
 open Workspace_backlog
 open Workspace_task_id
@@ -148,12 +146,7 @@ let add_task_with_result
              Printf.sprintf "task-%03d" (next_task_number config backlog)
            in
            let contract =
-             Some
-               (Workspace_task_classify.ensure_task_contract_for_verification
-                  ?contract
-                  ~title
-                  ~description
-                  ())
+             Option.map Workspace_task_classify.normalize_task_contract contract
            in
            let new_task =
              { id = task_id
@@ -169,6 +162,7 @@ let add_task_with_result
              ; handoff_context = None
              ; cycle_count = 0
              ; reclaim_policy = None
+             ; execution_links = Masc_domain.no_execution_links
              ; do_not_reclaim_reason = None
              }
            in
@@ -268,12 +262,9 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                 let task_id = Printf.sprintf "task-%03d" !next_num in
                 incr next_num;
                 let contract =
-                  Some
-                    (Workspace_task_classify.ensure_task_contract_for_verification
-                       ?contract
-                       ~title
-                       ~description
-                       ())
+                  Option.map
+                    Workspace_task_classify.normalize_task_contract
+                    contract
                 in
                 let task =
                   { id = task_id
@@ -291,6 +282,7 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                   ; handoff_context = None
                   ; cycle_count = 0
                   ; reclaim_policy = None
+                  ; execution_links = Masc_domain.no_execution_links
                   ; do_not_reclaim_reason = None
                   }
                 in

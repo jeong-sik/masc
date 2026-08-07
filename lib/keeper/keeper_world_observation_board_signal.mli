@@ -84,6 +84,7 @@ val check_self_comment_status
 type wake_reason =
   | Explicit_mention
   | Broadcast
+  | Comment_on_self_post
   | Thread_reply_after_self_comment
   | Reaction_after_self_activity
 (** Closed set of reasons a keeper wakes for a board signal (RFC-0020).

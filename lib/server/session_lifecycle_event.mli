@@ -15,7 +15,10 @@ type evict_reason =
   | Cap_exceeded
       (** oldest-eviction triggered by [max_clients] cap. *)
   | Idle_timeout
-      (** [cleanup_stale] crossed [MASC_TRANSPORT_IDLE_EVICT_SEC]. *)
+      (** [cleanup_stale] crossed its idle age. The bound is
+          [Sse.cleanup_stale]'s own [?max_age_s] default of 1800 s, applied
+          because the caller passes no argument; RFC-0099 PR-5 is where the
+          transport keep-alive knobs become configuration. *)
   | Backpressure
       (** mailbox-full beyond drain grace, or {!Fd_accountant} pressure
           escalation (RFC-0101 §3.6, 5 s sustained). *)

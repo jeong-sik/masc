@@ -14,13 +14,11 @@ type section =
     them unqualified. *)
 
 val collect_metadata_gaps :
-  sessions:Yojson.Safe.t list ->
   keepers:Yojson.Safe.t list ->
   agents:Yojson.Safe.t list ->
   Yojson.Safe.t list
-(** Scan the three briefing fact lists for metadata gaps and
-    return at most 8 gap records (session goal missing, communication
-    mode missing, keeper last reply missing, active agent without
+(** Scan the two briefing fact lists for metadata gaps and return at
+    most 8 gap records (keeper last reply missing, active agent without
     focus). *)
 
 val count_metadata_gaps_for_section :

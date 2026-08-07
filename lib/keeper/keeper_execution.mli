@@ -23,9 +23,6 @@ val load_context_from_checkpoint :
   base_dir:string ->
   Keeper_context_runtime.session_context * Keeper_context_runtime.working_context option
 
-(** Default JSON for memory check tool. *)
-val memory_check_default_json : unit -> Yojson.Safe.t
-
 (** {1 Keepalive Runtime} *)
 
 (* Proactive emission and explicit workspace replies are now handled

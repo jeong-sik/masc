@@ -45,6 +45,8 @@ blocking_lints() {
   run_lint ".mli env knob exists" bash scripts/lint/mli-env-knob-exists.sh --fail
   run_lint "Guard scan targets exist self-test" bash scripts/lint/guard-scan-targets-exist.sh --self-test
   run_lint "Guard scan targets exist" bash scripts/lint/guard-scan-targets-exist.sh --fail
+  run_lint "CI gate outcome vocabulary self-test" bash scripts/ci/check-gate-outcome-vocabulary.sh --self-test
+  run_lint "CI gate outcome vocabulary" bash scripts/ci/check-gate-outcome-vocabulary.sh --fail
   run_lint "Opam cache freshness ratchet" bash scripts/ci/opam-cache-freshness.sh --check
   run_lint "Opam cache freshness self-test" bash scripts/ci/opam-cache-freshness.sh --self-test
   run_lint "No actionable-signal bool context" bash scripts/lint/no-actionable-signal-bool-context.sh

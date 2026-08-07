@@ -1260,14 +1260,6 @@ let test_readonly_policy_is_descriptor_input_aware () =
        ~tool_name:"tool_search_files"
        ~input:internal_input)
 
-let test_inline_policy_uses_descriptor_resolution () =
-  Alcotest.(check (list string))
-    "safe inline tools project from descriptors"
-    []
-    (Descriptor.keeper_safe_inline_names ());
-  ()
-;;
-
 let test_public_name_projection_uses_descriptor_resolution () =
   Alcotest.(check (list string))
     "tool_execute public projection"
@@ -1675,10 +1667,6 @@ let () =
             "descriptor read-only policy evaluates tool input"
             `Quick
             test_readonly_policy_is_descriptor_input_aware
-        ; test_case
-            "MCP context policy uses descriptor resolution"
-            `Quick
-            test_inline_policy_uses_descriptor_resolution
         ; test_case
             "public names project through descriptor resolution"
             `Quick

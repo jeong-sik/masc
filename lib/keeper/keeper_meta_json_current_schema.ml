@@ -203,6 +203,22 @@ let find_duplicate fields =
   loop [] fields
 ;;
 
+(** [persona] lost its target when the Persona subsystem was hard-cut
+    (masc#27048) -- no persona lookup remains to resolve it against. Every
+    live keeper meta JSON predating that cut still carries it (masc#27393:
+    exact-schema rejection took autoboot to 0/7 in production). Pre-release
+    policy tolerates legacy-version data rather than shipping migration
+    code (CLAUDE.md, "레거시 필드... 마이그레이션을 위한 코드나 구현을
+    하지 말라는 이야기임") -- the TOML loader made the same call for
+    [keeper.persona_name] in #27048's own round 4. Tolerated here on read,
+    never round-tripped: {!object_of_field_values} only ever emits
+    {!all_fields}, so a persona-bearing meta that gets rewritten drops the
+    field on its own, with no migration step needed. *)
+let legacy_ignored_meta_field_names = [ "persona" ]
+
+let known_meta_field_names =
+  current_field_names @ legacy_ignored_meta_field_names
+
 let validate_current_object (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
@@ -213,7 +229,7 @@ let validate_current_object (json : Yojson.Safe.t) =
      | None ->
        let present = List.map fst fields in
        let outside_current =
-         List.filter (fun key -> not (List.mem key current_field_names)) present
+         List.filter (fun key -> not (List.mem key known_meta_field_names)) present
        in
        let missing =
          List.filter (fun key -> not (List.mem key present)) current_field_names

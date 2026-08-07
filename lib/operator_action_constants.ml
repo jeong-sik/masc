@@ -20,7 +20,6 @@ let all_target_types = [ Workspace; Keeper; Goal ]
 let valid_target_type_strings = List.map target_type_to_string all_target_types
 let workspace_target_type = target_type_to_string Workspace
 let keeper_target_type = target_type_to_string Keeper
-let goal_target_type = target_type_to_string Goal
 let workspace_target_type_error = "target_type must be " ^ workspace_target_type
 
 let invalid_target_type_message =

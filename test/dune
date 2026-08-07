@@ -941,6 +941,7 @@
   test_tool_agent_timeline_build
   test_masc_log
   test_dashboard_namespace_truth
+  test_library_resource_topic
   test_dashboard_snapshot
   test_server_runtime_startup_maintenance
   test_server_hibernation
@@ -1086,6 +1087,7 @@
   test_tool_agent_timeline_build
   test_masc_log
   test_dashboard_namespace_truth
+  test_library_resource_topic
   test_dashboard_snapshot
   test_server_runtime_startup_maintenance
   test_server_hibernation
@@ -1856,6 +1858,8 @@
 (include stanzas/test_keeper_cwd_response.inc)
 
 (include stanzas/test_channel_gate_content_length_knob.inc)
+
+(include stanzas/test_keeper_decision_audit_dated_store.inc)
 
 (include stanzas/test_keeper_terminal_reason_typed.inc)
 

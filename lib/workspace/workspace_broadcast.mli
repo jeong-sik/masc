@@ -2,20 +2,6 @@
     accompanying message-activity event. *)
 
 
-(** RFC-0061: closed variants for broadcast envelope observability. *)
-type rewrite_reason =
-  | Cache_invalidated of { task_id : string; status : string }
-  | Task_cache_rewrite
-
-type rewrite_event = {
-  reason : rewrite_reason;
-  module_name : string;
-}
-
-type msg_type_typed =
-  | Broadcast
-  | Cache_invalidated of { task_id : string; status : string }
-
 type broadcast_delivery =
   { rendered : string
   ; from_agent : string
@@ -23,8 +9,6 @@ type broadcast_delivery =
   ; mention : string option
   ; msg_type : string
   }
-
-val string_of_msg_type_typed : msg_type_typed -> string
 
 val emit_message_activity : Workspace_utils_backend_setup.config ->
            from_agent:string ->

@@ -405,7 +405,12 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.sha }}
         run: |
           chmod +x scripts/check-release-train-guard.sh
-          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=100 --tags
+          # No --depth here. This guard only runs `git show` and `git tag`, so
+          # it never needed one -- but `git fetch --depth=N` writes
+          # .git/shallow, which is repository-global state. It ran first and
+          # left the clone shallow for the hygiene step below, which does walk
+          # ancestry. That is the trigger for #27365 / #26938 / #27384.
+          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --tags
           scripts/check-release-train-guard.sh \
             --base "$BASE_REF" \
             --head "$HEAD_REF"
@@ -417,7 +422,14 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.sha }}
         run: |
           chmod +x scripts/check-pr-hygiene.sh
-          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=100
+          # No --depth. `git fetch --depth=100` grafts origin/<base> at 100
+          # commits, and rev-list then reports everything older than that graft
+          # as reachable only from HEAD -- so a long-lived branch had hundreds
+          # of main's own commits attributed to it (#27365, #26938, #27384).
+          # merge-base still returns a real commit, so the shallow-boundary
+          # recovery added in #27277 never engages. The checkout above already
+          # fetched full history; truncating it here only removed information.
+          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
           scripts/check-pr-hygiene.sh \
             --base "$BASE_REF" \
             --head "$HEAD_REF" \
@@ -450,6 +462,13 @@ jobs:
       # of the unwired set either reads a live .masc runtime (credential and
       # fleet audits, meaningless on a runner) or needs a tool the image lacks
       # (valgrind), and stays out.
+      # Its own step because it takes arguments, which the loop below cannot
+      # pass. The walk used to descend into every worktree and never finish,
+      # which is why an audit this specific sat unwired (#27386); at ~6s it is
+      # cheaper than most steps here.
+      - name: Run dead-surface ratchet
+        run: python3 scripts/audit-dead-surface.py --exports --ratchet
+
       - name: Run repo audit scripts
         run: |
           set -e
@@ -970,6 +989,16 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_metric_zero_cell_declaration
 
+      - name: Run library resource topic resolution suite
+        # The topic comes from the client's URI. Before the fix it was
+        # concatenated onto docs/library and read, so library/../<name>
+        # reached a file outside that directory, and the bare "library"
+        # prefix plus a fixed offset of 8 read libraryfoo as topic "oo".
+        # Both cases fail on the pre-fix tree.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_library_resource_topic
+
       - name: Run transport metrics snapshot suite
         # The health snapshot reads counters through metric_value_or_zero, so a
         # field naming a metric that does not exist is emitted as 0 rather than
@@ -1141,6 +1170,20 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_autoboot_single_owner"
 
+      - name: Run keeper meta current-schema conformance suite
+        # This suite would have caught masc#27393 (fleet-wide autoboot 0/7:
+        # the persona hard-cut's schema change made every real, durable
+        # keeper meta JSON unloadable) before it reached production -- it
+        # was compiling under @check but never executing in CI.
+        id: keeper_meta_current_schema_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_meta_current_schema"
+
       # NOTE: the "Shell IR differential-safety harness gate" step was removed
       # here. #24332 (nonhierarchical Gate refactor) retired the entire
       # shell_ir risk/typed subsystem (Shell_ir_risk, Shell_ir_typed,
@@ -1244,6 +1287,18 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_channel_gate_content_length_knob"
+
+      - name: Run keeper decision-audit dated-store suite
+        id: decision_audit_dated_store_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_decision_audit_dated_store"
 
       # Redaction is the last thing every observability payload passes through,
       # so a defect here is not scoped to one field: a preview truncated inside

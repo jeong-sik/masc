@@ -527,8 +527,33 @@ let run_best_effort
                     deferred)
                ~cadence_deferred:deferred
          with
+         (* A cancelled pass reached the lane registry and stopped there, so the
+            journal — the record of what the librarian did on this keeper —
+            showed the same silence for a pass killed mid-flight as for a turn
+            on which the librarian never ran. Measured live on 2026-08-07: 11
+            of 23 completed librarian lane runs cancelled, none of them
+            represented in the journal.
+
+            The write runs under [Eio.Cancel.protect] because the surrounding
+            context is already cancelled; without it the append would be
+            cancelled in turn and record nothing, which is the failure it
+            exists to close. *)
          | Eio.Cancel.Cancelled _ as exn ->
            complete Exact_lane_run_registry.Cancelled `Null;
+           Eio.Cancel.protect (fun () ->
+             record_failure
+               ~keepers_dir
+               ~keeper_id
+               ~trace_id
+               ~kind:Keeper_memory_os_current.Lane_cancelled
+               ~detail:
+                 (Printf.sprintf
+                    "memory os librarian cancelled lane=%s before commit"
+                    exact_lane_id)
+                 (* Cancellation is not the pass declining its own turn, so the
+                    cadence counter is left alone and the next due turn retries
+                    as it would after any other incomplete pass. *)
+               ~cadence_deferred:false);
            raise exn
          | exn ->
            complete

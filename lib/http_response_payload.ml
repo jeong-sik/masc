@@ -98,22 +98,6 @@ let q_value_in_params value start stop =
   in
   Option.value ~default:1.0 (loop start)
 
-let param_exists value start stop target =
-  let rec loop start =
-    if start >= stop then
-      false
-    else
-      let next =
-        match index_char value ';' start stop with
-        | Some idx -> idx
-        | None -> stop
-      in
-      let param_start, param_stop = trim_span value start next in
-      equal_ascii_ci_span value param_start param_stop target
-      || (next < stop && loop (next + 1))
-  in
-  loop start
-
 let encoding_matches_span value start stop token =
   let token_stop, params_start =
     match index_char value ';' start stop with
@@ -145,35 +129,6 @@ let accepts_encoding_header ~token = function
 
 let accepts_zstd_header header =
   accepts_encoding_header ~token:"zstd" header
-
-let accepts_zstd_dict_header = function
-  | None -> false
-  | Some accept_encoding ->
-      let stop = String.length accept_encoding in
-      let segment_matches start stop =
-        let token_stop, params_start =
-          match index_char accept_encoding ';' start stop with
-          | Some idx -> idx, idx + 1
-          | None -> stop, stop
-        in
-        let token_start, token_stop = trim_span accept_encoding start token_stop in
-        q_value_in_params accept_encoding params_start stop > 0.0
-        && (equal_ascii_ci_span accept_encoding token_start token_stop "zstd-dict"
-            || (equal_ascii_ci_span accept_encoding token_start token_stop "zstd"
-                && param_exists accept_encoding params_start stop "dict=masc"))
-      in
-      let rec loop start =
-        if start >= stop then
-          false
-        else
-          let next =
-            match index_char accept_encoding ',' start stop with
-            | Some idx -> idx
-            | None -> stop
-          in
-          segment_matches start next || (next < stop && loop (next + 1))
-      in
-      loop 0
 
 let compress_body ?(level = 3) ?(compress = true) ~accept_encoding body =
   if not compress then

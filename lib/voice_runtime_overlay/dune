@@ -2,7 +2,6 @@
 
 (library
  (name voice_runtime_overlay)
- (flags :standard -w +32)
  (public_name masc.voice_runtime_overlay)
  (wrapped false)
  (modules voice_runtime_overlay)

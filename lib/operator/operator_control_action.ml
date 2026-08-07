@@ -4,9 +4,6 @@ type 'a context = 'a Tool_operator.context
 
 open Result.Syntax
 
-let judgment_surface_enums =
-  [ "command.namespace"; "intervene" ]
-
 let normalize_judgment_surface value =
   let normalized = String.trim value |> String.lowercase_ascii in
   match normalized with

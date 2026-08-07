@@ -106,6 +106,13 @@ let missing_sidecar_dir_message ?sidecar_root ?project_root ~base_path id =
     searched_text
 ;;
 
+(* Local time on purpose, and the one place in this repository where that is
+   the correct answer for a filename. The names this has to match are produced
+   by the sidecar launchers — sidecars/{slack,telegram,imessage}-bot/run.sh all
+   build "$LOG_DIR/<id>-sidecar-$(date +%Y%m%d).log", and `date` without -u is
+   the host's calendar. Switching this to UTC would make the lookup miss the
+   live file for the whole UTC-offset window, which is #10392's failure with
+   the reader and writer swapped. Change it only together with those scripts. *)
 let today_yyyymmdd () =
   let tm = Unix.localtime (Unix.time ()) in
   Printf.sprintf "%04d%02d%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday

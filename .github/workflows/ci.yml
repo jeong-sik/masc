@@ -966,6 +966,17 @@ jobs:
             @test/runtest-test_gate_connector_observability \
             @test/runtest-test_discord_observability
 
+      - name: Run Discord API version pinning suites
+        # The version now has one definition, and these two suites are what
+        # holds it: test_discord_gateway_state asserts Open_wss carries
+        # ?v=10, test_discord_rest_client asserts the /api/v10 paths. Both
+        # already made those assertions and neither ran in CI, so a bump
+        # could land with the assertions untouched. 33 + 118 pass here.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_discord_gateway_state \
+            @test/runtest-test_discord_rest_client
+
       - name: Run repos relative-path suite
         # The stored default must stay relative: Repo_store.local_path concats
         # it onto the base path, so an absolute value resolves twice.

@@ -77,9 +77,8 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
   | "broadcast" ->
       let* () = validate_target_type Operator_action_constants.Workspace request in
       let* message =
-        match get_string_opt request.payload "message" with
-        | Some value -> Ok value
-        | None -> Error "payload.message is required"
+        require_payload_field request.payload "message"
+          "payload.message is required"
       in
       let result = Workspace.broadcast ctx.config ~from_agent:request.actor ~content:message in
       workspace_action_result request (`String result.rendered)
@@ -102,9 +101,8 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
   | "task_inject" ->
       let* () = validate_target_type Operator_action_constants.Workspace request in
       let* title =
-        match get_string_opt request.payload "title" with
-        | Some value -> Ok value
-        | None -> Error "payload.title is required"
+        require_payload_field request.payload "title"
+          "payload.title is required"
       in
       let priority = get_int request.payload "priority" 2 in
       let description =
@@ -202,9 +200,8 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       let* () = validate_target_type Operator_action_constants.Keeper request in
       let* name = require_target_id request in
       let* message =
-        match get_string_opt request.payload "message" with
-        | Some value -> Ok value
-        | None -> Error "payload.message is required"
+        require_payload_field request.payload "message"
+          "payload.message is required"
       in
       let* () =
         Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_delegate"

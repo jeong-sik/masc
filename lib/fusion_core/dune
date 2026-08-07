@@ -8,7 +8,6 @@
 
 (library
  (name masc_fusion_core)
- (flags :standard -w +32)
  (public_name masc.fusion_core)
  (wrapped false)
  (libraries fs_compat masc_log masc.run_registry_core yojson otoml)

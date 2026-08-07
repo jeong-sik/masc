@@ -2,6 +2,5 @@
 
 (library
  (name lockfree_atomic)
- (flags :standard -w +32)
  (public_name masc.lockfree_atomic)
  (wrapped false))

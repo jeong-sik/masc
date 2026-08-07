@@ -21,7 +21,6 @@
 
 (library
  (name masc_tool_types)
- (flags :standard -w +32)
  (public_name masc.tool_types)
  (wrapped false)
  (libraries yojson unix masc_log masc_core eio time_compat)

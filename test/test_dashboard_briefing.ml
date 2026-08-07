@@ -298,6 +298,68 @@ let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidenc
       check bool "no observed tools without evidence" true
         ((brief |> member "latest_tool_names" |> to_list) = []))
 
+(* An internal signal reports one stream. The operator digest records no link
+   between an attention item and a recommended action, so a row must not fill
+   in the other side, and no action may be dropped for having been "matched"
+   to an incident. The removed matcher did both: normalized-prose equality of
+   summary vs reason, else a kind -> action_type table, which attached the one
+   workspace recommendation to every incident whose kind that table listed. *)
+let test_internal_signals_do_not_pair_streams () =
+  let workspace = Lib.Operator_action_constants.workspace_target_type in
+  let incident kind summary =
+    `Assoc
+      [
+        ("kind", `String kind);
+        ("severity", `String "warn");
+        ("summary", `String summary);
+        ("target_type", `String workspace);
+        ("target_id", `Null);
+      ]
+  in
+  let action action_type reason =
+    `Assoc
+      [
+        ("action_type", `String action_type);
+        ("severity", `String "warn");
+        ("reason", `String reason);
+        ("target_type", `String workspace);
+        ("target_id", `Null);
+      ]
+  in
+  let incidents =
+    [
+      (* kind the deleted table mapped to "broadcast" *)
+      incident "intent_blocked" "Namespace intent is blocked";
+      (* reason identical to the action's, which the deleted prose
+         comparison treated as proof of a response *)
+      incident "stalled_session" "Pause the namespace";
+    ]
+  in
+  let actions = [ action "broadcast" "Pause the namespace" ] in
+  let signals =
+    Dashboard_briefing_assembly.build_internal_signals incidents actions
+  in
+  let open Yojson.Safe.Util in
+  let of_type wanted =
+    signals
+    |> List.filter (fun row -> to_string (member "signal_type" row) = wanted)
+  in
+  Alcotest.(check int) "both incidents kept" 2 (List.length (of_type "attention"));
+  Alcotest.(check int) "the action is still its own row" 1
+    (List.length (of_type "action"));
+  List.iter
+    (fun row ->
+      Alcotest.(check bool)
+        "an attention row claims no action" true
+        (member "action" row = `Null))
+    (of_type "attention");
+  List.iter
+    (fun row ->
+      Alcotest.(check bool)
+        "an action row claims no attention" true
+        (member "attention" row = `Null))
+    (of_type "action")
+
 let test_dashboard_keeper_unknown_context_is_informational () =
   let dir = test_dir () in
   Fun.protect
@@ -413,5 +475,7 @@ let () =
             test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidence;
           Alcotest.test_case "unknown keeper context is informational" `Quick
             test_dashboard_keeper_unknown_context_is_informational;
+          Alcotest.test_case "internal signals do not pair the two streams"
+            `Quick test_internal_signals_do_not_pair_streams;
         ] );
     ]

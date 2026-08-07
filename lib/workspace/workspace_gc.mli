@@ -1,6 +1,6 @@
 (** Workspace_gc — heartbeat and explicit garbage collection.
 
-    Public surface for {!Workspace_gc.ml}.  Extracted from [workspace.ml] for
+    Public surface for [workspace_gc.ml].  Extracted from [workspace.ml] for
     modularity (#4638).  See issue #10751 for the broader [workspace/]
     [.mli] coverage push.
 

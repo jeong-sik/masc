@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.13"
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.14"
 # v0.231.0 is a hard-cut wave: checkpoint schema is v9 only (v1-v8
 # rejected; #2867), provider_config.output_schema is removed in favor of
 # response_format = JsonSchema as the single structured-output request state
@@ -76,12 +76,24 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.13"
 # capability failures rather than dropping them or relabelling them as parse
 # errors.
 # Previous pin: v0.231.12 (966cd3f61).
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.13"
+# v0.231.14 (7d916a23b) types glm error code 1261 ("Prompt exceeds max
+# length") as Retry.ContextOverflow instead of flattening it into
+# InvalidRequest (oas#2947/#2948). MASC's overflow recovery branches on the
+# typed constructor, so under the old pin a glm prompt overflow produced a
+# ~30s retry loop that no amount of retrying could clear -- only compaction
+# can, and it never fired. Live: keeper 5/7 down 2026-08-07, code-reviewer
+# again 2026-08-08 (masc#27427).
+#
+# Pinned to the fix commit rather than waiting for the 0.231.15 release PR
+# (oas#2949): the pin is git+<url>#<sha>, and sdk_version at 7d916a23b is
+# already 0.231.14, which satisfies MIN_VERSION below.
+# Previous pin: v0.231.13 (59ccced68).
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.14"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584). Use main
 # for merge-ready pins. A blocked Draft cross-repo PR may temporarily declare
 # the exact refs/pull/<number>/head review ref; CI rejects that ref once the PR
 # is no longer both Draft and blocked-on-oas.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="59ccced68c2dc96389a91eee24d0b2c6bd5c53a6"
+readonly OAS_AGENT_SDK_SHA="7d916a23b8a936e32d31f4a58f91aabfe0cc066b"
 readonly OAS_AGENT_SDK_MIN_VERSION="0.231.13"

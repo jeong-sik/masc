@@ -4,7 +4,7 @@ Keeper is MASC's persistent autonomous agent unit. A Keeper has one canonical
 name, one complete `AGENT.md` prompt, and one operational TOML declaration.
 
 <!-- BEGIN GENERATED: oas-pin-manual -->
-OAS pin metadata is generated from `scripts/oas-agent-sdk-pin.sh`. Current dependency floor: `agent_sdk >= 0.231.13`, runtime pin: `main@59ccced68c2dc96389a91eee24d0b2c6bd5c53a6`, declared base version: `v0.231.13`. 최신성 검증이 필요할 때는 문서에 적힌 숫자보다 `dune-project`와 pin script를 우선 truth source로 본다.
+OAS pin metadata is generated from `scripts/oas-agent-sdk-pin.sh`. Current dependency floor: `agent_sdk >= 0.231.13`, runtime pin: `main@7d916a23b8a936e32d31f4a58f91aabfe0cc066b`, declared base version: `v0.231.14`. 최신성 검증이 필요할 때는 문서에 적힌 숫자보다 `dune-project`와 pin script를 우선 truth source로 본다.
 <!-- END GENERATED: oas-pin-manual -->
 
 ## Configure a Keeper

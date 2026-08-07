@@ -22,6 +22,11 @@ let pp_error fmt = function
    Messages longer than this must be split into multiple payloads. *)
 let message_content_limit = 2000
 
+(* Discord takes the API version in the request path. Built from the
+   shared constant so the gateway and REST surfaces cannot drift apart. *)
+let api_base =
+  Printf.sprintf "https://discord.com/api/v%d" Discord_api_version.current
+
 (* Discord requires a specific User-Agent format:
    "DiscordBot ($url, $version)". *)
 let user_agent =
@@ -35,8 +40,8 @@ let auth_headers ~token =
 let build_request ~token ~channel_id ~content ?reply_to_message_id () =
   let url =
     Printf.sprintf
-      "https://discord.com/api/v10/channels/%s/messages"
-      channel_id
+      "%s/channels/%s/messages"
+      api_base channel_id
   in
   let headers =
     ("Content-Type", "application/json") :: auth_headers ~token
@@ -55,8 +60,8 @@ let build_request ~token ~channel_id ~content ?reply_to_message_id () =
 let build_typing_request ~token ~channel_id () =
   let url =
     Printf.sprintf
-      "https://discord.com/api/v10/channels/%s/typing"
-      channel_id
+      "%s/channels/%s/typing"
+      api_base channel_id
   in
   (url, auth_headers ~token, "")
 
@@ -160,8 +165,8 @@ let truncate_to_limit content =
 let build_edit_request ~token ~channel_id ~message_id ~content () =
   let url =
     Printf.sprintf
-      "https://discord.com/api/v10/channels/%s/messages/%s"
-      channel_id message_id
+      "%s/channels/%s/messages/%s"
+      api_base channel_id message_id
   in
   let headers =
     ("Content-Type", "application/json") :: auth_headers ~token
@@ -271,8 +276,8 @@ let image_embed ~url ~caption =
 let build_embed_request ~token ~channel_id ~content ?embeds () =
   let url =
     Printf.sprintf
-      "https://discord.com/api/v10/channels/%s/messages"
-      channel_id
+      "%s/channels/%s/messages"
+      api_base channel_id
   in
   let headers =
     ("Content-Type", "application/json") :: auth_headers ~token
@@ -294,8 +299,8 @@ let build_edit_embed_request ~token ~channel_id ~message_id
       ~content ?embeds () =
   let url =
     Printf.sprintf
-      "https://discord.com/api/v10/channels/%s/messages/%s"
-      channel_id message_id
+      "%s/channels/%s/messages/%s"
+      api_base channel_id message_id
   in
   let headers =
     ("Content-Type", "application/json") :: auth_headers ~token

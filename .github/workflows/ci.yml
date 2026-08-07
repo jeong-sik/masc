@@ -448,6 +448,16 @@ jobs:
       - name: Check dashboard prompt keys
         run: bash scripts/audit-dashboard-prompt-keys.sh
 
+      # An odoc reference is not checked by the compiler, so a rename or a
+      # deletion leaves {!foo} syntactically valid and silently wrong. One sweep
+      # found nine: mcp_prompt_surface justified a concrete record with a
+      # function that module does not have, server_mcp_transport_ws named an
+      # absent read_inbound_message_frame three times as the reason ws_session
+      # is exposed, and three files wrote {!Foo.ml}, which reads as a value
+      # named ml inside Foo. Seconds, and the renaming PR sees it.
+      - name: Check odoc references
+        run: python3 scripts/audit-odoc-refs.py
+
       # Both directions of the hand-maintained CI test allowlist. A target
       # whose suite was deleted makes dune hard-fail after a full build
       # (#24352, and again today when config/prompts/behavior emptied), and a

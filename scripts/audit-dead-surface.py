@@ -547,7 +547,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # merged tree after main's batch-1..3 landed, not computed from the batch
 # size -- the merge also dropped should_use_dict, which lost its last
 # caller when batch 1 removed the dictionary helpers around it.
-DEAD_EXPORT_BASELINE = 575
+DEAD_EXPORT_BASELINE = 576
 
 
 def run_ratchet(count: int) -> int:

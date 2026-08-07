@@ -146,7 +146,7 @@ let classify_store_dir source ~site dir =
 
 (** Discover all keeper metric directories under [masc_root/keepers/]. *)
 let discover_keeper_metric_dirs masc_root : (string * string) list =
-  let keepers_dir = Filename.concat masc_root "keepers" in
+  let keepers_dir = Filename.concat masc_root Common.keepers_runtime_dirname in
   match classify_store_dir Keeper_metric ~site:"discover_keeper_metric_root"
           keepers_dir with
   | Store_missing | Store_invalid -> []
@@ -191,7 +191,7 @@ let discover_trajectory_keeper_dirs masc_root : (string * string) list =
   | Store_directory -> discover_trajectory_keeper_dirs_in_root trajectories_root
 
 let discover_execution_receipt_dirs masc_root : (string * string) list =
-  let keepers_dir = Filename.concat masc_root "keepers" in
+  let keepers_dir = Filename.concat masc_root Common.keepers_runtime_dirname in
   match classify_store_dir Execution_receipt
           ~site:"discover_execution_receipt_root" keepers_dir with
   | Store_missing | Store_invalid -> []

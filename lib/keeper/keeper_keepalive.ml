@@ -73,7 +73,7 @@ let persist_directive_meta_update
   in
   let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path:entry.base_path in
   let default_path =
-    Filename.concat (Filename.concat masc_root "keepers") keeper_filename
+    Filename.concat (Filename.concat masc_root Common.keepers_runtime_dirname) keeper_filename
   in
   let persisted_path =
     if Fs_compat.file_exists default_path
@@ -86,7 +86,7 @@ let persist_directive_meta_update
           names
           |> List.map (fun cluster_name ->
             Filename.concat
-              (Filename.concat (Filename.concat clusters_dir cluster_name) "keepers")
+              (Filename.concat (Filename.concat clusters_dir cluster_name) Common.keepers_runtime_dirname)
               keeper_filename)
           |> List.filter Fs_compat.file_exists
         | Error _ -> []

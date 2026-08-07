@@ -125,7 +125,7 @@ let urgency_to_string = function
 let store_dir ~masc_root ~keeper_name =
   Filename.concat
     (Filename.concat
-       (Filename.concat (Filename.concat masc_root "keepers") keeper_name)
+       (Filename.concat (Filename.concat masc_root Common.keepers_runtime_dirname) keeper_name)
        "reaction-ledger")
     storage_generation
 ;;

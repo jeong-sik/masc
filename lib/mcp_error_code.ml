@@ -54,6 +54,25 @@ let to_wire_message_default = function
   | Session_evicted -> "Session evicted by server policy"
   | Quiet { reason ; _ } -> reason
 
+(* JSON-RPC 2.0 §5: a response may carry a null id only when the request
+   id could not be determined — a parse failure or a malformed request
+   object. Every other code answers a request whose id was read, so the
+   arms are listed rather than caught, and a new code has to choose here. *)
+let allows_null_request_id : t -> bool = function
+  | Parse_error -> true
+  | Invalid_request -> true
+  | Method_not_found -> false
+  | Invalid_params -> false
+  | Internal_error -> false
+  | Auth_error -> false
+  | Not_ready -> false
+  | Provider_timeout -> false
+  | Tool_dispatch_failure -> false
+  | Backpressure_shed -> false
+  | Session_evicted -> false
+  | Quiet _ -> false
+;;
+
 let to_http_status : t -> Httpun.Status.t = function
   | Parse_error -> `Bad_request
   | Invalid_request -> `Bad_request

@@ -12,7 +12,7 @@
     point (with signal handlers) lives in the executable
     [bin/main_eio.ml] (and sibling [bin/*_eio.ml] binaries).
 
-    Internal: \[safe_respond_with_string] stays private.
+    Internal: [safe_respond_with_string] stays private.
 
     @see <https://github.com/anmonteiro/httpun> httpun
     documentation *)

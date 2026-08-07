@@ -19,9 +19,9 @@
     no [library_source_ssot] test; the compile errors are the whole
     guard.
 
-    Internal: \[all_sources], the \[frontmatter] type +
-    \[parse_frontmatter] + \[list_documents], and \[handle_list] /
-    \[handle_add] (reachable via {!dispatch}).  All consumed only
+    Internal: [all_sources], the [frontmatter] type +
+    [parse_frontmatter] + [list_documents], and [handle_list] /
+    [handle_add] (reachable via {!dispatch}).  All consumed only
     inside the dispatch handlers or {!schemas}. *)
 
 (** {1 Library source SSOT} *)

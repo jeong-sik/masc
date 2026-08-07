@@ -13,16 +13,16 @@
     mirror the runtime — those helpers are implementation
     detail; probe is the contract layer.
 
-    Internal: ~22 helpers stay private — \[bool_opt_to_json] /
-    \[clamp] / \[trim_to_option] / \[ns_to_ms] / \[tok_per_second] /
-    \[collapse_preview] / \[truncate_text] /
-    \[generate_probe_skip_reason_to_string] / \[string_or_fallback] /
-    \[loaded_model_name] / \[ollama_loaded_model_to_yojson] /
-    \[ollama_probe_run_to_yojson] / \[default_probe_prompt] /
-    \[fetch_ollama_ps] / \[select_effective_model] /
-    \[failed_probe_run] / \[run_single_probe] /
-    \[prompt_eval_duration_ms_of_run_json] /
-    \[generate_probe_skip_reason] type + the
+    Internal: ~22 helpers stay private — [bool_opt_to_json] /
+    [clamp] / [trim_to_option] / [ns_to_ms] / [tok_per_second] /
+    [collapse_preview] / [truncate_text] /
+    [generate_probe_skip_reason_to_string] / [string_or_fallback] /
+    [loaded_model_name] / [ollama_loaded_model_to_yojson] /
+    [ollama_probe_run_to_yojson] / [default_probe_prompt] /
+    [fetch_ollama_ps] / [select_effective_model] /
+    [failed_probe_run] / [run_single_probe] /
+    [prompt_eval_duration_ms_of_run_json] /
+    [generate_probe_skip_reason] type + the
     [include Tool_local_runtime_http] runtime.  All consumed
     only inside {!runtime_ollama_probe_json}'s pipeline. *)
 
@@ -240,10 +240,10 @@ val runtime_ollama_probe_json :
   unit ->
   Yojson.Safe.t
 (** Top-level probe orchestrator.  Defaults: [probe_runs=2]
-    (clamped to [\[1, 4]]), [max_tokens=16] (clamped to
-    [\[1, 128]]), [think_mode=Think_auto], [timeout_sec=6]
+    (clamped to [\[1, 4\]]), [max_tokens=16] (clamped to
+    [\[1, 128\]]), [think_mode=Think_auto], [timeout_sec=6]
     (every positive explicit value is preserved; non-positive values raise
-    [Invalid_argument]), [ps_timeout_sec=2] (clamped to [\[1, 30]]),
+    [Invalid_argument]), [ps_timeout_sec=2] (clamped to [\[1, 30\]]),
     [generate_when_unloaded=true], [run_generate=true].
     Returns a JSON snapshot with [/api/ps] state + per-run timing +
     KV-cache assessment.  Per PR #20479 spirit: the tool itself

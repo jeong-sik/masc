@@ -45,6 +45,17 @@ let all_agent_statuses = [ Active; Busy; Listening; Inactive ]
 let valid_agent_status_strings =
   List.map agent_status_to_string all_agent_statuses
 
+(* Presence ordering for operator surfaces: the agent doing work outranks the
+   one merely holding a session, which outranks the one only listening. A
+   fifth constructor breaks compilation here instead of silently ranking 0,
+   which is what happens when the ordering is written over the serialized
+   strings instead. *)
+let agent_status_rank = function
+  | Busy -> 4
+  | Active -> 3
+  | Listening -> 2
+  | Inactive -> 1
+
 let agent_status_of_string_opt = function
   | "active" -> Some Active
   | "busy" -> Some Busy

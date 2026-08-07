@@ -47,12 +47,15 @@ let severity_rank s =
   | "warn" | "watch" | "interrupted" | "degraded" -> 1
   | _ -> 0
 
-let status_rank = function
-  | "busy" -> 4
-  | "active" -> 3
-  | "listening" -> 2
-  | "idle" -> 1
-  | _ -> 0
+(* The wire carries [agent_status_to_string]'s output, so ranking a serialized
+   status means decoding it first. Ranking the raw string instead left an arm
+   for "idle" — a spelling this producer never emits — while the real fourth
+   constructor, [Inactive], fell through to the catch-all and ranked the same
+   as garbage. *)
+let status_rank raw =
+  match Masc_domain.agent_status_of_string_opt (String.lowercase_ascii (String.trim raw)) with
+  | Some status -> Masc_domain.agent_status_rank status
+  | None -> 0
 
 let rec take n items =
   if n <= 0 then [] else match items with [] -> [] | x :: xs -> x :: take (n - 1) xs

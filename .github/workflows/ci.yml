@@ -906,6 +906,7 @@ jobs:
             @test/runtest-test_server_oauth_protocol \
             @test/runtest-test_server_auth_dashboard_actor_resolution \
             @test/runtest-test_error_body_wire_shape \
+            @test/runtest-test_mcp_error_code \
             @test/runtest-test_tool_registry_consistency \
             @test/runtest-test_tool_spec \
             @test/runtest-test_tool_shard_coverage \

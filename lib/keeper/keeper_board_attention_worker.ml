@@ -1578,8 +1578,9 @@ let settles_without_admitting (item : Partition.completed_item) =
 ;;
 
 (* Each settlement performs at least the candidate-consumption write and the
-   partition transition write. Keep one owner turn to at most sixteen such
-   durability operations, then persist a continuation wake for the remainder.
+   partition transition write, so one owner turn performs at most twice the
+   configured settlement bound (default 8, see Keeper_config) such durability
+   operations before persisting a continuation wake for the remainder.
    This is deliberately a settlement bound, not a scan or arrival-window
    heuristic: every successful iteration removes one exact Completed
    partition.
@@ -1593,6 +1594,10 @@ let settles_without_admitting (item : Partition.completed_item) =
 let max_completed_settlements_per_owner_turn () =
   Keeper_config.keeper_board_attention_settlements_per_turn ()
 
+(* [Eio.Fiber.yield] raises [Effect.Unhandled] when no Eio event loop is
+   running — the Alcotest suite drives [settle_one_completed] directly without
+   [Eio_main.run]. Production heartbeats always run under Eio, so the yield is
+   effective there; end-to-end drain behavior is tracked by masc#27055. *)
 let yield_between_discard_settlements () =
   try Eio.Fiber.yield () with
   | Effect.Unhandled _ -> ()

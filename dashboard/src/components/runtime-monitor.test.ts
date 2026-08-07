@@ -235,7 +235,6 @@ describe('RuntimeMonitor', () => {
                 supports_computer_use: true,
                 supports_code_execution: true,
               },
-              match_prefixes: ['Qwen/'],
             },
             binding: {
               provider_id: 'runpod_mtp',

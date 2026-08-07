@@ -1,8 +1,9 @@
 (** Byte-budget contract for the dynamic Memory OS fact payload.
 
     The measured bytes are exactly the UTF-8 bytes that recall places in the
-    [facts] template variable: identity, category, claim, separators, and line
-    breaks. Prompt-template boilerplate is deliberately outside this policy. *)
+    [facts] template variable: identity, category, record time, claim,
+    separators, and line breaks. Prompt-template boilerplate is deliberately
+    outside this policy. *)
 
 type measurement =
   { actual_bytes : int

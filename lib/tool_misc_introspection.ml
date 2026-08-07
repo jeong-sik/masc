@@ -32,7 +32,6 @@ type tool_result = Tool_result.result
 
 let tool_inventory_json _ctx ~include_hidden =
   (* Returns all tool schemas from catalog with metadata.
-     enabled_in_current_mode=false because this is dashboard context (no keeper).
      Keeper model visibility is the complete descriptor-declared surface. *)
   let surface_map : (string, string list) Hashtbl.t = Hashtbl.create 256 in
   let add_surface name s =
@@ -103,7 +102,6 @@ let tool_inventory_json _ctx ~include_hidden =
                 ("registered_schema", `Bool true);
                 ( "dispatch_registered",
                   `Bool (Option.is_some (Tool_dispatch.lookup_tag schema.name)) );
-                ("enabled_in_current_mode", `Bool false);
                 ("direct_call_allowed", `Bool (Tool_catalog.allow_direct_call schema.name));
                 ("doc_refs", `List (List.map (fun value -> `String value) help_entry.doc_refs));
                 ("prompt_hints", `List (List.map (fun value -> `String value) help_entry.prompt_hints));

@@ -536,6 +536,15 @@ let format_own_board_post_text (post : Board.post) : string =
   format_prompt_row
     [ "post_id", Board.Post_id.to_string post.id
     ; "updated_at", Masc_domain.iso8601_of_unix_seconds post.updated_at
+      (* What the Board did with it. The record carries these; the row dropped
+         them, so a Keeper reading its own posts could not tell an answered one
+         from an ignored one. The prompt tells a Keeper that a vote or comment
+         is how agreement reaches whoever posted, and votes reach no wake path
+         at all — [Board_dispatch.vote] emits only the dashboard SSE event, not
+         a board signal — so this row is where the response becomes visible.
+         Counts, not advice: the rows stay data. *)
+    ; "replies", string_of_int post.reply_count
+    ; "votes", Printf.sprintf "+%d/-%d" post.votes_up post.votes_down
     ; "title", Keeper_types_profile.short_preview ~max_len:80 post.title
     ; "preview", Keeper_types_profile.short_preview ~max_len:80 post.content
     ]

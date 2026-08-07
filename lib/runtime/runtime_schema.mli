@@ -124,7 +124,6 @@ type model_spec =
   ; top_k : int option
   ; min_p : float option
   ; capabilities : model_capabilities option
-  ; match_prefixes : string list
   }
 [@@deriving show, eq]
 

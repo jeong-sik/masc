@@ -153,7 +153,14 @@ def module_name(stem: str) -> str:
     return stem[0].upper() + stem[1:]
 
 
-def is_skipped_dir(name: str) -> bool:
+def is_skipped_name(name: str) -> bool:
+    """One path component the walk must not descend into or collect.
+
+    `is_skipped` tested every component of a relative path, the filename
+    included, so a file whose own name is in SKIP_PARTS was dropped. Pruning
+    only directories would quietly widen what the scan reads, so the same
+    predicate is applied to filenames too.
+    """
     return name in SKIP_PARTS or name.startswith(".worktree")
 
 
@@ -173,14 +180,18 @@ def all_files(root: Path) -> list[Path]:
         rglob then filter   2,292,279 files and still going at 60s
         prune while walking     24,426 files in 0.4s
 
-    That is why this audit was never wired into CI -- not a policy about what it
-    reports, just a walk nobody could afford to wait for.
+    That number is this checkout, not CI: 192 worktrees contribute nearly all of
+    it and a fresh clone has none. What pruning is worth in CI is smaller and
+    still real -- `.git` and, after a build, `_build` (42,237 files here) were
+    both walked and then discarded.
     """
     out: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [name for name in dirnames if not is_skipped_dir(name)]
+        dirnames[:] = [name for name in dirnames if not is_skipped_name(name)]
         directory = Path(dirpath)
         for name in filenames:
+            if is_skipped_name(name):
+                continue
             path = directory / name
             if path.is_file():
                 out.append(path)
@@ -485,7 +496,11 @@ def run_self_test() -> int:
         if "wrapped_helper" not in entries:
             failures.append("a reference under _build/ was counted as live")
 
+        (root / "lib" / "_build").parent.joinpath("_opam").write_text("not a directory\n")
+
         walked = {path.name for path in all_files(root)}
+        if "_opam" in walked:
+            failures.append("a file whose own name is skipped was collected")
         if "stale_consumer.ml" in walked:
             failures.append(".worktrees/ was walked instead of pruned")
         if "generated_consumer.ml" in walked:

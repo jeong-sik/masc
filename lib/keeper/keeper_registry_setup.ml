@@ -467,11 +467,6 @@ let update_entry_if_registered ~base_path name f =
   loop ())
 ;;
 
-let update_entry_if_registered_unit ~base_path name f =
-  (* fire-and-forget: discard whether the validated registry write was installed. *)
-  ignore (update_entry_if_registered ~base_path name (fun entry -> f entry, true))
-;;
-
 type registration_error =
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Registration_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot

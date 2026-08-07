@@ -283,9 +283,9 @@ let refresh_status results =
       0 results
   in
   match (successes, List.length results) with
-  | 0, _ -> "disconnected"
-  | n, total when n = total -> "connected"
-  | _ -> "degraded"
+  | 0, _ -> Masc_tui_types.Disconnected
+  | n, total when n = total -> Masc_tui_types.Connected
+  | _ -> Masc_tui_types.Degraded
 
 let load_http_surfaces ~host ~port =
   {
@@ -314,8 +314,8 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
     refresh_inflight := true;
     state.connection_status <-
       (match state.connection_status with
-      | "connected" | "degraded" -> "reconnecting"
-      | _ -> "connecting");
+       | Connected | Degraded -> Masc_tui_types.Reconnecting
+       | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
     let run_refresh () =
       try enqueue_async mailbox (Http_refresh_done (load_http_surfaces ~host ~port)) with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -463,7 +463,7 @@ let apply_async_message state ~http_refresh_inflight
       apply_http_surfaces state results
   | Http_refresh_failed err ->
       http_refresh_inflight := false;
-      state.connection_status <- "disconnected";
+      state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err
   | Board_post_refresh_done (post_id, result) ->
       if same_inflight_post !board_post_refresh_inflight post_id then

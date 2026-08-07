@@ -4,6 +4,16 @@ open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
 
+(* Exhaustive over [connection_status]: a new state is a compile error
+   here rather than an unexplained [disconnected] on screen. *)
+let connection_badge : Masc_tui_types.connection_status -> string = function
+  | Connected -> Ansi.green ^ "[connected]" ^ Ansi.reset
+  | Degraded -> Ansi.yellow ^ "[degraded]" ^ Ansi.reset
+  | Connecting -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
+  | Reconnecting -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
+  | Disconnected -> Ansi.red ^ "[disconnected]" ^ Ansi.reset
+;;
+
 let workspace_health_label = function
   | Workspace_health_critical -> "critical"
   | Workspace_health_bad -> "bad"
@@ -50,12 +60,7 @@ let render_dashboard (state : state) =
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf " MASC Dashboard  %s[%s]%s  %s  %s"
     Ansi.cyan state.workspace Ansi.reset timestamp
-    (match state.connection_status with
-     | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
-     | "degraded" -> Ansi.yellow ^ "[degraded]" ^ Ansi.reset
-     | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
-     | "reconnecting" -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
-     | _ -> Ansi.red ^ "[disconnected]" ^ Ansi.reset) in
+    (connection_badge state.connection_status) in
 
   (* Top border *)
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
@@ -181,12 +186,7 @@ let render_overview (state : state) =
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf " MASC Overview  %s[%s]%s  %s  %s"
     Ansi.cyan state.workspace Ansi.reset timestamp
-    (match state.connection_status with
-     | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
-     | "degraded" -> Ansi.yellow ^ "[degraded]" ^ Ansi.reset
-     | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
-     | "reconnecting" -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
-     | _ -> Ansi.red ^ "[disconnected]" ^ Ansi.reset) in
+    (connection_badge state.connection_status) in
 
   box_top buf cols;
   box_line buf cols header;
@@ -329,12 +329,7 @@ let render_approvals (state : state) =
   let count = List.length approvals in
   let header = Printf.sprintf " MASC Approvals (%d)  %s  %s"
     count timestamp
-    (match state.connection_status with
-     | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
-     | "degraded" -> Ansi.yellow ^ "[degraded]" ^ Ansi.reset
-     | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
-     | "reconnecting" -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
-     | _ -> Ansi.red ^ "[disconnected]" ^ Ansi.reset) in
+    (connection_badge state.connection_status) in
 
   box_top buf cols;
   box_line buf cols header;
@@ -429,12 +424,7 @@ let render_board_list (state : state) =
   let count = List.length state.board_posts in
   let header = Printf.sprintf " MASC Board (%d)  %s  %s"
     count timestamp
-    (match state.connection_status with
-     | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
-     | "degraded" -> Ansi.yellow ^ "[degraded]" ^ Ansi.reset
-     | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
-     | "reconnecting" -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
-     | _ -> Ansi.red ^ "[disconnected]" ^ Ansi.reset) in
+    (connection_badge state.connection_status) in
 
   box_top buf cols;
   box_line buf cols header;
@@ -589,12 +579,7 @@ let render_planning_list (state : state) =
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf " MASC Planning  %s  %s"
     timestamp
-    (match state.connection_status with
-     | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
-     | "degraded" -> Ansi.yellow ^ "[degraded]" ^ Ansi.reset
-     | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
-     | "reconnecting" -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
-     | _ -> Ansi.red ^ "[disconnected]" ^ Ansi.reset) in
+    (connection_badge state.connection_status) in
 
   box_top buf cols;
   box_line buf cols header;

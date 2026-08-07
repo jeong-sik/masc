@@ -81,7 +81,22 @@ let reset_for_testing () =
   Atomic.set runtime_state None;
   reset_spawn_guard_for_testing ()
 
-let default_buffer_size = 1024
+(* Bounded capture for one subprocess stream.
+
+   A subprocess can emit arbitrarily many bytes, and before this the drainers
+   copied all of them into an unbounded buffer: a single `rg` over a tree of
+   single-line multi-MB JSON retained 590MB in one call.
+   [Common.max_tool_output_bytes] did not stop it — that constant is the
+   inline-vs-blob threshold, not a ceiling on what the runtime accepts.
+
+   Retention is capped head+tail; the drainer still reads to EOF so the exit
+   status and the stream tail (where failures report) stay exact, making peak
+   memory O(head + tail) instead of O(output). Elided bytes are reported by
+   [Exec_buffer.render]'s truncation marker, never dropped silently. *)
+let create_capture () =
+  Exec_buffer.create
+    ~head_cap:Common.max_process_capture_head_bytes
+    ~tail_cap:Common.max_process_capture_tail_bytes
 
 exception Explicit_process_timeout of float
 
@@ -285,7 +300,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
               | Unix.Unix_error (Unix.EINTR, _, _) -> None
               | Unix.Unix_error (Unix.ECHILD, _, _) -> Some (Unix.WEXITED 127)
             in
-            let stdout_buf = Buffer.create default_buffer_size in
+            let stdout_buf = create_capture () in
             let chunk = Bytes.create 4096 in
             let read_available () =
               let rec loop () =
@@ -293,7 +308,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                   match Unix.read stdout_r chunk 0 (Bytes.length chunk) with
                   | 0 -> `Eof
                   | n ->
-                      Buffer.add_subbytes stdout_buf chunk 0 n;
+                      Exec_buffer.add_bytes stdout_buf chunk 0 n;
                       loop ()
                 with
                 | Unix.Unix_error
@@ -406,7 +421,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                     let (_pid, status) = waitpid_blocking () in
                     status
             in
-            let stdout = Buffer.contents stdout_buf in
+            let stdout = Exec_buffer.render stdout_buf in
             let stderr = captured_stderr_or_empty !stderr_path_ref in
             let timeout_event =
               if !timed_out then timeout_sec else None
@@ -545,13 +560,47 @@ let finalize_spawned_proc ~clock proc status flows =
       else
         reap_proc_with_clock clock proc)
 
-(** Spawn a process with explicit pipes and drain stdout/stderr into buffers
-    before returning.  This avoids a race where [Eio.Process.await] returns
-    (process exited) but the internal copy-fiber that moves pipe data into
-    [buffer_sink] has not finished yet, resulting in truncated/empty output.
+let invoke_output_chunk_callback f s =
+  try f s with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      Log.Misc.warn
+        "[Process_eio] output chunk callback error, continuing: %s"
+        (Printexc.to_string exn)
 
-    The fix mirrors [Eio.Process.parse_out]: create pipes, close write ends
-    after spawn, read to EOF in parallel fibers, then await the exit status. *)
+let drain_chunk_size = 4096
+
+(* Read [r] to EOF into the bounded [acc], invoking [on_chunk] per read.
+
+   Reading continues past the retention ceiling on purpose: stopping early
+   would SIGPIPE a child that is still doing legitimate work and would lose
+   both the exit status and the stream tail. [Exec_buffer] discards the
+   middle instead, so this loop is O(bytes) in time and O(caps) in space. *)
+let rec drain_into r acc ~on_chunk chunk =
+  match
+    try Eio.Flow.single_read r chunk with
+    | End_of_file -> 0
+  with
+  | 0 -> Eio.Flow.close r
+  | n ->
+      let s = Cstruct.to_string (Cstruct.sub chunk 0 n) in
+      invoke_output_chunk_callback on_chunk s;
+      Exec_buffer.add_string acc s;
+      drain_into r acc ~on_chunk chunk
+
+let drain_to_eof r acc ~on_chunk =
+  drain_into r acc ~on_chunk (Cstruct.create drain_chunk_size)
+
+let ignore_chunk (_ : string) = ()
+
+(** Spawn a process with explicit pipes and drain stdout into [stdout_buf]
+    before returning.  Draining inline (rather than handing the pipe to a
+    background copier) avoids a race where [Eio.Process.await] returns —
+    process exited — while data still sits unread in the pipe, which
+    surfaced as truncated or empty output.
+
+    The shape mirrors [Eio.Process.parse_out]: create pipes, close write ends
+    after spawn, read to EOF, then await the exit status. *)
 let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv stdout_buf =
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
   let proc =
@@ -573,8 +622,7 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
     ~finally:(fun () ->
       finalize_spawned_proc ~clock proc status [ "stdout", stdout_r ])
     (fun () ->
-      Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink stdout_buf);
-      Eio.Flow.close stdout_r;
+      drain_to_eof stdout_r stdout_buf ~on_chunk:ignore_chunk;
       let s = Eio.Process.await proc in
       status := Some s;
       s)
@@ -582,8 +630,11 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
 
 (** Like [spawn_and_drain_stdout] but captures both stdout and stderr into
     separate buffers and returns the process exit status.
-    Drain happens in parallel via [Fiber.both]; [await] is called after
-    both pipes reach EOF, so buffers are guaranteed complete. *)
+    Drain happens in parallel via [Fiber.both]; [await] is called after both
+    pipes reach EOF, so each buffer has seen the whole stream — retaining as
+    much of it as its head/tail caps allow. Each buffer has exactly one
+    draining fiber, which is what [Exec_buffer]'s single-producer contract
+    requires. *)
 let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv stdout_buf
     stderr_buf =
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
@@ -606,24 +657,12 @@ let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv s
         [ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Fiber.both
-        (fun () ->
-          Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink stdout_buf);
-          Eio.Flow.close stdout_r)
-        (fun () ->
-          Eio.Flow.copy stderr_r (Eio.Flow.buffer_sink stderr_buf);
-          Eio.Flow.close stderr_r);
+        (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:ignore_chunk)
+        (fun () -> drain_to_eof stderr_r stderr_buf ~on_chunk:ignore_chunk);
       let s = Eio.Process.await proc in
       status := Some s;
       s)
   |> unix_status_of_eio_status
-
-let invoke_output_chunk_callback f s =
-  try f s with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-      Log.Misc.warn
-        "[Process_eio] output chunk callback error, continuing: %s"
-        (Printexc.to_string exn)
 
 let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
     ~on_stdout_chunk ~on_stderr_chunk stdout_buf stderr_buf =
@@ -639,19 +678,6 @@ let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~cl
   Option.iter (fun r -> r := Timeout_origin.Command) phase_ref;
   Eio.Flow.close stdout_w;
   Eio.Flow.close stderr_w;
-  let chunk_size = 4096 in
-  let rec drain r buf ~on_chunk chunk =
-    match
-      try Eio.Flow.single_read r chunk with
-      | End_of_file -> 0
-    with
-    | 0 -> Eio.Flow.close r
-    | n ->
-      let s = Cstruct.to_string (Cstruct.sub chunk 0 n) in
-      invoke_output_chunk_callback on_chunk s;
-      Buffer.add_string buf s;
-      drain r buf ~on_chunk chunk
-  in
   let status = ref None in
   (* Cancellation-protected yielding cleanup; see [spawn_and_drain_stdout]. *)
   Fun.protect
@@ -660,12 +686,8 @@ let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~cl
         [ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Fiber.both
-        (fun () ->
-          let chunk = Cstruct.create chunk_size in
-          drain stdout_r stdout_buf ~on_chunk:on_stdout_chunk chunk)
-        (fun () ->
-          let chunk = Cstruct.create chunk_size in
-          drain stderr_r stderr_buf ~on_chunk:on_stderr_chunk chunk);
+        (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:on_stdout_chunk)
+        (fun () -> drain_to_eof stderr_r stderr_buf ~on_chunk:on_stderr_chunk);
       let s = Eio.Process.await proc in
       status := Some s;
       s)
@@ -701,14 +723,14 @@ let run_argv ?timeout_sec ?env (argv : string list) : string =
         | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
             run_unix_argv_fallback ?timeout_sec ?env argv
         | Ok pm, Ok clk, Ok cwd ->
-            let buf = Buffer.create default_buffer_size in
+            let buf = create_capture () in
             let label = String.concat " " (List.map Filename.quote argv) in
             let phase_ref = ref Timeout_origin.Spawn in
             try
               with_explicit_timeout_exn clk timeout_sec (fun () ->
                   Eio.Switch.run (fun sw ->
                       let status = spawn_and_drain_stdout ~phase_ref ~sw pm ~cwd ?env ~clock:clk argv buf in
-                      output_for_status ~status ~stdout:(Buffer.contents buf) ~stderr:""))
+                      output_for_status ~status ~stdout:(Exec_buffer.render buf) ~stderr:""))
             with
             | Explicit_process_timeout timeout_sec ->
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
@@ -751,7 +773,7 @@ let run_argv_with_stdin ?timeout_sec ?env ~(stdin_content : string) (argv : stri
         | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
             run_unix_argv_with_stdin_fallback ?timeout_sec ?env ~stdin_content argv
         | Ok pm, Ok clk, Ok cwd ->
-            let buf = Buffer.create default_buffer_size in
+            let buf = create_capture () in
             let label = String.concat " " (List.map Filename.quote argv) in
             let stdin_source = Eio.Flow.string_source stdin_content in
             let phase_ref = ref Timeout_origin.Spawn in
@@ -761,7 +783,7 @@ let run_argv_with_stdin ?timeout_sec ?env ~(stdin_content : string) (argv : stri
                       let status =
                         spawn_and_drain_stdout ~phase_ref ~sw pm ~cwd ?env ~stdin_source ~clock:clk argv buf
                       in
-                      output_for_status ~status ~stdout:(Buffer.contents buf) ~stderr:""))
+                      output_for_status ~status ~stdout:(Exec_buffer.render buf) ~stderr:""))
             with
             | Explicit_process_timeout timeout_sec ->
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
@@ -829,8 +851,8 @@ let run_argv_with_stdin_and_status_split
               | None -> default_cwd
               | Some dir -> Eio.Path.(default_cwd / dir)
             in
-            let stdout_buf = Buffer.create default_buffer_size in
-            let stderr_buf = Buffer.create default_buffer_size in
+            let stdout_buf = create_capture () in
+            let stderr_buf = create_capture () in
             let label = String.concat " " (List.map Filename.quote argv) in
             let stdin_source = Eio.Flow.string_source stdin_content in
             let phase_ref = ref Timeout_origin.Spawn in
@@ -869,16 +891,16 @@ let run_argv_with_stdin_and_status_split
                               stderr_buf)
                   in
                   ( unix_status,
-                    Buffer.contents stdout_buf,
-                    Buffer.contents stderr_buf ))
+                    Exec_buffer.render stdout_buf,
+                    Exec_buffer.render stderr_buf ))
             with
             | Explicit_process_timeout timeout_sec ->
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
                 let timeout_status = Unix.WEXITED 124 in
-                let stdout = Buffer.contents stdout_buf in
-                let stderr = Buffer.contents stderr_buf in
+                let stdout = Exec_buffer.render stdout_buf in
+                let stderr = Exec_buffer.render stderr_buf in
                 let stderr =
                   if String.trim stdout = "" && String.trim stderr = "" then
                     process_error_output ~label
@@ -948,8 +970,8 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
               | None -> default_cwd
               | Some dir -> Eio.Path.(default_cwd / dir)
             in
-            let stdout_buf = Buffer.create default_buffer_size in
-            let stderr_buf = Buffer.create 256 in
+            let stdout_buf = create_capture () in
+            let stderr_buf = create_capture () in
             let label = String.concat " " (List.map Filename.quote argv) in
             let phase_ref = ref Timeout_origin.Spawn in
             try
@@ -960,16 +982,16 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
                           ~clock:clk argv stdout_buf stderr_buf)
                   in
                   ( unix_status,
-                    Buffer.contents stdout_buf,
-                    Buffer.contents stderr_buf ))
+                    Exec_buffer.render stdout_buf,
+                    Exec_buffer.render stderr_buf ))
             with
             | Explicit_process_timeout timeout_sec ->
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
                 observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
                 let timeout_status = Unix.WEXITED 124 in
-                let stdout = Buffer.contents stdout_buf in
-                let stderr = Buffer.contents stderr_buf in
+                let stdout = Exec_buffer.render stdout_buf in
+                let stderr = Exec_buffer.render stderr_buf in
                 let stderr =
                   if String.trim stdout = "" && String.trim stderr = "" then
                     process_error_output ~label
@@ -1044,8 +1066,8 @@ let run_argv_with_status_split_streaming
             | None -> default_cwd
             | Some dir -> Eio.Path.(default_cwd / dir)
           in
-          let stdout_buf = Buffer.create default_buffer_size in
-          let stderr_buf = Buffer.create 256 in
+          let stdout_buf = create_capture () in
+          let stderr_buf = create_capture () in
           let label = String.concat " " (List.map Filename.quote argv) in
           let phase_ref = ref Timeout_origin.Spawn in
           try
@@ -1065,15 +1087,15 @@ let run_argv_with_status_split_streaming
                         stdout_buf
                         stderr_buf)
                 in
-                unix_status, Buffer.contents stdout_buf, Buffer.contents stderr_buf)
+                unix_status, Exec_buffer.render stdout_buf, Exec_buffer.render stderr_buf)
           with
           | Explicit_process_timeout timeout_sec ->
             Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
               timeout_sec (Timeout_origin.to_label !phase_ref) label;
             observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
             let timeout_status = Unix.WEXITED 124 in
-            let stdout = Buffer.contents stdout_buf in
-            let stderr = Buffer.contents stderr_buf in
+            let stdout = Exec_buffer.render stdout_buf in
+            let stderr = Exec_buffer.render stderr_buf in
             let stderr =
               if String.trim stdout = "" && String.trim stderr = ""
               then process_error_output ~label
@@ -1159,15 +1181,11 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                 String.concat " " (List.map Filename.quote stage.argv))
               |> String.concat " | "
             in
-            let stdout_buf = Buffer.create default_buffer_size in
-            let stderr_buffers =
-              List.map
-                (fun _ -> Buffer.create 256)
-                stages
-            in
+            let stdout_buf = create_capture () in
+            let stderr_buffers = List.map (fun _ -> create_capture ()) stages in
             let stderr_contents () =
               stderr_buffers
-              |> List.map Buffer.contents
+              |> List.map Exec_buffer.render
               |> String.concat ""
             in
             let phase_ref = ref Timeout_origin.Spawn in
@@ -1239,7 +1257,7 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                            Option.iter
                              (fun f -> invoke_output_chunk_callback f s)
                              on_chunk;
-                           Buffer.add_string buf s;
+                           Exec_buffer.add_string buf s;
                            loop ()
                      in
                      loop ()
@@ -1268,7 +1286,7 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                      with_explicit_timeout_exn clk timeout_sec (fun () ->
                        let statuses, () = Eio.Fiber.pair await_all drain_all in
                        let stderr = stderr_contents () in
-                       (pipeline_status statuses, Buffer.contents stdout_buf, stderr))
+                       (pipeline_status statuses, Exec_buffer.render stdout_buf, stderr))
                    with Explicit_process_timeout timeout_sec ->
                      List.iter (reap_proc_with_clock clk) procs;
                      raise (Explicit_process_timeout timeout_sec))
@@ -1287,7 +1305,7 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                        ()
                    else streamed_stderr
                  in
-                 (Unix.WEXITED 124, Buffer.contents stdout_buf, stderr)
+                 (Unix.WEXITED 124, Exec_buffer.render stdout_buf, stderr)
              | Eio.Cancel.Cancelled _ as exn -> raise exn
              | exn ->
                  if should_retry_unix_fallback exn then (

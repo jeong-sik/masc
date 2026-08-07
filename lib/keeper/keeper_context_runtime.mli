@@ -177,8 +177,6 @@ val resolve_max_context_resolution
   -> string list
   -> max_context_resolution
 
-val resolve_max_context_resolution_of_meta : keeper_meta -> max_context_resolution
-
 val resolve_max_context_resolution_for_runtime_id
   :  requested_override:int option
   -> runtime_id:string
@@ -219,7 +217,3 @@ val append_trait_clause : base:string -> clause:string -> string
 (** {1 Fragment Detection (used by dashboard)} *)
 
 val looks_fragmentary_history_text : string -> bool
-
-(** {1 Memory Check} *)
-
-val memory_check_default_json : unit -> Yojson.Safe.t

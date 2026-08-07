@@ -342,7 +342,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   seed_persona_dir base_path tool_matrix_agent_name;
   let auth_token =
     match
-      Masc.Auth.create_token base_path ~agent_name:tool_matrix_agent_name
+      Auth.create_token base_path ~agent_name:tool_matrix_agent_name
         ~role:Masc_domain.Admin
     with
     | Ok (token, _cred) -> token

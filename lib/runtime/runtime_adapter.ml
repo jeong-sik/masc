@@ -23,10 +23,25 @@ module Provider_binding = Runtime_provider_binding
 
 let normalize_header_key key = String.lowercase_ascii (String.trim key)
 
+(* SSOT for "this header carries a credential". [runtime_adapter] strips these
+   from [Provider_config.headers] so the secret is not duplicated alongside
+   [api_key], and the dashboard hides them from the provider header list. The
+   two used to keep separate lists: this one knew authorization / x-api-key,
+   the dashboard's also knew api-key and x-auth-token. The narrower list was
+   the one doing the stripping, so a provider declaring
+   [headers."api-key"] passed the filter and the secret reached
+   [Provider_config.headers] — while the dashboard hid the very header that
+   was being forwarded.
+
+   This stays a deny list over free-form TOML keys, which is why the real fix
+   is to reject credential-looking keys at parse time or give headers a typed
+   non-secret map (issue linked in the PR). Until then one list is strictly
+   better than two that disagree. *)
+let auth_header_keys = [ "authorization"; "x-api-key"; "api-key"; "x-auth-token" ]
+
 let is_auth_header_key key =
-  match normalize_header_key key with
-  | "authorization" | "x-api-key" -> true
-  | _ -> false
+  let normalized = normalize_header_key key in
+  List.exists (String.equal normalized) auth_header_keys
 ;;
 
 let trim_trailing_slash path =

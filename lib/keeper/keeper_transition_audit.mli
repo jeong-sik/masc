@@ -67,7 +67,7 @@ val queue_depth : unit -> int
 
 module For_testing : sig
   val reset_state : unit -> unit
-  val clear_completed_turn_ring : keeper_name:string -> unit
+
   val observe_append_failure : site:string -> exn -> unit
   val queued_count : unit -> int
   val dropped_count : unit -> int

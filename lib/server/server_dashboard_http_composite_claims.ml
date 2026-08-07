@@ -5,8 +5,6 @@
     Depends on Server_dashboard_http_json_utils, Server_dashboard_compact_receipt_json,
     Server_dashboard_fleet_readiness, and various Keeper modules. *)
 
-open Masc_domain
-open Server_utils
 
 let json_member = Server_dashboard_http_json_utils.json_member
 let json_string key json = Json_util.get_string json key
@@ -232,12 +230,6 @@ let string_opt_is_any value candidates =
 let string_opt_present value =
   match Option.map String.trim value with
   | Some value -> value <> ""
-  | None -> false
-;;
-
-let string_opt_has_prefix value ~prefix =
-  match lower_string_opt value with
-  | Some value -> string_has_prefix ~prefix value
   | None -> false
 ;;
 

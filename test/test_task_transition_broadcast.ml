@@ -62,6 +62,7 @@ let make_task ~id ~status : D.task =
   ; handoff_context = None
   ; cycle_count = 0
   ; reclaim_policy = None
+  ; execution_links = Masc_domain.no_execution_links
   ; do_not_reclaim_reason = None
   }
 ;;

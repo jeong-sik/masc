@@ -202,7 +202,6 @@ let make_task_contract ?(strict = false) ?(completion_contract = [])
     required_evidence;
     inspect_gate_evidence;
     verify_gate_evidence;
-    links = { operation_id = None; session_id = None };
   }
 
 let add_priority_task ctx ~title =
@@ -650,13 +649,17 @@ let () = test "handle_add_task_persists_contract" (fun () ->
   | _ -> failwith "expected exactly one task"
 )
 
-let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
+(* A caller who states no completion criteria gets a task that says so. The
+   handler used to fill the gap with "Task scope satisfied: <title>", which
+   read as stated criteria to everything downstream while telling a verifier
+   nothing. *)
+let () = test "handle_add_task_omits_contract_when_unstated" (fun () ->
   let ctx = make_test_ctx () in
   let result =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
-          ("title", `String "Default verification task");
+          ("title", `String "Unstated criteria task");
           ("description", `String "Need verifier-visible evidence.");
         ])
   in
@@ -664,21 +667,16 @@ let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
   match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.contract with
+      | None -> ()
       | Some contract ->
-          assert (not contract.strict);
-          assert (contract.completion_contract <> []);
-          (* The default contract carries task facts, not magic-token evidence
-             requirements. The LLM reviewer judges the completion claim in
-             context; this layer does not search for required substrings. *)
-          assert (contract.required_evidence = []);
-          assert (contract.verify_gate_evidence = []);
-          assert (str_contains (List.hd contract.completion_contract)
-                    "Default verification task")
-      | None -> failwith "expected default verification contract")
+          failwith
+            (Printf.sprintf
+               "expected no contract, got completion_contract=[%s]"
+               (String.concat "; " contract.completion_contract)))
   | _ -> failwith "expected exactly one task"
 )
 
-let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (fun () ->
+let () = test "handle_batch_add_tasks_omits_contract_when_unstated" (fun () ->
   let ctx = make_test_ctx () in
   let result =
     Task.Tool.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -698,14 +696,13 @@ let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (f
   List.iter
     (fun (task : Masc_domain.task) ->
        match task.contract with
+       | None -> ()
        | Some contract ->
-           (* Default verification contract is injected (completion_contract
-              present); RFC-0311 §8: it no longer carries magic-token
-              required/verify evidence. *)
-           assert (contract.completion_contract <> []);
-           assert (contract.required_evidence = []);
-           assert (contract.verify_gate_evidence = [])
-       | None -> failwith "expected default verification contract for batch task")
+           failwith
+             (Printf.sprintf
+                "expected no contract for %s, got completion_contract=[%s]"
+                task.id
+                (String.concat "; " contract.completion_contract)))
     tasks
 )
 
@@ -743,8 +740,18 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
               [
                 ("summary", `String "blocked on integration fixture");
                 ("next_step", `String "reproduce with real fixture");
+                (* Was ["task-001"; "session:test"]. Neither is a form the
+                   verification store can read, so both were snapshotted as
+                   payload-free invalid references and this case asserted
+                   success on evidence that is invisible at review. The
+                   boundary now refuses them; the case keeps its subject
+                   (strict release requires a handoff) with references that
+                   survive to the reviewer. *)
                 ( "evidence_refs",
-                  `List [ `String "task-001"; `String "session:test" ] );
+                  `List
+                    [ `String "note:task-001"
+                    ; `String "note:session test transcript"
+                    ] );
               ] );
         ])
   in
@@ -788,6 +795,73 @@ let () = test "handle_transition_rejects_blank_evidence_ref_entries" (fun () ->
   assert (not (Tool_result.is_success result));
   assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
   assert (str_contains (Tool_result.message result) "must contain only non-empty strings")
+)
+
+(* The same boundary rule for a reference the verification store cannot read.
+   Accepting it snapshots a payload-free invalid reference, and the reviewer
+   reads that as unavailable evidence — a verdict the submitter cannot act on
+   because nothing names the reference form as the fault. Live: task-174 resent
+   the same `board:p-…` entry and drew 59 rejections in two hours. *)
+let () = test "handle_transition_rejects_unresolvable_evidence_ref_entries" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Unresolvable evidence task") ])
+  in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let reject reference =
+    let result =
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "release");
+            ( "handoff_context",
+              `Assoc
+                [
+                  ("summary", `String "handing off");
+                  ("evidence_refs", `List [ `String reference ]);
+                ] );
+          ])
+    in
+    assert (not (Tool_result.is_success result));
+    assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+    assert (str_contains (Tool_result.message result) "note:<text>")
+  in
+  (* Every form the live workspace actually submitted and had rejected. *)
+  reject "board:p-b8655a197dcf2f5da46655e10b3acbd1";
+  reject "file:///Users/x/repo/out.diff";
+  reject "https://github.com/o/r/pull/1";
+  reject "artifacts/relative/but/unprefixed.md";
+  reject "task-002:approved"
+)
+
+let () = test "handle_transition_accepts_resolvable_evidence_ref_forms" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Resolvable evidence task") ])
+  in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "release");
+          ( "handoff_context",
+            `Assoc
+              [
+                ("summary", `String "handing off");
+                ( "evidence_refs"
+                , `List
+                    [ `String "artifact:out/report.md"
+                    ; `String "note:board post p-b8655a19 carries the rationale"
+                    ] );
+              ] );
+        ])
+  in
+  assert (Tool_result.is_success result)
 )
 
 let () = test "handle_transition_entry_action_rejects_blank_evidence_ref_entries" (fun () ->
@@ -1060,7 +1134,12 @@ let () = test "handle_transition_submit_rejects_registered_keeper_alias"
            ])
     in
     assert (not (Tool_result.is_success result));
-    assert (str_contains (Tool_result.message result) "requires owning the task");
+    (* Pin the fact, not the phrasing: the refusal has to name the identity that
+       actually owns the task, so a reader can tell an ownership rejection from
+       an incidental FSM one. The old assertion pinned the literal "requires
+       owning the task", which the message stopped using while still rejecting
+       for exactly this reason. *)
+    assert (str_contains (Tool_result.message result) "keeper-executor-agent");
     assert_task_claimed_by ctx "keeper-executor-agent"))
 
 let () = test "keeper_reconciliation_ignores_prefix_matched_agent"
@@ -2527,6 +2606,59 @@ let () = test "handle_batch_add_tasks_rejects_unknown_item_fields" (fun () ->
        "Unknown argument(s): retired_tool_policy_field")
 )
 
+let () = test "handle_batch_add_tasks_rejects_removed_contract_field" (fun () ->
+  let ctx = make_test_ctx () in
+  let args =
+    `Assoc
+      [ ( "tasks"
+        , `List
+            [ `Assoc
+                [ "title", `String "Task 1"
+                ; "contract", `Assoc [ "links", `Assoc [] ]
+                ]
+            ] )
+      ]
+  in
+  let result =
+    Task.Tool.handle_batch_add_tasks
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      args
+  in
+  assert (not (Tool_result.is_success result));
+  assert
+    (str_contains
+       (Tool_result.message result)
+       "contract contains unsupported field links"))
+
+let () = test "handle_batch_add_tasks_rejects_duplicate_contract_field" (fun () ->
+  let ctx = make_test_ctx () in
+  let args =
+    `Assoc
+      [ ( "tasks"
+        , `List
+            [ `Assoc
+                [ "title", `String "Task 1"
+                ; ( "contract"
+                  , `Assoc [ "strict", `Bool true; "strict", `Bool false ] )
+                ]
+            ] )
+      ]
+  in
+  let result =
+    Task.Tool.handle_batch_add_tasks
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      args
+  in
+  assert (not (Tool_result.is_success result));
+  assert
+    (str_contains
+       (Tool_result.message result)
+       "contract contains duplicate field strict"))
+
 (* Test helper functions *)
 let () = test "get_string_present" (fun () ->
   let args = `Assoc [("key", `String "value")] in
@@ -2675,6 +2807,75 @@ let () =
     (* Credited to the producer with no collaborators: the authority is not an
        agent, so it never enters the collaborator set. *)
     assert (List.mem ("producer", true, []) !metric_events))
+;;
+
+(* The action list reaches the model twice: as the enum, derived from
+   [Masc_domain.valid_task_action_strings], and as the property description.
+   The description used to spell the same six names out by hand, which put
+   "done" in front of the model as one ordinary option among them.
+
+   It is not one. The lifecycle answers Done_action with
+   Verification_submission_required from Claimed and InProgress, and with
+   Invalid_transition from Todo, AwaitingVerification and Cancelled — every
+   status a Keeper can be working. Only Done->Done succeeds, as a no-op.
+   Measured over the live tool log: 111 calls passed action="done", 70 errored,
+   and the remaining 41 were that no-op.
+
+   Pinned from two sides. The enum must still carry every action the type has,
+   because that is what the dispatcher accepts; the description must not
+   re-list them, because a hand-written copy of a derived list is what drifted. *)
+let () = test "transition action description does not re-list the enum" (fun () ->
+  let schema =
+    List.find
+      (fun (s : Masc_domain.tool_schema) -> String.equal s.name "masc_transition")
+      Masc.Task.Schemas.schemas
+  in
+  let action_description =
+    match schema.input_schema with
+    | `Assoc top ->
+      (match List.assoc "properties" top with
+       | `Assoc props ->
+         (match List.assoc "action" props with
+          | `Assoc action ->
+            (match List.assoc "description" action with
+             | `String d -> d
+             | _ -> failwith "action description is not a string")
+          | _ -> failwith "action property is not an object")
+       | _ -> failwith "properties is not an object")
+    | _ -> failwith "input_schema is not an object"
+  in
+  let contains needle =
+    let n = String.length needle and h = String.length action_description in
+    let rec loop i =
+      i + n <= h && (String.sub action_description i n = needle || loop (i + 1))
+    in
+    loop 0
+  in
+  (* The pipe-separated copy of the enum is gone. *)
+  assert (not (contains "claim | start"));
+  (* done is named, and named as refused rather than offered. *)
+  assert (contains "done is refused");
+  (* The route that does complete a Task is the one stated. *)
+  assert (contains "submit_for_verification");
+  (* The enum keeps every action the dispatcher accepts, done included. *)
+  let enum_actions =
+    match schema.input_schema with
+    | `Assoc top ->
+      (match List.assoc "properties" top with
+       | `Assoc props ->
+         (match List.assoc "action" props with
+          | `Assoc action ->
+            (match List.assoc "enum" action with
+             | `List xs ->
+               List.filter_map (function `String s -> Some s | _ -> None) xs
+             | _ -> failwith "enum is not a list")
+          | _ -> failwith "action property is not an object")
+       | _ -> failwith "properties is not an object")
+    | _ -> failwith "input_schema is not an object"
+  in
+  assert (
+    List.sort compare enum_actions
+    = List.sort compare Masc_domain.valid_task_action_strings))
 ;;
 
 let () =

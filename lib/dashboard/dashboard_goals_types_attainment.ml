@@ -44,98 +44,6 @@ let metric_evaluation_of_goal (goal : Goal_store.goal) =
 
 
 
-(* Token-split that respects camelCase AND acronym boundaries.
-
-   - lower -> upper splits (so [successRate] -> [success; rate])
-   - upper -> upper-followed-by-lower splits (so [APIRatio] ->
-     [api; ratio]; [PRCount] -> [pr; count])
-   - consecutive uppercase letters not followed by a lowercase stay
-     glued (so [API] -> [api], [HTTP] -> [http])
-
-   Without the acronym rule, common acronym-prefixed metric names
-   regressed against percent inference: post-#13170 review noted
-   that names like [APIRatio] / [PRCount] still missed the percent
-   token even after the camelCase fix. The split point is the
-   *last* uppercase letter in a run -- that is the start of the
-   following lowercase word -- not every uppercase letter, so
-   abbreviations stay intact. *)
-let metric_word_tokens raw =
-  let len = String.length raw in
-  let tokens = ref [] in
-  let current = Buffer.create 16 in
-  let flush () =
-    if Buffer.length current > 0 then (
-      tokens := Buffer.contents current :: !tokens;
-      Buffer.clear current)
-  in
-  let is_lower c = c >= 'a' && c <= 'z' in
-  let is_upper c = c >= 'A' && c <= 'Z' in
-  let next_at i = if i + 1 < len then Some raw.[i + 1] else None in
-  let prev_at i = if i > 0 then Some raw.[i - 1] else None in
-  for i = 0 to len - 1 do
-    let ch = raw.[i] in
-    match ch with
-    | 'A' .. 'Z' ->
-        let prev_lower =
-          match prev_at i with Some c -> is_lower c | None -> false
-        in
-        let prev_upper =
-          match prev_at i with Some c -> is_upper c | None -> false
-        in
-        let next_lower =
-          match next_at i with Some c -> is_lower c | None -> false
-        in
-        if prev_lower then flush ()
-        else if prev_upper && next_lower then flush ();
-        Buffer.add_char current (Char.lowercase_ascii ch)
-    | 'a' .. 'z' | '0' .. '9' ->
-        Buffer.add_char current ch
-    | _ ->
-        flush ()
-  done;
-  flush ();
-  List.rev !tokens
-
-(* Post-#13131 review (P1): substring match on "rate"/"ratio"/"pct"
-   gave false positives for metric names like "iteration_rate"-vs-
-   "iterate", "operation"-vs-"ratio". Match against tokenized words
-   (alphanumerics split on punctuation) so only the actual metric
-   nouns trigger the percent inference. *)
-let metric_word_implies_percent token =
-  match token with
-  | "percent" | "pct" | "ratio" | "rate" | "completion" -> true
-  | _ -> false
-
-let metric_implies_percent metric =
-  match metric with
-  | None -> false
-  | Some raw ->
-      String_util.contains_substring_ci raw "%"
-      || List.exists metric_word_implies_percent (metric_word_tokens raw)
-
-let metric_count_token = function
-  | "task" | "tasks" | "todo" | "todos" | "issue" | "issues" | "ticket"
-  | "tickets" | "pr" | "prs" | "done" ->
-      true
-  | _ ->
-      false
-
-let metric_has_pull_request_phrase tokens =
-  let rec loop = function
-    | "pull" :: next :: _ when next = "request" || next = "requests" -> true
-    | _ :: rest -> loop rest
-    | [] -> false
-  in
-  loop tokens
-
-let metric_supports_count_target metric =
-  match metric with
-  | None -> true
-  | Some raw ->
-      let tokens = metric_word_tokens raw in
-      List.exists metric_count_token tokens
-      || metric_has_pull_request_phrase tokens
-
 let target_value_implies_percent raw =
   String_util.contains_substring_ci raw "%"
   || String_util.contains_substring_ci raw "percent"
@@ -186,11 +94,15 @@ let parse_first_float raw =
   in
   search 0
 
-let parsed_target_unit metric raw =
-  if target_value_implies_percent raw || metric_implies_percent metric then
-    Percent
-  else
-    Count
+(* The unit comes from the target value's own marker — "80%" is a percentage,
+   "12" is a count. It used to also be inferred from English nouns in the
+   goal's free-text metric name ("rate" / "ratio" / "completion" implied a
+   percentage; "task" / "issue" / "pr" / "done" were required before a count
+   target could be measured at all). On the live store that inference fired 0
+   times and the count gate blocked one goal outright — a Korean metric ending
+   in 수 (count), whose ASCII tokens are only ["end"; "to"; "end"]. *)
+let parsed_target_unit raw =
+  if target_value_implies_percent raw then Percent else Count
 
 let build_attainment_json ~state ~basis ~task_done_count ~task_count
     ~target_parse_status ~unit ~observed_value ~target_numeric ~attainment_pct
@@ -294,7 +206,7 @@ let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
               unmeasured "invalid_target"
                 "Target value must be greater than zero."
           | Some target_numeric -> (
-              let unit = parsed_target_unit goal.metric raw in
+              let unit = parsed_target_unit raw in
               match unit with
               | Percent -> (
                   match task_completion_pct with
@@ -306,13 +218,13 @@ let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
                       unmeasured ~unit ~target_numeric "no_linked_tasks"
                         "Percent target needs linked task evidence." )
               | Count ->
-                  if metric_supports_count_target goal.metric then
+                  if task_count > 0 then
                     measured ~basis:"metric_target_count" ~unit
                       ~observed_value:(float_of_int task_done_count)
                       ~target_numeric ~target_parse_status:"parseable"
                   else
-                    unmeasured ~unit ~target_numeric "unsupported_metric"
-                      "Numeric target is not mapped to a known count metric."
+                    unmeasured ~unit ~target_numeric "no_linked_tasks"
+                      "Count target needs linked task evidence."
               | Unknown ->
                   unmeasured "unsupported_metric"
                     "Target unit is unknown." ))
@@ -324,8 +236,6 @@ let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
           | None ->
               unmeasured "absent"
                 "No target value or linked task evidence is available." ))
-
-let assoc_member_opt = Json_util.assoc_member_opt
 
 let assoc_string_opt = Json_util.assoc_string_opt
 

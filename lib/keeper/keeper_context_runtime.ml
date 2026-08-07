@@ -390,25 +390,6 @@ let resolve_max_context_resolution_for_runtime_id
   | Some runtime ->
     resolve_max_context_resolution_for_runtime ~requested_override runtime
 
-let resolve_max_context_resolution_of_meta (m : keeper_meta)
-    : max_context_resolution =
-  (* Projection-only compatibility path for manual compaction, operator/status,
-     dashboard, and tool surfaces that do not yet return typed capacity errors.
-     Actual direct/unified turn admission uses
-     [resolve_max_context_resolution_for_runtime_id] and never falls through
-     this ordered-label/default path.
-
-     [effective_model_labels_for_turn] projects through
-     [Provider_runtime_projection.default_execution_model_strings], which ignores
-     the runtime id and returns the GLOBAL preferred labels (an RFC-0206
-     single-binding artifact), so on its own the budget would size against
-     [runtime].default and could admit prompts exceeding a smaller per-keeper
-     model's window. Prepend the routed id so these remaining projections prefer
-     it until their typed hard-cut removes this fallback API. *)
-  let labels = runtime_id_of_meta m :: effective_model_labels_for_turn m in
-  resolve_max_context_resolution
-    ~requested_override:m.max_context_override labels
-
 let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
@@ -420,22 +401,3 @@ let append_trait_clause = Keeper_prompt.append_trait_clause
 
 
 include Keeper_text_processing
-
-let memory_check_default_json () : Yojson.Safe.t =
-  `Assoc [
-    ("performed", `Bool false);
-    ("query_kind", `String "none");
-    ("expected_topic", `Null);
-    ("candidate_count", `Int 0);
-    ("initial_score", `Float 0.0);
-    ("final_score", `Float 0.0);
-    ("threshold", `Float 0.18);
-    ("passed", `Bool true);
-    ("best_match", `Null);
-    ("correction_applied", `Bool false);
-    ("correction_success", `Bool false);
-    ("prompt_fallback_applied", `Bool false);
-    ("prompt_fallback_success", `Bool false);
-    ("deterministic_fallback_applied", `Bool false);
-    ("recall_fallback_applied", `Bool false);
-  ]

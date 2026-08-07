@@ -166,8 +166,6 @@ type rollup = {
 }
 [@@deriving yojson]
 
-type upsert_kind = [ `created | `updated ]
-
 let parse_goal_phase = function
   | Some s -> Goal_phase.parse s
   | None -> None

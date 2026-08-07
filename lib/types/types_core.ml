@@ -46,6 +46,17 @@ let all_agent_statuses = [ Active; Busy; Listening; Inactive ]
 let valid_agent_status_strings =
   List.map agent_status_to_string all_agent_statuses
 
+(* Presence ordering for operator surfaces: the agent doing work outranks the
+   one merely holding a session, which outranks the one only listening. A
+   fifth constructor breaks compilation here instead of silently ranking 0,
+   which is what happens when the ordering is written over the serialized
+   strings instead. *)
+let agent_status_rank = function
+  | Busy -> 4
+  | Active -> 3
+  | Listening -> 2
+  | Inactive -> 1
+
 let agent_status_of_string_opt = function
   | "active" -> Some Active
   | "busy" -> Some Busy
@@ -411,9 +422,10 @@ let task_status_is_done = function
     - String identity: schema enum is the actual function image, so
       renames cannot desync.
 
-    The remaining hand-coded axis is the witness list's length —
-    [test_types.ml] pins it at 6, so adding a constructor without
-    adding a witness here breaks that test.
+    The remaining hand-coded axis is the witness list itself.
+    [test_task_status_vocabulary] compares it against the arms of
+    [task_status_of_yojson], so a status one side knows and the other does
+    not fails there.
 
     Order matches the FSM lifecycle (Todo -> Claimed -> InProgress ->
     AwaitingVerification -> Done | Cancelled) for readable schema docs. *)
@@ -517,28 +529,27 @@ let task_status_of_yojson json =
 type task_execution_links = {
   operation_id : string option; [@default None]
   session_id : string option; [@default None]
-} [@@deriving show, yojson { strict = false }]
+} [@@deriving show, yojson { strict = true }]
+
+(** No producer has been linked yet. A task starts here and stays here until a
+    runtime records the operation or session that carried it out. *)
+let no_execution_links = { operation_id = None; session_id = None }
 
 (** Task contract - persisted completion criteria and evidence facts.
 
+    Written once, when the task is created, and never rewritten: what counts as
+    done cannot change while the task runs. Runtime evidence producers are
+    recorded independently on the task itself as [execution_links].
+
     [completion_contract], [required_evidence], and [verify_gate_evidence] are
     supplied to the completion authority as task facts. The workspace FSM never
-    interprets their prose, counts entries, or derives a completion verdict.
-
-    A [required_tools : string list] field was also removed (2026-06-03,
-    same fan-in-0 pattern): it was deprecated and ignored by task claim
-    routing, always normalized to [[]] by [Workspace_task_classify], had no
-    production reader, and the keeper turn layer rejects the [required_tools]
-    key outright (#19806, [Keeper_config_text]). Later cleanup removed the
-    same-named dashboard and tool-call benchmark fields too, so the string no
-    longer names any task, dashboard, or benchmark contract surface. *)
+    interprets their prose, counts entries, or derives a completion verdict. *)
 type task_contract = {
   strict : bool; [@default false]
   completion_contract : string list; [@default []]
   required_evidence : string list; [@default []]
   inspect_gate_evidence : string list; [@default []]
   verify_gate_evidence : string list; [@default []]
-  links : task_execution_links; [@default { operation_id = None; session_id = None }]
 } [@@deriving show, yojson { strict = false }]
 
 (** Handoff context persisted across release/reclaim cycles *)
@@ -630,6 +641,10 @@ type task = {
      side registry). *)
   predecessor_task_id: string option; [@default None]
   contract: task_contract option; [@default None]
+  (* Runtime identifiers attached after the task is created, by whichever
+     execution picks it up. Separate from [contract] so linking them never
+     touches what counts as done. *)
+  execution_links: task_execution_links; [@default no_execution_links]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
   reclaim_policy: task_reclaim_policy option; [@default None]
@@ -737,7 +752,7 @@ let task_to_yojson t =
     | None -> base
     | Some created_by -> base @ [("created_by", `String created_by)]
   in
-  (* Omitted when None (created_by pattern): old readers never see the key. *)
+  (* Omitted when no predecessor exists. *)
   let with_predecessor = match t.predecessor_task_id with
     | None -> with_created_by
     | Some p -> with_created_by @ [("predecessor_task_id", `String p)]
@@ -747,15 +762,24 @@ let task_to_yojson t =
     | Some contract ->
         with_predecessor @ [ ("contract", task_contract_to_yojson contract) ]
   in
-  let with_handoff_context = match t.handoff_context with
-    | None -> with_contract
-    | Some handoff_context ->
+  (* Omitted while unlinked, so a task carries the key only once an execution
+     claimed it. *)
+  let with_execution_links =
+    match t.execution_links with
+    | { operation_id = None; session_id = None } -> with_contract
+    | links ->
         with_contract
+        @ [ ("execution_links", task_execution_links_to_yojson links) ]
+  in
+  let with_handoff_context = match t.handoff_context with
+    | None -> with_execution_links
+    | Some handoff_context ->
+        with_execution_links
         @
         [ ( "handoff_context",
             task_handoff_context_to_yojson handoff_context ) ]
   in
-  (* cycle_count omitted when 0 for backward-compat on existing backlogs. *)
+  (* A zero cycle count is the implicit initial state. *)
   let with_cycle_count =
     if t.cycle_count = 0 then with_handoff_context
     else with_handoff_context @ [("cycle_count", `Int t.cycle_count)]
@@ -779,6 +803,7 @@ let task_to_yojson t =
 let task_of_yojson json =
   let req key = Json_util.get_string_with_default json ~key ~default:"" in
   let opt key = Json_util.get_string json key in
+  let member key = Json_util.assoc_member_opt key json in
   let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
     let id = req "id" in
@@ -788,15 +813,18 @@ let task_of_yojson json =
     let files = Json_util.get_string_list json "files" in
     let created_at = req "created_at" in
     let created_by = opt "created_by" in
-    (* Absent or non-string value degrades to None — a decode Error here would
-       make backlog_of_yojson silently drop the whole task. *)
+    (* The predecessor link is optional. *)
     let predecessor_task_id = opt "predecessor_task_id" in
-    let contract = match m "contract" with
-      | `Null -> None
-      | contract_json ->
-          (match task_contract_of_yojson contract_json with
-           | Ok contract -> Some contract
-           | Error _ -> None)
+    let contract_result =
+      match member "contract" with
+      | None | Some `Null -> Ok None
+      | Some contract_json ->
+        Result.map Option.some (task_contract_of_yojson contract_json)
+    in
+    let execution_links_result =
+      match member "execution_links" with
+      | None -> Ok no_execution_links
+      | Some links_json -> task_execution_links_of_yojson links_json
     in
     let handoff_context = match m "handoff_context" with
       | `Null -> None
@@ -815,8 +843,8 @@ let task_of_yojson json =
            | Error _ -> None)
     in
     let do_not_reclaim_reason = opt "do_not_reclaim_reason" in
-    match task_status_of_yojson json with
-    | Ok task_status ->
+    match contract_result, execution_links_result, task_status_of_yojson json with
+    | Ok contract, Ok execution_links, Ok task_status ->
         Ok
           {
             id;
@@ -829,12 +857,15 @@ let task_of_yojson json =
             created_by;
             predecessor_task_id;
             contract;
+            execution_links;
             handoff_context;
             cycle_count;
             reclaim_policy;
             do_not_reclaim_reason;
           }
-    | Error e -> Error e
+    | Error error, _, _ -> Error ("task.contract corrupt: " ^ error)
+    | _, Error error, _ -> Error ("task.execution_links corrupt: " ^ error)
+    | _, _, Error error -> Error error
   with e -> Error (Printexc.to_string e)
 
 (** Message - broadcast or direct *)

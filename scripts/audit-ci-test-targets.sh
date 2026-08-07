@@ -88,7 +88,10 @@ echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, al
 # authority tools, memory journal) without lowering the baseline. A PR that
 # wires a suite must lower this number in the same PR, or this check goes red
 # for everyone.
-UNWIRED_BASELINE=747
+# 733 -> 732: this branch wires test_rfc3339_format_owner, one suite ci.yml
+# now names. Leaving it at 733 would bank a unit of slack the next unwired
+# suite could spend unnoticed.
+UNWIRED_BASELINE=732
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

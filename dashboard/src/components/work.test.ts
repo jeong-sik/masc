@@ -514,10 +514,6 @@ describe('Work', () => {
             strict: true,
             completion_contract: ['merge-ready proof'],
             required_evidence: ['typed test evidence'],
-            links: {
-              session_id: null,
-              operation_id: 'op-contract',
-            },
           },
           handoff_context: {
             summary: '',
@@ -537,7 +533,6 @@ describe('Work', () => {
       expect(ledger.textContent).toContain('sess-ledger')
       expect(ledger.textContent).toContain('op-ledger')
       expect(ledger.textContent).toContain('strict')
-      expect(ledger.textContent).toContain('op-contract')
       expect(ledger.textContent).toContain('merge-ready proof')
       expect(ledger.textContent).toContain('typed test evidence')
       expect(ledger.textContent).toContain('receipt-1')
@@ -1548,7 +1543,14 @@ describe('Work', () => {
                 is_terminal: false,
                 ready_to_request_completion: false,
               },
-              timeline_events: [{ kind: 'turn' }],
+              timeline_events: [{
+                ts: '2026-01-04T10:00:00Z',
+                kind: 'goal_owner',
+                lane: 'goal',
+                title: 'Goal Owner',
+                summary: 'owner: <unassigned> -> dancer by operator',
+                severity: 'ok',
+              }],
               last_activity_at: '2026-01-04T10:00:00Z',
               stagnation_seconds: 3600,
               linked_keeper_names: ['sangsu'],
@@ -1578,6 +1580,55 @@ describe('Work', () => {
         expect(dossier.textContent).toContain('keeper sangsu')
         expect(dossier.textContent).toContain('turn 42')
         expect(dossier.textContent).toContain('approvals 2')
+      })
+
+      it('expands the goal dossier timeline events behind the toggle', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              title: 'Goal One',
+              priority: 5,
+              phase: 'executing',
+              timeline_events: [{
+                ts: '2026-01-04T10:00:00Z',
+                kind: 'goal_owner',
+                lane: 'goal',
+                title: 'Goal Owner',
+                summary: 'owner: <unassigned> -> dancer by operator',
+                severity: 'ok',
+              }],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+
+        const goalCard = screen.getByTestId('goal-card')
+        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+
+        const dossier = within(goalCard).getByTestId('goal-dossier')
+        const toggle = dossier.querySelector('[data-goal-dossier-timeline-toggle="G-1"]')
+        expect(toggle).not.toBeNull()
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(dossier.querySelectorAll('[data-goal-dossier-timeline-event]')).toHaveLength(0)
+
+        fireEvent.click(toggle!)
+
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        const rows = dossier.querySelectorAll('[data-goal-dossier-timeline-event]')
+        expect(rows).toHaveLength(1)
+        expect(rows[0]!.textContent).toContain('goal_owner')
+        expect(rows[0]!.textContent).toContain('2026-01-04T10:00:00Z')
+        expect(rows[0]!.textContent).toContain('owner: <unassigned> -> dancer by operator')
+        // The count chip and its hook stay put while the list opens.
+        expect(dossier).toHaveAttribute('data-goal-dossier-timeline-count', '1')
+        expect(dossier.textContent).toContain('events 1')
       })
 
       it('renders tree-only Goal Store goals in the list without an execution goal mirror', () => {

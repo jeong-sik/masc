@@ -1,6 +1,5 @@
 open Server_auth
 open Server_utils
-open Server_routes_http_pages
 
 module Http = Http_server_eio
 
@@ -324,7 +323,6 @@ type path_resolution =
 
 type workspace_file = {
   lexical_path : string;
-  resolved_base : string;
   resolved_path : string;
 }
 
@@ -375,7 +373,6 @@ let resolve_workspace_file base requested =
             Ok
               {
                 lexical_path = full;
-                resolved_base;
                 resolved_path = resolved_full;
               }
 

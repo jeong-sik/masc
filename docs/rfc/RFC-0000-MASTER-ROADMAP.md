@@ -696,7 +696,7 @@ extraction에서 나온 상세 inventory다. first-class 실행 권한이 없으
 | 변경 | 영향 모듈/subsystem | risk | rollback |
 |------|---------------------|------|----------|
 | Exact EffectIntent permission(Goal 9) | keeper_gate.ml, keeper_tool_policy.ml, keeper_tool_dispatch_runtime.ml, ApprovalsSurface | **높음** — 계층 classifier 재도입 시 전 lane liveness 회귀 | exact request-local decision slice revert |
-| Capability registry projection | 4 surface(public_mcp/spawned_agent/local_worker/keeper) 동시 | **중** — SSOT choke이나 4 surface fan-out | registry 단일 revert |
+| Capability registry projection | 3 surface(public_mcp/spawned_agent/keeper) 동시 | **중** — SSOT choke이나 3 surface fan-out | registry 단일 revert |
 | Provider failover SSOT 정합(PR-A, Goal 3) | keeper_turn_driver.run_named `attempt_runtime_candidates`(이미 candidate-list) → `Runtime_attempt_fsm.decide` 경유 + `[runtime.lanes.*]` TOML; RFC-0265 modality reroute 상호작용 | **높음** — core turn path, 18h; 기존 `[runtime.assignments]`=one-candidate lane 유지 필요 | decide-경유 feature flag |
 | Implicit runaway watchdog(#24386) | keeper_supervisor + keeper_keepalive + orphan stop-reason | **KILL** — 삭제한 cap/heuristic supervision 재도입 | caller-owned explicit Eio lifetime만 유지 |
 | Step 5 Switch.on_release(Goal 4) | keeper_agent_run.ml/keeper_unified_turn.ml cancellation finalizer(`keeper_unified_turn.ml:534-555` Cancelled 삼킴 지점) | **높음** — 매 turn terminal path; `KeeperTurnFSM.tla` `StopSignalRespected` invariant 검증 필수(bug action `StopSignalSwallowedAsDone`) | catch-all 복귀 |

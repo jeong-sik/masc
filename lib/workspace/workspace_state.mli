@@ -1,7 +1,5 @@
 (** Workspace state — backlog, workspace state, and recovery helpers. *)
 
-open Masc_domain
-open Workspace_utils
 
 val normalized_string_list : string list -> string list
 

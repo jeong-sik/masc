@@ -13,13 +13,11 @@ module StringMap = Set_util.StringMap
 type audience =
   | External_mcp_client
   | Spawned_managed_agent
-  | Local_worker_agent
   | Keeper_agent
 
 type surface =
   | Public_mcp
   | Spawned_agent_mcp
-  | Local_worker
   | Keeper
 
 type projection = {
@@ -65,7 +63,6 @@ let dedupe_projections projections =
             (match projection.surface with
             | Public_mcp -> "public_mcp"
             | Spawned_agent_mcp -> "spawned_agent_mcp"
-            | Local_worker -> "local_worker"
             | Keeper -> "keeper")
             projection.tool_name
         in
@@ -87,7 +84,6 @@ let canonical_capability_id tool_name =
 let surface_to_string = function
   | Public_mcp -> "public_mcp"
   | Spawned_agent_mcp -> "spawned_agent_mcp"
-  | Local_worker -> "local_worker"
   | Keeper -> "keeper"
 
 let projection_to_schema (projection : projection) : Masc_domain.tool_schema =
@@ -125,12 +121,6 @@ let spawned_agent_public_tool_names : string list =
 let spawned_agent_prefixed_tools : string list =
   prefixed_tool_names Tool_catalog_surfaces.spawned_agent_surface_tools
 
-let local_worker_public_tool_names : string list =
-  Tool_catalog_surfaces.local_worker_surface_tools
-
-let local_worker_internal_schemas : Masc_domain.tool_schema list =
-  Keeper_tool_surfaces.local_worker_internal_schemas
-
 let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
   let public_schemas =
@@ -141,8 +131,7 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
     let audiences =
       Json_util.dedupe_keep_order
         (External_mcp_client
-         :: (if List.mem name spawned_agent_public_tool_names then [ Spawned_managed_agent ] else [])
-         @ (if List.mem name local_worker_public_tool_names then [ Local_worker_agent ] else []))
+         :: (if List.mem name spawned_agent_public_tool_names then [ Spawned_managed_agent ] else []))
     in
     let supports_audit_evidence =
       List.mem name spawned_agent_public_tool_names
@@ -164,31 +153,9 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
       else
         base
     in
-    let with_local_worker =
-      if List.mem name local_worker_public_tool_names then
-        with_spawned
-        @ [
-            make_seed ~audiences ~supports_audit_evidence
-              ~supports_direct_user_discovery:false ~surface:Local_worker schema;
-          ]
-      else
-        with_spawned
-    in
-    with_local_worker
+    with_spawned
   in
   public_schemas |> List.concat_map make_public_seed
-
-let local_worker_internal_seeds : capability_seed list =
-  let base =
-    local_worker_internal_schemas
-    |> List.map (fun schema ->
-           make_seed
-             ~audiences:[ Local_worker_agent ]
-             ~supports_audit_evidence:true
-             ~supports_direct_user_discovery:false ~surface:Local_worker
-             schema)
-  in
-  base
 
 let keeper_projection_seeds : capability_seed list =
   Keeper_tool_descriptor.model_visible_descriptors ()
@@ -212,7 +179,7 @@ let keeper_projection_seeds : capability_seed list =
 let all_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
   public_projection_seeds_from public_tool_source_schemas
-  @ local_worker_internal_seeds @ keeper_projection_seeds
+  @ keeper_projection_seeds
 
 let all_capabilities_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_def list =
@@ -299,10 +266,6 @@ let visible_public_tool_schemas_from
   |> List.filter (fun (schema : Masc_domain.tool_schema) ->
          Tool_catalog.is_visible ~include_hidden schema.name)
 
-let local_worker_tool_schemas ?names () :
-    (Masc_domain.tool_schema list, string) result =
-  Keeper_tool_surfaces.local_worker_tool_schemas ?names ()
-
 let surface_snapshot_json
     (public_tool_source_schemas : Masc_domain.tool_schema list) =
   let surface_json surface =
@@ -317,7 +280,6 @@ let surface_snapshot_json
     [
       ("public_mcp", surface_json Public_mcp);
       ("spawned_agent_mcp", surface_json Spawned_agent_mcp);
-      ("local_worker", surface_json Local_worker);
       ("keeper", surface_json Keeper);
     ]
 

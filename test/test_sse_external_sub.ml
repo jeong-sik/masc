@@ -39,7 +39,8 @@ let test_subscribe_and_unsubscribe () =
   Eio_main.run (fun _env ->
     let count_before = Masc.Sse.external_subscriber_count () in
     Masc.Sse.subscribe_external ~id:"test-sub-1"
-      ~callback:(fun ev -> received_events := ev :: !received_events) ();
+      ~callback:(fun (ev : Masc.Sse.external_event) ->
+        received_events := ev.Masc.Sse.ext_frame :: !received_events) ();
     let count_after = Masc.Sse.external_subscriber_count () in
     Alcotest.(check int) "subscriber added" (count_before + 1) count_after;
     Masc.Sse.unsubscribe_external "test-sub-1";
@@ -62,7 +63,8 @@ let test_broadcast_notifies_external () =
   setup ();
   Eio_main.run (fun _env ->
     Masc.Sse.subscribe_external ~id:"test-broadcast"
-      ~callback:(fun ev -> received_events := ev :: !received_events) ();
+      ~callback:(fun (ev : Masc.Sse.external_event) ->
+        received_events := ev.Masc.Sse.ext_frame :: !received_events) ();
     Masc.Sse.broadcast (`Assoc [("test", `String "hello")]);
     Alcotest.(check int) "received 1 event" 1 (List.length !received_events);
     let event = List.hd !received_events in
@@ -78,7 +80,8 @@ let test_waiting_inventory_changed_wire_contract () =
   Eio_main.run (fun _env ->
     Masc.Sse.subscribe_external
       ~id:"test-waiting-inventory-changed"
-      ~callback:(fun ev -> received_events := ev :: !received_events)
+      ~callback:(fun (ev : Masc.Sse.external_event) ->
+        received_events := ev.Masc.Sse.ext_frame :: !received_events)
       ();
     Masc.Keeper_waiting_inventory_broadcast.changed
       ~keeper_name:"kidsnote"
@@ -114,7 +117,8 @@ let test_broadcast_skips_after_unsubscribe () =
   setup ();
   Eio_main.run (fun _env ->
     Masc.Sse.subscribe_external ~id:"test-skip"
-      ~callback:(fun ev -> received_events := ev :: !received_events) ();
+      ~callback:(fun (ev : Masc.Sse.external_event) ->
+        received_events := ev.Masc.Sse.ext_frame :: !received_events) ();
     Masc.Sse.broadcast (`Assoc [("msg", `String "first")]);
     Alcotest.(check int) "got first" 1 (List.length !received_events);
     Masc.Sse.unsubscribe_external "test-skip";
@@ -129,7 +133,8 @@ let test_callback_error_does_not_crash_broadcast () =
       ~callback:(fun _ev -> failwith "intentional test error") ();
     (* Register a healthy subscriber *)
     Masc.Sse.subscribe_external ~id:"test-ok"
-      ~callback:(fun ev -> received_events := ev :: !received_events) ();
+      ~callback:(fun (ev : Masc.Sse.external_event) ->
+        received_events := ev.Masc.Sse.ext_frame :: !received_events) ();
     (* Broadcast should not raise despite the failing subscriber *)
     Masc.Sse.broadcast (`Assoc [("msg", `String "resilient")]);
     Alcotest.(check int) "healthy subscriber still got event"

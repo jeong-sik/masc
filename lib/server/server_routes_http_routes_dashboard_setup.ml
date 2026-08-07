@@ -1,8 +1,6 @@
 
 open Server_auth
-open Server_dashboard_http
 open Server_routes_http_common
-open Server_routes_http_keeper_stream
 
 module Http = Http_server_eio
 module Mcp_eio = Mcp_server_eio

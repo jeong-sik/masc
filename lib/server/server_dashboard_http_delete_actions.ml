@@ -535,10 +535,6 @@ let keeper_purge_submit_status = function
   | Existing_operation_intent_mismatch _ -> `Conflict
 ;;
 
-module For_testing = struct
-  let purge_dashboard_keeper_artifacts = purge_dashboard_keeper_artifacts
-end
-
 let respond_keeper_purge_operation_accepted ~request reqd operation =
   match operation.Keeper_shutdown_types.cleanup_intent.reason with
   | Keeper_shutdown_types.Dashboard_keeper_purge context ->
@@ -934,8 +930,10 @@ let add_delete_action_routes router =
                                       | Error e ->
                                           Some (Board_tool.board_error_to_string e))
                                  | Board_moderation.Target_comment ->
-                                     (* Comment removal not yet backed by dispatch; note only *)
-                                     None)
+                                     (match Board_dispatch.delete_comment ~comment_id:target_id with
+                                      | Ok () -> None
+                                      | Error e ->
+                                          Some (Board_tool.board_error_to_string e)))
                               else
                                 None
                             in

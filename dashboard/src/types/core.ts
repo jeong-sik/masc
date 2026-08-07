@@ -87,7 +87,6 @@ interface TaskContract {
   required_evidence?: string[]
   inspect_gate_evidence?: string[]
   verify_gate_evidence?: string[]
-  links?: TaskExecutionLinks | null
 }
 
 interface TaskHandoffContext {
@@ -687,8 +686,10 @@ interface KeeperConversationUsage {
 
 // RFC-0232 P2: producer-typed turn outcome carried in the reply payload
 // (`turn_outcome`). `continuation_checkpoint` marks a resume-next-cycle
-// boundary, `external_effect_pending` marks a durable control wait, and
-// `no_visible_reply` marks a completed runtime turn with no assistant text.
+// boundary, `external_effect_pending` marks a durable control wait,
+// `external_effect_completed` marks a reply delivered by an external
+// connector (e.g. Slack/Discord), and `no_visible_reply` marks a completed
+// runtime turn with no assistant text.
 export type KeeperTurnOutcome =
   | 'visible_reply'
   | 'continuation_checkpoint'

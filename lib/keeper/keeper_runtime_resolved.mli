@@ -28,6 +28,7 @@ type 'a field = {
 type t = {
   stream_idle_timeout_sec : float option field;
   body_timeout_override_sec : float option field;
+  provider_call_deadline_sec : float option field;
 }
 
 val init : unit -> unit
@@ -68,6 +69,16 @@ val stream_idle_timeout_sec : unit -> float option
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.body_timeout_sec_override}. *)
 val body_timeout_override_sec : unit -> float option
+
+(** Total wall-clock deadline for one provider call attempt (#27349).
+    [None] (env unset) means no MASC-side enforcement -- the provider
+    attempt caller skips the [Eio.Time.with_timeout_exn] wrap and runs
+    unbounded, same as before this knob existed. Deliberately no failsafe
+    floor: unlike [stream_idle_timeout_sec], a reasonable total-call
+    ceiling depends on provider and workload, so MASC does not guess one.
+
+    SSOT: {!Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override}. *)
+val provider_call_deadline_sec : unit -> float option
 
 (** CLI subprocess stdout-idle timeout, read fresh per turn from
     [MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC] and clamped to [10, 600].

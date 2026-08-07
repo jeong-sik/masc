@@ -1,6 +1,5 @@
 (** Runtime-lens clock-edge projection from existing manifest rows. *)
 
-open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
@@ -250,9 +249,6 @@ let clock_edge_json ~idx ~provider_attempt_index (row : manifest_row) =
     ]
 
 let edge_string key edge = Json_util.get_string edge key
-let edge_int key edge = Json_util.get_int edge key
-let edge_string_list key edge = Json_util.get_string_list edge key
-
 let clock_edge_jsons scan =
   let provider_attempt_index = ref 0 in
   let edges =

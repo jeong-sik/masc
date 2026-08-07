@@ -10,8 +10,6 @@
    incomplete transition surfaces as an explicit, named failure
    rather than a silent no-op or catch-all swallow. *)
 
-let protocol_version = 10
-
 (* ── Opcodes ────────────────────────────────────────────────────── *)
 
 type opcode =
@@ -256,7 +254,12 @@ let trigger_policy_to_string = function
 
 (* ── Opaque state ──────────────────────────────────────────────── *)
 
-let gateway_url = "wss://gateway.discord.gg/?v=10&encoding=json"
+(* [v] is the API version, per the gateway docs' query-parameter table, so
+   it comes from the one place that number is defined. *)
+let gateway_url =
+  Printf.sprintf
+    "wss://gateway.discord.gg/?v=%d&encoding=json"
+    Discord_api_version.current
 
 module StringMap = Map.Make (String)
 
@@ -265,7 +268,6 @@ type t =
   ; config : config
   ; reconnect_attempts : int        (* Exponential backoff exponent. *)
   ; last_seq : int option           (* Latest dispatch sequence number. *)
-  ; heartbeat_interval_ms : int option  (* From Op_hello, used by Heartbeat_tick. *)
   ; resume_gateway_url : string option  (* From READY, used by Resuming. *)
   ; resume_context : (string * int option) option
     (* (session_id, last_seq_at_disconnect). Set when leaving Connected
@@ -286,7 +288,6 @@ let create ~config =
   ; config
   ; reconnect_attempts = 0
   ; last_seq = None
-  ; heartbeat_interval_ms = None
   ; resume_gateway_url = None
   ; resume_context = None
   ; awaiting_hello_since_mono = None
@@ -788,7 +789,6 @@ let handle_hello t (frame : frame) =
            in
            ( { t with
                state = next_state
-             ; heartbeat_interval_ms = Some interval_ms
              ; awaiting_hello_since_mono = None
              }
            , [ Schedule_heartbeat { interval_ms }

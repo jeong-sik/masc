@@ -483,19 +483,6 @@ let string_field ~context name fields =
   let* json = required_field ~context name fields in
   string_of_json ~context:(context ^ "." ^ name) json
 
-let string_list_field ~context name fields =
-  let* json = required_field ~context name fields in
-  match json with
-  | `List items ->
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
-      | item :: rest ->
-        let* value = string_of_json ~context:(context ^ "." ^ name) item in
-        loop (value :: acc) rest
-    in
-    loop [] items
-  | _ -> Error (Printf.sprintf "%s.%s must be a JSON list" context name)
-
 let bool_field ~context name fields =
   let* json = required_field ~context name fields in
   bool_of_json ~context:(context ^ "." ^ name) json

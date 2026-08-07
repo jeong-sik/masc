@@ -146,8 +146,7 @@ type intake_token =
   }
 
 type token =
-  { slot : slot
-  ; mutable active : bool
+  { mutable active : bool
   ; mutable before_dispatch_authority : (unit -> (unit, string) result) option
   }
 
@@ -234,7 +233,7 @@ let peek_shutdown slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.shut
    cancellation cannot leak the slot; the exception arm releases on every
    raise out of [f], including [Eio.Cancel.Cancelled]. *)
 let run_locked_with_token slot ~lane f =
-  let token = { slot; active = true; before_dispatch_authority = None } in
+  let token = { active = true; before_dispatch_authority = None } in
   let admission =
     Stdlib.Mutex.protect slot.state_mu (fun () ->
       match slot.shutdown_operation_id with
@@ -754,15 +753,6 @@ module For_testing = struct
   let reset () =
     Atomic.set slot_transition_observer None;
     Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.reset slots)
-
-  let with_unpublished_turn_lock ~base_path ~keeper_name f =
-    let slot = slot_for ~base_path ~keeper_name in
-    Eio.Mutex.lock slot.turn_mu;
-    (* fun-protect-finally-ok: Eio.Mutex.unlock is non-suspending; this helper
-       acquired the raw test-only lock immediately above and the finalizer
-       releases exactly that lock on normal return, exception, or cancellation. *)
-    Fun.protect ~finally:(fun () -> Eio.Mutex.unlock slot.turn_mu) f
-  ;;
 
   let peek ~base_path ~keeper_name =
     let key = Keeper_registry_types.registry_key ~base_path keeper_name in

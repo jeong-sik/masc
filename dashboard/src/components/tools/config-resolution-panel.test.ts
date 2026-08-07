@@ -107,7 +107,6 @@ function runtimeProvidersPayload() {
               supports_response_format_json: true,
               supports_structured_output: true,
             },
-            match_prefixes: ['Qwen/'],
           },
           binding: {
             provider_id: 'runpod_mtp',

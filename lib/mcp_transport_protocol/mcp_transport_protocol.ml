@@ -309,7 +309,7 @@ let protocol_version_2026_07_28 = "2026-07-28"
 let protocol_version_draft_2026_v1 = "DRAFT-2026-v1"
 
 let supported_protocol_versions =
-  let rec add acc version =
+  let add acc version =
     if List.mem version acc then acc else acc @ [ version ]
   in
   List.fold_left add []

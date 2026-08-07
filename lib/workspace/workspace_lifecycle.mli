@@ -1,10 +1,6 @@
 (** Workspace lifecycle — agent session binding and registry parse-error
     diagnostics. *)
 
-open Masc_domain
-open Workspace_utils
-open Workspace_state
-open Workspace_broadcast
 
 val bind_session :
   Workspace_utils_backend_setup.config ->

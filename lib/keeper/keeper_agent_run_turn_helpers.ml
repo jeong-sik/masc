@@ -37,7 +37,7 @@ let evict_oldest state =
     ; size = state.size - 1
     }
 
-let rec mark_task_link ~keeper ~task_id ~trace_id =
+let mark_task_link ~keeper ~task_id ~trace_id =
   let key = (keeper, task_id, trace_id) in
   let rec loop () =
     let state = Atomic.get link_task_cache_state in

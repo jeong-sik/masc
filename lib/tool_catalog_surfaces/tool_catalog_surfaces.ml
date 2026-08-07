@@ -147,40 +147,6 @@ let spawned_agent_surface_tools =
   ]
 ;;
 
-let local_worker_surface_tools =
-  [ "masc_status"
-  ; "masc_tasks"
-  ; "masc_transition"
-  ; "masc_add_task"
-  ; "masc_heartbeat"
-  ; "masc_agent_card"
-  ; "masc_goal_list"
-  ; "masc_goal_upsert"
-  ; "masc_goal_assign"
-  ; "masc_goal_transition"
-  ; "masc_board_post"
-  ; "masc_board_list"
-  ; "masc_board_post_get"
-  ; "masc_board_comment"
-  ; "masc_board_vote"
-  ; "masc_board_search"
-  ; "masc_board_stats"
-  ; "masc_board_profile"
-  ; "masc_board_hearths"
-  ; "masc_board_curation_read"
-  ; "masc_board_sub_board_create"
-  ; "masc_board_sub_board_list"
-  ; "masc_board_sub_board_get"
-  ; "masc_board_sub_board_update"
-  ; "masc_board_sub_board_delete"
-  ; "masc_board_curation_submit"
-  ; "masc_run_init"
-  ; "masc_run_plan"
-  ; "masc_run_get"
-  ; "masc_run_list"
-  ]
-;;
-
 let session_min_surface_tools =
   [ "masc_status"
   ; "masc_tasks"

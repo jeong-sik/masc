@@ -280,7 +280,7 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       Eio.Switch.run (fun sw ->
-        Lib.Auth.disable_auth dir;
+        Auth.disable_auth dir;
         let state =
           Lib.Mcp_server_eio.create_state_eio
             ~sw
@@ -335,7 +335,7 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       Eio.Switch.run (fun sw ->
-        Lib.Auth.disable_auth dir;
+        Auth.disable_auth dir;
         let state =
           Lib.Mcp_server_eio.create_state_eio
             ~sw

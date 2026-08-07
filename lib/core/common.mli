@@ -79,7 +79,34 @@ val agents_dir_from_base_path : base_path:string -> string
     files live ([<agent_name>.json]). *)
 
 val max_tool_output_bytes : int
-(** SSOT 64KB cap for MCP tool response bodies. *)
+(** SSOT 64KB cap for MCP tool response bodies.
+
+    This is an {e inline} threshold: it decides how much of a result is
+    carried in the response body versus offloaded to the blob store. It is
+    not a bound on how much output the runtime will accept from a
+    subprocess — that bound is {!max_process_capture_head_bytes} +
+    {!max_process_capture_tail_bytes}. Conflating the two is what let a
+    single [Execute] call retain 590MB. *)
+
+val max_process_capture_head_bytes : int
+(** Bytes retained from the {e start} of one captured subprocess stream.
+    Backed by a growable buffer, so this budget costs nothing until output
+    actually reaches it. *)
+
+val max_process_capture_tail_bytes : int
+(** Bytes retained from the {e end} of one captured subprocess stream.
+    Backed by a ring allocated eagerly at this size, so it is set to the
+    256KB scale the dashboard already pays per keeper rather than to the
+    head budget.
+
+    Head + tail is the acceptance ceiling for a single stream. claude-code's
+    comparable ceiling is 64 MiB, but it streams bash output to a file on
+    disk while MASC retains the capture in memory for the turn, so the
+    ceiling here is lower. The drainer keeps reading past the ceiling so the
+    exit status and the tail (where failures report) stay exact; only
+    retention is bounded, so memory is O(head + tail) rather than
+    O(output). Elided bytes are reported by {!Exec_buffer.render}'s
+    truncation marker rather than dropped silently. *)
 
 val truncate_response :
   ?max_bytes:int ->

@@ -5,7 +5,7 @@ module Request_context = Server_mcp_request_context
 module Headers = Server_mcp_transport_http_headers
 module Negotiation = Mcp_transport_protocol.Http_negotiation
 module Mcp_store = Masc.Session.McpSessionStore
-module Auth = Masc.Auth
+module Auth = Auth
 
 let request_trust_policy =
   match

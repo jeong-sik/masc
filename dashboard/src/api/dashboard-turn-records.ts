@@ -12,6 +12,7 @@ export type TurnPromptBlockId =
   | 'dynamic_context'
   | 'temporal_summary'
   | 'memory_os_recall'
+  | 'operator_note'
 
 export type TurnInputComponentId =
   | `prompt.${TurnPromptBlockId}`
@@ -374,6 +375,7 @@ function decodeTurnPromptBlockId(raw: unknown): TurnPromptBlockId | null {
     case 'dynamic_context':
     case 'temporal_summary':
     case 'memory_os_recall':
+    case 'operator_note':
       return raw
     default:
       return null

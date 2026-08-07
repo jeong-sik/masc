@@ -46,6 +46,16 @@ let severity_rank = function
   | Sev_bad -> 2
   | Sev_warn -> 1
 
+(* The wire carries [operator_severity_to_string]'s output, so ranking a
+   serialized severity means decoding it first. Ranking the raw string
+   instead used to collapse "critical" and "bad" onto the same value. An
+   unrecognized string ranks 0 — it is not an [operator_severity]. *)
+let severity_rank_of_string raw =
+  match operator_severity_of_string_opt (String.lowercase_ascii (String.trim raw)) with
+  | Some severity -> severity_rank severity
+  | None -> 0
+;;
+
 let compare_attention (a : attention_item) (b : attention_item) =
   let by_severity = Int.compare (severity_rank b.severity) (severity_rank a.severity) in
   if by_severity <> 0 then by_severity

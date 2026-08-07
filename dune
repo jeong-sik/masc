@@ -7,13 +7,20 @@
   archive
   dashboard_bonsai))
 
+; Warning 32 (unused value declaration) is set here, once, for the whole
+; tree. It used to be decided per library: of 121 stanzas under lib/, 84
+; opted in and 37 did not, so an unreachable value in any of those 37
+; produced no signal at all, and a wrapper ladder could grow four rungs deep
+; before anyone could see it. Setting it centrally means the build stops the
+; moment a value loses its last caller, in the same edit that removed it.
+; scripts/ci/check-ocaml-compile-authority.sh asserts both flags stay here.
 (env
  (dev
   (flags
-   (:standard -warn-error +a)))
+   (:standard -w +32 -warn-error +a)))
  (release
   (flags
-   (:standard -warn-error +a))))
+   (:standard -w +32 -warn-error +a))))
 
 (install
  (package masc)

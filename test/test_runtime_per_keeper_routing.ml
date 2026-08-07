@@ -406,6 +406,35 @@ let test_runtime_assignment_writer_updates_runtime_toml () =
       (KMC.runtime_id_of_meta (make_meta "routingtest")))
 ;;
 
+(* The inventory reports two kind fields per provider: [runtime_kind] is the
+   transport as classified, [kind] is the operator-facing bucket. A
+   non-loopback HTTP endpoint is "http" / "cloud". The mapping used to reach
+   "cloud" through a wildcard over the serialized name, so this pair was the
+   wildcard's only live input and nothing asserted it. *)
+let test_runtime_inventory_reports_transport_kind () =
+  with_runtime_initialized (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let field runtime_id key =
+      providers
+      |> List.find (fun p ->
+           String.equal runtime_id (p |> J.member "runtime_id" |> J.to_string))
+      |> J.member key
+      |> J.to_string
+    in
+    List.iter
+      (fun runtime_id ->
+         Alcotest.(check string)
+           (Printf.sprintf "%s runtime_kind" runtime_id)
+           "http"
+           (field runtime_id "runtime_kind");
+         Alcotest.(check string)
+           (Printf.sprintf "%s dashboard kind" runtime_id)
+           "cloud"
+           (field runtime_id "kind"))
+      [ "runpod_mtp.qwen"; "openai.gpt" ])
+;;
+
 let test_runtime_inventory_surfaces_assignment_status () =
   with_runtime_initialized (fun () ->
     let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
@@ -1788,6 +1817,10 @@ let () =
             "dashboard runtime inventory exposes assignment status"
             `Quick
             test_runtime_inventory_surfaces_assignment_status
+        ; Alcotest.test_case
+            "dashboard runtime inventory reports transport kind"
+            `Quick
+            test_runtime_inventory_reports_transport_kind
         ; Alcotest.test_case
             "unknown assignment is rejected before runtime.toml write"
             `Quick

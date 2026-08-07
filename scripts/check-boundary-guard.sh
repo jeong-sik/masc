@@ -412,12 +412,6 @@ check_forbidden_outside "V10-provider-filter-ownership" \
   "lib/keeper/keeper_config_text.ml" \
   "lib/keeper/keeper_config_text.mli"
 
-# V12: oas-runtime session root literal must stay inside the runtime path adapter.
-check_forbidden_outside "V12-oas-runtime-layout" \
-  '"oas-runtime"' \
-  "lib/" \
-  "lib/local/worker_container.ml"
-
 if [[ "$rc" -eq 0 ]]; then
   echo "BOUNDARY: all checks within baseline"
 fi

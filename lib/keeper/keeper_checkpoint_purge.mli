@@ -11,6 +11,12 @@
     - R3 tool-result clear: [ToolResult] blocks in closed tool cycles have
       their content replaced by {!cleared_tool_result_content}, preserving the
       [tool_use_id]/[ToolUse] pairing (the cycle stays a valid closed unit).
+      Failed results ([Tool_failed]) are exempt and pass through byte-exact:
+      their payload is the feedback the keeper reads on later turns and the
+      only error evidence the durable history carries. The exemption is a
+      type-level distinction (the typed outcome), not content classification,
+      so it stays inside RFC-0351 §2's "judge by type, integer, or byte
+      comparison only" rule.
 
     R2 and R3 run before R1: stripping reasoning can make previously distinct
     assistant messages byte-identical, and duplicate grouping sees only the

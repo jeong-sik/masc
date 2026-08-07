@@ -218,10 +218,6 @@ let coverage_gap_status_fields gaps source ~latest_ts =
 
 (* ── Semantic duplicate suppression ───────────────── *)
 
-let assoc_field name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-
 let string_field name json =
   match Json_field.string json name |> Json_field.to_option with
   | None -> None
@@ -230,48 +226,16 @@ let string_field name json =
     if value = "" then None else Some value
 ;;
 
-let bool_field name json =
-  Json_field.bool json name |> Json_field.to_option
-;;
+module Execution_id_set = Set.Make (String)
 
-let drop_prefix prefix value =
-  if String.starts_with ~prefix value then
-    String.sub value (String.length prefix)
-      (String.length value - String.length prefix)
-  else value
-
-let drop_suffix suffix value =
-  if String.ends_with ~suffix value then
-    String.sub value 0 (String.length value - String.length suffix)
-  else value
-
-let canonical_actor_name value =
-  value
-  |> String.trim
-  |> drop_prefix "keeper-"
-  |> drop_suffix "-agent"
-
-type tool_call_signature = {
-  actor : string;
-  tool : string;
-  success : bool option;
-  ts : float;
-}
-
-let tool_call_signature ?success ~actor ~tool ~ts () =
-  let actor = canonical_actor_name actor in
-  let tool = String.trim tool in
-  if actor = "" || tool = "" || ts <= 0.0 then None
-  else Some { actor; tool; success; ts }
-
-let tool_call_io_signature json =
+(* Both streams report the same physical tool call. [execution_id] is the
+   RFC-0233 join key: minted once at the MCP dispatch boundary, written to
+   the tool_calls row and carried on the [Tool_called] event for the same
+   execution. A row without one is not matched against — an unidentified
+   event is kept, because nothing proves it is a duplicate. *)
+let tool_call_io_execution_id json =
   match string_field "source" json with
-  | Some "tool_call_io" ->
-    (match string_field "keeper" json, string_field "tool" json with
-     | Some actor, Some tool ->
-       tool_call_signature ?success:(bool_field "success" json) ~actor ~tool
-         ~ts:(extract_ts json) ()
-     | _ -> None)
+  | Some "tool_call_io" -> string_field "execution_id" json
   | _ -> None
 
 let tool_called_detail_from_fields fields =
@@ -288,58 +252,25 @@ let tool_called_event_detail json =
   | Some "agent_event", `Assoc fields -> tool_called_detail_from_fields fields
   | _ -> None
 
-let keeper_tool_called_signature json =
+let keeper_tool_called_execution_id json =
   match tool_called_event_detail json with
   | None -> None
-  | Some detail ->
-    (match string_field "agent_id" detail, string_field "tool_name" detail with
-     | Some actor, Some tool ->
-       tool_call_signature ?success:(bool_field "success" detail) ~actor ~tool
-         ~ts:(extract_ts json) ()
-     | _ -> None)
-
-(* WORKAROUND: the two sources report the same physical tool call with no
-   shared identifier, so sameness is inferred from proximity.
-
-   A [tool_call_io] row carries ts / keeper / tool / input / output / success /
-   duration_ms / runtime_contract / action_radius. The [Tool_called] agent
-   event carries agent_id / tool_name / success / duration_ms plus session_id,
-   operation_id and worker_run_id. Nothing is common to both that identifies a
-   call, so matching on actor + tool + outcome within a window is what the
-   schemas allow.
-
-   Where it is wrong: two genuinely distinct calls of the same tool by the same
-   actor with the same outcome, closer together than the window, look like one
-   report of one call — and [suppress_shadow_keeper_tool_events] drops the
-   agent-side event for the second.
-
-   Root fix: give the durable tool-call row a call identifier that the agent
-   event also carries, and key on that. That is a schema change to a durable
-   store and both producers, so it is not done here. *)
-let shadow_dedup_window_sec = 5.0
-
-let same_tool_call_signature left right =
-  String.equal left.actor right.actor
-  && String.equal left.tool right.tool
-  &&
-  (match left.success, right.success with
-   | Some a, Some b -> Bool.equal a b
-   | None, None -> true
-   | Some _, None | None, Some _ -> false)
-  && abs_float (left.ts -. right.ts) <= shadow_dedup_window_sec
+  | Some detail -> string_field "execution_id" detail
 
 let suppress_shadow_keeper_tool_events entries =
-  let tool_call_io =
-    List.filter_map tool_call_io_signature entries
+  let logged_executions =
+    entries
+    |> List.filter_map tool_call_io_execution_id
+    |> List.fold_left (fun acc id -> Execution_id_set.add id acc) Execution_id_set.empty
   in
-  if tool_call_io = [] then entries
+  if Execution_id_set.is_empty logged_executions
+  then entries
   else
     List.filter
       (fun json ->
-        match keeper_tool_called_signature json with
-        | None -> true
-        | Some signature ->
-          not (List.exists (same_tool_call_signature signature) tool_call_io))
+         match keeper_tool_called_execution_id json with
+         | None -> true
+         | Some execution_id -> not (Execution_id_set.mem execution_id logged_executions))
       entries
 
 (* ── Entry tagging ──────────────────────────────────── *)

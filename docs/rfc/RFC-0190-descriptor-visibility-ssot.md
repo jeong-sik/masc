@@ -36,7 +36,7 @@ The descriptor enum (`In_process | Filesystem | Shell_ir`) is closed and assumes
 
 RFC-0179 framed coverage as "every tool the LLM can call needs a descriptor." That framing assumes a single dispatch axis. The audit shows two distinct axes:
 
-- **Visibility axis** (`policy.visibility`): who can see/call this tool — `Public_mcp | Keeper_internal | Spawned_agent | Local_worker | Admin | Keeper_denied | …`.
+- **Visibility axis** (`policy.visibility`): who can see/call this tool — `Public_mcp | Keeper_internal | Spawned_agent | Admin | Keeper_denied | …`.
 - **Execution axis** (`executor`): how the call is dispatched — `In_process | Filesystem | Shell_ir`.
 
 Today `Agent_tool_descriptor.t` collapses both axes into one record, but coverage is asymmetric — the execution axis demands the descriptor own dispatch, which the inline-path tools cannot satisfy without being moved.
@@ -47,7 +47,7 @@ Make `Agent_tool_descriptor.t` the single source of truth for *visibility and me
 
 - `Tool_catalog_surfaces.public_mcp_surface_tools` is computed as
   `filter (fun d -> d.policy.visibility = Public_mcp) all_descriptors`.
-- Every entry on every surface (`public_mcp_surface_tools`, `spawned_agent_surface_tools`, `local_worker_surface_tools`, `session_min_surface_tools`) has a descriptor.
+- Every entry on every surface (`public_mcp_surface_tools`, `spawned_agent_surface_tools`, `session_min_surface_tools`) has a descriptor.
 - Dispatch routing remains opt-in: descriptors whose execution lives in `Mcp_tool_runtime` declare `executor = External_inline` and `runtime_handler = Tool_external_inline`, and the descriptor dispatcher returns `None` for them, leaving the inline path unchanged.
 - The surface↔descriptor diff becomes a compile-/test-time invariant (Phase 4).
 

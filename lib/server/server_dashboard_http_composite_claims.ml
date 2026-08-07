@@ -5,8 +5,6 @@
     Depends on Server_dashboard_http_json_utils, Server_dashboard_compact_receipt_json,
     Server_dashboard_fleet_readiness, and various Keeper modules. *)
 
-open Masc_domain
-open Server_utils
 
 let json_member = Server_dashboard_http_json_utils.json_member
 let json_string key json = Json_util.get_string json key

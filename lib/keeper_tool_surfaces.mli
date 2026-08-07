@@ -19,16 +19,12 @@ module Random = Stdlib.Random
 (** Keeper_tool_surfaces — lightweight internal tool surface
     definitions.
 
-    This module stays dependency-light so spawned agents, local
-    workers, and strict worker flows can share allowlists without
-    pulling in the full public capability registry.
-
-    Three surface families are exposed:
+    This module stays dependency-light so spawned agents can share
+    allowlists without pulling in the full public capability
+    registry.
 
     - **Spawned-agent**: tools available to MCP-spawned agent
-      sub-processes (a small public set for scripting agents).
-    - **Local-worker**: tools available to in-process worker
-      flows (a larger set including SDK contract schemas). *)
+      sub-processes (a small public set for scripting agents). *)
 
 (** {1 Helpers} *)
 
@@ -56,45 +52,3 @@ val spawned_agent_public_tool_names : string list
 (** SSOT: {!Tool_catalog_surfaces.spawned_agent_surface_tools}.  The small
     set of tools a spawned scripting agent can use. *)
 
-(** {1 Local-worker surface} *)
-
-val local_worker_public_tool_names : string list
-(** SSOT: {!Tool_catalog_surfaces.local_worker_surface_tools}. *)
-
-val local_worker_contract_schemas : Masc_domain.tool_schema list
-(** Re-export of {!Sdk_tool_contract.sdk_tool_schemas}. *)
-
-val local_worker_run_schemas : Masc_domain.tool_schema list
-(** Domain-grouped schema bundle (run)
-    used by {!select_public_local_worker_schemas} and the
-    autonomous catalogue resolver. *)
-
-val select_public_local_worker_schemas :
-  unit -> Masc_domain.tool_schema list
-(** [select_public_local_worker_schemas ()] returns the union of
-    board / workspace-core / workspace-extra / agent / run schemas,
-    intersected with
-    {!local_worker_public_tool_names}.  This is the public local-
-    worker surface as the dashboard sees it. *)
-
-val resolve_named_schemas :
-  Masc_domain.tool_schema list ->
-  string list ->
-  (Masc_domain.tool_schema list, string) Result.t
-(** [resolve_named_schemas all_schemas values] is the [Result]-
-    typed sibling of {!lookup_schemas_by_name_exn}: returns
-    [Error "unknown tool schema(s): <list>"] for missing names
-    rather than raising. *)
-
-val local_worker_tool_schemas :
-  ?names:string list ->
-  unit ->
-  (Masc_domain.tool_schema list, string) Result.t
-(** [local_worker_tool_schemas ?names ()] returns the full local-
-    worker schema set when [names] is omitted, or the named
-    subset when provided.  The full set is the union of
-    contract + {!select_public_local_worker_schemas}
-    outputs.
-
-    [Error] when [names] contains an unknown name (operator-
-    visible message format from {!resolve_named_schemas}). *)

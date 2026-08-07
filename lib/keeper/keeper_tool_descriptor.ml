@@ -843,28 +843,29 @@ let empty_object_schema =
     ]
 ;;
 
-let find_schema_input_opt schemas name =
+(* The whole registry record, not just its input schema: [cluster_descriptor]
+   takes the description from this same lookup. *)
+let find_schema_opt schemas name =
   List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
     schemas
-  |> Option.map (fun (s : Masc_domain.tool_schema) -> s.input_schema)
 ;;
 
 let find_taskboard_schema_opt name =
-  find_schema_input_opt Tool_shard_types.taskboard_tools name
+  find_schema_opt Tool_shard_types.taskboard_tools name
 ;;
 
 let find_voice_schema_opt name =
-  find_schema_input_opt Tool_shard_types.voice_tools name
+  find_schema_opt Tool_shard_types.voice_tools name
 ;;
 
 let find_misc_schema_opt name =
-  find_schema_input_opt Tool_schemas_misc.schemas name
+  find_schema_opt Tool_schemas_misc.schemas name
 ;;
 
 let find_base_schema_opt name =
-  match find_schema_input_opt Tool_shard_types.base_tools name with
+  match find_schema_opt Tool_shard_types.base_tools name with
   | Some _ as schema -> schema
-  | None -> find_schema_input_opt Tool_shard_types.filesystem_tools name
+  | None -> find_schema_opt Tool_shard_types.filesystem_tools name
 ;;
 
 let remove_schema_fields removed schema =
@@ -897,14 +898,14 @@ let remove_schema_fields removed schema =
 
 let find_masc_schema_opt name =
   match Tools.find_tool name with
-  | Some schema -> Some schema.input_schema
+  | Some _ as schema -> schema
   | None ->
     (* [Tool_agent_timeline] is registered by the main composition root and is
        intentionally absent from [Tools.all_schemas_extended] to avoid pulling
        keeper/runtime dependencies into the neutral schema aggregate. *)
-    (match find_schema_input_opt Tool_agent_timeline.schemas name with
+    (match find_schema_opt Tool_agent_timeline.schemas name with
      | Some _ as schema -> schema
-     | None -> find_schema_input_opt Keeper_schema.schemas name)
+     | None -> find_schema_opt Keeper_schema.schemas name)
 
 let find_cluster_schema_opt name =
   (* Keeper taskboard tools are checked before voice, misc, and public
@@ -925,7 +926,8 @@ let find_cluster_schema_opt name =
 
 let base_schema_input name =
   match find_base_schema_opt name with
-  | Some schema -> Canonical_registry, schema
+  | Some (schema : Masc_domain.tool_schema) ->
+    Canonical_registry, schema.input_schema
   | None -> invalid_arg ("missing base tool schema for " ^ name)
 
 let artifact_read_schema =
@@ -1223,11 +1225,18 @@ let cluster_descriptor_with_schema_source
     ()
 ;;
 
+(* Schema and description both come from the one registry lookup. Callers used
+   to pass a second description inline and nothing kept the two in agreement:
+   measured 2026-08-06 over [model_visible_descriptors], 66 of 98 descriptors
+   disagreed with their canonical schema and the model saw the shorter string
+   in 57 — including every Goal tool and [masc_transition], whose canonical
+   text is the only place [release] is named. Taking one field from the record
+   and re-typing the other beside it is what allowed the drift. *)
 let cluster_descriptor ?(polling_read = false) ~capability_identity
       ~keeper_model_projection ~id ~name
-      ~description ~handler ~readonly ~inline_safe ()
+      ~handler ~readonly ~inline_safe ()
   =
-  let input_schema_source, input_schema =
+  let input_schema_source, (schema : Masc_domain.tool_schema) =
     match find_cluster_schema_opt name with
     | Some schema -> Canonical_registry, schema
     | None -> invalid_arg ("missing canonical registry schema for " ^ name)
@@ -1237,10 +1246,10 @@ let cluster_descriptor ?(polling_read = false) ~capability_identity
     ~capability_identity
     ~keeper_model_projection
     ~input_schema_source
-    ~input_schema
+    ~input_schema:schema.input_schema
     ~id
     ~name
-    ~description
+    ~description:schema.description
     ~handler
     ~readonly
     ~inline_safe
@@ -1282,27 +1291,25 @@ let masc_board_descriptors =
   List.map masc_board_descriptor Tool_name.Board_name.all
 ;;
 
-let voice_descriptor name description ~readonly =
+let voice_descriptor name ~readonly =
   cluster_descriptor
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("keeper.voice." ^ String.sub name (String.length "keeper_voice_")
          (String.length name - String.length "keeper_voice_"))
     ~name
-    ~description
     ~handler:Tool_voice_dispatch
     ~readonly
     ~inline_safe:false
     ()
 ;;
 
-let task_descriptor ~capability_identity id name description ~readonly =
+let task_descriptor ~capability_identity id name ~readonly =
   cluster_descriptor
     ~capability_identity
     ~keeper_model_projection:Internal_name
     ~id:("keeper.task." ^ id)
     ~name
-    ~description
     ~handler:Tool_task_dispatch
     ~readonly
     ~inline_safe:false
@@ -1316,67 +1323,62 @@ let task_descriptor ~capability_identity id name description ~readonly =
    (Task.Tool / Tool_plan / Tool_run / Tool_agent / Tool_workspace) are not
    schema-registry-backed. The handler routes by descriptor.internal_name
    through the existing typed dispatcher. *)
-let masc_task_descriptor id name description ~readonly =
+let masc_task_descriptor id name ~readonly =
   cluster_descriptor
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.task." ^ id)
     ~name
-    ~description
     ~handler:Tool_masc_task_dispatch
     ~readonly
     ~inline_safe:false
     ()
 ;;
 
-let masc_task_transport_descriptor id name description ~readonly =
+let masc_task_transport_descriptor id name ~readonly =
   cluster_descriptor
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:
       (Transport_alias { projected_by = "keeper_tasks_list" })
     ~id:("masc.task." ^ id)
     ~name
-    ~description
     ~handler:Tool_masc_task_dispatch
     ~readonly
     ~inline_safe:false
     ()
 ;;
 
-let masc_plan_descriptor id name description ~readonly =
+let masc_plan_descriptor id name ~readonly =
   cluster_descriptor
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.plan." ^ id)
     ~name
-    ~description
     ~handler:Tool_masc_plan_dispatch
     ~readonly
     ~inline_safe:false
     ()
 ;;
 
-let masc_run_descriptor name description ~readonly =
+let masc_run_descriptor name ~readonly =
   cluster_descriptor
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.run." ^ String.sub name (String.length "masc_run_")
          (String.length name - String.length "masc_run_"))
     ~name
-    ~description
     ~handler:Tool_masc_run_dispatch
     ~readonly
     ~inline_safe:false
     ()
 ;;
 
-let masc_agent_descriptor id name description ~readonly =
+let masc_agent_descriptor id name ~readonly =
   cluster_descriptor
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.agent." ^ id)
     ~name
-    ~description
     ~handler:Tool_masc_agent_dispatch
     ~readonly
     ~inline_safe:false
@@ -1387,7 +1389,6 @@ let masc_workspace_descriptor
     ?(keeper_model_projection = Internal_name)
     id
     name
-    description
     ~readonly
   =
   cluster_descriptor
@@ -1395,7 +1396,6 @@ let masc_workspace_descriptor
     ~keeper_model_projection
     ~id:("masc.workspace." ^ id)
     ~name
-    ~description
     ~handler:Tool_masc_workspace_dispatch
     ~readonly
     ~inline_safe:false
@@ -1404,13 +1404,12 @@ let masc_workspace_descriptor
 
 (* RFC-0182 §3.1 — additional cluster descriptor helpers (Phase 3:
    misc / control / agent_timeline / local_runtime). *)
-let masc_misc_descriptor id name description ~readonly =
+let masc_misc_descriptor id name ~readonly =
   cluster_descriptor
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.misc." ^ id)
     ~name
-    ~description
     ~handler:Tool_masc_misc_dispatch
     ~readonly
     ~inline_safe:false
@@ -1439,7 +1438,6 @@ let masc_agent_timeline_descriptor name description ~readonly =
     ~keeper_model_projection:Internal_name
     ~id:"masc.agent_timeline"
     ~name
-    ~description
     ~handler:Tool_masc_agent_timeline_dispatch
     ~readonly
     ~inline_safe:false
@@ -1530,7 +1528,11 @@ let masc_local_runtime_descriptor
   let schema = definition.schema in
   cluster_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection:
+      (Tool_schemas_local_runtime.keeper_model_exposure definition.operation
+       |> function
+       | Tool_schemas_local_runtime.Keeper_callable -> Internal_name
+       | Tool_schemas_local_runtime.Operator_diagnostic -> Operator_only)
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
     ~id:
@@ -1754,119 +1756,107 @@ let internal_descriptors : t list =
     (* ── voice cluster (RFC-0179 PR-3, 6 tools) ───────────────── *)
   ; voice_descriptor
       "keeper_voice_speak"
-      "Synthesize speech for the keeper to deliver."
       ~readonly:false
   ; voice_descriptor
       "keeper_voice_listen"
-      "Listen for spoken input on the keeper voice channel."
       ~readonly:false
   ; voice_descriptor
       "keeper_voice_agent"
-      "Read the keeper voice capability, assigned voice, and active turn-based \
-       session state. This does not start a realtime audio stream."
       ~readonly:true
   ; voice_descriptor
       "keeper_voice_sessions"
-      "List active voice sessions for this keeper."
       ~readonly:true
   ; voice_descriptor
       "keeper_voice_session_start"
-      "Start a new voice session for the keeper."
       ~readonly:false
   ; voice_descriptor
       "keeper_voice_session_end"
-      "End the current voice session."
       ~readonly:false
     (* ── task / broadcast cluster (RFC-0179 PR-3, 6 tools) ────── *)
   ; task_descriptor
       ~capability_identity:(Named_capability "masc_tasks")
       "list"
       "keeper_tasks_list"
-      "List MASC tasks visible to this keeper."
       ~readonly:true
   ; task_descriptor
       ~capability_identity:Internal_name_identity
       "audit"
       "keeper_tasks_audit"
-      "Audit MASC task state for stale claims and verification gaps."
       ~readonly:true
   ; task_descriptor
       ~capability_identity:(Named_capability "masc_broadcast")
       "broadcast"
       "keeper_broadcast"
-      "Broadcast a workspace message to the MASC workspace."
       ~readonly:false
   ; task_descriptor
       ~capability_identity:Internal_name_identity
       "claim"
       "keeper_task_claim"
-      "Claim ownership of a MASC task."
       ~readonly:false
   ; task_descriptor
       ~capability_identity:Internal_name_identity
       "create"
       "keeper_task_create"
-      "Create a new MASC task on the board."
       ~readonly:false
   ; task_descriptor
       ~capability_identity:Internal_name_identity
       "done"
       "keeper_task_done"
-      "Mark the claimed MASC task as done."
+      (* The name says done; the handler issues submit_for_verification
+         (keeper_tool_task_runtime.ml:806). The description that says so now
+         lives once, on the canonical schema this descriptor reads. *)
       ~readonly:false
   (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)
   ; masc_task_descriptor "add" "masc_add_task"
-      "Add a task to the workspace plan." ~readonly:false
+       ~readonly:false
   ; masc_task_descriptor "batch_add" "masc_batch_add_tasks"
-      "Add multiple tasks in a single call." ~readonly:false
+       ~readonly:false
   ; masc_task_descriptor "task_history" "masc_task_history"
-      "Read history events for a task." ~readonly:true
+       ~readonly:true
   ; masc_task_transport_descriptor "tasks" "masc_tasks"
-      "List tasks visible to the caller." ~readonly:true
+       ~readonly:true
   ; masc_task_descriptor "transition" "masc_transition"
-      "Transition a task to a new status." ~readonly:false
+       ~readonly:false
   ; masc_task_descriptor "update_priority" "masc_update_priority"
-      "Update the priority of a task." ~readonly:false
+       ~readonly:false
   ; masc_task_descriptor "set_goal" "masc_task_set_goal"
-      "Assign an existing, currently goalless task to a goal." ~readonly:false
+       ~readonly:false
   (* ── RFC-0182 §3.1 — masc_plan_* + note + deliver (8 entries) ── *)
   ; masc_plan_descriptor "init" "masc_plan_init"
-      "Initialise a workspace plan." ~readonly:false
+       ~readonly:false
   ; masc_plan_descriptor "update" "masc_plan_update"
-      "Update a workspace plan." ~readonly:false
+       ~readonly:false
   ; masc_plan_descriptor "get" "masc_plan_get"
-      "Read the current plan, creating an empty planning context when missing."
       ~readonly:false
   ; masc_plan_descriptor "set_task" "masc_plan_set_task"
-      "Bind a task to a plan slot." ~readonly:false
+       ~readonly:false
   ; masc_plan_descriptor "get_task" "masc_plan_get_task"
-      "Read the task bound to a plan slot." ~readonly:true
+       ~readonly:true
   ; masc_plan_descriptor "clear_task" "masc_plan_clear_task"
-      "Unbind a task from a plan slot." ~readonly:false
+       ~readonly:false
   ; masc_plan_descriptor "note_add" "masc_note_add"
-      "Append a workspace note." ~readonly:false
+       ~readonly:false
   ; masc_plan_descriptor "deliver" "masc_deliver"
-      "Record a deliverable against the plan." ~readonly:false
+       ~readonly:false
   (* ── RFC-0182 §3.1 — masc_run_* cluster (4 entries) ──────────── *)
   ; masc_run_descriptor "masc_run_init"
-      "Initialise a workspace run." ~readonly:false
+       ~readonly:false
   ; masc_run_descriptor "masc_run_list"
-      "List recent runs." ~readonly:true
+       ~readonly:true
   ; masc_run_descriptor "masc_run_get"
-      "Read a single run by id, creating an empty run record when missing."
       ~readonly:false
   ; masc_run_descriptor "masc_run_plan"
-      "Read the run plan." ~readonly:true
+       ~readonly:true
   (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries; masc_agents +
        masc_agent_update removed 2026-06-09 with the dead agent-status
        surface) ────────── *)
   ; (masc_agent_descriptor "card" "masc_agent_card"
-       "Read an agent card." ~readonly:true
+        ~readonly:true
      |> with_eval_tags [ "agent_profile_lookup" ])
   ; masc_agent_descriptor "fitness" "masc_agent_fitness"
-      "Read agent fitness metrics." ~readonly:true
+       ~readonly:true
   ; masc_agent_descriptor "get_metrics" "masc_get_metrics"
-      "Read aggregated agent metrics." ~readonly:true
+       ~readonly:true
   (* ── RFC-0182 §3.1 — masc_workspace_* cluster (8 entries) ────────── *)
   (* Operator-only: [masc_status] answers with the operator's status *screen*.
      Workspace_status renders it for a terminal — emoji, a box-drawing rule, a
@@ -1890,40 +1880,38 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Operator_only
       "status"
       "masc_status"
-      "Read overall workspace status." ~readonly:true
+       ~readonly:true
   ; masc_workspace_descriptor
       "heartbeat"
       "masc_heartbeat"
-      "Emit an agent heartbeat." ~readonly:false
+       ~readonly:false
   ; masc_workspace_descriptor "check" "masc_check"
-      "Read a workspace assertion check." ~readonly:true
+       ~readonly:true
   ; masc_workspace_descriptor "goal_list" "masc_goal_list"
-      "List workspace goals." ~readonly:true
+       ~readonly:true
   ; masc_workspace_descriptor "goal_upsert" "masc_goal_upsert"
-      "Create or update a workspace goal." ~readonly:false
+       ~readonly:false
   ; masc_workspace_descriptor "goal_assign" "masc_goal_assign"
-      "Assign a goal to the keeper responsible for it." ~readonly:false
+       ~readonly:false
   ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
-      "Transition a goal status." ~readonly:false
+       ~readonly:false
   (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)
   ; masc_misc_descriptor "config" "masc_config"
-      "Read workspace configuration." ~readonly:true
+       ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
-      "Read workspace dashboard summary." ~readonly:true
+       ~readonly:true
   ; cluster_descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Operator_only
       ~id:"masc.misc.keeper_waiting_inventory"
       ~name:"masc_keeper_waiting_inventory"
-      ~description:"Read keeper waiting inventory."
       ~handler:Tool_masc_misc_dispatch
       ~readonly:true
       ~inline_safe:false
       ()
   ; masc_misc_descriptor "tool_help" "masc_tool_help"
-      "Read help text for a tool name." ~readonly:true
+       ~readonly:true
   ; masc_misc_descriptor "gc" "masc_gc"
-      "Run workspace garbage collection and return the collection result."
       ~readonly:false
   (* [masc_web_search] / [masc_web_fetch] are already owned by the
      MASC-owned web descriptors above. Do not add

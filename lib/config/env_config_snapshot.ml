@@ -216,8 +216,8 @@ let cache_entries =
 let channel_gate_entries =
   [
     entry ~default:"(none)" "MASC_CHANNEL_GATE_DEDUP_TTL_SEC"
-      "Dedup TTL (seconds, clamped 10-3600)";
-    entry ~default:"(none)" "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
+      "Dedup TTL (seconds, floored at 1)";
+    entry ~default:"4000" "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
       "Max content length (clamped 100-16000)";
     entry ~default:"30" "MASC_DISCORD_STATUS_STALE_SEC"
       "Discord status stale threshold (seconds)";
@@ -503,8 +503,6 @@ let worker_entries =
       "Local runtime cooldown (seconds); None when unset";
     entry ~default:"(none)" "MASC_LOCAL_RUNTIME_DEBUG"
       "Local runtime debug logging (feature flag)";
-    entry ~default:"60" "MASC_LOCAL_WORKER_HEARTBEAT_SEC"
-      "Local worker heartbeat interval (seconds, clamped >=1)";
   ]
 
 let all_categories () =

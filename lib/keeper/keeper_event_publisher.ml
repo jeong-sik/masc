@@ -37,9 +37,10 @@ let masc_publish event =
     (\[reconciled\] / \[dead_cleaned\] / \[admission_denied\]) — exactly the events that signal supervisor
     recovery actions where observability matters most. Subscribe to
     {!Keeper_lifecycle_events.all_event_names} to receive the full
-    stream; the sync test in [test_types.ml ::
-    lifecycle_events_ssot] asserts every literal still emitted by
-    [Keeper_supervisor] / [Keeper_keepalive] lives in the SSOT. *)
+    stream.  A sync test asserting every literal emitted by
+    [Keeper_supervisor] / [Keeper_keepalive] lives in the SSOT was cited
+    here as [test_types.ml :: lifecycle_events_ssot]; neither the file
+    nor the test exists (#22071). *)
 (* #8856 / #8605 family: [event] is now the unified
    [Keeper_lifecycle_events.lifecycle_event] variant -- typos at the
    16 supervisor/keepalive call sites fail to compile. JSON wire

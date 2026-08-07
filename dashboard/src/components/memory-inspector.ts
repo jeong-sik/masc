@@ -71,6 +71,9 @@ const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
   dynamic_context: { lbl: '동적 컨텍스트', color: 'var(--volt)', mem: false },
   temporal_summary: { lbl: '시간 요약', color: 'var(--status-warn)', mem: false },
   memory_os_recall: { lbl: '메모리 회상', color: 'var(--volt-strong)', mem: true },
+  // RFC-0366: one operator sentence, rendered for one turn and then stamped
+  // consumed. Not memory — it never reaches the recall block.
+  operator_note: { lbl: '운영자 노트', color: 'var(--status-warn)', mem: false },
 }
 export function promptBlockMeta(token: TurnPromptBlockId): BlockMeta {
   return PROMPT_BLOCK_META[token]
@@ -107,6 +110,7 @@ const INPUT_COMPONENT_META: Readonly<Record<TurnInputComponentId, BlockMeta>> = 
   'prompt.dynamic_context': PROMPT_BLOCK_META.dynamic_context,
   'prompt.temporal_summary': PROMPT_BLOCK_META.temporal_summary,
   'prompt.memory_os_recall': PROMPT_BLOCK_META.memory_os_recall,
+  'prompt.operator_note': PROMPT_BLOCK_META.operator_note,
   tool_schemas: { lbl: '도구 스키마', color: 'var(--status-warn)', mem: false },
   message_user: { lbl: '사용자 메시지', color: 'var(--info)', mem: false },
   message_system: { lbl: '시스템 메시지', color: 'var(--text-dim)', mem: false },

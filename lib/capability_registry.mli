@@ -3,7 +3,7 @@
     Public MCP tools and internal agent-facing tool surfaces are
     projections over one capability inventory. Some surfaces
     intentionally reuse the same tool name with a narrower schema
-    (e.g. local worker projections).
+    (e.g. spawned-agent projections).
 
     Internal helpers ([StringSet] / [StringMap], [require_unique_schemas],
     [require_unique_projections], [prefixed_tool_names],
@@ -11,8 +11,7 @@
     [public_projection_seeds_from],
     [keeper_projection_seeds], [surface_tool_schemas_from],
     [surface_tool_names_from], [oauth_login_stage], the surface-name lists
-    [spawned_agent_public_tool_names],
-    [local_worker_public_tool_names]) are hidden — callers consume the
+    [spawned_agent_public_tool_names]) are hidden — callers consume the
     typed projections, the [from] entry points, and the snapshot /
     schema accessors below. *)
 
@@ -21,13 +20,11 @@
 type audience =
   | External_mcp_client
   | Spawned_managed_agent
-  | Local_worker_agent
   | Keeper_agent
 
 type surface =
   | Public_mcp
   | Spawned_agent_mcp
-  | Local_worker
   | Keeper
 
 val surface_to_string : surface -> string
@@ -64,9 +61,9 @@ type capability_seed = {
 
 val all_projection_seeds_from :
   Masc_domain.tool_schema list -> capability_seed list
-(** Combine public, local-worker-internal, and keeper seeds into one
-    flat list keyed off [public_tool_source_schemas] (the canonical
-    public schema list owned by [Tool_help_registry]). *)
+(** Combine public and keeper seeds into one flat list keyed off
+    [public_tool_source_schemas] (the canonical public schema list
+    owned by [Tool_help_registry]). *)
 
 val all_capabilities_from :
   Masc_domain.tool_schema list -> capability_def list
@@ -85,12 +82,6 @@ val visible_public_tool_schemas_from :
   Masc_domain.tool_schema list
 (** [public_tool_schemas_from] filtered through [Tool_catalog.is_visible].
     [include_hidden] defaults to [false]. *)
-
-val local_worker_tool_schemas :
-  ?names:string list ->
-  unit ->
-  (Masc_domain.tool_schema list, string) result
-(** Delegates to [Keeper_tool_surfaces.local_worker_tool_schemas]. *)
 
 (** {1 Spawned-agent tool naming} *)
 

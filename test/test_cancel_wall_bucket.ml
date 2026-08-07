@@ -5,7 +5,7 @@
     fails before that drift can ship. *)
 
 (* [masc] is a wrapped library, so reach the new module through its
-   namespace (the same pattern existing tests use, e.g. [Masc.Auth]). *)
+   namespace (the same pattern existing tests use, e.g. [Auth]). *)
 module Cancel_wall_bucket = Masc.Cancel_wall_bucket
 
 let label = Alcotest.(check string)

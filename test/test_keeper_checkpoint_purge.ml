@@ -29,6 +29,22 @@ let cycle id =
   ; { (block_message Types.Tool [ tool_result id ]) with tool_call_id = Some id }
   ]
 
+let tool_error_result ?(content = "raw tool error") id : Types.content_block =
+  Types.ToolResult
+    { tool_use_id = id
+    ; content
+    ; outcome =
+        Types.Tool_failed
+          { failure_kind = Types.Recoverable_tool_error; error_class = None }
+    ; json = Some (`Assoc [ "error", `String "boom" ])
+    ; content_blocks = None
+    }
+
+let error_cycle id =
+  [ block_message Types.Assistant [ tool_use id ]
+  ; { (block_message Types.Tool [ tool_error_result id ]) with tool_call_id = Some id }
+  ]
+
 let unsigned_thinking text : Types.content_block =
   Types.Thinking { content = text; signature = None }
 
@@ -143,6 +159,29 @@ let test_tool_result_clear_preserves_pairing () =
   match Masc.Keeper_compaction_unit.validate purged with
   | Ok () -> ()
   | Error _ -> Alcotest.fail "cleared cycle no longer validates"
+
+let test_error_tool_result_is_never_cleared () =
+  (* R3 clears successful payloads only: an error result is feedback and
+     lesson evidence, so its payload, json, and outcome all survive. *)
+  let messages = error_cycle "a" @ cycle "b" in
+  let purged, report = run messages in
+  Alcotest.(check int)
+    "only the successful result is cleared"
+    1
+    report.tool_results_cleared;
+  (match List.nth purged 1 with
+   | { Types.content = [ Types.ToolResult { content; json; outcome; _ } ]; _ } ->
+     Alcotest.(check string) "error payload survives" "raw tool error" content;
+     Alcotest.(check bool) "error json untouched" true (Option.is_some json);
+     (match outcome with
+      | Types.Tool_failed _ -> ()
+      | _ -> Alcotest.fail "error outcome must survive the purge")
+   | _ -> Alcotest.fail "error cycle lost its ToolResult block");
+  let twice, _ = run purged in
+  Alcotest.(check (list string))
+    "preserved errors make the second purge the identity too"
+    (message_texts purged)
+    (message_texts twice)
 
 let test_protected_tail_is_byte_exact () =
   let wake = text_message Types.User "(autonomous wake)" in
@@ -315,6 +354,10 @@ let () =
             "tool result clear preserves pairing"
             `Quick
             test_tool_result_clear_preserves_pairing
+        ; Alcotest.test_case
+            "error tool result is never cleared"
+            `Quick
+            test_error_tool_result_is_never_cleared
         ; Alcotest.test_case
             "strip-revealed duplicates collapse in one pass"
             `Quick

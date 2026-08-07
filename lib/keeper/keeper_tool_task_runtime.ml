@@ -213,7 +213,13 @@ let no_eligible_exclusion_summary =
 
 let find_task_goal_id config task_id =
   let index = Workspace_goal_index.build_task_goal_index_for_config config in
-  try Some (List.hd (Hashtbl.find index task_id)) with Not_found -> None
+  (* [Not_found] only covers the missing-key case. [List.hd] raises
+     [Failure "hd"], which this arm would not catch, so match the list
+     instead: the builder appends every goal id, but that invariant lives in
+     Workspace_goal_index and is not visible in the type here. *)
+  match Hashtbl.find_opt index task_id with
+  | Some (goal_id :: _) -> Some goal_id
+  | Some [] | None -> None
 ;;
 
 let merge_current_task_id ~(latest : keeper_meta) ~(caller : keeper_meta) =
@@ -298,6 +304,20 @@ let parse_keeper_task_done_evidence_refs args =
          | `String ref_ :: rest ->
            if Task.Completion_review.blank_evidence_ref ref_
            then Error "evidence_refs must contain only non-empty strings."
+           else if Task.Completion_review.unresolvable_evidence_ref ref_
+           then
+             (* The masc_transition boundary refuses the same entries; this
+                parser states it in keeper vocabulary. Without it the store
+                snapshots a payload-free invalid reference and the reviewer
+                rejects for missing evidence, which reads as a verdict on the
+                work rather than on the reference form. *)
+             Error
+               (Printf.sprintf
+                  "evidence_refs entries must be %s. Nothing else can be read \
+                   back at review. Wrap a Board post id, a commit, a URL, or \
+                   any narrative as %s."
+                  Task.Completion_review.resolvable_evidence_ref_forms
+                  Task.Completion_review.note_evidence_ref_form)
            else collect (String.trim ref_ :: acc) rest
          | _ :: _ -> Error "evidence_refs must be an array of non-empty strings."
        in

@@ -476,8 +476,7 @@ let test_provider_kind_is_not_reconstructed () =
     check (option string) "provider not reconstructed" None s.provider;
     let recent = List.hd s.recent_entries in
     check (option string) "recent provider not reconstructed" None recent.re_provider;
-    let rollup = M.provider_rollup agg in
-    check int "provider rollup stays empty" 0 (List.length rollup))
+    ())
 
 let test_usage_labels_never_suppress_raw_aggregates () =
   let base = test_dir () in
@@ -1424,13 +1423,11 @@ let test_buckets_with_compute () =
     let b = List.hd m.buckets in
     check int "bucket entry_count" 1 b.b_entry_count)
 
-(* ── provider_rollup ─────────────────────────────── *)
+(* ── Hand-built aggregate fixtures ────────────── *)
 
-(* We build aggregates by hand instead of going through [M.compute] so
-   these tests verify only the rollup math (weighted means, entry_count
-   sums, model_count grouping) without depending on the jsonl parser.
-   That keeps the assertions robust to future changes in decisions.jsonl
-   shape. *)
+(* Built by hand instead of going through [M.compute] so the assertions
+   below do not depend on the jsonl parser, and stay robust to future
+   changes in the decisions.jsonl shape. *)
 
 let zero_model_stats (model_id : string) ~provider ~entry_count
     : M.model_stats =
@@ -1482,127 +1479,6 @@ let successful_cost_read : M.cost_read_result =
     ; schema_violation_rows = 0
     ; identity_conflict_rows = 0
     }
-
-let test_provider_rollup_empty_aggregate () =
-  let agg : M.aggregate =
-    { window_minutes = 30
-    ; bucket_minutes = 0
-    ; models = []
-    ; total_entries = 0
-    ; total_error_entries = 0
-    ; latency_buckets = []
-    ; cost_read = successful_cost_read
-    }
-  in
-  check int "empty models gives empty rollup" 0
-    (List.length (M.provider_rollup agg))
-
-let test_provider_rollup_skips_unknown_provider () =
-  let m1 = zero_model_stats "glm-coding:auto" ~provider:(Some "glm-coding")
-             ~entry_count:5 in
-  let m2 = zero_model_stats "bare-model" ~provider:None ~entry_count:3 in
-  let agg : M.aggregate =
-    { window_minutes = 30; bucket_minutes = 0; models = [m1; m2]
-    ; total_entries = 8; total_error_entries = 0; latency_buckets = []
-    ; cost_read = successful_cost_read }
-  in
-  let rollup = M.provider_rollup agg in
-  check int "only provider=Some survives" 1 (List.length rollup);
-  let stats = List.hd rollup in
-  check string "provider" "glm-coding" stats.ps_provider;
-  check int "entry_count" 5 stats.ps_entry_count
-
-let test_provider_rollup_weighted_mean () =
-  (* Two models on the same provider with different entry_counts should
-     produce an entry-weighted mean, not a simple average:
-     (100 * 20 + 50 * 80) / (20 + 80) = (2000 + 4000) / 100 = 60.0 *)
-  let m1 =
-    { (zero_model_stats "ollama:qwen3.6" ~provider:(Some "ollama")
-                         ~entry_count:20)
-      with avg_tok_per_sec = Some 100.0 }
-  in
-  let m2 =
-    { (zero_model_stats "ollama:qwen3.5" ~provider:(Some "ollama")
-                         ~entry_count:80)
-      with avg_tok_per_sec = Some 50.0 }
-  in
-  let agg : M.aggregate =
-    { window_minutes = 30; bucket_minutes = 0; models = [m1; m2]
-    ; total_entries = 100; total_error_entries = 0; latency_buckets = []
-    ; cost_read = successful_cost_read }
-  in
-  let rollup = M.provider_rollup agg in
-  let stats = List.hd rollup in
-  check int "merged entry_count" 100 stats.ps_entry_count;
-  check int "model_count" 2 stats.ps_model_count;
-  (match stats.ps_avg_tok_per_sec with
-   | Some v ->
-     (* Alcotest doesn't export float approx eq by default; allow 0.01. *)
-     if Float.abs (v -. 60.0) > 0.01 then
-       failf "weighted mean expected ~60.0 but got %f" v
-   | None -> fail "weighted mean should be Some")
-
-let test_provider_rollup_all_none_yields_none () =
-  (* Two models with every perf field None — the rollup must not
-     invent zeros where upstream reported nothing. *)
-  let m1 = zero_model_stats "x:1" ~provider:(Some "x") ~entry_count:5 in
-  let m2 = zero_model_stats "x:2" ~provider:(Some "x") ~entry_count:5 in
-  let agg : M.aggregate =
-    { window_minutes = 30; bucket_minutes = 0; models = [m1; m2]
-    ; total_entries = 10; total_error_entries = 0; latency_buckets = []
-    ; cost_read = successful_cost_read }
-  in
-  let rollup = M.provider_rollup agg in
-  let stats = List.hd rollup in
-  check (option (float 0.0001)) "avg_tok_per_sec stays None"
-    None stats.ps_avg_tok_per_sec;
-  check (option (float 0.0001)) "avg_prompt_tok_per_sec stays None"
-    None stats.ps_avg_prompt_tok_per_sec;
-  check (option (float 0.0001)) "p95_latency_ms stays None"
-    None stats.ps_p95_latency_ms
-
-let test_provider_rollup_sort_by_entry_count_desc () =
-  let a = zero_model_stats "a:1" ~provider:(Some "a") ~entry_count:3 in
-  let b = zero_model_stats "b:1" ~provider:(Some "b") ~entry_count:10 in
-  let c = zero_model_stats "c:1" ~provider:(Some "c") ~entry_count:7 in
-  let agg : M.aggregate =
-    { window_minutes = 30; bucket_minutes = 0; models = [a; b; c]
-    ; total_entries = 20; total_error_entries = 0; latency_buckets = []
-    ; cost_read = successful_cost_read }
-  in
-  let rollup = M.provider_rollup agg in
-  let names = List.map (fun s -> s.M.ps_provider) rollup in
-  check (list string) "sorted by entry_count desc" ["b"; "c"; "a"] names
-
-let test_provider_rollup_json_shape () =
-  let m =
-    { (zero_model_stats "kimi_cli:kimi" ~provider:(Some "kimi_cli")
-                         ~entry_count:42)
-      with avg_tok_per_sec = Some 25.0
-         ; prompt_avg_tok_per_sec = Some 180.0
-         ; p95_latency_ms = Some 3200.0 }
-  in
-  let agg : M.aggregate =
-    { window_minutes = 30; bucket_minutes = 0; models = [m]
-    ; total_entries = 42; total_error_entries = 0; latency_buckets = []
-    ; cost_read = successful_cost_read }
-  in
-  let json = M.provider_stats_to_json (List.hd (M.provider_rollup agg)) in
-  match json with
-  | `Assoc fields ->
-    check string "provider redacted"
-      (match List.assoc "provider" fields with `String s -> s | _ -> "!")
-      "runtime";
-    check int "model_count redacted"
-      0
-      (match List.assoc "model_count" fields with `Int n -> n | _ -> -1);
-    check int "request_count surfaces entry_count"
-      42
-      (match List.assoc "entry_count" fields with `Int n -> n | _ -> -1);
-    (match List.assoc "avg_prompt_tok_per_sec" fields with
-     | `Float f when Float.abs (f -. 180.0) < 0.01 -> ()
-     | _ -> fail "avg_prompt_tok_per_sec should be Float 180.0")
-  | _ -> fail "provider_stats_to_json should return an Assoc"
 
 let test_prompt_feedback_empty_aggregate () =
   let agg : M.aggregate =
@@ -1788,20 +1664,6 @@ let () =
       test_case "sparse entries → distinct buckets" `Quick test_buckets_sparse;
       test_case "cache_hit_ratio zero denom" `Quick test_buckets_cache_hit_ratio_zero_denom;
       test_case "compute_with_buckets integration" `Quick test_buckets_with_compute;
-    ];
-    "provider_rollup", [
-      test_case "empty aggregate gives empty rollup" `Quick
-        test_provider_rollup_empty_aggregate;
-      test_case "skips models with provider=None" `Quick
-        test_provider_rollup_skips_unknown_provider;
-      test_case "entry-weighted mean across models" `Quick
-        test_provider_rollup_weighted_mean;
-      test_case "all-None perf fields preserve None in rollup" `Quick
-        test_provider_rollup_all_none_yields_none;
-      test_case "sorted by entry_count descending" `Quick
-        test_provider_rollup_sort_by_entry_count_desc;
-      test_case "provider_stats_to_json shape" `Quick
-        test_provider_rollup_json_shape;
     ];
     "prompt_feedback", [
       test_case "empty aggregate renders empty" `Quick

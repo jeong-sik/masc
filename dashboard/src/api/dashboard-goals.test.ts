@@ -180,6 +180,43 @@ describe('fetchDashboardGoalsTree decoding', () => {
     expect(result.tree[1]!.owner).toBeNull()
   })
 
+  it('decodes typed timeline events on tree nodes and drops malformed entries', async () => {
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      tree: [
+        validNode('goal-1', 'Goal one', {
+          timeline_events: [
+            {
+              ts: '2026-08-05T01:00:00Z',
+              kind: 'goal_owner',
+              lane: 'goal',
+              title: 'Goal Owner',
+              summary: 'owner: <unassigned> -> dancer by operator',
+              severity: 'ok',
+            },
+            { kind: 'goal_owner' },
+          ],
+        }),
+        validNode('goal-2', 'Goal two'),
+      ],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
+    })
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.tree[0]!.timeline_events).toEqual([
+      {
+        ts: '2026-08-05T01:00:00Z',
+        kind: 'goal_owner',
+        lane: 'goal',
+        title: 'Goal Owner',
+        summary: 'owner: <unassigned> -> dancer by operator',
+        severity: 'ok',
+      },
+    ])
+    expect(result.tree[1]!.timeline_events).toEqual([])
+  })
+
   it('backfills missing attainment metric_evaluation from metric presence', async () => {
     getMock.mockResolvedValue({
       ...readyApprovalQueue,

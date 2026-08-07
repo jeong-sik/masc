@@ -4,7 +4,6 @@
    Extracted from server_routes_http_runtime.ml during godfile decomposition.
    Depends on: Keeper_types, Keeper_types_profile, Keeper_meta_store, etc. *)
 
-open Server_utils
 open Server_routes_http_common
 
 module String_set = Set.Make (String)

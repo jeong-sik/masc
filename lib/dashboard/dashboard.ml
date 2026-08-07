@@ -65,10 +65,10 @@ type scope =
 (** Issue #8592: SSOT helpers for [scope]. The witness function and
     canonical string list are mirrored in the JSON Schema layer
     ([Tool_schemas_misc.dashboard_scope_enum_strings]) — direct
-    dependency would cycle. The test [test_types.ml ::
-    dashboard_scope_ssot] asserts the mirror stays in sync. Adding a
-    new constructor here forces a compile error in [scope_to_string]
-    and fails the schema mirror test instead of silently dropping
+    dependency would cycle. No suite asserts the mirror stays in sync:
+    [dashboard_scope_ssot] does not exist. Adding a new constructor here
+    forces a compile error in [scope_to_string], which is the only thing
+    standing between a new scope and silently dropping
     from the enum. *)
 let scope_to_string = function
   | All -> "all"

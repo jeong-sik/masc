@@ -30,5 +30,4 @@ val pause_info :
   (string option * string option * string option) option
 
 val parse_iso_time_opt : string -> float option
-val parse_iso_time : string -> float
 val take : int -> 'a list -> 'a list

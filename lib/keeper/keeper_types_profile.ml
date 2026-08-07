@@ -97,63 +97,10 @@ include Keeper_types_profile_toml
 
 (* ── JSON workspace-seq helpers ───────────────────────────────────────── *)
 
-let workspace_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
-  `Assoc (List.map (fun (workspace_id, seq) -> (workspace_id, `Int seq)) items)
-
-let workspace_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
-  match json with
-  | `Assoc fields ->
-      fields
-      |> List.filter_map (fun (workspace_id, value) ->
-             if not (validate_name workspace_id) then
-               None
-             else
-               match value with
-               | `Int seq -> Some (workspace_id, seq)
-               | `Intlit raw ->
-                   Some (workspace_id, Safe_ops.int_of_string_with_default ~default:0 raw)
-               | _ -> None)
-  | _ -> []
-
-
-include Keeper_types_profile_defaults
-
 let operator_todo_placeholder_marker = "OPERATOR_TODO"
 
 let string_has_operator_todo_placeholder value =
   String_util.contains_substring value operator_todo_placeholder_marker
-;;
-
-let json_operator_todo_placeholder_paths json =
-  let child_path path key = if path = "$" then "$." ^ key else path ^ "." ^ key in
-  let indexed_path path index = Printf.sprintf "%s[%d]" path index in
-  let rec loop path = function
-    | `String value ->
-      if string_has_operator_todo_placeholder value then [ path ] else []
-    | `Assoc fields ->
-      fields
-      |> List.concat_map (fun (key, value) ->
-        let field_path = child_path path key in
-        let key_hits =
-          if string_has_operator_todo_placeholder key then [ field_path ] else []
-        in
-        key_hits @ loop field_path value)
-    | `List values | `Tuple values ->
-      values
-      |> List.mapi (fun index value -> loop (indexed_path path index) value)
-      |> List.concat
-    | `Variant (name, value) ->
-      let variant_path = child_path path name in
-      let name_hits =
-        if string_has_operator_todo_placeholder name then [ variant_path ] else []
-      in
-      name_hits
-      @ (match value with
-         | None -> []
-         | Some value -> loop variant_path value)
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Floatlit _ -> []
-  in
-  loop "$" json
 ;;
 
 let keeper_profile_defaults_materializable (defaults : keeper_profile_defaults) =

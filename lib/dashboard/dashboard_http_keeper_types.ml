@@ -115,12 +115,6 @@ let nonempty_string_opt value =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
 
-let parse_json_line_opt line =
-  try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
-
-let string_member_nonempty key json =
-  Option.bind (Safe_ops.json_string_opt key json) nonempty_string_opt
-
 let take_list n xs = List_util.take_first n xs
 
 let percentile_sorted_float (sorted : float array) (p : float) : float =

@@ -25,7 +25,6 @@ val operator_snapshot_recent_completed_limit : unit -> int
 
 (** {1 Tag/detail parsing} *)
 
-val bool_of_tag_value : string -> bool
 (** Truthy tag value: ["1" | "true" | "yes" | "y" | "on"], case-insensitive. *)
 
 (** {1 Numeric helpers} *)

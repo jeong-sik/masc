@@ -22,10 +22,6 @@ let domain_local_pg_backend_diagnostics_json () =
       ("last_error", `Null);
     ]
 
-let with_domain_local_pg_backend ~sw ~net ~clock ~mono_clock config =
-  let _ = sw, net, clock, mono_clock in
-  Some config
-
 (* ============================================ *)
 (* Git Root Detection (Worktree Support)        *)
 (* ============================================ *)

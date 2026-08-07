@@ -91,11 +91,6 @@ module For_testing : sig
   val install_domain_pool_references : Domain_pool.t -> unit
 end
 
-val runtime_path_diagnostics :
-  ?input_base_path:string ->
-  Mcp_server.server_state ->
-  Server_base_path_diagnostics.t
-
 val restore_persisted_sessions : Mcp_server.server_state -> unit
 val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
 val bootstrap_prompt_state : Mcp_server.server_state -> unit

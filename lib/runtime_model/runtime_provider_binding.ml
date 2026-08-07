@@ -15,12 +15,6 @@ let normalize_provider_id provider_id =
   |> String.map (fun c -> if c = '-' then '_' else c)
 ;;
 
-let runtime_binding_of_label label =
-  match Runtime_binding.find label with
-  | Some _ as found -> found
-  | None -> Runtime_binding.find (normalize_provider_id label)
-;;
-
 let provider_name_of_kind (kind : Llm_provider.Provider_config.provider_kind) =
   let cfg =
     Llm_provider.Provider_config.make ~kind ~model_id:"auto" ~base_url:"" ()

@@ -61,11 +61,6 @@ let agent_current_task_matches_assignments active_task_assignees ~agent_name tas
   | None -> false
 ;;
 
-let agent_current_task_matches_backlog backlog ~agent_name task_id =
-  let active_task_assignees = active_task_assignees_by_task_id backlog in
-  agent_current_task_matches_assignments active_task_assignees ~agent_name task_id
-;;
-
 let reconcile_agent_current_task_record
       config
       ?(touch_last_seen = true)

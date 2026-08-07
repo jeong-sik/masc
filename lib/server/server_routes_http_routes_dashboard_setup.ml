@@ -9,7 +9,6 @@ module Keeper_api = Server_dashboard_http_keeper_api
 
 (* Dashboard /logs JSON builder extracted to
    [Server_dashboard_logs_json] (godfile decomp). *)
-let dashboard_logs_store_path = Server_dashboard_logs_json.store_path
 let dashboard_logs_json = Server_dashboard_logs_json.build
 
 module Provider_logs = Server_routes_http_dashboard_provider_logs

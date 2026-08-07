@@ -161,18 +161,6 @@ let event_lane = function
 let lane_policy_for_lane lane =
   List.find_opt (fun policy -> String.equal policy.lane lane) lane_policies
 
-let lane_mandatory_event_codes lane =
-  match lane_policy_for_lane lane with
-  | Some policy ->
-    List.map Keeper_runtime_manifest.event_kind_to_string policy.mandatory_events
-  | None -> []
-
-let lane_terminal_event_codes lane =
-  match lane_policy_for_lane lane with
-  | Some policy ->
-    List.map Keeper_runtime_manifest.event_kind_to_string policy.terminal_events
-  | None -> []
-
 let lane_mandatory_events_present scan lane =
   match lane_policy_for_lane lane with
   | Some policy ->

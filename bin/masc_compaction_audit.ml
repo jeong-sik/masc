@@ -106,11 +106,7 @@ let initial_cfg () = {
 
 (* ── Formatting ───────────────────────────────────────────────── *)
 
-let format_ts ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-    tm.tm_hour tm.tm_min tm.tm_sec
+let format_ts = Time_codec.rfc3339_of_unix
 
 let print_paired ~(pre : KCA.start_record) ~(post : KCA.complete_record) =
   let delta = post.before_tokens - post.after_tokens in

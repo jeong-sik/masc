@@ -25,7 +25,6 @@ val task_log_warn : task_id:string -> ('a, unit, string, unit) format4 -> 'a
 
 (** Formats [fmt] and emits it on [Log.Task] at error level, prefixed with
     [task_id=<task_id> ]. *)
-val task_log_error : task_id:string -> ('a, unit, string, unit) format4 -> 'a
 
 include module type of Tool_task_payloads
 include module type of Tool_task_args

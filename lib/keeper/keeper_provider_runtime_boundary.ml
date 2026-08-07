@@ -38,18 +38,6 @@ let stream_idle_state_of_label = function
   | _ -> None
 ;;
 
-let stream_idle_state_is_activity = function
-  | Streaming_answer
-  | Streaming_thinking
-  | Streaming_tool_call
-  | Streaming_heartbeat
-  | Streaming_substrate -> true
-  | Awaiting_first_event
-  | Awaiting_first_delta
-  | Streaming_done
-  | Streaming_unknown -> false
-;;
-
 type timeout_phase =
   | First_token
   | Http_operation
@@ -111,20 +99,6 @@ let timeout_phase_of_label label =
       Some Capacity_backpressure
     | "unknown_timeout" -> Some Unknown_timeout
     | _ -> None
-;;
-
-let timeout_phase_is_streaming_activity = function
-  | Stream_idle state -> stream_idle_state_is_activity state
-  | First_token
-  | Http_operation
-  | Non_streaming_body
-  | Stream_body
-  | Provider_step
-  | Cli_stdout_idle
-  | Caller_budget
-  | Wall_clock
-  | Capacity_backpressure
-  | Unknown_timeout -> false
 ;;
 
 type timeout_source =

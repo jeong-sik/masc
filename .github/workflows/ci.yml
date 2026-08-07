@@ -405,7 +405,12 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.sha }}
         run: |
           chmod +x scripts/check-release-train-guard.sh
-          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=100 --tags
+          # No --depth here. This guard only runs `git show` and `git tag`, so
+          # it never needed one -- but `git fetch --depth=N` writes
+          # .git/shallow, which is repository-global state. It ran first and
+          # left the clone shallow for the hygiene step below, which does walk
+          # ancestry. That is the trigger for #27365 / #26938 / #27384.
+          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --tags
           scripts/check-release-train-guard.sh \
             --base "$BASE_REF" \
             --head "$HEAD_REF"
@@ -417,7 +422,14 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.sha }}
         run: |
           chmod +x scripts/check-pr-hygiene.sh
-          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=100
+          # No --depth. `git fetch --depth=100` grafts origin/<base> at 100
+          # commits, and rev-list then reports everything older than that graft
+          # as reachable only from HEAD -- so a long-lived branch had hundreds
+          # of main's own commits attributed to it (#27365, #26938, #27384).
+          # merge-base still returns a real commit, so the shallow-boundary
+          # recovery added in #27277 never engages. The checkout above already
+          # fetched full history; truncating it here only removed information.
+          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
           scripts/check-pr-hygiene.sh \
             --base "$BASE_REF" \
             --head "$HEAD_REF" \
@@ -1028,6 +1040,15 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_repos_relative_path
 
+      - name: Run RFC 3339 writer suite
+        # @check compiles this one but never runs it, and its whole job is to
+        # catch a silent divergence: a delegate drifting from the owner, or the
+        # writer emitting something Time_codec.parse_rfc3339 cannot read back.
+        # Neither shows up as a compile error.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_rfc3339_format_owner
+
       - name: Run JSONL day-key suite
         # The key and the writer's path have to name the same day. A reader
         # that drifts does not error -- it filters a layout the writer does
@@ -1148,6 +1169,20 @@ jobs:
         run: |
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_autoboot_single_owner"
+
+      - name: Run keeper meta current-schema conformance suite
+        # This suite would have caught masc#27393 (fleet-wide autoboot 0/7:
+        # the persona hard-cut's schema change made every real, durable
+        # keeper meta JSON unloadable) before it reached production -- it
+        # was compiling under @check but never executing in CI.
+        id: keeper_meta_current_schema_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_meta_current_schema"
 
       # NOTE: the "Shell IR differential-safety harness gate" step was removed
       # here. #24332 (nonhierarchical Gate refactor) retired the entire

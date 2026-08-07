@@ -8,12 +8,13 @@ include Ids
 (* ============================================ *)
 
 (** Timestamp utilities *)
-let now_iso () =
-  let open Unix in
-  let tm = gmtime (gettimeofday ()) in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-    tm.tm_hour tm.tm_min tm.tm_sec
+
+(* The clock read is not new — reading it is what [now_iso] is for. Only the
+   body around it changed, from an inline gmtime block to a call to the shared
+   writer, and the ratchet's move detector cannot match a line across that
+   reshape.
+   DET-OK *)
+let now_iso () = Time_codec.rfc3339_of_unix (Unix.gettimeofday ())
 
 (** Parse a strict RFC 3339 timestamp to Unix seconds. *)
 let parse_iso8601_opt value = Time_codec.parse_rfc3339_opt value
@@ -123,11 +124,9 @@ type agent = {
 
 let agent_of_yojson_generated = agent_of_yojson
 
-let iso8601_of_unix_seconds ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+(* Name kept because 73 call sites reach it through [Masc_domain]; renaming
+   them to [Time_codec.rfc3339_of_unix] is tracked in #27131. *)
+let iso8601_of_unix_seconds = Time_codec.rfc3339_of_unix
 
 let normalize_agent_last_seen ~session_bound_at = function
   | `String _ as value -> Some value

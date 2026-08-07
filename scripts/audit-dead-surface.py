@@ -543,10 +543,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # Lower it in the PR that earns the reduction. Raising it needs a reason in the
 # PR body -- a new export with no caller is usually a surface someone meant to
 # wire and did not.
-# 817 -> 800: this PR removes 17 exports nothing referenced. Measured on
-# the merged tree, not assumed -- the ratchet reported the slack and this
-# holds it, which is what its own message asks the earning PR to do.
-DEAD_EXPORT_BASELINE = 800
+DEAD_EXPORT_BASELINE = 658
 
 
 def run_ratchet(count: int) -> int:

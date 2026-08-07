@@ -92,8 +92,6 @@ let is_live () = true
 let elapsed_since_start () =
   Unix.gettimeofday () -. !state.started_at
 
-let default_watchdog_timeout_sec = 240.0
-
 let watchdog_timeout_sec () = Env_config.Transport.startup_watchdog_sec ()
 
 let remaining_watchdog_budget_sec ~reserve_sec =
@@ -104,9 +102,6 @@ let remaining_watchdog_budget_sec ~reserve_sec =
 
 let pending_lazy_tasks () =
   !state.pending_lazy_tasks
-
-let lazy_tasks_complete () =
-  !state.pending_lazy_tasks = []
 
 (* ── Transitions (with product-state invariant checking) ── *)
 

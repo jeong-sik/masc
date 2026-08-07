@@ -1,8 +1,5 @@
 (** Board JSON wire encoders and reaction parsers. *)
 
-module Option = Stdlib.Option
-module List = Stdlib.List
-module String = Stdlib.String
 
 include Board_core_classify
 

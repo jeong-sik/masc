@@ -984,12 +984,26 @@ let broadcast_is_unobservable target ~buffer ~notify_external =
   &&
   match target with
   | Presence_only ->
+    (* [session_kind_matches_target] is the only definition of which session a
+       target reaches. Asking it here rather than re-testing [kind = Presence]
+       keeps the skip and the delivery on one predicate: if [Presence_only]
+       ever widens, this stops skipping instead of silently dropping the
+       broadcast for the sessions it just gained. [jsonrpc_payload] is unused
+       on this arm — it only gates [All] and [Agent_streams], which are handled
+       below. *)
     let state = Atomic.get clients in
     state.count = 0
     || not
          (SMap.exists
-            (fun _ (client : client) -> client.kind = Presence)
+            (fun _ (client : client) ->
+              session_kind_matches_target
+                target
+                ~jsonrpc_payload:false
+                client.kind)
             state.entries)
+  (* Not skipped: these arms need [jsonrpc_payload], which costs a filter pass
+     over the payload, so the check would no longer be the O(1) it has to be on
+     this path. *)
   | All | Observers | Agent_streams -> false
 
 let broadcast_deliver ~buffer ~notify_external ~event_type target json =

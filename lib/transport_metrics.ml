@@ -155,25 +155,6 @@ let set_ws_sessions count =
   Otel_metric_store.set_gauge Otel_metric_store.metric_ws_sessions (float_of_int count)
 ;;
 
-(** Iter 28 visibility fix — counter for previously-silent JSON parse
-    drops in parse_sse_dashboard_event. Closed 2-value error_kind
-    vocab keeps Otel_metric_store label cardinality bounded. *)
-type ws_frame_json_parse_error_kind =
-  | Yojson_parse_error
-  | Other_ws_frame_json_parse_error
-
-let ws_frame_json_parse_error_kind_to_string = function
-  | Yojson_parse_error -> "yojson_parse_error"
-  | Other_ws_frame_json_parse_error -> "other"
-;;
-
-let inc_ws_frame_json_parse_failure ~error_kind =
-  Otel_metric_store.inc_counter
-    Otel_metric_store.metric_server_mcp_ws_frame_json_parse_failures
-    ~labels:[ "error_kind", ws_frame_json_parse_error_kind_to_string error_kind ]
-    ()
-;;
-
 let inc_ws_bytes_cache_hit () =
   Otel_metric_store.inc_counter Otel_metric_store.metric_ws_bytes_cache_hits ()
 ;;

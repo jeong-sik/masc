@@ -32,12 +32,6 @@ val metric_ws_sessions : string
 val metric_ws_bytes_cache_hits : string
 val metric_ws_bytes_cache_misses : string
 
-(** Counter of WebSocket transport incoming-frame JSON parse failures.
-    Frame is dropped (parse_sse_dashboard_event returns None) but
-    operators now have a counter + warn log.
-    Labels: [error_kind = yojson_parse_error | other]. Iter 28. *)
-val metric_server_mcp_ws_frame_json_parse_failures : string
-
 (** Counter of sidecar HTTP route [schema_field_types] JSON parse
     failures. Previously the catch-all returned [] silently, allowing
     callers (e.g. [coerce_value] in TOML sidecar handlers) to proceed

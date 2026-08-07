@@ -260,6 +260,7 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
                   ("success", `Bool true);
                   ("duration_ms", `Int 12);
                   ("agent_id", `String "keeper-sangsu-agent");
+                  ("execution_id", `String "exec-a");
                 ];
             ] );
       ];
@@ -272,6 +273,7 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
         ("tool", `String "masc_status");
         ("success", `Bool true);
         ("duration_ms", `Float 12.0);
+        ("execution_id", `String "exec-a");
       ];
   ];
   let result =
@@ -292,6 +294,111 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
   in
   Alcotest.(check int) "source-filtered agent event remains available" 1
     (List.length raw_agent_entries)
+
+(* Two physical calls of the same tool by the same keeper with the same
+   outcome, one second apart. Sameness is decided by [execution_id], so both
+   agent events survive. The proximity match this replaced treated any two
+   such calls inside a five-second window as one report of one call and
+   dropped the second agent event. *)
+let test_distinct_calls_within_the_old_window_are_both_kept () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_distinct_calls" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let tool_calls_dir = Filename.concat dir ".masc/tool_calls" in
+  Fs_compat.mkdir_p telemetry_dir;
+  Fs_compat.mkdir_p tool_calls_dir;
+  let agent_event ~ts ~execution_id =
+    `Assoc
+      [
+        ("timestamp", `Float ts);
+        ( "event",
+          `List
+            [
+              `String "Tool_called";
+              `Assoc
+                [
+                  ("tool_name", `String "masc_status");
+                  ("success", `Bool true);
+                  ("duration_ms", `Int 12);
+                  ("agent_id", `String "keeper-sangsu-agent");
+                  ("execution_id", `String execution_id);
+                ];
+            ] );
+      ]
+  in
+  let io_row ~ts ~execution_id =
+    `Assoc
+      [
+        ("ts", `Float ts);
+        ("keeper", `String "sangsu");
+        ("tool", `String "masc_status");
+        ("success", `Bool true);
+        ("duration_ms", `Float 12.0);
+        ("execution_id", `String execution_id);
+      ]
+  in
+  write_jsonl telemetry_dir
+    [ agent_event ~ts:1000.2 ~execution_id:"exec-1"
+    ; agent_event ~ts:1001.2 ~execution_id:"exec-2"
+    ];
+  (* Only the first call reached the durable tool_calls store. *)
+  write_jsonl tool_calls_dir [ io_row ~ts:1000.0 ~execution_id:"exec-1" ];
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ~sources:[ Telemetry_unified.Agent_event; Telemetry_unified.Tool_call_io ]
+      ()
+  in
+  let sources =
+    result.entries |> List.map (json_string_field "source") |> List.sort compare
+  in
+  Alcotest.(check (list string))
+    "the unmatched agent event survives alongside the logged row"
+    [ "agent_event"; "tool_call_io" ]
+    sources
+
+(* An agent event with no [execution_id] cannot be proven to duplicate any
+   row, so it is kept. *)
+let test_agent_event_without_execution_id_is_kept () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_unidentified_call" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let tool_calls_dir = Filename.concat dir ".masc/tool_calls" in
+  Fs_compat.mkdir_p telemetry_dir;
+  Fs_compat.mkdir_p tool_calls_dir;
+  write_jsonl telemetry_dir
+    [ `Assoc
+        [ ("timestamp", `Float 1000.2)
+        ; ( "event"
+          , `List
+              [ `String "Tool_called"
+              ; `Assoc
+                  [ ("tool_name", `String "masc_status")
+                  ; ("success", `Bool true)
+                  ; ("duration_ms", `Int 12)
+                  ; ("agent_id", `String "keeper-sangsu-agent")
+                  ] ] ) ]
+    ];
+  write_jsonl tool_calls_dir
+    [ `Assoc
+        [ ("ts", `Float 1000.0)
+        ; ("keeper", `String "sangsu")
+        ; ("tool", `String "masc_status")
+        ; ("success", `Bool true)
+        ; ("duration_ms", `Float 12.0)
+        ; ("execution_id", `String "exec-a")
+        ]
+    ];
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ~sources:[ Telemetry_unified.Agent_event; Telemetry_unified.Tool_call_io ]
+      ()
+  in
+  Alcotest.(check int) "unidentified agent event is not suppressed" 2
+    (List.length result.entries)
 
 (* ── Keeper metrics discovery ────────────────────── *)
 
@@ -1323,6 +1430,10 @@ let () =
             test_keeper_tool_called_scope_promoted_for_filters;
           Alcotest.test_case "dedupe shadow agent tool_called" `Quick
             test_shadow_keeper_tool_called_deduped_from_unified_view;
+          Alcotest.test_case "distinct calls in the old window both survive"
+            `Quick test_distinct_calls_within_the_old_window_are_both_kept;
+          Alcotest.test_case "agent event without execution_id is kept" `Quick
+            test_agent_event_without_execution_id_is_kept;
           Alcotest.test_case "keeper metrics" `Quick test_keeper_metrics_per_keeper;
           Alcotest.test_case "keeper metrics fast path keeps noisy top n" `Quick
             test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n;

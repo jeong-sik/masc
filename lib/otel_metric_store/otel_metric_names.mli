@@ -82,7 +82,7 @@ val metric_board_persist_lock_held_sec : string
 
 (** Time spent waiting to acquire [Backend.FileSystem.t.mutex] before
     a write/delete operation.  Labels: [op] in
-    {[set | delete | set_if_not_exists]}.
+    [set | delete | set_if_not_exists].
 
     Combined with [metric_backend_mutex_held_sec] this distinguishes
     keeper write contention (acquire high) from disk I/O stall (held
@@ -95,7 +95,7 @@ val metric_board_persist_lock_held_sec : string
 val metric_backend_mutex_acquire_sec : string
 
 (** Time spent inside the backend persist lock, from acquisition to
-    release. Labels: [op] in {[set | delete | set_if_not_exists]}.
+    release. Labels: [op] in [set | delete | set_if_not_exists].
 
     Captures time spent in the write critical section, used together
     with [metric_backend_mutex_acquire_sec]. *)
@@ -124,7 +124,7 @@ val metric_keeper_waiting_age_seconds : string
 val metric_keeper_waiting_keeper_count : string
 
 (** Schedule unsupported payload counter. Label: [phase] in
-    {[creation | dispatch]}. Raw payload kinds are not
+    [creation | dispatch]. Raw payload kinds are not
     labels; they remain in typed errors/projections to avoid unbounded metric
     cardinality. *)
 val metric_schedule_payload_unsupported_total : string

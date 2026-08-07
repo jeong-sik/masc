@@ -137,7 +137,6 @@ function makeToolItem(overrides: Partial<DashboardToolInventoryItem> = {}): Dash
     name: 'tool',
     description: '',
     category: 'uncategorized',
-    enabled_in_current_mode: false,
     direct_call_allowed: false,
     doc_refs: [],
     prompt_hints: [],

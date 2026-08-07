@@ -27,12 +27,10 @@ ALLOWLIST=(
   # SSOT definition — the canonical helper itself.
   "lib/core/json_util.ml"
 
-  # RFC-0056 yojson-only sub-libraries (leaf isolation).  Adding
-  # masc_core to these libs would break the dependency-graph
-  # invariant that the autonomous/multimodal sub-libs
-  # remain consumable by lightweight downstream tooling without
-  # pulling the whole masc_core surface.
-  "lib/autonomous/stimulus.ml"
+  # RFC-0056 yojson-only sub-library (leaf isolation).  Adding
+  # masc_core to this lib would break the dependency-graph invariant
+  # that the multimodal sub-lib remains consumable by lightweight
+  # downstream tooling without pulling the whole masc_core surface.
   "lib/multimodal/payload.ml"
 )
 

@@ -397,15 +397,27 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
         ~system_prompt:ctx.system_prompt
         ~tools:ctx.tools)
   in
+  (* One memo per provider attempt, not per request.  A turn issues one
+     projection per provider request — measured on the live wire capture:
+     83 requests for turn 12263, 62 for 15638 — and every request re-measures
+     the same history, which is tens of thousands of messages on a live
+     Keeper.  Building the memo inside the per-request closure threw that work
+     away between requests.
+
+     Safe to share: [run_try_provider] builds one closure per provider
+     attempt, so no two Keepers share a memo; OAS drives the turn loop
+     sequentially (no [Fiber.fork] around [prepare_turn_for_agent] in
+     pipeline_stage_prepare.ml); and [Domain_pool.submit_cpu] is
+     [Eio.Executor_pool.submit_exn], which blocks until the job finishes, so
+     successive jobs are ordered even when they land on different domains.
+
+     The message records are physically shared across a turn's requests — only
+     the list spine is rebuilt — which is what makes the memo hit at all: it
+     confirms every lookup with physical equality. *)
+  let measure_message_bytes = memoize_message_measurement measure_message_bytes in
   fun messages ->
     let planned_and_windowed =
       offload_model_input_cpu (fun () ->
-        (* The raw cut and demotion plan both measure immutable message records.
-           Cache only for this worker-domain job so repeated candidates are
-           encoded once without retaining a long-lived Keeper's history. *)
-        let measure_message_bytes =
-          memoize_message_measurement measure_message_bytes
-        in
         let raw_cut candidate =
           Runtime_model_input_tail_window.project_with_drop
             ~measure_message_bytes

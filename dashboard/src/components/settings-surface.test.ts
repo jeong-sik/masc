@@ -1150,7 +1150,6 @@ describe('SettingsSurface', () => {
                 supports_computer_use: false,
                 supports_code_execution: true,
               },
-              match_prefixes: ['m1'],
             },
             binding: {
               provider_id: 'provider-a',

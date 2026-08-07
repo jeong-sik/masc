@@ -51,20 +51,26 @@ val all_actions : action list
 (** Every action in declaration order. SSOT for the schema/validator action
     enum via [List.map action_to_string all_actions]. *)
 
-(** Outcome of {!decide_transition}. [Move_to] is a direct phase change and
-    [Complete] is the terminal success transition. *)
+(** What a transition request resolves to.
+
+    [Move_to] is a phase change: the caller writes the new phase and records
+    the event. [Already] is the same request made against a goal that is
+    already in the phase the action targets — satisfied, with nothing to write.
+    A caller that treats the two alike turns a repeated report into repeated
+    history. *)
+type outcome =
+  | Move_to of t
+  | Already of t
 
 val decide_transition :
   phase:t ->
   action:action ->
-  (t, string) result
-(** Pure transition decider: the phase the goal moves to, or [Error msg] for
-    an invalid pair.
+  (outcome, string) result
+(** Pure transition decider: what the request resolves to, or [Error msg] for a
+    pair that names no reachable phase.
 
-    This returned a [transition_outcome] whose [Complete] arm was the
-    else-branch of a verifier-policy check — one of four outcomes alongside
-    [Open_verification] and [Open_approval], removed with the goal quorum
-    engine in #24332. With those gone [Complete] and [Move_to Completed] named
-    the same thing, and both consumers immediately collapsed one into the
-    other while the doc still called [Complete] a distinct terminal
-    transition. A phase is now just a phase. *)
+    The diagonal — an action whose target phase the goal already occupies —
+    answers [Already] rather than an error, which is what the Task FSM already
+    says for the same shape (Cancel on Cancelled, Done_action on Done). Not
+    every terminal pair is on it: [Dropped, Request_complete] is still an
+    error, because completion is not the phase a dropped goal is in. *)

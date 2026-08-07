@@ -982,6 +982,15 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_goal_scope_terminal_phase
 
+      - name: Run goal phase suite
+        # decide_transition is a 5x7 matrix that had no behavioural test. Its
+        # exhaustive match proves every pair has an arm, not that the arm gives
+        # the right answer -- so a matrix edit could change what the Goal FSM
+        # admits without anything going red. The suite states all 35 pairs.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_goal_phase_all
+
       - name: Run metric zero-cell declaration suite
         # A counter emitted as a bare string still compiles and still counts;
         # what it loses is the 0-cell, and only a running store shows that.

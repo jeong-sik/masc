@@ -97,9 +97,20 @@ let gen_event : Telemetry_eio.event QCheck.Gen.t =
         (Telemetry_eio.Tool_assigned
            { agent_id; profile; tool_count; assignment_id })
 
+(* [event_record.timestamp] is unix seconds. [QCheck.Gen.float] spans the whole
+   double range including nan and the infinities, and nan does not survive a
+   JSON round-trip — it has no literal, and [nan = nan] is false either way. So
+   the round-trip property failed on roughly one seed in three, on whichever
+   variant the generator happened to pick. Generating what the field actually
+   holds makes the property state something true. *)
+let earliest_timestamp = 0.0
+
+(* 2100-01-01T00:00:00Z — past any real record, still exactly representable. *)
+let latest_timestamp = 4_102_444_800.0
+
 let gen_record : Telemetry_eio.event_record QCheck.Gen.t =
   let open QCheck.Gen in
-  let* timestamp = float in
+  let* timestamp = float_range earliest_timestamp latest_timestamp in
   let* event = gen_event in
   return Telemetry_eio.{ timestamp; event }
 

@@ -609,10 +609,16 @@ let snapshot_json
           let workspace_attention =
             build_workspace_attention_items config |> List.sort compare_attention
           in
-          let workspace_recommendation_items = workspace_recommendations config in
+          (* #26144 moved actions out of the fallback read model: this layer
+             observes and does not recommend. The summary is constant here --
+             count=0, top_action=null, provenance="fallback",
+             authoritative=false. It used to read
+             [workspace_recommendations config], which that change had already
+             emptied to [fun _ -> []], so the config argument was only making a
+             constant look derived. *)
           [ "attention_summary", summary_of_attention_items workspace_attention
           ; ( "recommendation_summary"
-            , summary_of_recommendations ~actor:actor_name workspace_recommendation_items )
+            , summary_of_recommendations ~actor:actor_name [] )
           ])
         else [])
     in

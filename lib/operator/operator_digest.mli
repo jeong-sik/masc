@@ -40,8 +40,6 @@ val health_from_attention_items : attention_item list -> string
 
 val build_workspace_attention_items : Workspace.config -> attention_item list
 
-val workspace_recommendations : Workspace.config -> recommended_action list
-
 val normalize_digest_target_type :
   string option -> (string, string) result
 

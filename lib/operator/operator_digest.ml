@@ -246,9 +246,6 @@ let keeper_attention_projection_items config =
   in
   status_attention @ external_attention
 
-let workspace_recommendations _config =
-  dedup_recommendations []
-
 let workspace_state_json config =
   if not (Workspace.is_initialized config) then
     `Assoc

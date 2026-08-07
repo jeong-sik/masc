@@ -551,7 +551,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # proactive_has_terminal_korean_ending val. Measured with --exports on the
 # merged tree; main moved 575 -> 573 -> 564 while this branch was open
 # (#27460 and #27456), so every earlier value here was stale by the next merge.
-DEAD_EXPORT_BASELINE = 563
+DEAD_EXPORT_BASELINE = 562
 
 
 def run_ratchet(count: int) -> int:

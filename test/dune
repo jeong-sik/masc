@@ -1647,6 +1647,7 @@
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
 (include stanzas/test_dedup_rules.inc)
+(include stanzas/test_jsonl_retention_window.inc)
 (include stanzas/test_trailing_slash_rules.inc)
 (include stanzas/test_repos_relative_path.inc)
 (include stanzas/test_metric_zero_cell_declaration.inc)

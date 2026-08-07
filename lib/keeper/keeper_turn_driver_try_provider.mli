@@ -4,6 +4,7 @@ type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
   ; max_request_body_bytes : int
+  ; model_input_capacity_bytes : int
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -67,6 +68,14 @@ val run_try_provider :
   * Agent_sdk.Checkpoint.t option
   * (string * Obj.t) option
 
+val run_try_provider_with_context_overflow_shrink :
+  try_provider_ctx ->
+  ?enable_thinking_override:bool ->
+  Runtime_candidate.t ->
+  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+  * Agent_sdk.Checkpoint.t option
+  * (string * Obj.t) option
+
 val accept_rejected_error :
   runtime_id:string ->
   response:Agent_sdk_response.api_response ->
@@ -95,4 +104,19 @@ module For_testing : sig
     (Agent_sdk.Types.message -> int) -> Agent_sdk.Types.message -> int
 
   val offload_model_input_cpu : (unit -> 'a) -> 'a
+
+  val context_overflow_shrink_max_attempts : int
+  val context_overflow_shrink_divisor : int
+
+  val context_overflow_shrink_sequence :
+    starting_capacity_bytes:int ->
+    same_run_retry_authorized:(unit -> bool) ->
+    record_success:(capacity_bytes:int -> unit) ->
+    on_shrink_retry:
+      (shrink_attempt:int ->
+       previous_capacity_bytes:int ->
+       capacity_bytes:int ->
+       unit) ->
+    attempt:(capacity_bytes:int -> ('ok, Agent_sdk.Error.sdk_error) result) ->
+    ('ok, Agent_sdk.Error.sdk_error) result
 end

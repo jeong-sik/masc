@@ -28,9 +28,6 @@ val handle_done :
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_transition :
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_update_priority : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_task_history : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val task_history_events_json :
   Workspace_core.config -> task_id:string -> limit:int -> Yojson.Safe.t
 

@@ -89,6 +89,26 @@ let keeper_batch_limit_rp =
 let keeper_batch_limit () : int =
   Runtime_params.get keeper_batch_limit_rp
 
+(* Batch-size knob, not a workaround cap: adversarial review on
+   masc#27054 traced continuation_wake and found it re-wakes the owner for
+   exactly one more Completed partition per heartbeat cycle, not an
+   off-turn queue. So the choice is not "block vs don't block" but a
+   cycle-count/per-cycle-blocking-time tradeoff with bad extremes on both
+   ends: 1 settlement/turn means 192 heartbeat cycles for a 192-item
+   backlog; 192 settlements/turn is the original unbounded blocking this
+   knob replaced (384 durable writes before the owner's turn can proceed
+   at all). 8 sits between those without profiling data past that it
+   avoids either extreme; max_v caps the dial at the largest backlog
+   this repo has observed in production (masc#27017's 192). *)
+let keeper_board_attention_settlements_per_turn_rp =
+  _rp_int ~key:"keeper.board_attention.settlements_per_turn"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_ATTENTION_SETTLEMENTS_PER_TURN"
+                          ~default:8 ~min_v:1 ~max_v:192)
+    ~min_v:1 ~max_v:192
+    ~description:"Completed board-attention partitions settled per owner turn before the remainder defers to a continuation wake" ()
+let keeper_board_attention_settlements_per_turn () : int =
+  Runtime_params.get keeper_board_attention_settlements_per_turn_rp
+
 
 
 

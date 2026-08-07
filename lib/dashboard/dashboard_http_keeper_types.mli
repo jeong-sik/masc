@@ -65,8 +65,6 @@ val source_health_fields :
 (** {1 Internal metric / list / decision helpers} *)
 
 val nonempty_string_opt : string -> string option
-val parse_json_line_opt : string -> Yojson.Safe.t option
-val string_member_nonempty : string -> Yojson.Safe.t -> string option
 val take_list : int -> 'a list -> 'a list
 val percentile_sorted_float : float array -> float -> float
 val keeper_cost_metric_row_is_event : Yojson.Safe.t -> bool

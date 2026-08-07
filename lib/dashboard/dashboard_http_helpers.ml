@@ -32,10 +32,6 @@ let operator_snapshot_recent_completed_limit () =
   int_of_env_default "MASC_OPERATOR_SNAPSHOT_RECENT_COMPLETED_LIMIT"
     ~default:5 ~min_v:1 ~max_v:50
 
-let bool_of_tag_value (raw : string) : bool =
-  let v = String.trim raw |> String.lowercase_ascii in
-  v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
-
 let safe_age_seconds_opt ~(now_ts : float) ~(event_ts : float) : int option =
   let delta = now_ts -. event_ts in
   if Float.is_nan delta || Float.is_infinite delta then None

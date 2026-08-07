@@ -11,13 +11,6 @@ type config = {
 }
 
 val domain_local_pg_backend_diagnostics_json : unit -> Yojson.Safe.t
-val with_domain_local_pg_backend :
-  sw:Eio.Switch.t ->
-  net:[> `Generic | `Unix] Eio.Net.ty Eio.Resource.t ->
-  clock:_ Eio.Time.clock ->
-  mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
-  config ->
-  config option
 val read_git_file : string -> string option
 val parse_gitdir_to_main_root : string -> string option
 val find_git_root : string -> string option

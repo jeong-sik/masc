@@ -17,8 +17,5 @@ val tool_call_health_json :
 val board_monitoring_json : now_ts:float -> Yojson.Safe.t * bool
 
 (** Point-in-time slot occupancy / queue depth snapshot. *)
-val slot_monitoring_json : unit -> Yojson.Safe.t
-
 (** Per-executor outcome counts (success / failure / cancelled)
     aggregated from the audit log. *)
-val executor_outcomes_json : Workspace.config -> Yojson.Safe.t

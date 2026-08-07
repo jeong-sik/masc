@@ -33,12 +33,6 @@ val agent_current_task_matches_assignments
   -> string
   -> bool
 
-val agent_current_task_matches_backlog
-  :  Masc_domain.backlog
-  -> agent_name:string
-  -> string
-  -> bool
-
 val reconcile_agent_current_task_with_backlog
   :  config
   -> ?touch_last_seen:bool

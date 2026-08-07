@@ -239,10 +239,6 @@ val retry_backoff_active : now:string -> attempt_record -> bool
     last attempt. [now] is parsed at the boundary; the deadline comparison
     uses {!Attempt_state.is_backoff_active}. *)
 
-val next_attempt_record :
-  now:string ->
-  next_retry_at:string ->
-  attempt_record option -> desired_record -> attempt_record
 (** Compute the next [attempt_record] given the previous one and the
     reconciler decision context. *)
 

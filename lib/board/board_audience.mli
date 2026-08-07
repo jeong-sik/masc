@@ -22,5 +22,3 @@ val audience_for_comment : content:string -> (audience, board_error) result
 
 val audience_for_reaction : audience
 (** Reactions are structural thread activity and carry no textual address. *)
-
-val audience_label : audience -> string

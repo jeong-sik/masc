@@ -105,10 +105,3 @@ let audience_for_comment ~content =
 ;;
 
 let audience_for_reaction = Thread_participants
-
-let audience_label = function
-  | Targets _ -> "targets"
-  | Broadcast -> "broadcast"
-  | Thread_participants -> "thread_participants"
-  | Discoverable -> "discoverable"
-;;

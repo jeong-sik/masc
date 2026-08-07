@@ -302,12 +302,6 @@ let link_task_to_goal_result config ~goal_id ~task_id =
         write_goal_task_links_result config ~previous_links:links new_links)
 ;;
 
-let link_task_to_goal config ~goal_id ~task_id =
-  match link_task_to_goal_result config ~goal_id ~task_id with
-  | Ok () -> ()
-  | Error msg -> Log.Misc.warn "%s" msg
-;;
-
 let before_unlink_task_from_goal_for_testing = Atomic.make None
 
 let unlink_task_from_goal_result_impl config ~goal_id ~task_id =

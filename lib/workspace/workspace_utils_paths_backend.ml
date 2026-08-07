@@ -95,25 +95,6 @@ let backend_list_keys config ~prefix =
   | FileSystem t -> Backend.FileSystem.list_keys t ~prefix
 
 (** get_all: Memory uses native Hashtbl fold, FileSystem uses list_keys + get. *)
-let backend_get_all config ~prefix =
-  match config.backend with
-  | Memory t -> Backend.Memory.get_all t ~prefix
-  | FileSystem _ ->
-      (match backend_list_keys config ~prefix with
-       | Error e -> Error e
-       | Ok keys ->
-           let pairs = List.filter_map (fun k ->
-             match backend_get config ~key:k with
-             | Ok (Some v) -> Some (k, v)
-             | Ok None | Error _ -> None
-           ) keys in
-           Ok pairs)
-
-let backend_set_if_not_exists config ~key ~value =
-  match config.backend with
-  | Memory t -> Backend.Memory.set_if_not_exists t key value
-  | FileSystem t -> Backend.FileSystem.set_if_not_exists t key value
-
 let backend_acquire_lock config ~key ~ttl_seconds ~owner =
   match config.backend with
   | Memory _ -> Ok true  (* In-memory is single-process *)
@@ -123,16 +104,6 @@ let backend_release_lock config ~key ~owner =
   match config.backend with
   | Memory _ -> Ok true
   | FileSystem t -> Backend.FileSystem.release_lock t ~key ~owner
-
-let backend_extend_lock config ~key ~ttl_seconds ~owner =
-  match config.backend with
-  | Memory _ -> Ok true
-  | FileSystem t -> Backend.FileSystem.extend_lock t ~key ~owner ~ttl_seconds
-
-let backend_health_check config =
-  match config.backend with
-  | Memory _ -> Ok { Backend_types.latency_ms = 0.0; is_healthy = true }
-  | FileSystem t -> Backend.FileSystem.health_check t
 
 let backend_publish config ~channel ~message =
   match config.backend with

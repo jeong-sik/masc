@@ -90,9 +90,6 @@ let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
   @ submitted_evidence_sources ~notes ?handoff_context ?submitted_evidence_refs task
   |> clean_evidence_refs
 
-let verification_evidence_refs_for_task (task : Masc_domain.task) =
-  concrete_verification_evidence_refs task
-
 (* task-1664: the flat [evidence_refs] list above concatenates the
    contract-required artifacts with the agent-submitted references, so a
    verifier reading it cannot tell "the contract asked for a PR link" from

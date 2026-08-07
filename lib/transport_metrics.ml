@@ -465,6 +465,7 @@ type ws_delivery_metric_names =
   ; client_acks : string
   ; throttled_deliveries : string
   ; delta_payload_serializations : string
+  ; delta_built : string
   ; slice_fanout_skipped : string
   ; client_buffered_bytes : string
   ; client_buffered_bytes_count : string
@@ -478,6 +479,7 @@ let ws_delivery_metric_names =
   ; client_acks = "masc_ws_client_acks_total"
   ; throttled_deliveries = "masc_ws_throttled_deliveries_total"
   ; delta_payload_serializations = "masc_ws_delta_payload_serializations_total"
+  ; delta_built = Otel_metric_store.metric_ws_delta_built
     (* Named by the declaration, not by a literal: [metric_value_or_zero]
        answers an unknown name with 0, so a typo here would surface as a
        permanently-zero field instead of a failure. *)
@@ -684,6 +686,14 @@ let transport_health_json ~config =
                   , `Int
                       (int_of_float
                          (v ws_delivery_metrics.delta_payload_serializations ())) )
+                ; (* Deltas actually handed to a session, counted after the
+                     slice gate.  Paired with the two above it separates work
+                     done from work delivered: serializations counts payloads
+                     built (shared across sessions), delta_built counts sends.
+                     It has advanced on every delivered delta since #23339 with
+                     nothing reading it. *)
+                  ( "delta_built"
+                  , `Int (int_of_float (v ws_delivery_metrics.delta_built ())) )
                 ; (* Deliveries the slice gate dropped because the session did
                      not subscribe to that slice.  Without it the gap between
                      delivered broadcasts and what reaches the bytes cache is

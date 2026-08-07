@@ -356,11 +356,15 @@ let test_transport_health_json () =
   let slice_fanout_skipped_before =
     Otel_metric_store.metric_total Otel_metric_store.metric_ws_slice_fanout_skipped
   in
+  let delta_built_before =
+    Otel_metric_store.metric_total Otel_metric_store.metric_ws_delta_built
+  in
   TM.observe_ws_dashboard_hello_latency ~success:true 0.125;
   (* Drive the counter so the assertion below is not satisfied by a field that
      is wired to the wrong metric name: [metric_value_or_zero] answers an
      unknown name with 0, which a presence-only check accepts. *)
   TM.inc_ws_slice_fanout_skipped ();
+  TM.inc_ws_delta_built ();
   Masc.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   Masc.Sse.sync_transport_snapshot ~force:true ();
   let json = TM.transport_health_json ~config in
@@ -507,6 +511,12 @@ let test_transport_health_json () =
   check bool "slice_fanout_skipped advances" true
     (float_of_int (delivery_json |> U.member "slice_fanout_skipped" |> U.to_int)
      >= slice_fanout_skipped_before +. 1.0);
+  (* Same shape, same reason: the counter has advanced on every delivered delta
+     since #23339, but no snapshot carried it, so no operator could see it and
+     no test could notice if it stopped. *)
+  check bool "delta_built advances" true
+    (float_of_int (delivery_json |> U.member "delta_built" |> U.to_int)
+     >= delta_built_before +. 1.0);
   check bool "client_buffered_bytes_sum field present (float)" true
     (match delivery_json |> U.member "client_buffered_bytes_sum" with
      | `Float _ | `Int _ -> true | _ -> false);

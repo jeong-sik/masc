@@ -909,6 +909,55 @@ let test_own_recent_board_posts_show_the_response () =
   check bool "an unanswered post says so rather than omitting the field" true
     (contains_sub "replies=\"0\"" world_state)
 
+(* The post author is the one participant who never commented on their own
+   thread, so [check_self_comment_status] answers [`Never] and [self_commented]
+   stays false. The observation still resolves the commenter and a preview of
+   what they wrote. Gating those two on [self_commented] meant the wake #27288
+   added told the author only that something had happened. *)
+let test_a_comment_on_your_own_post_says_who_and_what () =
+  let commented_on_by_someone_else =
+    { sample_board_event with
+      event_kind = WO.Board_comment_added
+    ; self_commented = false
+    ; new_external_since = 1
+    ; latest_external_author = Some "bob"
+    ; latest_external_preview = Some "I hit this too, here is the trace"
+    }
+  in
+  let obs =
+    { base_observation with pending_board_events = [ commented_on_by_someone_else ] }
+  in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  check bool "the commenter is named" true
+    (contains_sub "latest_external_author=\"bob\"" world_state);
+  check bool "what they said reaches the author" true
+    (contains_sub "I hit this too, here is the trace" world_state);
+  (* The count keeps its condition: with no own comment there is no "since own"
+     to count from, so stating it would be false rather than merely absent. *)
+  check bool "no since-own count without an own comment" false
+    (contains_sub "new_replies_since_own" world_state)
+
+let test_a_reply_after_your_own_comment_still_counts () =
+  let replied_after_me =
+    { sample_board_event with
+      event_kind = WO.Board_comment_added
+    ; self_commented = true
+    ; new_external_since = 2
+    ; latest_external_author = Some "carol"
+    ; latest_external_preview = Some "two of us saw it"
+    }
+  in
+  let obs = { base_observation with pending_board_events = [ replied_after_me ] } in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  check bool "count still rendered for a participant" true
+    (contains_sub "new_replies_since_own=\"2\"" world_state);
+  check bool "commenter still named" true
+    (contains_sub "latest_external_author=\"carol\"" world_state)
+
 let test_board_and_own_post_rows_escape_external_fields () =
   let hostile_event : WO.pending_board_event =
     { sample_board_event with
@@ -1022,6 +1071,12 @@ let () =
           test_case
             "prompt: own recent board posts show the response"
             `Quick test_own_recent_board_posts_show_the_response;
+          test_case
+            "prompt: a comment on your own post says who and what"
+            `Quick test_a_comment_on_your_own_post_says_who_and_what;
+          test_case
+            "prompt: a reply after your own comment still counts"
+            `Quick test_a_reply_after_your_own_comment_still_counts;
           test_case
             "prompt: Board and own-post fields escape external newlines"
             `Quick test_board_and_own_post_rows_escape_external_fields;

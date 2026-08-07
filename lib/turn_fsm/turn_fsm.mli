@@ -87,6 +87,11 @@ type transition_action =
   | TerminalStutter
 (** Runtime image of [KeeperTurnFSM.tla] [Next] actions. *)
 
+(** Every [transition_action] constructor. Exposed so the TLA+ parity guard can
+    walk the set; [transition_action_label] is exhaustive, so a new constructor
+    fails to compile there before it can be missed here. *)
+val all_transition_actions : transition_action list
+
 val transition_action_label : transition_action -> string
 
 type transition_context = {

@@ -44,6 +44,14 @@ type try_provider_ctx =
   ; model_input_projection : Agent_sdk.Agent.model_input_projection option
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
+  ; (* #27349: total wall-clock ceiling for THIS provider call attempt,
+       independent of streaming progress -- distinct from
+       [stream_idle_timeout_s] (inter-line gap) and [body_timeout_s]
+       (non-streaming body read only). [None] (the operator has not set
+       [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]) means no MASC-side
+       enforcement; the call runs exactly as it did before this field
+       existed. See [run_try_provider]'s use of [Eio.Time.with_timeout_exn]. *)
+    provider_call_deadline_sec : float option
   ; temperature : float option
   ; accept : Agent_sdk_response.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
@@ -596,7 +604,11 @@ let run_try_provider
   | Ok config ->
     (* Explicit stream stall detection is handled by OAS's
        [stream_idle_timeout_s]; [None] deliberately leaves it disabled.
-       No separate liveness FSM — provider stall is an OAS-level concern.
+       No separate liveness FSM for the common case — provider stall is
+       primarily an OAS-level concern. #27349: when the operator has set
+       [ctx.provider_call_deadline_sec], the wrap below adds a total
+       wall-clock ceiling on this whole attempt as a MASC-side backstop —
+       still opt-in, off by default, same as before this existed.
        No per-lane capacity gate — provider load is managed by operator
        adjusting keeper count. *)
     let run_started_at =
@@ -604,7 +616,7 @@ let run_try_provider
       (* NDT-OK: provider-attempt latency telemetry only; dispatch/control
          decisions do not branch on this timestamp. *)
     in
-    let result =
+    let run_attempt_switch () =
       Eio.Switch.run (fun attempt_sw ->
         let run_fn () =
           Eio_guard.check_if_ready ();
@@ -636,6 +648,37 @@ let run_try_provider
                 ctx.goal
         in
         run_fn ())
+    in
+    (* #27349: [Eio.Time.with_timeout]'s own signature requires a
+       polymorphic-variant error row ([> `Timeout]), which
+       [run_attempt_switch]'s concrete [Agent_sdk.Error.sdk_error] result
+       cannot unify with, so [with_timeout_exn] (raises the [Timeout]
+       exception) is the primitive that fits here — the established
+       pattern in this repo for wrapping a concretely-typed result
+       (graphql_client.ml, server_ide_lsp_proxy.ml). Catches ONLY
+       [Eio.Time.Timeout]: [Eio.Cancel.Cancelled] is never caught here, so
+       an outer cancellation (switch shutdown, etc.) propagates unmodified.
+       OAS's own internal [stream_idle_timeout_s]/[body_timeout_s] firing
+       is a typed RETURN VALUE inside [Runtime_agent.run]'s result, not a
+       raised exception, so it can never reach this handler and be
+       misclassified as this deadline firing. *)
+    let result =
+      match ctx.provider_call_deadline_sec, Eio_context.get_clock_opt () with
+      | Some deadline_sec, Some clock ->
+        (try Eio.Time.with_timeout_exn clock deadline_sec run_attempt_switch with
+         | Eio.Time.Timeout ->
+           Error
+             (Agent_sdk.Error.Api
+                (Llm_provider.Retry.Timeout
+                   { message =
+                       Printf.sprintf
+                         "provider call exceeded the configured wall-clock \
+                          deadline (%.0fs, runtime_id=%s)"
+                         deadline_sec
+                         ctx.runtime_id
+                   ; phase = Some Llm_provider.Http_client.Wall_clock
+                   })))
+      | None, _ | _, None -> run_attempt_switch ()
     in
     let result =
       match result with

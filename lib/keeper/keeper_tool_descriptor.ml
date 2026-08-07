@@ -1997,17 +1997,6 @@ let keeper_model_names descriptor =
   | [], (Operator_only | Transport_alias _) -> []
 ;;
 
-let keeper_candidate_names descriptor =
-  match model_schema_errors descriptor, descriptor.keeper_model_projection with
-  | _ :: _, _ -> []
-  | [], Preferred_public_name ->
-    [ descriptor.public_name; descriptor.internal_name ]
-    |> List.sort_uniq String.compare
-  | [], Internal_name ->
-    [ descriptor.internal_name ]
-  | [], (Operator_only | Transport_alias _) -> []
-;;
-
 let registered_names descriptor =
   [ descriptor.internal_name; descriptor.public_name ]
   |> List.sort_uniq String.compare

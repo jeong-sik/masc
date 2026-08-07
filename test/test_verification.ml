@@ -910,7 +910,6 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
             ; required_evidence = [ "persisted required artifact" ]
             ; inspect_gate_evidence = []
             ; verify_gate_evidence = [ "persisted gate artifact" ]
-            ; links = { operation_id = None; session_id = None }
             }
           in
           let config = W.default_config base_path in

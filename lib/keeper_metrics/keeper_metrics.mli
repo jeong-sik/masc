@@ -12,6 +12,8 @@ type t =
   | TurnCompleted
   | FailureRoute
   | IdleSeconds
+  | InFlightElapsedSeconds
+  | SinceLastProgressSeconds
   | StreamProjectionEventCutoff
   | MetricEmitDropped
   | ContextMaxObserved

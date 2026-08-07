@@ -56,11 +56,6 @@ let empty_contract : Masc_domain.task_contract =
     required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence = [];
-    links =
-      {
-        operation_id = None;
-        session_id = None;
-      };
   }
 
 let extract_json_from_text text =

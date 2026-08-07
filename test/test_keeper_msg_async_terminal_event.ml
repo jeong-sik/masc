@@ -363,6 +363,42 @@ let test_closed_background_switch_rejects_worker_acceptance () =
       | None -> fail "submit did not return before the background switch closed"))
 ;;
 
+
+(* The terminal partition check tells a duplicate publish from an integrity
+   conflict with this predicate. It used to be equality of
+   [entry_record_to_json]'s output, which agreed only because that function
+   emits every field on one code path. Pin the property directly: changing any
+   single field must make two records differ. *)
+let test_same_entry_record_is_sensitive_to_every_field () =
+  let module A = Masc.Keeper_msg_async in
+  let base : A.entry =
+    { request_id = "req-1"
+    ; keeper_name = "kp"
+    ; base_path = "/tmp/base"
+    ; submitted_by = "operator"
+    ; status = A.Queued
+    ; submitted_at = 100.0
+    ; completed_at = None
+    }
+  in
+  check bool "a record equals itself" true (A.same_entry_record base base);
+  let variants =
+    [ "request_id", { base with request_id = "req-2" }
+    ; "keeper_name", { base with keeper_name = "other" }
+    ; "base_path", { base with base_path = "/tmp/other" }
+    ; "submitted_by", { base with submitted_by = "someone" }
+    ; "status", { base with status = A.Running }
+    ; "submitted_at", { base with submitted_at = 101.0 }
+    ; "completed_at", { base with completed_at = Some 200.0 }
+    ]
+  in
+  List.iter
+    (fun (field, variant) ->
+       check bool (field ^ " makes the records differ") false
+         (A.same_entry_record base variant))
+    variants
+;;
+
 let () =
   run
     "keeper_msg_async_terminal_event"
@@ -385,6 +421,10 @@ let () =
             "closed background switch rejects worker acceptance"
             `Quick
             test_closed_background_switch_rejects_worker_acceptance
+        ; test_case
+            "same_entry_record is sensitive to every field"
+            `Quick
+            test_same_entry_record_is_sensitive_to_every_field
         ] )
     ]
 ;;

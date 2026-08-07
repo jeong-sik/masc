@@ -178,7 +178,6 @@ describe('decodeTransportHealthData', () => {
         observer_stream: '/events',
         presence_stream: '/events/presence',
         managed_endpoint: '/mcp/managed',
-        operator_endpoint: '/mcp/operator',
         delete_endpoint: '',
         default_transport: 'streamable-http',
         supports_post: true,

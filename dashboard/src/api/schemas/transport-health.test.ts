@@ -30,7 +30,7 @@ describe('parseTransportHealthData', () => {
     expect(result.grpc.enabled).toBe(false)
     expect(result.grpc.port).toBe(0)
     expect(result.websocket.mode).toBe('unknown')
-    expect(result.websocket.delivery.parse_cache_hits).toBe(0)
+    expect(result.websocket.delivery.bytes_cache_hits).toBe(0)
     expect(result.webrtc.signaling_mode).toBe('unknown')
     expect(result.streamable_http.endpoint).toBe('/mcp')
     expect(result.http2.listener_mode).toBe('unknown')
@@ -176,8 +176,6 @@ describe('parseTransportHealthData', () => {
         sessions: 15,
         relay_source: 'sse',
         delivery: {
-          parse_cache_hits: 100,
-          parse_cache_misses: 5,
           bytes_cache_hits: 200,
           bytes_cache_misses: 10,
           client_acks: 95,
@@ -202,7 +200,6 @@ describe('parseTransportHealthData', () => {
         observer_stream: '/events',
         presence_stream: '/events/presence',
         managed_endpoint: '/mcp/managed',
-        operator_endpoint: '/mcp/operator',
         delete_endpoint: '',
         default_transport: 'streamable_http',
         supports_post: true,

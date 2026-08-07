@@ -640,7 +640,8 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       in
       Masc.Sse.subscribe_external
         ~id:subscriber_id
-        ~callback:(fun payload -> received_sse := Some payload)
+        ~callback:(fun (ev : Masc.Sse.external_event) ->
+          received_sse := Some ev.Masc.Sse.ext_frame)
         ();
       Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
         ~mcp_session_id:"mcp-session-9"

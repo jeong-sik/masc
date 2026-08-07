@@ -53,11 +53,7 @@ val validate_ttl : int -> int
 
 (** [acquire_flock fd]: [Unix.F_TLOCK] — non-blocking exclusive lock.
     Returns [true] on success, [false] on [EAGAIN]/[EACCES] or any other error. *)
-val acquire_flock : Unix.file_descr -> bool
-
 (** Best-effort release — logs a warning on failure. *)
-val release_flock : Unix.file_descr -> unit
-
 (** {1 In-Memory Pub/Sub} shared by Memory + FileSystem backends. *)
 module Pubsub_mem : sig
   type t

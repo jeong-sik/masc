@@ -543,7 +543,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # Lower it in the PR that earns the reduction. Raising it needs a reason in the
 # PR body -- a new export with no caller is usually a surface someone meant to
 # wire and did not.
-DEAD_EXPORT_BASELINE = 671
+DEAD_EXPORT_BASELINE = 658
 
 
 def run_ratchet(count: int) -> int:

@@ -549,7 +549,6 @@ export function TransportHealthPanel() {
                 <${MetricRow} label="POST" value=${data.streamable_http.endpoint} />
                 <${MetricRow} label="옵저버 스트림" value=${data.streamable_http.observer_stream} />
                 <${MetricRow} label="프레즌스 스트림" value=${data.streamable_http.presence_stream} />
-                <${MetricRow} label="오퍼레이터 표면" value=${data.streamable_http.operator_endpoint} />
               </div>
             <//>
 

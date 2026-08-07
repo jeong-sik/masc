@@ -56,13 +56,6 @@ let protocol_of_string = function
   | "webrtc" -> Some Webrtc
   | _ -> None
 
-(** Transport binding configuration *)
-type binding = {
-  protocol: protocol;
-  url: string;
-  options: (string * string) list;
-}
-
 (** Standard JSON-RPC 2.0 error codes *)
 module ErrorCodes = struct
   let parse_error = -32700
@@ -708,70 +701,6 @@ module Rest = struct
         | None -> `Assoc [])
     | _ -> `Assoc []
 end
-
-(** Get available bindings for current MASC instance *)
-let get_bindings ~host ~port : binding list =
-  let base_url = Printf.sprintf "http://%s:%d" host port in
-  let bindings =
-    [
-      { protocol = Sse; url = Printf.sprintf "%s/sse" base_url; options = [] };
-      { protocol = JsonRpc; url = Printf.sprintf "%s/mcp" base_url; options = [] };
-      { protocol = Rest; url = Printf.sprintf "%s/api/v1" base_url; options = [] };
-    ]
-  in
-  let bindings =
-    if Env_config.Transport.grpc_enabled () then
-      bindings
-      @ [
-          {
-            protocol = Grpc;
-            url =
-              Printf.sprintf "grpc://%s:%d" host
-                Env_config.Transport.grpc_port;
-            options = [ ("health_service", "grpc.health.v1.Health") ];
-          };
-        ]
-    else
-      bindings
-  in
-  let bindings =
-    if Env_config.Transport.ws_enabled () then
-      bindings
-      @ [
-          {
-            protocol = Ws;
-            url = Printf.sprintf "ws://%s:%d/ws" host port;
-            options =
-              [ ("mode", "same_origin_upgrade")
-              ; ("discovery_path", "/ws")
-              ; ("standalone_port", string_of_int Env_config.Transport.ws_port)
-              ];
-          };
-        ]
-    else
-      bindings
-  in
-  if Env_config.Transport.webrtc_enabled () then
-    bindings
-    @ [
-        {
-          protocol = Webrtc;
-          url = Printf.sprintf "%s/webrtc" base_url;
-          options =
-            [ ("offer_path", "/webrtc/offer"); ("answer_path", "/webrtc/answer") ];
-        };
-      ]
-  else
-    bindings
-
-(** Bindings to JSON (for Agent Card) *)
-let bindings_to_json (bindings : binding list) : Yojson.Safe.t =
-  `List (List.map (fun b ->
-    `Assoc [
-      ("protocol", `String (protocol_to_string b.protocol));
-      ("url", `String b.url);
-    ]
-  ) bindings)
 
 (** Atomic statistics for monitoring *)
 module Stats = struct

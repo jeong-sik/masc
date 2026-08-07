@@ -293,36 +293,6 @@ let test_error_with_data () =
   | None -> fail "expected data"
 
 (* ============================================================
-   binding Tests
-   ============================================================ *)
-
-let test_binding_creation () =
-  let b : Transport.binding = {
-    protocol = Transport.JsonRpc;
-    url = "http://localhost:8931";
-    options = [("timeout", "30")];
-  } in
-  check bool "protocol jsonrpc" true (b.protocol = Transport.JsonRpc);
-  check string "url" "http://localhost:8931" b.url;
-  check int "options count" 1 (List.length b.options)
-
-let test_binding_rest () =
-  let b : Transport.binding = {
-    protocol = Transport.Rest;
-    url = "https://api.example.com/v1";
-    options = [];
-  } in
-  check bool "protocol rest" true (b.protocol = Transport.Rest)
-
-let test_binding_grpc () =
-  let b : Transport.binding = {
-    protocol = Transport.Grpc;
-    url = "grpc://localhost:50051";
-    options = [("tls", "true")];
-  } in
-  check bool "protocol grpc" true (b.protocol = Transport.Grpc)
-
-(* ============================================================
    JsonRpc Module Tests
    ============================================================ *)
 
@@ -761,85 +731,7 @@ let test_rest_generate_openapi_document_relative_server_fallback () =
   check string "relative server url when host unknown" "/"
     (doc |> member "servers" |> index 0 |> member "url" |> to_string)
 
-(* ============================================================
-   get_bindings Tests
-   ============================================================ *)
 
-let test_get_bindings_nonempty () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "nonempty" true (List.length bindings > 0)
-
-let test_get_bindings_has_sse () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has sse" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.Sse) bindings)
-
-let test_get_bindings_has_jsonrpc () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has jsonrpc" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.JsonRpc) bindings)
-
-let test_get_bindings_has_rest () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has rest" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.Rest) bindings)
-
-let test_get_bindings_has_grpc () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has grpc" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.Grpc) bindings)
-
-let test_get_bindings_has_ws () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has ws" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.Ws) bindings)
-
-let test_get_bindings_has_webrtc () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has webrtc" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.Webrtc) bindings)
-
-let test_get_bindings_url_contains_host () =
-  let bindings = Transport.get_bindings ~host:"127.0.0.1" ~port:9000 in
-  check bool "contains host" true
-    (List.exists (fun b ->
-      try let _ = Str.search_forward (Str.regexp "127.0.0.1") b.Transport.url 0 in true
-      with Not_found -> false
-    ) bindings)
-
-let test_get_bindings_url_contains_port () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:9999 in
-  check bool "contains port" true
-    (List.exists (fun b ->
-      try let _ = Str.search_forward (Str.regexp "9999") b.Transport.url 0 in true
-      with Not_found -> false
-    ) bindings)
-
-(* ============================================================
-   bindings_to_json Tests
-   ============================================================ *)
-
-let test_bindings_to_json_nonempty () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  let json = Transport.bindings_to_json bindings in
-  let json_str = Yojson.Safe.to_string json in
-  check bool "nonempty" true (String.length json_str > 2)
-
-let test_bindings_to_json_has_protocol () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  let json = Transport.bindings_to_json bindings in
-  let json_str = Yojson.Safe.to_string json in
-  check bool "has protocol" true
-    (try let _ = Str.search_forward (Str.regexp "protocol") json_str 0 in true
-     with Not_found -> false)
-
-let test_bindings_to_json_has_url () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  let json = Transport.bindings_to_json bindings in
-  let json_str = Yojson.Safe.to_string json in
-  check bool "has url" true
-    (try let _ = Str.search_forward (Str.regexp "url") json_str 0 in true
-     with Not_found -> false)
 
 (* generate_request_id, parallel_requests, batch_requests removed: dead code (#2990) *)
 
@@ -948,11 +840,6 @@ let () =
       test_case "creation" `Quick test_error_creation;
       test_case "with data" `Quick test_error_with_data;
     ];
-    "binding", [
-      test_case "creation" `Quick test_binding_creation;
-      test_case "rest" `Quick test_binding_rest;
-      test_case "grpc" `Quick test_binding_grpc;
-    ];
     "jsonrpc", [
       test_case "version" `Quick test_jsonrpc_version;
       test_case "parse valid" `Quick test_jsonrpc_parse_request_valid;
@@ -1026,22 +913,6 @@ let () =
       test_case "document" `Quick test_rest_generate_openapi_document;
       test_case "relative server fallback" `Quick
         test_rest_generate_openapi_document_relative_server_fallback;
-    ];
-    "get_bindings", [
-      test_case "nonempty" `Quick test_get_bindings_nonempty;
-      test_case "has sse" `Quick test_get_bindings_has_sse;
-      test_case "has jsonrpc" `Quick test_get_bindings_has_jsonrpc;
-      test_case "has rest" `Quick test_get_bindings_has_rest;
-      test_case "has grpc" `Quick test_get_bindings_has_grpc;
-      test_case "has ws" `Quick test_get_bindings_has_ws;
-      test_case "has webrtc" `Quick test_get_bindings_has_webrtc;
-      test_case "url contains host" `Quick test_get_bindings_url_contains_host;
-      test_case "url contains port" `Quick test_get_bindings_url_contains_port;
-    ];
-    "bindings_to_json", [
-      test_case "nonempty" `Quick test_bindings_to_json_nonempty;
-      test_case "has protocol" `Quick test_bindings_to_json_has_protocol;
-      test_case "has url" `Quick test_bindings_to_json_has_url;
     ];
     "stats", [
       test_case "record success" `Quick test_stats_record_request_success;

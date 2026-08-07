@@ -244,7 +244,7 @@ let with_server f =
   in
   let log_file = Filename.temp_file "mcp-post-sse-e2e-" ".log" in
   let base_path = Filename.temp_dir "mcp-post-sse-base-" "" in
-  Masc.Auth.save_auth_config base_path
+  Auth.save_auth_config base_path
     { Masc_domain.default_auth_config with
       enabled = false
     ; require_token = false

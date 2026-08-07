@@ -455,19 +455,29 @@ let test_bytes_cache_counters () =
   Alcotest.(check (float 0.001)) "fresh allocation forces another miss"
     2.0 (read_counter misses_name -. misses0)
 
+(* [seq] is per-session but the payload text is shared across every session that
+   subscribed to the slice, so a [seq] inside the payload would make the sharing
+   wrong rather than merely wasteful.  [send_dashboard_delta_frame] carries it in
+   a separate notification for exactly that reason.
+
+   Written against "goal_loop_status" -> "goals" (#23339).  RFC-0352 (#25500)
+   deleted that mapping arm, which left this red for 17 days -- unnoticed because
+   test_ws_transport is not in any ci.yml target list.  The property under test is
+   about the shared-payload contract and not about which event carries it, so it
+   moves to a live mapping instead of being deleted with the dead vocabulary. *)
 let test_dashboard_delta_payload_text_excludes_seq () =
   let event =
     external_event_of_payload
       (`Assoc
         [
-          ("type", `String "goal_loop_status");
+          ("type", `String "keeper_composite_changed");
           ("payload", `Assoc [ ("status", `String "running") ]);
         ])
   in
   match Ws.__test_dashboard_delta_payload_text_for_event event with
   | None -> Alcotest.fail "expected shared dashboard delta payload"
   | Some frame ->
-      Alcotest.(check string) "slice" "goals" frame.slice;
+      Alcotest.(check string) "slice" "composite" frame.slice;
       let json = Yojson.Safe.from_string frame.text in
       let params =
         match json with
@@ -483,7 +493,7 @@ let test_dashboard_delta_payload_text_excludes_seq () =
         false
         (List.mem_assoc "seq" fields);
       Alcotest.(check (option string)) "event type preserved"
-        (Some "goal_loop_status")
+        (Some "keeper_composite_changed")
         (Option.bind (List.assoc_opt "event_type" fields) (function
           | `String s -> Some s
           | _ -> None))

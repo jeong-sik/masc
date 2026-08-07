@@ -146,7 +146,7 @@ include Tool_task_contract_gate
 
 let handle_add_task ?created_by ~tool_name ~start_time ctx args =
   let valid_keys =
-    [ "title"; "priority"; "description"; "goal_id"; "contract"; "predecessor_task_id" ]
+    [ "title"; "priority"; "description"; "goal_id"; "contract"; "predecessor_task_id"; "required_repo" ]
   in
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
@@ -173,6 +173,11 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
      [Unknown_predecessor] / [Predecessor_not_terminal] errors). *)
   let predecessor_task_id =
     match Safe_ops.json_string_opt "predecessor_task_id" args with
+    | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
+    | _ -> None
+  in
+  let required_repo =
+    match Safe_ops.json_string_opt "required_repo" args with
     | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
     | _ -> None
   in
@@ -222,6 +227,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
           Workspace.add_task_with_result ?contract
             ?goal_id
             ?predecessor_task_id
+            ?required_repo
             ~created_by ctx.config ~title:trimmed_title
             ~priority ~description
         in
@@ -241,6 +247,8 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
                   ; "goal_id", Json_util.string_opt_to_json goal_id
                   ; ( "predecessor_task_id"
                     , Json_util.string_opt_to_json predecessor_task_id )
+                  ; ( "required_repo"
+                    , Json_util.string_opt_to_json required_repo )
                   ])
              ()
          | Error err ->
@@ -297,7 +305,7 @@ let handle_set_goal ~tool_name ~start_time ctx args =
           (Task_goal_assignment.set_task_goal_error_to_string err))
 
 let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
-  let valid_item_keys = [ "title"; "priority"; "description"; "goal_id"; "contract" ] in
+  let valid_item_keys = [ "title"; "priority"; "description"; "goal_id"; "contract"; "required_repo" ] in
   let tasks_json = match Json_util.assoc_member_opt "tasks" args with
     | Some (`List l) -> l
     | _ -> []
@@ -353,7 +361,12 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
                  (String.concat ", " unknown)
                  (String.concat ", " valid_item_keys))
           else
-            Ok (title, priority, description, contract, goal_id)
+            let required_repo =
+              match Json_util.get_string t "required_repo" with
+              | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
+              | _ -> None
+            in
+            Ok (title, priority, description, contract, goal_id, required_repo)
       | Error error -> Error error
   ) tasks_json in
   let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in

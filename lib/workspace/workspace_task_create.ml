@@ -104,6 +104,7 @@ let add_task_with_result
       ?goal_id
       ?created_by
       ?predecessor_task_id
+      ?required_repo
       config
       ~title
       ~priority
@@ -114,6 +115,7 @@ let add_task_with_result
   let actor = Option.value ~default:"system" created_by in
   let goal_id = Workspace_task_classify.trim_opt goal_id in
   let predecessor_task_id = Workspace_task_classify.trim_opt predecessor_task_id in
+  let required_repo = Workspace_task_classify.trim_opt required_repo in
   try
     with_file_lock config lock_path (fun () ->
       match read_backlog_r config with
@@ -168,6 +170,7 @@ let add_task_with_result
              ; cycle_count = 0
              ; reclaim_policy = None
              ; do_not_reclaim_reason = None
+             ; required_repo
              }
            in
            (* [write_backlog] stamps version/last_updated at the commit point. *)
@@ -262,7 +265,7 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
          let next_num = ref (next_task_number config backlog) in
          let added_tasks_with_goal_ids =
            List.map
-             (fun (title, priority, description, contract, goal_id) ->
+             (fun (title, priority, description, contract, goal_id, required_repo) ->
                 let task_id = Printf.sprintf "task-%03d" !next_num in
                 incr next_num;
                 let contract =
@@ -290,6 +293,7 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                   ; cycle_count = 0
                   ; reclaim_policy = None
                   ; do_not_reclaim_reason = None
+                  ; required_repo
                   }
                 in
                 (task, goal_id))
@@ -386,7 +390,7 @@ let batch_add_tasks ?created_by config tasks =
     config
     (List.map
        (fun (title, priority, description, goal_id) ->
-          title, priority, description, None, goal_id)
+          title, priority, description, None, goal_id, None)
        tasks)
 ;;
 

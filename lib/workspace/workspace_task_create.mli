@@ -54,6 +54,7 @@ val add_task_with_result :
   ?goal_id:string ->
   ?created_by:string ->
   ?predecessor_task_id:string ->
+  ?required_repo:string ->
   config ->
   title:string ->
   priority:int ->
@@ -73,19 +74,19 @@ val batch_add_tasks :
 val batch_add_tasks_with_contracts :
   ?created_by:string ->
   config ->
-  (string * int * string * Masc_domain.task_contract option * string option) list ->
+  (string * int * string * Masc_domain.task_contract option * string option * string option) list ->
   string
 
 val batch_add_tasks_with_contracts_result :
   ?created_by:string ->
   config ->
-  (string * int * string * Masc_domain.task_contract option * string option) list ->
+  (string * int * string * Masc_domain.task_contract option * string option * string option) list ->
   (batch_add_tasks_success, batch_add_tasks_error) result
 
 val batch_add_tasks_internal :
   ?created_by:string ->
   config ->
-  (string * int * string * Masc_domain.task_contract option * string option) list ->
+  (string * int * string * Masc_domain.task_contract option * string option * string option) list ->
   string
 (** Internal batch implementation shared by [batch_add_tasks] and
     [batch_add_tasks_with_contracts]. *)

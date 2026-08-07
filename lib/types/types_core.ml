@@ -647,6 +647,9 @@ type task = {
   cycle_count: int; [@default 0]
   reclaim_policy: task_reclaim_policy option; [@default None]
   do_not_reclaim_reason: string option; [@default None]
+  (* task-205: optional repo required for execution.
+     When set, taskmaster can pre-check repo availability before claim. *)
+  required_repo: string option; [@default None]
 } [@@deriving show]
 
 (* RFC-0323 G-10: the typed reclaim claim gate is retired. #23661 removed its
@@ -828,6 +831,7 @@ let task_of_yojson json =
            | Error _ -> None)
     in
     let do_not_reclaim_reason = opt "do_not_reclaim_reason" in
+    let required_repo = opt "required_repo" in
     match task_status_of_yojson json with
     | Ok task_status ->
         Ok
@@ -846,6 +850,7 @@ let task_of_yojson json =
             cycle_count;
             reclaim_policy;
             do_not_reclaim_reason;
+            required_repo;
           }
     | Error e -> Error e
   with e -> Error (Printexc.to_string e)

@@ -220,6 +220,7 @@ type task =
   ; cycle_count : int [@default 0]
   ; reclaim_policy : task_reclaim_policy option [@default None]
   ; do_not_reclaim_reason : string option [@default None]
+  ; required_repo : string option [@default None]
   }
 [@@deriving show]
 

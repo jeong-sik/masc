@@ -69,15 +69,19 @@ val owned_executing_goals_without_tasks :
     decoration and should be removed. *)
 
 val unowned_executing_goals_without_tasks :
-  config:Workspace.config -> (string * string) list
-(** RFC-0362 §6 Q2 — the executing Goals nobody owns and no Task serves. The
-    same list for every keeper, because an unowned Goal is addressed to whoever
-    reads it.
+  config:Workspace.config -> (string * string * string option) list
+(** RFC-0362 §6 Q2 — the executing Goals nobody owns and no Task serves, each
+    with its [parent_goal_id]. The same list for every keeper, because an
+    unowned Goal is addressed to whoever reads it.
 
     The prompt already states that taking one is a move a keeper can make, and
     [handle_goal_assign] carries no ownership check. What was missing was the
     sighting: with 15 of 16 live Goals unowned,
-    {!owned_executing_goals_without_tasks} renders for nobody. *)
+    {!owned_executing_goals_without_tasks} renders for nobody.
+
+    The parent rides along because the list misreads without it: on the live
+    store seven of the ten are children of the eighth, and as peers "take one"
+    cannot distinguish taking the umbrella from taking one service under it. *)
 
 val active_goal_summaries :
   config:Workspace.config ->

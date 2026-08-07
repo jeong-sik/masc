@@ -101,7 +101,6 @@ type policy =
   ; readonly_hint : bool option
   ; retryable : bool
   ; cwd_scope : string option
-  ; inline_safe : bool
   ; polling_read : bool
   }
 
@@ -263,7 +262,7 @@ let discovery_example ~label ?cwd ~argv () =
 ;;
 
 let policy ?readonly ?readonly_of_input ?cwd_scope ?(retryable = false)
-      ?(inline_safe = false) ?(polling_read = false) ()
+      ?(polling_read = false) ()
   =
   let readonly_of_input =
     match readonly_of_input with
@@ -274,7 +273,6 @@ let policy ?readonly ?readonly_of_input ?cwd_scope ?(retryable = false)
   ; readonly_hint = readonly
   ; retryable
   ; cwd_scope
-  ; inline_safe
   ; polling_read
   }
 ;;
@@ -1124,23 +1122,12 @@ let analyze_image_schema =
     ]
 ;;
 
-let read_only_in_process_policy ?(inline_safe = false) ?(polling_read = false) ()
-  =
-  policy
-    ~readonly:true
-    ~retryable:true
-    ~inline_safe
-    ~polling_read
-    ()
+let read_only_in_process_policy ?(polling_read = false) () =
+  policy ~readonly:true ~retryable:true ~polling_read ()
 ;;
 
-let write_in_process_policy ?(retryable = false) ?(inline_safe = false) ()
-  =
-  policy
-    ~readonly:false
-    ~retryable
-    ~inline_safe
-    ()
+let write_in_process_policy ?(retryable = false) () =
+  policy ~readonly:false ~retryable ()
 ;;
 
 let in_process_descriptor_with_schema_source
@@ -1187,14 +1174,12 @@ let in_process_descriptor ~keeper_model_projection ~id ~name ~description
    [runtime_handler] variant but expose distinct [internal_name]s so each
    tool retains its own descriptor entry and receipt evidence. The
    [keeper_tool_in_process_runtime] handler routes by descriptor.internal_name. *)
-let cluster_policy ?(polling_read = false) ~readonly ~inline_safe () =
+let cluster_policy ?(polling_read = false) ~readonly () =
   if polling_read && not readonly then
     invalid_arg "polling_read descriptors must declare readonly=true";
-  if inline_safe && not readonly then
-    invalid_arg "inline_safe descriptors must declare readonly=true";
   if readonly
-  then read_only_in_process_policy ~inline_safe ~polling_read ()
-  else write_in_process_policy ~inline_safe ()
+  then read_only_in_process_policy ~polling_read ()
+  else write_in_process_policy ()
 ;;
 
 let cluster_descriptor_with_schema_source
@@ -1208,10 +1193,9 @@ let cluster_descriptor_with_schema_source
       ~description
       ~handler
       ~readonly
-      ~inline_safe
       ()
   =
-  let policy = cluster_policy ~polling_read ~readonly ~inline_safe () in
+  let policy = cluster_policy ~polling_read ~readonly () in
   in_process_descriptor_with_schema_source
     ~capability_identity
     ~keeper_model_projection
@@ -1234,7 +1218,7 @@ let cluster_descriptor_with_schema_source
    and re-typing the other beside it is what allowed the drift. *)
 let cluster_descriptor ?(polling_read = false) ~capability_identity
       ~keeper_model_projection ~id ~name
-      ~handler ~readonly ~inline_safe ()
+      ~handler ~readonly ()
   =
   let input_schema_source, (schema : Masc_domain.tool_schema) =
     match find_cluster_schema_opt name with
@@ -1252,7 +1236,6 @@ let cluster_descriptor ?(polling_read = false) ~capability_identity
     ~description:schema.description
     ~handler
     ~readonly
-    ~inline_safe
     ()
 ;;
 
@@ -1300,7 +1283,6 @@ let voice_descriptor name ~readonly =
     ~name
     ~handler:Tool_voice_dispatch
     ~readonly
-    ~inline_safe:false
     ()
 ;;
 
@@ -1312,7 +1294,6 @@ let task_descriptor ~capability_identity id name ~readonly =
     ~name
     ~handler:Tool_task_dispatch
     ~readonly
-    ~inline_safe:false
     ()
 ;;
 
@@ -1331,7 +1312,6 @@ let masc_task_descriptor id name ~readonly =
     ~name
     ~handler:Tool_masc_task_dispatch
     ~readonly
-    ~inline_safe:false
     ()
 ;;
 
@@ -1344,7 +1324,6 @@ let masc_task_transport_descriptor id name ~readonly =
     ~name
     ~handler:Tool_masc_task_dispatch
     ~readonly
-    ~inline_safe:false
     ()
 ;;
 
@@ -1356,7 +1335,6 @@ let masc_plan_descriptor id name ~readonly =
     ~name
     ~handler:Tool_masc_plan_dispatch
     ~readonly
-    ~inline_safe:false
     ()
 ;;
 
@@ -1369,7 +1347,6 @@ let masc_run_descriptor name ~readonly =
     ~name
     ~handler:Tool_masc_run_dispatch
     ~readonly
-    ~inline_safe:false
     ()
 ;;
 
@@ -1381,7 +1358,6 @@ let masc_agent_descriptor id name ~readonly =
     ~name
     ~handler:Tool_masc_agent_dispatch
     ~readonly
-    ~inline_safe:false
     ()
 ;;
 
@@ -1398,7 +1374,6 @@ let masc_workspace_descriptor
     ~name
     ~handler:Tool_masc_workspace_dispatch
     ~readonly
-    ~inline_safe:false
     ()
 ;;
 
@@ -1412,7 +1387,6 @@ let masc_misc_descriptor id name ~readonly =
     ~name
     ~handler:Tool_masc_misc_dispatch
     ~readonly
-    ~inline_safe:false
     ()
 ;;
 
@@ -1428,7 +1402,6 @@ let masc_control_descriptor operation =
     ~description:schema.description
     ~handler:Tool_masc_control_dispatch
     ~readonly:false
-    ~inline_safe:false
     ()
 ;;
 
@@ -1440,7 +1413,6 @@ let masc_agent_timeline_descriptor name description ~readonly =
     ~name
     ~handler:Tool_masc_agent_timeline_dispatch
     ~readonly
-    ~inline_safe:false
     ()
 ;;
 
@@ -1456,7 +1428,6 @@ let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
     ~description:schema.description
     ~handler:Tool_masc_schedule_dispatch
     ~readonly:definition.read_only
-    ~inline_safe:false
     ()
 ;;
 
@@ -1486,7 +1457,6 @@ let masc_keeper_descriptor
     ~description:schema.description
     ~handler:Tool_masc_keeper_dispatch
     ~readonly
-    ~inline_safe:false
     ()
 ;;
 
@@ -1515,7 +1485,6 @@ let masc_library_descriptor (definition : Tool_schemas_library.definition) =
     ~description
     ~handler:Tool_masc_library_dispatch
     ~readonly:definition.read_only
-    ~inline_safe:false
     ()
 ;;
 
@@ -1542,7 +1511,6 @@ let masc_local_runtime_descriptor
     ~description:schema.description
     ~handler:Tool_masc_local_runtime_dispatch
     ~readonly:true
-    ~inline_safe:false
     ()
 ;;
 
@@ -1907,7 +1875,6 @@ let internal_descriptors : t list =
       ~name:"masc_keeper_waiting_inventory"
       ~handler:Tool_masc_misc_dispatch
       ~readonly:true
-      ~inline_safe:false
       ()
   ; masc_misc_descriptor "tool_help" "masc_tool_help"
        ~readonly:true
@@ -2053,12 +2020,6 @@ let readonly_internal_names () =
   |> List.sort_uniq String.compare
 ;;
 
-let keeper_safe_inline_names () =
-  all_descriptors ()
-  |> List.concat_map (fun d -> if d.policy.inline_safe then internal_names d else [])
-  |> List.sort_uniq String.compare
-;;
-
 let public_name_for_internal internal_name =
   match public_descriptors_for_internal internal_name with
   | [] -> None
@@ -2088,7 +2049,6 @@ let common_policy_json_fields ~readonly_key policy =
   [ readonly_key, Json_util.bool_opt_to_json policy.readonly_hint
   ; "retryable", `Bool policy.retryable
   ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
-  ; "inline_safe", `Bool policy.inline_safe
   ; "polling_read", `Bool policy.polling_read
   ]
 ;;

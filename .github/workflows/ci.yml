@@ -1538,7 +1538,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_persona_name @test/runtest-test_dashboard_briefing @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_verification_authority_tools"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_persona_name @test/runtest-test_dashboard_briefing @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_telemetry_eio_pbt @test/runtest-test_verification_authority_tools"
 
       - name: Run transport harness suite
         id: transport_harness_suite

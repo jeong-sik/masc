@@ -38,6 +38,12 @@ let all_assertion_kinds = [ Task_claimed; Current_task_set ]
 
 let valid_assertion_strings = List.map assertion_kind_to_string all_assertion_kinds
 
+(* Stands in for an [assertions] element that was not a JSON string. It is
+   deliberately not a valid assertion name, so [check_assertion] reports it
+   with [passed = false] and [expected_assertions] instead of the caller
+   losing the element silently. *)
+let unreadable_assertion = "<non-string assertion>"
+
 let assertion_kind_of_string_lenient = function
   | "task_claimed" -> Some Task_claimed
   | "current_task_set" -> Some Current_task_set
@@ -73,11 +79,19 @@ let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_tim
   let assertions =
     match Json_util.assoc_member_opt "assertions" args with
     | Some (`List items) ->
+      (* Total, so the list the caller sent and the list that gets checked
+         have the same length. [List.filter_map] dropped anything that was
+         not a JSON string before it reached [check_assertion], so the
+         element never appeared in the response and [all_passed] answered a
+         narrower question than the caller asked. [check_assertion] already
+         handles input it cannot read -- an unrecognised name comes back
+         [passed = false] with [expected_assertions] -- and a wrong-typed
+         element now takes that same path. *)
       let parsed =
-        List.filter_map
+        List.map
           (function
-            | `String s -> Some s
-            | _ -> None)
+            | `String s -> s
+            | _ -> unreadable_assertion)
           items
       in
       (match parsed with

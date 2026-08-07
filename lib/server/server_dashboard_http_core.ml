@@ -304,35 +304,11 @@ let is_dashboard_cache_timeout_json = function
 
 module Shell_projection_trace = Server_dashboard_shell_projection_trace
 
-type shell_projection_timing = Shell_projection_trace.shell_projection_timing =
-  { projection_label : string
-  ; projection_ms : int
-  }
-
 type shell_projection_trace_status =
   Shell_projection_trace.shell_projection_trace_status =
   | Shell_trace_running
   | Shell_trace_finished
   | Shell_trace_failed
-
-type shell_projection_trace = Shell_projection_trace.shell_projection_trace =
-  { trace_light : bool
-  ; trace_started_at : float
-  ; mutable trace_status : shell_projection_trace_status
-  ; mutable trace_active : string list
-  ; mutable trace_completed : shell_projection_timing list
-  ; mutable trace_finished_at : float option
-  }
-
-type shell_projection_trace_snapshot =
-  Shell_projection_trace.shell_projection_trace_snapshot =
-  { snapshot_status : shell_projection_trace_status
-  ; snapshot_light : bool
-  ; snapshot_elapsed_ms : int
-  ; snapshot_active : string list
-  ; snapshot_completed : shell_projection_timing list
-  ; snapshot_finished_at : float option
-  }
 
 let shell_projection_trace_start = Shell_projection_trace.start
 let shell_projection_trace_start_projection = Shell_projection_trace.start_projection

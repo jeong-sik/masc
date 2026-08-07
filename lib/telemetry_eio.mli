@@ -56,6 +56,7 @@ type event =
       session_id : string option; [@default None]
       operation_id : string option; [@default None]
       worker_run_id : string option; [@default None]
+      execution_id : string option; [@default None]
       error_kind : error_kind option; [@default None]
       error_message : string option; [@default None]
       exit_code : int option; [@default None]
@@ -187,6 +188,7 @@ val track_tool_called :
   ?session_id:string ->
   ?operation_id:string ->
   ?worker_run_id:string ->
+  ?execution_id:string ->
   ?failure_class:Tool_result.tool_failure_class ->
   ?error_kind:error_kind ->
   ?error_message:string ->

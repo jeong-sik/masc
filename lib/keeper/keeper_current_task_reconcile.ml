@@ -182,7 +182,7 @@ let sync_current_task_id_from_backlog ~(config : Workspace.config)
            (match desired with
             | Some task_id -> Keeper_id.Task_id.to_string task_id
             | None -> "(cleared)")
-           msg);
+           (Keeper_meta_store.write_meta_error_to_string msg));
       (* RFC-0142 / audit 2026-05-21 §10.2: this is the success path of a
          routine drift correction, firing on every observed delta between
          keeper_meta.current_task_id and backlog ownership.  Live measurement

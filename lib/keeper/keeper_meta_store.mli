@@ -15,9 +15,6 @@ val runtime_meta_write_sync_hook :
 val register_runtime_meta_write_sync :
   (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) -> unit
 
-(** Pre-compiled regex matching the CAS [meta version conflict]
-    error message. Exposed for symmetry — used internally by
-    [is_version_conflict_error]. *)
 (** Read a keeper meta JSON file at [path]. Returns [Ok None] when
     the file does not exist. Unknown top-level keys are rejected with a
     reset-required error; the persisted file is never rewritten. *)
@@ -120,6 +117,26 @@ val write_meta_deferred_runtime_sync :
 (** Lifecycle-owner variant of [write_meta]. The opaque reservation token is
     checked against the same BasePath/name key before entering the per-path
     CAS critical section. *)
+(** Why a metadata write did not land. [Version_conflict] is the CAS race the
+    retry path recognises; the caller sees it only after retries are exhausted.
+    Exposed so callers match on the case instead of testing the rendered
+    string -- {!write_meta_error_to_string} stays for log and label text. *)
+type write_meta_error =
+  | Version_conflict of
+      { keeper_name : string
+      ; expected : int
+      ; actual : int
+      }
+  | Lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Read_failed of string
+  | Persist_failed of string
+  | Invariant_violation of
+      { keeper_name : string
+      ; detail : string
+      }
+
+val write_meta_error_to_string : write_meta_error -> string
+
 type identity_update_error =
   | Identity_missing
   | Identity_changed
@@ -193,8 +210,19 @@ val remove_meta_if_exact_identity :
   meta_version:int ->
   (unit, exact_identity_error) result
 
-(** [true] iff [msg] matches [version_conflict_re]. *)
-val is_version_conflict_error : string -> bool
+(** Whether a successful meta write also runs the runtime registry-sync hook. *)
+type runtime_sync =
+  | Sync_runtime
+  | Defer_runtime_sync
+
+(** Same CAS persistence as {!write_meta}, but keeps the typed error so the
+    caller can match the case instead of reading the rendered string. *)
+val write_meta_typed :
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  ?runtime_sync_override:runtime_sync ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, write_meta_error) result
 
 (** Retry [write_meta] on CAS version conflicts using caller-declared
     field ownership via [merge]. Use [Keeper_meta_merge.caller_wins]
@@ -206,7 +234,7 @@ val write_meta_with_merge :
   merge:(latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta) ->
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
-  (unit, string) result
+  (unit, write_meta_error) result
 
 val write_meta_with_merge_for_lifecycle :
   Keeper_lifecycle_reservation.token ->

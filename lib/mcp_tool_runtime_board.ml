@@ -246,9 +246,14 @@ let ensure_board_post_author ~agent_name arguments =
   enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
     ~agent_name arguments
 
-let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~sw ~clock ~name ~start_time =
-  (* fire-and-forget: unused params kept for interface contract with callers *)
-  ignore (config, state, sw, clock, start_time);
+(* [sw] and [clock] used to sit here beside the others, under an [ignore] and a
+   comment calling all five "unused params kept for interface contract with
+   callers". Three of the five -- [config], [state] and [start_time] -- are used
+   in this function, and there is no interface contract: [dispatch] has one
+   caller, a direct call from [Mcp_tool_runtime], and the sibling handlers take
+   a different shape (~tool_name ~start_time ctx). What the [ignore] did was
+   suppress the warning that would have named [sw] and [clock] as dead. *)
+let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~name ~start_time =
   let arguments =
     match name with
     | "masc_board_post" | "masc_board_post_update" ->

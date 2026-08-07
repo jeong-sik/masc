@@ -563,10 +563,20 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       | Some hv ->
           if label_verdict_of_verdict ev = hv then
             (fp, fn, ag + 1)
-          else
+          else (
+            (* Every disagreement pair is written out. The wildcard this
+               replaces asserted "false negative" for anything that was not
+               (Approve, Reject_label); a third label_verdict would have been
+               counted as a false negative and quietly lowered
+               agreement_rate. Listing the pairs makes the compiler ask
+               instead. *)
             match ev, hv with
             | Task.Anti_rationalization.Approve, Reject_label -> (fp + 1, fn, ag)
-            | _ -> (fp, fn + 1, ag)
+            | Task.Anti_rationalization.Reject _, Approve_label -> (fp, fn + 1, ag)
+            | Task.Anti_rationalization.Approve, Approve_label
+            | Task.Anti_rationalization.Reject _, Reject_label ->
+                (* [label_verdict_of_verdict ev = hv] already returned above. *)
+                (fp, fn, ag + 1))
     ) verdict_hashes (0, 0, 0)
   in
   let labeled_total = false_pos + false_neg + agree in

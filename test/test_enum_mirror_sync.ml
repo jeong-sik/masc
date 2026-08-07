@@ -31,11 +31,31 @@ let all_schemas () =
   @ Tool_shard_types.voice_tools
   @ [ Tool_shard_types.tool_execute_schema ]
   @ board_schemas
+  (* The Schedule tools publish from their own library rather than the keeper
+     shard, so they were outside this walk and their four hand-written enum
+     lists were unguarded. [schedule_status] is the one with an owner to
+     compare against. *)
+  @ Tool_schemas_schedule.schemas
   (* [board_schemas] above is the eight curated Keeper projections. The other
      thirteen Board tools reach a Keeper through the canonical registry, which
      was outside this walk, and so were the Task schemas. *)
   @ Board_tool_registry.tools
   @ Masc.Task.Schemas.schemas
+;;
+
+(* [Schedule_domain.all_schedule_statuses] is the owner: [test_schedule_domain]
+   pins that every constructor is in it, and the dashboard reads it. The tool
+   schema hand-wrote the same seven strings, so the enum an LLM is handed could
+   drift from the one the decoder takes without anything going red. *)
+let test_schedule_status_mirror () =
+  check_mirror_in_sync
+    ~copy_lives_in:"tool_schemas_schedule.ml"
+    ~label:"schedule_status_enum_strings"
+    ~owner:
+      (List.map
+         Schedule_domain.schedule_status_to_string
+         Schedule_domain.all_schedule_statuses)
+    ()
 ;;
 
 (* Every value a schema advertises has to be one the handler takes -- the
@@ -195,6 +215,8 @@ let () =
         ; test_case "fs write mode" `Quick test_fs_write_mode_mirror
         ; test_case "board sort order" `Quick test_sort_order_mirror
         ; test_case "board vote direction" `Quick test_vote_direction_mirror
+
+        ; test_case "schedule status" `Quick test_schedule_status_mirror
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode
         ; test_case "reclaim_policy values decode" `Quick

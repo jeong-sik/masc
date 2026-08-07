@@ -113,7 +113,7 @@ let runtime_failed_decision ~idx ~runtime_id error =
     [
       ("idx", `Int idx);
       ("runtime_id", `String runtime_id);
-      ("error_kind", `String (Oas_compat.error_kind error));
+      ("error_kind", `String (Agent_sdk_compat.error_kind error));
     ]
 
 let lane_should_retry
@@ -657,7 +657,7 @@ let run_named
           keeper_name
           attempt_runtime_id
           attempt
-          (Oas_compat.error_kind error);
+          (Agent_sdk_compat.error_kind error);
       allowed)
     ~runtime_id:
       (match deferred_runtime_lane with

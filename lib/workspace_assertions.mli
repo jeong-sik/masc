@@ -77,6 +77,10 @@ val assertion_kind_of_string_lenient : string -> assertion_kind option
       fall back to the canonical defaults ([task_claimed] /
       [current_task_set]).  An empty list also falls back to
       defaults so callers cannot accidentally pass nothing.
+      Within a list, an element that is not a JSON string is not
+      discarded — it is carried through as an unrecognised assertion,
+      so it appears in the response with [passed = false] and the
+      number of elements reported equals the number sent.
 
     {2 Return value}
     [{ success = true; message = json_string }] — [success] is

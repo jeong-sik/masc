@@ -51,7 +51,9 @@ val default_config : unit -> config
     inputs collapse to [1]; values above 24h collapse to [day_int]. *)
 val validate_ttl : int -> int
 
-(** {1 In-Memory Pub/Sub} shared by Memory + FileSystem backends. *)
+(** {1 In-Memory Pub/Sub}
+
+    Shared by the Memory and FileSystem backends. *)
 module Pubsub_mem : sig
   type t
 

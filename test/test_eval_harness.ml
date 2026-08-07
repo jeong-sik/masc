@@ -198,6 +198,28 @@ let test_pass_at_k_edge_zero_n () =
   let p = Eval_harness.compute_pass_at_k ~k:1 ~n:0 ~c:0 in
   Alcotest.(check (float 0.01)) "zero n" 0.0 p
 
+(* The four cases above all sit where the unbiased estimator
+   1 - C(n-c,k)/C(n,k) and the plug-in 1 - (1-c/n)^k agree: c >= n, c = 0,
+   k = 1, and n = 0. They cannot see which one is implemented. These pick
+   points where the two disagree, which is what the .mli promises. *)
+
+let test_pass_at_k_is_unbiased_not_plug_in () =
+  (* 1 - C(4,3)/C(5,3) = 1 - 4/10 = 0.6. The plug-in gives
+     1 - (1 - 1/5)^3 = 0.488. *)
+  let p = Eval_harness.compute_pass_at_k ~k:3 ~n:5 ~c:1 in
+  Alcotest.(check (float 0.001)) "n=5 c=1 k=3" 0.6 p
+
+let test_pass_at_k_unbiased_half_passing () =
+  (* 1 - C(5,2)/C(10,2) = 1 - 10/45 = 0.7778. Plug-in: 0.75. *)
+  let p = Eval_harness.compute_pass_at_k ~k:2 ~n:10 ~c:5 in
+  Alcotest.(check (float 0.001)) "n=10 c=5 k=2" 0.7778 p
+
+let test_pass_at_k_certain_when_failures_below_k () =
+  (* Only one of five runs failed, so every 3-run sample contains a pass:
+     C(1,3) = 0 and pass@3 is exactly 1. The plug-in reports 0.992. *)
+  let p = Eval_harness.compute_pass_at_k ~k:3 ~n:5 ~c:4 in
+  Alcotest.(check (float 0.001)) "n=5 c=4 k=3 is certain" 1.0 p
+
 (* ================================================================ *)
 (* Test: scenario_of_json parsing                                    *)
 (* ================================================================ *)
@@ -464,6 +486,12 @@ let () =
       Alcotest.test_case "none pass" `Quick test_pass_at_k_none_pass;
       Alcotest.test_case "some pass" `Quick test_pass_at_k_some_pass;
       Alcotest.test_case "edge zero n" `Quick test_pass_at_k_edge_zero_n;
+      Alcotest.test_case "unbiased, not plug-in" `Quick
+        test_pass_at_k_is_unbiased_not_plug_in;
+      Alcotest.test_case "unbiased with half passing" `Quick
+        test_pass_at_k_unbiased_half_passing;
+      Alcotest.test_case "certain when failures below k" `Quick
+        test_pass_at_k_certain_when_failures_below_k;
     ]);
     ("scenario_parsing", [
       Alcotest.test_case "minimal" `Quick test_parse_minimal_scenario;

@@ -1375,12 +1375,7 @@ let record_before_advance ~worker_epoch ~base_path ~partition ~source ~next =
              Error "before-advance predispatch rejection requires a durable advancing visit")
         | Unbound ->
           (match source with
-           | Predispatch_rejection _ ->
-             let last_from =
-               match source with
-               | Predispatch_rejection visit -> visit
-               | Executed_failure _ -> assert false
-             in
+           | Predispatch_rejection last_from ->
              Ok
                (Running
                   { running with

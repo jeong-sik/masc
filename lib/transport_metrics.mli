@@ -8,9 +8,9 @@
     - [masc_ws_*] for WebSocket transport
     - [masc_agent_heartbeat_*] for agent liveness
 
-    Internal: 35 helpers stay private — \[sse_hot_sessions]
+    Internal: 35 helpers stay private — [sse_hot_sessions]
     (Atomic.t state cell mutated by {!set_sse_queue_snapshot}),
-    \[grpc_runtime_listening] / \[ws_runtime_listening] (bool
+    [grpc_runtime_listening] / [ws_runtime_listening] (bool
     Atomic.t cells mutated by the [set_*_runtime_listening]
     functions), [grpc_enabled] /
     [grpc_port] / [ws_port] (env-derived), [set_agent_heartbeat_age]

@@ -83,7 +83,8 @@ let seed_meta_file config m0 =
       m0
   with
   | Ok () -> ()
-  | Error e -> fail ("seed write failed: " ^ e)
+  | Error e ->
+    fail ("seed write failed: " ^ Keeper_meta_store.write_meta_error_to_string e)
 
 let persist_terminal_turn_meta_for_done ~config ~m0 ~active_goal_ids =
   let (_ : Keeper_meta_contract.keeper_meta) =

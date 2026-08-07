@@ -24,7 +24,7 @@ type trace_id = string
 val tool_type_of_name : string -> string
 
 (** [with_span ~tool_name f] opens an OTel span named
-    {v tool_dispatch.<tool_name> v}, invokes [f] inside the span, and
+    [tool_dispatch.<tool_name>], invokes [f] inside the span, and
     increments [tool_dispatch_total] with labels [tool = tool_name],
     [outcome = <outcome returned by f>], [surface], and [tool_type].
 

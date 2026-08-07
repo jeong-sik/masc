@@ -80,22 +80,15 @@ let submitted_evidence_sources ?(notes = "") ?handoff_context
 
 let clean_evidence_refs = non_empty_trimmed_strings
 
-(* Typed concat for the completion request output (observability only).
-   Only empty transport values are removed. Evidence meaning and sufficiency
-   belong to the authenticated completion authority. *)
-let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
-    ?submitted_evidence_refs
-    (task : Masc_domain.task) =
-  required_evidence_sources task
-  @ submitted_evidence_sources ~notes ?handoff_context ?submitted_evidence_refs task
-  |> clean_evidence_refs
-
-(* task-1664: the flat [evidence_refs] list above concatenates the
+(* task-1664: the flat projection that used to sit here concatenated the
    contract-required artifacts with the agent-submitted references, so a
-   verifier reading it cannot tell "the contract asked for a PR link" from
-   "here is the submitted PR link". The typed split keeps the two roles
-   distinct in the verification request; the flat projection above stays
-   byte-compatible for existing consumers. *)
+   verifier reading it could not tell "the contract asked for a PR link" from
+   "here is the submitted PR link". This typed split keeps the two roles
+   distinct in the verification request.
+
+   The flat one was kept afterwards for byte-compatibility with existing
+   consumers. It had none -- no caller inside this module or outside it -- so
+   it is gone. *)
 type verification_evidence =
   { required_artifacts : string list
   ; submitted_evidence : string list
@@ -118,7 +111,12 @@ let concrete_verification_evidence ?(notes = "") ?handoff_context
 (* JSON object fields for the typed split, spliced into the verification
    request output / board meta / SSE alongside the unchanged [evidence_refs]
    field. Shares the derived [verification_evidence_to_yojson] so the
-   serialization tested by the roundtrip is the one production emits. *)
+   serialization tested by the roundtrip is the one production emits.
+
+   That roundtrip is [test_verification] / "verification_evidence wire", which
+   states the wire object as a literal and checks this function against it. It
+   is named here because the sentence above claimed a test that did not exist
+   until it was written. *)
 let verification_evidence_fields (evidence : verification_evidence)
   : (string * Yojson.Safe.t) list =
   match verification_evidence_to_yojson evidence with

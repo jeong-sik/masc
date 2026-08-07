@@ -1179,14 +1179,14 @@ let test_board_curation_submit_roundtrips_to_read () =
     "Board has one high-priority routing item."
     Yojson.Safe.Util.(read_json |> member "summary" |> to_string)
 
-let mcp_runtime_board_dispatch ~sw ~clock name args =
+let mcp_runtime_board_dispatch name args =
   let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
   Mcp_tool_runtime_board.dispatch ~config:(Mcp_server.workspace_config state)
-    ~agent_name:"mcp-runtime-curator" ~arguments:args ~state ~sw ~clock ~name
+    ~agent_name:"mcp-runtime-curator" ~arguments:args ~state ~name
     ~start_time:(Unix.gettimeofday ())
 
-let require_mcp_runtime_result ~sw ~clock name args =
-  match mcp_runtime_board_dispatch ~sw ~clock name args with
+let require_mcp_runtime_result name args =
+  match mcp_runtime_board_dispatch name args with
   | Some result -> ((Tool_result.is_success result), (Tool_result.message result))
   | None -> Alcotest.failf "%s not routed by MCP runtime board dispatch" name
 
@@ -1194,15 +1194,16 @@ let test_board_curation_mcp_runtime_routes_read_and_submit () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Eio.Switch.run @@ fun sw ->
-  let clock = Eio.Stdenv.clock env in
+  (* The switch stays: [with_eio] scopes the fibers this test runs under. The
+     clock binding existed only to reach [dispatch], which never read it. *)
+  Eio.Switch.run @@ fun _sw ->
   let read_ok, read_body =
-    require_mcp_runtime_result ~sw ~clock "masc_board_curation_read" (make_args [])
+    require_mcp_runtime_result "masc_board_curation_read" (make_args [])
   in
   Alcotest.(check bool) "MCP runtime curation read ok" true read_ok;
   Alcotest.(check string) "MCP runtime curation read empty" "null" read_body;
   let submit_ok, submit_body =
-    require_mcp_runtime_result ~sw ~clock "masc_board_curation_submit"
+    require_mcp_runtime_result "masc_board_curation_submit"
       (make_args
          [
            ("submitted_by", `String "mcp-runtime-curator");
@@ -1219,7 +1220,7 @@ let test_board_curation_mcp_runtime_routes_read_and_submit () =
   Alcotest.(check string) "MCP runtime submitted_by persisted" "curator"
     Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
   let read2_ok, read2_body =
-    require_mcp_runtime_result ~sw ~clock "masc_board_curation_read" (make_args [])
+    require_mcp_runtime_result "masc_board_curation_read" (make_args [])
   in
   Alcotest.(check bool) "MCP runtime curation read after submit ok" true read2_ok;
   Alcotest.(check string) "MCP runtime curation read after submit summary"

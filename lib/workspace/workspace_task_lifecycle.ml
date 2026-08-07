@@ -265,7 +265,17 @@ let valid_next_actions ~same_agent ~task_status =
         ~notes:"preview"
         ~reason:"preview"
     with
-    | Ok _ -> true
+    (* An action the FSM admits but that leaves the status where it is -- Claim
+       on a Task you already hold, Start on one already started, Release on a
+       Todo, Cancel on a Cancelled one -- is not a next action. It is accepted
+       so a repeat is idempotent rather than an error, which is a different
+       question from "what can you do from here".
+
+       Listing them told a Keeper that a Done Task's next actions were
+       [claim;start;done], all three of which return it unchanged. The Goal
+       surface answers the same question the same way as of #27464: its
+       available-actions list carries [Move_to] and drops [Already]. *)
+    | Ok { new_status; _ } -> new_status <> task_status
     | Error _ -> false
   in
   List.filter try_action Masc_domain.all_task_actions

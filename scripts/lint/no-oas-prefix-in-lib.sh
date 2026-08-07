@@ -12,7 +12,7 @@
 #   agent_sdk_*). This gate prevents recurrence.
 #
 # Signal:
-#   Any tracked source file matching `lib/oas_*.{ml,mli}`. Such a file
+#   Any tracked source file matching `lib/**/oas_*.{ml,mli}`. Such a file
 #   would imply masc consumer code is being labeled as if it were
 #   OAS itself.
 #
@@ -29,10 +29,14 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-violations=$(ls lib/oas_*.ml lib/oas_*.mli 2>/dev/null || true)
+# Any depth under lib/, not just its top level. The prefix came back twice
+# after RFC-0047 closed — lib/oas_compat/ (2026-07-03) and
+# lib/server/oas_diag_sink.ml (2026-07-19) — because `ls lib/oas_*` never
+# looked into a subdirectory.
+violations=$(find lib -type f \( -name 'oas_*.ml' -o -name 'oas_*.mli' \) 2>/dev/null | sort || true)
 
 if [ -n "$violations" ]; then
-  echo "ERROR: lib/oas_*.{ml,mli} files reintroduced. The oas_* prefix in"
+  echo "ERROR: lib/**/oas_*.{ml,mli} files reintroduced. The oas_* prefix in"
   echo "masc/lib/ was retired by RFC-0047. Real OAS lives in a separate"
   echo "repository (~/me/workspace/yousleepwhen/oas, agent_sdk opam library)."
   echo ""
@@ -48,4 +52,4 @@ if [ -n "$violations" ]; then
   exit 1
 fi
 
-echo "OK: no lib/oas_*.{ml,mli} files (RFC-0047 prefix retirement preserved)."
+echo "OK: no lib/**/oas_*.{ml,mli} files (RFC-0047 prefix retirement preserved)."

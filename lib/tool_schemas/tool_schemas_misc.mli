@@ -46,9 +46,12 @@ val schemas : Masc_domain.tool_schema list
     Public-surface exclusion is enforced downstream by
     {!Tool_catalog.is_public_mcp} / [public_mcp_surface_tools], not by trimming
     the raw inventory. The schema [enum] fields derive from
-    {!dashboard_scope_enum_strings} /
     [Tool_schemas_specs_types.config_category_enum_strings] so
-    adding a value updates the schema automatically. *)
+    adding a value updates the schema automatically.
+
+    This also named [dashboard_scope_enum_strings], which is not in the tree;
+    [config_category_enum_strings] is the only [*_enum_strings] that module
+    exports. *)
 
 val mcp_runtime_tool_names : string list
 (** Exact names dispatched by [Mcp_tool_runtime]. *)

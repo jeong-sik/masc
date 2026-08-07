@@ -2092,8 +2092,82 @@ let test_generate_id_no_collisions () =
   done;
   Alcotest.(check int) "all 10k ids unique" n (StringSet.cardinal !seen)
 
+(* [tool_task_completion_review.ml] says of [verification_evidence_fields]:
+   "Shares the derived [verification_evidence_to_yojson] so the serialization
+   tested by the roundtrip is the one production emits."
+
+   There was no such roundtrip. The type reaches the verification request
+   output, the Board meta and SSE through [verification_evidence_fields], so its
+   wire shape is a contract with readers outside this repo's control, and
+   nothing pinned it.
+
+   Both expectations below are literals. Encoding with the function under test
+   and comparing against itself would pass whatever the encoder became. *)
+
+module CR = Masc.Task.Completion_review
+
+let evidence_fixture : CR.verification_evidence =
+  { required_artifacts = [ "artifact:spec.md"; "artifact:bench.json" ]
+  ; submitted_evidence = [ "note:tsc passes"; "artifact:run.log" ]
+  }
+
+let evidence_wire : Yojson.Safe.t =
+  `Assoc
+    [ ( "required_artifacts"
+      , `List [ `String "artifact:spec.md"; `String "artifact:bench.json" ] )
+    ; ( "submitted_evidence"
+      , `List [ `String "note:tsc passes"; `String "artifact:run.log" ] )
+    ]
+
+let test_verification_evidence_roundtrip () =
+  Alcotest.(check string)
+    "encodes to the stated wire shape"
+    (Yojson.Safe.to_string evidence_wire)
+    (Yojson.Safe.to_string (CR.verification_evidence_to_yojson evidence_fixture));
+  match CR.verification_evidence_of_yojson evidence_wire with
+  | Error detail -> Alcotest.failf "the stated wire shape must decode: %s" detail
+  | Ok decoded ->
+    Alcotest.(check (list string))
+      "required_artifacts survives the trip"
+      evidence_fixture.required_artifacts
+      decoded.required_artifacts;
+    Alcotest.(check (list string))
+      "submitted_evidence survives the trip"
+      evidence_fixture.submitted_evidence
+      decoded.submitted_evidence
+
+(* The half the comment is actually about: what production splices into the
+   request, the Board meta and SSE is the encoder this roundtrip pins, not a
+   second hand-built object beside it. *)
+let test_verification_evidence_fields_are_the_encoded_object () =
+  let fields = CR.verification_evidence_fields evidence_fixture in
+  Alcotest.(check string)
+    "the spliced fields are the encoded object"
+    (Yojson.Safe.to_string evidence_wire)
+    (Yojson.Safe.to_string (`Assoc fields))
+
+(* An absent list is not an empty one: a reader that sees no key cannot tell
+   "nothing was required" from "the producer did not say". *)
+let test_verification_evidence_decode_requires_both_keys () =
+  List.iter
+    (fun (label, json) ->
+       match CR.verification_evidence_of_yojson json with
+       | Ok _ -> Alcotest.failf "%s must not decode" label
+       | Error _ -> ())
+    [ ("a missing submitted_evidence", `Assoc [ ("required_artifacts", `List []) ])
+    ; ("a missing required_artifacts", `Assoc [ ("submitted_evidence", `List []) ])
+    ; ("a non-object", `List [])
+    ]
+
 let () =
   Alcotest.run "Verification" [
+    "verification_evidence wire", [
+      Alcotest.test_case "roundtrip" `Quick test_verification_evidence_roundtrip;
+      Alcotest.test_case "spliced fields are the encoded object" `Quick
+        test_verification_evidence_fields_are_the_encoded_object;
+      Alcotest.test_case "decode requires both keys" `Quick
+        test_verification_evidence_decode_requires_both_keys;
+    ];
     "criterion", [
       Alcotest.test_case "roundtrip" `Quick test_criterion_roundtrip;
       Alcotest.test_case "of_yojson errors" `Quick test_criterion_of_yojson_errors;

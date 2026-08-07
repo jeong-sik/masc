@@ -563,8 +563,13 @@ let bootstrap_live_keeper_meta ?lifecycle_token ~(ctx : _ context) (m : keeper_m
           Log.Keeper.emit
             Log.Warn
             ~category:Log.Heartbeat
-            ~details:(`Assoc [ "keeper", `String synced.name; "error", `String e ])
-            (Printf.sprintf "write_meta failed (bootstrap): %s" e)));
+            ~details:
+              (`Assoc
+                 [ "keeper", `String synced.name
+                 ; "error", `String (Keeper_meta_store.write_meta_error_to_string e)
+                 ])
+            (Printf.sprintf "write_meta failed (bootstrap): %s"
+                 (Keeper_meta_store.write_meta_error_to_string e))));
     synced
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

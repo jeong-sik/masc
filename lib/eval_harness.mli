@@ -147,9 +147,13 @@ val check_tool_expectations_with_evidence :
 (** {1 Pass@k + summary} *)
 
 val compute_pass_at_k : k:int -> n:int -> c:int -> float
-(** Probability of at least one pass in [k] independent runs given
-    [c] successes out of [n] total. The unbiased estimator from the
-    agent-eval / METR literature. *)
+(** The chance that a [k]-run sample drawn from the [n] recorded runs, [c] of
+    which passed, contains at least one pass: [1 - C(n-c, k) / C(n, k)].
+
+    The draw is without replacement, so a single failing run cannot fill more
+    than one slot of the sample. That is what separates this from
+    [1 - (1 - c/n)^k], which reads the same counts with replacement and
+    therefore never reports more than this one does. *)
 
 val summarize_runs :
   scenario:scenario -> k:int -> eval_run list -> eval_result

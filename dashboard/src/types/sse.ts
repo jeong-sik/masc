@@ -112,19 +112,12 @@ export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 
 
 export type AttributionOrigin = 'det' | 'nondet'
 
-// Known gate identifiers. Kept open ('string') so new gates can emit without
-// a client update, but enumerating canonical values gives us autocomplete and
-// catches typos.
-export type AttributionGate =
-  | 'verification'
-  | 'exec_policy'
-  | 'accountability'
-  | 'keeper_fsm'
-  | 'oas_completion'
-  | 'agent_lifecycle'
-  | 'task_transition'
-  | 'worker_dev_tools'
-  | string
+// The gate a backend attribution record carries. Open by contract: a new
+// gate emits without a client update. The union of named values that used to
+// sit here ended in '| string', which absorbs every other string, so it
+// caught no typo and gave no exhaustiveness — only the appearance of both.
+// The gates masc actually emits live in attribution-panel's KNOWN_GATES.
+export type AttributionGate = string
 
 // Gate decision outcome. Discriminated union — exhaustive switch on 'kind'.
 export type AttributionOutcome =

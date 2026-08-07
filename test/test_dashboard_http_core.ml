@@ -6,6 +6,7 @@ module Lib = Masc
 module Auth = Auth
 module Keeper_chat_queue = Masc.Keeper_chat_queue
 module Workspace = Masc.Workspace
+module Dashboard_http_keeper = Dashboard_http_keeper
 
 open Alcotest
 
@@ -3306,6 +3307,62 @@ let test_config_post_prevalidates_mixed_request () =
   in
   check (option bool) "activation was not committed" (Some false)
     (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled")
+
+(* #10710 regression: [keepers_dashboard_json] must aggregate every persisted
+   keeper through the bounded fiber pool. Before the fiber-batch change the
+   per-keeper enrich ran as an unbounded fan-out; this pins that all registered
+   keepers still surface in the envelope (and that the pool cap stays a sane
+   positive bound). *)
+let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let names = [ "fiber-a"; "fiber-b"; "fiber-c" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun name ->
+          Masc.Keeper_registry.For_testing.unregister
+            ~base_path:config.base_path
+            name)
+        names)
+    (fun () ->
+      List.iter
+        (fun name ->
+          let meta =
+            match
+              Masc_test_deps.meta_of_json_fixture
+                (`Assoc
+                  [ "name", `String name
+                  ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
+                  ; "trace_id", `String (name ^ "-trace")
+                  ])
+            with
+            | Ok meta -> meta
+            | Error error -> fail ("meta fixture: " ^ error)
+          in
+          (match Masc.Keeper_meta_store.write_meta config meta with
+           | Ok () -> ()
+           | Error error -> fail ("write meta: " ^ error));
+          ignore
+            (Masc.Keeper_registry.For_testing.register
+               ~base_path:config.base_path
+               name
+               meta))
+        names;
+      let json = Dashboard_http_keeper.keepers_dashboard_json config in
+      let open Yojson.Safe.Util in
+      let keeper_rows = json |> member "keepers" |> to_list in
+      let row_names =
+        keeper_rows
+        |> List.map (fun row -> row |> member "name" |> to_string)
+        |> List.sort String.compare
+      in
+      check (list string) "fiber pool collects every registered keeper"
+        (List.sort String.compare names)
+        row_names;
+      check int "total mirrors collected keeper count"
+        (List.length names)
+        (json |> member "total" |> to_int))
 
 let () =
   run "dashboard_http_core"

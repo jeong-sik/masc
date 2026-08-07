@@ -16,14 +16,6 @@ type link_goalless_task_to_goal_error =
   | Already_linked_to_goals of string list
   | Link_write_failed of goal_task_links_write_error
 
-let goal_task_links_write_error_to_string msg = msg
-
-let link_goalless_task_to_goal_error_to_string = function
-  | Already_linked_to_goals existing_goal_ids ->
-    Printf.sprintf "task already linked to goal(s): %s" (String.concat ", " existing_goal_ids)
-  | Link_write_failed msg -> msg
-;;
-
 let goal_task_links_path config =
   Filename.concat (tasks_dir config) "goal_task_links.json"
 ;;
@@ -297,12 +289,6 @@ let prune_links_for_goal_result config ~goal_id =
           new_links)
 ;;
 
-let prune_links_for_goal config ~goal_id =
-  match prune_links_for_goal_result config ~goal_id with
-  | Ok () -> ()
-  | Error msg -> Log.Misc.warn "%s" msg
-;;
-
 let link_task_to_goal_result config ~goal_id ~task_id =
   let goal_id = String.trim goal_id in
   let task_id = String.trim task_id in
@@ -408,12 +394,6 @@ let link_tasks_to_goals_result config links =
             trimmed_links
         in
         write_goal_task_links_result config ~previous_links:existing_links updated_links)
-;;
-
-let link_tasks_to_goals config links =
-  match link_tasks_to_goals_result config links with
-  | Ok () -> ()
-  | Error msg -> Log.Misc.warn "%s" msg
 ;;
 
 (** Build a reverse index from goal_id to its linked tasks.

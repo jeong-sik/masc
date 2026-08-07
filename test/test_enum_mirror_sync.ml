@@ -31,6 +31,11 @@ let all_schemas () =
   @ Tool_shard_types.voice_tools
   @ [ Tool_shard_types.tool_execute_schema ]
   @ board_schemas
+  (* The Schedule tools publish from their own library rather than the keeper
+     shard, so they were outside this walk and their four hand-written enum
+     lists were unguarded. [schedule_status] is the one with an owner to
+     compare against. *)
+  @ Tool_schemas_schedule.schemas
 ;;
 
 (* Collect every string list that appears under an "enum" key anywhere in a
@@ -59,42 +64,62 @@ let published_enums () =
   |> List.concat_map (fun (t : Masc_domain.tool_schema) -> enum_arrays t.input_schema)
 ;;
 
-let check_mirror_in_sync ~label ~owner =
+let check_mirror_in_sync ?(copy_lives_in = "Tool_shard_types_enum_mirrors") ~label ~owner () =
   let published = published_enums () in
   let matched = List.exists (fun e -> e = owner) published in
   if not matched
   then
     failf
       "%s: no published schema enum equals its owner's list %s.\n\
-       The hand-mirrored copy in Tool_shard_types_enum_mirrors has drifted.\n\
+       The hand-written copy in %s has drifted.\n\
        Published enums seen: %s"
       label
       (String.concat "|" owner)
+      copy_lives_in
       (String.concat "  /  " (List.map (String.concat "|") published))
+;;
+
+(* [Schedule_domain.all_schedule_statuses] is the owner: [test_schedule_domain]
+   pins that every constructor is in it, and the dashboard reads it. The tool
+   schema hand-wrote the same seven strings, so the enum an LLM is handed could
+   drift from the one the decoder takes without anything going red. *)
+let test_schedule_status_mirror () =
+  check_mirror_in_sync
+    ~copy_lives_in:"tool_schemas_schedule.ml"
+    ~label:"schedule_status_enum_strings"
+    ~owner:
+      (List.map
+         Schedule_domain.schedule_status_to_string
+         Schedule_domain.all_schedule_statuses)
+    ()
 ;;
 
 let test_memory_search_source_mirror () =
   check_mirror_in_sync
     ~label:"memory_search_source_enum_strings"
     ~owner:Masc.Keeper_tool_memory_runtime.valid_memory_search_source_strings
+    ()
 ;;
 
 let test_fs_write_mode_mirror () =
   check_mirror_in_sync
     ~label:"fs_write_mode_enum_strings"
     ~owner:Masc.Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings
+    ()
 ;;
 
 let test_sort_order_mirror () =
   check_mirror_in_sync
     ~label:"sort_order_enum_strings"
     ~owner:Masc.Board_dispatch.valid_sort_order_strings
+    ()
 ;;
 
 let test_vote_direction_mirror () =
   check_mirror_in_sync
     ~label:"vote_direction_enum_strings"
     ~owner:Masc.Board_votes.valid_vote_direction_strings
+    ()
 ;;
 
 (* A guard that passes when the thing it guards is empty is not a guard. *)
@@ -121,6 +146,7 @@ let () =
         ; test_case "fs write mode" `Quick test_fs_write_mode_mirror
         ; test_case "board sort order" `Quick test_sort_order_mirror
         ; test_case "board vote direction" `Quick test_vote_direction_mirror
+        ; test_case "schedule status" `Quick test_schedule_status_mirror
         ; test_case "owner lists are non-empty" `Quick test_owners_are_non_empty
         ; test_case "schemas publish enums" `Quick test_schema_set_is_non_empty
         ] )

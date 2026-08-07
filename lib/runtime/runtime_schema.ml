@@ -149,10 +149,9 @@ let model_capabilities_default =
   }
 ;;
 
-(** [models.<id>] — capability declaration. [match_prefixes] empty = match only
-    exact [api_name] equality; non-empty = match any requested model id starting
-    with one of the prefixes (longest-prefix-first; resolver lives outside the
-    schema and is added only if a binding needs fuzzy resolution — RFC-0206 R4). *)
+(** [models.<id>] — capability declaration. A requested model id resolves by
+    exact [api_name] equality. RFC-0206 R4 forbids porting the longest-prefix
+    matcher until a binding actually requires fuzzy resolution. *)
 type model_spec =
   { id : string
   ; api_name : string
@@ -186,7 +185,6 @@ type model_spec =
         the materialized OAS [Provider_config]. [None] leaves the caller/OAS
         profile unchanged. *)
   ; capabilities : model_capabilities option
-  ; match_prefixes : string list
   }
 [@@deriving show, eq]
 

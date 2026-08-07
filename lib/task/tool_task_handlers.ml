@@ -320,14 +320,11 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
     let contract =
       match Json_util.assoc_member_opt "contract" t with
       | None | Some `Null -> Ok None
-      | Some (`Assoc _ as json) -> (
-          match Masc_domain.task_contract_of_yojson json with
-          | Ok contract -> Ok (Some contract)
-          | Error error ->
-              Error
-                (Printf.sprintf "item[%d]: invalid contract payload: %s" idx
-                   error))
-      | Some _ -> Error (Printf.sprintf "item[%d]: contract must be an object" idx)
+      | Some json ->
+        parse_task_contract_object json
+        |> Result.map Option.some
+        |> Result.map_error (fun error ->
+          Printf.sprintf "item[%d]: invalid contract payload: %s" idx error)
     in
     if String.equal title "" then
       Error (Printf.sprintf "item[%d]: title cannot be empty" idx)

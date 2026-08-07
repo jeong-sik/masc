@@ -255,6 +255,41 @@ let test_broadcast_presence_is_live_only ~auth () =
       Alcotest.(check int) "presence not replay buffered" 0
         (List.length (Sse.get_events_after_for_test before_id)))
 
+(* [broadcast_is_unobservable] short-circuits a presence broadcast before it
+   allocates an event id, so [current_id] is what says whether the skip fired.
+   The two cases are opposite failures: skipping with a presence session
+   registered loses a delivery and shows up only as "presence went quiet",
+   while never skipping means the fanout mutex keeps paying for a broadcast
+   nobody can read. *)
+let test_presence_broadcast_skipped_without_a_presence_session ~auth () =
+  reset ();
+  Fun.protect
+    ~finally:(fun () -> Sse.unregister "s-skip-observer")
+    (fun () ->
+      ignore (register_exn ~auth ~kind:Observer "s-skip-observer" ~last_event_id:0);
+      let before_id = Sse.current_id () in
+      Sse.broadcast_presence (`Assoc [("type", `String "keeper_heartbeat")]);
+      Alcotest.(check int) "no event id consumed" before_id (Sse.current_id ());
+      Alcotest.(check bool) "observer got nothing" true
+        (Sse.try_pop "s-skip-observer" = None))
+
+let test_presence_broadcast_not_skipped_with_a_presence_session ~auth () =
+  reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      Sse.unregister "s-noskip-presence";
+      Sse.unregister "s-noskip-observer")
+    (fun () ->
+      ignore (register_exn ~auth ~kind:Presence "s-noskip-presence" ~last_event_id:0);
+      ignore (register_exn ~auth ~kind:Observer "s-noskip-observer" ~last_event_id:0);
+      let before_id = Sse.current_id () in
+      Sse.broadcast_presence (`Assoc [("type", `String "keeper_heartbeat")]);
+      Alcotest.(check bool) "event id advanced" true (Sse.current_id () > before_id);
+      Alcotest.(check bool) "presence session got the event" true
+        (Sse.try_pop "s-noskip-presence" <> None);
+      Alcotest.(check bool) "observer still excluded" true
+        (Sse.try_pop "s-noskip-observer" = None))
+
 let test_non_jsonrpc_broadcast_does_not_reach_agent_streams ~auth () =
   reset ();
   let before_id = Sse.current_id () in
@@ -338,6 +373,10 @@ let () =
               Alcotest.test_case "broadcast = broadcast_to All" `Quick (test_broadcast_equals_broadcast_to_all ~auth);
               Alcotest.test_case "broadcast All excludes presence" `Quick (test_broadcast_all_excludes_presence_sessions ~auth);
               Alcotest.test_case "presence live-only" `Quick (test_broadcast_presence_is_live_only ~auth);
+              Alcotest.test_case "presence broadcast skipped with no presence session" `Quick
+                (test_presence_broadcast_skipped_without_a_presence_session ~auth);
+              Alcotest.test_case "presence broadcast delivered with a presence session" `Quick
+                (test_presence_broadcast_not_skipped_with_a_presence_session ~auth);
               Alcotest.test_case "non-JSON-RPC skips agent_streams" `Quick
                 (test_non_jsonrpc_broadcast_does_not_reach_agent_streams ~auth);
               Alcotest.test_case "default kind is Agent_stream" `Quick (test_register_defaults_to_agent_stream ~auth);

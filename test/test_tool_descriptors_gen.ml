@@ -33,20 +33,6 @@ let has_schema name schemas =
   List.exists (fun (s : tool_schema) -> String.equal s.name name) schemas
 ;;
 
-let descriptor_internal_schema name : tool_schema =
-  match
-    List.find_opt
-      (fun (descriptor : Descriptor.t) -> String.equal descriptor.internal_name name)
-      Descriptor.public_descriptors
-  with
-  | Some descriptor ->
-    { name = descriptor.internal_name
-    ; description = descriptor.description
-    ; input_schema = descriptor.input_schema
-    }
-  | None -> Alcotest.failf "descriptor %S not in Keeper_tool_descriptor.public_descriptors" name
-;;
-
 let test_masc_config_name_matches () =
   let gen = find_by_name "masc_config" Tool_descriptors_gen.schemas in
   let hand = find_by_name "masc_config" Tool_schemas_misc.schemas in

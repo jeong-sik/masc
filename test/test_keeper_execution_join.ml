@@ -471,6 +471,52 @@ let test_input_capacity_projection_preserves_evidence () =
     (Some "input_rejected")
     (string_of_field (member "kind" reason_json))
 
+(* [Retry.Timeout] carries a typed phase that separates an admission or queue
+   wait from a streaming stall. The arm bound only [message], so every timeout
+   reached the wire indistinguishable from every other one. *)
+let test_timeout_projection_preserves_phase () =
+  let projection =
+    Error_json.agent_failed_error_projection
+      (Agent_sdk.Error.Api
+         (Agent_sdk.Retry.Timeout
+            { message = "per-provider timeout after 90.0s"
+            ; phase = Some Llm_provider.Http_client.Admission
+            }))
+  in
+  check
+    (option string)
+    "typed variant"
+    (Some "timeout")
+    (string_of_field (member "variant" projection.error_detail));
+  check
+    (option string)
+    "typed phase"
+    (Some
+       (Llm_provider.Http_client.timeout_phase_to_label
+          Llm_provider.Http_client.Admission))
+    (string_of_field (member "timeout_phase" projection.error_detail))
+
+(* An absent phase stays absent on the wire. Naming one would report a phase
+   the provider never attributed. *)
+let test_timeout_projection_without_phase_reports_null () =
+  let projection =
+    Error_json.agent_failed_error_projection
+      (Agent_sdk.Error.Api
+         (Agent_sdk.Retry.Timeout { message = "unattributed timeout"; phase = None }))
+  in
+  check
+    (option string)
+    "typed variant"
+    (Some "timeout")
+    (string_of_field (member "variant" projection.error_detail));
+  check
+    bool
+    "phase is null, not a guess"
+    true
+    (match member "timeout_phase" projection.error_detail with
+     | Some `Null -> true
+     | Some _ | None -> false)
+
 let () =
   run "keeper_execution_join"
     [ ( "join_table"
@@ -502,5 +548,9 @@ let () =
             test_provider_request_body_refusal_projection_preserves_status
         ; test_case "input capacity preserves typed evidence" `Quick
             test_input_capacity_projection_preserves_evidence
+        ; test_case "timeout preserves typed phase" `Quick
+            test_timeout_projection_preserves_phase
+        ; test_case "unattributed timeout reports null phase" `Quick
+            test_timeout_projection_without_phase_reports_null
         ] )
     ]

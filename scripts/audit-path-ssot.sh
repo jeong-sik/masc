@@ -18,7 +18,10 @@
 # Exit codes:
 #   0  clean
 #   1  violations found
-#   2  ripgrep missing
+#   2  the gate could not be trusted: ripgrep missing, or the allowlist
+#      carries entries that suppress nothing. Both mean the run says less
+#      than it appears to, which is why neither shares code 1 with a real
+#      violation.
 
 set -u
 
@@ -44,10 +47,15 @@ filter_allowed() {
   fi
 }
 
+RAW_HITS="$(mktemp)"
+trap 'rm -f "$RAW_HITS"' EXIT
+
 scan() {
   local label="$1" pattern="$2"; shift 2
-  local hits
-  hits=$(rg -n "$pattern" "$@" 2>/dev/null | filter_allowed)
+  local raw hits
+  raw=$(rg -n "$pattern" "$@" 2>/dev/null)
+  printf '%s\n' "$raw" >>"$RAW_HITS"
+  hits=$(printf '%s\n' "$raw" | filter_allowed)
   if [ -n "$hits" ]; then
     echo "=== [FAIL] $label ===" >&2
     echo "$hits" >&2
@@ -78,9 +86,31 @@ scan "non-canonical MASC env var" \
   '\bMASC_HOME\b|\bMASC_ROOT\b' \
   lib/ scripts/ docs/ start-masc.sh
 
-if [ "$VIOLATIONS" -eq 0 ]; then
-  echo "audit-path-ssot: OK (0 violations)"
+# Stale allowlist entries: a substring that suppresses nothing is not a
+# carve-out, it is debris. Kept as its own exit code so a rotting list is
+# distinguishable from a real regression.
+STALE=0
+if [ "$ALLOWLIST" != "/dev/null" ]; then
+  while IFS= read -r entry; do
+    [ -z "$entry" ] && continue
+    if ! grep -qF -- "$entry" "$RAW_HITS"; then
+      if [ "$STALE" -eq 0 ]; then
+        echo "audit-path-ssot: stale allowlist entries (suppress nothing):" >&2
+      fi
+      echo "  $entry" >&2
+      STALE=$((STALE + 1))
+    fi
+  done < <(grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST")
+fi
+
+if [ "$VIOLATIONS" -eq 0 ] && [ "$STALE" -eq 0 ]; then
+  echo "audit-path-ssot: OK (0 violations, 0 stale allowlist entries)"
   exit 0
+fi
+
+if [ "$VIOLATIONS" -eq 0 ]; then
+  echo "audit-path-ssot: ${STALE} stale allowlist entry/entries; remove them." >&2
+  exit 2
 fi
 
 cat >&2 <<'EOM'

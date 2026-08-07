@@ -514,6 +514,46 @@ module KeeperKeepalive = struct
     | None -> None
   ;;
 
+  (** Total wall-clock deadline for a single provider call attempt (whole
+      operation, independent of streaming progress) — distinct from
+      [stream_idle_timeout_sec] (bounds the GAP between streamed lines, and
+      per RFC-0345 falls back to a 600s failsafe floor when unset) and
+      [body_timeout_sec_override] (non-streaming calls only, no failsafe).
+      Neither narrower knob bounds a call stuck before its first token
+      (Admission/Queue/pre-stream phases) or a non-streaming call left
+      unconfigured, which is exactly the gap #27349 measured: 4 keepers
+      in-flight 25+ minutes with neither narrower knob set.
+
+      Opt-in: unset env leaves [None] so the provider-attempt caller skips
+      the [Eio.Time.with_timeout_exn] wrap and the call runs unbounded,
+      same as before this knob existed. Deliberately NO failsafe floor
+      (unlike [stream_idle_timeout_sec]'s RFC-0345 fallback): a reasonable
+      total-call ceiling depends on provider and workload (tool-heavy turns
+      legitimately run minutes between chunks), so MASC does not guess one.
+      The operator sets it from measured turn durations.
+
+      On expiry the caller classifies the failure as the existing typed
+      [Api (Timeout { phase = Some Wall_clock })] and routes it through the
+      existing declared-lane rotation — no new recovery mechanism.
+
+      Range when set: [30, 3600] — wider than [body_timeout_sec_override]'s
+      [10, 600] on purpose: this bounds an entire agentic turn's provider
+      call, not one HTTP body read.
+
+      Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. Default: unset -> [None].
+      @category Timeouts
+      @ops_class operator *)
+  let provider_call_deadline_sec_override =
+    match
+      Env_config_core.raw_value_opt "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
+    with
+    | Some raw ->
+      (match Float.of_string_opt (String.trim raw) with
+       | Some v -> Some (Float.max 30.0 (Float.min 3600.0 v))
+       | None -> None)
+    | None -> None
+  ;;
+
   (* [@warning "-32"] below: this binding has no OCaml caller — the live read is
      [Keeper_runtime_resolved.cli_subprocess_idle_sec], which re-reads the env var
      per turn. It survives as the knob's declaration for [bin/env_knob_catalog.ml],

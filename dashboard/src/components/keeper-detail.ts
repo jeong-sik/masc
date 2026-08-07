@@ -7,7 +7,4 @@ export {
   closeKeeperDetail,
   keeperMobilePane,
 } from './keeper-detail-state'
-export {
-  filterCheckpointHistory,
-  lineageTransitionLabel,
-} from './keeper-detail-history'
+export { filterCheckpointHistory } from './keeper-detail-history'

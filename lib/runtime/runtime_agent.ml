@@ -165,10 +165,6 @@ let worker_lifecycle_classification_of_result = function
     Explicit model-label execution must never silently substitute a
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)
-type label_resolution_error =
-  Runtime_transport.label_resolution_error =
-  | Invalid_model_label of string
-
 let label_resolution_error_to_string =
   Runtime_transport.label_resolution_error_to_string
 
@@ -816,19 +812,14 @@ module For_testing = struct
          f ())
   ;;
 
-  let provider_http_observation_transport = provider_http_observation_transport
-  let runtime_id_of_config = runtime_id_of_config
   let runtime_observation_for_completed_config =
     runtime_observation_for_completed_config
   let runtime_observation_for_terminal_config =
     runtime_observation_for_terminal_config
   let decide_clock_for_idle = decide_clock_for_idle
   let required_modalities_of_content_blocks = required_modalities_of_content_blocks
-  let content_blocks_of_messages = content_blocks_of_messages
   let messages_for_run_with_checkpoint = messages_for_run_with_checkpoint
   let content_blocks_for_run = content_blocks_for_run
-  let content_blocks_for_run_with_checkpoint =
-    content_blocks_for_run_with_checkpoint
   let required_modalities_of_messages = required_modalities_of_messages
   let required_modalities_for_run = required_modalities_for_run
   let required_modalities_for_run_with_checkpoint =

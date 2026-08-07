@@ -21,7 +21,6 @@ Each capability may project into multiple surfaces:
 
 - `public_mcp`
 - `spawned_agent_mcp`
-- `local_worker`
 - `keeper`
 
 Removed surfaces (historical record):

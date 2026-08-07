@@ -98,8 +98,26 @@ let auth_dir_from_base_path ~base_path =
 let agents_dir_from_base_path ~base_path =
   Filename.concat (auth_dir_from_base_path ~base_path) "agents"
 
-(** Maximum output bytes for tool responses. SSOT for the 64KB cap. *)
+(** Maximum output bytes for tool responses. SSOT for the 64KB cap.
+    Inline-vs-blob threshold only; see [max_process_capture_*_bytes] for the
+    separate ceiling on what the runtime accepts from a subprocess. *)
 let max_tool_output_bytes = 65_536
+
+(** Acceptance ceiling for one captured subprocess stream, split head/tail.
+
+    Head is an [Exec_buffer] head buffer, which grows only as far as the
+    output actually reaches, so a large head budget costs nothing on the
+    common short-output call. Tail is a ring buffer allocated eagerly at
+    [tail_cap], so it is sized to the 256KB already used per keeper by the
+    dashboard retained-stream buffer rather than to the head budget.
+
+    claude-code's comparable ceiling is 64 MiB, but it streams bash output to
+    a file on disk; MASC retains the capture in memory for the turn, so the
+    ceiling here is set lower. 8 MiB still leaves the blob store 128x the
+    64KB inline budget for range reads. *)
+let max_process_capture_head_bytes = 8 * 1024 * 1024
+
+let max_process_capture_tail_bytes = 256 * 1024
 
 (** BUG-016: Truncate large tool responses to prevent MCP transport overload.
     Default max: 64KB. Appends truncation metadata when trimmed. *)

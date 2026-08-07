@@ -42,5 +42,7 @@ let completion_state_error ~(task_id : string) ~(agent_name : string)
       Some
         (Masc_domain.Task (Masc_domain.Task_error.InvalidState
            (Printf.sprintf
-              "task %s has a pending verification workflow for %s"
+              "task %s has a pending verification workflow for %s; resolve it \
+               with an operator or auto-judge verdict before another \
+               transition — this tool cannot produce one"
               task_id assignee)))

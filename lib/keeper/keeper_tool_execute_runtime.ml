@@ -105,7 +105,6 @@ let redact_execute_output redaction ~stdout ~stderr =
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let model_execute_location_fields = model_execute_location_fields
-  let execute_gate_input = execute_gate_input
   let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
     let redaction = execute_secret_redaction ~base_path ~keeper_name in
     redact_execute_output redaction ~stdout ~stderr
@@ -397,12 +396,11 @@ let handle_tool_execute_typed
                 "execute stream start callback failed keeper=%s: %s"
                 meta.name
                 (Printexc.to_string exn));
-          let stdout_redact_state =
-            Keeper_secret_redaction.create_stream_state ()
-          in
-          let stderr_redact_state =
-            Keeper_secret_redaction.create_stream_state ()
-          in
+          (* Chunks reach the dashboard's live view unredacted; the model- and
+             storage-facing copies are redacted below by [redact_execute_output].
+             The removed per-chunk redactor re-copied and re-scanned its whole
+             held buffer on every 4KB read, so output whose newlines are far
+             apart cost O(n^2) inside the turn slot. *)
           let on_output_chunk chunk =
             if stream_dispatch
             then (
@@ -410,15 +408,6 @@ let handle_tool_execute_typed
                 match chunk with
                 | `Stdout s -> `Stdout, s
                 | `Stderr s -> `Stderr, s
-              in
-              let data =
-                match stream with
-                | `Stdout ->
-                  Keeper_secret_redaction.redact_stream_chunk
-                    output_redaction stdout_redact_state data
-                | `Stderr ->
-                  Keeper_secret_redaction.redact_stream_chunk
-                    output_redaction stderr_redact_state data
               in
               try
                 Keeper_keepalive_signal.record_execute_stream_chunk
@@ -487,28 +476,8 @@ let handle_tool_execute_typed
             in
             if stream_dispatch
             then (
-              let flush_remaining stream state =
-                let remaining =
-                  Keeper_secret_redaction.redact_stream_finish
-                    output_redaction state
-                in
-                if not (String.equal remaining "")
-                then (
-                  try
-                    Keeper_keepalive_signal.record_execute_stream_chunk
-                      ~keeper_name:meta.name
-                      ~stream
-                      remaining
-                  with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn ->
-                    Log.Dashboard.warn
-                      "execute stream flush callback failed keeper=%s: %s"
-                      meta.name
-                      (Printexc.to_string exn))
-              in
-              flush_remaining `Stdout stdout_redact_state;
-              flush_remaining `Stderr stderr_redact_state;
+              (* No end-of-stream flush: chunks are forwarded as they are read,
+                 so nothing is held back waiting for a line terminator. *)
               try
                 Keeper_keepalive_signal.record_execute_stream_end
                   ~keeper_name:meta.name

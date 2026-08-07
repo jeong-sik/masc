@@ -188,6 +188,52 @@ let test_lru_evict_preserves_data () =
     paths
 ;;
 
+(* RFC-0108 §3.2 Record-interleave-0 over the cached [append_file_unix]
+   path. task-196 reinstated the fd cache for [append_file_unix]; this
+   stress re-runs the canonical 16-thread case against that path so the
+   cache must not degrade the existing guarantee. *)
+let test_append_file_unix_concurrent_records () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let dir = tmpdir "fd_cache_append_file" in
+  let path = Filename.concat dir "out.log" in
+  let n_threads = 16 in
+  let n_records_per_thread = 100 in
+  let threads =
+    List.init n_threads (fun tid ->
+      Thread.create
+        (fun () ->
+          for seq = 0 to n_records_per_thread - 1 do
+            Fs_compat.append_file path (Printf.sprintf "%d:%d\n" tid seq)
+          done)
+        ())
+  in
+  List.iter Thread.join threads;
+  let lines = read_lines path in
+  check
+    int
+    "line count == threads × records (append_file_unix)"
+    (n_threads * n_records_per_thread)
+    (List.length lines);
+  let seen = Hashtbl.create (n_threads * n_records_per_thread) in
+  List.iter
+    (fun line ->
+      match String.split_on_char ':' line with
+      | [ tid_s; seq_s ] ->
+        let tid = int_of_string tid_s in
+        let seq = int_of_string seq_s in
+        let key = tid, seq in
+        if Hashtbl.mem seen key
+        then failf "duplicate record: tid=%d seq=%d" tid seq;
+        Hashtbl.add seen key ()
+      | _ -> failf "interleaved/corrupt record: %S" line)
+    lines;
+  check
+    int
+    "unique (tid, seq) pairs (append_file_unix)"
+    (n_threads * n_records_per_thread)
+    (Hashtbl.length seen)
+;;
+
 let test_lru_evict_skips_active_writer () =
   Fs_compat.reset_fd_cache_for_testing ();
   let dir = tmpdir "fd_cache_active" in
@@ -247,6 +293,10 @@ let () =
             "LRU eviction preserves data on every path"
             `Quick
             test_lru_evict_preserves_data
+        ; test_case
+            "16 threads × 100 records over cached append_file_unix"
+            `Quick
+            test_append_file_unix_concurrent_records
         ; test_case
             "LRU eviction does not close active writer"
             `Quick

@@ -4,7 +4,7 @@
  (name masc_dashboard)
  (public_name masc.dashboard)
  (wrapped false)
- (flags :standard -open Masc)
+ (flags :standard -open Masc -w +33)
  (libraries
   masc
   yojson

@@ -71,7 +71,12 @@ type streaming_dispatch_fn =
 
 (* ── Configuration ──────────────────────────────────────────── *)
 
-let max_content_length () = 4000
+(* [max 1] for the same reason as the sibling below: the caller compares
+   [String.length trimmed > max_content_length ()], so a non-positive setting
+   would reject every inbound message instead of raising the ceiling. *)
+let max_content_length () =
+  Env_config_core.get_int ~default:4000 "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
+  |> max 1
 
 let dedup_ttl_sec () =
   Env_config_core.get_int ~default:3600 "MASC_CHANNEL_GATE_DEDUP_TTL_SEC"

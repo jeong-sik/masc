@@ -122,9 +122,10 @@ val runtime_id_of_base_url : string -> string
 
 val parse_errors : unit -> string list
 (** Returns the [pool_state.parse_errors] list.  Populated
-    when [load_runtimes_from_env] could not interpret the
-    [MASC_LOCAL_LLM_ENDPOINTS] entry; surfaced to the
-    operator dashboard. *)
+    when [load_runtimes_from_env] could not interpret an
+    entry of [LLM_ENDPOINTS] — the SDK's
+    [Llm_provider.Discovery.llm_endpoints_env_var], not a
+    MASC-prefixed name; surfaced to the operator dashboard. *)
 
 val snapshots : unit -> runtime_snapshot list
 (** Read-only projection of every {!runtime} into a

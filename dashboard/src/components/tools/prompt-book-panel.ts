@@ -66,14 +66,6 @@ const FAMILY_DEFS: readonly FamilyDef[] = [
     category: 'verification',
   },
   {
-    id: 'worker',
-    family: 'Worker · 로컬 워커',
-    feedsTurn: false,
-    order: 2,
-    note: '로컬 워커 시스템 프롬프트 — keeper 턴 아님',
-    category: 'worker',
-  },
-  {
     id: 'keeper',
     family: 'keeper 턴 · 계열',
     feedsTurn: true,

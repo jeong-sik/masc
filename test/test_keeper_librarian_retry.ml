@@ -157,6 +157,30 @@ let test_budget_measurement_matches_exact_rendered_utf8_bytes () =
   | Budget.Exceeds _ -> fail "exact boundary rejected"
 ;;
 
+(* The Keeper prompt says memory "records what was true when it was written:
+   verify time-sensitive claims against live state before acting on them". A
+   line that omits the record time makes that instruction unfollowable, and a
+   constraint captured from a transient condition then reads as permanent. Pin
+   the field so the exact-bytes accounting above cannot be satisfied by
+   dropping it again. *)
+let test_rendered_fact_states_when_it_was_recorded () =
+  let rendered = Budget.render_facts [ fact ~claim:"plain ASCII" ] in
+  let contains needle =
+    let n = String.length needle in
+    let rec scan i =
+      i + n <= String.length rendered
+      && (String.equal (String.sub rendered i n) needle || scan (i + 1))
+    in
+    scan 0
+  in
+  check bool "recall line names the record time" true (contains " recorded=");
+  check
+    bool
+    "record time is the fact's own first_seen"
+    true
+    (contains (Masc_domain.iso8601_of_unix_seconds 1_000_000.))
+;;
+
 let test_unknown_and_duplicate_retained_ids_reject () =
   (match parse (selection_json ~retained:[ "missing" ] ()) with
    | Error (Librarian.Unknown_retained_memory_id "missing") -> ()
@@ -548,6 +572,10 @@ let () =
             "incremental budget equals rendered UTF-8 bytes"
             `Quick
             test_budget_measurement_matches_exact_rendered_utf8_bytes
+        ; test_case
+            "rendered fact states when it was recorded"
+            `Quick
+            test_rendered_fact_states_when_it_was_recorded
         ; test_case "unknown and duplicate retained reject" `Quick
             test_unknown_and_duplicate_retained_ids_reject
         ; test_case "retained/new collision rejects" `Quick

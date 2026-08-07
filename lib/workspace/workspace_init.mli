@@ -4,8 +4,6 @@
     agent claims, and a destructive [reset] helper for tests and explicit
     internal maintenance. *)
 
-open Masc_domain
-open Workspace_utils
 
 (** Initialise workspace state; session-binds [agent_name] when given. *)
 val init :

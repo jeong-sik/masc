@@ -59,14 +59,6 @@ let cap_string_list ?(limit = execution_tool_preview_limit) values =
 
 let dedup_strings = Dashboard_utils.dedup_strings
 
-(** severity_rank works on raw JSON strings — broader matching than Dashboard_utils.tone_rank.
-    Used by dashboard_briefing / dashboard_briefing_assembly for external JSON data. *)
-let severity_rank = function
-  | "bad" | "critical" | "failed" -> 2
-  | "warn" | "blocked" | "paused" | "interrupted" -> 1
-  | _ -> 0
-
-
 let dashboard_fixture_name ?fixture () =
   let fixtures_enabled = Env_config.Dashboard_config.fixtures_enabled () in
   if not fixtures_enabled then None

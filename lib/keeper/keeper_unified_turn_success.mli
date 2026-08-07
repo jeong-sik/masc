@@ -8,7 +8,6 @@ module For_testing : sig
     | Terminal_checkpoint
     | Terminal_input_required
 
-  val terminal_outcome_of_result : Keeper_agent_run.run_result -> terminal_outcome
 
   val persist_terminal_turn_meta_for_outcome
     :  config:Workspace.config
@@ -22,11 +21,6 @@ module For_testing : sig
     -> updated_meta:Keeper_meta_contract.keeper_meta
     -> Keeper_agent_run.run_result
     -> unit
-
-  val acknowledge_pending_messages
-    :  Keeper_meta_contract.keeper_meta
-    -> Keeper_world_observation.world_observation
-    -> Keeper_meta_contract.keeper_meta
 
   type cycle_post_action =
     | Assign_task

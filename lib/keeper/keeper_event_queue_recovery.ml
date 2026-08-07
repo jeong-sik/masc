@@ -462,24 +462,4 @@ module For_testing = struct
     | Claim_acquired of 'a
     | Claim_already_held
 
-  let with_owner_claim ~base_path ~keeper_name f =
-    match Persistence.resolve_owner_identity ~base_path ~keeper_name with
-    | Error error -> Error (Owner_unavailable error)
-    | Ok owner ->
-      (match with_owner_claim owner f with
-       | Owner_claim_busy -> Ok Claim_already_held
-       | Owner_claim_acquired value -> Ok (Claim_acquired value))
-  ;;
-
-  let pending_transition_count_result ~base_path ~keeper_name =
-    match Persistence.resolve_owner_identity ~base_path ~keeper_name with
-    | Error error -> Error (Owner_unavailable error)
-    | Ok owner ->
-      let base_path = Persistence.owner_identity_base_path owner in
-      let keeper_name = Persistence.owner_identity_keeper_name owner in
-      (match Persistence.load_state_result ~base_path ~keeper_name with
-       | Ok state ->
-         Ok (List.length (Keeper_event_queue_state.transition_outbox state))
-       | Error detail -> Error (Outbox_unavailable detail))
-  ;;
 end

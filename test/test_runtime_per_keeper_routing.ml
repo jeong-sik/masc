@@ -406,6 +406,35 @@ let test_runtime_assignment_writer_updates_runtime_toml () =
       (KMC.runtime_id_of_meta (make_meta "routingtest")))
 ;;
 
+(* The inventory reports two kind fields per provider: [runtime_kind] is the
+   transport as classified, [kind] is the operator-facing bucket. A
+   non-loopback HTTP endpoint is "http" / "cloud". The mapping used to reach
+   "cloud" through a wildcard over the serialized name, so this pair was the
+   wildcard's only live input and nothing asserted it. *)
+let test_runtime_inventory_reports_transport_kind () =
+  with_runtime_initialized (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let field runtime_id key =
+      providers
+      |> List.find (fun p ->
+           String.equal runtime_id (p |> J.member "runtime_id" |> J.to_string))
+      |> J.member key
+      |> J.to_string
+    in
+    List.iter
+      (fun runtime_id ->
+         Alcotest.(check string)
+           (Printf.sprintf "%s runtime_kind" runtime_id)
+           "http"
+           (field runtime_id "runtime_kind");
+         Alcotest.(check string)
+           (Printf.sprintf "%s dashboard kind" runtime_id)
+           "cloud"
+           (field runtime_id "kind"))
+      [ "runpod_mtp.qwen"; "openai.gpt" ])
+;;
+
 let test_runtime_inventory_surfaces_assignment_status () =
   with_runtime_initialized (fun () ->
     let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
@@ -986,21 +1015,28 @@ let test_runtime_budget_source_survives_to_status_json () =
        | _ -> Alcotest.fail "context budget JSON must be an object"))
 ;;
 
-(* Remaining projection path: [resolve_max_context_resolution_of_meta] must
-   prefer the keeper's routed runtime (openai.gpt = 64000), NOT
-   [runtime].default (runpod_mtp.qwen = 128000). Actual turn admission is
-   exercised separately through the strict runtime-ID resolver. *)
+(* The keeper's routed runtime (openai.gpt = 64000) must be preferred over
+   [runtime].default (runpod_mtp.qwen = 128000) through the strict runtime-ID
+   resolver, which is the only remaining capacity path. *)
 let test_of_meta_projection_budgets_against_routed_runtime () =
   with_runtime_initialized (fun () ->
     (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
-    let res =
-      Keeper_context_runtime.resolve_max_context_resolution_of_meta
-        (make_meta "budgettest")
-    in
-    Alcotest.(check int)
-      "of_meta budgets against routed runtime (openai.gpt=64000), not default (128000)"
-      64000
-      res.Keeper_context_runtime.effective_budget)
+    let m = make_meta "budgettest" in
+    let runtime_id = KMC.runtime_id_of_meta m in
+    match
+      Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+        ~requested_override:m.max_context_override
+        ~runtime_id
+    with
+    | Error error ->
+        Alcotest.failf
+          "budgettest routed runtime must resolve: %s"
+          (Keeper_context_runtime.max_context_resolution_error_to_string error)
+    | Ok res ->
+        Alcotest.(check int)
+          "of_meta budgets against routed runtime (openai.gpt=64000), not default (128000)"
+          64000
+          res.Keeper_context_runtime.effective_budget)
 ;;
 
 (* ---- per-model thinking gate: runtime.toml [thinking-support] drives the
@@ -1792,6 +1828,10 @@ let () =
             "dashboard runtime inventory exposes assignment status"
             `Quick
             test_runtime_inventory_surfaces_assignment_status
+        ; Alcotest.test_case
+            "dashboard runtime inventory reports transport kind"
+            `Quick
+            test_runtime_inventory_reports_transport_kind
         ; Alcotest.test_case
             "unknown assignment is rejected before runtime.toml write"
             `Quick

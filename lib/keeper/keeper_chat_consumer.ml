@@ -185,7 +185,6 @@ module Persistence_blocked = struct
         Hashtbl.remove entries key
       | Some _ | None -> ())
 
-  let reset () = with_lock (fun () -> Hashtbl.clear entries)
 end
 
 type dispatch_state = {
@@ -285,7 +284,6 @@ module For_testing = struct
     Wake_inbox.reset ();
     Preclaim_retry.reset ()
 
-  let reset_persistence_blocked = Persistence_blocked.reset
 end
 
 (* A finalization persist failure is recoverable: queue-core keeps the lease

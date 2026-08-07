@@ -23,6 +23,7 @@ val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
 val keeper_suffix_paused_work : string
 val keeper_suffix_catchup_judge : string
+val keeper_suffix_operator_note : string
 
 val keeper_chat_receipt_state_json :
   Keeper_chat_queue.receipt_state -> Yojson.Safe.t
@@ -81,6 +82,7 @@ type keeper_post_route_kind =
   | Keeper_post_directive
   | Keeper_post_paused_work
   | Keeper_post_catchup_judge
+  | Keeper_post_operator_note
   | Keeper_post_chat_recovery of keeper_chat_recovery_route
   | Keeper_post_board_attention_quarantine_recovery of
       keeper_board_attention_quarantine_route

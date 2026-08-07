@@ -3,7 +3,7 @@
     Pure facade — the .ml is 3 [include] statements bringing
     in 3 sub-modules.  This .mli mirrors the runtime with
     [include module type of] so callers can reach every sub-
-    module symbol via {!Workspace_utils.X} and type identity is
+    module symbol via [Workspace_utils.X] and type identity is
     preserved end-to-end:
 
     - {!Workspace_utils_backend_setup} — backend probe + git-root
@@ -20,10 +20,11 @@
     facade and sub-modules stay in sync.
 
     Type identity is preserved across the runtime — callers
-    can interleave {!Workspace_utils.X} and the source modules'
+    can interleave [Workspace_utils.X] and the source modules'
     [X] freely (the [config] type, for example, is the same
     nominal type whether reached via {!Workspace_utils.config} or
-    {!Workspace_utils_paths_backend.config}). *)
+    {!Workspace_utils_backend_setup.config}, which is where it is
+    declared). *)
 
 include module type of struct
   include Workspace_utils_backend_setup

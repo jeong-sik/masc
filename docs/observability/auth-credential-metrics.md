@@ -2,7 +2,6 @@
 status: reference
 last_verified: 2026-06-05
 code_refs:
-  - lib/auth.ml
   - lib/auth/auth.mli
   - lib/auth/auth_metric_store.ml
   - lib/otel_metric_store.ml
@@ -47,7 +46,7 @@ events that can be queried as a rate in the active backend. The audit pass
 (2026-05-14) confirmed no genuine duplication; the only addition needed was
 flow + heartbeat surfaces to catch what the snapshot gauges cannot show.
 
-## γ Classifier (lib/auth.ml)
+## γ Classifier
 
 `classify_bare_for_canonical` is the pure read-only predicate that decides whether a bare-form file is alive or dead. It returns one of three variants:
 

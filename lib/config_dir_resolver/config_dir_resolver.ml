@@ -536,8 +536,15 @@ let credentials_dir ~base_path =
 let agent_runtime_dir ~base_path =
   Filename.concat (masc_root ~base_path) "runtime/agent"
 
-let repos_dir ~base_path =
-  Filename.concat (masc_root ~base_path) "repos"
+let repos_dirname = "repos"
+
+let repos_dir ~base_path = Filename.concat (masc_root ~base_path) repos_dirname
+
+(* Base-path-relative, because Repo_manager stores repository.local_path
+   relative and resolves it later: Repo_store.local_path does
+   [Filename.concat base_path repo.local_path]. An absolute [repos_dir] would
+   be resolved a second time. *)
+let repos_relative_path ~id = Filename.concat (Filename.concat Common.masc_dirname repos_dirname) id
 
 let tmp_dir ~base_path =
   Filename.concat (masc_root ~base_path) "tmp"

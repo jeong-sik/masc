@@ -192,7 +192,7 @@ post-turn 요약이 요청되더라도 configured LLM이 유효한 plan을 반�
 
 Handoff를 `same keeper, new trace`로 읽어야 한다. 코드상 성공 handoff는 `keeper_rollover.ml`이 새 session을 만들고, 새 session에 checkpoint를 저장한 뒤, 마지막에만 `trace_id`, `generation`, `trace_history`, `last_handoff_ts`를 교체하는 순서로 커밋된다.
 
-OAS가 checkpoint/session commit truth를 담당하고, `.masc/traces/<trace_id>/generation_manifest.json` 및 `.masc/keepers/<name>.generation_index.jsonl`은 그 성공 commit 뒤에 MASC가 남기는 lineage telemetry artifact다.
+OAS가 checkpoint/session commit truth를 담당한다.
 
 Handoff 후 경계는 다음처럼 읽는다.
 
@@ -214,7 +214,7 @@ Handoff 후 경계는 다음처럼 읽는다.
 |------------|-----------|-------------|------------------|--------|
 | turn 종료 | `keeper_unified_turn` | turn metrics, checkpoint 입력 | `.masc/traces/<trace>/...` | keeper state machine + unified turn path |
 | compaction 완료 | `keeper_post_turn` | 압축된 checkpoint, compaction metrics | 현재 trace session | post-turn single-writer contract |
-| handoff 완료 | `keeper_post_turn` + `keeper_rollover` | 새 trace checkpoint, `generation + 1`, `trace_history` append | 새 trace session + keeper meta | `KeeperGenerationLineage.tla`, checkpoint commit result |
+| handoff 완료 | `keeper_post_turn` + `keeper_rollover` | 새 trace checkpoint, `generation + 1`, `trace_history` append | 새 trace session + keeper meta | checkpoint commit result |
 | memory bank write | memory tool/librarian lane | provenance이 있는 명시적 note | `.masc/keepers/<name>.memory.jsonl` | memory policy / bank compaction policy |
 | task 완료/취소 | `workspace_task` | relation/materializer + activity signal | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |
 

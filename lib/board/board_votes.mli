@@ -20,7 +20,7 @@
     - {b Vote-direction normaliser}: [all_vote_directions],
       [vote_direction_of_string_opt].
     - {b Vote log persistence}: [append_vote_log],
-      [rewrite_vote_log].
+      [save_vote_log_jsonl].
     - {b Internal vote outcome}: the [vote_outcome] record
       carries the score delta and post-lock vote log / feedback
       side effects.
@@ -54,8 +54,8 @@ val all_vote_directions : vote_direction list
 val vote_direction_of_string_opt : string -> vote_direction option
 (** Sound partial parser: case-insensitive, trims whitespace, and
     accepts only ["up"] / ["down"].  Empty or unknown input returns
-    [None] (no silent permissive fallback).  Pinned for
-    behaviour-tests under {!test/test_types}. *)
+    [None] (no silent permissive fallback).  No suite pins this
+    parser today. *)
 
 (** {1 Vote log path} *)
 
@@ -166,6 +166,13 @@ val delete_post :
     in-memory store.  The JSONL log keeps the original
     rows; the rewriter on next flush overwrites the file
     without them. *)
+
+val delete_comment :
+  store -> comment_id:string -> (unit, board_error) Result.t
+(** Removes a single comment (and its votes/reactions) from the
+    in-memory store and decrements the parent post's reply_count.
+    The JSONL log keeps the original rows; the rewriter on next
+    flush overwrites the file without them. *)
 
 (** {1 Global store + lifecycle} *)
 

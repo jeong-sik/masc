@@ -26,13 +26,11 @@ include Dashboard_http_helpers
 include Dashboard_http_monitoring
 include Dashboard_http_keeper
 
-let dashboard_request_timeout_s = Server_dashboard_http_core_cache.dashboard_request_timeout_s
 let shell_warmed = Server_dashboard_http_core_cache.shell_warmed
 let shell_warming = Server_dashboard_http_core_cache.shell_warming
 let last_good_shell = Server_dashboard_http_core_cache.last_good_shell
 let last_good_shell_light = Server_dashboard_http_core_cache.last_good_shell_light
 let with_dashboard_timeout = Server_dashboard_http_core_cache.with_dashboard_timeout
-let cache_partition_segment = Server_dashboard_http_core_cache.cache_partition_segment
 let dashboard_cache_key = Server_dashboard_http_core_cache.dashboard_cache_key
 let dashboard_briefing_timeout_s = Server_dashboard_http_core_cache.dashboard_briefing_timeout_s
 let attach_projection_diagnostics = Server_dashboard_http_core_cache.attach_projection_diagnostics
@@ -52,25 +50,9 @@ let operator_snapshot_cache_diagnostics_json =
   Server_dashboard_http_core_operator.operator_snapshot_cache_diagnostics_json
 ;;
 let operator_digest_cache = Server_dashboard_http_core_operator.operator_digest_cache
-let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
-let operator_snapshot_extra = Server_dashboard_http_core_operator.operator_snapshot_extra
 let json_assoc_int_opt = Server_dashboard_http_core_json.json_assoc_int_opt
-let projection_diagnostics_fields = Server_dashboard_http_core_json.projection_diagnostics_fields
-let projection_diagnostics_field = Server_dashboard_http_core_json.projection_diagnostics_field
-let operator_generated_at_iso = Server_dashboard_http_core_json.operator_generated_at_iso
-let operator_cache_json = Server_dashboard_http_core_json.operator_cache_json
-
 (* Operator query-JSON + envelope metadata helpers extracted to
    [Server_dashboard_http_core_operator_query] (godfile decomp). *)
-let operator_retention_json = Server_dashboard_http_core_operator_query.operator_retention_json
-let operator_snapshot_query_json = Server_dashboard_http_core_operator_query.operator_snapshot_query_json
-let operator_digest_query_json = Server_dashboard_http_core_operator_query.operator_digest_query_json
-let with_operator_surface_metadata = Server_dashboard_http_core_operator_query.with_operator_surface_metadata
-let with_operator_snapshot_metadata = Server_dashboard_http_core_operator_query.with_operator_snapshot_metadata
-let with_operator_digest_metadata = Server_dashboard_http_core_operator_query.with_operator_digest_metadata
-let operator_snapshot_default_query = Server_dashboard_http_core_operator_query.operator_snapshot_default_query
-let operator_digest_default_query = Server_dashboard_http_core_operator_query.operator_digest_default_query
-
 let start_operator_snapshot_refresh_loop = Server_dashboard_http_core_snapshot_refresh.start_operator_snapshot_refresh_loop
 
 let start_operator_digest_refresh_loop = Server_dashboard_http_core_digest_refresh.start_operator_digest_refresh_loop
@@ -322,45 +304,16 @@ let is_dashboard_cache_timeout_json = function
 
 module Shell_projection_trace = Server_dashboard_shell_projection_trace
 
-type shell_projection_timing = Shell_projection_trace.shell_projection_timing =
-  { projection_label : string
-  ; projection_ms : int
-  }
-
 type shell_projection_trace_status =
   Shell_projection_trace.shell_projection_trace_status =
   | Shell_trace_running
   | Shell_trace_finished
   | Shell_trace_failed
 
-type shell_projection_trace = Shell_projection_trace.shell_projection_trace =
-  { trace_light : bool
-  ; trace_started_at : float
-  ; mutable trace_status : shell_projection_trace_status
-  ; mutable trace_active : string list
-  ; mutable trace_completed : shell_projection_timing list
-  ; mutable trace_finished_at : float option
-  }
-
-type shell_projection_trace_snapshot =
-  Shell_projection_trace.shell_projection_trace_snapshot =
-  { snapshot_status : shell_projection_trace_status
-  ; snapshot_light : bool
-  ; snapshot_elapsed_ms : int
-  ; snapshot_active : string list
-  ; snapshot_completed : shell_projection_timing list
-  ; snapshot_finished_at : float option
-  }
-
-let shell_trace_status_string = Shell_projection_trace.status_string
-let shell_projection_timing_top = Shell_projection_trace.timing_top
-let shell_projection_timing_json = Shell_projection_trace.timing_json
-let shell_projection_timing_log = Shell_projection_trace.timing_log
 let shell_projection_trace_start = Shell_projection_trace.start
 let shell_projection_trace_start_projection = Shell_projection_trace.start_projection
 let shell_projection_trace_finish_projection = Shell_projection_trace.finish_projection
 let shell_projection_trace_finish = Shell_projection_trace.finish
-let shell_projection_trace_snapshot = Shell_projection_trace.snapshot
 let shell_projection_trace_diagnostics = Shell_projection_trace.diagnostics
 let shell_projection_trace_log = Shell_projection_trace.log
 

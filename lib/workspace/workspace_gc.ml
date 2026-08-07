@@ -5,7 +5,6 @@
 
 open Masc_domain
 open Workspace_utils
-open Workspace_state
 open Workspace_identity
 open Workspace_backlog
 open Workspace_task_id

@@ -46,7 +46,6 @@ export interface DashboardMissionAttentionQueueItem {
   summary: string
   target_type: string
   target_id?: string | null
-  top_action?: OperatorRecommendedAction | null
   related_agent_names: string[]
   evidence?: unknown
   evidence_preview: string[]
@@ -321,18 +320,6 @@ export interface OperatorJudgment {
   provenance?: string | null
 }
 
-export interface OperatorReviewDecision {
-  item_id: string
-  fingerprint: string
-  decision: 'resolved' | 'deferred'
-  actor: string
-  reason: string
-  at: string
-  target_type: string
-  target_id?: string | null
-  recommended_action_type?: string | null
-}
-
 export interface OperatorDigest {
   trace_id?: string
   target_type: 'root' | 'namespace' | 'workspace' | 'keeper'
@@ -351,7 +338,6 @@ export interface OperatorDigest {
   root?: OperatorNamespaceSnapshot
   attention_items: OperatorAttentionItem[]
   recommended_actions: OperatorRecommendedAction[]
-  recent_reviews: OperatorReviewDecision[]
 }
 
 export interface KeeperProbeResult {

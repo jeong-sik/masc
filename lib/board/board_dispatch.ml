@@ -273,11 +273,6 @@ let emit_board_sse_event event =
   | Some hook -> Safe_ops.protect ~default:() (fun () -> hook event)
   | None -> ()
 
-let is_initialized () =
-  match Atomic.get backend_state with
-  | Active _ -> true
-  | Uninitialized -> false
-
 let init_jsonl () =
   if match Atomic.get backend_state with Active _ -> true | Uninitialized -> false then
     Log.BoardLog.warn "already initialized, ignoring init_jsonl"
@@ -728,6 +723,10 @@ let set_pinned ~post_id ~pinned =
 let delete_post ~post_id =
   match backend () with
   | Jsonl store -> Board.delete_post store ~post_id
+
+let delete_comment ~comment_id =
+  match backend () with
+  | Jsonl store -> Board.delete_comment store ~comment_id
 
 let search ~query ~limit =
   match backend () with

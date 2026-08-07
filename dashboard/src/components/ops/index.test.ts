@@ -56,7 +56,7 @@ describe('Ops surface', () => {
     vi.doUnmock('../flow-control/flow-control-panel')
   })
 
-  it('renders a combined activity timeline merging recent reviews and interventions', async () => {
+  it('renders the activity timeline from the intervention log', async () => {
     const {
       Ops,
       route,
@@ -84,27 +84,6 @@ describe('Ops surface', () => {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
-      recent_reviews: [
-        {
-          item_id: 'review-newest',
-          fingerprint: 'fp-1',
-          decision: 'resolved',
-          actor: 'reviewer-1',
-          reason: '프로젝트 검토 완료',
-          at: '2026-03-31T10:05:00Z',
-          target_type: 'namespace',
-        },
-        {
-          item_id: 'review-oldest',
-          fingerprint: 'fp-2',
-          decision: 'deferred',
-          actor: 'reviewer-2',
-          reason: '키퍼 메시지는 잠시 보류',
-          at: '2026-03-31T10:01:00Z',
-          target_type: 'keeper',
-          target_id: 'keeper-a',
-        },
-      ],
     } as unknown as OperatorDigest
     operatorActionLog.value = [
       {
@@ -133,10 +112,8 @@ describe('Ops surface', () => {
     expect(container.textContent).not.toContain('실행 작업대')
 
     const items = Array.from(container.querySelectorAll('[data-testid="ops-activity-item"]'))
-    expect(items).toHaveLength(3)
-    expect(items[0]?.textContent).toContain('프로젝트 검토 완료')
-    expect(items[1]?.textContent).toContain('keeper-a에게 메시지 전달')
-    expect(items[2]?.textContent).toContain('키퍼 메시지는 잠시 보류')
+    expect(items).toHaveLength(1)
+    expect(items[0]?.textContent).toContain('keeper-a에게 메시지 전달')
   }, 120000)
 
   it('wraps the ops view in the v2 command surface class', async () => {
@@ -167,7 +144,6 @@ describe('Ops surface', () => {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
-      recent_reviews: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = []
 
@@ -269,7 +245,6 @@ describe('Ops surface', () => {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
-      recent_reviews: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = [
       {
@@ -331,7 +306,6 @@ describe('Ops surface', () => {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
-      recent_reviews: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = []
 
@@ -374,7 +348,6 @@ describe('Ops surface', () => {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
-      recent_reviews: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = []
 
@@ -422,7 +395,6 @@ describe('Ops surface', () => {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
-      recent_reviews: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = []
 
@@ -464,7 +436,6 @@ describe('Ops surface', () => {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
-      recent_reviews: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = []
 
@@ -572,7 +543,7 @@ describe('Ops surface', () => {
     })
   }, 60000)
 
-  it('filters out entries older than 3 days so stale reviews stop showing', async () => {
+  it('filters out entries older than 3 days so stale interventions stop showing', async () => {
     const {
       Ops,
       route,
@@ -602,35 +573,34 @@ describe('Ops surface', () => {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
-      recent_reviews: [
-        {
-          item_id: 'review-stale',
-          fingerprint: 'fp-stale',
-          decision: 'deferred',
-          actor: 'reviewer-1',
-          reason: '18일 전 보류',
-          at: '2026-03-31T10:05:00Z',
-          target_type: 'namespace',
-        },
-        {
-          item_id: 'review-fresh',
-          fingerprint: 'fp-fresh',
-          decision: 'resolved',
-          actor: 'reviewer-2',
-          reason: '방금 전 해결',
-          at: '2026-04-18T09:30:00Z',
-          target_type: 'namespace',
-        },
-      ],
     } as unknown as OperatorDigest
-    operatorActionLog.value = []
+    operatorActionLog.value = [
+      {
+        id: 1,
+        at: '2026-04-18T09:59:00Z',
+        actor: 'dashboard',
+        action_type: 'keeper_message',
+        target_label: 'keeper:keeper-a',
+        outcome: 'executed',
+        message: '방금 전 개입',
+      },
+      {
+        id: 2,
+        at: '2026-03-31T10:00:00Z',
+        actor: 'dashboard',
+        action_type: 'keeper_message',
+        target_label: 'keeper:keeper-b',
+        outcome: 'executed',
+        message: '18일 전 개입',
+      },
+    ]
 
     render(html`<${Ops} />`, container)
     await flushUi()
 
     const items = Array.from(container.querySelectorAll('[data-testid="ops-activity-item"]'))
     expect(items).toHaveLength(1)
-    expect(items[0]?.textContent).toContain('방금 전 해결')
-    expect(container.textContent).not.toContain('18일 전 보류')
+    expect(items[0]?.textContent).toContain('방금 전 개입')
+    expect(container.textContent).not.toContain('18일 전 개입')
   }, 60000)
 })

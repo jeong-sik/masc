@@ -484,7 +484,6 @@ describe('KeeperWorkspaceRail', () => {
                 supports_computer_use: false,
                 supports_code_execution: true,
               },
-              match_prefixes: ['minimax'],
             },
             binding: {
               provider_id: 'ollama_cloud',

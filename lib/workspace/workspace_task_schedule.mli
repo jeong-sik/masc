@@ -1,6 +1,5 @@
 (** Workspace task scheduling — claim pool state and the [claim_next] entry. *)
 
-open Masc_domain
 include module type of Workspace_utils
 include module type of Workspace_state
 

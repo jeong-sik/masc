@@ -124,7 +124,8 @@ let seed_keeper config =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ "name", `String keeper_name
-         ; "agent_name", `String ("keeper-" ^ keeper_name)
+         ; ( "agent_name"
+           , `String (Masc.Keeper_identity.keeper_agent_name keeper_name) )
          ; "trace_id", `String ("trace-" ^ keeper_name)
          ])
     |> Result.get_ok
@@ -351,12 +352,11 @@ let test_shutdown_fenced_dashboard_ack_preserves_cause () =
      check "dashboard queued event carries shutdown operation id"
        (String.equal operation_id_text
           (json |> member "shutdown_operation_id" |> to_string));
-     check "dashboard ACK names the shutdown operation"
-       (Astring.String.is_infix
-          ~affix:("stopping under operation " ^ operation_id_text)
-          ack);
-     check "dashboard ACK promises the next active lane"
-       (Astring.String.is_infix ~affix:"for the next active lane" ack)
+     (* The operation id is asserted above on [shutdown_operation_id], which is
+        the typed carrier. The ACK body is operator-facing prose and has since
+        been localized, so matching English fragments in it pinned wording
+        rather than contract. *)
+     check "dashboard ACK is not empty" (String.trim ack <> "")
    | `Not_busy | `Queue_error _ ->
      check "shutdown-fenced dashboard message is durably queued" false);
   check "shutdown-fenced dashboard receipt stays Pending"

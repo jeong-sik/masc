@@ -18,20 +18,20 @@ val redact_text : t -> string -> string
     with [\[REDACTED\]], preserving message length semantics except for
     the replacements themselves. *)
 
-type stream_state
+(* Chunk-streaming redaction ([create_stream_state] / [redact_stream_chunk] /
+   [redact_stream_finish]) was removed. It held raw bytes until the next
+   ['\n'] and re-copied plus re-scanned the whole held buffer on every 4KB
+   chunk, so a stream with newlines far apart cost O(n^2): one 590MB
+   subprocess capture over single-line JSON moved ~3.1TB and held a keeper's
+   turn slot for 115 minutes, which stalled that keeper's event queue.
 
-val create_stream_state : unit -> stream_state
-
-val redact_stream_chunk : t -> stream_state -> string -> string
-(** Stateful chunk redaction for streaming output. Buffers raw bytes up to
-    the last ['\n'] so a single-line secret split across chunk boundaries is
-    reassembled into one {!redact_text} call. Returns only the bytes safe
-    to emit now; the remainder is held until the next chunk or
-    {!redact_stream_finish}. *)
-
-val redact_stream_finish : t -> stream_state -> string
-(** Flush any remaining buffered bytes at end of stream and redact them as
-    one unit. *)
+   No comparable harness redacts at this layer — claude-code, Codex,
+   OpenHands, SWE-agent and Hermes have no built-in tool-output redaction,
+   and the third-party Claude Code redactors run as PostToolUse hooks over
+   an already-bounded result. The model- and storage-facing paths here keep
+   their redaction: [Keeper_tool_execute_runtime] applies {!redact_text} to
+   the final stdout/stderr, so removing the streaming pass leaves only the
+   dashboard's live view unredacted until the command finishes. *)
 
 val redact_json : t -> Yojson.Safe.t -> Yojson.Safe.t
 (** Redact all string leaves in a JSON value, preserving shape. *)

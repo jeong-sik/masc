@@ -271,7 +271,7 @@ let oas_tool_of_masc_with_execution_env
       ?externalization_error_recoverable
       (handler execution_env json_args)
   in
-  Agent_sdk.Tool.create_with_execution_env
+  Agent_sdk_base.Tool.create_with_execution_env
     ?descriptor
     ~name
     ~description

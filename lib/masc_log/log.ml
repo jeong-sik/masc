@@ -840,15 +840,6 @@ let details_with_event_class event_class details =
       `Assoc (event_class_field :: fields)
   | payload -> `Assoc [ event_class_field; ("payload", payload) ]
 
-let emit_event event_class level ?module_name ?(details = `Null) ?category message =
-  emit level ?module_name ~details:(details_with_event_class event_class details)
-    ?category message
-
-let emit_routine ?module_name ?(details = `Null) ?category message =
-  match routine_level () with
-  | None -> ()
-  | Some level -> emit_event Routine level ?module_name ~details ?category message
-
 (** Convenience functions *)
 let debug ?ctx ?category fmt = log Debug ?ctx ?category fmt
 let info ?ctx ?category fmt = log Info ?ctx ?category fmt

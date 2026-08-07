@@ -1447,6 +1447,3 @@ let keeper_cycle_decision
         })
 ;;
 
-let should_run_keeper_cycle ~(meta : keeper_meta) (observation : world_observation) =
-  (keeper_cycle_decision ~meta observation).should_run
-;;

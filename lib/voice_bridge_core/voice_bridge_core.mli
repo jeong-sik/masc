@@ -62,12 +62,8 @@ val voice_mcp_uri : unit -> Uri.t
 (** MCP voice URL from the configured endpoint, falling back to
     [default_voice_uri "/mcp"] on any resolution failure. *)
 
-val voice_health_uri : unit -> Uri.t
 (** Health URL from the configured endpoint, falling back to
     [default_voice_uri "/health"]. *)
-
-val voice_mcp_host : unit -> string
-val voice_mcp_port : unit -> int
 
 (* RFC-0107 Phase D.2c bis-2 — [client_for_uri] / [client_for_uri_result]
    removed.  Voice HTTP callers now route through [Masc_http_client]
@@ -145,8 +141,6 @@ val run_local_playback :
     When [message] is omitted the dedup re-check is skipped (legacy
     callers that do not propagate the message string). *)
 
-val start_local_playback :
-  sw:Eio.Switch.t -> agent_id:string -> audio_file:string -> unit
 (** Fire-and-forget wrapper around {!run_local_playback}. *)
 
 (** {1 Filesystem layout} *)

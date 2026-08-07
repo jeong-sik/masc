@@ -162,7 +162,6 @@ val supervisor_sweep_running : string -> bool
 val stop_supervisor_sweep : string -> unit
 (** Stop and forget the supervisor sweep for [keeper_name]; idempotent. *)
 
-val update_supervisor_sweep_interval : string -> float -> bool
 (** Adjust the sweep interval for an active sweep.  Returns [false] when
     the keeper has no active sweep. *)
 

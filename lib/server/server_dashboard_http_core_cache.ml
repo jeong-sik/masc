@@ -46,23 +46,15 @@ let dashboard_projection_cache_ttl_s = 120.0
     Atomic.t for cross-domain visibility: read from executor pool
     worker domains via namespace-truth and warmup helpers. *)
 let shell_warmed : bool Atomic.t = Atomic.make false
-let _shell_warmed = shell_warmed
-
 (** Track whether the startup shell pre-warm fiber is still building the
     first payload. Cold HTTP requests use this to serve a bootstrap payload
     instead of blocking on the same expensive shell projection. *)
 let shell_warming : bool Atomic.t = Atomic.make false
-let _shell_warming = shell_warming
-
 (** Last-known-good shell result for graceful degradation on timeout. *)
 let last_good_shell : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
-let _last_good_shell = last_good_shell
-
 (** Last-known-good light shell result for first-paint requests while
     full shell pre-warm is still running. *)
 let last_good_shell_light : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
-let _last_good_shell_light = last_good_shell_light
-
 (** Wrap a dashboard computation with a configurable timeout.
     Returns a partial-response JSON on timeout instead of hanging. *)
 let with_dashboard_timeout ~clock compute =

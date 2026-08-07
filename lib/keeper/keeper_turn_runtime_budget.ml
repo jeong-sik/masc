@@ -530,11 +530,6 @@ let capacity_refusal_of_error
     None
 ;;
 
-let current_keeper_meta ~(config : Workspace.config) ~(fallback_meta : keeper_meta) =
-  match Keeper_registry.get ~base_path:config.base_path fallback_meta.name with
-  | Some entry -> entry.meta
-  | None -> fallback_meta
-
 type post_turn_resilience_handles = {
   resilience_audit_store : Shared_audit.Store.t option;
   resilience_strategy_executor : Resilience.Recovery.strategy_executor option;

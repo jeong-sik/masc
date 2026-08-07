@@ -63,11 +63,6 @@ let task_log_warn ~task_id fmt =
     (fun message -> Log.Task.warn "task_id=%s %s" task_id message)
     fmt
 
-let task_log_error ~task_id fmt =
-  Stdlib.Format.ksprintf
-    (fun message -> Log.Task.error "task_id=%s %s" task_id message)
-    fmt
-
 let task_agent_log_warn ~agent_name fmt =
   Stdlib.Format.ksprintf
     (fun message -> Log.Task.warn "agent_name=%s %s" agent_name message)

@@ -36,8 +36,6 @@ module StringMap = Set_util.StringMap
 
 (* OAS Event_bus — delegated to Event_bus_slots to avoid dependency cycles. *)
 let set_bus bus = Event_bus_slots.set_keeper bus
-let get_bus () = Event_bus_slots.get_keeper ()
-
 (* ── gRPC directive processing ── *)
 
 let keeper_entry_by_identity_opt identity =
@@ -1293,7 +1291,3 @@ let stop_keepalive_and_await ~base_path name =
 
 (** Stop all running keepers. Used in test cleanup to prevent orphaned
     keepalive loops from blocking process exit. *)
-let stop_all_keepalives () =
-  Keeper_registry.all ()
-  |> List.iter (fun (entry : Keeper_registry.registry_entry) -> stop_keepalive entry.name)
-;;

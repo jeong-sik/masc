@@ -64,29 +64,6 @@ let total_session_count () =
     0
     (Atomic.get registry)
 
-let status_all_json () =
-  `Assoc
-    (List.map
-       (fun m ->
-          let module M = (val m : PROVIDER) in
-          ( M.name,
-            `Assoc
-              [
-                "enabled", `Bool (M.is_enabled ());
-                "protocol", `String (Transport.protocol_to_string M.protocol);
-                "sessions", `Int (M.session_count ());
-                "detail", M.status_json ();
-              ] ))
-       (Atomic.get registry))
-
-let reap_all_stale () =
-  List.fold_left
-    (fun acc m ->
-       let module M = (val m : PROVIDER) in
-       if M.is_enabled () then acc + M.reap_stale () else acc)
-    0
-    (Atomic.get registry)
-
 let enabled_protocols () =
   List.filter_map
     (fun m ->

@@ -36,8 +36,6 @@ val feature_to_health_item :
 
 val get_all_features : unit -> feature_health_item list
 
-val get_features_by_category : string -> feature_health_item list
-
 val get_feature_categories : unit -> string list
 
 val count_by_status :

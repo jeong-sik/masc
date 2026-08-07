@@ -24,8 +24,6 @@ type broadcast_delivery =
   ; msg_type : string
   }
 
-val string_of_msg_type_typed : msg_type_typed -> string
-
 val emit_message_activity : Workspace_utils_backend_setup.config ->
            from_agent:string ->
            content:string ->

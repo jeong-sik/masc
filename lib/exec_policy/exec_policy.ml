@@ -51,31 +51,6 @@ let tool_execute_syntax_policy ?(allow_pipes = true) ()
   { allow_pipes; redirect_allowed = false }
 ;;
 
-let rec shell_ir_literal_text = function
-  | Masc_exec.Shell_ir.Lit (text, _) -> Some text
-  | Masc_exec.Shell_ir.Concat parts ->
-    let rec loop acc = function
-      | [] -> Some (String.concat "" (List.rev acc))
-      | part :: rest ->
-        (match shell_ir_literal_text part with
-         | Some text -> loop (text :: acc) rest
-         | None -> None)
-    in
-    loop [] parts
-  | Masc_exec.Shell_ir.Var (_, _) -> None
-;;
-
-let simple_literal_args (simple : Masc_exec.Shell_ir.simple) =
-  let rec loop acc = function
-    | [] -> Some (List.rev acc)
-    | arg :: rest ->
-      (match shell_ir_literal_text arg with
-       | Some text -> loop (text :: acc) rest
-       | None -> None)
-  in
-  loop [] simple.Masc_exec.Shell_ir.args
-;;
-
 let meta_has_unquoted_glob (meta : Masc_exec.Shell_ir.arg_meta) =
   meta.glob && not meta.quoted
 ;;
@@ -162,10 +137,6 @@ let command_context ir =
   | Reject { reason; _ } -> Error (block_reason_of_exec_reject reason)
   | Cannot_parse _ -> Error Chain_or_redirect
   | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason)
-;;
-
-let validate_command ir =
-  command_context ir |> Result.map (fun _ -> ())
 ;;
 
 let command_context_tool_execute
@@ -344,18 +315,3 @@ let block_reason_tag = function
   | Pipes_not_allowed -> "pipes_not_allowed"
 ;;
 
-let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attribution.t =
-  match result with
-  | Ok () ->
-    let evidence : Yojson.Safe.t = `Assoc [ "cmd", `String cmd ] in
-    Attribution.passed ~origin:Det ~gate:"exec_policy" ~evidence
-  | Error br ->
-    let evidence : Yojson.Safe.t =
-      `Assoc [ "cmd", `String cmd; "block_reason", `String (block_reason_tag br) ]
-    in
-    Attribution.policy_failed
-      ~origin:Det
-      ~gate:"exec_policy"
-      ~evidence
-      ~reason:(block_reason_to_string br)
-;;

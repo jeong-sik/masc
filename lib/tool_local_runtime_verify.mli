@@ -10,7 +10,6 @@
     renderer behind {!runtime_verify_json}.  The old single-host legacy
     probe fallback is gone; verification now requires OAS discovery. *)
 
-val provider_health_reachable : status:int option -> bool
 (** [provider_health_reachable ~status] is [true] iff
     [status = Some 200].  The health endpoint is a status-code-only
     check. Drift to body-content validation would change "what counts

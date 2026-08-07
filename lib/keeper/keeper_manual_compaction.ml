@@ -452,26 +452,6 @@ let run_admitted_with
      | `Ran (Ok (No_compaction no_compaction)) -> `No_compaction no_compaction)
 ;;
 
-let run_admitted
-    ?before_dispatch_authority
-    ~config
-    ~meta
-    () =
-  run_admitted_with
-    ~append_compaction_manifest:append_manifest
-    ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
-      Keeper_post_turn.prepare_compaction
-        ?before_dispatch_authority
-        ~base_path
-        ~base_dir
-        ~meta
-        ~trigger
-        ())
-    ~already_admitted:false
-    ~config
-    ~meta
-;;
-
 let run_under_admission
     ?before_dispatch_authority
     ~config

@@ -236,12 +236,6 @@ let assoc_bool_opt name json =
   | Some (`Bool value) -> Some value
   | _ -> None
 
-let assoc_float_opt name json =
-  match assoc_member_opt name json with
-  | Some (`Float value) -> Some value
-  | Some (`Int value) -> Some (Float.of_int value)
-  | _ -> None
-
 (** Scans a JSON array for the first [`Assoc] row whose [field] member is
     the string [value].  Rows that are not objects, and rows without a
     string [field], are skipped. *)

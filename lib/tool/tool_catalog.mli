@@ -91,7 +91,6 @@ val implementation_status_to_string : implementation_status -> string
 val metadata_to_fields : string -> (string * Yojson.Safe.t) list
 (** Full metadata as JSON key-value pairs. *)
 
-val public_contract_fields : string -> (string * Yojson.Safe.t) list
 (** Minimal metadata for public contract responses. *)
 
 val register_runtime_metadata : string -> metadata -> (unit, string) result

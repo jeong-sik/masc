@@ -342,18 +342,6 @@ let ensure_terminal_attempt (capture : runtime_metrics_capture)
 
 let record_attempt_terminal = ensure_terminal_attempt
 
-let record_fallback_event (capture : runtime_metrics_capture)
-    ~from_model:_ ~to_model:_ ~(reason : string) =
-  capture.fallback_events_rev <-
-    {
-      from_model_id = public_runtime_model_label;
-      from_model_label = None;
-      to_model_id = public_runtime_model_label;
-      to_model_label = None;
-      reason;
-    }
-    :: capture.fallback_events_rev
-
 let empty_streaming_capture () : streaming_metrics_capture =
   { ttfrc_ms = None; inter_chunk_count = 0; inter_chunk_total_ms = 0.0 }
 
@@ -730,11 +718,6 @@ let run_actor () =
 
 let start_actor_if_needed ~sw =
   Eio.Fiber.fork_daemon ~sw run_actor
-
-let record_runtime ?keeper_name ~observation ~runtime_id ~outcome () =
-  let now = Time_compat.now () in
-  Eio.Stream.add stream
-    (Record_runtime { keeper_name; runtime_id; observation; outcome; now })
 
 let runtime_metrics_json () =
   let p, u = Eio.Promise.create () in

@@ -80,8 +80,6 @@ type compaction_outcome =
 (** {1 Own-module vals} *)
 
 val payload_role_to_string : payload_role -> string
-val payload_role_of_string : string -> payload_role option
-
 val source_clock_to_string : source_clock -> string
 val source_clock_of_string : string -> source_clock option
 val source_clock_of_event : event_kind -> source_clock

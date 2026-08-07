@@ -263,12 +263,6 @@ let remove_pending_confirms_by_typed_target config target =
       then write_pending_confirms config remaining |> Result.map (fun () -> removed)
       else Ok 0)
 
-let remove_pending_confirms_by_target config ~target_type ~target_id =
-  match Operator_action_constants.target_type_of_string target_type with
-  | None -> Error (Printf.sprintf "invalid pending-confirm target type: %S" target_type)
-  | Some target_type ->
-    remove_pending_confirms_by_typed_target config { target_type; target_id }
-
 let normalize_pending_confirm_actor_filter = function
   | Some raw ->
       let trimmed = String.trim raw in
@@ -371,10 +365,3 @@ let pending_confirm_summary_json_of_scope scope =
 let pending_confirm_summary_json ?actor config =
   pending_confirm_summary_json_of_scope (pending_confirm_scope ?actor config)
 
-let pending_confirm_envelope_json ?actor config =
-  let scope = pending_confirm_scope ?actor config in
-  `Assoc
-    [
-      ("items", `List (List.map pending_confirm_to_yojson scope.visible_entries));
-      ("summary", pending_confirm_summary_json_of_scope scope);
-    ]

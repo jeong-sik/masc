@@ -264,9 +264,6 @@ type credential_status =
   | Credential_present of agent_credential
   | Credential_missing
 
-val audit_keeper_credentials :
-  string -> keeper_names:string list ->
-  (string * credential_status) list
 (** Read-only audit: for each [keeper_name] in [keeper_names], report
     whether a credential file exists at [.masc/auth/agents/<n>.json].
     Used at boot to emit one structured summary instead of
@@ -290,10 +287,6 @@ val create_token_without_expiry :
 val verify_token :
   string -> agent_name:string -> token:string ->
   (agent_credential, masc_error) result
-
-val refresh_token :
-  string -> agent_name:string -> old_token:string ->
-  (string * agent_credential, masc_error) result
 
 (** {1 Permission Checks} *)
 

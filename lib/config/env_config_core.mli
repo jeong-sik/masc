@@ -93,8 +93,6 @@ val existing_file : string -> bool
 
 (** {1 HTTP host + port (SSOT for issue 8352)} *)
 
-val default_http_port : string
-val default_http_port_int : int
 val host_env_key : string
 val http_port_env_key : string
 val masc_http_port : unit -> string
@@ -182,8 +180,6 @@ val personas_dir_env_key : string
    [Host_config.from_env ()] (fields [config_dir] / [personas_dir]). *)
 
 val data_dir_env_key : string
-val data_dir_opt : unit -> string option
-
 (** {1 Auth} *)
 
 val admin_token_env_key : string
@@ -204,13 +200,10 @@ val telemetry_enabled_env_key : string
     them to a hard {!Config_error} (fail-fast boot). *)
 val parse_warn_env_key : string
 
-val log_level_opt : unit -> string option
 val telemetry_enabled : unit -> bool
 
 (** Whether malformed env parses are escalated to {!Config_error} (fail-fast)
     instead of warn + default. Controlled by [MASC_PARSE_WARN]. Default: false. *)
-val parse_warn_enabled : unit -> bool
-
 (** {1 Build identity / pubsub} *)
 
 val build_git_commit_opt : unit -> string option

@@ -369,5 +369,3 @@ val keeper_cycle_decision :
   ?event_queue_triggers:event_queue_trigger list ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
-val should_run_keeper_cycle :
-  meta:Keeper_meta_contract.keeper_meta -> world_observation -> bool

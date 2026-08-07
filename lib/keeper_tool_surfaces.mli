@@ -43,11 +43,6 @@ val dedupe_schemas :
 (** [dedupe_schemas schemas] removes duplicate-by-[name] entries
     while preserving first-occurrence order. *)
 
-val lookup_schemas_by_name_exn :
-  label:string ->
-  Masc_domain.tool_schema list ->
-  string list ->
-  Masc_domain.tool_schema list
 (** [lookup_schemas_by_name_exn ~label all_schemas values] returns
     the schemas in [all_schemas] whose names appear in [values],
     raising [Invalid_argument "<label>: unknown tool schema(s): <list>"]

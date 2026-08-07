@@ -348,10 +348,6 @@ let task_actor_of_status = function
   | Done { assignee; _ } -> Completer assignee
   | Cancelled { cancelled_by; _ } -> Canceller cancelled_by
 
-let task_actor_name = function
-  | Unassigned -> None
-  | Holder name | Submitter name | Completer name | Canceller name -> Some name
-
 (** Who owes work on this Task now. [Done] and [Cancelled] owe nothing, so
     they answer [None] even though both carry a name. Canonical
     ownership-check helper — used by task_state, gRPC, etc. *)

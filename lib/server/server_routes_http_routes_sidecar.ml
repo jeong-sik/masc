@@ -425,12 +425,6 @@ let next_attempt_record_result ~now ~next_retry_at previous (record : desired_re
     }
 ;;
 
-let next_attempt_record ~now ~next_retry_at previous record =
-  match next_attempt_record_result ~now ~next_retry_at previous record with
-  | Ok record -> record
-  | Error msg -> invalid_arg msg
-;;
-
 let reconcile_desired_once
       ?(now = Masc_domain.now_iso ())
       ?(next_retry_at = Masc_domain.iso8601_of_unix_seconds (Unix.time () +. retry_backoff_seconds ()))

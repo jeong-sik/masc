@@ -20,4 +20,3 @@ val rank_string : string -> int
 val max : t -> t -> t
 val max_string : string -> string -> string
 val requires_operator_action : t -> bool
-val requires_operator_action_string : string -> bool

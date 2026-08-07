@@ -13,5 +13,4 @@ val parse_bool_token : string -> bool option
 
 val env_opt : string -> string option
 val get_int_logged : string -> default:int -> int
-val get_float_positive_logged : string -> default:float -> float
 val get_bool_logged : ?invalid:invalid_bool_policy -> string -> default:bool -> bool

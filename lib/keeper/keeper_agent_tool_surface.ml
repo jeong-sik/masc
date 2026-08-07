@@ -22,14 +22,6 @@ let turn_lane_to_string = function
   | Lane_tool_disabled -> "tool_disabled"
   | Lane_retry -> "retry"
 
-let turn_lane_of_string = function
-  | "pre_dispatch" -> Some Lane_pre_dispatch
-  | "text_only" -> Some Lane_text_only
-  | "tool_optional" -> Some Lane_tool_optional
-  | "tool_disabled" -> Some Lane_tool_disabled
-  | "retry" -> Some Lane_retry
-  | _ -> None
-
 let turn_lane_to_yojson lane = `String (turn_lane_to_string lane)
 
 type tool_surface_metrics =

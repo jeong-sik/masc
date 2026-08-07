@@ -33,14 +33,11 @@ val default_keeper_wake_urgency : keeper_wake_urgency
 (** Schema-v1 default urgency for [masc.keeper_wake] when the optional
     [urgency] field is absent. *)
 
-val keeper_wake_urgency_to_string : keeper_wake_urgency -> string
-
 val keeper_wake_urgency_of_string : string -> (keeper_wake_urgency, string) result
 (** Neutral wire enum for [masc.keeper_wake] urgency. Tool-side validation uses
     this schedule-owned contract; keeper-side consumers map it to
     [Keeper_event_queue.urgency] at the boundary. *)
 
-val keeper_wake_target_name_pattern : string
 (** Accepted name grammar for [masc.keeper_wake] body targets. *)
 
 val valid_keeper_wake_target_name : string -> bool

@@ -43,8 +43,6 @@ val resolve_auto_model
   -> model_selector
   -> model_resolution
 
-val resolve_auto_model_id : string -> string -> string
-
 (** Parse a "model@url" custom model spec.
     Returns [(model_id, base_url)].
     Without [@], uses [CUSTOM_LLM_BASE_URL] env or the local discovery

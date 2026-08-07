@@ -18,7 +18,6 @@ type mention_record = {
   read_at: float;          (** 0.0 = unread, otherwise Unix timestamp when read *)
 }
 
-val generate_mention_id : unit -> string
 (** Generate a unique mention ID with "m-" prefix. *)
 
 val mention_record_to_json : mention_record -> Yojson.Safe.t
@@ -43,5 +42,4 @@ val read_mentions : Workspace.config -> target_agent:string -> limit:int -> ment
 val unread_count : Workspace.config -> target_agent:string -> int
 (** Count unread mentions (where read_at = 0.0) for a target agent. *)
 
-val mark_read : Workspace.config -> mention_id:string -> unit
 (** Set read_at to current time for the given mention ID. *)

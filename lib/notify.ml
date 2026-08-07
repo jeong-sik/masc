@@ -293,5 +293,3 @@ let notify event =
 let notify_mention ?target_agent ~from_agent ~message () =
   notify (Mention { from_agent; target_agent; message })
 
-let notify_task_done ~agent ~task_id =
-  notify (TaskCompleted { agent; task_id })

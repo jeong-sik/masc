@@ -73,6 +73,5 @@ val emit_streaming_chunk
   -> inter_chunk_ms:float
   -> unit
 
-val emit_fallback_triggered : kind:string -> detail:string -> unit
 val make_sink : unit -> Llm_provider.Metrics.t
 val install : unit -> unit

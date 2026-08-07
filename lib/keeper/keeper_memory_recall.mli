@@ -51,14 +51,6 @@ val record_memory_recall_read_error :
     {!read_file_tail_lines_result}.  This is logging only; callers must
     choose their own degraded value explicitly. *)
 
-val recent_lines_or_record :
-  string list Jsonl_incremental_projection.t ->
-  site:string ->
-  key:string ->
-  path:string ->
-  window:int ->
-  initial_tail_bytes:int ->
-  string list
 (** Snapshot read-path helper: project the most recent [window] lines of
     [path] through {!Jsonl_incremental_projection.recent_lines} (steady-state
     O(new bytes) rather than a full tail re-read per snapshot), returning them

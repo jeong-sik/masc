@@ -1453,8 +1453,6 @@ let fold_jsonl_lines ~init ~f path =
    - The cache lookup uses a separate, microsecond-scoped mutex
      ([fd_cache_mu]) so two appends to *different* paths never
      contend on a global fd-cache lock. *)
-let close_all_cached_writers () = Fd_cache.close_all ()
-
 let invalidate_cached_writer path =
   let path_mu = get_append_path_mutex path in
   Stdlib.Mutex.protect path_mu (fun () -> Fd_cache.invalidate path)

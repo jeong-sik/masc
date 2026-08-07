@@ -480,12 +480,6 @@ let with_transport_health_metadata ~config ~timeout_s json =
     json
 ;;
 
-let dashboard_execution_snapshot_json () = Server_dashboard_http_cache.cached_surface_json execution_cache
-
-let dashboard_transport_health_snapshot_json () =
-  Server_dashboard_http_cache.cached_surface_json transport_health_cache
-;;
-
 (* Cache patchers project a typed lifecycle transition onto dashboard row fields
    (keepalive_running / phase / pipeline_stage / paused). Phase-derived events
    and custom events arrive here only after the event-bus

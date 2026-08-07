@@ -196,22 +196,6 @@ let get_origin_url ~local_path =
   | Ok [] -> Error "git remote get-url origin returned no output"
   | Error msg -> Error msg
 
-let worktree_root ~local_path =
-  match
-    run_git
-      ~cwd:local_path
-      ~env:read_only_git_env
-      ~timeout_sec:status_summary_timeout_sec
-      [ "rev-parse"; "--show-toplevel" ]
-  with
-  | Ok (root :: _) ->
-    let root = String.trim root in
-    if String.equal root ""
-    then Stdlib.Error "git rev-parse --show-toplevel returned blank"
-    else Stdlib.Ok root
-  | Ok [] -> Stdlib.Error "git rev-parse --show-toplevel returned no output"
-  | Error msg -> Stdlib.Error msg
-
 let branch_of_origin_head_ref refname =
   let refname = String.trim refname in
   let prefix = "refs/remotes/origin/" in

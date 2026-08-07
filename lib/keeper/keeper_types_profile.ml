@@ -98,25 +98,6 @@ include Keeper_types_profile_toml
 
 (* ── JSON workspace-seq helpers ───────────────────────────────────────── *)
 
-let workspace_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
-  `Assoc (List.map (fun (workspace_id, seq) -> (workspace_id, `Int seq)) items)
-
-let workspace_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
-  match json with
-  | `Assoc fields ->
-      fields
-      |> List.filter_map (fun (workspace_id, value) ->
-             if not (validate_name workspace_id) then
-               None
-             else
-               match value with
-               | `Int seq -> Some (workspace_id, seq)
-               | `Intlit raw ->
-                   Some (workspace_id, Safe_ops.int_of_string_with_default ~default:0 raw)
-               | _ -> None)
-  | _ -> []
-
-
 include Keeper_types_profile_defaults
 
 type persona_summary = Keeper_types_profile_persona.persona_summary =

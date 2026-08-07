@@ -21,7 +21,6 @@ let metric_oas_sse_relay_drop_marker_failures =
   Otel_metric_store_core.declare_counter "masc_oas_sse_relay_drop_marker_failures_total"
 ;;
 
-let metric_sse_stream_queue_depth = "masc_sse_stream_queue_depth"
 let metric_sse_queue_depth_avg = "masc_sse_queue_depth_avg"
 let metric_sse_queue_depth_max = "masc_sse_queue_depth_max"
 let metric_sse_external_subscribers = "masc_sse_external_subscribers_total"

@@ -194,19 +194,6 @@ let decision_source_of_string = function
   | _ -> None
 ;;
 
-let string_opt_of_json = function
-  | `String value ->
-    let trimmed = String.trim value in
-    if String.equal trimmed "" then None else Some trimmed
-  | _ -> None
-;;
-
-let bool_member key json ~default =
-  match Json_util.assoc_member_opt key json with
-  | Some (`Bool value) -> value
-  | _ -> default
-;;
-
 let rule_match_to_yojson (matched : rule_match) =
   `Assoc [ "rule_id", `String matched.rule_id ]
 ;;

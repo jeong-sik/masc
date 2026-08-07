@@ -613,15 +613,6 @@ let chat_waiting ~base_path ~keeper_name =
   | Some slot -> waiting_count slot > 0
 ;;
 
-let chat_waiting_since ~base_path ~keeper_name =
-  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
-  match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
-  | None -> None
-  | Some slot ->
-    Stdlib.Mutex.protect slot.state_mu (fun () ->
-      oldest_waiting_since slot.waiting_entries)
-;;
-
 let zero_snapshot ~keeper_name =
   { snapshot_keeper_name = keeper_name
   ; snapshot_slot_created = false

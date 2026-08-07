@@ -28,11 +28,6 @@ val report_keeper_cycle_side_effect_issue :
   string -> unit
 (** Log and record a side-effect failure for a keeper cycle. *)
 
-val dispatch_keeper_phase_event_checked :
-  config:Workspace.config ->
-  keeper_name:string ->
-  side_effect:string ->
-  Keeper_state_machine.event -> unit
 (** Dispatch a phase event and log on error instead of raising. *)
 
 val finalize_trajectory_acc :

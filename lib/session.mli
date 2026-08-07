@@ -195,6 +195,3 @@ val extract_mcp_session_id : Cohttp.Header.t -> string option
 val get_or_create_mcp_session :
   Cohttp.Header.t -> McpSessionStore.mcp_session
 
-(** Add [Mcp-Session-Id] to response headers. *)
-val add_mcp_session_header :
-  Cohttp.Header.t -> McpSessionStore.mcp_session -> Cohttp.Header.t

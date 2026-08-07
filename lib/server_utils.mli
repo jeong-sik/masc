@@ -63,11 +63,6 @@ val board_sort_label : Board_dispatch.sort_order -> string
 
 (** {1 Board post / comment filtering} *)
 
-val filter_board_posts :
-  exclude_system:bool ->
-  exclude_automation:bool ->
-  Board.post list ->
-  Board.post list
 (** [filter_board_posts ~exclude_system ~exclude_automation posts]
     applies {!Board.post_matches_filters} to every entry. *)
 
@@ -229,7 +224,6 @@ val board_post_dashboard_json :
     so the dashboard never sees the SDK's structured shapes by
     accident. *)
 
-val dashboard_compact_mode : Httpun.Request.t -> bool
 (** [dashboard_compact_mode request] returns [true] iff the
     [mode] query param equals ["compact"] (case-insensitive,
     trimmed). *)
@@ -254,7 +248,6 @@ val standard_limit : Httpun.Request.t -> int
 (** [standard_limit request] reads the [limit] query param,
     defaulting to [50], and clamps to [\[1, 200\]]. *)
 
-val standard_offset : Httpun.Request.t -> int
 (** [standard_offset request] reads the [offset] query param,
     defaulting to [0], with a non-negative floor.  No upper
     clamp — pagination over very large windows is the caller's

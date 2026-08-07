@@ -17,7 +17,6 @@ let keeper_suffix_paused_work = "/paused-work"
 let keeper_suffix_catchup_judge = "/catchup-judge"
 let keeper_suffix_operator_note = "/operator-note"
 
-let keeper_chat_receipt_state_json = Keeper_chat_receipt_projection.state_json
 let keeper_chat_receipt_json = Keeper_chat_receipt_projection.receipt_json
 
 let cache_key_string_segment value =
@@ -188,9 +187,6 @@ let extract_keeper_name_for_suffix req_path suffix =
 let is_keeper_checkpoints_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_checkpoints
 
-let is_keeper_runtime_trace_get_path req_path =
-  keeper_path_ends_with req_path keeper_suffix_runtime_trace
-
 let is_keeper_paused_work_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_paused_work
 
@@ -351,12 +347,6 @@ let tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json =
       || Json_util.assoc_int_opt "keeper_turn_id" contract = Some wanted
   in
   keeper_matches && trace_matches && turn_matches
-
-let first_string_opt values =
-  List.find_map (fun value -> value) values
-
-let first_int_opt values =
-  List.find_map (fun value -> value) values
 
 let string_has_prefix = Server_dashboard_http_json_utils.string_has_prefix
 

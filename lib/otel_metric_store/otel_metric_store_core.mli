@@ -54,4 +54,3 @@ val snapshot : unit -> metric list
 
 (** The most recent EDEADLK backtrace captured by the store lock. [None]
     until the first re-entrant lock failure. *)
-val last_deadlock_backtrace_for_test : unit -> string option

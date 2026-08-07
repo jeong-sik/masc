@@ -206,11 +206,6 @@ val resource_exhausted :
   limit:float ->
   error_mode
 
-val resource_exhausted_unknown :
-  resource:[ `Tokens | `Time | `Cost | `Memory | `Disk ] ->
-  detail:string ->
-  error_mode
-
 val ambiguity : detail:string -> branches:string list -> error_mode
 
 val consensus_failure :

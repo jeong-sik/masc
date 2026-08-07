@@ -128,8 +128,6 @@ type task_actor =
 
 val task_actor_of_status : task_status -> task_actor
 
-val task_actor_name : task_actor -> string option
-
 (** Who owes work now. [Done] and [Cancelled] owe nothing. *)
 val task_assignee_of_status : task_status -> string option
 

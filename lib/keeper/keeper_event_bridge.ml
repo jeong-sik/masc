@@ -720,12 +720,3 @@ let start ~sw ~clock ~(config : Workspace.config) ~bus =
   start_impl ~interval_s:(drain_interval_s ()) ~sw ~clock ~config ~bus
 ;;
 
-let start_with_interval
-      ~drain_interval_s:interval_s
-      ~sw
-      ~clock
-      ~(config : Workspace.config)
-      ~bus
-  =
-  start_impl ~interval_s ~sw ~clock ~config ~bus
-;;

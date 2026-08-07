@@ -68,10 +68,3 @@ let nonempty_string_list_override field default live acc =
   else acc
 ;;
 
-let maybe_string_option_override field default live acc =
-  match default, live with
-  | Some authored, Some active when authored <> active ->
-    override_field field ~default_value:(`String authored) ~live_value:(`String active)
-    :: acc
-  | _ -> acc
-;;

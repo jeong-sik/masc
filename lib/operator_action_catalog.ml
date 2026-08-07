@@ -46,7 +46,6 @@ let all =
   ]
 ;;
 
-let strings = List.map to_string all
 let is_allowed action = Option.is_some (of_string action)
 
 (* Confirmation is uniform, not inferred from a subjective action class. *)

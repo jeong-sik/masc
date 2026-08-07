@@ -105,14 +105,10 @@ val start_session :
 val end_session : t -> agent_id:string -> bool
 (** [true] if a session was removed, [false] if [agent_id] had none. *)
 
-val suspend_session : t -> agent_id:string -> unit
-val resume_session : t -> agent_id:string -> unit
-
 (** {1 Query} *)
 
 val get_session : t -> agent_id:string -> session option
 val list_sessions : t -> session list
-val has_session : t -> agent_id:string -> bool
 val session_count : t -> int
 
 (** {1 Activity tracking} *)

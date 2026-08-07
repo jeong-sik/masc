@@ -35,8 +35,6 @@ type parsed_args =
     missing keys. *)
 (** [true] iff [key] exists in the assoc and its value is not
     [`Null]. *)
-val json_non_null_member_present : string -> Yojson.Safe.t -> bool
-
 (** Parse an optional string-list field at [key]; uses
     [normalize_name_list]. *)
 val parse_present_string_list_opt :

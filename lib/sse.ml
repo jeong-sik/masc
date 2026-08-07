@@ -1169,9 +1169,6 @@ let client_count_by_kind kind =
 
 (** Return list of session_ids for all connected clients.
     Used by transport metrics to report session count by kind. *)
-let all_session_ids () =
-  SMap.fold (fun sid _client acc -> sid :: acc) (Atomic.get clients).entries []
-
 (** Close all SSE clients - for graceful shutdown.
     Returns the number of clients that were closed. *)
 let close_all_clients () =

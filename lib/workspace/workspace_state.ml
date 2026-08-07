@@ -147,9 +147,4 @@ let pause_info config =
 
 let parse_iso_time_opt = Workspace_resilience.Time.parse_iso8601_opt
 
-let parse_iso_time iso_str =
-  match parse_iso_time_opt iso_str with
-  | Some t -> t
-  | None -> Workspace_resilience.Time.now ()
-
 let take = List.take

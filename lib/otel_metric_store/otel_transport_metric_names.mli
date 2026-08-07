@@ -11,7 +11,6 @@ val metric_sse_broadcast_failures : string
 val metric_sse_external_subscriber_callback_failures : string
 val metric_sse_external_fanout_duration_seconds : string
 val metric_oas_sse_relay_drop_marker_failures : string
-val metric_sse_stream_queue_depth : string
 val metric_sse_queue_depth_avg : string
 val metric_sse_queue_depth_max : string
 val metric_sse_external_subscribers : string

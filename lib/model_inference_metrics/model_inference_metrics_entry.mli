@@ -3,8 +3,6 @@
 module StringMap : module type of Set_util.StringMap
 module IntMap : Map.S with type key = int
 
-val model_id_unknown : string
-
 type recent_entry =
   { re_ts_unix : float
   ; re_provider : string option

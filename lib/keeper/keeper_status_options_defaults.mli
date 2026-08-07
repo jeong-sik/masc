@@ -10,8 +10,6 @@ val max_tail_turns : int
 val max_tail_messages : int
 val max_tail_bytes : int
 val metrics_lines_per_turn : int
-val min_metrics_scan_lines : int
-
 type tail_order =
   | Oldest_first
   | Newest_first

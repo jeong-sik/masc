@@ -115,4 +115,3 @@ val inspect_submitted_evidence_for_authority :
     authority. The task id and producer must still match the durable request. *)
 val verifications_dir : string -> string
 val request_path : string -> string -> string
-val list_request_headers : string -> request_header list

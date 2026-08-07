@@ -15,8 +15,6 @@
 module StringMap = Set_util.StringMap
 module IntMap = Map.Make (Int)
 
-let model_id_unknown = "unknown"
-
 (* ── Types ──────────────────────────────────────────────── *)
 
 type recent_entry =

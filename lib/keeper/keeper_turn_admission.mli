@@ -175,7 +175,6 @@ val chat_waiting : base_path:string -> keeper_name:string -> bool
     admitted (in-flight) turn — an admitted chat holds the slot and is no
     longer waiting. *)
 
-val chat_waiting_since : base_path:string -> keeper_name:string -> float option
 (** Unix epoch seconds for the oldest currently parked chat waiter on this
     keeper's slot, or [None] when no chat request is waiting or the keeper slot
     is unknown. *)

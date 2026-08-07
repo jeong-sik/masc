@@ -36,7 +36,6 @@ val sanitize_user_message : string -> string
 (** Normalize malformed UTF-8 before appending the complete user message to
     the OAS context. This boundary does not classify or rewrite its meaning. *)
 
-val normalize_memory_fragment : string -> string
 (** Normalize malformed UTF-8 while preserving the complete recalled memory.
     Trust and relevance are interpreted by the configured model, not by a
     local string deny-list. *)

@@ -35,8 +35,6 @@ type timeout_phase =
 
 val timeout_phase_to_label : timeout_phase -> string
 val timeout_phase_of_label : string -> timeout_phase option
-val timeout_phase_is_streaming_activity : timeout_phase -> bool
-
 type timeout_source =
   | Oas_api
   | Oas_provider

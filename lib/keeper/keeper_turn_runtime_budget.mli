@@ -235,10 +235,6 @@ val capacity_transition_of_error :
 (** Total classifier over typed SDK errors. This function does not inspect
     rendered error prose and does not select a provider, model, or failover. *)
 
-val current_keeper_meta :
-  config:Workspace.config ->
-  fallback_meta:keeper_meta ->
-  keeper_meta
 (** Read the latest meta from the registry, falling back to the given
     [fallback_meta] when the registry entry is missing. *)
 

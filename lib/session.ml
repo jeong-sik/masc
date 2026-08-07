@@ -756,5 +756,3 @@ let get_or_create_mcp_session (headers : Cohttp.Header.t) : McpSessionStore.mcp_
   | None ->
     McpSessionStore.create ()
 
-let add_mcp_session_header (headers : Cohttp.Header.t) (session : McpSessionStore.mcp_session) : Cohttp.Header.t =
-  Cohttp.Header.add headers "Mcp-Session-Id" session.id

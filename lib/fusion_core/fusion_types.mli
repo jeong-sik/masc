@@ -306,9 +306,6 @@ type fusion_trigger =
   | Harness_eval  (** eval 하네스가 결정론적으로 구동 *)
 [@@deriving yojson, show, eq]
 
-(** 안정적 짧은 라벨 (로깅·메트릭·board meta용). [show]의 장황한 출력 대신 사용. *)
-val trigger_label : fusion_trigger -> string
-
 (** {1 심의 요청} *)
 
 (** out-of-band 오케스트레이터에 전달되는 심의 요청. *)

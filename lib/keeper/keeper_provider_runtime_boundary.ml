@@ -113,20 +113,6 @@ let timeout_phase_of_label label =
     | _ -> None
 ;;
 
-let timeout_phase_is_streaming_activity = function
-  | Stream_idle state -> stream_idle_state_is_activity state
-  | First_token
-  | Http_operation
-  | Non_streaming_body
-  | Stream_body
-  | Provider_step
-  | Cli_stdout_idle
-  | Caller_budget
-  | Wall_clock
-  | Capacity_backpressure
-  | Unknown_timeout -> false
-;;
-
 type timeout_source =
   | Oas_api
   | Oas_provider

@@ -162,8 +162,6 @@ val load_state_result :
     unprojected source-bearing row remains authoritative until the reaction
     projector records and retires it. *)
 
-val load_existing_state_result :
-  base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
 (** Read already-created durable queue state. A current snapshot or v6 WAL is
     durable owner evidence; a WAL-only owner is replayed from the row's exact
     complete pre-transition state.
@@ -307,18 +305,9 @@ val project_accepted_transfer_guarded_result :
     converges after target identity rotation, while a first projection cannot
     create state for an absent or replaced Keeper. *)
 
-val project_accepted_transfer_result :
-  after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  transfer:accepted_transfer ->
-  (transfer_projection_result, string) result
 (** Atomically persist target-side transfer accounting with the exact enqueue.
     The accounting survives target consumption and makes later receipt replay
     return [Transfer_already_projected] without a second target effect. *)
-
-val persist_snapshot :
-  base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
 
 val ack_consumed :
   base_path:string ->

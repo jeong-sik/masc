@@ -35,12 +35,6 @@ type context =
        handlers may consume it only after matching their normalized request. *)
   }
 
-let descriptor_for_internal internal_name =
-  match Keeper_tool_descriptor.descriptors_for_internal internal_name with
-  | descriptor :: _ -> Some descriptor
-  | [] -> None
-;;
-
 let handle_filesystem ctx descriptor args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_read_file ->

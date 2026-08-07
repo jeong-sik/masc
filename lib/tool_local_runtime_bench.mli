@@ -18,16 +18,6 @@ include module type of struct
   include Tool_local_runtime_http
 end
 
-val run_bench :
-  ?model_id:string ->
-  ?runtime_pool:string ->
-  parallelism:int ->
-  rounds:int ->
-  prompt:string ->
-  max_tokens:int ->
-  timeout_sec:int ->
-  unit ->
-  (Yojson.Safe.t, string) Result.t
 (** [run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt
       ~max_tokens ~timeout_sec ()] runs a concurrency benchmark.
 

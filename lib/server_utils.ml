@@ -58,11 +58,6 @@ let board_sort_order_of_request request =
 (** Issue #8449 PR C: thin alias over the Variant SSOT helper. *)
 let board_sort_label = Board_dispatch.sort_order_to_string
 
-let filter_board_posts ~exclude_system ~exclude_automation posts =
-  posts
-  |> List.filter
-       (Board.post_matches_filters ~exclude_system ~exclude_automation)
-
 let board_actor_key ~kind id =
   kind ^ ":" ^ String.lowercase_ascii (String.trim id)
 
@@ -355,11 +350,6 @@ let board_post_dashboard_json ?(include_moderation = false)
       @ board_vote_state_fields current_vote
       @ board_reaction_fields reactions )
 
-let dashboard_compact_mode request =
-  match query_param request "mode" with
-  | Some s -> String.equal "compact" (String.lowercase_ascii (String.trim s))
-  | None -> false
-
 (** Extract a path parameter after a known prefix.
     Returns None if the path doesn't start with prefix or the parameter is empty.
     Prevents String.sub crash from bounds violations. *)
@@ -381,6 +371,3 @@ let path_parts rest =
 let standard_limit request =
   int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200
 
-(** Standard query param: offset with default 0, min 0. *)
-let standard_offset request =
-  int_query_param request "offset" ~default:0 |> max 0

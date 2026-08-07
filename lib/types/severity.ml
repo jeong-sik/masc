@@ -29,9 +29,6 @@ let of_string = function
   | "critical" | "fatal" -> Ok Critical
   | other -> Error ("unknown severity: " ^ other)
 
-let of_string_default ~default s =
-  match of_string s with Ok v -> v | Error _ -> default
-
 (** Numeric ordering: Debug=0 .. Critical=4.
     Higher is more severe. *)
 let to_int = function

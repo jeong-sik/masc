@@ -235,10 +235,6 @@ val sanitize_inherited_test_base_path_opt :
   home:string option ->
   string option
 
-val path_from_executable : cwd:string -> string -> string option
-
-val path_from_cwd : string -> string option
-
 (** {1 Warnings and logging} *)
 
 val warnings : unit -> string list

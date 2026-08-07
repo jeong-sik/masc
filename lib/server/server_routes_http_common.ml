@@ -93,14 +93,6 @@ let state_clock_opt = function
       | None -> Eio_context.get_clock_opt ())
   | None -> Eio_context.get_clock_opt ()
 
-let state_net_opt = function
-  | Some state -> (
-      match state.Mcp_server.net with
-      | Some net -> Some net
-      | None -> Eio_context.get_net_opt ())
-  | None -> Eio_context.get_net_opt ()
-
-
 (** Requests that enter the MCP transport surface.  [/]'s GET representation
     is the dashboard, while its POST representation is the legacy MCP endpoint;
     keep that method distinction explicit instead of using a path prefix. *)
@@ -121,11 +113,6 @@ let validate_origin ~request_authority (request : Httpun.Request.t) =
   | Multiple_origins
   | Malformed_origin ->
     false
-
-(** Check if client accepts SSE *)
-let accepts_sse (request : Httpun.Request.t) =
-  Http_negotiation.accepts_sse_header
-    (Httpun.Headers.get request.headers "accept")
 
 (** Check if client accepts MCP Streamable HTTP (JSON + SSE) *)
 let accepts_streamable_mcp (request : Httpun.Request.t) =

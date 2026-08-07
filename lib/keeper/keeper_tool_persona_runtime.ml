@@ -18,28 +18,6 @@ let persona_summary_to_json (persona : persona_summary) : Yojson.Safe.t =
     ]
 
 
-let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
-  match read_file_tail_lines_result path ~max_bytes ~max_lines with
-  | Ok lines -> lines
-  | Error exn_class ->
-      record_memory_recall_read_error ~site path exn_class;
-      []
-
-let read_jsonl_rows path ~max_bytes ~max_lines : Yojson.Safe.t list =
-  if not (Fs_compat.file_exists path) then
-    []
-  else
-    read_tail_lines_or_empty ~site:"persona_metrics" path ~max_bytes ~max_lines
-    |> Fs_compat.parse_jsonl_lines ~source:"persona_metrics"
-    |> fst
-
-let find_jsonl_row_by_action_id rows action_id =
-  rows
-  |> List.find_map (fun json ->
-         match Safe_ops.json_string_opt "action_id" json with
-         | Some candidate when candidate = action_id -> Some json
-         | _ -> None)
-
 let create_from_persona_arg_names =
   [ "active_goal_ids"
   ; "allowed_paths"

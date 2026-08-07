@@ -24,24 +24,6 @@ module Float = Stdlib.Float
 let string_prop description =
   `Assoc [ ("type", `String "string"); ("description", `String description) ]
 
-let integer_prop ?default description =
-  `Assoc
-    ([ ("type", `String "integer"); ("description", `String description) ]
-    @ (match default with Some v -> [ ("default", `Int v) ] | None -> []))
-
-let boolean_prop ?default description =
-  `Assoc
-    ([ ("type", `String "boolean"); ("description", `String description) ]
-    @ (match default with Some v -> [ ("default", `Bool v) ] | None -> []))
-
-let string_array_prop description =
-  `Assoc
-    [
-      ("type", `String "array");
-      ("description", `String description);
-      ("items", `Assoc [ ("type", `String "string") ]);
-    ]
-
 let object_schema ?(required = []) properties =
   `Assoc
     [

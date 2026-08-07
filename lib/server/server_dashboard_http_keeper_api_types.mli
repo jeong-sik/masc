@@ -25,9 +25,6 @@ val keeper_suffix_paused_work : string
 val keeper_suffix_catchup_judge : string
 val keeper_suffix_operator_note : string
 
-val keeper_chat_receipt_state_json :
-  Keeper_chat_queue.receipt_state -> Yojson.Safe.t
-
 val keeper_chat_receipt_json :
   keeper_name:string ->
   revision:int64 ->
@@ -102,7 +99,6 @@ val extract_keeper_name_for_suffix : string -> string -> string
 val is_keeper_checkpoints_get_path : string -> bool
 (** [true] for [GET /api/v1/keepers/<name>/checkpoints] paths. *)
 
-val is_keeper_runtime_trace_get_path : string -> bool
 (** [true] for [GET /api/v1/keepers/<name>/runtime-trace] paths. *)
 
 val is_keeper_paused_work_get_path : string -> bool
@@ -180,8 +176,6 @@ val tool_call_matches_trace :
 
 (** {1 Option list + string utilities} *)
 
-val first_string_opt : string option list -> string option
-val first_int_opt : int option list -> int option
 val string_has_prefix : prefix:string -> string -> bool
 
 (** {1 Claim tool-call summary} *)

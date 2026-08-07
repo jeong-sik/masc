@@ -1,5 +1,3 @@
-val with_cwd : raw:string -> cwd:string -> Masc_exec.Shell_ir.t -> Masc_exec.Shell_ir.t
-
 val simple_bin :
   ?cwd_raw:string ->
   ?cwd_base:string ->

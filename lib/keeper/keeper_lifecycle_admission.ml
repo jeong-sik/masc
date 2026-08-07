@@ -46,11 +46,6 @@ let admit_autonomous = function
   | Dead_tombstone -> Autonomous_denied Autonomous_dead_tombstone
 ;;
 
-let paused_latch_to_wire = function
-  | Classified reason -> Keeper_latched_reason.to_wire reason
-  | Unclassified -> "unclassified"
-;;
-
 let state_to_wire = function
   | Active -> "active"
   | Paused _ -> "paused"

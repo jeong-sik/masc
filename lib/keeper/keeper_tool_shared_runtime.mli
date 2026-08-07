@@ -8,8 +8,6 @@ val error_json : ?fields:(string * Yojson.Safe.t) list -> string -> string
 
 (** Render a failed [Tool_result.result] as [error_json], preserving
     [failure_class] for keeper-facing routing and diagnostics. *)
-val tool_result_error_json : Tool_result.result -> string
-
 val file_not_found_prefix : string
 
 (** Render a missing-file JSON envelope with the error, path, and
@@ -150,8 +148,6 @@ val shell_readonly_limit : Yojson.Safe.t -> int
 
 (** Clamp [args.max_bytes] to [256..100000] (default 4000) for
     the structured [cat] read operation. *)
-val shell_readonly_cat_max_bytes : Yojson.Safe.t -> int
-
 (** Project [text] to a JSON array of lines, capped by [limit]
     lines and [max_bytes] total payload. The omitted-tail line
     surfaces a hint for the LLM to narrow its search. *)

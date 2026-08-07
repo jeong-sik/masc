@@ -51,10 +51,6 @@ let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string)
               e)))
 ;;
 
-let is_keeper_meta_file f =
-  Option.is_some (Keeper_runtime_root_entry.metadata_keeper_name f)
-;;
-
 let persisted_keeper_names_result config =
   let dir = keeper_dir config in
   match Safe_ops.list_dir_safe dir with
@@ -428,11 +424,6 @@ let write_meta_deferred_runtime_sync config m =
   |> Result.map_error write_meta_error_to_string
 ;;
 
-let write_meta_for_lifecycle token config m =
-  write_meta_typed ~lifecycle_token:token config m
-  |> Result.map_error write_meta_error_to_string
-;;
-
 let is_version_conflict_error msg =
   try
     ignore (Re.exec version_conflict_re msg);
@@ -512,26 +503,6 @@ let write_meta_with_merge_for_lifecycle token ?max_retries ~merge config m =
    so a concurrent heartbeat/turn CAS race re-applies the stamp instead of
    dropping it. [`No_durable_meta] is a distinct, non-fatal outcome (keeper meta
    never persisted) rather than a swallowed error. *)
-let persist_compaction_decision config ~keeper_name ~decision
-  : ([ `Persisted | `No_durable_meta ], string) result
-  =
-  let stamp (m : Keeper_meta_contract.keeper_meta) =
-    Keeper_meta_contract.map_compaction_rt
-      (fun rt ->
-        { rt with last_decision = decision })
-      m
-  in
-  match read_meta config keeper_name with
-  | Error msg -> Error msg
-  | Ok None -> Ok `No_durable_meta
-  | Ok (Some disk_meta) ->
-    write_meta_with_merge
-      ~merge:(fun ~latest ~caller:_ -> stamp latest)
-      config
-      (stamp disk_meta)
-    |> Result.map (fun () -> `Persisted)
-;;
-
 let persist_compaction_commit_projection config ~keeper_name ~commit_count
   : ([ `Persisted | `No_durable_meta ], string) result
   =

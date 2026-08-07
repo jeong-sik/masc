@@ -29,7 +29,6 @@ val split_csv_nonempty : string -> string list
 val configured_bind_host : unit -> string
 (** Currently configured HTTP bind host (env / config). *)
 
-val ipaddr_is_loopback : (Ipaddr.V4.t, Ipaddr.V6.t) Ipaddr.v4v6 -> bool
 val ipaddr_is_unspecified : (Ipaddr.V4.t, Ipaddr.V6.t) Ipaddr.v4v6 -> bool
 val is_loopback_host : string -> bool
 val is_unspecified_host : string -> bool
@@ -41,7 +40,6 @@ val base_url_has_non_loopback_host : unit -> bool
 val http_auth_strict_enabled : unit -> bool
 (** [true] when strict HTTP token auth is enabled by config. *)
 
-val http_auth_bind_host : unit -> string
 (** Bind host used by HTTP auth checks (mirrors
     [configured_bind_host]). *)
 
@@ -71,7 +69,6 @@ val request_carries_auth_credential : Httpun.Request.t -> bool
     distinguish a genuinely anonymous request from a credential that must fail
     closed during parsing or validation. *)
 
-val observer_sse_query_token_from_request : Httpun.Request.t -> string option
 (** Observer/presence/cursor SSE allows the token via query string for browser
     EventSource. *)
 
@@ -206,8 +203,6 @@ val classify_request_origin :
     is parsed as one complete HTTP(S) serialized origin; repeated fields and
     partially consumed values are distinct fail-closed outcomes. *)
 
-val browser_origin_matches_request_authority :
-  request_authority:Server_request_authority.authority -> string -> bool
 (** Compare an HTTP(S) browser origin with the admitted request authority.
     The explicit loopback development allowlist is accepted only when its
     normalized host is also the admitted loopback host. *)
@@ -284,9 +279,6 @@ val public_read_cors_headers :
 (** Header set for public-read responses (looser than the protected
     route policy). *)
 
-val respond_public_read_json :
-  ?status:Httpun.Status.t ->
-  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Public-read JSON responder. *)
 
 val respond_public_read_json_value :
@@ -332,10 +324,6 @@ val check_agent_rate_limit :
     a structured auth error via [respond_auth_error].  All combinators
     apply per-agent rate limiting after successful auth. *)
 
-val with_admin_auth :
-  (Mcp_server.server_state ->
-   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Require admin-tier auth (operator MCP). *)
 
 val is_public_read_path : String.t -> bool

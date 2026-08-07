@@ -25,7 +25,6 @@ val operator_snapshot_recent_completed_limit : unit -> int
 
 (** {1 Tag/detail parsing} *)
 
-val bool_of_tag_value : string -> bool
 (** Truthy tag value: ["1" | "true" | "yes" | "y" | "on"], case-insensitive. *)
 
 (** {1 Numeric helpers} *)
@@ -61,6 +60,5 @@ val json_assoc_field : string -> Yojson.Safe.t -> Yojson.Safe.t
 val count_where : 'a list -> ('a -> bool) -> int
 (** [count_where xs p] is [List.length (List.filter p xs)]. *)
 
-val normalize_text : string -> string
 (** Collapse multi-line text into a single trimmed line, dropping blank
     rows. SSOT for judge-module LLM output normalization. *)

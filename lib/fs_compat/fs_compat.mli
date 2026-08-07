@@ -1348,8 +1348,6 @@ val append_jsonl_batch : string -> Yojson.Safe.t list -> unit
     a subsequent [append_jsonl] re-opens fresh. Intended for
     shutdown sequencing and rare administrative refresh.
     RFC-0162 §3.4. *)
-val close_all_cached_writers : unit -> unit
-
 (** [invalidate_cached_writer path] drops the cached [append_jsonl]
     writer for [path] (a no-op if none is cached). Call it after
     replacing the inode at [path] with [save_file_atomic]: the cached

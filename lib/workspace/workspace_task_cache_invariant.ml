@@ -153,20 +153,6 @@ let record_backlog_unavailable ~config ~module_name task_ids =
     task_ids
 ;;
 
-let stale_active_task_signal_present ~config ~from_agent ~module_name ~content =
-  if string_starts_with ~prefix:"[cache_invalidated]" (String.trim content)
-     || not (trusted_cache_signal_sender from_agent)
-  then false
-  else match check_cache_signal ~config ~content with
-  | No_cache_signal | No_terminal_task -> false
-  | Terminal_tasks stale_tasks ->
-    record_cache_desync_cleared ~config ~module_name stale_tasks;
-    true
-  | Backlog_unavailable { task_ids; _ } ->
-    record_backlog_unavailable ~config ~module_name task_ids;
-    true
-;;
-
 let rewrite_broadcast_content ~config ~from_agent ~module_name ~content =
   if string_starts_with ~prefix:"[cache_invalidated]" (String.trim content)
      || not (trusted_cache_signal_sender from_agent)

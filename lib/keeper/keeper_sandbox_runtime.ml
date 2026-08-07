@@ -714,10 +714,6 @@ let docker_image_present_optional ~image ?timeout_sec () =
   | Error classified -> Error classified.message
 ;;
 
-let docker_image_present ~image ~timeout_sec =
-  docker_image_present_optional ~image ~timeout_sec ()
-;;
-
 let ensure_keeper_sandbox_image_present_with_class_optional
       ~image
       ?timeout_sec
@@ -792,27 +788,6 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
     ; ( "next_actions"
       , `List (List.map (fun action -> `String action) preflight.next_actions) )
     ]
-;;
-
-let docker_preflight_failure_message (preflight : docker_preflight) =
-  let reasons =
-    [ preflight.docker_runtime_error
-    ; preflight.hardening_error
-    ; preflight.image_error
-    ]
-    |> List.filter_map (fun item -> item)
-    |> List.filter (fun s -> s <> "")
-    |> Json_util.dedupe_keep_order
-  in
-  let next_actions =
-    match preflight.next_actions with
-    | [] -> ""
-    | actions -> " Next: " ^ String.concat " " actions
-  in
-  Printf.sprintf
-    "Docker sandbox preflight failed: %s.%s"
-    (String.concat "; " reasons)
-    next_actions
 ;;
 
 let ensure_keeper_sandbox_runtime_optional ?timeout_sec () =

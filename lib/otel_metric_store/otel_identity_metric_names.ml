@@ -25,14 +25,6 @@ let metric_auth_credential_hash_collision =
   Otel_metric_store_core.declare_counter "masc_auth_credential_hash_collision_total"
 ;;
 
-let metric_auth_credential_index_cache_hits =
-  Otel_metric_store_core.declare_counter "masc_auth_credential_index_cache_hits_total"
-;;
-
-let metric_auth_credential_index_cache_misses =
-  Otel_metric_store_core.declare_counter "masc_auth_credential_index_cache_misses_total"
-;;
-
 let metric_silent_auth_token_resolve_error =
   Otel_metric_store_core.declare_counter "masc_silent_auth_token_resolve_error_total"
 ;;

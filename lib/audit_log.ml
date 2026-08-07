@@ -686,10 +686,3 @@ let get_stats (config : config) =
     newest_timestamp = !newest;
   }
 
-let stats_to_json (s : stats) : Yojson.Safe.t =
-  `Assoc [
-    ("total_entries", `Int s.total_entries);
-    ("file_size_bytes", `Int s.file_size_bytes);
-    ("oldest_timestamp", Json_util.float_opt_to_json s.oldest_timestamp);
-    ("newest_timestamp", Json_util.float_opt_to_json s.newest_timestamp);
-  ]

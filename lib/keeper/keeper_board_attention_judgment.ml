@@ -7,8 +7,6 @@ type t =
   ; rationale : string
   }
 
-let batch_schema_name = "keeper_board_attention_judgment_batch"
-
 let decision_to_string = function
   | Relevant -> "relevant"
   | Not_relevant -> "not_relevant"
@@ -81,10 +79,6 @@ let batch_item_of_yojson = function
             else Ok { candidate_id; verdict = { decision; rationale } })
        | _ -> Error "board-attention batch item fields must be strings")
   | _ -> Error "board-attention batch item must be an object"
-;;
-
-let batch_to_yojson items =
-  `Assoc [ "verdicts", `List (List.map batch_item_to_yojson items) ]
 ;;
 
 let batch_of_yojson = function

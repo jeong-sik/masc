@@ -31,12 +31,6 @@ let nonnegative_number_schema description =
 let tail_order_enum_strings =
   Keeper_status_options_defaults.valid_tail_order_strings
 
-let string_array_schema =
-  `Assoc [
-    ("type", `String "array");
-    ("items", `Assoc [ ("type", `String "string") ]);
-  ]
-
 let closed_object_schema ~required properties =
   `Assoc
     [ "type", `String "object"

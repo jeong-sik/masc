@@ -42,24 +42,6 @@ val close : t -> unit
 
 (** {1 Unary RPCs} *)
 
-(** Get current project status. *)
-val get_status :
-  t ->
-  sw:Eio.Switch.t ->
-  env:Eio_unix.Stdenv.base ->
-  (Masc_grpc_types.StatusResponse.t, string) result
-
-(** Call an MCP tool via gRPC. *)
-val tool_call :
-  t ->
-  sw:Eio.Switch.t ->
-  env:Eio_unix.Stdenv.base ->
-  agent_name:string ->
-  session_id:string ->
-  tool_name:string ->
-  arguments_json:string ->
-  (Masc_grpc_types.ToolCallResponse.t, string) result
-
 (** Broadcast a message to all agents. *)
 val broadcast :
   t ->

@@ -227,4 +227,3 @@ type stats = {
 val get_stats : config -> stats
 (** [file_size_bytes] is always [0] under the date-split layout. *)
 
-val stats_to_json : stats -> Yojson.Safe.t

@@ -203,11 +203,6 @@ let validate_request_payload_for_creation_detailed ~payload =
   | _ -> Error (Creation_invalid_payload "payload must be a JSON object")
 ;;
 
-let validate_request_payload_for_creation ~payload =
-  validate_request_payload_for_creation_detailed ~payload
-  |> Result.map_error creation_rejection_message
-;;
-
 let creation_keeper_wake_target ~payload =
   match payload with
   | `Assoc fields ->
@@ -241,10 +236,6 @@ let dispatch_view_detailed request =
     in
     Ok (Keeper_wake, view)
   | None -> Error (Dispatch_unsupported_kind view.raw_kind)
-;;
-
-let dispatch_view request =
-  dispatch_view_detailed request |> Result.map_error dispatch_rejection_message
 ;;
 
 let log_projection_error (request : Schedule_domain.schedule_request) ~surface message =

@@ -42,9 +42,6 @@ val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option
 val lower_string_list_opt : string list -> string list option
-val workspace_seq_map_to_json : (string * int) list -> Yojson.Safe.t
-val workspace_seq_map_of_json : Yojson.Safe.t -> (string * int) list
-
 include module type of Keeper_types_profile_defaults
 
 type persona_summary =

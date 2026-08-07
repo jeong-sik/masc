@@ -49,7 +49,6 @@ end
 
 (** {1 SSE wire encoding} *)
 
-val format_sse_event : event -> string
 (** Renders [value] as a single SSE frame:
     [id: <seq>\nevent: activity\ndata: <json>\n\n].
     Consumed by {!emit} during fan-out and by the dashboard's

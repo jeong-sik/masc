@@ -74,11 +74,6 @@ let set_clock clock =
 let set_mono_clock mc =
   Atomic.set current_mono_clock (Some mc)
 
-let get_mono_clock () : (Eio.Time.Mono.ty Eio.Resource.t, string) result =
-  match Atomic.get current_mono_clock with
-  | Some mc -> Ok mc
-  | None -> Error "Eio mono_clock not initialized"
-
 let get_mono_clock_opt () =
   Atomic.get current_mono_clock
 
@@ -160,26 +155,11 @@ let get_switch_opt () =
   | Some _ as some_sw -> some_sw
   | None -> get_root_switch_opt ()
 
-let get_net () : (eio_net, string) result =
-  match Atomic.get current_net with
-  | Some net -> Ok net
-  | None ->
-      if Atomic.get net_initialized then
-        Error "Eio net was set but is now None (unexpected state)"
-      else
-        Error "Eio net not initialized - ensure set_net is called during server startup"
-
 let get_clock () : (float Eio.Time.clock_ty Eio.Resource.t, string) result =
   match Atomic.get current_clock with
   | Some clock -> Ok clock
   | None ->
       Error "Eio clock not initialized - ensure set_clock is called during server startup"
-
-let get_switch () : (Eio.Switch.t, string) result =
-  match get_switch_opt () with
-  | Some sw -> Ok sw
-  | None ->
-      Error "Eio switch not initialized - ensure set_switch is called during server startup"
 
 (** TLS connector for Cohttp_eio HTTPS support.
 

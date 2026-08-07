@@ -23,7 +23,6 @@ val of_string : string -> (t, string) result
     ["warn" → Warning], ["bad" → Error], ["fatal" → Critical].
     Returns [Error msg] for unknown inputs. *)
 
-val of_string_default : default:t -> string -> t
 (** Like {!of_string} but yields [default] on parse failure. *)
 
 val to_int : t -> int

@@ -141,12 +141,3 @@ val no_compaction_of_prepared :
 (** Reload the canonical OAS checkpoint and apply an explicit typed
     compaction request. Composition of {!prepare_compaction} and
     {!commit_prepared_compaction}; the source CAS is the commit authority. *)
-val recover_latest_checkpoint_for_compaction :
-  ?before_dispatch_authority:
-    Keeper_compaction_llm_summarizer.before_dispatch_authority ->
-  base_path:string ->
-  base_dir:string ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  trigger:Compaction_trigger.t ->
-  unit ->
-  prepared_commit_outcome

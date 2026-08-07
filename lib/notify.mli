@@ -31,8 +31,6 @@ val notify : event -> unit
 
 val notify_mention :
   ?target_agent:string -> from_agent:string -> message:string -> unit -> unit
-val notify_task_done : agent:string -> task_id:string -> unit
-
 (** {1 Helpers} *)
 
 val sanitize_token : string -> string

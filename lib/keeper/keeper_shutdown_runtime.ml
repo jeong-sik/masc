@@ -525,40 +525,6 @@ let recover_operation_with_corrupt_owner_fence
                  (Operation_id.to_string existing))))
 ;;
 
-let recover_at_boot ~config =
-  match Keeper_shutdown_store.scan_inventory ~config with
-  | Error error -> [ Error (Keeper_shutdown_store.error_to_string error) ]
-  | Ok inventory ->
-    (match restore_inventory_admission ~config inventory with
-     | Error detail -> [ Error detail ]
-     | Ok restored ->
-       let corrupt_results =
-         List.map
-           (fun (corrupt : Keeper_shutdown_store.corrupt_record) ->
-              Error
-                (Printf.sprintf
-                   "corrupt shutdown operation fenced: keeper=%s operation=%s path=%s error=%s"
-                   corrupt.Keeper_shutdown_store.keeper_name
-                   (Operation_id.to_string corrupt.operation_id)
-                   corrupt.path
-                   (Keeper_shutdown_store.error_to_string corrupt.error)))
-           restored.corrupt_records
-       in
-       let recover (operation : Keeper_shutdown_types.t) =
-         let corrupt_owner_fence =
-           List.find_opt
-             (fun (fence : corrupt_owner_fence) ->
-                String.equal fence.keeper_name operation.keeper_name)
-             restored.corrupt_owner_fences
-         in
-         recover_operation_with_corrupt_owner_fence
-           ~config
-           ~corrupt_owner_fence
-           operation
-       in
-       List.map recover restored.operations @ corrupt_results)
-;;
-
 module For_testing = struct
   let persist_unhandled_failure = persist_unhandled_failure
 end

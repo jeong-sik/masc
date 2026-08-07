@@ -63,4 +63,3 @@ let provider_attempt_finished_decision record =
 let success_selected_model_raw candidate =
   Some (Runtime_candidate.model_health_key candidate)
 
-let runtime_candidate_label = "runtime"

@@ -250,8 +250,3 @@ let identity_fields_for_board_name = function
   -> []
 ;;
 
-let identity_input_fields =
-  Tool_name.Board_name.all
-  |> List.concat_map identity_fields_for_board_name
-  |> List.sort_uniq String.compare
-;;

@@ -11,4 +11,3 @@
     aggregate [models] field is populated. Observations include
     warnings about misconfigured capacity, missing processes, or
     runtime parse errors. *)
-val runtime_status_json : ?include_models:bool -> unit -> Yojson.Safe.t

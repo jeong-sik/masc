@@ -16,13 +16,6 @@ let payload_role_to_string = function
   | Checkpoint -> "checkpoint"
   | Memory_store -> "memory_store"
 
-let payload_role_of_string = function
-  | "model_input" -> Some Model_input
-  | "operator_evidence" -> Some Operator_evidence
-  | "checkpoint" -> Some Checkpoint
-  | "memory_store" -> Some Memory_store
-  | _ -> None
-
 type source_clock =
   | Wall
   | Monotonic

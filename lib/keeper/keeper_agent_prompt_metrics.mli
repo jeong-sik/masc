@@ -48,8 +48,6 @@ val empty_prompt_segment_metrics : prompt_segment_metrics
 
 (** Compute byte count and fingerprint for a single text segment after
     UTF-8 sanitisation. *)
-val prompt_segment_metrics_of_text : string -> prompt_segment_metrics
-
 val build_prompt_metrics :
   system_prompt:string ->
   dynamic_context:string ->

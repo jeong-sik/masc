@@ -92,27 +92,6 @@ let voice_mcp_uri () =
       | Error _ -> default_voice_uri "/mcp")
   | Error _ -> default_voice_uri "/mcp"
 
-let voice_health_uri () =
-  match load_voice_config () with
-  | Ok config -> (
-      match Voice_runtime_overlay.session_endpoint_result config with
-      | Ok endpoint -> (
-          match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
-          | Ok url -> Uri.of_string url
-          | Error _ -> default_voice_uri "/health" )
-      | Error _ -> default_voice_uri "/health")
-  | Error _ -> default_voice_uri "/health"
-
-let voice_mcp_host () =
-  match Uri.host (voice_mcp_uri ()) with
-  | Some host -> host
-  | None -> Env_config_runtime.Voice.default_host
-
-let voice_mcp_port () =
-  match Uri.port (voice_mcp_uri ()) with
-  | Some port -> port
-  | None -> Env_config_runtime.Voice.default_port
-
 (** ============================================
     Structured Logging
     ============================================ *)
@@ -405,16 +384,6 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
             in
             try_candidates [] candidates
           end)
-
-let start_local_playback ~sw ~agent_id ~audio_file =
-  ignore
-    (run_local_playback ~sw ~agent_id ~audio_file ()
-      : [ `Dedup_hit
-        | `Failed of string
-        | `Opened of float
-        | `Played of float
-        | `Skipped of string
-        ])
 
 (** Voice used when [load_voice_config ()] itself fails. This is the
     only remaining hardcoded fallback; the normal "agent not listed"

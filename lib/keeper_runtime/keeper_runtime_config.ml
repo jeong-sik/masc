@@ -150,8 +150,6 @@ let resolve_overrides
    effective env override against the operator's TOML intent (issue #17192). *)
 let toml_shadow : (string, string) Hashtbl.t = Hashtbl.create 16
 
-let toml_value_opt env_name = Hashtbl.find_opt toml_shadow env_name
-
 let validate_stream_idle_timeout doc =
   let key = "turn.stream_idle_timeout_sec" in
   match List.assoc_opt key doc with

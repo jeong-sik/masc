@@ -59,5 +59,3 @@ let uses_anthropic_caching_for_kind kind =
   in
   caps.supports_prompt_caching || caps.supports_caching
 
-let uses_anthropic_caching_for_spec spec =
-  kind_of_spec spec |> Option.map uses_anthropic_caching_for_kind

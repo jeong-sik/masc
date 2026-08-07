@@ -13,7 +13,6 @@ type t =
 val to_string : t -> string
 val of_string : string -> t option
 val all : t list
-val strings : string list
 val is_allowed : string -> bool
 
 (** Every recognized product action follows the same explicit confirmation

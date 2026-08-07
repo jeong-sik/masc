@@ -51,8 +51,6 @@ type lane_policy =
 
 val lane_policies : lane_policy list
 val event_lane : Keeper_runtime_manifest.event_kind -> string
-val lane_mandatory_event_codes : string -> string list
-val lane_terminal_event_codes : string -> string list
 val lane_mandatory_events_present :
   Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan -> string -> bool
 val lane_terminal_event_present :

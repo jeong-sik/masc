@@ -40,12 +40,6 @@ let to_json (outcome : t) : Yojson.Safe.t =
     `Assoc [ "kind", `String "Error"; "reason", `String reason ]
 ;;
 
-let is_nonprogress (outcome : t option) : bool =
-  match outcome with
-  | Some (No_progress _ | Error _) -> true
-  | Some Progress | None -> false
-;;
-
 let of_json (json : Yojson.Safe.t) : t option =
   match json with
   | `Assoc fields ->
@@ -94,8 +88,3 @@ let of_json (json : Yojson.Safe.t) : t option =
   | _ -> None
 ;;
 
-let strip_from_json (json : Yojson.Safe.t) : Yojson.Safe.t =
-  match json with
-  | `Assoc fields -> `Assoc (List.filter (fun (k, _) -> not (String.equal k "typed_outcome")) fields)
-  | json -> json
-;;

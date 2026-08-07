@@ -308,23 +308,6 @@ let end_session t ~agent_id =
       true
     | None -> false)
 
-let suspend_session t ~agent_id =
-  with_lock t (fun () ->
-    match Hashtbl.find_opt t.sessions agent_id with
-    | Some session ->
-      session.status <- Suspended;
-      save_session t session
-    | None -> ())
-
-let resume_session t ~agent_id =
-  with_lock t (fun () ->
-    match Hashtbl.find_opt t.sessions agent_id with
-    | Some session ->
-      session.status <- Active;
-      session.last_activity <- Time_compat.now ();
-      save_session t session
-    | None -> ())
-
 (** {1 Session Query} *)
 
 let get_session t ~agent_id =
@@ -333,9 +316,6 @@ let get_session t ~agent_id =
 let list_sessions t =
   with_lock t (fun () ->
     Hashtbl.fold (fun _ session acc -> session :: acc) t.sessions [])
-
-let has_session t ~agent_id =
-  with_lock t (fun () -> Hashtbl.mem t.sessions agent_id)
 
 let session_count t =
   with_lock t (fun () -> Hashtbl.length t.sessions)

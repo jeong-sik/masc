@@ -99,15 +99,6 @@ let resolve_opt t_opt ~cwd =
    have no way to render a failure, so widening the type is its own change.
    Deciding that here at least confines the substitute to one site instead of
    leaving it implied by a [| None ->] branch. *)
-let container_cwd_of_host t ~host_cwd =
-  let sandbox = Keeper_sandbox.of_meta ~config:t.config ~meta:t.meta in
-  match Keeper_sandbox.visible_path_of_raw sandbox host_cwd with
-  | Ok visible -> Keeper_sandbox.Path.visible_to_string visible
-  | Error _ -> Keeper_sandbox.keeper_visible_root_abs sandbox
-
-let container_cwd_of_host_opt t_opt ~host_cwd =
-  Option.map (fun t -> container_cwd_of_host t ~host_cwd) t_opt
-
 let cleanup (t : t) =
   if Hashtbl.length t.cache = 0 then ()
   else

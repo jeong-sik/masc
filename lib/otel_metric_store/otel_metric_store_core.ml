@@ -38,8 +38,6 @@ let with_lock f =
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock metrics_mutex) f
 ;;
 
-let last_deadlock_backtrace_for_test () = Atomic.get last_deadlock_backtrace
-
 (** Best-effort wrapper: never crash the caller fiber for a metrics update.
     Metrics are advisory; losing one sample must not take down the OTel tick
     fiber or the keeper turn. *)

@@ -62,7 +62,6 @@ val failure_reason_label : failure_reason -> string
 val to_tla_symbol : _ turn_state -> string
 val turn_state_label : _ turn_state -> string
 
-val pp_cancel_reason : Format.formatter -> cancel_reason -> unit
 val pp_failure_reason : Format.formatter -> failure_reason -> unit
 val pp_turn_state : Format.formatter -> _ turn_state -> unit
 
@@ -125,8 +124,6 @@ val assert_transition_allowed :
 
 type any_state = Any : _ turn_state -> any_state
 val any_state_label : any_state -> string
-val pp_any_state : Format.formatter -> any_state -> unit
-
 val all_symbols : string list
 val active_symbols : string list
 val terminal_symbols : string list

@@ -73,7 +73,6 @@ val log : level -> ?ctx:string -> ?category:category -> ('a, unit, string, unit)
 val emit : level -> ?module_name:string -> ?details:Yojson.Safe.t -> ?category:category -> string -> unit
 (** Log a preformatted structured message with optional JSON details. *)
 
-val emit_routine : ?module_name:string -> ?details:Yojson.Safe.t -> ?category:category -> string -> unit
 (** Log repeatable housekeeping/telemetry through the central routine policy.
     The effective level is controlled by [MASC_LOG_ROUTINE_LEVEL] and defaults
     to [Debug]. Set it to [off] to suppress routine events entirely. *)

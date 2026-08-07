@@ -18,8 +18,6 @@ type tail_order = Keeper_status_options_defaults.tail_order =
 (** Parse the [tail_order] argument from a tool-call JSON.
     Defaults to [Oldest_first] when missing and rejects values outside the
     public schema enum. *)
-val tail_order_of_args : Yojson.Safe.t -> (tail_order, string) result
-
 val tail_order_to_string : tail_order -> string
 
 (** Every variant in [tail_order]; used by the [Keeper_schema]

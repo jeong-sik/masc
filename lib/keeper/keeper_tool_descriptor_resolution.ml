@@ -44,15 +44,6 @@ let public_names_for_allowed_internal_names internal_names =
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;
 
-let is_public_mcp_surface_name tool_name =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
-  match descriptor_for_tool_name stripped with
-  | Some descriptor ->
-    String.equal descriptor.Keeper_tool_descriptor.public_name stripped
-    && Tool_catalog.is_public_mcp stripped
-  | None -> false
-;;
-
 let capability_has kind tool_name =
   let descriptor = descriptor_for_tool_name tool_name in
   let descriptor_readonly_hint =
@@ -157,12 +148,6 @@ let validated_descriptor_and_input_for_tool_call ~tool_name ~input =
       (descriptor_and_input_for_tool_call ~tool_name ~input)
 ;;
 
-let readonly_for_tool_name tool_name =
-  match descriptor_for_tool_name tool_name with
-  | Some descriptor -> Keeper_tool_descriptor.readonly_static_hint descriptor
-  | None -> None
-;;
-
 let readonly_for_tool_call ~tool_name ~input =
   match descriptor_and_input_for_tool_call ~tool_name ~input with
   | Some (descriptor, input) ->
@@ -172,15 +157,3 @@ let readonly_for_tool_call ~tool_name ~input =
   | None -> None
 ;;
 
-let descriptors_for_tool_names tool_names =
-  let add_descriptor (seen, acc) descriptor =
-    if List.mem descriptor.Keeper_tool_descriptor.id seen
-    then seen, acc
-    else descriptor.id :: seen, descriptor :: acc
-  in
-  tool_names
-  |> List.filter_map descriptor_for_tool_name
-  |> List.fold_left add_descriptor ([], [])
-  |> snd
-  |> List.rev
-;;

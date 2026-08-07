@@ -141,6 +141,5 @@ val fetch_models_at :
     {!Masc_network_defaults.openai_models_path} — pinning
     centrally so all siblings hit the same path. *)
 
-val fetch_models : unit -> (string * string list, string) Result.t
 (** Convenience wrapper over {!fetch_models_at} using
     {!Env_config.Local_runtime.server_url} as the base URL. *)

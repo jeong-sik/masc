@@ -161,18 +161,6 @@ let sanitize_message_utf8 (m : Agent_sdk.Types.message) : Agent_sdk.Types.messag
   if sanitized_content == m.content then m
   else { m with content = sanitized_content }
 
-let sanitize_messages_utf8 (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
-  let rec loop messages =
-    match messages with
-    | [] -> messages
-    | msg :: rest ->
-        let sanitized_msg = sanitize_message_utf8 msg in
-        let sanitized_rest = loop rest in
-        if sanitized_msg == msg && sanitized_rest == rest then messages
-        else sanitized_msg :: sanitized_rest
-  in
-  loop msgs
-
 (* ================================================================ *)
 (* Concurrency diagnostics (observability only, no throttling)       *)
 (* ================================================================ *)

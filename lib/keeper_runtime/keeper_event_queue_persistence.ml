@@ -472,35 +472,6 @@ let load_state_result ~base_path ~keeper_name =
             (Printexc.to_string exn)))
 ;;
 
-let load_existing_state_result ~base_path ~keeper_name =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match read_primary_unlocked owner with
-         | Error _ as error -> error
-         | Ok (Primary_current state) -> replay_transition_wal_unlocked owner state
-         | Ok Primary_missing when durable_state_exists_unlocked owner ->
-           replay_transition_wal_unlocked ~wal_only:true owner State.empty
-         | Ok Primary_missing ->
-           Error
-             (Printf.sprintf
-                "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
-                (keeper_name_of_owner owner)
-                (snapshot_path_of_owner owner)
-                (transition_wal_path_of_owner owner)))
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue existing-state load raised keeper=%s path=%s: %s"
-            (keeper_name_of_owner owner)
-            (snapshot_path_of_owner owner)
-            (Printexc.to_string exn)))
-;;
-
 let validate_state_read_only_result_with ~require_existing ~base_path ~keeper_name =
   match resolve_owner ~base_path ~keeper_name with
   | Error _ as error -> error
@@ -811,26 +782,6 @@ let project_accepted_transfer_guarded_result
          | Ok () -> Ok (next, Transfer_projection_result result)))
 ;;
 
-let project_accepted_transfer_result
-      ~after_commit
-      ~base_path
-      ~keeper_name
-      ~transfer
-  =
-  let projection =
-    project_accepted_transfer_guarded_result
-      ~authorize_first_projection:(fun () -> (Ok () : (unit, string) result))
-      ~after_commit
-      ~base_path
-      ~keeper_name
-      ~transfer
-  in
-  Result.bind projection (function
-    | Transfer_projection_result result -> Ok result
-    | First_projection_rejected _ ->
-      Error "unguarded transfer projection rejected its unconditional authority")
-;;
-
 let update_result ?after_commit ~base_path ~keeper_name f =
   update_checked_result ?after_commit ~base_path ~keeper_name (fun queue -> Ok (f queue))
 ;;
@@ -844,10 +795,6 @@ let update ~base_path ~keeper_name f =
 
 let persist ~base_path ~keeper_name queue =
   update ~base_path ~keeper_name (fun _ -> queue)
-;;
-
-let persist_snapshot ~base_path ~keeper_name snapshot =
-  update ~base_path ~keeper_name (fun _ -> snapshot ())
 ;;
 
 let peek_when_result ~base_path ~keeper_name ~ready =

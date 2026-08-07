@@ -198,12 +198,6 @@ let read_all_events ?fs:_ config : event_record list =
   let store = get_telemetry_store config in
   Dated_jsonl.read_recent store 100_000 |> parse_event_records
 
-let read_recent_events ?fs:_ config ~limit : event_record list =
-  if limit <= 0 then []
-  else
-    let store = get_telemetry_store config in
-    Dated_jsonl.read_recent store limit |> parse_event_records
-
 (* ── Tool usage summary cache ──────────────────────────────────────
    The dashboard refreshes Tool Monitor / Fleet Health / Tool Quality
    surfaces every 30 s. Each surface calls [summarize_tool_usage] on
@@ -377,19 +371,6 @@ let calculate_error_rate events =
   let total = List.length events in
   if total = 0 then 0.0
   else float_of_int errors /. float_of_int total
-
-(** Get aggregated metrics for last 24 hours *)
-let get_metrics ?fs config : metrics =
-  let now = Time_compat.now () in
-  let since_24h = now -. Masc_time_constants.day in
-  let events = read_events_since ?fs config ~since:since_24h in
-  {
-    active_agents = count_active_agents events;
-    tasks_in_progress = count_tasks_in_progress events;
-    tasks_completed_24h = count_completed_tasks events;
-    avg_task_duration_ms = avg_duration events;
-    error_rate = calculate_error_rate events;
-  }
 
 (** Convenience tracking functions *)
 let track_agent_session_bound ?fs config ~agent_id ?(capabilities=[]) () =

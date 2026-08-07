@@ -35,7 +35,6 @@ type extra_system_context_assembly =
   ; blocks : (Prompt_block_id.t * string) list
   }
 
-let normalize_memory_fragment = Inference_utils.sanitize_text_utf8
 let sanitize_user_message = Inference_utils.sanitize_text_utf8
 
 let append_extra_system_context ctx text =

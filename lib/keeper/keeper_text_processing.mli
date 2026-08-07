@@ -12,9 +12,6 @@ val truncate_utf8_prefix : max_bytes:int -> string -> string * bool
 (** Normalise proactive text by collapsing whitespace. *)
 val normalize_proactive_text : string -> string
 
-(** Extract check-in text from a proactive reply. *)
-val extract_checkin_text : string -> string option
-
 (** {1 Terminal Ending Detection} *)
 
 (** Check for terminal punctuation ([.!?] or CJK equivalents). *)

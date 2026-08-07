@@ -117,7 +117,6 @@ type delete_error =
   ; reason : string
   }
 
-val delete_error_to_string : delete_error -> string
 val delete : t -> sha256:string -> (bool, delete_error) result
 (** Delete one exact blob. [Ok false] means it is already absent; filesystem
     failures remain typed and visible. Bulk retention/deletion is owned

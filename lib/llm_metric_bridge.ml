@@ -392,10 +392,6 @@ let emit_streaming_chunk ~provider ~model_id ~chunk_index ~inter_chunk_ms =
       ()
 ;;
 
-let emit_fallback_triggered ~kind ~detail =
-  inc_counter fallback_triggered_metric ~labels:[ ("kind", kind); ("detail", detail) ]
-;;
-
 let make_sink () : Metrics.t =
   { Metrics.
     on_cache_hit = emit_cache_hit

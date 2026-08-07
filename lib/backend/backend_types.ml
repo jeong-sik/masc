@@ -67,21 +67,6 @@ let validate_ttl ttl_seconds =
 
 (** Acquire exclusive file lock using Unix.lockf.
     Returns true if lock acquired, false if would block. *)
-let acquire_flock fd =
-  try
-    Unix.lockf fd Unix.F_TLOCK 0;
-    true
-  with
-  | Unix.Unix_error (Unix.EAGAIN, _, _)
-  | Unix.Unix_error (Unix.EACCES, _, _) -> false
-  | _ -> false
-
-(** Release file lock *)
-let release_flock fd =
-  try Unix.lockf fd Unix.F_ULOCK 0
-  with Unix.Unix_error (err, _, _) ->
-    Log.Misc.error "Failed to release flock: %s" (Unix.error_message err)
-
 (* ============================================ *)
 (* In-Memory Pub/Sub (shared by Memory + FS)    *)
 (* ============================================ *)

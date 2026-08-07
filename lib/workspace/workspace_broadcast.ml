@@ -31,10 +31,6 @@ type broadcast_delivery =
   ; msg_type : string
   }
 
-let string_of_msg_type_typed = function
-  | Broadcast -> "broadcast"
-  | Cache_invalidated _ -> "cache_invalidated"
-
 let emit_message_activity config ~from_agent ~content ~mention
     ?session_id ?operation_id ?worker_run_id ?(evidence_refs = []) () =
   let evidence_refs = Workspace_state.normalized_string_list evidence_refs in

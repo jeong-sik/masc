@@ -162,9 +162,3 @@ val dispatch_keepalive_event :
   ctx:'a context -> keeper_name:string ->
   Keeper_state_machine.event -> unit
 
-val dispatch_keepalive_event_with_audit :
-  ctx:'a context -> keeper_name:string ->
-  snapshot:Keeper_measurement.measurement_snapshot ->
-  events_fired:Keeper_state_machine.event list ->
-  selected_event:Keeper_state_machine.event ->
-  Keeper_state_machine.event -> unit

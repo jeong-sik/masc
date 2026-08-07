@@ -37,10 +37,6 @@ let normalize_proactive_text (raw : string) : string =
   |> Re.replace_string re_whitespace ~by:" "
   |> String.trim
 
-let extract_checkin_text (raw : string) : string option =
-  let cleaned = normalize_proactive_text raw in
-  if cleaned = "" then None else Some cleaned
-
 let proactive_has_terminal_punct (s : string) : bool =
   let t = String.trim s in
   t <> "" && Re.execp re_terminal_punct t

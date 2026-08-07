@@ -624,34 +624,3 @@ let inspect_submitted_evidence_for_authority ~base_path ~request_id ~task_id
           }
 ;;
 
-let list_request_headers base_path =
-  let surface = "verification" in
-  let report_drop ~reason ~path ~detail =
-    Safe_ops.report_persistence_read_drop
-      ~on_drop:ignore
-      ~surface
-      ~reason
-      ~path
-      ~detail
-  in
-  let dir = verifications_dir base_path in
-  if not (Sys.file_exists dir) then
-    []
-  else
-    match Safe_ops.list_dir_safe dir with
-    | Error detail ->
-        report_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_list_dir_error
-          ~path:dir ~detail;
-        []
-    | Ok files ->
-        files
-        |> List.filter (fun f -> Filename.check_suffix f ".json")
-        |> List.filter_map (fun f ->
-               let id = Filename.chop_suffix f ".json" in
-               Safe_ops.result_to_option_logged
-                 ~on_drop:(fun () -> ())
-                 ~surface
-                 ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-                 ~path:(Filename.concat dir f)
-                 (load_request_header base_path id))

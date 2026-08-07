@@ -176,12 +176,6 @@ val runtime_observation_with_metrics :
 
 (** {1 Fallback recorder} *)
 
-val record_fallback_event :
-  runtime_metrics_capture ->
-  from_model:string ->
-  to_model:string ->
-  reason:string ->
-  unit
 (** Appends a fallback event to [capture].  The public event keeps the
     historical field names but records runtime-lane labels rather than
     concrete provider/model identities. *)
@@ -194,13 +188,6 @@ val start_actor_if_needed : sw:Eio.Switch.t -> unit
     Idempotent — a second call is a no-op so the bootstrap
     paths can call it from multiple entry points. *)
 
-val record_runtime :
-  ?keeper_name:string ->
-  observation:runtime_observation option ->
-  runtime_id:string ->
-  outcome:[ `Success | `Failure | `Rejected ] ->
-  unit ->
-  unit
 (** Posts a record-runtime message onto the audit stream.
     The actor consumes it asynchronously, bumping the
     per-runtime counters and persisting the audit JSON

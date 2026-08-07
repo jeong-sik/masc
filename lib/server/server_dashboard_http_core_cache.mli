@@ -11,14 +11,9 @@ val realtime_cache_ttl_s : float
 val feature_health_cache_ttl_s : float
 val dashboard_projection_cache_ttl_s : float
 val shell_warmed : bool Atomic.t
-val _shell_warmed : bool Atomic.t
 val shell_warming : bool Atomic.t
-val _shell_warming : bool Atomic.t
 val last_good_shell : Yojson.Safe.t Atomic.t
-val _last_good_shell : Yojson.Safe.t Atomic.t
 val last_good_shell_light : Yojson.Safe.t Atomic.t
-val _last_good_shell_light : Yojson.Safe.t Atomic.t
-
 val with_dashboard_timeout :
   clock:_ Eio.Time.clock -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 

@@ -17,8 +17,6 @@ val docker_info_security_options_with_class :
   timeout_sec:float -> (string list, classified_error) result
 val docker_info_security_options_with_class_optional :
   ?timeout_sec:float -> unit -> (string list, classified_error) result
-val docker_info_security_options :
-  timeout_sec:float -> (string list, string) result
 val docker_info_security_options_optional :
   ?timeout_sec:float -> unit -> (string list, string) result
 type docker_preflight = {

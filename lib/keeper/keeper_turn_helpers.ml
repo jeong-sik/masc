@@ -56,26 +56,6 @@ let report_keeper_cycle_side_effect_issue
   | `Error -> Log.Keeper.error "%s: %s" keeper_name message
 ;;
 
-let dispatch_keeper_phase_event_checked
-      ~(config : Workspace.config)
-      ~(keeper_name : string)
-      ~(side_effect : string)
-      (event : Keeper_state_machine.event)
-  : unit
-  =
-  match Keeper_registry.dispatch_event ~base_path:config.base_path keeper_name event with
-  | Ok _ -> ()
-  | Error err ->
-    report_keeper_cycle_side_effect_issue
-      ~config
-      ~keeper_name
-      ~side_effect
-      (Printf.sprintf
-         "phase dispatch %s failed: %s"
-         (Keeper_state_machine.event_to_string event)
-         (Keeper_state_machine.transition_error_to_string err))
-;;
-
 let finalize_trajectory_acc
       ~(config : Workspace.config)
       ~(keeper_name : string)

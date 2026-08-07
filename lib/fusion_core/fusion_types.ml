@@ -311,14 +311,6 @@ type fusion_trigger =
   | Harness_eval
 [@@deriving yojson, show, eq]
 
-let trigger_label = function
-  | Explicit_tool_call -> "explicit_tool_call"
-  | Low_confidence -> "low_confidence"
-  | High_stakes _ -> "high_stakes"
-  | Contested_board _ -> "contested_board"
-  | Operator_requested -> "operator_requested"
-  | Harness_eval -> "harness_eval"
-
 type fusion_request =
   { run_id : string
   ; keeper : string

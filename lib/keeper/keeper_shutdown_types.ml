@@ -209,19 +209,6 @@ let requires_admission_fence operation =
   | Blocked _ -> true
 ;;
 
-let meta_disposition_to_string = function
-  | Retain_operator_pause -> "retain_operator_pause"
-  | Retain_dead_tombstone -> "retain_dead_tombstone"
-  | Remove_meta -> "remove_meta"
-;;
-
-let meta_disposition_of_string = function
-  | "retain_operator_pause" -> Ok Retain_operator_pause
-  | "retain_dead_tombstone" -> Ok Retain_dead_tombstone
-  | "remove_meta" -> Ok Remove_meta
-  | value -> Error (Printf.sprintf "unknown Keeper shutdown meta disposition: %S" value)
-;;
-
 let cleanup_reason_label = function
   | Operator_stop_retain_meta -> "operator_stop_retain_meta"
   | Operator_stop_remove_meta -> "operator_stop_remove_meta"

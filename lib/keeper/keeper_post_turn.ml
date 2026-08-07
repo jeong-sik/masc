@@ -804,23 +804,3 @@ module For_testing = struct
   ;;
 end
 
-let recover_latest_checkpoint_for_compaction
-    ?before_dispatch_authority
-    ~(base_path : string)
-    ~(base_dir : string)
-    ~(meta : keeper_meta)
-    ~(trigger : Compaction_trigger.t)
-    ()
-  : prepared_commit_outcome =
-  match
-    prepare_compaction
-      ?before_dispatch_authority
-      ~base_path
-      ~base_dir
-      ~meta
-      ~trigger
-      ()
-  with
-  | Error error -> Commit_failed { error; committed = None }
-  | Ok prepared -> commit_prepared_compaction prepared
-;;

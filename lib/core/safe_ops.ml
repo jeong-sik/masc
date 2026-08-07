@@ -77,9 +77,6 @@ let utf8_repair_log_seen : (string, utf8_repair_log_entry) Hashtbl.t =
 
 let utf8_repair_log_key ~surface ~path = surface ^ "\x00" ^ path
 
-let set_persistence_utf8_repair_metric_hook hook =
-  Atomic.set persistence_utf8_repair_metric_hook (Some hook)
-
 let emit_persistence_utf8_repair_metric () =
   match Atomic.get persistence_utf8_repair_metric_hook with
   | None -> ()
@@ -398,8 +395,6 @@ let read_json_file_logged ~label path : Yojson.Safe.t option =
 let persistence_read_drop_reason_list_dir_error = "list_dir_error"
 let persistence_read_drop_reason_entry_load_error = "entry_load_error"
 let persistence_read_drop_reason_invalid_payload = "invalid_payload"
-let persistence_read_drop_reason_json_syntax_error = "json_syntax_error"
-
 (* The last line of an append-only file was still being written when a tail
    reader reached it. Kept apart from [entry_load_error] because it is not a
    loss: the reader falls through to the previous complete line and the next

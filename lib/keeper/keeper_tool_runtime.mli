@@ -31,8 +31,6 @@ type context =
         handlers must match it against the normalized request before use. *)
   }
 
-val descriptor_for_internal : string -> Keeper_tool_descriptor.t option
-
 val handle :
   context ->
   descriptor:Keeper_tool_descriptor.t ->

@@ -14,8 +14,6 @@ val concrete_verification_evidence_refs :
   Masc_domain.task ->
   string list
 
-val verification_evidence_refs_for_task : Masc_domain.task -> string list
-
 (** task-1664: typed split of a task's verification evidence. [required_artifacts]
     are the artifacts the contract demands; [submitted_evidence] are the
     references the agent actually provided. The flat

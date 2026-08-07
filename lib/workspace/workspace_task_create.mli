@@ -70,12 +70,6 @@ val batch_add_tasks :
   ?created_by:string ->
   config -> (string * int * string * string option) list -> string
 
-val batch_add_tasks_with_contracts :
-  ?created_by:string ->
-  config ->
-  (string * int * string * Masc_domain.task_contract option * string option) list ->
-  string
-
 val batch_add_tasks_with_contracts_result :
   ?created_by:string ->
   config ->

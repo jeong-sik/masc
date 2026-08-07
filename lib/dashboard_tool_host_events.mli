@@ -86,11 +86,6 @@ type assignment_snapshot = {
   assignment_id : string;
 }
 
-val record_assignment :
-  ?fs:'fs ->
-  Workspace_utils.config ->
-  assignment_snapshot ->
-  unit
 (** [record_assignment ?fs config snapshot] forwards to
     {!Telemetry_eio.track_tool_assigned}.  No callers today, but the
     surface is exposed because the dashboard tool-assignment card is a

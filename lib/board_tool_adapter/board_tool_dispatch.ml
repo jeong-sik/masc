@@ -71,13 +71,6 @@ let handle_tool name args : Tool_result.result =
       (Printf.sprintf "Unknown tool: %s" name)
 ;;
 
-let tool_spec_read_only =
-  Tool_name.Board_name.all
-  |> List.filter (fun board_name ->
-    (Board_tool_registry.operation_policy board_name).readonly)
-  |> List.map Tool_name.Board_name.to_string
-;;
-
 let register () =
   let handler ~name ~args = Some (handle_tool name args) in
   let make_spec board_name =

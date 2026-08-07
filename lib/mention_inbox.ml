@@ -23,16 +23,6 @@ type mention_record = {
    the previous doc comment claiming otherwise was incorrect.  Guard
    the shared state with an [Eio.Mutex] and route every RNG access
    through [with_mention_rng]. *)
-let mention_rng = Random.State.make_self_init ()
-let mention_rng_mutex = Eio.Mutex.create ()
-let with_mention_rng f =
-  Eio.Mutex.use_ro mention_rng_mutex (fun () -> f mention_rng)
-
-let generate_mention_id () =
-  let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let rand = with_mention_rng (fun rng -> Random.State.int rng 10000) in
-  Printf.sprintf "m-%d-%04d" ts rand
-
 (** {1 JSON Serialization} *)
 
 let mention_record_to_json (r : mention_record) : Yojson.Safe.t =
@@ -129,22 +119,3 @@ let unread_count (config : Workspace.config) ~(target_agent : string) : int =
   |> List.filter (fun r -> r.target_agent = target_agent && r.read_at = 0.0)
   |> List.length
 
-let mark_read (config : Workspace.config) ~(mention_id : string) : unit =
-  let path = inbox_path config in
-  let all = load_all_mentions config in
-  let now = Time_compat.now () in
-  let updated =
-    List.map (fun r ->
-        if r.id = mention_id && r.read_at = 0.0 then
-          { r with read_at = now }
-        else r)
-      all
-  in
-  (* Rewrite entire file with updated records *)
-  let content =
-    updated
-    |> List.map (fun r -> Yojson.Safe.to_string (mention_record_to_json r))
-    |> String.concat "\n"
-  in
-  let content = if content = "" then "" else content ^ "\n" in
-  Fs_compat.save_file path content

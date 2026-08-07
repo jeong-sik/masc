@@ -283,22 +283,10 @@ type close_decision =
   | Already_drained
   | Close_invariant of invariant_violation
 
-let access_error_to_string = function
-  | Keeper_lane_not_available ->
-    "keeper lane publication recovery store is not available"
-;;
-
 let validation_error_to_string = Core.validation_error_to_string
 let transition_error_to_string = Core.transition_error_to_string
 
 let owner_to_string = Core.owner_to_string
-
-let owner_discovery_row_to_string = function
-  | Discovered_owner owner ->
-    Printf.sprintf "discovered_owner(%S)" (owner_to_string owner)
-  | Invalid_owner_name name ->
-    Printf.sprintf "invalid_owner_name(%S)" name
-;;
 
 let owner_inventory_row_to_string = function
   | Valid_owner owner ->
@@ -417,15 +405,6 @@ let lane_open_error_to_string = function
 ;;
 
 let registry_error_to_string = Core.transition_error_to_string
-;;
-
-let lane_release_failure_to_string
-      (failure : lane_release_failure)
-  =
-  Printf.sprintf
-    "%s backtrace=%s"
-    (Core.failure_to_string failure.failure)
-    (Printexc.raw_backtrace_to_string failure.backtrace)
 ;;
 
 let empty_owner_health_counts =

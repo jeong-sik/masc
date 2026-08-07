@@ -96,8 +96,6 @@ val capture_typed_result_for_keeper :
 
 (** Snapshot of keeper names with a registered accumulator, in
     ascending order. Useful for metrics/diagnostics. *)
-val registered_keeper_names : unit -> string list
-
 (** Remove a keeper's accumulator entry from the registry. Intended
     for keeper teardown paths (process shutdown, keeper down/repair).
     Safe to call on a name that was never registered (no-op). *)

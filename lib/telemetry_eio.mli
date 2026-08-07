@@ -112,9 +112,6 @@ type agent_activity = {
 
 val read_all_events : ?fs:'a -> config -> event_record list
 
-val read_recent_events :
-  ?fs:'a -> config -> limit:int -> event_record list
-
 val read_events_since :
   ?fs:'a -> config -> since:float -> event_record list
 
@@ -133,8 +130,6 @@ val summarize_agent_activity :
 
 val tool_usage_fields :
   tool_usage_summary -> string -> (string * Yojson.Safe.t) list
-
-val get_metrics : ?fs:'a -> config -> metrics
 
 (** {1 Pure metric calculators} *)
 

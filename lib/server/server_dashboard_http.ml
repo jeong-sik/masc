@@ -571,12 +571,6 @@ let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t 
   Dashboard_goals.dashboard_goals_tree_json ~config
 ;;
 
-let dashboard_goals_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
-  `Assoc
-    [ "planning", dashboard_planning_http_json ~config
-    ; "tree", dashboard_goals_tree_http_json ~config
-    ]
-
 let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
   let base_path = config.base_path in
   let partition = Ide_paths.Legacy_default in

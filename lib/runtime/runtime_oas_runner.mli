@@ -9,7 +9,6 @@
 
 (** {1 Runtime profile defaults} *)
 
-val default_config_path : unit -> string option
 (** Alias for [Runtime.config_path]. *)
 
 (** {1 Eio context validation} *)

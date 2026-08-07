@@ -185,10 +185,6 @@ let resource_exhausted ~resource ~consumed ~limit =
   ResourceExhausted
     { resource; consumed = Some consumed; limit = Some limit; detail = None }
 
-let resource_exhausted_unknown ~resource ~detail =
-  ResourceExhausted
-    { resource; consumed = None; limit = None; detail = Some detail }
-
 let ambiguity ~detail ~branches = AmbiguityError { detail; branches }
 
 let consensus_failure ~detail ~dissenters =

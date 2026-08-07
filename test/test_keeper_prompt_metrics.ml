@@ -385,22 +385,25 @@ let test_system_block_states_the_collaboration_surface () =
     (has_in prompt "a claim on another is refused and names both the Task you hold");
   check bool "walking the candidate list is named as the wrong move" true
     (has_in prompt "trying each candidate in turn only produces a run of refusals");
-  (* That limit is narrower than it reads, and the prompt used to overstate it.
-     [active_owned_task_ids_for_agent] matches Claimed and InProgress only and
-     answers None for AwaitingVerification, so a submitted Task does not refuse
-     the next claim. Everything a keeper can see says otherwise: the world frame
-     renders it under "Current Task (held by you)", and the lifecycle refuses
-     Release from AwaitingVerification while admitting Cancel by the assignee,
-     so the only exit in view is the one that discards its own evidence. Live
-     workspace: of 56 cancelled tasks 10 had already written a verification
-     record, and task-128 states the belief in words -- "awaiting_verification
-     blocks claim". It does not. Pin the correction against silent widening. *)
-  check bool "a submitted Task is stated not to hold the next claim" true
-    (has_in prompt "A Task you submitted for verification is not one of those");
-  check bool "claiming while a verdict is pending is stated as available" true
-    (has_in prompt "you claim the next work while it waits");
+  (* That limit is narrower than it reads. [active_owned_task_ids_for_agent]
+     matches Claimed and InProgress only and answers None for
+     AwaitingVerification, so a submitted Task does not refuse the next claim.
+     Live workspace: of 56 cancelled tasks 10 had already written a verification
+     record, and task-032 states the belief in the act of acting on it --
+     "useYupValidationResolver typed properly, tsc passes. Cancelling to free".
+
+     Two sentences used to carry the correction here, and they existed because
+     the world frame contradicted them one heading away: it rendered a submitted
+     Task under "Current Task (held by you)". The heading now states the status
+     it is describing, so the correction is made where the claim was made and
+     the prose no longer restates it. What stays in prose is the consequence a
+     heading cannot carry — that cancelling discards evidence already submitted.
+     The heading itself is pinned in test_keeper_wake_turn_context, which builds
+     a Task in each status and reads the rendered frame. *)
   check bool "cancelling submitted work is named as evidence loss" true
     (has_in prompt "cancels the evidence you already submitted");
+  check bool "the correction it replaced is not restated in prose" false
+    (has_in prompt "A Task you submitted for verification is not one of those");
   (* Release exists under the other namespace: keeper_task_claim /
      keeper_task_done / keeper_task_create sit on the keeper_* surface while
      handing a task back is masc_transition with action "release".

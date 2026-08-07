@@ -784,7 +784,6 @@ let () =
 
 let () =
   Tool_operator.register_operator_tools ~dispatch ~schemas ~remote_schemas;
-  Dashboard_briefing_sections.register_operator_snapshot_json { Dashboard_projection_cache.snapshot = Operator_control.snapshot_json };
   Dashboard_projection_cache.register_operator_snapshot_json { Dashboard_projection_cache.snapshot = Operator_control.snapshot_json };
   Dashboard_projection_cache.register_operator_digest_json { Dashboard_projection_cache.digest = Operator_control.digest_json };
   Atomic.set

@@ -88,8 +88,26 @@ let execute_with_observers
          dispatch observers explicitly. *)
       Tool_dispatch.run_dispatch_observers
         Dispatch_outcome.Handled (Some dispatch_result);
+      (* Bound before sanitizing, not after.  [raw_result] is whatever the
+         tool wrote, and a tool that dumps a file returns the whole file: a
+         single [tool_execute] error on 2026-08-06 produced a 699,341,105-byte
+         [detail], which became 94.3% of that day's 708 MB system log, a
+         618,922,307-byte blob, and one SSE broadcast of the same bytes.
+
+         The sibling telemetry on this very call already bounds the same
+         string — [tool_io_preview_fields ~output:raw_result] routes through
+         [Observability_redact.redact_tool_output]. [error_text] was the one
+         consumer that skipped the redactor, so it also skipped secret
+         masking.
+
+         Truncating first means [sanitize_text_utf8] scans at most
+         [max_tool_output_bytes] instead of the whole payload, and it repairs
+         any multi-byte character the cut split. *)
       let detail =
-        raw_result |> String.trim |> Safe_ops.sanitize_text_utf8
+        raw_result
+        |> Observability_redact.redact_preview
+             ~max_len:Common.max_tool_output_bytes
+        |> Safe_ops.sanitize_text_utf8
       in
       let ts = Time_compat.now () in
       broadcast_keeper_tool_call_event

@@ -401,22 +401,3 @@ let append_trait_clause = Keeper_prompt.append_trait_clause
 
 
 include Keeper_text_processing
-
-let memory_check_default_json () : Yojson.Safe.t =
-  `Assoc [
-    ("performed", `Bool false);
-    ("query_kind", `String "none");
-    ("expected_topic", `Null);
-    ("candidate_count", `Int 0);
-    ("initial_score", `Float 0.0);
-    ("final_score", `Float 0.0);
-    ("threshold", `Float 0.18);
-    ("passed", `Bool true);
-    ("best_match", `Null);
-    ("correction_applied", `Bool false);
-    ("correction_success", `Bool false);
-    ("prompt_fallback_applied", `Bool false);
-    ("prompt_fallback_success", `Bool false);
-    ("deterministic_fallback_applied", `Bool false);
-    ("recall_fallback_applied", `Bool false);
-  ]

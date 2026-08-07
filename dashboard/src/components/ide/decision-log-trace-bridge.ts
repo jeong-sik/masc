@@ -9,7 +9,7 @@ import {
  * RFC-0028 PR-δ producer: decision-log → keeper-trace bridge.
  *
  * Pure mapper — given a snapshot of KeeperDecision values
- * (from `/api/v1/keeper/decisions`) and a set of dedup keys that have
+ * (from `/api/v1/dashboard/keeper-decisions`) and a set of dedup keys that have
  * already been emitted, push trace events for the new ones and return
  * the updated set.
  *

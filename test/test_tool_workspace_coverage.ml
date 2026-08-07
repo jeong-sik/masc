@@ -898,44 +898,14 @@ let () =
     | None -> failwith "dispatch returned None")
 ;;
 
+(* Deliverable prose does not change a task's status. The removed classifier
+   read the first line for an English "completed" prefix and, when it matched,
+   re-badged the task [todo_conflict], added a "completed-looking" attention
+   item and a Planning: deliverable_conflict line. It matched 0 of the 199
+   non-empty deliverables in the live planning store, and only ever fired on
+   fixtures written like the one below. *)
 let () =
-  test
-    "dispatch_status_surfaces_completed_deliverable_conflict_for_active_owned_task"
-    (fun () ->
-       Fun.protect ~finally:Fs_compat.clear_fs
-       @@ fun () ->
-       Eio_main.run
-       @@ fun env ->
-       Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let ctx = make_test_ctx () in
-       let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
-       ignore
-         (Workspace.add_task
-            ctx.config
-            ~title:"Claimed with stale deliverable"
-            ~priority:3
-            ~description:"");
-       ignore (Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
-       set_current_task_ok ctx.config ~task_id:"task-001";
-       ignore
-         (Planning_eio.set_deliverable
-            ctx.config
-            ~task_id:"task-001"
-            ~content:"Task-001 completed. stale operator artifact.");
-       match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-       | Some r -> let result = status_message r in let success = Tool_result.is_success r in
-         assert success;
-         assert (str_contains result "owned=task-001 | current=task-001");
-         assert (str_contains result "Planning: deliverable_conflict=yes | task=task-001");
-         assert_contains
-           result
-           "Owned task task-001 already has a completed-looking deliverable";
-         assert (not (str_contains result "Suggested next:"))
-       | None -> failwith "dispatch returned None")
-;;
-
-let () =
-  test "dispatch_status_flags_todo_with_completed_deliverable_as_conflict" (fun () ->
+  test "dispatch_status_ignores_deliverable_prose_when_badging_tasks" (fun () ->
     Fun.protect ~finally:Fs_compat.clear_fs
     @@ fun () ->
     Eio_main.run
@@ -945,21 +915,22 @@ let () =
     let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
     ignore
       (Workspace.add_task ctx.config ~title:"Conflicted todo" ~priority:2 ~description:"");
-    ignore (Workspace.add_task ctx.config ~title:"Fresh todo" ~priority:2 ~description:"");
+    ignore
+      (Workspace.add_task ctx.config ~title:"Fresh todo" ~priority:2 ~description:"");
     ignore
       (Planning_eio.set_deliverable
          ctx.config
          ~task_id:"task-001"
          ~content:"Task-001 completed. Exercised masc_operator_snapshot.");
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some r -> let result = status_message r in let success = Tool_result.is_success r in
-      assert success;
-      assert (
-        str_contains
-          result
-          "warning task-001 P2 [todo_conflict] Conflicted todo (unclaimed)");
+    | Some r ->
+      let result = status_message r in
+      assert (Tool_result.is_success r);
+      assert (str_contains result "📋 task-001 P2 [todo] Conflicted todo (unclaimed)");
       assert (str_contains result "📋 task-002 P2 [todo] Fresh todo (unclaimed)");
-      assert_contains result "1 todo task(s) have completed-looking planning deliverables"
+      assert (not (str_contains result "todo_conflict"));
+      assert (not (str_contains result "deliverable_conflict"));
+      assert (not (str_contains result "completed-looking"))
     | None -> failwith "dispatch returned None")
 ;;
 

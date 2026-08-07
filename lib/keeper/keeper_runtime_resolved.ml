@@ -12,6 +12,7 @@ type 'a field = {
 type t = {
   stream_idle_timeout_sec : float option field;
   body_timeout_override_sec : float option field;
+  provider_call_deadline_sec : float option field;
 }
 
 (** Exhaustive boundary for the labels emitted by
@@ -62,6 +63,21 @@ let body_timeout_override_sec_live () =
        | None -> None)
   | None -> None
 
+(* SSOT: Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override
+   (same env var, same clamp [30, 3600]). Opt-in: unset -> None, no failsafe
+   floor (#27349 -- deliberately different from stream_idle_timeout_sec's
+   RFC-0345 fallback below: a total-call ceiling depends on provider and
+   workload, so MASC does not substitute a guessed value). *)
+let provider_call_deadline_sec_live () =
+  match
+    Env_config_core.raw_value_opt "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
+  with
+  | Some raw ->
+      (match Float.of_string_opt (String.trim raw) with
+       | Some v -> Some (Float.max 30.0 (Float.min 3600.0 v))
+       | None -> None)
+  | None -> None
+
 (* Fail-safe liveness floor for the streaming inter-line idle timeout
    (seconds). When neither [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC] nor runtime.toml
    [turn.stream_idle_timeout_sec] is set, the resolved value would be [None] and
@@ -99,9 +115,16 @@ let freeze_from_current () =
       source = source_of_env_name "MASC_KEEPER_BODY_TIMEOUT_SEC";
     }
   in
+  let provider_call_deadline_sec =
+    {
+      value = provider_call_deadline_sec_live ();
+      source = source_of_env_name "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC";
+    }
+  in
   {
     stream_idle_timeout_sec;
     body_timeout_override_sec;
+    provider_call_deadline_sec;
   }
 
 let frozen : t option Atomic.t = Atomic.make None
@@ -135,6 +158,7 @@ let to_yojson (runtime : t) =
     [
       ("stream_idle_timeout_sec", field_to_yojson option_float_to_yojson runtime.stream_idle_timeout_sec);
       ("body_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.body_timeout_override_sec);
+      ("provider_call_deadline_sec", field_to_yojson option_float_to_yojson runtime.provider_call_deadline_sec);
     ]
 
 let stream_idle_timeout_sec () =
@@ -142,3 +166,6 @@ let stream_idle_timeout_sec () =
 
 let body_timeout_override_sec () =
   (current ()).body_timeout_override_sec.value
+
+let provider_call_deadline_sec () =
+  (current ()).provider_call_deadline_sec.value

@@ -9,6 +9,9 @@ let metric_sse_broadcast_duration = "masc_sse_broadcast_duration_seconds"
 let metric_sse_broadcast_events = Otel_metric_store_core.declare_counter "masc_sse_broadcast_events_total"
 let metric_sse_broadcast_failures = Otel_metric_store_core.declare_counter "masc_sse_broadcast_failures_total"
 
+let metric_sse_broadcast_skipped_no_observer =
+  Otel_metric_store_core.declare_counter "masc_sse_broadcast_skipped_no_observer_total"
+
 let metric_sse_external_subscriber_callback_failures =
   Otel_metric_store_core.declare_counter "masc_sse_external_subscriber_callback_failures_total"
 ;;
@@ -35,12 +38,6 @@ let metric_grpc_subscribers = Otel_metric_store_core.declare_counter "masc_grpc_
 let metric_grpc_events_delivered = Otel_metric_store_core.declare_counter "masc_grpc_events_delivered_total"
 let metric_grpc_events_dropped = Otel_metric_store_core.declare_counter "masc_grpc_events_dropped_total"
 let metric_ws_sessions = Otel_metric_store_core.declare_counter "masc_ws_sessions_total"
-let metric_ws_parse_cache_hits = Otel_metric_store_core.declare_counter "masc_ws_parse_cache_hits_total"
-let metric_ws_parse_cache_misses = Otel_metric_store_core.declare_counter "masc_ws_parse_cache_misses_total"
-
-let metric_server_mcp_ws_frame_json_parse_failures =
-  Otel_metric_store_core.declare_counter "masc_server_mcp_ws_frame_json_parse_failures_total"
-;;
 
 let metric_sidecar_schema_field_types_json_parse_failures =
   Otel_metric_store_core.declare_counter "masc_sidecar_schema_field_types_json_parse_failures_total"

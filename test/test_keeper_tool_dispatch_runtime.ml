@@ -3769,7 +3769,8 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
        let subscriber_id = "surface-post-append-failure" in
        Masc.Sse.subscribe_external
          ~id:subscriber_id
-         ~callback:(fun event ->
+         ~callback:(fun (ev : Masc.Sse.external_event) ->
+            let event = ev.Masc.Sse.ext_frame in
            if contains_substring event "\"type\":\"keeper_chat_appended\""
            then incr chat_broadcast_count)
          ();

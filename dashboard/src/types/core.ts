@@ -87,7 +87,6 @@ interface TaskContract {
   required_evidence?: string[]
   inspect_gate_evidence?: string[]
   verify_gate_evidence?: string[]
-  links?: TaskExecutionLinks | null
 }
 
 interface TaskHandoffContext {

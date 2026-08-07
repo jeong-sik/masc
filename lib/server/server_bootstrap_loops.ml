@@ -351,13 +351,11 @@ type keeper_persistence_base_path =
 
 type prepared_keeper_persistence =
   { base_path : keeper_persistence_base_path
-  ; config : Workspace.config
   ; report : keeper_persistence_report
   }
 
 type claimed_keeper_persistence =
   { claimed_base_path : keeper_persistence_base_path
-  ; claimed_config : Workspace.config
   ; claimed_report : keeper_persistence_report
   }
 
@@ -676,7 +674,6 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
          report.examined report.projected report.pending);
   let prepared =
     { base_path = base_path_identity
-    ; config
     ; report =
         { shutdown
         ; queue = queue_recovery
@@ -880,7 +877,6 @@ let rec claim_prepared_keeper_persistence ~config prepared =
      | Ok () ->
       let claimed =
         { claimed_base_path = prepared.base_path
-        ; claimed_config = prepared.config
         ; claimed_report = prepared.report
         }
       in

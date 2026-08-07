@@ -45,9 +45,6 @@ val sweep_and_recover :
 
 (** {1 Pure Helpers (exposed for testing)} *)
 
-val supervisor_agent_name : string
-(** Canonical actor name for supervisor-owned workspace operations. *)
-
 val keep_last_n : int -> 'a -> 'a list -> 'a list
 (** [keep_last_n n item lst] prepends [item] and keeps at most [n] entries. *)
 

@@ -352,6 +352,13 @@ let test_masc_add_task_schema () =
                 Alcotest.(check bool) "goal_id does not label omitted links orphaned" false
                   (contains_substring ~needle:"orphaned" description)
             | None -> Alcotest.fail "masc_add_task missing goal_id property")
+          ; (match List.assoc_opt "contract" props with
+             | Some contract_schema ->
+               Alcotest.(check (option bool))
+                 "contract rejects additional properties"
+                 (Some false)
+                 (get_json_bool "additionalProperties" contract_schema)
+             | None -> Alcotest.fail "masc_add_task missing contract property")
        | None -> Alcotest.fail "masc_add_task missing properties");
       (match get_json_list "required" schema.input_schema with
        | Some reqs ->
@@ -376,7 +383,18 @@ let test_masc_batch_add_tasks_schema () =
                           Alcotest.(check bool) "item has title" true
                             (List.mem_assoc "title" item_props);
                           Alcotest.(check bool) "item has goal_id" true
-                            (List.mem_assoc "goal_id" item_props)
+                            (List.mem_assoc "goal_id" item_props);
+                          (match List.assoc_opt "contract" item_props with
+                           | Some contract_schema ->
+                             Alcotest.(check (option bool))
+                               "item contract rejects additional properties"
+                               (Some false)
+                               (get_json_bool
+                                  "additionalProperties"
+                                  contract_schema)
+                           | None ->
+                             Alcotest.fail
+                               "masc_batch_add_tasks item missing contract")
                       | _ -> Alcotest.fail "masc_batch_add_tasks item missing properties");
                      (match List.assoc_opt "required" item_fields with
                       | Some (`List item_reqs) ->

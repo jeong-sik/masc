@@ -79,6 +79,29 @@ val read_regular_file_prefix :
     a live read and its snapshot cannot disagree about the same file: one byte
     cap, one policy for a multi-byte sequence cut by that cap, one failure
     vocabulary. *)
+(** The reference shapes this store can read, decided without touching the
+    filesystem. *)
+type reference_form =
+  | Artifact_reference of string
+  | Note_reference of string
+  | Unresolvable_reference
+
+val classify_evidence_reference : string -> reference_form
+(** Shape of an evidence reference as {!snapshot_submitted_evidence_json} will
+    read it. This module is the only producer of evidence snapshots, so the
+    submit boundaries call this rather than restating the accepted prefixes:
+    a reference cannot be admitted at submit and then be unreadable at review,
+    and a new form added here reaches every caller. *)
+
+val artifact_reference_form : string
+val note_reference_form : string
+(** One accepted form each, spelled from the prefix this module matches on, so
+    an error message naming a single form cannot drift from the classifier. *)
+
+val resolvable_reference_forms : string list
+(** The accepted forms, spelled for an error message that has to tell a caller
+    what to write instead. *)
+
 val snapshot_submitted_evidence_json :
   base_path:string ->
   worker:string ->

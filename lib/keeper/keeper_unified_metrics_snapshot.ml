@@ -121,7 +121,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
          match result.runtime_observation with
          | Some observation -> redacted_runtime_observation_to_json observation
          | None -> `Null);
-        ("memory_check", memory_check_default_json ());
         ("handoff_performed",
          `Bool
            (match handoff_json with

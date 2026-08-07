@@ -440,9 +440,5 @@ module For_testing = struct
   let dropped_count = dropped_count_for_testing
   let set_async_append_active v = Atomic.set async_append_active v
 
-  let clear_completed_turn_ring ~keeper_name =
-    Hashtbl.remove completed_turn_rings keeper_name
-  ;;
-
   let observe_append_failure = observe_append_failure
 end

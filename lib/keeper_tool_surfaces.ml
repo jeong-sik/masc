@@ -39,14 +39,6 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   in
   List.rev unique
 
-(* Hashtbl materialisation helper for membership-only checks.  Used
-   below where we'd otherwise scan a name list per element of a
-   filter loop — replaces O(N x M) with O(N + M). *)
-let name_set names =
-  let tbl = Hashtbl.create (List.length names) in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) names;
-  tbl
-
 let lookup_schemas_by_name_exn ~label all_schemas values =
   let requested =
     values

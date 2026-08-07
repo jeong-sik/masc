@@ -4,14 +4,25 @@ type 'a context = 'a Tool_operator.context
 
 open Result.Syntax
 
-let judgment_surface_enums =
-  [ "command.namespace"; "intervene" ]
+(* The two surfaces a judgment can be recorded against. Closed, because every
+   per-surface policy below has to answer for each one: the freshness TTL used
+   to be selected by matching the normalized string with a wildcard default of
+   120s, an arm no caller could reach — [normalize_judgment_surface] rejects
+   everything else before the TTL is asked for. A third surface now breaks
+   compilation where the policy lives instead of silently getting 120s. *)
+type judgment_surface =
+  | Command_namespace
+  | Intervene
+
+let judgment_surface_to_string = function
+  | Command_namespace -> "command.namespace"
+  | Intervene -> "intervene"
+;;
 
 let normalize_judgment_surface value =
-  let normalized = String.trim value |> String.lowercase_ascii in
-  match normalized with
-  | "command.namespace" -> Ok "command.namespace"
-  | "intervene" -> Ok normalized
+  match String.trim value |> String.lowercase_ascii with
+  | "command.namespace" -> Ok Command_namespace
+  | "intervene" -> Ok Intervene
   | _ -> Error "surface must be one of command.namespace, intervene"
 
 let normalize_judgment_target_type value =
@@ -21,11 +32,9 @@ let normalize_judgment_target_type value =
       Ok (Operator_judgment.target_type_to_string target_type, target_type)
   | None -> Error Operator_action_constants.workspace_target_type_error
 
-let default_fresh_ttl_sec surface =
-  match surface with
-  | "command.namespace" -> 60
-  | "intervene" -> 300
-  | _ -> 120
+let default_fresh_ttl_sec = function
+  | Command_namespace -> 60
+  | Intervene -> 300
 
 let judgment_write_json (ctx : 'a context) args =
   let* surface = normalize_judgment_surface (get_string args "surface" "") in
@@ -74,7 +83,7 @@ let judgment_write_json (ctx : 'a context) args =
     in
     let recommended_action = Json_util.get_object args "recommended_action" in
     let judgment =
-      Operator_judgment.record ctx.config ~surface
+      Operator_judgment.record ctx.config ~surface:(judgment_surface_to_string surface)
         ~target_type:judgment_target_type ~target_id ~summary ~confidence
         ?model_name:(get_string_opt args "model_name")
         ?runtime_name:(get_string_opt args "runtime_name")
@@ -98,7 +107,7 @@ let judgment_latest_json (_ctx : 'a context) args =
   let require_fresh = get_bool args "require_fresh" true in
   let judgment =
     match
-      Operator_judgment.latest_active _ctx.config ~surface
+      Operator_judgment.latest_active _ctx.config ~surface:(judgment_surface_to_string surface)
         ~target_type:judgment_target_type ~target_id
     with
     | Some value when (not require_fresh) || Operator_judgment.is_fresh value ->

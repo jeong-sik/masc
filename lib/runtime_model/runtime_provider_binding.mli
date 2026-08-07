@@ -14,9 +14,6 @@ val normalize_provider_id : string -> string
 (** Trim, lowercase, and replace [-] with [_] in a provider identifier so
     label/binding lookups are case- and separator-insensitive. *)
 
-(** Look up a runtime binding by raw label, falling back to
-    {!normalize_provider_id}-normalized form. *)
-
 val provider_name_of_kind :
   Llm_provider.Provider_config.provider_kind -> string
 

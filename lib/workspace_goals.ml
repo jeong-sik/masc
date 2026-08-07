@@ -421,7 +421,21 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
        (match Goal_phase.decide_transition ~phase:goal.phase ~action with
         | Error msg ->
           error_result_typed ~tool_name ~start_time ~code:Conflict msg
-        | Ok phase ->
+        (* The goal already occupies the phase this action targets. Writing it
+           and emitting a phase event would turn a repeated report — a duplicate
+           reconciliation, a stale racing event — into repeated history, so the
+           request is answered from the goal as it stands. *)
+        | Ok (Goal_phase.Already phase) ->
+          ok_result
+            ~tool_name
+            ~start_time
+            [ "goal_id", `String goal_id
+            ; "action", `String (Goal_phase.action_to_string action)
+            ; "noop", `Bool true
+            ; "phase", Goal_phase.to_yojson phase
+            ; "goal", Goal_store.goal_to_yojson goal
+            ]
+        | Ok (Goal_phase.Move_to phase) ->
           (match update_goal_phase ctx goal ~phase ?note () with
            | Error msg ->
              error_result_typed ~tool_name ~start_time ~code:Internal_error msg

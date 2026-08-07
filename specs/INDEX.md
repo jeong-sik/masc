@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-08-07T07:56:48Z (HEAD: 95f54b5f0a)
+Generated: 2026-08-07T12:22:26Z (HEAD: 45cd310611)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -17,8 +17,8 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | Manual specs | 41 |
 | TTrace (auto-generated) | 0 |
 | Directories | 12 |
-| Total .cfg files | 85 |
-| Buggy .cfg (bug-model pair) | 44 |
+| Total .cfg files | 86 |
+| Buggy .cfg (bug-model pair) | 45 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -123,7 +123,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| TaskLifecycle.tla | TaskLifecycle | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | aba3b16dcfe3 |
+| TaskLifecycle.tla | TaskLifecycle | manual | 3 | 2 | clean={inv:Safety} buggy={inv:Safety} supersede-buggy={inv:Safety} | c32f68c8697f |
 
 ## Notes
 

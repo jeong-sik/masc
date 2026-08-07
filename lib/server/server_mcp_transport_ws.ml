@@ -393,16 +393,16 @@ let rec atomic_bump_max a v =
   let cur = Atomic.get a in
   if v > cur && not (Atomic.compare_and_set a cur v) then atomic_bump_max a v
 
+(* Must stay the exact domain of [dashboard_slice_for_sse_type]: accepting a
+   slice no event can be routed to is a subscription that silently never
+   delivers, and the rejection below is all-or-nothing, so it cannot be
+   discovered by watching one slice go quiet.
+
+   "shell", "board" and "goals" were accepted here until #27027. They were fed
+   by dashboard/subscribe's one-shot snapshot provider rather than by deltas,
+   and that commit deleted the provider without pruning either vocabulary. *)
 let valid_dashboard_slice = function
-  | "shell"
-  | "execution"
-  | "operator"
-  | "transport"
-  | "namespace"
-  | "composite"
-  | "board"
-  | "goals" ->
-      true
+  | "execution" | "operator" | "transport" | "namespace" | "composite" -> true
   | _ -> false
 
 let dashboard_slice_for_sse_type = function

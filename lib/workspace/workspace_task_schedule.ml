@@ -233,14 +233,9 @@ let claim_next_r
            Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some prev.id });
            let message =
-             Printf.sprintf
-               "%s already holds [P%d] %s: %s. Finish it, or hand it back with \
-                masc_transition action=release and a handoff_context.summary, \
-                before claiming different work."
-               agent_name
-               prev.priority
-               prev.id
-               prev.title
+             (* Shared with the claim-by-task_id refusal, which used to say only
+                that a task was held. One constraint, one sentence. *)
+             Workspace_task.held_tasks_refusal_message ~agent_name [ prev ]
            in
            raise
              (Existing_claim

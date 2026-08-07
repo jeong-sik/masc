@@ -244,6 +244,20 @@ let test_ws_upgrade_accept_rejects_wrong_version () =
 
 (* ====== Dashboard route-scoped slices ====== *)
 
+(* Every event type the bus can carry into a delta.  A literal, because
+   [dashboard_slice_for_sse_type] is a closed match with a [_ -> None]
+   catch-all: nothing enumerates its domain, so a new arm has to be added here
+   too, and the assertion below is what makes that visible. *)
+let mapped_sse_event_types =
+  [ "project_snapshot"
+  ; "namespace_truth_snapshot"
+  ; "execution_snapshot"
+  ; "operator_snapshot"
+  ; "operator_digest"
+  ; "transport_health_snapshot"
+  ; "keeper_composite_changed"
+  ]
+
 let test_dashboard_route_scoped_slices_are_valid () =
   List.iter
     (fun slice ->
@@ -251,15 +265,52 @@ let test_dashboard_route_scoped_slices_are_valid () =
         (Printf.sprintf "%s is accepted" slice)
         true
         (Ws.valid_dashboard_slice slice))
-    [ "shell"
-    ; "namespace"
-    ; "transport"
-    ; "execution"
-    ; "goals"
-    ; "board"
-    ; "composite"
-    ; "operator"
-    ]
+    [ "namespace"; "transport"; "execution"; "composite"; "operator" ]
+
+(* The drift that motivated this: for a day after #27027 the acceptor said yes
+   to shell, board and goals while the producer could emit none of them.  A
+   client subscribing to one got an Ok and then silence -- and because
+   dashboard_subscribe rejects the whole request when any single name is
+   unknown, the failure could not be localised by watching one slice go quiet.
+
+   Direction matters and both halves are asserted:
+   accepted-but-unproducible is the silent subscription; producible-but-rejected
+   would make dashboard_subscribe fail outright for a client asking for a slice
+   the server actively emits. *)
+let test_accepted_slices_equal_producible_slices () =
+  let producible =
+    mapped_sse_event_types
+    |> List.filter_map Ws.dashboard_slice_for_sse_type
+    |> List.sort_uniq compare
+  in
+  List.iter
+    (fun slice ->
+      Alcotest.(check bool)
+        (Printf.sprintf "producible slice %s is accepted by subscribe" slice)
+        true
+        (Ws.valid_dashboard_slice slice))
+    producible;
+  (* The reverse direction needs a domain to quantify over, and
+     [valid_dashboard_slice] is a function rather than a list.  Feeding it the
+     producible set plus every name this repo has ever accepted covers both the
+     current vocabulary and the three that were removed. *)
+  List.iter
+    (fun slice ->
+      if Ws.valid_dashboard_slice slice then
+        Alcotest.(check bool)
+          (Printf.sprintf "accepted slice %s is producible from some event" slice)
+          true
+          (List.mem slice producible))
+    ([ "shell"; "board"; "goals"; "ide" ] @ producible)
+
+let test_removed_slices_are_rejected () =
+  List.iter
+    (fun slice ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s is no longer accepted" slice)
+        false
+        (Ws.valid_dashboard_slice slice))
+    [ "shell"; "board"; "goals" ]
 
 (* ====== Parse cache for broadcast amplification ====== *)
 
@@ -455,19 +506,29 @@ let test_bytes_cache_counters () =
   Alcotest.(check (float 0.001)) "fresh allocation forces another miss"
     2.0 (read_counter misses_name -. misses0)
 
+(* [seq] is per-session but the payload text is shared across every session that
+   subscribed to the slice, so a [seq] inside the payload would make the sharing
+   wrong rather than merely wasteful.  [send_dashboard_delta_frame] carries it in
+   a separate notification for exactly that reason.
+
+   Written against "goal_loop_status" -> "goals" (#23339).  RFC-0352 (#25500)
+   deleted that mapping arm, which left this red for 17 days -- unnoticed because
+   test_ws_transport is not in any ci.yml target list.  The property under test is
+   about the shared-payload contract and not about which event carries it, so it
+   moves to a live mapping instead of being deleted with the dead vocabulary. *)
 let test_dashboard_delta_payload_text_excludes_seq () =
   let event =
     external_event_of_payload
       (`Assoc
         [
-          ("type", `String "goal_loop_status");
+          ("type", `String "keeper_composite_changed");
           ("payload", `Assoc [ ("status", `String "running") ]);
         ])
   in
   match Ws.__test_dashboard_delta_payload_text_for_event event with
   | None -> Alcotest.fail "expected shared dashboard delta payload"
   | Some frame ->
-      Alcotest.(check string) "slice" "goals" frame.slice;
+      Alcotest.(check string) "slice" "composite" frame.slice;
       let json = Yojson.Safe.from_string frame.text in
       let params =
         match json with
@@ -483,7 +544,7 @@ let test_dashboard_delta_payload_text_excludes_seq () =
         false
         (List.mem_assoc "seq" fields);
       Alcotest.(check (option string)) "event type preserved"
-        (Some "goal_loop_status")
+        (Some "keeper_composite_changed")
         (Option.bind (List.assoc_opt "event_type" fields) (function
           | `String s -> Some s
           | _ -> None))
@@ -1153,6 +1214,10 @@ let () =
     ("dashboard", [
       Alcotest.test_case "route scoped slices are valid" `Quick
         test_dashboard_route_scoped_slices_are_valid;
+      Alcotest.test_case "accepted slices equal producible slices" `Quick
+        test_accepted_slices_equal_producible_slices;
+      Alcotest.test_case "slices removed with the snapshot provider are rejected"
+        `Quick test_removed_slices_are_rejected;
     ]);
     ("dashboard_event", [
       Alcotest.test_case "known type maps to slice" `Quick

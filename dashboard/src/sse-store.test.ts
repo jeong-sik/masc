@@ -1,10 +1,6 @@
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BoardPost, BoardSortMode, RouteState } from './types'
-import {
-  DASHBOARD_PUSH_SLICES,
-  type DashboardPushSlice,
-} from './dashboard-slices'
 
 void vi
 
@@ -948,65 +944,42 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshBoard).not.toHaveBeenCalled()
   })
 
-  it('hydrates websocket dashboard snapshots for board, goals, and composite slices', async () => {
+  // Every dashboard/delta the server can emit carries an event_type: the slice is
+  // DERIVED from it by dashboard_slice_for_sse_type, so a delta with a slice and
+  // no event_type is unconstructible. These two tests used to call
+  // hydrateDashboardSlice with a slice and a hand-written payload and no
+  // event_type, which exercised the snapshot-shaped branch that #27027 deleted
+  // when it made dashboard/subscribe ACK-only. They passed either way, which is
+  // why the vocabulary rotted unnoticed.
+  it('routes every server-producible dashboard delta by its event type', async () => {
     const { sseStore } = await loadSseStore()
 
-    sseStore.hydrateDashboardSlice('board', { posts: [], generated_at: 'now' })
-    sseStore.hydrateDashboardSlice('goals', {
-      planning: { goals: [], generated_at: 'now' },
-      tree: {
-        approval_queue_state: { state: 'ready' },
-        tree: [],
-        summary: { total_goals: 0 },
-      },
-    })
-    sseStore.hydrateDashboardSlice('composite', {
-      generated_at: 1,
-      count: 0,
-      snapshots: [],
-    })
+    // The full image of dashboard_slice_for_sse_type
+    // (lib/server/server_mcp_transport_ws.ml). If the server gains a mapping,
+    // this list has to gain the event type, and the assertion below fails until
+    // a handler exists for it.
+    const deltas: Array<{ eventType: string; slice: string; payload: unknown }> = [
+      { eventType: 'project_snapshot', slice: 'namespace',
+        payload: { root: { status: { project: 'default' } } } },
+      { eventType: 'namespace_truth_snapshot', slice: 'namespace',
+        payload: { root: { status: { project: 'default' } } } },
+      { eventType: 'execution_snapshot', slice: 'execution',
+        payload: { agents: [], tasks: [], messages: [], keepers: [] } },
+      { eventType: 'operator_snapshot', slice: 'operator', payload: { keepers: [] } },
+      { eventType: 'operator_digest', slice: 'operator', payload: { target_type: 'namespace' } },
+      { eventType: 'transport_health_snapshot', slice: 'transport', payload: { transports: [] } },
+      { eventType: 'keeper_composite_changed', slice: 'composite',
+        payload: { name: 'alpha', ts_unix: 1 } },
+    ]
 
-    expect(hydrateBoardSnapshot).toHaveBeenCalledWith({ posts: [], generated_at: 'now' })
-    expect(hydratePlanningSnapshot).toHaveBeenCalledWith({ goals: [], generated_at: 'now' })
-    expect(hydrateGoalTreeSnapshot).toHaveBeenCalledWith({
-      approval_queue_state: { state: 'ready' },
-      tree: [],
-      summary: { total_goals: 0 },
-    })
-    expect(hydrateFleetCompositeSnapshot).toHaveBeenCalledWith({
-      generated_at: 1,
-      count: 0,
-      snapshots: [],
-    })
-  })
-
-  it('handles every dashboard push slice advertised to route subscriptions', async () => {
-    const { sseStore } = await loadSseStore()
-    const payloads: Record<DashboardPushSlice, unknown> = {
-      shell: { counts: { agents: 1, tasks: 2, keepers: 3 } },
-      namespace: { root: { status: { project: 'default' } } },
-      transport: { transports: [] },
-      execution: { agents: [], tasks: [], messages: [], keepers: [] },
-      goals: {
-        planning: { goals: [], generated_at: 'now' },
-        tree: { tree: [], summary: { total_goals: 0 } },
-      },
-      board: { posts: [], generated_at: 'now' },
-      composite: { generated_at: 1, count: 0, snapshots: [] },
-      operator: { snapshot: { keepers: [] }, digest: { target_type: 'namespace' } },
+    for (const { eventType, slice, payload } of deltas) {
+      expect(() => sseStore.hydrateDashboardSlice(slice, payload, eventType)).not.toThrow()
     }
 
-    for (const slice of DASHBOARD_PUSH_SLICES) {
-      expect(() => sseStore.hydrateDashboardSlice(slice, payloads[slice])).not.toThrow()
-    }
-
-    expect(hydrateShellSnapshot).toHaveBeenCalledWith(
-      payloads.shell,
-      { light: true, preserveAuth: true },
+    // Not merely "did not throw": the typed arms must actually hydrate.
+    expect(hydrateExecutionSnapshot).toHaveBeenCalledWith(
+      { agents: [], tasks: [], messages: [], keepers: [] },
     )
-    expect(hydrateExecutionSnapshot).toHaveBeenCalledWith(payloads.execution)
-    expect(hydrateBoardSnapshot).toHaveBeenCalledWith(payloads.board)
-    expect(hydrateFleetCompositeSnapshot).toHaveBeenCalledWith(payloads.composite)
   })
 
   it('routes websocket dashboard delta event types without treating payloads as snapshots', async () => {

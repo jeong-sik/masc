@@ -95,11 +95,31 @@ let parse_action s =
   String.trim s |> String.lowercase_ascii |> action_of_string
 
 
+type outcome =
+  | Move_to of t
+  | Already of t
+
+
 (* Every (phase, action) pair is stated. The catch-all this replaces absorbed
    22 of the 35 pairs, so adding a phase or an action compiled cleanly and the
    new combinations silently became "invalid" — the same FSM sparse-match class
    that produced a runtime Assert_failure in keeper_registry. The compiler now
    refuses a matrix with a hole in it. *)
+(* The diagonal -- an action whose target phase the goal already occupies --
+   answers [Already]. It used to answer "invalid goal transition", which is the
+   opposite of what the Task FSM says for the same shape: there, Cancel on a
+   Cancelled task and Done_action on a Done task both return the status
+   unchanged. Two domains a Keeper reaches for in one breath disagreed about
+   whether asking for a state you are in is an error.
+
+   The live log shows what that cost. A reconciliation event fired four times
+   for one already-completed Goal, and the Keeper's own notes on the refused
+   calls read "Goal already completed at 08:57:35Z. This is a duplicate
+   reconciliation event" and "Already completed at 09:00:32Z. Stale racing
+   event." It knew, it reported accurately, and it was refused.
+
+   [Already] is not [Move_to]: the caller must not write or emit a phase event
+   for it, or a repeated report would produce repeated history. *)
 let decide_transition ~phase ~(action : action) =
   let invalid =
     Error
@@ -107,25 +127,32 @@ let decide_transition ~phase ~(action : action) =
          (to_string phase) (action_to_string action))
   in
   match phase, action with
-  (* Executing: the only phase that can request completion. *)
-  | Executing, Request_complete -> Ok Completed
-  | Executing, Pause -> Ok (Paused)
-  | Executing, Block -> Ok (Blocked)
-  | Executing, Drop -> Ok (Dropped)
-  | Executing, (Resume | Unblock | Reopen) -> invalid
+  (* Executing: the only phase that can request completion. Resume, Unblock and
+     Reopen all target Executing, which is where the goal already is. *)
+  | Executing, Request_complete -> Ok (Move_to Completed)
+  | Executing, Pause -> Ok (Move_to Paused)
+  | Executing, Block -> Ok (Move_to Blocked)
+  | Executing, Drop -> Ok (Move_to Dropped)
+  | Executing, (Resume | Unblock | Reopen) -> Ok (Already Executing)
   (* Paused: resumes or drops; it is not blocked and not finished. *)
-  | Paused, Resume -> Ok (Executing)
-  | Paused, Drop -> Ok (Dropped)
-  | Paused, (Request_complete | Pause | Block | Unblock | Reopen) -> invalid
+  | Paused, Resume -> Ok (Move_to Executing)
+  | Paused, Drop -> Ok (Move_to Dropped)
+  | Paused, Pause -> Ok (Already Paused)
+  | Paused, (Request_complete | Block | Unblock | Reopen) -> invalid
   (* Blocked: unblocks or drops. Completing while blocked would skip the
      impediment rather than resolve it. *)
-  | Blocked, Unblock -> Ok (Executing)
-  | Blocked, Drop -> Ok (Dropped)
-  | Blocked, (Request_complete | Pause | Resume | Block | Reopen) -> invalid
-  (* Completed and Dropped are terminal: only reopening leaves them. *)
-  | Completed, Reopen -> Ok (Executing)
-  | Completed, Drop -> Ok (Dropped)
-  | Completed, (Request_complete | Pause | Resume | Block | Unblock) -> invalid
-  | Dropped, Reopen -> Ok (Executing)
-  | Dropped, (Request_complete | Pause | Resume | Block | Unblock | Drop) ->
-    invalid
+  | Blocked, Unblock -> Ok (Move_to Executing)
+  | Blocked, Drop -> Ok (Move_to Dropped)
+  | Blocked, Block -> Ok (Already Blocked)
+  | Blocked, (Request_complete | Pause | Resume | Reopen) -> invalid
+  (* Completed and Dropped are terminal: only reopening leaves them.
+     [Dropped, Request_complete] stays invalid -- completion is not the phase a
+     dropped goal is in, so it is a real request for a state change, not a
+     restatement. Reopen first. *)
+  | Completed, Reopen -> Ok (Move_to Executing)
+  | Completed, Drop -> Ok (Move_to Dropped)
+  | Completed, Request_complete -> Ok (Already Completed)
+  | Completed, (Pause | Resume | Block | Unblock) -> invalid
+  | Dropped, Reopen -> Ok (Move_to Executing)
+  | Dropped, Drop -> Ok (Already Dropped)
+  | Dropped, (Request_complete | Pause | Resume | Block | Unblock) -> invalid

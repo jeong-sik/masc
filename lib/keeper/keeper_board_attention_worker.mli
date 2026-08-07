@@ -65,6 +65,13 @@ type fatal_error =
 
 val fatal_error_to_string : fatal_error -> string
 
+val max_completed_settlements_per_owner_turn : unit -> int
+(** Hard ceiling for filesystem-backed completed partitions settled by one
+    owner turn. Remaining work is preserved behind a continuation wake.
+    Backed by the [keeper.board_attention.settlements_per_turn]
+    runtime_params tunable (see [Keeper_config]); read fresh on each call
+    since an operator override can change it between turns. *)
+
 val run :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -85,11 +92,12 @@ val settle_one_completed :
   base_path:string ->
   keeper_name:string ->
   (settlement, string) result
-(** Owner-admission boundary. Apply and deliver at most one completed judgment,
-    settle its partition, and request one continuation wake when more completed
-    results remain. A completion that remains sync-unconfirmed after one explicit
-    confirmation returns an error without delivery or wake. This function never
-    invokes OAS. *)
+(** Owner-admission boundary. Settle preceding non-admitting judgments only up
+    to the fixed per-turn durability bound, cooperatively yielding between
+    them; stop after the first admitting judgment and request one continuation
+    wake when more completed results remain. A completion that remains
+    sync-unconfirmed after one explicit confirmation returns an error without
+    delivery or wake. This function never invokes OAS. *)
 
 module For_testing : sig
   type rearm_scheduler

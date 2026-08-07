@@ -21,6 +21,11 @@ type verification_submission =
   ; assignee : string
   ; verification_id : string
   ; evidence_refs : string list
+  ; (* Set when the submission superseded a pending one, so the record it
+       replaced can be removed after the commit. The task points only at the
+       new id; leaving the old file behind would show the dashboard a request
+       no task is waiting on. *)
+    superseded_verification_id : string option
   }
 
 (* Workspace-visible wording for a committed transition, or [None] when the
@@ -448,6 +453,16 @@ let transition_task_outcome_r
                  ; assignee
                  ; verification_id
                  ; evidence_refs = verification_submission_evidence_refs
+                 ; superseded_verification_id =
+                     (match task.task_status with
+                      | Masc_domain.AwaitingVerification
+                          { verification_id = superseded; _ } ->
+                        Some superseded
+                      | Masc_domain.Todo
+                      | Masc_domain.Claimed _
+                      | Masc_domain.InProgress _
+                      | Masc_domain.Done _
+                      | Masc_domain.Cancelled _ -> None)
                  }
            | ( ( Masc_domain.Claim
                | Masc_domain.Start
@@ -705,7 +720,29 @@ let transition_task_outcome_r
   in
   (match !committed_verification_submission with
    | None -> ()
-   | Some { task; assignee; verification_id; evidence_refs } ->
+   | Some { task; assignee; verification_id; evidence_refs; superseded_verification_id }
+     ->
+     (* Order matters: remove the superseded record before announcing the new
+        one, so no reader woken by the notification can see two open requests
+        for one task. A failed removal leaves a request no task points at --
+        visible in the dashboard, refused by [decide_verdict] on the id -- which
+        is why it degrades rather than failing the committed transition. *)
+     (match superseded_verification_id with
+      | None -> ()
+      | Some superseded ->
+        (match
+           (Atomic.get Workspace_hooks.verification_delete_request_fn) config
+             ~verification_id:superseded
+         with
+         | Ok () -> ()
+         | Error detail ->
+           Log.TaskState.error
+             "verification supersede delete degraded after commit task_id=%s \
+              superseded=%s replaced_by=%s detail=%s"
+             task_id
+             superseded
+             verification_id
+             detail));
      (try
         (Atomic.get Workspace_hooks.verification_notify_submit_fn)
           config

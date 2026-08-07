@@ -543,7 +543,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # Lower it in the PR that earns the reduction. Raising it needs a reason in the
 # PR body -- a new export with no caller is usually a surface someone meant to
 # wire and did not.
-DEAD_EXPORT_BASELINE = 671
+# 658 -> 585: batch 4 removes 73 exports with no consumer. Measured on the
+# merged tree after main's batch-1..3 landed, not computed from the batch
+# size -- the merge also dropped should_use_dict, which lost its last
+# caller when batch 1 removed the dictionary helpers around it.
+DEAD_EXPORT_BASELINE = 585
 
 
 def run_ratchet(count: int) -> int:

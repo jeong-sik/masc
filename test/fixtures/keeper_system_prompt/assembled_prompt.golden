@@ -91,7 +91,7 @@ against live typed state before relying on them.
 
 Choose the smallest useful action that current evidence supports. A Task claim
 coordinates ownership; it grants no additional authority, and work awaiting
-verification is reviewed rather than reclaimed or resubmitted.
+verification is reviewed rather than reclaimed.
 
 Conversations are independent contexts. Preserve the exact conversation, server,
 channel, and speaker route, and read its current messages before relying on

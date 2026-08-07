@@ -116,6 +116,22 @@ let capability_of_json ~field = function
   | _ -> invalid_wire_value ~field ~expected:"invoke_turn"
 ;;
 
+(* [capability] has one legal value, so a submitter cannot choose it -- it can
+   only restate it or get it wrong. Every one of the week's 29 [delegate]
+   rejections was this field: 22 said "task_assignment" and 7 said
+   "claim_and_execute", which are descriptions of the prompt, not capabilities
+   the contract offers. A field named [capability] reads as a menu.
+
+   Absent now resolves to the single value. An explicit wrong one is still
+   refused, so this admits nothing new -- it stops requiring a restatement. If a
+   second capability is ever added, this default becomes a real choice and has
+   to be revisited here, which is why it is written as an explicit arm rather
+   than folded into [capability_of_json]. *)
+let optional_capability_of_json ~field = function
+  | None -> Ok Invoke_turn
+  | Some json -> capability_of_json ~field json
+;;
+
 let request ~keeper_name ~prompt =
   let* keeper_name =
     Keeper_id.Keeper_name.of_string keeper_name
@@ -212,8 +228,11 @@ let request_of_json json =
   in
   let* target_json = required_field ~field:"delegate" "target" fields in
   let* target = target_of_json target_json in
-  let* capability_json = required_field ~field:"delegate" "capability" fields in
-  let* capability = capability_of_json ~field:"delegate.capability" capability_json in
+  let* capability =
+    optional_capability_of_json
+      ~field:"delegate.capability"
+      (List.assoc_opt "capability" fields)
+  in
   let* prompt_json = required_field ~field:"delegate" "prompt" fields in
   let* prompt = string_value ~field:"delegate.prompt" prompt_json in
   if String.equal prompt "" then Error Empty_prompt else Ok { target; capability; prompt }

@@ -152,7 +152,7 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
     section: 'runtime',
     label: 'Runtime catalog cards',
     kind: 'live-read',
-    source: 'GET /api/v1/dashboard/runtime-providers',
+    source: 'GET /api/v1/providers',
     action: 'read-only projection',
   },
   {

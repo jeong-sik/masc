@@ -97,7 +97,6 @@ function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnap
       model: {
         id: modelId,
         api_name: 'model-api',
-        match_prefixes: ['model-'],
         capabilities: {
           source: 'runtime.toml',
           thinking_control_format: 'reasoning-effort',

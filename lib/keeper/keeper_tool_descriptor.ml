@@ -1530,7 +1530,11 @@ let masc_local_runtime_descriptor
   let schema = definition.schema in
   cluster_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection:
+      (Tool_schemas_local_runtime.keeper_model_exposure definition.operation
+       |> function
+       | Tool_schemas_local_runtime.Keeper_callable -> Internal_name
+       | Tool_schemas_local_runtime.Operator_diagnostic -> Operator_only)
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
     ~id:
@@ -1812,7 +1816,12 @@ let internal_descriptors : t list =
       ~capability_identity:Internal_name_identity
       "done"
       "keeper_task_done"
-      "Mark the claimed MASC task as done."
+      (* The name says done; the handler issues submit_for_verification
+         (keeper_tool_task_runtime.ml:806). Saying "done" here left the model
+         expecting a terminal state and finding AwaitingVerification. *)
+      "Submit the claimed MASC task for verification with evidence. The task \
+       waits for a completion authority's verdict; it does not become done \
+       here, and it does not hold your next claim while it waits."
       ~readonly:false
   (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)
   ; masc_task_descriptor "add" "masc_add_task"

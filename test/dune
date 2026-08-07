@@ -1977,6 +1977,8 @@
 
 (include stanzas/test_agent_card_action_mirror.inc)
 
+(include stanzas/test_task_status_vocabulary.inc)
+
 (include stanzas/test_workspace_heartbeat_outcome.inc)
 
 (include stanzas/test_http_auth_strict_flag.inc)

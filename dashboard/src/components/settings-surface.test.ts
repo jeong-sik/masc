@@ -248,7 +248,6 @@ function makeRuntimeProvider(
     source: 'runtime.toml',
     endpoint_url: 'https://runtime.example/v1',
     note: null,
-    discovery: null,
     ...overrides,
   }
 }
@@ -1151,7 +1150,6 @@ describe('SettingsSurface', () => {
                 supports_computer_use: false,
                 supports_code_execution: true,
               },
-              match_prefixes: ['m1'],
             },
             binding: {
               provider_id: 'provider-a',
@@ -1257,7 +1255,7 @@ describe('SettingsSurface', () => {
   it('runtime overview shows its own error state when the provider catalog is unavailable, without fabricating catalog cards', async () => {
     // PR-6 (bug #14/#15/#36): the settings surface no longer re-projects
     // /api/v1/dashboard/runtime-defaults into a fake runtime-provider-catalog
-    // shape when /api/v1/dashboard/runtime-providers fails — it shows the
+    // shape when /api/v1/providers fails — it shows the
     // catalog's own error state instead.
     apiMock.fetchRuntimeProviders.mockRejectedValueOnce(new Error('provider catalog unavailable'))
 

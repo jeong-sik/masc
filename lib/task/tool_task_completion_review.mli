@@ -24,18 +24,15 @@ val note_evidence_ref_form : string
 
 val non_empty_trimmed_strings : string list -> string list
 
-val concrete_verification_evidence_refs :
-  ?notes:string ->
-  ?handoff_context:Masc_domain.task_handoff_context ->
-  ?submitted_evidence_refs:string list ->
-  Masc_domain.task ->
-  string list
+(** task-1664: typed split of a task's verification evidence.
+    [required_artifacts] are the artifacts the contract demands;
+    [submitted_evidence] are the references the agent actually provided.
 
-(** task-1664: typed split of a task's verification evidence. [required_artifacts]
-    are the artifacts the contract demands; [submitted_evidence] are the
-    references the agent actually provided. The flat
-    {!concrete_verification_evidence_refs} concatenates both and cannot
-    distinguish the two roles. *)
+    It replaced a flat projection that concatenated both, so a verifier reading
+    the list could not tell "the contract asked for a PR link" from "here is the
+    submitted PR link". That projection was kept afterwards for
+    byte-compatibility with existing consumers, and it had none -- no caller
+    inside this module or outside it -- so it is gone. *)
 type verification_evidence =
   { required_artifacts : string list
   ; submitted_evidence : string list

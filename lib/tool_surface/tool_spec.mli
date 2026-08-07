@@ -89,12 +89,4 @@ val register_all : t list -> unit
 val to_tool_schema : t -> Masc_domain.tool_schema
 (** Convert to [Masc_domain.tool_schema] for interop with existing schema-based APIs. *)
 
-(** {1 Boot-time verification} *)
-
-val verify_handler_coverage : unit -> string list
-(** Returns tool names that were registered via [register] with [Direct] or
-    [Shared] binding but have no handler in [Tool_dispatch]. [Tag_dispatch]
-    bindings are excluded. Call after server initialization completes.
-    Empty list means full coverage. *)
-
 val all_registered_names : unit -> string list

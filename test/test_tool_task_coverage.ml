@@ -1665,6 +1665,169 @@ let () = test "operator verdict path replaces verifier agent actions" (fun () ->
     | Masc_domain.Done _ -> ()
     | _ -> failwith "expected verifier approval to complete task"))
 
+(* Refusing this transition left [Cancel] as the assignee's only move out of
+   [AwaitingVerification]: the live backlog carried 16 refusals of
+   "awaiting_verification -> submit_for_verification" and 10 cancellations whose
+   stated reason was the deliverable. These four cases pin what makes the
+   supersede safe rather than merely permitted. *)
+
+let awaiting_snapshot ctx task_id =
+  match
+    Workspace.get_tasks_raw ctx.Task.Tool.config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+  with
+  | Some
+      { task_status =
+          Masc_domain.AwaitingVerification { verification_id; started_at; assignee; _ }
+      ; _
+      } -> verification_id, started_at, assignee
+  | Some _ -> failwith (Printf.sprintf "task %s is not awaiting verification" task_id)
+  | None -> failwith (Printf.sprintf "task %s not found" task_id)
+
+let submit_for_verification ctx ~task_id ~notes =
+  Task.Tool.handle_transition
+    ~tool_name:"test_tool"
+    ~start_time:0.0
+    ctx
+    (`Assoc
+      [ "task_id", `String task_id
+      ; "action", `String "submit_for_verification"
+      ; "notes", `String notes
+      ])
+
+let resubmit_fixture () =
+  let ctx = make_test_ctx_with_agent "worker" in
+  let _ =
+    Task.Tool.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ "title", `String "Resubmittable deliverable" ])
+  in
+  let _ = Workspace.claim_task ctx.Task.Tool.config ~agent_name:"worker" ~task_id:"task-001" in
+  let first =
+    submit_for_verification
+      ctx
+      ~task_id:"task-001"
+      ~notes:
+        "completion_notes: first pass. reviewable_evidence_ref: \
+         artifact:first-pass.json ready for review"
+  in
+  if not (Tool_result.is_success first) then failwith (Tool_result.message first);
+  ctx
+
+let () =
+  test "resubmit supersedes the pending verification instead of discarding it" (fun () ->
+    let ctx = resubmit_fixture () in
+    let base_path = ctx.Task.Tool.config.Workspace.base_path in
+    let first_id, first_started_at, _ = awaiting_snapshot ctx "task-001" in
+    (match Verification.load_request base_path first_id with
+     | Ok _ -> ()
+     | Error detail -> failwith ("first request should exist: " ^ detail));
+    let second =
+      submit_for_verification
+        ctx
+        ~task_id:"task-001"
+        ~notes:
+          "completion_notes: second pass adds the missing benchmark. \
+           reviewable_evidence_ref: artifact:second-pass.json ready for review"
+    in
+    if not (Tool_result.is_success second) then failwith (Tool_result.message second);
+    let second_id, second_started_at, _ = awaiting_snapshot ctx "task-001" in
+    (* A fresh id is what makes the supersede safe -- see the mismatch case
+       below -- so equality here would defeat the whole design. *)
+    assert (not (String.equal first_id second_id));
+    (* The work began once, whatever the submission count. *)
+    assert (String.equal first_started_at second_started_at);
+    (match Verification.load_request base_path second_id with
+     | Ok _ -> ()
+     | Error detail -> failwith ("second request should exist: " ^ detail));
+    match Verification.load_request base_path first_id with
+    | Error _ -> ()
+    | Ok _ ->
+      failwith "superseded request should not survive: the task points only at the new id")
+
+let () =
+  test "a verdict on the superseded verification is refused" (fun () ->
+    let ctx = resubmit_fixture () in
+    let first_id, _, _ = awaiting_snapshot ctx "task-001" in
+    let second =
+      submit_for_verification
+        ctx
+        ~task_id:"task-001"
+        ~notes:
+          "completion_notes: second pass. reviewable_evidence_ref: \
+           artifact:second-pass.json ready for review"
+    in
+    if not (Tool_result.is_success second) then failwith (Tool_result.message second);
+    (* An in-flight judge reads its request once at the start, so it can return
+       a verdict for evidence the task no longer carries. The id is what stops
+       it landing. *)
+    let stale =
+      Workspace.commit_verdict_r
+        ctx.Task.Tool.config
+        ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+        ~verdict:Masc_domain.Verdict_approved
+        ~task_id:"task-001"
+        ~verification_id:first_id
+        ~notes:"approved against the superseded evidence"
+        ()
+    in
+    (match stale with
+     | Error _ -> ()
+     | Ok _ -> failwith "a verdict carrying the superseded id must not complete the task");
+    match (only_task ctx).Masc_domain.task_status with
+    | Masc_domain.AwaitingVerification _ -> ()
+    | _ -> failwith "task should still be awaiting its current verification")
+
+let () =
+  test "a verdict on the current verification still completes the task" (fun () ->
+    let ctx = resubmit_fixture () in
+    let second =
+      submit_for_verification
+        ctx
+        ~task_id:"task-001"
+        ~notes:
+          "completion_notes: second pass. reviewable_evidence_ref: \
+           artifact:second-pass.json ready for review"
+    in
+    if not (Tool_result.is_success second) then failwith (Tool_result.message second);
+    let second_id, _, _ = awaiting_snapshot ctx "task-001" in
+    let approved =
+      Workspace.commit_verdict_r
+        ctx.Task.Tool.config
+        ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+        ~verdict:Masc_domain.Verdict_approved
+        ~task_id:"task-001"
+        ~verification_id:second_id
+        ~notes:"approved against the resubmitted evidence"
+        ()
+    in
+    (match approved with
+     | Ok _ -> ()
+     | Error error -> failwith (Masc_domain.masc_error_to_string error));
+    match (only_task ctx).Masc_domain.task_status with
+    | Masc_domain.Done _ -> ()
+    | _ -> failwith "expected the resubmitted verification to complete the task")
+
+let () =
+  test "only the assignee may supersede a pending verification" (fun () ->
+    let ctx = resubmit_fixture () in
+    let other_ctx = { ctx with Task.Tool.agent_name = "bystander" } in
+    let first_id, _, _ = awaiting_snapshot ctx "task-001" in
+    let result =
+      submit_for_verification
+        other_ctx
+        ~task_id:"task-001"
+        ~notes:
+          "completion_notes: not my task. reviewable_evidence_ref: \
+           artifact:bystander.json ready for review"
+    in
+    assert (not (Tool_result.is_success result));
+    let unchanged_id, _, assignee = awaiting_snapshot ctx "task-001" in
+    assert (String.equal first_id unchanged_id);
+    assert (String.equal assignee "worker"))
+
 let () =
   test "operator-approved verification leaves Goal action to durable reconciler"
     (fun () ->

@@ -152,11 +152,31 @@ let decide
            ; verification_id = new_verification_id ()
            })
     else Error Invalid_transition
+  (* Resubmission supersedes the pending obligation instead of replacing the
+     task. Refusing it left [Cancel] as the assignee's only move out of
+     [AwaitingVerification], and the live backlog shows what that cost: 16
+     refusals of this exact transition, and 10 cancellations whose stated reason
+     was the deliverable itself.
+
+     A fresh [verification_id] is what makes it safe. A verdict computed against
+     the superseded request carries the old id and is refused by
+     {!decide_verdict} with [Verification_id_mismatch], so an in-flight judge
+     cannot land on evidence it never read. [started_at] is preserved: the work
+     began once, whatever the submission count. *)
   | ( Masc_domain.Submit_for_verification
-    , ( Masc_domain.Todo
-      | Masc_domain.AwaitingVerification _
-      | Masc_domain.Done _
-      | Masc_domain.Cancelled _ ) ) ->
+    , Masc_domain.AwaitingVerification { assignee; started_at; _ } ) ->
+    if same_agent assignee
+    then
+      ok
+        (Masc_domain.AwaitingVerification
+           { assignee
+           ; started_at
+           ; submitted_at = now
+           ; verification_id = new_verification_id ()
+           })
+    else Error Invalid_transition
+  | ( Masc_domain.Submit_for_verification
+    , (Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _) ) ->
     Error Invalid_transition
 ;;
 

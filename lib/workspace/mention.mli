@@ -2,9 +2,9 @@
 
 (** Mention routing mode *)
 type mode =
-  | Stateless of string       (** @agent → pick one available *)
-  | Stateful of string        (** @agent-adj-animal → specific agent *)
-  | Broadcast of string       (** @@agent → all of type *)
+  | Stateless of string       (** [@agent] → pick one available *)
+  | Stateful of string        (** [@agent-adj-animal] → specific agent *)
+  | Broadcast of string       (** [@@agent] → all of type *)
   | None                      (** No mention found *)
 
 val mode_to_string : mode -> string
@@ -18,12 +18,12 @@ val is_nickname : string -> bool
 (** Check if mention follows nickname pattern (agent-adj-animal) *)
 
 val parse : string -> mode
-(** Parse @mention from message content
+(** Parse [@mention] from message content
 
     Priority:
-    1. @@agent → Broadcast
-    2. @agent-adj-animal → Stateful
-    3. @agent → Stateless
+    1. [@@agent] → Broadcast
+    2. [@agent-adj-animal] → Stateful
+    3. [@agent] → Stateless
 *)
 
 val extract : string -> string option

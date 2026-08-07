@@ -23,7 +23,7 @@ val process_directive : agent_name:string -> Keeper_directive.t -> unit
 val current_task_id_for_agent : config:Workspace.config -> string -> string
 
 (** Wake up a specific keeper immediately. Used by broadcast notification
-    when a @mention targets a running keeper.
+    when a [@mention] targets a running keeper.
 
     [?stimulus] appends the payload to the keeper's Event Layer queue
     before flipping the wakeup flag. See RFC-0020 §3. *)

@@ -88,7 +88,15 @@ echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, al
 # authority tools, memory journal) without lowering the baseline. A PR that
 # wires a suite must lower this number in the same PR, or this check goes red
 # for everyone.
-UNWIRED_BASELINE=738
+#
+# 738 -> 735: #27275, #27330 and #27285 each wired a suite and left the
+# baseline where it was, so the check carried three slots of slack. Slack is
+# not neutral — it is the number of suites a later PR can add without wiring
+# before anything goes red, which is exactly what this guard exists to catch.
+# The advice this script prints when unwired drops below the baseline is only
+# printed, never enforced; until it is (#27297) the number has to be pulled
+# down by hand after each wiring lands.
+UNWIRED_BASELINE=735
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

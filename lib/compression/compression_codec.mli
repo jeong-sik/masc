@@ -24,7 +24,6 @@ type compress_result =
 val min_size : int
 (** Minimum payload size (bytes) below which compression is skipped. *)
 
-val max_dict_size : int
 (** Upper bound reserved for dictionary payloads. *)
 
 (** {1 Encoding helpers} *)
@@ -33,10 +32,7 @@ val should_use_dict : int -> bool
 (** [should_use_dict size] returns whether a payload of [size] bytes should be
     routed through the dictionary-aware path. Currently a simple size floor. *)
 
-val get_dict : unit -> string
 (** Current dictionary bytes. Empty string when no dictionary is loaded. *)
-
-val has_dict : unit -> bool
 
 val uses_dict : encoding -> bool
 

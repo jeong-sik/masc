@@ -12,7 +12,6 @@ function makeItem(overrides: Partial<DashboardToolInventoryItem> = {}): Dashboar
     description: 'A test tool',
     category: 'shell',
     category_description: null,
-    enabled_in_current_mode: true,
     direct_call_allowed: true,
     required_permission: null,
     doc_refs: [],

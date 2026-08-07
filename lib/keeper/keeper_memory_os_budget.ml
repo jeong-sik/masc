@@ -9,11 +9,21 @@ type fit =
   | Fits of measurement
   | Exceeds of measurement
 
+(* [first_seen] is on the fact, persisted, and encoded on the wire — it was the
+   one field the rendered line dropped. The Keeper prompt tells the model that
+   memory "records what was true when it was written: verify time-sensitive
+   claims against live state before acting on them", which it cannot do from a
+   line that never says when. Live case (2026-08-06): a constraint recorded
+   from a transient build-lock condition read as a standing prohibition and a
+   Keeper refused every open Task on it. *)
+let recorded_at fact = Masc_domain.iso8601_of_unix_seconds fact.first_seen
+
 let render_fact fact =
   Printf.sprintf
-    "- [memory_id=%s category=%s] %s"
+    "- [memory_id=%s category=%s recorded=%s] %s"
     (memory_id fact)
     (category_to_string fact.category)
+    (recorded_at fact)
     fact.claim
 ;;
 
@@ -36,6 +46,8 @@ let rendered_bytes facts =
     |> saturated_add memory_id_bytes
     |> saturated_add (String.length " category=")
     |> saturated_add (String.length (category_to_string fact.category))
+    |> saturated_add (String.length " recorded=")
+    |> saturated_add (String.length (recorded_at fact))
     |> saturated_add (String.length "] ")
     |> saturated_add (String.length fact.claim)
   in

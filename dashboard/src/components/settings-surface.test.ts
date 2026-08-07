@@ -137,7 +137,6 @@ function makeToolItem(overrides: Partial<DashboardToolInventoryItem> = {}): Dash
     name: 'tool',
     description: '',
     category: 'uncategorized',
-    enabled_in_current_mode: false,
     direct_call_allowed: false,
     doc_refs: [],
     prompt_hints: [],
@@ -248,7 +247,6 @@ function makeRuntimeProvider(
     source: 'runtime.toml',
     endpoint_url: 'https://runtime.example/v1',
     note: null,
-    discovery: null,
     ...overrides,
   }
 }
@@ -1151,7 +1149,6 @@ describe('SettingsSurface', () => {
                 supports_computer_use: false,
                 supports_code_execution: true,
               },
-              match_prefixes: ['m1'],
             },
             binding: {
               provider_id: 'provider-a',

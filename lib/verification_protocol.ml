@@ -23,7 +23,6 @@ type submit_request_spec =
   { criteria : Verification.criterion list
   ; output : Yojson.Safe.t
   ; request_kind : string
-  ; request_summary : string
   ; next_action : string
   ; board_type : string
   ; board_title : string
@@ -88,7 +87,6 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
   { criteria
   ; output
   ; request_kind
-  ; request_summary
   ; next_action
   ; board_type
   ; board_title

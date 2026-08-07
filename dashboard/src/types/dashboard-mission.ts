@@ -46,7 +46,6 @@ export interface DashboardMissionAttentionQueueItem {
   summary: string
   target_type: string
   target_id?: string | null
-  top_action?: OperatorRecommendedAction | null
   related_agent_names: string[]
   evidence?: unknown
   evidence_preview: string[]

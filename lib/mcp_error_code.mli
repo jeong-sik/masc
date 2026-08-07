@@ -82,7 +82,7 @@ val to_http_status : t -> Httpun.Status.t
 val all : t list
 (** Enumerable list of every constructor, with a canonical exemplar for
     [Quiet] (reason = ["<exemplar>"], recovered = false). Used by
-    {!test/test_mcp_error_code.ml} to assert wire-code uniqueness. *)
+    [test/test_mcp_error_code.ml] to assert wire-code uniqueness. *)
 
 val jsonrpc_error_body : t -> message:string -> string
 (** [jsonrpc_error_body t ~message] returns a complete JSON-RPC 2.0 error

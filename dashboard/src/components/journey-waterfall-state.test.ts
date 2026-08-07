@@ -44,8 +44,6 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
     manifest_scan_diagnostics: {
       state: 'available',
       schema: 'keeper.runtime_manifest_scan_diagnostics.v1',
-      retired_event_count: 0,
-      retired_event_counts: [],
       unsupported_event_count: 0,
       unsupported_event_counts: [],
       unsupported_event_unattributed_count: 0,

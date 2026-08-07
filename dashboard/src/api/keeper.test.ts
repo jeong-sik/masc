@@ -1362,18 +1362,12 @@ describe('keeper runtime trace', () => {
       receipt_returned_rows: 1,
       manifest_scan_diagnostics: {
         schema: 'keeper.runtime_manifest_scan_diagnostics.v1',
-        retired_event_count: 2,
-        retired_event_counts: [
-          { event: 'state_snapshot_sidecar_saved', count: 1 },
-          { event: 'working_state_sidecar_saved', count: 1 },
-        ],
         unsupported_event_count: 1,
         unsupported_event_counts: [{ event: 'future_event', count: 1 }],
         unsupported_event_unattributed_count: 0,
         invalid_manifest_row_count: 1,
         invalid_json_row_count: 1,
         samples: [
-          { kind: 'retired_event', event: 'state_snapshot_sidecar_saved' },
           { kind: 'unsupported_event', event: 'future_event' },
         ],
       },
@@ -1456,7 +1450,6 @@ describe('keeper runtime trace', () => {
     if (result.manifest_scan_diagnostics.state !== 'available') {
       throw new Error(result.manifest_scan_diagnostics.error)
     }
-    expect(result.manifest_scan_diagnostics.retired_event_count).toBe(2)
     expect(result.manifest_scan_diagnostics.unsupported_event_counts).toEqual([
       { event: 'future_event', count: 1 },
     ])

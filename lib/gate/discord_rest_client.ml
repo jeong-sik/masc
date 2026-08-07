@@ -249,11 +249,7 @@ let embed_to_json (e : embed) : Yojson.Safe.t =
 (* Embed colors *)
 let color_blue = 0x3498DB    (* Running / in progress *)
 let color_green = 0x2ECC71   (* Success *)
-let color_red = 0xE74C3C     (* Error *)
-
 (* Discord embed field value limit is 1024 characters. *)
-let embed_field_value_limit = 1024
-
 
 let link_embed ~url ~title ~description ~image =
   { title
@@ -327,13 +323,3 @@ let send_embed_message ?clock
   match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_response ~status ~body
-
-let edit_embed_message ?clock
-    ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
-    ~token ~channel_id ~message_id ~content ?embeds () =
-  let (url, headers, body) =
-    build_edit_embed_request ~token ~channel_id ~message_id ~content ?embeds ()
-  in
-  match Masc_http_client.patch_sync ?clock ~timeout_sec ~url ~headers ~body () with
-  | Error msg -> Error (Network msg)
-  | Ok (status, body) -> parse_empty_response ~status ~body

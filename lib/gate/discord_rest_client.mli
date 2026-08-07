@@ -119,12 +119,10 @@ type embed =
 val embed_to_json : embed -> Yojson.Safe.t
 (** Convert an embed to its JSON representation. Exposed for testing. *)
 
-val embed_field_value_limit : int
 (** Discord embed field value limit, in characters. *)
 
 val color_blue : int
 val color_green : int
-val color_red : int
 (** Predefined embed colors: blue=running, green=success, red=error. *)
 
 val link_embed :
@@ -150,16 +148,6 @@ val send_embed_message :
 (** [send_embed_message] posts a message with optional embeds.
     Returns the created message id on [Ok]. *)
 
-val edit_embed_message :
-  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  ?timeout_sec:float ->
-  token:string ->
-  channel_id:string ->
-  message_id:string ->
-  content:string ->
-  ?embeds:embed list ->
-  unit ->
-  (unit, error) result
 (** [edit_embed_message] patches a message with updated content/embeds. *)
 
 (** {1 Internal — exposed for unit testing}

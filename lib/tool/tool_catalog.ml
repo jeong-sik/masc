@@ -606,23 +606,6 @@ let metadata_to_fields name =
   in
   with_mcp_context_required
 
-let public_contract_fields name =
-  let meta = metadata name in
-  let base =
-    [
-      ( "implementationStatus",
-        `String (implementation_status_to_string meta.implementation_status) );
-    ]
-  in
-  let with_mcp_context_required =
-    match meta.mcp_context_required with
-    | Some value -> ("mcpContextRequired", `Bool value) :: base
-    | None -> base
-  in
-  match meta.canonical_name with
-  | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_mcp_context_required
-  | None -> with_mcp_context_required
-
 let allow_direct_call name =
   let meta = metadata name in
   match meta.visibility with

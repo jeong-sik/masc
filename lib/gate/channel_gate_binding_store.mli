@@ -68,13 +68,10 @@ val create :
   guild_id_field:guild_id_field ->
   t
 
-val read_json_file_result : string -> (Yojson.Safe.t option, string) result
 val read_json_file_opt : string -> Yojson.Safe.t option
 val normalize_bindings_json :
   Yojson.Safe.t -> (binding list, binding_decode_error) result
-val binding_decode_error_to_string : binding_decode_error -> string
 val binding_store_error_to_string : binding_store_error -> string
-val audit_append_error_to_string : audit_append_error -> string
 val mutation_error_to_string : mutation_error -> string
 val read_bindings_result : t -> (binding list, binding_store_error) result
 val bound_channels_result :

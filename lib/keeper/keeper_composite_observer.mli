@@ -63,9 +63,6 @@ type invariants_check = {
     once per violated invariant. No-op when all invariants hold. Called
     automatically from [observe]; exposed so unit tests can assert the
     counter bump without going through the full snapshot pipeline. *)
-val bump_invariant_violations :
-  keeper_name:string -> invariants_check -> unit
-
 (** {2 Pure invariant predicates}
 
     The [check_*] functions below are the conjuncts of the composite
@@ -347,15 +344,9 @@ val observe :
 val turn_phase_to_string : Keeper_registry.packed_turn_phase -> string
 
 (** Stringify [decision_stage]. Mirrors KeeperDecisionPipeline.tla. *)
-val decision_stage_to_string : Keeper_registry.packed_decision_stage -> string
-
 (** Stringify the runtime-state compatibility field. *)
-val runtime_state_to_string : runtime_state -> string
-
 (** Stringify [compaction_stage]. *)
 val compaction_stage_to_string : Keeper_registry.packed_compaction_stage -> string
-
-val invariant_key_to_string : invariant_key -> string
 
 (** Serialise a snapshot as the [/api/keepers/:name/composite] payload
     documented in RFC-0003 §7. *)

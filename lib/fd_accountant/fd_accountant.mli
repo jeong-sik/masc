@@ -22,8 +22,6 @@ val kind_of_string : string -> kind option
 val all_kinds : kind list
 val all_resource_errors : resource_error list
 val resource_error_to_string : resource_error -> string
-val resource_error_of_exn : exn -> resource_error option
-
 val install_observers :
   nofile_soft_limit:(unit -> int option) ->
   on_resource_error:(kind:kind -> resource_error -> exn -> unit) ->
@@ -47,8 +45,6 @@ val resource_error_count : kind:kind -> resource_error -> int
     internal, so an unavailable or faulty external observer cannot erase the
     event from telemetry. *)
 
-val install_dated_jsonl_log_writer_observer : unit -> unit
-val install_process_eio_sandbox_exec_observer : unit -> unit
 val install_with_process_sandbox_exec_observer : unit -> unit
 
 type snapshot =

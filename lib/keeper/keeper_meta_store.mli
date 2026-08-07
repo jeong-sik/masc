@@ -18,8 +18,6 @@ val register_runtime_meta_write_sync :
 (** Pre-compiled regex matching the CAS [meta version conflict]
     error message. Exposed for symmetry — used internally by
     [is_version_conflict_error]. *)
-val version_conflict_re : Re.re
-
 (** Read a keeper meta JSON file at [path]. Returns [Ok None] when
     the file does not exist. Unknown top-level keys are rejected with a
     reset-required error; the persisted file is never rewritten. *)
@@ -27,8 +25,6 @@ val read_meta_file_path :
   string -> (Keeper_meta_contract.keeper_meta option, string) result
 
 (** [true] when [f] has an exact canonical Keeper-metadata interpretation. *)
-val is_keeper_meta_file : string -> bool
-
 (** List keeper names with persisted JSON in [.masc/keepers/].
     Sidecars filtered, names validated, sorted ascending. *)
 val persisted_keeper_names_result : Workspace.config -> (string list, string) result
@@ -124,12 +120,6 @@ val write_meta_deferred_runtime_sync :
 (** Lifecycle-owner variant of [write_meta]. The opaque reservation token is
     checked against the same BasePath/name key before entering the per-path
     CAS critical section. *)
-val write_meta_for_lifecycle :
-  Keeper_lifecycle_reservation.token ->
-  Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  (unit, string) result
-
 type identity_update_error =
   | Identity_missing
   | Identity_changed
@@ -240,12 +230,6 @@ val write_meta_with_merge_for_lifecycle :
     with a concurrent heartbeat/turn write re-applies the stamp. [`No_durable_meta]
     reports that no on-disk meta exists to stamp (non-fatal); [Error] carries a
     read/write failure. *)
-val persist_compaction_decision :
-  Workspace.config ->
-  keeper_name:string ->
-  decision:Keeper_meta_contract.compaction_runtime_decision ->
-  ([ `Persisted | `No_durable_meta ], string) result
-
 val persist_compaction_commit_projection :
   Workspace.config ->
   keeper_name:string ->

@@ -468,7 +468,6 @@ let finalize
       ~config
       ~meta
       ~generation
-      ~profile_defaults
       ~turn:manifest_keeper_turn_id
       ~oas_turn_count:result.turns
       ~actual_tools:actual_keeper_tool_names

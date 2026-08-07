@@ -290,8 +290,7 @@ describe('ConfigResolutionPanel', () => {
           warnings: ['Resolved config child is missing: keepers'],
           config_root: { path: '/tmp/runtime/config', exists: true, source: 'env' },
           prompts: { path: '/tmp/runtime/config/prompts', exists: true, source: 'env' },
-          keepers: { path: '/tmp/runtime/config/keepers', exists: false, source: 'env' },
-          personas: { path: '/tmp/custom-personas', exists: false, source: 'invalid_env' },
+          keepers: { path: '/tmp/runtime/config/keepers', exists: false, source: 'invalid_env' },
         }}
         runtimeResolution=${{
           status: 'warn',
@@ -343,7 +342,6 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('repo seed not active')
     expect(container.textContent).toContain('root-relative')
     expect(container.textContent).toContain('under config root')
-    expect(container.textContent).toContain('/tmp/custom-personas')
     expect(container.textContent).toContain('invalid env')
     expect(container.textContent).toContain('/tmp/workspace/.masc')
     expect(container.textContent).toContain('/tmp/shared/prompts')
@@ -383,7 +381,6 @@ describe('ConfigResolutionPanel', () => {
           config_root: { path: '/tmp/root-config', exists: true, source: 'env' },
           prompts: { path: '/tmp/root-config/prompts', exists: true, source: 'env' },
           keepers: { path: '/tmp/root-config/keepers', exists: true, source: 'env' },
-          personas: { path: '/tmp/root-config/personas', exists: true, source: 'env' },
         }}
         runtimeResolution=${runtimeResolutionPayload()}
       />`,
@@ -415,7 +412,6 @@ describe('ConfigResolutionPanel', () => {
           config_root: { path: '/tmp/root-config', exists: true, source: 'env' },
           prompts: { path: '/tmp/root-config/prompts', exists: true, source: 'env' },
           keepers: { path: '/tmp/root-config/keepers', exists: true, source: 'cwd' },
-          personas: { path: '/tmp/root-config/personas', exists: true, source: 'env' },
         }}
       />`,
       container,
@@ -435,14 +431,12 @@ describe('ConfigResolutionPanel', () => {
           warnings: [],
           config_root: { path: '/tmp/root', exists: true, source: 'env' },
           prompts: { path: '/tmp/root/prompts', exists: true, source: 'env' },
-          keepers: { path: '/tmp/root/keepers', exists: true, source: 'env' },
-          personas: { path: '/tmp/root-extra/personas', exists: true, source: 'env' },
+          keepers: { path: '/tmp/root-extra/keepers', exists: true, source: 'env' },
         }}
       />`,
       container,
     )
 
-    expect(container.textContent).toContain('/tmp/root-extra/personas')
     expect(container.textContent).toContain('outside config root')
   })
 
@@ -455,7 +449,6 @@ describe('ConfigResolutionPanel', () => {
           config_root: { path: '/tmp/root', exists: true, source: 'env' },
           prompts: { path: '/tmp/root/prompts', exists: true, source: 'env' },
           keepers: { path: '/tmp/root/keepers', exists: true, source: 'env' },
-          personas: { path: '/tmp/root/personas', exists: true, source: 'env' },
         }}
       />`,
       container,
@@ -474,7 +467,6 @@ describe('ConfigResolutionPanel', () => {
           config_root: { path: '/', exists: true, source: 'cwd' },
           prompts: { path: '/var/prompts', exists: true, source: 'cwd' },
           keepers: { path: '/opt/keepers', exists: true, source: 'cwd' },
-          personas: { path: '/srv/personas', exists: true, source: 'cwd' },
         }}
       />`,
       container,
@@ -491,7 +483,6 @@ describe('ConfigResolutionPanel', () => {
           config_root: { path: '/tmp/project/.masc/config', exists: true, source: 'local_masc' },
           prompts: { path: '/tmp/project/.masc/config/prompts', exists: true, source: 'local_masc' },
           keepers: { path: '/tmp/project/.masc/config/keepers', exists: true, source: 'local_masc' },
-          personas: { path: '/tmp/project/.masc/config/personas', exists: true, source: 'local_masc' },
         }}
       />`,
       container,
@@ -510,7 +501,6 @@ describe('ConfigResolutionPanel', () => {
           config_root: { path: '/tmp/project/config', exists: true, source: 'cwd' },
           prompts: { path: '/tmp/project/config/prompts', exists: true, source: 'cwd' },
           keepers: { path: '/tmp/project/config/keepers', exists: true, source: 'cwd' },
-          personas: { path: '/tmp/project/config/personas', exists: true, source: 'cwd' },
         }}
       />`,
       container,

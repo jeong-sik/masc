@@ -81,8 +81,6 @@ type t =
         (** Resolved [MASC_CONFIG_DIR].  [None] when unset. *)
   ; data_dir : string option
         (** Resolved [MASC_DATA_DIR].  [None] when unset. *)
-  ; personas_dir : string option
-        (** Resolved [MASC_PERSONAS_DIR].  [None] when unset. *)
   ; home : string option
         (** Operator [$HOME] directory, trimmed.  [None] when unset or
             empty.  RFC-0085 PR-10 replaces
@@ -104,13 +102,13 @@ val resolve : ?base_path:string -> unit -> (t, string) result
     [Filename.get_temp_dir_name ()] (honours [TMPDIR]).  Binary paths
     fall back to the [coreutils_defaults] record.
 
-    The four [_dir]/[base_path]/etc env-var-derived fields are populated
+    The path env-var-derived fields are populated
     from [Sys.getenv_opt] at call time; [host ()] reflects the *current*
     process environment, not a snapshot from boot. *)
 val host : unit -> t
 
-(** [from_env ()] is an alias for [host ()] emphasising that the four
-    [base_path]/[config_dir]/[data_dir]/[personas_dir] fields are
+(** [from_env ()] is an alias for [host ()] emphasising that the
+    [base_path]/[config_dir]/[data_dir] fields are
     populated by reading the corresponding [MASC_*] environment
     variables.  RFC-0085 PR-6 introduces this surface so callers (today
     in [Config_dir_resolver]) can route env-derived path decisions

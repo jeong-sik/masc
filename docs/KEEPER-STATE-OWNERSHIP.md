@@ -42,7 +42,7 @@ goals, or progress with typed provenance, but they never drive a transition.
 - No model-authored prose envelope is a state transport.
 - No parser, stripper, sidecar, dashboard field, or compatibility reader may
   promote assistant text into runtime state.
-- No persona-introspection record or UI projection may act as lifecycle truth.
+- No keeper-introspection record or UI projection may act as lifecycle truth.
 - No state transition is inferred by matching model text.
 - No duplicate state cache is derived from an assistant reply.
 

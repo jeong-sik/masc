@@ -25,12 +25,11 @@ describe('AgentAvatar a11y', () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 
-  it('avatar with name + status + traits passes axe', async () => {
+  it('avatar with name and status passes axe', async () => {
     render(
       html`<${AgentAvatar}
         name="alpha"
         status="working"
-        traits=${['curious', 'fast']}
         showName=${true}
       />`,
       container,

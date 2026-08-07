@@ -203,7 +203,6 @@ echo "[run-local-smoke] log=${LOG_FILE}"
 env \
   -u MASC_BASE_PATH \
   -u MASC_CONFIG_DIR \
-  -u MASC_PERSONAS_DIR \
   -u MASC_HOST \
   -u MASC_PORT \
   -u MASC_PUBLIC_TOOLS_EXTRA \
@@ -214,7 +213,6 @@ env \
   env \
     -u MASC_BASE_PATH \
     -u MASC_CONFIG_DIR \
-    -u MASC_PERSONAS_DIR \
     -u MASC_HOST \
     -u MASC_PORT \
     -u MASC_PUBLIC_TOOLS_EXTRA \

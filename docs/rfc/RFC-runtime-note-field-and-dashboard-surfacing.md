@@ -56,13 +56,13 @@ Untouched. OAS owns provider/model/transport/turn-lifecycle. `note` never crosse
 
 ### 2.4 No second SSOT
 
-`note` lives **inside** `runtime.toml` (the existing SSOT, RFC-0211). This RFC explicitly rejects a sidecar note store (separate JSON/DB keyed by runtime id) because that creates a second source of truth that drifts from the config it annotates. See §4 Rejected alternatives.
+`note` lives **inside** `runtime.toml` (the existing SSOT, runtime assignment contract). This RFC explicitly rejects a sidecar note store (separate JSON/DB keyed by runtime id) because that creates a second source of truth that drifts from the config it annotates. See §4 Rejected alternatives.
 
 Because comments remain valid (§7), a table could contain both a rationale comment block and a `note` field. To avoid divergent rationales, the dashboard/TOML lint **MUST warn** when a table contains both; comments are **not** deprecated.
 
 ## 3. Design
 
-### 3.1 Schema (extends RFC-0211)
+### 3.1 Schema (extends runtime assignment contract)
 
 Add an **optional** `note` key (TOML string; may be a multi-line triple-quoted string to hold a dated changelog) to:
 

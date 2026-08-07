@@ -36,7 +36,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   mkdir_p base_path;
   List.iter
     (fun name -> mkdir_p (Filename.concat config_root name))
-    [ "keepers"; "personas"; "prompts" ];
+    [ "keepers"; "prompts" ];
   let overlay_path = Filename.concat config_root "oas-models-overlay.toml" in
   let replacement_path = Filename.concat root "replacement-models.toml" in
   let runtime_path = Filename.concat config_root "runtime.toml" in
@@ -422,7 +422,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
   mkdir_p base_path;
   List.iter
     (fun name -> mkdir_p (Filename.concat config_root name))
-    [ "keepers"; "personas"; "prompts" ];
+    [ "keepers"; "prompts" ];
   let replacement_path = Filename.concat root "replacement-models.toml" in
   let runtime_path = Filename.concat config_root "runtime.toml" in
   write_file replacement_path replacement_catalog;

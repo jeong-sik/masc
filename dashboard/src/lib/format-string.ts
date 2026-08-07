@@ -109,7 +109,6 @@ export function escapeRegExp(value: string): string {
  * `components/ide/execute-output-drawer`,
  * `components/ide/interject-store`, `components/journey-panel`,
  * `components/keeper-shared`, `components/keeper-reactivity-monitor`,
- * `components/keeper-spawn/keeper-spawn-state`,
  * `components/task-manage/task-manage-state`,
  * `components/telemetry-unified`,
  * `components/tool-executor/tool-executor-state`,

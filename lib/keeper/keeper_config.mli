@@ -24,7 +24,7 @@ val validate_max_context_override_value : int -> (int, string) result
 
 val default_proactive_enabled : bool
 
-(** Maximum bytes of personality text included in the rendered keeper prompt.
+(** Maximum bytes of Keeper instructions included in the rendered prompt.
     Drives [normalize_prompt_text] when called from prompt rendering.
     NOTE: persistence layer does NOT enforce this — disk JSON may hold
     longer values; the cap applies at prompt build time. *)
@@ -64,25 +64,6 @@ val validate_name : string -> bool
 
 val invalid_name_error : string -> string
 (** Canonical explanation for a value rejected by {!validate_name}. *)
-
-(** {1 Removed Key Detection} *)
-
-(** Field names that are no longer accepted in keeper creation/update input. *)
-val removed_keeper_input_key_names : string list
-
-(** Field names that are no longer accepted in keeper message input. *)
-
-(** Return which [keys] are present as top-level keys in the JSON object. *)
-val present_json_keys : string list -> Yojson.Safe.t -> string list
-
-(** Reject removed keeper input keys.  Returns [Error msg] listing the offending fields. *)
-val reject_removed_keeper_input_keys :
-  ?allow_sandbox_fields:bool ->
-  tool_name:string ->
-  Yojson.Safe.t ->
-  (unit, string) result
-
-(** Reject removed keeper message input keys. *)
 
 (** {1 UTF-8 Safety} *)
 

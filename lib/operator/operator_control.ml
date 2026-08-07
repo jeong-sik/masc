@@ -203,10 +203,6 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         require_payload_field request.payload "message"
           "payload.message is required"
       in
-      let* () =
-        Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_delegate"
-          request.payload
-      in
       let args =
         `Assoc
           [ ( "target"

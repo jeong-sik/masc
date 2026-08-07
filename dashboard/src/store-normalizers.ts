@@ -77,10 +77,6 @@ export function normalizeAgent(raw: unknown): Agent | null {
     emoji: asString(raw.emoji),
     koreanName: asString(raw.koreanName) ?? asString(raw.korean_name),
     model: asString(raw.model),
-    traits: asStringArray(raw.traits),
-    interests: asStringArray(raw.interests),
-    activityLevel: asNumber(raw.activityLevel) ?? asNumber(raw.activity_level),
-    primaryValue: asString(raw.primaryValue) ?? asString(raw.primary_value),
   }
 }
 
@@ -337,8 +333,7 @@ export function normalizeDashboardConfigResolution(
   const runtime = normalizeDashboardConfigResolutionItem(raw.runtime)
   const prompts = normalizeDashboardConfigResolutionItem(raw.prompts)
   const keepers = normalizeDashboardConfigResolutionItem(raw.keepers)
-  const personas = normalizeDashboardConfigResolutionItem(raw.personas)
-  if (!status || !configRoot || !runtimeAuthoring || !runtime || !prompts || !keepers || !personas) return null
+  if (!status || !configRoot || !runtimeAuthoring || !runtime || !prompts || !keepers) return null
   return {
     status: status as DashboardConfigResolution['status'],
     warnings: asStringArray(raw.warnings),
@@ -347,7 +342,6 @@ export function normalizeDashboardConfigResolution(
     runtime,
     prompts,
     keepers,
-    personas,
   }
 }
 

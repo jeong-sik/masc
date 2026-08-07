@@ -44,7 +44,7 @@ L1 Write   모델이 memory tool 로 직접 기록(주 경로) + 예산 게이�
 L2 Judge   consolidation = LLM-judged merge/forget (중복 병합의 유일 결정자, RFC-0332 준수)
 L3 Select  검색 기반 recall 주입 (bulk 500/500 전량 주입 은퇴; RFC-0244 계열/pgvector)
 L4 Flush   예산 근접 시 memory flush silent turn (openclaw shape) — 떨어져 나갈 내용의 durable 저장 유도
-L5 Budget  매턴 조립 예산: persona + dynamic + Select 결과 + 최근 창(구조 경계 존중) ≤ budget
+L5 Budget  매턴 조립 예산: keeper + dynamic + Select 결과 + 최근 창(구조 경계 존중) ≤ budget
            초과 시 결정론적 축소 순서(Select 주입분 → 오래된 최근 창)로 재조립. history 재작성 없음.
 ```
 

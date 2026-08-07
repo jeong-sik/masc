@@ -394,12 +394,6 @@ pub fn apply_actor_spawned(
                 .filter(|a| !a.is_empty())
                 .cloned()
                 .unwrap_or_else(|| payload.class.clone()),
-            persona: data
-                .map(|d| d.persona.clone())
-                .unwrap_or_default(),
-            traits: data
-                .map(|d| d.traits.clone())
-                .unwrap_or_default(),
             hp: server_hp,
             max_hp: server_max_hp,
             mp: 0,
@@ -415,9 +409,7 @@ pub fn apply_actor_spawned(
                 .and_then(|d| d.alive)
                 .map(|alive| !alive)
                 .unwrap_or(false),
-            inventory: data
-                .map(|d| d.inventory.clone())
-                .unwrap_or_default(),
+            inventory: data.map(|d| d.inventory.clone()).unwrap_or_default(),
             buffs: Vec::new(),
             debuffs: Vec::new(),
             skills: Vec::new(),

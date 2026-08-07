@@ -1803,6 +1803,7 @@ let audit_approval_event
       ?source_approval_id
       ?actor
       ?decision_source
+      ?authorization_source
       ?decision
       ?summary_status
       ?exact_attempt
@@ -1834,6 +1835,13 @@ let audit_approval_event
          ; ( "decision_source"
            , match decision_source with
              | Some source -> `String (decision_source_to_string source)
+             | None -> `Null )
+           (* Which standing authority allowed this. Without it every blanket
+              allow is indistinguishable from an operator approving one exact
+              request: both land as decision_source=always_allowed. *)
+         ; ( "authorization_source"
+           , match authorization_source with
+             | Some source -> `String (authorization_source_to_string source)
              | None -> `Null )
          ]
          @ (match rule_match with

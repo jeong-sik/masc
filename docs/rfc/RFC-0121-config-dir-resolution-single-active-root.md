@@ -45,7 +45,7 @@ implementation_prs:
 
 `docs/spec/14-configuration.md`:
 
-> "암묵적 secondary search (운영자 home personas, base-path root personas) 는 사용하지 않는다."
+> "암묵적 secondary search (운영자 home keepers, base-path root keepers) 는 사용하지 않는다."
 
 `docs/BOOT-ENV-STATE-INVENTORY.md`:
 
@@ -64,7 +64,7 @@ implementation_prs:
 4. **Surface 의 의미적 단일화**:
    - `MASC_CONFIG_DIR` env (explicit)
    - `<base-path>/.masc/config` (implicit but well-defined)
-   - 그 외 fallback **모두 제거** (home, home-root .masc, operator home personas, base-path-root personas, etc.)
+   - 그 외 fallback **모두 제거** (home, home-root .masc, operator home keepers, base-path-root keepers, etc.)
 
 근본 원인: **resolver function 가 *list of candidates* 가 아닌 *typed Result* 가 되어야**. 명시적 priority chain 으로.
 
@@ -93,7 +93,7 @@ closed sum 가 *forbidden by design*: 새 fallback 추가 시 variant 정의 필
 
 **Layer B — Adoption gate**
 
-`scripts/lint-config-fallback.sh`: `lib/` 안 `home_dir`, `Sys.getenv "HOME"`, `Filename.concat home`, `home_base`, `home-root .masc`, `operator_home_personas`, `base_path_root_personas` 같은 token grep. *grandfather list* (baseline = 현재 잔존 site) 에 등록된 site 만 허용. 새 호출은 build fail.
+`scripts/lint-config-fallback.sh`: `lib/` 안 `home_dir`, `Sys.getenv "HOME"`, `Filename.concat home`, `home_base`, `home-root .masc`, `operator_home_keepers`, `base_path_root_keepers` 같은 token grep. *grandfather list* (baseline = 현재 잔존 site) 에 등록된 site 만 허용. 새 호출은 build fail.
 
 RFC-0112 (typed JSON parse boundary, iter-4) 의 `lint-json-parse-raw.sh` 패턴 재사용.
 
@@ -128,7 +128,7 @@ P3 가 핵심 — grandfather list 가 더 이상 늘어나지 않음을 enforce
 
 - **Base path 자체 결정 정책 변경**: 본 RFC 는 *config root resolution* 만, base path 별도.
 - **Disk format / schema 변경**: 본 RFC 는 *config 위치* 만, 내용 별도.
-- **사용자별 personas vs operator personas 의 *의도된* 분리**: 본 RFC 는 *모든 personas* 가 `<base-path>/.masc/personas` 가정. 다른 위치 personas 사용 case 별도 spec PR.
+- **사용자별 keepers vs operator keepers 의 *의도된* 분리**: 본 RFC 는 *모든 keepers* 가 `<base-path>/.masc/keepers` 가정. 다른 위치 keepers 사용 case 별도 spec PR.
 
 ## §6 Risk & rollback
 

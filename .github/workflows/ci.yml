@@ -585,7 +585,7 @@ jobs:
           bash scripts/ci/check-determinism-contract.sh
           bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
           bash scripts/ci/check-credential-audits.sh
-          bash scripts/ci/check-persona-profile-placeholders.sh
+          bash scripts/ci/check-keeper-instructions-placeholders.sh
           bash scripts/ci/check-accept-fd-lifecycle.sh
           bash scripts/ci/check-actor-consumer-wired.sh
           bash scripts/ci/check-log-severity-anti-patterns.sh
@@ -1266,6 +1266,24 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_observability_redact"
 
+      # The Gate is the boundary every external effect crosses, and its audit
+      # log is the only durable record of what it let through. Seven suites
+      # cover it (approval queue, rules, rules types, resolved history, audit
+      # timeline, gate effect coverage, gate replay) and none was named here, so
+      # none ran. This wires the audit-vocabulary suite, which is the one that
+      # pins what a reader of ~/.masc/audit-approvals can actually tell apart.
+      - name: Run approval audit vocabulary suite
+        id: approval_audit_vocabulary_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_approval_audit_timeline"
+
       - name: Run verification behavior suite
         id: verification_behavior_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
@@ -1607,7 +1625,24 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_persona_name @test/runtest-test_dashboard_briefing @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_telemetry_eio_pbt @test/runtest-test_verification_authority_tools"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_keeper_name @test/runtest-test_dashboard_briefing @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_telemetry_eio_pbt @test/runtest-test_verification_authority_tools"
+
+      # Subprocess capture is bounded head+tail; without a runtest target the
+      # assertions that a 9MiB child gets truncated — and that a short one does
+      # not — would only ever be compiled. Unbounded capture is what retained
+      # 590MB in a single Execute call and stalled a keeper for 115 minutes, so
+      # this is the suite that has to actually run.
+      - name: Run subprocess capture bound suite
+        id: process_capture_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_process_eio_coverage @test/runtest-test_keeper_secret_redaction"
 
       - name: Run transport harness suite
         id: transport_harness_suite

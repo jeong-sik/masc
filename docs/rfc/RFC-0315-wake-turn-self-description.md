@@ -44,7 +44,7 @@ long-running job wakes that Keeper without blocking unrelated lanes.
 When no immediate stimulus is actionable, a Keeper with an active Goal may
 decompose it into typed Tasks, claim eligible work, publish observable progress,
 or state a typed blocker through the owning API. A Keeper with no active Goal
-may choose work consistent with its persona and tools, but must create or claim
+may choose work consistent with its keeper and tools, but must create or claim
 typed work before treating it as an operational objective.
 
 The runtime must not pause solely because a prose summary is absent. Pause/stop

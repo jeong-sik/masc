@@ -7,7 +7,6 @@ let run
   ~config
   ~(meta : Keeper_meta_contract.keeper_meta)
   ~generation
-  ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
   ~turn
   ~oas_turn_count
   ~actual_tools
@@ -53,20 +52,10 @@ let run
               Some { Keeper_librarian.facts = snapshot.facts }, Some snapshot.revision
           in
           let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-          (* Same persona SSOT as the keeper's own system prompt
-             ([Keeper_unified_prompt.build_system_prompt]). Loaded here on
-             the memory lane — off the turn path — so the librarian judges
-             retention through the identity the keeper currently lives with. *)
-          let persona =
-            Keeper_types_profile.load_resolved_persona_extended
-              ~keeper_name:meta.name
-              ~profile_defaults
-              ()
-          in
           let librarian_input : Keeper_librarian.input =
             { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
             ; generation
-            ; persona
+            ; keeper_instructions = meta.instructions
             ; current = current_selection
             ; max_recall_fact_bytes =
                 Env_config.KeeperMemoryOs.recall_facts_max_bytes ()

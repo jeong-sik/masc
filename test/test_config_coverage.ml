@@ -12,27 +12,28 @@ module Tool_help_registry = Tool_help_registry
 module Tool_shard = Masc.Tool_shard
 module Types = Masc_domain
 
-let dummy_schema name : Masc_domain.tool_schema =
-  {
-    name;
-    description = "dummy";
-    input_schema =
-      `Assoc
-        [
-          ("type", `String "object");
-          ("properties", `Assoc []);
-        ];
-  }
-
-let test_dedupe_schemas () =
-  let deduped =
-    Config.dedupe_schemas
-      [ dummy_schema "alpha"; dummy_schema "alpha"; dummy_schema "beta" ]
-  in
-  check int "deduped length" 2 (List.length deduped)
-
 let test_raw_all_tool_schemas_non_empty () =
   check bool "raw schemas exist" true (List.length Config.raw_all_tool_schemas > 0)
+
+let test_raw_all_tool_schema_names_are_unique () =
+  let names =
+    Config.raw_all_tool_schemas
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  in
+  let counts = Hashtbl.create (List.length names) in
+  List.iter
+    (fun name ->
+       Hashtbl.replace counts name
+         (Option.value ~default:0 (Hashtbl.find_opt counts name) + 1))
+    names;
+  let duplicates =
+    Hashtbl.to_seq counts
+    |> Seq.filter_map (fun (name, count) ->
+           if count > 1 then Some (Printf.sprintf "%s×%d" name count) else None)
+    |> List.of_seq
+    |> List.sort String.compare
+  in
+  check (list string) "raw schema names are unique" [] duplicates
 
 let test_all_tool_schemas_non_empty () =
   check bool "public schemas exist" true (List.length Config.all_tool_schemas > 0)
@@ -74,9 +75,10 @@ let () =
     [
       ( "schema_registry",
         [
-          test_case "dedupe_schemas" `Quick test_dedupe_schemas;
           test_case "raw schemas non-empty" `Quick
             test_raw_all_tool_schemas_non_empty;
+          test_case "raw schema names are unique" `Quick
+            test_raw_all_tool_schema_names_are_unique;
           test_case "all schemas non-empty" `Quick
             test_all_tool_schemas_non_empty;
           test_case "all_tool_names omits hidden pause" `Quick

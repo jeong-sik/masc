@@ -139,7 +139,7 @@ describe('resolveRuntimeCounts', () => {
 
   it('reports both 2 live and 16 configured keepers in the fluctuation scenario without picking a winner', () => {
     // Real-world reproduction: composite API returns 2 running fiber keepers
-    // while .masc/keepers/ holds 16 persona registrations. Both must surface
+    // while .masc/keepers/ holds 16 Keeper registrations. Both must surface
     // simultaneously so the UI can render "keeper 실행 fiber 2 / configured keeper 16" instead of swapping.
     expect(resolveRuntimeCounts({
       executionLoaded: true,

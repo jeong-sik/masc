@@ -36,7 +36,7 @@ val read_backlog_counts
     was authored by the keeper's own stable handle ([meta.name]).
 
     A keeper that treats its own output as work waiting for it closes a
-    positive feedback loop: a persona whose response to "an unclaimed task
+    positive feedback loop: a Keeper whose response to "an unclaimed task
     exists" is to create a routing or report task produces a new unclaimed Todo
     authored by itself, which re-satisfies the trigger on the next observation.
     Self-authored tasks therefore stay in the [unclaimed] count (an honest view

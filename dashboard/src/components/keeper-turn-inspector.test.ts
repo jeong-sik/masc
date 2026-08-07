@@ -131,7 +131,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           turn_ref: 'trace-active#41',
           ts: 1_781_587_500,
           runtime_profile: 'local',
-          blocks: [{ block: 'persona', bytes: 1200, digest: '1111222233334444' }],
+          blocks: [{ block: 'keeper_instructions', bytes: 1200, digest: '1111222233334444' }],
           input_components: [],
           request_runtime_profile: null,
           request_body_bytes: null,
@@ -161,11 +161,11 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           request_latency_ms: 1234,
           ttfrc_ms: 567.8,
           blocks: [
-            { block: 'persona', bytes: 1200, digest: '1111222233334444' },
+            { block: 'keeper_instructions', bytes: 1200, digest: '1111222233334444' },
             { block: 'memory_os_recall', bytes: 3392, digest: 'aabbccddeeff00112233' },
           ],
           input_components: [
-            { component: 'prompt.persona', bytes: 1200 },
+            { component: 'prompt.keeper_instructions', bytes: 1200 },
             { component: 'prompt.memory_os_recall', bytes: 3392 },
           ],
           request_runtime_profile: 'local',
@@ -302,8 +302,8 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(text).toContain('입력 구성')
     expect(text).toContain('prompt.memory_os_recall')
     expect(text).toContain('3.3KB')
-    // Sorted by bytes descending: recall (3392B) precedes persona (1200B).
-    expect(text.indexOf('prompt.memory_os_recall')).toBeLessThan(text.indexOf('prompt.persona'))
+    // Sorted by bytes descending: recall (3392B) precedes Keeper instructions (1200B).
+    expect(text.indexOf('prompt.memory_os_recall')).toBeLessThan(text.indexOf('prompt.keeper_instructions'))
     expect(text).toContain('합계 4.5KB')
     expect(text).toContain('wire 547.4KB')
   })

@@ -949,6 +949,16 @@ jobs:
             @test/runtest-test_tool_contract_truth \
             @test/runtest-test_voice_command_descriptor_parity
 
+      - name: Run goal-scope terminal-phase suite
+        # validate_active_goal_ids is where a keeper's declared goal scope meets
+        # the live store, and everything downstream reads the list it returns.
+        # The prompt and the world observation filter the same list by phase, so
+        # a Completed goal left in scope makes the two disagree -- for 2.5 days
+        # on the live workspace before this was closed.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_goal_scope_terminal_phase
+
       - name: Run metric zero-cell declaration suite
         # A counter emitted as a bare string still compiles and still counts;
         # what it loses is the 0-cell, and only a running store shows that.

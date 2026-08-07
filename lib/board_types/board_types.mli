@@ -32,9 +32,13 @@ type board_error =
 
 (** {1 Safe ID Modules — Parse, Don't Validate} *)
 
-val alphanumeric_id_re : Re.re
-(** Shared regex [^[a-zA-Z0-9_-]+$] for alphanumeric ID validation.
-    Used by [Post_id], [Board_id], [Sub_board_id], and [Board_attachment_meta.Id]. *)
+(* The shared alphanumeric regex [^[a-zA-Z0-9_-]+$] is not exported.
+   [Post_id], [Comment_id] and [Sub_board_id] apply it and hand back a parsed
+   value; a caller holding the raw regex could validate without parsing, which
+   is the split those modules exist to remove.
+
+   The doc this replaces named [Board_id] and [Board_attachment_meta.Id], which
+   do not use it, and omitted [Comment_id], which does. *)
 
 module Post_id : sig
   type t

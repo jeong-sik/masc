@@ -1,5 +1,50 @@
 module Exact_output = Agent_sdk.Exact_output
 
+(* [Flow_exact_execution_failed] is the branch that carries the provider's own
+   verdict. The typed cause alone ("completion failed") says nothing about
+   which provider said what; the raw response body carried next to it does. *)
+let execution_cause_detail : Exact_output.execution_error_cause -> string = function
+  | Attempt_already_started -> "attempt already started"
+  | Clock_required_for_timeout -> "clock required for timeout"
+  | Frozen_request_mismatch -> "frozen request mismatch"
+  | Completion_failed -> "completion failed"
+  | Serialized_request_refused { http_status } ->
+    Printf.sprintf "serialized request refused (http_status=%d)" http_status
+  | Incomplete_output -> "incomplete output"
+  | Missing_output -> "missing output"
+  | Ambiguous_output count -> Printf.sprintf "ambiguous output (candidates=%d)" count
+  | Unexpected_output_content -> "unexpected output content"
+  | Invalid_json_output -> "invalid json output"
+  | Internal_non_json_output -> "internal non-json output"
+;;
+
+(* [flow_evidence] is a private SDK type with no constructor outside the SDK,
+   so the assembled line cannot be built in a test. The part that decides what
+   the line says is split out here, where it can. That gap is why the label
+   collapse below survived: the leaf renderer [execution_cause_detail] was
+   covered, and the caller that failed to use it was not. *)
+let advance_failure_kind : Exact_output.flow_advance_failure_snapshot -> string * string
+  = function
+  | Exact_output.Flow_advance_candidate_rejected rejection ->
+    (Exact_output.candidate_rejection_identity rejection).candidate_id, "candidate_rejected"
+  (* [execution_error_cause] distinguishes eleven outcomes — a quota refusal,
+     an output budget spent before the answer, invalid JSON, an HTTP refusal
+     with its status. Rendering only "execution_failed" collapsed all eleven
+     into one label, and this advance is the only place a losing slot is
+     recorded: it left no other trace, so "why did the first slot lose the
+     run" had no answer anywhere. Observed 2026-08-07: the librarian advanced
+     off glm-coding.glm-5-turbo eight times and the cause was recoverable from
+     neither the log nor the call id. *)
+  | Exact_output.Flow_advance_execution_failed { candidate; cause; raw_response_sha256 } ->
+    let sha =
+      match raw_response_sha256 with
+      | None -> ""
+      | Some sha -> Printf.sprintf " raw_response_sha256=%s" sha
+    in
+    ( candidate.visit.identity.candidate_id
+    , Printf.sprintf "execution_failed cause=%s%s" (execution_cause_detail cause) sha )
+;;
+
 let flow_evidence_detail (evidence : Exact_output.flow_evidence) =
   let attempts =
     List.map
@@ -14,14 +59,7 @@ let flow_evidence_detail (evidence : Exact_output.flow_evidence) =
   let advances =
     List.map
       (fun (advance : Exact_output.flow_advance_receipt) ->
-         let failed_slot, failure_kind =
-           match advance.failed with
-           | Exact_output.Flow_advance_candidate_rejected rejection ->
-             ( (Exact_output.candidate_rejection_identity rejection).candidate_id
-             , "candidate_rejected" )
-           | Exact_output.Flow_advance_execution_failed { candidate; _ } ->
-             candidate.visit.identity.candidate_id, "execution_failed"
-         in
+         let failed_slot, failure_kind = advance_failure_kind advance.failed in
          Printf.sprintf
            "advance=%s->%s kind=%s"
            failed_slot
@@ -107,23 +145,6 @@ let candidate_rejection_detail (rejection : Exact_output.candidate_rejection_rec
      |> rejection_disposition_detail)
 ;;
 
-(* [Flow_exact_execution_failed] is the branch that carries the provider's own
-   verdict. The typed cause alone ("completion failed") says nothing about
-   which provider said what; the raw response body carried next to it does. *)
-let execution_cause_detail : Exact_output.execution_error_cause -> string = function
-  | Attempt_already_started -> "attempt already started"
-  | Clock_required_for_timeout -> "clock required for timeout"
-  | Frozen_request_mismatch -> "frozen request mismatch"
-  | Completion_failed -> "completion failed"
-  | Serialized_request_refused { http_status } ->
-    Printf.sprintf "serialized request refused (http_status=%d)" http_status
-  | Incomplete_output -> "incomplete output"
-  | Missing_output -> "missing output"
-  | Ambiguous_output count -> Printf.sprintf "ambiguous output (candidates=%d)" count
-  | Unexpected_output_content -> "unexpected output content"
-  | Invalid_json_output -> "invalid json output"
-  | Internal_non_json_output -> "internal non-json output"
-;;
 
 (* Log lines are single-line records; the excerpt bound keeps one failed call
    from flooding them while the sha256 keeps the full body identifiable in

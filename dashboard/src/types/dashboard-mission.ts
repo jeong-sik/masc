@@ -158,7 +158,6 @@ export interface DashboardMissionBriefingResponse {
   criteria: string[]
   basis?: {
     namespace?: string | null
-    crew_count?: number
     agent_count?: number
     keeper_count?: number
   }

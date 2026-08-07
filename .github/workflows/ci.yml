@@ -1246,6 +1246,18 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_channel_gate_content_length_knob"
 
+      - name: Run keeper decision-audit dated-store suite
+        id: decision_audit_dated_store_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_decision_audit_dated_store"
+
       # Redaction is the last thing every observability payload passes through,
       # so a defect here is not scoped to one field: a preview truncated inside
       # a multibyte character makes the whole JSON response undecodable and the

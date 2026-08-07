@@ -1426,7 +1426,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          prompt_targets="@test/runtest-test_keeper_system_prompt_bytes @test/runtest-test_keeper_prompt_metrics @test/runtest-test_keeper_surface_presence_prompt"
+          prompt_targets="@test/runtest-test_keeper_system_prompt_bytes @test/runtest-test_keeper_tool_schema_bytes @test/runtest-test_keeper_prompt_metrics @test/runtest-test_keeper_surface_presence_prompt"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${prompt_targets}"
 
       - name: Run board attention suite

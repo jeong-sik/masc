@@ -2596,6 +2596,11 @@
 ; string, and declaring the prompt sources as deps is what makes an edit under
 ; config/prompts re-run it instead of returning a cached pass.
 (test
+ (name test_keeper_tool_schema_bytes)
+ (modules test_keeper_tool_schema_bytes)
+ (libraries alcotest yojson masc masc_test_deps))
+
+(test
  (name test_keeper_system_prompt_bytes)
  (modules test_keeper_system_prompt_bytes)
  (deps

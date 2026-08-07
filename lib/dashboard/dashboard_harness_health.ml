@@ -68,6 +68,14 @@ let max_signal_scan = 500
 let runtime_stale_after_s = 30. *. 60.
 let evaluator_stale_after_s = 12. *. Masc_time_constants.hour
 
+(* Fraction of an evaluator's verdicts that came back Invalid_verdict or
+   Evaluator_unavailable before the rail stops reading Healthy. The two
+   thresholds above are named, this one was a bare 0.8 at its comparison, so
+   the number nobody had to look at was the one that decides whether four
+   failures in five still read as fine. Named here so changing it is a
+   reviewed edit. *)
+let evaluator_fallback_warning_ratio = 0.8
+
 let pre_compact_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 let pre_compact_store_mu = Eio.Mutex.create ()
 
@@ -650,7 +658,9 @@ let evaluator_status ~calibration latest_timestamp =
       let fallback_ratio =
         float_of_int fallback_count /. float_of_int (max 1 total_verdicts)
       in
-      if fallback_ratio > 0.8 then Warning else Healthy)
+      if fallback_ratio > evaluator_fallback_warning_ratio
+      then Warning
+      else Healthy)
 ;;
 
 let latest_timestamp_of_verdicts (verdicts : harness_verdict_item list) =

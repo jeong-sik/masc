@@ -71,9 +71,6 @@ val prune_links_for_goal_result :
   (unit, goal_task_links_write_error) result
 
 (** Add one task-to-goal link to the persistent registry. *)
-val link_task_to_goal :
-  Workspace_utils_backend_setup.config -> goal_id:string -> task_id:string -> unit
-
 val link_task_to_goal_result :
   Workspace_utils_backend_setup.config ->
   goal_id:string ->

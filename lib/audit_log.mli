@@ -86,10 +86,6 @@ val string_to_action : string -> action
     [Unknown] so callers can distinguish future action variants from
     explicit [Custom] events. *)
 
-val gate_audit_decision_to_string : gate_audit_decision -> string
-
-val gate_audit_decision_of_string : string -> gate_audit_decision
-
 val entry_to_json : audit_entry -> Yojson.Safe.t
 
 val entry_of_json_r : Yojson.Safe.t -> (audit_entry, string) result
@@ -110,7 +106,6 @@ val append_entry : config -> audit_entry -> unit
 (** Atomic append to today's day-file; creates the directory and
     file on first call. *)
 
-val audit_event_severity : audit_entry -> string
 (** Dashboard severity for an audit entry: ["info"], ["warn"], or ["error"]. *)
 
 val audit_event_json : audit_entry -> Yojson.Safe.t
@@ -226,5 +221,3 @@ type stats = {
 
 val get_stats : config -> stats
 (** [file_size_bytes] is always [0] under the date-split layout. *)
-
-val stats_to_json : stats -> Yojson.Safe.t

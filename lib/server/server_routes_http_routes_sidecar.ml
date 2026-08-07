@@ -302,12 +302,6 @@ let read_attempt_record_result ~base_path id =
       Error (Printf.sprintf "malformed attempt state JSON at %s: %s" path msg))
 ;;
 
-let read_attempt_record ~base_path id =
-  match read_attempt_record_result ~base_path id with
-  | Ok record -> record
-  | Error _ -> None
-;;
-
 (** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
     tries to rename into it. *)
 let ensure_parent_dir path =
@@ -423,12 +417,6 @@ let next_attempt_record_result ~now ~next_retry_at previous (record : desired_re
           ~previous
     ; operator_next_action = sidecar_operator_next_action
     }
-;;
-
-let next_attempt_record ~now ~next_retry_at previous record =
-  match next_attempt_record_result ~now ~next_retry_at previous record with
-  | Ok record -> record
-  | Error msg -> invalid_arg msg
 ;;
 
 let reconcile_desired_once

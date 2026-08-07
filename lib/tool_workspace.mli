@@ -14,9 +14,7 @@
 
     Internal: ~50+ helpers stay private — \[effective_cluster_name],
     \[unique_trimmed_nonblank], \[credential_state],
-    \[safe_resolve_agent_name] / \[safe_current_task] / \[safe_get_agents] /
-    the deliverable-conflict scanners (\[todo_task_has_completed_deliverable_conflict],
-    \[todo_completed_deliverable_conflicts]),
+    \[safe_resolve_agent_name] / \[safe_current_task] / \[safe_get_agents],
     \[resolve_current_binding], \[planning_context_state],
     \[assertion_kind_to_string], \[all_assertion_kinds], plus per-tool handlers
     ([handle_status], [handle_init],

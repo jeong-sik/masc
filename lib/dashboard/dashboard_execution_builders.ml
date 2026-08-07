@@ -411,7 +411,7 @@ let task_operation_updated_at (task : Masc_domain.task) =
   | Masc_domain.Todo -> task.created_at
 
 let task_operation_id (task : Masc_domain.task) =
-  match Option.bind task.contract (fun contract -> contract.links.operation_id) with
+  match task.execution_links.operation_id with
   | Some operation_id -> (
       match String_util.trim_to_option operation_id with
       | Some operation_id -> operation_id
@@ -443,7 +443,7 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
                      ("task_status", `String (Masc_domain.task_status_to_string task.task_status));
                      ("objective", `String task.title);
                      ("updated_at", `String updated_at);
-                     ("source", `String "task_contract");
+                     ("source", `String "task_execution_links");
                      ("task_id", `String task.id);
                      ("severity", `String (Dashboard_utils.string_of_tone severity));
                      ( "handoff",

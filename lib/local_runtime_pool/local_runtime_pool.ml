@@ -7,7 +7,6 @@ type runtime = {
   max_concurrency : int;
   active_slots : int;
   queue_depth : int;
-  latency_ema_ms : float option;
   failure_streak : int;
   cooldown_until : float option;
   last_error : string option;
@@ -23,7 +22,6 @@ type runtime_snapshot = {
   max_concurrency : int;
   active_slots : int;
   queue_depth : int;
-  latency_ema_ms : float option;
   failure_streak : int;
   cooldown_until : float option;
   last_error : string option;
@@ -123,7 +121,6 @@ let runtime_of_discovery_status (status : Discovery_cache.endpoint_info) =
     max_concurrency = max_concurrency_of_discovery_status status;
     active_slots = 0;
     queue_depth = 0;
-    latency_ema_ms = None;
     failure_streak = if status.healthy then 0 else 1;
     cooldown_until = unavailable;
     last_error =
@@ -144,7 +141,6 @@ let runtime_of_endpoint_url base_url =
         ~default:default_parallel_hint;
     active_slots = 0;
     queue_depth = 0;
-    latency_ema_ms = None;
     failure_streak = 0;
     cooldown_until = None;
     last_error = None;
@@ -169,7 +165,6 @@ let runtime_to_snapshot (runtime : runtime) =
     max_concurrency = runtime.max_concurrency;
     active_slots = runtime.active_slots;
     queue_depth = runtime.queue_depth;
-    latency_ema_ms = runtime.latency_ema_ms;
     failure_streak = runtime.failure_streak;
     cooldown_until = runtime.cooldown_until;
     last_error = runtime.last_error;
@@ -196,7 +191,6 @@ let default_runtime () =
       int_of_env_default "LLAMA_SERVER_PARALLEL_HINT" ~default:default_parallel_hint;
     active_slots = 0;
     queue_depth = 0;
-    latency_ema_ms = None;
     failure_streak = 0;
     cooldown_until = None;
     last_error = None;
@@ -333,7 +327,6 @@ let snapshot_to_yojson (snapshot : runtime_snapshot) =
       ("max_concurrency", `Int snapshot.max_concurrency);
       ("active_slots", `Int snapshot.active_slots);
       ("queue_depth", `Int snapshot.queue_depth);
-      ("latency_ema_ms", Json_util.float_opt_to_json snapshot.latency_ema_ms);
       ("failure_streak", `Int snapshot.failure_streak);
       ("cooldown_until", Json_util.float_opt_to_json snapshot.cooldown_until);
       ("last_error", Json_util.string_opt_to_json snapshot.last_error);

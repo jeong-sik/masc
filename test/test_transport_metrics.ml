@@ -353,7 +353,14 @@ let test_transport_health_json () =
     Otel_metric_store.metric_total
       (Otel_metric_store.metric_sse_external_fanout_duration_seconds ^ "_count")
   in
+  let slice_fanout_skipped_before =
+    Otel_metric_store.metric_total Otel_metric_store.metric_ws_slice_fanout_skipped
+  in
   TM.observe_ws_dashboard_hello_latency ~success:true 0.125;
+  (* Drive the counter so the assertion below is not satisfied by a field that
+     is wired to the wrong metric name: [metric_value_or_zero] answers an
+     unknown name with 0, which a presence-only check accepts. *)
+  TM.inc_ws_slice_fanout_skipped ();
   Masc.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   Masc.Sse.sync_transport_snapshot ~force:true ();
   let json = TM.transport_health_json ~config in
@@ -392,6 +399,13 @@ let test_transport_health_json () =
   check bool "external fanout count advances" true
     (float_of_int (sse_json |> U.member "external_fanout_count" |> U.to_int)
      >= external_fanout_count_before +. 1.0);
+  (* A broadcast nothing can observe is short-circuited before the fanout
+     mutex.  Surfacing the count is what makes that skip auditable rather than
+     a silent behaviour change. *)
+  check bool "skipped-no-observer count surfaced" true
+    (match sse_json |> U.member "broadcast_skipped_no_observer" with
+     | `Int _ -> true
+     | _ -> false);
   check bool "external fanout sum surfaced" true
     (match sse_json |> U.member "external_fanout_sum_seconds" with
      | `Float _ | `Int _ -> true
@@ -479,15 +493,20 @@ let test_transport_health_json () =
   List.iter (fun (field, label) ->
     check bool (Printf.sprintf "%s field present (int)" label) true
       (match delivery_json |> U.member field with `Int _ -> true | _ -> false))
-    [ "parse_cache_hits", "parse_cache_hits"
-    ; "parse_cache_misses", "parse_cache_misses"
-    ; "bytes_cache_hits", "bytes_cache_hits"
+    [ "bytes_cache_hits", "bytes_cache_hits"
     ; "bytes_cache_misses", "bytes_cache_misses"
     ; "client_acks", "client_acks"
     ; "throttled_deliveries", "throttled_deliveries"
     ; "client_buffered_bytes_count", "client_buffered_bytes_count"
     ; "hello_latency_count", "hello_latency_count"
     ];
+  (* The slice gate's drop count: without it the gap between delivered
+     broadcasts and what reaches the bytes cache is unattributable.  Asserted
+     by advance rather than by presence — a field reading an unknown metric
+     name is emitted as 0, so presence alone proves nothing. *)
+  check bool "slice_fanout_skipped advances" true
+    (float_of_int (delivery_json |> U.member "slice_fanout_skipped" |> U.to_int)
+     >= slice_fanout_skipped_before +. 1.0);
   check bool "client_buffered_bytes_sum field present (float)" true
     (match delivery_json |> U.member "client_buffered_bytes_sum" with
      | `Float _ | `Int _ -> true | _ -> false);

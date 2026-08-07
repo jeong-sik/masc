@@ -120,19 +120,6 @@ type aggregate =
   ; cost_read : cost_read_result
   }
 
-type provider_stats =
-  { ps_provider : string
-  ; ps_entry_count : int
-  ; ps_model_count : int
-  ; ps_avg_tok_per_sec : float option
-  ; ps_avg_prompt_tok_per_sec : float option
-  ; ps_avg_decode_tok_per_sec : float option
-  ; ps_avg_latency_ms : float option
-  ; ps_p50_latency_ms : float option
-  ; ps_p95_latency_ms : float option
-  ; ps_total_cost_usd : float option
-  }
-
 type raw_entry =
   { model : string
   ; provider : string option

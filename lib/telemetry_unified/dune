@@ -5,8 +5,6 @@
  (public_name masc.telemetry_unified)
  (wrapped false)
  (modules telemetry_unified)
- (flags
-  (:standard -w +32))
  (libraries
   dated_jsonl
   eio

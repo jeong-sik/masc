@@ -96,12 +96,6 @@ export function normalizeTask(raw: unknown): Task | null {
         required_evidence: asStringArray(raw.contract.required_evidence),
         inspect_gate_evidence: asStringArray(raw.contract.inspect_gate_evidence),
         verify_gate_evidence: asStringArray(raw.contract.verify_gate_evidence),
-        links: isRecord(raw.contract.links)
-          ? {
-              operation_id: asString(raw.contract.links.operation_id) ?? null,
-              session_id: asString(raw.contract.links.session_id) ?? null,
-            }
-          : null,
       }
     : null
   const handoffContext = isRecord(raw.handoff_context)

@@ -520,7 +520,8 @@ let handle_subscribe (workspace_config : Workspace_utils_backend_setup.config) (
     ~id:sub_id
     ~is_alive:(fun () ->
       (not (Atomic.get stream_closed)) && not (Grpc_eio.Stream.is_closed stream))
-    ~callback:(fun sse_event ->
+    ~callback:(fun (ev : Sse.external_event) ->
+      let sse_event = ev.Sse.ext_frame in
       if Atomic.get stream_closed || Grpc_eio.Stream.is_closed stream
       then
         (* Stream already gone — auto-cleanup *)

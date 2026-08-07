@@ -43,10 +43,7 @@ describe('normalizeNamespaceTruth', () => {
     const result = normalizeNamespaceTruth({
       generated_at_iso: '2026-04-17T10:00:00Z',
       dashboard_surface: '/api/v1/dashboard/namespace-truth',
-      dashboard_aliases: [
-        '/api/v1/dashboard/project-snapshot',
-        '/api/v1/dashboard/workspace-truth',
-      ],
+      dashboard_aliases: ['/api/v1/dashboard/project-snapshot'],
       source: 'namespace_truth_read_model',
       retention: {
         scope: 'dashboard_namespace_truth',
@@ -60,7 +57,7 @@ describe('normalizeNamespaceTruth', () => {
 
     expect(result.generated_at_iso).toBe('2026-04-17T10:00:00Z')
     expect(result.dashboard_surface).toBe('/api/v1/dashboard/namespace-truth')
-    expect(result.dashboard_aliases).toContain('/api/v1/dashboard/workspace-truth')
+    expect(result.dashboard_aliases).toEqual(['/api/v1/dashboard/project-snapshot'])
     expect(result.source).toBe('namespace_truth_read_model')
     expect(result.retention?.scope).toBe('dashboard_namespace_truth')
     expect(result.retention?.execution_input).toBe('/api/v1/dashboard/execution')

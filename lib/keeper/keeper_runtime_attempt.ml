@@ -143,9 +143,18 @@ let sdk_error_to_runtime_outcome err =
            http_error ~code:529 ~body:message
          | NetworkError { message; kind } ->
            Llm_provider.Http_client.NetworkError { message; kind }
-         | Timeout { message } ->
-           Llm_provider.Http_client.NetworkError
-             { message; kind = Llm_provider.Http_client.Timeout }
+         | Timeout { message; phase } ->
+           (* [Http_client.Timeout] is the ETIMEDOUT transport kind, but
+              [Retry.Timeout] also covers Admission, Queue, First_token and
+              Capacity_backpressure waits that never touched a socket.
+              [TimeoutError] carries the phase, so route there and keep it. *)
+           Llm_provider.Http_client.TimeoutError
+             { message
+             ; phase =
+                 (* DET-OK: [Unknown_timeout] is the SDK's own constructor for an
+                    unattributed timeout — it names the absence, not a real phase. *)
+                 Option.value phase ~default:Llm_provider.Http_client.Unknown_timeout
+             }
        in
        Some (Runtime_attempt_fsm.Call_err http_err)
      | Agent_sdk.Error.Provider provider_err ->

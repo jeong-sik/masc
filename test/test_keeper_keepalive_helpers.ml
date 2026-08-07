@@ -66,6 +66,7 @@ let make_in_progress_task ~id ~assignee : Types.task =
     handoff_context = None;
     cycle_count = 0;
     reclaim_policy = None;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = None;
   }
 
@@ -745,6 +746,71 @@ let test_thread_participant_wakes_after_transient_store_read_failure () =
        | None -> fail "threadlane registry entry missing")
 ;;
 
+(* The author of a post is a thread participant. [check_self_comment_status]
+   only looks for the keeper's own comments, so before the authorship check an
+   answer to a keeper's question never reached the keeper that asked. Measured
+   on the live Board: 72 of 98 external comments on Keeper posts did not wake
+   the poster. This fixture is the one the old rule missed — the keeper wrote
+   the post and never commented on it. *)
+let create_self_post_fixture config ~keeper_name =
+  let meta = make_board_resume_meta keeper_name in
+  persist_and_register_board_lane config meta;
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:meta.Keeper_meta_contract.agent_name
+        ~content:"does anyone know why the fixture is empty?"
+        ~title:"question from the keeper"
+        ~post_kind:Board.Human_post
+        ~visibility:Board.Internal
+        ()
+    with
+    | Error error -> fail (Board.show_board_error error)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match
+     Board_dispatch.add_comment
+       ~post_id
+       ~author:"external-author"
+       ~content:"it is empty because the loader skips it"
+       ()
+   with
+   | Error error -> fail (Board.show_board_error error)
+   | Ok _comment -> ());
+  let signal : Board_dispatch.addressed_board_signal =
+    { signal =
+        { kind = Board_dispatch.Board_comment_added
+        ; post_id
+        ; author = "external-author"
+        ; title = "question from the keeper"
+        ; content = "it is empty because the loader skips it"
+        ; hearth = None
+        ; updated_at = Some 130.5
+        }
+    ; audience = Board.Thread_participants
+    }
+  in
+  meta, signal
+;;
+
+let test_comment_on_own_post_wakes_the_author () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let meta, signal = create_self_post_fixture config ~keeper_name:"posterlane" in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "author lane receives the comment" 1
+         (board_queue_length config meta.name);
+       match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+         check bool "author woken by a comment on its own post" true
+           (Atomic.get entry.fiber_wakeup)
+       | None -> fail "posterlane registry entry missing")
+;;
+
 (* #25600 bound pin: the retry is bounded — a store that keeps failing past
    [board_signal_relevance_max_attempts] still drops the lane (loudly), it
    does not retry forever. *)
@@ -812,6 +878,8 @@ let () =
             test_thread_participant_wakes_after_transient_store_read_failure
         ; test_case "thread participant drop is bounded under persistent failure" `Quick
             test_thread_participant_drop_is_bounded_under_persistent_failure
+        ; test_case "comment on own post wakes the author" `Quick
+            test_comment_on_own_post_wakes_the_author
         ] )
     ; ( "interruptible_cadence"
       , [ test_case "directed wake cuts configured sleep" `Quick

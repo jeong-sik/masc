@@ -27,4 +27,5 @@
   masc.attribution
   masc.masc_process
   masc.agent_observation
-  masc.masc_exec))
+  masc.masc_exec
+  masc_core))

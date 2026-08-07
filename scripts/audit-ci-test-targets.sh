@@ -72,23 +72,11 @@ fi
 
 echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in test/dune"
 
-# Second direction, the larger one: suites test/dune declares that no CI step
-# runs. Those compile under @check and never execute, so their assertions can
-# assert deleted text for months. Three were found this way in one day
-# (#26811 benchmark, the prompt suites, test_keeper_wake_turn_context).
-#
-# Frozen as a ratchet rather than a hard zero: this is where it stands, and a
-# PR that adds a suite without wiring it makes that number grow.
-#
-# 765 -> 748 when the declaration parser above was fixed. The first check
-# exited before this one could run, so the baseline had gone stale by 17 while
-# suites were being wired.
-#
-# 748 -> 747 after #27139 and #27134 each wired one more suite (verification
-# authority tools, memory journal) without lowering the baseline. A PR that
-# wires a suite must lower this number in the same PR, or this check goes red
-# for everyone.
-UNWIRED_BASELINE=711
+# 714 -> 710: this PR wires test_tool_input_validation, and #27429,
+# #27433 and #27441 each wired a suite test/dune already declared without
+# lowering this number. Measured on the merged tree after all four, not
+# computed -- #27441 landed between this branch's first push and now.
+UNWIRED_BASELINE=710
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

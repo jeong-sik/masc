@@ -30,7 +30,7 @@ val paused_keeper_detail_json :
   [> `Assoc of (string * Yojson.Safe.t) list ]
 val registry_paused_keeper_names : unit -> String.t list
 val durable_paused_keeper_scan :
-  ?include_details:bool -> Workspace.config -> paused_keeper_scan
+  Workspace.config -> paused_keeper_scan
 val paused_keepers_health_json_of_scan :
   registry_paused_names:String.t list ->
   paused_keeper_scan ->

@@ -58,7 +58,6 @@ let validate_paths ~workdir ir =
 
 let dispatch
       ?(allow_pipes = true)
-      ?(redirect_allowed = true)
       ~workdir
       ~sandbox
       ?base_host_env
@@ -69,7 +68,7 @@ let dispatch
   let gate_verdict =
     Shell_gate.gate_typed
       ~ir
-      ~syntax_policy:{ allow_pipes; redirect_allowed }
+      ~syntax_policy:{ allow_pipes; redirect_allowed = true }
       ~sandbox:{ target = sandbox }
       ()
   in

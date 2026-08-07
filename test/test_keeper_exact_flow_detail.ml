@@ -90,6 +90,44 @@ let test_raw_response_excerpt_cuts_on_utf8_boundary () =
     (Astring.String.is_infix ~affix:"301 bytes total" rendered)
 ;;
 
+(* The eleven distinct execution causes reach the advance line through
+   [execution_cause_detail]. The execution-failed branch of
+   the execution-failed branch cannot be built here — [flow_attempt_snapshot] is a
+   private SDK type with no constructor — so what is pinned is that every
+   cause the renderer can receive still renders apart from every other. A
+   single shared label is what made the eleven indistinguishable in the log,
+   and this fails if any two collapse onto the same string. *)
+let test_every_execution_cause_renders_distinctly () =
+  let causes : Exact_output.execution_error_cause list =
+    [ Attempt_already_started
+    ; Clock_required_for_timeout
+    ; Frozen_request_mismatch
+    ; Completion_failed
+    ; Serialized_request_refused { http_status = 429 }
+    ; Incomplete_output
+    ; Missing_output
+    ; Ambiguous_output 3
+    ; Unexpected_output_content
+    ; Invalid_json_output
+    ; Internal_non_json_output
+    ]
+  in
+  let rendered = List.map Detail.execution_cause_detail causes in
+  let unique = List.sort_uniq String.compare rendered in
+  Alcotest.(check int)
+    "every cause keeps its own wording"
+    (List.length causes)
+    (List.length unique);
+  (* The two an operator most needs to tell apart: a provider that refused the
+     call outright versus one that answered but ran out of output budget. *)
+  Alcotest.(check bool)
+    "quota refusal and truncated output are not the same string"
+    false
+    (String.equal
+       (Detail.execution_cause_detail Completion_failed)
+       (Detail.execution_cause_detail Incomplete_output))
+;;
+
 let () =
   Alcotest.run
     "keeper_exact_flow_detail"
@@ -106,5 +144,7 @@ let () =
             test_raw_response_excerpt_redacts_secrets
         ; Alcotest.test_case "raw response cuts on utf8 boundary" `Quick
             test_raw_response_excerpt_cuts_on_utf8_boundary
+        ; Alcotest.test_case "every execution cause renders distinctly" `Quick
+            test_every_execution_cause_renders_distinctly
         ] )
     ]

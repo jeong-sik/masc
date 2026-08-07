@@ -569,7 +569,6 @@ let handle
       lifecycle.KEC.updated_meta
       ~latency_ms
       ~observation
-      ~update_proactive_rt:true
       result
   in
   let updated_meta = acknowledge_pending_messages updated_meta observation in

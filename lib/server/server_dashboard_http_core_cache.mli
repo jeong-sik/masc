@@ -42,5 +42,4 @@ val with_projection_diagnostics :
   Yojson.Safe.t ->
   Yojson.Safe.t
 
-val initialized_json_opt :
-  ?allow_initializing:bool -> Yojson.Safe.t -> Yojson.Safe.t option
+val initialized_json_opt : Yojson.Safe.t -> Yojson.Safe.t option

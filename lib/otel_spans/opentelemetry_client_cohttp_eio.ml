@@ -481,8 +481,8 @@ let setup_ ~sw ?stop ?config env : unit =
   OT.Collector.set_backend backend
 ;;
 
-let setup ?stop ?config ?(enable = true) ~sw env =
-  if enable then setup_ ~sw ?stop ?config env
+let setup ?stop ?config ~sw env =
+  setup_ ~sw ?stop ?config env
 ;;
 
 let remove_backend () =

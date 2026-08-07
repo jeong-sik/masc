@@ -67,7 +67,10 @@ let body_timeout_override_sec_live () =
    (same env var, same clamp [30, 3600]). Opt-in: unset -> None, no failsafe
    floor (#27349 -- deliberately different from stream_idle_timeout_sec's
    RFC-0345 fallback below: a total-call ceiling depends on provider and
-   workload, so MASC does not substitute a guessed value). *)
+   workload, so MASC does not substitute a guessed value).
+   Durable channel (#27416): runtime.toml [turn.provider_call_deadline_sec]
+   reaches this reader through the boot-override layer behind
+   [Env_config_core.raw_value_opt]; a set process env var still wins. *)
 let provider_call_deadline_sec_live () =
   match
     Env_config_core.raw_value_opt "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"

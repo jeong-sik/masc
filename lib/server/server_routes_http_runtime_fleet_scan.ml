@@ -81,7 +81,7 @@ let running_keeper_names ?base_path () =
        | Keeper_state_machine.Dead -> None)
   |> sorted_unique_strings
 
-let durable_paused_keeper_scan ?(include_details = true) config =
+let durable_paused_keeper_scan config =
   (* NDT-OK: HTTP health snapshots report wall-clock pause age; state transitions remain ledger-driven. *)
   let now = Unix.gettimeofday () in
   Keeper_meta_store.keeper_names config
@@ -97,15 +97,12 @@ let durable_paused_keeper_scan ?(include_details = true) config =
                  (if autoboot_enabled then meta.name :: acc.autoboot_enabled_names
                   else acc.autoboot_enabled_names);
                details =
-                 (if include_details
-                  then
-                    paused_keeper_detail_json
-                      ~now
-                      ~name:meta.name
-                      ~autoboot_enabled
-                      meta
-                    :: acc.details
-                  else acc.details);
+                 paused_keeper_detail_json
+                   ~now
+                   ~name:meta.name
+                   ~autoboot_enabled
+                   meta
+                 :: acc.details;
              }
          | Ok (Some _) | Ok None -> acc
          | Error err ->

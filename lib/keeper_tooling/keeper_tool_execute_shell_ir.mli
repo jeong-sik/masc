@@ -30,7 +30,6 @@ val validate_paths :
 
 val dispatch :
   ?allow_pipes:bool ->
-  ?redirect_allowed:bool ->
   workdir:string ->
   sandbox:Masc_exec.Sandbox_target.t ->
   ?base_host_env:string array ->

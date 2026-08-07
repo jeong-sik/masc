@@ -55,7 +55,6 @@ end
 val setup :
   ?stop:bool Atomic.t ->
   ?config:Config.t ->
-  ?enable:bool ->
   sw:Eio.Switch.t ->
   Eio_unix.Stdenv.base ->
   unit

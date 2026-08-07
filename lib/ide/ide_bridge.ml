@@ -443,9 +443,13 @@ let ingest_tool_event
     ~timestamp_ms
     ()
   =
+  (* [String.sub] cuts at a byte, which splits a multi-byte character: a
+     Korean summary is 3 bytes per character, so a raw cut at 200 emits an
+     incomplete sequence roughly two times in three. [utf8_safe] backs the
+     cut up to a character boundary and budgets for the suffix. *)
   let truncated_summary =
-    if String.length summary > 200 then String.sub summary 0 200 ^ "..."
-    else summary
+    String_util.utf8_safe ~max_bytes:200 ~suffix:"..." summary
+    |> String_util.to_string
   in
   let event =
     Tool_event
@@ -706,8 +710,8 @@ let ingest_tool_event_from_hook
   =
   let file_path = Tool_input_path.tool_input_file_path input in
   let summary =
-    if String.length output_text > 200 then String.sub output_text 0 200
-    else output_text
+    String_util.utf8_safe ~max_bytes:200 ~suffix:"" output_text
+    |> String_util.to_string
   in
   let timestamp_ms = now_ms () in
   ingest_tool_event

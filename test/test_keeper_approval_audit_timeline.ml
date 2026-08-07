@@ -196,6 +196,46 @@ let test_unknown_spelling_says_so () =
     check (option string) "severity" (Some "warn") (field "severity" event)
 ;;
 
+(* [decision_source] answers who decided; [authorization_source] answers under
+   what standing authority. Collapsing the second into the first is not a
+   cosmetic loss: over 2026-08-01..06 the Gate recorded 6,670 allows, every one
+   of them decision_source=always_allowed, and the file could not say that 4,570
+   came from the workspace being in Always_allow mode and 2,100 from a per-keeper
+   blanket, while operator-approved exact rules accounted for none. *)
+let every_authorization_source =
+  [ Q.One_shot_resolution
+  ; Q.Exact_always_rule
+  ; Q.Keeper_always_allow
+  ; Q.Workspace_always_allow
+  ]
+;;
+
+let test_authorization_sources_are_distinct () =
+  let rendered = List.map Q.authorization_source_to_string every_authorization_source in
+  check (list string) "each authority renders as itself"
+    [ "one_shot_resolution"; "exact_always_rule"; "keeper_always_allow";
+      "workspace_always_allow" ]
+    rendered;
+  check int "no two authorities share a spelling"
+    (List.length rendered)
+    (List.length (List.sort_uniq String.compare rendered))
+;;
+
+let test_authorization_source_round_trips () =
+  List.iter
+    (fun source ->
+      let spelling = Q.authorization_source_to_string source in
+      check (option string) ("round-trips: " ^ spelling) (Some spelling)
+        (Option.map Q.authorization_source_to_string
+           (Q.authorization_source_of_string spelling)))
+    every_authorization_source
+;;
+
+let test_unknown_authorization_source_is_none () =
+  check bool "an unknown spelling is not coerced to a default" true
+    (Option.is_none (Q.authorization_source_of_string "always_allowed"))
+;;
+
 let () =
   Alcotest.run
     "Keeper approval audit timeline"
@@ -220,5 +260,13 @@ let () =
         ] )
     ; ( "historical records"
       , [ test_case "an unknown spelling says so" `Quick test_unknown_spelling_says_so ] )
+    ; ( "authorization source"
+      , [ test_case "each authority renders distinctly" `Quick
+            test_authorization_sources_are_distinct
+        ; test_case "spellings round-trip" `Quick
+            test_authorization_source_round_trips
+        ; test_case "an unknown spelling is not coerced" `Quick
+            test_unknown_authorization_source_is_none
+        ] )
     ]
 ;;

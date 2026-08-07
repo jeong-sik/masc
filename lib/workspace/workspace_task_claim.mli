@@ -17,6 +17,12 @@ val active_owned_task_ids_for_agent :
 (** Active [Claimed] or [InProgress] tasks owned by [agent_name], using the
     same canonical keeper/agent identity comparison as task transitions. *)
 
+val held_tasks_refusal_message : agent_name:string -> Masc_domain.task list -> string
+(** The one sentence both claim paths refuse with. [claim_next] and a claim by
+    task_id enforce the same limit; before this was shared only [claim_next]
+    named the way out, so which refusal a Keeper received decided whether it was
+    told how to hand the Task back. *)
+
 val active_ownership_conflict_for_claim :
   config ->
   agent_name:string ->

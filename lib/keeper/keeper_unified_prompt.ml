@@ -265,20 +265,29 @@ let board_event_fields
     else fields
   in
   let fields = fields @ board_event_note_fields event.event_kind in
+  (* [new_replies_since_own] counts replies that arrived after this Keeper's own
+     comment, so it is stated only when there is an own comment to count from.
+     The author of the post is the case that has none: [check_self_comment_status]
+     answers [`Never], and the observation still fills
+     [latest_external_author]/[latest_external_preview] with the commenter and
+     what they said.
+
+     Those two used to be gated on [self_commented] together with the count, so
+     the author of a post learned that a comment existed and not one word of it
+     — the wake #27288 added arrived empty, and reading it back cost a
+     masc_board_post_get. The count keeps its condition because its name is only
+     true under it; the two content fields follow the data instead. *)
   let fields =
-    if event.self_commented && event.new_external_since > 0 then
-      let fields =
-        fields
-        @ [ "new_replies_since_own", string_of_int event.new_external_since ]
-      in
-      match event.latest_external_author, event.latest_external_preview with
-      | Some author, Some preview ->
-        fields
-        @ [ "latest_external_author", author
-          ; "latest_external_preview", preview
-          ]
-      | _ -> fields
+    if event.self_commented && event.new_external_since > 0
+    then fields @ [ "new_replies_since_own", string_of_int event.new_external_since ]
     else fields
+  in
+  let fields =
+    match event.latest_external_author, event.latest_external_preview with
+    | Some author, Some preview ->
+      fields @ [ "latest_external_author", author; "latest_external_preview", preview ]
+    | Some author, None -> fields @ [ "latest_external_author", author ]
+    | None, _ -> fields
   in
   fields @ [ "preview", event.preview ]
 ;;

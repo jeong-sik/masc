@@ -944,6 +944,7 @@ jobs:
             @test/runtest-test_rfc_0086_keeper_namespace_invariant \
             @test/runtest-test_server_base_path_guard \
             @test/runtest-test_sse_retry_ssot \
+            @test/runtest-test_sse_stream \
             @test/runtest-test_task_cache_invariant_13397 \
             @test/runtest-test_task_status_vocabulary \
             @test/runtest-test_tool_contract_truth \

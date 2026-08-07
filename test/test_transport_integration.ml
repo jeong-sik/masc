@@ -21,7 +21,8 @@ let test_grpc_subscribe_receives_sse_broadcast () =
     let sub_id = "integration-test-grpc" in
     let seq_counter = Atomic.make 1 in
     Masc.Sse.subscribe_external ~id:sub_id
-      ~callback:(fun sse_event ->
+      ~callback:(fun (ev : Masc.Sse.external_event) ->
+        let sse_event = ev.Masc.Sse.ext_frame in
         let seq = Int64.of_int (Atomic.fetch_and_add seq_counter 1) in
         let event = T.Event.{
           seq;
@@ -57,7 +58,8 @@ let test_grpc_subscribe_multiple_broadcasts () =
     let sub_id = "integration-test-multi" in
     let seq_counter = Atomic.make 1 in
     Masc.Sse.subscribe_external ~id:sub_id
-      ~callback:(fun sse_event ->
+      ~callback:(fun (ev : Masc.Sse.external_event) ->
+        let sse_event = ev.Masc.Sse.ext_frame in
         let seq = Int64.of_int (Atomic.fetch_and_add seq_counter 1) in
         let event = T.Event.{
           seq; event_type = "sse_broadcast"; source_agent = "server";
@@ -85,7 +87,8 @@ let test_grpc_unsubscribe_stops_events () =
     let stream = Grpc_eio.Stream.create 16 in
     let sub_id = "integration-test-unsub" in
     Masc.Sse.subscribe_external ~id:sub_id
-      ~callback:(fun sse_event ->
+      ~callback:(fun (ev : Masc.Sse.external_event) ->
+        let sse_event = ev.Masc.Sse.ext_frame in
         let event = T.Event.{
           seq = 1L; event_type = "sse_broadcast"; source_agent = "server";
           timestamp_ms = 0L; payload_json = sse_event;
@@ -111,7 +114,8 @@ let test_ws_external_subscriber_receives_broadcast () =
     let received = ref [] in
     let sub_id = "integration-test-ws" in
     Masc.Sse.subscribe_external ~id:sub_id
-      ~callback:(fun sse_event -> received := sse_event :: !received) ();
+      ~callback:(fun (ev : Masc.Sse.external_event) ->
+        received := ev.Masc.Sse.ext_frame :: !received) ();
     Masc.Sse.broadcast (`Assoc [("type", `String "ws_test")]);
     Alcotest.(check int) "ws received 1" 1 (List.length !received);
     let event = List.hd !received in
@@ -121,19 +125,23 @@ let test_ws_external_subscriber_receives_broadcast () =
             with Not_found -> false);
     Masc.Sse.unsubscribe_external sub_id)
 
-(* Regression test for #10194: parse_sse_dashboard_event used to feed
-   the full SSE-formatted string into Yojson.Safe.from_string and
-   silently always returned None in production.  Unit tests passed
-   because they fed pure JSON.  This test fires a real Sse.broadcast
-   so the WS callback receives the production wire format, then asserts
-   parse extracts the event_type — closing the gap that hid the bug
-   for the entire WS perf series. *)
-let test_ws_parse_handles_real_broadcast_wire_format () =
+(* Descendant of the #10194 regression test.  That bug was the WS transport
+   feeding a whole SSE-formatted string into [Yojson.Safe.from_string], which
+   silently returned None in production while unit tests passed because they
+   fed pure JSON.  The frame parse is gone — the bus now hands the broadcast
+   value over directly — so the wire-format trap it guarded cannot recur.
+
+   What still needs guarding is the property that test was really about: what a
+   WS session derives from a *real* [Sse.broadcast] must be the right dashboard
+   event.  This fires an actual broadcast and asserts on the derivation, so a
+   future change to either side of the bus contract fails here. *)
+let test_ws_derives_dashboard_event_from_real_broadcast () =
   Eio_main.run (fun _env ->
-    let sub_id = "integration-test-ws-parse-wire" in
+    let sub_id = "integration-test-ws-derive" in
     let captured = ref None in
     Masc.Sse.subscribe_external ~id:sub_id
-      ~callback:(fun sse_event -> captured := Some sse_event) ();
+      ~callback:(fun (ev : Masc.Sse.external_event) -> captured := Some ev)
+      ();
     Masc.Sse.broadcast
       (`Assoc [
         ("type", `String "execution_snapshot");
@@ -142,19 +150,24 @@ let test_ws_parse_handles_real_broadcast_wire_format () =
     Masc.Sse.unsubscribe_external sub_id;
     match !captured with
     | None -> Alcotest.fail "callback never fired"
-    | Some sse_event ->
-        match Server_mcp_transport_ws.parse_sse_dashboard_event
-                sse_event with
+    | Some ev ->
+        (* The frame still reaches subscribers that forward it verbatim. *)
+        Alcotest.(check bool) "frame is still carried"
+          true
+          (String.length ev.Masc.Sse.ext_frame > 0);
+        match Server_mcp_transport_ws.dashboard_event_of_external ev with
         | None ->
             Alcotest.fail
-              "parse returned None on real broadcast wire format \
-               (regression of #10194)"
+              "derivation returned None on a real broadcast"
         | Some parsed ->
             Alcotest.(check string) "event_type extracted"
               "execution_snapshot" parsed.event_type;
             Alcotest.(check (option string))
               "execution_snapshot maps to execution slice"
-              (Some "execution") parsed.slice)
+              (Some "execution") parsed.slice;
+            Alcotest.(check bool) "delta carries the bus emission time"
+              true
+              (parsed.broadcast_ts = ev.Masc.Sse.ext_emitted_at))
 
 (* ============================================================
    3. WebRTC Signaling Full Flow
@@ -234,7 +247,8 @@ let test_grpc_stream_closed_triggers_cleanup () =
     let seq_counter = Atomic.make 1 in
     Masc.Sse.subscribe_external ~id:sub_id
       ~is_alive:(fun () -> not (Grpc_eio.Stream.is_closed stream))
-      ~callback:(fun sse_event ->
+      ~callback:(fun (ev : Masc.Sse.external_event) ->
+        let sse_event = ev.Masc.Sse.ext_frame in
         if not (Grpc_eio.Stream.is_closed stream) then begin
           let seq = Int64.of_int (Atomic.fetch_and_add seq_counter 1) in
           let event = T.Event.{
@@ -294,7 +308,7 @@ let () =
       Alcotest.test_case "broadcast reaches WS subscriber" `Quick
         test_ws_external_subscriber_receives_broadcast;
       Alcotest.test_case "parse handles real broadcast wire format" `Quick
-        test_ws_parse_handles_real_broadcast_wire_format;
+        test_ws_derives_dashboard_event_from_real_broadcast;
     ]);
     ("webrtc_signaling",
       if Sys.getenv_opt "MASC_TEST_WEBRTC" = Some "1" then [

@@ -8,6 +8,10 @@ val metric_sse_sessions : string
 val metric_sse_broadcast_duration : string
 val metric_sse_broadcast_events : string
 val metric_sse_broadcast_failures : string
+val metric_sse_broadcast_skipped_no_observer : string
+(** Broadcasts short-circuited because nothing could observe them: bufferless,
+    no external subscriber, and no session of the target kind. *)
+
 val metric_sse_external_subscriber_callback_failures : string
 val metric_sse_external_fanout_duration_seconds : string
 val metric_oas_sse_relay_drop_marker_failures : string
@@ -25,16 +29,8 @@ val metric_grpc_subscribers : string
 val metric_grpc_events_delivered : string
 val metric_grpc_events_dropped : string
 val metric_ws_sessions : string
-val metric_ws_parse_cache_hits : string
-val metric_ws_parse_cache_misses : string
 val metric_ws_bytes_cache_hits : string
 val metric_ws_bytes_cache_misses : string
-
-(** Counter of WebSocket transport incoming-frame JSON parse failures.
-    Frame is dropped (parse_sse_dashboard_event returns None) but
-    operators now have a counter + warn log.
-    Labels: [error_kind = yojson_parse_error | other]. Iter 28. *)
-val metric_server_mcp_ws_frame_json_parse_failures : string
 
 (** Counter of sidecar HTTP route [schema_field_types] JSON parse
     failures. Previously the catch-all returned [] silently, allowing

@@ -82,8 +82,6 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       sessions: 0,
       relay_source: 'sse_external_subscriber',
       delivery: {
-        parse_cache_hits: 0,
-        parse_cache_misses: 0,
         bytes_cache_hits: 0,
         bytes_cache_misses: 0,
         client_acks: 0,
@@ -717,8 +715,6 @@ function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData
       sessions: 0,
       relay_source: 'sse_external_subscriber',
       delivery: {
-        parse_cache_hits: 0,
-        parse_cache_misses: 0,
         bytes_cache_hits: 0,
         bytes_cache_misses: 0,
         client_acks: 0,

@@ -88,7 +88,11 @@ echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, al
 # authority tools, memory journal) without lowering the baseline. A PR that
 # wires a suite must lower this number in the same PR, or this check goes red
 # for everyone.
-UNWIRED_BASELINE=714
+# 714 -> 712: #27429 wired test_goal_phase_all and #27433 wired
+# test_ws_transport, each a suite test/dune already declared, so each
+# lowered the unwired count by one without lowering this number. Measured
+# on main after both merged, not computed.
+UNWIRED_BASELINE=712
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

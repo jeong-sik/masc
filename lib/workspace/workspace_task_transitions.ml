@@ -68,6 +68,8 @@ let transition_broadcast_content ~action ~task_id ~reason ~handoff_context
      Done→Done is filtered earlier as a no-op. Completion commits through
      [commit_verdict_r], which posts the verdict to Board. *)
   | Masc_domain.Done_action -> None
+  | Masc_domain.Assign target ->
+    Some (Printf.sprintf "Assigned %s → %s" task_id target)
 ;;
 
 let transition_task_outcome_r
@@ -108,7 +110,8 @@ let transition_task_outcome_r
        | Masc_domain.Start
        | Masc_domain.Done_action
        | Masc_domain.Cancel
-       | Masc_domain.Release -> None)
+       | Masc_domain.Release
+       | Masc_domain.Assign _ -> None)
   in
   (* Compensation has the same defaulting rule.  Its result type is [unit],
      so a failed cleanup is logged by the adapter but cannot hide the original
@@ -137,7 +140,8 @@ let transition_task_outcome_r
        | Masc_domain.Start
        | Masc_domain.Done_action
        | Masc_domain.Cancel
-       | Masc_domain.Release -> None)
+       | Masc_domain.Release
+       | Masc_domain.Assign _ -> None)
   in
   let open Result.Syntax in
   let* () =
@@ -197,7 +201,8 @@ let transition_task_outcome_r
             | Masc_domain.Done_action
             | Masc_domain.Cancel
             | Masc_domain.Release
-            | Masc_domain.Submit_for_verification ), _ -> Ok ())
+            | Masc_domain.Submit_for_verification
+            | Masc_domain.Assign _ ), _ -> Ok ())
           [@warning "-4"]
         in
         let now = now_iso () in
@@ -295,7 +300,8 @@ let transition_task_outcome_r
           | Masc_domain.Start
           | Masc_domain.Done_action
           | Masc_domain.Cancel
-          | Masc_domain.Release -> []
+          | Masc_domain.Release
+          | Masc_domain.Assign _ -> []
         in
         let* () =
           match action with
@@ -311,7 +317,8 @@ let transition_task_outcome_r
           | Masc_domain.Done_action
           | Masc_domain.Cancel
           | Masc_domain.Release
-          | Masc_domain.Submit_for_verification -> Ok ()
+          | Masc_domain.Submit_for_verification
+          | Masc_domain.Assign _ -> Ok ()
         in
         (* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
         let* () =
@@ -359,7 +366,8 @@ let transition_task_outcome_r
               | Masc_domain.Start
               | Masc_domain.Done_action
               | Masc_domain.Cancel
-              | Masc_domain.Release )
+              | Masc_domain.Release
+              | Masc_domain.Assign _ )
             , _
             , _
             , Some _ ) -> Ok ()
@@ -368,7 +376,8 @@ let transition_task_outcome_r
               | Masc_domain.Done_action
               | Masc_domain.Cancel
               | Masc_domain.Release
-              | Masc_domain.Submit_for_verification )
+              | Masc_domain.Submit_for_verification
+              | Masc_domain.Assign _ )
             , _
             , _
             , None ) -> Ok ()) [@warning "-4"]
@@ -382,6 +391,7 @@ let transition_task_outcome_r
         | Masc_domain.Done_action, _
         | Masc_domain.Cancel, _
         | Masc_domain.Submit_for_verification, _
+        | Masc_domain.Assign _, _
          | Masc_domain.Release, Masc_domain.Claimed _
          | Masc_domain.Release, Masc_domain.InProgress _
          | Masc_domain.Release, Masc_domain.AwaitingVerification _
@@ -437,7 +447,8 @@ let transition_task_outcome_r
                  | Masc_domain.Start
                  | Masc_domain.Done_action
                  | Masc_domain.Cancel
-                 | Masc_domain.Release -> ()));
+                 | Masc_domain.Release
+                 | Masc_domain.Assign _ -> ()));
              raise exn);
           (match action, new_status with
            | ( Masc_domain.Submit_for_verification
@@ -454,7 +465,8 @@ let transition_task_outcome_r
                | Masc_domain.Done_action
                | Masc_domain.Cancel
                | Masc_domain.Release
-               | Masc_domain.Submit_for_verification )
+               | Masc_domain.Submit_for_verification
+               | Masc_domain.Assign _ )
              , ( Masc_domain.Todo
                | Masc_domain.Claimed _
                | Masc_domain.InProgress _
@@ -576,7 +588,11 @@ let transition_task_outcome_r
                ~agent_name
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
-               ~payload);
+               ~payload
+           | Masc_domain.Assign target ->
+             emit_task_activity config ~agent_name ~task_id
+               ~kind:"assigned"
+               ~payload:(`Assoc [ "task_id", `String task_id; "assigned_to", `String target ]));
              (match new_status with
               | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
                 (try
@@ -651,7 +667,8 @@ let transition_task_outcome_r
               | Masc_domain.Claim
               | Masc_domain.Start
               | Masc_domain.Release
-              | Masc_domain.Submit_for_verification -> None)
+              | Masc_domain.Submit_for_verification
+              | Masc_domain.Assign _ -> None)
           in
           observe_task_transition
             config
@@ -687,7 +704,8 @@ let transition_task_outcome_r
            | Masc_domain.Release
            | Masc_domain.Claim
            | Masc_domain.Start
-           | Masc_domain.Submit_for_verification -> ());
+           | Masc_domain.Submit_for_verification
+           | Masc_domain.Assign _ -> ());
           Ok
             { message =
                 Printf.sprintf

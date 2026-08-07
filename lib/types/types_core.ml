@@ -224,6 +224,7 @@ type task_action =
   | Cancel
   | Release
   | Submit_for_verification
+  | Assign of string  (** Route a task to a specific keeper (taskmaster primitive). *)
 [@@deriving show]
 
 let task_action_of_string s =
@@ -234,6 +235,10 @@ let task_action_of_string s =
   | "cancel" -> Ok Cancel
   | "release" -> Ok Release
   | "submit_for_verification" -> Ok Submit_for_verification
+  | "assign" ->
+    Error
+      "Assign requires a target keeper name: use the masc_assign tool with \
+       task_id and keeper parameters, not through the raw action string."
   | ("approve" | "reject") as verdict ->
     (* Explicit rejection rather than "unknown action": the caller asked for a
        real operation that is no longer reachable from the agent action surface.
@@ -254,6 +259,7 @@ let task_action_to_string = function
   | Cancel -> "cancel"
   | Release -> "release"
   | Submit_for_verification -> "submit_for_verification"
+  | Assign _ -> "assign"
 
 (** All valid task actions, derived from the ADT (single source of truth). *)
 let all_task_actions =

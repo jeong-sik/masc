@@ -128,6 +128,20 @@ let decide
   | ( Masc_domain.Release
     , (Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Cancelled _) ) ->
     Error Invalid_transition
+  | Masc_domain.Assign target, Masc_domain.Todo ->
+    (* Assign routes an unclaimed task to a specific keeper without requiring
+       the target to perform a Claim transition. The caller (typically taskmaster)
+       provides the target keeper name as the payload. *)
+    ok
+      ~set_current:task_id
+      (Masc_domain.Claimed { assignee = target; claimed_at = now })
+  | ( Masc_domain.Assign _
+    , ( Masc_domain.Claimed _
+      | Masc_domain.InProgress _
+      | Masc_domain.AwaitingVerification _
+      | Masc_domain.Done _
+      | Masc_domain.Cancelled _ ) ) ->
+    Error Invalid_transition
   | ( Masc_domain.Submit_for_verification
     , Masc_domain.Claimed { assignee; claimed_at } ) ->
     if same_agent assignee

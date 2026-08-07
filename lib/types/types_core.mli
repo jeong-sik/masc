@@ -69,6 +69,7 @@ type task_action =
   | Cancel
   | Release
   | Submit_for_verification
+  | Assign of string  (** Route a task to a specific keeper (taskmaster primitive). *)
 [@@deriving show]
 
 (** Rejects ["approve"] / ["reject"] with an explanation naming

@@ -36,7 +36,7 @@ let handoff_context_after ~action ~previous ~argument =
   | Masc_domain.Done_action
   | Masc_domain.Submit_for_verification
   | Masc_domain.Cancel -> argument
-  | Masc_domain.Claim | Masc_domain.Start -> previous
+  | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Assign _ -> previous
 ;;
 
 (* What *this* transition put on the record, which is a different question from
@@ -49,7 +49,7 @@ let handoff_context_authored_by ~action ~argument =
   | Masc_domain.Done_action
   | Masc_domain.Submit_for_verification
   | Masc_domain.Cancel -> argument
-  | Masc_domain.Claim | Masc_domain.Start -> None
+  | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Assign _ -> None
 ;;
 
 let normalize_task_before_status ~action task =
@@ -60,7 +60,8 @@ let normalize_task_before_status ~action task =
   | Masc_domain.Start
   | Masc_domain.Done_action
   | Masc_domain.Cancel
-  | Masc_domain.Submit_for_verification ->
+  | Masc_domain.Submit_for_verification
+  | Masc_domain.Assign _ ->
     task
 ;;
 
@@ -74,7 +75,8 @@ let release_counters ~action task handoff_context =
   | Masc_domain.Claim
   | Masc_domain.Start
   | Masc_domain.Done_action
-  | Masc_domain.Submit_for_verification ->
+  | Masc_domain.Submit_for_verification
+  | Masc_domain.Assign _ ->
     task.cycle_count, task.reclaim_policy, task.do_not_reclaim_reason
 ;;
 

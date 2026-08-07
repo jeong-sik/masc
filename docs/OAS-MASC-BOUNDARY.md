@@ -295,11 +295,11 @@ OAS API surface: ✓ matches fingerprint
 
 Drift shows as `⚠ drift (added N, removed M) — run 'make diagnostics-oas-drift' for detail`. `make diagnostics-oas-drift` prints the section-grouped added/removed lists and the repair sequence.
 
-### Layer 2 — Type adapter (`lib/oas_compat/`)
+### Layer 2 — Type adapter (`lib/agent_sdk_compat/`)
 
-Consumer-side pattern matches against OAS variants and record literals against OAS records are consolidated in `lib/oas_compat/oas_compat.ml` (Http_client + Metrics so far; Event_bus pending). When OAS adds a variant or field, only this module fails to compile, not every consumer. Adding a new surface to the adapter requires both:
+Consumer-side pattern matches against OAS variants and record literals against OAS records are consolidated in `lib/agent_sdk_compat/agent_sdk_compat.ml` (Http_client + Metrics so far; Event_bus pending). When OAS adds a variant or field, only this module fails to compile, not every consumer. Adding a new surface to the adapter requires both:
 
-1. Extend `oas_compat.mli` / `.ml` with the new projection
+1. Extend `agent_sdk_compat.mli` / `.ml` with the new projection
 2. Migrate call sites to use the adapter (one line each, usually)
 
 ### Repair flow when drift is reported
@@ -308,7 +308,7 @@ Consumer-side pattern matches against OAS variants and record literals against O
 # 1. Investigate: what actually changed upstream?
 make diagnostics-oas-drift             # section-grouped added/removed
 
-# 2. Fix the consumer side (usually: update lib/oas_compat/oas_compat.ml
+# 2. Fix the consumer side (usually: update lib/agent_sdk_compat/agent_sdk_compat.ml
 #    so the adapter compiles against the new OAS; migrate any remaining
 #    call sites that match OAS types directly)
 

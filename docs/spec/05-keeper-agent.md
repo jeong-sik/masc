@@ -431,21 +431,6 @@ keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML
 
 Keeper는 idle 상태에서 주기적으로 자발적 행동을 생성한다.
 
-### 10.1 Quality Gate
-
-`proactive_quality_check`가 생성된 텍스트를 검증:
-
-1. `extract_checkin_text`: `CHECKIN:` 접두사 추출 또는 전체 텍스트 사용
-2. `proactive_looks_fragmentary`: 미완성 문장 감지 (`"`, `(`, `:`, `-` 등으로 끝남)
-3. `proactive_has_terminal_ending`: 종결 구두점 또는 한국어 종결 어미(`다`, `요`, `니다`, `습니다`) 확인
-4. Similarity check: 이전 출력과 Jaccard 유사도 >= threshold(0.72) 시 재생성
-
-실패 시 최대 3회 재시도, temperature를 점진적으로 상승(0.55 -> 0.75 -> 0.9).
-
-### 10.2 Fallback Reply
-
-3회 모두 실패하면 deterministic fallback 템플릿을 사용한다. 모든 keeper에 동일한 통합 fallback 문구가 적용된다.
-
 ---
 
 ## 14. Invariants

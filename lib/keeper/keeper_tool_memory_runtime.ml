@@ -352,7 +352,7 @@ let keeper_context_status_json
            ]))
 ;;
 
-(* --- Explicit memory write (RFC-0035 P4 surface) ----------------- *)
+(* --- Explicit memory write surface ------------------------------- *)
 
 let keeper_memory_write_max_title_chars = 120
 

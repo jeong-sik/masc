@@ -57,8 +57,6 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let state = ctx.state in
-  let sw = ctx.sw in
-  let clock = ctx.clock in
   let arguments = ctx.arguments in
 
   match name with
@@ -74,7 +72,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | _ ->
-      Mcp_tool_runtime_board.dispatch ~config ~agent_name ~arguments ~state ~sw ~clock ~name ~start_time:start
+      Mcp_tool_runtime_board.dispatch ~config ~agent_name ~arguments ~state ~name ~start_time:start
 
 (* ================================================================ *)
 (* Tool_spec registration (RFC-0182 §3.2)                           *)

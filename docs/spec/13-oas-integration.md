@@ -5,7 +5,7 @@ code_refs:
   - lib/keeper/keeper_event_bridge.ml
   - lib/agent_sdk_response.ml
   - lib/masc_oas_bridge.ml
-  - lib/oas_compat/oas_compat.ml
+  - lib/agent_sdk_compat/agent_sdk_compat.ml
   - lib/keeper/keeper_agent_error.ml
   - lib/keeper/keeper_compact_policy.ml
   - lib/keeper/keeper_manual_compaction.ml
@@ -17,7 +17,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | OAS Bridge |
-| Maps to | `lib/keeper/keeper_event_bridge.ml`, `lib/agent_sdk_response.ml`, `lib/masc_oas_bridge.ml`, `lib/oas_compat/oas_compat.ml` |
+| Maps to | `lib/keeper/keeper_event_bridge.ml`, `lib/agent_sdk_response.ml`, `lib/masc_oas_bridge.ml`, `lib/agent_sdk_compat/agent_sdk_compat.ml` |
 | Dependencies | 02-types-and-invariants |
 | OAS Version | `agent_sdk` library (OCaml, in-tree dependency) |
 
@@ -57,7 +57,7 @@ graph TB
     KEB[keeper_event_bridge.ml]
     ASR[agent_sdk_response.ml]
     MOB[masc_oas_bridge.ml]
-    OC[oas_compat.ml]
+    OC[agent_sdk_compat.ml]
     CI[runtime_inference.ml]
     TB[tool_bridge.ml]
   end

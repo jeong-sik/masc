@@ -30,7 +30,18 @@ import { describe, expect, it } from 'vitest'
 // uses TypeScript AST comparisons, so a suffix rename ("approval:pending:v2")
 // does not satisfy "approval:pending".
 
-// event-type -> the backend .ml that emits the quoted literal.
+// event-type -> the backend .ml that EMITS the quoted literal.
+//
+// Emits, not merely mentions. A consumer that matches on the same literal
+// satisfies the assertion just as well as the producer does, and binding one
+// here makes the gate green while the real emitter is free to rename -- which
+// is the exact failure this file exists to prevent. Four entries pointed at
+// server_mcp_transport_ws.ml, whose dashboard_slice_for_sse_type matches these
+// literals to pick a delta slice; it reads them, it does not emit them.
+//
+// When adding an entry, find the site that builds the broadcast payload
+// (`"type", `String "..."` or `~event_type:"..."`), not the site that branches
+// on it.
 const BACKEND_EMITTED: Record<string, string> = {
   'approval:pending': '../lib/keeper/keeper_approval_queue.ml',
   'approval:resolved': '../lib/keeper/keeper_approval_queue.ml',
@@ -41,15 +52,15 @@ const BACKEND_EMITTED: Record<string, string> = {
   keeper_waiting_inventory_changed: '../lib/keeper/keeper_waiting_inventory_broadcast.ml',
   keeper_compaction_snapshots_changed: '../lib/server/server_dashboard_http_keeper_api.ml',
   ide_cursor_changed: '../lib/server/server_ide_http.ml',
-  keeper_composite_changed: '../lib/server/server_mcp_transport_ws.ml',
+  keeper_composite_changed: '../lib/keeper/keeper_registry_broadcast.ml',
   keeper_heartbeat: '../lib/keeper/keeper_heartbeat_snapshot.ml',
   keeper_turn_complete: '../lib/keeper/keeper_hooks_oas.ml',
   oas_telemetry_sample: '../lib/runtime/dashboard_oas_bridge.ml',
-  namespace_truth_snapshot: '../lib/server/server_mcp_transport_ws.ml',
+  namespace_truth_snapshot: '../lib/server/server_dashboard_http_namespace_truth.ml',
   operator_digest: '../lib/server/server_dashboard_http_core_digest_refresh.ml',
-  operator_snapshot: '../lib/server/server_mcp_transport_ws.ml',
+  operator_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
   post_created: '../lib/keeper_runtime/keeper_event_queue.ml',
-  project_snapshot: '../lib/server/server_mcp_transport_ws.ml',
+  project_snapshot: '../lib/server/server_dashboard_http_namespace_truth.ml',
   transport_health_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
   fusion_run_status: '../lib/fusion/fusion_sink.ml',
 }

@@ -31,7 +31,7 @@ val keeper_context_status_json
   -> ctx_work:Keeper_types.working_context
   -> string
 
-(** RFC-0035 P4 surface: explicit memory write.
+(** Explicit memory write surface.
 
     Atomically adds a durable claim to the current Memory OS snapshot, the only
     store an explicit write reaches.

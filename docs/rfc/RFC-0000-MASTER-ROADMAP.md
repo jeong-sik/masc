@@ -817,7 +817,7 @@ extraction에서 나온 상세 inventory다. first-class 실행 권한이 없으
 | Idea | 왜 밀렸나 | Blast radius | Revival 조건 |
 |------|-----------|--------------|--------------|
 | Board admin/janitor resident LLM agent (#64) | MISSING, never started; keeper와 구별되는 resident cleanup agent | 낮음 | 결정 필요 |
-| chronicle_librarian Responder + Proactive Summary (RFC-0035 PR-6+) | 모듈 자체는 #25213에서 **삭제됨**(HEAD 파일·참조 0, 2026-07-20 — 옛 "PR-5 lib-only slice stalled" 기술은 stale); 이름만 남은 deferred idea | 낮음 | revival 시 처음부터 신규 구현(삭제 전 코드 복원 아님) |
+| chronicle_librarian Responder + Proactive Summary | 모듈 자체는 #25213에서 **삭제됨**(HEAD 파일·참조 0, 2026-07-20 — 옛 "PR-5 lib-only slice stalled" 기술은 stale); 이름만 남은 deferred idea | 낮음 | revival 시 처음부터 신규 구현(삭제 전 코드 복원 아님) |
 | auto_recall (File_context recall, score-based) | `auto_recall.ml` 모듈은 **HEAD 부재**(문서의 "dead scaffold"보다 강한 형태 — 파일 없음); 과거 hand-tuned float score가 RFC-0247 SSOT와 모순됐던 설계 | 낮음 | RFC-respec만(재도입 시 score 금지) |
 | Voice provider freedom (ElevenLabs 외 typed selection) | TODO/P3; voice_bridge 하드코딩 silent Error-swallow | 낮음 | provider 추상화 |
 | Repo-mapping UI/policy + GitHub App device flow | 결정 권한과 옵션은 **D2만**. 이 inventory 행은 독립 결정이 아님 | 낮음 | D2 참조 |

@@ -68,8 +68,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0029 | Dashboard Fiber-Batched Aggregation | Active | - |
 | 0032 | Environment Knob Unification | Draft | - |
 | 0034 | v2: Withdraw per-Goal Task caps (`RFC-0034-cap-all-callers.md`)<br>Task Oscillation Mitigation (Cooldown + Severe-Level Human Escalation) (`RFC-0034-task-oscillation-mitigation.md`) | Draft<br>Draft | - |
-| 0035 | Cognitive IDE Master Plan Integration | Draft | - |
-| 0036 | Multi-Keeper Docker Orchestration & Lifecycle Cleanup (`RFC-0036-multi-keeper-docker-orchestration.md`)<br>oas Cognitive Mapping (companion to RFC-0035) (`RFC-0036-oas-cognitive-mapping.md`) | Draft<br>Draft | - |
+| 0036 | Multi-Keeper Docker Orchestration & Lifecycle Cleanup | Draft | - |
 | 0037 | Board Multimedia & Vision — Eio/File-Based Adaptation (`RFC-0037-board-multimedia-vision-adapted.md`)<br>Local-first Keeper Enablement: Harness/User Boundary (`RFC-0037-local-first-keeper-enablement-boundary.md`) | Draft<br>Draft | - |
 | 0038 | Opaque Identifier Types for Provider, Runtime, Model (`RFC-0038-opaque-identifier-types.md`)<br>Withdraw MASC capability-routing plan (`RFC-0038-runtime-routing-intent-preservation.md`) | Draft<br>Withdrawn | Withdraw identity-alias migration (`RFC-0038-phase-2-keeper-identity-canonical.md`, Withdrawn) |
 | 0041 | Withdraw runtime group/item hierarchy | Withdrawn | - |

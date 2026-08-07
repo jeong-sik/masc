@@ -36,11 +36,6 @@ ALLOWLIST=(
   # status.
   "lib/dashboard/dashboard_briefing_sections.ml"
 
-  # Tier B: Yojson.Safe.pretty_to_string (multi-line indented form)
-  # rather than to_string. The SSOT helper emits compact form. Wire
-  # format divergence: a follow-up RFC must decide whether to keep
-  # pretty form or normalize.
-  "lib/tool_keeper.ml"
 
   # Single-shot health endpoint, no caller chain. De-prioritized — safe
   # to migrate but no test/wire impact.

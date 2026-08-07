@@ -40,6 +40,7 @@ let task ?handoff_context ~status id : Domain.task =
   ; created_by = Some "operator"
   ; predecessor_task_id = None
   ; contract = None
+  ; execution_links = Domain.no_execution_links
   ; handoff_context
   ; cycle_count = 0
   ; reclaim_policy = None

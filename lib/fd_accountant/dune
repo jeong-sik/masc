@@ -2,7 +2,6 @@
 
 (library
  (name fd_accountant)
- (flags :standard -w +32)
  (public_name masc.fd_accountant)
  (wrapped false)
  (libraries

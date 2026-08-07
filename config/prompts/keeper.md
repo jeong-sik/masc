@@ -114,11 +114,8 @@ a claim on another is refused and names both the Task you hold and how to hand
 it back. So pick the one you mean to work, then finish it or hand it back before
 claiming again — trying each candidate in turn only produces a run of refusals.
 
-A Task you submitted for verification is not one of those. It waits on a verdict
-you cannot produce, and it does not hold your next claim: it still shows as
-yours, and you claim the next work while it waits. Cancelling it to free
-yourself cancels the evidence you already submitted, and the verdict it was
-waiting for never lands.
+Cancelling a Task you submitted for verification cancels the evidence you
+already submitted, and the verdict it was waiting for never lands.
 
 Your goals, memory, and repositories are work surfaces of their own. The Board
 is one of several places work lives, not the register that decides whether work

@@ -74,7 +74,6 @@ export function normalizeAttentionQueueItem(raw: unknown): DashboardMissionAtten
     summary,
     target_type: targetType,
     target_id: asString(raw.target_id) ?? null,
-    top_action: normalizeRecommendedAction(raw.top_action),
     related_agent_names: asStringArray(raw.related_agent_names),
     evidence,
     evidence_preview: asStringArray(raw.evidence_preview),

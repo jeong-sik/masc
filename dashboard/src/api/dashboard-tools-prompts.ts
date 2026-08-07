@@ -14,7 +14,6 @@ export interface DashboardToolInventoryItem {
   description: string
   category: string
   category_description?: string | null
-  enabled_in_current_mode: boolean
   direct_call_allowed: boolean
   required_permission?: string | null
   doc_refs: string[]

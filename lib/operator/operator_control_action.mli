@@ -12,9 +12,9 @@
     {b Include runtime:} starts with [include Operator_control_snapshot]
     so {!Operator_control}'s [include] propagates the snapshot
     surface (notably the [\\'a context] type) through.  Internal
-    helpers ([judgment_surface_enums], [normalize_judgment_*],
+    helpers ([normalize_judgment_*],
     [default_fresh_ttl_sec], [normalize_action_target_type],
-    [default_target_type_for], [require_payload_field]) stay
+    [default_target_type_for]) stay
     private. *)
 
 include module type of struct
@@ -60,6 +60,13 @@ type action_request = {
   payload : Yojson.Safe.t;
 }
 (** Parsed operator action — output of {!action_request_of_args}. *)
+
+val require_payload_field :
+  Yojson.Safe.t -> string -> string -> (string, string) result
+(** [require_payload_field payload key error] reads a string [key] from
+    [payload], or returns [Error error] when it is absent or not a string.
+    Exported so the action handlers in {!Operator_control} state the
+    requirement once instead of repeating the match at each site. *)
 
 val canonical_action_type : string -> string
 (** [canonical_action_type t] is the remaining parser seam for

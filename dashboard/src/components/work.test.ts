@@ -514,10 +514,6 @@ describe('Work', () => {
             strict: true,
             completion_contract: ['merge-ready proof'],
             required_evidence: ['typed test evidence'],
-            links: {
-              session_id: null,
-              operation_id: 'op-contract',
-            },
           },
           handoff_context: {
             summary: '',
@@ -537,7 +533,6 @@ describe('Work', () => {
       expect(ledger.textContent).toContain('sess-ledger')
       expect(ledger.textContent).toContain('op-ledger')
       expect(ledger.textContent).toContain('strict')
-      expect(ledger.textContent).toContain('op-contract')
       expect(ledger.textContent).toContain('merge-ready proof')
       expect(ledger.textContent).toContain('typed test evidence')
       expect(ledger.textContent).toContain('receipt-1')

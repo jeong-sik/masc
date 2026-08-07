@@ -5,6 +5,23 @@ val blank_evidence_ref : string -> bool
     predicate for evidence-ref boundary checks (RFC-0337 decision 4):
     boundaries reject flagged entries instead of silently dropping them. *)
 
+val unresolvable_evidence_ref : string -> bool
+(** [true] when {!Workspace_verification_store.classify_evidence_reference}
+    answers [Unresolvable_reference] — the store would snapshot the entry as a
+    payload-free invalid reference, which the reviewer must then read as
+    unavailable evidence. Same boundary rule as {!blank_evidence_ref}: refuse
+    it where the caller can still correct it. *)
+
+val resolvable_evidence_ref_forms : string
+(** The accepted reference forms, joined for an error message that has to tell
+    a caller what to write instead. *)
+
+val note_evidence_ref_form : string
+(** The note form alone, for the sentence that tells a caller how to carry
+    narrative. Taken from
+    {!Workspace_verification_store.note_reference_form} so the prose cannot
+    name a prefix the classifier no longer matches. *)
+
 val non_empty_trimmed_strings : string list -> string list
 
 val concrete_verification_evidence_refs :

@@ -31,8 +31,6 @@
  (name masc_tool_dispatch)
  (public_name masc.masc_tool_dispatch)
  (wrapped false)
- (flags
-  (:standard -w +32))
  (libraries
   masc_types
   masc_core

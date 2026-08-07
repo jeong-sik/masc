@@ -14,7 +14,6 @@
 
 (library
  (name masc_tool_call_quality_benchmark)
- (flags :standard -w +32)
  (public_name masc.tool_call_quality_benchmark)
  (wrapped false)
  (libraries yojson masc_core time_compat))

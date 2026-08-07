@@ -142,6 +142,47 @@ let test_guidance_ignores_unsupported_target_type () =
       Alcotest.(check int) "fallback cannot synthesize actions" 0
         (List.length fields.recommended_actions))
 
+(* Each surface carries its own freshness default: a namespace judgment goes
+   stale in 60s, an intervention in 300s. The selection used to match the
+   normalized surface string with a wildcard default of 120s — unreachable,
+   because normalize_judgment_surface rejects everything else first, but it
+   would have absorbed a third surface in silence. Nothing pinned the two
+   values, so collapsing or swapping them was invisible. *)
+let test_judgment_freshness_default_is_per_surface () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator-judge"));
+      let ctx = operator_ctx env sw config "operator-judge" in
+      let ttl_for surface =
+        match
+          Operator_control.judgment_write_json ctx
+            (`Assoc
+              [ ("surface", `String surface)
+              ; ("target_type", `String "workspace")
+              ; ("summary", `String "default freshness probe")
+              ; ("confidence", `Float 0.5)
+              ; ("evidence_refs", `List [])
+              ])
+        with
+        | Error err -> Alcotest.fail err
+        | Ok json ->
+          let open Yojson.Safe.Util in
+          let judgment = json |> member "judgment" in
+          let generated = judgment |> member "generated_at_unix" |> to_float in
+          let fresh_until = judgment |> member "fresh_until_unix" |> to_float in
+          Float.round (fresh_until -. generated)
+      in
+      Alcotest.(check (float 0.5))
+        "command.namespace default ttl" 60.0 (ttl_for "command.namespace");
+      Alcotest.(check (float 0.5))
+        "intervene default ttl" 300.0 (ttl_for "intervene"))
+
 let test_operator_judgment_write_and_latest_roundtrip () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -350,6 +391,8 @@ let tests =
       test_digest_workspace_ignores_stale_operator_judgment;
     Alcotest.test_case "guidance ignores unsupported target type" `Quick
       test_guidance_ignores_unsupported_target_type;
+    Alcotest.test_case "freshness default is per surface" `Quick
+      test_judgment_freshness_default_is_per_surface;
     Alcotest.test_case "operator judgment write/latest roundtrip" `Quick
       test_operator_judgment_write_and_latest_roundtrip;
     Alcotest.test_case "rejects retired target type aliases" `Quick

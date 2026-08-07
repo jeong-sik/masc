@@ -2,7 +2,6 @@
 
 (library
  (name voice_config)
- (flags :standard -w +32)
  (public_name masc.voice_config)
  (wrapped false)
  (modules voice_config)

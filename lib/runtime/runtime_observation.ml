@@ -218,7 +218,7 @@ type runtime_metrics_capture = {
   mutable next_attempt_index : int;
   mutable attempts_rev : runtime_attempt list;
   mutable fallback_events_rev : runtime_fallback_event list;
-  mutable streaming : streaming_metrics_capture;
+  streaming : streaming_metrics_capture;
 }
 
 (* Non-redacted JSON encoders for the internal audit log

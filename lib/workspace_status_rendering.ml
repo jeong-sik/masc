@@ -143,7 +143,6 @@ let status_summary_string
     ~(in_progress_count : int)
     ~(done_count : int)
     ~(cancelled_count : int)
-    ~(todo_conflict_task_ids : string list)
     ~(binding : current_binding)
     ~(planning_state : planning_context_state)
     ~(attention_items : string list)
@@ -185,12 +184,6 @@ let status_summary_string
   | Some task_id ->
       Buffer.add_string buf
         (Printf.sprintf "Planning: missing=yes | task=%s\n" task_id)
-  | None -> ());
-  (match planning_state.deliverable_conflict_task with
-  | Some task_id ->
-      Buffer.add_string buf
-        (Printf.sprintf "Planning: deliverable_conflict=yes | task=%s\n"
-           task_id)
   | None -> ());
   if credential_state.credential_required then
     Buffer.add_string buf
@@ -240,12 +233,7 @@ let status_summary_string
   List.iter
     (fun (task : Masc_domain.task) ->
       Workspace_query.safe_yield ();
-      let (status_icon, status_label) =
-        if List.exists (String.equal task.id) todo_conflict_task_ids then
-          ("warning", "todo_conflict")
-        else
-          task_status_badge task.task_status
-      in
+      let status_icon, status_label = task_status_badge task.task_status in
       let assignee = task_assignee task.task_status in
       Buffer.add_string buf
         (Printf.sprintf "  %s %s P%d [%s] %s (%s)\n" status_icon task.id

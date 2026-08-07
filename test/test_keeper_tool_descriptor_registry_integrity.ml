@@ -124,17 +124,21 @@ let test_keeper_model_projection_is_single_and_unique () =
   List.iter
     (fun (descriptor : Descriptor.t) ->
        let projected = Descriptor.keeper_model_names descriptor in
-       let candidates = Descriptor.keeper_candidate_names descriptor in
        match descriptor.keeper_model_projection with
        | Descriptor.Preferred_public_name ->
          Alcotest.(check (list string))
            (descriptor.id ^ " preferred model projection")
            [ descriptor.public_name ]
            projected;
+         (* The internal name stays owned by this descriptor even though the
+            model is never shown it. [registered_names] is the name-integrity
+            axis; [keeper_model_names] is the admission axis. Keeping both here
+            is what stops a rename from freeing the internal name for another
+            descriptor to claim. *)
          Alcotest.(check bool)
-           (descriptor.id ^ " keeps internal dispatch candidate")
+           (descriptor.id ^ " still owns its internal handler route")
            true
-           (List.mem descriptor.internal_name candidates)
+           (List.mem descriptor.internal_name (Descriptor.registered_names descriptor))
        | Descriptor.Internal_name ->
          Alcotest.(check (list string))
            (descriptor.id ^ " internal model projection")
@@ -144,20 +148,12 @@ let test_keeper_model_projection_is_single_and_unique () =
          Alcotest.(check (list string))
            (descriptor.id ^ " operator-only control has no model projection")
            []
-           projected;
-         Alcotest.(check (list string))
-           (descriptor.id ^ " operator-only control has no Keeper candidates")
-           []
-           candidates
+           projected
        | Descriptor.Transport_alias _ ->
          Alcotest.(check (list string))
            (descriptor.id ^ " transport alias has no duplicate model projection")
            []
-           projected;
-         Alcotest.(check (list string))
-           (descriptor.id ^ " has no Keeper candidates")
-           []
-           candidates)
+           projected)
     (all_descriptors ())
 ;;
 
@@ -252,11 +248,76 @@ let test_structurally_invalid_schema_is_excluded () =
   Alcotest.(check (list string))
     "malformed schema has no model names"
     []
-    (Descriptor.keeper_model_names malformed);
+    (Descriptor.keeper_model_names malformed)
+;;
+
+(* The description a Keeper reads and the description in the canonical registry
+   used to be two strings. [cluster_descriptor] looked the tool up for its
+   input_schema and then took a second description from an inline argument, and
+   nothing compared them: 66 of 98 model-visible descriptors disagreed, and in
+   57 the model saw the shorter one — including every Goal tool and
+   [masc_transition], whose canonical text is the only place [release] is
+   named.
+
+   That seam is closed: [cluster_descriptor] takes both fields from the one
+   lookup. This pins it. The exceptions below reach the model through other
+   constructors and keep their own text on purpose — the Board projection
+   narrows the canonical schema for the Keeper surface (its description is
+   usually the longer, more specific one), and the shard/library/individual
+   tools are declared with [in_process_descriptor] rather than the cluster
+   path. Adding an inline description back onto a cluster tool fails here. *)
+let descriptions_owned_elsewhere =
+  [ (* Board: [masc_board_descriptor] carries the Keeper projection's own text *)
+    "masc_board_comment"
+  ; "masc_board_curation_read"
+  ; "masc_board_curation_submit"
+  ; "masc_board_list"
+  ; "masc_board_post"
+  ; "masc_board_search"
+  ; "masc_board_vote"
+    (* Shard runtime tools: declared directly, not through the cluster path *)
+  ; "tool_edit_file"
+  ; "tool_execute"
+  ; "tool_read_file"
+  ; "tool_search_files"
+  ; "tool_write_file"
+    (* Library and individually-declared keeper tools *)
+  ; "keeper_library_read"
+  ; "keeper_library_search"
+  ; "masc_library_list"
+  ; "keeper_context_status"
+  ; "keeper_ide_annotate"
+  ; "keeper_memory_search"
+  ; "keeper_memory_write"
+  ; "keeper_person_note_set"
+  ; "keeper_time_now"
+  ; "keeper_tools_list"
+  ]
+;;
+
+let test_cluster_descriptions_come_from_the_registry () =
+  let canonical = Hashtbl.create 512 in
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+       if not (Hashtbl.mem canonical schema.name)
+       then Hashtbl.add canonical schema.name schema.description)
+    Masc.Config.raw_all_tool_schemas;
+  let drifted =
+    Descriptor.model_visible_descriptors ()
+    |> List.filter_map (fun (d : Descriptor.t) ->
+         if List.mem d.internal_name descriptions_owned_elsewhere
+         then None
+         else
+           match Hashtbl.find_opt canonical d.internal_name with
+           | None -> None
+           | Some canon ->
+             if String.equal canon d.description then None else Some d.internal_name)
+    |> List.sort String.compare
+  in
   Alcotest.(check (list string))
-    "malformed schema has no execution candidates"
+    "every cluster tool's description is the registry's"
     []
-    (Descriptor.keeper_candidate_names malformed)
+    drifted
 ;;
 
 let test_registered_cluster_model_projections_are_explicit () =
@@ -270,9 +331,7 @@ let test_registered_cluster_model_projections_are_explicit () =
   let keeper_model_names = Policy.keeper_model_tool_names () in
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
-    [ "masc_runtime_verify"
-    ; "masc_runtime_ollama_probe"
-    ];
+    [ "masc_runtime_verify" ];
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
     [ "keeper_library_read"
@@ -297,6 +356,14 @@ let test_registered_cluster_model_projections_are_explicit () =
       "masc_status"
     ; "masc_pause"
     ; "masc_resume"
+      (* Native Ollama timing probe. Its output is load/prompt-eval timings and
+         a prefix-reuse inference — operator diagnostics, read through
+         /api/v1/dashboard/runtime-probe. It carried 1,219 bytes of schema into
+         every Keeper turn and was called 0 times in the 6 days to 2026-08-06.
+         Registration is unchanged: that dashboard route authorizes with
+         [with_tool_auth ~tool_name:"masc_runtime_ollama_probe"], and
+         [Auth.authorize_tool_for_role] refuses any unregistered name. *)
+    ; "masc_runtime_ollama_probe"
     ];
   List.iter
     (fun (name, projected_by) ->
@@ -1493,6 +1560,10 @@ let () =
             "structurally invalid schema is excluded"
             `Quick
             test_structurally_invalid_schema_is_excluded
+        ; test_case
+            "cluster descriptions come from the registry"
+            `Quick
+            test_cluster_descriptions_come_from_the_registry
         ; test_case
             "registered cluster model projections are explicit"
             `Quick

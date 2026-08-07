@@ -41,5 +41,4 @@ type current_binding =
 
 type planning_context_state =
   { planning_missing_task : string option
-  ; deliverable_conflict_task : string option
   }

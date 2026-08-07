@@ -4,7 +4,6 @@ include Operator_digest
 
 (* Keeper runtime identity fields extracted to
    [Operator_control_snapshot_identity_fields] (godfile decomp). *)
-let non_empty_trimmed_string_opt = Operator_control_snapshot_identity_fields.non_empty_trimmed_string_opt
 let keeper_runtime_identity_fields = Operator_control_snapshot_identity_fields.keeper_runtime_identity_fields
 (* action_result_status + confirmation_state + action_log_entry types,
    stringifiers, and persistence helpers extracted to
@@ -28,8 +27,6 @@ let merge_json_objects left right =
 (* remote_confirm_ttl_seconds + runtime-status alignment helpers
    extracted to [Operator_control_snapshot_runtime_status] (godfile decomp). *)
 let remote_confirm_ttl_seconds = Operator_control_snapshot_runtime_status.remote_confirm_ttl_seconds
-let runtime_status_from_live_signal = Operator_control_snapshot_runtime_status.runtime_status_from_live_signal
-let health_state_allows_runtime_status_override = Operator_control_snapshot_runtime_status.health_state_allows_runtime_status_override
 let align_keeper_runtime_status = Operator_control_snapshot_runtime_status.align_keeper_runtime_status
 let remote_client_type_of_context = Operator_control_snapshot_runtime_status.remote_client_type_of_context
 let operator_server_profile_json = Operator_control_snapshot_runtime_status.operator_server_profile_json
@@ -710,9 +707,8 @@ in
     if elapsed_total > 1.0
     then (
       Log.Dashboard.info
-        "[snapshot_json] total: %.0fms (sessions=%d keepers=%d)"
+        "[snapshot_json] total: %.0fms (keepers=%d)"
         (elapsed_total *. 1000.0)
-        0
         (List.length keeper_names);
       List.iter
         (fun (label, dt) ->

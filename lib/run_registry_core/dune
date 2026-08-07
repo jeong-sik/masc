@@ -2,7 +2,6 @@
 
 (library
  (name run_registry_core)
- (flags :standard -w +32)
  (public_name masc.run_registry_core)
  (wrapped false)
  (libraries fs_compat masc_log threads yojson))

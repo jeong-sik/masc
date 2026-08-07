@@ -55,17 +55,6 @@ let annotate_section ~section ~status ~summary ~evidence ~metadata_gaps
       ("authoritative", `Bool false);
     ]
 
-let int_field_direct ?(default = 0) key json =
-  Option.value ~default (Json_util.assoc_int_opt key json)
-
-let sum_int_field key items =
-  List.fold_left (fun acc json -> acc + int_field_direct key json) 0 items
-
-let count_matching_field key ~predicate items =
-  List.fold_left
-    (fun acc json -> if predicate (string_field key json) then acc + 1 else acc)
-    0 items
-
 let status_is_active_agent value =
   List.mem
     (String.lowercase_ascii (String.trim value))
@@ -74,59 +63,32 @@ let status_is_active_agent value =
 let evidence_add_if cond text items =
   if cond && text <> "" then text :: items else items
 
-let build_communication_section ~sessions ~recent_messages ~metadata_gaps
-    ~workspace_health ~incident_count ~recommended_action_count =
-  let live_session_count = List.length sessions in
+let build_communication_section ~recent_messages ~metadata_gaps ~workspace_health
+    ~incident_count ~recommended_action_count =
   let recent_message_count = List.length recent_messages in
-  let broadcast_total = sum_int_field "broadcast_count" sessions in
-  let known_mode_count =
-    count_matching_field "communication_mode" sessions ~predicate:(fun value ->
-        not (is_missing_or_unknown value))
-  in
   let metadata_evidence = evidence_of_metadata_gaps ~section:Communication metadata_gaps in
-  let positive_signal =
-    recent_message_count > 0 || broadcast_total > 0
-  in
-  let positive_evidence =
-    []
-    |> evidence_add_if (recent_message_count > 0)
-         (Printf.sprintf "Recent namespace messages recorded: %d" recent_message_count)
-    |> evidence_add_if (broadcast_total > 0)
-         (Printf.sprintf "Session broadcasts recorded: %d" broadcast_total)
-  in
-  let inactivity_evidence =
-    []
-    |> evidence_add_if
-         (not positive_signal && live_session_count = 0)
-         "Active sessions count is zero"
-    |> evidence_add_if
-         (not positive_signal && live_session_count > 0)
-         "No communication activity is recorded for the live sessions"
-  in
+  let positive_signal = recent_message_count > 0 in
   let evidence =
-    if metadata_evidence <> [] then
-      take 2 (metadata_evidence @ positive_evidence @ inactivity_evidence)
-    else
-      take 2 (positive_evidence @ inactivity_evidence)
+    []
+    |> evidence_add_if positive_signal
+         (Printf.sprintf "Recent namespace messages recorded: %d" recent_message_count)
+    |> evidence_add_if (not positive_signal) "Recent namespace message count is zero"
+    |> fun activity_evidence -> take 2 (metadata_evidence @ activity_evidence)
   in
   if positive_signal && metadata_evidence = [] then
-    ("healthy", "Communication activity is recorded across recent messages and session metrics.", evidence)
+    ("healthy", "Communication activity is recorded across recent namespace messages.", evidence)
   else if positive_signal then
     ("watch", "Communication activity exists, but some communication metadata is still missing.", evidence)
-  else if live_session_count = 0 then
-    ("unclear", "No live session is present, so communication health cannot be judged.", evidence)
   else if metadata_evidence <> [] then
-    ("unclear", "Communication metadata is incomplete and no positive activity signal is recorded.", evidence)
-  else if known_mode_count = 0 then
-    ("unclear", "Communication mode is not recorded for the live sessions.", evidence)
+    ("unclear", "Communication metadata is incomplete and no message activity is recorded.", evidence)
   else if Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string workspace_health)
           || incident_count > 0 || recommended_action_count > 0
   then
-    ("watch", "Live sessions exist without recorded communication activity while the namespace still has open operator attention.", evidence)
+    ("watch", "No communication activity is recorded while the namespace still has open operator attention.", evidence)
   else
-    ("watch", "Live sessions exist, but no communication activity is recorded yet.", evidence)
+    ("watch", "No communication activity is recorded yet.", evidence)
 
-let build_alignment_section ~sessions ~agents ~metadata_gaps =
+let build_alignment_section ~agents ~metadata_gaps =
   let active_agent_count =
     List.fold_left
       (fun acc json ->
@@ -142,21 +104,12 @@ let build_alignment_section ~sessions ~agents ~metadata_gaps =
         else acc)
       0 agents
   in
-  let bound_goal_count =
-    List.fold_left
-      (fun acc json ->
-        if String_util.trim_to_option (string_field "goal" json) = None then acc
-        else acc + 1)
-      0 sessions
-  in
   let metadata_evidence = evidence_of_metadata_gaps ~section:Alignment metadata_gaps in
   let evidence =
     []
     |> evidence_add_if (active_agent_count = 0) "Active agents count is zero"
     |> evidence_add_if (active_agent_count > 0)
          (Printf.sprintf "Active agents recorded: %d" active_agent_count)
-    |> evidence_add_if (bound_goal_count > 0)
-         (Printf.sprintf "Session goals bound: %d" bound_goal_count)
     |> evidence_add_if
          (active_agent_count > 0 && assigned_active_agent_count = active_agent_count)
          "All active agents have bound focus"
@@ -166,11 +119,9 @@ let build_alignment_section ~sessions ~agents ~metadata_gaps =
   if active_agent_count = 0 then
     ("unclear", "No active agents are present, so alignment cannot be judged.", evidence)
   else if metadata_evidence <> [] then
-    ("unclear", "Goal or focus bindings are incomplete, so alignment cannot be confirmed.", evidence)
-  else if bound_goal_count = 0 then
-    ("unclear", "Active agents exist, but no bound session goal is recorded.", evidence)
+    ("unclear", "Focus bindings are incomplete, so alignment cannot be confirmed.", evidence)
   else if assigned_active_agent_count = active_agent_count then
-    ("aligned", "Active agents have bound focus and session goals are recorded.", evidence)
+    ("aligned", "Every active agent has a bound focus.", evidence)
   else
     ("watch", "Some active agents are present without a bound focus.", evidence)
 
@@ -207,7 +158,7 @@ let build_watch_section ~workspace_health ~incident_count ~recommended_action_co
   else
     ("ok", "No immediate operator action is flagged by the namespace summary.", evidence)
 
-let build_briefing_sections ~briefing_summary_json ~sessions ~agents ~recent_messages
+let build_briefing_sections ~briefing_summary_json ~agents ~recent_messages
     ~metadata_gaps =
   let workspace_health = briefing_summary_json |> string_field "workspace_health" in
   let incident_count = Option.value ~default:0 (Json_util.assoc_int_opt "incident_count" briefing_summary_json) in
@@ -218,11 +169,11 @@ let build_briefing_sections ~briefing_summary_json ~sessions ~agents ~recent_mes
     briefing_summary_json |> string_field "top_attention_summary"
   in
   let communication_status, communication_summary, communication_evidence =
-    build_communication_section ~sessions ~recent_messages ~metadata_gaps
-      ~workspace_health ~incident_count ~recommended_action_count
+    build_communication_section ~recent_messages ~metadata_gaps ~workspace_health
+      ~incident_count ~recommended_action_count
   in
   let alignment_status, alignment_summary, alignment_evidence =
-    build_alignment_section ~sessions ~agents ~metadata_gaps
+    build_alignment_section ~agents ~metadata_gaps
   in
   let watch_status, watch_summary, watch_evidence =
     build_watch_section ~workspace_health ~incident_count ~recommended_action_count

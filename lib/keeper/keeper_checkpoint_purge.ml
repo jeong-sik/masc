@@ -81,14 +81,21 @@ let strip_reasoning_blocks (message : Agent_sdk.Types.message) =
   { message with Agent_sdk.Types.content = List.rev kept }, stripped
 ;;
 
-(* R3: replace a tool result's payload with the fixed marker while keeping the
-   [tool_use_id] pairing and the typed delivery outcome. *)
+(* R3: replace a SUCCESSFUL tool result's payload with the fixed marker while
+   keeping the [tool_use_id] pairing and the typed delivery outcome.
+   Failed results ([Tool_failed]) are exempt: their payload is the feedback
+   the keeper reads on later turns and the only lesson evidence the librarian
+   could learn from, and the exemption is a type-level distinction (the typed
+   outcome), not content classification — RFC-0351 §2 permits judging by
+   type. *)
 let clear_tool_result_blocks (message : Agent_sdk.Types.message) =
   let cleared_count = ref 0 in
   let content =
     List.map
       (fun block ->
          match block with
+         | Agent_sdk.Types.ToolResult { outcome = Agent_sdk.Types.Tool_failed _; _ }
+           -> block
          | Agent_sdk.Types.ToolResult
              ({ content; json; content_blocks; _ } as result) ->
            if String.equal content cleared_tool_result_content

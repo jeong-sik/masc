@@ -37,6 +37,12 @@ type event =
       session_id: string option [@default None];
       operation_id: string option [@default None];
       worker_run_id: string option [@default None];
+      (* RFC-0233 canonical join key, minted once at the dispatch boundary.
+         The tool_calls row for the same execution carries the identical
+         value, so a consumer reading both streams can tell one physical
+         call reported twice from two calls. [None] on lanes that write no
+         tool_calls row — nothing there is a duplicate to begin with. *)
+      execution_id: string option [@default None];
       error_kind: error_kind option [@default None];
       error_message: string option [@default None];
       exit_code: int option [@default None];
@@ -425,7 +431,8 @@ let nonempty_error_kind_opt value =
   | None -> None
 
 let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
-    ?source ?session_id ?operation_id ?worker_run_id ?failure_class ?error_kind
+    ?source ?session_id ?operation_id ?worker_run_id ?execution_id
+    ?failure_class ?error_kind
     ?error_message ?exit_code ?stderr_excerpt () =
   let failure_class = if success then None else failure_class in
   let error_kind =
@@ -447,6 +454,7 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
          session_id;
          operation_id;
          worker_run_id;
+         execution_id;
          error_kind;
          error_message;
          exit_code;

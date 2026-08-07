@@ -61,25 +61,12 @@ val working_agents : config -> string list
     actor identity; name-shape aliases have no ownership authority. *)
 val same_task_actor : config -> string -> string -> bool
 
-val normalize_execution_links
-  :  Masc_domain.task_execution_links
-  -> Masc_domain.task_execution_links
-
 val normalize_task_contract : Masc_domain.task_contract -> Masc_domain.task_contract
-val empty_task_contract : Masc_domain.task_contract
 
-val default_verification_evidence_refs : string list
-val first_line : string -> string
-val truncate : max_len:int -> string -> string
-val default_completion_contract_text : title:string -> description:string -> string
-
-val ensure_task_contract_for_verification
-  :  ?contract:Masc_domain.task_contract
-  -> title:string
-  -> description:string
-  -> unit
-  -> Masc_domain.task_contract
-
+(** [merge_execution_links existing ?session_id ?operation_id ()] keeps the
+    identifiers already linked and adds the ones supplied. It touches only
+    execution identity — completion criteria are written when the task is
+    created and are not derived, defaulted, or rewritten anywhere. *)
 val merge_execution_links
   :  Masc_domain.task_execution_links
   -> ?session_id:string

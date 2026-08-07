@@ -12,6 +12,29 @@
    semantics locally on raw JSON for keeper-vocabulary error messages. *)
 let blank_evidence_ref value = String.equal (String.trim value) ""
 
+(* The same boundary rule, one step further: an entry the verification store
+   cannot read is refused where the caller can still fix it, instead of being
+   snapshotted as [Evidence_invalid_reference] and surfacing later as a
+   reviewer REJECT the submitter cannot act on. Live case (2026-08-05):
+   task-174 resubmitted the same `board:p-…` reference and was rejected 59
+   times in two hours before one approval — 49% of every rejection the
+   completion authority issued. The shape decision stays the store's; this is
+   a call into it, not a second copy of the accepted prefixes. *)
+let unresolvable_evidence_ref value =
+  match
+    Workspace_verification_store.classify_evidence_reference (String.trim value)
+  with
+  | Workspace_verification_store.Unresolvable_reference -> true
+  | Workspace_verification_store.Artifact_reference _
+  | Workspace_verification_store.Note_reference _ -> false
+;;
+
+let resolvable_evidence_ref_forms =
+  String.concat " or " Workspace_verification_store.resolvable_reference_forms
+;;
+
+let note_evidence_ref_form = Workspace_verification_store.note_reference_form
+
 let non_empty_trimmed_strings values =
   values
   |> List.filter_map (fun value ->

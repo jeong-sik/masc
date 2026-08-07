@@ -175,8 +175,24 @@ val try_pop : string -> string option
 
 (** {1 External Subscribers} *)
 
+type external_event = {
+  ext_frame : string;
+      (** The SSE wire framing of this event. For subscribers that forward the
+          frame verbatim. *)
+  ext_payload : Yojson.Safe.t;
+      (** The value passed to [broadcast], before framing. A subscriber that
+          wants the data reads this; recovering it by parsing [ext_frame] costs
+          one [Yojson.Safe.from_string] per broadcast per transport. *)
+  ext_event_id : int;
+  ext_emitted_at : float;  (** Broadcast time, not subscriber arrival time. *)
+}
+
 val subscribe_external :
-  id:string -> callback:(string -> unit) -> ?is_alive:(unit -> bool) -> unit -> unit
+  id:string
+  -> callback:(external_event -> unit)
+  -> ?is_alive:(unit -> bool)
+  -> unit
+  -> unit
 val unsubscribe_external : string -> unit
 val external_subscriber_count : unit -> int
 val external_subscriber_count_with_prefix : string -> int

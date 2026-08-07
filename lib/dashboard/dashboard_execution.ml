@@ -547,9 +547,9 @@ let task_completed_at (task : Masc_domain.task) =
 ;;
 
 let task_execution_links_json (task : Masc_domain.task) =
-  match task.contract with
-  | Some contract -> Masc_domain.task_execution_links_to_yojson contract.links
-  | None -> `Null
+  match task.execution_links with
+  | { operation_id = None; session_id = None } -> `Null
+  | links -> Masc_domain.task_execution_links_to_yojson links
 ;;
 
 (* RFC-0267 Phase 1: project the registry's canonical goal_id onto the wire.

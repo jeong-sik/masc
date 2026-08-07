@@ -327,6 +327,11 @@ type wake_reason =
   | Broadcast
       (** The exact [@@all] Keeper Board address selected every non-author
           lane. *)
+  | Comment_on_self_post
+      (** An external comment arrived on a post the keeper authored. The
+          reaction path already woke the author of the post it landed on; the
+          comment path checked only whether the keeper had itself commented, so
+          an answer to a keeper's own question did not reach it. *)
   | Thread_reply_after_self_comment
       (** A new external comment arrived on a post the keeper had commented on. *)
   | Reaction_after_self_activity
@@ -336,6 +341,7 @@ type wake_reason =
 let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"
   | Broadcast -> "broadcast"
+  | Comment_on_self_post -> "comment_on_self_post"
   | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
   | Reaction_after_self_activity -> "reaction_after_self_activity"
 ;;
@@ -385,9 +391,21 @@ let wake_reason
        | Available true -> Available (Some Reaction_after_self_activity)
        | Available false -> Available None)
     | Board_dispatch.Board_comment_added ->
-      (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+      (* Authorship first, the same order [reaction_touches_self_activity] uses
+         above. Without it [check_self_comment_status] answers [`Never] for the
+         author of the post — it only looks for the keeper's own comments — so
+         an answer to a keeper's question never reached the keeper that asked.
+         Measured on the live Board: 72 of 98 external comments on Keeper posts
+         did not wake the poster, including a post whose title addressed the
+         replier by name. *)
+      (match self_authored_post ~self_ids ~post_id:signal.post_id with
        | Unavailable _ as unavailable -> unavailable
-       | Available (`New_external _) -> Available (Some Thread_reply_after_self_comment)
-       | Available (`Never | `No_new_external) -> Available None)
+       | Available true -> Available (Some Comment_on_self_post)
+       | Available false ->
+         (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+          | Unavailable _ as unavailable -> unavailable
+          | Available (`New_external _) ->
+            Available (Some Thread_reply_after_self_comment)
+          | Available (`Never | `No_new_external) -> Available None))
     | Board_dispatch.Board_post_created -> Available None)
 ;;

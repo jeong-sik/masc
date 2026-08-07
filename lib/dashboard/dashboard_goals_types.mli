@@ -81,20 +81,14 @@ val attainment_unit_to_string : attainment_unit -> string
 
 val contains_ci : string -> string -> bool
 
-val metric_word_tokens : string -> string list
-val metric_word_implies_percent : string -> bool
-val metric_implies_percent : string option -> bool
 
-val metric_count_token : string -> bool
-val metric_has_pull_request_phrase : string list -> bool
-val metric_supports_count_target : string option -> bool
 
 val target_value_implies_percent : string -> bool
 
 val strip_number_group_separators : string -> string
 val parse_first_float : string -> float option
 
-val parsed_target_unit : string option -> string -> attainment_unit
+val parsed_target_unit : string -> attainment_unit
 
 (** {1 Goal attainment JSON projection — pure tree → JSON converter} *)
 

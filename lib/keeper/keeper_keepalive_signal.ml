@@ -328,6 +328,10 @@ let board_signal_stimulus
       (match reason with
        | Board_wake.Explicit_mention | Board_wake.Broadcast ->
          Keeper_event_queue.Immediate
+       (* A comment on the keeper's own post is a thread event, so it keeps
+          the thread priority. This change's subject is that it wakes at all;
+          raising it to Immediate would be a separate queue decision. *)
+       | Board_wake.Comment_on_self_post
        | Board_wake.Thread_reply_after_self_comment
        | Board_wake.Reaction_after_self_activity ->
          Keeper_event_queue.Normal)
@@ -652,6 +656,7 @@ let wakeup_relevant_keeper_for_board_signal
                       match reason with
                       | Board_wake.Broadcast -> Keeper_registry.Broadcast_signal
                       | Board_wake.Explicit_mention
+                      | Board_wake.Comment_on_self_post
                       | Board_wake.Thread_reply_after_self_comment
                       | Board_wake.Reaction_after_self_activity ->
                         Keeper_registry.Reactive_signal

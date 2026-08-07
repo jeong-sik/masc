@@ -135,10 +135,21 @@ let redact_patterns (s : string) : string =
 let redact_text (s : string) : string =
   redact_patterns s
 
+(* [max_len] is a byte budget, but the strings that reach here are UTF-8 and
+   [String.sub s 0 max_len] lands inside a multibyte character whenever one
+   straddles the boundary, leaving a lead byte with no continuation. The damage
+   is not local to the field: a consumer that decodes the whole payload fails on
+   all of it. The dashboard's exact-lane panel rendered nothing for this reason
+   — one Korean board comment crossing the 1024-byte preview boundary made
+   [response.json()] throw, and 68 runs went unshown.
+
+   [String_util.utf8_char_boundary] is the existing answer to this (8+ callers
+   already route through that module's UTF-8 helpers); only the cut index moves,
+   so the byte budget and the suffix behave exactly as before. *)
 let truncate ?(max_len = default_max_len) (s : string) : string =
   let s = String.trim s in
   if String.length s <= max_len then s
-  else String.sub s 0 max_len ^ "...(truncated)"
+  else String.sub s 0 (String_util.utf8_char_boundary s max_len) ^ "...(truncated)"
 
 (* Blob markers (see [Tool_output.encode_for_oas]) carry structural fields
    (sha256/bytes/mime) the dashboard needs to render the marker as a "Stored

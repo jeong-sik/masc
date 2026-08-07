@@ -18,7 +18,6 @@ let make_runtime ?model ?(max_concurrency = 2) id base_url =
     max_concurrency;
     active_slots = 0;
     queue_depth = 0;
-    latency_ema_ms = None;
     failure_streak = 0;
     cooldown_until = None;
     last_error = None;

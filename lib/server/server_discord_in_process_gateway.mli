@@ -15,9 +15,8 @@
        {!Channel_gate_discord_state.send_message} when streaming never
        starts or fails.
 
-    Always-on by design: there is no [MASC_DISCORD_BUILTIN]-style
-    toggle. The legacy Python sidecar is gone — there is no
-    fallback path to switch back to. If
+    Always-on by design: there is no toggle and no fallback transport to
+    switch to. If
     [DISCORD_BOT_TOKEN] is unset the gateway logs a warning and
     skips startup; the server still boots normally.
 

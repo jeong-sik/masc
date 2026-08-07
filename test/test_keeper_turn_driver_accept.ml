@@ -903,6 +903,28 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
       ; effective_budget = 4096
       }
     in
+    (* #27331: distinct from [retry_context_resolution] on purpose. The two
+       assertions below ("first attempt uses initial max context" = 1024,
+       "final max context comes from fallback runtime" = 4096) exist to prove
+       [run_direct_no_progress_retry_loop] threads each attempt's OWN
+       [runtime_execution.max_context] through instead of reusing whichever
+       runtime happened to run first. #26177 migrated this call site from
+       [~initial_max_context:1024] to [~initial_execution] but built the new
+       value via [retry_execution], which carries [retry_context_resolution]
+       (4096) — collapsing the two runtimes onto one budget and silently
+       making the first assertion false. Restoring a resolution of its own
+       is the fix; the sibling test below (2048, its own record) shows the
+       migration done correctly. *)
+    let initial_context_resolution
+        : Masc.Keeper_context_runtime.max_context_resolution =
+      { requested_override = None
+      ; primary_budget = 1024
+      ; runtime_budget = 1024
+      ; runtime_budget_source = Some Runtime.Capability
+      ; requested_context_window = 1024
+      ; effective_budget = 1024
+      }
+    in
     let attempts = ref [] in
     let published = ref [] in
     let selected = ref [] in
@@ -917,8 +939,12 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
       ; temperature = 0.0
       }
     in
-    let initial_execution =
-      retry_execution "runtime.direct-empty"
+    let initial_execution : Masc.Keeper_turn_runtime_budget.runtime_execution =
+      { runtime_id = "runtime.direct-empty"
+      ; max_context_resolution = initial_context_resolution
+      ; max_context = initial_context_resolution.requested_context_window
+      ; temperature = 0.0
+      }
     in
     let result =
       Masc.Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop

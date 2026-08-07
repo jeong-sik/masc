@@ -21,7 +21,6 @@ type parsed_args = {
   proactive_enabled_opt : bool option;
   sandbox_profile_opt : string option;
   network_mode_opt : string option;
-  persona_name_opt : string option;
   instructions_arg : string option;
   profile_defaults : keeper_profile_defaults;
   instructions_opt : string option;
@@ -95,7 +94,7 @@ let parse_max_context_override args =
            "max_context_override must be an integer or null (received %s)"
            (Json_util.kind_name other))
 
-let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.t) :
+let parse (ctx : _ context) (args : Yojson.Safe.t) :
     (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
@@ -112,25 +111,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
                 "invalid keeper name: %S is a runtime agent identity; use the canonical keeper name %S"
                 name canonical_name))
     | None ->
-    match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_up" args with
-    | Error e -> Error (tool_result_error e)
-    | Ok () ->
-    match
-      reject_removed_keeper_input_keys ~allow_sandbox_fields:true
-        ~tool_name:"masc_keeper_up" args
-    with
-    | Error e -> Error (tool_result_error e)
-    | Ok () ->
-    if
-      (not allow_sandbox_fields)
-      && Option.is_some (Json_util.assoc_member_opt "network_mode" args)
-    then
-      Error
-        (tool_result_error
-           "removed keeper sandbox args for masc_keeper_up: network_mode. Configure \
-            network posture in keeper TOML/profile defaults; the public keeper-up \
-            contract accepts only the optional sandbox_profile isolation boundary.")
-    else
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
@@ -150,14 +130,7 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
-    let persona_name_opt = Safe_ops.json_string_opt "persona_name" args in
     let instructions_arg = get_string_opt args "instructions" in
-    let persona_name_error =
-      match persona_name_opt with
-      | Some persona_name when not (validate_name persona_name) ->
-        Some (Printf.sprintf "invalid persona_name: %S" persona_name)
-      | Some _ | None -> None
-    in
     match
       load_keeper_profile_defaults_result_for_base_path
         ~base_path:ctx.config.base_path
@@ -186,24 +159,15 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
              ~keeper_name:name
              profile_defaults)
     in
-    (* The previous implementation read [<base>/memory/souls/<name>/SOUL.md]
-       on every keeper turn-up and wrapped the resulting (or "not found")
-       text into a "[SYSTEM: SOUL INFUSION]" block prepended to the
-       keeper's instructions.  No production keeper ships a SOUL.md
-       and no spec defines one — the directory does not exist on any
-       host — so the path emitted an INFO log every cycle and silently
-       polluted every keeper's instructions with a fallback string.
-       Removed; instructions now reflect only the operator-supplied
-       argument or the keeper profile default. *)
     let instructions_opt =
       match instructions_arg with
       | Some _ -> instructions_arg
       | None -> profile_defaults.instructions
     in
-    match persona_name_error, sandbox_profile_error, max_context_override_res with
-    | Some msg, _, _ | None, Some msg, _ -> Error (tool_result_error msg)
-    | None, None, Error msg -> Error (tool_result_error msg)
-    | None, None, Ok (max_context_override_present, max_context_override_opt) ->
+    match sandbox_profile_error, max_context_override_res with
+    | Some msg, _ -> Error (tool_result_error msg)
+    | None, Error msg -> Error (tool_result_error msg)
+    | None, Ok (max_context_override_present, max_context_override_opt) ->
     Ok {
       name;
       runtime_id_opt;
@@ -216,7 +180,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       proactive_enabled_opt;
       sandbox_profile_opt;
       network_mode_opt;
-      persona_name_opt;
       instructions_arg;
       profile_defaults;
       instructions_opt;

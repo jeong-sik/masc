@@ -19,9 +19,6 @@ vi.mock('../keeper-detail-state', () => ({ openKeeperDetail: mocks.openKeeperDet
 vi.mock('../keeper-detail-page', () => ({
   KeeperDetailPage: () => h('div', { 'data-testid': 'keeper-detail-page' }, 'KeeperDetailPage'),
 }))
-vi.mock('../keeper-spawn/persona-browser', () => ({
-  PersonaBrowser: () => h('div', { 'data-testid': 'persona-browser' }, 'PersonaBrowser'),
-}))
 vi.mock('../keeper-badge', () => ({
   KeeperBadge: ({ id }: { id: string }) => h('span', { 'data-testid': 'keeper-badge' }, id),
 }))
@@ -78,31 +75,17 @@ describe('RegistrySurface', () => {
     container.remove()
   })
 
-  // Registry owns persona writes. A read-only persona list here would recreate
-  // the split that kept create/edit/delete on a separate route.
-  it('mounts the persona browser so create/edit/delete live on this route', () => {
-    render(h(RegistrySurface, null), container)
-    expect(container.querySelector('[data-testid="persona-browser"]')).not.toBeNull()
-  })
-
-  it('puts personas first and keeps keeper instances in a collapsed details block', () => {
+  it('renders keepers as the only registry layer', () => {
     mocks.keepers.value = [keeper({ name: 'alpha' })]
     render(h(RegistrySurface, null), container)
 
-    const details = container.querySelector<HTMLDetailsElement>('details.reg-keepers')
-    expect(details).not.toBeNull()
-    expect(details!.open).toBe(false)
-    expect(details!.textContent).toContain('Keeper 인스턴스')
-    // Persona layer precedes the keeper instance block in document order.
-    const personas = container.querySelector('.reg-personas')
-    expect(personas).not.toBeNull()
-    expect(
-      personas!.compareDocumentPosition(details!) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy()
+    const registry = container.querySelector('.reg-keepers')
+    expect(registry).not.toBeNull()
+    expect(registry!.textContent).toContain('Keeper')
     // Canonical group labels from KEEPER_STATUS_LABEL_KO.
-    expect(details!.textContent).toContain('실행 중')
-    expect(details!.textContent).not.toContain('차단 · 확인 필요')
-    expect(details!.textContent).not.toContain('중지 · 미기동')
+    expect(registry!.textContent).toContain('실행 중')
+    expect(registry!.textContent).not.toContain('차단 · 확인 필요')
+    expect(registry!.textContent).not.toContain('중지 · 미기동')
   })
 
   it('opens keeper detail from a roster row instead of reimplementing update/delete', () => {
@@ -123,6 +106,5 @@ describe('RegistrySurface', () => {
     render(h(RegistrySurface, null), container)
 
     expect(container.querySelector('[data-testid="keeper-detail-page"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="persona-browser"]')).toBeNull()
   })
 })

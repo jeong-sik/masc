@@ -638,7 +638,7 @@ function firstJudgeContradictionCount(judge: FusionJudge, identity: string): num
 // (excluded from meta reconcile, RFC-0283 §2.3); a synthesized node shows its
 // decision badge, resolved-answer gist, derived 합의/상충 counts, and token spend.
 // No lens/model split — the backend carries only `identity` (= panelist_id) for a
-// first node, so inventing a persona/model split would fabricate data.
+// first node, so inventing an identity/model split would fabricate data.
 function FusionFirstJudgeCard({ node, judge }: { node: FusionJudgeNode; judge: FusionJudge }) {
   if (node.failed) {
     return html`

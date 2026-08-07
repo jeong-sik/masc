@@ -56,7 +56,7 @@ Vincent removed cost from the table; the verdict holds anyway, on four grounds:
 
 A self-observation is **token-reflexive, stage-level, and causally active when re-read**:
 - *token-reflexive*: "I am idle" is true only relative to the turn that minted it ("yesterday-idle ≠ today-idle" — the exact analogue of RFC-0259's "PR-was-open ≠ PR-is-open").
-- *stage-level*: it describes an on/off momentary stage, not a standing trait.
+- *stage-level*: it describes an on/off momentary stage, not a standing property.
 - *causally active*: re-injecting "I am idle" into the prompt is **not inert** — it is a control signal that helps make the observed state true (the observer effect that is the echo loop).
 
 **The key correction to RFC-0285 §7 (High open question).** RFC-0285 says: "there is *no deterministic oracle* for 'is this self-observation still true'… do not pretend a reconciler exists." Two lenses (self-obs epistemics, AI memory) show this is **too strong**: the keeper's **own subsequent action stream is a deterministic oracle**. A keeper that claimed "no unclaimed tasks / I am idle" and then *claims a task or emits a tool call* has **falsified** the standing claim. This is:

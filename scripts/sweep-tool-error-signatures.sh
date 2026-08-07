@@ -5,7 +5,7 @@
 # Reads <base-path>/.masc/tool_calls/YYYY-MM/DD.jsonl and emits
 # newline-delimited JSON records, one per (tool, signature) pair with count.
 #
-# Purpose: observe whether persona/hint changes reduce per-class repeats
+# Purpose: observe whether prompt/hint changes reduce per-class repeats
 # over time. Pair with RFC #8760 R1/R2 rollouts.
 #
 # Usage:

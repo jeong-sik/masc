@@ -683,7 +683,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
               actual_input_tokens: 1000,
               attributed_bytes: 1160,
               segments: {
-                'prompt.persona': { bytes: 320, fingerprint: null },
+                'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
                 message_user: { bytes: 210, fingerprint: null },
                 message_tool_use: { bytes: 90, fingerprint: null },
                 message_tool_result: { bytes: 540, fingerprint: null },
@@ -700,7 +700,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       actual_input_tokens: 1000,
       attributed_bytes: 1160,
       segments: {
-        'prompt.persona': { bytes: 320, fingerprint: null },
+        'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
         message_user: { bytes: 210, fingerprint: null },
         message_tool_use: { bytes: 90, fingerprint: null },
         message_tool_result: { bytes: 540, fingerprint: null },

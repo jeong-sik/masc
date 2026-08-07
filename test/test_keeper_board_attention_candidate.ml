@@ -109,7 +109,6 @@ let keeper_context ?(active_goal_ids = []) () =
     ; "agent_name", `String "sangsu-agent"
     ; "keeper_record_id", `Null
     ; "keeper_runtime_uid", `Null
-    ; "persona", `Null
     ; "instructions", `String "continue"
     ; "active_goal_ids", `List (List.map (fun id -> `String id) active_goal_ids)
     ; "current_task_id", `Null

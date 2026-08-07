@@ -13,7 +13,7 @@ let validate_join_identity ~base_path ~agent_name =
     Keeper_identity.normalize_all_names
       ~input_agent_name:agent_name
       ~base_path
-      ~check_persona:true
+      ~check_keeper:true
       ()
   with
   | Ok bundle -> Ok bundle.keeper_name

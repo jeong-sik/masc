@@ -17,7 +17,7 @@ export function autonomyHint(count: number | undefined, proactiveEnabled: boolea
 }
 
 export const CTX_SEGMENT_LABELS: Record<string, string> = {
-  'prompt.persona': '페르소나',
+  'prompt.keeper_instructions': 'Keeper 지침',
   'prompt.dynamic_context': '턴 컨텍스트',
   'prompt.temporal_summary': '시간 요약',
   'prompt.memory_os_recall': '메모리 회상',
@@ -35,7 +35,7 @@ export const CTX_SEGMENT_LABELS: Record<string, string> = {
 }
 
 export const CTX_SEGMENT_COLORS: Record<string, string> = {
-  'prompt.persona': 'var(--amber-bright)',
+  'prompt.keeper_instructions': 'var(--amber-bright)',
   'prompt.dynamic_context': 'var(--purple)',
   'prompt.temporal_summary': 'var(--cyan)',
   'prompt.memory_os_recall': 'var(--rose-light)',

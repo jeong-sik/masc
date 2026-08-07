@@ -1,7 +1,7 @@
 (** Keeper lifecycle phase variant + bijection helpers.
 
     SSOT for the lifecycle phase enum referenced by the
-    [Keeper_state_machine] FSM, dashboard UI, persona audits, and
+    [Keeper_state_machine] FSM, dashboard UI, Keeper audits, and
     operator-facing keeper status surfaces. Verbatim extract from the
     head of [Keeper_state_machine]; the parent retains a transparent
     variant alias so existing exhaustive matches at ~109 call sites

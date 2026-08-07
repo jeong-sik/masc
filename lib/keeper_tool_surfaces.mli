@@ -19,29 +19,18 @@ module Random = Stdlib.Random
 (** Keeper_tool_surfaces — lightweight internal tool surface
     definitions.
 
-    This module stays dependency-light so spawned agents, local
-    workers, and strict worker flows can share allowlists without
-    pulling in the full public capability registry.
-
-    Three surface families are exposed:
+    This module stays dependency-light so spawned agents can share
+    allowlists without pulling in the full public capability
+    registry.
 
     - **Spawned-agent**: tools available to MCP-spawned agent
-      sub-processes (a small public set for scripting agents).
-    - **Local-worker**: tools available to in-process worker
-      flows (a larger set including SDK contract schemas).
-    - **Role-catalogue**: dynamic role-based filtering for the
-      autonomous agent (worker / workspace_lead / fleet_leader). *)
+      sub-processes (a small public set for scripting agents). *)
 
 (** {1 Helpers} *)
 
 (** [unique_preserve_order xs] removes duplicates from [xs] while
     preserving first-occurrence order.  Thin alias over
     {!Json_util.dedupe_keep_order} re-exported for siblings. *)
-
-val dedupe_schemas :
-  Masc_domain.tool_schema list -> Masc_domain.tool_schema list
-(** [dedupe_schemas schemas] removes duplicate-by-[name] entries
-    while preserving first-occurrence order. *)
 
 val lookup_schemas_by_name_exn :
   label:string ->

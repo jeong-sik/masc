@@ -361,7 +361,7 @@ flowchart TD
 
 | Source | Injection path |
 |---|---|
-| Base keeper persona/goals/git policy | `Keeper_prompt.build_keeper_system_prompt` in `prepare_run_context`. |
+| Keeper instructions/goals/git policy | `Keeper_prompt.build_keeper_system_prompt` in `prepare_run_context`. |
 | Turn-specific world/task context | `build_turn_prompt` callback returns `turn_system_prompt` + `dynamic_context`. |
 | Memory context | `Memory_hooks.before_turn_params` appends text to OAS `extra_system_context`; no longer imperatively seeds OAS memory. |
 | Temporal context | `Masc_context_injector.render_temporal_summary` appended by keeper `BeforeTurnParams`. |

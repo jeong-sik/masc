@@ -137,9 +137,9 @@ MASC does not normalize `execute_command`, `Bash`, `Shell`, `cmd`, `command`,
 tool-name boundaries must produce the canonical typed call directly. Any
 non-canonical field that reaches MASC is rejected explicitly.
 
-### 4.5 Persona / prompt examples
+### 4.5 Keeper / prompt examples
 
-The `issue_king` persona (`config/personas/issue_king/profile.json`) explicitly instructs:
+The `issue_king` keeper (`config/keepers/issue_king/AGENT.md`) explicitly instructs:
 
 > "PR 생성은 준비된 작업 브랜치에서 git push 후 별도 실행 축이 아니라 Execute typed argv 경로로 수행한다."
 
@@ -219,7 +219,7 @@ Search `.masc/trajectories/`, `logs/`, or telemetry for the affected `issue_king
 5. **Add a typed pre-check before OAS bridge**
    - For `Execute`, validate/coerce the input immediately after provider parsing and before exposing it to the model loop, so bad shapes fail fast with a clearer error.
 
-6. **Audit persona/memory examples**
+6. **Audit keeper/memory examples**
    - Search all `.json` / `.toml` / `.md` under `config/` for any `Execute` example that uses `args`, `command`, or `cmd`, and replace with `executable`/`argv`.
 
 ---
@@ -229,7 +229,7 @@ Search `.masc/trajectories/`, `logs/`, or telemetry for the affected `issue_king
 | File | Why |
 |---|---|
 | `config/keepers/issue_king.toml` | Provider/runtime binding for `issue_king`, and its own `instructions` block |
-| `config/personas/issue_king/profile.json` | Prompt examples mentioning Execute |
+| `config/keepers/issue_king/AGENT.md` | Prompt examples mentioning Execute |
 | `config/keepers/*.toml` | Prompt examples — each keeper carries its own `instructions`; the former shared `base.toml` is gone |
 | `oas/lib/llm_provider/backend_gemini.ml` | If provider is Gemini, check `args` unwrap |
 | `oas/lib/llm_provider/backend_openai_parse.ml` | If provider is OpenAI-compatible |

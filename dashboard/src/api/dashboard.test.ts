@@ -2540,13 +2540,6 @@ describe('fetchKeeperConfig', () => {
       proactive: {
         enabled: 'true',
       },
-      drift: {
-        status: 'wired',
-        enabled: 'true',
-        min_turn_gap: '4',
-        count_total: '2',
-        last_reason: 'board quiet',
-      },
       hooks: {
         scope: 'keeper_runtime_composite',
         slots: {

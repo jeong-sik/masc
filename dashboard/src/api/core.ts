@@ -401,7 +401,6 @@ const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
   '/api/v1/dashboard/shell',
   '/api/v1/dashboard/project-snapshot',
   '/api/v1/dashboard/namespace-truth',
-  '/api/v1/dashboard/workspace-truth',
   '/api/v1/dashboard/execution',
   '/api/v1/dashboard/planning',
   '/api/v1/dashboard/briefing',
@@ -547,7 +546,6 @@ function bootstrapInitializingPayload(path: string): unknown | null {
       }
     case '/api/v1/dashboard/project-snapshot':
     case '/api/v1/dashboard/namespace-truth':
-    case '/api/v1/dashboard/workspace-truth':
       return {
         status: 'initializing',
         generated_at: generatedAt,

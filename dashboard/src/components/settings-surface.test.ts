@@ -248,7 +248,6 @@ function makeRuntimeProvider(
     source: 'runtime.toml',
     endpoint_url: 'https://runtime.example/v1',
     note: null,
-    discovery: null,
     ...overrides,
   }
 }

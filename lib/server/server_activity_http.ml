@@ -202,12 +202,3 @@ let swimlane_http_json ~deps ~state request =
       Activity_graph.agent_spans_json (Mcp_server.workspace_config state) ~limit
         ?since_ms ())
 
-type stream_info = {
-  session_id : string;
-  client_id : int;
-  writer : Httpun.Body.Writer.t;
-  mutex : Eio.Mutex.t;
-  stop : bool ref;
-  mutable closed : bool;
-}
-

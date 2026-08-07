@@ -165,10 +165,6 @@ let worker_lifecycle_classification_of_result = function
     Explicit model-label execution must never silently substitute a
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)
-type label_resolution_error =
-  Runtime_transport.label_resolution_error =
-  | Invalid_model_label of string
-
 let label_resolution_error_to_string =
   Runtime_transport.label_resolution_error_to_string
 

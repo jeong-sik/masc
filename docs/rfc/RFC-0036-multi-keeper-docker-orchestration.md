@@ -67,13 +67,13 @@ New env knob `MASC_KEEPER_RUNTIME_TOPOLOGY` with values:
 - `container-per-keeper` (opt-in — keeper = docker container)
 
 When `container-per-keeper`:
-- `Keeper_supervisor.boot_keeper` calls `Docker_runtime.spawn_keeper_container ~keeper_id ~persona ~base_path` instead of starting a fiber.
+- `Keeper_supervisor.boot_keeper` calls `Docker_runtime.spawn_keeper_container ~keeper_id ~keeper ~base_path` instead of starting a fiber.
 - Container labels: `masc.keeper.id=<id>`, `masc.keeper.session=<server-uuid>`, `masc.keeper.runtime=container`.
 - Returns a `keeper_handle` opaque type that wraps either `fiber_handle` (single) or `container_handle` (multi). All other supervisor ops route through this handle.
 
 `docker-compose.multi-keeper.yml` (new file, NOT replacing the single-container `docker-compose.yml`):
 - One service template + scaling instructions, OR
-- One named service per keeper persona declared in `config/keepers/*.toml`.
+- One named service per Keeper declared in `config/keepers/*.toml`.
 
 Decision deferred to Phase B (see §4).
 
@@ -126,7 +126,7 @@ Phase A is non-architectural — it's a hook plumbing addition that single-conta
 
 1. Does `container-per-keeper` mode need its own admission controller, or can it reuse `keeper_turn_slot` semaphore? (RFC-0026 territory.)
 2. How does `lib/runtime_routes` route turns when keepers are in different containers? Probably unchanged (HTTP → MCP socket), but worth confirming.
-3. Multi-keeper compose: per-persona named services (declarative) vs `--scale keeper=N` (parameterized)? Phase B decision.
+3. Multi-keeper compose: per-keeper named services (declarative) vs `--scale keeper=N` (parameterized)? Phase B decision.
 
 ## 8. Migration Plan
 

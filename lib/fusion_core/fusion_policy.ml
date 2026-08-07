@@ -9,7 +9,7 @@ type panel_group =
   { models : string list  (** provider.model ids *)
   ; label : string
       (** 패널 정체성 라벨 (RFC-0278). 같은 model을 다른 system_prompt로 여러 그룹에
-          둘 때(persona ensemble) 패널을 구분한다. ""(기본)이면 정체성=model 그대로
+          둘 때(identity ensemble) 패널을 구분한다. ""(기본)이면 정체성=model 그대로
           → legacy/단일-occurrence는 byte-identical. 정체성 derive는 [panelist_id]. *)
   ; system_prompt : string  (** 그룹 패널 모델 system prompt (config 필수) *)
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부 *)

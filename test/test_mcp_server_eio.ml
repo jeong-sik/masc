@@ -2290,19 +2290,10 @@ let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal
           ~internal_keeper_runtime:true state request
       in
       let names = tool_names_from_list_response response in
-      (* internal_keeper_runtime no longer exposes keeper-internal tools to
-         tools/list: the Agent_internal surface was removed and
-         include_agent_internal adds no schema (see
-         mcp_server_eio_tool_profile.ml), so the Full-profile is_public_mcp
-         filter still drops them. Pin that tool_execute remains outside external
-         MCP discovery even when the flag is set. A prior half-finished refactor left a
-         contradictory "tool_execute listed = true" assertion here against the
-         identical [List.mem] expression; it could never co-pass with the
-         hidden check below and is removed. *)
-      Alcotest.(check bool) "retired tool_execute not externally discovered" false
+      Alcotest.(check bool) "tool_execute is not externally discovered" false
         (List.mem "tool_execute" names))
 
-let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execute
+let test_handle_request_tools_call_internal_keeper_runtime_rejects_unknown_execute
     () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2353,7 +2344,7 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execu
             | _ -> Alcotest.fail "missing content text")
         | _ -> Alcotest.fail "missing content"
       in
-      Alcotest.(check bool) "mentions retired tool_execute" true
+      Alcotest.(check bool) "mentions unknown tool_execute" true
         (contains_substring msg "Unknown tool: tool_execute");
       Alcotest.(check bool) "mentions registry inconsistency" true
         (contains_substring msg "registry inconsistency"))
@@ -3100,8 +3091,8 @@ let eio_tests = [
     test_handle_request_tools_call_blocks_keeper_internal_tool;
   "handle tools/list internal keeper runtime hides keeper internal tools", `Quick,
     test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal_tools;
-  "handle tools/call internal keeper runtime rejects retired execute", `Quick,
-    test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execute;
+  "handle tools/call internal keeper runtime rejects unknown execute", `Quick,
+    test_handle_request_tools_call_internal_keeper_runtime_rejects_unknown_execute;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)

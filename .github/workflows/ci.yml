@@ -585,7 +585,7 @@ jobs:
           bash scripts/ci/check-determinism-contract.sh
           bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
           bash scripts/ci/check-credential-audits.sh
-          bash scripts/ci/check-persona-profile-placeholders.sh
+          bash scripts/ci/check-keeper-instructions-placeholders.sh
           bash scripts/ci/check-accept-fd-lifecycle.sh
           bash scripts/ci/check-actor-consumer-wired.sh
           bash scripts/ci/check-log-severity-anti-patterns.sh
@@ -1570,7 +1570,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_persona_name @test/runtest-test_dashboard_briefing @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_telemetry_eio_pbt @test/runtest-test_verification_authority_tools"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_keeper_name @test/runtest-test_dashboard_briefing @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_telemetry_eio_pbt @test/runtest-test_verification_authority_tools"
 
       - name: Run transport harness suite
         id: transport_harness_suite

@@ -1,5 +1,4 @@
-(** Keeper_types_profile — keeper profile defaults, persona loading,
-    and directory path helpers.
+(** Keeper_types_profile — keeper config and prompt loading.
 
     Extracted from keeper_types.ml to reduce file size.
     Depends only on Keeper_config (no Keeper_types dependency).
@@ -119,40 +118,46 @@ let workspace_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
 
 include Keeper_types_profile_defaults
 
-type persona_summary = Keeper_types_profile_persona.persona_summary =
-  { persona_name : string
-  ; display_name : string
-  ; role : string option
-  ; trait : string option
-  ; profile_path : string
-  ; has_keeper_defaults : bool
-  }
+let operator_todo_placeholder_marker = "OPERATOR_TODO"
 
-let operator_todo_placeholder_marker =
-  Keeper_types_profile_persona.operator_todo_placeholder_marker
+let string_has_operator_todo_placeholder value =
+  String_util.contains_substring value operator_todo_placeholder_marker
 ;;
 
-let string_has_operator_todo_placeholder =
-  Keeper_types_profile_persona.string_has_operator_todo_placeholder
-;;
-
-let json_has_operator_todo_placeholder =
-  Keeper_types_profile_persona.json_has_operator_todo_placeholder
-;;
-
-let json_operator_todo_placeholder_paths =
-  Keeper_types_profile_persona.json_operator_todo_placeholder_paths
-;;
-
-let reject_placeholder_persona_profile =
-  Keeper_types_profile_persona.reject_placeholder_persona_profile
+let json_operator_todo_placeholder_paths json =
+  let child_path path key = if path = "$" then "$." ^ key else path ^ "." ^ key in
+  let indexed_path path index = Printf.sprintf "%s[%d]" path index in
+  let rec loop path = function
+    | `String value ->
+      if string_has_operator_todo_placeholder value then [ path ] else []
+    | `Assoc fields ->
+      fields
+      |> List.concat_map (fun (key, value) ->
+        let field_path = child_path path key in
+        let key_hits =
+          if string_has_operator_todo_placeholder key then [ field_path ] else []
+        in
+        key_hits @ loop field_path value)
+    | `List values | `Tuple values ->
+      values
+      |> List.mapi (fun index value -> loop (indexed_path path index) value)
+      |> List.concat
+    | `Variant (name, value) ->
+      let variant_path = child_path path name in
+      let name_hits =
+        if string_has_operator_todo_placeholder name then [ variant_path ] else []
+      in
+      name_hits
+      @ (match value with
+         | None -> []
+         | Some value -> loop variant_path value)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Floatlit _ -> []
+  in
+  loop "$" json
 ;;
 
 let keeper_profile_defaults_materializable (defaults : keeper_profile_defaults) =
-  let has_runtime_identity =
-    Option.is_some defaults.persona_name
-    || defaults.mention_targets <> []
-  in
+  let has_runtime_identity = Option.is_some defaults.instructions in
   match defaults.autoboot_enabled with
   | Some true -> true
   | Some false | None -> has_runtime_identity
@@ -165,101 +170,49 @@ let keeper_toml_path_opt name =
 let keeper_toml_path_opt_for_base_path ~base_path name =
   Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path name
 
-let persona_load_error_to_profile_error
-    ?keeper_path
-    (error : Keeper_types_profile_persona_defaults.load_error) =
-  let kind =
-    match error.kind with
-    | Keeper_types_profile_persona_defaults.Persona_read_error -> Read_error
-    | Keeper_types_profile_persona_defaults.Persona_parse_error -> Parse_error
+let keeper_instructions_path ~toml_path name =
+  Filename.concat (Filename.concat (Filename.dirname toml_path) name) "AGENT.md"
+
+let load_keeper_instructions ~toml_path name defaults =
+  let path = keeper_instructions_path ~toml_path name in
+  let error kind detail =
+    Error { keeper_path = toml_path; failing_path = path; kind; detail }
   in
-  let keeper_path =
-    match keeper_path with
-    | Some keeper_path -> keeper_path
-    | None -> error.path
-  in
-  { keeper_path
-  ; failing_path = error.path
-  ; kind
-  ; detail = error.detail
-  }
-
-let load_keeper_profile_defaults_from_persona_dirs
-    ?keeper_path
-    ~persona_dirs
-    name =
-  Keeper_types_profile_persona_defaults.load_from_dirs ~persona_dirs ~name
-  |> Result.map_error (persona_load_error_to_profile_error ?keeper_path)
-
-let safe_persona_dirs ?base_path () =
-  try
-    match base_path with
-    | Some base_path -> Config_dir_resolver.personas_dirs_for_base_path ~base_path
-    | None -> Config_dir_resolver.personas_dirs ()
-  with
-  | Sys_error _ -> []
-  | exn ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string ProfileLoadFailures)
-        ~labels:
-          [ "site", Keeper_profile_load_failure_site.(to_label Personas_dirs_resolve) ]
-        ();
-      Log.Keeper.warn
-        "profile defaults personas_dirs unexpected: %s"
-        (Printexc.to_string exn);
-      []
-
-let resolved_persona_name ~keeper_name
-    (defaults : keeper_profile_defaults) : string =
-  match defaults.persona_name with
-  | Some name when String.trim name <> "" -> name
-  | _ -> keeper_name
+  match Safe_ops.read_file_safe path with
+  | Error detail -> error Read_error detail
+  | Ok content ->
+    let instructions = String.trim content in
+    if instructions = "" then
+      error Parse_error "keeper AGENT.md must not be empty"
+    else if string_has_operator_todo_placeholder instructions then
+      error Parse_error
+        (Printf.sprintf
+           "keeper AGENT.md contains %s placeholder text"
+           operator_todo_placeholder_marker)
+    else Ok { defaults with instructions = Some instructions }
 
 let load_keeper_profile_defaults_result_uncached_with_paths
     ~keeper_toml_path_opt
-    ~persona_dirs
     name :
     (keeper_profile_defaults, keeper_toml_load_error) result =
-  (* Priority: TOML config/keepers/<name>.toml > persona profile.json.
-     If TOML sets [persona_name], load that persona first and treat TOML as a
-     thin overlay instead of duplicating the full keeper profile. *)
-  let result =
-    match keeper_toml_path_opt with
-    | Some toml_path ->
-      (match load_keeper_toml toml_path with
-       | Ok (_name, defaults) -> (
-           match defaults.persona_name with
-           | Some persona_name ->
-               (match
-                  load_keeper_profile_defaults_from_persona_dirs
-                    ~keeper_path:toml_path
-                    ~persona_dirs
-                    persona_name
-                with
-                | Error _ as error -> error
-                | Ok persona_defaults ->
-                  Ok
-                    (merge_keeper_profile_defaults
-                       ~base:persona_defaults ~overlay:defaults))
-           | None -> Ok defaults)
-       | Error e -> Error e)
-    | None ->
-      load_keeper_profile_defaults_from_persona_dirs ~persona_dirs name
-  in
-  result
+  match keeper_toml_path_opt with
+  | None -> Ok empty_keeper_profile_defaults
+  | Some toml_path ->
+    (match load_keeper_toml toml_path with
+     | Error _ as error -> error
+     | Ok (loaded_name, defaults) ->
+       load_keeper_instructions ~toml_path loaded_name defaults)
 
 let load_keeper_profile_defaults_result_uncached name :
     (keeper_profile_defaults, keeper_toml_load_error) result =
   load_keeper_profile_defaults_result_uncached_with_paths
     ~keeper_toml_path_opt:(keeper_toml_path_opt name)
-    ~persona_dirs:(safe_persona_dirs ())
     name
 
 let load_keeper_profile_defaults_result_for_base_path ~base_path name :
     (keeper_profile_defaults, keeper_toml_load_error) result =
   load_keeper_profile_defaults_result_uncached_with_paths
     ~keeper_toml_path_opt:(keeper_toml_path_opt_for_base_path ~base_path name)
-    ~persona_dirs:(safe_persona_dirs ~base_path ())
     name
 
 type keeper_toml_config_error = {
@@ -365,7 +318,7 @@ let keeper_toml_unknown_keys_of_path path =
                 {
                   keeper_name = keeper_name_of_toml_path path;
                   path;
-                  unknown_keys = normalize_unknown_keeper_toml_keys unknown_keys;
+                  unknown_keys = List.sort_uniq String.compare unknown_keys;
                 }))
 
 let keeper_toml_config_error_of_path path =
@@ -433,7 +386,7 @@ let keeper_toml_unknown_keys () =
   keeper_toml_unknown_keys_in_dir (Config_dir_resolver.keepers_dir ())
 
 (* Profile defaults cache — strict results are cached by source file
-   fingerprint, not by keeper name alone. TOML/persona edits happen outside the
+   fingerprint, not by keeper name alone. TOML and AGENT.md edits happen outside the
    process, so both Ok and Error entries must invalidate when their dependency
    mtimes/sizes change. *)
 type profile_defaults_cache_key = string * string
@@ -452,19 +405,15 @@ let profile_defaults_mu = Stdlib.Mutex.create ()
 let profile_cache_scope () =
   try
     let resolution = Config_dir_resolver.resolve () in
-    String.concat "|"
-      [ resolution.config_root.path; resolution.personas.path ]
+    resolution.config_root.path
   with
   | exn ->
     (* resolver failure fallback uses env only as a cache-key salt;
        profile parsing remains explicit and the cache miss path revalidates
        file fingerprints before returning a cached result. NDT-OK *)
     String.concat "|"
-      [
-        Option.value ~default:"" (Sys.getenv_opt "MASC_CONFIG_DIR");
-        (* NDT-OK: same cache-key salt fallback as MASC_CONFIG_DIR above. *)
-        Option.value ~default:"" (Sys.getenv_opt "MASC_PERSONAS_DIR");
-        Printexc.to_string exn;
+      [ Option.value ~default:"" (Sys.getenv_opt "MASC_CONFIG_DIR")
+      ; Printexc.to_string exn
       ]
 
 let profile_defaults_cache_key name = (profile_cache_scope (), name)
@@ -485,38 +434,14 @@ let file_fingerprint path =
 let dependency_fingerprint paths =
   paths |> List.map file_fingerprint |> String.concat "|"
 
-let persona_profile_candidate_paths name =
-  let dirs =
-    try Config_dir_resolver.personas_dirs () with
-    | Sys_error _ -> []
-    | exn ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string ProfileLoadFailures)
-        ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Personas_dirs_resolve) ]
-        ();
-      Log.Keeper.warn
-        "profile cache personas_dirs unexpected: %s"
-        (Printexc.to_string exn);
-      []
-  in
-  dirs
-  |> List.map (fun root ->
-       Filename.concat (Filename.concat root name) "profile.json")
-
 let profile_dependency_paths ~name ~primary_toml_path
     (result : (keeper_profile_defaults, keeper_toml_load_error) result) =
   let paths =
     match primary_toml_path, result with
-    | Some toml_path, Ok defaults ->
-      let persona_paths =
-        match defaults.persona_name with
-        | Some persona_name when String.trim persona_name <> "" ->
-          persona_profile_candidate_paths persona_name
-        | _ -> []
-      in
-      toml_path :: persona_paths
+    | Some toml_path, Ok _ ->
+      [ toml_path; keeper_instructions_path ~toml_path name ]
     | Some _, Error error -> keeper_toml_load_error_paths error
-    | None, _ -> persona_profile_candidate_paths name
+    | None, _ -> []
   in
   dedupe_keep_order paths
 
@@ -605,62 +530,17 @@ type keeper_default_source_snapshot = {
 }
 
 let keeper_default_source_snapshot ~base_path name : keeper_default_source_snapshot =
-  match keeper_toml_path_opt_for_base_path ~base_path name with
-  | Some toml_path -> (
-      match load_keeper_toml toml_path with
-      | Ok (_name, defaults) ->
-          { source_kind = Some "toml"; defaults; config_error = None }
-      | Error e ->
-          Log.Keeper.warn
-            "toml config for %s failed (%s); no declarative defaults projected"
-            name
-            (keeper_toml_load_error_to_string e);
-          { source_kind = None
-          ; defaults = empty_keeper_profile_defaults
-          ; config_error = Some e
-          })
-  | None ->
-      (match
-         load_keeper_profile_defaults_from_persona_dirs
-           ~persona_dirs:(safe_persona_dirs ~base_path ())
-           name
-       with
-       | Error config_error ->
-         { source_kind = None
-         ; defaults = empty_keeper_profile_defaults
-         ; config_error = Some config_error
-         }
-       | Ok defaults ->
-         let source_kind =
-           if Option.is_some defaults.manifest_path then Some "persona" else None
-         in
-         { source_kind; defaults; config_error = None })
-
-let persona_description_max_chars =
-  Keeper_types_profile_persona.persona_description_max_chars
-;;
-
-let load_persona_extended = Keeper_types_profile_persona.load_persona_extended
-
-let load_resolved_persona_extended ~keeper_name ?profile_defaults () =
-  let persona_name =
-    match profile_defaults with
-    | Some defaults -> resolved_persona_name ~keeper_name defaults
-    | None -> keeper_name
-  in
-  (* Read failures are already operator-visible inside
-     [load_persona_extended]; "" renders as an explicit [no persona]
-     marker at the librarian prompt boundary. *)
-  (* DET-OK: absent persona is a known-valid empty block, not unknown input. *)
-  Option.value ~default:"" (load_persona_extended persona_name)
-
-let load_persona_summary = Keeper_types_profile_persona.load_persona_summary
-
-let load_persona_summary_from_path =
-  Keeper_types_profile_persona.load_persona_summary_from_path
-;;
-
-let list_persona_summaries = Keeper_types_profile_persona.list_persona_summaries
+  match load_keeper_profile_defaults_result_for_base_path ~base_path name with
+  | Ok defaults ->
+    { source_kind = Option.map (fun _ -> "toml") defaults.manifest_path
+    ; defaults
+    ; config_error = None
+    }
+  | Error config_error ->
+    { source_kind = None
+    ; defaults = empty_keeper_profile_defaults
+    ; config_error = Some config_error
+    }
 
 let keeper_dir (config : Workspace.config) =
   let d = Workspace.keepers_runtime_dir config in

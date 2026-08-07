@@ -73,7 +73,7 @@ describe('keeper prompt byte telemetry', () => {
           actual_input_tokens: 1000,
           attributed_bytes: 1160,
           segments: {
-            'prompt.persona': { bytes: 320, fingerprint: null },
+            'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
             message_tool_result: { bytes: 840, fingerprint: null },
           },
         },

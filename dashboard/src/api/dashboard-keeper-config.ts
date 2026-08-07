@@ -6,7 +6,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperConfig, KeeperFeatureStatus, KeeperHookSlot } from '../types'
+import type { KeeperConfig, KeeperHookSlot } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
   const booleanValue = asBoolean(value)
@@ -17,13 +17,6 @@ function asLooseBoolean(value: unknown, fallback = false): boolean {
     if (normalized === 'false') return false
   }
   return fallback
-}
-
-function asLooseNullableBoolean(value: unknown): boolean | null {
-  const booleanValue = asBoolean(value)
-  if (booleanValue !== undefined) return booleanValue
-  if (typeof value !== 'string') return null
-  return asLooseBoolean(value)
 }
 
 function asLooseNumber(value: unknown): number | undefined {
@@ -51,18 +44,6 @@ function normalizeStringList(value: unknown): string[] {
   if (array.length > 0) return array
   const single = asNullableString(value)
   return single ? [single] : []
-}
-
-function normalizeKeeperFeatureStatus(value: unknown): KeeperFeatureStatus {
-  const status = asNullableString(value)
-  switch (status) {
-    case 'wired':
-    case 'source_only':
-    case 'unwired':
-      return status
-    default:
-      return 'unwired'
-  }
 }
 
 function normalizeKeeperHookSlot(raw: unknown): KeeperHookSlot | null {
@@ -148,7 +129,6 @@ function normalizeDefaultSourceKind(value: unknown): KeeperConfig['sources']['de
   const sourceKind = asNullableString(value)
   switch (sourceKind) {
     case 'toml':
-    case 'persona':
       return sourceKind
     default:
       return null
@@ -161,7 +141,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const promptBlocks = isRecord(prompt.system_prompt_blocks) ? prompt.system_prompt_blocks : {}
   const execution = isRecord(data.execution) ? data.execution : {}
   const proactive = isRecord(data.proactive) ? data.proactive : {}
-  const drift = isRecord(data.drift) ? data.drift : {}
   const hooks = isRecord(data.hooks) ? data.hooks : null
   const runtime = isRecord(data.runtime) ? data.runtime : {}
   const runtimeTrust = isRecord(data.runtime_trust) ? data.runtime_trust : null
@@ -205,13 +184,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     },
     proactive: {
       enabled: asLooseBoolean(proactive.enabled),
-    },
-    drift: {
-      status: normalizeKeeperFeatureStatus(drift.status),
-      enabled: asLooseNullableBoolean(drift.enabled),
-      min_turn_gap: asInt(drift.min_turn_gap) ?? null,
-      count_total: asInt(drift.count_total) ?? null,
-      last_reason: asNullableString(drift.last_reason),
     },
     hooks: hooks
       ? {

@@ -153,7 +153,7 @@ let config_bootstrap_mode () =
 
 let ensure_config_root_scaffold config_root =
   Fs_compat.mkdir_p config_root;
-  [ "prompts"; "keepers"; "personas" ]
+  [ "prompts"; "keepers" ]
   |> List.iter (fun name -> Fs_compat.mkdir_p (Filename.concat config_root name))
 ;;
 
@@ -246,6 +246,5 @@ let startup_config_resolution ~base_path =
       ; executable_name = Sys.executable_name
       ; env_base_path = Some base_path
       ; env_config_dir = Config_dir_resolver.current_env_config_dir_opt ()
-      ; env_personas_dir = Config_dir_resolver.current_env_personas_dir_opt ()
       }
 ;;

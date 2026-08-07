@@ -36,4 +36,4 @@
  (deps
   (source_tree .))
  (action
-  (run scripts/ci/check-persona-profile-placeholders.sh .)))
+  (run scripts/ci/check-keeper-instructions-placeholders.sh .)))

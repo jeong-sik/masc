@@ -116,7 +116,7 @@ let json_upsert_meta_string_field name value fields =
     caller supplied an identity field whose canonical form disagrees
     with the runtime contract's [agent_name].  Pre-fix the caller's
     value was accepted unconditionally; the counter makes spoof
-    attempts (or persona/system-prompt confusion) visible to
+    attempts (or Keeper instruction confusion) visible to
     operators instead of leaving them as silent audit drift.
 
     Cardinality is bounded by the small board write surface and identity fields
@@ -171,7 +171,7 @@ let record_identity_raw_surface field raw canonical fields =
 
     Lenient mode (rewrite + preserve) is preferred over strict
     fail-closed because the LLM occasionally supplies a wrong
-    [author] under persona confusion; rejecting the call would
+    [author] under Keeper instruction confusion; rejecting the call would
     break the chain and lose the post entirely, while the rewrite
     preserves the post with correct attribution and surfaces the
     drift to metrics. *)

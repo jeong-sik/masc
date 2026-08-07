@@ -58,13 +58,13 @@ let sample_record () : Turn_record.t =
   ; turn_ref =
       Ids.Turn_ref.make ~trace_id:"trace-1780648779957-00000" ~absolute_turn:4071
   ; blocks =
-      [ sample_block Prompt_block_id.Persona "aaaa"
+      [ sample_block Prompt_block_id.Keeper_instructions "aaaa"
       ; sample_block Prompt_block_id.Dynamic_context "bbbb"
       ; sample_block Prompt_block_id.Memory_os_recall "cccc"
       ]
   ; input_components =
       Some
-        [ { component = Turn_record.Prompt_block Prompt_block_id.Persona
+        [ { component = Turn_record.Prompt_block Prompt_block_id.Keeper_instructions
           ; bytes = 4
           }
         ; { component = Turn_record.Tool_schemas; bytes = 8192 }
@@ -493,13 +493,13 @@ let valid_block_json ?(bytes = 4) ?(digest = digest_of_label "block") block =
 let test_codec_rejects_malformed_blocks () =
   let cases =
     [ ( "negative bytes"
-      , valid_block_json ~bytes:(-1) Prompt_block_id.Persona )
+      , valid_block_json ~bytes:(-1) Prompt_block_id.Keeper_instructions )
     ; ( "non-sha256 digest"
-      , valid_block_json ~digest:"abcd" Prompt_block_id.Persona )
+      , valid_block_json ~digest:"abcd" Prompt_block_id.Keeper_instructions )
     ; ( "uppercase digest"
       , valid_block_json
           ~digest:(String.make 64 'A')
-          Prompt_block_id.Persona )
+          Prompt_block_id.Keeper_instructions )
     ]
   in
   List.iter
@@ -510,8 +510,8 @@ let test_codec_rejects_malformed_blocks () =
     cases
 
 let test_codec_rejects_duplicate_blocks_and_components () =
-  let persona = valid_block_json Prompt_block_id.Persona in
-  (match Turn_record.of_json (replace_blocks [ persona; persona ]) with
+  let keeper_instructions = valid_block_json Prompt_block_id.Keeper_instructions in
+  (match Turn_record.of_json (replace_blocks [ keeper_instructions; keeper_instructions ]) with
    | Ok _ -> fail "decoded duplicate prompt blocks"
    | Error message ->
      check bool "duplicate block is explicit" true
@@ -597,14 +597,14 @@ let record_with_blocks blocks = { (sample_record ()) with blocks }
 let test_diff_added_removed_changed () =
   let prev =
     record_with_blocks
-      [ sample_block Prompt_block_id.Persona "aaaa"
+      [ sample_block Prompt_block_id.Keeper_instructions "aaaa"
       ; sample_block Prompt_block_id.Dynamic_context "bbbb"
       ; sample_block Prompt_block_id.Temporal_summary "rrrr"
       ]
   in
   let next =
     record_with_blocks
-      [ sample_block Prompt_block_id.Persona "aaaa" (* unchanged *)
+      [ sample_block Prompt_block_id.Keeper_instructions "aaaa" (* unchanged *)
       ; sample_block Prompt_block_id.Dynamic_context "BBBB" (* changed *)
       ; sample_block Prompt_block_id.Memory_os_recall "mmmm" (* added *)
       ]
@@ -631,7 +631,7 @@ let test_diff_identical_records_is_empty () =
 
 let test_entries_with_diffs_same_trace_only () =
   let r1 =
-    { (record_with_blocks [ sample_block Prompt_block_id.Persona "aaaa" ]) with
+    { (record_with_blocks [ sample_block Prompt_block_id.Keeper_instructions "aaaa" ]) with
       trace_id = "trace-A"
     ; absolute_turn = 1
     ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-A" ~absolute_turn:1
@@ -639,7 +639,7 @@ let test_entries_with_diffs_same_trace_only () =
   in
   let r2 =
     { (record_with_blocks
-         [ sample_block Prompt_block_id.Persona "aaaa"
+         [ sample_block Prompt_block_id.Keeper_instructions "aaaa"
          ; sample_block Prompt_block_id.Temporal_summary "rrrr"
          ])
       with
@@ -649,7 +649,7 @@ let test_entries_with_diffs_same_trace_only () =
     }
   in
   let r3 =
-    { (record_with_blocks [ sample_block Prompt_block_id.Persona "zzzz" ]) with
+    { (record_with_blocks [ sample_block Prompt_block_id.Keeper_instructions "zzzz" ]) with
       trace_id = "trace-B" (* new generation: diff must be None *)
     ; absolute_turn = 3
     ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-B" ~absolute_turn:3

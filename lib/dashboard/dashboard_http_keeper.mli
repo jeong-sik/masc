@@ -63,7 +63,7 @@ val compute_outcomes_rollup :
     (turns / compactions / handoffs / gate rejections).
     [recent_crash_count] is folded in as an additional
     failure axis; [registry_entry] supplies metadata
-    (active model, persona role, etc) when present. *)
+    (active model and other runtime metadata) when present. *)
 
 (** {1 Dashboard producers} *)
 

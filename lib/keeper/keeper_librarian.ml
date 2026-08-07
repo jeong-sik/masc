@@ -16,7 +16,7 @@ type current_selection =
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; generation : int
-  ; persona : string
+  ; keeper_instructions : string
   ; current : current_selection option
   ; max_recall_fact_bytes : int
   ; messages : Agent_sdk.Types.message list
@@ -125,14 +125,15 @@ let format_current_selection_for_prompt
     current_selection_json current |> Yojson.Safe.pretty_to_string
 ;;
 
-let format_persona_for_prompt persona =
-  match trim_nonempty persona with
-  | None -> "[no persona]"
-  | Some persona -> persona
+let format_keeper_instructions_for_prompt instructions =
+  match trim_nonempty instructions with
+  | None -> "[no keeper instructions]"
+  | Some instructions -> instructions
 ;;
 
 let prompt_variables (inp : input) : (string * string) list =
-  [ "persona", format_persona_for_prompt inp.persona
+  [ ( "keeper_instructions"
+    , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "current_memory", format_current_selection_for_prompt inp.current
   ; "max_recall_fact_bytes", string_of_int inp.max_recall_fact_bytes
   ; ( "conversation_history"

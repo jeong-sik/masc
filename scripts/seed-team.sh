@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# seed-team.sh — copy a team preset (keepers + personas) into a live MASC config
+# seed-team.sh — copy a team preset into a live MASC config
 # root so the named keepers autoboot on the next server start.
 #
-# Config seeding intentionally excludes keepers/ and personas/, so a fresh
+# Config seeding intentionally excludes keepers/, so a fresh
 # install boots zero keepers. This script is the explicit opt-in that seeds a
 # team. It copies files from presets/<preset>/ (listed in that preset's
 # manifest.txt) into <base-path>/.masc/config/. The keepers inherit
@@ -15,7 +15,7 @@
 # Flags:
 #   --preset ID     Team preset under config/team-presets/ (default: classic)
 #   --base-path DIR Live MASC base path; seeds into DIR/.masc/config (required)
-#   --force         Overwrite existing keeper/persona files
+#   --force         Overwrite existing Keeper files
 #   --dry-run       Print what would happen, write nothing
 #   --list          List available presets and exit
 

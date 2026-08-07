@@ -101,9 +101,9 @@ let () =
     match
       List.find_opt
         (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
-        Tool_schemas_inline.schemas
+        Tool_schemas_misc.mcp_runtime_schemas
     with
-    | None -> invalid_arg ("missing inline MCP schema: " ^ name)
+    | None -> invalid_arg ("missing MCP runtime schema: " ^ name)
     | Some (schema : Masc_domain.tool_schema) ->
       Tool_spec.register
         (Tool_spec.create

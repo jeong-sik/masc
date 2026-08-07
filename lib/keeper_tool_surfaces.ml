@@ -18,26 +18,11 @@ module Random = Stdlib.Random
 
 (** Keeper_tool_surfaces — lightweight internal tool surface definitions.
 
-    This module stays dependency-light so spawned agents, local workers, and
-    strict worker flows can share allowlists without pulling in the full public
-    capability registry.
+    This module stays dependency-light so spawned agents can share
+    allowlists without pulling in the full public capability registry.
 *)
 
 open Masc_domain
-
-module SS = Set_util.StringSet
-
-
-let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
-  let unique, _ =
-    List.fold_left
-      (fun (acc, seen) (schema : Masc_domain.tool_schema) ->
-        if SS.mem schema.name seen then (acc, seen)
-        else (schema :: acc, SS.add schema.name seen))
-      ([], SS.empty)
-      schemas
-  in
-  List.rev unique
 
 let lookup_schemas_by_name_exn ~label all_schemas values =
   let requested =

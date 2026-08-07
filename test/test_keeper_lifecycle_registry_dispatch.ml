@@ -71,13 +71,22 @@ let write_json path json =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc (Yojson.Safe.pretty_to_string json))
 
+let keepers_dir_of ~base_dir =
+  Filename.concat
+    (Filename.concat (Filename.concat base_dir ".masc") "config")
+    "keepers"
+
 let write_keeper_toml ~base_dir name lines =
-  let path =
-    Filename.concat
-      (Filename.concat (Filename.concat (Filename.concat base_dir ".masc") "config") "keepers")
-      (name ^ ".toml")
-  in
-  write_lines path lines
+  write_lines (Filename.concat (keepers_dir_of ~base_dir) (name ^ ".toml")) lines
+
+(* Instructions come from [keepers/<name>/AGENT.md]; [keeper.instructions] is
+   an unknown TOML key and rejecting it leaves the profile unloaded. *)
+let write_keeper_instructions ~base_dir name body =
+  write_lines
+    (Filename.concat
+       (Filename.concat (keepers_dir_of ~base_dir) name)
+       "AGENT.md")
+    [ body ]
 
 let write_keeper_meta_json config (meta : Keeper_meta_contract.keeper_meta) =
   write_json
@@ -213,10 +222,8 @@ let test_registry_reload_meta_from_disk_repairs_stale_meta () =
       write_keeper_toml
         ~base_dir
         name
-        [ "[keeper]"
-        ; {|sandbox_profile = "local"|}
-        ; {|instructions = "fresh instructions"|}
-        ];
+        [ "[keeper]"; {|sandbox_profile = "local"|} ];
+      write_keeper_instructions ~base_dir name "fresh instructions";
       let persisted_meta = make_keeper_meta ~name () in
       let stale_meta = { persisted_meta with instructions = "stale instructions" } in
       let observed_meta =

@@ -108,7 +108,6 @@ let with_config_dir f =
   let dir = temp_dir () in
   let config_dir = Filename.concat dir "config" in
   mkdir_p (Filename.concat config_dir "keepers");
-  mkdir_p (Filename.concat config_dir "personas");
   let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
@@ -437,92 +436,6 @@ let ensure_test_runtime =
           match Runtime.init_default ~config_path:path with
           | Ok () -> initialized := true
           | Error msg -> fail msg))
-
-let test_persona_drift_check_uses_toml_persona_name () =
-  with_config_dir @@ fun config_dir ->
-  let keepers_dir = Filename.concat config_dir "keepers" in
-  let executor_persona_dir =
-    Filename.concat (Filename.concat config_dir "personas") "executor"
-  in
-  mkdir_p executor_persona_dir;
-  write_file
-    (Filename.concat executor_persona_dir "profile.json")
-    {|{"name":"Executor","role":"execution"}|};
-  write_file
-    (Filename.concat keepers_dir "tech_glutton.toml")
-    {|
-[keeper]
-name = "tech_glutton"
-persona_name = "executor"
-instructions = "plan coding work"
-|};
-  match Sup.persona_name_for_drift_check (make_meta "tech_glutton") with
-  | Ok persona_name ->
-    check string "drift check honors TOML persona_name" "executor" persona_name
-  | Error error ->
-    fail (Keeper_types_profile.keeper_toml_load_error_to_string error)
-
-let test_persona_drift_check_preserves_invalid_config () =
-  with_config_dir @@ fun config_dir ->
-  let keepers_dir = Filename.concat config_dir "keepers" in
-  write_file
-    (Filename.concat keepers_dir "invalid.toml")
-    "[keeper\nname = \"invalid\"\n";
-  match Sup.persona_name_for_drift_check (make_meta "invalid") with
-  | Error _ -> ()
-  | Ok persona_name ->
-    fail
-      (Printf.sprintf
-         "invalid config must not fall back to persona identity %S"
-         persona_name)
-
-let test_persona_drift_path_points_to_profile_json () =
-  with_config_dir @@ fun config_dir ->
-  let expected =
-    Filename.concat
-      (Filename.concat (Filename.concat config_dir "personas") "executor")
-      "profile.json"
-  in
-  check
-    string
-    "profile path"
-    expected
-    (Sup.persona_profile_path_for_drift_check
-       ~base_path:(Filename.dirname (Filename.dirname config_dir))
-       "executor")
-
-let test_missing_persona_with_inline_toml_is_warn () =
-  with_config_dir @@ fun config_dir ->
-  let keepers_dir = Filename.concat config_dir "keepers" in
-  write_file
-    (Filename.concat keepers_dir "inline-only.toml")
-    {|
-[keeper]
-name = "inline-only"
-persona_name = "missing-profile"
-instructions = "inline keeper metadata is enough to run"
-|};
-  check
-    bool
-    "inline TOML missing profile is warn"
-    true
-    (match Sup.persona_drift_log_level_for_missing_profile
-             (make_meta "inline-only")
-     with
-     | Sup.Persona_drift_warn -> true
-     | Sup.Persona_drift_error -> false)
-
-let test_missing_persona_without_profile_or_toml_is_error () =
-  with_config_dir @@ fun _config_dir ->
-  check
-    bool
-    "missing profile without TOML is error"
-    true
-    (match Sup.persona_drift_log_level_for_missing_profile
-             (make_meta "missing-everywhere")
-     with
-     | Sup.Persona_drift_error -> true
-     | Sup.Persona_drift_warn -> false)
 
 let publication_recovery_registry env sw config =
   let registry_root =
@@ -2108,18 +2021,6 @@ let () =
       test_case "under limit" `Quick test_keep_last_n_under_limit;
       test_case "at limit" `Quick test_keep_last_n_at_limit;
       test_case "over limit drops oldest" `Quick test_keep_last_n_over_limit;
-    ];
-    "persona_drift", [
-      test_case "drift check honors TOML persona_name" `Quick
-        test_persona_drift_check_uses_toml_persona_name;
-      test_case "drift check preserves invalid config" `Quick
-        test_persona_drift_check_preserves_invalid_config;
-      test_case "drift path points to profile.json" `Quick
-        test_persona_drift_path_points_to_profile_json;
-      test_case "missing persona with inline TOML is WARN" `Quick
-        test_missing_persona_with_inline_toml_is_warn;
-      test_case "missing persona without TOML is ERROR" `Quick
-        test_missing_persona_without_profile_or_toml_is_error;
     ];
     "boot_meta_materialization", [
       test_case "declarative boot preserves instructions" `Quick

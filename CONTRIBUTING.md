@@ -113,7 +113,7 @@ Use conventional commits:
 ```
 feat(governance): add review queue guard
 fix(heartbeat): reduce GraphQL query cost under limit
-refactor(keeper): rename persona to agent terminology
+refactor(keeper): simplify Keeper terminology
 test(governance): add review queue persistence tests
 docs: update CONTRIBUTING for current architecture
 chore: bump version to 0.9.0

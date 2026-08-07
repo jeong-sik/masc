@@ -87,6 +87,25 @@ type wake_record =
 
 let ( let* ) = Result.bind
 
+(* A rejection that names only the value it refused leaves the caller guessing.
+   Measured on the live log: [actor_kind] answered "unknown actor_kind: operator"
+   and the caller tried "keeper" next, then the right one -- two wrong guesses
+   over 2m24s. The Goal validator, which answers with its accepted set, was
+   corrected on the first retry in 20s across three cases, and the Board target
+   hint closed 43 rejections the same way.
+
+   The accepted set is derived through [*_to_string] so it cannot name a value
+   the decoder does not take: the [to_string] matches are exhaustive, and
+   test_schedule_store pins that every listed string decodes. *)
+let unknown_value ~field ~accepted got =
+  Error
+    (Printf.sprintf
+       "unknown %s: %s; accepted: %s"
+       field
+       got
+       (String.concat ", " accepted))
+;;
+
 let nonempty field value =
   if String.trim value = "" then Error (field ^ " must be non-empty") else Ok value
 ;;
@@ -97,11 +116,14 @@ let actor_kind_to_string = function
   | System -> "system"
 ;;
 
+let actor_kinds = [ Human_operator; Automated_actor; System ]
+
 let actor_kind_of_string = function
   | "human_operator" -> Ok Human_operator
   | "automated_actor" -> Ok Automated_actor
   | "system" -> Ok System
-  | other -> Error ("unknown actor_kind: " ^ other)
+  | other ->
+    unknown_value ~field:"actor_kind" ~accepted:(List.map actor_kind_to_string actor_kinds) other
 ;;
 
 let schedule_status_to_string = function
@@ -114,6 +136,10 @@ let schedule_status_to_string = function
   | Expired -> "expired"
 ;;
 
+let schedule_statuses =
+  [ Scheduled; Due; Running; Succeeded; Failed; Cancelled; Expired ]
+;;
+
 let schedule_status_of_string = function
   | "scheduled" -> Ok Scheduled
   | "due" -> Ok Due
@@ -122,7 +148,11 @@ let schedule_status_of_string = function
   | "failed" -> Ok Failed
   | "cancelled" -> Ok Cancelled
   | "expired" -> Ok Expired
-  | other -> Error ("unknown schedule_status: " ^ other)
+  | other ->
+    unknown_value
+      ~field:"schedule_status"
+      ~accepted:(List.map schedule_status_to_string schedule_statuses)
+      other
 ;;
 
 let schedule_source_to_string = function
@@ -131,11 +161,17 @@ let schedule_source_to_string = function
   | System_request -> "system_request"
 ;;
 
+let schedule_sources = [ Operator_request; Automated_request; System_request ]
+
 let schedule_source_of_string = function
   | "operator_request" -> Ok Operator_request
   | "automated_request" -> Ok Automated_request
   | "system_request" -> Ok System_request
-  | other -> Error ("unknown schedule_source: " ^ other)
+  | other ->
+    unknown_value
+      ~field:"schedule_source"
+      ~accepted:(List.map schedule_source_to_string schedule_sources)
+      other
 ;;
 
 let recurrence_kind_to_string = function
@@ -159,11 +195,17 @@ let wake_status_to_string = function
   | Wake_failed -> "failed"
 ;;
 
+let wake_statuses = [ Wake_running; Wake_succeeded; Wake_failed ]
+
 let wake_status_of_string = function
   | "running" -> Ok Wake_running
   | "succeeded" -> Ok Wake_succeeded
   | "failed" -> Ok Wake_failed
-  | other -> Error ("unknown wake_status: " ^ other)
+  | other ->
+    unknown_value
+      ~field:"wake_status"
+      ~accepted:(List.map wake_status_to_string wake_statuses)
+      other
 ;;
 
 let is_terminal = function

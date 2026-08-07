@@ -113,7 +113,16 @@ let recurrence_of_arg args =
     let* expression = required_string args "recurrence_cron" in
     let* timezone = required_string args "recurrence_timezone" in
     validate_recurrence_arg (Schedule_domain.Cron { expression; timezone })
-  | Some other -> Error ("unknown recurrence_kind: " ^ other)
+  | Some other ->
+    (* Same reason as the four decoders in [Schedule_domain]: a rejection that
+       names only what it refused leaves the caller guessing. Listed here rather
+       than derived because [recurrence_kind] is a wire discriminator read off
+       the arms above, not a sum with a [to_string]; test_schedule_tool_wiring
+       pins that each listed value is one of them. *)
+    Error
+      (Printf.sprintf
+         "unknown recurrence_kind: %s; accepted: one_shot, interval, daily, cron"
+         other)
 ;;
 
 let actor_from_args args ~prefix ~default_id ~default_kind =

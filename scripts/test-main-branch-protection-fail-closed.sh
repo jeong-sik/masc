@@ -22,9 +22,8 @@ cat >"$work/bin/gh" <<'MOCK'
 case "${MOCK_GH_MODE:-ok}" in
   401) echo "gh: Requires authentication (HTTP 401)" >&2; exit 1 ;;
   403) echo 'gh: Resource not accessible by integration (HTTP 403)' >&2; exit 1 ;;
-  drift) [[ "$*" == *enforce_admins* ]] && echo "false" || echo "CI Gate"; exit 0 ;;
-  missing_context) [[ "$*" == *enforce_admins* ]] && echo "true" || echo "Some Other Check"; exit 0 ;;
-  ok) [[ "$*" == *enforce_admins* ]] && echo "true" || echo "CI Gate"; exit 0 ;;
+  missing_context) echo "Some Other Check"; exit 0 ;;
+  ok) echo "CI Gate"; exit 0 ;;
   *) echo "unknown MOCK_GH_MODE" >&2; exit 2 ;;
 esac
 MOCK
@@ -61,8 +60,8 @@ expect_exit "retired bypass variable does not reopen 401" 1 401 \
 expect_exit "retired bypass variable does not reopen 403" 1 403 \
   BRANCH_PROTECTION_ALLOW_UNREADABLE=1
 
-# Drift the guard exists to catch.
-expect_exit "enforce_admins=false is drift" 1 drift
+# The drift the guard exists to catch: main no longer requires CI Gate, which
+# is what lets an unchecked merge land.
 expect_exit "absent required context is drift" 1 missing_context
 
 # And a clean read still passes, so the cases above are not passing for the

@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # check-main-branch-protection.sh - detect branch-protection drift for #9738.
 #
+# What it guards: main still requires the status contexts named in
+# BRANCH_PROTECTION_REQUIRED_CONTEXTS. Dropping one of those is what lets an
+# unchecked merge reach main, so it is the assertion worth holding.
+#
+# It does not assert enforce_admins. That was checked until admin enforcement
+# was turned off on main (2026-07-17), after which the check reported the same
+# drift every hour without anyone restoring the setting — a permanently red
+# check that stops being read and takes the checks near it down with it. The
+# only document arguing otherwise is RFC-0270, which is still status: Draft
+# with implementation_prs: [], so it records a proposal rather than a decision.
+# Restore this clause alongside the setting if admin enforcement comes back.
+#
 # This check fails closed when it cannot read branch-protection settings;
 # otherwise CI silently masks required-context drift.
 set -euo pipefail
@@ -67,17 +79,6 @@ handle_unauthorized() {
   exit 1
 }
 
-if ! enforce_admins="$(gh api "$endpoint" --jq '.enforce_admins.enabled' 2>&1)"; then
-  if is_unauthorized "$enforce_admins"; then
-    handle_unauthorized "$enforce_admins"
-  fi
-  if is_integration_forbidden "$enforce_admins"; then
-    handle_integration_forbidden "$enforce_admins"
-  fi
-  echo "::error title=Branch protection check failed::Could not read ${repo}/${branch} branch protection: ${enforce_admins}"
-  exit 1
-fi
-
 if ! contexts="$(gh api "$endpoint" --jq '.required_status_checks.contexts[]?' 2>&1)"; then
   if is_unauthorized "$contexts"; then
     handle_unauthorized "$contexts"
@@ -90,9 +91,6 @@ if ! contexts="$(gh api "$endpoint" --jq '.required_status_checks.contexts[]?' 2
 fi
 
 failures=()
-if [[ "$enforce_admins" != "true" ]]; then
-  failures+=("enforce_admins.enabled=${enforce_admins}; expected true")
-fi
 
 IFS=',' read -r -a required_contexts <<<"$required_contexts_csv"
 for context in "${required_contexts[@]}"; do
@@ -109,5 +107,5 @@ if ((${#failures[@]} > 0)); then
   exit 1
 fi
 
-printf 'branch protection drift: OK for %s/%s (enforce_admins=true; required contexts present: %s)\n' \
+printf 'branch protection drift: OK for %s/%s (required contexts present: %s)\n' \
   "$repo" "$branch" "$required_contexts_csv"

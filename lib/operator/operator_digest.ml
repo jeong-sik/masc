@@ -187,24 +187,7 @@ let external_attention_projection item =
       evidence = external_attention_evidence item;
     }
   in
-  let recommended_action =
-    {
-      action_type = "keeper_probe";
-      target_type = Operator_action_constants.keeper_target_type;
-      target_id = Some item.keeper_name;
-      severity;
-      reason = "Inspect pending external attention";
-      suggested_payload =
-        `Assoc
-          [
-            ("source", `String "operator_digest");
-            ("keeper", `String item.keeper_name);
-            ("event_id", `String item.event_id);
-            ("conversation_id", `String item.conversation.conversation_id);
-          ];
-    }
-  in
-  (attention_item, recommended_action)
+  attention_item
 
 let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta) =
   let attention_fields = Keeper_status_bridge.attention_fields_json config meta in
@@ -213,9 +196,6 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
   else
     let blocker_fields = Keeper_status_bridge.runtime_blocker_fields_json config meta in
     let reason = assoc_string_field "attention_reason" attention_fields in
-    let next_human_action =
-      assoc_string_field "next_human_action" attention_fields
-    in
     let runtime_blocker_class =
       assoc_string_field "runtime_blocker_class" blocker_fields
     in
@@ -246,29 +226,7 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
         evidence;
       }
     in
-    let action_reason =
-      match next_human_action with
-      | Some action -> Printf.sprintf "Inspect keeper attention: %s" action
-      | None -> "Inspect keeper attention"
-    in
-    let recommended_action =
-      {
-        action_type = "keeper_probe";
-        target_type = Operator_action_constants.keeper_target_type;
-        target_id = Some meta.name;
-        severity;
-        reason = action_reason;
-        suggested_payload =
-          `Assoc
-            [
-              ("source", `String "operator_digest");
-              ("keeper", `String meta.name);
-              ("reason", Json_util.string_opt_to_json reason);
-              ("next_human_action", Json_util.string_opt_to_json next_human_action);
-            ];
-      }
-    in
-    Some (attention_item, recommended_action)
+    Some attention_item
 
 let keeper_attention_projection_items config =
   let keeper_names = Keeper_meta_store.keeper_names config in
@@ -344,7 +302,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     | Some Operator_action_constants.Workspace ->
         let confirm_scope = pending_confirm_scope ?actor config in
         let keeper_attention =
-          keeper_attention_projection_items config |> List.map fst
+          keeper_attention_projection_items config
         in
         let attention_items =
           build_workspace_attention_items config

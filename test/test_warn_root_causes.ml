@@ -267,8 +267,28 @@ let test_missing_current_task_reconciled_before_transition_hint () =
               (string_contains description "not found in backlog");
             check bool "no reconciled task hint either" false
               (string_contains description "No task currently assigned");
-            check string "description is the static capability statement"
-              "Transition a task to a new status." description))
+            (* Was pinned to the literal "Transition a task to a new status." —
+               the inline string [cluster_descriptor] used to be handed. That
+               string is gone: the descriptor now takes its description from
+               the canonical registry, so pinning the registry's own text keeps
+               the contract this case exists for (a static capability
+               statement, no turn-specific state) without re-typing a 400-byte
+               literal that would drift the moment the schema is edited.
+               Injecting turn state would still fail here, because the injected
+               text would no longer equal the registry's. *)
+            let canonical =
+              List.find_map
+                (fun (schema : Masc_domain.tool_schema) ->
+                   if String.equal schema.name "masc_transition"
+                   then Some schema.description
+                   else None)
+                Config.raw_all_tool_schemas
+            in
+            (match canonical with
+             | None -> fail "masc_transition missing from the canonical registry"
+             | Some canonical ->
+               check string "description is the registry's capability statement"
+                 canonical description)))
 
 let test_tool_bundle_does_not_emit_full_universe_assignment () =
   ignore (init_registry ());

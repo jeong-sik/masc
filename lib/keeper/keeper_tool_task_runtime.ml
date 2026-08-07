@@ -256,7 +256,7 @@ let sync_keeper_meta_current_task
          ();
        Log.Keeper.warn ~keeper_name:meta.name
          "failed to persist claimed current_task_id=%s: %s"
-         task_id msg)
+         task_id (Keeper_meta_store.write_meta_error_to_string msg))
 ;;
 
 (* Cluster sub-dispatch via closed sum type — string [name] is converted

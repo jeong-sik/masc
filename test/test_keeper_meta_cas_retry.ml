@@ -5,7 +5,7 @@
       - succeeds when no concurrent writer interferes
       - succeeds after N attempts when the disk version has advanced
       - distinguishes version conflicts from real I/O errors via
-        [is_version_conflict_error] *)
+        the typed [write_meta_error] the CAS path returns *)
 
 open Alcotest
 open Masc
@@ -64,7 +64,7 @@ let test_no_conflict_writes_first_attempt () =
          ~merge:Keeper_meta_merge.caller_wins config m0
      with
      | Ok () -> ()
-     | Error e -> fail ("first write failed: " ^ e));
+     | Error e -> fail ("first write failed: " ^ Keeper_meta_store.write_meta_error_to_string e));
     (* Read what landed on disk and bump caller's version to match. *)
     let disk = match Keeper_meta_store.read_meta config "alpha" with
       | Ok (Some m) -> m
@@ -84,7 +84,7 @@ let test_no_conflict_writes_first_attempt () =
       in
       check (list string) "active_goal_ids updated" [ "goal-updated" ]
         after.active_goal_ids
-    | Error e -> fail ("second write failed: " ^ e))
+    | Error e -> fail ("second write failed: " ^ Keeper_meta_store.write_meta_error_to_string e))
 
 let test_retry_succeeds_after_concurrent_bump () =
   Eio_main.run @@ fun env ->
@@ -123,7 +123,7 @@ let test_retry_succeeds_after_concurrent_bump () =
          ~merge:Keeper_meta_merge.caller_wins config cycle_payload
      with
      | Ok () -> ()
-     | Error e -> fail ("retry write failed: " ^ e));
+     | Error e -> fail ("retry write failed: " ^ Keeper_meta_store.write_meta_error_to_string e));
     let after_retry_metric =
       Otel_metric_store.metric_value_or_zero
         Otel_metric_store.metric_write_meta_cas_retry_total
@@ -185,7 +185,7 @@ let test_monotonic_usage_counters_on_cas_retry () =
          ~merge:Keeper_meta_merge.heartbeat_fields_from_disk config stale
      with
      | Ok () -> ()
-     | Error e -> fail ("stale retry write failed: " ^ e));
+     | Error e -> fail ("stale retry write failed: " ^ Keeper_meta_store.write_meta_error_to_string e));
     let final = match Keeper_meta_store.read_meta config "gamma" with
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
@@ -245,7 +245,7 @@ let test_operator_pause_survives_stale_heartbeat_retry () =
          ~merge:Keeper_meta_merge.heartbeat_fields_from_disk config stale_completion
      with
      | Ok () -> ()
-     | Error e -> fail ("stale retry write failed: " ^ e));
+     | Error e -> fail ("stale retry write failed: " ^ Keeper_meta_store.write_meta_error_to_string e));
     let final = match Keeper_meta_store.read_meta config "operator-pause-cas" with
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
@@ -297,25 +297,19 @@ let test_stale_write_conflicts_without_force () =
       with_usage caller_view
         { caller_view.runtime.usage with total_turns = 5 }
     in
-    (match Keeper_meta_store.write_meta config stale with
+    (match Keeper_meta_store.write_meta_typed config stale with
      | Ok () -> fail "stale write unexpectedly succeeded (CAS bypass present?)"
-     | Error msg ->
-       check bool "stale write is rejected as a version conflict" true
-         (Keeper_meta_store.is_version_conflict_error msg));
+     | Error (Keeper_meta_store.Version_conflict _) -> ()
+     | Error other ->
+       fail
+         (Printf.sprintf "stale write rejected, but not as a version conflict: %s"
+            (Keeper_meta_store.write_meta_error_to_string other)));
     let final = match Keeper_meta_store.read_meta config "delta" with
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
     in
     check int "advanced disk counter survives (no rewind without force)"
       42 final.runtime.usage.total_turns)
-
-let test_is_version_conflict_error_classifies () =
-  let conflict_msg = "meta version conflict for foo: expected 3, disk has 4" in
-  let other_msg = "failed to write meta /tmp/x: Permission denied" in
-  check bool "classifies version conflict" true
-    (Keeper_meta_store.is_version_conflict_error conflict_msg);
-  check bool "rejects unrelated error" false
-    (Keeper_meta_store.is_version_conflict_error other_msg)
 
 (* Fix: [paused=false] + [Dead_tombstone] is un-recoverable — lifecycle
    admission denies by the latch regardless of [paused], but every sanctioned
@@ -431,10 +425,5 @@ let () =
             `Quick test_operator_pause_survives_stale_heartbeat_retry;
           test_case "stale write conflicts without force (RFC-0237 escape hatch closed)"
             `Quick test_stale_write_conflicts_without_force;
-        ] );
-      ( "is_version_conflict_error",
-        [
-          test_case "classifies conflict vs I/O error" `Quick
-            test_is_version_conflict_error_classifies;
         ] );
     ]

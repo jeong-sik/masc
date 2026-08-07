@@ -20,6 +20,7 @@ let write_initial_meta config meta =
   write_meta_with_merge
     ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
     config meta
+  |> Result.map_error Keeper_meta_store.write_meta_error_to_string
 
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;

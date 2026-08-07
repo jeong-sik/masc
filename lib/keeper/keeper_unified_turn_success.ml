@@ -421,9 +421,12 @@ let persist_terminal_turn_meta
        ~labels:
          [ "keeper", updated_meta.name
          ; ( "phase"
-           , if Keeper_meta_store.is_version_conflict_error msg
-             then "keeper_cycle_cas_race"
-             else "keeper_cycle" )
+           , match msg with
+             | Keeper_meta_store.Version_conflict _ -> "keeper_cycle_cas_race"
+             | Keeper_meta_store.Lifecycle_reserved _
+             | Keeper_meta_store.Read_failed _
+             | Keeper_meta_store.Persist_failed _
+             | Keeper_meta_store.Invariant_violation _ -> "keeper_cycle" )
          ]
        ();
      (* #22043: emit inside the [Error] arm so
@@ -439,9 +442,15 @@ let persist_terminal_turn_meta
          ; "site", Keeper_write_meta_cycle_failure_site.(to_label Keeper_cycle)
          ]
        ();
-     if Keeper_meta_store.is_version_conflict_error msg
-     then Log.Keeper.warn "write_meta lost CAS race after retries (keeper cycle): %s" msg
-     else Log.Keeper.error "write_meta failed after keeper cycle: %s" msg);
+     let detail = Keeper_meta_store.write_meta_error_to_string msg in
+     (match msg with
+      | Keeper_meta_store.Version_conflict _ ->
+        Log.Keeper.warn "write_meta lost CAS race after retries (keeper cycle): %s" detail
+      | Keeper_meta_store.Lifecycle_reserved _
+      | Keeper_meta_store.Read_failed _
+      | Keeper_meta_store.Persist_failed _
+      | Keeper_meta_store.Invariant_violation _ ->
+        Log.Keeper.error "write_meta failed after keeper cycle: %s" detail));
   updated_meta
 ;;
 

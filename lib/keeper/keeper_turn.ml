@@ -815,18 +815,28 @@ let run_keeper_invocation_turn_admitted_inner
                      ~labels:
                        [ ("keeper", updated_meta.name);
                          ("phase",
-                          if is_version_conflict_error msg
-                          then "keeper_msg_turn_cas_race"
-                          else "keeper_msg_turn")
+                          match msg with
+                          | Keeper_meta_store.Version_conflict _ ->
+                            "keeper_msg_turn_cas_race"
+                          | Keeper_meta_store.Lifecycle_reserved _
+                          | Keeper_meta_store.Read_failed _
+                          | Keeper_meta_store.Persist_failed _
+                          | Keeper_meta_store.Invariant_violation _ ->
+                            "keeper_msg_turn")
                        ]
                      ();
-                   if is_version_conflict_error msg then
+                   let detail = Keeper_meta_store.write_meta_error_to_string msg in
+                   match msg with
+                   | Keeper_meta_store.Version_conflict _ ->
                      Log.Keeper.warn
                        "write_meta lost CAS race after retries (keeper_msg turn): %s"
-                       msg
-                   else
+                       detail
+                   | Keeper_meta_store.Lifecycle_reserved _
+                   | Keeper_meta_store.Read_failed _
+                   | Keeper_meta_store.Persist_failed _
+                   | Keeper_meta_store.Invariant_violation _ ->
                      Log.Keeper.error
-                       "write_meta failed after keeper_msg turn: %s" msg);
+                       "write_meta failed after keeper_msg turn: %s" detail);
               (try
                  Keeper_unified_metrics.append_metrics_snapshot
                    ~config:ctx.config

@@ -1308,7 +1308,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
   in
   (* Route OAS provider diagnostics into the structured log before any
      provider call runs (#25148). *)
-  Oas_diag_sink.install ();
+  Agent_sdk_diag_sink.install ();
   (* 0. Dashboard bundle freshness — a stale bundle silently keeps calling
      routes the current binary already removed (#24332 governance->gate:
      the served SPA still called DELETE'd /api/v1/dashboard/governance for

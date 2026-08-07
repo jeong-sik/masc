@@ -22,29 +22,29 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_ADMIN_TOKEN` | string_literal | n/a | n/a | 506 | SSOT for auth env-var names (issue 8352). |
-| `MASC_BASE_PATH` | string_literal | n/a | n/a | 359 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
-| `MASC_BASE_PATH_INPUT` | string_literal | n/a | n/a | 360 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
-| `MASC_BUILD_GIT_COMMIT` | string_literal | n/a | n/a | 553 | Git commit hash override for build identity. |
-| `MASC_CLUSTER_NAME` | string_literal | n/a | n/a | 277 |  |
-| `MASC_CONFIG_DIR` | string_literal | n/a | n/a | 493 | SSOT for the MASC_CONFIG_DIR env-var name (issue 8352). |
-| `MASC_DATA_DIR` | string_literal | n/a | n/a | 497 | SSOT for the MASC_DATA_DIR env-var name (issue 8352). Overrides [<base_path>/data] as the root for runtime data stores. |
-| `MASC_GIT_FETCH_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 525 | [git fetch origin] is network-bound and can stall behind a slow Docker bridge or a large remote. Default 120s gives e... |
-| `MASC_HOST` | string_literal | n/a | n/a | 248 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
-| `MASC_HOST_FD_PRESSURE_POLLER_DISABLED` | typed:bool | Policies | operator | 343 | Operator policy toggle for disabling host fd pressure polling. @category Policies @ops_class operator |
-| `MASC_HOST_FD_PRESSURE_POLL_INTERVAL_SEC` | typed:float | Timeouts | operator | 349 | Operator timeout/interval knob for host fd pressure polling cadence. @category Timeouts @ops_class operator |
-| `MASC_HOST_FD_PRESSURE_STATE_FILE` | string_literal | n/a | n/a | 332 | {1 Host pressure integration} |
-| `MASC_HTTP_BASE_URL` | string_literal | n/a | n/a | 290 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
-| `MASC_HTTP_PORT` | string_literal | n/a | n/a | 249 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
-| `MASC_JSONL_RETENTION_DAYS` | typed:int | Policies | operator | 570 | Day-file retention for the JSONL stores under [.masc]. Default: 30. Read by the startup prune, the periodic maintenan... |
-| `MASC_LOG_LEVEL` | string_literal | n/a | n/a | 530 | SSOT for logging / observability env-var names (issue 8352). |
-| `MASC_LOG_ROUTINE_LEVEL` | string_literal | n/a | n/a | 531 | SSOT for logging / observability env-var names (issue 8352). |
-| `MASC_ORCHESTRATOR_ENABLED` | string_literal | n/a | n/a | 490 | SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352). Referenced by feature_flag_registry catalog, env_co... |
+| `MASC_ADMIN_TOKEN` | string_literal | n/a | n/a | 500 | SSOT for auth env-var names (issue 8352). |
+| `MASC_BASE_PATH` | string_literal | n/a | n/a | 356 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
+| `MASC_BASE_PATH_INPUT` | string_literal | n/a | n/a | 357 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
+| `MASC_BUILD_GIT_COMMIT` | string_literal | n/a | n/a | 542 | Git commit hash override for build identity. |
+| `MASC_CLUSTER_NAME` | string_literal | n/a | n/a | 274 |  |
+| `MASC_CONFIG_DIR` | string_literal | n/a | n/a | 490 | SSOT for the MASC_CONFIG_DIR env-var name (issue 8352). |
+| `MASC_DATA_DIR` | string_literal | n/a | n/a | 494 | SSOT for the MASC_DATA_DIR env-var name (issue 8352). Overrides [<base_path>/data] as the root for runtime data stores. |
+| `MASC_GIT_FETCH_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 519 | [git fetch origin] is network-bound and can stall behind a slow Docker bridge or a large remote. Default 120s gives e... |
+| `MASC_HOST` | string_literal | n/a | n/a | 245 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
+| `MASC_HOST_FD_PRESSURE_POLLER_DISABLED` | typed:bool | Policies | operator | 340 | Operator policy toggle for disabling host fd pressure polling. @category Policies @ops_class operator |
+| `MASC_HOST_FD_PRESSURE_POLL_INTERVAL_SEC` | typed:float | Timeouts | operator | 346 | Operator timeout/interval knob for host fd pressure polling cadence. @category Timeouts @ops_class operator |
+| `MASC_HOST_FD_PRESSURE_STATE_FILE` | string_literal | n/a | n/a | 329 | {1 Host pressure integration} |
+| `MASC_HTTP_BASE_URL` | string_literal | n/a | n/a | 287 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
+| `MASC_HTTP_PORT` | string_literal | n/a | n/a | 246 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
+| `MASC_JSONL_RETENTION_DAYS` | typed:int | Policies | operator | 559 | Day-file retention for the JSONL stores under [.masc]. Default: 30. Read by the startup prune, the periodic maintenan... |
+| `MASC_LOG_LEVEL` | string_literal | n/a | n/a | 524 | SSOT for logging / observability env-var names (issue 8352). |
+| `MASC_LOG_ROUTINE_LEVEL` | string_literal | n/a | n/a | 525 | SSOT for logging / observability env-var names (issue 8352). |
+| `MASC_ORCHESTRATOR_ENABLED` | string_literal | n/a | n/a | 487 | SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352). Referenced by feature_flag_registry catalog, env_co... |
 | `MASC_PARSE_WARN` | string_literal | n/a | n/a | 34 |  |
-| `MASC_PUBSUB_MAX_MESSAGES` | typed:int | unclassified | unclassified | 557 | PubSub max messages per read. Default: 1000. |
-| `MASC_TELEMETRY_ENABLED` | typed:bool | unclassified | unclassified | 542 | Whether telemetry tracking is enabled. Default: true. |
-| `MASC_TEST_ALLOW_HOME_BASE_PATH` | string_literal | n/a | n/a | 418 | #9903: production base-path safeguard for test executables. Without this, a test whose [MASC_BASE_PATH] override fail... |
-| `MASC_URL` | string_literal | n/a | n/a | 291 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
+| `MASC_PUBSUB_MAX_MESSAGES` | typed:int | unclassified | unclassified | 546 | PubSub max messages per read. Default: 1000. |
+| `MASC_TELEMETRY_ENABLED` | typed:bool | unclassified | unclassified | 533 | Whether telemetry tracking is enabled. Default: true. |
+| `MASC_TEST_ALLOW_HOME_BASE_PATH` | string_literal | n/a | n/a | 415 | #9903: production base-path safeguard for test executables. Without this, a test whose [MASC_BASE_PATH] override fail... |
+| `MASC_URL` | string_literal | n/a | n/a | 288 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
 
 ## Env_config_keeper (39 knobs; typed classification 20/31)
 

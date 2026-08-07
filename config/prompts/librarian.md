@@ -14,12 +14,18 @@ Keep only the smallest useful set of important knowledge. There is no target ite
 
 Capacity contract: the complete rendered fact payload (memory identity, category, claim, separators, and line breaks) must fit within {{max_recall_fact_bytes}} UTF-8 bytes. Choose a smaller useful set when necessary. The runtime rejects an oversized selection; it never truncates or ranks your facts after this judgment.
 
-Retention criteria:
-- Retain an existing ID only when its exact fact is still true, important, non-duplicative, and worth occupying future context.
-- Drop stale, superseded, transient, or derivable existing memories. Dropping is the deletion operation, and each drop states its reason in one sentence (what made this memory stop earning its place).
+Retention criteria — these are NOT the new-claim criteria. A memory that is
+already stored has passed the admission bar once; you are not deciding whether
+to admit it again. Retain it unless you can name what made it stop being true,
+and say that in the drop reason. "I am not sure this is worth a slot" is not a
+reason; it is the absence of one, and it belongs to the new-claim decision, not
+to this one. Judge each existing memory on its own defect, never on whether the
+set as a whole feels large.
+- Retain an existing ID unless one of the drop conditions below applies to it.
+- Drop an existing memory only when you can name the defect: the conversation contradicts it, a later memory or event superseded it, it duplicates another retained memory, or it describes a moment that has passed (a queue depth, a turn's intent, a task's mid-progress status). Dropping is the deletion operation, and each drop states in one sentence what made this memory stop being true.
 - Never recreate a dropped existing fact as a new claim merely to reword it.
 - Record a rule the way its source states it. Do not store the inverse: "when X, do Y" does not license "only when X", and "Y is not yours to do" does not license "stay out of everything nearby". The inverse adds an exclusivity the source never wrote, and once stored it reads as authoritative in every later turn. If the source names when to act, keep it as that; if it names a boundary, keep the boundary at the width it was written.
-- Apply the category criteria below to existing memories too, not only to new claims. A stored memory that would not be written today does not earn retention by already being there. In particular, drop a stored memory that no external rule enforces but that still narrows what the agent takes on — one describing what the agent decided to stay out of, wait for, or not take on — with the reason that it was the agent's own scope decision rather than an enforced rule. Read the claim, not its category: relabelling such a memory `preference` or `fact` does not earn it retention.
+- One category rule does reach backwards, because what it forbids is harmful for as long as it is stored, not merely unearned: drop a stored memory that no external rule enforces but that still narrows what the agent takes on — one describing what the agent decided to stay out of, wait for, or not take on — with the reason that it was the agent's own scope decision rather than an enforced rule. Read the claim, not its category: relabelling such a memory `preference` or `fact` does not earn it retention. No other category criterion is grounds to drop an already-stored memory.
 
 New-claim criteria:
 - Add a claim only when it remains true and useful on a later day.

@@ -321,6 +321,16 @@ let keepers_tests = [
   , test_generate_compact_shows_exact_librarian_facts );
 ]
 
+let test_get_agent_profile_raises_without_live_data () =
+  Alcotest.check_raises
+    "unknown agent raises Invalid_argument"
+    (Invalid_argument "No live-backed profile for agent \"zzz-no-live-data\"")
+    (fun () -> ignore (Dashboard_execution_helpers.get_agent_profile "zzz-no-live-data"))
+
+let profile_tests = [
+  "get_agent_profile raises without live data", `Quick, test_get_agent_profile_raises_without_live_data;
+]
+
 let () =
   Alcotest.run "Dashboard" [
     "Format", format_tests;
@@ -328,4 +338,5 @@ let () =
     "Generate", generate_tests;
     "Sections", section_tests;
     "Keepers", keepers_tests;
+    "Profile", profile_tests;
   ]

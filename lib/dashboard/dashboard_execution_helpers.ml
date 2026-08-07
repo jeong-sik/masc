@@ -245,14 +245,14 @@ let merge_profiles ~(base : agent_profile) ~(overlay : agent_profile) : agent_pr
     primary_value = (match overlay.primary_value with Some _ -> overlay.primary_value | None -> base.primary_value);
   }
 
-(** Get full agent profile: persona + Neo4j merged -> hardcoded fallback *)
+(** Get full agent profile: persona + Neo4j merged -> live-backed surface only.
+
+    No hardcoded fallback is returned. If neither persona files nor Neo4j data
+    exists for the requested agent, we raise a typed exception: the dashboard
+    must render from live data (option a of TODO(task-1823)). A guaranteed
+    registry (option b) would require cross-cutting registry changes and is not
+    chosen here. *)
 let get_agent_profile (name : string) : agent_profile =
-  (* TODO(task-1823): The fallback below is a fake Keeper v2 dashboard field.
-     When neither persona files nor Neo4j data exist, we return hardcoded values
-     (emoji="🤖", korean_name=name) instead of live-backed surfaces.
-     A future change should either:
-       (a) require live-backed surfaces and raise/warn when no data is found, or
-       (b) populate from a guaranteed registry so no agent falls through. *)
   let persona_name = extract_persona_name name in
   let neo4j_profile = lookup_neo4j_profile persona_name in
   let persona_profile = load_persona_profile persona_name in
@@ -263,16 +263,8 @@ let get_agent_profile (name : string) : agent_profile =
   | (Some persona, None) -> persona
   | (None, Some neo4j) -> neo4j
   | (None, None) ->
-      (* Generic fallback — no persona or Neo4j data available *)
-      {
-        emoji = "🤖";
-        korean_name = name;
-        model = None;
-        traits = [];
-        interests = [];
-        activity_level = None;
-        primary_value = None;
-      }
+      Log.Dashboard.warn "No live-backed profile for agent %S; raising" name;
+      raise (Invalid_argument (Printf.sprintf "No live-backed profile for agent %S" name))
 
 let handoff_json ~surface ?command_surface ?operation_id ~label ~target_type ~target_id
     ~focus_kind () =

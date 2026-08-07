@@ -78,7 +78,8 @@ let base_tools : Masc_domain.tool_schema list =
           ; "required", `List [ `String "query" ]
           ]
     }
-  ; (* RFC-0035 P4: explicit memory write surface. Writes a durable claim
+  ; (* Explicit memory write surface (docs/spec/05-keeper-agent.md 6 Memory Subsystem).
+     Writes a durable claim
      into the Memory OS fact store (RFC keeper-memory-consolidation
      Stage 4: the turn-scoped bank is gone). *)
     { name = "keeper_memory_write"

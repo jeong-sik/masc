@@ -632,7 +632,6 @@ let message_json (message : Masc_domain.message) =
     ; "timestamp", `String message.timestamp
     ; "trace_context", Json_util.string_opt_to_json message.trace_context
     ; "expires_at", Json_util.float_opt_to_json message.expires_at
-    ; "relevance", `String message.relevance
     ; "seq", `Int message.seq
     ]
 ;;

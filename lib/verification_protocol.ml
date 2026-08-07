@@ -36,27 +36,18 @@ type submit_request_spec =
 
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     ~assignee ~evidence_refs =
-  let request_kind, request_summary, next_action, board_type, board_title, board_content =
-    match Masc_task_handlers.Planning_eio.load config ~task_id:task.id with
-    | Ok plan_ctx
-      when Task_completion_claim.deliverable_claims_completion ~task_id:task.id
-             plan_ctx.deliverable ->
-        ( "conflict_triage",
-          "Conflict verification required: board / planning / mutation path disagree.",
-          "Reconcile board / planning / mutation surfaces before ordinary approval.",
-          "verification_conflict_request",
-          Printf.sprintf "Conflict verify: %s" task.title,
-          Printf.sprintf
-            "Conflict verification required for task %s (%s) by %s. Do not approve as ordinary merged-PR verification; reconcile board / planning / mutation surfaces first."
-            task.id task.title assignee )
-    | Ok _ | Error _ ->
-        ( "normal",
-          "",
-          "",
-          "verification_request",
-          Printf.sprintf "Verify: %s" task.title,
-          Printf.sprintf "Verification requested for task %s (%s) by %s"
-            task.id task.title assignee )
+  (* Every submission is an ordinary verification request. The
+     [conflict_triage] branch this replaced was selected by reading the
+     planning deliverable's prose for an English "completed" prefix, which
+     matched 0 of the 199 non-empty deliverables in the live store. *)
+  let request_kind = "normal" in
+  let request_summary = "" in
+  let next_action = "" in
+  let board_type = "verification_request" in
+  let board_title = Printf.sprintf "Verify: %s" task.title in
+  let board_content =
+    Printf.sprintf "Verification requested for task %s (%s) by %s"
+      task.id task.title assignee
   in
   let criteria = List.map (fun s -> Verification.Custom s)
     (match task.contract with

@@ -31,6 +31,11 @@ let key_to_env =
     "proactive.enabled",                "MASC_KEEPER_PROACTIVE_ENABLED";
     (* [turn] *)
     "turn.stream_idle_timeout_sec",     "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC";
+    (* #27416: the provider-call deadline lived only in restart-command env,
+       and 2 of 3 restarts on 2026-08-07 silently dropped it (a wedge recurred
+       in the unprotected window). TOML makes the knob survive whoever
+       restarts the server; env remains the CI/operator override. *)
+    "turn.provider_call_deadline_sec",  "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC";
     "turn.cli_subprocess_idle_sec",     "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC";
     "turn.capacity_limit",              "MASC_KEEPER_TURN_CAPACITY_LIMIT";
     "turn.batch_limit",                 "MASC_KEEPER_BATCH_LIMIT";
@@ -152,8 +157,7 @@ let toml_shadow : (string, string) Hashtbl.t = Hashtbl.create 16
 
 let toml_value_opt env_name = Hashtbl.find_opt toml_shadow env_name
 
-let validate_stream_idle_timeout doc =
-  let key = "turn.stream_idle_timeout_sec" in
+let validate_positive_seconds_key doc key =
   match List.assoc_opt key doc with
   | None -> Ok ()
   | Some (Keeper_toml_loader.Toml_int seconds) ->
@@ -179,6 +183,22 @@ let validate_stream_idle_timeout doc =
       | Keeper_toml_loader.Toml_local_date _
       | Keeper_toml_loader.Toml_local_time _) ->
     Error (Printf.sprintf "%s: expected a numeric TOML value" key)
+
+(* Boot-validated seconds keys. Both are opt-in liveness ceilings whose
+   readers expect a finite, positive duration; a malformed TOML value must be
+   an operator configuration error at boot, never a silent disable (the
+   deadline reader maps unparseable input to [None] = off). *)
+let validated_positive_seconds_keys =
+  [ "turn.stream_idle_timeout_sec"; "turn.provider_call_deadline_sec" ]
+
+let validate_positive_seconds_keys doc =
+  List.fold_left
+    (fun acc key ->
+       match acc with
+       | Error _ -> acc
+       | Ok () -> validate_positive_seconds_key doc key)
+    (Ok ())
+    validated_positive_seconds_keys
 
 (* Bootstrap labels its failure counter from this. It used to recover the label
    by re-reading the rendered message for a "read " or "parse " prefix, which
@@ -227,7 +247,7 @@ let load_and_apply ~base_path =
       | Error msg ->
         Error { kind = Parse; message = Printf.sprintf "%s: %s" path msg }
       | Ok doc ->
-        (match validate_stream_idle_timeout doc with
+        (match validate_positive_seconds_keys doc with
          | Error msg ->
            Error { kind = Validate; message = Printf.sprintf "%s: %s" path msg }
          | Ok () ->

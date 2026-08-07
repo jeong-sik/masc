@@ -293,6 +293,64 @@ let test_resolved_runtime_prefers_env_over_toml () =
     "env"
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
 
+(* #27416: the provider-call deadline knob must survive a restart that
+   forgets the env var — TOML is the durable channel, env the override. *)
+let test_applies_provider_call_deadline_override () =
+  let doc = parse_or_fail "[turn]\nprovider_call_deadline_sec = 900\n" in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied 1" 1 count;
+  check (option string) "provider call deadline"
+    (Some "900")
+    (List.assoc_opt "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" overrides)
+
+let test_provider_call_deadline_invalid_toml_returns_error () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nprovider_call_deadline_sec = 0\n";
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok _ -> fail "expected non-positive provider call deadline to be rejected"
+  | Error failure ->
+    check bool "classified as a validate failure" true
+      (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate);
+    check bool "diagnostic names the TOML key" true
+      (String.ends_with
+         ~suffix:
+           "turn.provider_call_deadline_sec: expected a finite, positive number of seconds"
+         (Keeper_runtime_config.load_failure_to_string failure))
+
+let test_resolved_provider_call_deadline_uses_toml () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nprovider_call_deadline_sec = 900\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (option (float 0.0001)) "provider call deadline from toml"
+    (Some 900.0) runtime.provider_call_deadline_sec.value;
+  check string "provider call deadline source"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source)
+
+let test_resolved_provider_call_deadline_prefers_env () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nprovider_call_deadline_sec = 900\n";
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" (Some "1200") @@ fun () ->
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (option (float 0.0001)) "env provider call deadline wins"
+    (Some 1200.0) runtime.provider_call_deadline_sec.value;
+  check string "env source"
+    "env"
+    (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source)
+
 let test_resolved_stream_idle_timeout_does_not_clamp () =
   with_clean_boot_overrides @@ fun () ->
   with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some "3600") @@ fun () ->
@@ -445,6 +503,14 @@ let () =
         ; test_case "resolved stream idle timeout uses toml" `Quick test_resolved_stream_idle_timeout_uses_toml
         ; test_case "invalid stream idle TOML returns Error" `Quick test_stream_idle_timeout_invalid_toml_returns_error
         ; test_case "wrong-type stream idle TOML returns Error" `Quick test_stream_idle_timeout_toml_wrong_type_returns_error
+        ; test_case "applies provider call deadline override (#27416)" `Quick
+            test_applies_provider_call_deadline_override
+        ; test_case "invalid provider call deadline TOML returns Error" `Quick
+            test_provider_call_deadline_invalid_toml_returns_error
+        ; test_case "resolved provider call deadline uses toml" `Quick
+            test_resolved_provider_call_deadline_uses_toml
+        ; test_case "resolved provider call deadline prefers env" `Quick
+            test_resolved_provider_call_deadline_prefers_env
         ; test_case "cli subprocess idle default 120s" `Quick test_resolved_cli_subprocess_idle_default_120s
         ; test_case "cli subprocess idle from toml" `Quick test_resolved_cli_subprocess_idle_from_toml
         ; test_case "cli subprocess idle clamps to 10s floor" `Quick test_resolved_cli_subprocess_idle_clamps_low

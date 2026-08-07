@@ -64,6 +64,12 @@ val to_wire_message_default : t -> string
     {!Server_mcp_transport_http_respond} contract for [respond_not_ready]).
 *)
 
+val allows_null_request_id : t -> bool
+(** Whether a response carrying this code may leave [id] null.  True only
+    for [Parse_error] and [Invalid_request], the two JSON-RPC 2.0 §5 cases
+    where the request id could not be read.  Exhaustive over [t]: adding a
+    code is a compile error here rather than a silent [false]. *)
+
 val to_http_status : t -> Httpun.Status.t
 (** Mapping from error code to HTTP status, colocated with the variant
     so the transport cannot drift from envelope semantics.

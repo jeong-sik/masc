@@ -50,7 +50,13 @@ let goal_fsm_next_actions ~goal_phase =
          match
            Goal_phase.decide_transition ~phase:goal_phase ~action
          with
-         | Ok _ -> true
+         (* Next actions are the ones that move the goal. [Already] is accepted
+            by the tool but changes nothing, and listing "pause" under a paused
+            goal reads as a step that is still to come. Written as an explicit
+            arm because [Ok _] would have absorbed the new outcome and widened
+            this list without a compiler error. *)
+         | Ok (Goal_phase.Move_to _) -> true
+         | Ok (Goal_phase.Already _) -> false
          | Error _ -> false)
   |> List.map Goal_phase.action_to_string
 

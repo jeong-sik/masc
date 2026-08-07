@@ -104,6 +104,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import defaultdict
@@ -152,20 +153,48 @@ def module_name(stem: str) -> str:
     return stem[0].upper() + stem[1:]
 
 
+def is_skipped_name(name: str) -> bool:
+    """One path component the walk must not descend into or collect.
+
+    `is_skipped` tested every component of a relative path, the filename
+    included, so a file whose own name is in SKIP_PARTS was dropped. Pruning
+    only directories would quietly widen what the scan reads, so the same
+    predicate is applied to filenames too.
+    """
+    return name in SKIP_PARTS or name.startswith(".worktree")
+
+
 def all_files(root: Path) -> list[Path]:
     """Every authored file in the tree, whatever its extension.
 
     Extension allow-lists are the failure mode this audit exists to avoid: an
     earlier ad-hoc version skipped `test/stanzas/*.inc` and reported three
     live, CI-running tests as orphans.
+
+    Pruned during the walk, not filtered after it. `Path.rglob` descends into
+    every directory and hands back what it found, so `SKIP_PARTS` could only
+    discard paths already visited: on a checkout with worktrees under
+    `.worktrees/`, each with its own `_build`, that is the whole tree many times
+    over. Measured here, 2026-08-07, 192 worktrees present:
+
+        rglob then filter   2,292,279 files and still going at 60s
+        prune while walking     24,426 files in 0.4s
+
+    That number is this checkout, not CI: 192 worktrees contribute nearly all of
+    it and a fresh clone has none. What pruning is worth in CI is smaller and
+    still real -- `.git` and, after a build, `_build` (42,237 files here) were
+    both walked and then discarded.
     """
     out: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        if is_skipped(path.relative_to(root)):
-            continue
-        out.append(path)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if not is_skipped_name(name)]
+        directory = Path(dirpath)
+        for name in filenames:
+            if is_skipped_name(name):
+                continue
+            path = directory / name
+            if path.is_file():
+                out.append(path)
     return out
 
 
@@ -426,6 +455,19 @@ def run_self_test() -> int:
             "module Alias = Plain_surface\nlet _ = 0\n"
         )
 
+        # Skipped trees are pruned during the walk, and pruning must not change
+        # what the scan sees. Both halves are asserted below: a reference parked
+        # inside a skipped tree must not keep a value alive, and the pruning
+        # must not swallow the sibling directories it walks past.
+        stale = root / ".worktrees" / "old-checkout" / "lib"
+        stale.mkdir(parents=True)
+        (stale / "stale_consumer.ml").write_text("let _ = Plain_surface.unfacaded_helper ()\n")
+        build = root / "lib" / "_build" / "default"
+        build.mkdir(parents=True)
+        (build / "generated_consumer.ml").write_text(
+            "let _ = Wrapped_surface.wrapped_helper ()\n"
+        )
+
         entries = {d["name"]: d for d in find_dead_exports(root, DEFAULT_MIN_NAME_LEN)}
         republished = entries.get("republished_helper")
         if republished is None:
@@ -444,6 +486,27 @@ def run_self_test() -> int:
             failures.append("value behind a multi-line facade not reported")
         elif not wrapped.get("reexported_by"):
             failures.append("multi-line include module type of not matched")
+
+        # Both of these were still reported above: a call sitting in
+        # .worktrees/ or _build/ is not a reference. They are asserted here so
+        # that a walk which stops pruning fails loudly instead of quietly
+        # shrinking the report -- the direction that hides dead surface.
+        if "unfacaded_helper" not in entries:
+            failures.append("a reference under .worktrees/ was counted as live")
+        if "wrapped_helper" not in entries:
+            failures.append("a reference under _build/ was counted as live")
+
+        (root / "lib" / "_build").parent.joinpath("_opam").write_text("not a directory\n")
+
+        walked = {path.name for path in all_files(root)}
+        if "_opam" in walked:
+            failures.append("a file whose own name is skipped was collected")
+        if "stale_consumer.ml" in walked:
+            failures.append(".worktrees/ was walked instead of pruned")
+        if "generated_consumer.ml" in walked:
+            failures.append("_build/ was walked instead of pruned")
+        if "plain_surface.ml" not in walked:
+            failures.append("pruning removed a sibling it should have walked")
 
     for failure in failures:
         print(f"self-test FAIL: {failure}", file=sys.stderr)

@@ -36,7 +36,11 @@ type prompt_def = {
   icons : Mcp_server.mcp_icon list;
 }
 (** Concrete record for the same reason as {!prompt_argument} —
-    {!Mcp_sdk_adapter_masc.sdk_prompt_of_local} reads every field.
+    {!prompt_json} in this module reads every field.
+
+    The doc this replaces named [Mcp_sdk_adapter_masc.sdk_prompt_of_local].
+    That module still exists and has no prompt function at all; the symbol is
+    absent from the tree.
 
     The [icons] field is non-optional and currently always populated
     with a single themed icon; the contract permits an empty list,

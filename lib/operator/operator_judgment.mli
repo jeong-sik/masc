@@ -6,8 +6,9 @@
     window, supersedes-chain, confidence, evidence refs, and
     optional recommended-action JSON.
 
-    Two read paths: {!latest_active} (typed record) and
-    {!latest_active_json} (JSON envelope).  One write path:
+    One read path, {!latest_active}, whose record serializes through
+    {!to_yojson}.  This said "two read paths" and named a
+    [latest_active_json] that is not in the tree.  One write path:
     {!record}, which auto-chains supersedes by reading the
     current latest before append. *)
 

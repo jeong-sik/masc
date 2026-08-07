@@ -4,13 +4,17 @@
     need full-duplex.
 
     External surface:
-    - {b session record} ({!ws_session}) — concrete because
+    - {b session record} ({!ws_session}) — concrete, though nothing outside
+      this module names it today. The justification this replaces said
       [server_ws_standalone] passes session values to
-      {!read_inbound_message_frame} /
-      {!send_dashboard_or_raw_sse} and reaches the live
-      {!sessions} table directly.
+      [read_inbound_message_frame] / {!send_dashboard_or_raw_sse} and reaches
+      the live {!sessions} table directly. That module uses exactly two symbols
+      from here, {!mcp_websocket_handler} and {!max_inbound_message_bytes},
+      and [read_inbound_message_frame] is absent from the tree.
     - {b inbound size decisions}
-      ({!inbound_size_rejection}, {!inbound_size_decision}).
+      ({!inbound_dispatch_rejection}, {!inbound_dispatch_admission}) --
+      renamed from inbound_size_rejection / inbound_size_decision, which this
+      line still named.
     - {b SSE parse record} ({!parsed_sse_event}) — exposed
       so the regression test at
       [test/test_transport_integration] can pattern-match
@@ -23,8 +27,7 @@
       {!session_count}, {!sessions}, {!with_sessions_rw},
       {!next_id}).
     - {b inbound framing}
-      ({!read_inbound_message_frame},
-      {!max_inbound_dispatches_per_session},
+      ({!max_inbound_dispatches_per_session},
       {!try_begin_inbound_dispatch},
       {!finish_inbound_dispatch}).
     - {b dashboard JSON-RPC handlers}
@@ -107,11 +110,9 @@ type ws_session = {
   dashboard_last_delta_at : float Atomic.t;
   inbound_dispatches : int Atomic.t;
 }
-(** Per-WS session state.  Concrete record because
-    [server_ws_standalone] threads the value through
-    {!read_inbound_message_frame} +
-    {!send_dashboard_or_raw_sse} and reaches the
-    {!sessions} table directly.  The dashboard handshake /
+(** Per-WS session state.  Concrete record; see the note on the external
+    surface at the top of this file for what that claim used to rest on and
+    what is actually true.  The dashboard handshake /
     ack state machine is tracked in the [dashboard_*] fields;
     see the [#10648] / dashboard-ws.v1 protocol notes in the
     .ml for the field semantics.

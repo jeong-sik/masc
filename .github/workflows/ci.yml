@@ -1049,6 +1049,18 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_env_snapshot_reports_applied_default
 
+      - name: Run JSONL retention getter contract suite
+        # Pins the digest fallback contract: the getter must report a
+        # non-positive override as-is (that's how "pruning disabled" reaches
+        # the caller) while the exported default stays positive (the bound a
+        # caller substitutes instead). @check compiles this but does not run
+        # it, and the PR that introduced the getter tripped this exact
+        # failure mode once -- the getter silently swallowed the override and
+        # returned the default instead.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_jsonl_retention_window
+
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
         # it. It sat outside every target list while one of its counts was

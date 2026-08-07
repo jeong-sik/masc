@@ -62,11 +62,22 @@ val owned_executing_goals_without_tasks :
 (** RFC-0362 §4.3 — the Goals this keeper owns that are still executing and
     carry no linked Task. Read from [goal.owner], not from
     [meta.active_goal_ids]: ownership lives on the Goal, and that keeper-side
-    pointer is empty for every keeper on the live workspace.
+    pointer names a Completed Goal for the one keeper that has it set.
 
     The RFC's acceptance criterion (§4.3) reads off this list: the measured
     0-of-10 executing goals with a Task must move, or the owner field is
     decoration and should be removed. *)
+
+val unowned_executing_goals_without_tasks :
+  config:Workspace.config -> (string * string) list
+(** RFC-0362 §6 Q2 — the executing Goals nobody owns and no Task serves. The
+    same list for every keeper, because an unowned Goal is addressed to whoever
+    reads it.
+
+    The prompt already states that taking one is a move a keeper can make, and
+    [handle_goal_assign] carries no ownership check. What was missing was the
+    sighting: with 15 of 16 live Goals unowned,
+    {!owned_executing_goals_without_tasks} renders for nobody. *)
 
 val active_goal_summaries :
   config:Workspace.config ->

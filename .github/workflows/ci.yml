@@ -867,8 +867,13 @@ jobs:
         # #26445) that predate this PR. Alcotest exits non-zero when
         # the name matches no suite, so a suite rename cannot silently
         # unwire this step.
+        # claim_next is wired for the same reason: the single-claim refusal
+        # carries its own correction hint (masc_transition action=release),
+        # which keeper.md no longer restates. An unrun assertion would let
+        # that hint rot back out of the message.
         run: |
           opam exec -- dune exec --root . test/test_workspace_coverage.exe -- test revision
+          opam exec -- dune exec --root . test/test_workspace_coverage.exe -- test claim_next
 
       - name: Run MCP authentication contract suites
         # @check compiles these suites but never runs them. Exercise both the
@@ -883,7 +888,9 @@ jobs:
             @test/runtest-test_error_body_wire_shape \
             @test/runtest-test_tool_registry_consistency \
             @test/runtest-test_tool_spec \
-            @test/runtest-test_tool_shard_coverage
+            @test/runtest-test_tool_shard_coverage \
+            @test/runtest-test_tool_board_coverage \
+            @test/runtest-test_tool_task_coverage
 
       - name: Run completion-authority lookup surface suite
         # The judge's lookup tools reach the filesystem and Git inside a
@@ -938,6 +945,7 @@ jobs:
             @test/runtest-test_server_base_path_guard \
             @test/runtest-test_sse_retry_ssot \
             @test/runtest-test_task_cache_invariant_13397 \
+            @test/runtest-test_task_status_vocabulary \
             @test/runtest-test_tool_contract_truth \
             @test/runtest-test_voice_command_descriptor_parity
 
@@ -958,6 +966,67 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_gate_connector_observability \
             @test/runtest-test_discord_observability
+
+      - name: Run Discord API version pinning suites
+        # The version now has one definition, and these two suites are what
+        # holds it: test_discord_gateway_state asserts Open_wss carries
+        # ?v=10, test_discord_rest_client asserts the /api/v10 paths. Both
+        # already made those assertions and neither ran in CI, so a bump
+        # could land with the assertions untouched. 33 + 118 pass here.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_discord_gateway_state \
+            @test/runtest-test_discord_rest_client
+
+      - name: Run repos relative-path suite
+        # The stored default must stay relative: Repo_store.local_path concats
+        # it onto the base path, so an absolute value resolves twice.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_repos_relative_path
+
+      - name: Run JSONL day-key suite
+        # The key and the writer's path have to name the same day. A reader
+        # that drifts does not error -- it filters a layout the writer does
+        # not produce and comes back empty, which @check cannot see.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_jsonl_day_key
+
+      - name: Run memory journal projection suite
+        # The librarian's failed passes reach the dashboard through this
+        # projection. A torn line presented as a commit would make a damaged
+        # journal read as a healthy shorter one, and that compiles either way.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_memory_journal_projection
+
+      - name: Run operator note lifetime suite
+        # RFC-0366. A note that renders twice is a standing rule the operator
+        # never wrote — the #26729 shape. @check compiles "renders once then
+        # never again" whether or not it holds, so the suite has to run.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_operator_note
+
+      - name: Run prompt capture round-trip suite
+        # The assembled extra system context reaches disk as text here. @check
+        # compiles the cases but does not run them, and "an unknown block id
+        # must not decode short" compiles whether or not it holds. The write
+        # path also degrades to a warning by design, so a broken capture is
+        # silent unless a test exercises it.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_prompt_capture
+
+      - name: Run raw-trace reader containment suite
+        # This surface takes a caller-supplied file name and reads inside a
+        # keeper's directory. @check compiles the containment cases but does not
+        # run them, and "../secret.jsonl must not resolve" compiles whether or
+        # not it holds.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_raw_trace_reader
 
       - name: Run keeper lane launch-order AST suite
         # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
@@ -1097,6 +1166,36 @@ jobs:
       # suite asserts routed identities and stored payloads, never source
       # text or log wording. It stayed compile-only under @check, so
       # regression tests added there (#26625, #26657) never ran.
+      - name: Run channel-gate content-length knob suite
+        id: channel_gate_content_length_knob_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_channel_gate_content_length_knob"
+
+      # Redaction is the last thing every observability payload passes through,
+      # so a defect here is not scoped to one field: a preview truncated inside
+      # a multibyte character makes the whole JSON response undecodable and the
+      # panel that reads it renders nothing. test_observability_redact carried a
+      # max-length case from the start and compiled on every run, but was never
+      # named here, so it never executed and the byte-indexed cut survived.
+      - name: Run observability redaction suite
+        id: observability_redaction_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_observability_redact"
+
       - name: Run verification behavior suite
         id: verification_behavior_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

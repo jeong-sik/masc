@@ -1,7 +1,6 @@
 (** Runtime-resolution and dashboard tools projections extracted from the
     dashboard HTTP facade. *)
 
-open Dashboard_http_helpers
 
 let take = Server_dashboard_http_runtime_info_json.take
 type dashboard_runtime_probe_cache_entry =
@@ -1640,7 +1639,6 @@ let runtime_declared_spec_json (rt : Runtime.t) =
           ; "top_k", Json_util.int_opt_to_json rt.model.top_k
           ; "min_p", Json_util.float_opt_to_json rt.model.min_p
           ; "capabilities", runtime_declared_model_capabilities_json rt.model.capabilities
-          ; "match_prefixes", Json_util.json_string_list rt.model.match_prefixes
           ] )
     ; ( "binding"
       , `Assoc

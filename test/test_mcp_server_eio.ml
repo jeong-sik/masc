@@ -984,7 +984,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
-  Masc.Auth.disable_auth base_path;
+  Auth.disable_auth base_path;
   let sid = "mcp-transition-claim-guidance" in
   let init_result =
     Mcp_eio.execute_tool_eio ~sw ~clock
@@ -1043,7 +1043,7 @@ let test_handle_request_tools_call_transition_done_requires_llm_verdict () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
-  Masc.Auth.disable_auth base_path;
+  Auth.disable_auth base_path;
   let sid = "mcp-transition-done-guidance" in
   let init_result =
     Mcp_eio.execute_tool_eio ~sw ~clock
@@ -1133,7 +1133,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
-  Masc.Auth.disable_auth base_path;
+  Auth.disable_auth base_path;
   let sid = "mcp-deprecated-claim-alias" in
   let init_result =
     Mcp_eio.execute_tool_eio ~sw ~clock
@@ -1424,9 +1424,9 @@ let test_execute_tool_generated_agent_name_uses_token_identity () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
+    match Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
@@ -1453,13 +1453,13 @@ let test_execute_tool_actor_mismatch_reports_typed_code () =
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore
-    (Masc.Auth.enable_auth
+    (Auth.enable_auth
        base_path
        ~require_token:true
        ~agent_name:"bootstrap-admin");
   let raw_token =
     match
-      Masc.Auth.create_token
+      Auth.create_token
         base_path
         ~agent_name:"codex"
         ~role:Masc_domain.Worker
@@ -1568,9 +1568,9 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
+    match Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
@@ -1601,9 +1601,9 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
+    match Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
@@ -1641,9 +1641,9 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mut
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc.Auth.create_token base_path ~agent_name:"qa-king" ~role:Masc_domain.Admin with
+    match Auth.create_token base_path ~agent_name:"qa-king" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
@@ -1680,7 +1680,7 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   ignore (Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
   ignore
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"claim-next-auth-preflight"
@@ -1709,7 +1709,7 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   ignore (Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
   ignore
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"transition-auth-preflight"
@@ -1744,9 +1744,9 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
+    match Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
@@ -2130,7 +2130,7 @@ let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.For_testing.create_state ~base_path () in
-      let token = Masc.Auth.ensure_internal_keeper_token base_path in
+      let token = Auth.ensure_internal_keeper_token base_path in
       let request = Yojson.Safe.to_string (`Assoc [
         ("jsonrpc", `String "2.0");
         ("id", `Int 119);
@@ -2173,7 +2173,7 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execu
         (Keeper_registry.For_testing.register ~base_path keeper_name
            (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
       let state = Mcp_eio.For_testing.create_state ~base_path () in
-      let token = Masc.Auth.ensure_internal_keeper_token base_path in
+      let token = Auth.ensure_internal_keeper_token base_path in
       let request = Yojson.Safe.to_string (`Assoc [
         ("jsonrpc", `String "2.0");
         ("id", `Int 120);

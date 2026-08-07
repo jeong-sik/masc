@@ -29,8 +29,9 @@ open Printf
     independently — the docstring drifted (claimed 3, runtime had 4).
     The witness pattern below is the standard Variant SSOT shape used by
     #8486 (tail_order), #8467 (sandbox_profile), #8592 (dashboard scope).
-    Adding a 5th source forces compile errors in [source_to_string] and
-    fails the [library_source_ssot] test in test_types.ml. *)
+    Adding a 5th source forces compile errors in [source_to_string].
+    There is no [library_source_ssot] test; the compile errors are the
+    whole guard. *)
 type library_source =
   | Direct_experience
   | Research

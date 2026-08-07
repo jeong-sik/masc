@@ -16,8 +16,8 @@
       [server_dashboard_http_keeper_api]).
     - {!valid_snapshot_view_strings},
       {!snapshot_view_of_string_opt}, {!snapshot_view}
-      (consumed by [tool_operator] tool schema +
-      [test/test_types]).
+      (consumed by the [tool_operator] tool schema; no suite pins
+      the view vocabulary today).
     - {!align_keeper_runtime_status}
       (test-only direct caller).
     - {!get_payload} (runtime-include
@@ -33,8 +33,6 @@
     [action_log_entry] types and their stringifiers,
     [action_log_path],
     [remote_confirm_ttl_seconds],
-    [runtime_status_from_live_signal],
-    [health_state_allows_runtime_status_override],
     [remote_client_type_of_context],
     [operator_server_profile_json],
     [action_log_entry_to_yojson], the snapshot dispatcher
@@ -69,14 +67,6 @@ val merge_json_objects :
     snapshot envelope with downstream-derived metadata. *)
 
 (** {1 Snapshot cache} *)
-
-val invalidate_snapshot_cache : unit -> unit
-(** Drops every cached operator snapshot entry.  Called
-    automatically by the keeper-mutation routes
-    ([server_dashboard_http_keeper_api]) so the next
-    snapshot read sees fresh state.  No-op when the
-    {!Eio_guard} runtime is not yet ready (the cache is
-    empty in that case). *)
 
 (** {1 Snapshot view variant} *)
 

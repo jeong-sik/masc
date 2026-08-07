@@ -324,7 +324,7 @@ module For_testing : sig
     has_visible_blocks:bool ->
     has_tool_calls:bool ->
     [ `Visible_blocks | `Tool_calls_only | `Failure | `User_only ]
-  val format_surface_context : Yojson.Safe.t -> string
+
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   val keeper_tool_failure_log_details :
     tool_name:string ->

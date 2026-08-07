@@ -24,12 +24,7 @@ let get_id = Mcp_transport_protocol.get_id
 let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
 let make_response = Mcp_transport_protocol.make_response
 let make_error = Mcp_transport_protocol.make_error
-let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
-
 (* Protocol version — canonical in Mcp_transport_protocol *)
-let supported_protocol_versions = Mcp_transport_protocol.supported_protocol_versions
-let default_protocol_version = Mcp_transport_protocol.default_protocol_version
-let is_supported_protocol_version = Mcp_transport_protocol.is_supported_protocol_version
 let validate_protocol_version = Mcp_transport_protocol.validate_protocol_version
 
 (** Server info *)

@@ -199,7 +199,7 @@ stateDiagram-v2
 | 경계 | OCaml owner | 저장소 | TLA/FSM |
 |------|-------------|--------|---------|
 | compaction | `keeper_post_turn.ml` | 현재 trace checkpoint | post-turn single-writer |
-| handoff rollover | `keeper_post_turn.ml` + `keeper_rollover.ml` | 새 trace checkpoint + keeper meta lineage | `KeeperGenerationLineage.tla`, keeper FSM `Handoff_*` events |
+| handoff rollover | `keeper_post_turn.ml` + `keeper_rollover.ml` | 새 trace checkpoint + keeper meta generation/trace | keeper FSM `Handoff_*` events |
 | typed checkpoint metadata | `keeper_post_turn.ml` | keeper meta | keeper post-turn contract |
 | Memory OS facts/episodes | `keeper_librarian_runtime.ml` | `.masc/config/keepers/<name>.facts.jsonl` + `episodes/` | librarian 계약 (RFC-0247/0272) |
 | collaboration activity signal | `workspace_task.ml` + `workspace.ml` | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |

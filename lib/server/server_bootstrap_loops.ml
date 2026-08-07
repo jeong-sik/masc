@@ -287,14 +287,10 @@ module Projection_for_testing = struct
 end
 
 let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
-let log_server_fiber_crash =
-  Server_bootstrap_loops_fiber.log_server_fiber_crash
 let log_dashboard_fiber_crash =
   Server_bootstrap_loops_fiber.log_dashboard_fiber_crash
 let filteri_with_fair_yield =
   Server_bootstrap_loops_fiber.filteri_with_fair_yield
-let iteri_with_fair_yield = Server_bootstrap_loops_fiber.iteri_with_fair_yield
-
 type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
   ; queue : Keeper_chat_queue.configure_report
@@ -355,13 +351,11 @@ type keeper_persistence_base_path =
 
 type prepared_keeper_persistence =
   { base_path : keeper_persistence_base_path
-  ; config : Workspace.config
   ; report : keeper_persistence_report
   }
 
 type claimed_keeper_persistence =
   { claimed_base_path : keeper_persistence_base_path
-  ; claimed_config : Workspace.config
   ; claimed_report : keeper_persistence_report
   }
 
@@ -680,7 +674,6 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
          report.examined report.projected report.pending);
   let prepared =
     { base_path = base_path_identity
-    ; config
     ; report =
         { shutdown
         ; queue = queue_recovery
@@ -884,7 +877,6 @@ let rec claim_prepared_keeper_persistence ~config prepared =
      | Ok () ->
       let claimed =
         { claimed_base_path = prepared.base_path
-        ; claimed_config = prepared.config
         ; claimed_report = prepared.report
         }
       in

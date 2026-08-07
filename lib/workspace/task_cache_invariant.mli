@@ -7,8 +7,6 @@
 
     @since #13397 *)
 
-open Masc_domain
-open Workspace_utils
 
 (** Read the current task status directly from the backlog.
     Returns [None] when the task is absent or the backlog cannot be read. *)

@@ -14,5 +14,5 @@ val digest_tool_io :
   io_fingerprints option
 
 module For_testing : sig
-  val normalize_json : Yojson.Safe.t -> Yojson.Safe.t
+
 end

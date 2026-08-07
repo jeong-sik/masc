@@ -183,7 +183,7 @@ function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
       <div class="flex items-center justify-between gap-3">
         <div class="text-2xs font-medium text-[var(--text)]">${pillar.label}</div>
         <div class="font-mono text-2xs ${readinessStatusClass(pillar.status)}">
-          ${pillar.score.toFixed(2)}
+          ${pillar.status}
         </div>
       </div>
       <div class="mt-1 text-3xs ${readinessStatusClass(pillar.status)}">${pillar.summary}</div>
@@ -252,7 +252,7 @@ function ControlWorkspacePanel({ state }: { state: FleetTelemetryState }) {
       <div class="grid grid-cols-1 gap-3 xl:grid-cols-4">
         <${SummaryCard}
           title="준비 상태"
-          value=${readiness.score.toFixed(2)}
+          value=${readiness.status}
           detail=${`차단 ${readiness.blocking_count} · 결정 필요 ${readiness.decision_required_count}.`}
           tone=${readinessTone(readiness.status)}
         />

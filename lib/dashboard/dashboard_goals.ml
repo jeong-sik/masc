@@ -356,7 +356,4 @@ let dashboard_goals_tree_json ~(config : Workspace.config) =
 module For_testing = struct
   let dashboard_goals_tree_json_with_pending_reader =
     dashboard_goals_tree_json_with_pending_reader
-
-  let goal_detail_json_with_pending_reader =
-    goal_detail_json_with_pending_reader
 end

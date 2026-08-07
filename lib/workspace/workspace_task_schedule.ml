@@ -239,7 +239,9 @@ let claim_next_r
              { agent with status = Busy; current_task = Some prev.id });
            let message =
              Printf.sprintf
-               "%s already holds [P%d] %s: %s."
+               "%s already holds [P%d] %s: %s. Finish it, or hand it back with \
+                masc_transition action=release and a handoff_context.summary, \
+                before claiming different work."
                agent_name
                prev.priority
                prev.id

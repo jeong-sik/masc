@@ -33,7 +33,6 @@ module Keeper_tool_call_log = Masc.Keeper_tool_call_log
 module Graphql_api = Masc.Graphql_api
 module Types = Masc_domain
 module Tempo = Masc.Tempo
-module Auth = Masc.Auth
 module Board = Masc.Board
 module Board_curation = Masc.Board_curation
 module Board_dispatch = Masc.Board_dispatch

@@ -205,11 +205,23 @@ function hashLooksLikeQuery(rawHashBody: string): boolean {
 
 function parsePathname(pathname: string, search: string): RouteState | null {
   const segments = pathname.replace(/^\/+/, '').split('/').filter(Boolean)
+  // The server serves the dashboard at both / and /dashboard, so a link
+  // written as /?tab=monitoring is the same request as /dashboard?tab=…. It
+  // used to fall through to the default route, which is a silent answer to a
+  // URL that named a destination.
+  if (segments.length === 0) {
+    return parseSegments([], parseParams(search.replace(/^\?/, '')))
+  }
   if (segments[0] !== 'dashboard') return null
 
   const sub = segments.slice(1)
-  if (sub.length === 0) return { ...DEFAULT_ROUTE, params: parseParams(search.replace(/^\?/, '')) }
   if (sub[0] === 'assets' || sub[0] === 'credits') return null
+  // /dashboard?tab=monitoring&section=… is the shape a person writes by hand,
+  // and it used to land on overview: this returned DEFAULT_ROUTE with the
+  // params attached, so `tab` rode along as a parameter of the wrong tab.
+  // parseSegments already resolves a tab from the query when the path carries
+  // none, so hand it the empty segment list rather than answering first.
+  if (sub.length === 0) return parseSegments([], parseParams(search.replace(/^\?/, '')))
 
   const params = parseParams(search.replace(/^\?/, ''))
   return parseSegments(sub, params)

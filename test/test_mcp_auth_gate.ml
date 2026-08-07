@@ -100,9 +100,9 @@ let has_result response =
 let setup_auth_workspace () =
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc.Auth.create_token base_path ~agent_name:"test-agent" ~role:Masc_domain.Worker with
+    match Auth.create_token base_path ~agent_name:"test-agent" ~role:Masc_domain.Worker with
     | Ok (token, _cred) -> token
     | Error e -> fail (Masc_domain.masc_error_to_string e)
   in

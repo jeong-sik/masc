@@ -120,21 +120,6 @@ end
 
 include Make (Docker_backend)
 
-let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
-
-let normalize p =
-  Keeper_alerting_path.normalize_path_for_check p
-  |> strip_trailing_slashes
-
-let in_playground ~config ~meta ~cwd =
-  let host_root =
-    Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> normalize
-  in
-  let cwd = normalize cwd in
-  String.equal cwd host_root
-  || String.starts_with ~prefix:(host_root ^ "/") cwd
-
 let uses_backend ~config:_ ~meta ~cwd:_ =
   match effective_sandbox_profile ~meta with
   | Keeper_types_profile_sandbox.Docker, _ -> true

@@ -82,10 +82,7 @@ let gateway_state_label = function
 
 (* Bot identity. Slack has no READY dispatch; [record_ready] is called from the
    gateway's hello handler once the bot user id is known. *)
-type ready_info = {
-  ready_bot_user_id : string;
-  ready_at : string;
-}
+type ready_info = Channel_gate_connector.ready_info
 
 let last_ready : ready_info option Atomic.t = Atomic.make None
 let startup_error : string option Atomic.t = Atomic.make None

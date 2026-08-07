@@ -20,6 +20,3 @@ val verification : string
 
 val librarian : string
 (** Current-memory selection. *)
-
-val worker : string
-(** The local worker's standing rules. *)

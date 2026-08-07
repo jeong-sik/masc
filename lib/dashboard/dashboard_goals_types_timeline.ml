@@ -14,8 +14,6 @@
 open Dashboard_goals_types_accessor
 
 let json_to_string_opt = function | `String s -> Some s | _ -> None
-let json_to_int_opt = function | `Int n -> Some n | `Intlit s -> (try Some (int_of_string s) with _ -> None) | _ -> None
-
 let goal_phase_color = function
   | Goal_phase.Executing -> "#4ade80"
   | Goal_phase.Blocked -> "#ef4444"
@@ -260,6 +258,27 @@ let goal_event_timeline_json event =
           | "blocked" -> "bad"
           | "paused" -> "warn"
           | _ -> "ok") )
+    | "goal_owner" ->
+        (* Unlike the bracketed markers above, [<unassigned>] names a real
+           state, not a producer gap: workspace_goals.ml writes both sides of
+           the transition and [Null] means the goal was unassigned there. *)
+        let previous_owner =
+          payload_field "previous_owner" |> json_to_string_opt
+        in
+        let owner = payload_field "owner" |> json_to_string_opt in
+        let actor = payload_field "actor" |> json_to_string_opt in
+        (* DET-OK: [owner]/[previous_owner] are persisted goal_owner payload
+           fields; [Null] is the typed unassigned state, not unknown input. *)
+        let side value = Option.value ~default:"<unassigned>" value (* renders the typed unassigned state *) in
+        ( "Goal Owner",
+          (match actor with
+          | Some actor_id ->
+              Printf.sprintf "owner: %s -> %s by %s" (side previous_owner)
+                (side owner) actor_id
+          | None ->
+              Printf.sprintf "owner: %s -> %s" (side previous_owner)
+                (side owner)),
+          "ok" )
     | _ ->
         ("Goal Event", event_type, "ok")
   in

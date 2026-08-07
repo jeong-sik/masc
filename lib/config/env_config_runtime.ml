@@ -302,9 +302,6 @@ module Worker = struct
   (** Local runtime cooldown (seconds). *)
   let local_runtime_cooldown_sec_opt () =
     Sys.getenv_opt "MASC_LOCAL_RUNTIME_COOLDOWN_SEC" |> trim_opt
-
-  (** Local worker heartbeat interval (seconds). Default: 60. *)
-  let local_worker_heartbeat_sec = max 1 (get_int ~default:60 "MASC_LOCAL_WORKER_HEARTBEAT_SEC")
 end
 
 (** {1 OAS SSE Bridge Configuration} *)

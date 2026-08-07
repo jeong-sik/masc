@@ -142,6 +142,16 @@ val agent_runtime_dir : base_path:string -> string
 val repos_dir : base_path:string -> string
 (** [<base_path>/.masc/repos/]. Managed repository checkouts. *)
 
+val repos_relative_path : id:string -> string
+(** [".masc/repos/<id>"], relative to the base path.
+
+    [Repo_manager_types.repository.local_path] is stored relative and resolved
+    by [Repo_store.local_path], which concats it onto the base path. A caller
+    that needs that default must not use {!repos_dir}: the result would be
+    resolved twice. Before this existed the HTTP repository constructor built
+    the literal inline, and the RFC-0121 audit did not see it because an
+    unanchored allowlist entry suppressed the pattern repo-wide. *)
+
 val tmp_dir : base_path:string -> string
 (** [<base_path>/.masc/tmp/]. Short-lived process artifacts. *)
 

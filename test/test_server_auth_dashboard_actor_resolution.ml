@@ -83,7 +83,7 @@ let test_rejected_credential_cannot_supply_actor_hint () =
 
 let test_malformed_credential_cannot_become_anonymous () =
   with_temp_base_path @@ fun base_path ->
-  Masc.Auth.save_auth_config
+  Auth.save_auth_config
     base_path
     { Masc_domain.default_auth_config with enabled = true; require_token = false };
   let request =
@@ -161,7 +161,7 @@ let expect_observer_admitted ~base_path request message =
 
 let test_mcp_auth_surfaces_preserve_typed_reasons () =
   with_temp_base_path @@ fun base_path ->
-  Masc.Auth.save_auth_config
+  Auth.save_auth_config
     base_path
     { Masc_domain.default_auth_config with enabled = true; require_token = true };
   let observer = observer_request () in
@@ -206,12 +206,12 @@ let test_mcp_auth_surfaces_preserve_typed_reasons () =
 
 let test_credential_source_precedence_and_observer_query_state () =
   with_temp_base_path @@ fun base_path ->
-  Masc.Auth.save_auth_config
+  Auth.save_auth_config
     base_path
     { Masc_domain.default_auth_config with enabled = true; require_token = false };
   let save_token agent_name raw_token =
     match
-      Masc.Auth.save_raw_token_credential
+      Auth.save_raw_token_credential
         base_path
         ~agent_name
         ~role:Masc_domain.Worker
@@ -274,7 +274,7 @@ let test_authenticated_owner_overrides_request_hint () =
   with_temp_base_path @@ fun base_path ->
   let token = "owner-token" in
   (match
-     Masc.Auth.save_raw_token_credential
+     Auth.save_raw_token_credential
        base_path
        ~agent_name:"credential-owner"
        ~role:Masc_domain.Worker

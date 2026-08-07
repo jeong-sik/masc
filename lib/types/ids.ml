@@ -245,7 +245,6 @@ end = struct
           (Printf.sprintf "Expected string for Keeper_id (received %s)"
              (Json_util.kind_name other))
   module Keeper_name = struct
-    type t = string
     let is_valid s =
       let len = String.length s in
       len > 0 && len <= 64 &&

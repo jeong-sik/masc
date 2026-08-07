@@ -377,10 +377,10 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   Mirage_crypto_rng_unix.use_default ();
   let supervisor_token, planner_token, implementer_a_token, implementer_b_token =
     if enable_auth then begin
-      ignore (Masc.Auth.enable_auth config.base_path ~require_token:true ~agent_name:"test-supervisor");
+      ignore (Auth.enable_auth config.base_path ~require_token:true ~agent_name:"test-supervisor");
       let supervisor_token =
         match
-          Masc.Auth.create_token config.base_path ~agent_name:supervisor_nickname
+          Auth.create_token config.base_path ~agent_name:supervisor_nickname
             ~role:Masc_domain.Admin
         with
         | Ok (token, _cred) -> token
@@ -391,7 +391,7 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
       in
       let create_worker_token agent_name =
         match
-          Masc.Auth.create_token config.base_path ~agent_name
+          Auth.create_token config.base_path ~agent_name
             ~role:Masc_domain.Worker
         with
         | Ok (token, _cred) -> token
@@ -405,7 +405,7 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
         create_worker_token implementer_a_nickname,
         create_worker_token implementer_b_nickname )
     end else
-      (Masc.Auth.save_auth_config config.base_path
+      (Auth.save_auth_config config.base_path
          { Masc_domain.default_auth_config with enabled = false; require_token = false };
       ("", "", "", "")
       )

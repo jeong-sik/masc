@@ -30,8 +30,3 @@ val handle_keeper_lifecycle_completion :
   Keeper_shutdown_types.t ->
   Keeper_shutdown_types.completion_action ->
   (unit, string) result
-
-module For_testing : sig
-  val purge_dashboard_keeper_artifacts :
-    Workspace.config -> Keeper_shutdown_types.t -> (unit, string) result
-end

@@ -137,7 +137,6 @@ end
 module Worker : sig
   val local_runtime_debug : bool
   val local_runtime_cooldown_sec_opt : unit -> string option
-  val local_worker_heartbeat_sec : int
 end
 
 (** {1 OAS SSE bridge} *)

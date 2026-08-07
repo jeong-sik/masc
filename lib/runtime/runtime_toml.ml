@@ -693,27 +693,6 @@ let parse_model (id : string) (tbl : Otoml.t)
       | Some t ->
         Result.map Option.some (parse_model_capabilities ~path:(path ^ ".capabilities") t)
     in
-    let match_prefixes =
-      match Otoml.find_opt tbl Fun.id [ "match-prefixes" ] with
-      | None -> []
-      | Some v ->
-        (* RFC-0145 — narrow to the only exception [Otoml.get_array]
-           raises on a wrong-typed value.  Unrelated runtime exceptions
-           propagate. *)
-        (try
-           Otoml.get_array Otoml.get_string v
-           |> List.filter_map (fun s ->
-             let trimmed = String.trim s in
-             if String.length trimmed = 0
-             then (
-               Log.Runtime.warn "runtime_toml: %s.match-prefixes contains empty entry, ignoring" path;
-               None)
-             else Some trimmed)
-         with
-         | Otoml.Type_error _ ->
-           Log.Runtime.warn "runtime_toml: %s.match-prefixes — expected string array, ignoring" path;
-           [])
-    in
     let temperature_result = temperature_opt_field ~path tbl in
     let top_p_result = probability_opt_field ~path ~key:"top-p" tbl in
     let top_k_result = positive_int_opt_field ~path ~key:"top-k" tbl in
@@ -741,9 +720,7 @@ let parse_model (id : string) (tbl : Otoml.t)
         ; top_p
         ; top_k
         ; min_p
-        ; capabilities
-        ; match_prefixes
-        })
+        ; capabilities        })
 ;;
 
 let parse_models (toml : Otoml.t)

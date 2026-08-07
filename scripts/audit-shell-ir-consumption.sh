@@ -87,7 +87,6 @@ parse_refs=$(count_code_refs "$parse_pattern")
 allowed_parse_files=(
   "lib/exec/command_gate/shell_command_gate.ml"
   "lib/exec_policy/exec_policy.ml"
-  "lib/exec_policy/exec_policy_command_syntax.ml"
 )
 
 unclassified_parse_files=()

@@ -111,20 +111,6 @@ let env_values key env =
     else None)
 ;;
 
-let with_env key value f =
-  let previous = Sys.getenv_opt key in
-  Fun.protect
-    ~finally:(fun () ->
-      match previous with
-      | Some existing -> Unix.putenv key existing
-      | None -> Unix.putenv key "")
-    (fun () ->
-      (match value with
-       | Some next -> Unix.putenv key next
-       | None -> Unix.putenv key "");
-      f ())
-;;
-
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;

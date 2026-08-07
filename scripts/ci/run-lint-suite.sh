@@ -41,6 +41,10 @@ blocking_lints() {
   run_lint "Raw font-size px" bash scripts/lint/no-raw-font-size-px.sh
   run_lint "OCaml comment terminator trap" bash scripts/lint/no-ocaml-comment-terminator-trap.sh
   run_lint "Timeout env knob ceiling (RFC-0138)" bash scripts/lint/timeout-env-ceiling.sh
+  run_lint ".mli env knob exists self-test" bash scripts/lint/mli-env-knob-exists.sh --self-test
+  run_lint ".mli env knob exists" bash scripts/lint/mli-env-knob-exists.sh --fail
+  run_lint "Guard scan targets exist self-test" bash scripts/lint/guard-scan-targets-exist.sh --self-test
+  run_lint "Guard scan targets exist" bash scripts/lint/guard-scan-targets-exist.sh --fail
   run_lint "Opam cache freshness ratchet" bash scripts/ci/opam-cache-freshness.sh --check
   run_lint "Opam cache freshness self-test" bash scripts/ci/opam-cache-freshness.sh --self-test
   run_lint "No actionable-signal bool context" bash scripts/lint/no-actionable-signal-bool-context.sh

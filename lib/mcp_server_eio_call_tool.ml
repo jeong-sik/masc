@@ -420,6 +420,7 @@ let record_runtime_mcp_keeper_tool_trace
     ~(arguments : Yojson.Safe.t)
     ~(message : string)
     ~(disposition : ('completed, 'deferred, 'failed) Tool_result.disposition)
+    ~(execution_id : Ids.Execution_id.t)
     ~(duration_ms : int) : unit =
   let ctx =
     runtime_mcp_keeper_log_context_of_entry
@@ -427,9 +428,6 @@ let record_runtime_mcp_keeper_tool_trace
       entry
       ~arguments
   in
-  (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
-     the tool_calls row and the trajectory row below share the value. *)
-  let execution_id = Ids.Execution_id.generate () in
   let success =
     match disposition with
     | Tool_result.Completed _ | Tool_result.Deferred _ -> true
@@ -653,6 +651,14 @@ let handle_call_tool_eio ~execute_tool_eio ~sw ~clock ?(profile = Full) ?mcp_ses
       |> List.find_opt (fun (entry : Keeper_registry.registry_entry) ->
         String.equal entry.meta.agent_name agent_name)
   in
+  (* RFC-0233 PR-1: one mint per execution at this dispatch boundary. The
+     tool_calls row, the trajectory row and the [Tool_called] telemetry event
+     all carry this value, so a reader of two streams can tell one physical
+     call reported twice from two calls. Minted only when a keeper owns the
+     call, because that is when a tool_calls row is written. *)
+  let execution_id =
+    Option.map (fun _ -> Ids.Execution_id.generate ()) keeper_entry
+  in
   let source : Tool_registry.call_source =
     match keeper_entry with
     | Some _ -> Agent_internal
@@ -689,6 +695,7 @@ let handle_call_tool_eio ~execute_tool_eio ~sw ~clock ?(profile = Full) ?mcp_ses
                 ?session_id:telemetry_session_id
                 ?operation_id:telemetry_operation_id
                 ?worker_run_id:telemetry_worker_run_id
+                ?execution_id:(Option.map Ids.Execution_id.to_string execution_id)
                 ?failure_class:telemetry_failure_class
                 ?error_kind:telemetry_error_kind
                 ?error_message:error_detail
@@ -777,8 +784,8 @@ let handle_call_tool_eio ~execute_tool_eio ~sw ~clock ?(profile = Full) ?mcp_ses
     | Some tid -> tid
     | None -> request_id_trace_fallback
   in
-  (match keeper_entry with
-   | Some entry ->
+  (match keeper_entry, execution_id with
+   | Some entry, Some execution_id ->
        (try
           record_runtime_mcp_keeper_tool_trace
             ?mcp_session_id
@@ -787,10 +794,11 @@ let handle_call_tool_eio ~execute_tool_eio ~sw ~clock ?(profile = Full) ?mcp_ses
             ~arguments
             ~message
             ~disposition:result
+            ~execution_id
             ~duration_ms
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn)
-   | None -> ());
+   | Some _, None | None, _ -> ());
   let status = status_of_result result in
   let envelope =
     `Assoc [

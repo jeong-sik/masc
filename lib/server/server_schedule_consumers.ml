@@ -48,17 +48,6 @@ let optional_string_field name fields =
   | Some _ -> Error ("expected string field: " ^ name)
 ;;
 
-let optional_keeper_wake_urgency_field name fields =
-  match List.assoc_opt name fields with
-  | None | Some `Null -> Ok None
-  | Some (`String value) ->
-    let* urgency =
-      Schedule_supported_kinds.keeper_wake_urgency_of_string (String.trim value)
-    in
-    Ok (Some urgency)
-  | Some _ -> Error ("expected string field: " ^ name)
-;;
-
 let keeper_name_field name fields =
   let* value = string_field name fields in
   if Schedule_supported_kinds.valid_keeper_wake_target_name value

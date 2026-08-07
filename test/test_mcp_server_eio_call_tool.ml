@@ -654,6 +654,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
             ])
         ~message:"command exited 1"
         ~disposition:(Tool_result.Failed Tool_result.Runtime_failure)
+        ~execution_id:(Ids.Execution_id.generate ())
         ~duration_ms:87;
       let rows =
         Masc.Keeper_tool_call_log.read_recent ~keeper_name ~n:1 ()

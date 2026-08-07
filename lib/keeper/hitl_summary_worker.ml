@@ -807,6 +807,24 @@ let last_semantic_rejection
     trace.rest
 ;;
 
+(* The outcome a finished exact run earns, decided by whether a summary was
+   observed. Named rather than inline because both arms are load-bearing: a
+   summary reaches [on_summary] only after domain validation, provenance
+   verification and fsync (see the .mli), so its absence is the failure, not a
+   shape to synthesise an output for. *)
+let run_outcome_of_observed_summary = function
+  | Some summary ->
+    Exact_lane_run_registry.Succeeded, hitl_context_summary_to_yojson summary
+  | None ->
+    ( Exact_lane_run_registry.Failed
+        { code = "no_summary_produced"
+        ; detail =
+            "exact flow terminalized without a judgment summary; the candidate \
+             was quarantined"
+        }
+    , `Null )
+;;
+
 let handle_semantic_exhaustion ~queue_ops (prepared : prepared_flow) trace =
   let rejection = last_semantic_rejection trace in
   let flow_success = rejection.transport_success in
@@ -1247,12 +1265,20 @@ let spawn_with
     in
     match execution_outcome with
     | `Completed ->
-      let output =
-        match !observed_summary with
-        | Some summary -> hitl_context_summary_to_yojson summary
-        | None -> `Assoc [ "terminal", `String "conclusive_terminalization" ]
-      in
-      complete Exact_lane_run_registry.Succeeded output;
+      (* The flow can reach here without ever producing a summary: when every
+         candidate is rejected, [Flow_semantic_candidates_exhausted] routes to
+         [handle_semantic_exhaustion], which quarantines the candidate and
+         returns [Executed] like a judged run. Recording [Succeeded] with a
+         synthesised output made a run that judged nothing indistinguishable
+         from one that did, and the .mli already says a summary reaches
+         [on_summary] only after validation, provenance and fsync. So the
+         absence of one is the failure, and the outcome type has a variant for
+         it.
+
+         [on_finish] is unchanged: whether an exhausted flow should still
+         permit draining later owner work is a separate contract question. *)
+      let outcome, output = run_outcome_of_observed_summary !observed_summary in
+      complete outcome output;
       on_finish Conclusive_terminalization
     | `Cancelled (cancellation, cancellation_backtrace) ->
       complete Exact_lane_run_registry.Cancelled `Null;
@@ -1310,6 +1336,8 @@ let spawn =
 ;;
 
 module For_testing = struct
+  let run_outcome_of_observed_summary = run_outcome_of_observed_summary
+
   type nonrec prepared_flow = prepared_flow
   type nonrec exact_transition = exact_transition
   type nonrec exact_completion_transition = exact_completion_transition
@@ -1317,7 +1345,6 @@ module For_testing = struct
   type nonrec exact_queue_ops = exact_queue_ops
 
   let build_context_bundle = build_context_bundle
-  let messages_for_summary = messages_for_summary
   let parse_summary = parse_summary
   let prepare_flow = prepare_flow
   let execute_prepared_flow = execute_prepared_flow
@@ -1373,7 +1400,6 @@ module For_testing = struct
   ;;
 
   let flow_evidence prepared = Exact_output.flow_attempt_evidence prepared.attempt
-  let success_provenance_matches = success_provenance_matches
   let system_prompt = system_prompt
   let summary_version = summary_version
   let lane_id = lane_id

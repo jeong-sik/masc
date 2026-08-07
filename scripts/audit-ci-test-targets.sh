@@ -88,7 +88,7 @@ echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, al
 # authority tools, memory journal) without lowering the baseline. A PR that
 # wires a suite must lower this number in the same PR, or this check goes red
 # for everyone.
-UNWIRED_BASELINE=747
+UNWIRED_BASELINE=739
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

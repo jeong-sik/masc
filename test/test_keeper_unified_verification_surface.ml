@@ -885,6 +885,30 @@ let test_own_recent_board_posts_render_in_world_state () =
   check bool "own post title rendered" true
     (contains_sub "My earlier review" world_state)
 
+(* A Keeper reading its own posts could not tell an answered one from an
+   ignored one: the record carries reply_count and the vote tallies and the row
+   dropped all three. The prompt tells a Keeper that a vote or a comment is how
+   agreement reaches whoever posted, and [Board_dispatch.vote] emits only the
+   dashboard SSE event -- no board signal, so no wake -- which makes this row
+   the only place the response can appear. *)
+let test_own_recent_board_posts_show_the_response () =
+  let answered =
+    { sample_own_post with reply_count = 3; votes_up = 2; votes_down = 1 }
+  in
+  let obs = { base_observation with own_recent_board_posts = [ answered ] } in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  check bool "reply count rendered" true (contains_sub "replies=\"3\"" world_state);
+  check bool "vote tally rendered" true (contains_sub "votes=\"+2/-1\"" world_state);
+  let ignored = { sample_own_post with reply_count = 0; votes_up = 0; votes_down = 0 } in
+  let obs = { base_observation with own_recent_board_posts = [ ignored ] } in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  check bool "an unanswered post says so rather than omitting the field" true
+    (contains_sub "replies=\"0\"" world_state)
+
 let test_board_and_own_post_rows_escape_external_fields () =
   let hostile_event : WO.pending_board_event =
     { sample_board_event with
@@ -995,6 +1019,9 @@ let () =
           test_case
             "prompt: own recent board posts render as neutral observation rows"
             `Quick test_own_recent_board_posts_render_in_world_state;
+          test_case
+            "prompt: own recent board posts show the response"
+            `Quick test_own_recent_board_posts_show_the_response;
           test_case
             "prompt: Board and own-post fields escape external newlines"
             `Quick test_board_and_own_post_rows_escape_external_fields;

@@ -666,3 +666,45 @@ let upsert_fact
       ~facts
       ())
 ;;
+
+(* Read-side projection. The write-side [journal_entry_to_json] above encodes a
+   committed snapshot for the append; this projects a line that was read back,
+   including the shapes that only exist on the failure path. Reusing the
+   existing field encoders keeps one owner for source/change on the wire. *)
+let decoded_journal_entry_to_json = function
+  | Journal_committed { recorded_at; revision; source; change; dropped } ->
+    `Assoc
+      ([ "outcome", `String committed_outcome
+       ; "recorded_at", `Float recorded_at
+       ; "revision", `Int revision
+       ; "source", source_to_json source
+       ; "change", change_to_json change
+       ]
+       @
+       match dropped with
+       | None -> []
+       | Some statements ->
+         [ "dropped", `List (List.map dropped_statement_to_json statements) ])
+  | Journal_failed
+      { recorded_at; trace_id; kind; detail; snapshot_present; cadence_deferred } ->
+    `Assoc
+      [ "outcome", `String failed_outcome
+      ; "recorded_at", `Float recorded_at
+      ; "trace_id", `String trace_id
+      ; "kind", `String (librarian_failure_kind_to_string kind)
+      ; "detail", `String detail
+      ; "snapshot_present", `Bool snapshot_present
+      ; "cadence_deferred", `Bool cadence_deferred
+      ]
+;;
+
+(* A line this build could not decode keeps its position and says why. Dropping
+   it would make a journal with a torn line read as a shorter one, and the
+   operator counting passes is the one who would be misled. *)
+let journal_line_to_json = function
+  | Ok entry ->
+    (match decoded_journal_entry_to_json entry with
+     | `Assoc fields -> `Assoc (("ok", `Bool true) :: fields)
+     | json -> json)
+  | Error reason -> `Assoc [ "ok", `Bool false; "error", `String reason ]
+;;

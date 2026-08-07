@@ -3120,8 +3120,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       let metrics_dir = Keeper_types_support.keeper_metrics_dir config meta.name in
       write_file (Filename.concat metrics_dir "2026-07/15.jsonl") "{}\n";
       let sidecar_paths =
-        [ Keeper_types_support.keeper_generation_index_path config meta.name
-        ; Keeper_types_support.keeper_decision_log_path config meta.name
+        [ Keeper_types_support.keeper_decision_log_path config meta.name
         ; Keeper_types_support.keeper_feedback_log_path config meta.name
         ]
       in
@@ -3155,12 +3154,12 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         Filename.concat (Workspace.agents_dir config) "unrelated.json"
       in
       write_file unrelated_path "{}";
-      Masc.Auth.save_credential
+      Auth.save_credential
         config.base_path
         { id = None
         ; agent_id = None
         ; agent_name = meta.agent_name
-        ; token = Masc.Auth.sha256_hash "dashboard-purge-token"
+        ; token = Auth.sha256_hash "dashboard-purge-token"
         ; role = Masc_domain.Worker
         ; created_at = Masc_domain.now_iso ()
         ; expires_at = None
@@ -3274,7 +3273,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         ; configuration_path
         ; agent_path
         ; agent_metrics_dir
-        ; Masc.Auth.credential_file config.base_path meta.agent_name
+        ; Auth.credential_file config.base_path meta.agent_name
         ]
         @ sidecar_paths
       in

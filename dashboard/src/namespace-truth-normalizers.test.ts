@@ -43,10 +43,7 @@ describe('normalizeNamespaceTruth', () => {
     const result = normalizeNamespaceTruth({
       generated_at_iso: '2026-04-17T10:00:00Z',
       dashboard_surface: '/api/v1/dashboard/namespace-truth',
-      dashboard_aliases: [
-        '/api/v1/dashboard/project-snapshot',
-        '/api/v1/dashboard/workspace-truth',
-      ],
+      dashboard_aliases: ['/api/v1/dashboard/project-snapshot'],
       source: 'namespace_truth_read_model',
       retention: {
         scope: 'dashboard_namespace_truth',
@@ -60,7 +57,7 @@ describe('normalizeNamespaceTruth', () => {
 
     expect(result.generated_at_iso).toBe('2026-04-17T10:00:00Z')
     expect(result.dashboard_surface).toBe('/api/v1/dashboard/namespace-truth')
-    expect(result.dashboard_aliases).toContain('/api/v1/dashboard/workspace-truth')
+    expect(result.dashboard_aliases).toEqual(['/api/v1/dashboard/project-snapshot'])
     expect(result.source).toBe('namespace_truth_read_model')
     expect(result.retention?.scope).toBe('dashboard_namespace_truth')
     expect(result.retention?.execution_input).toBe('/api/v1/dashboard/execution')
@@ -323,7 +320,6 @@ describe('normalizeNamespaceTruth', () => {
     const result = normalizeNamespaceTruth({
       readiness: {
         status: 'warn',
-        score: 0.61,
         decision_required_count: 2,
         blocking_count: 3,
         pillars: [
@@ -331,7 +327,6 @@ describe('normalizeNamespaceTruth', () => {
             key: 'execution_safety',
             label: 'Execution Safety',
             status: 'ok',
-            score: 1,
             summary: 'Sandbox posture is visible.',
             blocking_reasons: [],
             metrics: { keeper_count: 4 },
@@ -340,7 +335,6 @@ describe('normalizeNamespaceTruth', () => {
             key: 'goal_coherence',
             label: 'Goal Coherence',
             status: 'warn',
-            score: 0.25,
             summary: 'One keeper is unscoped.',
             blocking_reasons: ['1 keeper has no active goal link.'],
             metrics: { unscoped_keepers: 1 },
@@ -362,7 +356,6 @@ describe('normalizeNamespaceTruth', () => {
 
     expect(result.readiness).not.toBeNull()
     expect(result.readiness!.status).toBe('warn')
-    expect(result.readiness!.score).toBe(0.61)
     expect(result.readiness!.decision_required_count).toBe(2)
     expect(result.readiness!.pillars).toHaveLength(2)
     expect(result.readiness!.pillars[1]!.blocking_reasons).toEqual(['1 keeper has no active goal link.'])

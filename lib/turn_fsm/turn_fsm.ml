@@ -160,6 +160,30 @@ type transition_action =
   | HonorStopSignal
   | TerminalStutter
 
+(* Every constructor above. [transition_action_label] is exhaustive, so a new
+   one fails to compile there first; this list is what lets a test walk the set
+   and compare it against the TLA+ spec's Next disjunction. *)
+let all_transition_actions =
+  [ StartTurn
+  ; PhaseGateSkip
+  ; PhaseGateOk
+  ; RuntimeRouted
+  ; RuntimeUnavailable
+  ; ProviderResponded
+  ; ProviderTimeout
+  ; StreamYieldsTool
+  ; ToolReturned
+  ; StreamComplete
+  ; FinishTurn
+  ; ReceiptLost
+  ; NoToolCapableProvider
+  ; ProviderError
+  ; GenericFail
+  ; SupervisorRequestsStop
+  ; HonorStopSignal
+  ; TerminalStutter
+  ]
+
 let transition_action_label = function
   | StartTurn -> "StartTurn"
   | PhaseGateSkip -> "PhaseGateSkip"

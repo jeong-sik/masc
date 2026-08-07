@@ -909,6 +909,56 @@ let test_own_recent_board_posts_show_the_response () =
   check bool "an unanswered post says so rather than omitting the field" true
     (contains_sub "replies=\"0\"" world_state)
 
+(* Board Activity is bounded at the render. The two cases below pin the two
+   halves of that: under the budget nothing changes, over it the heading states
+   what was left out and mentions survive the cut.
+
+   [board_activity_render_budget_rows] is 20; these build 25 so the excess is
+   five rows and the arithmetic in the heading is checkable by hand. *)
+let board_event_n ?(mention = false) i =
+  { sample_board_event with
+    post_id = Printf.sprintf "board-post-%02d" i
+  ; explicit_mention = mention
+  ; updated_at = float_of_int i
+  }
+
+let test_board_activity_under_the_budget_renders_every_row () =
+  let events = List.init 20 (fun i -> board_event_n i) in
+  let obs = { base_observation with pending_board_events = events } in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  check bool "heading states one count only" true
+    (contains_sub "### Board Activity (20 new)" world_state);
+  check bool "no truncation notice" false (contains_sub "shown" world_state);
+  check bool "the last row is present" true
+    (contains_sub "board-post-19" world_state);
+  check bool "the first row is present" true
+    (contains_sub "board-post-00" world_state)
+
+let test_board_activity_over_the_budget_says_what_it_left_out () =
+  (* One mention, deliberately the oldest, so keeping it can only be the
+     mention rule and not recency. *)
+  let events =
+    board_event_n ~mention:true 0 :: List.init 24 (fun i -> board_event_n (i + 1))
+  in
+  let obs = { base_observation with pending_board_events = events } in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  check bool "both counts stated" true
+    (contains_sub "### Board Activity (25 new, 20 shown" world_state);
+  check bool "the route to the rest is named" true
+    (contains_sub "masc_board_list" world_state);
+  check bool "the oldest row survives because it is a mention" true
+    (contains_sub "board-post-00" world_state);
+  check bool "the newest non-mention survives" true
+    (contains_sub "board-post-24" world_state);
+  (* 25 rows, 20 shown: the oldest non-mentions are the five dropped. With the
+     mention taking one slot, recency fills 19, so 01..05 fall out. *)
+  check bool "an oldest non-mention is dropped" false
+    (contains_sub "board-post-01" world_state)
+
 (* The post author is the one participant who never commented on their own
    thread, so [check_self_comment_status] answers [`Never] and [self_commented]
    stays false. The observation still resolves the commenter and a preview of
@@ -1071,6 +1121,12 @@ let () =
           test_case
             "prompt: own recent board posts show the response"
             `Quick test_own_recent_board_posts_show_the_response;
+          test_case
+            "prompt: Board Activity under the budget renders every row"
+            `Quick test_board_activity_under_the_budget_renders_every_row;
+          test_case
+            "prompt: Board Activity over the budget says what it left out"
+            `Quick test_board_activity_over_the_budget_says_what_it_left_out;
           test_case
             "prompt: a comment on your own post says who and what"
             `Quick test_a_comment_on_your_own_post_says_who_and_what;

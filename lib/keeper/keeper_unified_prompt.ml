@@ -552,6 +552,46 @@ let combine_prompt_sections sections =
    and exact-mention state remain source/routing context only; none of them
    grants instruction authority. Relevance and action remain model decisions,
    while external effects still cross the Gate. *)
+(* Board Activity was the one per-turn list with no bound. Its two siblings in
+   the same observation have one — [scheduled_automation_item_limit = 5] and
+   [Keeper_config.keeper_board_own_recent_max] — so the absence here was a gap,
+   not a policy.
+
+   The gap is invisible while a Keeper keeps up: the cursor advances each turn
+   and the list is short. It opens on resume. A Keeper down for hours comes back
+   to everything posted meanwhile, and the live board has produced 269 posts in
+   a day (2026-08-05); at ~220 bytes a row that is tens of KB in one turn,
+   against a 9,167-byte system prompt.
+
+   Bounded at the render, not at collection: [pending_board_events] also drives
+   the wake decision, and dropping events before that would change which turns
+   happen at all. This changes only what a turn that already happened reads.
+
+   Under the budget the output is byte-identical to before — same order, same
+   heading. Over it, mentions come first (an unread mention is the row whose
+   loss costs most), recency breaks the rest, and the heading states both counts
+   and the tool that fetches the remainder. Nothing is silently dropped. *)
+let board_activity_render_budget_rows = 20
+
+let board_activity_render_budget
+      (events : Keeper_world_observation.pending_board_event list)
+  : Keeper_world_observation.pending_board_event list
+  =
+  if List.length events <= board_activity_render_budget_rows
+  then events
+  else
+    events
+    |> List.stable_sort
+         (fun
+           (a : Keeper_world_observation.pending_board_event)
+           (b : Keeper_world_observation.pending_board_event)
+         ->
+           match compare b.explicit_mention a.explicit_mention with
+           | 0 -> compare b.updated_at a.updated_at
+           | ordered -> ordered)
+    |> List.filteri (fun i _ -> i < board_activity_render_budget_rows)
+;;
+
 let render_board_observations
       (events : Keeper_world_observation.pending_board_event list)
   : string
@@ -992,12 +1032,20 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
           observation.pending_board_events
       in
       if board_events <> [] then (
+        let total = List.length board_events in
+        let shown = board_activity_render_budget board_events in
+        let shown_count = List.length shown in
         let ubuf = Buffer.create 256 in
         Buffer.add_string ubuf
-          (Printf.sprintf "### Board Activity (%d new)\n"
-             (List.length board_events));
-        Buffer.add_string ubuf
-          (render_board_observations board_events);
+          (if shown_count < total
+           then
+             Printf.sprintf
+               "### Board Activity (%d new, %d shown — read the rest with \
+                masc_board_list)\n"
+               total
+               shown_count
+           else Printf.sprintf "### Board Activity (%d new)\n" total);
+        Buffer.add_string ubuf (render_board_observations shown);
         Buffer.add_string ubuf "\n\n";
         Some (Buffer.contents ubuf))
       else None

@@ -1,5 +1,3 @@
-import { isoTimestamp, pipe, safeParse, string } from 'valibot'
-
 import { asBoolean, asString, isRecord } from './components/common/normalize'
 import type {
   OperatorActionDescriptor,
@@ -20,15 +18,15 @@ const PENDING_CONFIRM_SUMMARY_KEYS = [
   'hidden_actors', 'confirm_required_actions',
 ] as const
 const PENDING_CONFIRM_ENVELOPE_KEYS = ['items', 'summary'] as const
-const IsoTimestampSchema = pipe(string(), isoTimestamp())
 
 function hasExactKeys(raw: Record<string, unknown>, allowed: readonly string[]): boolean {
   const keys = Object.keys(raw)
   return keys.length === allowed.length && keys.every(key => allowed.includes(key))
 }
 
-function isIsoTimestamp(value: string): boolean {
-  return safeParse(IsoTimestampSchema, value).success
+function timestampMs(value: string): number | null {
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 export function normalizeOperatorActionDescriptor(raw: unknown): OperatorActionDescriptor | null {
@@ -59,6 +57,10 @@ export function normalizePendingConfirmation(raw: unknown): PendingConfirmation 
   const createdAt = asString(raw.created_at)
   const targetId = raw.target_id === null ? null : asString(raw.target_id)
   const expiresAt = raw.expires_at === null ? null : asString(raw.expires_at)
+  const createdAtMs = createdAt ? timestampMs(createdAt) : null
+  const expiresAtMs = expiresAt === null || expiresAt === undefined
+    ? expiresAt
+    : timestampMs(expiresAt)
   if (
     !confirmToken
     || !traceId
@@ -69,10 +71,10 @@ export function normalizePendingConfirmation(raw: unknown): PendingConfirmation 
     || !isRecord(raw.payload)
     || !delegatedTool
     || !createdAt
-    || !isIsoTimestamp(createdAt)
+    || createdAtMs === null
     || expiresAt === undefined
     || (expiresAt !== null
-      && (!isIsoTimestamp(expiresAt) || Date.parse(expiresAt) <= Date.parse(createdAt)))
+      && (expiresAtMs === undefined || expiresAtMs === null || expiresAtMs <= createdAtMs))
   ) return null
   return {
     confirm_token: confirmToken,

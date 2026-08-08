@@ -396,7 +396,7 @@ let with_server f =
       [
         ("MASC_BASE_PATH", base_path);
         ("MASC_BASE_PATH_INPUT", base_path);
-        ("MASC_AUTONOMY_ENABLED", "0");
+        ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
       ]

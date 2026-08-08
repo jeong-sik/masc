@@ -1585,7 +1585,7 @@ let with_database
             raise exception_
           | exn -> Error (Printexc.to_string exn)
         in
-        combine_cleanup_error body_result (close_database handle)
+        Keeper_chat_queue_sqlite.combine_cleanup_error body_result (close_database handle)
       with
       | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
       | exn -> Error (Printexc.to_string exn))

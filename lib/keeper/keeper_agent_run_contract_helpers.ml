@@ -6,7 +6,7 @@ let keeper_tool_names_for_outcome ~(tool_calls : Keeper_agent_result.tool_call_d
   |> List.rev
   |> List.filter_map (fun (detail : Keeper_agent_result.tool_call_detail) ->
     if detail.execution_outcome = outcome
-    then Some (Keeper_tool_resolution.canonical_tool_name detail.tool_name)
+    then Some (Keeper_tool_descriptor_resolution.canonical_tool_name detail.tool_name)
     else None)
 ;;
 

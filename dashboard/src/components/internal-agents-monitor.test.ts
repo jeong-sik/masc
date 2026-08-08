@@ -110,6 +110,7 @@ describe('InternalAgentsMonitor', () => {
         recordedAt: 1786000002,
         revision: 42,
         traceId: 'trace-1',
+        sourceKind: 'librarian',
         added: [{ claim: '새 기억', category: 'fact', firstSeen: 1786000001 }],
         removed: [{ claim: '낡은 기억', category: 'blocker', firstSeen: 1785000000 }],
         retained: 0,
@@ -131,5 +132,49 @@ describe('InternalAgentsMonitor', () => {
       500,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
+  })
+
+  it('does not claim an explicit write as the librarian output for the same trace', async () => {
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchExactLaneRuns.mockResolvedValue({
+      count: 1,
+      generatedAt: 'now',
+      runs: [{
+        runId: 'exact-lib-running',
+        lane: 'librarian_exact',
+        subjectId: 'trace-shared',
+        actor: 'full-cycle-probe',
+        startedAt: 1786200000,
+        input: { current_fact_count: 2 },
+        status: 'running',
+      }],
+    })
+    memoryApi.fetchKeeperMemoryJournal.mockResolvedValue({
+      keeper: 'full-cycle-probe',
+      returned: 1,
+      undecodableLines: 0,
+      entries: [{
+        ok: true,
+        outcome: 'committed',
+        recordedAt: 1786202863,
+        revision: 617,
+        traceId: 'trace-shared',
+        sourceKind: 'explicit_write',
+        added: [{ claim: '실제 도구 체인 성공', category: 'fact', firstSeen: 1786202863 }],
+        removed: [],
+        retained: 2,
+        drops: [],
+      }],
+    })
+
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+    fireEvent.click(await screen.findByRole('button', { name: /Librarian trace-shared/i }))
+
+    expect(await screen.findByText('같은 trace · exact join 아님')).toBeTruthy()
+    expect(container.textContent).toContain('정확히 조인되는 journal 행이 없습니다')
+    expect(container.textContent).toContain('explicit_write')
+    expect(container.textContent).toContain('revision 617')
+    expect(container.textContent).toContain('실제 도구 체인 성공')
   })
 })

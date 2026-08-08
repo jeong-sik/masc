@@ -11,6 +11,7 @@ import {
 import {
   fetchKeeperMemoryJournal,
   type MemoryJournal,
+  type MemoryJournalEntry,
 } from '../api/dashboard-memory-journal'
 import { KeeperTurnInspectorPanel } from './keeper-turn-inspector-panel'
 import { registerInternalAgentRefresh } from '../sse-store'
@@ -27,6 +28,8 @@ type Row =
   | { source: 'exact'; id: string; run: ExactLaneRunRecord }
   | { source: 'verification'; id: string; run: VerificationRunRecord }
   | { source: 'fusion'; id: string; run: FusionRunRecord }
+type CommittedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'committed' }>
+type FailedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'failed' }>
 
 const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'all', label: 'All' },
@@ -159,10 +162,25 @@ function LibrarianJournal({
     `
   }
 
-  const related = journal.entries.filter(entry => {
-    if (!entry.ok || entry.traceId !== traceId) return false
-    return revision == null || (entry.outcome === 'committed' && entry.revision === revision)
-  })
+  const related = journal.entries.filter((entry): entry is CommittedMemoryJournalEntry =>
+    entry.ok
+    && entry.outcome === 'committed'
+    && entry.traceId === traceId
+    && entry.sourceKind === 'librarian'
+    && revision != null
+    && entry.revision === revision,
+  )
+  const traceOnlyCommits = journal.entries.filter((entry): entry is CommittedMemoryJournalEntry =>
+    entry.ok
+    && entry.outcome === 'committed'
+    && entry.traceId === traceId
+    && !related.includes(entry),
+  )
+  const traceOnlyFailures = journal.entries.filter((entry): entry is FailedMemoryJournalEntry =>
+    entry.ok
+    && entry.outcome === 'failed'
+    && entry.traceId === traceId,
+  )
 
   return html`
     <div class="grid gap-2">
@@ -179,28 +197,9 @@ function LibrarianJournal({
         : null}
       <ol class="grid gap-1">
         ${related.map((entry, index) => {
-          if (!entry.ok) {
-            return html`<li key=${index} class="rounded border border-[var(--color-danger)] p-2 text-3xs">
-              <strong class="text-[var(--color-danger)]">읽지 못한 줄</strong>
-              <span class="block text-[var(--color-fg-muted)]">${entry.error}</span>
-            </li>`
-          }
-          if (entry.outcome === 'failed') {
-            return html`<li key=${index} class="rounded border border-[var(--color-danger)] p-2 text-3xs">
-              <div class="flex flex-wrap gap-2">
-                <strong class="text-[var(--color-danger)]">실패</strong>
-                <code>${entry.kind}</code>
-                <time dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
-                <span class="text-[var(--color-fg-muted)]">
-                  스냅샷 ${entry.snapshotPresent ? '있음' : '없음'}
-                  ${entry.cadenceDeferred ? ' · 주기 연기' : ''}
-                </span>
-              </div>
-              <span class="block mt-1 text-[var(--color-fg-muted)]">${entry.detail}</span>
-            </li>`
-          }
           return html`<li key=${index} class="grid gap-3 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-3xs">
             <div class="flex flex-wrap items-center gap-2">
+              <code>${entry.sourceKind}</code>
               <strong>revision ${entry.revision}</strong>
               <time class="text-[var(--color-fg-muted)]" dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
               <span class="text-[var(--color-fg-muted)]">
@@ -215,6 +214,42 @@ function LibrarianJournal({
           </li>`
         })}
       </ol>
+      ${traceOnlyCommits.length === 0 && traceOnlyFailures.length === 0
+        ? null
+        : html`<div class="grid gap-2 rounded border border-[var(--status-warn)] bg-[var(--color-bg-elevated)] p-3">
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+              <${EvidenceBadge} kind="typed" />
+              <strong>같은 trace · exact join 아님</strong>
+            </div>
+            <p class="text-xs text-[var(--color-fg-muted)]">아래 행은 trace만 같습니다. source.kind가 다르거나 exact revision이 없어 이 Librarian pass의 산출물로 주장하지 않습니다.</p>
+            <ol class="grid gap-2">
+              ${traceOnlyCommits.map((entry, index) => html`
+                <li key=${index} class="grid gap-2 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-3xs">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <code>${entry.sourceKind}</code>
+                    <strong>revision ${entry.revision}</strong>
+                    <time class="text-[var(--color-fg-muted)]" dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
+                    <span class="text-[var(--color-fg-muted)]">추가 ${entry.added.length} · 제거 ${entry.removed.length} · 유지 ${entry.retained}</span>
+                  </div>
+                  <div class="grid gap-2 lg:grid-cols-2">
+                    <${JsonViewerCard} title=${`별도 producer 추가 ${entry.added.length}건`} data=${entry.added} />
+                    <${JsonViewerCard} title=${`별도 producer 제거 ${entry.removed.length}건`} data=${entry.removed} />
+                  </div>
+                </li>
+              `)}
+              ${traceOnlyFailures.map((entry, index) => html`
+                <li key=${`failure-${index}`} class="rounded border border-[var(--color-danger)] p-2 text-3xs">
+                  <div class="flex flex-wrap gap-2">
+                    <code>librarian_failure</code>
+                    <strong class="text-[var(--color-danger)]">${entry.kind}</strong>
+                    <time dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
+                    <span class="text-[var(--color-fg-muted)]">스냅샷 ${entry.snapshotPresent ? '있음' : '없음'}${entry.cadenceDeferred ? ' · 주기 연기' : ''}</span>
+                  </div>
+                  <span class="mt-1 block text-[var(--color-fg-muted)]">${entry.detail}</span>
+                </li>
+              `)}
+            </ol>
+          </div>`}
     </div>
   `
 }

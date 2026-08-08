@@ -21,6 +21,8 @@ export type MemoryJournalFact = {
   readonly firstSeen: number
 }
 
+export type MemoryJournalSourceKind = 'librarian' | 'explicit_write'
+
 // A committed pass wrote a revision. A failed pass did not, so the two are
 // separate members rather than one shape with nulls — a reader that has to
 // check a null to tell them apart will eventually forget to.
@@ -31,6 +33,7 @@ export type MemoryJournalEntry =
       readonly recordedAt: number
       readonly revision: number
       readonly traceId: string
+      readonly sourceKind: MemoryJournalSourceKind
       readonly added: readonly MemoryJournalFact[]
       readonly removed: readonly MemoryJournalFact[]
       readonly retained: number
@@ -89,8 +92,13 @@ function decodeCommitted(raw: Record<string, unknown>): MemoryJournalEntry | nul
   if (recordedAt == null || revision == null) return null
   if (!isRecord(raw.source) || !isRecord(raw.change)) return null
   const traceId = asString(raw.source.trace_id)
+  const sourceKind = asString(raw.source.kind)
   const retained = asNumber(raw.change.retained)
-  if (traceId == null || retained == null) return null
+  if (
+    traceId == null
+    || (sourceKind !== 'librarian' && sourceKind !== 'explicit_write')
+    || retained == null
+  ) return null
   const added = decodeFacts(raw.change.added)
   const removed = decodeFacts(raw.change.removed)
   if (added === null || removed === null) return null
@@ -111,6 +119,7 @@ function decodeCommitted(raw: Record<string, unknown>): MemoryJournalEntry | nul
     recordedAt,
     revision,
     traceId,
+    sourceKind,
     added,
     removed,
     retained,

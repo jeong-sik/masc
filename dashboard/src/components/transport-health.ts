@@ -7,7 +7,7 @@ import { FetchScheduler } from '../lib/fetch-scheduler'
 import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from '../lib/format-time'
 import {
   fetchTransportHealth,
-  decodeTransportHealthData,
+  parseTransportHealthData,
   type HotSession,
   type TransportHealthData,
 } from '../api/transport-health'
@@ -35,6 +35,7 @@ type PracticalCase = {
 }
 
 const transportHealthResource = createManagedAsyncResource<TransportHealthData>()
+const transportHealthWireError = signal<string | null>(null)
 let inflightTransportHealthRefresh: Promise<void> | null = null
 
 // Module-scoped search state for the hot-sessions list (stale-filter-carryover
@@ -66,14 +67,21 @@ export function filterHotSessions(
 export function resetTransportHealthState(): void {
   inflightTransportHealthRefresh = null
   hotSessionsSearchQuery.value = ''
+  transportHealthWireError.value = null
   transportHealthResource.reset()
 }
 
 /** Hydrate transport health from a server-push payload — zero HTTP fetch. */
 export function hydrateTransportHealthFromSSE(data: unknown): void {
-  const decoded = decodeTransportHealthData(data)
-  if (!decoded) return
-  transportHealthResource.reset(decoded)
+  try {
+    const decoded = parseTransportHealthData(data)
+    transportHealthWireError.value = null
+    transportHealthResource.reset(decoded)
+  } catch (error) {
+    transportHealthResource.reset()
+    transportHealthWireError.value =
+      error instanceof Error ? error.message : String(error)
+  }
 }
 
 const PRACTICAL_CASES: PracticalCase[] = [
@@ -123,7 +131,17 @@ async function refreshTransportHealth(): Promise<void> {
   if (inflightTransportHealthRefresh) return inflightTransportHealthRefresh
   inflightTransportHealthRefresh = transportHealthResource
     .load((signal) => fetchTransportHealth({ signal }))
-    .then(() => {})
+    .then((data) => {
+      if (data) {
+        transportHealthWireError.value = null
+        return
+      }
+      const refreshError = transportHealthResource.state.value.error
+      if (refreshError) {
+        transportHealthResource.reset()
+        transportHealthWireError.value = refreshError
+      }
+    })
     .finally(() => {
       inflightTransportHealthRefresh = null
     })
@@ -381,13 +399,14 @@ export function TransportHealthPanel() {
   }, [])
 
   const { data, loading, error } = transportHealthResource.state.value
+  const wireError = transportHealthWireError.value
+
+  if (wireError || error) {
+    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${wireError ?? error}</div>`
+  }
 
   if (loading && !data) {
     return html`<div class="p-6 text-center text-text-muted text-sm" role="status">트랜스포트 상태 로딩 중...</div>`
-  }
-
-  if (error && !data) {
-    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${error}</div>`
   }
 
   if (!data) return null

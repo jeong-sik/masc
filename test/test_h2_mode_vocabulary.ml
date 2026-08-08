@@ -14,7 +14,6 @@ let accepted_spellings () =
     ; "h2_only", "h2_only"
     ; "0", "h1_only"
     ; "1", "h2_only"
-    ; "  H2_Only  ", "h2_only"
     ]
 ;;
 
@@ -25,10 +24,19 @@ let invalid_values_are_rejected () =
          ("reject " ^ raw)
          (Env_config_core.Config_error
             (Printf.sprintf
-               "malformed env MASC_USE_H2=%S (expected auto|h1_only|h2_only)"
+               "malformed env MASC_USE_H2=%S (expected auto|0|h1_only|1|h2_only)"
                raw))
          (fun () -> ignore (T.h2_mode_of_string raw)))
-    [ "h2c"; "prior_knowledge"; "h2"; ""; "yes"; "H1"; "true"; "false" ]
+    [ "h2c"
+    ; "prior_knowledge"
+    ; "h2"
+    ; ""
+    ; "yes"
+    ; "H1"
+    ; "true"
+    ; "false"
+    ; "  H2_Only  "
+    ]
 ;;
 
 let with_env name value_opt f =
@@ -55,7 +63,7 @@ let actual_env_admission_is_fail_closed () =
            ("env rejects " ^ raw)
            (Env_config_core.Config_error
               (Printf.sprintf
-                 "malformed env MASC_USE_H2=%S (expected auto|h1_only|h2_only)"
+                 "malformed env MASC_USE_H2=%S (expected auto|0|h1_only|1|h2_only)"
                  raw))
            (fun () -> ignore (T.use_h2 ()))))
     [ ""; "h2c" ]

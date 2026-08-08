@@ -3,10 +3,7 @@
 //
 // The largest endpoint on the dashboard: 10 nested transport surfaces
 // (summary, sse, grpc, websocket, webrtc, streamable_http, http2,
-// cluster, agent_health, plus optional projection_diagnostics). The
-// prior hand-rolled decoder returned `null` if ANY of the 9 required
-// subsections or `generated_at` was missing — this PR preserves that
-// contract via the thin null-returning wrapper in `api/transport-health.ts`.
+// cluster, agent_health, plus optional projection_diagnostics).
 //
 // Uses the shared `SchemaDriftError` base landed in #7732.
 

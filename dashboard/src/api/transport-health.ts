@@ -6,20 +6,10 @@ import {
 } from './schemas/transport-health'
 
 export type { HotSession, TransportHealthData }
-export { TransportHealthSchemaDriftError } from './schemas/transport-health'
-
-// Thin null-returning wrapper preserving the pre-migration contract —
-// `src/api/transport-health.test.ts` has many assertions on
-// `decodeTransportHealthData(x) === null` for missing subsections.
-// New call sites should use `parseTransportHealthData` directly for
-// throw-on-drift semantics.
-export function decodeTransportHealthData(raw: unknown): TransportHealthData | null {
-  try {
-    return parseTransportHealthData(raw)
-  } catch {
-    return null
-  }
-}
+export {
+  parseTransportHealthData,
+  TransportHealthSchemaDriftError,
+} from './schemas/transport-health'
 
 export async function fetchTransportHealth(
   opts?: AbortableRequestOptions,

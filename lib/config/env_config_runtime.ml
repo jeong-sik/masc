@@ -137,13 +137,10 @@ module Transport = struct
     | H1_only
     | H2_only
 
-  let normalize_token raw =
-    raw |> String.trim |> String.lowercase_ascii
-
   (* The vocabulary is closed. Only an absent setting selects [Auto]; a present
      value outside this set is an operator error and stops startup. *)
   let h2_mode_of_string raw =
-    match normalize_token raw with
+    match raw with
     | "1" | "h2_only" -> H2_only
     | "0" | "h1_only" -> H1_only
     | "auto" -> Auto
@@ -151,7 +148,7 @@ module Transport = struct
       raise
         (Env_config_core.Config_error
            (Printf.sprintf
-              "malformed env MASC_USE_H2=%S (expected auto|h1_only|h2_only)"
+              "malformed env MASC_USE_H2=%S (expected auto|0|h1_only|1|h2_only)"
               raw))
 
   let h2_mode_to_string = function

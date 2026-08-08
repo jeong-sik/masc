@@ -30,6 +30,7 @@ import {
   type StatusTone,
 } from './transport-health'
 import type { HotSession, TransportHealthData } from '../api/transport-health'
+import type * as TransportHealthApi from '../api/transport-health'
 import type { SSEEvent } from '../types'
 
 function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
@@ -149,9 +150,9 @@ async function loadComponentWithApi(api: {
   lastEvent: { value: unknown }
 }) {
   vi.resetModules()
-  vi.doMock('../api/transport-health', () => ({
+  vi.doMock('../api/transport-health', async (importOriginal) => ({
+    ...(await importOriginal<typeof TransportHealthApi>()),
     fetchTransportHealth: api.fetchTransportHealth,
-    decodeTransportHealthData: (payload: unknown) => payload,
   }))
   vi.doMock('../sse', () => ({
     lastEvent: api.lastEvent,
@@ -401,6 +402,54 @@ describe('TransportHealthPanel', () => {
 
     await vi.advanceTimersByTimeAsync(1)
     expect(fetchTransportHealth).toHaveBeenCalledTimes(2)
+  })
+
+  it('replaces a stale green snapshot with an HTTP schema error', async () => {
+    const lastEvent = signal<unknown>(null)
+    const fetchTransportHealth = vi
+      .fn<() => Promise<unknown>>()
+      .mockResolvedValueOnce(sampleResponse())
+      .mockRejectedValueOnce(new Error('transport-health schema drift: invalid http2 mode'))
+    const { TransportHealthPanel } = await loadComponentWithApi({
+      fetchTransportHealth,
+      lastEvent,
+    })
+
+    render(html`<${TransportHealthPanel} />`, container)
+    await flushUi()
+    expect(container.querySelector('.v2-monitoring-surface')).not.toBeNull()
+
+    vi.useFakeTimers()
+    lastEvent.value = { type: 'agent_bound' }
+    await vi.advanceTimersByTimeAsync(1_200)
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'transport-health schema drift: invalid http2 mode',
+    )
+    expect(container.querySelector('.v2-monitoring-surface')).toBeNull()
+  })
+
+  it('renders an SSE schema error instead of retaining a green snapshot', async () => {
+    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleResponse())
+    const { TransportHealthPanel, hydrateTransportHealthFromSSE } = await loadComponentWithApi({
+      fetchTransportHealth,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${TransportHealthPanel} />`, container)
+    await flushUi()
+    expect(container.querySelector('.v2-monitoring-surface')).not.toBeNull()
+
+    hydrateTransportHealthFromSSE({
+      ...sampleResponse(),
+      http2: { listener_mode: 'h2c', multiplex_ready: true },
+    })
+    await flushUi()
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'transport-health schema drift',
+    )
+    expect(container.querySelector('.v2-monitoring-surface')).toBeNull()
   })
 })
 

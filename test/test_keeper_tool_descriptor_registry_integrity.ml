@@ -1503,6 +1503,17 @@ let test_public_mcp_surface_has_exact_dispatch_owner () =
       (String.concat ", " missing)
 ;;
 
+let test_public_mcp_membership_matches_surface_ssot () =
+  let surface = Tool_catalog_surfaces.public_mcp_surface_tools in
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+       Alcotest.(check bool)
+         (schema.name ^ " public membership matches the canonical surface")
+         (List.mem schema.name surface)
+         (Tool_catalog.is_public_mcp schema.name))
+    Masc.Config.raw_all_tool_schemas
+;;
+
 let () =
   Alcotest.run
     "keeper_tool_descriptor_registry_integrity"
@@ -1657,6 +1668,10 @@ let () =
             "public_mcp_surface_tools has an exact dispatch owner"
             `Quick
             test_public_mcp_surface_has_exact_dispatch_owner
+        ; test_case
+            "public MCP membership matches the canonical surface"
+            `Quick
+            test_public_mcp_membership_matches_surface_ssot
         ] )
     ; ( "policy-projection"
       , [ test_case

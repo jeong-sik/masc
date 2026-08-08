@@ -199,8 +199,79 @@ let claude_code_error_to_sdk_error = function
   | error -> Agent_sdk.Error.Internal (Runtime_claude_code_cli.error_to_string error)
 ;;
 
+let runtime_observation
+    ~runtime_id
+    ~turn_count
+    ~latency_ms
+    ~attempt_error
+    ~model
+    ~num_turns
+    ~(usage : Runtime_claude_code_cli.usage)
+    ~tool_calls
+    ~permission_mode
+    ~resumed
+  =
+  let capture, _metrics =
+    Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
+  in
+  Runtime_observation.record_attempt_terminal
+    capture
+    ~model_id:model
+    ~latency_ms:(Some latency_ms)
+    ~error:attempt_error;
+  let official_client : Runtime_observation.official_client_measurement =
+    { client = Claude_code
+    ; execution_mode = Plan_read_only
+    ; tool_owner = Official_client
+    ; permission_mode = Some permission_mode
+    ; session_bound = true
+    ; resumed
+    ; turn_count
+    ; tool_calls
+    ; usage =
+        Some
+          { input_tokens = usage.input_tokens
+          ; output_tokens = usage.output_tokens
+          ; thinking_tokens = None
+          ; cache_creation_input_tokens = Some usage.cache_creation_input_tokens
+          ; cache_read_input_tokens = usage.cache_read_input_tokens
+          ; total_tokens = None
+          ; total_cost_usd = Some usage.total_cost_usd
+          }
+    }
+  in
+  Runtime_observation.runtime_observation_with_metrics
+    ~runtime_id
+    ~strategy:"official_client_runtime"
+    ~official_client
+    ~configured_labels:
+      [ "claude_code"
+      ; "execution_mode=plan_read_only"
+      ; "tool_owner=official_client"
+      ; "masc_tool_hooks=unavailable"
+      ; Printf.sprintf "permission_mode=%s" permission_mode
+      ; Printf.sprintf "tool_calls=%d" tool_calls
+      ; Printf.sprintf "resumed=%b" resumed
+      ; Printf.sprintf "turn_count=%d" turn_count
+      ; Printf.sprintf "client_turns=%d" num_turns
+      ; Printf.sprintf "input_tokens=%d" usage.input_tokens
+      ; Printf.sprintf "output_tokens=%d" usage.output_tokens
+      ; Printf.sprintf
+          "cache_creation_input_tokens=%d"
+          usage.cache_creation_input_tokens
+      ; Printf.sprintf "cache_read_input_tokens=%d" usage.cache_read_input_tokens
+      ; Printf.sprintf "total_cost_usd=%.12g" usage.total_cost_usd
+      ]
+    ~candidate_count:1
+    ~selected_model_raw:(Some model)
+    ~capture
+    ~attempt_details_source:"claude_code"
+    ~oas_internal_runtime_allowed:false
+    ()
+;;
+
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
-    ~initial_messages ~model_input_projection ~hooks
+    ~initial_messages ~model_input_projection ~hooks ~on_runtime_observation
     ~(config : Runtime_execution.claude_code) =
   let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
   let* goal =
@@ -282,6 +353,41 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
   in
   let started_at = Time_compat.now () in
   match Runtime_claude_code_cli.run_turn ~session_mode client_config ~prompt with
+  | Error (Turn_rejected rejection as error) ->
+    let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
+    let observation =
+      runtime_observation
+        ~runtime_id
+        ~turn_count
+        ~latency_ms
+        ~attempt_error:(Some "claude_code_rejected")
+        ~model:rejection.model
+        ~num_turns:rejection.num_turns
+        ~usage:rejection.usage
+        ~tool_calls:rejection.tool_calls
+        ~permission_mode:rejection.permission_mode
+        ~resumed:rejection.resumed
+    in
+    Option.iter (fun observe -> observe observation) on_runtime_observation;
+    let session_id =
+      match session_mode with
+      | Runtime_claude_code_cli.Start { session_id }
+      | Runtime_claude_code_cli.Resume { session_id } -> session_id
+    in
+    (match
+       Keeper_claude_code_session_store.settle
+         ~base_path
+         ~keeper_name
+         ~expected:claimed
+         ~session_id
+         ~usage:rejection.usage
+         ~updated_at:(Time_compat.now ())
+     with
+     | Ok _ -> Error (claude_code_error_to_sdk_error error)
+     | Error detail ->
+       Error
+         (internal_error
+            ("Claude Code rejected-session settlement failed: " ^ detail)))
   | Error error -> Error (claude_code_error_to_sdk_error error)
   | Ok turn ->
     let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
@@ -352,67 +458,18 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
       | Error detail ->
         Error (internal_error ("Claude Code session settlement failed: " ^ detail))
     in
-    let capture, _metrics =
-      Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
-    in
-    Runtime_observation.record_attempt_terminal
-      capture
-      ~model_id:turn.model
-      ~latency_ms:(Some latency_ms)
-      ~error:None;
     let runtime_observation =
-      let official_client : Runtime_observation.official_client_measurement =
-        { client = Claude_code
-        ; execution_mode = Plan_read_only
-        ; tool_owner = Official_client
-        ; permission_mode = Some turn.permission_mode
-        ; session_bound = true
-        ; resumed = turn.resumed
-        ; turn_count
-        ; tool_calls = turn.tool_calls
-        ; usage =
-            Some
-              { input_tokens = turn.usage.input_tokens
-              ; output_tokens = turn.usage.output_tokens
-              ; thinking_tokens = None
-              ; cache_creation_input_tokens =
-                  Some turn.usage.cache_creation_input_tokens
-              ; cache_read_input_tokens = turn.usage.cache_read_input_tokens
-              ; total_tokens = None
-              ; total_cost_usd = Some turn.usage.total_cost_usd
-              }
-        }
-      in
-      Runtime_observation.runtime_observation_with_metrics
+      runtime_observation
         ~runtime_id
-        ~strategy:"official_client_runtime"
-        ~official_client
-        ~configured_labels:
-          [ "claude_code"
-          ; "execution_mode=plan_read_only"
-          ; "tool_owner=official_client"
-          ; "masc_tool_hooks=unavailable"
-          ; Printf.sprintf "permission_mode=%s" turn.permission_mode
-          ; Printf.sprintf "tool_calls=%d" turn.tool_calls
-          ; Printf.sprintf "resumed=%b" turn.resumed
-          ; Printf.sprintf "turn_count=%d" turn_count
-          ; Printf.sprintf "client_turns=%d" turn.num_turns
-          ; Printf.sprintf "input_tokens=%d" turn.usage.input_tokens
-          ; Printf.sprintf "output_tokens=%d" turn.usage.output_tokens
-          ; Printf.sprintf
-              "cache_creation_input_tokens=%d"
-              turn.usage.cache_creation_input_tokens
-          ; Printf.sprintf
-              "cache_read_input_tokens=%d"
-              turn.usage.cache_read_input_tokens
-          ; Printf.sprintf "total_cost_usd=%.12g" turn.usage.total_cost_usd
-          ]
-        ~candidate_count:1
-        ~selected_model_raw:(Some turn.model)
-        ~capture
-        ~attempt_details_source:"claude_code"
-        ~oas_internal_runtime_allowed:false
-        ()
+        ~turn_count
+        ~latency_ms
+        ~attempt_error:None
+        ~model:turn.model
+        ~num_turns:turn.num_turns
+        ~usage:turn.usage
+        ~tool_calls:turn.tool_calls
+        ~permission_mode:turn.permission_mode
+        ~resumed:turn.resumed
     in
     Ok
       { Runtime_agent.response

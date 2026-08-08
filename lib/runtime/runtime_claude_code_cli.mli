@@ -40,6 +40,12 @@ type rejection =
   { status : string
   ; reset_at : int option
   ; detail : string
+  ; model : string
+  ; num_turns : int
+  ; usage : usage
+  ; tool_calls : int
+  ; permission_mode : string
+  ; resumed : bool
   }
 
 type error =

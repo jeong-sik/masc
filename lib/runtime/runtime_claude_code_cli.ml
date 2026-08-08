@@ -33,6 +33,12 @@ type rejection =
   { status : string
   ; reset_at : int option
   ; detail : string
+  ; model : string
+  ; num_turns : int
+  ; usage : usage
+  ; tool_calls : int
+  ; permission_mode : string
+  ; resumed : bool
   }
 
 type error =
@@ -52,7 +58,7 @@ let error_to_string = function
   | Spawn_failed detail -> "failed to start Claude Code CLI: " ^ detail
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Claude Code CLI protocol error during %s: %s" stage detail
-  | Turn_rejected { status; reset_at; detail } ->
+  | Turn_rejected { status; reset_at; detail; _ } ->
     let reset =
       match reset_at with
       | None -> ""
@@ -423,13 +429,24 @@ let parse_output ~expected_model ~expected_cwd ~session_mode output =
         then Ok ()
         else protocol_error "init" "reported cwd differs from configured cwd"
       in
+      let rejected_turn ~status ~reset_at =
+        Turn_rejected
+          { status
+          ; reset_at
+          ; detail = terminal.result
+          ; model = init.model
+          ; num_turns = terminal.num_turns
+          ; usage = terminal.usage
+          ; tool_calls
+          ; permission_mode = init.permission_mode
+          ; resumed
+          }
+      in
       (match rejection, terminal.api_error_status with
        | Some (status, reset_at), _ ->
-         Error (Turn_rejected { status; reset_at; detail = terminal.result })
+         Error (rejected_turn ~status ~reset_at)
        | None, Some 429 ->
-         Error
-           (Turn_rejected
-              { status = "http_429"; reset_at = None; detail = terminal.result })
+         Error (rejected_turn ~status:"http_429" ~reset_at:None)
        | None, Some _ when not terminal.is_error ->
          protocol_error "result" "api_error_status requires is_error=true"
        | None, None

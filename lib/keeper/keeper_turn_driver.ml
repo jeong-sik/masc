@@ -821,6 +821,7 @@ let run_named
               ~initial_messages
               ~model_input_projection
               ~hooks
+              ~on_runtime_observation
               ~config
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;

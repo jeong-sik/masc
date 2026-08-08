@@ -27,7 +27,7 @@ let cleanup_tree root =
   | _ -> ()
 ;;
 
-let fixture_script ~workspace =
+let fixture_script ~reject ~workspace =
   let path = Filename.temp_file "masc-claude-keeper-" ".sh" in
   let output = open_out_bin path in
   output_string output "#!/bin/sh\n";
@@ -44,8 +44,15 @@ let fixture_script ~workspace =
     "printf '%s\\n' \"{\\\"type\\\":\\\"system\\\",\\\"subtype\\\":\\\"init\\\",\\\"cwd\\\":\\\"$PWD\\\",\\\"session_id\\\":\\\"$session\\\",\\\"tools\\\":[\\\"Glob\\\",\\\"Grep\\\",\\\"Read\\\",\\\"WebFetch\\\",\\\"WebSearch\\\"],\\\"model\\\":\\\"claude-opus-5\\\",\\\"permissionMode\\\":\\\"plan\\\",\\\"apiKeySource\\\":\\\"none\\\"}\"\n";
   output_string output
     "printf '%s\\n' \"{\\\"type\\\":\\\"assistant\\\",\\\"message\\\":{\\\"model\\\":\\\"claude-opus-5\\\",\\\"role\\\":\\\"assistant\\\",\\\"content\\\":[{\\\"type\\\":\\\"tool_use\\\",\\\"id\\\":\\\"tool-1\\\",\\\"name\\\":\\\"Read\\\",\\\"input\\\":{}}]},\\\"session_id\\\":\\\"$session\\\"}\"\n";
-  output_string output
-    "printf '%s\\n' \"{\\\"type\\\":\\\"result\\\",\\\"subtype\\\":\\\"success\\\",\\\"is_error\\\":false,\\\"num_turns\\\":1,\\\"result\\\":\\\"$response\\\",\\\"session_id\\\":\\\"$session\\\",\\\"total_cost_usd\\\":0.0125,\\\"usage\\\":{\\\"input_tokens\\\":21,\\\"output_tokens\\\":4,\\\"cache_creation_input_tokens\\\":2,\\\"cache_read_input_tokens\\\":7},\\\"terminal_reason\\\":null,\\\"api_error_status\\\":null}\"\n";
+  if reject
+  then (
+    output_string output
+      "printf '%s\\n' \"{\\\"type\\\":\\\"rate_limit_event\\\",\\\"rate_limit_info\\\":{\\\"status\\\":\\\"rejected\\\",\\\"resetsAt\\\":1786356000,\\\"rateLimitType\\\":\\\"seven_day\\\"},\\\"session_id\\\":\\\"$session\\\"}\"\n";
+    output_string output
+      "printf '%s\\n' \"{\\\"type\\\":\\\"result\\\",\\\"subtype\\\":\\\"success\\\",\\\"is_error\\\":true,\\\"num_turns\\\":1,\\\"result\\\":\\\"subscription limit\\\",\\\"session_id\\\":\\\"$session\\\",\\\"total_cost_usd\\\":0.0,\\\"usage\\\":{\\\"input_tokens\\\":0,\\\"output_tokens\\\":0,\\\"cache_creation_input_tokens\\\":0,\\\"cache_read_input_tokens\\\":0},\\\"terminal_reason\\\":\\\"api_error\\\",\\\"api_error_status\\\":429}\"\n")
+  else
+    output_string output
+      "printf '%s\\n' \"{\\\"type\\\":\\\"result\\\",\\\"subtype\\\":\\\"success\\\",\\\"is_error\\\":false,\\\"num_turns\\\":1,\\\"result\\\":\\\"$response\\\",\\\"session_id\\\":\\\"$session\\\",\\\"total_cost_usd\\\":0.0125,\\\"usage\\\":{\\\"input_tokens\\\":21,\\\"output_tokens\\\":4,\\\"cache_creation_input_tokens\\\":2,\\\"cache_read_input_tokens\\\":7},\\\"terminal_reason\\\":null,\\\"api_error_status\\\":null}\"\n";
   close_out output;
   Unix.chmod path 0o700;
   path
@@ -83,7 +90,7 @@ let response_text (result : Runtime_agent.run_result) =
   |> String.concat ""
 ;;
 
-let run_turn ~base_path ~cli_path ~goal =
+let run_turn ?on_runtime_observation ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -114,6 +121,7 @@ let run_turn ~base_path ~cli_path ~goal =
                            ~base_path
                            ~goal
                            ~initial_messages:[]
+                           ?on_runtime_observation
                            ~sw
                            ~net:(Eio.Stdenv.net env)
                            ()))))))
@@ -173,12 +181,12 @@ let test_session_store_roundtrip_and_duplicate_claim () =
 
 let test_keeper_start_resume_and_measured_observation () =
   let base_path = temp_workspace "masc-claude-keeper-" in
-  let cli_path = fixture_script ~workspace:base_path in
+  let cli_path = fixture_script ~reject:false ~workspace:base_path in
   Fun.protect
     ~finally:(fun () -> Sys.remove cli_path; cleanup_tree base_path)
     (fun () ->
        let first =
-         match run_turn ~base_path ~cli_path ~goal:"fixture start" with
+         match run_turn ~base_path ~cli_path ~goal:"fixture start" () with
          | Ok result -> result
          | Error error -> fail (Agent_sdk.Error.to_string error)
        in
@@ -223,7 +231,7 @@ let test_keeper_start_resume_and_measured_observation () =
             ; "cache_creation_input_tokens=2"
             ]);
        let resumed =
-         match run_turn ~base_path ~cli_path ~goal:"fixture resume" with
+         match run_turn ~base_path ~cli_path ~goal:"fixture resume" () with
          | Ok result -> result
          | Error error -> fail (Agent_sdk.Error.to_string error)
        in
@@ -234,6 +242,54 @@ let test_keeper_start_resume_and_measured_observation () =
        | Error detail -> fail detail
        | Ok None -> fail "resumed Claude Code session disappeared"
        | Ok (Some session) -> check int "stored turn count" 2 session.turn_count)
+;;
+
+let test_keeper_rejection_preserves_measurement_and_settles_session () =
+  let base_path = temp_workspace "masc-claude-rejected-" in
+  let cli_path = fixture_script ~reject:true ~workspace:base_path in
+  Fun.protect
+    ~finally:(fun () -> Sys.remove cli_path; cleanup_tree base_path)
+    (fun () ->
+       let observed = ref None in
+       (match
+          run_turn
+            ~on_runtime_observation:(fun observation -> observed := Some observation)
+            ~base_path
+            ~cli_path
+            ~goal:"fixture rejected"
+            ()
+        with
+        | Error (Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)) -> ()
+        | Error error -> fail (Agent_sdk.Error.to_string error)
+        | Ok _ -> fail "rate-limited Claude Code turn was accepted");
+       (match !observed with
+        | Some
+            { Runtime_observation.official_client =
+                Some
+                  { client = Claude_code
+                  ; execution_mode = Plan_read_only
+                  ; permission_mode = Some "plan"
+                  ; usage = Some usage
+                  ; _
+                  }
+            ; attempts = [ { error = Some "claude_code_rejected"; _ } ]
+            ; _
+            } ->
+          check int "rejected measured input" 0 usage.input_tokens;
+          check int "rejected measured output" 0 usage.output_tokens
+        | Some _ -> fail "rejected Claude Code evidence was misclassified"
+        | None -> fail "rejected Claude Code evidence was dropped");
+       match
+         Keeper_claude_code_session_store.load
+           ~base_path
+           ~keeper_name:"claude-fixture"
+       with
+       | Error detail -> fail detail
+       | Ok None -> fail "rejected Claude Code session disappeared"
+       | Ok (Some { phase = Settled _; turn_count; _ }) ->
+         check int "rejected session settled at first turn" 1 turn_count
+       | Ok (Some { phase = Claimed _; _ }) ->
+         fail "terminal rejection left the Claude Code session claimed")
 ;;
 
 let () =
@@ -248,6 +304,10 @@ let () =
             "start resume and measured observation"
             `Quick
             test_keeper_start_resume_and_measured_observation
+        ; test_case
+            "rejection measurement and settlement"
+            `Quick
+            test_keeper_rejection_preserves_measurement_and_settles_session
         ] )
     ]
 ;;

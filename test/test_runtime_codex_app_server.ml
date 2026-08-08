@@ -892,7 +892,18 @@ let assert_production_keeper_result result =
   check bool "production measured observation" true
     (Option.is_some result.runtime_observation);
   check bool "official client does not fabricate OAS checkpoint" true
-    (Option.is_none result.checkpoint)
+    (Option.is_none result.checkpoint);
+  match
+    Runtime_observation.latest_official_client_snapshot ~runtime_id:"codex.codex"
+  with
+  | Some
+      { outcome = `Success
+      ; measurement = { client = Codex; execution_mode = App_server; _ }
+      ; _
+      } ->
+    ()
+  | Some _ -> fail "production receipt published a misclassified runtime snapshot"
+  | None -> fail "production receipt did not publish its official-client snapshot"
 ;;
 
 let test_production_keeper_dispatches_codex_runtime () =

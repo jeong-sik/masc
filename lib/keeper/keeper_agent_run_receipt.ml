@@ -41,6 +41,17 @@ let degraded_retry_runtime_of_wire ~keeper_name raw =
           raw;
       None
 
+let runtime_record_outcome = function
+  | Ok _ -> `Success
+  | Error
+      (Agent_sdk.Error.Api
+         (Llm_provider.Retry.RateLimited _
+         | Llm_provider.Retry.AuthError _
+         | Llm_provider.Retry.AuthorizationError _
+         | Llm_provider.Retry.PaymentRequired _)) ->
+    `Rejected
+  | Error _ -> `Failure
+
 let finalize
     ~config
     ~meta
@@ -110,6 +121,12 @@ let finalize
   let runtime_observation : Runtime_observation.runtime_observation option =
     !receipt_runtime_observation_ref
   in
+  Runtime_observation.record_runtime
+    ~keeper_name:meta.name
+    ~observation:runtime_observation
+    ~runtime_id
+    ~outcome:(runtime_record_outcome turn_result)
+    ();
   (* #20936: the before_turn_params hook snapshots the final injected
      extra_system_context (digest + byte size) into the accumulator each
      SDK turn; the receipt reports the last SDK turn's values. The SDK

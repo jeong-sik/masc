@@ -128,8 +128,24 @@ let test_rate_limit_rejection_beats_success_subtype () =
   match parse ~cwd:"/tmp" output with
   | Error
       (Runtime_claude_code_cli.Turn_rejected
-         { status = "rejected"; reset_at = Some 1786356000; detail }) ->
-    check string "detail" "individual spend limit" detail
+         { status = "rejected"
+         ; reset_at = Some 1786356000
+         ; detail
+         ; model
+         ; num_turns
+         ; usage
+         ; tool_calls
+         ; permission_mode
+         ; resumed
+         }) ->
+    check string "detail" "individual spend limit" detail;
+    check string "measured model" "claude-opus-5" model;
+    check int "measured client turns" 1 num_turns;
+    check int "measured input" 20 usage.input_tokens;
+    check int "measured output" 4 usage.output_tokens;
+    check int "measured tool calls" 0 tool_calls;
+    check string "measured permission" "plan" permission_mode;
+    check bool "measured start" false resumed
   | Error error -> fail (Runtime_claude_code_cli.error_to_string error)
   | Ok _ -> fail "rate-limit result with subtype=success was accepted"
 ;;

@@ -105,8 +105,8 @@ let phase_of_yojson = function
        ; "previous_session_id", `String session_id
        ] ->
        Ok (Claimed { previous_session_id = Some session_id })
-     | [ "session_id", `String session_id
-       ; "kind", `String "settled"
+     | [ "kind", `String "settled"
+       ; "session_id", `String session_id
        ] -> Ok (Settled { session_id })
      | _ -> Error "Claude Code session phase fields are not exact")
   | _ -> Error "Claude Code session phase must be a JSON object"

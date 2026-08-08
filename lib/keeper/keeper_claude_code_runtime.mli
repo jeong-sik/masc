@@ -13,5 +13,6 @@ val run :
   initial_messages:Agent_sdk.Types.message list ->
   model_input_projection:Agent_sdk.Agent.model_input_projection option ->
   hooks:Agent_sdk.Hooks.hooks option ->
+  on_runtime_observation:(Runtime_observation.runtime_observation -> unit) option ->
   config:Runtime_execution.claude_code ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result

@@ -8,11 +8,9 @@
 
     A [limit] property had been widened to ["type": ["integer","string"]] to
     accept numeric-string arguments (Issue #18472). But
-    [Tool_bridge.params_of_json_schema] delegates to
-    [Agent_sdk.Mcp.json_schema_to_params] (OAS #2343, fail-closed on schema
-    types it cannot map to a single param type), which raises Invalid_argument
-    on a multi-non-null-type union. The uncaught exception took down the whole
-    keeper turn — every tool, not just the offending one.
+    The OAS schema boundary fails closed on malformed projectable fields. An
+    uncaught conversion failure used to take down the whole keeper turn — every
+    tool, not just the offending one.
 
     This test asserts the descriptor-derived Keeper model catalog never
     reintroduces a schema the OAS boundary cannot convert (multi-type union,
@@ -38,12 +36,18 @@ let test_catalog_non_empty () =
 let test_all_keeper_schemas_convert () =
   List.iter
     (fun (schema : Masc_domain.tool_schema) ->
-       match Tool_bridge.params_of_json_schema schema.input_schema with
-       | _ -> ()
-       | exception Invalid_argument detail ->
+       match
+         Agent_sdk.Types.tool_schema_of_input_schema
+           ~name:schema.name
+           ~description:schema.description
+           ~input_schema:schema.input_schema
+           ()
+       with
+       | Ok _ -> ()
+       | Error detail ->
          Alcotest.failf
            "Keeper model tool schema %S is not convertible by the MASC/OAS \
-            boundary (Tool_bridge.params_of_json_schema): %s. Fix the reported \
+            authoritative-schema boundary: %s. Fix the reported \
             descriptor-owned or canonical schema before exposing it to OAS \
             (#25272)."
            schema.name

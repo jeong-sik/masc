@@ -2,8 +2,8 @@ module Types = Masc_domain
 
 (** Unit tests for Tool_input_validation — OAS-delegated strict validation.
 
-    Tests the integration: MASC JSON Schema -> Tool_bridge.params_of_json_schema
-    -> Agent_sdk.Tool_input_validation.validate -> pre_hook_action mapping.
+    Tests the integration: authoritative MASC JSON Schema -> OAS tool schema ->
+    Agent_sdk.Tool_input_validation.validate -> pre_hook_action mapping.
 
     OAS 0.212 (oas@6f3648d6, "hard-cut implicit agent governance") removed
     implicit type coercion from validate: a string value for an
@@ -32,25 +32,22 @@ let assert_contains label haystack needle =
 (* Helper: validate via the same pipeline as the pre-hook            *)
 (* ================================================================ *)
 
-(** Reproduce the exact validation pipeline used in the pre-hook:
-    JSON Schema -> params_of_json_schema -> OAS validate. *)
+(** Reproduce the exact validation pipeline used in the pre-hook. *)
 let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t)
   : Tool_dispatch.pre_hook_action =
-  let parameters = Tool_bridge.params_of_json_schema schema in
-  if parameters = [] then Pass
+  let oas_schema : Agent_sdk.Types.tool_schema =
+    match
+      Agent_sdk.Types.tool_schema_of_input_schema
+        ~name:tool_name
+        ~description:""
+        ~input_schema:schema
+        ()
+    with
+    | Ok schema -> schema
+    | Error detail -> failwith ("test_tool_input_validation: " ^ detail)
+  in
+  if oas_schema.parameters = [] then Pass
   else
-    let json =
-      `Assoc
-        [ ("name", `String tool_name)
-        ; ("description", `String "")
-        ; ("parameters", `List (List.map Agent_sdk.Types.tool_param_to_json parameters))
-        ]
-    in
-    let oas_schema : Agent_sdk.Types.tool_schema =
-      match Agent_sdk.Types.tool_schema_of_json json with
-      | Ok s -> s
-      | Error err -> failwith ("test_tool_input_validation: " ^ err)
-    in
     match Agent_sdk.Tool_input_validation.validate oas_schema args with
     | Agent_sdk.Tool_input_validation.Valid coerced ->
       if Yojson.Safe.equal coerced args then Pass
@@ -335,9 +332,15 @@ let test_schema_ambiguous_union_is_rejected () =
             ] );
       ]
   in
-  match Tool_bridge.params_of_json_schema schema with
-  | _ -> Alcotest.fail "ambiguous union must not select its first member"
-  | exception Invalid_argument _ -> ()
+  match
+    Agent_sdk.Types.tool_schema_of_input_schema
+      ~name:"ambiguous_union"
+      ~description:""
+      ~input_schema:schema
+      ()
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "ambiguous union must not select its first member"
 
 let test_schema_nullable_union_preserves_non_null_type () =
   let schema =
@@ -353,23 +356,36 @@ let test_schema_nullable_union_preserves_non_null_type () =
             ] )
       ]
   in
-  match Tool_bridge.params_of_json_schema schema with
-  | [ (param : Agent_sdk.Types.tool_param) ] ->
+  match
+    Agent_sdk.Types.tool_schema_of_input_schema
+      ~name:"nullable_union"
+      ~description:""
+      ~input_schema:schema
+      ()
+  with
+  | Ok { parameters = [ (param : Agent_sdk.Types.tool_param) ]; _ } ->
       Alcotest.(check string) "name" "payload" param.name;
       Alcotest.(check bool) "optional" false param.required;
       (match param.param_type with
        | Agent_sdk.Types.Object -> ()
        | _ -> Alcotest.fail "nullable object must remain object")
-  | params ->
+  | Ok { parameters; _ } ->
       Alcotest.failf "expected one converted parameter, got %d"
-        (List.length params)
+        (List.length parameters)
+  | Error detail -> Alcotest.fail detail
 
 let test_all_masc_tool_schemas_project_through_oas () =
   List.iter
     (fun (schema : Masc_domain.tool_schema) ->
-      match Tool_bridge.params_of_json_schema schema.input_schema with
-      | _ -> ()
-      | exception Invalid_argument detail ->
+      match
+        Agent_sdk.Types.tool_schema_of_input_schema
+          ~name:schema.name
+          ~description:schema.description
+          ~input_schema:schema.input_schema
+          ()
+      with
+      | Ok _ -> ()
+      | Error detail ->
           Alcotest.failf "tool %s has invalid OAS schema: %s" schema.name detail)
     Config.raw_all_tool_schemas
 
@@ -842,7 +858,17 @@ let check_param_type name expected params =
   | None -> Alcotest.failf "missing param: %s" name
 
 let test_tool_execute_schema_exposes_typed_boundary () =
-  let params = Tool_bridge.params_of_json_schema tool_execute_schema in
+  let params =
+    match
+      Agent_sdk.Types.tool_schema_of_input_schema
+        ~name:"tool_execute"
+        ~description:""
+        ~input_schema:tool_execute_schema
+        ()
+    with
+    | Ok schema -> schema.parameters
+    | Error detail -> Alcotest.fail detail
+  in
   Alcotest.(check bool)
     "retired executable field is not exposed"
     true

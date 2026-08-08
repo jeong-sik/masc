@@ -1,0 +1,52 @@
+_build/
+_build_*/
+.worktrees/
+
+# OCaml / opam
+*.install
+*.merlin
+.merlin
+_opam/
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# TLA+ / TLC artifacts
+/states/
+specs/states/
+specs/*_TTrace_*.tla
+specs/*_TTrace_*.bin
+*.toolbox/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+_coverage/
+*.coverage
+
+# Environment
+.env
+.env.*
+
+# TLA+ generated state files
+specs/states/
+
+# Local working documents and one-off scripts (operator scratch)
+REFACTORING-PLAN*.md
+ISSUE_OCAML_*.md
+CDAL-ENHANCEMENT*.md
+TODO.md
+add_logs.py
+apply_fix.py
+fix_*.py
+patch_*.py
+.mcp.json
+
+# Generated operational reports must not be committed (boundary hygiene, PR #2470 follow-up)
+reports/

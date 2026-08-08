@@ -1,0 +1,12 @@
+(executables
+ (names
+  basic_agent
+  tool_use
+  async_agent_demo
+  streaming
+  review_agent
+  codegen_agent
+  error_handling
+  observable_agent
+  builder_patterns)
+ (libraries agent_sdk eio eio_main yojson unix str))

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VCS Graph Snapshot v1",
+  "description": "Generic VCS graph snapshot data contract. Pure data only; no subprocess, agent, keeper, or renderer semantics.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "repo_root",
+    "captured_at",
+    "refs",
+    "commits",
+    "edges",
+    "worktree_status",
+    "conflicts"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "repo_root": { "type": "string" },
+    "captured_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "head": {
+      "type": ["string", "null"],
+      "description": "Current head object id, when available."
+    },
+    "refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ref_pointer" }
+    },
+    "commits": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/commit_node" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/commit_edge" }
+    },
+    "worktree_status": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/worktree_status" }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/conflict_entry" }
+    }
+  },
+  "$defs": {
+    "ref_pointer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "target", "kind"],
+      "properties": {
+        "name": { "type": "string" },
+        "target": { "type": "string" },
+        "kind": { "type": "string" }
+      }
+    },
+    "commit_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "parents"],
+      "properties": {
+        "id": { "type": "string" },
+        "summary": { "type": ["string", "null"] },
+        "author_name": { "type": ["string", "null"] },
+        "author_email": { "type": ["string", "null"] },
+        "authored_at": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "committer_name": { "type": ["string", "null"] },
+        "committer_email": { "type": ["string", "null"] },
+        "committed_at": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "parents": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "commit_edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parent", "child", "kind"],
+      "properties": {
+        "parent": { "type": "string" },
+        "child": { "type": "string" },
+        "kind": { "type": "string" }
+      }
+    },
+    "worktree_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string" },
+        "index": { "type": ["string", "null"] },
+        "working_tree": { "type": ["string", "null"] },
+        "original_path": { "type": ["string", "null"] }
+      }
+    },
+    "conflict_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind"],
+      "properties": {
+        "path": { "type": "string" },
+        "kind": { "type": "string" },
+        "ours": { "type": ["string", "null"] },
+        "theirs": { "type": ["string", "null"] },
+        "ancestor": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

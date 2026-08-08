@@ -1,0 +1,5 @@
+module Callback : sig
+  type hook = unit -> unit
+end
+
+val measure : request:string -> callback:Callback.hook -> unit

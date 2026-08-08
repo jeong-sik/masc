@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "oas:swiss-verdict:v1",
+  "type": "object",
+  "required": ["schema_version", "all_passed", "coverage", "layer_results"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "all_passed": { "type": "boolean" },
+    "coverage": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+    "layer_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["layer_name", "passed", "evidence"],
+        "properties": {
+          "layer_name": { "type": "string" },
+          "passed": { "type": "boolean" },
+          "score": { "type": ["number", "null"] },
+          "evidence": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "detail": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "eval_metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {
+          "name": { "type": "string" },
+          "value": {},
+          "unit": { "type": ["string", "null"] },
+          "tags": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

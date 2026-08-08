@@ -1,0 +1,69 @@
+{
+  "_comment": "Production hardening ratchet baseline. Source: docs/rfc/RFC-OAS-023-hardening-ratchet.md. Regenerate with scripts/hardening-ratchet.sh --rebaseline.",
+  "examples": {
+    "base_url_host_fuzzy_classifiers": [],
+    "direct_env_reads": [
+      "lib/llm_provider/cli_common_env.ml:11:let default_getenv = Sys.getenv_opt",
+      "lib/llm_provider/env_parse.ml:10:match Sys.getenv_opt name with",
+      "lib/llm_provider/env_parse.ml:16:let original = Sys.getenv_opt name in",
+      "lib/otel_tracer.ml:75:let default_config_from_env ?(getenv = Sys.getenv_opt) () =",
+      "lib/protocol/mcp.ml:418:match Sys.getenv_opt \"OAS_MCP_ALLOW_SHELL_COMMANDS\" with",
+      "lib/protocol/mcp.ml:609:(match Sys.getenv_opt \"OAS_MCP_OUTPUT_MAX_TOKENS\" with",
+      "lib/protocol/mcp.ml:618:(match Sys.getenv_opt \"OAS_MCP_OUTPUT_MAX_TOKENS\" with",
+      "lib/provider.ml:400:(match Sys.getenv_opt cfg.api_key_env with"
+    ],
+    "direct_env_reads_outside_env_boundary": [
+      "lib/otel_tracer.ml:75:let default_config_from_env ?(getenv = Sys.getenv_opt) () =",
+      "lib/protocol/mcp.ml:418:match Sys.getenv_opt \"OAS_MCP_ALLOW_SHELL_COMMANDS\" with",
+      "lib/protocol/mcp.ml:609:(match Sys.getenv_opt \"OAS_MCP_OUTPUT_MAX_TOKENS\" with",
+      "lib/protocol/mcp.ml:618:(match Sys.getenv_opt \"OAS_MCP_OUTPUT_MAX_TOKENS\" with",
+      "lib/provider.ml:400:(match Sys.getenv_opt cfg.api_key_env with",
+      "lib/provider.ml:419:(match Sys.getenv_opt cfg.api_key_env with",
+      "lib/provider.ml:575:match Sys.getenv_opt name with",
+      "lib/streaming.ml:80:(match Sys.getenv_opt \"ANTHROPIC_API_KEY\" with"
+    ],
+    "exception_message_classifiers": [
+      "lib/llm_provider/retry.ml:319:let msg = String.lowercase_ascii (extract_error_message body) in"
+    ],
+    "heuristic_markers": [],
+    "local_workspace_path_literals": [],
+    "model_id_string_classifiers_outside_catalog": [],
+    "stub_markers": [],
+    "wildcard_silent_defaults": [
+      "lib/agent/agent.ml:1035:| _ -> false)",
+      "lib/agent/agent_handoff.ml:36:| _ -> None))",
+      "lib/agent/agent_handoff.ml:79:| _ -> false)",
+      "lib/agent/builder.ml:502:| _ -> Ok (build b)))",
+      "lib/agent_tool.ml:33:| _ -> None)",
+      "lib/api_openai.ml:20:| _ -> []",
+      "lib/api_openai.ml:308:| _ -> None",
+      "lib/api_openai.ml:314:| _ -> true"
+    ],
+    "workaround_markers": []
+  },
+  "lastUpdatedCommit": "4fdf5deb4d9a7579cfd832fa720edf923c290cb0",
+  "metrics": {
+    "base_url_host_fuzzy_classifiers": 0,
+    "direct_env_reads": 11,
+    "direct_env_reads_outside_env_boundary": 8,
+    "exception_message_classifiers": 1,
+    "heuristic_markers": 0,
+    "local_workspace_path_literals": 0,
+    "model_id_string_classifiers_outside_catalog": 0,
+    "stub_markers": 0,
+    "wildcard_silent_defaults": 251,
+    "workaround_markers": 0
+  },
+  "removalTargets": {
+    "base_url_host_fuzzy_classifiers": "RFC-OAS-034: host/URL is transport, not capability provenance. New fuzzy String matching (starts_with/ends_with/contains/is_substring) on base_url/host is forbidden; bind vendor identity via exact Uri.host equality and capability via the model catalog. Existing ollama.com matchers are reducible debt (migrate to exact Uri.host).",
+    "direct_env_reads": "RFC-OAS-023: reduce by moving runtime env access behind config/env boundary modules.",
+    "direct_env_reads_outside_env_boundary": "RFC-OAS-023: target zero outside explicit envBoundaryPaths.",
+    "exception_message_classifiers": "RFC-OAS-023: target zero after typed Unix_error/Eio/http_error classifiers land.",
+    "heuristic_markers": "RFC-OAS-023/RFC-OAS-029: target zero for untyped heuristic runtime routing; new heuristic code requires a waiver and sunset plan.",
+    "local_workspace_path_literals": "RFC-OAS-023: target zero; new local developer paths are never accepted without waiver.",
+    "model_id_string_classifiers_outside_catalog": "RFC-OAS-029: keep model-id string classification inside catalog/capability boundary modules; scattered model matching is SSOT drift.",
+    "stub_markers": "RFC-OAS-023: target zero; assert false is excluded because it is commonly used for unreachable proof arms.",
+    "wildcard_silent_defaults": "RFC-OAS-023: reduce by replacing permissive catch-all defaults with typed/default-explicit handling.",
+    "workaround_markers": "RFC-OAS-023/RFC-OAS-029: target zero for permanent runtime workaround debt; temporary additions require waiver and sunset issue."
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "oas:runtime-sync-window:v1",
+  "title": "OAS Runtime Sync Window v1",
+  "description": "Versioned replay window over existing OAS runtime events and canonical event envelopes.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "stream_id",
+    "cursor",
+    "next_cursor",
+    "events",
+    "artifact_refs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "stream_id": { "type": "string", "minLength": 1 },
+    "cursor": { "$ref": "#/$defs/cursor" },
+    "next_cursor": { "$ref": "#/$defs/cursor" },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/event_record" }
+    },
+    "artifact_refs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "persistence": {
+      "anyOf": [{ "$ref": "#/$defs/persistence_contract" }, { "type": "null" }]
+    },
+    "merge_policy": {
+      "oneOf": [
+        { "const": "Append_only" },
+        { "const": "Last_write_wins" },
+        { "const": "Reject_conflicts" }
+      ]
+    }
+  },
+  "$defs": {
+    "cursor": {
+      "type": "object",
+      "required": ["stream_id", "after_seq"],
+      "additionalProperties": false,
+      "properties": {
+        "stream_id": { "type": "string", "minLength": 1 },
+        "after_seq": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "event_record": {
+      "type": "object",
+      "required": ["envelope", "event"],
+      "additionalProperties": false,
+      "properties": {
+        "envelope": { "$ref": "#/$defs/event_envelope" },
+        "event": {
+          "type": "object",
+          "description": "Existing Runtime.event JSON payload."
+        }
+      }
+    },
+    "event_envelope": {
+      "type": "object",
+      "required": [
+        "event_id",
+        "correlation_id",
+        "run_id",
+        "event_time",
+        "observed_at",
+        "seq",
+        "parent_event_id",
+        "caused_by",
+        "source_clock"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": { "type": "string", "minLength": 1 },
+        "correlation_id": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "minLength": 1 },
+        "event_time": { "type": "number" },
+        "observed_at": { "type": "number" },
+        "seq": { "type": ["integer", "null"], "minimum": 0 },
+        "parent_event_id": { "type": ["string", "null"] },
+        "caused_by": { "type": ["string", "null"] },
+        "source_clock": {
+          "type": "string",
+          "enum": ["wall", "monotonic", "logical", "unknown"]
+        }
+      }
+    },
+    "persistence_contract": {
+      "type": "object",
+      "required": ["backend", "namespace", "durable", "binary_deltas"],
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "oneOf": [
+            { "const": "Browser_indexeddb" },
+            { "const": "Browser_opfs" },
+            { "const": "Sqlite" },
+            { "const": "Filesystem" },
+            { "const": "Memory" },
+            {
+              "type": "array",
+              "prefixItems": [{ "const": "Custom_backend" }, { "type": "string" }],
+              "items": false
+            }
+          ]
+        },
+        "namespace": { "type": "string", "minLength": 1 },
+        "durable": { "type": "boolean" },
+        "binary_deltas": { "type": "boolean" },
+        "max_window_events": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    }
+  }
+}

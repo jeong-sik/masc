@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "source": "sanitized from /Users/dancer/me/.masc/traces/trace-*/oas-snapshot-*.json, checked 2026-06-29",
+  "purpose": "multi-turn assistant thinking + tool_use/tool_result replay with an operator nudge before a late tool result",
+  "messages": [
+    {
+      "role": "assistant",
+      "blocks": [
+        {
+          "type": "thinking",
+          "text": "trace-reasoning:first-tool"
+        },
+        {
+          "type": "text",
+          "text": "calling first lookup"
+        },
+        {
+          "type": "tool_use",
+          "id": "trace-call-a",
+          "name": "lookup_weather",
+          "input": {
+            "city": "Seoul"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "blocks": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "trace-call-a",
+          "content": "{\"temp_c\":21}",
+          "is_error": false
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "blocks": [
+        {
+          "type": "thinking",
+          "text": "trace-reasoning:plain-progress"
+        },
+        {
+          "type": "text",
+          "text": "first lookup complete"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "blocks": [
+        {
+          "type": "thinking",
+          "text": "trace-reasoning:second-tool"
+        },
+        {
+          "type": "tool_use",
+          "id": "trace-call-b",
+          "name": "lookup_weather",
+          "input": {
+            "city": "Busan"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "operator nudge before late tool result"
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "blocks": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "trace-call-b",
+          "content": "{\"temp_c\":24}",
+          "is_error": false
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "blocks": [
+        {
+          "type": "thinking",
+          "text": "trace-reasoning:final"
+        },
+        {
+          "type": "text",
+          "text": "done"
+        }
+      ]
+    }
+  ]
+}

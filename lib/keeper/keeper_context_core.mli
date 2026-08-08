@@ -88,7 +88,7 @@ val persist_message :
 val timed : (unit -> 'a) -> 'a * int
 val zero_usage : Agent_sdk.Types.api_usage
 val usage_of_response :
-  Agent_sdk_response.api_response -> Agent_sdk.Types.api_usage
+  Agent_sdk.Types.api_response -> Agent_sdk.Types.api_usage
 val total_tokens : Agent_sdk.Types.api_usage -> int
 
 type 'persistence_error checkpoint_write_error =

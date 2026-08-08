@@ -17,7 +17,7 @@ val run_model_by_label :
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?accept:(Agent_sdk_response.api_response -> bool) ->
+  ?accept:(Agent_sdk.Types.api_response -> bool) ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?enable_thinking:bool ->
   ?provider_config_transform:
@@ -44,7 +44,7 @@ val run_named_with_masc_tools :
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
-  ?accept:(Agent_sdk_response.api_response -> bool) ->
+  ?accept:(Agent_sdk.Types.api_response -> bool) ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->

@@ -40,11 +40,11 @@ The key distinction is:
 ### `runtime.toml`
 
 - Loaded once at boot from
-  [`Keeper_runtime_config.load_and_apply`](../lib/keeper/keeper_runtime_config.ml)
+  [`Keeper_runtime_config.load_and_apply`](../lib/keeper_runtime/keeper_runtime_config.ml)
 - Invoked during bootstrap in
   [`server_runtime_bootstrap.ml`](../lib/server/server_runtime_bootstrap.ml)
 - Contract documented in
-  [`keeper_runtime_config.mli`](../lib/keeper/keeper_runtime_config.mli)
+  [`keeper_runtime_config.mli`](../lib/keeper_runtime/keeper_runtime_config.mli)
 
 Operational meaning:
 
@@ -56,7 +56,7 @@ Operational meaning:
 - Parsed by
   [`Keeper_types_profile.load_keeper_toml`](../lib/keeper/keeper_types_profile.ml)
 - Resolved through
-  [`Config_dir_resolver.keeper_toml_path_opt`](../lib/config_dir_resolver.ml)
+  [`Config_dir_resolver.keeper_toml_path_opt`](../lib/config_dir_resolver/config_dir_resolver.ml)
 - Reconciled for running keepers by
   [`ensure_keeper_meta`](../lib/keeper/keeper_runtime.ml)
   inside the supervisor sweep
@@ -70,13 +70,13 @@ Operational meaning:
 
 ### `runtime.toml`
 
-- TOML source resolution/materialization lives in
-  [`Runtime_toml_materializer`](../lib/runtime/runtime_toml_materializer.ml)
-- Resolved via
-  [`Runtime_runtime.models_of_runtime_id`](../lib/runtime/runtime_runtime.ml)
-- The code renders TOML to an in-memory JSON-shaped view and caches by
-  source-path mtime
-  ([`runtime_runtime.ml`](../lib/runtime/runtime_runtime.ml))
+- The file is located by
+  [`Config_dir_resolver`](../lib/config_dir_resolver/config_dir_resolver.ml),
+  which owns the `runtime.toml` filename
+- Parsing and validation live in
+  [`Runtime_toml`](../lib/runtime/runtime_toml.ml)
+- Lookups by runtime id are resolved in
+  [`Runtime`](../lib/runtime/runtime.ml)
 
 Operational meaning:
 

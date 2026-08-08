@@ -32,6 +32,7 @@ type t =
 type librarian_failure_kind =
   | Prompt_render_failure
   | Execution_clock_unavailable
+  | Research_execution_failure
   | Exact_setup_failure
   | Exact_execution_failure
   | Domain_output_invalid
@@ -325,6 +326,7 @@ let compute_change ~previous ~next =
 let librarian_failure_kind_to_string = function
   | Prompt_render_failure -> "prompt_render_failure"
   | Execution_clock_unavailable -> "execution_clock_unavailable"
+  | Research_execution_failure -> "research_execution_failure"
   | Exact_setup_failure -> "exact_setup_failure"
   | Exact_execution_failure -> "exact_execution_failure"
   | Domain_output_invalid -> "domain_output_invalid"
@@ -337,6 +339,7 @@ let librarian_failure_kind_to_string = function
 let librarian_failure_kind_of_string = function
   | "prompt_render_failure" -> Some Prompt_render_failure
   | "execution_clock_unavailable" -> Some Execution_clock_unavailable
+  | "research_execution_failure" -> Some Research_execution_failure
   | "exact_setup_failure" -> Some Exact_setup_failure
   | "exact_execution_failure" -> Some Exact_execution_failure
   | "domain_output_invalid" -> Some Domain_output_invalid

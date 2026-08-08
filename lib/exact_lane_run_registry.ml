@@ -247,6 +247,36 @@ let run_to_yojson run =
   `Assoc (base @ completion)
 ;;
 
+let research_input ~raw_trace_path ~payload =
+  `Assoc
+    [ ( "research_raw_trace_path"
+      , Option.fold
+          ~none:`Null
+          ~some:(fun path -> `String path)
+          raw_trace_path )
+    ; "payload", payload
+    ]
+;;
+
+let research_raw_trace_paths t ~actor =
+  list_runs t
+  |> List.filter_map (fun run ->
+    if not (String.equal run.actor actor)
+    then None
+    else
+      match run.input with
+      | `Assoc fields ->
+        (match List.assoc_opt "research_raw_trace_path" fields with
+         | Some (`String path) when not (String.equal (String.trim path) "") ->
+           Some path
+         | Some (`String _) -> None
+         | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null)
+         | None -> None)
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+        None)
+  |> List.sort_uniq String.compare
+;;
+
 type global_install_error = Already_installed
 
 module Global = Run_registry_core.Global (struct

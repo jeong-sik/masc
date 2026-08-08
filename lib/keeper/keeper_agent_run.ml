@@ -1065,7 +1065,9 @@ let run_turn
                                  AfterTurn ordinal")
                          | Ok turn_outcome, Some final_oas_turn_ordinal ->
                            Keeper_agent_run_finalize_response.finalize
-                             ~config ~meta ~generation ~profile_defaults
+                             ~config ~meta ~publication_recovery
+                             ~ctx_snapshot:ctx_work
+                             ~generation ~profile_defaults
                              ~manifest_keeper_turn_id
                              ~session ~append_manifest ~model
                              ~acc
@@ -1082,6 +1084,7 @@ let run_turn
                              ~history_assistant_source
                              ~raw_response_text:response_text
                              ~turn_outcome
+                             ?continuation_channel
                              ?continuation_delivery_channel
                              ~capture_replay_response:
                                (fun ~response_text ->

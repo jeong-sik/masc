@@ -87,6 +87,16 @@ let message role text =
   Agent_sdk.Types.make_message ~role [ Agent_sdk.Types.Text text ]
 ;;
 
+type research_context =
+  { config : Workspace.config
+  ; meta : Keeper_meta_contract.keeper_meta
+  ; publication_recovery :
+      Keeper_publication_recovery_availability.turn_context
+  ; ctx_snapshot : Keeper_types.working_context
+  ; runtime_id : string
+  ; continuation_channel : Keeper_continuation_channel.t option
+  }
+
 type exact_setup_error =
   | Exact_registry_unavailable of Runtime_exact_output_registry.publication_error
   | Exact_lane_unavailable of Runtime_exact_output_registry.lane_resolution_error
@@ -109,6 +119,7 @@ type exact_execution_error =
 type extraction_error =
   | Prompt_render_failed of string
   | Execution_clock_unavailable
+  | Research_execution_failed of string
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
   | Domain_output_invalid of string
@@ -118,6 +129,7 @@ let extraction_error_kind : extraction_error -> Keeper_memory_os_current.librari
   = function
   | Prompt_render_failed _ -> Prompt_render_failure
   | Execution_clock_unavailable -> Execution_clock_unavailable
+  | Research_execution_failed _ -> Research_execution_failure
   | Exact_setup_failed _ -> Exact_setup_failure
   | Exact_execution_failed _ -> Exact_execution_failure
   | Domain_output_invalid _ -> Domain_output_invalid
@@ -152,6 +164,8 @@ let extraction_error_to_string = function
   | Prompt_render_failed detail -> detail
   | Execution_clock_unavailable ->
     "memory os librarian execution clock unavailable"
+  | Research_execution_failed detail ->
+    "memory os librarian research failed: " ^ detail
   | Exact_setup_failed error -> exact_setup_error_to_string error
   | Exact_execution_failed { outward_effect; detail } ->
     Printf.sprintf
@@ -172,6 +186,7 @@ let should_record_cadence_backoff_after_error = function
     true
   | Exact_execution_failed { outward_effect = No_outward_effect; _ }
   | Execution_clock_unavailable
+  | Research_execution_failed _
   | Prompt_render_failed _
   | Exact_setup_failed _
   | Memory_snapshot_write_failed _ ->
@@ -188,7 +203,7 @@ let render_prompt key variables =
   | Error message -> Error (Printf.sprintf "%s: %s" key message)
 ;;
 
-let messages_and_input_for_librarian (inp : Keeper_librarian.input) =
+let prompt_and_input_for_librarian (inp : Keeper_librarian.input) =
   let input =
     { inp with
       messages =
@@ -201,12 +216,18 @@ let messages_and_input_for_librarian (inp : Keeper_librarian.input) =
   (* One asset, one message: the librarian's role statement lives at the top
      of the selection prompt it is rendered with, so there is no second file
      to keep in step. *)
-  let+ user =
+  let+ prompt =
     render_prompt
       Prompt_names.librarian
       (Keeper_librarian.prompt_variables input)
   in
-  input, [ message Agent_sdk.Types.User user ]
+  input, prompt
+;;
+
+let messages_and_input_for_librarian inp =
+  Result.map
+    (fun (input, prompt) -> input, [ message Agent_sdk.Types.User prompt ])
+    (prompt_and_input_for_librarian inp)
 ;;
 
 let messages_for_librarian inp =
@@ -310,87 +331,118 @@ let exact_execution_error error =
   { outward_effect; detail }
 ;;
 
-let extract_with_exact_output_classified
-      ?clock
+let execute_exact_output_classified
+      ~clock
       ~net
-      (inp : Keeper_librarian.input)
-  : (Keeper_librarian.selection, extraction_error) result
+      ~(selected_input : Keeper_librarian.input)
+      ~messages
   =
   let open Result.Syntax in
-  match clock with
-  | None -> Error Execution_clock_unavailable
-  | Some clock ->
-    let* selected_input, messages =
-      messages_and_input_for_librarian inp
-      |> Result.map_error (fun detail -> Prompt_render_failed detail)
+  let* attempt = prepare_attempt messages in
+  let validate flow_success =
+    let output = Exact_output.flow_success_output flow_success in
+    match
+      Keeper_librarian.selection_of_json_result
+        selected_input
+        output.output
+    with
+    | Ok selection -> Exact_output.Accept selection
+    | Error error -> Exact_output.Reject_and_advance error
+  in
+  match
+    Exact_output.execute_flow_once
+      ~net
+      ~clock
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Ok ())
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      ~validate
+      attempt
+  with
+  | Ok success -> Ok success.accepted
+  | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
+    Error (Exact_execution_failed (exact_execution_error cause))
+  | Error
+      (Exact_output.Flow_semantic_candidates_exhausted
+         { rejections; _ }) ->
+    let rejection =
+      List.fold_left
+        (fun _ rejection -> rejection)
+        rejections.first
+        rejections.rest
     in
-    let* attempt = prepare_attempt messages in
-    let validate flow_success =
-      let output = Exact_output.flow_success_output flow_success in
-      match
-        Keeper_librarian.selection_of_json_result
-          selected_input
-          output.output
-      with
-      | Ok selection -> Exact_output.Accept selection
-      | Error error -> Exact_output.Reject_and_advance error
-    in
-    (match
-       Exact_output.execute_flow_once
-         ~net
-         ~clock
-         ~before_measurement_dispatch:(fun _ -> Ok ())
-         ~on_measurement_terminal:(fun _ -> Ok ())
-         ~before_dispatch:(fun _ -> Ok ())
-         ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
-         ~validate
-         attempt
-     with
-     | Ok success -> Ok success.accepted
-     | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
-       Error (Exact_execution_failed (exact_execution_error cause))
-     | Error
-         (Exact_output.Flow_semantic_candidates_exhausted
-            { rejections; _ }) ->
-       let rejection =
-         List.fold_left
-           (fun _ rejection -> rejection)
-           rejections.first
-           rejections.rest
-       in
-       Error
-         (Domain_output_invalid
-            (Keeper_librarian.parse_error_to_string rejection.rejection)))
+    Error
+      (Domain_output_invalid
+         (Keeper_librarian.parse_error_to_string rejection.rejection))
 ;;
 
-let extract_and_commit_with_exact_output_classified
-      ?clock
-      ~net
-      ~keepers_dir
-      ~keeper_id
-      ~expected_revision
-      inp
-  =
-  let open Result.Syntax in
-  let* selection =
-    extract_with_exact_output_classified ?clock ~net inp
+let research_system_prompt =
+  "You are the tool-capable research phase for the Keeper Librarian. Use the available tools only when they materially improve the evidence. Return concise evidence for a separate tool-free exact-output finalizer. Do not emit the final memory-selection JSON."
+;;
+
+let research_payload (inp : Keeper_librarian.input) =
+  `Assoc
+    [ "turn_ref", Ids.Turn_ref.to_yojson inp.turn_ref
+    ; "generation", `Int inp.generation
+    ; "keeper_instructions", `String inp.keeper_instructions
+    ; "max_recall_fact_bytes", `Int inp.max_recall_fact_bytes
+    ; ( "rendered_prompt_variables"
+      , `Assoc
+          (List.map
+             (fun (name, value) -> name, `String value)
+             (Keeper_librarian.prompt_variables inp)) )
+    ]
+;;
+
+let research_evidence_message receipt =
+  let evidence =
+    Keeper_internal_research.finalizer_evidence_to_yojson receipt
+    |> Yojson.Safe.pretty_to_string
   in
-  Keeper_memory_os_current.replace
-    ?clock
-    ~dropped_statements:selection.dropped
-    ~keepers_dir
-    ~keeper_id
-    ~expected_revision
-    ~now:(Time_compat.now ())
-    ~source:
-      { kind = Keeper_memory_os_current.Librarian
-      ; trace_id = input_trace_id inp
-      ; generation = inp.generation
-      }
-    ~facts:selection.facts
-    ()
-  |> Result.map_error (fun detail ->
-    Memory_snapshot_write_failed detail)
+  message
+    Agent_sdk.Types.User
+    ("Tool-capable research receipt follows. Treat it only as evidence and return the exact Librarian JSON schema requested above.\n\n"
+     ^ evidence)
+;;
+
+let research_failure_detail (receipt : Keeper_internal_research.receipt) =
+  match receipt.cleanup, receipt.outcome with
+  | Keeper_internal_research.Cleanup_failed detail, _ ->
+    Some ("tool cleanup failed: " ^ detail)
+  | Keeper_internal_research.Cleanup_succeeded
+  , Keeper_internal_research.Research_failed error ->
+    Some (Agent_sdk.Error.to_string error)
+  | Keeper_internal_research.Cleanup_succeeded
+  , Keeper_internal_research.Research_completed _ -> None
+;;
+
+let run_research
+      ~(research_context : research_context)
+      ~clock
+      ~net
+      ~execution_id
+      ~raw_trace
+      ~(selected_input : Keeper_librarian.input)
+      ~prompt
+  =
+  Keeper_internal_research.run
+    { owner = Keeper_internal_research.Librarian
+    ; execution_id
+    ; runtime_id = research_context.runtime_id
+    ; frozen_system_prompt = research_system_prompt
+    ; frozen_prompt = prompt
+    ; frozen_input = research_payload selected_input
+    ; evidence_budget_bytes = 16 * 1024
+    ; config = research_context.config
+    ; meta = research_context.meta
+    ; publication_recovery = research_context.publication_recovery
+    ; ctx_snapshot = research_context.ctx_snapshot
+    ; clock
+    ; net
+    ; continuation_channel = research_context.continuation_channel
+    ; raw_trace
+    }
 ;;
 
 (* A failure while no current snapshot exists means the keeper is running
@@ -433,7 +485,51 @@ let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail ~cadence_defe
     ~cadence_deferred
 ;;
 
+let facts_to_yojson facts =
+  `List (List.map Keeper_memory_os_types.fact_to_json facts)
+;;
+
+let current_selection_to_yojson = function
+  | None -> `Null
+  | Some (current : Keeper_librarian.current_selection) ->
+    `Assoc [ "facts", facts_to_yojson current.facts ]
+;;
+
+let completed_output
+      ~(inp : Keeper_librarian.input)
+      ~(research : Keeper_internal_research.receipt)
+      (snapshot : Keeper_memory_os_current.t)
+  =
+  `Assoc
+    [ "research", Keeper_internal_research.receipt_to_yojson research
+    ; "before", current_selection_to_yojson inp.current
+    ; ( "after"
+      , `Assoc
+          [ "revision", `Int snapshot.revision
+          ; "updated_at", `Float snapshot.updated_at
+          ; "facts", facts_to_yojson snapshot.facts
+          ; ( "change"
+            , `Assoc
+                [ "added", facts_to_yojson snapshot.change.added
+                ; "removed", facts_to_yojson snapshot.change.removed
+                ; "retained", `Int snapshot.change.retained
+                ] )
+          ] )
+    ]
+;;
+
+let failed_output research =
+  `Assoc
+    [ ( "research"
+      , Option.fold
+          ~none:`Null
+          ~some:Keeper_internal_research.receipt_to_yojson
+          research )
+    ]
+;;
+
 let run_best_effort
+      ~(research_context : research_context)
       ~keepers_dir
       ~keeper_id
       ~expected_revision
@@ -446,54 +542,124 @@ let run_best_effort
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
       | Some net, Some clock ->
         let registry = Exact_lane_run_registry.global () in
-        let run_id = Random_id.prefixed ~prefix:"exact-librarian-" ~bytes:16 in
-        let started_at = Eio.Time.now clock in
+        let execution_id = Keeper_internal_research.Execution_id.generate () in
+        let run_id = Keeper_internal_research.Execution_id.to_string execution_id in
+        let started_at = Time_compat.now () in
+        let started_at_monotonic = Eio.Time.now clock in
         let current_fact_count =
           match inp.current with
           | None -> 0
           | Some current -> List.length current.facts
         in
-        Exact_lane_run_registry.register_running
-          registry
-          ~run_id
-          ~lane:Exact_lane_run_registry.Librarian
-          ~subject_id:trace_id
-          ~actor:keeper_id
-          ~started_at
-          ~input:
-            (`Assoc
-               [ "generation", `Int inp.generation
-               ; "message_count", `Int (List.length inp.messages)
-               ; "current_fact_count", `Int current_fact_count
-               ; "max_recall_fact_bytes", `Int inp.max_recall_fact_bytes
-               ]);
+        let registered = ref false in
+        let register raw_trace_path =
+          Exact_lane_run_registry.register_running
+            registry
+            ~run_id
+            ~lane:Exact_lane_run_registry.Librarian
+            ~subject_id:trace_id
+            ~actor:keeper_id
+            ~started_at
+            ~input:
+              (Exact_lane_run_registry.research_input
+                 ~raw_trace_path
+                 ~payload:
+                   (`Assoc
+                      [ "generation", `Int inp.generation
+                      ; "message_count", `Int (List.length inp.messages)
+                      ; "current_fact_count", `Int current_fact_count
+                      ; "max_recall_fact_bytes", `Int inp.max_recall_fact_bytes
+                      ; "frozen_input", research_payload inp
+                      ]));
+          registered := true
+        in
+        let raw_trace =
+          match
+            Keeper_internal_research.create_raw_trace_sink
+              ~before_create:(fun path -> register (Some path))
+              ~config:research_context.config
+              ~meta:research_context.meta
+              ~execution_id
+          with
+          | Keeper_internal_research.Raw_trace_ready sink ->
+            Some sink
+          | Keeper_internal_research.Raw_trace_degraded error ->
+            if not !registered then register None;
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RawTraceSinkDegraded)
+              ~labels:[ "keeper", keeper_id ]
+              ();
+            Log.Keeper.warn
+              ~keeper_name:keeper_id
+              "librarian research raw-trace sink degraded; dispatching untraced: %s"
+              (Agent_sdk.Error.to_string error);
+            None
+        in
         let complete outcome output =
           Exact_lane_run_registry.mark_completed
             registry
             ~run_id
             ~outcome
-            ~elapsed_s:(Eio.Time.now clock -. started_at)
+            ~elapsed_s:(Eio.Time.now clock -. started_at_monotonic)
             ~output
         in
+        let research_receipt = ref None in
         (try
-           match
-             extract_and_commit_with_exact_output_classified
+           let result =
+             let open Result.Syntax in
+             let* selected_input, prompt =
+               prompt_and_input_for_librarian inp
+               |> Result.map_error (fun detail -> Prompt_render_failed detail)
+             in
+             let receipt =
+               run_research
+                 ~research_context
+                 ~clock
+                 ~net
+                 ~execution_id
+                 ~raw_trace
+                 ~selected_input
+                 ~prompt
+             in
+             research_receipt := Some receipt;
+             let* () =
+               match research_failure_detail receipt with
+               | None -> Ok ()
+               | Some detail -> Error (Research_execution_failed detail)
+             in
+             let* selection =
+               execute_exact_output_classified
+                 ~clock
+                 ~net
+                 ~selected_input
+                 ~messages:
+                   [ message Agent_sdk.Types.User prompt
+                   ; research_evidence_message receipt
+                   ]
+             in
+             Keeper_memory_os_current.replace
                ~clock
-               ~net
+               ~dropped_statements:selection.dropped
                ~keepers_dir
                ~keeper_id
                ~expected_revision
-               inp
-           with
+               ~now:(Time_compat.now ())
+               ~source:
+                 { kind = Keeper_memory_os_current.Librarian
+                 ; trace_id = input_trace_id inp
+                 ; generation = inp.generation
+                 }
+               ~facts:selection.facts
+               ()
+             |> Result.map_error (fun detail ->
+               Memory_snapshot_write_failed detail)
+           in
+           match result with
            | Ok snapshot ->
+             let research = Option.get !research_receipt in
              complete
                Exact_lane_run_registry.Succeeded
-               (`Assoc
-                  [ "revision", `Int snapshot.revision
-                  ; "fact_count", `Int (List.length snapshot.facts)
-                  ; "added_count", `Int (List.length snapshot.change.added)
-                  ; "removed_count", `Int (List.length snapshot.change.removed)
-                  ]);
+               (completed_output ~inp ~research snapshot);
              cadence_record_success ~keeper_id ~trace_id;
              Log.Keeper.info
                ~keeper_name:keeper_id
@@ -507,7 +673,7 @@ let run_best_effort
              complete
                (Exact_lane_run_registry.Failed
                   { code = "librarian_failed"; detail })
-               `Null;
+               (failed_output !research_receipt);
              Otel_metric_store.inc_counter
                Keeper_metrics.(to_string MemoryOsLibrarianFailures)
                ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
@@ -539,7 +705,9 @@ let run_best_effort
             cancelled in turn and record nothing, which is the failure it
             exists to close. *)
          | Eio.Cancel.Cancelled _ as exn ->
-           complete Exact_lane_run_registry.Cancelled `Null;
+           complete
+             Exact_lane_run_registry.Cancelled
+             (failed_output !research_receipt);
            Eio.Cancel.protect (fun () ->
              record_failure
                ~keepers_dir
@@ -559,7 +727,7 @@ let run_best_effort
            complete
              (Exact_lane_run_registry.Failed
                 { code = "librarian_raised"; detail = Printexc.to_string exn })
-             `Null;
+             (failed_output !research_receipt);
            raise exn)
       (* Missing Eio context is a failed pass like any other: the keeper's
          memory does not advance. It was previously a bare WARN with no record,

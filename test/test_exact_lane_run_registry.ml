@@ -50,11 +50,40 @@ let test_running_shape_has_no_invented_completion () =
   | _ -> fail "run serializer must emit an object"
 ;;
 
+let test_research_trace_path_is_typed_by_registry_envelope () =
+  let registry = R.create () in
+  let input =
+    R.research_input
+      ~raw_trace_path:(Some "/tmp/keeper/raw-traces/research.jsonl")
+      ~payload:(`Assoc [ "message_count", `Int 4 ])
+  in
+  R.register_running
+    registry
+    ~run_id:"research-1"
+    ~lane:R.Librarian
+    ~subject_id:"trace-1"
+    ~actor:"keeper-a"
+    ~started_at:20.0
+    ~input;
+  check
+    (list string)
+    "registered research path"
+    [ "/tmp/keeper/raw-traces/research.jsonl" ]
+    (R.research_raw_trace_paths registry ~actor:"keeper-a");
+  check
+    (list string)
+    "other actor cannot retain the path"
+    []
+    (R.research_raw_trace_paths registry ~actor:"keeper-b")
+;;
+
 let () =
   run
     "exact_lane_run_registry"
     [ ( "registry"
       , [ test_case "durable exact evidence" `Quick test_round_trip_preserves_exact_evidence
         ; test_case "running shape" `Quick test_running_shape_has_no_invented_completion
+        ; test_case "research trace reachability envelope" `Quick
+            test_research_trace_path_is_typed_by_registry_envelope
         ] )
     ]

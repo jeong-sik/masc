@@ -41,6 +41,7 @@ type t =
 type librarian_failure_kind =
   | Prompt_render_failure
   | Execution_clock_unavailable
+  | Research_execution_failure
   | Exact_setup_failure
   | Exact_execution_failure
   | Domain_output_invalid

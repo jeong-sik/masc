@@ -39,6 +39,7 @@ let append_raw ~keepers_dir line =
 let all_kinds : Current.librarian_failure_kind list =
   [ Prompt_render_failure
   ; Execution_clock_unavailable
+  ; Research_execution_failure
   ; Exact_setup_failure
   ; Exact_execution_failure
   ; Domain_output_invalid
@@ -53,6 +54,7 @@ let kind_label (kind : Current.librarian_failure_kind) =
   match kind with
   | Prompt_render_failure -> "Prompt_render_failure"
   | Execution_clock_unavailable -> "Execution_clock_unavailable"
+  | Research_execution_failure -> "Research_execution_failure"
   | Exact_setup_failure -> "Exact_setup_failure"
   | Exact_execution_failure -> "Exact_execution_failure"
   | Domain_output_invalid -> "Domain_output_invalid"

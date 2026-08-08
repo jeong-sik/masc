@@ -221,6 +221,36 @@ let test_sink_creates_keeper_runtime_dir () =
   Alcotest.(check bool) "raw-trace store dir created" true
     (Sys.file_exists raw_trace_dir && Sys.is_directory raw_trace_dir)
 
+let test_internal_research_sink_registers_path_before_file_creation () =
+  with_workspace @@ fun config ->
+  let meta = make_test_meta () in
+  let execution_id = Keeper_internal_research.Execution_id.generate () in
+  let registered_path = ref None in
+  let sink =
+    match
+      Keeper_internal_research.create_raw_trace_sink
+        ~before_create:(fun path ->
+          Alcotest.(check bool) "trace file not created before registration" false
+            (Sys.file_exists path);
+          registered_path := Some path)
+        ~config
+        ~meta
+        ~execution_id
+    with
+    | Keeper_internal_research.Raw_trace_ready sink -> sink
+    | Keeper_internal_research.Raw_trace_degraded error ->
+      Alcotest.failf
+        "internal research trace sink degraded: %s"
+        (Agent_sdk.Error.to_string error)
+  in
+  Alcotest.(check (option string)) "registered path is the sink path"
+    (Some (Agent_sdk.Raw_trace.file_path sink))
+    !registered_path;
+  Alcotest.(check (option string)) "execution id is the trace session join"
+    (Some (Keeper_internal_research.Execution_id.to_string execution_id))
+    (Agent_sdk.Raw_trace.session_id sink)
+;;
+
 (* Each turn is its own file: turn N+1 never appends to (or scans) turn
    N's file, so per-turn sink creation cost is independent of lifetime
    trace volume. *)
@@ -477,6 +507,36 @@ let test_post_commit_cleanup_prunes_orphan_and_preserves_reference () =
   Alcotest.(check int) "only reference plus current sink remain" 2
     (List.length (jsonl_files dir))
 
+(* Internal research traces are not named by the parent Keeper TurnRecord.
+   Their durable exact-lane registration is the independent reachability root,
+   including while the research phase is still running. *)
+let test_prune_preserves_registered_internal_research_trace () =
+  with_workspace @@ fun config ->
+  let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
+  Fs_compat.mkdir_p dir;
+  let research = Filename.concat dir "turn-internal-research.jsonl" in
+  let orphan = Filename.concat dir "turn-unreferenced.jsonl" in
+  write_file research "{}\n";
+  write_file orphan "{}\n";
+  Exact_lane_run_registry.register_running
+    (Exact_lane_run_registry.global ())
+    ~run_id:"internal-research-retention"
+    ~lane:Exact_lane_run_registry.Librarian
+    ~subject_id:"trace-internal"
+    ~actor:keeper_name
+    ~started_at:1.0
+    ~input:
+      (Exact_lane_run_registry.research_input
+         ~raw_trace_path:(Some research)
+         ~payload:`Null);
+  let summary = prune_or_fail config in
+  Alcotest.(check int) "unreferenced trace removed" 1 summary.removed;
+  Alcotest.(check int) "research trace retained" 1 summary.retained_references;
+  Alcotest.(check bool) "registered research trace survives" true
+    (Sys.file_exists research);
+  Alcotest.(check bool) "unreferenced trace is removed" false
+    (Sys.file_exists orphan)
+
 let response ?(content = []) ?(stop_reason = Agent_sdk.Types.EndTurn) () =
   {
     Agent_sdk.Types.id = "resp-test";
@@ -630,6 +690,8 @@ let () =
             test_sink_path_and_session_identity;
           Alcotest.test_case "sink creates keeper runtime dir" `Quick
             test_sink_creates_keeper_runtime_dir;
+          Alcotest.test_case "internal research path registers before create" `Quick
+            test_internal_research_sink_registers_path_before_file_creation;
           Alcotest.test_case "per-turn files isolate turns" `Quick
             test_per_turn_files_isolate_turns;
           Alcotest.test_case "corrupt history does not block sink" `Quick
@@ -644,6 +706,8 @@ let () =
             test_prune_uses_shared_turn_record_window;
           Alcotest.test_case "post-commit cleanup is reference-aware" `Quick
             test_post_commit_cleanup_prunes_orphan_and_preserves_reference;
+          Alcotest.test_case "retention preserves registered internal research" `Quick
+            test_prune_preserves_registered_internal_research_trace;
           Alcotest.test_case "traced turn yields result-level fields" `Quick
             test_traced_turn_yields_result_level_fields;
           Alcotest.test_case "dispatch passes ?raw_trace" `Quick

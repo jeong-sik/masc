@@ -17,6 +17,16 @@ val messages_for_librarian
   :  Keeper_librarian.input
   -> (Agent_sdk.Types.message list, string) result
 
+type research_context =
+  { config : Workspace.config
+  ; meta : Keeper_meta_contract.keeper_meta
+  ; publication_recovery :
+      Keeper_publication_recovery_availability.turn_context
+  ; ctx_snapshot : Keeper_types.working_context
+  ; runtime_id : string
+  ; continuation_channel : Keeper_continuation_channel.t option
+  }
+
 type extraction_error
 
 (** Which failure kind this error records in the memory journal. The vocabulary
@@ -25,7 +35,8 @@ type extraction_error
     happens, so adding an [extraction_error] case fails to compile until it
     names its journal kind. *)
 val run_best_effort
-  :  keepers_dir:string
+  :  research_context:research_context
+  -> keepers_dir:string
   -> keeper_id:string
   -> expected_revision:int option
   -> Keeper_librarian.input

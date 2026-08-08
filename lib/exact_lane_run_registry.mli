@@ -62,6 +62,18 @@ val outcome_label : outcome -> string
 val status_label : run_status -> string
 val run_to_yojson : run -> Yojson.Safe.t
 
+(** Canonical envelope for a tool-capable research phase that feeds an exact
+    finalizer. [raw_trace_path] is a reachability root consumed by Keeper raw
+    trace retention; [payload] is the role's frozen input. *)
+val research_input
+  :  raw_trace_path:string option
+  -> payload:Yojson.Safe.t
+  -> Yojson.Safe.t
+
+(** Raw-trace paths retained by registered research/exact executions for one
+    Keeper actor. *)
+val research_raw_trace_paths : t -> actor:string -> string list
+
 (** Called after a registry mutation is durable/in-memory-visible. The server
     installs a WS invalidation broadcaster; tests and library-only users keep
     the no-op default. *)

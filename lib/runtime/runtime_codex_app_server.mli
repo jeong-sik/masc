@@ -83,6 +83,9 @@ val run_turn :
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   ?history:history_message list ->
+  ?on_thread_ready:(thread_id:string -> (unit, string) result) ->
+  ?on_turn_starting:(thread_id:string -> (unit, string) result) ->
+  ?on_turn_started:(thread_id:string -> turn_id:string -> (unit, string) result) ->
   config ->
   prompt:string ->
   (turn_result, error) result

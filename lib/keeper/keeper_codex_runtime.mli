@@ -4,7 +4,6 @@ val run :
   runtime_id:string ->
   keeper_name:string ->
   base_path:string ->
-  session_dir:string ->
   goal:string ->
   goal_blocks:Agent_sdk.Types.content_block list option ->
   system_prompt:string ->

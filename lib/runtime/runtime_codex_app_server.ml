@@ -601,7 +601,18 @@ let history_item (message : history_message) =
     ]
 ;;
 
-let run_protocol io config ~dynamic_tools ~reasoning_effort ~thread_mode ~history ~prompt =
+let invoke_state_callback ~stage callback =
+  try
+    match callback () with
+    | Ok () -> Ok ()
+    | Error detail -> protocol_error stage detail
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> protocol_error stage (Printexc.to_string exn)
+;;
+
+let run_protocol io config ~dynamic_tools ~reasoning_effort ~thread_mode ~history ~prompt
+    ~on_thread_ready ~on_turn_starting ~on_turn_started =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
       (`Assoc
@@ -676,6 +687,14 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~thread_mode ~histor
       Ok 5
   in
   let* turn_request_id = turn_request_id in
+  let* () =
+    invoke_state_callback ~stage:"thread ready callback" (fun () ->
+      on_thread_ready ~thread_id)
+  in
+  let* () =
+    invoke_state_callback ~stage:"turn starting callback" (fun () ->
+      on_turn_starting ~thread_id)
+  in
   send_request io ~id:turn_request_id ~method_:"turn/start"
     ~params:
       (`Assoc
@@ -688,6 +707,10 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~thread_mode ~histor
               (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)));
   let* turn = await_response io ~id:turn_request_id ~method_:"turn/start" in
   let* turn_id = parse_turn_start turn in
+  let* () =
+    invoke_state_callback ~stage:"turn started callback" (fun () ->
+      on_turn_started ~thread_id ~turn_id)
+  in
   let tool_call_count = ref 0 in
   let* text =
     await_turn_terminal
@@ -787,7 +810,7 @@ let terminate_spawned_process ~clock proc stdin_w =
 ;;
 
 let run_spawned ~mgr ~clock config ~dynamic_tools ~reasoning_effort ~thread_mode ~history
-    ~prompt =
+    ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_started =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -831,7 +854,10 @@ let run_spawned ~mgr ~clock config ~dynamic_tools ~reasoning_effort ~thread_mode
             ~reasoning_effort
             ~thread_mode
             ~history
-            ~prompt)))
+            ~prompt
+            ~on_thread_ready
+            ~on_turn_starting
+            ~on_turn_started)))
 ;;
 
 let validate_config config ~thread_mode ~prompt =
@@ -865,7 +891,9 @@ let validate_dynamic_tools tools =
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock
-    ?(history = []) config ~prompt =
+    ?(history = []) ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
+    ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
+    ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) config ~prompt =
   let result =
     match validate_config config ~thread_mode ~prompt with
     | Error _ as error -> error
@@ -884,6 +912,9 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
            ~thread_mode
            ~history
            ~prompt
+           ~on_thread_ready
+           ~on_turn_starting
+           ~on_turn_started
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | Eio.Time.Timeout -> Error (Timeout config.timeout_s)

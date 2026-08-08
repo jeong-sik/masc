@@ -403,31 +403,70 @@ let fixture_tool ?(parameters = []) ~name ~description () =
 ;;
 
 let test_codex_session_store_roundtrip () =
-  let session_dir = temp_workspace "masc-codex-store-" in
+  let base_path = temp_workspace "masc-codex-store-" in
+  let keeper_name = "roundtrip" in
   Fun.protect
-    ~finally:(fun () -> cleanup_tree session_dir)
+    ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       let binding : Keeper_codex_session_store.t =
-         { runtime_id = "codex.codex"
-         ; thread_id = "thread-1"
-         ; turn_count = 2
-         ; tool_surface_sha256 = Keeper_codex_session_store.tool_surface_sha256 []
-         ; updated_at = 42.5
-         }
-       in
-       (match Keeper_codex_session_store.load ~session_dir with
+       (match Keeper_codex_session_store.load ~base_path ~keeper_name with
         | Ok None -> ()
         | Ok (Some _) -> fail "missing Codex session was reported as present"
         | Error detail -> fail detail);
-       (match Keeper_codex_session_store.save ~session_dir binding with
-        | Ok () -> ()
-        | Error detail -> fail detail);
-       match Keeper_codex_session_store.load ~session_dir with
+       let claim =
+         Keeper_codex_session_store.claim
+           ~base_path
+           ~keeper_name
+           ~expected:None
+           ~runtime_id:"codex.codex"
+           ~tool_surface_sha256:
+             (Keeper_codex_session_store.tool_surface_sha256 [])
+           ~updated_at:40.0
+         |> Result.get_ok
+       in
+       let active =
+         Keeper_codex_session_store.mark_active
+           ~base_path
+           ~keeper_name
+           ~expected:claim
+           ~thread_id:"thread-1"
+           ~updated_at:41.0
+         |> Result.get_ok
+       in
+       let starting =
+         Keeper_codex_session_store.mark_turn_starting
+           ~base_path
+           ~keeper_name
+           ~expected:active
+           ~thread_id:"thread-1"
+           ~updated_at:41.5
+         |> Result.get_ok
+       in
+       let started =
+         Keeper_codex_session_store.mark_turn_started
+           ~base_path
+           ~keeper_name
+           ~expected:starting
+           ~thread_id:"thread-1"
+           ~turn_id:"turn-1"
+           ~updated_at:42.0
+         |> Result.get_ok
+       in
+       let binding =
+         Keeper_codex_session_store.settle
+           ~base_path
+           ~keeper_name
+           ~expected:started
+           ~thread_id:"thread-1"
+           ~turn_id:"turn-1"
+           ~updated_at:42.5
+         |> Result.get_ok
+       in
+       match Keeper_codex_session_store.load ~base_path ~keeper_name with
        | Error detail -> fail detail
        | Ok None -> fail "saved Codex session disappeared"
        | Ok (Some loaded) ->
          check string "runtime" binding.runtime_id loaded.runtime_id;
-         check string "thread" binding.thread_id loaded.thread_id;
+         check bool "phase" true (binding.phase = loaded.phase);
          check int "turn count" binding.turn_count loaded.turn_count;
          check string
            "tool surface"
@@ -437,16 +476,73 @@ let test_codex_session_store_roundtrip () =
 ;;
 
 let test_codex_session_store_rejects_ambiguous_json () =
-  let session_dir = temp_workspace "masc-codex-store-invalid-" in
+  let base_path = temp_workspace "masc-codex-store-invalid-" in
+  let keeper_name = "ambiguous" in
   Fun.protect
-    ~finally:(fun () -> cleanup_tree session_dir)
+    ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
+       let state_path =
+         Keeper_codex_session_store.path ~base_path ~keeper_name |> Result.get_ok
+       in
+       let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname state_path) in
        write_fixture_file
-         (Keeper_codex_session_store.path ~session_dir)
-         {|{"runtime_id":"codex.codex","runtime_id":"codex.other","schema":"masc.keeper.codex-session.v1","thread_id":"thread-1","tool_surface_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","turn_count":1,"updated_at":1.0}|};
-       match Keeper_codex_session_store.load ~session_dir with
+         state_path
+         {|{"runtime_id":"codex.codex","runtime_id":"codex.other","phase":{"kind":"settled","thread_id":"thread-1","turn_id":"turn-1"},"schema":"masc.keeper.codex-session.v2","tool_surface_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","turn_count":1,"updated_at":1.0}|};
+       match Keeper_codex_session_store.load ~base_path ~keeper_name with
        | Error _ -> ()
        | Ok _ -> fail "ambiguous Codex session JSON was admitted")
+;;
+
+let test_codex_inflight_session_blocks_duplicate_claim () =
+  let base_path = temp_workspace "masc-codex-store-inflight-" in
+  let keeper_name = "inflight" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let claim =
+         Keeper_codex_session_store.claim
+           ~base_path
+           ~keeper_name
+           ~expected:None
+           ~runtime_id:"codex.codex"
+           ~tool_surface_sha256:
+             (Keeper_codex_session_store.tool_surface_sha256 [])
+           ~updated_at:1.0
+         |> Result.get_ok
+       in
+       let active =
+         Keeper_codex_session_store.mark_active
+           ~base_path
+           ~keeper_name
+           ~expected:claim
+           ~thread_id:"thread-1"
+           ~updated_at:2.0
+         |> Result.get_ok
+       in
+       let inflight =
+         Keeper_codex_session_store.mark_turn_starting
+           ~base_path
+           ~keeper_name
+           ~expected:active
+           ~thread_id:"thread-1"
+           ~updated_at:3.0
+         |> Result.get_ok
+       in
+       (match
+          Keeper_codex_session_store.claim
+            ~base_path
+            ~keeper_name
+            ~expected:(Some inflight)
+            ~runtime_id:"codex.codex"
+            ~tool_surface_sha256:inflight.tool_surface_sha256
+            ~updated_at:4.0
+        with
+        | Error _ -> ()
+        | Ok _ -> fail "in-flight Codex session admitted a duplicate claim");
+       match Keeper_codex_session_store.load ~base_path ~keeper_name with
+       | Ok (Some { phase = Turn_inflight { turn_id = None; _ }; _ }) -> ()
+       | Error detail -> fail detail
+       | Ok None | Ok (Some _) -> fail "duplicate claim changed the in-flight phase")
 ;;
 
 let test_codex_tool_surface_fingerprint_is_exact () =
@@ -487,14 +583,14 @@ let test_codex_tool_surface_fingerprint_is_exact () =
     (not (String.equal (digest [ alpha ]) (digest [ changed ])))
 ;;
 
-let production_keeper_meta ~base_path =
+let production_keeper_meta ~base_path ~trace_id =
   let name = "codex-production-fixture" in
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ "name", `String name
          ; "agent_name", `String (Keeper_identity.keeper_agent_name name)
-         ; "trace_id", `String "codex-production-fixture-trace"
+         ; "trace_id", `String trace_id
          ; "allowed_paths", `List [ `String base_path ]
          ])
   with
@@ -502,17 +598,13 @@ let production_keeper_meta ~base_path =
   | Error detail -> fail ("production Keeper meta fixture failed: " ^ detail)
 ;;
 
-let run_production_keeper_turn ~cli_path ~model =
+let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
     (fun () ->
        with_runtime_config ~model cli_path (fun runtime_path ->
-         let base_path = temp_workspace "masc-codex-production-" in
-         Fun.protect
-           ~finally:(fun () -> cleanup_tree base_path)
-           (fun () ->
-              Eio_main.run (fun env ->
+         Eio_main.run (fun env ->
                 Eio.Switch.run (fun sw ->
                   Fs_compat.set_fs (Eio.Stdenv.fs env);
                   Eio_context.set_env env;
@@ -526,7 +618,7 @@ let run_production_keeper_turn ~cli_path ~model =
                        | Error error -> fail error
                        | Ok () ->
                          let config = Workspace.default_config base_path in
-                         let meta = production_keeper_meta ~base_path in
+                         let meta = production_keeper_meta ~base_path ~trace_id in
                          ignore
                            (Keeper_registry.For_testing.register
                               ~base_path
@@ -563,27 +655,26 @@ let run_production_keeper_turn ~cli_path ~model =
                                     { Keeper_agent_run.system_prompt = base_system_prompt
                                     ; dynamic_context = ""
                                     })
-                                ~user_message:
-                                  "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+                                ~user_message
                                 ~turn_kind:Turn_record.Direct
                                 ~runtime_id:"codex.codex"
                                 ~generation:1
-                                ())))))))
+                                ()))))))
 ;;
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
-    ?session_dir
+    ?base_path
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
     ~model () =
-  let owns_session_dir = Option.is_none session_dir in
-  let session_dir =
-    Option.value session_dir ~default:(temp_workspace "masc-codex-session-")
+  let owns_base_path = Option.is_none base_path in
+  let base_path =
+    Option.value base_path ~default:(temp_workspace "masc-codex-session-")
   in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () ->
       Runtime.For_testing.restore runtime_snapshot;
-      if owns_session_dir then cleanup_tree session_dir)
+      if owns_base_path then cleanup_tree base_path)
     (fun () ->
        with_runtime_config ~model cli_path (fun runtime_path ->
          Eio_main.run (fun env ->
@@ -606,9 +697,8 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                     Keeper_turn_driver.run_named
                       ~runtime_id:"codex.codex"
                       ~keeper_name:"codex-fixture"
-                      ~base_path:"/tmp"
+                      ~base_path
                       ~goal
-                      ~keeper_session_dir:session_dir
                       ~tools
                       ~initial_messages:[]
                       ?model_input_projection
@@ -632,9 +722,9 @@ let test_keeper_dispatches_codex_turn_runtime () =
 ;;
 
 let test_keeper_resumes_persisted_codex_thread () =
-  let session_dir = temp_workspace "masc-codex-resume-" in
+  let base_path = temp_workspace "masc-codex-resume-" in
   Fun.protect
-    ~finally:(fun () -> cleanup_tree session_dir)
+    ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        with_fixture
          [ init_result
@@ -647,7 +737,7 @@ let test_keeper_resumes_persisted_codex_thread () =
          (fun cli_path ->
             match
               run_keeper_turn
-                ~session_dir
+                ~base_path
                 ~cli_path
                 ~model:"gpt-fixture"
                 ()
@@ -685,7 +775,7 @@ let test_keeper_resumes_persisted_codex_thread () =
          (fun cli_path ->
             match
               run_keeper_turn
-                ~session_dir
+                ~base_path
                 ~hooks
                 ~goal:"Return the resumed fixture marker"
                 ~cli_path
@@ -699,16 +789,20 @@ let test_keeper_resumes_persisted_codex_thread () =
               check int "cumulative turns" 2 result.turns;
               check int "before-turn ordinal" 2 !before_turn_ordinal;
               check int "after-turn ordinal" 2 !after_turn_ordinal);
-       match Keeper_codex_session_store.load ~session_dir with
+       match
+         Keeper_codex_session_store.load
+           ~base_path
+           ~keeper_name:"codex-fixture"
+       with
        | Error detail -> fail detail
        | Ok None -> fail "resumed Codex binding disappeared"
        | Ok (Some binding) -> check int "stored turns" 2 binding.turn_count)
 ;;
 
 let test_keeper_rejects_changed_tool_surface_on_resume () =
-  let session_dir = temp_workspace "masc-codex-tool-change-" in
+  let base_path = temp_workspace "masc-codex-tool-change-" in
   Fun.protect
-    ~finally:(fun () -> cleanup_tree session_dir)
+    ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        with_fixture
          [ init_result
@@ -721,7 +815,7 @@ let test_keeper_rejects_changed_tool_surface_on_resume () =
          (fun cli_path ->
             (match
                run_keeper_turn
-                 ~session_dir
+                 ~base_path
                  ~cli_path
                  ~model:"gpt-fixture"
                  ()
@@ -731,7 +825,7 @@ let test_keeper_rejects_changed_tool_surface_on_resume () =
             let tool = fixture_tool ~name:"new_tool" ~description:"new surface" () in
             match
               run_keeper_turn
-                ~session_dir
+                ~base_path
                 ~tools:[ tool ]
                 ~cli_path
                 ~model:"gpt-fixture"
@@ -762,18 +856,93 @@ let assert_production_keeper_result result =
 ;;
 
 let test_production_keeper_dispatches_codex_runtime () =
-  with_fixture
-    [ init_result
-    ; account_chatgpt
-    ; thread_result
-    ; turn_result
-    ; item_completed
-    ; turn_completed
-    ]
-    (fun cli_path ->
-       match run_production_keeper_turn ~cli_path ~model:"gpt-fixture" with
-       | Error error -> fail (Agent_sdk.Error.to_string error)
-       | Ok result -> assert_production_keeper_result result)
+  let base_path = temp_workspace "masc-codex-production-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-trace-1"
+                ~user_message:
+                  "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+                ~cli_path
+                ~model:"gpt-fixture"
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok result -> assert_production_keeper_result result))
+;;
+
+let test_production_keeper_resumes_across_trace_rotation () =
+  let base_path = temp_workspace "masc-codex-production-resume-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-trace-1"
+                ~user_message:"Start the production fixture thread."
+                ~cli_path
+                ~model:"gpt-fixture"
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok _ -> ());
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; resumed_turn_result
+         ; resumed_item_completed
+         ; resumed_turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-trace-2"
+                ~user_message:"Resume the production fixture thread."
+                ~cli_path
+                ~model:"gpt-fixture"
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok result ->
+              check string
+                "production resumed response"
+                "MASC_RESUMED_OK"
+                result.Keeper_agent_run.response_text);
+       match
+         Keeper_codex_session_store.load
+           ~base_path
+           ~keeper_name:"codex-production-fixture"
+       with
+       | Error detail -> fail detail
+       | Ok None -> fail "production Codex current-owner state disappeared"
+       | Ok (Some state) ->
+         check int "production cumulative turns" 2 state.turn_count;
+         (match state.phase with
+          | Settled { thread_id; _ } ->
+            check string "production thread" "thread-1" thread_id
+          | Start _ | Active _ | Turn_inflight _ ->
+            fail "production Codex state did not settle"))
 ;;
 
 let test_keeper_projects_typed_tools_and_hooks () =
@@ -1060,13 +1229,13 @@ let test_live_keeper_resumes_official_thread () =
   if Sys.getenv_opt "MASC_CODEX_APP_SERVER_LIVE" <> Some "1"
   then Alcotest.skip ()
   else
-    let session_dir = temp_workspace "masc-codex-live-resume-" in
+    let base_path = temp_workspace "masc-codex-live-resume-" in
     Fun.protect
-      ~finally:(fun () -> cleanup_tree session_dir)
+      ~finally:(fun () -> cleanup_tree base_path)
       (fun () ->
          (match
             run_keeper_turn
-              ~session_dir
+              ~base_path
               ~goal:
                 "Remember marker MASC_RESUME_MEMORY. Reply exactly MASC_RESUME_FIRST."
               ~cli_path:"codex"
@@ -1081,7 +1250,7 @@ let test_live_keeper_resumes_official_thread () =
               (keeper_response_text result));
          match
            run_keeper_turn
-             ~session_dir
+             ~base_path
              ~goal:"Reply exactly with the remembered marker."
              ~cli_path:"codex"
              ~model:"gpt-5.6-sol"
@@ -1100,9 +1269,21 @@ let test_live_production_keeper_subscription () =
   if Sys.getenv_opt "MASC_CODEX_APP_SERVER_LIVE" <> Some "1"
   then Alcotest.skip ()
   else
-    match run_production_keeper_turn ~cli_path:"codex" ~model:"gpt-5.6-sol" with
-    | Error error -> fail (Agent_sdk.Error.to_string error)
-    | Ok result -> assert_production_keeper_result result
+    let base_path = temp_workspace "masc-codex-live-production-" in
+    Fun.protect
+      ~finally:(fun () -> cleanup_tree base_path)
+      (fun () ->
+         match
+           run_production_keeper_turn
+             ~base_path
+             ~trace_id:"codex-live-production-trace"
+             ~user_message:
+               "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+             ~cli_path:"codex"
+             ~model:"gpt-5.6-sol"
+         with
+         | Error error -> fail (Agent_sdk.Error.to_string error)
+         | Ok result -> assert_production_keeper_result result)
 ;;
 
 let () =
@@ -1148,6 +1329,10 @@ let () =
             `Quick
             test_codex_session_store_rejects_ambiguous_json
         ; test_case
+            "Codex in-flight session blocks duplicate claim"
+            `Quick
+            test_codex_inflight_session_blocks_duplicate_claim
+        ; test_case
             "Codex tool fingerprint is exact"
             `Quick
             test_codex_tool_surface_fingerprint_is_exact
@@ -1167,6 +1352,10 @@ let () =
             "production Keeper dispatches Codex runtime"
             `Quick
             test_production_keeper_dispatches_codex_runtime
+        ; test_case
+            "production Keeper resumes across trace rotation"
+            `Quick
+            test_production_keeper_resumes_across_trace_rotation
         ; test_case
             "Keeper projects typed tools and hooks"
             `Quick

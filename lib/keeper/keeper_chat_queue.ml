@@ -1295,107 +1295,6 @@ let validate_database_paths ~ownership_root path =
   in
   Ok database
 
-let sqlite_error ~operation db rc =
-  Printf.sprintf
-    "SQLite %s failed: rc=%s error=%s"
-    operation
-    (Sqlite3.Rc.to_string rc)
-    (Sqlite3.errmsg db)
-
-let sqlite_exec db ~operation sql =
-  let rc = Sqlite3.exec db sql in
-  if Sqlite3.Rc.is_success rc
-  then Ok ()
-  else Error (sqlite_error ~operation db rc)
-
-let sqlite_bind db stmt ~operation index value =
-  let rc = Sqlite3.bind stmt index value in
-  if Sqlite3.Rc.is_success rc
-  then Ok ()
-  else Error (sqlite_error ~operation db rc)
-
-let sqlite_bind_text db stmt ~operation index value =
-  let rc = Sqlite3.bind_text stmt index value in
-  if Sqlite3.Rc.is_success rc
-  then Ok ()
-  else Error (sqlite_error ~operation db rc)
-
-let sqlite_bind_int64 db stmt ~operation index value =
-  let rc = Sqlite3.bind_int64 stmt index value in
-  if Sqlite3.Rc.is_success rc
-  then Ok ()
-  else Error (sqlite_error ~operation db rc)
-
-let sqlite_expect_done db stmt ~operation =
-  match Sqlite3.step stmt with
-  | Sqlite3.Rc.DONE -> Ok ()
-  | rc -> Error (sqlite_error ~operation db rc)
-
-(* Total: [Sqlite3.finalize] may raise SqliteError (documented in the
-   binding's mli) in addition to returning an error rc. A raise here has
-   two bad escapes in [with_statement]: on the normal path it would erase
-   [body_result], and on the cancellation path it would replace
-   [Eio.Cancel.Cancelled] with SqliteError, breaking cancellation
-   propagation. [Sqlite3.finalize] is a non-suspending C call, so the
-   catch-all cannot swallow Cancelled itself. *)
-let sqlite_finalize db stmt =
-  let result =
-    match Sqlite3.finalize stmt with
-    | rc ->
-      if Sqlite3.Rc.is_success rc
-      then Ok ()
-      else Error (sqlite_error ~operation:"statement finalize" db rc)
-    | exception exn ->
-      Error ("SQLite statement finalize raised: " ^ Printexc.to_string exn)
-  in
-  (* GC-liveness pin. The sqlite3 binding's [caml_sqlite3_stmt_finalize]
-     releases the OCaml runtime lock around [sqlite3_finalize] and only
-     nulls the wrap's statement pointer after re-acquiring it
-     (sqlite3_stubs.c, sqlite3.5.4.1). The call above is otherwise the
-     last use of [stmt], so the compiler drops it from the frame's GC
-     map; a GC from another domain during that blocking window can then
-     collect the wrap and run [stmt_wrap_finalize_gc], which calls
-     [sqlite3_finalize] on the same (already freed) pointer —
-     use-after-free, observed as SIGSEGV `checkMutexEnter <-
-     sqlite3_finalize <- stmt_wrap_finalize_gc` in the 2026-07-15 23:32
-     and 2026-07-17 01:31 crash reports. Keeping [stmt] reachable past
-     the call closes the window — [Sys.opaque_identity] is documented to
-     "prevent the argument from being garbage collected until the
-     location where the call would have occurred" (sys.mli). The true
-     fix (null the pointer before releasing the runtime) belongs
-     upstream in the binding. *)
-  ignore (Sys.opaque_identity stmt) (* See GC-liveness pin note above. *);
-  result
-
-let combine_cleanup_error primary cleanup =
-  match primary, cleanup with
-  | Ok value, Ok () -> Ok value
-  | Error detail, Ok () -> Error detail
-  | Ok _, Error detail -> Error detail
-  | Error primary, Error cleanup ->
-    Error (primary ^ "; cleanup also failed: " ^ cleanup)
-
-let with_statement db sql body =
-  match
-    try Ok (Sqlite3.prepare db sql) with
-    | exn -> Error ("SQLite statement prepare failed: " ^ Printexc.to_string exn)
-  with
-  | Error _ as error -> error
-  | Ok stmt ->
-    let body_result =
-      try body stmt with
-      | Eio.Cancel.Cancelled _ as exception_ ->
-        (match sqlite_finalize db stmt with
-         | Ok () -> ()
-         | Error detail ->
-           Log.Keeper.error
-             "chat queue statement finalize failed during cancellation: %s"
-             detail);
-        raise exception_
-      | exn -> Error (Printexc.to_string exn)
-    in
-    combine_cleanup_error body_result (sqlite_finalize db stmt)
-
 let queue_meta_table_sql =
   "CREATE TABLE queue_meta (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema_version TEXT NOT NULL, revision INTEGER NOT NULL CHECK (revision >= 0), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0), terminal_count INTEGER NOT NULL CHECK (terminal_count >= 0)) STRICT"
 
@@ -1419,42 +1318,22 @@ let expected_schema_objects =
   ; "table", "receipts", receipts_table_sql
   ]
 
-let sqlite_single_int64 db ~operation sql =
-  with_statement db sql (fun stmt ->
-      match Sqlite3.step stmt with
-      | Sqlite3.Rc.ROW ->
-        let value = Sqlite3.column_int64 stmt 0 in
-        (match Sqlite3.step stmt with
-         | Sqlite3.Rc.DONE -> Ok value
-         | rc -> Error (sqlite_error ~operation db rc))
-      | rc -> Error (sqlite_error ~operation db rc))
-
-let sqlite_single_text db ~operation sql =
-  with_statement db sql (fun stmt ->
-      match Sqlite3.step stmt with
-      | Sqlite3.Rc.ROW ->
-        let value = Sqlite3.column_text stmt 0 in
-        (match Sqlite3.step stmt with
-         | Sqlite3.Rc.DONE -> Ok value
-         | rc -> Error (sqlite_error ~operation db rc))
-      | rc -> Error (sqlite_error ~operation db rc))
-
 let configure_sqlite_connection db =
   let* mode =
-    sqlite_single_text db ~operation:"set DELETE journal mode" "PRAGMA journal_mode=DELETE"
+    Keeper_chat_queue_sqlite.single_text db ~operation:"set DELETE journal mode" "PRAGMA journal_mode=DELETE"
   in
   let* () =
     if String.equal mode "delete"
     then Ok ()
     else Error (Printf.sprintf "SQLite refused DELETE journal mode: %s" mode)
   in
-  let* () = sqlite_exec db ~operation:"set FULL synchronous" "PRAGMA synchronous=FULL" in
-  let* () = sqlite_exec db ~operation:"enable foreign keys" "PRAGMA foreign_keys=ON" in
+  let* () = Keeper_chat_queue_sqlite.exec db ~operation:"set FULL synchronous" "PRAGMA synchronous=FULL" in
+  let* () = Keeper_chat_queue_sqlite.exec db ~operation:"enable foreign keys" "PRAGMA foreign_keys=ON" in
   let* synchronous =
-    sqlite_single_int64 db ~operation:"read synchronous mode" "PRAGMA synchronous"
+    Keeper_chat_queue_sqlite.single_int64 db ~operation:"read synchronous mode" "PRAGMA synchronous"
   in
   let* foreign_keys =
-    sqlite_single_int64 db ~operation:"read foreign key mode" "PRAGMA foreign_keys"
+    Keeper_chat_queue_sqlite.single_int64 db ~operation:"read foreign key mode" "PRAGMA foreign_keys"
   in
   if not (Int64.equal synchronous 2L)
   then Error (Printf.sprintf "SQLite synchronous mode is %Ld, expected FULL(2)" synchronous)
@@ -1463,35 +1342,35 @@ let configure_sqlite_connection db =
   else Ok ()
 
 let initialize_database db path =
-  let* () = sqlite_exec db ~operation:"begin schema transaction" "BEGIN EXCLUSIVE" in
+  let* () = Keeper_chat_queue_sqlite.exec db ~operation:"begin schema transaction" "BEGIN EXCLUSIVE" in
   let body =
-    let* () = sqlite_exec db ~operation:"create queue_meta" queue_meta_table_sql in
-    let* () = sqlite_exec db ~operation:"create receipts" receipts_table_sql in
-    let* () = sqlite_exec db ~operation:"create FIFO index" fifo_index_sql in
+    let* () = Keeper_chat_queue_sqlite.exec db ~operation:"create queue_meta" queue_meta_table_sql in
+    let* () = Keeper_chat_queue_sqlite.exec db ~operation:"create receipts" receipts_table_sql in
+    let* () = Keeper_chat_queue_sqlite.exec db ~operation:"create FIFO index" fifo_index_sql in
     let* () =
-      sqlite_exec db ~operation:"create active FIFO index" active_fifo_index_sql
+      Keeper_chat_queue_sqlite.exec db ~operation:"create active FIFO index" active_fifo_index_sql
     in
     let* () =
-      sqlite_exec db ~operation:"create active lease index" active_lease_index_sql
+      Keeper_chat_queue_sqlite.exec db ~operation:"create active lease index" active_lease_index_sql
     in
     let* () =
-      with_statement db
+      Keeper_chat_queue_sqlite.with_statement db
         "INSERT INTO queue_meta(singleton, schema_version, revision, next_sequence, terminal_count) VALUES (1, ?, 0, 0, 0)"
         (fun stmt ->
           let* () =
-            sqlite_bind_text db stmt ~operation:"bind schema version" 1 database_schema
+            Keeper_chat_queue_sqlite.bind_text db stmt ~operation:"bind schema version" 1 database_schema
           in
-          sqlite_expect_done db stmt ~operation:"insert queue metadata")
+          Keeper_chat_queue_sqlite.expect_done db stmt ~operation:"insert queue metadata")
     in
     let* () =
-      sqlite_exec db ~operation:"set application id"
+      Keeper_chat_queue_sqlite.exec db ~operation:"set application id"
         (Printf.sprintf "PRAGMA application_id=%Ld" database_application_id)
     in
     let* () =
-      sqlite_exec db ~operation:"set user version"
+      Keeper_chat_queue_sqlite.exec db ~operation:"set user version"
         (Printf.sprintf "PRAGMA user_version=%Ld" database_user_version)
     in
-    sqlite_exec db ~operation:"commit schema transaction" "COMMIT"
+    Keeper_chat_queue_sqlite.exec db ~operation:"commit schema transaction" "COMMIT"
   in
   match body with
   | Ok () ->
@@ -1506,14 +1385,14 @@ let initialize_database db path =
          ("failed to durably publish chat queue database file: "
           ^ Printexc.to_string exn))
   | Error detail ->
-    let rollback = sqlite_exec db ~operation:"rollback schema transaction" "ROLLBACK" in
+    let rollback = Keeper_chat_queue_sqlite.exec db ~operation:"rollback schema transaction" "ROLLBACK" in
     (match rollback with
      | Ok () -> Error detail
      | Error rollback_detail ->
        Error (detail ^ "; schema rollback also failed: " ^ rollback_detail))
 
 let read_schema_objects db =
-  with_statement db
+  Keeper_chat_queue_sqlite.with_statement db
     "SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
     (fun stmt ->
       let rec loop acc =
@@ -1528,23 +1407,23 @@ let read_schema_objects db =
                , Sqlite3.column_text stmt 1
                , Sqlite3.column_text stmt 2 )
                :: acc)
-        | rc -> Error (sqlite_error ~operation:"read schema objects" db rc)
+        | rc -> Error (Keeper_chat_queue_sqlite.error ~operation:"read schema objects" db rc)
       in
       loop [])
 
 let validate_database_identity db =
   let* application_id =
-    sqlite_single_int64 db ~operation:"read application id" "PRAGMA application_id"
+    Keeper_chat_queue_sqlite.single_int64 db ~operation:"read application id" "PRAGMA application_id"
   in
   let* user_version =
-    sqlite_single_int64 db ~operation:"read user version" "PRAGMA user_version"
+    Keeper_chat_queue_sqlite.single_int64 db ~operation:"read user version" "PRAGMA user_version"
   in
   let* schema_version =
-    sqlite_single_text db ~operation:"read schema version"
+    Keeper_chat_queue_sqlite.single_text db ~operation:"read schema version"
       "SELECT schema_version FROM queue_meta WHERE singleton = 1"
   in
   let* meta_rows =
-    sqlite_single_int64 db ~operation:"count metadata rows"
+    Keeper_chat_queue_sqlite.single_int64 db ~operation:"count metadata rows"
       "SELECT COUNT(*) FROM queue_meta"
   in
   if not (Int64.equal application_id database_application_id)
@@ -1594,7 +1473,7 @@ let close_database handle =
       Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
     | exn -> Error ("SQLite database close failed: " ^ Printexc.to_string exn)
   in
-  (* Same GC-liveness pin as [sqlite_finalize]: [caml_sqlite3_close]
+  (* Same GC-liveness pin as [Keeper_chat_queue_sqlite.finalize]: [caml_sqlite3_close]
      also releases the runtime around [sqlite3_close] and nulls the
      wrap's pointer only afterwards. [handle] happens to stay reachable
      through [identity_result] below today; pin it explicitly so the
@@ -1712,7 +1591,7 @@ let with_database
       | exn -> Error (Printexc.to_string exn))
 
 let read_meta db =
-  with_statement db
+  Keeper_chat_queue_sqlite.with_statement db
     "SELECT revision, next_sequence, terminal_count FROM queue_meta WHERE singleton = 1"
     (fun stmt ->
       match Sqlite3.step stmt with
@@ -1726,8 +1605,8 @@ let read_meta db =
                               && Int64.compare terminal_count 0L >= 0 ->
            Ok (revision, next_sequence, terminal_count)
          | Sqlite3.Rc.DONE -> Error "chat queue metadata is outside the int64 domain"
-         | rc -> Error (sqlite_error ~operation:"read queue metadata" db rc))
-      | rc -> Error (sqlite_error ~operation:"read queue metadata" db rc))
+         | rc -> Error (Keeper_chat_queue_sqlite.error ~operation:"read queue metadata" db rc))
+      | rc -> Error (Keeper_chat_queue_sqlite.error ~operation:"read queue metadata" db rc))
 
 let decode_stored_row ~fifo_sequence ~state_kind ~lease_id ~receipt_wire =
   if Int64.compare fifo_sequence 0L < 0
@@ -1753,11 +1632,11 @@ let decode_row_columns stmt =
   decode_stored_row ~fifo_sequence ~state_kind ~lease_id ~receipt_wire
 
 let read_row_by_receipt_id db receipt_id =
-  with_statement db
+  Keeper_chat_queue_sqlite.with_statement db
     "SELECT fifo_sequence, state_kind, lease_id, receipt_json FROM receipts WHERE receipt_id = ?"
     (fun stmt ->
       let* () =
-        sqlite_bind_text db stmt ~operation:"bind receipt lookup" 1
+        Keeper_chat_queue_sqlite.bind_text db stmt ~operation:"bind receipt lookup" 1
           (Receipt_id.to_string receipt_id)
       in
       match Sqlite3.step stmt with
@@ -1769,8 +1648,8 @@ let read_row_by_receipt_id db receipt_id =
         else
           (match Sqlite3.step stmt with
            | Sqlite3.Rc.DONE -> Ok (Some row)
-           | rc -> Error (sqlite_error ~operation:"finish receipt lookup" db rc))
-      | rc -> Error (sqlite_error ~operation:"lookup receipt" db rc))
+           | rc -> Error (Keeper_chat_queue_sqlite.error ~operation:"finish receipt lookup" db rc))
+      | rc -> Error (Keeper_chat_queue_sqlite.error ~operation:"lookup receipt" db rc))
 
 type loaded_database = {
   loaded_revision : int64;
@@ -1782,7 +1661,7 @@ type loaded_database = {
 }
 
 let read_active_rows db =
-  with_statement db
+  Keeper_chat_queue_sqlite.with_statement db
     "SELECT fifo_sequence, state_kind, lease_id, receipt_json FROM receipts INDEXED BY receipts_active_fifo WHERE state_kind IN ('pending', 'inflight', 'recovery_required') ORDER BY fifo_sequence"
     (fun stmt ->
       let rec loop pending inflight recovery_required =
@@ -1806,12 +1685,12 @@ let read_active_rows db =
              Error "chat queue contains more than one active lease receipt"
            | (Stored_delivered _ | Stored_failed _), _, _ ->
              Error "chat queue active index returned a terminal receipt")
-        | rc -> Error (sqlite_error ~operation:"read active receipts" db rc)
+        | rc -> Error (Keeper_chat_queue_sqlite.error ~operation:"read active receipts" db rc)
       in
       loop Sequence_map.empty None None)
 
 let read_last_sequence db =
-  with_statement db
+  Keeper_chat_queue_sqlite.with_statement db
     "SELECT MAX(fifo_sequence) FROM receipts INDEXED BY receipts_fifo_sequence"
     (fun stmt ->
       match Sqlite3.step stmt with
@@ -1823,11 +1702,11 @@ let read_last_sequence db =
         in
         (match Sqlite3.step stmt with
          | Sqlite3.Rc.DONE -> Ok sequence
-         | rc -> Error (sqlite_error ~operation:"finish FIFO summary" db rc))
-      | rc -> Error (sqlite_error ~operation:"read FIFO summary" db rc))
+         | rc -> Error (Keeper_chat_queue_sqlite.error ~operation:"finish FIFO summary" db rc))
+      | rc -> Error (Keeper_chat_queue_sqlite.error ~operation:"read FIFO summary" db rc))
 
 let read_loaded_database db =
-  let* () = sqlite_exec db ~operation:"begin load transaction" "BEGIN" in
+  let* () = Keeper_chat_queue_sqlite.exec db ~operation:"begin load transaction" "BEGIN" in
   let body =
     let* loaded_revision, loaded_next_sequence, loaded_terminal_count =
       read_meta db
@@ -1857,7 +1736,7 @@ let read_loaded_database db =
     if not sequence_is_contiguous
     then Error "chat queue FIFO sequence metadata is not contiguous"
     else
-      let* () = sqlite_exec db ~operation:"commit load transaction" "COMMIT" in
+      let* () = Keeper_chat_queue_sqlite.exec db ~operation:"commit load transaction" "COMMIT" in
       Ok
         { loaded_revision
         ; loaded_next_sequence
@@ -1870,24 +1749,24 @@ let read_loaded_database db =
   match body with
   | Ok _ as result -> result
   | Error detail ->
-    let rollback = sqlite_exec db ~operation:"rollback load transaction" "ROLLBACK" in
+    let rollback = Keeper_chat_queue_sqlite.exec db ~operation:"rollback load transaction" "ROLLBACK" in
     (match rollback with
      | Ok () -> Error detail
      | Error rollback_detail ->
        Error (detail ^ "; load rollback also failed: " ^ rollback_detail))
 
 let read_meta_and_row db receipt_id =
-  let* () = sqlite_exec db ~operation:"begin receipt observation" "BEGIN" in
+  let* () = Keeper_chat_queue_sqlite.exec db ~operation:"begin receipt observation" "BEGIN" in
   let body =
     let* revision, next_sequence, terminal_count = read_meta db in
     let* row = read_row_by_receipt_id db receipt_id in
-    let* () = sqlite_exec db ~operation:"commit receipt observation" "COMMIT" in
+    let* () = Keeper_chat_queue_sqlite.exec db ~operation:"commit receipt observation" "COMMIT" in
     Ok (revision, next_sequence, terminal_count, row)
   in
   match body with
   | Ok _ as result -> result
   | Error detail ->
-    let rollback = sqlite_exec db ~operation:"rollback receipt observation" "ROLLBACK" in
+    let rollback = Keeper_chat_queue_sqlite.exec db ~operation:"rollback receipt observation" "ROLLBACK" in
     (match rollback with
      | Ok () -> Error detail
      | Error rollback_detail ->
@@ -1902,91 +1781,91 @@ let require_sqlite = function
 let bind_row db stmt row =
   let state_kind, lease_id = state_kind_and_lease row.receipt.state in
   require_sqlite
-    (sqlite_bind_text db stmt ~operation:"bind receipt id" 1
+    (Keeper_chat_queue_sqlite.bind_text db stmt ~operation:"bind receipt id" 1
        (Receipt_id.to_string row.receipt.receipt_id));
   require_sqlite
-    (sqlite_bind_int64 db stmt ~operation:"bind FIFO sequence" 2 row.fifo_sequence);
+    (Keeper_chat_queue_sqlite.bind_int64 db stmt ~operation:"bind FIFO sequence" 2 row.fifo_sequence);
   require_sqlite
-    (sqlite_bind_text db stmt ~operation:"bind receipt state" 3 state_kind);
+    (Keeper_chat_queue_sqlite.bind_text db stmt ~operation:"bind receipt state" 3 state_kind);
   require_sqlite
-    (sqlite_bind db stmt ~operation:"bind receipt lease" 4
+    (Keeper_chat_queue_sqlite.bind db stmt ~operation:"bind receipt lease" 4
        (match lease_id with
         | None -> Sqlite3.Data.NULL
         | Some lease_id -> Sqlite3.Data.TEXT lease_id));
   require_sqlite
-    (sqlite_bind_text db stmt ~operation:"bind canonical receipt" 5
+    (Keeper_chat_queue_sqlite.bind_text db stmt ~operation:"bind canonical receipt" 5
        (stored_receipt_wire row.receipt))
 
 let insert_row db row =
   require_sqlite
-    (with_statement db
+    (Keeper_chat_queue_sqlite.with_statement db
        "INSERT INTO receipts(receipt_id, fifo_sequence, state_kind, lease_id, receipt_json) VALUES (?, ?, ?, ?, ?)"
        (fun stmt ->
          bind_row db stmt row;
-         sqlite_expect_done db stmt ~operation:"insert receipt"))
+         Keeper_chat_queue_sqlite.expect_done db stmt ~operation:"insert receipt"))
 
 let update_row db row =
   require_sqlite
-    (with_statement db
+    (Keeper_chat_queue_sqlite.with_statement db
        "UPDATE receipts SET fifo_sequence = ?, state_kind = ?, lease_id = ?, receipt_json = ? WHERE receipt_id = ?"
        (fun stmt ->
          let state_kind, lease_id = state_kind_and_lease row.receipt.state in
          let receipt_id = Receipt_id.to_string row.receipt.receipt_id in
          let* () =
-           sqlite_bind_int64 db stmt ~operation:"bind updated FIFO sequence" 1
+           Keeper_chat_queue_sqlite.bind_int64 db stmt ~operation:"bind updated FIFO sequence" 1
              row.fifo_sequence
          in
          let* () =
-           sqlite_bind_text db stmt ~operation:"bind updated receipt state" 2 state_kind
+           Keeper_chat_queue_sqlite.bind_text db stmt ~operation:"bind updated receipt state" 2 state_kind
          in
          let* () =
-           sqlite_bind db stmt ~operation:"bind updated receipt lease" 3
+           Keeper_chat_queue_sqlite.bind db stmt ~operation:"bind updated receipt lease" 3
              (match lease_id with
               | None -> Sqlite3.Data.NULL
               | Some lease_id -> Sqlite3.Data.TEXT lease_id)
          in
          let* () =
-           sqlite_bind_text db stmt ~operation:"bind updated canonical receipt" 4
+           Keeper_chat_queue_sqlite.bind_text db stmt ~operation:"bind updated canonical receipt" 4
              (stored_receipt_wire row.receipt)
          in
          let* () =
-           sqlite_bind_text db stmt ~operation:"bind updated receipt id" 5 receipt_id
+           Keeper_chat_queue_sqlite.bind_text db stmt ~operation:"bind updated receipt id" 5 receipt_id
          in
-         let* () = sqlite_expect_done db stmt ~operation:"update receipt" in
+         let* () = Keeper_chat_queue_sqlite.expect_done db stmt ~operation:"update receipt" in
          if Sqlite3.changes db = 1
          then Ok ()
          else Error "chat queue receipt update did not affect exactly one row"))
 
 let update_meta db plan =
   require_sqlite
-    (with_statement db
+    (Keeper_chat_queue_sqlite.with_statement db
        "UPDATE queue_meta SET revision = ?, next_sequence = ?, terminal_count = ? WHERE singleton = 1 AND revision = ? AND next_sequence = ? AND terminal_count = ?"
        (fun stmt ->
          let* () =
-           sqlite_bind_int64 db stmt ~operation:"bind target revision" 1
+           Keeper_chat_queue_sqlite.bind_int64 db stmt ~operation:"bind target revision" 1
              plan.target_revision
          in
          let* () =
-           sqlite_bind_int64 db stmt ~operation:"bind target FIFO cursor" 2
+           Keeper_chat_queue_sqlite.bind_int64 db stmt ~operation:"bind target FIFO cursor" 2
              plan.target_next_sequence
          in
          let* () =
-           sqlite_bind_int64 db stmt ~operation:"bind target terminal count" 3
+           Keeper_chat_queue_sqlite.bind_int64 db stmt ~operation:"bind target terminal count" 3
              plan.target_terminal_count
          in
          let* () =
-           sqlite_bind_int64 db stmt ~operation:"bind expected revision" 4
+           Keeper_chat_queue_sqlite.bind_int64 db stmt ~operation:"bind expected revision" 4
              plan.before_revision
          in
          let* () =
-           sqlite_bind_int64 db stmt ~operation:"bind expected FIFO cursor" 5
+           Keeper_chat_queue_sqlite.bind_int64 db stmt ~operation:"bind expected FIFO cursor" 5
              plan.before_next_sequence
          in
          let* () =
-           sqlite_bind_int64 db stmt ~operation:"bind expected terminal count" 6
+           Keeper_chat_queue_sqlite.bind_int64 db stmt ~operation:"bind expected terminal count" 6
              plan.before_terminal_count
          in
-         let* () = sqlite_expect_done db stmt ~operation:"update queue metadata" in
+         let* () = Keeper_chat_queue_sqlite.expect_done db stmt ~operation:"update queue metadata" in
          if Sqlite3.changes db = 1
          then Ok ()
          else Error "chat queue metadata compare-and-set did not affect exactly one row"))
@@ -2158,7 +2037,7 @@ let run_transaction ~ownership_root ~path ~create_if_missing plan =
            in
            (try
               require_sqlite
-                (sqlite_exec handle.db ~operation:"begin mutation" "BEGIN IMMEDIATE");
+                (Keeper_chat_queue_sqlite.exec handle.db ~operation:"begin mutation" "BEGIN IMMEDIATE");
               transaction_started := true;
               visit Transaction_begun;
               apply_plan_in_transaction handle.db plan;
@@ -2177,7 +2056,7 @@ let run_transaction ~ownership_root ~path ~create_if_missing plan =
                       (injected_commit_failure_to_string failure))
                | None ->
                  require_sqlite
-                   (sqlite_exec handle.db ~operation:"commit mutation" "COMMIT"));
+                   (Keeper_chat_queue_sqlite.exec handle.db ~operation:"commit mutation" "COMMIT"));
               committed := true;
               visit Commit_returned
             with
@@ -2190,7 +2069,7 @@ let run_transaction ~ownership_root ~path ~create_if_missing plan =
            then (
              (try visit Before_rollback with
               | exn -> record rollback_error (Printexc.to_string exn));
-             (match sqlite_exec handle.db ~operation:"rollback mutation" "ROLLBACK" with
+             (match Keeper_chat_queue_sqlite.exec handle.db ~operation:"rollback mutation" "ROLLBACK" with
               | Ok () -> ()
               | Error detail -> record rollback_error detail));
            (try visit Before_close with
@@ -3537,14 +3416,14 @@ type receipt_observation = {
 }
 
 let read_receipt_observation db receipt_id =
-  let* () = sqlite_exec db ~operation:"begin reconciliation observation" "BEGIN" in
+  let* () = Keeper_chat_queue_sqlite.exec db ~operation:"begin reconciliation observation" "BEGIN" in
   let body =
     let* observed_revision, observed_next_sequence, observed_terminal_count =
       read_meta db
     in
     let* observed_row = read_row_by_receipt_id db receipt_id in
     let* () =
-      sqlite_exec db ~operation:"commit reconciliation observation" "COMMIT"
+      Keeper_chat_queue_sqlite.exec db ~operation:"commit reconciliation observation" "COMMIT"
     in
     Ok
       { observed_revision
@@ -3557,7 +3436,7 @@ let read_receipt_observation db receipt_id =
   | Ok _ as result -> result
   | Error detail ->
     let rollback =
-      sqlite_exec db ~operation:"rollback reconciliation observation" "ROLLBACK"
+      Keeper_chat_queue_sqlite.exec db ~operation:"rollback reconciliation observation" "ROLLBACK"
     in
     (match rollback with
      | Ok () -> Error detail
@@ -4394,7 +4273,7 @@ module For_testing = struct
   let set_inventory_classified_observer observer =
     Atomic.set inventory_classified_observer_for_testing observer
 
-  let finalize_statement = sqlite_finalize
+  let finalize_statement = Keeper_chat_queue_sqlite.finalize
   let snapshot_path = snapshot_path
 
   let receipt_json ~base_path ~keeper_name ~receipt_id =

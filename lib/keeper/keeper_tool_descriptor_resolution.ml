@@ -156,3 +156,39 @@ let readonly_for_tool_call ~tool_name ~input =
      | None -> Keeper_tool_descriptor.readonly_static_hint descriptor)
   | None -> None
 ;;
+
+type runtime_decision_outcome =
+  | Route_hit of { internal : string }
+  | Already_internal of { canonical : string }
+  | Miss
+
+let runtime_decision name =
+  match Keeper_tool_alias.canonical_resolution name with
+  | Keeper_tool_alias.Public_name { internal } -> Route_hit { internal }
+  | Keeper_tool_alias.Internal { canonical } -> Already_internal { canonical }
+  | Keeper_tool_alias.Unknown -> Miss
+;;
+
+let canonical_tool_name name =
+  match runtime_decision name with
+  | Route_hit { internal } -> internal
+  | Already_internal { canonical } -> canonical
+  | Miss -> name
+;;
+
+let canonical_tool_name_observed name =
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
+  match runtime_decision name with
+  | Route_hit { internal } ->
+    Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
+    internal
+  | Already_internal { canonical } ->
+    Keeper_tool_alias.record_route_outcome
+      ~tool:canonical
+      ~routed_to:canonical
+      ~result:"ok";
+    canonical
+  | Miss ->
+    Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:"none" ~result:"miss";
+    name
+;;

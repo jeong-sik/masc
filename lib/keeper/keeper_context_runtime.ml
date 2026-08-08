@@ -279,7 +279,9 @@ let keeper_board_write_tool_names =
   ; "masc_board_curation_submit"
   ]
 
-let canonical_tool_name name = Keeper_tool_resolution.canonical_tool_name name
+let canonical_tool_name name =
+  Keeper_tool_descriptor_resolution.canonical_tool_name name
+;;
 
 let keeper_tool_name_matches tool name =
   String.equal (canonical_tool_name name) tool

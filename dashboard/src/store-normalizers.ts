@@ -222,7 +222,6 @@ export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQue
     next_human_action: asString(raw.next_human_action) ?? null,
     terminal_reason_code: terminalReasonCode,
     stop_cause: normalizeStopCause({
-      stop_cause: raw.stop_cause,
       runtime_blocker_class: asString(raw.runtime_blocker_class) ?? asString(raw.runtime_blocker) ?? null,
       runtime_blocker_summary: asString(raw.runtime_blocker_summary) ?? null,
       terminal_reason_code: terminalReasonCode,

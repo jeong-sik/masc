@@ -681,7 +681,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       const terminalReason = trust?.latest_terminal_reason ?? null
       const nextHumanAction = asString(row.next_human_action) ?? null
       const stopCause = normalizeStopCause({
-        stop_cause: row.stop_cause,
         runtime_blocker_class: runtimeBlockerClass,
         runtime_blocker_summary: runtimeBlockerSummary,
         terminal_reason_code: terminalReason?.code ?? null,

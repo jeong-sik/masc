@@ -1307,8 +1307,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
     init_runtime_context env
   in
   let configured_agent_transport = Masc_grpc_transport.configure_from_env () in
-  let configured_http_mode = Env_config.Transport.use_h2 () in
-  Transport_metrics.set_http_configured_mode configured_http_mode;
+  let configured_http_mode = Env_config.Transport.configure_h2_from_env () in
   (* Route OAS provider diagnostics into the structured log before any
      provider call runs (#25148). *)
   Agent_sdk_diag_sink.install ();

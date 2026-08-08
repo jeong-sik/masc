@@ -137,19 +137,31 @@ module Transport = struct
     | H1_only
     | H2_only
 
+  let h2_env_name = "MASC_USE_H2"
+  let h2_default = Auto
+  let h2_description = "HTTP mode (auto|0|h1_only|1|h2_only)"
+
+  let h2_accepted_values =
+    [ "auto", Auto
+    ; "0", H1_only
+    ; "h1_only", H1_only
+    ; "1", H2_only
+    ; "h2_only", H2_only
+    ]
+
   (* The vocabulary is closed. Only an absent setting selects [Auto]; a present
      value outside this set is an operator error and stops startup. *)
   let h2_mode_of_string raw =
-    match raw with
-    | "1" | "h2_only" -> H2_only
-    | "0" | "h1_only" -> H1_only
-    | "auto" -> Auto
-    | _ ->
+    match List.assoc_opt raw h2_accepted_values with
+    | Some mode -> mode
+    | None ->
       raise
         (Env_config_core.Config_error
            (Printf.sprintf
-              "malformed env MASC_USE_H2=%S (expected auto|0|h1_only|1|h2_only)"
-              raw))
+              "malformed env %s=%S (expected %s)"
+              h2_env_name
+              raw
+              (h2_accepted_values |> List.map fst |> String.concat "|")))
 
   let h2_mode_to_string = function
     | Auto -> "auto"
@@ -178,11 +190,48 @@ module Transport = struct
       Accessor-shaped reader; listener lifecycle is still decided at boot. *)
   let webrtc_enabled () = Feature_flag_registry.get_bool "MASC_WEBRTC_ENABLED"
 
+  type h2_resolution =
+    { value : h2_mode
+    ; source : Env_config_snapshot_core.effective_source
+    }
+
+  let resolve_h2_env () =
+    match Sys.getenv_opt h2_env_name with
+    | None ->
+      { value = h2_default; source = Env_config_snapshot_core.Default }
+    | Some raw ->
+      { value = h2_mode_of_string raw
+      ; source = Env_config_snapshot_core.Environment
+      }
+
+  let configured_h2 = Atomic.make None
+
+  let rec configure_h2_from_env () =
+    match Atomic.get configured_h2 with
+    | Some resolution -> resolution.value
+    | None ->
+      let resolution = resolve_h2_env () in
+      if Atomic.compare_and_set configured_h2 None (Some resolution)
+      then resolution.value
+      else configure_h2_from_env ()
+
+  let effective_h2_resolution () =
+    match Atomic.get configured_h2 with
+    | Some resolution -> resolution
+    | None -> resolve_h2_env ()
+
   (** HTTP mode: exact [auto|0|h1_only|1|h2_only] vocabulary. *)
-  let use_h2 () =
-    match Sys.getenv_opt "MASC_USE_H2" with
-    | Some raw -> h2_mode_of_string raw
-    | None -> Auto
+  let use_h2 () = (resolve_h2_env ()).value
+  let effective_h2_mode () = (effective_h2_resolution ()).value
+
+  let h2_snapshot_entry =
+    Env_config_snapshot_core.effective_entry
+      ~default:(h2_mode_to_string h2_default)
+      ~read:(fun () ->
+        let resolution = effective_h2_resolution () in
+        h2_mode_to_string resolution.value, resolution.source)
+      h2_env_name
+      h2_description
 
   (** Force strict auth for all HTTP endpoints. Default: false.
 
@@ -205,11 +254,6 @@ end
 (** {1 Board Configuration} *)
 
 module Board = struct
-  (* MASC_BOARD_BACKEND and the [backend] type were deleted together with
-     the test-only [Board_dispatch.jsonl_forced] pin: JSONL is the only
-     board lane, so a backend selector had nothing to select. The knob row
-     was removed from docs/runtime-tunables.md in the same change. *)
-
   (** Flush interval for board persistence (seconds). Default: 30. *)
   let flush_interval_sec =
     get_float ~default:30.0 "MASC_BOARD_FLUSH_INTERVAL_SEC"

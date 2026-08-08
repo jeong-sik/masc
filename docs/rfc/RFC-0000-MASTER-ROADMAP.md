@@ -650,7 +650,7 @@ extraction에서 나온 상세 inventory다. first-class 실행 권한이 없으
 ### DS-9 — Keeper-Config SSOT doc-only 정정 (§3.15)
 - **문제:** §3.15 파편화 축 중 **무행동변경 doc 정정**. 코드 SSOT 통합은 RFC-scale(§11 D9)이며 이 DS는 문서만.
 - **결정론↔LLM:** 문서. behavior-only.
-- **touch (grep 확인):** `docs/KEEPER-FILE-MODEL.md`(§3), `docs/runtime-tunables.md`, `lib/keeper/keeper_tool_execute_path.ml`(dead `_docker_playground_cwd`).
+- **touch (grep 확인):** `docs/KEEPER-FILE-MODEL.md`(§3), `lib/keeper/keeper_tool_execute_path.ml`(dead `_docker_playground_cwd`).
 - **acceptance:** (1) `KEEPER-FILE-MODEL.md §3`에서 keeper.json 필드 목록을 serializer 현실과 맞춘다. (2) Keeper는 AGENT.md 전체 프롬프트만 소유한다. (3) runtime.toml = assignment 글로벌 SSOT + seed(`config/runtime.toml`) vs live(`<base>/.masc/config/runtime.toml`) 구분 문서화. (4) dead `_docker_playground_cwd` + stale 주석 삭제(runtime surface 0). (5) `allowed_providers`가 현재 미강제임 기록.
 - **DoD:** 위 6 doc 정정 착지; serializer↔doc drift 0.
 
@@ -710,7 +710,6 @@ extraction에서 나온 상세 inventory다. first-class 실행 권한이 없으
 | Board status-rollup fix | lib/board/board_core.ml + lib/board/board_core_persist.ml + lib/board/board_moderation.ml(현재 Hashtbl.replace 파괴적 덮어쓰기; grep 확인. draft의 board_core_status_rollup.ml은 HEAD 미존재) | **중** — prior content 보존 필수; Board+Dashboard Chat 결합 | append-only 전환 |
 | runtime.toml `[runtime].default` 변경 | 전 unassigned keeper fan-out(per-keeper escape hatch 없음, hard-reject) | **높음** — single default가 fleet 전체 | default revert |
 | Dashboard auth(#69) | server_dashboard_http, mint_dashboard_dev_token, operator/action | **높음** — credential/identity RFC-gated subsystem, security-blocking | route별 401 |
-| Env knob 변경 | docs/runtime-tunables.md(bin/env_knob_catalog.exe drift gate) | **낮음** — 같은 PR에서 재생성 안 하면 CI fail | catalog 재생성 |
 | Verification FSM ignition(default_on flip) | 매 task Done transition + verifier rework loop + G-2 probe | **높음** — solo-room guard 없이 flip 시 production permanent wake-loop | flag false |
 | lib/schedule(Goal 6) | import/dependency edge 0 유지 필요(현재 `schedule_supported_kinds.{ml,mli}`에 `Keeper_wake_*` enum label 14건은 있으나 import edge 아님; Fusion/Board/OAS 0). "coupling grep 0"은 enum label 제외 시 성립 | **낮음** — 격리; 단 CI boundary gate real OAS checkout 필요 | — |
 | Scheduler live proof(G0/G2/G4) | 배포 diverged runtime(source ≠ server HEAD) | **proof-only** — 코드 blast 아님; 모든 G* live-proof가 deploy identity 선행 | infra |
@@ -919,7 +918,7 @@ FSM 전이 매트릭스는 `_ -> false` catch-all 금지 — 모든 쌍 명시. 
 - NORTH-STAR-OCAML.md · OAS-MASC-BOUNDARY.md · MASC-V2-DESIGN.md · **PRODUCT-OPERATING-PLAN.md** *(⚠ STALE worldview: "repo-local … one repository"·"supervised" — RFC-0318/0319/0322/0329/0337/0341이 폐기; §1.1 정본)* · PRODUCT-REVIEW.md · **external-comparison-and-positioning.md** *(⚠ STALE worldview: "operator-governed supervisor"·"supervised cycles not self-driven loops"·"autonomy bounded by phase policy" — 폐기; §1.1/§7 정본)* · VERSIONED-ROADMAP.md *(stale v2.87-v2.93; renumber 필요)* · sdk-independence-principle.md
 
 ### Keeper / Runtime / Scheduler
-- KEEPER-STATE-OWNERSHIP.md · KEEPER-FILE-MODEL.md · KEEPER-CAPABILITY-MATRIX.md · spec/04-turn-lifecycle.md · KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md · KEEPER-SANDBOX-BOUNDARY-POLICY.md · IMMORTAL-SERVER-ROADMAP.md · runtime-tunables.md · SUPERVISOR-MODE.md · Keeper Scheduler _ Waiting Goal Matrix - 2026-07-04.html
+- KEEPER-STATE-OWNERSHIP.md · KEEPER-FILE-MODEL.md · KEEPER-CAPABILITY-MATRIX.md · spec/04-turn-lifecycle.md · KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md · KEEPER-SANDBOX-BOUNDARY-POLICY.md · IMMORTAL-SERVER-ROADMAP.md · SUPERVISOR-MODE.md · Keeper Scheduler _ Waiting Goal Matrix - 2026-07-04.html
 
 ### Connector / Board / Fusion / Memory
 - CONNECTOR-CONFIG-SCHEMA.md · CONNECTOR-UI-DESIGN.md · DESIGN-RICH-CONNECTOR-RENDERING.md · Keeper Connector-Aware Continuation — Goal Matrix.html (RFC-0320) · RFC-0223-typed-connector-surfaces-presence-pull-speaker.md · RFC-0283-fusion-judge-of-judges.md · RFC-0277-fusion-heterogeneous-panels.md · RFC-0298-fusion-judge-pool.md · RFC-0266-fusion-async-completion-wake-and-visibility.md · RFC-0306-fusion-settings-typed-editor.md · RFC-0037-board-multimedia-vision-adapted.md · 2026-06-24-fusion-dashboard-wiring-rich-text-design.md · RFC-0247-memory-os-associative-graph-forgetting-brain.md · 2026-06-23-what-to-forget-keeper-memory-forgetting-policy.md · RFC-0332-memory-write-boundary-dedup.md (REJECTED)

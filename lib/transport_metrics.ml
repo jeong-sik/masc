@@ -243,7 +243,6 @@ let inc_grpc_backlog_replay_events_replayed ?(delta = 1) () =
 (** {1 Primary HTTP listener state} *)
 
 let http_listener_mode_runtime : string Atomic.t = Atomic.make "unknown"
-let http_configured_mode = Atomic.make Env_config.Transport.Auto
 let http_listener_status : string Atomic.t = Atomic.make "not_started"
 let http_active_connections : int Atomic.t = Atomic.make 0
 let http_last_accept_unix : float option Atomic.t = Atomic.make None
@@ -253,10 +252,6 @@ let set_http_connection_gauge value =
   Otel_metric_store.set_gauge
     Otel_metric_store.metric_http_active_connections
     (float_of_int (max 0 value))
-;;
-
-let set_http_configured_mode mode =
-  Atomic.set http_configured_mode mode
 ;;
 
 let record_http_listener_started ~mode =
@@ -391,28 +386,9 @@ let inc_agent_stale () = Otel_metric_store.inc_counter Otel_metric_store.metric_
 
 (** {1 Transport Health JSON Snapshot} *)
 
-let int_field key json =
-  match Json_util.assoc_member_opt key json with
-  | Some (`Int value) -> value
-  | Some (`Intlit raw) -> Safe_ops.int_of_string_with_default ~default:0 raw
-  | _ -> 0
-;;
-
-let workspace_id_from_config (_config : Workspace.config) = "default"
-
-let cluster_summary_json (_config : Workspace.config) =
-  (* Transport health should stay metrics-only and avoid Workspace I/O. *)
-  None
-;;
-
-let int_field_opt key = function
-  | Some json -> Some (int_field key json)
-  | None -> None
-;;
-
 
 let http_listener_mode () =
-  Atomic.get http_configured_mode
+  Env_config.Transport.effective_h2_mode ()
 ;;
 
 let primary_path ~webrtc_channels ~grpc_subscribers ~ws_sessions ~sse_sessions =
@@ -442,18 +418,6 @@ let ws_listening () = ws_enabled () && Atomic.get ws_runtime_listening
 let ws_same_origin_ready () =
   ws_enabled () && Atomic.get ws_same_origin_runtime_ready
 
-(* [tcp_port_reachable] is intentionally [false], matching the canonical
-   decision in [Transport_read_model.tcp_port_reachable]. A stdlib
-   [Unix.connect] probe here would (a) block the Eio domain on a syscall
-   inside the transport-health refresh path and (b) only ever flip to
-   [true] by racing a foreign listener on the same port, which is not a
-   useful health signal. With this, [grpc_reachable]/[ws_reachable]
-   collapse to their [*_live] (listener-bound) state, the single source
-   of truth shared with the read model. Argument kept for call-site
-   stability. *)
-let tcp_port_reachable (_port : int) : bool = false
-;;
-
 let hot_session_json (session : hot_queue_session) =
   `Assoc
     [ "session_id", `String session.session_id
@@ -469,13 +433,8 @@ type ws_delivery_metric_names =
   ; bytes_cache_misses : string
   ; client_acks : string
   ; throttled_deliveries : string
-  ; delta_payload_serializations : string
-  ; delta_built : string
-  ; slice_fanout_skipped : string
   ; client_buffered_bytes : string
   ; client_buffered_bytes_count : string
-  ; hello_latency : string
-  ; hello_latency_count : string
   }
 
 let ws_delivery_metric_names =
@@ -483,20 +442,12 @@ let ws_delivery_metric_names =
   ; bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
   ; client_acks = "masc_ws_client_acks_total"
   ; throttled_deliveries = "masc_ws_throttled_deliveries_total"
-  ; delta_payload_serializations = "masc_ws_delta_payload_serializations_total"
-  ; delta_built = Otel_metric_store.metric_ws_delta_built
-    (* Named by the declaration, not by a literal: [metric_value_or_zero]
-       answers an unknown name with 0, so a typo here would surface as a
-       permanently-zero field instead of a failure. *)
-  ; slice_fanout_skipped = Otel_metric_store.metric_ws_slice_fanout_skipped
   ; client_buffered_bytes = "masc_ws_client_buffered_bytes"
   ; client_buffered_bytes_count = "masc_ws_client_buffered_bytes_count"
-  ; hello_latency = Otel_metric_store.metric_ws_dashboard_hello_latency_seconds
-  ; hello_latency_count = Otel_metric_store.metric_ws_dashboard_hello_latency_seconds ^ "_count"
   }
 ;;
 
-let transport_health_json ~config =
+let transport_health_json () =
   let v name ?(labels = []) () = Otel_metric_store.metric_value_or_zero name ~labels () in
   let sse_observer = v Otel_metric_store.metric_sse_sessions ~labels:[ "kind", "observer" ] () in
   let sse_agent_stream =
@@ -542,20 +493,6 @@ let transport_health_json ~config =
   let broadcast_avg =
     if broadcast_count > 0.0 then broadcast_sum /. broadcast_count else 0.0
   in
-  let external_fanout_sum =
-    v Otel_metric_store.metric_sse_external_fanout_duration_seconds ()
-  in
-  let broadcast_skipped_no_observer =
-    v Otel_metric_store.metric_sse_broadcast_skipped_no_observer ()
-  in
-  let external_fanout_count =
-    v (Otel_metric_store.metric_sse_external_fanout_duration_seconds ^ "_count") ()
-  in
-  let external_fanout_avg =
-    if external_fanout_count > 0.0
-    then external_fanout_sum /. external_fanout_count
-    else 0.0
-  in
   let grpc_streams = v Otel_metric_store.metric_grpc_active_streams () in
   let grpc_subscribers = v Otel_metric_store.metric_grpc_subscribers () in
   let grpc_heartbeat_sum = v Otel_metric_store.metric_grpc_heartbeat_latency () in
@@ -574,13 +511,8 @@ let transport_health_json ~config =
   let ws_sessions = int_of_float (v Otel_metric_store.metric_ws_sessions ()) in
   let grpc_configured = grpc_enabled () in
   let grpc_live = grpc_listening () in
-  let grpc_reachable = grpc_live || tcp_port_reachable (grpc_port ()) in
   let ws_configured = ws_enabled () in
   let ws_live = ws_listening () in
-  let ws_reachable = ws_live || tcp_port_reachable (ws_port ()) in
-  let streamable_auth_policy_present =
-    Env_config.Transport.http_auth_strict_env_enabled ()
-  in
   let webrtc_configured = (Atomic.get webrtc_is_enabled_ref) () in
   let webrtc_pending = (Atomic.get webrtc_pending_count_ref) () in
   let webrtc_peers = (Atomic.get webrtc_peers_count_ref) () in
@@ -595,13 +527,6 @@ let transport_health_json ~config =
     | Env_config.Transport.H1_only -> false
     | Env_config.Transport.Auto | Env_config.Transport.H2_only -> true
   in
-  let topology_summary = cluster_summary_json config in
-  let workspace_id = workspace_id_from_config config in
-  let cluster_name = Env_config_core.cluster_name () in
-  (* Keep transport-health free of Workspace/PG reads so proactive refresh does not
-     contend with dashboard and MCP writes on the shared backend. *)
-  let recent_messages = None in
-  let recent_messages_available = Option.is_some recent_messages in
   let grpc_subscribers_i = int_of_float grpc_subscribers in
   let primary_path =
     primary_path
@@ -610,8 +535,6 @@ let transport_health_json ~config =
       ~ws_sessions
       ~sse_sessions:sse_total
   in
-  let topology_available = Option.is_some topology_summary in
-  let degraded_source = "metrics_only" in
   `Assoc
     [ ( "summary"
       , `Assoc
@@ -623,9 +546,6 @@ let transport_health_json ~config =
                    ~relay_queue_depth
                    ~relay_retry_total
                    ~relay_drop_total) )
-          ; "recent_messages", Json_util.int_opt_to_json recent_messages
-          ; "recent_messages_available", `Bool recent_messages_available
-          ; "recent_messages_source", `String degraded_source
           ; "external_fanout_targets", `Int sse_external_subscribers
           ] )
     ; ( "sse"
@@ -637,11 +557,6 @@ let transport_health_json ~config =
           ; "external_subscribers", `Int sse_external_subscribers
           ; "broadcast_avg_seconds", `Float broadcast_avg
           ; "broadcast_count", `Int (int_of_float broadcast_count)
-          ; ( "broadcast_skipped_no_observer"
-            , `Int (int_of_float broadcast_skipped_no_observer) )
-          ; "external_fanout_avg_seconds", `Float external_fanout_avg
-          ; "external_fanout_count", `Int (int_of_float external_fanout_count)
-          ; "external_fanout_sum_seconds", `Float external_fanout_sum
           ; "queue_avg_depth", `Float sse_queue_avg
           ; "queue_max_depth", `Int sse_queue_max
           ; "relay_queue_depth", `Int relay_queue_depth
@@ -657,11 +572,8 @@ let transport_health_json ~config =
           ] )
     ; ( "grpc"
       , `Assoc
-          [ "enabled", `Bool grpc_configured
-          ; "configured", `Bool grpc_configured
+          [ "configured", `Bool grpc_configured
           ; "listening", `Bool grpc_live
-          ; "reachable", `Bool grpc_reachable
-          ; "listen_status", `String (Atomic.get grpc_listen_status)
           ; "port", `Int (grpc_port ())
           ; "active_streams", `Int (int_of_float grpc_streams)
           ; "subscribers", `Int grpc_subscribers_i
@@ -671,11 +583,8 @@ let transport_health_json ~config =
           ] )
     ; ( "websocket"
       , `Assoc
-          [ "enabled", `Bool ws_configured
-          ; "configured", `Bool ws_configured
+          [ "configured", `Bool ws_configured
           ; "listening", `Bool ws_live
-          ; "reachable", `Bool ws_reachable
-          ; "listen_status", `String (Atomic.get ws_listen_status)
           ; "mode", `String "standalone"
           ; "port", `Int (ws_port ())
           ; "sessions", `Int ws_sessions
@@ -695,45 +604,19 @@ let transport_health_json ~config =
                   , `Int (int_of_float (v ws_delivery_metrics.client_acks ())) )
                 ; ( "throttled_deliveries"
                   , `Int (int_of_float (v ws_delivery_metrics.throttled_deliveries ())) )
-                ; ( "delta_payload_serializations"
-                  , `Int
-                      (int_of_float
-                         (v ws_delivery_metrics.delta_payload_serializations ())) )
-                ; (* Deltas actually handed to a session, counted after the
-                     slice gate.  Paired with the two above it separates work
-                     done from work delivered: serializations counts payloads
-                     built (shared across sessions), delta_built counts sends.
-                     It has advanced on every delivered delta since #23339 with
-                     nothing reading it. *)
-                  ( "delta_built"
-                  , `Int (int_of_float (v ws_delivery_metrics.delta_built ())) )
-                ; (* Deliveries the slice gate dropped because the session did
-                     not subscribe to that slice.  Without it the gap between
-                     delivered broadcasts and what reaches the bytes cache is
-                     unattributable. *)
-                  ( "slice_fanout_skipped"
-                  , `Int (int_of_float (v ws_delivery_metrics.slice_fanout_skipped ())) )
                 ; (* Histogram sum + auto _count give operators enough to compute
-           average buffered bytes per ack without external telemetry queries. *)
+                     average buffered bytes per ack. *)
                   ( "client_buffered_bytes_sum"
                   , `Float (v ws_delivery_metrics.client_buffered_bytes ()) )
                 ; ( "client_buffered_bytes_count"
                   , `Int
                       (int_of_float
                          (v ws_delivery_metrics.client_buffered_bytes_count ())) )
-                ; ( "hello_latency_sum_seconds"
-                  , `Float (Otel_metric_store.metric_total ws_delivery_metrics.hello_latency) )
-                ; ( "hello_latency_count"
-                  , `Int
-                      (int_of_float
-                         (Otel_metric_store.metric_total ws_delivery_metrics.hello_latency_count))
-                  )
                 ] )
           ] )
     ; ( "webrtc"
       , `Assoc
-          [ "enabled", `Bool webrtc_configured
-          ; "configured", `Bool webrtc_configured
+          [ "configured", `Bool webrtc_configured
           ; "signaling_available", `Bool webrtc_configured
           ; "signaling_mode", `String "shared_http"
           ; "pending_offers", `Int webrtc_pending
@@ -748,38 +631,13 @@ let transport_health_json ~config =
           [ "endpoint", `String "/mcp"
           ; "observer_stream", `String "/mcp?sse_kind=observer"
           ; "presence_stream", `String "/events/presence"
-          ; "managed_endpoint", `String "/mcp/managed"
-          ; "delete_endpoint", `String "/mcp"
-          ; "default_transport", `String "streamable_http"
-          ; "configured", `Bool true
-          ; "protocol_capable", `Bool true
-          ; "auth_policy_present", `Bool streamable_auth_policy_present
           ; "supports_post", `Bool true
           ; "supports_sse_upgrade", `Bool true
-          ; "supports_delete", `Bool true
-          ; "listener", http_listener_json ()
           ] )
     ; ( "http2"
       , `Assoc
           [ "listener_mode", `String listener_mode_label
           ; "multiplex_ready", `Bool multiplex_ready
-          ; "prior_knowledge_path", `String "/mcp"
-          ] )
-    ; ( "cluster"
-      , `Assoc
-          [ "cluster", `String cluster_name
-          ; "workspace_id", `String workspace_id
-          ; "topology_available", `Bool topology_available
-          ; "topology_source", `String degraded_source
-          ; "total_units", Json_util.int_opt_to_json (int_field_opt "total_units" topology_summary)
-          ; ( "managed_units"
-            , Json_util.int_opt_to_json (int_field_opt "managed_unit_count" topology_summary) )
-          ; ( "live_agents"
-            , Json_util.int_opt_to_json (int_field_opt "live_agent_count" topology_summary) )
-          ; ( "active_operations"
-            , Json_util.int_opt_to_json (int_field_opt "active_operation_count" topology_summary) )
-          ; ( "stale_units"
-            , Json_util.int_opt_to_json (int_field_opt "stale_unit_count" topology_summary) )
           ] )
     ; ( "agent_health"
       , `Assoc

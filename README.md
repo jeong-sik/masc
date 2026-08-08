@@ -290,7 +290,7 @@ Keeper → runtime assignment is done in `runtime.toml` (the keeper toml does no
 albini = "<provider>.<model>"   # replace with an id from config/runtime.toml
 ```
 
-If the selected runtime uses a cloud provider, export the provider credentials before starting the server. Treat [`config/runtime.toml`](config/runtime.toml) and [`docs/runtime-tunables.md`](docs/runtime-tunables.md) as the source of truth for runtime IDs and environment knobs instead of copying provider key names into docs.
+If the selected runtime uses a cloud provider, export the provider credentials before starting the server. Runtime IDs come from [`config/runtime.toml`](config/runtime.toml); applied environment configuration is exposed by the typed `masc_config` tool and `/api/v1/dashboard/config`.
 
 ---
 

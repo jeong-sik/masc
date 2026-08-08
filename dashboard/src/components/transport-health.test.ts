@@ -23,7 +23,6 @@ import {
   http2Tone,
   staleTone,
   agentPoolTone,
-  formatMetricValue,
   transportTruthLine,
   transportEyebrow,
   webrtcEyebrow,
@@ -38,9 +37,6 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
     summary: {
       primary_path: 'streamable_http',
       queue_pressure: 'steady',
-      recent_messages: null,
-      recent_messages_available: false,
-      recent_messages_source: 'metrics_only',
       external_fanout_targets: 0,
     },
     sse: {
@@ -64,7 +60,6 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       hot_sessions: [],
     },
     grpc: {
-      enabled: true,
       configured: true,
       listening: true,
       port: 50052,
@@ -75,7 +70,6 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       events_dropped: 0,
     },
     websocket: {
-      enabled: true,
       configured: true,
       listening: true,
       mode: 'standalone',
@@ -92,7 +86,6 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       },
     },
     webrtc: {
-      enabled: true,
       configured: true,
       signaling_available: true,
       signaling_mode: 'shared_http',
@@ -106,34 +99,27 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       endpoint: '/mcp',
       observer_stream: '/mcp?sse_kind=observer',
       presence_stream: '/events/presence',
-      managed_endpoint: '/mcp/managed',
-      delete_endpoint: '/mcp',
-      default_transport: 'streamable_http',
       supports_post: true,
       supports_sse_upgrade: true,
-      supports_delete: true,
     },
     http2: {
       listener_mode: 'h2_only',
       multiplex_ready: true,
-      prior_knowledge_path: '/mcp',
-    },
-    cluster: {
-      cluster: 'default',
-      workspace_id: 'default',
-      topology_available: false,
-      topology_source: 'metrics_only',
-      total_units: null,
-      managed_units: null,
-      live_agents: null,
-      active_operations: null,
-      stale_units: null,
     },
     agent_health: {
       stale_total: 0,
       lifecycle_dispatch_rejections_total: 0,
     },
     generated_at: '2026-04-02T00:00:00Z',
+    projection_diagnostics: {
+      source: 'cached_surface',
+      cache_state: 'fresh',
+      last_success_at: '2026-04-02T00:00:00Z',
+      last_attempt_at: null,
+      last_error_at: null,
+      stale_reason: null,
+      stale_age_ms: null,
+    },
     ...overrides,
   }
 }
@@ -186,7 +172,6 @@ describe('TransportHealthPanel', () => {
     const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
       sampleResponse({
         webrtc: {
-          enabled: true,
           configured: true,
           signaling_available: false,
           signaling_mode: 'shared_http',
@@ -214,45 +199,15 @@ describe('TransportHealthPanel', () => {
     expect(container.textContent).toContain('shared_http')
     expect(container.innerHTML).toContain('시그널링 중단')
     expect(container.innerHTML).not.toContain('2 ICE')
-    expect(container.textContent).toContain('namespace default')
     expect(container.textContent).toContain('프레즌스 스트림')
     expect(container.textContent).toContain('/events/presence')
-  })
-
-  it('renders namespace chip with cluster prefix for non-default clusters', async () => {
-    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
-      sampleResponse({
-        cluster: {
-          cluster: 'prod',
-          workspace_id: 'default',
-          topology_available: false,
-          topology_source: 'metrics_only',
-          total_units: null,
-          managed_units: null,
-          live_agents: null,
-          active_operations: null,
-          stale_units: null,
-        },
-      }),
-    )
-
-    const { TransportHealthPanel } = await loadComponentWithApi({
-      fetchTransportHealth,
-      lastEvent: signal(null),
-    })
-
-    render(html`<${TransportHealthPanel} />`, container)
-    await flushUi()
-
-    expect(fetchTransportHealth).toHaveBeenCalled()
-    expect(container.textContent).toContain('prod / namespace default')
   })
 
   it('renders live-vs-cache truth line when projection diagnostics exist', async () => {
     const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
       sampleResponse({
         projection_diagnostics: {
-          source: 'live_metrics',
+          source: 'cached_surface',
           cache_state: 'fresh',
           last_success_at: '2026-04-15T10:00:00Z',
           last_attempt_at: '2026-04-15T10:00:01Z',
@@ -271,7 +226,7 @@ describe('TransportHealthPanel', () => {
     render(html`<${TransportHealthPanel} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('live_metrics')
+    expect(container.textContent).toContain('cached_surface')
     expect(container.textContent).toContain('cache fresh')
     expect(container.textContent).toContain('last ok 2026-04-15T10:00:00Z')
   })
@@ -282,9 +237,6 @@ describe('TransportHealthPanel', () => {
         summary: {
           primary_path: 'streamable_http',
           queue_pressure: 'high',
-          recent_messages: null,
-          recent_messages_available: false,
-          recent_messages_source: 'metrics_only',
           external_fanout_targets: 0,
         },
         sse: {
@@ -335,7 +287,6 @@ describe('TransportHealthPanel', () => {
     const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
       sampleResponse({
         grpc: {
-          enabled: true,
           configured: true,
           listening: true,
           port: 50052,
@@ -457,7 +408,7 @@ describe('filterHotSessions', () => {
   const sessions: HotSession[] = [
     { session_id: 'aaaa1111-2222-3333-4444-555566667777', kind: 'observer', queue_depth: 5, last_event_id: 101, idle_seconds: 3 },
     { session_id: 'bbbb9999-8888-7777-6666-555544443333', kind: 'agent_stream', queue_depth: 12, last_event_id: 202, idle_seconds: 9 },
-    { session_id: 'cccc0000-1111-2222-3333-444455556666', kind: 'external', queue_depth: 3, last_event_id: 303, idle_seconds: 30 },
+    { session_id: 'cccc0000-1111-2222-3333-444455556666', kind: 'presence', queue_depth: 3, last_event_id: 303, idle_seconds: 30 },
   ]
 
   it('returns the input reference unchanged when query is empty', () => {
@@ -694,17 +645,6 @@ describe('staleTone', () => {
   })
 })
 
-describe('formatMetricValue', () => {
-  it.each([
-    [null, 'n/a'],
-    [0, 0],
-    [42, 42],
-    [-1, -1],
-  ] as const)('formatMetricValue(%s) → %s', (input, expected) => {
-    expect(formatMetricValue(input)).toBe(expected)
-  })
-})
-
 describe('transportEyebrow', () => {
   it.each([
     [false, true, 50052, '비활성'],
@@ -720,9 +660,6 @@ function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData
     summary: {
       primary_path: 'streamable_http',
       queue_pressure: 'steady',
-      recent_messages: null,
-      recent_messages_available: false,
-      recent_messages_source: 'metrics_only',
       external_fanout_targets: 0,
     },
     sse: {
@@ -740,12 +677,12 @@ function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData
       relay_retry_append: 0,
       relay_retry_broadcast: 0,
       relay_drop_total: 0,
+      relay_drop_queue: 0,
       relay_drop_append: 0,
       relay_drop_broadcast: 0,
       hot_sessions: [],
     },
     grpc: {
-      enabled: true,
       configured: true,
       listening: true,
       port: 50052,
@@ -756,7 +693,6 @@ function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData
       events_dropped: 0,
     },
     websocket: {
-      enabled: true,
       configured: true,
       listening: true,
       mode: 'standalone',
@@ -773,7 +709,6 @@ function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData
       },
     },
     webrtc: {
-      enabled: true,
       configured: true,
       signaling_available: true,
       signaling_mode: 'shared_http',
@@ -787,34 +722,27 @@ function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData
       endpoint: '/mcp',
       observer_stream: '/mcp?sse_kind=observer',
       presence_stream: '/events/presence',
-      managed_endpoint: '/mcp/managed',
-      delete_endpoint: '/mcp',
-      default_transport: 'streamable_http',
       supports_post: true,
       supports_sse_upgrade: true,
-      supports_delete: true,
     },
     http2: {
       listener_mode: 'h2_only',
       multiplex_ready: true,
-      prior_knowledge_path: '/mcp',
-    },
-    cluster: {
-      cluster: 'default',
-      workspace_id: 'default',
-      topology_available: false,
-      topology_source: 'metrics_only',
-      total_units: null,
-      managed_units: null,
-      live_agents: null,
-      active_operations: null,
-      stale_units: null,
     },
     agent_health: {
       stale_total: 0,
       lifecycle_dispatch_rejections_total: 0,
     },
     generated_at: '2026-04-02T00:00:00Z',
+    projection_diagnostics: {
+      source: 'cached_surface',
+      cache_state: 'fresh',
+      last_success_at: '2026-04-02T00:00:00Z',
+      last_attempt_at: null,
+      last_error_at: null,
+      stale_reason: null,
+      stale_age_ms: null,
+    },
     ...overrides,
   } as unknown as TransportHealthData
 }
@@ -918,13 +846,10 @@ describe('agentPoolTone', () => {
 })
 
 describe('transportTruthLine', () => {
-  it('returns null when no projection_diagnostics', () => {
-    expect(transportTruthLine(makeData())).toBeNull()
-  })
   it('builds a line from source, cache state, and last success', () => {
     const data = makeData({
       projection_diagnostics: {
-        source: 'live_metrics',
+        source: 'cached_surface',
         cache_state: 'fresh',
         last_success_at: '2026-04-15T10:00:00Z',
         last_attempt_at: '2026-04-15T10:00:01Z',
@@ -933,12 +858,12 @@ describe('transportTruthLine', () => {
         stale_age_ms: null,
       },
     })
-    expect(transportTruthLine(data)).toBe('live_metrics · cache fresh · last ok 2026-04-15T10:00:00Z')
+    expect(transportTruthLine(data)).toBe('cached_surface · cache fresh · last ok 2026-04-15T10:00:00Z')
   })
   it('shows stale age when present instead of last success', () => {
     const data = makeData({
       projection_diagnostics: {
-        source: 'live_metrics',
+        source: 'cached_surface',
         cache_state: 'stale',
         last_success_at: '2026-04-15T10:00:00Z',
         last_attempt_at: '2026-04-15T10:00:01Z',
@@ -947,7 +872,7 @@ describe('transportTruthLine', () => {
         stale_age_ms: 1234,
       },
     })
-    expect(transportTruthLine(data)).toBe('live_metrics · cache stale · stale 1234ms')
+    expect(transportTruthLine(data)).toBe('cached_surface · cache stale · stale 1234ms')
   })
 })
 

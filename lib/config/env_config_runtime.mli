@@ -81,6 +81,9 @@ module Transport : sig
 
   val h2_mode_of_string : string -> h2_mode
   val h2_mode_to_string : h2_mode -> string
+  val configure_h2_from_env : unit -> h2_mode
+  val effective_h2_mode : unit -> h2_mode
+  val h2_snapshot_entry : Env_config_snapshot_core.entry
 
   val grpc_port : int
   val grpc_enabled : unit -> bool

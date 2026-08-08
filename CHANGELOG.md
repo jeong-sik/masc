@@ -611,7 +611,6 @@
 - Fixed `Execute` tool `rg` context path args.
 
 ### Fixed
-- Regenerated `runtime-tunables.md` to fix env knob catalog drift.
 - Resolved pre-existing CI gate failures (version truth, code-smell
   baseline drift, RFC numbering).
 

@@ -66,7 +66,7 @@ entry states why the site cannot route through the canonical surface. Summary:
   user-facing CLI output.
 - **Standalone CLI tools** (`bin/masc_trace.ml`,
   `bin/masc_tui_loader.ml`, `bin/masc_cost.ml`, `bin/masc_compaction_audit.ml`,
-  `bin/keeper_feature_proof_report.ml`, `bin/env_knob_catalog.ml`) — one-shot
+  `bin/keeper_feature_proof_report.ml`) — one-shot
   binaries; their I/O is the tool's user interface, not server logging.
 - **RFC-0079 legacy bridge** (`lib/server/server_startup_takeover.ml`,
   `lib/backend/backend.ml`, `lib/workspace/workspace_query.ml`,

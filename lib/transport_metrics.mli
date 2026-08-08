@@ -8,19 +8,8 @@
     - [masc_ws_*] for WebSocket transport
     - [masc_agent_heartbeat_*] for agent liveness
 
-    Internal: 35 helpers stay private — [sse_hot_sessions]
-    (Atomic.t state cell mutated by {!set_sse_queue_snapshot}),
-    [grpc_runtime_listening] / [ws_runtime_listening] (bool
-    Atomic.t cells mutated by the [set_*_runtime_listening]
-    functions), [grpc_enabled] /
-    [grpc_port] / [ws_port] (env-derived), [set_agent_heartbeat_age]
-    / [inc_agent_stale] (per-agent labels, internal-only), the
-    JSON helpers ([int_field], [int_field_opt],
-    [int_option_json], [workspace_id_from_config], [cluster_summary_json]),
-    [http_listener_mode], [primary_path], [queue_pressure],
-    [tcp_port_reachable], [hot_session_json], the
-    [ws_delivery_metric_names] data table + its type.  All
-    consumed only inside {!transport_health_json}'s pipeline. *)
+    Internal state cells and JSON projection helpers stay private; the typed
+    mutation and snapshot functions below are the public boundary. *)
 
 (** {1 SSE hot-queue snapshot} *)
 
@@ -158,10 +147,6 @@ val inc_grpc_backlog_replay_lines_scanned : ?delta:int -> unit -> unit
 val inc_grpc_backlog_replay_events_replayed : ?delta:int -> unit -> unit
 
 (** {1 Primary HTTP listener state} *)
-
-(** Records the typed HTTP mode selected once during server startup. Transport
-    health projects this value instead of re-reading the environment. *)
-val set_http_configured_mode : Env_config.Transport.h2_mode -> unit
 
 (** Marks the primary HTTP accept loop as listening.  [mode] is one of
     ["h1"], ["h2"], or ["auto"]. *)
@@ -313,15 +298,12 @@ val inc_agent_stale : unit -> unit
 
 (** {1 Transport health snapshot} *)
 
-(** [transport_health_json ~config] returns a JSON object with
+(** [transport_health_json ()] returns a JSON object with
     SSE / gRPC / WebSocket / agent-health metric values plus
     derived fields ([primary_path], [queue_pressure],
     [http_listener_mode]).  Reads metric values via
-    [Otel_metric_store.metric_value_or_zero] — never raises on missing
-    metrics.  [~config] is currently used for workspace-id
-    derivation; [cluster_summary_json] is intentionally [None]
-    to keep transport health metrics-only (no Workspace I/O). *)
-val transport_health_json : config:Workspace.config -> Yojson.Safe.t
+    [Otel_metric_store.metric_value_or_zero] and performs no Workspace I/O. *)
+val transport_health_json : unit -> Yojson.Safe.t
 
 val register_webrtc_metrics :
   is_enabled:(unit -> bool) ->

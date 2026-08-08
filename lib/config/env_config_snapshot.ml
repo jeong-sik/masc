@@ -107,12 +107,10 @@ let transport_entries =
        masc_ws_slice_fanout_skipped_total advances per skip. RFC #10119 \
        Phase 2. Set to false for emergency rollback only.";
     entry ~default:"true" "MASC_WEBRTC_ENABLED" "Enable WebRTC transport";
-    entry ~default:"auto" "MASC_USE_H2"
-      "HTTP mode (auto|0|h1_only|1|h2_only)";
+    Env_config_runtime.Transport.h2_snapshot_entry;
     entry ~default:"240" "MASC_STARTUP_WATCHDOG_SEC"
       "Startup watchdog timeout (seconds)";
-    entry ~default:"local" "MASC_AGENT_TRANSPORT"
-      "Agent transport (http|grpc|ws|webrtc|local)";
+    Masc_grpc_transport.snapshot_entry;
     entry ~default:"32" "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION"
       "Maximum concurrent JSON-RPC request dispatch fibers admitted from one \
        WebSocket session. 0 disables the per-session admission gate.";
@@ -506,45 +504,44 @@ let worker_entries =
       "Local runtime debug logging (feature flag)";
   ]
 
-let all_categories () =
+let category_specs =
   [
-    category "server"
-      (server_entries @ path_entries
-       @ docker_playground_entries @ test_entries);
-    category "auth" auth_entries;
-    category "transport" transport_entries;
-    category "storage" (storage_entries @ cache_entries @ memory_entries @ board_entries);
-    category "runtime"
-      (runtime_entries
-       @ message_gc_entries @ internal_timer_entries
-       @ sse_entries @ telemetry_entries
-       @ tool_entries);
-    category "rate_limiting" rate_limiting_entries;
-    category "inference"
-      (model_routing_entries @ oas_sse_entries @ local_runtime_entries);
-    category "keeper"
-      (keeper_entries
-       @ keeper_keepalive_entries @ keeper_metrics_entries
-       @ keeper_health_entries
-       @ docker_playground_entries
-       @ keeper_sandbox_entries);
-    category "keeper_execution"
-      (keeper_execution_entries @ decision_entries @ keeper_proactive_entries
-       @ keeper_grpc_entries);
-    category "autonomy" (autonomy_entries @ keeper_supervisor_entries);
-    category "dashboard" dashboard_entries;
-    category "operations"
-      (operator_entries @ orchestrator_entries);
-    category "channel" channel_gate_entries;
-    category "process"
-      shutdown_entries;
-    category "worker" worker_entries;
-    category "web_search" web_search_entries;
-    category "session" (session_entries @ tempo_entries);
+    ( "server"
+    , server_entries @ path_entries
+      @ docker_playground_entries @ test_entries );
+    "auth", auth_entries;
+    "transport", transport_entries;
+    "storage", storage_entries @ cache_entries @ memory_entries @ board_entries;
+    ( "runtime"
+    , runtime_entries
+      @ message_gc_entries @ internal_timer_entries
+      @ sse_entries @ telemetry_entries
+      @ tool_entries );
+    "rate_limiting", rate_limiting_entries;
+    "inference", model_routing_entries @ oas_sse_entries @ local_runtime_entries;
+    ( "keeper"
+    , keeper_entries
+      @ keeper_keepalive_entries @ keeper_metrics_entries
+      @ keeper_health_entries
+      @ docker_playground_entries
+      @ keeper_sandbox_entries );
+    ( "keeper_execution"
+    , keeper_execution_entries @ decision_entries @ keeper_proactive_entries
+      @ keeper_grpc_entries );
+    "autonomy", autonomy_entries @ keeper_supervisor_entries;
+    "dashboard", dashboard_entries;
+    "operations", operator_entries @ orchestrator_entries;
+    "channel", channel_gate_entries;
+    "process", shutdown_entries;
+    "worker", worker_entries;
+    "web_search", web_search_entries;
+    "session", session_entries @ tempo_entries;
   ]
 
-let valid_config_category_strings =
-  all_categories () |> List.map fst
+let all_categories () =
+  List.map (fun (name, entries) -> category name entries) category_specs
+
+let valid_config_category_strings = List.map fst category_specs
 
 let to_json ?server_meta ?generated_at ?cat () =
   let categories =

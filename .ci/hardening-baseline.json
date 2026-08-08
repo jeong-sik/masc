@@ -53,7 +53,6 @@
       "lib/voice_bridge_core/voice_bridge_core.ml:470:| None -> find_git_root_from (Sys.getcwd ())"
     ],
     "wildcard_silent_defaults": [
-      "bin/env_knob_catalog.ml:314:| _ -> ())",
       "bin/gen_tool_descriptors.ml:496:| _ -> ());",
       "bin/gen_tool_descriptors.ml:508:| _ -> ());",
       "bin/gen_tool_descriptors.ml:511:| _ -> ());",

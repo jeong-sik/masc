@@ -20,3 +20,6 @@ val configure_from_env : unit -> t
 
 (** String representation for logging. *)
 val to_string : t -> string
+
+(** Operator snapshot entry projected from the same typed process resolution. *)
+val snapshot_entry : Env_config_snapshot_core.entry

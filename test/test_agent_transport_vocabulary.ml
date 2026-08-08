@@ -21,6 +21,16 @@ let with_env value_opt f =
 
 let spelling () = T.from_env () |> T.to_string
 
+let snapshot_entry () =
+  Env_config_snapshot.all_categories ()
+  |> List.assoc "transport"
+  |> Yojson.Safe.Util.to_list
+  |> List.find (fun json ->
+    String.equal
+      (json |> Yojson.Safe.Util.member "env" |> Yojson.Safe.Util.to_string)
+      "MASC_AGENT_TRANSPORT")
+;;
+
 let accepted_spellings () =
   List.iter
     (fun raw ->
@@ -43,7 +53,13 @@ let invalid_values_are_rejected () =
 ;;
 
 let absent_value_selects_local () =
-  with_env None (fun () -> check string "absent" "local" (spelling ()))
+  with_env None (fun () ->
+    check string "absent" "local" (spelling ());
+    let snapshot = snapshot_entry () in
+    check string "default snapshot value" "local"
+      (snapshot |> Yojson.Safe.Util.member "value" |> Yojson.Safe.Util.to_string);
+    check string "default snapshot source" "default"
+      (snapshot |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string))
 ;;
 
 let configured_value_is_stable () =
@@ -52,7 +68,12 @@ let configured_value_is_stable () =
   with_env (Some "local") (fun () ->
     check string "retained" "grpc" (T.from_env () |> T.to_string);
     check string "configure is one-shot" "grpc"
-      (T.configure_from_env () |> T.to_string))
+      (T.configure_from_env () |> T.to_string);
+    let snapshot = snapshot_entry () in
+    check string "snapshot value" "grpc"
+      (snapshot |> Yojson.Safe.Util.member "value" |> Yojson.Safe.Util.to_string);
+    check string "snapshot source" "env"
+      (snapshot |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string))
 ;;
 
 let () =

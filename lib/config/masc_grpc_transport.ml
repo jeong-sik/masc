@@ -7,44 +7,58 @@ type t =
   | Webrtc
   | Local
 
+let env_name = "MASC_AGENT_TRANSPORT"
+let default = Local
+let description = "Agent transport (http|grpc|ws|webrtc|local)"
+
+let accepted_values =
+  [ "http", Http; "grpc", Grpc; "ws", Ws; "webrtc", Webrtc; "local", Local ]
+
 let of_env_value raw =
-  match raw with
-  | "http" -> Http
-  | "grpc" -> Grpc
-  | "ws" -> Ws
-  | "webrtc" -> Webrtc
-  | "local" -> Local
-  | _ ->
+  match List.assoc_opt raw accepted_values with
+  | Some transport -> transport
+  | None ->
     raise
       (Env_config_core.Config_error
          (Printf.sprintf
-            "malformed env MASC_AGENT_TRANSPORT=%S (expected http|grpc|ws|webrtc|local)"
-            raw))
+            "malformed env %s=%S (expected %s)"
+            env_name
+            raw
+            (accepted_values |> List.map fst |> String.concat "|")))
 ;;
 
-let read_env () =
-  match Sys.getenv_opt "MASC_AGENT_TRANSPORT" with
-  | None -> Local
-  | Some raw -> of_env_value raw
+type resolution =
+  { value : t
+  ; source : Env_config_snapshot_core.effective_source
+  }
+
+let resolve_env () =
+  match Sys.getenv_opt env_name with
+  | None ->
+    { value = default; source = Env_config_snapshot_core.Default }
+  | Some raw ->
+    { value = of_env_value raw; source = Env_config_snapshot_core.Environment }
 ;;
 
 let configured = Atomic.make None
 
 let rec configure_from_env () =
   match Atomic.get configured with
-  | Some transport -> transport
+  | Some resolution -> resolution.value
   | None ->
-    let transport = read_env () in
-    if Atomic.compare_and_set configured None (Some transport)
-    then transport
+    let resolution = resolve_env () in
+    if Atomic.compare_and_set configured None (Some resolution)
+    then resolution.value
     else configure_from_env ()
 ;;
 
-let from_env () =
+let effective_resolution () =
   match Atomic.get configured with
-  | Some transport -> transport
-  | None -> read_env ()
+  | Some resolution -> resolution
+  | None -> resolve_env ()
 ;;
+
+let from_env () = (effective_resolution ()).value
 
 let to_string = function
   | Http -> "http"
@@ -52,4 +66,14 @@ let to_string = function
   | Ws -> "ws"
   | Webrtc -> "webrtc"
   | Local -> "local"
+;;
+
+let snapshot_entry =
+  Env_config_snapshot_core.effective_entry
+    ~default:(to_string default)
+    ~read:(fun () ->
+      let resolution = effective_resolution () in
+      to_string resolution.value, resolution.source)
+    env_name
+    description
 ;;

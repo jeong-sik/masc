@@ -41,7 +41,7 @@ let prune_keeper_scoped_stores ~prune_dir ~masc_root =
         (fun acc store -> acc + prune_dir (Filename.concat keeper_dir store))
         0
         keeper_scoped_dated_stores)
-    (Filename.concat masc_root "keepers")
+    (Filename.concat masc_root Common.keepers_runtime_dirname)
 
 (* A flat-store file is [<name>.jsonl] or a numeric rotation sibling
    [<name>.jsonl.<n>] (runtime-manifests rotate whole files to [.jsonl.1],
@@ -103,7 +103,7 @@ let prune_keeper_scoped_flat_stores ~days ~masc_root =
           acc + prune_flat_jsonl_older_than ~days (Filename.concat keeper_dir store))
         0
         keeper_scoped_flat_stores)
-    (Filename.concat masc_root "keepers")
+    (Filename.concat masc_root Common.keepers_runtime_dirname)
 
 (* Top-level dated-JSONL stores under the masc root pruned by BOTH the
    startup pass and the 24h periodic pass. SSOT: replaces the two inline

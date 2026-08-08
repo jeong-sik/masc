@@ -205,7 +205,7 @@ let to_json (resolution : resolution) =
 let config_signature_exists config_dir =
   let runtime_toml = Filename.concat config_dir runtime_toml_filename in
   let prompts = Filename.concat config_dir "prompts" in
-  let keepers = Filename.concat config_dir "keepers" in
+  let keepers = Filename.concat config_dir Common.keepers_runtime_dirname in
   existing_dir config_dir
   && (existing_file runtime_toml
      || existing_dir prompts || existing_dir keepers)

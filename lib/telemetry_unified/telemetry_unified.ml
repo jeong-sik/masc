@@ -970,7 +970,7 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
               ~read_error ?coverage_gap ()),
         count )
     | Execution_receipt ->
-      let keepers_root = Filename.concat masc_root "keepers" in
+      let keepers_root = Filename.concat masc_root Common.keepers_runtime_dirname in
       let dirs = discover_execution_receipt_dirs masc_root in
       let dir_state =
         classify_store_dir Execution_receipt

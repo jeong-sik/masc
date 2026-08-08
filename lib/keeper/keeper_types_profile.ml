@@ -508,6 +508,4 @@ let keeper_meta_path config name =
        ~keeper_name:name
        Keeper_runtime_root_entry.Metadata)
 
-let session_base_dir (config : Workspace.config) =
-  let d = Filename.concat (Workspace.masc_root_dir config) "traces" in
-  ensure_dir d
+let session_base_dir (config : Workspace.config) = Keeper_fs.session_base_dir config

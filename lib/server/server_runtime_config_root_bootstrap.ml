@@ -170,7 +170,7 @@ let copy_missing_config_root_seed ~src ~dst =
       copy_missing_tree
         ~src:(Filename.concat src name)
         ~dst:(Filename.concat dst name));
-  Fs_compat.mkdir_p (Filename.concat dst "keepers")
+  Fs_compat.mkdir_p (Filename.concat dst Common.keepers_runtime_dirname)
 ;;
 
 let bootstrap_base_path_config_root ~base_path =

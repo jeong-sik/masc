@@ -130,8 +130,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_execute_path.mli` - shell-surface
 - `lib/keeper_tool_execute_timeout/keeper_tool_execute_timeout.ml` - shell-surface
 - `lib/keeper_tool_execute_timeout/keeper_tool_execute_timeout.mli` - shell-surface
-- `lib/keeper/keeper_tool_alias.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_alias.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_execute_typed_input.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_execute_typed_input.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_boundary.ml` - tool-surface-policy
@@ -156,8 +154,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_progress_identity.mli` - tool-surface-policy
 - `lib/keeper_tool_response/keeper_tool_response.ml` - tool-surface-policy
 - `lib/keeper_tool_response/keeper_tool_response.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_resolution.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_resolution.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_route_telemetry.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_route_telemetry.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface_ops.ml` - tool-surface-policy

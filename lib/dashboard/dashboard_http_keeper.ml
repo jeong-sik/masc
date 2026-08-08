@@ -735,8 +735,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 | Some keeper_id ->
                     `String (Keeper_id.Uid.to_string keeper_id)
                 | None -> `Null );
-              ("emoji", `String profile.emoji);
-              ("koreanName", `String profile.korean_name);
+              ("emoji", Json_util.string_opt_to_json (Dashboard_execution_helpers.profile_emoji_opt profile));
+              ("koreanName", Json_util.string_opt_to_json (Dashboard_execution_helpers.profile_korean_name_opt profile));
               ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
               ("generation", `Int m.runtime.nonce);
               ( "current_task_id",

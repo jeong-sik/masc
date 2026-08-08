@@ -81,9 +81,15 @@ type agent_profile = {
   primary_value : string option;
 }
 
-val get_agent_profile : string -> agent_profile
-(** Resolves the agent's profile through the persona
-    file → Neo4j cache → fallback chain. *)
+val get_agent_profile : string -> agent_profile option
+(** Resolves the agent's profile from live-backed surfaces (persona file
+    or Neo4j cache). Returns [None] when neither source has data, so the
+    caller can surface the absence instead of using a fabricated fallback. *)
+
+val profile_emoji_opt : agent_profile option -> string option
+val profile_korean_name_opt : agent_profile option -> string option
+(** Convenience accessors that map a resolved profile option to its
+    emoji / Korean name, returning [None] when the profile itself is missing. *)
 
 (** {1 JSON envelope helpers} *)
 

@@ -56,25 +56,38 @@ let dashboard_task_json config (task : Masc_domain.task) =
 let dashboard_agent_json (agent : Masc_domain.agent) =
   let profile = Dashboard_execution_helpers.get_agent_profile agent.name in
   let meta = agent.meta in
+  let profile_fields =
+    match profile with
+    | Some p ->
+        [ "emoji", `String p.emoji
+        ; "koreanName", `String p.korean_name
+        ; "traits", `List (List.map (fun t -> `String t) p.traits)
+        ; "interests", `List (List.map (fun i -> `String i) p.interests)
+        ; "activityLevel", Json_util.float_opt_to_json p.activity_level
+        ; "primaryValue", Json_util.string_opt_to_json p.primary_value
+        ]
+    | None ->
+        [ "emoji", `Null
+        ; "koreanName", `Null
+        ; "traits", `List []
+        ; "interests", `List []
+        ; "activityLevel", `Null
+        ; "primaryValue", `Null
+        ]
+  in
   `Assoc
-    [ "name", `String agent.name
-    ; "agent_type", `String agent.agent_type
-    ; ( "keeper_name"
-      , Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_name)) )
-    ; "keeper_id", Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_id))
-    ; "status", `String (Masc_domain.string_of_agent_status agent.status)
-    ; "current_task", Json_util.string_opt_to_json agent.current_task
-    ; "session_bound_at", `String agent.session_bound_at
-    ; "last_seen", `String agent.last_seen
-    ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
-    ; "emoji", `String profile.emoji
-    ; "koreanName", `String profile.korean_name
-    ; "model", `Null
-    ; "traits", `List (List.map (fun t -> `String t) profile.traits)
-    ; "interests", `List (List.map (fun i -> `String i) profile.interests)
-    ; "activityLevel", Json_util.float_opt_to_json profile.activity_level
-    ; "primaryValue", Json_util.string_opt_to_json profile.primary_value
-    ]
+    ([ "name", `String agent.name
+     ; "agent_type", `String agent.agent_type
+     ; ( "keeper_name"
+       , Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_name)) )
+     ; "keeper_id", Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_id))
+     ; "status", `String (Masc_domain.string_of_agent_status agent.status)
+     ; "current_task", Json_util.string_opt_to_json agent.current_task
+     ; "session_bound_at", `String agent.session_bound_at
+     ; "last_seen", `String agent.last_seen
+     ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
+     ; "model", `Null
+     ] @ profile_fields)
 ;;
 
 let dashboard_message_json (message : Masc_domain.message) =

@@ -628,8 +628,8 @@ let agent_json ~model_map (agent : Masc_domain.agent) =
     ; "session_bound_at", `String agent.session_bound_at
     ; "last_seen", `String agent.last_seen
     ; "capabilities", `List (List.map (fun value -> `String value) agent.capabilities)
-    ; "emoji", `String profile.emoji
-    ; "koreanName", `String profile.korean_name
+    ; "emoji", Json_util.string_opt_to_json (profile_emoji_opt profile)
+    ; "koreanName", Json_util.string_opt_to_json (profile_korean_name_opt profile)
     ; "model", model_value
     ]
 ;;

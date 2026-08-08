@@ -143,7 +143,9 @@ let load_persona_profile (persona_name : string) : agent_profile option =
         let traits = match trait with Some t -> [t] | None -> [] in
         Some
           {
-            emoji = "🤖";  (* generic default — enriched from Neo4j later *)
+            emoji =
+              Safe_ops.json_string_opt "emoji" json
+              |> Option.value ~default:"";
             korean_name = name_val;
             model;
             traits;
@@ -245,34 +247,25 @@ let merge_profiles ~(base : agent_profile) ~(overlay : agent_profile) : agent_pr
     primary_value = (match overlay.primary_value with Some _ -> overlay.primary_value | None -> base.primary_value);
   }
 
-(** Get full agent profile: persona + Neo4j merged -> hardcoded fallback *)
-let get_agent_profile (name : string) : agent_profile =
-  (* TODO(task-1823): The fallback below is a fake Keeper v2 dashboard field.
-     When neither persona files nor Neo4j data exist, we return hardcoded values
-     (emoji="🤖", korean_name=name) instead of live-backed surfaces.
-     A future change should either:
-       (a) require live-backed surfaces and raise/warn when no data is found, or
-       (b) populate from a guaranteed registry so no agent falls through. *)
+(** Get full agent profile from live-backed surfaces (persona file or Neo4j).
+    Returns [None] when neither source has data, so callers can surface the
+    absence explicitly instead of receiving a fabricated Keeper v2 fallback. *)
+let get_agent_profile (name : string) : agent_profile option =
   let persona_name = extract_persona_name name in
   let neo4j_profile = lookup_neo4j_profile persona_name in
   let persona_profile = load_persona_profile persona_name in
   match (persona_profile, neo4j_profile) with
   | (Some persona, Some neo4j) ->
       (* Merge: Neo4j has emoji/traits/interests, persona has model/korean_name *)
-      merge_profiles ~base:persona ~overlay:neo4j
-  | (Some persona, None) -> persona
-  | (None, Some neo4j) -> neo4j
+      Some (merge_profiles ~base:persona ~overlay:neo4j)
+  | (Some persona, None) -> Some persona
+  | (None, Some neo4j) -> Some neo4j
   | (None, None) ->
-      (* Generic fallback — no persona or Neo4j data available *)
-      {
-        emoji = "🤖";
-        korean_name = name;
-        model = None;
-        traits = [];
-        interests = [];
-        activity_level = None;
-        primary_value = None;
-      }
+      Log.Dashboard.warn "No live-backed profile for agent %s (persona or Neo4j)" name;
+      None
+
+let profile_emoji_opt profile = Option.map (fun p -> p.emoji) profile
+let profile_korean_name_opt profile = Option.map (fun p -> p.korean_name) profile
 
 let handoff_json ~surface ?command_surface ?operation_id ~label ~target_type ~target_id
     ~focus_kind () =

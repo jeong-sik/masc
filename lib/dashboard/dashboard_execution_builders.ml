@@ -194,8 +194,8 @@ let worker_state_of_agent
           ("signal_truth", `String signal_truth);
           ("evidence_source", `String evidence_source);
           ("active_task_count", `Int active_task_count);
-          ("emoji", `String profile.emoji);
-          ("koreanName", `String profile.korean_name);
+          ("emoji", Json_util.string_opt_to_json (profile_emoji_opt profile));
+          ("koreanName", Json_util.string_opt_to_json (profile_korean_name_opt profile));
           ("model", `Null);
           ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
           ("recent_event", Json_util.string_opt_to_json recent_output_preview);
@@ -374,8 +374,8 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
             ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
             ( "model",
               Json_util.string_opt_to_json (String_util.trim_to_option (string_field "active_model" keeper)) );
-            ("emoji", `String profile.emoji);
-            ("koreanName", `String profile.korean_name);
+            ("emoji", Json_util.string_opt_to_json (profile_emoji_opt profile));
+            ("koreanName", Json_util.string_opt_to_json (profile_korean_name_opt profile));
           ]);
   }
 

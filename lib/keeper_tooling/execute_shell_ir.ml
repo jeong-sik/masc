@@ -58,6 +58,8 @@ let validate_paths ~workdir ir =
   Exec_policy.validate_shell_ir_paths ~workdir ir
 ;;
 
+(* TEL-OK: pure admission step; callers record typed rejection details at the
+   product boundary before any external effect is authorized. *)
 let validate_dispatch
       ?(allow_pipes = true)
       ~workdir
@@ -81,6 +83,9 @@ let validate_dispatch
      | Ok () -> Ok (Validated_dispatch context.ast))
 ;;
 
+(* TEL-OK: execution telemetry remains with the caller that owns the effect:
+   Keeper Execute records authorization, streaming, elapsed time, and status;
+   read-only workspace operations retain their existing runtime telemetry. *)
 let dispatch_validated
       ?base_host_env
       ?timeout_sec

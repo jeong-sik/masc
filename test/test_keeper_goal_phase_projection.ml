@@ -381,6 +381,23 @@ let test_a_child_renders_under_its_parent () =
     (contains_in world "taking one is a move you can make (3)")
 ;;
 
+let test_all_descendants_render_at_their_full_depth () =
+  with_workspace @@ fun config ->
+  Goal_store.write_state config
+    { version = 1
+    ; updated_at = Masc_domain.now_iso ()
+    ; goals =
+        [ goal_in Goal_phase.Executing "goal-root" "root"
+        ; goal_child_of "goal-root" Goal_phase.Executing "goal-child" "child"
+        ; goal_child_of "goal-child" Goal_phase.Executing "goal-grandchild" "grandchild"
+        ]
+    };
+  let world = rendered_world_state config in
+  check bool "the complete parent chain is visible" true
+    (contains_in world
+       "- goal-root — root\n  - goal-child — child\n    - goal-grandchild — grandchild")
+;;
+
 (* A child whose parent is not in this list -- owned, terminal, or already served
    by a Task -- is its own invitation, so it must not be hidden by the nesting. *)
 let test_a_child_whose_parent_is_absent_stands_alone () =
@@ -433,6 +450,8 @@ let () =
             test_unowned_goals_reach_the_rendered_turn
         ; test_case "a child renders under its parent" `Quick
             test_a_child_renders_under_its_parent
+        ; test_case "all descendants render at their full depth" `Quick
+            test_all_descendants_render_at_their_full_depth
         ; test_case "a child whose parent is absent stands alone" `Quick
             test_a_child_whose_parent_is_absent_stands_alone
         ] )

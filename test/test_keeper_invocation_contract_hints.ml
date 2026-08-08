@@ -137,6 +137,39 @@ let test_capability_is_still_accepted_on_the_wire () =
       "an existing sender's capability must still parse, got %s"
       (C.request_error_to_string err)
 
+(* keeper.md states this for the Board -- "an unchanged status republished every
+   cycle crowds that view" -- and addresses it to "another Keeper". The same
+   failure on the operator's own transcript had no such sentence anywhere, and
+   the measurement is what that cost: over the ten hours after one server start,
+   keeper_surface_post ran 177 times and 172 of them were the literal string
+   "대기 중." to the dashboard, from one Keeper. The rule existed; it named the
+   wrong surface. *)
+
+let surface_post_description () =
+  match
+    List.find_opt
+      (fun (s : Masc_domain.tool_schema) -> String.equal s.name "keeper_surface_post")
+      Tool_shard_types.surface_tools
+  with
+  | Some s -> s.description
+  | None -> Alcotest.fail "keeper_surface_post must be in the surface shard"
+
+let test_surface_post_names_its_reader () =
+  let description = surface_post_description () in
+  Alcotest.(check bool)
+    "the endpoints are stated as read by a person"
+    true
+    (contains ~needle:"read by a person" description);
+  Alcotest.(check bool)
+    "repeating an unchanged status is named as the cost"
+    true
+    (contains ~needle:"unchanged status reposted every cycle" description);
+  Alcotest.(check bool)
+    "the alternative is stated, not implied"
+    true
+    (contains ~needle:"the turn ends without a post" description)
+;;
+
 let () =
   Alcotest.run "keeper_invocation_contract_hints"
     [ ( "undeclared_field_hint"
@@ -158,5 +191,9 @@ let () =
             test_capability_is_not_advertised
         ; Alcotest.test_case "capability is still accepted on the wire" `Quick
             test_capability_is_still_accepted_on_the_wire
+        ] )
+    ; ( "surface_post"
+      , [ Alcotest.test_case "names its reader and the cost of repeating" `Quick
+            test_surface_post_names_its_reader
         ] )
     ]

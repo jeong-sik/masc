@@ -14,7 +14,8 @@ let agent_core_provider_config (runtime : Runtime.t) =
   match runtime.execution with
   | Runtime_execution.Agent_core provider_config -> provider_config
   | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Claude_code _ ->
     failf "runtime %s is not an agent_core provider" runtime.id
 ;;
 
@@ -3192,7 +3193,9 @@ let test_codex_app_server_materializes_as_turn_runtime () =
          check string "cli path" "codex" config.cli_path;
          check (option string) "model" (Some "gpt-5.6-sol") config.model
        | Runtime_execution.Antigravity_cli _ ->
-         fail "codex-app-server was incorrectly materialized as antigravity-cli"))
+         fail "codex-app-server was incorrectly materialized as antigravity-cli"
+       | Runtime_execution.Claude_code _ ->
+         fail "codex-app-server was incorrectly materialized as claude-code"))
 ;;
 
 let test_codex_app_server_rejects_declared_credentials () =
@@ -3244,7 +3247,9 @@ let test_antigravity_cli_materializes_as_turn_runtime () =
          check string "cli path" "agy" config.cli_path;
          check (option string) "model" (Some "gemini-3.6-flash-low") config.model
        | Runtime_execution.Agent_core _ | Runtime_execution.Codex_app_server _ ->
-         fail "antigravity-cli was materialized through the wrong execution owner"))
+         fail "antigravity-cli was materialized through the wrong execution owner"
+       | Runtime_execution.Claude_code _ ->
+         fail "antigravity-cli was incorrectly materialized as claude-code"))
 ;;
 
 let test_antigravity_cli_rejects_declared_credentials () =

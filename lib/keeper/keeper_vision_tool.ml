@@ -88,7 +88,8 @@ let vision_runtime_candidates ()
   |> List.filter_map (fun (rt : Runtime.t) ->
        match rt.Runtime.execution with
        | Runtime_execution.Codex_app_server _
-       | Runtime_execution.Antigravity_cli _ -> None
+       | Runtime_execution.Antigravity_cli _
+       | Runtime_execution.Claude_code _ -> None
        | Runtime_execution.Agent_core provider_config ->
          let caps = Runtime_agent.input_capabilities_of_runtime rt in
          if Runtime_agent.caps_admit_required_modalities caps [ "image" ]

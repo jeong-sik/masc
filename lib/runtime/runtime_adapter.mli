@@ -38,5 +38,6 @@ val binding_to_execution
     {!Runtime_execution.Agent_core}. The exact [codex-app-server] protocol over
     a credential-free CLI transport becomes
     {!Runtime_execution.Codex_app_server} and the exact [antigravity-cli]
-    protocol materializes as {!Runtime_execution.Antigravity_cli}. Other CLI
+    protocol materializes as {!Runtime_execution.Antigravity_cli}; the exact
+    [claude-code] protocol materializes as {!Runtime_execution.Claude_code}. Other CLI
     protocols remain rejected. *)

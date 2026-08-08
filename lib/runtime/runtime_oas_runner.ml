@@ -84,7 +84,8 @@ let resolve_runtime_providers ~runtime_id () =
     match rt.Runtime.execution with
     | Runtime_execution.Agent_core provider_config -> Ok provider_config
     | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Antigravity_cli _ ->
+    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Claude_code _ ->
       Error
         (Printf.sprintf
            "runtime %S is owned by an official CLI client, not the OAS agent_core"

@@ -4,7 +4,8 @@
     [Codex_app_server] means the official Codex client owns the whole turn;
     MASC owns admission, process lifetime, and result projection.
     [Antigravity_cli] has the same official-client ownership boundary, with
-    Antigravity's built-in tool loop fixed to plan+sandbox execution. *)
+    Antigravity's built-in tool loop fixed to plan+sandbox execution.
+    [Claude_code] fixes Claude Code to plan mode and a read-only tool set. *)
 
 type codex_app_server =
   { cli_path : string
@@ -18,10 +19,17 @@ type antigravity_cli =
   ; timeout_s : float
   }
 
+type claude_code =
+  { cli_path : string
+  ; model : string option
+  ; timeout_s : float
+  }
+
 type t =
   | Agent_core of Llm_provider.Provider_config.t
   | Codex_app_server of codex_app_server
   | Antigravity_cli of antigravity_cli
+  | Claude_code of claude_code
 
 type checkpoint_owner =
   | Masc_oas

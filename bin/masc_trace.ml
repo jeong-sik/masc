@@ -58,11 +58,17 @@ let masc_root ~base_path = Config_dir_resolver.masc_root ~base_path
 
 let receipts_dir ~base_path ~keeper =
   List.fold_left Filename.concat (masc_root ~base_path)
-    [ "keepers"; keeper; "execution-receipts" ]
+    [ Common.keepers_runtime_dirname
+    ; keeper
+    ; Common.keeper_runtime_store_dirname Common.Keeper_execution_receipts
+    ]
 
 let runtime_manifests_dir ~base_path ~keeper =
   List.fold_left Filename.concat (masc_root ~base_path)
-    [ "keepers"; keeper; "runtime-manifests" ]
+    [ Common.keepers_runtime_dirname
+    ; keeper
+    ; Common.keeper_runtime_store_dirname Common.Keeper_runtime_manifests
+    ]
 
 let logs_dir ~base_path =
   List.fold_left Filename.concat (masc_root ~base_path) [ "logs" ]

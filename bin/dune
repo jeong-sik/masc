@@ -205,7 +205,7 @@
  (modules masc_trace)
  (public_name masc-trace)
  (package masc)
- (libraries yojson masc.config_dir_resolver))
+ (libraries yojson masc.config_dir_resolver masc_core))
 
 ;; TUI Dashboard - Terminal interface for multi-agent workspace
 

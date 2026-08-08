@@ -43,7 +43,7 @@ let watched_store_dirs =
   ; "oas-events"
   ; "telemetry"
   ; "tool_usage"
-  ; "trajectories"
+  ; Common.keeper_runtime_store_dirname Common.Keeper_trajectories
   ; Keeper_transition_audit.store_dirname
   ; "logs"
   ]

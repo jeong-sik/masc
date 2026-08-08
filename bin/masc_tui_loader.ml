@@ -75,8 +75,10 @@ let find_metrics_files (base_path : string) (keeper_name : string) : string list
   let metrics_dir = Filename.concat
     (Filename.concat
        (Filename.concat base_path Common.masc_dirname)
-       "keepers")
-    (Filename.concat keeper_name "metrics") in
+       Common.keepers_runtime_dirname)
+    (Filename.concat
+       keeper_name
+       (Common.keeper_runtime_store_dirname Common.Keeper_metrics)) in
   if not (Sys.file_exists metrics_dir && Sys.is_directory metrics_dir) then []
   else begin
     (* List year-month directories, pick the most recent *)

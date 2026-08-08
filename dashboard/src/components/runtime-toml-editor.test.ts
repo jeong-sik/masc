@@ -889,6 +889,7 @@ describe('RuntimeTomlEditor', () => {
       'openai-compatible-cli',
       'codex-app-server',
       'antigravity-cli',
+      'claude-code',
     ])
     expect(protocolOptions).not.toContain('messages-http')
     expect(protocolOptions).not.toContain('messages-cli')
@@ -925,6 +926,41 @@ describe('RuntimeTomlEditor', () => {
       expect(source).toContain('command = "/opt/masc/bin/agy"')
       expect(source).toContain('is-non-interactive = true')
       expect(source).not.toContain('[providers.antigravity_subscription.credentials]')
+    })
+  })
+
+  it('creates a Claude Code subscription provider with no credential input', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement, {
+      target: { value: 'claude' },
+    })
+    fireEvent.change(container.querySelector('[aria-label="새 provider protocol"]') as HTMLSelectElement, {
+      target: { value: 'claude-code' },
+    })
+
+    const command = container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement
+    const credential = container.querySelector('[aria-label="새 provider credential 종류"]') as HTMLSelectElement
+    expect(command.placeholder).toBe('/absolute/path/to/claude')
+    expect(credential.value).toBe('none')
+    expect(credential.disabled).toBe(true)
+    expect(container.textContent).toContain('plan + 읽기 전용 도구, 최대 12 client turns')
+    fireEvent.input(command, { target: { value: '/Users/operator/.local/bin/claude' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[providers.claude]')
+      expect(source).toContain('protocol = "claude-code"')
+      expect(source).toContain('command = "/Users/operator/.local/bin/claude"')
+      expect(source).toContain('is-non-interactive = true')
+      expect(source).not.toContain('[providers.claude.credentials]')
     })
   })
 

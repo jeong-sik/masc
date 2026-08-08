@@ -375,8 +375,10 @@ describe('RuntimeMonitor', () => {
                 input_tokens: 21,
                 output_tokens: 4,
                 thinking_tokens: 2,
-                cache_read_tokens: 7,
+                cache_creation_input_tokens: null,
+                cache_read_input_tokens: 7,
                 total_tokens: 25,
+                total_cost_usd: null,
               },
             },
           },
@@ -403,7 +405,57 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('session · bound')
     expect(container.textContent).toContain('turn · 2 · resumed')
     expect(container.textContent).toContain('auth · official session measured')
-    expect(container.textContent).toContain('provider usage · in 21 · out 4 · thinking 2 · cache 7 · total 25')
+    expect(container.textContent).toContain('provider usage · in 21 · out 4 · thinking 2 · cache read 7 · total 25')
+  })
+
+  it('renders Claude Code plan, cache, and cost evidence', async () => {
+    apiMocks.fetchRuntimeProviders.mockResolvedValueOnce({
+      providers: [{
+        provider: 'claude.opus',
+        runtime_id: 'claude.opus',
+        provider_id: 'claude',
+        protocol: 'claude-code',
+        status: 'verified',
+        models: ['claude-opus-5'],
+        verification: {
+          status: 'verified',
+          measured: true,
+          evidence: {
+            runtime_id: 'claude.opus',
+            observed_at: 1786239000,
+            outcome: 'success',
+            measurement: {
+              client: 'claude_code',
+              execution_mode: 'plan_read_only',
+              tool_owner: 'official_client',
+              permission_mode: 'plan',
+              session_bound: true,
+              resumed: true,
+              turn_count: 2,
+              tool_calls: 1,
+              usage: {
+                input_tokens: 21,
+                output_tokens: 4,
+                thinking_tokens: null,
+                cache_creation_input_tokens: 2,
+                cache_read_input_tokens: 7,
+                total_tokens: null,
+                total_cost_usd: 0.0125,
+              },
+            },
+          },
+        },
+      }],
+    })
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('client · claude_code') ?? false,
+      'Claude Code official client evidence',
+    )
+    expect(container.textContent).toContain('mode · plan_read_only')
+    expect(container.textContent).toContain('permission · plan')
+    expect(container.textContent).toContain('cache write 2 · cache read 7 · cost $0.0125')
   })
 
   it('labels configured official clients as unmeasured instead of inferring auth', async () => {

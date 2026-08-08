@@ -179,7 +179,16 @@ function transportField(provider: RuntimeTomlProvider): RuntimeProviderTransport
 }
 
 function officialClientCommandPlaceholder(protocol: RuntimeTomlProtocol): string {
-  return protocol === 'antigravity-cli' ? '/absolute/path/to/agy' : '/absolute/path/to/codex'
+  if (protocol === 'antigravity-cli') return '/absolute/path/to/agy'
+  if (protocol === 'claude-code') return '/absolute/path/to/claude'
+  return '/absolute/path/to/codex'
+}
+
+function officialClientBoundaryText(protocol: RuntimeTomlProtocol): string {
+  if (protocol === 'claude-code') {
+    return '기존 Claude Code 구독 로그인을 사용합니다. plan + 읽기 전용 도구, 최대 12 client turns로 실행하며 API key는 저장하지 않습니다.'
+  }
+  return '공식 클라이언트의 기존 구독 로그인을 사용합니다. API key는 저장하지 않으며 non-interactive 실행을 강제합니다.'
 }
 
 // Prototype rt-model-ctx label (runtime-editor.jsx:176) — now via the shared
@@ -799,7 +808,7 @@ export function RuntimeEnvironmentEditor({
                 </div>
                 <div class="rt-note">
                   ${isRuntimeTomlOfficialClientProtocol(newProvider.protocol)
-                    ? '공식 클라이언트의 기존 구독 로그인을 사용합니다. API key는 저장하지 않으며 non-interactive 실행을 강제합니다.'
+                    ? officialClientBoundaryText(newProvider.protocol)
                     : '일반 provider는 endpoint transport를 사용합니다.'}
                 </div>
                 <div class="rt-field">

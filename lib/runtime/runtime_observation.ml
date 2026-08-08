@@ -14,10 +14,12 @@
 type official_client_kind =
   | Codex
   | Antigravity
+  | Claude_code
 
 type official_client_execution_mode =
   | App_server
   | Plan_sandbox
+  | Plan_read_only
 
 type official_client_tool_owner =
   | Masc
@@ -26,9 +28,11 @@ type official_client_tool_owner =
 type official_client_usage =
   { input_tokens : int
   ; output_tokens : int
-  ; thinking_tokens : int
-  ; cache_read_tokens : int
-  ; total_tokens : int
+  ; thinking_tokens : int option
+  ; cache_creation_input_tokens : int option
+  ; cache_read_input_tokens : int
+  ; total_tokens : int option
+  ; total_cost_usd : float option
   }
 
 type official_client_measurement =
@@ -468,11 +472,13 @@ let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
 let official_client_kind_to_string = function
   | Codex -> "codex"
   | Antigravity -> "antigravity"
+  | Claude_code -> "claude_code"
 ;;
 
 let official_client_execution_mode_to_string = function
   | App_server -> "app_server"
   | Plan_sandbox -> "plan_sandbox"
+  | Plan_read_only -> "plan_read_only"
 ;;
 
 let official_client_tool_owner_to_string = function
@@ -484,9 +490,12 @@ let official_client_usage_to_json (usage : official_client_usage) =
   `Assoc
     [ "input_tokens", `Int usage.input_tokens
     ; "output_tokens", `Int usage.output_tokens
-    ; "thinking_tokens", `Int usage.thinking_tokens
-    ; "cache_read_tokens", `Int usage.cache_read_tokens
-    ; "total_tokens", `Int usage.total_tokens
+    ; "thinking_tokens", Json_util.int_opt_to_json usage.thinking_tokens
+    ; ( "cache_creation_input_tokens"
+      , Json_util.int_opt_to_json usage.cache_creation_input_tokens )
+    ; "cache_read_input_tokens", `Int usage.cache_read_input_tokens
+    ; "total_tokens", Json_util.int_opt_to_json usage.total_tokens
+    ; "total_cost_usd", Json_util.float_opt_to_json usage.total_cost_usd
     ]
 ;;
 

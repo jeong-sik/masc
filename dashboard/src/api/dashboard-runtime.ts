@@ -148,14 +148,16 @@ export interface DashboardRuntimeDeclaredSpec {
 export interface DashboardOfficialClientUsage {
   input_tokens: number
   output_tokens: number
-  thinking_tokens: number
-  cache_read_tokens: number
-  total_tokens: number
+  thinking_tokens?: number | null
+  cache_creation_input_tokens?: number | null
+  cache_read_input_tokens: number
+  total_tokens?: number | null
+  total_cost_usd?: number | null
 }
 
 export interface DashboardOfficialClientMeasurement {
-  client: 'codex' | 'antigravity'
-  execution_mode: 'app_server' | 'plan_sandbox'
+  client: 'codex' | 'antigravity' | 'claude_code'
+  execution_mode: 'app_server' | 'plan_sandbox' | 'plan_read_only'
   tool_owner: 'masc' | 'official_client'
   permission_mode?: string | null
   session_bound: boolean
@@ -656,24 +658,31 @@ function decodeOfficialClientUsage(raw: unknown): DashboardOfficialClientUsage |
   if (!isRecord(raw)) return null
   const inputTokens = asNumber(raw.input_tokens)
   const outputTokens = asNumber(raw.output_tokens)
-  const thinkingTokens = asNumber(raw.thinking_tokens)
-  const cacheReadTokens = asNumber(raw.cache_read_tokens)
-  const totalTokens = asNumber(raw.total_tokens)
+  const thinkingTokens = raw.thinking_tokens == null ? null : asNumber(raw.thinking_tokens)
+  const cacheCreationInputTokens = raw.cache_creation_input_tokens == null
+    ? null
+    : asNumber(raw.cache_creation_input_tokens)
+  const cacheReadInputTokens = asNumber(raw.cache_read_input_tokens)
+  const totalTokens = raw.total_tokens == null ? null : asNumber(raw.total_tokens)
+  const totalCostUsd = raw.total_cost_usd == null ? null : asNumber(raw.total_cost_usd)
+  const optionalTokenCounts = [thinkingTokens, cacheCreationInputTokens, totalTokens]
   if (
     inputTokens == null
     || outputTokens == null
-    || thinkingTokens == null
-    || cacheReadTokens == null
-    || totalTokens == null
-    || ![inputTokens, outputTokens, thinkingTokens, cacheReadTokens, totalTokens]
+    || cacheReadInputTokens == null
+    || ![inputTokens, outputTokens, cacheReadInputTokens]
       .every(value => Number.isSafeInteger(value) && value >= 0)
+    || !optionalTokenCounts.every(value => value == null || (Number.isSafeInteger(value) && value >= 0))
+    || (totalCostUsd != null && (!Number.isFinite(totalCostUsd) || totalCostUsd < 0))
   ) return null
   return {
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     thinking_tokens: thinkingTokens,
-    cache_read_tokens: cacheReadTokens,
+    cache_creation_input_tokens: cacheCreationInputTokens,
+    cache_read_input_tokens: cacheReadInputTokens,
     total_tokens: totalTokens,
+    total_cost_usd: totalCostUsd,
   }
 }
 
@@ -687,8 +696,8 @@ function decodeOfficialClientMeasurement(raw: unknown): DashboardOfficialClientM
   const turnCount = asNumber(raw.turn_count)
   const toolCalls = asNumber(raw.tool_calls)
   if (
-    (client !== 'codex' && client !== 'antigravity')
-    || (executionMode !== 'app_server' && executionMode !== 'plan_sandbox')
+    (client !== 'codex' && client !== 'antigravity' && client !== 'claude_code')
+    || (executionMode !== 'app_server' && executionMode !== 'plan_sandbox' && executionMode !== 'plan_read_only')
     || (toolOwner !== 'masc' && toolOwner !== 'official_client')
     || sessionBound == null
     || resumed == null

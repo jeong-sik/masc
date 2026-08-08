@@ -60,10 +60,12 @@ type runtime_fallback_event = {
 type official_client_kind =
   | Codex
   | Antigravity
+  | Claude_code
 
 type official_client_execution_mode =
   | App_server
   | Plan_sandbox
+  | Plan_read_only
 
 type official_client_tool_owner =
   | Masc
@@ -72,9 +74,11 @@ type official_client_tool_owner =
 type official_client_usage =
   { input_tokens : int
   ; output_tokens : int
-  ; thinking_tokens : int
-  ; cache_read_tokens : int
-  ; total_tokens : int
+  ; thinking_tokens : int option
+  ; cache_creation_input_tokens : int option
+  ; cache_read_input_tokens : int
+  ; total_tokens : int option
+  ; total_cost_usd : float option
   }
 
 type official_client_measurement =

@@ -362,9 +362,11 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
             Some
               { input_tokens = turn.usage.input_tokens
               ; output_tokens = turn.usage.output_tokens
-              ; thinking_tokens = turn.usage.thinking_tokens
-              ; cache_read_tokens = turn.usage.cache_read_tokens
-              ; total_tokens = turn.usage.total_tokens
+              ; thinking_tokens = Some turn.usage.thinking_tokens
+              ; cache_creation_input_tokens = None
+              ; cache_read_input_tokens = turn.usage.cache_read_tokens
+              ; total_tokens = Some turn.usage.total_tokens
+              ; total_cost_usd = None
               }
         }
       in

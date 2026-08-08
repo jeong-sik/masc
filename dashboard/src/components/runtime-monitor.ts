@@ -178,13 +178,18 @@ function runtimeStatusLabel(provider: DashboardRuntimeProviderSnapshot): string 
 function officialClientUsageText(provider: DashboardRuntimeProviderSnapshot): string | null {
   const usage = provider.verification?.evidence?.measurement.usage
   if (!usage) return null
-  return [
+  const values = [
     `in ${formatNumber(usage.input_tokens)}`,
     `out ${formatNumber(usage.output_tokens)}`,
-    `thinking ${formatNumber(usage.thinking_tokens)}`,
-    `cache ${formatNumber(usage.cache_read_tokens)}`,
-    `total ${formatNumber(usage.total_tokens)}`,
-  ].join(' · ')
+  ]
+  if (usage.thinking_tokens != null) values.push(`thinking ${formatNumber(usage.thinking_tokens)}`)
+  if (usage.cache_creation_input_tokens != null) {
+    values.push(`cache write ${formatNumber(usage.cache_creation_input_tokens)}`)
+  }
+  values.push(`cache read ${formatNumber(usage.cache_read_input_tokens)}`)
+  if (usage.total_tokens != null) values.push(`total ${formatNumber(usage.total_tokens)}`)
+  if (usage.total_cost_usd != null) values.push(`cost $${usage.total_cost_usd.toFixed(4)}`)
+  return values.join(' · ')
 }
 
 function OfficialClientEvidence({ provider }: { provider: DashboardRuntimeProviderSnapshot }) {

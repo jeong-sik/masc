@@ -126,6 +126,35 @@ max-context = 128000
     })
   })
 
+  it('projects the Claude Code subscription boundary without credentials', () => {
+    const environment = parseRuntimeTomlEnvironment(`[runtime]
+default = "claude.opus"
+
+[providers.claude]
+display-name = "Claude Code Subscription"
+protocol = "claude-code"
+command = "/Users/operator/.local/bin/claude"
+is-non-interactive = true
+
+[models.opus]
+api-name = "claude-opus-5"
+max-context = 128000
+
+[claude.opus]
+`)
+    expect(environment.providers[0]).toMatchObject({
+      protocol: 'claude-code',
+      transportKind: 'command',
+      command: '/Users/operator/.local/bin/claude',
+      credentialType: 'none',
+      isNonInteractive: true,
+    })
+    expect(environment.models[0]).toMatchObject({
+      apiName: 'claude-opus-5',
+      maxContext: 128000,
+    })
+  })
+
   it('projects runtime routing lanes and keeper assignments from runtime.toml source', () => {
     const withRouting = `${sourceText.replace(
       'default = "runpod_mtp.qwen"',

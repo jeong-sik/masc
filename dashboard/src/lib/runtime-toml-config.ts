@@ -726,6 +726,7 @@ export const RUNTIME_TOML_PROTOCOLS = [
   'messages-cli',
   'codex-app-server',
   'antigravity-cli',
+  'claude-code',
 ] as const
 
 export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
@@ -739,7 +740,7 @@ export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
 // `Runtime.materialize_config`'s `List.filter_map` silently drops their bindings
 // from the live runtime list instead of failing the save
 // (lib/runtime/runtime_adapter.ml:183-203, lib/runtime/runtime.ml:239).
-// This is an allow-list of materializable endpoint protocols, so a future 6th
+// This is an allow-list of materializable endpoint protocols, so a future 7th
 // protocol defaults to non-creatable until reviewed.
 export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
   'openai-compatible-http',
@@ -747,6 +748,7 @@ export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
   'openai-compatible-cli',
   'codex-app-server',
   'antigravity-cli',
+  'claude-code',
 ] as const
 
 export type RuntimeTomlCreatableProtocol = (typeof RUNTIME_TOML_CREATABLE_PROTOCOLS)[number]
@@ -756,7 +758,9 @@ export function isRuntimeTomlCreatableProtocol(protocol: string): protocol is Ru
 }
 
 export function isRuntimeTomlOfficialClientProtocol(protocol: string): boolean {
-  return protocol === 'codex-app-server' || protocol === 'antigravity-cli'
+  return protocol === 'codex-app-server'
+    || protocol === 'antigravity-cli'
+    || protocol === 'claude-code'
 }
 
 const RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS = new Set([

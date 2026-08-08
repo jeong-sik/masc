@@ -239,7 +239,7 @@ let () =
          refactor: it exercised the deleted [Tool_catalog.tool_group] display
          classifier (and was already failing on base — it asserted richer
          categories the classifier never produced). *)
-      ( "verify_handler_coverage",
+      ( "handler binding registers through Tool_dispatch",
         [
           test_case "Tag_dispatch binding not in verify missing" `Quick (fun () ->
             let spec =
@@ -253,9 +253,10 @@ let () =
             in
             register_test_metadata "__test_spec_tag_dispatch";
             Tool_spec.register spec;
-            let missing = Tool_spec.verify_handler_coverage () in
-            check bool "Tag_dispatch not in missing" false
-              (List.mem "__test_spec_tag_dispatch" missing));
+            (* Tag_dispatch routes through the module tag, so [register] must
+               not put a name in the handler registry. *)
+            check bool "Tag_dispatch registers no direct handler" false
+              (Tool_dispatch.is_registered "__test_spec_tag_dispatch"));
           test_case "Direct binding registers handler" `Quick (fun () ->
             let name = "__test_spec_direct_handler" in
             let spec =
@@ -270,9 +271,6 @@ let () =
             register_test_metadata name;
             Tool_spec.register spec;
             check bool "handler registered in Tool_dispatch" true
-              (Tool_dispatch.is_registered name);
-            let missing = Tool_spec.verify_handler_coverage () in
-            check bool "not in missing" false
-              (List.mem name missing));
+              (Tool_dispatch.is_registered name));
         ] );
     ]

@@ -481,7 +481,7 @@ let acquire_pid_lock port =
   match Server_startup_takeover.acquire_pid_lock port with
   | Server_startup_takeover.Acquired -> ()
   | Server_startup_takeover.Already_running { pid } ->
-      Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+      Log.startup_console ~level:Log.Error ~module_name:"Server"
         (Printf.sprintf
            "[FATAL] Another MASC server (PID %d) is already running on port %d. Kill it first: kill %d"
            pid port pid);
@@ -492,13 +492,13 @@ let acquire_base_path_lock ~run_dir base_path =
   | Server_startup_takeover.Base_path_acquired lease -> lease
   | Server_startup_takeover.Base_path_already_owned { pid } ->
       let owner = Option.fold ~none:"unknown" ~some:string_of_int pid in
-      Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+      Log.startup_console ~level:Log.Error ~module_name:"Server"
         (Printf.sprintf
            "[FATAL] Another MASC runtime (PID %s) already owns base path %s"
            owner base_path);
       exit 1
   | Server_startup_takeover.Base_path_rejected rejection ->
-      Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+      Log.startup_console ~level:Log.Error ~module_name:"Server"
         (Printf.sprintf
            "[FATAL] BasePath ownership boundary rejected %s: %s"
            base_path
@@ -587,24 +587,9 @@ let run_cmd host port cli_base_path =
   Unix.putenv "MASC_BASE_PATH" canonical_base_path;
   Workspace_utils_backend_setup.cache_resolved_base_path canonical_base_path;
   Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
-  (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
-     Previous code wrote to base_path/logs/ which diverged from .masc/ when
-     base_path differed from the repo checkout directory. *)
+  (* Persist logs inside .masc/logs/, colocated with runtime state. *)
   let log_dir = Filename.concat masc_dir "logs" in
   Fs_compat.mkdir_p log_dir;
-  (* Migration: move .jsonl files from old base_path/logs/ if they exist *)
-  let old_log_dir = Filename.concat canonical_base_path "logs" in
-  (if Sys.file_exists old_log_dir && Sys.is_directory old_log_dir then
-     let files = try Sys.readdir old_log_dir with Sys_error _ -> [||] in
-     Array.iter (fun fname ->
-       if Filename.check_suffix fname ".jsonl" then begin
-         let src = Filename.concat old_log_dir fname in
-         let dst = Filename.concat log_dir fname in
-         if not (Sys.file_exists dst) then
-           (try Sys.rename src dst;
-                Log.Server.info "log migration: moved %s -> .masc/logs/" fname
-            with Sys_error _ -> ())
-          end) files);
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
   Eio_main.run @@ fun env ->

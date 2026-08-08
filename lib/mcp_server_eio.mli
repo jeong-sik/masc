@@ -15,14 +15,6 @@
 *)
 
 
-(** {1 Types} *)
-
-(** Server state - same as Mcp_server.server_state for compatibility *)
-type server_state = Mcp_server.server_state
-
-(** JSON-RPC request (re-exported for convenience) *)
-type jsonrpc_request = Mcp_server.jsonrpc_request
-
 (** Tool exposure profile for streamable HTTP endpoints. *)
 type tool_profile =
   | Full
@@ -32,7 +24,7 @@ type tool_profile =
 (** {1 JSON-RPC Helpers (re-exported)} *)
 
 val is_jsonrpc_response : Yojson.Safe.t -> bool
-val get_id : jsonrpc_request -> Yojson.Safe.t
+val get_id : Mcp_transport_protocol.jsonrpc_request -> Yojson.Safe.t
 val is_valid_request_id : Yojson.Safe.t -> bool
 val validate_initialize_params : Yojson.Safe.t option -> (unit, string) result
 
@@ -65,7 +57,7 @@ val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
 (** {1 State Management} *)
 
 module For_testing : sig
-  val create_state : base_path:string -> unit -> server_state
+  val create_state : base_path:string -> unit -> Mcp_server.server_state
   (** Create non-runtime state and explicitly disable workspace authentication.
       This constructor is isolated from the production bootstrap surface. *)
 end
@@ -91,7 +83,7 @@ val create_state_eio :
   mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   net:[> `Generic | `Unix] Eio.Net.ty Eio.Resource.t ->
   base_path:string ->
-  server_state
+  Mcp_server.server_state
 
 (** {1 Request Handling - Eio Native} *)
 
@@ -115,7 +107,7 @@ val handle_request :
   ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   ?auth_token:string ->
   ?internal_keeper_runtime:bool ->
-  server_state ->
+  Mcp_server.server_state ->
   string ->
   Yojson.Safe.t
 
@@ -131,7 +123,7 @@ val execute_tool_eio :
   ?invocation_ref:Tool_invocation_ref.t ->
   ?auth_token:string ->
   ?internal_keeper_runtime:bool ->
-  server_state ->
+  Mcp_server.server_state ->
   name:string ->
   arguments:Yojson.Safe.t ->
   Tool_result.result
@@ -150,4 +142,8 @@ val clear_resource_subscriptions_for_session : string -> unit
     @param sw Eio.Switch for structured concurrency
     @param env Eio environment (for stdin/stdout)
     @param state Server state *)
-val run_stdio : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> server_state -> unit
+val run_stdio :
+  sw:Eio.Switch.t ->
+  env:Eio_unix.Stdenv.base ->
+  Mcp_server.server_state ->
+  unit

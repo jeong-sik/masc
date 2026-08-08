@@ -77,7 +77,7 @@ let test_record_verdict_writes () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"task-1" ~req ~result ();
@@ -93,7 +93,7 @@ let test_record_verdict_reject () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   let req = make_req () in
   let result =
     make_result ~verdict:(AR.Reject "vague notes") ~gate:AR.Structured_tool ()
@@ -110,7 +110,7 @@ let test_record_verdict_hash_matches () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"task-3" ~req ~result ();
@@ -130,7 +130,7 @@ let test_record_human_label () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   Cal.record_human_label
     ~notes_hash:"abc123" ~human_verdict:Cal.Reject_label
     ~labeler:"vincent" ~reason:"work was incomplete";
@@ -151,7 +151,7 @@ let test_find_divergences_false_positive () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   let req = make_req ~title:"FP task" ~notes:"looks ok but not" () in
   let result = make_result ~verdict:AR.Approve ~gate:AR.Structured_tool () in
   Cal.record_verdict ~task_id:"t1" ~req ~result ();
@@ -172,7 +172,7 @@ let test_find_divergences_false_negative () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   let req = make_req ~title:"FN task" ~notes:"actually good work" () in
   let result =
     make_result ~verdict:(AR.Reject "unclear") ~gate:AR.Structured_tool ()
@@ -193,7 +193,7 @@ let test_find_divergences_agreement () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   let req = make_req ~title:"OK task" ~notes:"done correctly" () in
   let result = make_result ~verdict:AR.Approve () in
   Cal.record_verdict ~task_id:"t3" ~req ~result ();
@@ -209,7 +209,7 @@ let test_find_divergences_no_labels () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"t4" ~req ~result ();
@@ -225,7 +225,7 @@ let test_select_examples_max () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   (* Create 3 false positives *)
   for i = 1 to 3 do
     let title = Printf.sprintf "task-%d" i in
@@ -246,7 +246,7 @@ let test_select_examples_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   let examples = Cal.select_examples ~max_examples:5 in
   check int "empty when no data" 0 (List.length examples);
   Cal.reset_store_for_testing ()
@@ -275,7 +275,7 @@ let test_calibration_stats () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   (* 2 approvals, 1 rejection *)
   let req1 = make_req ~title:"t1" ~notes:"n1" () in
   Cal.record_verdict ~task_id:"id1" ~req:req1
@@ -310,7 +310,7 @@ let test_calibration_stats_cross_model_mix () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   Fun.protect ~finally:Cal.reset_store_for_testing @@ fun () ->
   (* Four verdicts:
      - same runtime (generator = evaluator)     → NOT cross-model
@@ -385,7 +385,7 @@ let test_on_harness_verdict_callback () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   let received = ref None in
   let req = make_req () in
   let result = make_result () in
@@ -402,7 +402,7 @@ let test_on_harness_verdict_with_collector () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   let collector = Agent_sdk.Eval.create_collector
     ~agent_name:"test-agent" ~run_id:"run-1" in
   let req = make_req () in
@@ -419,7 +419,7 @@ let test_on_harness_verdict_exception_safe () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.set_store ~base_dir:dir;
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"exc-1" ~req ~result

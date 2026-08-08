@@ -148,7 +148,7 @@ export {
   setGateMode,
 } from './dashboard-gate'
 export { pruneSchedules } from './dashboard-schedule'
-export { fetchDashboardBriefing, fetchDashboardMission } from './dashboard-mission'
+export { fetchDashboardBriefing } from './dashboard-mission'
 
 export type {
   DashboardRuntimeProviderSnapshot,

@@ -36,7 +36,7 @@ let test_round_trip_all_sources () =
        let decoded = Log.Ring.entry_of_json (Log.Ring.entry_to_json original) in
        Alcotest.(check bool)
          (Log.source_to_string source) true (decoded.source = source))
-    [ Log.Structured; Log.Legacy_stderr; Log.Legacy_traceln; Log.Client_tool_host ]
+    [ Log.Structured; Log.Startup_console; Log.Client_tool_host ]
 
 let test_round_trip_optional_fields () =
   let with_optional =

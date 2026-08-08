@@ -12,11 +12,7 @@ type entry =
   { seq : int
   ; ts : string                  (* ISO8601 UTC, e.g. "2026-04-19T14:32:15Z" *)
   ; level : string               (* canonical level — always set *)
-  ; raw_level : string           (* original pre-normalisation string *)
-  ; normalized_level : string    (* "DEBUG" | "INFO" | "WARN" | "ERROR" *)
-  ; source : string              (* "structured" | "legacy_stderr"
-                                    | "legacy_traceln" | "client_tool_host" *)
-  ; legacy_classified : bool
+  ; source : string              (* "structured" | "startup_console" | "client_tool_host" *)
   ; module_ : string             (* JSON field "module" — reserved keyword *)
   ; message : string
   ; details : string option      (* raw JSON string — parsed lazily by callers *)
@@ -67,10 +63,7 @@ let entry_of_yojson (json : Yojson.Safe.t) : entry =
   { seq = int_field json "seq"
   ; ts = string_field json "ts"
   ; level
-  ; raw_level = string_field ~default:level json "raw_level"
-  ; normalized_level = string_field ~default:level json "normalized_level"
   ; source = string_field ~default:"structured" json "source"
-  ; legacy_classified = bool_field json "legacy_classified"
   ; module_ = string_field json "module"
   ; message = string_field json "message"
   ; details
@@ -121,33 +114,24 @@ let fixture : response =
       [ { seq = 3
         ; ts = "2026-04-19T17:12:03Z"
         ; level = "ERROR"
-        ; raw_level = "ERROR"
-        ; normalized_level = "ERROR"
-        ; source = "structured"
-        ; legacy_classified = false
-        ; module_ = "Keeper"
+                    ; source = "structured"
+              ; module_ = "Keeper"
         ; message = "heartbeat check failed: timeout after 30s"
         ; details = Some {|{"request_id":"req-9aa1","session_id":"sess-0012"}|}
         }
       ; { seq = 2
         ; ts = "2026-04-19T17:12:02Z"
         ; level = "WARN"
-        ; raw_level = "WARN"
-        ; normalized_level = "WARN"
-        ; source = "structured"
-        ; legacy_classified = false
-        ; module_ = "Keeper"
+                    ; source = "structured"
+              ; module_ = "Keeper"
         ; message = "retry scheduled in 5s"
         ; details = None
         }
       ; { seq = 1
         ; ts = "2026-04-19T17:12:00Z"
         ; level = "INFO"
-        ; raw_level = "INFO"
-        ; normalized_level = "INFO"
-        ; source = "structured"
-        ; legacy_classified = false
-        ; module_ = "Server"
+                    ; source = "structured"
+              ; module_ = "Server"
         ; message = "masc server started on :8935"
         ; details = None
         }

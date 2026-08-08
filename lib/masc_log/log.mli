@@ -86,8 +86,7 @@ val error : ?ctx:string -> ?category:category -> ('a, unit, string, unit) format
 (** Mirror source kinds carried on every [Ring.entry]. *)
 type source =
   | Structured
-  | Legacy_stderr
-  | Legacy_traceln
+  | Startup_console
   | Client_tool_host
 
 val source_to_string : source -> string
@@ -95,14 +94,10 @@ val source_to_string : source -> string
     in [dashboard/src/api/schemas/logs.ts] reads this back via
     [source_of_string]. *)
 
-val legacy_stderr : level:level -> ?module_name:string -> string -> unit
-(** Mirror a stderr line into the dashboard log ring.  [~level] is
-    required as of RFC-0079; the prior [?level] option backed a
-    string-prefix classifier ([infer_legacy_level]) that has been removed. *)
-
-val legacy_traceln : level:level -> ?module_name:string -> string -> unit
-(** Mirror an [Eio.traceln]-style line into the dashboard log ring.
-    [~level] required (see [legacy_stderr]). *)
+val startup_console : level:level -> ?module_name:string -> string -> unit
+(** Write an initialization diagnostic without applying runtime log filtering,
+    and mirror it into the dashboard ring. Use only before server logging is
+    fully initialized or while acquiring the single-runtime ownership lease. *)
 
 (** In-memory ring buffer exposed for dashboard log viewer routes. *)
 module Ring : sig

@@ -82,9 +82,9 @@ module FileSystem = struct
     | Eio.Cancel.Cancelled _ as e ->
       Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
     | exn ->
-      Log.legacy_traceln ~level:Log.Debug ~module_name:"Backend"
+      Log.Backend.emit Log.Debug
         (Printf.sprintf
-           "[DEBUG] backend mutex %s observer failed for op=%s: %s"
+           "backend mutex %s observer failed for op=%s: %s"
            kind op (Printexc.to_string exn))
 
   (** Wrap a write critical section with acquire/held observers.
@@ -124,8 +124,8 @@ module FileSystem = struct
     (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 path
      with Eio.Cancel.Cancelled _ as e -> raise e
         | e ->
-            Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-              (Printf.sprintf "[WARN] mkdirs base failed: %s"
+            Log.Backend.emit Log.Warn
+              (Printf.sprintf "mkdirs base failed: %s"
                  (Printexc.to_string e)));
     {
       config;
@@ -256,8 +256,8 @@ module FileSystem = struct
          with Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
               if log_errors then
-                Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-                  (Printf.sprintf "[WARN] mkdirs failed: %s"
+                Log.Backend.emit Log.Warn
+                  (Printf.sprintf "mkdirs failed: %s"
                      (Printexc.to_string exn))
               else
                 raise exn)
@@ -707,8 +707,8 @@ module FileSystem = struct
            (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
             with Eio.Cancel.Cancelled _ as e -> raise e
                | e ->
-                   Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-                     (Printf.sprintf "[WARN] mkdirs failed: %s"
+                   Log.Backend.emit Log.Warn
+                     (Printf.sprintf "mkdirs failed: %s"
                         (Printexc.to_string e)))
        | None -> ());
 
@@ -775,8 +775,8 @@ module FileSystem = struct
            (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
             with Eio.Cancel.Cancelled _ as e -> raise e
                | e ->
-                   Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-                     (Printf.sprintf "[WARN] mkdirs failed: %s"
+                   Log.Backend.emit Log.Warn
+                     (Printf.sprintf "mkdirs failed: %s"
                         (Printexc.to_string e)))
        | None -> ());
 

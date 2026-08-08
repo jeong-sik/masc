@@ -52,22 +52,6 @@ let latest_seq () =
   | (entry : Log.Ring.entry) :: _ -> entry.seq
   | [] -> -1
 
-let test_legacy_traceln_records_metadata () =
-  let module_name = "TestLogLegacy" in
-  let message =
-    Printf.sprintf "[WARN] legacy warning %f" (Unix.gettimeofday ())
-  in
-  Log.legacy_traceln ~level:Log.Warn ~module_name message;
-  match find_entry ~module_name ~message with
-  | None -> Alcotest.fail "legacy traceln entry not found"
-  | Some (entry : Log.Ring.entry) ->
-      Alcotest.(check string)
-        "source" "legacy_traceln"
-        (Log.source_to_string entry.source);
-      Alcotest.(check string)
-        "level" "WARN"
-        (Log.level_to_string entry.level)
-
 let test_recent_since_seq_returns_only_new_entries () =
   let module_name = "TestLogDelta" in
   let baseline = latest_seq () in
@@ -203,8 +187,6 @@ let () =
   Alcotest.run "Masc_log" [
     ( "ring",
       [
-        Alcotest.test_case "legacy traceln records metadata" `Quick
-          test_legacy_traceln_records_metadata;
         Alcotest.test_case "recent since_seq returns only new entries" `Quick
           test_recent_since_seq_returns_only_new_entries;
         Alcotest.test_case "recent before_seq returns only older entries" `Quick

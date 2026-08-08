@@ -114,7 +114,8 @@ let test_task_inject_executes_after_confirmation () =
       in
       let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
       let pending_confirms =
-        snapshot |> Yojson.Safe.Util.member "pending_confirms"
+        snapshot |> Yojson.Safe.Util.member "pending_confirm_envelope"
+        |> Yojson.Safe.Util.member "items"
         |> Yojson.Safe.Util.to_list
       in
       Alcotest.(check int) "pending confirm count" 1 (List.length pending_confirms);
@@ -143,7 +144,8 @@ let test_task_inject_executes_after_confirmation () =
         (Yojson.Safe.Util.member "result" confirm_json <> `Null);
       let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
       let pending_confirms =
-        snapshot |> Yojson.Safe.Util.member "pending_confirms"
+        snapshot |> Yojson.Safe.Util.member "pending_confirm_envelope"
+        |> Yojson.Safe.Util.member "items"
         |> Yojson.Safe.Util.to_list
       in
       Alcotest.(check int) "pending confirm removed" 0

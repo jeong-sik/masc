@@ -106,8 +106,7 @@ const LEVEL_COLORS: Record<string, string> = {
 
 const SOURCE_LABELS: Record<string, string> = {
   structured: 'structured',
-  legacy_stderr: 'stderr',
-  legacy_traceln: 'trace line',
+  startup_console: 'startup console',
   client_tool_host: 'client tool-host',
   sse: 'sse',
 }
@@ -441,10 +440,8 @@ function sourceTone(source: string): string {
   switch (source) {
     case 'client_tool_host':
       return 'text-[var(--color-accent-fg)] bg-[var(--accent-10)] border-[var(--accent-22)]'
-    case 'legacy_stderr':
+    case 'startup_console':
       return 'text-[var(--bad-light)] bg-[var(--err-soft)] border-[var(--err-border)]'
-    case 'legacy_traceln':
-      return 'text-[var(--warn-fg)] bg-[var(--warn-soft)] border-[var(--warn-border)]'
     default:
       return 'text-[var(--color-fg-muted)] bg-[var(--color-bg-surface)] border-[var(--color-border-default)]'
   }

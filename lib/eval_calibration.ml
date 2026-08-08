@@ -113,13 +113,9 @@ let get_store () =
 (** Reset the store reference.  For testing only. *)
 let reset_store_for_testing () = store_ref := None
 
-(** Set the process-local verdict store to an explicit isolated directory.
-    Offline eval tooling uses this after verdict-store isolation checks; tests
-    use [set_store_for_testing] as a compatibility alias. *)
+(** Set the process-local verdict store to an explicit isolated directory. *)
 let set_store ~base_dir =
   store_ref := Some (Dated_jsonl.create ~base_dir ())
-
-let set_store_for_testing = set_store
 
 (** Resolve where an offline eval tool's [--record-verdicts] verdicts are
     written. Such a tool drives a real judge and persists verdicts; if those

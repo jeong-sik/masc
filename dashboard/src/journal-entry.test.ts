@@ -41,8 +41,7 @@ describe('journal severity helpers', () => {
 describe('normalizeJournalSource', () => {
   it('maps each recognized source string to its first-class variant', () => {
     expect(normalizeJournalSource('structured')).toBe('structured')
-    expect(normalizeJournalSource('legacy_stderr')).toBe('legacy_stderr')
-    expect(normalizeJournalSource('legacy_traceln')).toBe('legacy_traceln')
+    expect(normalizeJournalSource('startup_console')).toBe('startup_console')
     expect(normalizeJournalSource('sse')).toBe('sse')
   })
 

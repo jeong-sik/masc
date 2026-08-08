@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const apiMocks = vi.hoisted(() => ({
-  fetchDashboardMission: vi.fn(),
+  fetchDashboardBriefing: vi.fn(),
   fetchDashboardMissionBriefing: vi.fn(),
   fetchDashboardMissionSession: vi.fn(),
 }))
@@ -62,7 +62,7 @@ afterEach(() => {
 
 describe('refreshMissionSnapshot', () => {
   it('requests the mission endpoint without extra query flags', async () => {
-    apiMocks.fetchDashboardMission.mockResolvedValue(missionPayload)
+    apiMocks.fetchDashboardBriefing.mockResolvedValue(missionPayload)
 
     const missionActions = await import('./mission-actions')
     const missionStore = await import('./mission-store')
@@ -77,13 +77,13 @@ describe('refreshMissionSnapshot', () => {
           agent_briefs?: unknown[]
         }
       | null
-    expect(apiMocks.fetchDashboardMission).toHaveBeenCalledWith()
+    expect(apiMocks.fetchDashboardBriefing).toHaveBeenCalledWith()
     expect(mission?.summary?.workspace_health).toBe('ok')
     expect(mission?.agent_briefs).toHaveLength(1)
   })
 
   it('keeps the existing mission data when the cached mission is still initializing', async () => {
-    apiMocks.fetchDashboardMission
+    apiMocks.fetchDashboardBriefing
       .mockResolvedValueOnce(missionPayload)
       .mockResolvedValueOnce(initializingMissionPayload)
 

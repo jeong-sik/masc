@@ -357,8 +357,8 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
                  | Ok _ | Error _ -> loop remaining acc rest)
             | exception (Eio.Cancel.Cancelled _ as e) -> raise e
             | exception e ->
-                Log.legacy_traceln ~level:Log.Warn ~module_name:"Workspace"
-                  (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
+                Log.Workspace.emit Log.Warn
+                  (Printf.sprintf "Failed to read %s %s: %s" warn_label
                      name (Printexc.to_string e));
                 loop remaining acc rest
     in
@@ -396,9 +396,9 @@ let get_all_messages_raw config ~since_seq =
                  | Ok _ | Error _ -> loop acc rest)
             | exception (Eio.Cancel.Cancelled _ as e) -> raise e
             | exception e ->
-                Log.legacy_traceln ~level:Log.Warn ~module_name:"Workspace"
+                Log.Workspace.emit Log.Warn
                   (Printf.sprintf
-                     "[WARN] Failed to read workspace message %s: %s"
+                     "Failed to read workspace message %s: %s"
                      name (Printexc.to_string e));
                 loop acc rest
       in

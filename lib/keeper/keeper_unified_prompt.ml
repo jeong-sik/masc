@@ -919,8 +919,8 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
          list, because there taking the parent and taking the child are not two
          independent moves. A child whose parent is absent -- owned, terminal,
          or already served by a Task -- is its own invitation and stays at the
-         top level. Depth stops at one: [parent_goal_id] is a single link and
-         nesting further would trade the fact for a shape. *)
+         top level. Goal_store permits arbitrary parent depth, so the projection
+         follows the whole chain rather than dropping descendants. *)
       let unowned_block =
         match unowned_executing_goals_without_tasks ~config with
         | [] -> None
@@ -944,15 +944,29 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
             | None -> true
             | Some p -> not (List.exists (String.equal p) present)
           in
+          let rendered_ids = ref [] in
+          let rec render_subtree ~depth ((goal_id, _, _) as goal) =
+            if List.exists (String.equal goal_id) !rendered_ids
+            then []
+            else (
+              rendered_ids := goal_id :: !rendered_ids;
+              let indent = String.make (depth * 2) ' ' in
+              line ~indent goal
+              :: List.concat_map
+                   (render_subtree ~depth:(depth + 1))
+                   (children_of goal_id))
+          in
+          let rendered_roots =
+            goals
+            |> List.filter stands_alone
+            |> List.concat_map (render_subtree ~depth:0)
+          in
           let rendered =
-            List.concat_map
-              (fun ((goal_id, _, _) as goal) ->
-                 if not (stands_alone goal)
-                 then []
-                 else
-                   line ~indent:"" goal
-                   :: List.map (line ~indent:"  ") (children_of goal_id))
-              goals
+            rendered_roots
+            @ (goals
+               |> List.filter (fun (goal_id, _, _) ->
+                    not (List.exists (String.equal goal_id) !rendered_ids))
+               |> List.concat_map (render_subtree ~depth:0))
           in
           Some
             (Printf.sprintf

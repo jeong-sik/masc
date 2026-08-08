@@ -331,22 +331,11 @@ let resource_mime_type_exn response =
   | Some (`String value) -> value
   | _ -> Alcotest.fail "resource mime type missing"
 
-(* ===== Unit Tests for Type Re-exports ===== *)
-
 let test_create_state () =
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   Alcotest.(check string) "base_path preserved"
     base_path (Mcp_server.workspace_config state).base_path;
-  cleanup_dir base_path
-
-let test_type_compatibility () =
-  (* Verify Mcp_server_eio.server_state is same type as Mcp_server.server_state *)
-  let base_path = temp_dir () in
-  let state : Mcp_eio.server_state = Mcp_eio.For_testing.create_state ~base_path () in
-  let state2 : Mcp.server_state = state in  (* Type unification at compile time *)
-  (* Verify the unified type preserves field access *)
-  Alcotest.(check string) "base_path via unified type" base_path (Mcp_server.workspace_config state2).base_path;
   cleanup_dir base_path
 
 let test_eio_context_delegation () =
@@ -2997,7 +2986,6 @@ let test_handle_request_resources_subscribe_roundtrip () =
 
 let state_tests = [
   "create_state", `Quick, test_create_state;
-  "type compatibility", `Quick, test_type_compatibility;
   "eio context delegation", `Quick, test_eio_context_delegation;
   "eio context scoped restore", `Quick, test_eio_context_with_test_env_restores;
 ]

@@ -12,10 +12,6 @@ export function fetchDashboardBriefing(): Promise<DashboardMissionResponse> {
   return get('/api/v1/dashboard/briefing')
 }
 
-export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
-  return fetchDashboardBriefing()
-}
-
 export function fetchDashboardMissionBriefing(
   force = false,
   opts?: { signal?: AbortSignal },

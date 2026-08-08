@@ -98,7 +98,7 @@ export type JournalSeverity = 'debug' | 'info' | 'warn' | 'error' | 'unknown'
 // (mirroring JournalSeverity) so that `normalizeJournalSource` can fail
 // loud on unrecognized wire data instead of silently coercing it to
 // `'sse'`. Source of truth: see `normalizeJournalSource` in journal-entry.ts.
-export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 'sse' | 'unknown'
+export type JournalSource = 'structured' | 'startup_console' | 'sse' | 'unknown'
 
 // --- Attribution envelope ---
 // Structured verdict metadata for gate decisions. Emitted alongside existing

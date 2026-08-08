@@ -12,11 +12,6 @@
     - Mcp_server_eio_protocol: JSON-RPC handlers, subscriptions, transport
 *)
 
-(** {1 Re-exported Types} *)
-
-type server_state = Mcp_server.server_state
-type jsonrpc_request = Mcp_transport_protocol.jsonrpc_request
-
 type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent

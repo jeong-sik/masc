@@ -63,11 +63,9 @@ let handle_read_resource_eio state id params =
                     incr count
                 | Ok _ -> ()
                 | Error detail ->
-                  Log.legacy_traceln
-                    ~level:Log.Warn
-                    ~module_name:"MCP"
+                  Log.Mcp.emit Log.Warn
                     (Printf.sprintf
-                       "[WARN] Failed to decode message resource %s: %s"
+                       "Failed to decode message resource %s: %s"
                        path
                        detail)
               end
@@ -85,9 +83,9 @@ let handle_read_resource_eio state id params =
               | json -> Some json
               | exception Yojson.Json_error msg ->
                 let preview = String_util.utf8_safe ~max_bytes:53 ~suffix:"..." line |> String_util.to_string in
-                Log.legacy_traceln ~level:Log.Warn ~module_name:"MCP"
+                Log.Mcp.emit Log.Warn
                   (Printf.sprintf
-                     "[WARN] Failed to parse event JSON: %s (line: %s)" msg
+                     "Failed to parse event JSON: %s (line: %s)" msg
                      preview);
                 None
             ) lines

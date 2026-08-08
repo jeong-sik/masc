@@ -429,7 +429,7 @@ let write_takeover_breadcrumb ~lock_path ~port ~target_pid ~signal_name =
       ~finally:(fun () -> close_out_noerr oc)
       (fun () -> output_string oc (Yojson.Safe.to_string payload))
   | exception Sys_error reason ->
-    Log.legacy_stderr
+    Log.startup_console
       ~level:Log.Warn
       ~module_name:"Server"
       (Printf.sprintf "[WARN] takeover breadcrumb write failed at %s: %s" path reason)
@@ -528,7 +528,7 @@ let acquire_pid_lock
             | Some command -> not (looks_like_server_command command)
             | None -> true
           then (
-            Log.legacy_stderr
+            Log.startup_console
               ~level:Log.Error
               ~module_name:"Server"
               (Printf.sprintf
@@ -537,7 +537,7 @@ let acquire_pid_lock
                  pid);
             Already_running { pid })
           else (
-            Log.legacy_stderr
+            Log.startup_console
               ~level:Log.Warn
               ~module_name:"Server"
               (Printf.sprintf
@@ -554,7 +554,7 @@ let acquire_pid_lock
             if
               not (wait_for_pid_exit ~poll_interval_sec ~timeout_sec:term_timeout_sec pid)
             then (
-              Log.legacy_stderr
+              Log.startup_console
                 ~level:Log.Warn
                 ~module_name:"Server"
                 (Printf.sprintf "[WARN] PID %d did not exit; sending SIGKILL" pid);
@@ -566,7 +566,7 @@ let acquire_pid_lock
               Safe_ops.protect ~default:() (fun () -> Unix.kill pid Sys.sigkill);
               if not (wait_for_pid_exit ~poll_interval_sec ~timeout_sec:kill_wait_sec pid)
               then
-                Log.legacy_stderr
+                Log.startup_console
                   ~level:Log.Warn
                   ~module_name:"Server"
                   (Printf.sprintf
@@ -574,7 +574,7 @@ let acquire_pid_lock
                      pid));
             Acquired)
         else (
-          Log.legacy_stderr
+          Log.startup_console
             ~level:Log.Warn
             ~module_name:"Server"
             (Printf.sprintf
@@ -582,7 +582,7 @@ let acquire_pid_lock
                pid);
           Acquired)
       | _ ->
-        Log.legacy_stderr
+        Log.startup_console
           ~level:Log.Warn
           ~module_name:"Server"
           "[WARN] Invalid PID file contents, overwriting";

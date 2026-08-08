@@ -28,7 +28,6 @@ import {
   parseMemoryOsFactCategory,
   fetchKeeperTurnTranscript,
   fetchDashboardMemory,
-  fetchDashboardMission,
   fetchDashboardMissionBriefing,
   fetchDashboardRuntimeProbe,
   fetchCostLatency,
@@ -256,32 +255,6 @@ describe('dashboard briefing fetchers', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await fetchDashboardBriefing()
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/briefing')
-  })
-
-  it('keeps the mission snapshot fetcher as a compatibility alias', async () => {
-    const rawResponse = {
-      summary: { workspace_health: 'ok' },
-      incidents: [],
-      recommended_actions: [],
-      command_focus: {},
-      operator_targets: { keepers: [], pending_confirms: [], available_actions: [] },
-      attention_queue: [],
-      sessions: [],
-      agent_briefs: [],
-      keeper_briefs: [],
-      internal_signals: [],
-    }
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    await fetchDashboardMission()
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/briefing')
   })

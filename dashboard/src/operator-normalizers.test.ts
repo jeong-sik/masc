@@ -546,16 +546,6 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.pending_confirms[0]!.confirm_token).toBe('tok-e1')
   })
 
-  it('falls back to pending_confirms when no envelope', () => {
-    const result = normalizeOperatorSnapshot({
-      pending_confirms: [
-        { confirm_token: 'tok-raw', actor: 'system' },
-      ],
-    })
-    expect(result.pending_confirms).toHaveLength(1)
-    expect(result.pending_confirms[0]!.confirm_token).toBe('tok-raw')
-  })
-
   it('extracts top-level needs_attention, attention_reason and next_human_action from keeper payload', () => {
     const result = normalizeOperatorSnapshot({
       keepers: [

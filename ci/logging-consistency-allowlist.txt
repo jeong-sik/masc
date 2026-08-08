@@ -28,9 +28,8 @@ lib/fs_compat/
 # (b) FATAL exception handlers for Out_of_memory / Stack_overflow that must not
 # allocate through the logging stack, or (c) the `login` / `init` CLI
 # subcommands whose stderr/stdout is user-facing CLI output, not server logs.
-# The legacy_stderr "[FATAL] Another MASC server ... already running" lines are
-# the RFC-0079 raw-passthrough bridge (embedded [FATAL] prefix; migrating would
-# double-prefix the operator-visible message).
+# Ownership failures use Log.startup_console because runtime filtering must not
+# suppress diagnostics that explain why initialization stopped.
 bin/main_eio.ml
 
 # --- Standalone CLI tools (not the server runtime) ---
@@ -43,20 +42,6 @@ bin/masc_cost.ml
 bin/masc_compaction_audit.ml
 bin/keeper_feature_proof_report.ml
 bin/env_knob_catalog.ml
-
-# --- RFC-0079 legacy raw-stderr bridge (embedded [LEVEL] prefix) ---
-# Log.legacy_stderr / Log.legacy_traceln deliberately emit a raw, unprefixed
-# stderr line AND mirror it into the ring with a Legacy_stderr / Legacy_traceln
-# source tag (read back by dashboard/src/api/schemas/logs.ts). Every call site
-# embeds its own [FATAL] / [WARN] / [DEBUG] marker in the message body, so
-# migrating to Log.<Module>.<lvl> would (a) double-prefix the message and
-# (b) drop the Legacy_* source classification. They stay as the documented
-# bridge. (lib/server/server_startup_takeover.ml is allowlisted whole because
-# its only non-canonical logging is these legacy_stderr lines.)
-lib/server/server_startup_takeover.ml
-lib/backend/backend.ml
-lib/workspace/workspace_query.ml
-lib/mcp_server_eio_resource.ml
 
 # --- Dynamic component (runtime variable) ---
 # Log.warn ~ctx:context / Log.info ~ctx:context use a runtime-computed component

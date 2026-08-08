@@ -9,8 +9,7 @@ type level =
 
 type source =
   | Structured
-  | Legacy_stderr
-  | Legacy_traceln
+  | Startup_console
   | Client_tool_host
 
 type event_class = Routine
@@ -95,19 +94,13 @@ let protect ~default f =
 
 let source_to_string = function
   | Structured -> "structured"
-  | Legacy_stderr -> "legacy_stderr"
-  | Legacy_traceln -> "legacy_traceln"
+  | Startup_console -> "startup_console"
   | Client_tool_host -> "client_tool_host"
 
 let event_class_to_string : event_class -> string = function
   | Routine -> "routine"
 
 let has_prefix ~prefix value = String.starts_with ~prefix value
-
-(* RFC-0079: [infer_legacy_level] (a string-prefix classifier on the
-   message body) was deleted along with the [?level] option on
-   [legacy_stderr] / [legacy_traceln]. All callers now pass typed [~level]
-   explicitly; see [Log.legacy_stderr] / [Log.legacy_traceln] below. *)
 
 (** Check if level should be logged *)
 let should_log level =
@@ -451,8 +444,7 @@ module Ring = struct
      drift between encoder and decoder is visible to the reviewer. *)
   let source_of_string = function
     | "structured" -> Structured
-    | "legacy_stderr" -> Legacy_stderr
-    | "legacy_traceln" -> Legacy_traceln
+    | "startup_console" -> Startup_console
     | "client_tool_host" -> Client_tool_host
     | s -> raise (Entry_decode_error (Printf.sprintf "unknown source: %S" s))
 
@@ -566,13 +558,7 @@ module Ring = struct
       Fs_compat.fold_jsonl_lines
         ~init:()
         ~f:(fun () ~line_no json ->
-          (* RFC-0079: file-fold is the one boundary that tolerates legacy
-             rows written before the typed encoder. Older JSONL files (with
-             [raw_level] / [normalized_level] / [legacy_classified]) fail
-             [entry_of_json] because their schema is gone; the cleanup_old
-             rotation deletes them within [keep_days], so the WARN here is
-             load-bearing only during that window. Anywhere else, a decode
-             error propagates as [Entry_decode_error]. *)
+          (* File reads keep processing after a malformed row so one corrupt entry does not hide later current-schema entries. *)
           match entry_of_json json with
           | exception Entry_decode_error msg ->
               Printf.eprintf

@@ -206,9 +206,6 @@ type surface =
   | Approvals
   | Planning
 
-(** Backward-compatible alias. *)
-type view_mode = surface
-
 (** Dashboard state *)
 type state = {
   mutable agents: agent list;
@@ -217,7 +214,7 @@ type state = {
   mutable keepers: keeper list;
   mutable connection_status: connection_status;
   mutable last_refresh: float;
-  mutable view: view_mode;
+  mutable view: surface;
   mutable keeper_cursor: int;
   mutable log_entries: log_entry list;
   mutable log_scroll: int;

@@ -30,10 +30,8 @@ export function normalizeJournalSource(value: string | null | undefined): Journa
   switch ((value ?? '').trim().toLowerCase()) {
     case 'structured':
       return 'structured'
-    case 'legacy_stderr':
-      return 'legacy_stderr'
-    case 'legacy_traceln':
-      return 'legacy_traceln'
+    case 'startup_console':
+      return 'startup_console'
     case 'sse':
       return 'sse'
     default:

@@ -46,8 +46,8 @@ export async function refreshMissionSnapshot(
   missionError.value = null
   inflightMissionSnapshotRefresh = (async () => {
     try {
-      const { fetchDashboardMission } = await import('./api/dashboard-mission')
-      const raw = await fetchDashboardMission()
+      const { fetchDashboardBriefing } = await import('./api/dashboard-mission')
+      const raw = await fetchDashboardBriefing()
       const normalized = normalizeMission(raw)
       if (isMissionInitializingPayload(normalized) && missionSnapshot.value) {
         lastMissionSnapshotRefreshAt = Date.now()

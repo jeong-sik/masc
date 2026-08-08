@@ -22,7 +22,7 @@ type fixture = {
   auth_token : string;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   sw : Eio.Switch.t;
-  state : Mcp_eio.server_state;
+  state : Mcp_server.server_state;
   worktree_dir : string;
   mutable task_id : string option;
   mutable board_post_id : string option;

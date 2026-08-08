@@ -7,9 +7,10 @@
 #   lib/masc_log/log.ml exposes one canonical logging surface:
 #     Log.<Module>.{info,warn,error,debug}   (normal logs)
 #     Log.<Module>.routine                   (routine/housekeeping)
+#     Log.startup_console                    (pre-runtime ownership diagnostics)
 #   Everything else (raw Printf.eprintf / prerr_*, the top-level
 #   Log.{info,warn,error,debug} ~ctx form, the `Logs.*` library, the
-#   Log.legacy_stderr/legacy_traceln RFC-0079 bridge, and bare Log.emit /
+#   bare Log.emit /
 #   Log.emit_event) is a non-canonical way to write the same output. A mix of
 #   ~6 styles makes severity, component naming, and dashboard routing
 #   inconsistent. This gate scans lib/ and bin/ for the non-canonical styles,
@@ -116,8 +117,6 @@ scan_rows() {
       [ "toplevel", qr/\bLog\.(?!(?:[A-Z][A-Za-z0-9_]*)\.)(info|warn|error|debug)(?:\s+|\s*\n\s*)(?:~ctx|")/ ],
       # the Logs.* library (distinct from masc Log)
       [ "logs_lib", qr/\bLogs\.(info|warn|err|debug|app)\b/ ],
-      # RFC-0079 legacy raw-stderr bridge
-      [ "legacy",   qr/\bLog\.legacy_(stderr|traceln)\b/ ],
       # bare top-level Log.emit / Log.emit_event (emit_routine is the routine API,
       # intentionally not flagged)
       [ "emit",     qr/\bLog\.(emit|emit_event)(?!_routine)\b/ ],

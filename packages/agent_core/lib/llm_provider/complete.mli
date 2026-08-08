@@ -213,6 +213,23 @@ val complete_admitted
   -> ?request_wire_observer:Request_wire_observer.try_observe
   -> unit
   -> (Types.api_response, Http_client.http_error) result
+
+(** Dispatch a request whose exact final body already passed byte admission,
+    without attaching token-fit evidence. This is the typed body-only path;
+    callers that require token fit must use {!complete_admitted}. *)
+val complete_serialized
+  :  sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:_ Eio.Time.clock
+  -> ?transport:Llm_transport.t
+  -> serialized_request
+  -> ?cache:Cache.t
+  -> ?connection_cache:Http_client.cache
+  -> ?metrics:Metrics.t
+  -> ?body_timeout_s:float
+  -> ?request_wire_observer:Request_wire_observer.try_observe
+  -> unit
+  -> (Types.api_response, Http_client.http_error) result
 (** [body_timeout_s] is the exact caller-owned deadline, in seconds, for a
     non-streaming transport call after a cache miss. It must be finite and
     greater than zero and requires [clock]. The contract is validated before
@@ -350,6 +367,22 @@ val complete_stream_admitted
   -> ?wire_observer:Wire_observer.try_observe
   -> ?request_wire_observer:Request_wire_observer.try_observe
   -> admitted_request
+  -> on_event:(Types.sse_event -> unit)
+  -> ?metrics:Metrics.t
+  -> ?connection_cache:Http_client.cache
+  -> ?on_telemetry:(Telemetry_event.t -> unit)
+  -> unit
+  -> (Types.api_response, Http_client.http_error) result
+
+(** Streaming counterpart of {!complete_serialized}. *)
+val complete_stream_serialized
+  :  sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:_ Eio.Time.clock
+  -> ?transport:Llm_transport.t
+  -> ?wire_observer:Wire_observer.try_observe
+  -> ?request_wire_observer:Request_wire_observer.try_observe
+  -> serialized_request
   -> on_event:(Types.sse_event -> unit)
   -> ?metrics:Metrics.t
   -> ?connection_cache:Http_client.cache

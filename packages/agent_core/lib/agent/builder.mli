@@ -123,8 +123,8 @@ val with_periodic_callbacks : Agent.periodic_callback list -> t -> t
     Builder and may be replaced by later [with_*] calls. *)
 val with_provider_config : Llm_provider.Provider_config.t -> t -> t
 
-(** Select Agent-level provider-fit admission without changing standalone
-    [Complete] compatibility behavior. *)
+(** Select Agent-level provider-fit admission. [Require_exact_fit] never
+    degrades to an unmeasured provider call. *)
 val with_context_fit_admission : Agent.context_fit_admission -> t -> t
 
 (** Apply a caller-owned projection once to the complete provider-bound message

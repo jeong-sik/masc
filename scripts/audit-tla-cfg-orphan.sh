@@ -64,9 +64,7 @@ for cfg in $(find specs -name "*.cfg" | sort); do
     # A cfg whose parent .tla never resolves is itself an orphan: it can
     # never be model-checked (TLC has no spec to run) so it verifies nothing.
     # Previously this branch counted such cfgs as "skipped" and they passed
-    # the audit silently — the exact class of spec-level theatre this audit
-    # exists to catch (e.g. KeeperCampaignLifecycle-buggy.cfg, whose .tla was
-    # deleted in #9450). Flag it as an orphan so it fails the audit.
+    # the audit silently. Flag it as an orphan so it fails the audit.
     printf "ORPHAN %s -> (no parent .tla — cfg verifies nothing)\n" "$cfg"
     ORPHANS=$((ORPHANS+1))
     continue

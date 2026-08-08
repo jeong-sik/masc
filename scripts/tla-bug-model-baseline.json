@@ -1,7 +1,6 @@
 {
   "_comment": "TLA+ Bug Model coverage baseline. Regenerate with scripts/tla-bug-model-ratchet.sh --regenerate.",
   "_metrics": "See scripts/tla-bug-model-ratchet.sh STRICT_METRICS array.",
-  "_metric_change": "The stored floor was 98 although main contained only 45 matching cfg files. Issue #27578 records that impossible baseline. Purging the resolved DashboardCacheStampede model leaves 44 verdict-capable buggy cfgs.",
   "_audit": "docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md",
   "bug_model_coverage_specs": 44,
   "domains_without_bug_model": 0

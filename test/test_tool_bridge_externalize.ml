@@ -247,7 +247,40 @@ let test_execution_env_preserves_exact_invocation () =
     Alcotest.(check int)
       "planned index preserved"
       2
-      (Agent_sdk.Tool_contract.Invocation.planned_index seen)
+    (Agent_sdk.Tool_contract.Invocation.planned_index seen)
+
+let test_bridge_preserves_authoritative_input_schema () =
+  let input_schema =
+    `Assoc
+      [ "type", `String "object"
+      ; ( "properties"
+        , `Assoc
+            [ ( "count"
+              , `Assoc
+                  [ "type", `String "integer"
+                  ; "minimum", `Int 1
+                  ; "maximum", `Int 7
+                  ] )
+            ] )
+      ; "required", `List [ `String "count" ]
+      ; "additionalProperties", `Bool false
+      ]
+  in
+  let tool =
+    B.oas_tool_of_masc
+      ~name:"schema_probe"
+      ~description:"preserve the authoritative schema"
+      ~input_schema
+      (fun _input -> tool_ok ~tool_name:"schema_probe" "ok")
+  in
+  let published_schema =
+    Agent_sdk.Tool.schema_to_json tool
+    |> Yojson.Safe.Util.member "input_schema"
+  in
+  Alcotest.(check string)
+    "provider schema is the caller schema"
+    (Yojson.Safe.to_string input_schema)
+    (Yojson.Safe.to_string published_schema)
 
 (* --- Marker encoding round-trip via the bridge --- *)
 
@@ -396,6 +429,8 @@ let () =
             test_round_trip_through_oas;
           Alcotest.test_case "execution env preserves exact invocation" `Quick
             test_execution_env_preserves_exact_invocation;
+          Alcotest.test_case "authoritative input schema is preserved" `Quick
+            test_bridge_preserves_authoritative_input_schema;
         ] );
       ( "externalize",
         [

@@ -129,6 +129,15 @@ let params_of_json_schema schema =
   Agent_sdk.Mcp.json_schema_to_params schema
 ;;
 
+let oas_tool_schema ~name ~description ~input_schema =
+  match
+    Agent_sdk.Types.tool_schema_of_input_schema ~name ~description ~input_schema ()
+  with
+  | Ok schema -> schema
+  | Error detail ->
+    invalid_arg (Printf.sprintf "invalid input schema for OAS tool %s: %s" name detail)
+;;
+
 (** {1 OAS Tool.t Creation}
 
     Create OAS [Tool.t] from MASC schema definition + dispatch handler.
@@ -223,7 +232,7 @@ let oas_tool_of_masc
     ~description
     ~input_schema
     handler : Agent_sdk.Tool.t =
-  let parameters = params_of_json_schema input_schema in
+  let schema = oas_tool_schema ~name ~description ~input_schema in
   let oas_handler json_args =
     to_oas_typed_result
       ?base_path
@@ -232,7 +241,10 @@ let oas_tool_of_masc
       ?externalization_error_recoverable
       (handler json_args)
   in
-  Agent_sdk.Tool.create ?descriptor ~name ~description ~parameters oas_handler
+  Agent_sdk.Tool.of_schema
+    ?descriptor
+    schema
+    (Agent_sdk.Tool.ignoring_execution_env oas_handler)
 
 let oas_tool_of_masc_with_execution_env
     ?descriptor
@@ -246,7 +258,7 @@ let oas_tool_of_masc_with_execution_env
     handler
   : Agent_sdk.Tool.t
   =
-  let parameters = params_of_json_schema input_schema in
+  let schema = oas_tool_schema ~name ~description ~input_schema in
   let oas_handler execution_env json_args =
     to_oas_typed_result
       ?base_path
@@ -255,12 +267,7 @@ let oas_tool_of_masc_with_execution_env
       ?externalization_error_recoverable
       (handler execution_env json_args)
   in
-  Agent_sdk_base.Tool.create_with_execution_env
-    ?descriptor
-    ~name
-    ~description
-    ~parameters
-    oas_handler
+  Agent_sdk.Tool.of_schema ?descriptor schema oas_handler
 
 let () =
   Runtime_agent.set_oas_tool_of_masc_hook (fun ~name ~description ~input_schema handler ->

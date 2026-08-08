@@ -102,6 +102,54 @@ val trigger_typing :
 
     @raise nothing — failures are surfaced as typed {!error}. *)
 
+(** {1 Read-only Discord resources} *)
+
+val get_channel :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  channel_id:string ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** Fetch the Discord channel object for [channel_id]. *)
+
+val get_channel_messages :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  channel_id:string ->
+  ?limit:int ->
+  ?before:string ->
+  ?after:string ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** Fetch channel messages, newest first. [before] and [after] are mutually
+    exclusive at the Discord API boundary. *)
+
+val get_guild_members :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  guild_id:string ->
+  ?query:string ->
+  ?limit:int ->
+  ?after:string ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** List or search members of [guild_id]. A non-empty [query] uses Discord's
+    guild-member search endpoint; without it, the paged member-list endpoint
+    is used. *)
+
+val get_guild_member :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  guild_id:string ->
+  user_id:string ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** Fetch one guild member, retaining the user's guild nickname and roles. *)
+
 (** {1 Embed support} *)
 
 type embed =
@@ -178,6 +226,37 @@ val build_typing_request :
 (** [(url, headers, body) = build_typing_request ~token ~channel_id ()].
     The body is empty; headers include Authorization and User-Agent. *)
 
+val build_channel_request :
+  token:string ->
+  channel_id:string ->
+  unit ->
+  string * (string * string) list * string
+
+val build_channel_messages_request :
+  token:string ->
+  channel_id:string ->
+  ?limit:int ->
+  ?before:string ->
+  ?after:string ->
+  unit ->
+  string * (string * string) list * string
+
+val build_guild_members_request :
+  token:string ->
+  guild_id:string ->
+  ?query:string ->
+  ?limit:int ->
+  ?after:string ->
+  unit ->
+  string * (string * string) list * string
+
+val build_guild_member_request :
+  token:string ->
+  guild_id:string ->
+  user_id:string ->
+  unit ->
+  string * (string * string) list * string
+
 val build_edit_request :
   token:string ->
   channel_id:string ->
@@ -228,3 +307,10 @@ val parse_empty_response :
     - 2xx → [Ok ()]
     - non-2xx with Discord error envelope → [Error (Discord_api _)]
     - non-2xx without that envelope → [Error (Http_status _)] *)
+
+val parse_json_response :
+  status:int ->
+  body:string ->
+  (Yojson.Safe.t, error) result
+(** Classifies a JSON Discord response without imposing an endpoint-specific
+    top-level shape. *)

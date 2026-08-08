@@ -198,6 +198,7 @@ let run (ctx : ctx)
                  ~meta:run_meta
                  ~publication_recovery
                  ~profile_defaults
+                 ?continuation_channel:continuation_delivery_channel
                  ?continuation_delivery_channel
                  ?hitl_resolution
                  ~turn_ctx_cell

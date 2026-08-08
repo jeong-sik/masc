@@ -15,11 +15,9 @@ let surface_tools : Masc_domain.tool_schema list =
     ; description =
         "Read recent messages from one conversation endpoint (dashboard, \
          discord, slack, or another connector label) with speaker identity \
-         and a derived participant roster. Use when the user asks about a \
-         current connector lane, recent lane messages, or participants. This \
-         does not enumerate connector-wide channel registries; if asked for \
-         channels outside Connected Surfaces, read only visible lane evidence \
-         and state that the wider registry is unavailable."
+         and a derived participant roster. With mode='channel', 'messages', \
+         'members', or 'member', the Discord lane can also query its live \
+         channel and server read surface within the keeper's bound channels."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -53,6 +51,45 @@ let surface_tools : Masc_domain.tool_schema list =
                              previous call). Walk history by passing the \
                              oldest_ts of the previous response; stop when \
                              has_more is false." )
+                      ] )
+                ; ( "mode"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "enum"
+                        , `List
+                            (List.map
+                               (fun value -> `String value)
+                               [ "local"; "channel"; "messages"; "members"; "member" ]) )
+                      ; ( "description"
+                        , `String
+                            "Read mode: local persisted lane, or a live Discord channel/messages/members/member query" )
+                      ] )
+                ; ( "channel_id"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Bound Discord channel snowflake; optional when exactly one channel is bound" )
+                      ] )
+                ; ( "user_id"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description", `String "Discord user snowflake for mode='member'" )
+                      ] )
+                ; ( "query"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description", `String "Optional member username/nickname prefix" )
+                      ] )
+                ; ( "discord_before"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description", `String "Discord message snowflake for backward paging" )
+                      ] )
+                ; ( "discord_after"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description", `String "Discord paging cursor; do not combine with discord_before" )
                       ] )
                 ] )
           ; "required", `List [ `String "surface" ]

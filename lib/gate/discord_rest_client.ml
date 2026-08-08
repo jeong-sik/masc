@@ -65,6 +65,61 @@ let build_typing_request ~token ~channel_id () =
   in
   (url, auth_headers ~token, "")
 
+let build_channel_request ~token ~channel_id () =
+  let url = Printf.sprintf "%s/channels/%s" api_base channel_id in
+  (url, auth_headers ~token, "")
+
+let add_query_params url params =
+  Uri.of_string url
+  |> fun uri -> Uri.add_query_params' uri params
+  |> Uri.to_string
+
+let build_channel_messages_request
+      ~token
+      ~channel_id
+      ?limit
+      ?before
+      ?after
+      ()
+  =
+  let url = Printf.sprintf "%s/channels/%s/messages" api_base channel_id in
+  let params =
+    (match limit with Some value -> [ "limit", string_of_int value ] | None -> [])
+    @ (match before with Some value -> [ "before", value ] | None -> [])
+    @ (match after with Some value -> [ "after", value ] | None -> [])
+  in
+  (add_query_params url params, auth_headers ~token, "")
+
+let build_guild_members_request
+      ~token
+      ~guild_id
+      ?query
+      ?limit
+      ?after
+      ()
+  =
+  let path =
+    match query with
+    | Some value when String.trim value <> "" -> "members/search"
+    | Some _ | None -> "members"
+  in
+  let url = Printf.sprintf "%s/guilds/%s/%s" api_base guild_id path in
+  let params =
+    (match query with
+     | Some value when String.trim value <> "" -> [ "query", value ]
+     | Some _ | None -> [])
+    @ (match limit with Some value -> [ "limit", string_of_int value ] | None -> [])
+    @ (match query with
+       | Some value when String.trim value <> "" -> []
+       | Some _ | None ->
+         (match after with Some value -> [ "after", value ] | None -> []))
+  in
+  (add_query_params url params, auth_headers ~token, "")
+
+let build_guild_member_request ~token ~guild_id ~user_id () =
+  let url = Printf.sprintf "%s/guilds/%s/members/%s" api_base guild_id user_id in
+  (url, auth_headers ~token, "")
+
 let parse_json_safe s =
   try Some (Yojson.Safe.from_string s) with Yojson.Json_error _ -> None
 
@@ -97,6 +152,14 @@ let parse_response ~status ~body =
         (match field_opt "id" json with
          | Some (`String id) -> Ok id
          | _ -> Error (Other "2xx response missing 'id' string"))
+  else
+    Error (error_of_non2xx ~status ~body)
+
+let parse_json_response ~status ~body =
+  if status >= 200 && status < 300 then
+    match parse_json_safe body with
+    | Some json -> Ok json
+    | None -> Error (Other ("2xx response body is not valid JSON: " ^ body))
   else
     Error (error_of_non2xx ~status ~body)
 
@@ -192,6 +255,50 @@ let trigger_typing ?clock ?(timeout_sec = Masc_http_client.default_request_timeo
   match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_empty_response ~status ~body
+
+let get_json ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ~url ~headers () =
+  match Masc_http_client.get_sync ?clock ~timeout_sec ~url ~headers () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) -> parse_json_response ~status ~body
+
+let get_channel ?clock ?timeout_sec ~token ~channel_id () =
+  let url, headers, _ = build_channel_request ~token ~channel_id () in
+  get_json ?clock ?timeout_sec ~url ~headers ()
+
+let get_channel_messages
+      ?clock
+      ?timeout_sec
+      ~token
+      ~channel_id
+      ?limit
+      ?before
+      ?after
+      ()
+  =
+  let url, headers, _ =
+    build_channel_messages_request ~token ~channel_id ?limit ?before ?after ()
+  in
+  get_json ?clock ?timeout_sec ~url ~headers ()
+
+let get_guild_members
+      ?clock
+      ?timeout_sec
+      ~token
+      ~guild_id
+      ?query
+      ?limit
+      ?after
+      ()
+  =
+  let url, headers, _ =
+    build_guild_members_request ~token ~guild_id ?query ?limit ?after ()
+  in
+  get_json ?clock ?timeout_sec ~url ~headers ()
+
+let get_guild_member ?clock ?timeout_sec ~token ~guild_id ~user_id () =
+  let url, headers, _ = build_guild_member_request ~token ~guild_id ~user_id () in
+  get_json ?clock ?timeout_sec ~url ~headers ()
 
 (* ── Embed support ──────────────────────────────────────────────── *)
 

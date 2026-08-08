@@ -614,15 +614,24 @@ let capture_response_uses_finalized_replay_text () =
     | Some n -> n
     | None -> Alcotest.fail "replay_response_text_for_persistence use not found"
   in
+  let persist_line =
+    match last_line_of finalize_path "Keeper_context_runtime.persist_message" with
+    | Some n -> n
+    | None -> Alcotest.fail "persist_message invocation not found"
+  in
   let capture_callback_line =
     match last_line_of finalize_path "capture_replay_response ~response_text" with
     | Some n -> n
     | None -> Alcotest.fail "capture_replay_response invocation not found"
   in
   Alcotest.(check bool)
-    "capture callback runs after replay-visible response decision"
+    "persisted assistant uses the replay persistence decision"
     true
-    (capture_callback_line > replay_decision_line)
+    (persist_line > replay_decision_line);
+  Alcotest.(check bool)
+    "capture callback runs after assistant persistence"
+    true
+    (capture_callback_line > persist_line)
 
 let () =
   Alcotest.run "keeper_wire_capture"

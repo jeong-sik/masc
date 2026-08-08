@@ -251,7 +251,23 @@ let test_non_terminal_agent_outcomes_keep_distinct_wire_types () =
     (option string)
     "input question"
     (Some "Continue?")
-    (string_of_field (payload_member "question" input_required))
+    (string_of_field (payload_member "question" input_required));
+  check
+    (option string)
+    "input participant"
+    (Some "operator")
+    (string_of_field (payload_member "participant_name" input_required));
+  check
+    bool
+    "input schema"
+    true
+    (payload_member "schema" input_required
+     = Some (`Assoc [ "type", `String "boolean" ]));
+  check
+    bool
+    "input timeout"
+    true
+    (payload_member "timeout_s" input_required = Some (`Float 30.0))
 
 let terminal_projection_string_field ~label key = function
   | `Assoc fields ->

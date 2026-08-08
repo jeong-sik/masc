@@ -250,7 +250,7 @@ let rec past_day_cache_insert path mtime parsed =
     past_day_cache_insert path mtime parsed
 
 let file_mtime path =
-  try Some (Unix.stat path).Unix.st_mtime with _ -> None
+  try Some (Unix.stat path).Unix.st_mtime with _ -> None  (* cancel-guard-ok: guards Unix.stat: no Eio cancellation point *)
 
 let reset_past_day_cache_for_testing () = Atomic.set past_day_cache Past_day_path_map.empty
 

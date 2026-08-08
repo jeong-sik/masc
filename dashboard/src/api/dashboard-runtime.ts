@@ -1037,6 +1037,162 @@ export interface RuntimeTomlConfig {
   issues?: unknown
 }
 
+export type DashboardCodexRecoveryFailure =
+  | 'transport_interrupted'
+  | 'protocol_failed'
+  | 'provider_rejected'
+  | 'host_hook_failed'
+  | 'state_persistence_failed'
+
+export interface DashboardCodexSettlement {
+  thread_id: string
+  turn_id: string
+}
+
+export interface DashboardCodexSessionPhase {
+  kind: 'ready' | 'start' | 'active' | 'turn_inflight' | 'recovery_required' | 'settled'
+  thread_id?: string | null
+  turn_id?: string | null
+  previous_settlement?: DashboardCodexSettlement | null
+  recovery_id?: string | null
+  failure?: DashboardCodexRecoveryFailure | null
+  detail?: string | null
+  required_at?: number | null
+  observed_thread_id?: string | null
+  observed_turn_id?: string | null
+}
+
+export interface DashboardCodexRecoveryResolutionRecord {
+  recovery_id: string
+  failure: DashboardCodexRecoveryFailure
+  resolution: {
+    kind: 'retry_previous' | 'restart_fresh' | 'adopt_verified'
+    settlement?: DashboardCodexSettlement | null
+  }
+  resolved_by: string
+  resolved_at: number
+}
+
+export interface DashboardCodexSession {
+  runtime_id: string
+  phase: DashboardCodexSessionPhase
+  turn_count: number
+  tool_surface_sha256: string
+  last_recovery_resolution: DashboardCodexRecoveryResolutionRecord | null
+  updated_at: number
+}
+
+export interface DashboardCodexSessionResponse {
+  schema: 'masc.dashboard.codex-session.v1'
+  ok: true
+  keeper_name: string
+  session: DashboardCodexSession | null
+}
+
+export type DashboardCodexRecoveryDecision =
+  | { resolution: 'retry_previous' }
+  | { resolution: 'restart_fresh' }
+  | { resolution: 'adopt_verified'; thread_id: string; turn_id: string }
+
+const CODEX_RECOVERY_FAILURES = new Set<DashboardCodexRecoveryFailure>([
+  'transport_interrupted',
+  'protocol_failed',
+  'provider_rejected',
+  'host_hook_failed',
+  'state_persistence_failed',
+])
+
+function decodeCodexSettlement(raw: unknown): DashboardCodexSettlement | null {
+  if (!isRecord(raw)) return null
+  const thread_id = asString(raw.thread_id)
+  const turn_id = asString(raw.turn_id)
+  return thread_id && turn_id ? { thread_id, turn_id } : null
+}
+
+function decodeCodexFailure(raw: unknown): DashboardCodexRecoveryFailure | null {
+  return typeof raw === 'string' && CODEX_RECOVERY_FAILURES.has(raw as DashboardCodexRecoveryFailure)
+    ? raw as DashboardCodexRecoveryFailure
+    : null
+}
+
+function decodeCodexPhase(raw: unknown): DashboardCodexSessionPhase | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  if (!kind || !['ready', 'start', 'active', 'turn_inflight', 'recovery_required', 'settled'].includes(kind)) return null
+  const phase: DashboardCodexSessionPhase = {
+    kind: kind as DashboardCodexSessionPhase['kind'],
+    thread_id: asNullableString(raw.thread_id),
+    turn_id: asNullableString(raw.turn_id),
+    previous_settlement: raw.previous_settlement == null
+      ? null
+      : decodeCodexSettlement(raw.previous_settlement),
+    recovery_id: asNullableString(raw.recovery_id),
+    failure: raw.failure == null ? null : decodeCodexFailure(raw.failure),
+    detail: asNullableString(raw.detail),
+    required_at: asNumber(raw.required_at),
+    observed_thread_id: asNullableString(raw.observed_thread_id),
+    observed_turn_id: asNullableString(raw.observed_turn_id),
+  }
+  if (phase.kind === 'recovery_required' && (!phase.recovery_id || !phase.failure || phase.required_at == null)) return null
+  if (phase.kind === 'settled' && (!phase.thread_id || !phase.turn_id)) return null
+  return phase
+}
+
+function decodeCodexResolutionRecord(raw: unknown): DashboardCodexRecoveryResolutionRecord | null {
+  if (!isRecord(raw) || !isRecord(raw.resolution)) return null
+  const recovery_id = asString(raw.recovery_id)
+  const failure = decodeCodexFailure(raw.failure)
+  const resolved_by = asString(raw.resolved_by)
+  const resolved_at = asNumber(raw.resolved_at)
+  const kind = asString(raw.resolution.kind)
+  if (!recovery_id || !failure || !resolved_by || resolved_at == null) return null
+  if (kind !== 'retry_previous' && kind !== 'restart_fresh' && kind !== 'adopt_verified') return null
+  const settlement = raw.resolution.settlement == null
+    ? null
+    : decodeCodexSettlement(raw.resolution.settlement)
+  if (kind === 'adopt_verified' && !settlement) return null
+  return {
+    recovery_id,
+    failure,
+    resolution: { kind, settlement },
+    resolved_by,
+    resolved_at,
+  }
+}
+
+function decodeCodexSessionResponse(raw: unknown): DashboardCodexSessionResponse | null {
+  if (!isRecord(raw) || raw.schema !== 'masc.dashboard.codex-session.v1' || raw.ok !== true) return null
+  const keeper_name = asString(raw.keeper_name)
+  if (!keeper_name) return null
+  if (raw.session === null) {
+    return { schema: 'masc.dashboard.codex-session.v1', ok: true, keeper_name, session: null }
+  }
+  if (!isRecord(raw.session)) return null
+  const runtime_id = asString(raw.session.runtime_id)
+  const phase = decodeCodexPhase(raw.session.phase)
+  const turn_count = asNumber(raw.session.turn_count)
+  const tool_surface_sha256 = asString(raw.session.tool_surface_sha256)
+  const updated_at = asNumber(raw.session.updated_at)
+  const last_recovery_resolution = raw.session.last_recovery_resolution == null
+    ? null
+    : decodeCodexResolutionRecord(raw.session.last_recovery_resolution)
+  if (!runtime_id || !phase || turn_count == null || !Number.isInteger(turn_count) || turn_count < 0 || !tool_surface_sha256 || updated_at == null) return null
+  if (raw.session.last_recovery_resolution != null && !last_recovery_resolution) return null
+  return {
+    schema: 'masc.dashboard.codex-session.v1',
+    ok: true,
+    keeper_name,
+    session: {
+      runtime_id,
+      phase,
+      turn_count,
+      tool_surface_sha256,
+      last_recovery_resolution,
+      updated_at,
+    },
+  }
+}
+
 function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
   const record = isRecord(raw) ? raw : {}
   return {
@@ -1054,6 +1210,34 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
 export async function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
   await ensureDevToken()
   return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
+}
+
+export async function fetchCodexSession(
+  keeperName: string,
+  opts?: AbortableRequestOptions,
+): Promise<DashboardCodexSessionResponse> {
+  await ensureDevToken()
+  const query = new URLSearchParams({ keeper_name: keeperName })
+  const raw = await get<unknown>(`/api/v1/runtime/sessions/codex?${query}`, { signal: opts?.signal })
+  const decoded = decodeCodexSessionResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 Codex session payload')
+  return decoded
+}
+
+export async function resolveCodexSession(
+  keeperName: string,
+  recoveryId: string,
+  decision: DashboardCodexRecoveryDecision,
+): Promise<DashboardCodexSessionResponse> {
+  await ensureDevToken()
+  const raw = await post<unknown>('/api/v1/runtime/sessions/codex/resolve', {
+    keeper_name: keeperName,
+    recovery_id: recoveryId,
+    ...decision,
+  })
+  const decoded = decodeCodexSessionResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 Codex recovery payload')
+  return decoded
 }
 
 // Structured, already-resolved runtime defaults / model routing (runtime.toml

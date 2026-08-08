@@ -34,6 +34,7 @@ import {
   runtimeCatalogRequestConfig as runtimeRequestConfigText,
   runtimeCatalogSnapshotFacts as runtimeSnapshotFactsText,
 } from '../lib/runtime-provider-summary'
+import { CodexSessionRecoveryPanel } from './codex-session-recovery-panel'
 
 /**
  * Filters model metrics by case-insensitive substring match against
@@ -977,6 +978,8 @@ export function RuntimeMonitor() {
             : html`<${EmptyState} message="runtime snapshot이 없습니다." compact />`}
         </div>
       <//>
+
+      <${CodexSessionRecoveryPanel} />
 
       <${SectionCard} label="런타임 메트릭">
         <div class="grid grid-cols-3 gap-3 mb-4">

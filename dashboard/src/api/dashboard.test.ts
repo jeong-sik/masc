@@ -39,6 +39,8 @@ import {
   fetchRuntimeTomlConfig,
   fetchRuntimeDefaults,
   fetchRuntimeModelMetrics,
+  fetchCodexSession,
+  resolveCodexSession,
   patchRuntimeAssignment,
   patchRuntimeMediaFailover,
   patchRuntimeRouting,
@@ -3016,6 +3018,93 @@ describe('runtime.toml raw config API', () => {
       runtime_id: null,
     })
     expect(result.source_text).toBe(sourceText)
+  })
+})
+
+describe('Codex official-client session API', () => {
+  const recoveryPayload = {
+    schema: 'masc.dashboard.codex-session.v1',
+    ok: true,
+    keeper_name: 'sangsu',
+    session: {
+      runtime_id: 'codex.codex',
+      phase: {
+        kind: 'recovery_required',
+        recovery_id: '018f3a4a-27f4-7c9a-8fd8-330c2a3845aa',
+        failure: 'protocol_failed',
+        detail: 'malformed app-server event',
+        required_at: 1_786_230_000,
+        observed_thread_id: 'thread-1',
+        observed_turn_id: null,
+        previous_settlement: null,
+      },
+      turn_count: 1,
+      tool_surface_sha256: 'a'.repeat(64),
+      last_recovery_resolution: null,
+      updated_at: 1_786_230_000,
+    },
+  }
+
+  it('reads exact measured recovery evidence for one Keeper', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(recoveryPayload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchCodexSession('sangsu')
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/runtime/sessions/codex?keeper_name=sangsu')
+    expect(result.session?.phase.kind).toBe('recovery_required')
+    expect(result.session?.phase.failure).toBe('protocol_failed')
+    expect(result.session?.phase.observed_thread_id).toBe('thread-1')
+  })
+
+  it('posts the recovery fence and verified adoption identities', async () => {
+    const settledPayload = {
+      ...recoveryPayload,
+      session: {
+        ...recoveryPayload.session,
+        phase: { kind: 'settled', thread_id: 'thread-verified', turn_id: 'turn-verified' },
+        last_recovery_resolution: {
+          recovery_id: recoveryPayload.session.phase.recovery_id,
+          failure: 'protocol_failed',
+          resolution: {
+            kind: 'adopt_verified',
+            settlement: { thread_id: 'thread-verified', turn_id: 'turn-verified' },
+          },
+          resolved_by: 'dashboard',
+          resolved_at: 1_786_230_010,
+        },
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(settledPayload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await resolveCodexSession(
+      'sangsu',
+      recoveryPayload.session.phase.recovery_id,
+      { resolution: 'adopt_verified', thread_id: 'thread-verified', turn_id: 'turn-verified' },
+    )
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/runtime/sessions/codex/resolve')
+    expect(JSON.parse(init.body as string)).toEqual({
+      keeper_name: 'sangsu',
+      recovery_id: recoveryPayload.session.phase.recovery_id,
+      resolution: 'adopt_verified',
+      thread_id: 'thread-verified',
+      turn_id: 'turn-verified',
+    })
+    expect(result.session?.phase.kind).toBe('settled')
+    expect(result.session?.last_recovery_resolution?.resolved_by).toBe('dashboard')
   })
 })
 

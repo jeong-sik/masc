@@ -178,6 +178,13 @@ export type {
   DashboardRuntimeModelMetricsResponse,
   RuntimeTomlConfig,
   RuntimeRoutingLane,
+  DashboardCodexRecoveryFailure,
+  DashboardCodexSettlement,
+  DashboardCodexSessionPhase,
+  DashboardCodexRecoveryResolutionRecord,
+  DashboardCodexSession,
+  DashboardCodexSessionResponse,
+  DashboardCodexRecoveryDecision,
 } from './dashboard-runtime'
 export {
   fetchRuntimeProviders,
@@ -189,6 +196,8 @@ export {
   patchRuntimeAssignment,
   patchRuntimeMediaFailover,
   patchRuntimeRouting,
+  fetchCodexSession,
+  resolveCodexSession,
 } from './dashboard-runtime'
 
 export type {

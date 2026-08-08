@@ -145,6 +145,41 @@ export interface DashboardRuntimeDeclaredSpec {
   binding?: DashboardRuntimeDeclaredBindingSpec | null
 }
 
+export interface DashboardOfficialClientUsage {
+  input_tokens: number
+  output_tokens: number
+  thinking_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+}
+
+export interface DashboardOfficialClientMeasurement {
+  client: 'codex' | 'antigravity'
+  execution_mode: 'app_server' | 'plan_sandbox'
+  tool_owner: 'masc' | 'official_client'
+  permission_mode?: string | null
+  session_bound: boolean
+  resumed: boolean
+  turn_count: number
+  tool_calls: number
+  usage?: DashboardOfficialClientUsage | null
+}
+
+export interface DashboardOfficialClientEvidence {
+  runtime_id: string
+  observed_at: number
+  outcome: 'success' | 'failure' | 'rejected'
+  measurement: DashboardOfficialClientMeasurement
+}
+
+export interface DashboardRuntimeVerification {
+  status: 'verified' | 'unverified' | 'failed' | 'rejected'
+  measured: boolean
+  observed_at?: number | null
+  evidence?: DashboardOfficialClientEvidence | null
+  reason?: string | null
+}
+
 export interface DashboardRuntimeReasoningStreamingFormat {
   kind?: string | null
   field?: string | null
@@ -251,6 +286,7 @@ export interface DashboardRuntimeProviderSnapshot {
   parameter_policy?: DashboardRuntimeParameterPolicy | null
   request_config?: DashboardRuntimeRequestConfig | null
   declared_spec?: DashboardRuntimeDeclaredSpec | null
+  verification?: DashboardRuntimeVerification | null
   model_count?: number | null
   models: string[]
   source?: string | null
@@ -616,6 +652,113 @@ function decodeRuntimeDeclaredSpec(raw: unknown): DashboardRuntimeDeclaredSpec |
   }
 }
 
+function decodeOfficialClientUsage(raw: unknown): DashboardOfficialClientUsage | null {
+  if (!isRecord(raw)) return null
+  const inputTokens = asNumber(raw.input_tokens)
+  const outputTokens = asNumber(raw.output_tokens)
+  const thinkingTokens = asNumber(raw.thinking_tokens)
+  const cacheReadTokens = asNumber(raw.cache_read_tokens)
+  const totalTokens = asNumber(raw.total_tokens)
+  if (
+    inputTokens == null
+    || outputTokens == null
+    || thinkingTokens == null
+    || cacheReadTokens == null
+    || totalTokens == null
+    || ![inputTokens, outputTokens, thinkingTokens, cacheReadTokens, totalTokens]
+      .every(value => Number.isSafeInteger(value) && value >= 0)
+  ) return null
+  return {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    thinking_tokens: thinkingTokens,
+    cache_read_tokens: cacheReadTokens,
+    total_tokens: totalTokens,
+  }
+}
+
+function decodeOfficialClientMeasurement(raw: unknown): DashboardOfficialClientMeasurement | null {
+  if (!isRecord(raw)) return null
+  const client = asString(raw.client)
+  const executionMode = asString(raw.execution_mode)
+  const toolOwner = asString(raw.tool_owner)
+  const sessionBound = asBoolean(raw.session_bound)
+  const resumed = asBoolean(raw.resumed)
+  const turnCount = asNumber(raw.turn_count)
+  const toolCalls = asNumber(raw.tool_calls)
+  if (
+    (client !== 'codex' && client !== 'antigravity')
+    || (executionMode !== 'app_server' && executionMode !== 'plan_sandbox')
+    || (toolOwner !== 'masc' && toolOwner !== 'official_client')
+    || sessionBound == null
+    || resumed == null
+    || turnCount == null
+    || toolCalls == null
+    || !Number.isSafeInteger(turnCount)
+    || turnCount < 1
+    || !Number.isSafeInteger(toolCalls)
+    || toolCalls < 0
+  ) return null
+  const usage = raw.usage == null ? null : decodeOfficialClientUsage(raw.usage)
+  if (raw.usage != null && usage == null) return null
+  return {
+    client,
+    execution_mode: executionMode,
+    tool_owner: toolOwner,
+    permission_mode: asNullableString(raw.permission_mode),
+    session_bound: sessionBound,
+    resumed,
+    turn_count: turnCount,
+    tool_calls: toolCalls,
+    usage,
+  }
+}
+
+function decodeOfficialClientEvidence(raw: unknown): DashboardOfficialClientEvidence | null {
+  if (!isRecord(raw)) return null
+  const runtimeId = asString(raw.runtime_id)
+  const observedAt = asNumber(raw.observed_at)
+  const outcome = asString(raw.outcome)
+  const measurement = decodeOfficialClientMeasurement(raw.measurement)
+  if (
+    !runtimeId
+    || observedAt == null
+    || (outcome !== 'success' && outcome !== 'failure' && outcome !== 'rejected')
+    || !measurement
+  ) return null
+  return { runtime_id: runtimeId, observed_at: observedAt, outcome, measurement }
+}
+
+function decodeRuntimeVerification(raw: unknown): DashboardRuntimeVerification | null {
+  if (!isRecord(raw)) return null
+  const status = asString(raw.status)
+  const measured = asBoolean(raw.measured)
+  if (
+    (status !== 'verified' && status !== 'unverified' && status !== 'failed' && status !== 'rejected')
+    || measured == null
+  ) return null
+  const evidence = raw.evidence == null ? null : decodeOfficialClientEvidence(raw.evidence)
+  if (raw.evidence != null && evidence == null) return null
+  let expectedOutcome: DashboardOfficialClientEvidence['outcome'] | null = null
+  if (status === 'verified') expectedOutcome = 'success'
+  if (status === 'failed') expectedOutcome = 'failure'
+  if (status === 'rejected') expectedOutcome = 'rejected'
+  if (
+    (status === 'unverified' && (measured || evidence != null))
+    || (status !== 'unverified' && (!measured || evidence == null))
+    || (expectedOutcome != null && evidence?.outcome !== expectedOutcome)
+  ) return null
+  const observedAt = asNumber(raw.observed_at) ?? null
+  if (evidence != null && observedAt !== evidence.observed_at) return null
+  return {
+    status,
+    measured,
+    observed_at: observedAt,
+    evidence,
+    reason: asNullableString(raw.reason),
+  }
+}
+
 function decodeNullableStringArray(raw: unknown): string[] | null {
   return Array.isArray(raw) ? asStringArray(raw) : null
 }
@@ -685,6 +828,8 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
   if (!isRecord(raw)) return null
   const provider = asString(raw.provider)
   if (!provider) return null
+  const verification = raw.verification == null ? null : decodeRuntimeVerification(raw.verification)
+  if (raw.verification != null && verification == null) return null
   return {
     provider,
     runtime_id: asNullableString(raw.runtime_id),
@@ -738,6 +883,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     parameter_policy: decodeRuntimeParameterPolicy(raw.parameter_policy),
     request_config: decodeRuntimeRequestConfig(raw.request_config),
     declared_spec: decodeRuntimeDeclaredSpec(raw.declared_spec),
+    verification,
     model_count: asNumber(raw.model_count) ?? null,
     models: asStringArray(raw.models),
     source: asNullableString(raw.source),
@@ -860,6 +1006,9 @@ function decodeRuntimeStartupDegradation(raw: unknown): DashboardRuntimeStartupD
 function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProvidersResponse | null {
   if (!isRecord(raw)) return null
   const summary = isRecord(raw.summary) ? raw.summary : null
+  const rawProviders = asRecordArray(raw.providers)
+  const providers = rawProviders.map(decodeRuntimeProviderSnapshot)
+  if (providers.some(provider => provider == null)) return null
   return {
     updated_at: asString(raw.updated_at),
     summary: summary
@@ -872,9 +1021,7 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
           default_runtime_id: asNullableString(summary.default_runtime_id),
         }
       : null,
-    providers: asRecordArray(raw.providers)
-      .map(decodeRuntimeProviderSnapshot)
-      .filter((provider): provider is DashboardRuntimeProviderSnapshot => provider !== null),
+    providers: providers as DashboardRuntimeProviderSnapshot[],
     assignment_status: decodeRuntimeAssignmentStatus(raw.assignment_status),
     startup_degradation: decodeRuntimeStartupDegradation(raw.startup_degradation),
     config_path: asNullableString(raw.config_path),

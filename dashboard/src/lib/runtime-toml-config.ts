@@ -725,6 +725,7 @@ export const RUNTIME_TOML_PROTOCOLS = [
   'messages-http',
   'messages-cli',
   'codex-app-server',
+  'antigravity-cli',
 ] as const
 
 export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
@@ -745,6 +746,7 @@ export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
   'ollama-http',
   'openai-compatible-cli',
   'codex-app-server',
+  'antigravity-cli',
 ] as const
 
 export type RuntimeTomlCreatableProtocol = (typeof RUNTIME_TOML_CREATABLE_PROTOCOLS)[number]
@@ -754,7 +756,7 @@ export function isRuntimeTomlCreatableProtocol(protocol: string): protocol is Ru
 }
 
 export function isRuntimeTomlOfficialClientProtocol(protocol: string): boolean {
-  return protocol === 'codex-app-server'
+  return protocol === 'codex-app-server' || protocol === 'antigravity-cli'
 }
 
 const RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS = new Set([

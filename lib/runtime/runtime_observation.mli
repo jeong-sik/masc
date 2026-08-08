@@ -57,10 +57,43 @@ type runtime_fallback_event = {
   reason : string;
 }
 
+type official_client_kind =
+  | Codex
+  | Antigravity
+
+type official_client_execution_mode =
+  | App_server
+  | Plan_sandbox
+
+type official_client_tool_owner =
+  | Masc
+  | Official_client
+
+type official_client_usage =
+  { input_tokens : int
+  ; output_tokens : int
+  ; thinking_tokens : int
+  ; cache_read_tokens : int
+  ; total_tokens : int
+  }
+
+type official_client_measurement =
+  { client : official_client_kind
+  ; execution_mode : official_client_execution_mode
+  ; tool_owner : official_client_tool_owner
+  ; permission_mode : string option
+  ; session_bound : bool
+  ; resumed : bool
+  ; turn_count : int
+  ; tool_calls : int
+  ; usage : official_client_usage option
+  }
+
 type runtime_observation = {
   runtime_id : string;
   strategy : string option;
   configured_labels : string list;
+  official_client : official_client_measurement option;
   candidate_models : string list;
   primary_model : string option;
   selected_model : string option;
@@ -160,6 +193,7 @@ val runtime_observation_with_metrics :
   runtime_id:string ->
   ?strategy:string ->
   configured_labels:string list ->
+  ?official_client:official_client_measurement ->
   candidate_count:int ->
   selected_model_raw:string option ->
   capture:runtime_metrics_capture ->
@@ -224,3 +258,18 @@ val runtime_observation_to_json :
     [attempts] / [fallback_events] / outcome metadata
     into a single [`Assoc].  Pinned because the runtime-
     include consumer ([Runtime_agent]) re-exposes it. *)
+
+type official_client_snapshot =
+  { runtime_id : string
+  ; observed_at : float
+  ; outcome : [ `Success | `Failure | `Rejected ]
+  ; measurement : official_client_measurement
+  }
+
+val latest_official_client_snapshot :
+  runtime_id:string -> official_client_snapshot option
+(** Latest typed in-process official-client evidence. Raw session identifiers
+    are deliberately absent from this public dashboard boundary. *)
+
+val official_client_snapshot_to_json :
+  official_client_snapshot -> Yojson.Safe.t

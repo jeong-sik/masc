@@ -146,6 +146,9 @@ async function loadRuntimeData(
 // performance (success_rate, cooldown). Both signals can be shown together
 // without being duplicates.
 function runtimeProviderTone(provider: DashboardRuntimeProviderSnapshot): string {
+  if (provider.verification?.status === 'verified') return 'ok'
+  if (provider.verification?.status === 'failed' || provider.verification?.status === 'rejected') return 'bad'
+  if (provider.verification?.status === 'unverified') return 'warn'
   const advertised = provider.status?.trim().toLowerCase()
   if (advertised === 'missing_auth' || advertised === 'unsupported' || advertised === 'offline') {
     return 'bad'
@@ -159,6 +162,10 @@ function runtimeProviderTone(provider: DashboardRuntimeProviderSnapshot): string
 }
 
 function runtimeStatusLabel(provider: DashboardRuntimeProviderSnapshot): string {
+  if (provider.verification?.status === 'verified') return 'measured'
+  if (provider.verification?.status === 'failed') return 'measured failure'
+  if (provider.verification?.status === 'rejected') return 'measured rejected'
+  if (provider.verification?.status === 'unverified') return 'not measured'
   const advertised = provider.status?.trim().toLowerCase()
   if (advertised === 'missing_auth') return 'missing auth'
   if (advertised === 'unsupported') return 'unsupported'
@@ -166,6 +173,87 @@ function runtimeStatusLabel(provider: DashboardRuntimeProviderSnapshot): string 
   if (provider.available === true) return 'available'
   if (provider.available === false) return 'unavailable'
   return 'unknown'
+}
+
+function officialClientUsageText(provider: DashboardRuntimeProviderSnapshot): string | null {
+  const usage = provider.verification?.evidence?.measurement.usage
+  if (!usage) return null
+  return [
+    `in ${formatNumber(usage.input_tokens)}`,
+    `out ${formatNumber(usage.output_tokens)}`,
+    `thinking ${formatNumber(usage.thinking_tokens)}`,
+    `cache ${formatNumber(usage.cache_read_tokens)}`,
+    `total ${formatNumber(usage.total_tokens)}`,
+  ].join(' · ')
+}
+
+function OfficialClientEvidence({ provider }: { provider: DashboardRuntimeProviderSnapshot }) {
+  const verification = provider.verification
+  if (!verification) return null
+  const evidence = verification.evidence
+  if (!verification.measured || !evidence) {
+    return html`
+      <div
+        class="mt-1 rounded-[var(--r-1)] border border-[var(--status-warn)]/40 bg-[var(--status-warn)]/5 px-3 py-2"
+        data-testid=${`official-client-evidence-${provider.runtime_id ?? provider.provider}`}
+      >
+        <div class="flex items-center justify-between gap-2 text-2xs">
+          <strong class="text-[var(--status-warn)]">공식 구독 CLI · 아직 실측 없음</strong>
+          <span class="font-mono text-[var(--color-fg-muted)]">auth / usage / session unknown</span>
+        </div>
+        <div class="mt-1 text-3xs text-[var(--color-fg-muted)]">
+          설정만으로 설치·로그인·쿼터를 추정하지 않습니다. 이 서버 프로세스에서 성공한 turn이 생기면 증거가 표시됩니다.
+        </div>
+      </div>
+    `
+  }
+  const measurement = evidence.measurement
+  const usage = officialClientUsageText(provider)
+  const succeeded = verification.status === 'verified' && evidence.outcome === 'success'
+  const evidenceClass = succeeded
+    ? 'mt-1 rounded-[var(--r-1)] border border-[var(--status-ok)]/40 bg-[var(--status-ok)]/5 px-3 py-3'
+    : 'mt-1 rounded-[var(--r-1)] border border-[var(--status-bad)]/40 bg-[var(--status-bad)]/5 px-3 py-3'
+  const headingClass = succeeded
+    ? 'text-xs text-[var(--status-ok)]'
+    : 'text-xs text-[var(--status-bad)]'
+  let heading = '공식 구독 CLI · 실측 turn 실패'
+  if (succeeded) heading = '공식 구독 CLI · 실측 turn 성공'
+  if (evidence.outcome === 'rejected') heading = '공식 구독 CLI · 실측 turn 거부'
+  const authEvidence = succeeded
+    ? 'successful turn at observed time'
+    : `not established by ${evidence.outcome} turn`
+  return html`
+    <div
+      class=${evidenceClass}
+      data-testid=${`official-client-evidence-${provider.runtime_id ?? provider.provider}`}
+    >
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <strong class=${headingClass}>${heading}</strong>
+        <span class="font-mono text-3xs text-[var(--color-fg-muted)]">
+          ${formatTimeHms(evidence.observed_at)} · ${evidence.outcome}
+        </span>
+      </div>
+      <div class="mt-2 grid grid-cols-2 lg:grid-cols-4 gap-x-3 gap-y-1 text-2xs text-[var(--color-fg-secondary)]">
+        <div>client · <span class="font-mono">${measurement.client}</span></div>
+        <div>mode · <span class="font-mono">${measurement.execution_mode}</span></div>
+        <div>tool owner · <span class="font-mono">${measurement.tool_owner}</span></div>
+        <div>permission · <span class="font-mono">${measurement.permission_mode ?? 'not reported'}</span></div>
+        <div>session · ${measurement.session_bound ? 'bound' : 'not bound'}</div>
+        <div>turn · ${formatNumber(measurement.turn_count)} · ${measurement.resumed ? 'resumed' : 'started'}</div>
+        <div>tool calls · ${formatNumber(measurement.tool_calls)}</div>
+        <div>auth evidence · ${authEvidence}</div>
+      </div>
+      ${usage ? html`
+        <div class="mt-2 border-t border-[var(--status-ok)]/20 pt-2 font-mono text-2xs text-[var(--color-fg-secondary)]">
+          provider usage · ${usage}
+        </div>
+      ` : html`
+        <div class="mt-2 border-t border-[var(--status-ok)]/20 pt-2 text-2xs text-[var(--color-fg-muted)]">
+          provider usage · not reported by this official client boundary
+        </div>
+      `}
+    </div>
+  `
 }
 
 function runtimeRequestToolChoiceText(provider: DashboardRuntimeProviderSnapshot): string | null {
@@ -245,6 +333,10 @@ function runtimeProviderAuthText(
   provider: DashboardRuntimeProviderSnapshot,
   probe: DashboardRuntimeProviderProbe | null | undefined,
 ): string {
+  if (provider.verification?.status === 'verified') return 'official session measured'
+  if (provider.verification?.status === 'unverified') return 'unknown until measured turn'
+  if (provider.verification?.status === 'failed') return 'not established (failed turn)'
+  if (provider.verification?.status === 'rejected') return 'not established (rejected turn)'
   if (probe) return runtimeProbeAuthLabel(probe)
   return provider.auth_kind ?? MISSING_DATA_DASH
 }
@@ -838,7 +930,7 @@ export function RuntimeMonitor() {
     <div class="v2-monitoring-surface flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <${Select}
-          class="px-2 py-1 text-xs"
+          class="!w-28 px-2 py-1 text-xs"
           value=${String(windowMinutes.value)}
           ariaLabel="시간 윈도우 선택"
           options=${[
@@ -924,6 +1016,7 @@ export function RuntimeMonitor() {
                     <div>models · ${formatNumber(runtimeProviderModelCount(provider, liveProbe))}</div>
                     <div>auth · ${runtimeProviderAuthText(provider, liveProbe)}</div>
                   </div>
+                  <${OfficialClientEvidence} provider=${provider} />
                   ${snapshotFacts
                     ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${snapshotFacts}>
                         snapshot · ${snapshotFacts}

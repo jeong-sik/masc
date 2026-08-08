@@ -101,6 +101,31 @@ max-context = 131072
     })
   })
 
+  it('projects the Antigravity official-client subscription boundary without credentials', () => {
+    const environment = parseRuntimeTomlEnvironment(`[runtime]
+default = "antigravity_subscription.flash"
+
+[providers.antigravity_subscription]
+display-name = "Antigravity Subscription"
+protocol = "antigravity-cli"
+command = "/opt/masc/bin/agy"
+is-non-interactive = true
+
+[models.flash]
+api-name = "gemini-3.6-flash-low"
+max-context = 128000
+
+[antigravity_subscription.flash]
+`)
+    expect(environment.providers[0]).toMatchObject({
+      protocol: 'antigravity-cli',
+      transportKind: 'command',
+      command: '/opt/masc/bin/agy',
+      credentialType: 'none',
+      isNonInteractive: true,
+    })
+  })
+
   it('projects runtime routing lanes and keeper assignments from runtime.toml source', () => {
     const withRouting = `${sourceText.replace(
       'default = "runpod_mtp.qwen"',

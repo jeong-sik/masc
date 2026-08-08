@@ -349,9 +349,29 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
       ~latency_ms:(Some latency_ms)
       ~error:None;
     let runtime_observation =
+      let official_client : Runtime_observation.official_client_measurement =
+        { client = Antigravity
+        ; execution_mode = Plan_sandbox
+        ; tool_owner = Official_client
+        ; permission_mode = Some turn.permission_mode
+        ; session_bound = true
+        ; resumed = turn.resumed
+        ; turn_count
+        ; tool_calls = turn.tool_calls
+        ; usage =
+            Some
+              { input_tokens = turn.usage.input_tokens
+              ; output_tokens = turn.usage.output_tokens
+              ; thinking_tokens = turn.usage.thinking_tokens
+              ; cache_read_tokens = turn.usage.cache_read_tokens
+              ; total_tokens = turn.usage.total_tokens
+              }
+        }
+      in
       Runtime_observation.runtime_observation_with_metrics
         ~runtime_id
         ~strategy:"official_client_runtime"
+        ~official_client
         ~configured_labels:
           [ "antigravity_cli"
           ; "execution_mode=plan_sandbox"

@@ -178,6 +178,10 @@ function transportField(provider: RuntimeTomlProvider): RuntimeProviderTransport
   return provider.transportKind === 'command' ? 'command' : 'endpoint'
 }
 
+function officialClientCommandPlaceholder(protocol: RuntimeTomlProtocol): string {
+  return protocol === 'antigravity-cli' ? '/absolute/path/to/agy' : '/absolute/path/to/codex'
+}
+
 // Prototype rt-model-ctx label (runtime-editor.jsx:176) — now via the shared
 // formatContextTokens SSOT so 1M-class contexts read '1M ctx', not '1000k ctx'.
 function protoContext(value: number | null | undefined): string {
@@ -785,7 +789,9 @@ export function RuntimeEnvironmentEditor({
                   <input
                     class="rt-input mono"
                     value=${newProvider.transportValue}
-                    placeholder=${newProvider.transportKind === 'command' ? '/absolute/path/to/codex' : 'https://...'}
+                    placeholder=${newProvider.transportKind === 'command'
+                      ? officialClientCommandPlaceholder(newProvider.protocol)
+                      : 'https://...'}
                     disabled=${isDisabled}
                     aria-label="새 provider transport 값"
                     onInput=${(event: Event) => setNewProvider({ ...newProvider, transportValue: (event.currentTarget as HTMLInputElement).value })}

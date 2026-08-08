@@ -1,7 +1,4 @@
-(** Filesystem Compatibility Layer - Eio-native I/O with fallback
-
-    @since 2026-02 - Keeper Emergent Identity v2.0
-*)
+(** Filesystem access through Eio when configured and Unix I/O otherwise. *)
 
 open Fs_compat_internal
 
@@ -9,9 +6,8 @@ module Atomic_orphan_size_class = Atomic_orphan_size_class
 
 (** Capability-scoped observation of one immutable regular-file snapshot.
 
-    This module owns no digest, schema, history, migration, scan, retry, repair,
-    or deletion policy. It pins the supplied parent capability and dispatches
-    exactly one single-component leaf open.
+    It pins the supplied parent capability and dispatches exactly one
+    single-component leaf open.
 
     Before allocation, [read] proves non-negative [expected_length <=
     max_length], representability, regular-file kind, one link, mode [0600]
@@ -99,10 +95,8 @@ module Capability_exact_read : sig
     (observation, failure) result
 end
 
-(** #9921: raised by mutating [Fs_compat] entry points
-    ([append_file], [save_file], [mkdir_p]) when the target path falls
-    under [HOME] and the process is a test executable. Defense in depth
-    behind [Env_config_core.base_path_prod_guard]. Bypass with
+(** Raised by mutating entry points when a test executable targets a path that
+    resolves under [HOME]. Bypass with the exact setting
     [MASC_TEST_ALLOW_HOME_BASE_PATH=1]. *)
 exception Test_isolation_breach of string
 

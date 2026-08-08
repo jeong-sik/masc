@@ -97,11 +97,6 @@ val normalize_masc_base_path_input : string -> string
 val existing_dir : string -> bool
 val existing_file : string -> bool
 
-(* RFC-0085 PR-10 — [home_dir_opt] removed from the public surface;
-   callers read from [(Host_config.from_env ()).home] instead.  The
-   function is retained file-private because [base_path] /
-   [sb_path_opt] still call it internally. *)
-
 (** {1 HTTP host + port (SSOT for issue 8352)} *)
 
 val host_env_key : string
@@ -113,10 +108,6 @@ val default_host : string
 val masc_host : unit -> string
 
 (** {1 Assets / cluster name} *)
-
-(* RFC-0085 PR-10 — [assets_dir_opt] removed completely.  Caller 0
-   after PR-10 migration; readers use
-   [(Host_config.from_env ()).assets_dir]. *)
 
 val cluster_name_opt : unit -> string option
 val cluster_name : unit -> string
@@ -157,13 +148,8 @@ val base_path_env_key : string
 val base_path_input_env_key : string
 val base_path_source_opt : unit -> (string * string) option
 
-(* RFC-0085 PR-9 — [base_path_raw_opt] and [base_path_opt] are no
-   longer part of the public surface.  External callers read the
-   normalised env-derived base_path from
-   [(Host_config.from_env ()).base_path] instead.  The two functions
-   remain file-private inside [env_config_core.ml] because
-   [base_path] / [sb_path_opt] still reach for the raw value
-   internally; a follow-up RFC migrates those too. *)
+(* Raw base-path readers are private. External callers use
+   [(Host_config.from_env ()).base_path]. *)
 
 val running_under_test_executable : unit -> bool
 val test_allow_home_base_path_env : string

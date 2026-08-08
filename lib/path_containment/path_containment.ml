@@ -3,55 +3,70 @@ type t =
   | Outside
   | Undecidable of string
 
-(* Lexical pass: drop empty and ["."] components, fold [".."] against what has
-   been accumulated. Folding past the root keeps the root, matching how the
-   kernel treats ["/.."]. *)
-let split_normalized absolute =
-  let fold acc component =
-    match component with
-    | "" | "." -> acc
-    | ".." -> (match acc with _ :: rest -> rest | [] -> [])
-    | _ -> component :: acc
-  in
-  String.split_on_char '/' absolute |> List.fold_left fold [] |> List.rev
+let home_guard_bypass_enabled = function
+  | Some ("1" | "true") -> true
+  | Some _ | None -> false
 
-let join segments = "/" ^ String.concat "/" segments
+let split_components path = String.split_on_char '/' path
 
-(* [Unix.realpath] raises when the path does not exist, and a write target
-   usually does not exist yet. Resolve the longest existing prefix so a symlink
-   anywhere along it is followed, then put the components that do not exist back
-   on top: they cannot be symlinks, because they are not there. *)
-let resolve_existing_prefix segments =
-  let rec walk prefix tail =
-    match Unix.realpath (join prefix) with
-    | resolved -> Ok (split_normalized resolved @ tail)
-    | exception (Unix.Unix_error _ | Sys_error _) -> (
-        match prefix with
-        | [] -> Error (Printf.sprintf "no existing prefix resolves for %S" (join segments))
-        | _ ->
-            let dropped = List.nth prefix (List.length prefix - 1) in
-            let shorter = List.filteri (fun i _ -> i < List.length prefix - 1) prefix in
-            walk shorter (dropped :: tail))
-  in
-  walk segments []
+let join_absolute segments = "/" ^ String.concat "/" segments
 
-let absolutize raw =
-  let trimmed = String.trim raw in
-  if String.length trimmed = 0 then Error "empty path"
-  else if Char.equal trimmed.[0] '/' then Ok trimmed
+let absolute_components raw =
+  if String.equal raw "" then Error "empty path"
+  else if Char.equal raw.[0] '/' then Ok (split_components raw)
   else
     match Sys.getcwd () with
-    | cwd -> Ok (Filename.concat cwd trimmed)
+    | cwd -> Ok (split_components cwd @ split_components raw)
     | exception (Sys_error msg | Unix.Unix_error (_, _, msg)) ->
-        Error (Printf.sprintf "relative path %S with no reachable cwd: %s" trimmed msg)
+        Error (Printf.sprintf "relative path %S with no reachable cwd: %s" raw msg)
 
-let canonical_segments raw =
-  match absolutize raw with
-  | Error _ as error -> error
-  | Ok absolute -> resolve_existing_prefix (split_normalized absolute)
+let resolve raw =
+  let ( let* ) = Result.bind in
+  let* components = absolute_components raw in
+  let rec walk ~symlink_hops resolved_rev pending =
+    match pending with
+    | [] -> Ok (List.rev resolved_rev)
+    | ("" | ".") :: rest -> walk ~symlink_hops resolved_rev rest
+    | ".." :: rest ->
+        let parent_rev = match resolved_rev with _ :: parent -> parent | [] -> [] in
+        walk ~symlink_hops parent_rev rest
+    | component :: rest ->
+        let candidate =
+          join_absolute (List.rev_append resolved_rev [ component ])
+        in
+        (match Unix.lstat candidate with
+         | { Unix.st_kind = Unix.S_LNK; _ } ->
+             if symlink_hops >= 40 then
+               Error (Printf.sprintf "too many symbolic links while resolving %S" raw)
+             else
+               (match Unix.readlink candidate with
+                | target ->
+                    let target_components = split_components target in
+                    let target_base =
+                      if Filename.is_relative target then resolved_rev else []
+                    in
+                    walk ~symlink_hops:(symlink_hops + 1) target_base
+                      (target_components @ rest)
+                | exception (Unix.Unix_error (error, fn, arg)) ->
+                    Error
+                      (Printf.sprintf "%s(%S): %s" fn arg
+                         (Unix.error_message error))
+                | exception Sys_error msg -> Error msg)
+         | { Unix.st_kind; _ }
+           when (not (List.is_empty rest)) && st_kind <> Unix.S_DIR ->
+             Error
+               (Printf.sprintf "%S is not a directory while resolving %S"
+                  candidate raw)
+         | _ -> walk ~symlink_hops (component :: resolved_rev) rest
+         | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+             walk ~symlink_hops (component :: resolved_rev) rest
+         | exception Unix.Unix_error (error, fn, arg) ->
+             Error
+               (Printf.sprintf "%s(%S): %s" fn arg (Unix.error_message error))
+         | exception Sys_error msg -> Error msg)
+  in
+  walk ~symlink_hops:0 [] components
 
-(* Component-wise, so a sibling that merely extends the root's spelling does not
-   count as contained. *)
 let rec starts_with_components ~prefix segments =
   match prefix, segments with
   | [], _ -> true
@@ -60,11 +75,12 @@ let rec starts_with_components ~prefix segments =
       String.equal p s && starts_with_components ~prefix:prest srest
 
 let classify ~root ~path =
-  match canonical_segments root with
+  match resolve root with
   | Error reason -> Undecidable (Printf.sprintf "root: %s" reason)
-  | Ok root_segments -> (
-      match canonical_segments path with
-      | Error reason -> Undecidable (Printf.sprintf "path: %s" reason)
-      | Ok path_segments ->
-          if starts_with_components ~prefix:root_segments path_segments then Inside
-          else Outside)
+  | Ok root_segments ->
+      (match resolve path with
+       | Error reason -> Undecidable (Printf.sprintf "path: %s" reason)
+       | Ok path_segments ->
+           if starts_with_components ~prefix:root_segments path_segments then
+             Inside
+           else Outside)

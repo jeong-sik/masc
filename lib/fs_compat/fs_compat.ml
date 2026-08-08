@@ -1,17 +1,10 @@
-(** Filesystem Compatibility Layer - Eio-native I/O with fallback
-
-    Provides a unified filesystem API for gradual migration from
-    blocking Unix I/O to Eio.Path operations.
+(** Filesystem access through Eio when configured and Unix I/O otherwise.
 
     Usage:
     1. At server startup: [Fs_compat.set_fs (Eio.Stdenv.fs env)]
     2. In code: [Fs_compat.load_file path] instead of [open_in ...]
 
-    When fs is not set (non-Eio contexts), falls back to blocking Unix I/O.
-    This allows incremental migration without changing all call sites at once.
-
-    @since 2026-02 - Keeper Emergent Identity v2.0
-*)
+    When fs is not set, calls execute through blocking Unix I/O. *)
 
 open Fs_compat_internal
 
@@ -56,23 +49,9 @@ let with_io ~path f =
     raise (Sys_error (Printf.sprintf "%s: %s" path (Printexc.to_string e)))
 ;;
 
-(* #9921: defense-in-depth write-boundary guard.
-
-   [Env_config_core.base_path_prod_guard] stops test-time writes when path
-   resolution points under HOME.  Any code that caches a stale [base_path ()]
-   result or builds a HOME-relative path directly hits this gate before the
-   write lands on the production ledger.
-
-   The prod ledger observed 106 test-pattern rows
-   ([hot-voter-*], [flipper], [same-voter], [judge]) written pre-#9920.
-   This guard prevents regression if any new code path slips past the
-   resolution guard.
-
-   Active only for test executables (basename starts with [test_]).
-   Escape hatch [MASC_TEST_ALLOW_HOME_BASE_PATH=1] matches
-   [base_path_prod_guard] for the rare test that legitimately writes
-   under HOME.  Reads remain unguarded — this is about preventing
-   silent corruption, not restricting observability. *)
+(* Test executables must not mutate paths that resolve under HOME. Reads remain
+   available, and the exact [MASC_TEST_ALLOW_HOME_BASE_PATH=1] setting permits
+   an explicitly scoped test. *)
 exception Test_isolation_breach of string
 
 let test_exec_home_guard ~op path =
@@ -86,11 +65,8 @@ let test_exec_home_guard ~op path =
   then ()
   else (
     let allow =
-      match Sys.getenv_opt "MASC_TEST_ALLOW_HOME_BASE_PATH" with
-      | Some v ->
-        let v = String.lowercase_ascii (String.trim v) in
-        String.equal v "1" || String.equal v "true" || String.equal v "yes"
-      | None -> false
+      Path_containment.home_guard_bypass_enabled
+        (Sys.getenv_opt "MASC_TEST_ALLOW_HOME_BASE_PATH")
     in
     if allow
     then ()
@@ -102,8 +78,8 @@ let test_exec_home_guard ~op path =
           raise
             (Test_isolation_breach
                (Printf.sprintf
-                  "#9921 %s blocked: %s (HOME=%S, path=%S) in test executable %S. \
-                   MASC_BASE_PATH override did not apply — fix the test setup or set \
+                  "test isolation breach: %s blocked: %s (HOME=%S, path=%S) in \
+                   test executable %S. Fix the test setup or set \
                    MASC_TEST_ALLOW_HOME_BASE_PATH=1."
                   op
                   detail

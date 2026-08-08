@@ -267,9 +267,6 @@ let masc_host () =
   | Some host -> host
   | None -> default_host
 
-(* RFC-0085 PR-10 — [assets_dir_opt] removed (caller 0 after migration).
-   Readers use [(Host_config.from_env ()).assets_dir]. *)
-
 let cluster_name_opt () =
   raw_value_opt "MASC_CLUSTER_NAME" |> trim_opt
 
@@ -390,37 +387,17 @@ let running_under_test_executable () =
   in
   String.length basename >= 5 && String.starts_with ~prefix:"test_" basename
 
-(** #9903: production base-path safeguard for test executables.
-
-    Without this, a test whose [MASC_BASE_PATH] override fails to
-    take effect (due to any combination of dune env precedence,
-    module init-time caching, or Eio.Path absolute-path
-    interpretation) silently falls through to the operator's HOME
-    and appends fixture data to the live ledger — the exact
-    failure mode diagnosed on [<base-path>/.masc/board_votes.jsonl]
-    (112 hot-voter-* rows overwrote real keeper votes).
-
-    The safeguard is lossy by design: a test that resolves
-    [base_path] to a [HOME] prefix raises [Config_error]
-    immediately. Loss of a test run is strictly better than loss
-    of production data.
-
-    Escape hatch: set [MASC_TEST_ALLOW_HOME_BASE_PATH=1] for tests
-    that legitimately need HOME-relative paths (none known today;
-    the env var exists only so a reviewer can turn it on
-    temporarily while investigating a new breach).
-
-    Non-test executables (the MCP server) skip the check — HOME
-    fallback is the correct production behavior. *)
+(** Test executables must not use a base path that resolves under [HOME]. The
+    exact [MASC_TEST_ALLOW_HOME_BASE_PATH=1] setting permits an explicitly
+    scoped test. *)
 let test_allow_home_base_path_env = "MASC_TEST_ALLOW_HOME_BASE_PATH"
 
 let base_path_prod_guard path =
   if not (running_under_test_executable ()) then path
   else begin
     let allow =
-      match raw_value_opt test_allow_home_base_path_env |> trim_opt with
-      | Some v -> v = "1" || v = "true"
-      | None -> false
+      Path_containment.home_guard_bypass_enabled
+        (raw_value_opt test_allow_home_base_path_env)
     in
     if allow then path
     else
@@ -430,17 +407,14 @@ let base_path_prod_guard path =
         let breach detail =
           raise (Config_error
             (Printf.sprintf
-               "#9903 test isolation breach: Env_config_core.base_path() \
-                resolved to %S — %s (HOME=%S) in test executable %S. This \
-                indicates a MASC_BASE_PATH override failure — writing to \
-                the production ledger under HOME would corrupt real data. \
-                Fix the override path in the test, or set \
-                MASC_TEST_ALLOW_HOME_BASE_PATH=1 to bypass (not \
-                recommended)."
+               "test isolation breach: Env_config_core.base_path() resolved \
+                to %S — %s (HOME=%S) in test executable %S. Fix the test \
+                setup or set MASC_TEST_ALLOW_HOME_BASE_PATH=1 explicitly for \
+                this test."
                path detail home (Filename.basename Sys.executable_name)))
         in
-        (* Same owner as the Fs_compat mutation guard, so the two cannot drift
-           again. Undecidable takes the Inside exit: a base path whose
+        (* Same owner as the Fs_compat mutation guard. Undecidable takes the
+           Inside exit: a base path whose
            destination cannot be resolved is not known to be outside HOME. *)
         (match Path_containment.classify ~root:home ~path with
          | Path_containment.Outside -> path

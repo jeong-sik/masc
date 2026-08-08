@@ -4,7 +4,32 @@
     tool/product name. It records an exact request, accepts an explicit
     resolution, and wakes only the originating Keeper lane. *)
 
-include module type of Keeper_approval_queue_rules_types
+include
+  module type of Keeper_approval_queue_rules_types
+    with module Decision = Keeper_approval_queue_rules_types.Decision
+     and type advisory_judgment = Keeper_approval_queue_rules_types.advisory_judgment
+     and type hitl_context_summary = Keeper_approval_queue_rules_types.hitl_context_summary
+     and type summary_status = Keeper_approval_queue_rules_types.summary_status
+     and type exact_attempt_quarantine_cause =
+      Keeper_approval_queue_rules_types.exact_attempt_quarantine_cause
+     and type exact_attempt_status = Keeper_approval_queue_rules_types.exact_attempt_status
+     and type exact_attempt_binding = Keeper_approval_queue_rules_types.exact_attempt_binding
+     and type exact_attempt_state = Keeper_approval_queue_rules_types.exact_attempt_state
+     and type summary_attempt_pre_worker_unavailable_code =
+      Keeper_approval_queue_rules_types.summary_attempt_pre_worker_unavailable_code
+     and type summary_attempt_pre_worker_unavailable =
+      Keeper_approval_queue_rules_types.summary_attempt_pre_worker_unavailable
+     and type summary_attempt_disposition =
+      Keeper_approval_queue_rules_types.summary_attempt_disposition
+     and type pending_approval = Keeper_approval_queue_rules_types.pending_approval
+     and type decision = Keeper_approval_queue_rules_types.decision
+     and type decision_source = Keeper_approval_queue_rules_types.decision_source
+     and type authorization_source = Keeper_approval_queue_rules_types.authorization_source
+     and type approval_rule = Keeper_approval_queue_rules_types.approval_rule
+     and type rule_match = Keeper_approval_queue_rules_types.rule_match
+     and type rule_lookup = Keeper_approval_queue_rules_types.rule_lookup
+     and type rule_store_error = Keeper_approval_queue_rules_types.rule_store_error
+     and type resolution_result = Keeper_approval_queue_rules_types.resolution_result
 
 type storage_error =
   { path : string
@@ -247,63 +272,6 @@ val find_matching_rule :
   (rule_lookup, rule_store_error) result
 
 val generate_id : unit -> string
-val recent_resolved_history_limit : int
-val recent_resolved_max_limit : int
-val recent_resolved_default_window_minutes : int
-val recent_resolved_min_window_minutes : int
-val recent_resolved_max_window_minutes : int
-
-val read_recent_audit :
-  base_path:string -> ?keeper_name:string -> ?n:int -> unit -> Yojson.Safe.t list
-
-val audit_day_string_of_ts : float -> string
-(** Day key ["YYYY-MM-DD"] for the [YYYY-MM/DD.jsonl] audit layout. Exposed as
-    a pure function so the UTC invariant is testable: the write path
-    ([Jsonl_writer.dated_path]) picks the day file with [Unix.gmtime], so a
-    local-time key would read the wrong file for the hours where the two
-    calendars disagree. *)
-
-type resolved_history =
-  { resolved_rows : Yojson.Safe.t list
-  ; resolved_matched : int
-  ; resolved_limit : int
-  ; resolved_window_minutes : int
-  ; resolved_scan_exhausted : bool
-  }
-(** A page of resolved Gate decisions together with the bounds that produced
-    it. [resolved_rows] is newest first and holds at most [resolved_limit]
-    entries; [resolved_matched] counts every resolved decision the scan saw
-    inside the window, so [resolved_matched > resolved_limit] means the page is
-    a slice rather than the whole window. [resolved_scan_exhausted] reports the
-    second bound: the physical row cap stopped the scan before it reached the
-    window start, so even [resolved_matched] undercounts. Rendering only
-    [resolved_rows] reintroduces the silent truncation this type removes. *)
-
-val list_recent_resolved :
-  base_path:string ->
-  now_ts:float ->
-  ?limit:int ->
-  ?window_minutes:int ->
-  unit ->
-  resolved_history
-(** [list_recent_resolved ~base_path ~now_ts ()] returns resolved Gate decisions
-    from the last [window_minutes] (default
-    {!recent_resolved_default_window_minutes}, clamped to
-    [[recent_resolved_min_window_minutes, recent_resolved_max_window_minutes]]),
-    newest first, capped at [limit] (default
-    {!recent_resolved_history_limit}, clamped to
-    [[0, recent_resolved_max_limit]]).
-
-    [now_ts] is supplied by the caller rather than read here, matching
-    {!Dashboard_gate_metrics.tool_rejection_counts}: the observation boundary
-    captures the clock once for the whole projection, and this function stays
-    deterministic so a test can pin an exact window.
-
-    Rows without a [ts] are excluded: a wall-clock window cannot place an
-    undated decision, and dating it by guesswork would misreport history.
-
-    Storage failures are reported through the approval-queue failure metric and
-    yield an empty page rather than raising. *)
 
 module For_testing : sig
   type strict_snapshot_writer =

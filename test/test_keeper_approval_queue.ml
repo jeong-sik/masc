@@ -1,4 +1,15 @@
 module AQ = Masc.Keeper_approval_queue
+module Rule_contract = Keeper_approval_queue_rules_types
+
+let test_rule_contract_types_are_shared_by_identity () =
+  let through_queue : AQ.rule_match = { rule_id = "rule-shared" } in
+  let through_owner : Rule_contract.rule_match = through_queue in
+  let round_trip : AQ.rule_match = through_owner in
+  Alcotest.(check string)
+    "canonical rule contract identity"
+    "rule-shared"
+    round_trip.rule_id
+;;
 
 let reserve_retry_exact ~base_path (entry : AQ.pending_approval) =
   AQ.reserve_summary_attempt_retry
@@ -3683,6 +3694,10 @@ let () =
     "Keeper_approval_queue"
     [ ( "nonhierarchical queue"
       , [ Alcotest.test_case
+            "rule contract types share identity"
+            `Quick
+            test_rule_contract_types_are_shared_by_identity
+        ; Alcotest.test_case
             "durable lock serializes Eio fibers"
             `Quick
             test_pending_store_lock_serializes_eio_fibers

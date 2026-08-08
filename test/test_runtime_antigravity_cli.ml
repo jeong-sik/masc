@@ -304,9 +304,11 @@ let test_runtime_observation_publishes_typed_official_client_snapshot () =
         Some
           { input_tokens = 20
           ; output_tokens = 3
-          ; thinking_tokens = 1
-          ; cache_read_tokens = 5
-          ; total_tokens = 23
+          ; thinking_tokens = Some 1
+          ; cache_creation_input_tokens = None
+          ; cache_read_input_tokens = 5
+          ; total_tokens = Some 23
+          ; total_cost_usd = None
           }
     }
   in

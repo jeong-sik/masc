@@ -359,9 +359,11 @@ let test_effective_provider_config_drives_lifecycle_and_pricing () =
     }
   in
   let carrier =
+    (* An explicit [provider_id] selects provider-scoped catalog rows. This
+       fixture exercises the native Anthropic wire kind and its bare model
+       catalog row, so it must remain an anonymous native config. *)
     Llm_provider.Provider_config.make
       ~kind:Anthropic
-      ~provider_id:"anthropic"
       ~model_id:"carrier-model-without-pricing"
       ~base_url:"https://api.anthropic.com"
       ~request_path:"/v1/messages"

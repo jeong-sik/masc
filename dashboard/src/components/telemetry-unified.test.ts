@@ -841,7 +841,7 @@ describe('TelemetryUnified', () => {
     expect(turnGroups).toHaveLength(0)
   })
 
-  it('surfaces cloud Ollama model details in OAS telemetry previews and search', async () => {
+  it('surfaces cloud Ollama model details in runtime telemetry previews and search', async () => {
     const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadPanel(
       vi.fn().mockResolvedValue(baseTelemetry),
       vi.fn().mockResolvedValue(baseSummary),

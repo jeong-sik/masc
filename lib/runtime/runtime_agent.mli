@@ -1,9 +1,8 @@
 (** Runtime_agent — config, build, and run entry points
-    for OAS agent execution.
+    for Agent Core execution.
 
-    Thin facade over {!Runtime_agent_context},
-    {!Runtime_transport}, and
-    {!Runtime_oas_checkpoint}.  External callers reach
+    Coordinates {!Runtime_agent_context}, {!Runtime_transport}, and
+    {!Runtime_agent_checkpoint}. External callers reach
     the run/config entry points via [Runtime_agent.X];
     provider transport internals and transport-local diagnostics are owned by
     {!Runtime_transport}.
@@ -51,7 +50,7 @@ type cooperative_yield_decision =
 type cooperative_yield_probe =
   Agent_sdk.Agent.Advanced.tool_boundary ->
   (cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
-(** Why this single OAS call yielded control. [Completed] is the
+(** Why this single Agent Core call yielded control. [Completed] is the
     model's success path. [Yielded_to_chat_waiting] fires when an
     autonomous-lane run stopped at a turn boundary to hand the keeper's
     turn slot to a parked dashboard/connector chat request.
@@ -62,7 +61,7 @@ type cooperative_yield_probe =
     chat must receive an acknowledgement rather than a transport failure.
     [Yielded_after_repeated_tool_call] fires only after repeated exact tool
     input and output prove that the provider loop is not advancing.
-    [InputRequired] means OAS returned a typed elicitation request whose
+    [InputRequired] means Agent Core returned a typed elicitation request whose
     question and checkpoint must be surfaced without provider fallback. These
     typed non-completion stops persist checkpoints rather than claiming a
     completed deliverable: [InputRequired] resumes from later host input, while
@@ -179,7 +178,7 @@ val content_blocks_for_run :
   initial_messages:Agent_sdk.Types.message list ->
   goal_blocks:Agent_sdk.Types.content_block list ->
   Agent_sdk.Types.content_block list
-(** Active content blocks for a single OAS run: prior [initial_messages] plus
+(** Active content blocks for a single Agent Core run: prior [initial_messages] plus
     the current goal blocks. Keeper reroute and the runtime capability floor use
     this same view so media retained in history cannot bypass pre-dispatch
     gating on a later text-only follow-up. *)
@@ -235,12 +234,10 @@ val media_degrade_note :
 module For_testing : sig
   val with_oas_tool_of_masc_hook_unset : (unit -> 'a) -> 'a
 
-
   val stop_reason_of_cooperative_yield :
     turns_used:int -> cooperative_yield_reason -> stop_reason
 
-  (* RFC-OAS-026 §4.6 fail-fast (pure decision; raises [Failure] when an idle
-     deadline is configured but no clock resolves). *)
+  (** Fail closed when an idle deadline is configured but no clock resolves. *)
   val decide_clock_for_idle :
     stream_idle_timeout_s:float option ->
     process_clock:(float Eio.Time.clock_ty Eio.Resource.t, string) result ->
@@ -353,7 +350,7 @@ val run :
   ?cooperative_yield_probe:cooperative_yield_probe ->
   string ->
   (run_result, Agent_sdk.Error.sdk_error) result
-(** Runs an OAS agent against [goal].  When
+(** Runs an Agent Core agent against [goal]. When
     [oas_checkpoint] is present, {!resume_from_checkpoint}
     is used; otherwise {!build} produces a fresh agent.
     Returns the wrapped {!run_result}; errors propagate
@@ -371,7 +368,7 @@ val run_blocks :
   ?cooperative_yield_probe:cooperative_yield_probe ->
   Agent_sdk.Types.content_block list ->
   (run_result, Agent_sdk.Error.sdk_error) result
-(** Runs an OAS agent against structured user-authored content blocks. *)
+(** Runs an Agent Core agent against structured user-authored content blocks. *)
 
 val run_with_masc_tools :
   sw:Eio.Switch.t ->

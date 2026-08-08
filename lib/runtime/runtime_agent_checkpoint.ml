@@ -1,4 +1,4 @@
-(** Runtime_oas_checkpoint — Checkpoint and idle-detail helpers.
+(** Runtime_agent_checkpoint — checkpoint and idle-detail helpers.
 
     Keeps side-effecting run helpers separate from the main build/resume/run
     orchestration in {!Runtime_agent}. *)
@@ -19,7 +19,7 @@ let partial_response_of_stop
     ~(session_id : string)
     ~(text : string)
   : Agent_sdk.Types.api_response =
-  (* RFC-0132 PR-2: api_response model surface = external boundary; redact via SSOT. *)
+  (* The response model crosses an external boundary and uses the neutral runtime label. *)
   {
     id = session_id;
     model = Boundary_redaction.to_string Boundary_redaction.runtime_model_label;

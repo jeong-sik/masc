@@ -1,14 +1,12 @@
-(** Runtime_oas_checkpoint — checkpoint and
-    idle-detail helpers extracted from {!Runtime_agent}.
+(** Runtime_agent_checkpoint — checkpoint and idle-detail helpers used by
+    {!Runtime_agent}.
 
     Keeps side-effecting run helpers separate from the main
     build / resume / run orchestration so the orchestration
     module stays focused on Eio fiber composition.
 
-    No internal helpers are hidden; the .mli pins each entry
-    point's contract so a future refactor of the OAS Agent
-    surface (Provider / Checkpoint / Types renames) fails here
-    instead of at every call site in {!Runtime_agent}. *)
+    The interface pins the Agent Core checkpoint and response contracts at the
+    MASC runtime boundary. *)
 
 val build_checkpoint :
   session_id:string ->
@@ -35,4 +33,4 @@ val partial_response_of_stop :
     case (e.g. operator-side cancel before the model finishes).
     [stop_reason = EndTurn], single [Text] content block, no
     usage / telemetry. The emitted response model is the neutral [runtime]
-    lane; OAS owns concrete provider/model identity. *)
+    lane; Agent Core owns concrete provider/model identity. *)

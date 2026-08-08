@@ -836,10 +836,10 @@ end
 (* ================================================================ *)
 
 let build_checkpoint =
-  Runtime_oas_checkpoint.build_checkpoint
+  Runtime_agent_checkpoint.build_checkpoint
 
 let partial_response_of_stop =
-  Runtime_oas_checkpoint.partial_response_of_stop
+  Runtime_agent_checkpoint.partial_response_of_stop
 
 (* ================================================================ *)
 (* Build                                                             *)

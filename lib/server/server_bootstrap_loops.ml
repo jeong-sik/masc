@@ -1160,16 +1160,16 @@ let start_keeper_loops_owned
     in
     loop (Eio.Time.now clock)
   in
-  (* Create and install the MASC-owned Event_bus alongside OAS's.
+  (* Create and install the MASC-owned event bus alongside Agent Core's.
      MASC domain events (masc.keeper.*, masc.harness.*, ...) publish here per
-     OAS event_bus.mli:103-107. Dashboard SSE consumers receive both event
-     buses through the same relay. *)
+     the Event_bus contract. Dashboard SSE consumers receive both buses through
+     the same relay. *)
   let masc_event_bus = Agent_sdk.Event_bus.create () in
   Event_bus_slots.set_masc masc_event_bus;
-  (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
+  (* Event_bus → SSE bridge: relay both Agent Core and MASC buses to dashboard. *)
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:event_bus;
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:masc_event_bus;
-  (* Telemetry feedback loop: observe OAS per-turn signals without
+  (* Telemetry feedback loop: observe Agent Core per-turn signals without
      deserializing provider/model-bearing payloads. *)
   Keeper_telemetry_consumer.spawn_subscriber ~sw ~clock ~bus:event_bus;
   let keeper_lifecycle_sub =

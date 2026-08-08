@@ -34,6 +34,9 @@ val expect_done :
 
 val finalize : Sqlite3.db -> Sqlite3.stmt -> (unit, string) result
 
+val combine_cleanup_error :
+  ('a, string) result -> (unit, string) result -> ('a, string) result
+
 val with_statement :
   Sqlite3.db ->
   string ->

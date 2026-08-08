@@ -1490,7 +1490,7 @@ let close_database handle =
        | Some initial when same_regular_identity initial final_stat -> Ok ()
        | Some _ -> Error "chat queue database identity changed while its handle was open")
   in
-  combine_cleanup_error close_result identity_result
+  Keeper_chat_queue_sqlite.combine_cleanup_error close_result identity_result
 
 let open_database ~ownership_root ~path ~create_if_missing ~schema_validation =
   (* This function runs inside [Eio_guard.run_in_systhread]. Keep it limited

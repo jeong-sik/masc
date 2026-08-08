@@ -106,14 +106,16 @@ let partition_results
 
 let canonical_protocol_of_protocol = function
   | "messages-cli" | "messages-http" | "openai-compatible-cli"
-  | "openai-compatible-http" | "ollama-http" as protocol -> Some protocol
+  | "openai-compatible-http" | "ollama-http" | "codex-app-server" as protocol ->
+    Some protocol
   | _ -> None
 ;;
 
 let unknown_protocol_error s =
   Printf.sprintf
     "unknown protocol %S: expected one of messages-cli, messages-http, \
-     openai-compatible-cli, openai-compatible-http, ollama-http"
+     openai-compatible-cli, openai-compatible-http, ollama-http, \
+     codex-app-server"
     s
 ;;
 
@@ -125,6 +127,7 @@ let api_format_of_protocol (s : string)
   | "openai-compatible-cli" | "openai-compatible-http" ->
     Ok Runtime_schema.Chat_completions_api
   | "ollama-http" -> Ok Runtime_schema.Ollama_api
+  | "codex-app-server" -> Ok Runtime_schema.Codex_app_server_runtime
   | _ -> Error (unknown_protocol_error s)
 ;;
 

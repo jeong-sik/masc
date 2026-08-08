@@ -282,12 +282,15 @@ let validate_provider_request_cap ~runtime_id
 let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
   | Some runtime ->
-    let* _request_body_cap =
-      validate_provider_request_cap
-        ~runtime_id:runtime.id
-        runtime.Runtime.provider_config
-    in
-    Ok runtime
+    (match runtime.Runtime.execution with
+     | Runtime_execution.Codex_app_server _ -> Ok runtime
+     | Runtime_execution.Agent_core provider_config ->
+       let* _request_body_cap =
+         validate_provider_request_cap
+           ~runtime_id:runtime.id
+           provider_config
+       in
+       Ok runtime)
   | None -> Error (runtime_candidate_missing_error id)
 
 let resolve_runtime_candidate_for_attempt ?on_missing id =
@@ -681,11 +684,23 @@ let run_named
           ~fallback_enable_thinking:enable_thinking
           ()
       in
-      match
-         match provider_config_transform with
-         | None -> Ok runtime.Runtime.provider_config
-         | Some transform -> transform runtime.Runtime.provider_config
-      with
+      match runtime.Runtime.execution with
+      | Runtime_execution.Codex_app_server _ ->
+        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+        ( Error
+            (Agent_sdk.Error.Config
+               (Agent_sdk.Error.InvalidConfig
+                  { field = "runtime_execution"
+                  ; detail =
+                      "codex-app-server is materialized as an official-client runtime but is not yet admitted by the Keeper turn driver"
+                  }))
+        , None )
+      | Runtime_execution.Agent_core runtime_provider_config ->
+       (match
+          match provider_config_transform with
+          | None -> Ok runtime_provider_config
+          | Some transform -> transform runtime_provider_config
+        with
       | Error err ->
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         Error err, None
@@ -771,7 +786,7 @@ let run_named
               ~replay_prefix_projection
               provider_result
           in
-          outcomes.turn_result, checkpoint_after))
+          outcomes.turn_result, checkpoint_after)))
     attempt_candidates
 
 

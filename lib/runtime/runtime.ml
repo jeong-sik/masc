@@ -17,9 +17,10 @@ type t =
   ; provider : provider
   ; model : model_spec
   ; binding : binding
-  ; provider_config : Llm_provider.Provider_config.t
-    (** load 시점에 materialize 된 hot-path provider config. 소비자는
-        routing 없이 이걸 곧장 LLM dispatch 로 넘긴다. *)
+  ; execution : Runtime_execution.t
+    (** Turn owner materialized at load time. HTTP bindings become
+        [Agent_core]; official client runtimes remain distinct and can never
+        be dispatched as a fake LLM provider config. *)
   }
 
 (* id 파생의 단일 출처는 {!Runtime_schema.binding_key} — runtime 을 id 로
@@ -35,9 +36,9 @@ let id_of_binding (b : binding) : string = binding_key b
 let of_binding_result (cfg : config) (b : binding) : (t, string) result =
   match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
   | Some provider, Some model ->
-    (match Runtime_adapter.binding_to_provider_config cfg b with
-     | Ok provider_config ->
-       Ok { id = id_of_binding b; provider; model; binding = b; provider_config }
+    (match Runtime_adapter.binding_to_execution cfg b with
+     | Ok execution ->
+       Ok { id = id_of_binding b; provider; model; binding = b; execution }
      | Error reason -> Error reason)
   | None, _ -> Error (Printf.sprintf "provider not found: %s" b.provider_id)
   | Some _, None -> Error (Printf.sprintf "model not found: %s" b.model_id)
@@ -444,7 +445,10 @@ let startup_degradation_to_yojson = function
 ;;
 
 let capabilities_for_runtime (rt : t) =
-  Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config
+  match rt.execution with
+  | Runtime_execution.Agent_core provider_config ->
+    Llm_provider.Provider_config.capabilities_for_config_model provider_config
+  | Runtime_execution.Codex_app_server _ -> None
 ;;
 
 type max_context_source =
@@ -501,7 +505,9 @@ let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
           RFC-0206 §2.1)"
          config_path
          r.id
-         r.provider_config.model_id
+         (match Runtime_execution.model_id r.execution with
+          | Some model_id -> model_id
+          | None -> "<official-client-selected>")
          r.model.id)
 ;;
 
@@ -597,13 +603,16 @@ let validate_keeper_dispatch_request_caps
          match runtime_by_id id with
          | None -> None
          | Some runtime ->
-           (match
-              validate_request_body_cap
-                ~runtime_id:runtime.id
-                runtime.provider_config
-            with
-            | Ok _ -> None
-            | Error _ -> Some runtime))
+           (match runtime.execution with
+            | Runtime_execution.Codex_app_server _ -> None
+            | Runtime_execution.Agent_core provider_config ->
+              (match
+                 validate_request_body_cap
+                   ~runtime_id:runtime.id
+                   provider_config
+               with
+               | Ok _ -> None
+               | Error _ -> Some runtime)))
       ids
   with
   | None -> Ok ()
@@ -631,13 +640,14 @@ let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t lis
   let missing_models =
     List.filter_map
       (fun (r : t) ->
-         match capabilities_for_runtime r with
-         | Some _ -> None
-         | None ->
+         match r.execution, capabilities_for_runtime r with
+         | Runtime_execution.Codex_app_server _, _ -> None
+         | Runtime_execution.Agent_core _, Some _ -> None
+         | Runtime_execution.Agent_core provider_config, None ->
            let provider_label =
-             Llm_provider.Provider_config.capability_provider_label r.provider_config
+             Llm_provider.Provider_config.capability_provider_label provider_config
            in
-           let model_id = r.provider_config.model_id in
+           let model_id = provider_config.model_id in
            Some
              { runtime_id = r.id
              ; provider_id = r.provider.id
@@ -1287,7 +1297,7 @@ let temperature_of_runtime_id (id : string) : float option =
 
 let top_p_of_runtime_id (id : string) : float option =
   match get_runtime_by_id id with
-  | Some rt -> rt.provider_config.top_p
+  | Some rt -> rt.model.top_p
   | None -> None
 ;;
 

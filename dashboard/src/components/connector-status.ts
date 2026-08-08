@@ -905,7 +905,9 @@ function ConnectorLivePanel({
                 <${BoldLabel}>Next: </${BoldLabel}>
                 ${connectorError
                   ? html`refresh the dashboard or check <${Tk}>/api/v1/gate/connectors<//> on ${connector?.gate_base_url || 'the Gate server'}.`
-                  : html`run the ${connectorName} status command and inspect <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//>.`}
+                  : isInProcessConnector(connectorId)
+                    ? html`${connectorName} runs inside the server — check the server log, not a status file.`
+                    : html`run the ${connectorName} status command and inspect <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//>.`}
               </div>
             </${SurfaceCard}>
           `
@@ -1014,7 +1016,9 @@ function ConnectorLivePanel({
                   </div>
                 </div>
                 <div class="text-2xs text-[var(--color-status-warn)]/80">
-                  사이드카 status 파일이 <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//> 에서 관찰되지 않았습니다.
+                  ${isInProcessConnector(connectorId)
+                    ? html`${connectorName} 는 서버 프로세스 안에서 동작합니다 — status 파일이 아니라 서버 로그를 확인하세요.`
+                    : html`사이드카 status 파일이 <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//> 에서 관찰되지 않았습니다.`}
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">
                   <${CopyableCode}

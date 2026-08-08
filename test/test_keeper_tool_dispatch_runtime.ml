@@ -3151,6 +3151,118 @@ let test_tool_execute_validates_paths_before_manual_gate () =
       | Error error ->
         fail (Masc.Keeper_approval_queue.storage_error_to_string error))
 
+let test_tool_execute_path_rejection_preserves_exact_one_shot_grant () =
+  with_exec_fixture
+    "keeper_tool_dispatch_path_rejection_preserves_grant"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      (match
+         Masc.Keeper_gate_mode.set
+           config
+           ~actor:"test"
+           Masc.Keeper_gate_mode.Manual
+       with
+       | Ok _ -> ()
+       | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
+      let inside = Filename.concat config.base_path "inside" in
+      let redirect_root = Filename.concat config.base_path "redirect-root" in
+      let redirect_path = Filename.concat redirect_root "output.txt" in
+      Unix.mkdir inside 0o755;
+      Unix.symlink inside redirect_root;
+      Fun.protect
+        ~finally:(fun () ->
+          try Unix.unlink redirect_root with
+          | Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+        (fun () ->
+          let input =
+            `Assoc
+              [ "argv", `List [ `String "echo"; `String "approved" ]
+              ; "cwd", `String config.base_path
+              ; "stdout", `Assoc [ "file", `String redirect_path ]
+              ]
+          in
+          let first =
+            KET.execute_keeper_tool_call_with_outcome
+              ~config
+              ~meta
+              ~publication_recovery
+              ~ctx_work
+              ~name:"tool_execute"
+              ~input
+              ()
+          in
+          (match first.KTE.disposition with
+           | Tool_result.Deferred () -> ()
+           | disposition ->
+             failf
+               "exact path fixture did not defer: %s"
+               (outcome_label disposition));
+          let approval_id =
+            match
+              Masc.Keeper_approval_queue.list_pending_entries_for_workspace
+                ~base_path:config.base_path
+            with
+            | Ok [ pending ] -> pending.id
+            | Ok entries ->
+              failf
+                "expected one exact tool_execute approval, got %d"
+                (List.length entries)
+            | Error error ->
+              fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+          in
+          (match
+             Masc.Keeper_approval_queue.resolve_with_policy
+               ~base_path:config.base_path
+               ~id:approval_id
+               ~decision:Masc.Keeper_approval_queue.Decision.Approve
+               ~source:Masc.Keeper_approval_queue.Auto_judge
+               ()
+           with
+           | Ok _ -> ()
+           | Error error ->
+             fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
+          let resolution : Keeper_event_queue.hitl_resolution =
+            { approval_id
+            ; decision = Keeper_event_queue.Hitl_approved
+            ; channel =
+                Keeper_continuation_channel.unrouted
+                  "path validation before one-shot consumption"
+            }
+          in
+          let grant =
+            match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+            | Some grant -> grant
+            | None -> fail "approved resolution did not create a one-shot grant"
+          in
+          Unix.unlink redirect_root;
+          Unix.symlink "/var" redirect_root;
+          let second =
+            KET.execute_keeper_tool_call_with_outcome
+              ~config
+              ~meta
+              ~publication_recovery
+              ~ctx_work
+              ~gate_grant:grant
+              ~name:"tool_execute"
+              ~input
+              ()
+          in
+          (match second.KTE.disposition with
+           | Tool_result.Failed Tool_result.Policy_rejection -> ()
+           | disposition ->
+             failf
+               "changed path boundary returned %s"
+               (outcome_label disposition));
+          match
+            Masc.Keeper_approval_queue.approved_resolution_state
+              ~base_path:config.base_path
+              ~id:approval_id
+          with
+          | Ok Masc.Keeper_approval_queue.Resolution_unconsumed -> ()
+          | Ok Masc.Keeper_approval_queue.Resolution_consumed ->
+            fail "path rejection consumed the exact one-shot authorization"
+          | Error error ->
+            fail (Masc.Keeper_approval_queue.grant_error_to_string error)))
+
 let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
   with_exec_fixture "tool_execute_raw_cmd_requires_typed_shell_ir"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -4209,6 +4321,8 @@ let () =
         test_manual_gate_defers_tool_execute_before_process;
       test_case "tool_execute validates paths before Manual Gate" `Quick
         test_tool_execute_validates_paths_before_manual_gate;
+      test_case "tool_execute path rejection preserves exact one-shot grant" `Quick
+        test_tool_execute_path_rejection_preserves_exact_one_shot_grant;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
       test_case "OAS handler threads Eio context to keeper dispatch" `Quick

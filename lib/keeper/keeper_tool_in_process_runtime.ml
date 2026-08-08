@@ -335,7 +335,7 @@ let surface_read_mode_of_args args =
   | Error message -> Error message
   | Ok None -> Ok Local_lane
   | Ok (Some raw) ->
-    (match String.trim raw with
+    (match raw with
      | "local" -> Ok Local_lane
      | "channel" -> Ok Discord_channel
      | "messages" -> Ok Discord_messages
@@ -353,7 +353,7 @@ let strict_string_opt key args =
   | `Assoc fields ->
     (match List.assoc_opt key fields with
      | None -> Ok None
-     | Some (`String value) -> Ok (Some (String.trim value))
+     | Some (`String value) -> Ok (Some value)
      | Some _ -> Error (Printf.sprintf "%s must be a string" key))
   | _ -> Error "tool arguments must be a JSON object"
 ;;
@@ -423,24 +423,85 @@ let discord_token () =
   | Some _ | None -> Error "DISCORD_BOT_TOKEN is unset or empty"
 ;;
 
+let discord_snowflake ~field value =
+  match Discord_rest_client.snowflake_of_string value with
+  | Ok value -> Ok value
+  | Error message -> Error (Printf.sprintf "%s: %s" field message)
+
+let discord_optional_snowflake ~field = function
+  | None -> Ok None
+  | Some value ->
+    (match discord_snowflake ~field value with
+     | Ok value -> Ok (Some value)
+     | Error message -> Error message)
+
 let discord_object_field_string key = function
   | `Assoc fields ->
     (match List.assoc_opt key fields with
-     | Some (`String value) when String.trim value <> "" -> Ok (String.trim value)
+     | Some (`String value) when value <> "" -> Ok value
      | Some `Null | None -> Error (Printf.sprintf "Discord response has no %s" key)
      | Some _ -> Error (Printf.sprintf "Discord response field %s is not a string" key))
   | _ -> Error "Discord channel response is not an object"
 ;;
 
+let discord_required_snowflake_field ~field key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`String value) -> discord_snowflake ~field value
+     | Some _ ->
+       Error (Printf.sprintf "Discord response field %s is not a string" key)
+     | None -> Error (Printf.sprintf "Discord response has no %s" key))
+  | _ -> Error "Discord response item is not an object"
+
+let discord_member_user_id json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "user" fields with
+     | Some (`Assoc user_fields) ->
+       (match List.assoc_opt "id" user_fields with
+        | Some (`String value) -> discord_snowflake ~field:"user.id" value
+        | Some _ -> Error "Discord member user.id is not a string"
+        | None -> Error "Discord member user has no id")
+     | Some _ -> Error "Discord member user is not an object"
+     | None -> Error "Discord member has no user")
+  | _ -> Error "Discord member response item is not an object"
+
+let discord_require_items ~kind validate = function
+  | `List items ->
+    let rec loop index = function
+      | [] -> Ok ()
+      | item :: rest ->
+        (match validate item with
+         | Ok _ -> loop (index + 1) rest
+         | Error message ->
+           Error (Printf.sprintf "Discord %s item %d: %s" kind index message))
+    in
+    loop 0 items
+  | _ -> Error (Printf.sprintf "Discord %s response is not an array" kind)
+
 let discord_require_shape mode json =
-  match mode, json with
-  | (Discord_channel | Discord_member), `Assoc _ -> Ok ()
-  | (Discord_messages | Discord_members), `List _ -> Ok ()
-  | Discord_channel, _ -> Error "Discord channel response is not an object"
-  | Discord_member, _ -> Error "Discord member response is not an object"
-  | Discord_messages, _ -> Error "Discord messages response is not an array"
-  | Discord_members, _ -> Error "Discord members response is not an array"
-  | Local_lane, _ -> Ok ()
+  match mode with
+  | Discord_channel ->
+    (match json with
+     | `Assoc _ ->
+       (match discord_required_snowflake_field ~field:"id" "id" json with
+        | Ok _ -> Ok ()
+        | Error message -> Error ("Discord channel response: " ^ message))
+     | _ -> Error "Discord channel response is not an object")
+  | Discord_member ->
+    (match json with
+     | `Assoc _ ->
+       (match discord_member_user_id json with
+        | Ok _ -> Ok ()
+        | Error message -> Error ("Discord member response: " ^ message))
+     | _ -> Error "Discord member response is not an object")
+  | Discord_messages ->
+    discord_require_items ~kind:"message"
+      (fun item -> discord_required_snowflake_field ~field:"id" "id" item)
+      json
+  | Discord_members ->
+    discord_require_items ~kind:"member" discord_member_user_id json
+  | Local_lane -> Ok ()
 ;;
 
 let surface_read_mode_label = function
@@ -457,16 +518,20 @@ let discord_result_count (data : Yojson.Safe.t) =
   | `Assoc _ | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ -> None
 ;;
 
-let discord_success ~mode ~resource ~channel_id ?guild_id
+let discord_success ~mode ~resource ~(channel_id : Discord_rest_client.snowflake)
+    ?guild_id
     (data : Yojson.Safe.t) =
   let fields : (string * Yojson.Safe.t) list =
     [ "mode", `String (surface_read_mode_label mode)
     ; "resource", `String resource
     ; "scope", `String "bound_channel"
-    ; "channel_id", `String channel_id
+    ; "channel_id", `String (Discord_rest_client.snowflake_to_string channel_id)
     ; "data", data
     ]
-    @ match guild_id with Some id -> [ "guild_id", `String id ] | None -> []
+    @ match guild_id with
+      | Some id ->
+        [ "guild_id", `String (Discord_rest_client.snowflake_to_string id) ]
+      | None -> []
     @ match discord_result_count data with
       | Some count -> [ "data_count", `Int count ]
       | None -> []
@@ -477,133 +542,193 @@ let discord_success ~mode ~resource ~channel_id ?guild_id
 let handle_discord_surface_read ~meta ~args ~mode =
   match strict_string_opt "surface" args with
   | Error message -> discord_tool_error ~code:Tool_args.Validation_error message
-  | Ok (Some surface) when String.equal surface "discord" ->
+  | Ok (Some "discord") ->
     (match discord_bound_channel ~meta ~args, discord_token () with
-    | Error message, _ -> discord_tool_error ~code:Tool_args.Precondition_failed message
-    | _, Error message -> discord_tool_error ~code:Tool_args.Auth_required message
-    | Ok channel_id, Ok token ->
-      let clock = Eio_context.get_clock_opt () in
-      let rest ?guild_id call resource =
-        match call () with
-        | Error error ->
-          Log.Keeper.warn
-            ~keeper_name:meta.name
-            "discord_surface_read failed mode=%s resource=%s channel=%s: %s"
-            (surface_read_mode_label mode)
-            resource
-            channel_id
-            (Format.asprintf "%a" Discord_rest_client.pp_error error);
-          discord_rest_error error
-        | Ok data ->
-          (match discord_require_shape mode data with
-           | Error message ->
-             Log.Keeper.warn
-               ~keeper_name:meta.name
-               "discord_surface_read invalid response mode=%s resource=%s channel=%s: %s"
-               (surface_read_mode_label mode)
-               resource
-               channel_id
-               message;
-             discord_tool_error ~code:Tool_args.Internal_error message
-           | Ok () ->
-             Log.Keeper.info
-               ~keeper_name:meta.name
-               "discord_surface_read mode=%s resource=%s channel=%s guild=%s count=%s"
-               (surface_read_mode_label mode)
-               resource
-               channel_id
-               (Option.value ~default:"-" guild_id)
-               (match discord_result_count data with
-                | Some count -> string_of_int count
-                | None -> "-");
-             discord_success ~mode ~resource ~channel_id ?guild_id data)
-      in
-      match mode with
-      | Local_lane ->
-        discord_tool_error ~code:Tool_args.Internal_error "invalid Discord read mode"
-      | Discord_channel ->
-        rest
-          (fun () -> Discord_rest_client.get_channel ?clock ~token ~channel_id ())
-          "channel"
-      | Discord_messages ->
-        (match strict_int_opt "limit" args, strict_string_opt "discord_before" args,
-               strict_string_opt "discord_after" args with
-         | Error message, _, _
-         | _, Error message, _
-         | _, _, Error message -> discord_tool_error ~code:Tool_args.Validation_error message
-         | Ok limit, Ok before, Ok after ->
-           if Option.is_some before && Option.is_some after then
-             discord_tool_error
-               ~code:Tool_args.Validation_error
-               "discord_before and discord_after are mutually exclusive"
-           else
-             let limit = Option.value ~default:20 limit in
-             if limit < 1 || limit > 100 then
-               discord_tool_error
-                 ~code:Tool_args.Validation_error
-                 "limit for Discord messages must be between 1 and 100"
-             else
-               rest
-                 (fun () ->
-                    Discord_rest_client.get_channel_messages
-                      ?clock ~token ~channel_id ~limit ?before ?after ())
-                 "messages")
-      | Discord_members | Discord_member ->
-        (match Discord_rest_client.get_channel ?clock ~token ~channel_id () with
-        | Error error ->
-          Log.Keeper.warn
-            ~keeper_name:meta.name
-            "discord_surface_read failed mode=%s resource=channel channel=%s: %s"
-            (surface_read_mode_label mode)
-            channel_id
-            (Format.asprintf "%a" Discord_rest_client.pp_error error);
-          discord_rest_error error
-         | Ok channel ->
-           (match discord_object_field_string "guild_id" channel with
-            | Error message -> discord_tool_error ~code:Tool_args.Not_found message
-            | Ok guild_id ->
-              match mode with
-              | Discord_members ->
-                (match strict_string_opt "query" args, strict_int_opt "limit" args,
-                       strict_string_opt "discord_after" args with
-                 | Error message, _, _
-                 | _, Error message, _
-                 | _, _, Error message ->
-                   discord_tool_error ~code:Tool_args.Validation_error message
-                 | Ok query, Ok limit, Ok after ->
-                   if Option.is_some query && Option.is_some after then
-                     discord_tool_error
-                       ~code:Tool_args.Validation_error
-                       "discord_after cannot be combined with a member search query"
-                   else
-                   let limit = Option.value ~default:25 limit in
-                   if limit < 1 || limit > 1000 then
-                     discord_tool_error
-                       ~code:Tool_args.Validation_error
-                       "limit for Discord members must be between 1 and 1000"
-                   else
-                     rest
-                       (fun () ->
-                          Discord_rest_client.get_guild_members
-                            ?clock ~token ~guild_id ?query ~limit ?after ())
-                       ~guild_id
-                       "members")
-              | Discord_member ->
-                (match strict_string_opt "user_id" args with
-                 | Error message -> discord_tool_error ~code:Tool_args.Validation_error message
-                 | Ok None | Ok (Some "") ->
-                   discord_tool_error
-                     ~code:Tool_args.Validation_error
-                     "user_id is required for mode='member'"
-                 | Ok (Some user_id) ->
-                   rest
-                     (fun () ->
-                        Discord_rest_client.get_guild_member
-                          ?clock ~token ~guild_id ~user_id ())
-                     ~guild_id
-                     "member")
-              | Local_lane | Discord_channel | Discord_messages ->
-                discord_tool_error ~code:Tool_args.Internal_error "invalid Discord read mode")))
+     | Error message, _ ->
+       discord_tool_error ~code:Tool_args.Precondition_failed message
+     | _, Error message -> discord_tool_error ~code:Tool_args.Auth_required message
+     | Ok raw_channel_id, Ok token ->
+       (match discord_snowflake ~field:"channel_id" raw_channel_id with
+        | Error message ->
+          discord_tool_error ~code:Tool_args.Precondition_failed message
+        | Ok channel_id ->
+          let clock = Eio_context.get_clock_opt () in
+          let rest ?guild_id call resource =
+            match call () with
+            | Error error ->
+              Log.Keeper.warn
+                ~keeper_name:meta.name
+                "discord_surface_read failed mode=%s resource=%s channel=%s: %s"
+                (surface_read_mode_label mode)
+                resource
+                (Discord_rest_client.snowflake_to_string channel_id)
+                (Format.asprintf "%a" Discord_rest_client.pp_error error);
+              discord_rest_error error
+            | Ok data ->
+              (match discord_require_shape mode data with
+               | Error message ->
+                 Log.Keeper.warn
+                   ~keeper_name:meta.name
+                   "discord_surface_read invalid response mode=%s resource=%s channel=%s: %s"
+                   (surface_read_mode_label mode)
+                   resource
+                   (Discord_rest_client.snowflake_to_string channel_id)
+                   message;
+                 discord_tool_error ~code:Tool_args.Internal_error message
+               | Ok () ->
+                 Log.Keeper.info
+                   ~keeper_name:meta.name
+                   "discord_surface_read mode=%s resource=%s channel=%s guild=%s count=%s"
+                   (surface_read_mode_label mode)
+                   resource
+                   (Discord_rest_client.snowflake_to_string channel_id)
+                   (match guild_id with
+                    | Some value -> Discord_rest_client.snowflake_to_string value
+                    | None -> "-")
+                   (match discord_result_count data with
+                    | Some count -> string_of_int count
+                    | None -> "-");
+                 discord_success ~mode ~resource ~channel_id ?guild_id data)
+          in
+          match mode with
+          | Local_lane ->
+            discord_tool_error ~code:Tool_args.Internal_error
+              "invalid Discord read mode"
+          | Discord_channel ->
+            rest
+              (fun () ->
+                 Discord_rest_client.get_channel ?clock ~token ~channel_id ())
+              "channel"
+          | Discord_messages ->
+            (match
+               strict_int_opt "limit" args,
+               strict_string_opt "discord_before" args,
+               strict_string_opt "discord_after" args
+             with
+             | Error message, _, _
+             | _, Error message, _
+             | _, _, Error message ->
+               discord_tool_error ~code:Tool_args.Validation_error message
+             | Ok limit, Ok before_raw, Ok after_raw ->
+               if Option.is_some before_raw && Option.is_some after_raw then
+                 discord_tool_error
+                   ~code:Tool_args.Validation_error
+                   "discord_before and discord_after are mutually exclusive"
+               else
+                 (match
+                    discord_optional_snowflake ~field:"discord_before" before_raw,
+                    discord_optional_snowflake ~field:"discord_after" after_raw
+                  with
+                  | Error message, _ | _, Error message ->
+                    discord_tool_error ~code:Tool_args.Validation_error message
+                  | Ok before, Ok after ->
+                    let limit =
+                      match limit with
+                      | Some value -> value
+                      | None -> Keeper_surface_read.default_limit
+                    in
+                    if limit < 1 || limit > 100 then
+                      discord_tool_error
+                        ~code:Tool_args.Validation_error
+                        "limit for Discord messages must be between 1 and 100"
+                    else
+                      rest
+                        (fun () ->
+                           Discord_rest_client.get_channel_messages
+                             ?clock ~token ~channel_id ~limit ?before ?after ())
+                        "messages"))
+          | Discord_members | Discord_member ->
+            (match
+               Discord_rest_client.get_channel ?clock ~token ~channel_id ()
+             with
+             | Error error ->
+               Log.Keeper.warn
+                 ~keeper_name:meta.name
+                 "discord_surface_read failed mode=%s resource=channel channel=%s: %s"
+                 (surface_read_mode_label mode)
+                 (Discord_rest_client.snowflake_to_string channel_id)
+                 (Format.asprintf "%a" Discord_rest_client.pp_error error);
+               discord_rest_error error
+             | Ok channel ->
+               (match discord_object_field_string "guild_id" channel with
+                | Error message ->
+                  discord_tool_error ~code:Tool_args.Not_found message
+                | Ok raw_guild_id ->
+                  (match discord_snowflake ~field:"guild_id" raw_guild_id with
+                   | Error message ->
+                     discord_tool_error ~code:Tool_args.Internal_error message
+                   | Ok guild_id ->
+                     match mode with
+                     | Discord_members ->
+                       (match
+                          strict_string_opt "query" args,
+                          strict_int_opt "limit" args,
+                          strict_string_opt "discord_after" args
+                        with
+                        | Error message, _, _
+                        | _, Error message, _
+                        | _, _, Error message ->
+                          discord_tool_error ~code:Tool_args.Validation_error message
+                        | Ok query, Ok limit, Ok after_raw ->
+                          let searching =
+                            match query with
+                            | Some value -> value <> ""
+                            | None -> false
+                          in
+                          if searching && Option.is_some after_raw then
+                            discord_tool_error
+                              ~code:Tool_args.Validation_error
+                              "discord_after cannot be combined with a member search query"
+                          else
+                            (match
+                               discord_optional_snowflake
+                                 ~field:"discord_after" after_raw
+                             with
+                             | Error message ->
+                               discord_tool_error
+                                 ~code:Tool_args.Validation_error message
+                             | Ok after ->
+                               let limit =
+                                 match limit with
+                                 | Some value -> value
+                                 | None -> Keeper_surface_read.default_limit
+                               in
+                               if limit < 1 || limit > 1000 then
+                                 discord_tool_error
+                                   ~code:Tool_args.Validation_error
+                                   "limit for Discord members must be between 1 and 1000"
+                               else
+                                 rest
+                                   (fun () ->
+                                      Discord_rest_client.get_guild_members
+                                        ?clock ~token ~guild_id ?query ~limit
+                                        ?after ())
+                                   ~guild_id
+                                   "members"))
+                     | Discord_member ->
+                       (match strict_string_opt "user_id" args with
+                        | Error message ->
+                          discord_tool_error
+                            ~code:Tool_args.Validation_error message
+                        | Ok None | Ok (Some "") ->
+                          discord_tool_error
+                            ~code:Tool_args.Validation_error
+                            "user_id is required for mode='member'"
+                        | Ok (Some user_id) ->
+                          (match discord_snowflake ~field:"user_id" user_id with
+                           | Error message ->
+                             discord_tool_error
+                               ~code:Tool_args.Validation_error message
+                           | Ok user_id ->
+                             rest
+                               (fun () ->
+                                  Discord_rest_client.get_guild_member
+                                    ?clock ~token ~guild_id ~user_id ())
+                               ~guild_id
+                               "member"))
+                     | Local_lane | Discord_channel | Discord_messages ->
+                       discord_tool_error ~code:Tool_args.Internal_error
+                         "invalid Discord read mode")))))
   | Ok _ ->
     discord_tool_error
       ~code:Tool_args.Validation_error

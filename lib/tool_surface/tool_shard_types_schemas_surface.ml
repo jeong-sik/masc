@@ -62,7 +62,7 @@ let surface_tools : Masc_domain.tool_schema list =
                                [ "local"; "channel"; "messages"; "members"; "member" ]) )
                       ; ( "description"
                         , `String
-                            "Read mode: local persisted lane, or a live Discord channel/messages/members/member query" )
+                            "Optional exact read mode. When absent, the request is exactly 'local' for the persisted lane; padded or unknown values are invalid. The other modes query Discord live and require surface='discord'." )
                       ] )
                 ; ( "channel_id"
                   , `Assoc

@@ -995,14 +995,15 @@ let surface_read_schema =
     ; string_enum_property
         "mode"
         [ "local"; "channel"; "messages"; "members"; "member" ]
-        "Read mode. 'local' reads the keeper's persisted lane; the other modes \
-         query Discord live and require surface='discord'."
+        "Optional exact read mode. When absent, the request is exactly 'local' \
+         for the persisted lane; padded or unknown values are invalid. The \
+         other modes query Discord live and require surface='discord'."
     ; property
         "limit"
         "integer"
-        "Maximum messages or Discord members to return (messages: 1-100; \
-         members: 1-1000). The local participant roster covers the whole \
-         loaded lane."
+        "Maximum messages or Discord members to return (default 20; messages: \
+         1-100; members: 1-1000). The local participant roster covers the \
+         whole loaded lane."
     ; property
         "channel_id"
         "string"

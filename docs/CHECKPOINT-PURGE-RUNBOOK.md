@@ -1,9 +1,9 @@
 # Checkpoint Purge Runbook (RFC-0351 S1)
 
 RFC-0351:105 requires the operational cleanup procedure (backup included) to
-be documented before S2. This runbook covers `masc-checkpoint-purge`
-(#25537): the deterministic offline reduction of a keeper's canonical OAS
-checkpoint. No LLM is involved at any step.
+be documented before S2. This runbook covers the Dashboard action and
+`masc-checkpoint-purge` (#25537): the deterministic reduction of a stopped
+keeper's canonical OAS checkpoint. No LLM is involved at any step.
 
 ## What the tool does
 
@@ -23,6 +23,19 @@ the write boundary). `session_id`/`turn_count` are unchanged, so the save
 lands as an equal-watermark re-save through the locked validated store.
 
 ## Procedure
+
+### Dashboard
+
+1. Open the Keeper detail view and expand **Checkpoint & Snapshots**.
+2. Select **정리 미리보기**. Preview is read-only and may run while the
+   Keeper is active.
+3. Stop the Keeper completely, preview again, then select **백업 후 청소**.
+   Apply is unavailable while the Keeper is registered. The server takes the
+   same lifecycle key used by boot, writes and reads back a byte-exact backup,
+   then installs only against the exact checkpoint source reference it read.
+4. Keep the displayed backup path until the Keeper completes a healthy turn.
+
+### CLI
 
 1. **Confirm the keeper is stopped.** `masc_keeper_list` — the keeper must
    not be `active`/`keepalive_running`. A live keeper's next save overwrites
@@ -112,9 +125,9 @@ a decision before it is added.
 
 ## Relation to the sanctioned pipeline
 
-This tool is a one-shot operational lever, not a runtime mechanism: the
+Purge is an explicit operator action, not an automatic runtime mechanism. The
 runtime path stays compaction (until RFC-0351 S4 retires it) plus the S0
 settlement ceilings (#25536, #25541, #25544). If a purge is needed twice on
 the same keeper, that is a signal the inflow paths (#25462 wake markers,
-oversized tool results) are not closed — fix the inflow, do not schedule
-the purge.
+oversized tool results) are not closed — fix the inflow, do not schedule the
+purge.

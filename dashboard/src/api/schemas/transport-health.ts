@@ -14,6 +14,7 @@ import {
   boolean,
   check,
   fallback,
+  literal,
   nullable,
   number,
   object,
@@ -21,6 +22,7 @@ import {
   pipe,
   safeParse,
   string,
+  union,
   unknown,
   type BaseIssue,
   type InferOutput,
@@ -164,11 +166,23 @@ const StreamableHttpSchema = object({
   supports_delete: fallback(boolean(), false),
 })
 
-const Http2Schema = object({
-  listener_mode: fallback(string(), 'unknown'),
-  multiplex_ready: fallback(boolean(), false),
-  prior_knowledge_path: fallback(string(), '/mcp'),
-})
+const Http2Schema = union([
+  object({
+    listener_mode: literal('auto'),
+    multiplex_ready: literal(true),
+    prior_knowledge_path: fallback(string(), '/mcp'),
+  }),
+  object({
+    listener_mode: literal('h1_only'),
+    multiplex_ready: literal(false),
+    prior_knowledge_path: fallback(string(), '/mcp'),
+  }),
+  object({
+    listener_mode: literal('h2_only'),
+    multiplex_ready: literal(true),
+    prior_knowledge_path: fallback(string(), '/mcp'),
+  }),
+])
 
 const ClusterSchema = object({
   cluster: fallback(string(), 'default'),

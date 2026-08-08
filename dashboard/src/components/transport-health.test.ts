@@ -113,7 +113,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       supports_delete: true,
     },
     http2: {
-      listener_mode: 'h2',
+      listener_mode: 'h2_only',
       multiplex_ready: true,
       prior_knowledge_path: '/mcp',
     },
@@ -746,7 +746,7 @@ function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData
       supports_delete: true,
     },
     http2: {
-      listener_mode: 'h2',
+      listener_mode: 'h2_only',
       multiplex_ready: true,
       prior_knowledge_path: '/mcp',
     },
@@ -843,7 +843,13 @@ describe('http2Tone', () => {
     expect(http2Tone(makeData())).toBe('ok')
   })
   it('is warn when not multiplex_ready', () => {
-    expect(http2Tone(makeData({ http2: { ...makeData().http2, multiplex_ready: false } }))).toBe('warn')
+    expect(
+      http2Tone(
+        makeData({
+          http2: { ...makeData().http2, listener_mode: 'h1_only', multiplex_ready: false },
+        }),
+      ),
+    ).toBe('warn')
   })
 })
 

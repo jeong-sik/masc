@@ -140,20 +140,19 @@ module Transport = struct
   let normalize_token raw =
     raw |> String.trim |> String.lowercase_ascii
 
-  (* The vocabulary is closed: a value outside it is reported through the same
-     malformed-env path every other knob uses, then read as Auto. Carrying the
-     raw text in a variant let it reach listener_mode as a published mode. *)
+  (* The vocabulary is closed. Only an absent setting selects [Auto]; a present
+     value outside this set is an operator error and stops startup. *)
   let h2_mode_of_string raw =
     match normalize_token raw with
-    | "1" | "true" | "h2_only" -> H2_only
-    | "0" | "false" | "h1_only" -> H1_only
+    | "1" | "h2_only" -> H2_only
+    | "0" | "h1_only" -> H1_only
     | "auto" -> Auto
     | _ ->
-      Env_config_core.reject_malformed_env
-        ~name:"MASC_USE_H2"
-        ~raw
-        ~type_name:"auto|h1_only|h2_only";
-      Auto
+      raise
+        (Env_config_core.Config_error
+           (Printf.sprintf
+              "malformed env MASC_USE_H2=%S (expected auto|h1_only|h2_only)"
+              raw))
 
   let h2_mode_to_string = function
     | Auto -> "auto"
@@ -209,7 +208,7 @@ module Transport = struct
 
   (** HTTP mode: typed variant for "auto", "h2_only", "h1_only". *)
   let use_h2 () =
-    match Sys.getenv_opt "MASC_USE_H2" |> trim_opt with
+    match Sys.getenv_opt "MASC_USE_H2" with
     | Some raw -> h2_mode_of_string raw
     | None -> Auto
 

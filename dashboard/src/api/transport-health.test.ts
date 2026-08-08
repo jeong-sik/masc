@@ -10,7 +10,7 @@ function minimalRaw(overrides: Record<string, unknown> = {}) {
     websocket: {},
     webrtc: {},
     streamable_http: {},
-    http2: {},
+    http2: { listener_mode: 'auto', multiplex_ready: true },
     cluster: {},
     agent_health: {},
     generated_at: '2026-04-17T10:00:00Z',
@@ -99,7 +99,7 @@ describe('decodeTransportHealthData', () => {
     expect(result!.streamable_http.default_transport).toBe('unknown')
     expect(result!.streamable_http.presence_stream).toBe('/events/presence')
     // http2 defaults
-    expect(result!.http2.listener_mode).toBe('unknown')
+    expect(result!.http2.listener_mode).toBe('auto')
     // cluster defaults
     expect(result!.cluster.cluster).toBe('default')
     expect(result!.cluster.total_units).toBeNull()
@@ -185,7 +185,7 @@ describe('decodeTransportHealthData', () => {
         supports_delete: true,
       },
       http2: {
-        listener_mode: 'h2c',
+        listener_mode: 'h2_only',
         multiplex_ready: true,
         prior_knowledge_path: '/mcp',
       },
@@ -224,6 +224,26 @@ describe('decodeTransportHealthData', () => {
     expect(result!.cluster.live_agents).toBe(3)
     expect(result!.agent_health.stale_total).toBe(2)
     expect(result!.agent_health.lifecycle_dispatch_rejections_total).toBe(5)
+  })
+
+  it('returns null for an invalid listener mode', () => {
+    expect(
+      decodeTransportHealthData(
+        minimalRaw({
+          http2: { listener_mode: 'h2c', multiplex_ready: true },
+        }),
+      ),
+    ).toBeNull()
+  })
+
+  it('returns null when readiness contradicts the listener mode', () => {
+    expect(
+      decodeTransportHealthData(
+        minimalRaw({
+          http2: { listener_mode: 'h1_only', multiplex_ready: true },
+        }),
+      ),
+    ).toBeNull()
   })
 
   it('decodes hot_sessions with defaults', () => {

@@ -367,12 +367,17 @@ let test_transport_health_json () =
   TM.inc_ws_delta_built ();
   Masc.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   Masc.Sse.sync_transport_snapshot ~force:true ();
-  let json = TM.transport_health_json ~config in
+  TM.set_http_configured_mode Env_config.Transport.H1_only;
+  let json =
+    with_env "MASC_USE_H2" (Some "h2_only") (fun () ->
+      TM.transport_health_json ~config)
+  in
   let sse_json = json |> U.member "sse" in
   let streamable_json = json |> U.member "streamable_http" in
   let grpc_json = json |> U.member "grpc" in
   let ws_json = json |> U.member "websocket" in
   let webrtc_json = json |> U.member "webrtc" in
+  let http2_json = json |> U.member "http2" in
   let cluster_json = json |> U.member "cluster" in
   let summary_json = json |> U.member "summary" in
   let agent_health_json = json |> U.member "agent_health" in
@@ -476,6 +481,10 @@ let test_transport_health_json () =
     (match webrtc_json |> U.member "signaling_available" with `Bool _ -> true | _ -> false);
   check bool "webrtc signaling_mode field exists" true
     (match webrtc_json |> U.member "signaling_mode" with `String _ -> true | _ -> false);
+  check string "http2 reports the startup mode" "h1_only"
+    (http2_json |> U.member "listener_mode" |> U.to_string);
+  check bool "h1-only is not multiplex ready" false
+    (http2_json |> U.member "multiplex_ready" |> U.to_bool);
   check string "workspace id" "default"
     (cluster_json |> U.member "workspace_id" |> U.to_string);
   check bool "summary primary path exists" true

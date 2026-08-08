@@ -243,6 +243,7 @@ let inc_grpc_backlog_replay_events_replayed ?(delta = 1) () =
 (** {1 Primary HTTP listener state} *)
 
 let http_listener_mode_runtime : string Atomic.t = Atomic.make "unknown"
+let http_configured_mode = Atomic.make Env_config.Transport.Auto
 let http_listener_status : string Atomic.t = Atomic.make "not_started"
 let http_active_connections : int Atomic.t = Atomic.make 0
 let http_last_accept_unix : float option Atomic.t = Atomic.make None
@@ -252,6 +253,10 @@ let set_http_connection_gauge value =
   Otel_metric_store.set_gauge
     Otel_metric_store.metric_http_active_connections
     (float_of_int (max 0 value))
+;;
+
+let set_http_configured_mode mode =
+  Atomic.set http_configured_mode mode
 ;;
 
 let record_http_listener_started ~mode =
@@ -407,7 +412,7 @@ let int_field_opt key = function
 
 
 let http_listener_mode () =
-  Env_config.Transport.use_h2 () |> Env_config.Transport.h2_mode_to_string
+  Atomic.get http_configured_mode
 ;;
 
 let primary_path ~webrtc_channels ~grpc_subscribers ~ws_sessions ~sse_sessions =
@@ -582,6 +587,14 @@ let transport_health_json ~config =
   let webrtc_live = (Atomic.get webrtc_live_count_ref) () in
   let webrtc_channels = (Atomic.get webrtc_channels_count_ref) () in
   let listener_mode = http_listener_mode () in
+  let listener_mode_label =
+    Env_config.Transport.h2_mode_to_string listener_mode
+  in
+  let multiplex_ready =
+    match listener_mode with
+    | Env_config.Transport.H1_only -> false
+    | Env_config.Transport.Auto | Env_config.Transport.H2_only -> true
+  in
   let topology_summary = cluster_summary_json config in
   let workspace_id = workspace_id_from_config config in
   let cluster_name = Env_config_core.cluster_name () in
@@ -748,8 +761,8 @@ let transport_health_json ~config =
           ] )
     ; ( "http2"
       , `Assoc
-          [ "listener_mode", `String listener_mode
-          ; "multiplex_ready", `Bool (not (String.equal listener_mode "h1_only"))
+          [ "listener_mode", `String listener_mode_label
+          ; "multiplex_ready", `Bool multiplex_ready
           ; "prior_knowledge_path", `String "/mcp"
           ] )
     ; ( "cluster"

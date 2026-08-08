@@ -1351,8 +1351,10 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       ~server_start_time
   in
   let h2_error_handler = make_h2_error_handler () in
+  let configured_http_mode = Env_config.Transport.use_h2 () in
+  Transport_metrics.set_http_configured_mode configured_http_mode;
   let http_mode =
-    match Env_config.Transport.use_h2 () with
+    match configured_http_mode with
     | Env_config.Transport.H2_only -> `H2_only
     | Env_config.Transport.H1_only -> `H1_only
     | Env_config.Transport.Auto -> `Auto

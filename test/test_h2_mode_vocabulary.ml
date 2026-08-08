@@ -1,10 +1,4 @@
-(** [MASC_USE_H2] carries a closed vocabulary.
-
-    An unrecognized value used to become [Unknown_h2_mode raw]: the server ran
-    it as Auto without reporting anything, and h2_mode_to_string handed the raw
-    text back out, so it reached the dashboard as http2.listener_mode. The
-    panel computes multiplex_ready as [listener_mode <> "h1_only"], so a typo
-    was published as a mode and read as multiplexing-ready. *)
+(** [MASC_USE_H2] carries a closed vocabulary. *)
 
 open Alcotest
 
@@ -19,32 +13,52 @@ let accepted_spellings () =
     ; "h1_only", "h1_only"
     ; "h2_only", "h2_only"
     ; "0", "h1_only"
-    ; "false", "h1_only"
     ; "1", "h2_only"
-    ; "true", "h2_only"
     ; "  H2_Only  ", "h2_only"
     ]
 ;;
 
-(* The output vocabulary is what the dashboard receives, so it must stay
-   closed whatever the operator typed. *)
-let unknown_input_stays_in_vocabulary () =
+let invalid_values_are_rejected () =
   List.iter
     (fun raw ->
-       let out = mode raw in
-       check
-         bool
-         ("in vocabulary: " ^ raw)
-         true
-         (List.mem out [ "auto"; "h1_only"; "h2_only" ]))
-    [ "h2c"; "prior_knowledge"; "h2"; ""; "yes"; "H1" ]
+       check_raises
+         ("reject " ^ raw)
+         (Env_config_core.Config_error
+            (Printf.sprintf
+               "malformed env MASC_USE_H2=%S (expected auto|h1_only|h2_only)"
+               raw))
+         (fun () -> ignore (T.h2_mode_of_string raw)))
+    [ "h2c"; "prior_knowledge"; "h2"; ""; "yes"; "H1"; "true"; "false" ]
 ;;
 
-(* Auto is the documented fallback, and h1_only is what multiplex_ready keys
-   on — a typo must not land there by accident. *)
-let unknown_reads_as_auto () =
-  check string "typo" "auto" (mode "h2c");
-  check string "empty" "auto" (mode "")
+let with_env name value_opt f =
+  let previous = Sys.getenv_opt name in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> Unix.putenv name value
+      | None -> Unix.unsetenv name)
+    (fun () ->
+      (match value_opt with
+       | Some value -> Unix.putenv name value
+       | None -> Unix.unsetenv name);
+      f ())
+;;
+
+let actual_env_admission_is_fail_closed () =
+  with_env "MASC_USE_H2" None (fun () ->
+    check string "absent defaults" "auto" (T.use_h2 () |> T.h2_mode_to_string));
+  List.iter
+    (fun raw ->
+       with_env "MASC_USE_H2" (Some raw) (fun () ->
+         check_raises
+           ("env rejects " ^ raw)
+           (Env_config_core.Config_error
+              (Printf.sprintf
+                 "malformed env MASC_USE_H2=%S (expected auto|h1_only|h2_only)"
+                 raw))
+           (fun () -> ignore (T.use_h2 ()))))
+    [ ""; "h2c" ]
 ;;
 
 let () =
@@ -52,8 +66,9 @@ let () =
     "h2_mode_vocabulary"
     [ ( "vocabulary"
       , [ test_case "accepted spellings map as documented" `Quick accepted_spellings
-        ; test_case "unknown input stays in vocabulary" `Quick unknown_input_stays_in_vocabulary
-        ; test_case "unknown input reads as auto" `Quick unknown_reads_as_auto
+        ; test_case "invalid values are rejected" `Quick invalid_values_are_rejected
+        ; test_case "actual env admission is fail closed" `Quick
+            actual_env_admission_is_fail_closed
         ] )
     ]
 ;;

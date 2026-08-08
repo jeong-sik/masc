@@ -159,6 +159,10 @@ val inc_grpc_backlog_replay_events_replayed : ?delta:int -> unit -> unit
 
 (** {1 Primary HTTP listener state} *)
 
+(** Records the typed HTTP mode selected once during server startup. Transport
+    health projects this value instead of re-reading the environment. *)
+val set_http_configured_mode : Env_config.Transport.h2_mode -> unit
+
 (** Marks the primary HTTP accept loop as listening.  [mode] is one of
     ["h1"], ["h2"], or ["auto"]. *)
 val record_http_listener_started : mode:string -> unit

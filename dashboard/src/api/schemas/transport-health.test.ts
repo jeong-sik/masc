@@ -12,7 +12,7 @@ describe('parseTransportHealthData', () => {
     websocket: {},
     webrtc: {},
     streamable_http: {},
-    http2: {},
+    http2: { listener_mode: 'auto', multiplex_ready: true },
     cluster: {},
     agent_health: {},
     generated_at: '2024-01-01T00:00:00Z',
@@ -33,7 +33,7 @@ describe('parseTransportHealthData', () => {
     expect(result.websocket.delivery.bytes_cache_hits).toBe(0)
     expect(result.webrtc.signaling_mode).toBe('unknown')
     expect(result.streamable_http.endpoint).toBe('/mcp')
-    expect(result.http2.listener_mode).toBe('unknown')
+    expect(result.http2.listener_mode).toBe('auto')
     expect(result.cluster.cluster).toBe('default')
     expect(result.cluster.total_units).toBeNull()
     expect(result.agent_health.stale_total).toBe(0)
@@ -207,7 +207,7 @@ describe('parseTransportHealthData', () => {
         supports_delete: true,
       },
       http2: {
-        listener_mode: 'prior_knowledge',
+        listener_mode: 'h2_only',
         multiplex_ready: true,
         prior_knowledge_path: '/mcp',
       },
@@ -243,6 +243,24 @@ describe('parseTransportHealthData', () => {
     expect(result.cluster.cluster).toBe('alpha')
     expect(result.cluster.total_units).toBe(10)
     expect(result.agent_health.lifecycle_dispatch_rejections_total).toBe(1)
+  })
+
+  it('rejects a listener mode outside the closed wire vocabulary', () => {
+    expect(() =>
+      parseTransportHealthData({
+        ...minimalValid,
+        http2: { listener_mode: 'h2c', multiplex_ready: true },
+      }),
+    ).toThrow(TransportHealthSchemaDriftError)
+  })
+
+  it('rejects a readiness value that contradicts the listener mode', () => {
+    expect(() =>
+      parseTransportHealthData({
+        ...minimalValid,
+        http2: { listener_mode: 'h1_only', multiplex_ready: true },
+      }),
+    ).toThrow(TransportHealthSchemaDriftError)
   })
 
   it('parses nullable cluster fields as null when explicitly null', () => {

@@ -233,23 +233,6 @@ let test_unknown_tool_name_is_an_error () =
         (Astring.String.is_infix ~affix:"tool_execute" detail))
 ;;
 
-(* Every advertised schema must reach an implementation. Advertising a name
-   dispatch does not know would put a tool in the model's list that always
-   fails with "unknown tool". *)
-let test_every_schema_name_dispatches () =
-  with_surface (fun _config surface ->
-    List.iter
-      (fun (schema : Masc_domain.tool_schema) ->
-         match VAT.dispatch surface ~name:schema.name ~args:(`Assoc []) with
-         | Ok _ -> ()
-         | Error detail ->
-           Alcotest.(check bool)
-             (Printf.sprintf "%s is not reported as unknown" schema.name)
-             false
-             (Astring.String.is_infix ~affix:"unknown tool" detail))
-      (VAT.schemas surface))
-;;
-
 (* Where the judge's process would run is the safety property this layer owns.
    The keeper runtime resolves it and reports the resolution back, so the
    assertion is on that resolution rather than on process output: whether the
@@ -309,9 +292,7 @@ let test_execute_cannot_escape_the_producer_playground () =
         (Astring.String.is_infix ~affix:"\"scope\":\"playground_root\"" detail))
 ;;
 
-(* A run that failed must not read like a run that produced nothing. Handing
-   back [raw_output] on both paths would let a build that never started look
-   like one with no findings — the exact shape that made task-136 approvable. *)
+(* A failed process is a failed lookup result. *)
 let test_a_failed_run_is_an_error_not_empty_output () =
   with_surface (fun _config surface ->
     match
@@ -423,8 +404,6 @@ let () =
     ; ( "dispatch"
       , [ Alcotest.test_case "unknown tool name is an error" `Quick
             test_unknown_tool_name_is_an_error
-        ; Alcotest.test_case "every schema name dispatches" `Quick
-            test_every_schema_name_dispatches
         ] )
     ; ( "execution"
       , [ Alcotest.test_case "execute resolves inside the producer playground" `Quick

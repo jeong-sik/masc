@@ -478,6 +478,20 @@ let process_task_once
       ();
     process_outcome
   in
+  let reject_contract ~reason ~detail =
+    complete
+      (commit_verdict
+         runtime
+         task
+         ~assignee
+         ~verification_id
+         ~authority
+         ~verdict:(Masc_domain.Verdict_rejected { reason })
+         ~notes:reason
+         ~verdict_label:"rejected_contract"
+         ~on_commit:(Verification_run_registry.Contract_rejected { detail })
+         ~evaluator_runtime:None)
+  in
   try
     match
       prepare_review
@@ -489,64 +503,36 @@ let process_task_once
     with
     | Error reason ->
       let rejection_reason = "completion evidence contract invalid: " ^ reason in
-      complete
-        (commit_verdict
-           runtime
-           task
-           ~assignee
-           ~verification_id
-           ~authority
-           ~verdict:(Masc_domain.Verdict_rejected { reason = rejection_reason })
-           ~notes:rejection_reason
-           ~verdict_label:"rejected_contract"
-           ~on_commit:
-             (Verification_run_registry.Contract_rejected { detail = reason })
-             (* The evidence contract was rejected before any evaluator ran, so
-                this verdict has no judging runtime to name. *)
-           ~evaluator_runtime:None)
+      reject_contract ~reason:rejection_reason ~detail:reason
     | Ok prepared ->
-      (* The lookup surface borrows the producer's own keeper meta, so the same
-         judge reaches a different tree on the next task. [assignee] is the
-         worker the evidence snapshot was materialized against — [prepare_review]
-         rejects the request when it disagrees with [request.worker], so the
-         two cannot name different trees.
-
-         A producer with no readable meta leaves the judge on the snapshot
-         alone. The prompt says so in that case rather than advertising tools
-         whose every call would fail, and the reason is logged: a review that
-         could not reach the tree is a different event from one that chose not
-         to look. *)
-      let lookup =
-        match
-          Verification_authority_tools.create
-            ~config:runtime.config
-            ~producer:assignee
-        with
-        | Ok lookup_tools ->
-          Task.Anti_rationalization.Lookup_tools
-            { schemas = Verification_authority_tools.schemas lookup_tools
-            ; dispatch = Verification_authority_tools.dispatch lookup_tools
-            }
-        | Error reason ->
-          Log.Task.warn
-            "[verification-lookup] surface unavailable producer=%s: %s"
-            assignee
-            reason;
-          Task.Anti_rationalization.No_lookup_surface
-      in
-      let result =
-        Task.Anti_rationalization.review
-          ~base_path:runtime.config.base_path
-          ~sw:(Some runtime.sw)
-          ~lookup
-          ?completion_contract:prepared.completion_contract
-          ~required_evidence:prepared.required_artifacts
-          ~verify_gate_evidence:[]
-          ~on_tool_result
-          prepared.review_request
-      in
-      let evaluator_runtime = result.evaluator_runtime in
-      (match result.verdict with
+      (match
+         Verification_authority_tools.create
+           ~config:runtime.config
+           ~producer:assignee
+       with
+       | Error reason ->
+         let rejection_reason = "completion lookup contract invalid: " ^ reason in
+         reject_contract ~reason:rejection_reason ~detail:reason
+       | Ok lookup_tools ->
+         let lookup =
+           Task.Anti_rationalization.Lookup_tools
+             { schemas = Verification_authority_tools.schemas lookup_tools
+             ; dispatch = Verification_authority_tools.dispatch lookup_tools
+             }
+         in
+         let result =
+           Task.Anti_rationalization.review
+             ~base_path:runtime.config.base_path
+             ~sw:(Some runtime.sw)
+             ~lookup
+             ?completion_contract:prepared.completion_contract
+             ~required_evidence:prepared.required_artifacts
+             ~verify_gate_evidence:[]
+             ~on_tool_result
+             prepared.review_request
+         in
+         let evaluator_runtime = result.evaluator_runtime in
+         match result.verdict with
        | None ->
          let gate = Task.Anti_rationalization.gate_to_string result.gate in
          (* Both arms are real descriptions, not a default standing in for an

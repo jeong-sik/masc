@@ -1,6 +1,7 @@
 (** Durable, nonblocking HITL requests for Keeper external effects. *)
 
-include Keeper_approval_queue_rules
+open Keeper_approval_queue_rules_types
+open Keeper_approval_queue_rules
 
 type storage_error =
   { path : string
@@ -3168,7 +3169,7 @@ let approval_decision_equal left right =
 let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pending_approval) =
   try
     match
-      upsert_rule
+      Keeper_approval_queue_rules.upsert_rule
         ~base_path
         ~keeper_name:entry.keeper_name
         ~tool_name:entry.tool_name

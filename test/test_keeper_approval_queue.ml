@@ -1,6 +1,8 @@
 module AQ = Masc.Keeper_approval_queue
+module Rules = Masc.Keeper_approval_queue_rules
+module Rule_types = Keeper_approval_queue_rules_types
 
-let reserve_retry_exact ~base_path (entry : AQ.pending_approval) =
+let reserve_retry_exact ~base_path (entry : Rule_types.pending_approval) =
   AQ.reserve_summary_attempt_retry
     ~base_path
     ~id:entry.id
@@ -139,7 +141,7 @@ let submit ~base_path ~keeper_name ~input =
 ;;
 
 let reject_and_cleanup ~base_path id =
-  match aq_resolve ~base_path ~id ~decision:(AQ.Decision.Reject "test cleanup") with
+  match aq_resolve ~base_path ~id ~decision:(Rule_types.Decision.Reject "test cleanup") with
   | Ok () -> ()
   | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
 ;;
@@ -407,14 +409,14 @@ let expect_summary_rejection label = function
 ;;
 
 let exact_summary ?(context_summary = "Exact attempt summary") model_run_id :
-    AQ.hitl_context_summary
+    Rule_types.hitl_context_summary
   =
   { summary_version = 2
   ; generated_at = Unix.gettimeofday ()
   ; model_run_id
   ; context_summary
   ; key_questions = []
-  ; judgment = AQ.Approve
+  ; judgment = Rule_types.Approve
   ; rationale = "The exact durable attempt supports this judgment."
   }
 ;;
@@ -610,7 +612,7 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
         | None -> Alcotest.fail "pending request missing"
         | Some entry ->
           Alcotest.(check bool) "summary is not started by queue" true
-            (entry.summary_status = AQ.Summary_not_requested);
+            (entry.summary_status = Rule_types.Summary_not_requested);
           Alcotest.check (Alcotest.option yojson)
             "exact outer-turn context"
             (Some request_context)
@@ -682,7 +684,7 @@ let test_same_owner_drain_uses_sequence_not_wall_clock () =
          |> List.concat_map (fun base_path ->
               AQ.list_pending_entries_for_workspace ~base_path
               |> require_ok "read workspace-local FIFO")
-         |> List.map (fun (entry : AQ.pending_approval) -> entry.id)
+         |> List.map (fun (entry : Rule_types.pending_approval) -> entry.id)
        in
        Alcotest.(check (list string))
          "workspace projections compose deterministic FIFO"
@@ -709,20 +711,20 @@ let test_same_owner_drain_uses_sequence_not_wall_clock () =
    the oldest for 2416s. *)
 let head_of_line_owner = "head-of-line-owner"
 
-let require_human_summary () : AQ.hitl_context_summary =
-  { summary_version = AQ.current_hitl_context_summary_version
+let require_human_summary () : Rule_types.hitl_context_summary =
+  { summary_version = Rule_types.current_hitl_context_summary_version
   ; generated_at = 1.0
   ; model_run_id = "model-run-head-of-line"
   ; context_summary = "head approval was handed to a human"
   ; key_questions = []
-  ; judgment = AQ.Require_human
+  ; judgment = Rule_types.Require_human
   ; rationale = "operator decision required"
   }
 ;;
 
-let completed_exact_binding (entry : AQ.pending_approval) =
-  AQ.exact_attempt_binding_with_status
-    (AQ.make_exact_attempt_binding
+let completed_exact_binding (entry : Rule_types.pending_approval) =
+  Rule_types.exact_attempt_binding_with_status
+    (Rule_types.make_exact_attempt_binding
        ~approval_id:entry.id
        ~input_hash:entry.input_hash
        ~sequence:entry.sequence
@@ -731,7 +733,7 @@ let completed_exact_binding (entry : AQ.pending_approval) =
        ~plan_fingerprint:"plan-head-of-line"
        ~request_body_sha256:"sha256-head-of-line"
        ())
-    AQ.Exact_completed
+    Rule_types.Exact_completed
 ;;
 
 let check_owner_selection label ~base_path ~expected entries =
@@ -742,7 +744,7 @@ let check_owner_selection label ~base_path ~expected entries =
       entries
   with
   | [ selected ] ->
-    Alcotest.(check string) label expected selected.AQ.id
+    Alcotest.(check string) label expected selected.Rule_types.id
   | [] -> Alcotest.failf "%s: owner selection returned nothing" label
   | selected ->
     Alcotest.failf "%s: expected one entry, got %d" label (List.length selected)
@@ -776,9 +778,9 @@ let test_terminal_head_does_not_stall_owner_queue () =
          [ follower; head ];
        let judged_head =
          { head with
-           AQ.summary_status = AQ.Summary_available (require_human_summary ())
-         ; AQ.summary_attempt_disposition = AQ.Summary_attempt_settled
-         ; AQ.exact_attempt = AQ.Exact_bound (completed_exact_binding head)
+           Rule_types.summary_status = Rule_types.Summary_available (require_human_summary ())
+         ; Rule_types.summary_attempt_disposition = Rule_types.Summary_attempt_settled
+         ; Rule_types.exact_attempt = Rule_types.Exact_bound (completed_exact_binding head)
          }
        in
        check_owner_selection
@@ -788,10 +790,10 @@ let test_terminal_head_does_not_stall_owner_queue () =
          [ judged_head; follower ];
        let blocked_head =
          { head with
-           AQ.summary_status = AQ.Summary_pending
-         ; AQ.summary_attempt_disposition =
-             AQ.Summary_attempt_pre_worker_unavailable
-               { reason_code = AQ.Summary_pre_worker_auto_judge_unavailable
+           Rule_types.summary_status = Rule_types.Summary_pending
+         ; Rule_types.summary_attempt_disposition =
+             Rule_types.Summary_attempt_pre_worker_unavailable
+               { reason_code = Rule_types.Summary_pre_worker_auto_judge_unavailable
                ; operator_detail =
                    "HITL summary: exact outer-turn request context is unavailable"
                }
@@ -944,7 +946,7 @@ let test_delivery_wire_shape_drops_request_context () =
            ~input:(`Assoc [ "target", `String "document" ])
            ()
        in
-       (match aq_resolve ~base_path ~id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let open Yojson.Safe.Util in
@@ -997,7 +999,7 @@ let test_resolution_is_durable_and_origin_scoped () =
          AQ.resolve_with_policy
            ~base_path
            ~id
-           ~decision:AQ.Decision.Approve
+           ~decision:Rule_types.Decision.Approve
            ~remember_rule:true
            ~created_by:"operator"
            ()
@@ -1036,16 +1038,16 @@ let test_resolution_is_durable_and_origin_scoped () =
                ~approval_id:id));
        Alcotest.(check bool) "exact remembered request matches" true
          (match
-            AQ.find_matching_rule
+            Rules.find_matching_rule
               ~base_path
               ~keeper_name
               ~tool_name:"external-effect"
               ~input
               ()
           with
-          | Ok (AQ.Rule_match_active _) -> true
-          | Ok (AQ.Rule_match_expired _ | AQ.Rule_match_absent) -> false
-          | Error error -> Alcotest.fail (AQ.rule_store_error_to_string error));
+          | Ok (Rule_types.Rule_match_active _) -> true
+          | Ok (Rule_types.Rule_match_expired _ | Rule_types.Rule_match_absent) -> false
+          | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error));
        (match
           AQ.consume_approved_resolution
             ~base_path
@@ -1267,7 +1269,7 @@ let test_remembered_rule_carries_requested_expiry () =
          AQ.resolve_with_policy
            ~base_path
            ~id
-           ~decision:AQ.Decision.Approve
+           ~decision:Rule_types.Decision.Approve
            ~remember_rule:true
            ~rule_expires_at:expires_at
            ~created_by:"operator"
@@ -1287,7 +1289,7 @@ let test_remembered_rule_carries_requested_expiry () =
           AQ.resolve_with_policy
             ~base_path
             ~id
-            ~decision:AQ.Decision.Approve
+            ~decision:Rule_types.Decision.Approve
             ~remember_rule:true
             ~rule_expires_at:expires_at
             ~created_by:"operator"
@@ -1298,8 +1300,8 @@ let test_remembered_rule_carries_requested_expiry () =
           Alcotest.fail
             ("identical expiry re-resolution must be idempotent: "
              ^ AQ.resolve_error_to_string error));
-       match AQ.list_rules ~base_path () with
-       | Error error -> Alcotest.fail (AQ.rule_store_error_to_string error)
+       match Rules.list_rules ~base_path () with
+       | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error)
        | Ok [ rule ] ->
          Alcotest.(check (option (float 0.0)))
            "persisted rule carries requested expiry"
@@ -1337,7 +1339,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
            ~input
            ()
        in
-       (match aq_resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id:approval_id ~decision:Rule_types.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
@@ -1492,8 +1494,8 @@ let test_exact_binding_codec_validates_entry_identity () =
          |> List.hd
          |> member "exact_attempt"
        in
-       (match AQ.exact_attempt_state_of_yojson_with_error exact_json with
-        | Ok (AQ.Exact_bound binding) ->
+       (match Rule_types.exact_attempt_state_of_yojson_with_error exact_json with
+        | Ok (Rule_types.Exact_bound binding) ->
           Alcotest.(check string)
             "codec approval identity"
             identity.approval_id_arg
@@ -1516,7 +1518,7 @@ let test_exact_binding_codec_validates_entry_identity () =
        check_exact_update
          "quarantine exact codec fixture"
          true
-         (quarantine_exact identity AQ.Exact_flow_execution_failed);
+         (quarantine_exact identity Rule_types.Exact_flow_execution_failed);
        let quarantined_exact_json =
          read_pending_snapshot ~base_path
          |> member "pending"
@@ -1531,13 +1533,13 @@ let test_exact_binding_codec_validates_entry_identity () =
           |> member "quarantine_cause"
           |> to_string);
        (match
-          AQ.exact_attempt_state_of_yojson_with_error quarantined_exact_json
+          Rule_types.exact_attempt_state_of_yojson_with_error quarantined_exact_json
         with
         | Ok
-            (AQ.Exact_bound
+            (Rule_types.Exact_bound
               { status =
-                  AQ.Exact_quarantined
-                    AQ.Exact_flow_execution_failed
+                  Rule_types.Exact_quarantined
+                    Rule_types.Exact_flow_execution_failed
               ; _
               }) ->
           ()
@@ -1548,7 +1550,7 @@ let test_exact_binding_codec_validates_entry_identity () =
        List.iter
          (fun removed_cause ->
             match
-              AQ.exact_attempt_state_of_yojson_with_error
+              Rule_types.exact_attempt_state_of_yojson_with_error
                 (replace_field
                    "quarantine_cause"
                    (`String removed_cause)
@@ -1564,7 +1566,7 @@ let test_exact_binding_codec_validates_entry_identity () =
          ; "restart_uncertainty"
          ];
        (match
-          AQ.exact_attempt_state_of_yojson_with_error
+          Rule_types.exact_attempt_state_of_yojson_with_error
             (replace_field "call_id" (`String " ") exact_json)
         with
         | Error _ -> ()
@@ -1572,7 +1574,7 @@ let test_exact_binding_codec_validates_entry_identity () =
        List.iter
          (fun (label, hash) ->
             match
-              AQ.exact_attempt_state_of_yojson_with_error
+              Rule_types.exact_attempt_state_of_yojson_with_error
                 (replace_field
                    "request_body_sha256"
                    (`String hash)
@@ -1691,18 +1693,18 @@ let test_exact_attempt_binding_release_and_conflicts () =
          "bound restart is not rearmed"
          false
          (reserve_retry_exact ~base_path (pending_entry_exn id));
-       let quarantine_cause = AQ.Exact_domain_invalid_output in
+       let quarantine_cause = Rule_types.Exact_domain_invalid_output in
        check_exact_update
          "quarantine replacement"
          true
          (quarantine_exact replacement quarantine_cause);
        (match pending_entry_exn id with
-        | { summary_status = AQ.Summary_failed { reason }
+        | { summary_status = Rule_types.Summary_failed { reason }
           ; exact_attempt =
-              AQ.Exact_bound
+              Rule_types.Exact_bound
                 { status =
-                    AQ.Exact_quarantined
-                      AQ.Exact_domain_invalid_output
+                    Rule_types.Exact_quarantined
+                      Rule_types.Exact_domain_invalid_output
                 ; _
                 }
           ; _
@@ -1716,7 +1718,7 @@ let test_exact_attempt_binding_release_and_conflicts () =
          "same quarantine cause is idempotent"
          false
          (quarantine_exact replacement quarantine_cause);
-       (match quarantine_exact replacement AQ.Exact_cancellation with
+       (match quarantine_exact replacement Rule_types.Exact_cancellation with
         | Error
             (AQ.Exact_attempt_rejected
               (AQ.Exact_attempt_status_conflict _)) ->
@@ -1778,9 +1780,9 @@ let test_restart_classifies_uncertain_and_released_recovery () =
          (reserve_retry_exact ~base_path (pending_entry_exn released_id));
        (match pending_entry_exn released_id with
         | { exact_attempt =
-              AQ.Exact_bound
-                { status = AQ.Exact_released_before_dispatch; _ }
-          ; summary_status = AQ.Summary_pending
+              Rule_types.Exact_bound
+                { status = Rule_types.Exact_released_before_dispatch; _ }
+          ; summary_status = Rule_types.Summary_pending
           ; _
           } ->
           ()
@@ -1790,8 +1792,8 @@ let test_restart_classifies_uncertain_and_released_recovery () =
        let assert_restart_states label =
          (match pending_entry_exn uncertain_id with
           | { exact_attempt =
-                AQ.Exact_bound
-                  { status = AQ.Exact_restart_quarantined
+                Rule_types.Exact_bound
+                  { status = Rule_types.Exact_restart_quarantined
                   ; slot_id
                   ; call_id
                   ; _
@@ -1811,8 +1813,8 @@ let test_restart_classifies_uncertain_and_released_recovery () =
               (label ^ " did not quarantine dispatch-uncertain attempt"));
          match pending_entry_exn released_id with
          | { exact_attempt =
-               AQ.Exact_bound
-                 { status = AQ.Exact_released_recovery_required
+               Rule_types.Exact_bound
+                 { status = Rule_types.Exact_released_recovery_required
                  ; slot_id
                  ; call_id
                  ; _
@@ -1848,8 +1850,8 @@ let test_restart_classifies_uncertain_and_released_recovery () =
          true
          (reserve_retry_exact ~base_path (pending_entry_exn released_id));
        (match pending_entry_exn released_id with
-        | { summary_status = AQ.Summary_pending
-          ; exact_attempt = AQ.Exact_unbound
+        | { summary_status = Rule_types.Summary_pending
+          ; exact_attempt = Rule_types.Exact_unbound
           ; _
           } ->
           ()
@@ -1870,8 +1872,8 @@ let test_restart_classifies_uncertain_and_released_recovery () =
          true
          (reserve_retry_exact ~base_path (pending_entry_exn bulk_id));
        match pending_entry_exn bulk_id with
-       | { summary_status = AQ.Summary_pending
-         ; exact_attempt = AQ.Exact_unbound
+       | { summary_status = Rule_types.Summary_pending
+         ; exact_attempt = Rule_types.Exact_unbound
          ; _
          } ->
          ()
@@ -1920,9 +1922,9 @@ let test_exact_attempt_completion_is_atomic () =
         | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "mismatched completion provenance was accepted");
        (match pending_entry_exn id with
-        | { summary_status = AQ.Summary_pending
+        | { summary_status = Rule_types.Summary_pending
           ; exact_attempt =
-              AQ.Exact_bound { status = AQ.Exact_dispatch_uncertain; _ }
+              Rule_types.Exact_bound { status = Rule_types.Exact_dispatch_uncertain; _ }
           ; _
           } ->
           ()
@@ -1933,9 +1935,9 @@ let test_exact_attempt_completion_is_atomic () =
          true
          (complete_exact identity summary);
        (match pending_entry_exn id with
-        | { summary_status = AQ.Summary_available durable_summary
+        | { summary_status = Rule_types.Summary_available durable_summary
           ; exact_attempt =
-              AQ.Exact_bound { status = AQ.Exact_completed; _ }
+              Rule_types.Exact_bound { status = Rule_types.Exact_completed; _ }
           ; _
           } ->
           Alcotest.(check string)
@@ -2006,7 +2008,7 @@ let test_exact_attempt_bind_storage_failure_is_not_success () =
         | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "failed exact binding persistence reported success");
        match pending_entry_exn id with
-       | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+       | { exact_attempt = Rule_types.Exact_unbound; _ } -> ()
        | _ -> Alcotest.fail "failed exact binding persistence mutated memory")
 ;;
 
@@ -2034,11 +2036,11 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
        in
        let assert_status label id expected =
          match pending_entry_exn id with
-         | { exact_attempt = AQ.Exact_bound { status; _ }; _ } ->
+         | { exact_attempt = Rule_types.Exact_bound { status; _ }; _ } ->
            Alcotest.(check string)
              label
              expected
-             (AQ.exact_attempt_status_to_string status)
+             (Rule_types.exact_attempt_status_to_string status)
          | _ -> Alcotest.failf "%s did not retain an exact binding" label
        in
        let resolved_id =
@@ -2051,7 +2053,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
           AQ.resolve_with_policy
             ~base_path
             ~id:resolved_id
-            ~decision:AQ.Decision.Approve
+            ~decision:Rule_types.Decision.Approve
             ()
         with
         | Ok _ -> ()
@@ -2108,7 +2110,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             AQ.resolve_with_policy
               ~base_path
               ~id:resolved_id
-              ~decision:AQ.Decision.Approve
+              ~decision:Rule_types.Decision.Approve
               ()
           with
           | Error (AQ.Persistence_failed _) -> ()
@@ -2119,7 +2121,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          AQ.For_testing.reset_runtime_state ();
          ignore (install_exn ~base_path);
          (match pending_entry_exn before_id with
-          | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+          | { exact_attempt = Rule_types.Exact_unbound; _ } -> ()
           | _ -> Alcotest.fail "pre-rename failure mutated exact binding memory");
          let cancel_before_id, cancel_before_identity =
            prepare "cancel-before-rename"
@@ -2162,7 +2164,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
           | Ok _ ->
             Alcotest.fail "pre-rename cancellation reported a write outcome");
          (match pending_entry_exn cancel_before_id with
-          | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+          | { exact_attempt = Rule_types.Exact_unbound; _ } -> ()
           | _ -> Alcotest.fail "pre-rename cancellation mutated exact memory");
          let cancel_after_id, cancel_after_identity =
            prepare "cancel-after-rename"
@@ -2214,8 +2216,8 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
               Alcotest.failf
                 "released binding accepted %s"
                 label)
-         [ "domain-invalid output", AQ.Exact_domain_invalid_output
-         ; "attempt replay", AQ.Exact_attempt_replay
+         [ "domain-invalid output", Rule_types.Exact_domain_invalid_output
+         ; "attempt replay", Rule_types.Exact_attempt_replay
          ];
        assert_status
          "rejected causes preserve release"
@@ -2226,7 +2228,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          true
          (quarantine_exact
             release_identity
-            AQ.Exact_terminal_persistence_failure);
+            Rule_types.Exact_terminal_persistence_failure);
        assert_status "release terminal memory" release_id "quarantined";
        let terminalize_released label cause =
          let id, identity = prepare label in
@@ -2248,8 +2250,8 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
            (quarantine_exact identity cause);
          match pending_entry_exn id with
          | { exact_attempt =
-               AQ.Exact_bound
-                 { status = AQ.Exact_quarantined actual; _ }
+               Rule_types.Exact_bound
+                 { status = Rule_types.Exact_quarantined actual; _ }
            ; _
            } when actual = cause ->
            ()
@@ -2260,10 +2262,10 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
        in
        terminalize_released
          "release-cancellation"
-         AQ.Exact_cancellation;
+         Rule_types.Exact_cancellation;
        terminalize_released
          "release-flow-execution-failed"
-         AQ.Exact_flow_execution_failed;
+         Rule_types.Exact_flow_execution_failed;
        let quarantine_id, quarantine_identity = prepare "quarantine" in
        check_exact_update
          "bind quarantine fixture"
@@ -2281,7 +2283,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             ~call_id:quarantine_identity.call_id_arg
             ~plan_fingerprint:quarantine_identity.plan_fingerprint_arg
             ~request_body_sha256:quarantine_identity.request_body_sha256_arg
-            ~cause:AQ.Exact_flow_execution_failed);
+            ~cause:Rule_types.Exact_flow_execution_failed);
        assert_status
          "visible quarantine memory"
          quarantine_id
@@ -2291,7 +2293,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          false
          (quarantine_exact
             quarantine_identity
-            AQ.Exact_flow_execution_failed);
+            Rule_types.Exact_flow_execution_failed);
        let complete_id, complete_identity = prepare "complete" in
        check_exact_update
          "bind completion fixture"
@@ -2356,7 +2358,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
              ~call_id
              ~plan_fingerprint
              ~request_body_sha256
-             ~summary:(actual_summary : AQ.hitl_context_summary)
+             ~summary:(actual_summary : Rule_types.hitl_context_summary)
          =
          incr observed_calls;
          Alcotest.(check string) "recovery approval identity" id actual_id;
@@ -2418,7 +2420,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
           Alcotest.fail
             "deterministic completion rejection lost its typed recovery code");
        (match AQ.For_testing.get_pending_entry_unchecked ~id with
-        | Some { summary_attempt_disposition = AQ.Summary_attempt_settled; _ } ->
+        | Some { summary_attempt_disposition = Rule_types.Summary_attempt_settled; _ } ->
           ()
         | _ ->
           Alcotest.fail
@@ -2542,8 +2544,8 @@ let test_current_snapshot_rejects_unbound_available_summary () =
                      then
                        `Assoc
                          (("summary_status",
-                            AQ.summary_status_to_yojson
-                              (AQ.Summary_available summary))
+                            Rule_types.summary_status_to_yojson
+                              (Rule_types.Summary_available summary))
                           :: List.remove_assoc "summary_status" entry_fields)
                      else entry_json
                    | entry_json -> entry_json)
@@ -2608,7 +2610,7 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
         | Error
             (AQ.Exact_attempt_rejected
                (AQ.Exact_attempt_disposition_conflict
-                  { disposition = AQ.Summary_attempt_identity_unbound; _ })) ->
+                  { disposition = Rule_types.Summary_attempt_identity_unbound; _ })) ->
           ()
         | Error error ->
           Alcotest.fail
@@ -2656,11 +2658,11 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
          (reserve_retry_exact ~base_path retryable_entry);
        (match AQ.For_testing.get_pending_entry_unchecked ~id with
         | Some
-            { summary_status = AQ.Summary_pending
-            ; exact_attempt = AQ.Exact_unbound
+            { summary_status = Rule_types.Summary_pending
+            ; exact_attempt = Rule_types.Exact_unbound
             ; summary_attempt_disposition =
-                AQ.Summary_attempt_pre_worker_unavailable
-                  { reason_code = AQ.Summary_pre_worker_start_reserved
+                Rule_types.Summary_attempt_pre_worker_unavailable
+                  { reason_code = Rule_types.Summary_pre_worker_start_reserved
                   ; operator_detail
                   }
             ; _
@@ -2714,18 +2716,18 @@ let test_operator_recovery_skips_terminal_exact_failure () =
          true
          (quarantine_exact
             quarantined_identity
-            AQ.Exact_flow_execution_failed);
+            Rule_types.Exact_flow_execution_failed);
        check_rearm
          "explicit operator action cannot reopen exact quarantine"
          false
          (reserve_retry_exact ~base_path (pending_entry_exn quarantined_id));
        (match AQ.For_testing.get_pending_entry_unchecked ~id:quarantined_id with
         | Some
-            { summary_status = AQ.Summary_failed _
+            { summary_status = Rule_types.Summary_failed _
             ; exact_attempt =
-                AQ.Exact_bound
+                Rule_types.Exact_bound
                   { status =
-                      AQ.Exact_quarantined AQ.Exact_flow_execution_failed
+                      Rule_types.Exact_quarantined Rule_types.Exact_flow_execution_failed
                   ; _
                   }
             ; _
@@ -2782,8 +2784,8 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
         | Ok _ -> Alcotest.fail "bound owner retirement succeeded");
        (match AQ.For_testing.get_pending_entry_unchecked ~id:bound with
         | Some
-            { summary_status = AQ.Summary_pending
-            ; exact_attempt = AQ.Exact_bound binding
+            { summary_status = Rule_types.Summary_pending
+            ; exact_attempt = Rule_types.Exact_bound binding
             ; _
             } ->
           Alcotest.(check string)
@@ -2793,7 +2795,7 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
         | Some _ | None ->
           Alcotest.fail "bound entry changed on failed retirement");
        (match AQ.For_testing.get_pending_entry_unchecked ~id:sibling with
-        | Some { summary_status = AQ.Summary_pending; _ } -> ()
+        | Some { summary_status = Rule_types.Summary_pending; _ } -> ()
         | Some _ | None ->
           Alcotest.fail "blocked retirement partially mutated");
        (match
@@ -2812,7 +2814,7 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
             ids);
        match AQ.For_testing.get_pending_entry_unchecked ~id:retirable with
        | Some
-           { summary_status = AQ.Summary_failed { reason = "retired" }
+           { summary_status = Rule_types.Summary_failed { reason = "retired" }
            ; _
            } ->
          ()
@@ -3090,7 +3092,7 @@ let test_replay_sidecar_rejects_raw_output_wire () =
           aq_resolve
             ~base_path
             ~id:approval_id
-            ~decision:AQ.Decision.Approve
+            ~decision:Rule_types.Decision.Approve
         with
         | Ok () -> ()
         | Error error ->
@@ -3241,7 +3243,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
           aq_resolve
             ~base_path
             ~id
-            ~decision:AQ.Decision.Approve
+            ~decision:Rule_types.Decision.Approve
         with
         | Ok () -> ()
        | Error error ->
@@ -3479,12 +3481,12 @@ let test_default_auto_judge_defers_without_blocking () =
            (String.length detail > 0);
          (match AQ.For_testing.get_pending_entry_unchecked ~id:approval_id with
           | Some
-              { summary_status = AQ.Summary_pending
-              ; exact_attempt = AQ.Exact_unbound
+              { summary_status = Rule_types.Summary_pending
+              ; exact_attempt = Rule_types.Exact_unbound
               ; summary_attempt_disposition =
-                  AQ.Summary_attempt_pre_worker_unavailable
+                  Rule_types.Summary_attempt_pre_worker_unavailable
                     { reason_code =
-                        AQ.Summary_pre_worker_auto_judge_unavailable
+                        Rule_types.Summary_pre_worker_auto_judge_unavailable
                     ; operator_detail
                     }
               ; _
@@ -3522,7 +3524,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
     (fun () ->
        ignore (install_exn ~base_path);
        let approval_id = submit ~base_path ~keeper_name ~input in
-       (match aq_resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id:approval_id ~decision:Rule_types.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
@@ -3584,7 +3586,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
           aq_resolve
             ~base_path
             ~id:reject_id
-            ~decision:(AQ.Decision.Reject rationale)
+            ~decision:(Rule_types.Decision.Reject rationale)
         with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
@@ -3612,7 +3614,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
        let edited_input =
          `Assoc [ "target", `String "after"; "confirmed", `Bool true ]
        in
-       (match aq_resolve ~base_path ~id:edit_id ~decision:(AQ.Decision.Edit edited_input) with
+       (match aq_resolve ~base_path ~id:edit_id ~decision:(Rule_types.Decision.Edit edited_input) with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let edited =
@@ -3649,7 +3651,7 @@ let test_resolved_audit_event_carries_judge_evidence () =
        let id =
          submit ~base_path ~keeper_name ~input:(`Assoc [ "target", `String "doc" ])
        in
-       (match aq_resolve ~base_path ~id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let history =
@@ -3674,7 +3676,7 @@ let test_resolved_audit_event_carries_judge_evidence () =
            (row |> member "summary_status");
          Alcotest.check yojson
            "exact_attempt recorded at resolution"
-           (AQ.exact_attempt_state_to_yojson AQ.Exact_unbound)
+           (Rule_types.exact_attempt_state_to_yojson Rule_types.Exact_unbound)
            (row |> member "exact_attempt"))
 ;;
 

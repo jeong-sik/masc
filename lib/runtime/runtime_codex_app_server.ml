@@ -809,7 +809,7 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
-let run_spawned ~mgr ~clock config ~dynamic_tools ~reasoning_effort ~thread_mode ~history
+let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort ~thread_mode ~history
     ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_started =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
@@ -817,7 +817,7 @@ let run_spawned ~mgr ~clock config ~dynamic_tools ~reasoning_effort ~thread_mode
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = ref "" in
     let proc =
-      Eio.Process.spawn ~sw mgr
+      Eio.Process.spawn ~sw mgr ~cwd
         ~env:(subscription_only_environment ())
         ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
         [ config.cli_path; "app-server"; "--stdio" ]
@@ -890,7 +890,7 @@ let validate_dynamic_tools tools =
   loop [] tools
 ;;
 
-let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock
+let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
     ?(history = []) ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
     ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
     ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) config ~prompt =
@@ -906,6 +906,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
          run_spawned
            ~mgr
            ~clock
+           ~cwd
            config
            ~dynamic_tools
            ~reasoning_effort

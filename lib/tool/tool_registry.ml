@@ -65,12 +65,8 @@ let stats_catalog_tool_names : StringSet.t Eio.Lazy.t =
       explicit_metadata_names)
 ;;
 
-let is_keeper_internal_tool_name tool_name =
-  String.starts_with ~prefix:"keeper_" tool_name
-
 let is_stats_known_tool tool_name =
   StringSet.mem tool_name (Eio.Lazy.force stats_catalog_tool_names)
-  || is_keeper_internal_tool_name tool_name
 
 let is_known_tool = is_stats_known_tool
 

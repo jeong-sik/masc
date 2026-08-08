@@ -303,7 +303,7 @@
       "repeat_index": 1,
       "prompt_fingerprint": "fp-executor-board",
       "task_success": false,
-      "status": "unsupported",
+      "status": "executed_failed",
       "tool_calls": []
     }
   ]

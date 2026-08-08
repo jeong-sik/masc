@@ -527,19 +527,6 @@ task_success_from_final_result() {
   esac
 }
 
-classify_status() {
-  local text
-  text="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
-  case "${text}" in
-    *"not supported"*|*"unsupported"*|*"invalid_request_error"*|*"unknown model"*|*"model_not_found"*)
-      printf 'unsupported'
-      ;;
-    *)
-      printf 'executed_failed'
-      ;;
-  esac
-}
-
 create_keeper_status_snapshot() {
   local keeper_name="$1"
   local run_dir="$2"
@@ -610,7 +597,7 @@ run_live_case() {
       --arg keeper_profile "${keeper_profile}" \
       --arg run_id "${keeper_name}" \
       --argjson repeat_index "${repeat_index}" \
-      --arg status "$(classify_status "${create_error}")" \
+      --arg status "executed_failed" \
       --arg final_output "${create_error}" \
       '{
         case_id: $case_id,
@@ -647,7 +634,7 @@ run_live_case() {
       --arg keeper_profile "${keeper_profile}" \
       --arg run_id "${keeper_name}" \
       --argjson repeat_index "${repeat_index}" \
-      --arg status "$(classify_status "${msg_error}")" \
+      --arg status "executed_failed" \
       --arg final_output "${msg_error}" \
       --arg keeper_name "${keeper_name}" \
       --arg tool_surface_fingerprint "${tool_surface_fingerprint}" \
@@ -789,13 +776,7 @@ run_live_case() {
       task_success=true
     fi
   else
-    local failure_text
-    failure_text="$(printf '%s' "${result_json}" | jq -r '
-        if (.result | type) == "string" then .result
-        else (.result | tostring)
-        end
-      ')"
-    run_status="$(classify_status "${failure_text}")"
+    run_status="executed_failed"
     final_result_json='null'
   fi
 

@@ -42,11 +42,11 @@ val summarize :
     Filter strings are normalised (trim + lowercase) before
     comparison.
 
-    {b Status counters} ({!benchmark_summary.unsupported_runs} /
+    {b Status counters} ({!benchmark_summary.executed_failed_runs} /
     {!benchmark_summary.runtime_unreachable_runs} /
     {!benchmark_summary.unknown_case_runs}) reflect filtered runs:
 
-    - [unsupported_runs]: [run.status = Run_unsupported].
+    - [executed_failed_runs]: [run.status = Run_executed_failed].
     - [runtime_unreachable_runs]: [run.status = Run_runtime_unreachable].
     - [unknown_case_runs]: [run.status = Run_ok] AND
       [run.case_id] not in [cases].

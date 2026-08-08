@@ -55,7 +55,7 @@ val summary_row_to_yojson :
     [recovery_rate] / [unnecessary_tool_rate] / [avg_tool_calls] /
     [p95_latency_ms] / [avg_input_tokens] / [avg_output_tokens] /
     [avg_cost_usd] / [composite_score] (per-row metrics) +
-    [unsupported_runs] / [runtime_unreachable_runs] (failure
+    [executed_failed_runs] / [runtime_unreachable_runs] (failure
     classification) + [stability_score] /
     [tool_sequence_consistency_rate] /
     [prompt_fingerprint_consistency_rate] / [pass_consistency_rate]

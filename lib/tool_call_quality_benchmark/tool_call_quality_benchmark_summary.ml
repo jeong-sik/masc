@@ -177,6 +177,11 @@ let build_summary_rows view runs scores =
       let current = Hashtbl.find_opt scores_by_key key |> Option.value ~default:[] in
       Hashtbl.replace scores_by_key key (score :: current))
     scores;
+  List.iter
+    (fun run ->
+      let key = summary_key_of_run view run in
+      if not (Hashtbl.mem scores_by_key key) then Hashtbl.add scores_by_key key [])
+    runs;
   Hashtbl.fold
     (fun (provider, model, keeper_profile as key)
          (grouped_scores : case_score list) acc ->
@@ -187,9 +192,9 @@ let build_summary_rows view runs scores =
                (=) run_key key)
       in
       let grouped_scores_by_case = group_scores_by_case grouped_scores in
-      let unsupported_runs =
+      let executed_failed_runs =
         grouped_runs
-        |> List.filter (fun run -> (=) run.status Run_unsupported)
+        |> List.filter (fun run -> (=) run.status Run_executed_failed)
         |> List.length
       in
       let runtime_unreachable_runs =
@@ -258,7 +263,7 @@ let build_summary_rows view runs scores =
           composite_score =
             grouped_scores |> List.map (fun (score : case_score) -> score.composite_score)
             |> avg_float;
-          unsupported_runs;
+          executed_failed_runs;
           runtime_unreachable_runs;
           stability_score;
           tool_sequence_consistency_rate;
@@ -283,8 +288,10 @@ let summarize ~cases ~runs ?model_filters ?keeper_filters () =
     filtered_runs
     |> List.filter_map (Tool_call_quality_benchmark_scoring.score_run ~cases)
   in
-  let unsupported_runs =
-    filtered_runs |> List.filter (fun run -> (=) run.status Run_unsupported) |> List.length
+  let executed_failed_runs =
+    filtered_runs
+    |> List.filter (fun run -> (=) run.status Run_executed_failed)
+    |> List.length
   in
   let runtime_unreachable_runs =
     filtered_runs
@@ -302,7 +309,7 @@ let summarize ~cases ~runs ?model_filters ?keeper_filters () =
     cases_total = List.length cases;
     runs_total = List.length filtered_runs;
     scored_runs = List.length score_results;
-    unsupported_runs;
+    executed_failed_runs;
     runtime_unreachable_runs;
     unknown_case_runs;
     grouped_by_provider_model_keeper =

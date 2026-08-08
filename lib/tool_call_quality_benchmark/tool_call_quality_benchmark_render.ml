@@ -72,7 +72,7 @@ let summary_row_to_yojson (row : summary_row) =
       ("avg_output_tokens", `Float row.avg_output_tokens);
       ("avg_cost_usd", `Float row.avg_cost_usd);
       ("composite_score", `Float row.composite_score);
-      ("unsupported_runs", `Int row.unsupported_runs);
+      ("executed_failed_runs", `Int row.executed_failed_runs);
       ("runtime_unreachable_runs", `Int row.runtime_unreachable_runs);
       ("stability_score", Option.fold ~none:`Null ~some:(fun value -> `Float value) row.stability_score);
       ( "tool_sequence_consistency_rate",
@@ -93,7 +93,7 @@ let benchmark_summary_to_yojson (summary : benchmark_summary) =
       ("cases_total", `Int summary.cases_total);
       ("runs_total", `Int summary.runs_total);
       ("scored_runs", `Int summary.scored_runs);
-      ("unsupported_runs", `Int summary.unsupported_runs);
+      ("executed_failed_runs", `Int summary.executed_failed_runs);
       ("runtime_unreachable_runs", `Int summary.runtime_unreachable_runs);
       ("unknown_case_runs", `Int summary.unknown_case_runs);
       ( "grouped_by_provider_model_keeper",
@@ -144,7 +144,7 @@ let summary_rows_to_csv ~view summary =
       "avg_output_tokens";
       "avg_cost_usd";
       "composite_score";
-      "unsupported_runs";
+      "executed_failed_runs";
       "runtime_unreachable_runs";
       "stability_score";
       "tool_sequence_consistency_rate";
@@ -171,7 +171,7 @@ let summary_rows_to_csv ~view summary =
       Printf.sprintf "%.1f" row.avg_output_tokens;
       Printf.sprintf "%.6f" row.avg_cost_usd;
       Printf.sprintf "%.2f" row.composite_score;
-      Int.to_string row.unsupported_runs;
+      Int.to_string row.executed_failed_runs;
       Int.to_string row.runtime_unreachable_runs;
       string_of_float_option row.stability_score;
       string_of_float_option row.tool_sequence_consistency_rate;

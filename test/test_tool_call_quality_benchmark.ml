@@ -20,23 +20,44 @@ let fixture_runs repo_root =
    workspace source root as DUNE_SOURCEROOT; resolve fixtures against it and
    fall back to cwd for direct (non-dune) invocation. Mirrors
    test_disk_hygiene_script.ml / test_ci_run_tests_script.ml. *)
-(* Every summary compares status by equality against a known constructor, so a
-   status outside the vocabulary used to leave the run out of every total
-   instead of failing the load. *)
-let test_loader_rejects_unknown_run_status () =
+let load_single_run_status status_field =
   let path = Filename.temp_file "tcq_runs" ".json" in
   Fun.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
        let oc = open_out path in
-       output_string
-         oc
-         {|{"runs":[{"case_id":"c","provider":"p","model":"m","keeper_profile":"k","status":"okay","tool_calls":[]}]}|};
+       Printf.fprintf oc
+         {|{"runs":[{"case_id":"c","provider":"p","model":"m","keeper_profile":"k",%s"tool_calls":[]}]}|}
+         status_field;
        close_out oc;
-       match Tool_call_quality_benchmark.load_runs_from_file path with
-       | Ok _ -> fail "an unknown run status must not load"
+       Tool_call_quality_benchmark.load_runs_from_file path)
+;;
+
+let test_loader_requires_exact_run_status () =
+  let rejected =
+    [ ("unknown", {|"status":"okay",|}, "okay")
+    ; ("missing", "", "missing required string field status")
+    ; ("null", {|"status":null,|}, "field status must be a string")
+    ; ("number", {|"status":1,|}, "field status must be a string")
+    ; ("empty", {|"status":"",|}, {|""|})
+    ; ("case", {|"status":"OK",|}, "OK")
+    ; ("space", {|"status":" ok ",|}, " ok ")
+    ]
+  in
+  List.iter
+    (fun (label, field, expected) ->
+       match load_single_run_status field with
+       | Ok _ -> failf "%s status must not load" label
        | Error msg ->
-         check bool ("names the status: " ^ msg) true (contains_sub msg "okay"))
+         check bool (label ^ " error: " ^ msg) true (contains_sub msg expected))
+    rejected;
+  List.iter
+    (fun status ->
+       match load_single_run_status (Printf.sprintf {|"status":"%s",|} status) with
+       | Ok [ _ ] -> ()
+       | Ok _ -> failf "%s did not load exactly one run" status
+       | Error msg -> failf "%s must load: %s" status msg)
+    [ "ok"; "executed_failed"; "runtime_unreachable" ]
 ;;
 
 let repo_source_root () =
@@ -146,7 +167,7 @@ let test_summary_rollups_and_stability () =
   check int "cases total" 4 summary.cases_total;
   check int "runs total" 7 summary.runs_total;
   check int "scored runs" 6 summary.scored_runs;
-  check int "unsupported runs" 1 summary.unsupported_runs;
+  check int "executed failed runs" 1 summary.executed_failed_runs;
   check int "runtime unreachable runs" 0 summary.runtime_unreachable_runs;
   let analyst_row =
     find_row
@@ -194,7 +215,16 @@ let test_summary_rollups_and_stability () =
       summary.grouped_by_provider_model
   in
   check int "provider rollup unique cases" 2 provider_row.cases_total;
-  check int "provider rollup passed cases" 1 provider_row.cases_passed
+  check int "provider rollup passed cases" 1 provider_row.cases_passed;
+  let failed_row =
+    find_row
+      ~provider:(Some "anthropic")
+      ~model:(Some "claude-sonnet-latest")
+      ~keeper:(Some "bench-executor")
+      summary.grouped_by_provider_model_keeper
+  in
+  check int "failed-only group has no scored cases" 0 failed_row.cases_total;
+  check int "failed-only group reports the run" 1 failed_row.executed_failed_runs
 
 let test_csv_render_has_headers () =
   let cases, runs = load_fixture () in
@@ -439,54 +469,6 @@ let test_loader_parses_selector_backed_case_fields () =
                (List.length cases))
       | Error msg -> fail ("load_cases_from_file failed: " ^ msg))
 
-(* Regression guard for the legacy [tool_name] arg_check shape: case JSON that
-   predates typed selectors carries a bare ["tool_name"] field instead of a
-   ["selector"] object. parse_arg_check must keep parsing it as
-   [Eval_tool_selector.Tool_name], so removing that fallback fails here. *)
-let test_loader_parses_legacy_tool_name_arg_check () =
-  let path = Filename.temp_file "tool-call-quality-legacy" ".json" in
-  Fun.protect
-    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
-    (fun () ->
-      Fs_compat.save_file path
-        {|{
-  "cases": [
-    {
-      "id": "legacy_arg_check_case",
-      "prompt": "synthetic legacy arg_check case",
-      "category": "tool_use",
-      "keeper_profiles": ["bench-selector"],
-      "forbidden_tools": [],
-      "forbidden_selectors": [],
-      "required_selectors": [],
-      "max_tool_calls": 3,
-      "success_checks": [
-        {"path": "$.status", "equals": "completed"}
-      ],
-      "arg_checks": [
-        {
-          "tool_name": "tool_read_file",
-          "path": "$.path",
-          "contains": "keeper_tool_call_log"
-        }
-      ]
-    }
-  ]
-}|};
-      match Tool_call_quality_benchmark.load_cases_from_file path with
-      | Ok [ case ] ->
-          check int "arg check count" 1
-            (List.length case.Tool_call_quality_benchmark.arg_checks);
-          let arg_check = List.hd case.Tool_call_quality_benchmark.arg_checks in
-          check string "legacy tool_name selector" "tool_name:tool_read_file"
-            (Eval_tool_selector.label
-               arg_check.Tool_call_quality_benchmark.selector)
-      | Ok cases ->
-          fail
-            (Printf.sprintf "expected one parsed case, got %d"
-               (List.length cases))
-      | Error msg -> fail ("load_cases_from_file failed: " ^ msg))
-
 (* When a case uses semantic selectors but none of the run's tool calls carry
    usable route_evidence, scoring cannot distinguish "wrong tool" from
    "missing evidence". Per the evidence-quality contract, such runs are excluded
@@ -656,8 +638,6 @@ let () =
              test_route_evidence_quality_reports_semantic_case_gaps;
            test_case "loader parses selector-backed case fields" `Quick
              test_loader_parses_selector_backed_case_fields;
-           test_case "loader parses legacy tool_name arg check" `Quick
-             test_loader_parses_legacy_tool_name_arg_check;
            test_case "route evidence quality treats empty fields as missing"
              `Quick test_route_evidence_quality_treats_empty_evidence_as_missing;
            test_case "unavailable route evidence excludes run from scoring"
@@ -666,7 +646,7 @@ let () =
              test_case_selectors_resolve_to_live_descriptors;
            test_case "arg check paths exist in descriptor schema" `Quick
              test_arg_check_paths_exist_in_descriptor_schema;
-           test_case "loader rejects an unknown run status" `Quick
-             test_loader_rejects_unknown_run_status;
+           test_case "loader requires an exact run status" `Quick
+             test_loader_requires_exact_run_status;
          ]);
     ]

@@ -17,15 +17,12 @@ let rec map_m f = function
       let* ys = map_m f xs in
       Ok (y :: ys)
 
-(* Every summary compares status by equality against a known constructor, so a
-   status outside this set leaves the run out of every total. Reject it here,
-   the way the sibling category parser below does. *)
 let run_status_of_string raw =
-  match String.trim (String.lowercase_ascii raw) with
-  | "" | "ok" -> Ok Run_ok
-  | "unsupported" -> Ok Run_unsupported
+  match raw with
+  | "ok" -> Ok Run_ok
+  | "executed_failed" -> Ok Run_executed_failed
   | "runtime_unreachable" -> Ok Run_runtime_unreachable
-  | other -> errorf "unknown tool-call-quality run status: %s" other
+  | other -> errorf "unknown tool-call-quality run status: %S" other
 
 let case_category_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
@@ -86,9 +83,7 @@ let parse_arg_check json =
         (match Eval_tool_selector.of_yojson value with
          | Ok selector -> Ok selector
          | Error msg -> errorf "invalid arg_check selector: %s" msg)
-    | None ->
-        let* tool_name = required_string_field json "tool_name" in
-        Ok (Eval_tool_selector.Tool_name tool_name)
+    | None -> errorf "missing required selector field"
   in
   let* path = required_string_field json "path" in
   Ok {
@@ -164,11 +159,9 @@ let benchmark_case_of_yojson json =
   }
 
 let tool_call_of_yojson json =
-  {
-    tool_name =
-      (match Json_util.get_string json "tool_name" with
-       | Some value -> value
-       | None -> Json_util.get_string_with_default json ~key:"tool" ~default:"");
+  let* tool_name = required_string_field json "tool_name" in
+  Ok {
+    tool_name;
     success = Json_util.get_bool json "success" |> Option.value ~default:false;
     input = (match member_opt "input" json with Some value -> value | None -> `Assoc []);
     output = member_opt "output" json;
@@ -182,8 +175,12 @@ let evidence_run_of_yojson json =
   let* model = required_string_field json "model" in
   let* keeper_profile = required_string_field json "keeper_profile" in
   let* tool_call_items = list_field json "tool_calls" in
+  let* tool_calls = map_m tool_call_of_yojson tool_call_items in
   let* status =
-    Json_util.get_string json "status" |> Option.value ~default:"ok" |> run_status_of_string
+    match member_opt "status" json with
+    | Some (`String value) -> run_status_of_string value
+    | Some _ -> errorf "field status must be a string"
+    | None -> errorf "missing required string field status"
   in
   Ok {
     case_id;
@@ -201,15 +198,18 @@ let evidence_run_of_yojson json =
     output_tokens = Json_util.get_int json "output_tokens";
     cost_usd = Json_util.get_float json "cost_usd";
     status;
-    tool_calls = List.map tool_call_of_yojson tool_call_items;
+    tool_calls;
   }
 
 let load_cases_from_file path =
   let* json = read_json_file path in
   let* cases =
     match json with
-    | `List items -> Ok items
-    | `Assoc _ -> list_field json "cases"
+    | `Assoc _ ->
+        (match member_opt "cases" json with
+         | Some (`List items) -> Ok items
+         | Some _ -> errorf "field cases must be a list"
+         | None -> errorf "missing required list field cases")
     | _ -> errorf "invalid benchmark case set at %s" path
   in
   map_m benchmark_case_of_yojson cases
@@ -218,8 +218,11 @@ let load_runs_from_file path =
   let* json = read_json_file path in
   let* runs =
     match json with
-    | `List items -> Ok items
-    | `Assoc _ -> list_field json "runs"
+    | `Assoc _ ->
+        (match member_opt "runs" json with
+         | Some (`List items) -> Ok items
+         | Some _ -> errorf "field runs must be a list"
+         | None -> errorf "missing required list field runs")
     | _ -> errorf "invalid benchmark evidence set at %s" path
   in
   map_m evidence_run_of_yojson runs

@@ -53,7 +53,7 @@ type tool_call = {
 
 type run_status =
   | Run_ok
-  | Run_unsupported
+  | Run_executed_failed
   | Run_runtime_unreachable
 
 type evidence_run = {
@@ -134,7 +134,7 @@ type summary_row = {
   avg_output_tokens : float;
   avg_cost_usd : float;
   composite_score : float;
-  unsupported_runs : int;
+  executed_failed_runs : int;
   runtime_unreachable_runs : int;
   stability_score : float option;
   tool_sequence_consistency_rate : float option;
@@ -147,7 +147,7 @@ type benchmark_summary = {
   cases_total : int;
   runs_total : int;
   scored_runs : int;
-  unsupported_runs : int;
+  executed_failed_runs : int;
   runtime_unreachable_runs : int;
   unknown_case_runs : int;
   grouped_by_provider_model_keeper : summary_row list;

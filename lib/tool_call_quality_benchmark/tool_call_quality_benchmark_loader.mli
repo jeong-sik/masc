@@ -29,11 +29,8 @@ val load_cases_from_file :
   string ->
   (Tool_call_quality_benchmark_types.benchmark_case list, string)
   Result.t
-(** [load_cases_from_file path] reads the benchmark case set.
-    Accepts both shapes:
-    - [`List items] — the items are the cases directly.
-    - [`Assoc fields] with a [cases] field — the wrapped
-      shape used by older fixtures.
+(** [load_cases_from_file path] reads an object with a required
+    [cases] list.
 
     {2 Per-case validation}
 
@@ -50,8 +47,8 @@ val load_cases_from_file :
       category: <other>"]
     - [forbidden_tools] / [forbidden_selectors] /
       [required_selectors] / [arg_checks] default to empty lists.
-      [arg_checks] accepts either legacy [tool_name] or a structured
-      [selector] using the same schema as [required_selectors].
+      Every [arg_checks] entry requires a structured [selector]
+      using the same schema as [required_selectors].
     - [recovery_policy] defaults to [None] (case has no recovery
       requirement)
 
@@ -63,14 +60,19 @@ val load_runs_from_file :
   string ->
   (Tool_call_quality_benchmark_types.evidence_run list, string)
   Result.t
-(** [load_runs_from_file path] reads the evidence-runs file with
-    the same `List` / `Assoc[runs]` accept shapes as
-    {!load_cases_from_file}.
+(** [load_runs_from_file path] reads an object with a required
+    [runs] list.
 
     {2 Per-run required fields}
 
     [case_id] / [provider] / [model] / [keeper_profile] (all
     non-empty trimmed strings).
+
+    {2 Status contract}
+
+    [status] is required and must be exactly one of [["ok"]],
+    [["executed_failed"]], or [["runtime_unreachable"]]. Missing,
+    non-string, empty, normalized, and unknown values are rejected.
 
     {2 Optional fields with defaults}
 
@@ -79,21 +81,15 @@ val load_runs_from_file :
     | [run_id] / [repeat_index] / [prompt_fingerprint] | [None] |
     | [task_success] / [final_output] / [final_result] | [None] |
     | [latency_ms] / [input_tokens] / [output_tokens] / [cost_usd] | [None] |
-    | [status] | parsed via {!run_status_of_string} from string field, default [["ok"]] |
     | [tool_calls] | empty list, then per-call defaults |
 
     {2 Per-tool-call defaults}
 
     | Field | Default |
     |---|---|
-    | [tool_name] | [tool_name] field, then [tool] field, then [""] |
+    | [tool_name] | required non-empty string |
     | [success] | [false] |
     | [input] | [`Assoc []] |
     | [output] | [None] |
     | [route_evidence] | [None] |
-    | [duration_ms] | [None] |
-
-    The [tool_name] vs [tool] alias is intentional — older
-    fixtures use [tool], newer ones use [tool_name].  Pinning
-    at the contract seam so a future "drop legacy tool field"
-    PR must touch this explicitly. *)
+    | [duration_ms] | [None] | *)

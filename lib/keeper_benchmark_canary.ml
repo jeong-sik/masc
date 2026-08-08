@@ -21,7 +21,7 @@ let row_to_recommendation
   | Some provider, Some model, Some keeper_profile
     when row.cases_total > 0
          && row.cases_passed = row.cases_total
-         && row.unsupported_runs = 0
+         && row.executed_failed_runs = 0
          && row.runtime_unreachable_runs = 0 ->
       Some
         {

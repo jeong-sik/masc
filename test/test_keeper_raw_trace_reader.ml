@@ -82,9 +82,12 @@ let ok_records records =
 
 let test_lists_turns_newest_first () =
   with_traces
-    [ "turn-100" ^ Support.raw_trace_file_extension, [ line 1 "run_started" ]
+    [ ( "turn-100" ^ Support.raw_trace_file_extension
+      , [ line ~session_id:"trace-100" 1 "run_started" ] )
     ; ( "turn-300" ^ Support.raw_trace_file_extension
-      , [ line ~session_id:"trace-300" 1 "run_started"; line 2 "run_finished" ] )
+      , [ line ~session_id:"trace-300" 1 "run_started"
+        ; line ~session_id:"trace-300" 2 "run_finished"
+        ] )
     ]
     (fun config trace_dir ->
        (* mtime decides the order, so make the intended newest actually newer
@@ -121,7 +124,7 @@ let test_absent_keeper_directory_is_empty_not_error () =
         (Reader.read_error_to_string error))
 ;;
 
-let test_mixed_session_ids_do_not_claim_an_exact_trace () =
+let test_mixed_session_ids_reject_the_listing () =
   with_traces
     [ ( "turn-mixed" ^ Support.raw_trace_file_extension
       , [ line ~session_id:"trace-a" 1 "run_started"
@@ -130,14 +133,30 @@ let test_mixed_session_ids_do_not_claim_an_exact_trace () =
     ]
     (fun config _trace_dir ->
        match Reader.list_turns ~config ~keeper ~limit:10 with
+       | Error (Reader.Invalid_trace_record { line = 2; _ }) -> ()
        | Error error ->
-         Alcotest.failf "list failed: %s" (Reader.read_error_to_string error)
-       | Ok [ turn ] ->
-         Alcotest.(check (option string))
-           "mixed sessions fail closed instead of joining the first"
-           None
-           turn.trace_id
-       | Ok turns -> Alcotest.failf "expected one turn, got %d" (List.length turns))
+         Alcotest.failf "wrong listing failure: %s" (Reader.read_error_to_string error)
+       | Ok _ -> Alcotest.fail "mixed sessions must reject the listing")
+;;
+
+let test_missing_malformed_and_invalid_trace_ids_reject_the_listing () =
+  List.iter
+    (fun (label, raw) ->
+       with_traces
+         [ "turn-invalid" ^ Support.raw_trace_file_extension, [ raw ] ]
+         (fun config _trace_dir ->
+            match Reader.list_turns ~config ~keeper ~limit:10 with
+            | Error (Reader.Invalid_trace_record { line = 1; _ }) -> ()
+            | Error error ->
+              Alcotest.failf "%s had wrong failure: %s" label
+                (Reader.read_error_to_string error)
+            | Ok _ -> Alcotest.failf "%s must reject the listing" label))
+    [ "missing session", line 1 "run_started"
+    ; "malformed JSON", "{not json"
+    ; "invalid typed trace id", line ~session_id:"trace.with.dot" 1 "run_started"
+    ; ( "duplicate session"
+      , {|{"seq":1,"session_id":"trace-a","session_id":"trace-a"}|} )
+    ]
 ;;
 
 (* The file name is a handle, not a path. Every shape below would reach outside
@@ -179,6 +198,67 @@ let test_non_trace_extension_is_refused () =
         (Astring.String.is_infix
            ~affix:Support.raw_trace_file_extension
            (Reader.read_error_to_string error)))
+;;
+
+let test_symlink_trace_is_rejected_for_listing_and_read () =
+  with_traces [] (fun config trace_dir ->
+    let outside = Filename.concat (Filename.dirname trace_dir) "outside.jsonl" in
+    let file = "turn-link" ^ Support.raw_trace_file_extension in
+    write_file outside (line ~session_id:"trace-link" 1 "run_started" ^ "\n");
+    Unix.symlink outside (Filename.concat trace_dir file);
+    (match Reader.list_turns ~config ~keeper ~limit:10 with
+     | Error (Reader.Read_failed _) -> ()
+     | Error error ->
+       Alcotest.failf "symlink listing had wrong failure: %s"
+         (Reader.read_error_to_string error)
+     | Ok _ -> Alcotest.fail "symlink trace must reject the listing");
+    match Reader.read_turn ~config ~keeper ~file ~offset:0 ~limit:10 with
+    | Error (Reader.Read_failed _) -> ()
+    | Error error ->
+      Alcotest.failf "symlink read had wrong failure: %s"
+        (Reader.read_error_to_string error)
+    | Ok _ -> Alcotest.fail "symlink trace must not be read")
+;;
+
+let bearer_request token =
+  Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list [ "authorization", "Bearer " ^ token ])
+    `GET
+    "/api/v1/keepers/test-keeper/raw-traces"
+;;
+
+let create_token_exn base_path ~agent_name ~role =
+  match Auth.create_token base_path ~agent_name ~role with
+  | Ok (token, _) -> token
+  | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+;;
+
+let test_raw_trace_read_permission_requires_a_token () =
+  with_traces [] (fun config _trace_dir ->
+    Auth.save_auth_config config.base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let worker = create_token_exn config.base_path ~agent_name:"worker" ~role:Masc_domain.Worker in
+    let admin = create_token_exn config.base_path ~agent_name:"admin" ~role:Masc_domain.Admin in
+    let authorize request =
+      Server_auth.authorize_token_bound_permission_request
+        ~base_path:config.base_path
+        ~permission:Masc_domain.CanReadState
+        request
+    in
+    let anonymous = Httpun.Request.create `GET "/api/v1/keepers/test-keeper/raw-traces" in
+    (match authorize anonymous with
+     | Error error ->
+       Alcotest.(check bool) "anonymous is unauthorized" true
+         (Server_auth.http_status_of_auth_error error = `Unauthorized)
+     | Ok actor -> Alcotest.failf "anonymous resolved actor %s" actor);
+    Alcotest.(check (result string string)) "Worker can read"
+      (Ok "worker")
+      (authorize (bearer_request worker)
+       |> Result.map_error Masc_domain.masc_error_to_string);
+    Alcotest.(check (result string string)) "Admin can read"
+      (Ok "admin")
+      (authorize (bearer_request admin)
+       |> Result.map_error Masc_domain.masc_error_to_string))
 ;;
 
 let test_missing_turn_is_its_own_error () =
@@ -295,14 +375,20 @@ let () =
             test_non_trace_extension_is_refused
         ; Alcotest.test_case "invalid keeper name is refused" `Quick
             test_invalid_keeper_name_is_refused
+        ; Alcotest.test_case "symlink traces are rejected" `Quick
+            test_symlink_trace_is_rejected_for_listing_and_read
+        ; Alcotest.test_case "raw trace read requires Worker or Admin token" `Quick
+            test_raw_trace_read_permission_requires_a_token
         ] )
     ; ( "listing"
       , [ Alcotest.test_case "lists turns newest first" `Quick
             test_lists_turns_newest_first
         ; Alcotest.test_case "absent keeper directory is empty, not error" `Quick
             test_absent_keeper_directory_is_empty_not_error
-        ; Alcotest.test_case "mixed session ids have no exact trace" `Quick
-            test_mixed_session_ids_do_not_claim_an_exact_trace
+        ; Alcotest.test_case "mixed session ids reject the listing" `Quick
+            test_mixed_session_ids_reject_the_listing
+        ; Alcotest.test_case "invalid trace identities reject the listing" `Quick
+            test_missing_malformed_and_invalid_trace_ids_reject_the_listing
         ] )
     ; ( "reading"
       , [ Alcotest.test_case "missing turn is its own error" `Quick

@@ -1670,18 +1670,16 @@ let add_routes ~sw ~clock router =
              Keeper_chat_pending.handle_get state request reqd ~keeper_name)
            request reqd
        | None ->
-         if
-           Keeper_api.is_keeper_checkpoints_get_path (Http.Request.path request)
-           || Keeper_api.is_keeper_paused_work_get_path (Http.Request.path request)
-         then
-           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (match Keeper_api.keeper_get_permission (Http.Request.path request) with
+          | Some permission ->
+           with_token_permission_auth ~permission
              (fun state _agent_name req reqd ->
                Keeper_api.handle_keeper_get_subroutes state req request reqd
              ) request reqd
-         else
+          | None ->
            with_public_read (fun state req reqd ->
              Keeper_api.handle_keeper_get_subroutes state req request reqd
-           ) request reqd)
+           ) request reqd))
 
   |> Http.Router.post "/api/v1/keepers/turn/interrupt" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->

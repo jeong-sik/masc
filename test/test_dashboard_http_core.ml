@@ -173,6 +173,23 @@ let test_keeper_paused_work_route_is_admin_exact () =
     false
     (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path (path ^ "/extra"))
 
+let test_keeper_sensitive_get_permissions_are_exact () =
+  let permission path =
+    Server_dashboard_http_keeper_api.keeper_get_permission path
+  in
+  List.iter
+    (fun suffix ->
+       let path = "/api/v1/keepers/idealist/" ^ suffix in
+       check bool (suffix ^ " permission") true
+         (permission path = Some Masc_domain.CanReadState);
+       check bool (suffix ^ " trailing segment") true
+         (permission (path ^ "/extra") = None))
+    [ "raw-traces"; "raw-trace" ];
+  check bool "checkpoint permission" true
+    (permission "/api/v1/keepers/idealist/checkpoints" = Some Masc_domain.CanAdmin);
+  check bool "ordinary keeper read stays public" true
+    (permission "/api/v1/keepers/idealist/trajectory" = None)
+
 let test_keeper_chat_receipt_route_and_json () =
   let receipt_id =
     match
@@ -3532,6 +3549,8 @@ let () =
             test_keeper_post_route_classifies_catchup_judge;
           test_case "keeper paused-work route is exact" `Quick
             test_keeper_paused_work_route_is_admin_exact;
+          test_case "keeper sensitive GET permissions are exact" `Quick
+            test_keeper_sensitive_get_permissions_are_exact;
           test_case "keeper chat receipt route is typed" `Quick
             test_keeper_chat_receipt_route_and_json;
           test_case "keeper chat recovery route is exact" `Quick

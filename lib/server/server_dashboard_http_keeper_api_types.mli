@@ -104,6 +104,12 @@ val is_keeper_checkpoints_get_path : string -> bool
 val is_keeper_paused_work_get_path : string -> bool
 (** [true] for authenticated [GET /api/v1/keepers/<name>/paused-work] paths. *)
 
+val keeper_get_permission : string -> Masc_domain.permission option
+(** Mandatory token-bound permission for sensitive keeper GET sub-routes.
+    Raw retained traces require [CanReadState]; checkpoint and paused-work
+    operator state require [CanAdmin]. [None] leaves the route on its existing
+    public-read policy. *)
+
 (** {1 Trajectory preview helpers} *)
 
 val trim_to_opt : string -> string option

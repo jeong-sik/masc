@@ -19,9 +19,9 @@
 type turn_summary =
   { file : string (** Bare file name, the handle later reads take. *)
   ; trace_id : string option
-        (** Unique provider session identifier found across the retained JSONL.
-            [None] means the file has no decodable [session_id] or contains more
-            than one; callers must not infer a join from file time or name. *)
+        (** Unique typed session identifier shared by every retained record.
+            [None] is possible only for an empty file; malformed, missing,
+            duplicate, invalid, or mixed identities reject the listing. *)
   ; bytes : int
   ; modified_at : float
   ; records : int (** Non-blank JSONL lines. *)
@@ -31,6 +31,7 @@ type read_error =
   | Unknown_keeper of string
   | Invalid_file_name of string
   | No_such_turn of string
+  | Invalid_trace_record of { file : string; line : int; detail : string }
   | Read_failed of { file : string; detail : string }
 
 val read_error_to_string : read_error -> string

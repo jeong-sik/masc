@@ -76,31 +76,6 @@ describe('KeeperTurnInspectorPanel', () => {
     expect(screen.getByText('{not valid JSON')).toBeTruthy()
   })
 
-  it('opens the exact trace requested by a run row without time proximity matching', async () => {
-    api.fetchKeeperRawTraces.mockResolvedValue([
-      { file: 'turn-other.jsonl', traceId: 'trace-other', bytes: 10, records: 1, modifiedAt: 1786000001 },
-      { file: 'turn-target.jsonl', traceId: 'trace-target', bytes: 20, records: 1, modifiedAt: 1786000000 },
-    ])
-    api.fetchKeeperRawTrace.mockResolvedValue({
-      file: 'turn-target.jsonl',
-      totalRecords: 1,
-      offset: 0,
-      records: [{ ok: true, raw: '{"session_id":"trace-target"}', record: { session_id: 'trace-target' } }],
-    })
-
-    render(html`<${KeeperTurnInspectorPanel}
-      keepers=${KEEPERS}
-      target=${{ keeper: 'code-reviewer', traceId: 'trace-target', requestId: 1 }}
-    />`)
-
-    expect(await screen.findByText('{"session_id":"trace-target"}')).toBeTruthy()
-    expect(api.fetchKeeperRawTrace).toHaveBeenCalledWith(
-      'code-reviewer',
-      'turn-target.jsonl',
-      expect.objectContaining({ offset: 0 }),
-    )
-  })
-
   it('shows each prompt block with its own byte count', async () => {
     noTurns()
     api.fetchKeeperLastPrompt.mockResolvedValue({

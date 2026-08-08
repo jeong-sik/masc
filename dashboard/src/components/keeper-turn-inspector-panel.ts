@@ -9,7 +9,7 @@
 // put a sentence in front of the next turn.
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useState } from 'preact/hooks'
 import {
   fetchKeeperLastPrompt,
   fetchKeeperOperatorNote,
@@ -28,14 +28,8 @@ import { JsonViewerCard } from './common/json-viewer'
 type Tab = 'raw' | 'prompt' | 'note'
 type RawView = 'text' | 'tree'
 
-export type RawTraceTarget = {
-  readonly keeper: string
-  readonly traceId: string
-  readonly requestId: number
-}
-
 const TABS: Array<{ id: Tab; label: string; hint: string }> = [
-  { id: 'raw', label: 'RAW provider turns', hint: 'RAW · 프로바이더로 나간 요청·응답 원문' },
+  { id: 'raw', label: 'Retained trace records', hint: 'REDACTED TRACE · 보존된 실행 레코드' },
   { id: 'prompt', label: 'Typed next prompt', hint: 'TYPED · 다음 턴에 조립될 시스템 컨텍스트' },
   { id: 'note', label: 'Operator input', hint: 'OPERATOR INPUT · 다음 턴 한 번에만 실리는 문장' },
 ]
@@ -80,15 +74,14 @@ function Pre({ text }: { text: string }) {
   `
 }
 
-/** Every request and response for one turn, as it went to the provider. */
-function RawTurns({ keeper, target }: { keeper: string; target?: RawTraceTarget | null }) {
+/** Redacted semantic execution records retained for one keeper turn. */
+function RawTurns({ keeper }: { keeper: string }) {
   const [turns, setTurns] = useState<readonly RawTraceTurn[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [page, setPage] = useState<RawTracePage | null>(null)
   const [offset, setOffset] = useState(0)
   const [view, setView] = useState<RawView>('text')
   const [copyState, setCopyState] = useState<string | null>(null)
-  const [targetError, setTargetError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -96,7 +89,6 @@ function RawTurns({ keeper, target }: { keeper: string; target?: RawTraceTarget 
     setTurns(null)
     setSelected(null)
     setPage(null)
-    setTargetError(null)
     setError(null)
     fetchKeeperRawTraces(keeper, 50, { signal: controller.signal })
       .then(setTurns)
@@ -106,19 +98,6 @@ function RawTurns({ keeper, target }: { keeper: string; target?: RawTraceTarget 
       })
     return () => controller.abort()
   }, [keeper])
-
-  useEffect(() => {
-    if (turns === null || target == null || target.keeper !== keeper) return
-    const matched = turns.find(turn => turn.traceId === target.traceId)
-    if (matched == null) {
-      setTargetError(`trace ${target.traceId} 를 가리키는 retained RAW 파일이 없습니다.`)
-      return
-    }
-    setTargetError(null)
-    setSelected(matched.file)
-    setOffset(0)
-    setView('text')
-  }, [keeper, target?.requestId, turns])
 
   useEffect(() => {
     if (selected === null) return
@@ -177,8 +156,6 @@ function RawTurns({ keeper, target }: { keeper: string; target?: RawTraceTarget 
         `)}
       </div>
 
-      ${targetError === null ? null : html`<${Danger}>${targetError}<//>`}
-
       ${selected === null
         ? html`<${Muted}>턴을 고르면 원문이 열립니다.<//>`
         : page === null
@@ -217,13 +194,13 @@ function RawTurns({ keeper, target }: { keeper: string; target?: RawTraceTarget 
             </div>
             <p class="text-3xs text-[var(--color-fg-muted)]">
               ${view === 'text'
-                ? 'FULL RAW · retained JSONL의 literal 행을 변환 없이 표시합니다.'
+                ? 'REDACTED TRACE · retained JSONL의 literal 행을 변환 없이 표시합니다.'
                 : 'PARSED TREE · 같은 행을 JSON으로 해석한 탐색용 보기입니다.'}
             </p>
             ${page.records.map((record, index) => html`
               <div key=${page.offset + index} class="grid gap-1" data-testid="raw-trace-record">
                 <div class="flex items-center gap-2 text-3xs">
-                  <span class="w-fit rounded border border-[var(--status-warn)] px-1.5 py-0.5 font-semibold text-[var(--status-warn)]">FULL RAW</span>
+                  <span class="w-fit rounded border border-[var(--status-warn)] px-1.5 py-0.5 font-semibold text-[var(--status-warn)]">REDACTED TRACE</span>
                   <span class="font-mono text-[var(--color-fg-muted)]">line ${page.offset + index + 1}</span>
                 </div>
                 ${view === 'text'
@@ -405,16 +382,9 @@ function NoteEditor({ keeper }: { keeper: string }) {
   `
 }
 
-export function KeeperTurnInspectorPanel({
-  keepers,
-  target,
-}: {
-  keepers: readonly string[]
-  target?: RawTraceTarget | null
-}) {
+export function KeeperTurnInspectorPanel({ keepers }: { keepers: readonly string[] }) {
   const [keeper, setKeeper] = useState<string | null>(keepers[0] ?? null)
   const [tab, setTab] = useState<Tab>('raw')
-  const rootRef = useRef<HTMLElement | null>(null)
 
   // The roster arrives after the first render, so adopt the first keeper once
   // it does and drop a selection that is no longer in the roster.
@@ -422,13 +392,6 @@ export function KeeperTurnInspectorPanel({
     if (keeper !== null && keepers.includes(keeper)) return
     setKeeper(keepers[0] ?? null)
   }, [keepers, keeper])
-
-  useEffect(() => {
-    if (target == null) return
-    setKeeper(target.keeper)
-    setTab('raw')
-    rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [target?.requestId])
 
   if (keeper === null) {
     return html`
@@ -441,7 +404,7 @@ export function KeeperTurnInspectorPanel({
   const active = TABS.find(item => item.id === tab) ?? TABS[0]!
 
   return html`
-    <section ref=${rootRef} class="grid gap-2" data-testid="keeper-turn-inspector">
+    <section class="grid gap-2" data-testid="keeper-turn-inspector">
       <div class="flex flex-wrap items-center gap-2">
         <h3 class="text-xs font-semibold text-[var(--color-fg-primary)]">Turn inspector</h3>
         <label class="flex items-center gap-1 text-3xs text-[var(--color-fg-muted)]">
@@ -474,7 +437,7 @@ export function KeeperTurnInspectorPanel({
       </div>
       <${Muted}>${active.hint}<//>
 
-      ${tab === 'raw' ? html`<${RawTurns} keeper=${keeper} target=${target} />` : null}
+      ${tab === 'raw' ? html`<${RawTurns} keeper=${keeper} />` : null}
       ${tab === 'prompt' ? html`<${NextPrompt} keeper=${keeper} />` : null}
       ${tab === 'note' ? html`<${NoteEditor} keeper=${keeper} />` : null}
     </section>

@@ -24,6 +24,11 @@ type read_error =
   | Unknown_keeper of string
   | Invalid_file_name of string
   | No_such_turn of string
+  | Invalid_trace_record of
+      { file : string
+      ; line : int
+      ; detail : string
+      }
   | Read_failed of
       { file : string
       ; detail : string
@@ -37,6 +42,8 @@ let read_error_to_string = function
       file
       Keeper_types_support.raw_trace_file_extension
   | No_such_turn file -> Printf.sprintf "no raw trace named %s for this keeper" file
+  | Invalid_trace_record { file; line; detail } ->
+    Printf.sprintf "raw trace %s has invalid identity at line %d: %s" file line detail
   | Read_failed { file; detail } ->
     Printf.sprintf "raw trace %s could not be read: %s" file detail
 ;;
@@ -69,24 +76,47 @@ let nonblank_lines contents =
   |> List.filter (fun line -> not (String.equal (String.trim line) ""))
 ;;
 
-let trace_id_of_line line =
+let trace_id_of_line ~file ~line_number line =
+  let invalid detail = Error (Invalid_trace_record { file; line = line_number; detail }) in
   match Yojson.Safe.from_string line with
   | `Assoc fields ->
-    (match List.assoc_opt "session_id" fields with
-     | Some (`String value) when not (String.equal value "") -> Some value
-     | Some _ | None -> None)
-  | _ -> None
-  | exception Yojson.Json_error _ -> None
+    (match List.filter (fun (name, _) -> String.equal name "session_id") fields with
+     | [ _, `String value ] ->
+       (match Keeper_id.Trace_id.of_string value with
+        | Ok trace_id -> Ok trace_id
+        | Error detail -> invalid detail)
+     | [] -> invalid "missing session_id"
+     | [ _ ] -> invalid "session_id must be a string"
+     | _ :: _ :: _ -> invalid "duplicate session_id fields")
+  | _ -> invalid "record must be a JSON object"
+  | exception Yojson.Json_error detail -> invalid detail
 ;;
 
-let summarize_records path =
-  match Fs_compat.load_file_opt path with
-  | None -> 0, None
-  | Some contents ->
-    let lines = nonblank_lines contents in
-    let trace_ids = lines |> List.filter_map trace_id_of_line |> List.sort_uniq String.compare in
-    let trace_id = match trace_ids with [ value ] -> Some value | [] | _ :: _ :: _ -> None in
-    List.length lines, trace_id
+let summarize_records ~file contents =
+  let lines = nonblank_lines contents in
+  let rec loop line_number expected = function
+    | [] -> Ok (List.length lines, Option.map Keeper_id.Trace_id.to_string expected)
+    | line :: rest ->
+      (match trace_id_of_line ~file ~line_number line with
+       | Error _ as error -> error
+       | Ok trace_id ->
+         (match expected with
+          | None -> loop (line_number + 1) (Some trace_id) rest
+          | Some expected when Keeper_id.Trace_id.equal expected trace_id ->
+            loop (line_number + 1) (Some expected) rest
+          | Some expected ->
+            Error
+              (Invalid_trace_record
+                 { file
+                 ; line = line_number
+                 ; detail =
+                     Printf.sprintf
+                       "session_id %s does not match %s"
+                       (Keeper_id.Trace_id.to_string trace_id)
+                       (Keeper_id.Trace_id.to_string expected)
+                 })))
+  in
+  loop 1 None lines
 ;;
 
 let list_turns ~config ~keeper ~limit =
@@ -97,44 +127,74 @@ let list_turns ~config ~keeper ~limit =
     then Ok []
     else (
       let dir = Keeper_types_support.keeper_raw_trace_dir config keeper in
-      if not (Sys.file_exists dir && Sys.is_directory dir)
-      then Ok []
-      else (
+      match Fs_compat.inspect_owned_directory_chain ~ownership_root:config.base_path dir with
+      | Ok Fs_compat.Owned_directory_missing -> Ok []
+      | Error rejection ->
+        Error
+          (Read_failed
+             { file = dir
+             ; detail = Fs_compat.owned_directory_chain_rejection_to_string rejection
+             })
+      | Ok (Fs_compat.Owned_directory _) ->
         let entries =
-          Sys.readdir dir
-          |> Array.to_list
-          |> List.filter (fun entry ->
-            Filename.check_suffix entry Keeper_types_support.raw_trace_file_extension)
+          try
+            Ok
+              (Sys.readdir dir
+               |> Array.to_list
+               |> List.filter (fun entry ->
+                    Filename.check_suffix
+                      entry
+                      Keeper_types_support.raw_trace_file_extension))
+          with
+          | Sys_error detail -> Error (Read_failed { file = dir; detail })
         in
-        let summaries =
-          List.filter_map
-            (fun file ->
-               let path = Filename.concat dir file in
-               match Unix.stat path with
-               | { Unix.st_kind = Unix.S_REG; st_size; st_mtime; _ } ->
-                 let records, trace_id = summarize_records path in
-                 Some
-                   { file
-                   ; trace_id
-                   ; bytes = st_size
-                   ; modified_at = st_mtime
-                   ; records
-                   }
-               | _ -> None
-               | exception Unix.Unix_error _ -> None)
-            entries
+        let rec read_summaries acc = function
+          | [] -> Ok (List.rev acc)
+          | file :: rest ->
+            let path = Filename.concat dir file in
+            (match
+               Fs_compat.load_owned_regular_file_with_snapshot
+                 ~ownership_root:config.base_path
+                 path
+             with
+             | Error error ->
+               Error
+                 (Read_failed
+                    { file
+                    ; detail = Fs_compat.owned_regular_file_read_error_to_string error
+                    })
+             | Ok None -> Error (Read_failed { file; detail = "file disappeared during listing" })
+             | Ok (Some contents) ->
+               (match summarize_records ~file contents.content with
+                | Error _ as error -> error
+                | Ok (records, trace_id) ->
+                  read_summaries
+                    ({ file
+                     ; trace_id
+                     ; bytes = contents.snapshot.file_size
+                     ; modified_at = contents.snapshot.modified_at
+                     ; records
+                     }
+                     :: acc)
+                    rest))
         in
-        (* Newest first: an operator opening this list is looking for the turn
-           that just happened, not the oldest one retained. *)
-        let ordered =
-          List.sort
-            (fun a b ->
-               match Float.compare b.modified_at a.modified_at with
-               | 0 -> String.compare b.file a.file
-               | order -> order)
-            summaries
-        in
-        Ok (List.filteri (fun index _ -> index < limit) ordered)))
+        (match entries with
+         | Error _ as error -> error
+         | Ok entries ->
+           (match read_summaries [] entries with
+            | Error _ as error -> error
+            | Ok summaries ->
+              (* Newest first: an operator opening this list is looking for the turn
+                 that just happened, not the oldest one retained. *)
+              let ordered =
+                List.sort
+                  (fun a b ->
+                     match Float.compare b.modified_at a.modified_at with
+                     | 0 -> String.compare b.file a.file
+                     | order -> order)
+                  summaries
+              in
+              Ok (List.filteri (fun index _ -> index < limit) ordered))))
 ;;
 
 let read_turn ~config ~keeper ~file ~offset ~limit =
@@ -146,9 +206,15 @@ let read_turn ~config ~keeper ~file ~offset ~limit =
      | Ok file ->
        let dir = Keeper_types_support.keeper_raw_trace_dir config keeper in
        let path = Filename.concat dir file in
-       (match Fs_compat.load_file_opt path with
-        | None -> Error (No_such_turn file)
-        | Some contents ->
+       (match Fs_compat.load_owned_regular_file ~ownership_root:config.base_path path with
+        | Error error ->
+          Error
+            (Read_failed
+               { file
+               ; detail = Fs_compat.owned_regular_file_read_error_to_string error
+               })
+        | Ok None -> Error (No_such_turn file)
+        | Ok (Some contents) ->
           let lines = nonblank_lines contents in
           let total_records = List.length lines in
           let offset = max 0 offset in
@@ -164,8 +230,7 @@ let read_turn ~config ~keeper ~file ~offset ~limit =
               in
               { raw = line; parsed })
           in
-          Ok { file; total_records; offset; records })
-       | exception Sys_error detail -> Error (Read_failed { file; detail }))
+          Ok { file; total_records; offset; records }))
 ;;
 
 let turn_summary_to_json (summary : turn_summary) =

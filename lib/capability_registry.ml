@@ -270,15 +270,15 @@ let surface_tool_names_from (public_tool_source_schemas : Masc_domain.tool_schem
    PR-8 wires the MCP server; PR-9 wires tag-dispatch fallback.
    PR-11 removes the legacy [dispatch] and [dispatch_structured] entries
    once all callers migrate. *)
-let public_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
+let canonical_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     Masc_domain.tool_schema list =
   require_unique_schemas ~label:"public tool catalog" public_tool_source_schemas
   |> Tool_help_registry.canonicalize_schemas
 
-let visible_public_tool_schemas_from
+let visible_tool_schemas_from
     ?(include_hidden = false)
     (public_tool_source_schemas : Masc_domain.tool_schema list) : Masc_domain.tool_schema list =
-  public_tool_schemas_from public_tool_source_schemas
+  canonical_tool_schemas_from public_tool_source_schemas
   |> List.filter (fun (schema : Masc_domain.tool_schema) ->
          Tool_catalog.is_visible ~include_hidden schema.name)
 
@@ -298,4 +298,3 @@ let surface_snapshot_json
       ("spawned_agent_mcp", surface_json Spawned_agent_mcp);
       ("keeper", surface_json Keeper);
     ]
-

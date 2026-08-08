@@ -8,6 +8,7 @@ type install_error =
 type lookup_error =
   | Inventory_not_installed of string
   | Owner_not_found of string
+  | Owner_initialization_failed of Keeper_owner.error
   | Inventory_stopping
 
 type command_error =
@@ -49,6 +50,8 @@ let lookup_error_to_string = function
     Printf.sprintf "Keeper owner inventory is not installed for BasePath %s" base_path
   | Owner_not_found keeper_name ->
     Printf.sprintf "Keeper owner not found: %s" keeper_name
+  | Owner_initialization_failed error ->
+    "Keeper owner initialization failed: " ^ Keeper_owner.error_to_string error
   | Inventory_stopping -> "Keeper owner inventory is stopping"
 ;;
 
@@ -136,15 +139,18 @@ let ensure_in_pool pool meta =
       match Hashtbl.find_opt pool.owners meta.Keeper_meta_contract.name with
       | Some owner -> Ok owner
       | None ->
-        let owner =
+        (match
           Keeper_owner.start
             ~sw:pool.sw
             ~store:(store_for pool meta.name)
+            ~keeper_name:meta.name
             ~initial_meta:(Some meta)
-        in
-        Hashtbl.add pool.owners meta.name owner;
-        refresh_owner_handles pool;
-        Ok owner)
+         with
+         | Error error -> Error (Owner_initialization_failed error)
+         | Ok owner ->
+           Hashtbl.add pool.owners meta.name owner;
+           refresh_owner_handles pool;
+           Ok owner))
 ;;
 
 let install_from_store ~sw config =
@@ -189,7 +195,9 @@ let install_from_store ~sw config =
                   { keeper_name = Some meta.name
                   ; detail = "root switch stopped during owner installation"
                   })
-           | Error (Inventory_not_installed _ | Owner_not_found _) ->
+           | Error
+               (Inventory_not_installed _ | Owner_not_found _
+               | Owner_initialization_failed _) ->
              Error
                (Inventory_load_failed
                   { keeper_name = Some meta.name

@@ -38,13 +38,13 @@ awk '/^[[:space:]]+test_[a-z_0-9]+/ {
        }
      }' test/dune > "$declared"
 grep -oE '\(name test_[a-z_0-9]+\)' test/dune | sed 's/(name //;s/)//' >> "$declared"
-# Coverage tests are generated through Dune's dynamic_include. The manifest is
-# the source of truth; the generated stanza is a build artifact and must not be
-# checked in or reverse-parsed here.
+# Coverage tests use a committed generated include so Dune can load the graph
+# without a dynamic-include rule cycle. The manifest remains the source of
+# truth; test/stanzas/dune checks the committed projection for drift.
 coverage_manifest="test/stanzas/coverage_test_names.txt"
-if grep -qF '(dynamic_include stanzas/coverage_tests.inc)' test/dune; then
+if grep -qF '(include stanzas/coverage_tests.inc)' test/dune; then
   if [ ! -f "$coverage_manifest" ]; then
-    echo "[ci-test-targets] FAIL - dynamic coverage manifest is missing: $coverage_manifest"
+    echo "[ci-test-targets] FAIL - coverage manifest is missing: $coverage_manifest"
     exit 2
   fi
   cat "$coverage_manifest" >> "$declared"

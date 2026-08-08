@@ -88,6 +88,7 @@ val admitted_request : admitted -> t
 val admitted_fit : admitted -> context_fit
 val admitted_body : admitted -> admitted_body option
 val serialized_request : serialized -> t
+val serialized_admitted_body : serialized -> admitted_body
 val admitted_body_http_codec : admitted_body -> Provider_http_codec.t
 val admitted_body_contents : admitted_body -> string
 val admitted_body_evidence : admitted_body -> Request_wire_observer.observation

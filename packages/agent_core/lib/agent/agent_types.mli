@@ -31,8 +31,8 @@ type checkpoint_snapshot =
 type checkpoint_sink = checkpoint_snapshot -> (unit, string) result
 
 type context_fit_admission =
-  | Disabled
-  | Enforce_when_supported
+  | Body_only
+  | Require_exact_fit
 
 (** Caller-owned provider-message projection. [Error detail] aborts the turn
     before request measurement or dispatch. Canonical Agent state is unchanged. *)

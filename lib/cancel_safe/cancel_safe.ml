@@ -9,15 +9,8 @@
 let protect ~on_exn f =
   try f ()
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Eio.Cancel.Cancelled _ as exn ->
+      Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
   | exn -> on_exn exn
 
 let observe ~on_exn f = protect ~on_exn f
-
-let is_internal_race_cancel exn =
-  match exn with
-  | Eio.Cancel.Cancelled _ ->
-      let msg = Printexc.to_string exn in
-      String.equal msg "Cancelled: Eio__core__Fiber.Not_first"
-      || String.ends_with ~suffix:"Eio__core__Fiber.Not_first" msg
-  | _ -> false

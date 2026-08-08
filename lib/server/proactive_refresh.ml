@@ -28,11 +28,6 @@ let default_config ~label ~interval_s =
     warn_first_failure = true;
   }
 
-let should_reraise_cancel exn =
-  match exn with
-  | Eio.Cancel.Cancelled _ -> not (Cancel_safe.is_internal_race_cancel exn)
-  | _ -> false
-
 let timeout_failure_message ~label ~phase ~timeout_s ~elapsed_s =
   Printf.sprintf
     "refresh_timeout label=%s phase=%s timeout_s=%.1f elapsed_s=%.1f"
@@ -120,10 +115,10 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
          Log.Dashboard.warn "%s warm cache skipped (%.1fs timeout=%.1fs): %s"
            config.label dt config.timeout_s (Printexc.to_string timeout_exn)
      with
+     | Eio.Cancel.Cancelled _ as exn ->
+       Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
      | exn ->
-       if should_reraise_cancel exn then
-         raise exn
-       else begin
+       begin
          notify_error config exn;
          Log.Dashboard.warn "%s warm cache failed (%.1fs): %s" config.label
            (Time_compat.now () -. t0) (Printexc.to_string exn)
@@ -168,8 +163,10 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
              notify_error config timeout_exn;
              log_refresh_failure ~config ~consecutive_failures ~current_interval
                ~dt timeout_exn
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-         if should_reraise_cancel exn then raise exn;
+       with
+       | Eio.Cancel.Cancelled _ as exn ->
+         Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+       | exn ->
          let dt = Time_compat.now () -. t0 in
          notify_error config exn;
          log_refresh_failure ~config ~consecutive_failures ~current_interval

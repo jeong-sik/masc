@@ -1473,6 +1473,8 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
                 | Some _ -> Some `Null
                 | None -> None)
             | _ -> None
+            | exception (Eio.Cancel.Cancelled _ as exn) ->
+                Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
             | exception _ -> None
           in
           let send_overloaded_response rejection =

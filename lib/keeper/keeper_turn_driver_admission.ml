@@ -10,6 +10,8 @@ let release_client_capacity_quietly = function
   | Some release ->
       (match release () with
        | () -> ()
+       | exception (Eio.Cancel.Cancelled _ as exn) ->
+           Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
        | exception _ -> ())
 
 let provider_config_identity_key (cfg : Llm_provider.Provider_config.t) =

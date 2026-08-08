@@ -186,6 +186,21 @@ let test_publisher_exception_swallowed () =
         eviction path correctness depends on this") ;
   E.reset_publisher ()
 
+let test_publisher_cancelled_propagates () =
+  E.reset_publisher () ;
+  E.set_publisher (fun _ ->
+    raise (Eio.Cancel.Cancelled (Failure "publisher cancelled"))) ;
+  Fun.protect
+    ~finally:E.reset_publisher
+    (fun () ->
+      match
+        E.publish
+          (Evict
+             { transport = SSE; session_id = "s"; reason = Cap_exceeded })
+      with
+      | () -> Alcotest.fail "publish swallowed Eio cancellation"
+      | exception Eio.Cancel.Cancelled _ -> ())
+
 let test_publisher_swap_is_atomic () =
   E.reset_publisher () ;
   E.set_publisher (fun _ -> ()) ;
@@ -215,6 +230,8 @@ let () =
           test_case "set marks installed" `Quick test_publisher_set_marks_installed ;
           test_case "subscriber receives events" `Quick test_publisher_receives_events ;
           test_case "subscriber exception swallowed" `Quick test_publisher_exception_swallowed ;
+          test_case "subscriber cancellation propagates" `Quick
+            test_publisher_cancelled_propagates ;
           test_case "swap is atomic" `Quick test_publisher_swap_is_atomic ;
         ] ) ;
     ]

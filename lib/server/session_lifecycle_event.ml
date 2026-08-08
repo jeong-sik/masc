@@ -216,7 +216,10 @@ let _installed : bool Atomic.t = Atomic.make false
 let publish evt =
   let p = Atomic.get _publisher in
   try p evt
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exn ->
     (* Swallow + log: a failing observer must not break the eviction
        path. The whole point of PR-3 is that transport teardown
        remains predictable regardless of subscriber state. *)

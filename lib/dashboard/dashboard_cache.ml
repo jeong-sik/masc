@@ -176,7 +176,6 @@ let is_compute_timeout exn =
 let should_restore_stale_after_failure exn =
   match exn with
   | Compute_timeout _ -> true
-  | Eio.Cancel.Cancelled _ -> true
   | _ -> false
 
 let timeout_json ~key ~timeout_sec ~timeout_kind =
@@ -361,21 +360,22 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           )
         | exception exn ->
           (match exn with
+           | Eio.Cancel.Cancelled _ as cancelled ->
+               Printexc.raise_with_backtrace cancelled (Printexc.get_raw_backtrace ())
            | Compute_timeout _ -> ()
-           | _ when Cancel_safe.is_internal_race_cancel exn ->
-               Log.Dashboard.debug "cache bg-revalidate race-cancel for %s, scheduling early retry" key
            | _ -> Log.Dashboard.warn "cache bg-revalidate failed (%s): %s" key (Printexc.to_string exn));
           atomic_update table (fun map ->
             match SMap.find_opt key map with
             | Some (Computing { token = c; _ }) when c = token ->
               let ts = now () in
               let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-              (* After race-cancel, set expires_at = ts so the next lookup
-                 immediately triggers recompute instead of returning stale. *)
-              let expires_at =
-                if Cancel_safe.is_internal_race_cancel exn then ts else ts +. backoff_grace
-              in
-              ((), SMap.add key (Ready { value = stale_value; expires_at; stale_until = ts +. backoff_grace }) map)
+              ((), SMap.add key
+                (Ready
+                   { value = stale_value
+                   ; expires_at = ts +. backoff_grace
+                   ; stale_until = ts +. backoff_grace
+                   })
+                map)
             | _ -> ((), map)
           )
       and restore_stale_ready () =
@@ -402,7 +402,9 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
             with
             | Invalid_argument _ ->
                 restore_stale_ready ()
-            | Eio.Cancel.Cancelled _ -> ())
+            | Eio.Cancel.Cancelled _ as exn ->
+                restore_stale_ready ();
+                Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ()))
        | None ->
            Log.Dashboard.warn "cache: no switch for background revalidation, computing inline";
            do_bg_compute ());
@@ -466,7 +468,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            value
        | Some (Error exn) ->
            let fallback_val = ref None in
-           if not (Cancel_safe.is_internal_race_cancel exn || is_compute_timeout exn) then
+           if not (is_compute_timeout exn) then
              Log.Dashboard.error "cache revalidation failed: %s" (Printexc.to_string exn);
            atomic_update table (fun map ->
              match SMap.find_opt key map with

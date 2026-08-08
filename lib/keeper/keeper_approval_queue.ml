@@ -3179,7 +3179,12 @@ let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pen
         ()
     with
     | Ok (rule, created) ->
-      if created then audit_rule_event ~base_path ~event_type:Keeper_approval.Audit.Rule_created rule;
+      if created
+      then
+        Keeper_approval.Audit.record_rule
+          ~base_path
+          ~event_type:Keeper_approval.Audit.Rule_created
+          rule;
       Ok rule
     | Error reason -> Error reason
   with

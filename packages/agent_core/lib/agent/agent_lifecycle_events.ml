@@ -65,7 +65,7 @@ let publish_finished ~event_bus ~agent_name ~started ~current_run_id ~outcome ~e
           (Printf.sprintf "Event_bus.publish failed (%s)" label)
           [ Log.S ("error", Printexc.to_string exn) ]
     in
-    match outcome with
+    (match outcome with
      | Completed response ->
        publish
          "AgentCompleted"
@@ -86,7 +86,7 @@ let publish_finished ~event_bus ~agent_name ~started ~current_run_id ~outcome ~e
             { agent_name; task_id = started_run_id; result = Error error; elapsed });
        publish
          "AgentFailed"
-         (AgentFailed { agent_name; task_id = started_run_id; error; elapsed })
+         (AgentFailed { agent_name; task_id = started_run_id; error; elapsed }))
   | None, _ | Some _, None -> ()
 ;;
 

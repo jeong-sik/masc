@@ -280,12 +280,14 @@ let decision_to_yojson = function
    what it is missing is the tag. Map to the payload-free contract variant
    rather than a string, so a new Gate authority cannot reach the audit log
    without this match being updated. *)
-let audit_authorization_source : authorization_source -> Keeper_approval_queue.authorization_source
+let audit_authorization_source
+  : authorization_source -> Keeper_approval_queue_rules_types.authorization_source
   = function
-  | One_shot_resolution _ -> Keeper_approval_queue.One_shot_resolution
-  | Exact_always_rule _ -> Keeper_approval_queue.Exact_always_rule
-  | Keeper_always_allow -> Keeper_approval_queue.Keeper_always_allow
-  | Workspace_always_allow -> Keeper_approval_queue.Workspace_always_allow
+  | One_shot_resolution _ -> Keeper_approval_queue_rules_types.One_shot_resolution
+  | Exact_always_rule _ -> Keeper_approval_queue_rules_types.Exact_always_rule
+  | Keeper_always_allow -> Keeper_approval_queue_rules_types.Keeper_always_allow
+  | Workspace_always_allow ->
+    Keeper_approval_queue_rules_types.Workspace_always_allow
 ;;
 
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =

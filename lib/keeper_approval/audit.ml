@@ -234,7 +234,7 @@ let audit_today_path base_dir =
 let get_audit_store ~base_path () =
   let report_failure exn =
     Keeper_fd_pressure.note_exception ~site:"approval_audit.store_create" exn;
-    Otel_metric_store.inc_counter
+    Otel_metric_store_core.inc_counter
       Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels:
         [ "keeper", "aggregate"

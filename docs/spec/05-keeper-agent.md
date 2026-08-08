@@ -26,6 +26,8 @@ Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위
 
 Keeper 하나는 다음을 소유한다:
 - **identity**: `keeper_meta` 레코드 (이름, keeper, instructions, typed goal/task links)
+- **mutation serialization**: process-root `Keeper_owner` actor가 설치된 경로의
+  metadata command와 immutable projection
 - **context**: `working_context` (system prompt + messages + token count + OAS context)
 - **memory**: Memory OS fact/episode store (legacy memory bank 제거 — RFC keeper-memory-consolidation Stage 4)
 - **lifecycle**: heartbeat fiber + supervisor + checkpoint store
@@ -74,7 +76,19 @@ graph LR
 | Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_oas.ml`, `keeper_hooks_oas.ml` | 4 |
 | Supervision | `keeper_supervisor.ml`, `keeper_keepalive.ml`, `keeper_world_observation.ml` | 3 |
 | MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_keeper.ml`, `keeper_schema.ml` | 4 |
+| Ownership | `keeper_owner.ml`, `keeper_owner_reducer.ml`, `keeper_owner_registry.ml` | 3 |
 | Alerting / Metrics | `keeper_alerting*.ml`, `keeper_status_runtime*.ml`, `keeper_status_detail.ml` | 6+ |
+
+### 2.2 Single-owner 전환 상태
+
+서버 root는 Keeper별 bounded-mailbox owner actor를 설치하고, task binding처럼
+전환된 metadata mutation은 closed `Keeper_owner_reducer.meta_command`를 통해
+persist 후 immutable projection으로 publish한다. 임의의 snapshot mutation 함수,
+호환 facade, dual-write 경로는 두지 않는다.
+
+이 전환은 아직 진행 중이다. `Keeper_owner.start_turn`의 production entry-point
+배선과 남은 direct `Keeper_meta_store` writer 제거가 끝나기 전에는 turn
+single-flight가 런타임 전체에 적용됐다고 간주하지 않는다.
 
 ---
 
@@ -271,6 +285,9 @@ Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute 
 3. `unified_turn.run_keeper_cycle` -> `build_prompt` + `run_turn`
 4. `update_metrics_from_result` -> keeper_meta 갱신
 5. `write_meta` -> 메타데이터 영속화
+
+현재 이 turn-result writer는 single-owner 전환 대상이다. 반면 task binding은
+이미 `Keeper_owner_registry.apply_meta`의 typed command를 통해 persist/publish된다.
 
 ### 5.3 OAS 통합 구성
 

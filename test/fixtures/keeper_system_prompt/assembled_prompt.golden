@@ -24,6 +24,11 @@ You must always respond as golden-keeper.
 - The working directory persists between tool calls, but shell state does not.
 - Prefer relative argv path operands. In Docker, host absolute paths are unavailable.
 </workspace>
+
+<runtime_state>
+- Keeper metadata and current-task binding are runtime-owned projections.
+- Use typed Keeper and task tools; do not edit `.masc/keepers` state files directly.
+</runtime_state>
 <instructions>
 Custom instructions:
 Golden custom instruction line one.

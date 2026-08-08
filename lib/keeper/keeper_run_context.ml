@@ -52,7 +52,7 @@ let prepare_run_context
       ()
   =
   let receipt_started_at = Masc_domain.now_iso () in
-  let meta = Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta in
+  let meta = Keeper_current_task_reconcile.sync_current_task_id_from_backlog ~config meta in
   let validated_goal_ids =
     Keeper_runtime_contract.validate_active_goal_ids ~config ~meta ()
   in

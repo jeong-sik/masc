@@ -1,4 +1,4 @@
-(** Keeper turn-lane telemetry and backlog task reconciliation. *)
+(** Keeper turn-lane telemetry. *)
 
 (* Closed sum type for turn_lane.  Two producers emit values:
    - keeper_run_tools.ml emits the per-turn lanes
@@ -37,12 +37,3 @@ type tool_surface_metrics =
   ; config_root : string
   ; runtime_config_path : string option
   }
-
-let owned_active_task_id_for_meta =
-  Keeper_current_task_reconcile.owned_active_task_id_for_meta
-
-let sync_current_task_id_from_backlog =
-  Keeper_current_task_reconcile.sync_current_task_id_from_backlog
-
-let sync_current_task_id_for_agent_name =
-  Keeper_current_task_reconcile.sync_current_task_id_for_agent_name

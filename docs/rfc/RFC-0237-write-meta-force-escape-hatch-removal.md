@@ -1,15 +1,24 @@
 ---
 rfc: "0237"
 title: "Eliminate the write_meta ~force escape hatch (route snapshot writes through CAS+merge)"
-status: Draft
+status: Implemented
 created: 2026-06-14
-updated: 2026-06-14
+updated: 2026-08-09
 author: vincent
 supersedes: []
 related: ["RFC-0225"]
 ---
 
 # RFC-0237 — Eliminate the `write_meta ~force` escape hatch
+
+## Current authority
+
+The `~force` escape hatch is removed. CAS plus monotonic merge remains the
+persistence backstop for writers that have not yet moved, while the ongoing
+single-owner hard cut routes migrated mutations through closed
+`Keeper_owner_reducer.meta_command` values and publishes only after persistence
+succeeds. Direct `Keeper_meta_store` writers are migration inventory, not a
+second canonical mutation authority.
 
 ## §1 Problem (evidence-grounded)
 

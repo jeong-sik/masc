@@ -4,6 +4,7 @@ title: "Per-keeper turn single-flight admission"
 status: Draft
 relates: "RFC-0153 (tier admission), 2026-06-10 voice repeat RCA (~/me/reports/2026-06-10-masc-voice-repeat-rca.md)"
 date: 2026-06-10
+updated: 2026-08-09
 ---
 
 # RFC-0225: Per-keeper turn single-flight admission
@@ -49,6 +50,18 @@ Measured on 2026-06-10 (sangsu, session `trace-1780648779957-00000`): a
 - Not a turn scheduler redesign; RFC-0153 tier admission stays as-is.
 
 ## 3. Design
+
+### 3.0 Current implementation boundary
+
+`Keeper_owner`, `Keeper_owner_reducer`, and `Keeper_owner_registry` now provide
+the per-Keeper actor core, bounded mailbox, immutable projection, and closed
+metadata command set. Server-root inventory installation and selected metadata
+writers are routed through that owner.
+
+The hard cut is not complete: `Keeper_owner.start_turn` has no production
+caller yet, and direct metadata writers remain. Therefore this RFC stays Draft;
+the existence of the actor core is not evidence that every heartbeat, chat,
+MCP, and board-reactive turn passes one admission point.
 
 ### 3.1 Single admission point
 

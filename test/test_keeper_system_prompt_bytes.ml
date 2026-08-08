@@ -122,6 +122,8 @@ let test_assembled_prompt_carries_system_anchor () =
     (contains ("You are " ^ golden_keeper_name ^ "."));
   check bool "workspace block carries the sandbox root" true
     (contains golden_workspace_root);
+  check bool "runtime state ownership reaches the prompt" true
+    (contains "Keeper metadata and current-task binding are runtime-owned projections.");
   check bool "custom instructions reach the prompt" true
     (contains "Golden custom instruction line one.");
   check bool "active goals reach the prompt" true (contains "goal-golden-1")

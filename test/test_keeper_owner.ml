@@ -224,6 +224,38 @@ let test_child_isolation_and_per_keeper_parallelism () =
   ignore (owner_ok (Owner.exact_projection owner_a))
 ;;
 
+let test_cancelled_child_releases_turn_slot () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let owner =
+    Owner.start
+      ~sw
+      ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+      ~initial_meta:(Some (make_meta "cancelled-child"))
+  in
+  let child_context, resolve_child_context = Eio.Promise.create () in
+  (match
+     owner_ok
+       (Owner.start_turn owner ~operation_id:"cancelled-op" ~run:(fun _turn_sw ->
+          Eio.Cancel.sub (fun cancellation ->
+            Eio.Promise.resolve resolve_child_context cancellation;
+            Eio.Fiber.await_cancel ())))
+   with
+   | Owner.Started -> ()
+   | Busy _ -> fail "owner unexpectedly busy before cancellation");
+  Eio.Cancel.cancel
+    (Eio.Promise.await child_context)
+    (Failure "synthetic child cancellation");
+  await_idle (Eio.Stdenv.clock env) owner 1_000;
+  (match
+     owner_ok
+       (Owner.start_turn owner ~operation_id:"after-cancel" ~run:(fun _ -> ()))
+   with
+   | Owner.Started -> ()
+   | Busy _ -> fail "cancelled child retained the turn slot");
+  await_idle (Eio.Stdenv.clock env) owner 1_000
+;;
+
 let test_store_failure_is_precommit () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -349,6 +381,10 @@ let () =
             "child isolation and per-keeper parallelism"
             `Quick
             test_child_isolation_and_per_keeper_parallelism
+        ; test_case
+            "cancelled child releases turn slot"
+            `Quick
+            test_cancelled_child_releases_turn_slot
         ; test_case
             "mailbox backpressures without drop"
             `Quick

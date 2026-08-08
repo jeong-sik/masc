@@ -67,6 +67,12 @@ let build_keeper_system_prompt
          </workspace>\n"
         (String_util.escape_xml workspace_root)
   in
+  let runtime_state_block =
+    "\n<runtime_state>\n\
+     - Keeper metadata and current-task binding are runtime-owned projections.\n\
+     - Use typed Keeper and task tools; do not edit `.masc/keepers` state files directly.\n\
+     </runtime_state>\n"
+  in
   (* Prefix ordering: the shared block comes first for LLM KV cache sharing.
      All keepers share the same <system> text, so keeper-specific blocks come
      after it and the shared prefix stays maximal.
@@ -95,6 +101,7 @@ let build_keeper_system_prompt
       (* ── Keeper-specific blocks ─────────────────────────────── *)
       identity_block;
       workspace_block;
+      runtime_state_block;
       (* Operator instructions and the goals open right now. *)
       "<instructions>";
       custom;

@@ -21,6 +21,7 @@ type turn_request =
 
 type child_outcome =
   | Child_succeeded
+  | Child_cancelled of string
   | Child_failed of string
 
 type _ command =
@@ -107,17 +108,25 @@ let notify_child_finished t ~operation_id outcome =
 ;;
 
 let run_child t request =
-  let outcome =
+  let outcome, cancellation =
     match Eio.Switch.run (fun turn_sw -> request.run turn_sw) with
-    | () -> Child_succeeded
-    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-    | exception exn -> Child_failed (Printexc.to_string exn)
+    | () -> Child_succeeded, None
+    | exception (Eio.Cancel.Cancelled cause as exn) ->
+      Child_cancelled (Printexc.to_string cause), Some exn
+    | exception exn -> Child_failed (Printexc.to_string exn), None
   in
-  notify_child_finished t ~operation_id:request.operation_id outcome
+  Eio.Cancel.protect (fun () ->
+    notify_child_finished t ~operation_id:request.operation_id outcome);
+  Option.iter Stdlib.raise cancellation
 ;;
 
 let log_child_failure operation_id = function
   | Child_succeeded -> ()
+  | Child_cancelled detail ->
+    Log.Keeper.info
+      "keeper_owner: child turn cancelled operation_id=%s reason=%s"
+      operation_id
+      detail
   | Child_failed detail ->
     Log.Keeper.error
       "keeper_owner: child turn failed operation_id=%s error=%s"

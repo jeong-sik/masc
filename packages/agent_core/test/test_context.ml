@@ -159,22 +159,21 @@ let test_to_json () =
 
 let test_of_json_roundtrip () =
   let json = `Assoc [ "x", `Int 10; "y", `String "hello" ] in
-  let ctx = Context.of_json json in
+  let ctx = Context.of_json json |> Result.get_ok in
   check bool "x restored" true (Context.get ctx "x" = Some (`Int 10));
   check bool "y restored" true (Context.get ctx "y" = Some (`String "hello"))
 ;;
 
 let test_of_json_non_assoc () =
-  check_raises
-    "non-Assoc rejected"
-    (Invalid_argument "Context.of_json: expected JSON object")
-    (fun () -> ignore (Context.of_json (`String "invalid") : Context.t))
+  match Context.of_json (`String "invalid") with
+  | Error Context.Expected_object -> ()
+  | Ok _ -> fail "non-Assoc context must return Expected_object"
 ;;
 
 let test_of_json_eio_backend () =
   Eio_main.run
   @@ fun _env ->
-  let ctx = Context.of_json ~eio:true (`Assoc [ "x", `Int 1 ]) in
+  let ctx = Context.of_json ~eio:true (`Assoc [ "x", `Int 1 ]) |> Result.get_ok in
   check_backend "eio backend" Context.Eio_mutex ctx;
   check bool "value restored" true (Context.get ctx "x" = Some (`Int 1))
 ;;

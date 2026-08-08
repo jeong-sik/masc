@@ -1019,6 +1019,24 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
            Buffer.add_string ubuf
              "- Task backlog: readable; it holds 0 unclaimed tasks, 0 claimable tasks for this keeper, and 0 failed tasks.\n"
          | Backlog_readable_with_rows -> ());
+        (* The counts and ids below describe a set; they do not say whether it
+           is the set the last turn described. A keeper that concluded "nothing
+           actionable" reads "3 unclaimed" the same way whether those are the
+           same three tasks or three different ones, so the conclusion outlives
+           whatever made it true. [taskmaster] -- whose instructions are to take
+           unclaimed work on sight -- repeated one verbatim across every turn of
+           a day while its stated reason, that the three were blocked, appeared
+           nowhere in the backlog (#27629).
+
+           The revision is what changes when the backlog does. It is an int the
+           snapshot already carries and until now spent only on a presence check
+           in [backlog_statement_of_observation], so nothing new is read and no
+           keeper-authored text crosses into the frame. *)
+        (match observation.backlog_revision with
+         | None -> ()
+         | Some revision ->
+           Buffer.add_string ubuf
+             (Printf.sprintf "- Backlog revision: %d\n" revision));
         if observation.unclaimed_task_count > 0 then
           Buffer.add_string ubuf
             (Printf.sprintf "- Unclaimed tasks: %d\n"

@@ -219,8 +219,8 @@ let enqueue (queue : t) (s : stimulus) : t =
 (* Identity projection: durable-event identity must ignore display-only
    payload fields, or repeats of the same event with volatile text (token
    counts, addresses, timestamps inside provider error strings) defeat
-   [enqueue_if_missing]/[dedup_by_identity] and the queue grows unbounded
-   (RFC-0313 W2 loop-safety requirement). Exhaustive on purpose: a new
+   [enqueue_if_missing]/[dedup_by_identity] and the queue grows unbounded.
+   Exhaustive on purpose: a new
    payload kind must decide its identity fields here at compile time. *)
 let identity_payload = function
   | Goal_assigned ga ->

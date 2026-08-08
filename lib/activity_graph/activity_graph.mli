@@ -49,6 +49,10 @@ end
 
 (** {1 SSE wire encoding} *)
 
+(** The directory this store occupies under [.masc]. Readers of the same
+    store name it from here instead of spelling the literal. *)
+val store_dirname : string
+
 val format_sse_event : event -> string
 (** Renders [value] as a single SSE frame:
     [id: <seq>\nevent: activity\ndata: <json>\n\n].

@@ -32,10 +32,14 @@ let masc_dir_from_base_path ~base_path =
 let masc_dir config = masc_root_dir config
 
 let agents_dir config = Filename.concat (masc_dir config) "agents"
-let tasks_dir config = Filename.concat (masc_dir config) "tasks"
+(* Segment names for the task store, exposed so a reader holding only a
+   masc_dir string composes the same path this accessor does. *)
+let tasks_dirname = "tasks"
+let backlog_filename = "backlog.json"
+let tasks_dir config = Filename.concat (masc_dir config) tasks_dirname
 let messages_dir config = Filename.concat (masc_dir config) "messages"
 let state_path config = Filename.concat (masc_dir config) "state.json"
-let backlog_path config = Filename.concat (tasks_dir config) "backlog.json"
+let backlog_path config = Filename.concat (tasks_dir config) backlog_filename
 let archive_path config = Filename.concat (masc_dir config) "tasks-archive.json"
 
 (* Cluster-aware keeper OUTPUT directory (server-written state + sidecars). The

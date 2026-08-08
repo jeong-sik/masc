@@ -84,12 +84,24 @@ let keepers base = Filename.concat (masc base) "keepers"
 let keeper_local base store = Filename.concat (Filename.concat (keepers base) keeper) store
 let turn_dir base = keeper_local base "turn-records"
 let crash_dir base = keeper_local base "crash-events"
-let audit_dir base = Filename.concat (masc base) "audit"
-let activity_dir base = Filename.concat (masc base) "activity-events"
-let transition_dir base = Filename.concat (masc base) "transition-audit"
+(* Fixtures land where the owning module says its store lives, so a rename
+   moves the writer, the digest's reader and this test together. *)
+let audit_dir base = Filename.concat (masc base) Masc.Audit_log.store_dirname
+
+let activity_dir base =
+  Filename.concat (masc base) Activity_graph.store_dirname
+;;
+
+let transition_dir base =
+  Filename.concat (masc base) Masc.Keeper_transition_audit.store_dirname
+;;
 let chat_file base = Filename.concat (Filename.concat (masc base) "keeper_chat") (keeper ^ ".jsonl")
 let meta_file base = Filename.concat (keepers base) (keeper ^ ".json")
-let backlog_file base = Filename.concat (Filename.concat (masc base) "tasks") "backlog.json"
+let backlog_file base =
+  Filename.concat
+    (Filename.concat (masc base) Workspace_utils.tasks_dirname)
+    Workspace_utils.backlog_filename
+;;
 
 (* ── fixture row builders ────────────────────────────────────────── *)
 
@@ -292,16 +304,18 @@ let write_rich_fixture base =
   append_line (ttf (since_unix +. 1100.)) (transition_row ~keeper_name:keeper ~event_type:"operator_resume" ~ts:(since_unix +. 1100.));
   append_line (ttf (since_unix -. 100.)) (transition_row ~keeper_name:keeper ~event_type:"operator_pause" ~ts:(since_unix -. 100.));
   append_line (ttf (since_unix +. 1200.)) (transition_row ~keeper_name:"other" ~event_type:"operator_pause" ~ts:(since_unix +. 1200.));
-  (* meta with paused = true *)
-  write_file
-    (meta_file base)
-    (json_line
-       (`Assoc
-           [ "name", `String keeper
-           ; "agent_name", `String keeper
-           ; "trace_id", `String "digest-test"
-           ; "paused", `Bool true
-           ]))
+  (* meta with paused = true. Built through the shared fixture so every field
+     Keeper_meta_json_parse requires is present and canonical; a hand-written
+     object is rejected and the digest then reports paused_now = false. *)
+  (match
+     Masc_test_deps.meta_of_json_fixture
+       (`Assoc [ "name", `String keeper; "paused", `Bool true ])
+   with
+   | Ok meta ->
+     write_file
+       (meta_file base)
+       (json_line (Masc.Keeper_meta_json.meta_to_json meta))
+   | Error err -> Alcotest.fail ("keeper meta fixture: " ^ err))
 ;;
 
 let with_workspace f =

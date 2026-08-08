@@ -12,9 +12,7 @@
     runtime→Runtime 숙청: 이전의 phase_recovery / phase_buffer /
     tool_action / phase_routing 구분은 모두 동일한 default Runtime 으로
     수렴하는 죽은 추상화였으므로 이 단일 thunk 로 collapse 되었다.
-    @since v2.128.0
-    @since RFC-0066 Phase 1: changed from a string value to a thunk
-    (issue #14624). *)
+    @since v2.128.0 *)
 val default_runtime_id : unit -> string
 
 (** Validate one persisted/requested context override value. This is a

@@ -552,7 +552,7 @@ let trace_file_within_since ~since_ts path =
   | Some since ->
     (match Unix.stat path with
      | st -> st.Unix.st_mtime >= since
-     | exception _ -> true)
+     | exception _ -> true)  (* cancel-guard-ok: guards a blocking syscall: no Eio cancellation point *)
 
 let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     : Yojson.Safe.t list =

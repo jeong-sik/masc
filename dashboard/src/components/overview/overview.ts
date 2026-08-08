@@ -18,7 +18,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { AgentAvatar } from './agent-avatar'
-import { SCHED_TERMINAL_NORMALIZED } from '../v2/schedule-constants'
+import { SCHED_TERMINAL_SET } from '../v2/schedule-constants'
 import { tasks, keepers, boardPosts, boardTotal, lastBoardRefreshAt, goals, fusionRuns } from '../../store'
 import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
 import type {
@@ -297,7 +297,7 @@ function requestCountByProjectionCount(
 
 function sumTerminalCountFromProjection(counts: Record<string, number> | undefined): number {
   let sum = 0
-  for (const terminalStatus of SCHED_TERMINAL_NORMALIZED) {
+  for (const terminalStatus of SCHED_TERMINAL_SET) {
     const n = counts?.[terminalStatus]
     if (typeof n === 'number' && Number.isFinite(n)) sum += n
   }

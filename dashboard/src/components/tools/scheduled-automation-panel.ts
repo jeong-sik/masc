@@ -18,7 +18,7 @@ import { kSigil, kSlot } from '../keeper-badge'
 import {
   schedPayloadSpec,
   SCHED_TERMINAL,
-  SCHED_TERMINAL_NORMALIZED,
+  SCHED_TERMINAL_SET,
   schedStatusSpec,
   type SchedStatusSpec,
 } from '../v2/schedule-constants'
@@ -48,16 +48,16 @@ function actorLabel(actor: DashboardScheduledAutomationActor | null | undefined)
   return kind ? `${actor.id} (${kind})` : actor.id
 }
 
-export function normalizedScheduleStatus(value: string | null | undefined): string {
-  return value?.trim().toLowerCase() ?? ''
+export function scheduleWireValue(value: string | null | undefined): string {
+  return value ?? ''
 }
 
-function normalized(value: string | null | undefined): string {
-  return normalizedScheduleStatus(value)
+function wireValue(value: string | null | undefined): string {
+  return scheduleWireValue(value)
 }
 
 export function automationTone(status: string | null | undefined): StatusChipTone {
-  switch (normalized(status)) {
+  switch (wireValue(status)) {
     case 'running':
     case 'scheduled':
       return 'ok'
@@ -106,7 +106,7 @@ function assertNever(value: never): never {
 
 export function filterMatches(filter: ScheduleFilterKey, request: DashboardScheduledAutomationRequest): boolean {
   if (filter === 'all') return true
-  const status = normalized(effectiveStatus(request))
+  const status = wireValue(effectiveStatus(request))
   switch (filter) {
     case 'scheduled':
       return status === 'scheduled'
@@ -115,7 +115,7 @@ export function filterMatches(filter: ScheduleFilterKey, request: DashboardSched
     case 'running':
       return status === 'running'
     case 'terminal':
-      return SCHED_TERMINAL_NORMALIZED.has(status)
+      return SCHED_TERMINAL_SET.has(status)
     default:
       // Exhaustiveness: a new ScheduleFilterKey must fail to compile here rather
       // than silently fall through to "show all" (Unknown->Permissive-Default).
@@ -197,7 +197,7 @@ function payloadSupportBlocksWake(request: DashboardScheduledAutomationRequest):
 
 function canProjectUpcomingWake(request: DashboardScheduledAutomationRequest): boolean {
   if (payloadSupportBlocksWake(request)) return false
-  const status = normalized(effectiveStatus(request))
+  const status = wireValue(effectiveStatus(request))
   if (NON_UPCOMING_WAKE_STATUS.has(status)) return false
   return true
 }
@@ -1029,7 +1029,7 @@ function DurableSignalItem({
 // collapsed live Korean labels to English fallbacks). Unknown statuses fall
 // back to schedStatusSpec's dim spec.
 function statusSpecForLive(status: string | null | undefined): SchedStatusSpec {
-  return schedStatusSpec(normalized(status))
+  return schedStatusSpec(wireValue(status))
 }
 
 type PayloadSupportState = NonNullable<DashboardScheduledAutomationRequest['payload_support']>
@@ -1453,12 +1453,12 @@ const SCH_CADENCES: readonly SchCadenceDef[] = [
 
 function schTabMatches(tab: SchTabDef, request: DashboardScheduledAutomationRequest): boolean {
   if (tab.statuses === null) return true
-  return tab.statuses.includes(normalized(effectiveStatus(request)))
+  return tab.statuses.includes(wireValue(effectiveStatus(request)))
 }
 
 function recurrenceKind(request: DashboardScheduledAutomationRequest): string | null {
   const kind = request.recurrence?.kind ?? request.recurrence_kind ?? null
-  const value = normalized(kind)
+  const value = wireValue(kind)
   return value === '' ? null : value
 }
 
@@ -1539,7 +1539,7 @@ function SchCadenceSummary({
 }
 
 function isTerminalSchedule(request: DashboardScheduledAutomationRequest): boolean {
-  return SCHED_TERMINAL_NORMALIZED.has(normalized(effectiveStatus(request)))
+  return SCHED_TERMINAL_SET.has(wireValue(effectiveStatus(request)))
 }
 
 function SchPollingStrip({
@@ -1975,12 +1975,12 @@ export function ScheduleAside({
   onOpen: (scheduleId: string) => void
 }) {
   const asideStatus = (request: DashboardScheduledAutomationRequest): string =>
-    normalized(effectiveStatus(request))
+    wireValue(effectiveStatus(request))
   const payloadBlocked = requests.filter(payloadSupportBlocksWake)
   const failed = requests.filter(request => asideStatus(request) === 'failed' && !payloadSupportBlocksWake(request))
   const due = requests.filter(request => SCHEDULE_ASIDE_DUE.has(asideStatus(request)) && !payloadSupportBlocksWake(request))
   const recent = requests
-    .filter(request => SCHED_TERMINAL_NORMALIZED.has(asideStatus(request)))
+    .filter(request => SCHED_TERMINAL_SET.has(asideStatus(request)))
     .slice(0, SCHEDULE_ASIDE_RECENT_MAX)
   const needTotal = due.length
 

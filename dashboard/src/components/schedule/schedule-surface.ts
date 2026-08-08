@@ -23,7 +23,7 @@ import {
   ScheduleAside,
   ScheduledAutomationPanel,
   SchDetail,
-  normalizedScheduleStatus,
+  scheduleWireValue,
 } from '../tools/scheduled-automation-panel'
 import type { Cadence } from '../v2/schedule-constants'
 import { CadenceSummary, ScheduleCalendar, cadenceCounts, cadenceOfRequest } from './schedule-agenda'
@@ -61,10 +61,13 @@ function countByStatus(
   statuses: readonly string[],
 ): number {
   if (!automation) return 0
-  const normalizedStatuses = statuses.map(normalizedScheduleStatus)
-  const fromCounts = normalizedStatuses.reduce((sum, status) => sum + (automation.counts?.[status] ?? 0), 0)
+  const wireStatuses = statuses.map(scheduleWireValue)
+  const fromCounts = wireStatuses.reduce(
+    (sum, status) => sum + (automation.counts?.[status] ?? 0),
+    0,
+  )
   const fromRequests = (automation.requests ?? [])
-    .filter(request => normalizedStatuses.includes(normalizedScheduleStatus(request.status)))
+    .filter(request => wireStatuses.includes(scheduleWireValue(request.status)))
     .length
   return Math.max(fromCounts, fromRequests)
 }

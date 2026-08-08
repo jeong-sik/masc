@@ -57,7 +57,7 @@ const RECURRENCE_KINDS: readonly RecurrenceKind[] = ['one_shot', 'interval', 'da
 /** Parse a wire recurrence kind into the closed backend set, or `null` if it is
  * not one of them (Unknown → explicit, never Unknown → permissive default). */
 export function parseRecurrenceKind(raw: string | null | undefined): RecurrenceKind | null {
-  const value = raw?.trim().toLowerCase() ?? ''
+  const value = raw ?? ''
   return (RECURRENCE_KINDS as readonly string[]).includes(value) ? (value as RecurrenceKind) : null
 }
 
@@ -123,8 +123,5 @@ export const SCHED_CADENCE: Readonly<Record<Cadence, SchedCadenceSpec>> = {
 /** Display order for the cadence filter strip (정기 → 폴링 → 1회). */
 export const SCHED_CADENCE_ORDER: readonly Cadence[] = ['scheduled', 'interval', 'oneshot']
 
-/** Terminal statuses normalized to the lowercase form the live API emits, so
- * non-terminal filters share one source with {@link SCHED_TERMINAL}. */
-export const SCHED_TERMINAL_NORMALIZED: ReadonlySet<string> = new Set(
-  SCHED_TERMINAL.map(status => status.toLowerCase()),
-)
+/** Exact terminal values emitted by the schedule wire contract. */
+export const SCHED_TERMINAL_SET: ReadonlySet<string> = new Set(SCHED_TERMINAL)

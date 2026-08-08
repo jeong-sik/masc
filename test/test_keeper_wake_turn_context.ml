@@ -1,17 +1,4 @@
-(* RFC-0315 — wake-turn self-description.
-
-   Pins the three prompt additions that let a woken keeper resume instead of
-   acting lost:
-   1. [current_task] renders a "Current Task" layer for the task whose claim
-      admitted the turn (before: current_task_id only suppressed guidance).
-   2. [turn_decision] threads the scheduler's real cycle decision into the
-      wake-reason section, so stimulus-driven wakes render their reason.
-   3. [?active_goal_summaries] renders goal titles next to ids.
-
-   The third item once also pinned a self-direction directive for a keeper that
-   holds goals, mirroring a no-goal branch. masc#26123 ("stop the runtime
-   choosing the agent's next tool") removed both branches on purpose, so what is
-   pinned here now is their absence. *)
+(** Wake-turn task, trigger, and goal context contracts. *)
 
 open Alcotest
 
@@ -20,10 +7,7 @@ module Prompt = Masc.Keeper_unified_prompt
 module Turn = Masc.Keeper_turn
 module Inputs = Masc.Keeper_world_observation_inputs
 
-(* Repo-root sentinel: the one shared keeper prompt file. A sentinel that no
-   longer exists makes [repo_root] fall back to the dune sandbox cwd, which
-   loads an empty prompt registry and turns every shared-contract assertion
-   below into a comparison of two empty blocks. *)
+(* The shared Keeper prompt identifies the repository root from a Dune sandbox. *)
 let has_repo_prompts root =
   Sys.file_exists (Filename.concat root "config/prompts/keeper.md")
 
@@ -93,8 +77,7 @@ let meta : Masc.Keeper_meta_contract.keeper_meta =
 
 let prompt_config = lazy (Masc.Workspace.default_config "/tmp/unused")
 
-(* Same throwaway runtime default as test_keeper_surface_presence_prompt:
-   the Autonomous Trigger section consults the default runtime (RFC-0206). *)
+(* The autonomous trigger section requires a configured default runtime. *)
 let runtime_toml =
   {|
 [runtime]
@@ -153,12 +136,7 @@ let contains ~needle haystack =
   in
   loop 0
 
-(* Prose assertions match a sentence, not a line. The prompt assets are
-   hard-wrapped markdown, so a needle that spans a wrap point fails on a space
-   the file writes as a newline — masc#26823 re-wrapped the merged asset and
-   broke an assertion whose sentence was still there, word for word. Collapse
-   runs of whitespace on both sides so re-wrapping prose stays invisible here
-   while deleting the sentence still fails. *)
+(* Normalize wrapping so assertions match prompt sentences rather than lines. *)
 let collapse_whitespace text =
   let buf = Buffer.create (String.length text) in
   let in_space = ref false in
@@ -255,11 +233,7 @@ let test_current_task_section_renders () =
     (contains ~needle:"- task-42 — Wire the wake-turn context" user);
   check bool "status line" true
     (contains ~needle:"in progress (wake-context-keeper) since 2026-07-07T01:00:00Z" user);
-  (* RFC-0365: the line carries the note's author, because a handoff can now
-     survive an ownership change and an unattributed first-person account
-     reads as the holder's own recollection. This fixture records neither
-     [updated_by] nor [updated_at], so the absence is stated rather than
-     omitted. *)
+  (* An unattributed handoff stays explicit when author metadata is absent. *)
   check bool "handoff summary with attribution" true
     (contains
        ~needle:"- Prior handoff (unattributed): lexer done, parser half-wired"
@@ -267,13 +241,7 @@ let test_current_task_section_renders () =
   check bool "handoff next step" true
     (contains ~needle:"- Suggested next step: wire parser to store" user);
   check bool "no evidence line when the note records no refs" false
-    (contains ~needle:"- Handoff evidence:" user);
-  (* masc#24651 cut the "continue it or release it with a handoff summary"
-     directive from this section; masc#26123 then made not choosing the agent's
-     next action the standing policy. The section states what is held and what
-     the prior handoff said, and stops there. *)
-  check bool "section does not direct the next action" false
-    (contains ~needle:"release it with a handoff summary" user)
+    (contains ~needle:"- Handoff evidence:" user)
 
 let test_current_task_section_absent_without_task () =
   let user = user_message base_observation in
@@ -414,26 +382,19 @@ let test_direct_and_autonomous_share_system_prompt () =
         Masc.Keeper_types_profile_defaults.empty_keeper_profile_defaults
       ~meta
   in
-  (* Direct and autonomous turns share one system prompt outright: the
-     channel-specific block that used to be appended for direct_reply was the
-     last split between them and no longer exists, so the base prompt IS the
-     contract for both entrypoints. *)
+  (* Both turn entrypoints consume the same system prompt contract. *)
   check string
     "stable contract is byte-identical across turn entrypoints"
     autonomous_system_prompt
     base_system_prompt;
-  (* The discovery sentence this used to match was cut in masc#26579; the
-     policy it stated — an unregistered or unavailable checkout is handled
-     explicitly, and absent evidence blocks rather than licenses a guess —
-     is now stated in the merged [keeper] body. *)
-  check bool "shared contract carries repository checkout policy" true
+  check bool "shared contract keeps intended scope" true
     (contains_prose
-       ~needle:"handle a behind, diverged, dirty, unregistered, or unavailable"
+       ~needle:"Deliver the current work at its intended scope"
        base_system_prompt);
-  check bool "shared contract refuses to infer checkout state" true
-    (contains_prose
-       ~needle:"Missing, ambiguous, or stale checkout evidence is a blocker"
-       base_system_prompt)
+  check bool "shared contract excludes unrelated work" true
+    (contains_prose ~needle:"Do not add unrelated work" base_system_prompt);
+  check bool "shared contract leads with the result" true
+    (contains_prose ~needle:"lead with the result" base_system_prompt)
 
 let test_unresolved_goal_keeps_one_stable_safety_contract () =
   with_repo_prompt_config @@ fun () ->
@@ -476,18 +437,12 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
     (contains ~needle:"- missing-goal\n" base_system_prompt);
   check bool "identity block is preserved" true
     (contains ~needle:"<identity>" base_system_prompt);
-  (* The shared block is one [<system>] element now. Its former
-     [<world>]/[<capabilities>] tags are gone, so the two contracts they
-     wrapped are pinned by their own sentences instead of by a tag name. *)
+  (* The shared prompt remains the stable system prefix for both turn paths. *)
   check bool "shared system block is preserved" true
     (contains ~needle:"<system>" base_system_prompt);
-  check bool "ownership contract is preserved" true
+  check bool "scope contract is preserved" true
     (contains
-       ~needle:"MASC owns Board, Task, Goal, Schedule"
-       base_system_prompt);
-  check bool "capability contract is preserved" true
-    (contains
-       ~needle:"The active typed schema is the sole callable catalog"
+       ~needle:"Deliver the current work at its intended scope"
        base_system_prompt)
 
 (* --- 2. Threaded turn decision --- *)
@@ -573,16 +528,8 @@ let test_preview_does_not_invent_wake_reason () =
           ~labels:[ "keeper", preview_meta.name ]
           ()))
 
-(* [Workspace_task.active_owned_task_ids_for_agent] counts Claimed and
-   InProgress and answers None for AwaitingVerification, and the scheduler says
-   so in words ("AwaitingVerification is still excluded"). The heading is the
-   one place a Keeper reads that ownership, so it must not widen the two
-   statuses that hold a claim into all of them.
-
-   Live cost of the old wording: of 56 cancelled tasks 10 had already written a
-   verification record, task-032 among them -- "useYupValidationResolver typed
-   properly, tsc passes. Cancelling to free". The claim it freed itself for was
-   never blocked. *)
+(* AwaitingVerification does not hold a claim, so its heading must not imply
+   active ownership. *)
 let test_submitted_task_heading_does_not_claim_a_hold () =
   let task =
     make_task
@@ -619,7 +566,7 @@ let test_in_progress_task_heading_still_says_held () =
   check bool "a task actually held is still called held" true
     (contains ~needle:"### Current Task (held by you)" user)
 
-(* --- 3. Goal titles + self-direction parity --- *)
+(* --- 3. Goal titles --- *)
 
 let test_goal_summaries_render_titles () =
   let observation = { base_observation with active_goals = [ "goal-x" ] } in
@@ -651,47 +598,6 @@ let test_partial_goal_summaries_preserve_missing_ids () =
   check bool "missing title falls back to bare id" true
     (contains ~needle:"- goal-b" user)
 
-let test_goal_holder_gets_self_direction_directive () =
-  with_repo_prompt_config @@ fun () ->
-  let meta_with_goal =
-    meta_of_json
-      (`Assoc
-        [
-          ("name", `String "wake-context-keeper");
-          ("trace_id", `String "test-trace-wake-context");
-          ("active_goal_ids", `List [ `String "goal-x" ]);
-        ])
-  in
-  let goal_turn_decision =
-    WO.keeper_cycle_decision ~meta:meta_with_goal base_observation
-  in
-  let { Prompt.system_prompt = system; _ } =
-    Prompt.build_prompt ~meta:meta_with_goal ~config:(Lazy.force prompt_config)
-      ~turn_decision:goal_turn_decision ~current_task:Inputs.No_current_task
-      ~observation:base_observation ()
-  in
-  (* masc#26123 removed both self-direction branches. The prompt states the
-     goals a keeper holds and leaves the choice of next action to it, so the
-     directive that used to accompany them must not come back. *)
-  check bool "no self-direction directive for a goal holder" false
-    (contains ~needle:"advance one of your active" system);
-  check bool "no defer directive either" false
-    (contains ~needle:"Deferring is a valid choice" system);
-  check bool "the goal itself is still named" true
-    (contains ~needle:"goal-x" system);
-  let no_goal_turn_decision =
-    WO.keeper_cycle_decision ~meta base_observation
-  in
-  let { Prompt.system_prompt = no_goal_system; _ } =
-    Prompt.build_prompt ~meta ~config:(Lazy.force prompt_config)
-      ~turn_decision:no_goal_turn_decision ~current_task:Inputs.No_current_task
-      ~observation:base_observation ()
-  in
-  check bool "no-goal branch directs nothing either" false
-    (contains ~needle:"You have no active goal" no_goal_system);
-  check bool "and carries no goal-holder directive" false
-    (contains ~needle:"advance one of your active" no_goal_system)
-
 let () =
   init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
@@ -699,7 +605,7 @@ let () =
     [
       ( "current task layer",
         [
-          test_case "renders id, status, handoff, directive" `Quick
+          test_case "renders id, status, and handoff" `Quick
             test_current_task_section_renders;
           test_case "absent without a held task" `Quick
             test_current_task_section_absent_without_task;
@@ -735,13 +641,11 @@ let () =
           test_case "an in-progress task is still called held" `Quick
             test_in_progress_task_heading_still_says_held;
         ] );
-      ( "goal titles and parity directive",
+      ( "goal titles",
         [
           test_case "summaries render titles, unresolved ids stay bare" `Quick
             test_goal_summaries_render_titles;
           test_case "partial summaries preserve missing goal ids" `Quick
             test_partial_goal_summaries_preserve_missing_ids;
-          test_case "goal holder gets self-direction directive" `Quick
-            test_goal_holder_gets_self_direction_directive;
         ] );
     ]

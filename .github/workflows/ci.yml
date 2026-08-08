@@ -439,12 +439,8 @@ jobs:
       - name: Run deploy preflight safety contract
         run: bash test/test_deploy_preflight.sh
 
-      # Deleting a prompt asset is a server-side change that leaves the
-      # dashboard's key strings syntactically valid, so a panel keeps rendering
-      # a block that silently resolves to empty. #26823 folded keeper.world,
-      # keeper.capabilities and keeper.constitution into keeper.system and the
-      # config panel kept decoding all three. Unconditional: the drift appears
-      # when either config/prompts or dashboard/src moves.
+      # Dashboard prompt keys must resolve to current prompt assets or registry
+      # constants. Run this whenever either side of that contract changes.
       - name: Check dashboard prompt keys
         run: bash scripts/audit-dashboard-prompt-keys.sh
 
@@ -1525,11 +1521,8 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_unified_verification_surface @test/runtest-test_schedule_tool_wiring"
 
-      # Every keeper turn is built from the assembled system prompt, and until
-      # now no prompt assertion ran in CI: these suites existed in test/dune but
-      # appeared in no runtest target, so they were compile-only under @check.
-      # The golden target pins the assembled bytes, which is what makes a
-      # prompt-assembly refactor provable rather than eyeballed.
+      # Every Keeper turn uses the assembled prompt. Pin its exact bytes,
+      # current content contract, and tool-schema projection.
       - name: Run keeper prompt assembly suites
         id: keeper_prompt_assembly_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
@@ -1637,12 +1630,8 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_sse_coverage @test/runtest-test_ag_ui_coverage @test/runtest-test_sse_storm_e2e"
 
-      # Keeper prompt and tool-bundle contracts. Both suites assert on rendered
-      # prompt text and on a meta the production decoder must accept, and both
-      # went red without a failing check: @check compiles them and no runtest
-      # target ran them. masc#24651 and masc#26123 removed prompt directives and
-      # masc#26823 re-wrapped the merged asset; the assertions drifted silently
-      # through all three.
+      # Keeper prompt and tool-bundle contracts exercise rendered text and the
+      # current metadata shape accepted by the production decoder.
       - name: Run keeper prompt and tool-bundle contract suites
         id: keeper_prompt_contract_suites
         if: ${{ always() && steps.build_step.outcome == 'success' }}

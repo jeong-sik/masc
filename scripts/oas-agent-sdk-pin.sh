@@ -96,4 +96,4 @@ readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.14"
 # is no longer both Draft and blocked-on-oas.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
 readonly OAS_AGENT_SDK_SHA="7d916a23b8a936e32d31f4a58f91aabfe0cc066b"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.231.13"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.231.14"

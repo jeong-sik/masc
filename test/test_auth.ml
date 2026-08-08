@@ -167,6 +167,25 @@ let test_default_auth_config () =
   check bool "token required by default" true cfg.require_token;
   check int "24hr expiry by default" 24 cfg.token_expiry_hours
 
+(* An auth file that omits require_token must not be weaker than having no
+   file at all: default_auth_config requires a token, and with [false] an
+   anonymous caller is granted Worker permissions in optional-token mode. *)
+let test_auth_config_parse_defaults_match_default_config () =
+  match Masc_domain.auth_config_of_yojson (`Assoc [ "enabled", `Bool true ]) with
+  | Error msg -> fail ("auth_config_of_yojson failed: " ^ msg)
+  | Ok parsed ->
+    check
+      bool
+      "omitted require_token matches default_auth_config"
+      Masc_domain.default_auth_config.require_token
+      parsed.require_token;
+    check
+      int
+      "omitted token_expiry_hours matches default_auth_config"
+      Masc_domain.default_auth_config.token_expiry_hours
+      parsed.token_expiry_hours
+;;
+
 let test_save_load_auth_config () =
   let dir = setup_test_workspace () in
   let cfg = { Masc_domain.default_auth_config with enabled = true; require_token = true } in
@@ -1161,6 +1180,8 @@ let () =
   Random.init 42;
   run "Auth" [
     "token_generation", [
+      test_case "parse defaults match default_auth_config" `Quick
+        test_auth_config_parse_defaults_match_default_config;
       test_case "generate token" `Quick test_token_generation;
       test_case "sha256 hash" `Quick test_sha256_hash;
       test_case "Eqaf equality truth table" `Quick test_eqaf_equality_truth_table;

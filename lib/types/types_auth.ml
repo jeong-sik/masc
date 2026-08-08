@@ -153,7 +153,7 @@ let agent_credential_of_yojson json =
 type auth_config = {
   enabled: bool;
   workspace_secret_hash: string option; [@default None]
-  require_token: bool; [@default false]
+  require_token: bool; [@default true]
   token_expiry_hours: int; [@default 24]
 } [@@deriving show]
 
@@ -176,7 +176,10 @@ let auth_config_of_yojson json =
   try
     let enabled = Json_util.get_bool json "enabled" |> Option.value ~default:true in
     let workspace_secret_hash = Json_util.get_string json "workspace_secret_hash" in
-    let require_token = Json_util.get_bool json "require_token" |> Option.value ~default:false in
+    (* default_auth_config uses [true]; a file that omits the key must not be
+       weaker than no file at all. With [false] an anonymous caller is granted
+       Worker permissions (auth.ml optional-token mode). *)
+    let require_token = Json_util.get_bool json "require_token" |> Option.value ~default:true in
     let token_expiry_hours = Json_util.get_int json "token_expiry_hours" |> Option.value ~default:24 in
     Ok { enabled; workspace_secret_hash; require_token; token_expiry_hours }
   with e -> Error (Printexc.to_string e)

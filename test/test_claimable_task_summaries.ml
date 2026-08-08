@@ -91,7 +91,12 @@ let test_self_authored_tasks_are_not_offered_back () =
     add config ~title:"Mine" ~created_by:"claimable-probe";
     add config ~title:"Theirs" ~created_by:"someone-else";
     let observed = snapshot config meta in
-    let titles = List.map (fun row -> row.title_preview) observed.claimable_tasks in
+    let titles =
+      List.map
+        (fun (row : Keeper_world_observation_inputs.claimable_task_summary) ->
+           row.title_preview)
+        observed.claimable_tasks
+    in
     check (list string) "only the other keeper's task is offered" [ "Theirs" ] titles;
     check int "and the count agrees" 1 (List.length observed.claimable_tasks))
 ;;
@@ -100,7 +105,10 @@ let test_an_empty_backlog_offers_nothing () =
   with_config (fun config meta ->
     let observed = snapshot config meta in
     check (list string) "no rows" []
-      (List.map (fun row -> row.task_id) observed.claimable_tasks);
+      (List.map
+         (fun (row : Keeper_world_observation_inputs.claimable_task_summary) ->
+            row.task_id)
+         observed.claimable_tasks);
     check int "no count" 0 (List.length observed.claimable_tasks))
 ;;
 

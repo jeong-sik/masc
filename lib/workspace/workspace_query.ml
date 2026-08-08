@@ -202,7 +202,7 @@ let get_all_agents config =
     exact assignee identity is absent from explicit active workspace/session
     membership. [last_seen] is retained as observation and never changes task
     ownership. *)
-let audit_orphan_tasks config : (Masc_domain.task * string) list =
+let audit_orphan_tasks_in_tasks config tasks : (Masc_domain.task * string) list =
   if not (is_initialized config) then []
   else
     let active_names =
@@ -210,7 +210,6 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
       |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
     in
     let is_active_agent assignee = List.mem assignee active_names in
-    let backlog = read_backlog config in
     List.filter_map (fun (task : Masc_domain.task) ->
       match task.task_status with
       | Masc_domain.Claimed { assignee; _ }
@@ -219,7 +218,11 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
           if is_active_agent assignee then None
           else Some (task, assignee)
       | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
-    ) backlog.tasks
+    ) tasks
+
+let audit_orphan_tasks config : (Masc_domain.task * string) list =
+  if not (is_initialized config) then []
+  else audit_orphan_tasks_in_tasks config (read_backlog config).tasks
 
 (* RFC-0294 PR-4: the single typed source of truth for "is this status
    orphan-eligible, and under which gauge class". EXHAUSTIVE over [task_status]

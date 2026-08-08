@@ -1547,7 +1547,11 @@ let test_audit_orphan_tasks () =
     Alcotest.(check int) "one orphan detected" 1 (List.length orphans_after);
     let (task, assignee) = List.hd orphans_after in
     Alcotest.(check string) "orphan assignee" test_agent_a assignee;
-    Alcotest.(check string) "orphan task id" "task-001" task.id
+    Alcotest.(check string) "orphan task id" "task-001" task.id;
+    Alcotest.(check int)
+      "provided task snapshot is authoritative"
+      0
+      (List.length (Workspace.audit_orphan_tasks_in_tasks config []))
   )
 
 let test_audit_orphan_awaiting_verification_tasks () =

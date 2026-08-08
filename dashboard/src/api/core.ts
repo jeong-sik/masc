@@ -588,7 +588,7 @@ function bootstrapInitializingPayload(path: string): unknown | null {
         incidents: [],
         recommended_actions: [],
         command_focus: {},
-        operator_targets: { keepers: [], pending_confirms: [], available_actions: [] },
+        operator_targets: { keepers: [], available_actions: [] },
         attention_queue: [],
         sessions: [],
         agent_briefs: [],

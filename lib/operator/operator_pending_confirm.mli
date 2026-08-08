@@ -5,8 +5,8 @@ val pending_confirms_path : Workspace.config -> string
 val trace_id : string -> string
 val normalized_actor : context_actor:string -> string option -> string
 
-type pending_confirm = {
-  token : string;
+type pending_confirm = Workspace_hooks.operator_pending_confirm_request = {
+  confirm_token : string;
   trace_id : string;
   actor : string;
   action_type : string;
@@ -43,7 +43,6 @@ type target =
 val register_target_gate :
   (Workspace.config -> target -> (unit, string) result) -> unit
 
-val preview_of_pending_confirm : pending_confirm -> Yojson.Safe.t
 val pending_confirm_to_yojson : pending_confirm -> Yojson.Safe.t
 val pending_confirm_of_yojson : Yojson.Safe.t -> (pending_confirm, string) result
 val raw_pending_confirms_result :

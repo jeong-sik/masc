@@ -114,12 +114,10 @@ val normalize_request_target_type :
     Empty [target_type] is replaced by the action-type default.
     Invalid inputs return the canonical operator-target validation error. *)
 
-val delegated_tool_for : string -> string
+val delegated_tool_for : string -> (string, string) result
 (** [delegated_tool_for action_type] returns the tool name for an
-    action_type by lookup into
-    {!Operator_pending_confirm.available_actions}; returns
-    ["unknown"] when no match exists.  Used for confirm-step routing
-    so the JSON contract knows which tool will receive the call. *)
+    action type from {!Operator_pending_confirm.available_actions} or rejects
+    an action without a registered tool contract. *)
 
 val confirm_required : string -> bool
 (** Re-export of {!Operator_action_catalog.requires_confirmation}. Pinned here

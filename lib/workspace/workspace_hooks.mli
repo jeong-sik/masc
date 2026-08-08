@@ -10,7 +10,7 @@
 type activity_entity = { kind: string; id: string }
 
 type operator_pending_confirm_request = {
-  token : string;
+  confirm_token : string;
   trace_id : string;
   actor : string;
   action_type : string;

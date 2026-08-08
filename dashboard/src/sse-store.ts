@@ -47,7 +47,7 @@ import {
 } from './namespace-truth-store'
 import { mergeServerStatus } from './store-normalizers'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
-import { operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
+import { operatorError, operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
 import { compositeTick } from './composite-signals'
 import { isRecord } from './lib/type-guards'
 import { showToast } from './components/common/toast'
@@ -337,15 +337,16 @@ function handleNamespaceTruthSnapshot(payload: unknown): void {
   try {
     const normalized = normalizeNamespaceTruth(payload)
     namespaceTruth.value = normalized
+    namespaceTruthError.value = null
     serverStatus.value = mergeServerStatus(
       serverStatus.value,
       normalized.root.status ?? null,
     )
   } catch (err) {
-    // Mirrors the transport-health P2 fix below: hydration failures are
-    // operator-actionable (UI shows stale data + falls back to HTTP), not
-    // background-debug, so they get console.warn instead of console.debug.
-    console.warn('[server-push] project-snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
+    const detail = err instanceof Error ? err.message : 'invalid project snapshot'
+    namespaceTruth.value = null
+    namespaceTruthError.value = detail
+    console.warn('[server-push] project-snapshot hydration failed', detail)
   }
 }
 
@@ -358,11 +359,19 @@ function handleExecutionSnapshot(payload: unknown): void {
   }
 }
 
+function failOperatorSnapshotHydration(detail: string): void {
+  operatorSnapshot.value = null
+  operatorError.value = detail
+}
+
 function handleOperatorSnapshot(payload: unknown): void {
   try {
     operatorSnapshot.value = normalizeOperatorSnapshot(payload)
+    operatorError.value = null
   } catch (err) {
-    console.warn('[server-push] operator snapshot hydration failed', err instanceof Error ? err.message : '')
+    const detail = err instanceof Error ? err.message : 'invalid operator snapshot'
+    failOperatorSnapshotHydration(detail)
+    console.warn('[server-push] operator snapshot hydration failed', detail)
   }
 }
 
@@ -677,12 +686,13 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
-  if (event.type === 'operator_snapshot' && event.payload) {
-    const payload = isRecord(event.payload) ? event.payload : null
-    if (!payload) {
+  if (event.type === 'operator_snapshot') {
+    if (!isRecord(event.payload)) {
+      failOperatorSnapshotHydration('operator snapshot payload is invalid')
       requestOperatorSnapshotRefresh('operator_snapshot_invalid_payload')
       return true
     }
+    const payload = event.payload
     const epoch = payload.snapshot_epoch
     const generation = payload.snapshot_generation
     const computeSequence = payload.snapshot_compute_sequence
@@ -697,6 +707,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
       || typeof terminalSequence !== 'number'
       || !Number.isSafeInteger(terminalSequence)
     ) {
+      failOperatorSnapshotHydration('operator snapshot ordering is missing')
       requestOperatorSnapshotRefresh('operator_snapshot_missing_ordering')
       return true
     }
@@ -752,6 +763,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
         latestOperatorSnapshotComputeSequence = computeSequence
       }
       if (payload.status === 'invalidated') {
+        failOperatorSnapshotHydration('operator snapshot invalidated')
         requestOperatorSnapshotRefresh('operator_snapshot_invalidation')
         return true
       }
@@ -897,14 +909,7 @@ export function hydrateDashboardSlice(_slice: string, payload: unknown, eventTyp
     return
   }
 
-  // Reaching here means the server sent a delta with a slice but no event_type.
-  // It cannot: dashboard_event_of_external derives the slice from the event type
-  // and server_mcp_transport_ws.ml:674 always writes event_type alongside it.
-  //
-  // The slice-keyed hydrators that used to live here belonged to
-  // dashboard/subscribe's one-shot snapshot, whose provider #27027 deleted when
-  // it made subscribe ACK-only. Every snapshot now arrives as a typed event and
-  // is handled above.
+  // Dashboard deltas require an event type so the typed handler is explicit.
 }
 
 // --- WebSocket server-push reaction setup ---

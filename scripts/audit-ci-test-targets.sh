@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fail when ci.yml names a test target that test/dune cannot build.
+# Fail when ci.yml names a test target that the Dune test declarations cannot build.
 #
 # CI runs a hand-maintained allowlist of @test/runtest-<name> targets. Deleting
 # the test behind one is a normal cleanup, and nothing in the deleting PR looks
@@ -14,8 +14,8 @@
 #
 # This turns that into a seconds-long check the deleting PR sees.
 #
-# A target is buildable when test/dune declares it, either as a test name
-# under (names ...) / (name ...) or as an explicit (alias runtest-<name>).
+# A target is buildable when test/dune declares it directly, its dynamic
+# coverage-test manifest declares it, or an explicit alias declares it.
 set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -38,6 +38,17 @@ awk '/^[[:space:]]+test_[a-z_0-9]+/ {
        }
      }' test/dune > "$declared"
 grep -oE '\(name test_[a-z_0-9]+\)' test/dune | sed 's/(name //;s/)//' >> "$declared"
+# Coverage tests use a committed generated include so Dune can load the graph
+# without a dynamic-include rule cycle. The manifest remains the source of
+# truth; test/stanzas/dune checks the committed projection for drift.
+coverage_manifest="test/stanzas/coverage_test_names.txt"
+if grep -qF '(include stanzas/coverage_tests.inc)' test/dune; then
+  if [ ! -f "$coverage_manifest" ]; then
+    echo "[ci-test-targets] FAIL - coverage manifest is missing: $coverage_manifest"
+    exit 2
+  fi
+  cat "$coverage_manifest" >> "$declared"
+fi
 # Explicitly named aliases, e.g. (alias runtest-dashboard-http-behavior-contracts).
 grep -oE '\(alias runtest-[a-z_0-9-]+\)' test/dune \
   | sed 's/(alias runtest-//;s/)//' >> "$declared"
@@ -59,7 +70,7 @@ grep -oE '@test/runtest-[a-z_0-9-]+' .github/workflows/ci.yml \
 missing="$(comm -23 "$referenced" "$declared")"
 
 if [ -n "$missing" ]; then
-  echo "[ci-test-targets] FAIL - ci.yml names targets test/dune does not declare"
+  echo "[ci-test-targets] FAIL - ci.yml names targets Dune does not declare"
   echo
   printf '%s\n' "$missing" | sed 's/^/  - /'
   echo
@@ -74,7 +85,7 @@ if [ -n "$missing" ]; then
   exit 2
 fi
 
-echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in test/dune"
+echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in Dune"
 
 # 714 -> 710: this PR wires test_tool_input_validation, and #27429,
 # #27433 and #27441 each wired a suite test/dune already declared without
@@ -93,7 +104,7 @@ if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then
   echo
   echo "$((unwired - UNWIRED_BASELINE)) more than the baseline. The full unwired"
   echo "set is large, so diff it against main rather than reading it here:"
-  echo "  comm -13 <(ci targets) <(test/dune names)"
+  echo "  comm -13 <(ci targets) <(Dune test names)"
   echo
   echo "A suite outside ci.yml is compile-only: it never executes, so its"
   echo "assertions can outlive the code they pin. Add a @test/runtest-<name>"

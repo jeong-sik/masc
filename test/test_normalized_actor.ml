@@ -2,6 +2,8 @@ open Alcotest
 open Masc
 module Opc = Operator_pending_confirm
 
+let () = Opc.register_target_gate (fun _config _target -> Ok ())
+
 let na = Opc.normalized_actor
 
 let temp_dir () =
@@ -39,7 +41,7 @@ let test_whitespace_context_returns_unknown () =
   check string "whitespace context" "unknown" (na ~context_actor:"  " None)
 
 let pending_confirm_fixture token =
-  { Opc.token = token
+  { Opc.confirm_token = token
   ; trace_id = "ops_test"
   ; actor = "operator"
   ; action_type = "namespace_pause"
@@ -90,6 +92,44 @@ let test_remove_reports_persistence_failure () =
             && String.contains msg Filename.dir_sep.[0]
             && String.length msg > 0))
 
+let test_duplicate_confirm_tokens_are_rejected () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      Workspace_utils.mkdir_p (Opc.operator_dir config);
+      match
+        Opc.write_pending_confirms
+          config
+          [ pending_confirm_fixture "duplicate-token"
+          ; pending_confirm_fixture "duplicate-token"
+          ]
+      with
+      | Error message ->
+        check bool "duplicate token is named" true
+          (String.length message > 0)
+      | Ok () -> fail "duplicate confirm_token should be rejected")
+
+let test_unknown_pending_confirm_action_is_rejected () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      Workspace_utils.mkdir_p (Opc.operator_dir config);
+      let invalid =
+        { (pending_confirm_fixture "unknown-action") with
+          action_type = "unknown_action"
+        ; delegated_tool = "unknown_tool"
+        }
+      in
+      match Opc.write_pending_confirms config [ invalid ] with
+      | Error message ->
+        check bool "unknown action is named" true
+          (String.length message > 0)
+      | Ok () -> fail "unknown pending-confirm action should be rejected")
+
 let tests =
   [
     test_case "explicit raw" `Quick test_explicit_raw;
@@ -101,6 +141,8 @@ let tests =
     test_case "whitespace context returns unknown" `Quick test_whitespace_context_returns_unknown;
     test_case "upsert reports persistence failure" `Quick test_upsert_reports_persistence_failure;
     test_case "remove reports persistence failure" `Quick test_remove_reports_persistence_failure;
+    test_case "duplicate confirm tokens are rejected" `Quick test_duplicate_confirm_tokens_are_rejected;
+    test_case "unknown pending confirm action is rejected" `Quick test_unknown_pending_confirm_action_is_rejected;
   ]
 
 let () = run "normalized_actor" [ ("normalized_actor", tests) ]

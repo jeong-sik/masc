@@ -319,6 +319,7 @@ let test_tool_result_keeps_typed_disposition_and_input () =
   let tool =
     R.observe_tool_result
       ~input:(`Assoc [ "verdict", `String "APPROVE" ])
+      ~finished_at:12.5
       result
   in
   let t = R.create () in
@@ -346,6 +347,13 @@ let test_tool_result_keeps_typed_disposition_and_input () =
       (Some "completed")
       (match List.assoc_opt "disposition" fields with
        | Some (`String value) -> Some value
+       | _ -> None);
+    check
+      (option (float 0.0001))
+      "finished at"
+      (Some 12.5)
+      (match List.assoc_opt "finished_at" fields with
+       | Some (`Float value) -> Some value
        | _ -> None)
   | _ -> fail "completed review must serialize one tool observation"
 ;;

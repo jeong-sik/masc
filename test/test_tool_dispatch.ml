@@ -167,7 +167,7 @@ let () =
               let received_args = ref `Null in
               let capture_handler ~name:_ ~args =
                 received_args := args;
-                Some (tool_ok "captured")
+                tool_ok "captured"
               in
               register_full
                 ~tool_name:tool

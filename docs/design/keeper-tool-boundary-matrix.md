@@ -1,7 +1,7 @@
 # Keeper Tool Boundary Matrix
 
 Status: P0 ratchet source for keeper agent tool boundaries.
-Last updated: 2026-07-12.
+Last updated: 2026-08-09.
 
 This matrix freezes the owner map for keeper modules that participate in the
 agent tool path. A new file in scope must be added here with exactly one owner
@@ -48,8 +48,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_registered_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_shared_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_shared_runtime.mli` - execution-dispatch
-- `lib/keeper/keeper_tool_command_runtime.ml` - execution-dispatch
-- `lib/keeper/keeper_tool_command_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_task_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_task_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_voice_runtime.ml` - execution-dispatch

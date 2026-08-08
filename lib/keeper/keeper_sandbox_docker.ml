@@ -1,9 +1,8 @@
 (** Docker/sandbox shell execution infrastructure.
 
-    Extracted from keeper_tool_command_runtime.ml — Docker container lifecycle,
-    sandbox profile resolution, and container invocation functions.
-    These are pure infrastructure; command dispatch remains in
-    keeper_tool_command_runtime.ml. *)
+    Owns Docker container lifecycle, sandbox profile resolution, and
+    container invocation. Typed command dispatch is owned by
+    [Keeper_tool_execute_runtime]. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -47,13 +46,6 @@ let docker_mount_preflight_details
 
 (* ── Container naming ──────────────────────────────────── *)
 
-let keeper_sandbox_container_name =
-  Keeper_sandbox_docker_container_name.keeper_sandbox_container_name
-let keeper_private_container_root =
-  Keeper_sandbox_docker_container_name.keeper_private_container_root
-let docker_private_workspace_cwd =
-  Keeper_sandbox_docker_container_name.docker_private_workspace_cwd
-
 let rewrite_docker_command_paths ~(config : Workspace.config) ~(meta : keeper_meta) cmd =
   let raw_host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
@@ -62,7 +54,7 @@ let rewrite_docker_command_paths ~(config : Workspace.config) ~(meta : keeper_me
   let normalized_host_root =
     raw_host_root |> Keeper_alerting_path.normalize_path_for_check_stripped
   in
-  let container_root = keeper_private_container_root meta in
+  let container_root = Keeper_sandbox.container_root meta.name in
   let rewritten =
     Keeper_sandbox_runtime.rewrite_host_root_to_container_root
       ~host_root:raw_host_root
@@ -91,7 +83,8 @@ let rewrite_docker_command_paths_for_host_validation
     raw_host_root |> Keeper_alerting_path.normalize_path_for_check_stripped
   in
   let container_root =
-    keeper_private_container_root meta |> Keeper_alerting_path.strip_trailing_slashes
+    Keeper_sandbox.container_root meta.name
+    |> Keeper_alerting_path.strip_trailing_slashes
   in
   let rewritten =
     Keeper_sandbox_runtime.rewrite_host_root_to_container_root
@@ -113,12 +106,6 @@ let effective_sandbox_profile ~(meta : keeper_meta) =
   match meta.sandbox_profile with
   | Docker -> Docker, meta.network_mode
   | Local -> Local, meta.network_mode
-;;
-
-(* ── Sandbox runtime preflight ─────────────────────────── *)
-
-let ensure_keeper_sandbox_runtime ~timeout_sec =
-  Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec
 ;;
 
 (* ── Docker invocation ─────────────────────────────────── *)
@@ -424,9 +411,14 @@ let run_docker_shell_command_with_status_internal
           |> Keeper_alerting_path.normalize_path_for_check
           |> Keeper_alerting_path.strip_trailing_slashes
         in
-        let container_name = keeper_sandbox_container_name meta in
-              let container_root = keeper_private_container_root meta in
-              let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
+        let container_name =
+          Keeper_sandbox_docker_container_name.keeper_sandbox_container_name meta
+        in
+              let container_root = Keeper_sandbox.container_root meta.name in
+              let container_cwd =
+                Keeper_sandbox_docker_container_name.docker_private_workspace_cwd
+                  ~config ~meta cwd
+              in
               let network_args, network_label =
                 Keeper_sandbox_runtime.docker_network_args network_mode
               in
@@ -490,7 +482,7 @@ let run_docker_shell_command_with_status_internal
                     ~timeout_sec
                     ()
                 in
-                match ensure_keeper_sandbox_runtime ~timeout_sec with
+                match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
                 | Error err -> sandbox_error err
                 | Ok seccomp_args ->
                   (match ensure_docker_shell_image_available ~image ~timeout_sec with
@@ -633,7 +625,8 @@ let docker_result_to_bash_response ~config ~meta result =
       ~sandbox:(Keeper_sandbox.of_meta ~config ~meta)
       ~host_cwd:result.cwd
       ~container_cwd_for_docker:
-        (docker_private_workspace_cwd ~config ~meta result.cwd)
+        (Keeper_sandbox_docker_container_name.docker_private_workspace_cwd
+           ~config ~meta result.cwd)
   in
   docker_bash_response
     ~ok:(process_status_is_success result.status)

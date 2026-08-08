@@ -6,8 +6,9 @@
 
     Background: PR #11080 removed [sandbox_host_root] /
     [playground_path] from [execution_context], but sibling
-    [cwd] fields in [keeper_sandbox_docker] / [keeper_tool_command_runtime]
-    response builders still echoed the host abs path. The Docker
+    [cwd] fields in [Keeper_sandbox_docker] and
+    [Keeper_tool_execute_runtime] response builders still echoed the host
+    absolute path. The Docker
     [--workdir] argument was translated via
     [docker_private_workspace_cwd], yet that translation was not
     propagated into the response JSON, so the LLM re-emitted

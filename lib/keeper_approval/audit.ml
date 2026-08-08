@@ -399,7 +399,7 @@ let audit_scan_window ?keeper_name n =
 
 let record_audit_read_failure ?keeper_name ?(metric_site = Keeper_approval_queue_failure_site.Audit_read_recent) ~site exn =
   Keeper_fd_pressure.note_exception ~site exn;
-  Otel_metric_store.inc_counter
+  Otel_metric_store_core.inc_counter
     Keeper_metrics.(to_string ApprovalQueueFailures)
     ~labels:
       [ "keeper",

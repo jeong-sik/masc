@@ -466,9 +466,6 @@ end
 (* Public MCP surface — delegates to Tool_catalog_surfaces (SSOT)   *)
 (* ================================================================ *)
 
-(* Delegate to surfaces sub-module *)
-let public_mcp_tools = Tool_catalog_surfaces.public_mcp_surface_tools
-
 let public_mcp_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create 64 in
   List.iter (fun name -> Hashtbl.replace tbl name ())

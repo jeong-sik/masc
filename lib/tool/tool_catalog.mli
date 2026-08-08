@@ -59,10 +59,6 @@ val hidden_active :
 
 (** {1 Public tool surface} *)
 
-val public_mcp_tools : string list
-(** Alias for [Tool_catalog_surfaces.public_mcp_surface_tools].
-    Prefer the surfaces module directly for new code. *)
-
 val is_public_mcp : string -> bool
 (** O(1) membership check against the public surface. *)
 

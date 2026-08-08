@@ -19,9 +19,9 @@
 type turn_summary =
   { file : string (** Bare file name, the handle later reads take. *)
   ; trace_id : string option
-        (** Exact provider session identifier found in the retained JSONL. [None]
-            means the file has no decodable [session_id]; callers must not infer
-            a join from file time or name. *)
+        (** Unique provider session identifier found across the retained JSONL.
+            [None] means the file has no decodable [session_id] or contains more
+            than one; callers must not infer a join from file time or name. *)
   ; bytes : int
   ; modified_at : float
   ; records : int (** Non-blank JSONL lines. *)

@@ -84,7 +84,9 @@ let summarize_records path =
   | None -> 0, None
   | Some contents ->
     let lines = nonblank_lines contents in
-    List.length lines, List.find_map trace_id_of_line lines
+    let trace_ids = lines |> List.filter_map trace_id_of_line |> List.sort_uniq String.compare in
+    let trace_id = match trace_ids with [ value ] -> Some value | [] | _ :: _ :: _ -> None in
+    List.length lines, trace_id
 ;;
 
 let list_turns ~config ~keeper ~limit =

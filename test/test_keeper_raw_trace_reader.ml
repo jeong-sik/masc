@@ -121,6 +121,25 @@ let test_absent_keeper_directory_is_empty_not_error () =
         (Reader.read_error_to_string error))
 ;;
 
+let test_mixed_session_ids_do_not_claim_an_exact_trace () =
+  with_traces
+    [ ( "turn-mixed" ^ Support.raw_trace_file_extension
+      , [ line ~session_id:"trace-a" 1 "run_started"
+        ; line ~session_id:"trace-b" 2 "run_finished"
+        ] )
+    ]
+    (fun config _trace_dir ->
+       match Reader.list_turns ~config ~keeper ~limit:10 with
+       | Error error ->
+         Alcotest.failf "list failed: %s" (Reader.read_error_to_string error)
+       | Ok [ turn ] ->
+         Alcotest.(check (option string))
+           "mixed sessions fail closed instead of joining the first"
+           None
+           turn.trace_id
+       | Ok turns -> Alcotest.failf "expected one turn, got %d" (List.length turns))
+;;
+
 (* The file name is a handle, not a path. Every shape below would reach outside
    the keeper's directory if it were joined and normalized. *)
 let test_file_name_cannot_escape_the_keeper_directory () =
@@ -282,6 +301,8 @@ let () =
             test_lists_turns_newest_first
         ; Alcotest.test_case "absent keeper directory is empty, not error" `Quick
             test_absent_keeper_directory_is_empty_not_error
+        ; Alcotest.test_case "mixed session ids have no exact trace" `Quick
+            test_mixed_session_ids_do_not_claim_an_exact_trace
         ] )
     ; ( "reading"
       , [ Alcotest.test_case "missing turn is its own error" `Quick

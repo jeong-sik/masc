@@ -53,12 +53,15 @@ export function deriveMascPaths(connectors: GateConnectorInfo[]): MascPaths {
     c => typeof c.names_path === 'string' && c.names_path.length > 0,
   )
   if (!withPath) return fallback
-  const match = withPath.names_path.match(/^(.*)\/connectors\/[^/]+\/names\.json$/)
-  if (!match) return fallback
-  const mascRoot = match[1] ?? ''
+  // The server sends the file it actually writes; take its directory rather
+  // than re-deriving a layout from the string. A regex for
+  // `<root>/connectors/<id>/names.json` never matched after the runtime moved
+  // to .gate/runtime/ in #7467, so both rows below stayed hidden.
+  const dir = withPath.names_path.replace(/\/[^/]*$/, '')
+  if (dir === '' || dir === withPath.names_path) return fallback
   return {
-    connectorsDir: `${mascRoot}/connectors/`,
-    logsDir: `${mascRoot}/logs/`,
+    connectorsDir: `${dir}/`,
+    logsDir: null,
     keepersDir: 'config/keepers/',
     sidecarsDir: 'sidecars/',
   }

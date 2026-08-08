@@ -93,7 +93,7 @@ type projection =
 type persistence_intent =
   | No_persistence
   | Replace_snapshot of Keeper_meta_contract.keeper_meta
-  | Remove_snapshot
+  | Remove_snapshot of Keeper_meta_contract.keeper_meta
 
 type post_commit_effect =
   | Publish_projection of projection

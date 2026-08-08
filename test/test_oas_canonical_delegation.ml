@@ -33,7 +33,7 @@ let test_masc_delegates_canonical_oas_projections () =
     ~expected:1;
   check_calls
     ~file:"lib/tool_bridge.ml"
-    ~callee:"Agent_sdk.Mcp.json_schema_to_params"
+    ~callee:"Agent_sdk.Types.tool_schema_of_input_schema"
     ~expected:1
 ;;
 

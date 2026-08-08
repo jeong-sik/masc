@@ -4,6 +4,8 @@
   .worktrees
   worktrees
   _build_codex_trpg
+  ; Ad hoc refutation probes are operator scratch, never project source.
+  refute_tmp
   archive
   dashboard_bonsai))
 

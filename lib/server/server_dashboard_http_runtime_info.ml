@@ -1864,14 +1864,17 @@ let runtime_official_client_snapshot (rt : Runtime.t) =
   match rt.execution with
   | Runtime_execution.Agent_core _ -> None
   | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Claude_code _ ->
     Runtime_observation.latest_official_client_snapshot ~runtime_id:rt.id
 ;;
 
 let runtime_official_client_verification_json (rt : Runtime.t) =
   match rt.execution, runtime_official_client_snapshot rt with
   | Runtime_execution.Agent_core _, _ -> `Null
-  | (Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _), None ->
+  | ( Runtime_execution.Codex_app_server _
+    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Claude_code _ ), None ->
     `Assoc
       [ "status", `String "unverified"
       ; "measured", `Bool false
@@ -1879,7 +1882,9 @@ let runtime_official_client_verification_json (rt : Runtime.t) =
       ; "evidence", `Null
       ; "reason", `String "no_successful_runtime_observation"
       ]
-  | ( Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _
+  | ( Runtime_execution.Codex_app_server _
+    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Claude_code _
     ), Some snapshot ->
     let status =
       match snapshot.outcome with

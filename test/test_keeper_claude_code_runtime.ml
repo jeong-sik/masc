@@ -197,6 +197,22 @@ let test_keeper_start_resume_and_measured_observation () =
        (match first.runtime_observation with
         | None -> fail "measured runtime observation was not emitted"
         | Some observation ->
+          (match observation.official_client with
+           | Some
+               { client = Claude_code
+               ; execution_mode = Plan_read_only
+               ; tool_owner = Official_client
+               ; permission_mode = Some "plan"
+               ; usage = Some usage
+               ; _
+               } ->
+             check int "typed cache creation" 2
+               (Option.value usage.cache_creation_input_tokens ~default:(-1));
+             check int "typed cache read" 7 usage.cache_read_input_tokens;
+             check (option (float 0.000001)) "typed cost" (Some 0.0125)
+               usage.total_cost_usd
+           | Some _ -> fail "Claude Code official-client evidence was misclassified"
+           | None -> fail "typed official-client evidence was not emitted");
           List.iter
             (fun label ->
               check bool label true (List.mem label observation.configured_labels))

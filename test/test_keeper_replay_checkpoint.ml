@@ -4,7 +4,7 @@
     assistant response is durable conversation state even when the autonomous
     cycle has no external effect. *)
 
-module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
+module Finalize = Masc.Keeper_replay_checkpoint
 module Replay_prefix = Masc.Keeper_replay_prefix
 
 let message role content =

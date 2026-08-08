@@ -35,6 +35,18 @@ type payload =
       ; result : (api_response, Error.sdk_error) result
       ; elapsed : float
       }
+  | AgentYielded of
+      { agent_name : string
+      ; task_id : string
+      ; turn : int
+      ; elapsed : float
+      }
+  | AgentInputRequired of
+      { agent_name : string
+      ; task_id : string
+      ; request : Error.input_required
+      ; elapsed : float
+      }
   | AgentFailed of
       { agent_name : string
       ; task_id : string
@@ -118,6 +130,8 @@ type event =
 let payload_kind = function
   | AgentStarted _ -> "agent_started"
   | AgentCompleted _ -> "agent_completed"
+  | AgentYielded _ -> "agent_yielded"
+  | AgentInputRequired _ -> "agent_input_required"
   | AgentFailed _ -> "agent_failed"
   | ToolCalled _ -> "tool_called"
   | ToolCompleted _ -> "tool_completed"
@@ -250,6 +264,8 @@ let rec matches filter event =
     (match event.payload with
      | AgentStarted r -> r.agent_name = name
      | AgentCompleted r -> r.agent_name = name
+     | AgentYielded r -> r.agent_name = name
+     | AgentInputRequired r -> r.agent_name = name
      | AgentFailed r -> r.agent_name = name
      | ToolCalled r -> r.agent_name = name
      | ToolCompleted r -> r.agent_name = name
@@ -267,6 +283,8 @@ let rec matches filter event =
      | ToolCalled _ | ToolCompleted _ -> true
      | AgentStarted _
      | AgentCompleted _
+     | AgentYielded _
+     | AgentInputRequired _
      | AgentFailed _
      | TurnStarted _
      | TurnReady _
@@ -282,6 +300,8 @@ let rec matches filter event =
      | Custom (actual, _) -> String.equal actual topic
      | AgentStarted _
      | AgentCompleted _
+     | AgentYielded _
+     | AgentInputRequired _
      | AgentFailed _
      | ToolCalled _
      | ToolCompleted _

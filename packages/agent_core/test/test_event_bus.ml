@@ -331,6 +331,9 @@ let test_custom_event () =
 let test_payload_kind_canonical_labels () =
   let cases : (Event_bus.payload * string) list =
     [ Event_bus.AgentStarted { agent_name = "a"; task_id = "t" }, "agent_started"
+    ; ( Event_bus.AgentYielded
+          { agent_name = "a"; task_id = "t"; turn = 1; elapsed = 0.1 }
+      , "agent_yielded" )
     ; Event_bus.TurnStarted { agent_name = "a"; turn = 0 }, "turn_started"
     ; Event_bus.TurnReady { agent_name = "a"; turn = 0; tool_names = [] }, "turn_ready"
     ; Event_bus.TurnCompleted { agent_name = "a"; turn = 0 }, "turn_completed"
@@ -360,6 +363,20 @@ let test_payload_kind_canonical_labels () =
 let test_payload_kind_label_set_is_stable () =
   let label_cases : (Event_bus.payload * string) list =
     [ Event_bus.AgentStarted { agent_name = ""; task_id = "" }, "agent_started"
+    ; ( Event_bus.AgentInputRequired
+          { agent_name = ""
+          ; task_id = ""
+          ; request =
+              { Error.request_id = "request"
+              ; participant_name = None
+              ; question = "question"
+              ; schema = None
+              ; timeout_s = None
+              ; created_at = 0.0
+              }
+          ; elapsed = 0.0
+          }
+      , "agent_input_required" )
     ; ( Event_bus.AgentFailed
           { agent_name = ""
           ; task_id = ""

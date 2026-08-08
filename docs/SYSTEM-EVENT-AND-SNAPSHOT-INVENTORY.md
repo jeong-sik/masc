@@ -345,6 +345,6 @@ Meaning:
 - Composite signal router: `dashboard/src/sse-store.ts`, `dashboard/src/composite-signals.ts`
 - Composite producer: `lib/keeper/keeper_registry.ml`
 - Heartbeat snapshot writer: `lib/keeper/keeper_keepalive.ml`
-- MASC domain event publishers: `lib/keeper/keeper_event_publisher.ml`, `lib/runtime/runtime_oas_checkpoint.ml`
+- MASC domain event publisher: `lib/keeper/keeper_event_publisher.ml`
 - Agent core bridge + durable replay: `lib/keeper/keeper_event_bridge.ml`
 - Server-push snapshot loops: `lib/server/server_dashboard_http_core.ml`, `lib/server/server_dashboard_http_execution_surfaces.ml`, `lib/server/server_dashboard_http_namespace_truth.ml`

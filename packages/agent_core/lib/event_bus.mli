@@ -46,6 +46,18 @@ type payload =
       ; result : (Types.api_response, Error.sdk_error) result
       ; elapsed : float
       }
+  | AgentYielded of
+      { agent_name : string
+      ; task_id : string
+      ; turn : int
+      ; elapsed : float
+      }
+  | AgentInputRequired of
+      { agent_name : string
+      ; task_id : string
+      ; request : Error.input_required
+      ; elapsed : float
+      }
   | AgentFailed of
       { agent_name : string
       ; task_id : string

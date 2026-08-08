@@ -62,7 +62,8 @@ let sequence_transport ?(on_call = ignore) responses =
   transport, call_count
 ;;
 
-let make_agent
+let make_agent_with_options
+      ?event_bus
       ~net
       ~transport
       ~raw_trace
@@ -70,6 +71,7 @@ let make_agent
       ~context_injector
       ~on_run_complete
       ~tool
+      ()
   =
   let options =
     { Agent.default_options with
@@ -80,6 +82,11 @@ let make_agent
     ; on_run_complete
     }
   in
+  let options =
+    match event_bus with
+    | None -> options
+    | Some event_bus -> { options with event_bus = Some event_bus }
+  in
   let config =
     { (Types.default_config ~model:"mock-model") with
       name = "advanced-boundary-test"
@@ -87,6 +94,19 @@ let make_agent
     }
   in
   Agent.create ~net ~config ~tools:[ tool ] ~options ~checkpoint_sink ()
+;;
+
+let make_agent ~net ~transport ~raw_trace ~checkpoint_sink ~context_injector
+      ~on_run_complete ~tool =
+  make_agent_with_options
+    ~net
+    ~transport
+    ~raw_trace
+    ~checkpoint_sink
+    ~context_injector
+    ~on_run_complete
+    ~tool
+    ()
 ;;
 
 let time_tool ?descriptor ?result on_execute =
@@ -142,6 +162,64 @@ let with_temp_trace f =
     (fun () -> f path)
 ;;
 
+let test_advanced_run_emits_lifecycle_events () =
+  with_temp_trace
+  @@ fun trace_path ->
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let trace = Raw_trace.create ~path:trace_path () |> Result.get_ok in
+  let event_bus = Event_bus.create () in
+  let subscription =
+    Event_bus.subscribe
+      ~config:
+        (Event_bus.subscription_config
+           ~capacity:8
+           ~overflow:Event_bus.Drop_newest
+         |> Result.get_ok)
+      event_bus
+  in
+  let transport, _call_count = sequence_transport [ text_response "done" ] in
+  let agent =
+    make_agent_with_options
+      ~event_bus
+      ~net:env#net
+      ~transport
+      ~raw_trace:trace
+      ~checkpoint_sink:(fun _ -> Ok ())
+      ~context_injector:None
+      ~on_run_complete:None
+      ~tool:(time_tool ignore)
+      ()
+  in
+  (match
+     Agent.Advanced.run_blocks
+       ~sw
+       ~api_strategy:Agent.Sync
+       ~on_tool_boundary:(fun _ -> Agent.Advanced.Continue)
+       agent
+       [ Types.Text "finish" ]
+   with
+   | Ok (Agent.Advanced.Completed response) ->
+     Alcotest.(check string) "response" "done" (Types.visible_text_of_response response)
+   | Ok (Agent.Advanced.Yielded _) -> Alcotest.fail "advanced run unexpectedly yielded"
+   | Ok (Agent.Advanced.Terminal_tool_completed _) ->
+     Alcotest.fail "advanced run unexpectedly completed a terminal tool"
+   | Error error -> Alcotest.fail (Error.to_string error));
+  let lifecycle_event_kinds =
+    Event_bus.drain subscription
+    |> List.map (fun (event : Event_bus.event) ->
+      Event_bus.payload_kind event.payload)
+    |> List.filter (fun kind ->
+      List.mem kind [ "agent_started"; "agent_completed"; "agent_failed" ])
+  in
+  Alcotest.(check (list string))
+    "advanced lifecycle"
+    [ "agent_started"; "agent_completed" ]
+    lifecycle_event_kinds
+;;
+
 let test_yield_after_context_checkpoint () =
   with_temp_trace
   @@ fun trace_path ->
@@ -150,6 +228,16 @@ let test_yield_after_context_checkpoint () =
   Eio.Switch.run
   @@ fun sw ->
   let trace = Raw_trace.create ~path:trace_path () |> Result.get_ok in
+  let event_bus = Event_bus.create () in
+  let subscription =
+    Event_bus.subscribe
+      ~config:
+        (Event_bus.subscription_config
+           ~capacity:16
+           ~overflow:Event_bus.Drop_newest
+         |> Result.get_ok)
+      event_bus
+  in
   let persisted = ref [] in
   let checkpoint_sink snapshot =
     persisted := snapshot :: !persisted;
@@ -173,7 +261,8 @@ let test_yield_after_context_checkpoint () =
       [ tool_use_response ]
   in
   let agent =
-    make_agent
+    make_agent_with_options
+      ~event_bus
       ~net:env#net
       ~transport
       ~raw_trace:trace
@@ -184,6 +273,7 @@ let test_yield_after_context_checkpoint () =
         (time_tool (fun () ->
            tool_executed := true;
            lease_events := "tool" :: !lease_events))
+      ()
   in
   let callback_count = ref 0 in
   let on_tool_boundary (boundary : Agent.Advanced.tool_boundary) =
@@ -248,6 +338,16 @@ let test_yield_after_context_checkpoint () =
     (List.rev !lease_events);
   Alcotest.(check int) "provider call count" 1 !call_count;
   Alcotest.(check (list bool)) "not terminal-complete" [] !completions;
+  let lifecycle_event_kinds =
+    Event_bus.drain subscription
+    |> List.map (fun (event : Event_bus.event) ->
+      Event_bus.payload_kind event.payload)
+    |> List.filter (fun kind -> String.starts_with ~prefix:"agent_" kind)
+  in
+  Alcotest.(check (list string))
+    "yield is not completion"
+    [ "agent_started"; "agent_yielded" ]
+    lifecycle_event_kinds;
   (match Agent.lifecycle agent with
    | Some snapshot ->
      Alcotest.(check bool) "lifecycle ready" true (snapshot.status = Agent.Ready);
@@ -1071,7 +1171,13 @@ let test_terminal_success_stops_stream_before_next_provider () =
 let () =
   Alcotest.run
     "Agent advanced cooperative execution"
-    [ ( "tool boundary"
+    [ ( "lifecycle"
+      , [ Alcotest.test_case
+            "Advanced run emits lifecycle events"
+            `Quick
+            test_advanced_run_emits_lifecycle_events
+        ] )
+    ; ( "tool boundary"
       , [ Alcotest.test_case
             "yield after context checkpoint"
             `Quick

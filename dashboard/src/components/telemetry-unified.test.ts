@@ -841,27 +841,13 @@ describe('TelemetryUnified', () => {
     expect(turnGroups).toHaveLength(0)
   })
 
-  it('surfaces cloud Ollama provider details in OAS telemetry previews and search', async () => {
+  it('surfaces cloud Ollama model details in runtime telemetry previews and search', async () => {
     const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadPanel(
       vi.fn().mockResolvedValue(baseTelemetry),
       vi.fn().mockResolvedValue(baseSummary),
     )
 
     const items = buildTelemetryDisplayItems([
-      {
-        source: 'oas_event',
-        ts_unix: 1_775_709_500,
-        event_type: 'masc:runtime_agent:build',
-        agent_name: 'oas-tier-group.ollama_cloud_stable',
-        payload: {
-          agent: 'oas-tier-group.ollama_cloud_stable',
-          provider_kind: 'openai_compat',
-          model_id: 'kimi-k2.6:cloud',
-          provider_model_id: 'kimi-k2.6:cloud',
-          base_url: 'https://ollama.com/v1',
-          endpoint: 'https://ollama.com/v1/chat/completions',
-        },
-      },
       {
         source: 'oas_event',
         ts_unix: 1_775_709_499,
@@ -876,10 +862,6 @@ describe('TelemetryUnified', () => {
         ],
       },
     ])
-
-    const buildMatches = filterTelemetryDisplayItems(items, 'ollama.com')
-    expect(buildMatches).toHaveLength(1)
-    expect(buildMatches[0]).toMatchObject({ kind: 'entry' })
 
     const streamingMatches = filterTelemetryDisplayItems(items, 'Streaming_summary')
     expect(streamingMatches).toHaveLength(1)

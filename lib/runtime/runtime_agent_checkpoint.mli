@@ -1,35 +1,12 @@
-(** Runtime_oas_checkpoint — lifecycle, checkpoint, and
-    idle-detail helpers extracted from {!Runtime_agent}.
+(** Runtime_agent_checkpoint — checkpoint and idle-detail helpers used by
+    {!Runtime_agent}.
 
     Keeps side-effecting run helpers separate from the main
     build / resume / run orchestration so the orchestration
     module stays focused on Eio fiber composition.
 
-    No internal helpers are hidden; the .mli pins each entry
-    point's contract so a future refactor of the OAS Agent
-    surface (Provider / Checkpoint / Types renames) fails here
-    instead of at every call site in {!Runtime_agent}. *)
-
-val publish_lifecycle :
-  name:string ->
-  event:string ->
-  detail:string ->
-  ?error:string ->
-  ?session_id:string ->
-  ?status:string ->
-  ?attrs:(string * Yojson.Safe.t) list ->
-  unit ->
-  unit
-(** Publish a [Custom "masc.runtime_agent.<event>"] event on the
-    process-wide [Event_bus_slots] masc slot. Missing bootstrap state is surfaced by a
-    one-shot warning instead of silently dropping every lifecycle event.
-
-    Optional [error] / [session_id] / [status] fields are
-    included in the payload only when [Some] and non-empty
-    after trim — empty strings are dropped to keep the JSON
-    payload skinny for downstream SSE consumers. [attrs] carries
-    non-sensitive structured runtime metadata such as provider
-    kind, model, and endpoint path. *)
+    The interface pins the Agent Core checkpoint and response contracts at the
+    MASC runtime boundary. *)
 
 val build_checkpoint :
   session_id:string ->
@@ -56,4 +33,4 @@ val partial_response_of_stop :
     case (e.g. operator-side cancel before the model finishes).
     [stop_reason = EndTurn], single [Text] content block, no
     usage / telemetry. The emitted response model is the neutral [runtime]
-    lane; OAS owns concrete provider/model identity. *)
+    lane; Agent Core owns concrete provider/model identity. *)

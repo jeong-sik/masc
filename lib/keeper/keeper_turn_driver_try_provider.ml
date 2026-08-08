@@ -632,7 +632,6 @@ let run_try_provider
                 ?on_resume:ctx.on_resume
                 ~agent_ref:local_agent_ref
                 ?cooperative_yield_probe:ctx.cooperative_yield_probe
-                ~goal_detail:ctx.goal
                 blocks
           | None ->
               Runtime_agent.run

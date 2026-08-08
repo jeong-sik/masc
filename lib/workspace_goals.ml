@@ -17,7 +17,7 @@ let error_result_typed ~tool_name ~start_time ~code msg : Tool_result.result =
   in
   Tool_result.make_err
     ~tool_name
-    ~class_:Tool_result.Workflow_rejection
+    ~class_:(failure_class_of_error_code code)
     ~start_time
     ~data
     (Yojson.Safe.to_string data)
@@ -32,7 +32,7 @@ let validation_error_result
   let data = validation_error_assoc errors in
   Tool_result.make_err
     ~tool_name
-    ~class_:Tool_result.Workflow_rejection
+    ~class_:Tool_result.Policy_rejection
     ~start_time
     ~data
     (Yojson.Safe.to_string data)

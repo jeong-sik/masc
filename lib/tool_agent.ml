@@ -7,27 +7,12 @@ type context = {
   agent_name: string;
 }
 
-(* RFC-0189 PR-1b.14 — typed result helpers.
-
-   [json_ok]    : Yojson.Safe.t passes as [~data:json] first-class
-                  (drops the [Yojson.Safe.to_string] round-trip).
-   [text_ok]    : opaque text remains [`String body].
-   [workflow_err_envelope] : error wrapped through
-                  [Tool_args.error_response_typed ~code msg].  Both
-                  call sites (Not_found in get_metrics,
-                  Validation_error in agent_card) are caller-input
-                  rejections.
-   [result_to_response] : [Workspace.update_agent_r] Ok/Error
-                  projection.  Error is classified
-                  [Workflow_rejection] until [Masc_domain] grows
-                  a typed failure_class per error variant — at
-                  that point assignment can move to the domain
-                  layer. *)
+(* Typed result builders for agent handlers. *)
 
 let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 
-let workflow_err_envelope ~tool_name ~start_time ~code msg : Tool_result.result =
+let typed_error_envelope ~tool_name ~start_time ~code msg : Tool_result.result =
   let data =
     Tool_args.error_assoc
       [ "error_code", `String (Tool_args.error_code_to_string code)
@@ -36,7 +21,7 @@ let workflow_err_envelope ~tool_name ~start_time ~code msg : Tool_result.result 
   in
   Tool_result.make_err
     ~tool_name
-    ~class_:Tool_result.Workflow_rejection
+    ~class_:(Tool_args.failure_class_of_error_code code)
     ~start_time
     ~data
     (Yojson.Safe.to_string data)
@@ -143,12 +128,7 @@ let find_agent_by_identity agents raw =
       (fun (agent : Masc_domain.agent) -> String.equal agent.name candidate)
       agents)
 
-(* Issue #8501: Variant SSOT for masc_agent_card.action.  Adding a
-   new constructor forces compilation in [agent_card_action_to_string]
-   AND extends [valid_agent_card_action_strings]; the schema in
-   [tool_schemas_agent.ml] mirrors the SSOT (cycle-aware, sync test).
-   The previous code used a string match with a wildcard `_ -> Get`
-   branch which silently routed any unknown action to Get. *)
+(* Variant SSOT for [masc_agent_card.action]. *)
 type agent_card_action =
   | Agent_card_get
   | Agent_card_refresh
@@ -166,27 +146,13 @@ let agent_card_action_of_string raw =
   | "refresh" -> Some Agent_card_refresh
   | _ -> None
 
-(* masc_agents / masc_agent_update handlers removed (2026-06-09): both read/
-   wrote the disk-backed .masc/agents/ registry whose producer
-   (Workspace_eio.register_agent) had zero call sites. Live agent status is
-   served by the `who` resource (Session.get_agent_statuses). *)
-
 (** Handle masc_get_metrics *)
 let handle_get_metrics ?(tool_name = "masc_get_metrics") ?(start_time = 0.0) ctx args
   : Tool_result.result
   =
-  (* Original used [let*! target = get_string_required] which
-     wrapped "agent_name is required" as a raw message with no envelope.
-     Existing
-     test [test_get_metrics_missing_agent_name] parses
-     [result.message] as JSON expecting [status = "error"], i.e.
-     it was already broken on the raw-message path.  Promote here
-     to [workflow_err_envelope ~code:Validation_error] so the
-     envelope is present *and* the failure_class is correctly
-     [Workflow_rejection]. *)
   let target = get_string args "agent_name" "" in
   if String.equal target "" then
-    workflow_err_envelope ~tool_name ~start_time ~code:Validation_error
+    typed_error_envelope ~tool_name ~start_time ~code:Validation_error
       "agent_name is required"
   else
     let days = get_int args "days" 7 in
@@ -196,7 +162,7 @@ let handle_get_metrics ?(tool_name = "masc_get_metrics") ?(start_time = 0.0) ctx
           (Metrics_store_eio.agent_metrics_to_yojson metrics
            |> metrics_json_with_resolution ~requested:target ~resolved)
     | None ->
-        workflow_err_envelope ~tool_name ~start_time ~code:Not_found
+        typed_error_envelope ~tool_name ~start_time ~code:Not_found
           (Printf.sprintf "no metrics found for agent: %s" target)
 
 (** Create default metrics for agent *)
@@ -313,7 +279,7 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
   let action_raw = get_string args "action" "get" in
   match agent_card_action_of_string action_raw with
   | None ->
-      workflow_err_envelope ~tool_name ~start_time ~code:Validation_error
+      typed_error_envelope ~tool_name ~start_time ~code:Validation_error
         (Printf.sprintf "invalid action %S; expected one of: %s" action_raw
            (String.concat ", " valid_agent_card_action_strings))
   | Some action ->

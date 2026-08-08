@@ -40,7 +40,9 @@ projection into `tool_failure_class` is:
 | `Rate_limited`, `Timeout` | `Transient_error` |
 | `Not_implemented`, `Internal_error` | `Runtime_failure` |
 
-Handlers that need a structured failure use `Tool_args.error_result_typed ~code`.
+Handlers project `Tool_args.error_code` through
+`Tool_args.failure_class_of_error_code` and construct `Tool_result.Failed` at
+the handler boundary.
 Low-level JSON boundaries use the canonical `Tool_args.error_response`,
 `error_response_with`, or `error_assoc` constructors.
 

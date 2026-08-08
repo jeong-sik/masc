@@ -11,17 +11,8 @@
 
     {b Error response format}:
     [error_response] and [ok_response] are serialized boundary helpers only.
-    New tool handlers returning [Tool_result.result] must use
-    [error_result_typed] or [ok_result] so typed payloads never depend on
-    parsing the human-readable message.
-
-    TODO(M-2): Unify the existing error response formats across tool modules:
-    1. [error_response] below — [\{"status":"error","message":...\}]
-    2. Plain string returns — some tools return bare error strings
-    3. [isError: true] — MCP protocol-level error flag (correct for transport)
-    4. [Printf.sprintf] ad-hoc JSON — hand-built JSON strings
-    5. [Yojson.Safe.to_string] inline — direct JSON construction without helper
-    Preferred format: [\{"status":"error","message":"..."\}] via [error_response].
+    Tool handlers returning [Tool_result.result] construct the result at the
+    handler boundary and use these helpers only for its JSON payload.
 *)
 
 let get_string args key default = Safe_ops.json_string ~default key args
@@ -85,7 +76,7 @@ let failure_class_of_error_code = function
     [Tool_result.result] messages. *)
 
 (** Build a JSON error envelope as a [Yojson.Safe.t] node (unserialized).
-    Counterpart to {!ok_response} / {!ok_result} on the success side,
+    Counterpart to {!ok_response} / {!ok_assoc} on the success side,
     but returning the unserialized [Yojson.Safe.t] node so it can be
     composed into a larger structure or returned as
     [(Yojson.Safe.t, _) result]. *)
@@ -129,70 +120,6 @@ let ok_assoc fields : Yojson.Safe.t =
 (** Build a JSON OK response string with additional fields. *)
 let ok_response fields =
   Yojson.Safe.to_string (ok_assoc fields)
-
-(** {1 Tool_result.result Helpers}
-
-    These return structured [Tool_result.result] instead of [(bool * string)].
-    Handlers should use these directly — the dispatch boundary no longer
-    needs [wrap_result] conversion. *)
-
-(** [Tool_result.result] error with machine-readable error code. *)
-let error_result_typed ?tool_name ?start_time ~code msg =
-  let data =
-    error_assoc
-      [ ("error_code", `String (error_code_to_string code))
-      ; ("message", `String msg)
-      ]
-  in
-  let tool_name = Option.value ~default:"" tool_name in
-  let start_time = Option.value ~default:(Time_compat.now ()) start_time in
-  Tool_result.make_err
-    ~tool_name
-    ~class_:(failure_class_of_error_code code)
-    ~start_time
-    ~data
-    (Yojson.Safe.to_string data)
-
-(** [Tool_result.result] success with additional JSON fields. *)
-let ok_result ?tool_name ?start_time fields =
-  let tool_name = Option.value ~default:"" tool_name in
-  let start_time = Option.value ~default:(Time_compat.now ()) start_time in
-  Tool_result.make_ok ~tool_name ~start_time ~data:(ok_assoc fields) ()
-
-(** {1 Parse, Don't Validate — Required Field Extractors}
-
-    Use these for required parameters instead of [get_string args key ""].
-    Returns [Ok value] on success, [Error message] on missing/empty input.
-    The error is deliberately opaque text; callers needing typed fields must
-    construct them explicitly with [error_result_typed].  Combine with [let*!]
-    for early-return chaining. *)
-
-(** Required non-empty string. Trims whitespace. *)
-let get_string_required args key =
-  match Safe_ops.json_string_opt key args with
-  | Some s ->
-      let trimmed = String.trim s in
-      if not (String.equal trimmed "") then Ok trimmed
-      else Error (Printf.sprintf "%s must not be empty" key)
-  | None -> Error (Printf.sprintf "%s is required" key)
-
-(** Required integer. *)
-let get_int_required args key =
-  match Safe_ops.json_int_opt key args with
-  | Some i -> Ok i
-  | None -> Error (Printf.sprintf "%s is required" key)
-
-(** Monadic bind for [('a, string) Result.t] → [Tool_result.result].
-    Chains required field extractions with early error return. *)
-let ( let*! ) r f =
-  match r with
-  | Ok v -> f v
-  | Error e ->
-    Tool_result.error
-      ~failure_class:Tool_result.Policy_rejection
-      ~tool_name:""
-      ~start_time:(Time_compat.now ())
-      e
 
 (** {1 Structured Field Validation}
 
@@ -258,18 +185,6 @@ let validation_error_assoc (errors : field_error list) : Yojson.Safe.t =
 
 let validation_error_response errors =
   validation_error_assoc errors |> Yojson.Safe.to_string
-
-(** Convenience: [Tool_result.result] validation error. *)
-let validation_error_result ?tool_name ?start_time errors =
-  let data = validation_error_assoc errors in
-  let tool_name = Option.value ~default:"" tool_name in
-  let start_time = Option.value ~default:(Time_compat.now ()) start_time in
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Policy_rejection
-    ~start_time
-    ~data
-    (Yojson.Safe.to_string data)
 
 (** {2 Field Validators}
 

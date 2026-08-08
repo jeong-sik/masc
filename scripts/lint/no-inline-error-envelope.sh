@@ -63,7 +63,7 @@ if [[ $count -gt 0 ]]; then
   echo "  - Returns string (msg only)?  Tool_args.error_response msg"
   echo "  - Returns string (+ fields)?  Tool_args.error_response_with fields"
   echo "  - Returns Yojson.Safe.t?      Tool_args.error_assoc fields"
-  echo "  - Returns Tool_result.result? Tool_args.error_result_typed ~code msg"
+  echo "  - Returns Tool_result.result? Tool_result.make_err with Tool_args.failure_class_of_error_code"
   exit 1
 fi
 

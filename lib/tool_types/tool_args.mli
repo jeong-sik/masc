@@ -62,15 +62,18 @@ type error_code =
 
 val error_code_to_string : error_code -> string
 
+(** Canonical projection from a typed tool error code to its failure class. *)
+val failure_class_of_error_code : error_code -> Tool_result.tool_failure_class
+
 (** {1 Raw JSON String Builders}
 
-    These produce plain JSON strings without [Tool_result.result] wrapping.
-    Used by [get_string_required] error paths and other low-level callers. *)
+    These produce JSON nodes or strings without [Tool_result.result]
+    wrapping. *)
 
 (** [{"status":"error", <fields>}] as a [`Assoc] node.  Caller-supplied
     [status] fields are discarded so duplicate JSON keys cannot override
     the canonical envelope status.  Counterpart to {!ok_response} /
-    {!ok_result} on the success side, but returns the *unserialized*
+    {!ok_assoc} on the success side, but returns the *unserialized*
     [Yojson.Safe.t] for embedding in a larger response or returning via
     [(Yojson.Safe.t, _) result]. *)
 val error_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
@@ -97,37 +100,6 @@ val ok_response : (string * Yojson.Safe.t) list -> string
     prepended to the [`Assoc] head and caller-supplied [status] fields are
     discarded. *)
 val ok_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
-
-(** {1 Tool_result.result Helpers}
-
-    These return structured {!Tool_result.result} directly, eliminating the
-    need for [wrap_result] at the dispatch boundary.  Optional
-    [~tool_name] and [~start_time] are forwarded to [Tool_result]
-    constructors; absent metadata defaults to an empty tool name and the
-    current timestamp. *)
-
-val error_result_typed :
-  ?tool_name:string -> ?start_time:float -> code:error_code -> string -> Tool_result.result
-
-val ok_result :
-  ?tool_name:string -> ?start_time:float -> (string * Yojson.Safe.t) list -> Tool_result.result
-
-(** {1 Required field extractors (Parse, Don't Validate)}
-
-    Return [Ok value] on success, [Error message] on missing / empty input.
-    Messages are opaque text; callers that need typed failure fields must use
-    {!error_result_typed}. Combine with {!val-(let*!)} for early-return
-    chaining. *)
-
-(** Trim whitespace; reject empty. *)
-val get_string_required : Yojson.Safe.t -> string -> (string, string) Result.t
-
-val get_int_required : Yojson.Safe.t -> string -> (int, string) Result.t
-
-(** Monadic bind for [('a, string) Result.t] → [Tool_result.result].
-    Chains required field extractions with early error return. *)
-val ( let*! ) :
-  ('a, string) Result.t -> ('a -> Tool_result.result) -> Tool_result.result
 
 (** {1 Structured field validation}
 
@@ -165,9 +137,6 @@ val validation_error_assoc : field_error list -> Yojson.Safe.t
 (** [{"status":"error","error_code":"validation_error",
     "field_errors":[…],"message":"N field error(s)"}] *)
 val validation_error_response : field_error list -> string
-
-val validation_error_result :
-  ?tool_name:string -> ?start_time:float -> field_error list -> Tool_result.result
 
 (** {1 Field validators}
 

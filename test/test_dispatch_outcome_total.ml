@@ -1,19 +1,10 @@
 open Alcotest
 
-(** RFC-0084 PR-10 — Typed Dispatch_outcome.t sum invariants.
-
-    Pins:
-    - 2 variant arms exactly (cardinality drift guard). The sum was
-      collapsed from 5 to 2 arms after the dropped arms
-      (Rejected_by_capability / Rejected_by_pre_hook / Handler_error)
-      were confirmed to have zero producers.
-    - Round-trip: every arm.to_string |> of_string |> to_string preserves the label
-    - String vocabulary parity (handled / no_handler)
-*)
+(** Closed [Dispatch_outcome.t] vocabulary and round-trip invariants. *)
 
 let test_all_arms_cardinality () =
   (check int)
-    "Dispatch_outcome.all_arms enumerates 2 variants (RFC-0084 §6 D3)"
+    "Dispatch_outcome.all_arms enumerates the closed variants"
     2
     (List.length Dispatch_outcome.all_arms)
 ;;
@@ -55,9 +46,6 @@ let test_of_string_unknown_returns_none () =
 ;;
 
 let test_string_vocabulary_parity () =
-  (* Dispatch wraps emit outcome strings "handled" and "no_handler".
-     Both must remain valid arms in the typed sum so the otel_metric_store
-     counter label set is preserved. *)
   (check bool)
     "handled present in typed sum"
     true
@@ -70,12 +58,6 @@ let test_string_vocabulary_parity () =
 
 
 (* ── of_result_option and the label a real dispatch emits ── *)
-
-(* Three sites (Tool_dispatch, Mcp_server_eio_execute,
-   Keeper_tool_registered_runtime) each wrote `match r with Some _ ->
-   "handled" | None -> "no_handler"` by hand while this module's .mli
-   claimed to own that label. They now go through of_result_option +
-   to_string. *)
 
 let test_of_result_option_maps_both_arms () =
   (check bool)
@@ -90,8 +72,7 @@ let test_of_result_option_maps_both_arms () =
        (Dispatch_outcome.of_result_option None))
 ;;
 
-(* Every arm must be reachable from some option input, or one of them has
-   no producer -- the condition that shrank this sum from 5 arms to 2. *)
+(* Every arm must be reachable from the canonical option projection. *)
 let test_of_result_option_reaches_every_arm () =
   let produced =
     [ Dispatch_outcome.of_result_option (Some ()); Dispatch_outcome.of_result_option None ]
@@ -139,7 +120,7 @@ let test_dispatch_emits_the_owned_label () =
 
 let () =
   Alcotest.run
-    "RFC-0084 PR-10 Dispatch_outcome typed"
+    "Dispatch_outcome typed"
     [ ( "dispatch-outcome"
       , [ test_case "all-arms-cardinality" `Quick test_all_arms_cardinality
         ; test_case "to-string-labels" `Quick test_to_string_labels

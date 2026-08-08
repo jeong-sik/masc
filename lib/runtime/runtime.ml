@@ -112,10 +112,11 @@ let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
   List.find_opt (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
 ;;
 
-(* Each [runtime] reference is validated in its consumer's resolution domain:
-   - [Runtime_only] for keeper assignments and media_failover entries.
-   - [Lane_then_runtime] for route ids, where a lane shadows a same-named
-     runtime.
+(* Each [runtime] reference is validated under its field's admission contract:
+   - [Runtime_only] requires a declared runtime id for keeper assignments and
+     media_failover entries. Assignment execution may still resolve a
+     same-named lane first.
+   - [Lane_then_runtime] admits a declared lane or runtime id for route ids.
    Unknown ids are rejected while loading the configuration. *)
 type reference_domain =
   | Runtime_only

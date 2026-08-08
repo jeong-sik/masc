@@ -72,15 +72,16 @@ val all_capabilities_from :
 
 (** {1 Public surface accessors} *)
 
-val public_tool_schemas_from :
+val canonical_tool_schemas_from :
   Masc_domain.tool_schema list -> Masc_domain.tool_schema list
-(** Canonical public-MCP schemas. Duplicate names are rejected. *)
+(** Canonicalized full tool inventory. Duplicate names are rejected. Public
+    surface membership is projected separately through {!surface}. *)
 
-val visible_public_tool_schemas_from :
+val visible_tool_schemas_from :
   ?include_hidden:bool ->
   Masc_domain.tool_schema list ->
   Masc_domain.tool_schema list
-(** [public_tool_schemas_from] filtered through [Tool_catalog.is_visible].
+(** [canonical_tool_schemas_from] filtered through [Tool_catalog.is_visible].
     [include_hidden] defaults to [false]. *)
 
 (** {1 Spawned-agent tool naming} *)

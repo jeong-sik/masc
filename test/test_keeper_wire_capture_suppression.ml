@@ -1,7 +1,7 @@
 (** Response suppression is restricted to typed control checkpoints. Runtime
     budget and completion-contract observations preserve model output. *)
 
-module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
+module Finalize = Masc.Keeper_replay_checkpoint
 module Response_text = Masc.Keeper_agent_run_response_text
 module Keeper_metrics = Keeper_metrics
 module Metrics = Masc.Otel_metric_store
@@ -50,13 +50,20 @@ let test_wire_capture_suppression_reasons_emit_control_metric () =
     (metric_value ~labels:control_labels)
 ;;
 
-(* ── replay_response_text_for_capture ────────────────────────────────── *)
+(* ── consume_replay_response ────────────────────────────────── *)
+
+let consume_response ~suppress_visible_response ~response_text =
+  Finalize.consume_replay_response
+    ~suppress_visible_response
+    ~response_text
+    ~consume:(fun ~response_text -> response_text)
+;;
 
 let test_replay_capture_keeps_visible_response_text () =
   Alcotest.(check (option string))
     "visible response is captured verbatim"
     (Some "Visible reply")
-    (Finalize.replay_response_text_for_capture
+    (consume_response
        ~suppress_visible_response:false
        ~response_text:"Visible reply")
 ;;
@@ -65,7 +72,7 @@ let test_replay_capture_omits_suppressed_response_text () =
   Alcotest.(check (option string))
     "suppressed response is not captured even when response_text is non-empty"
     None
-    (Finalize.replay_response_text_for_capture
+    (consume_response
        ~suppress_visible_response:true
        ~response_text:"leftover text")
 ;;
@@ -74,7 +81,7 @@ let test_replay_capture_omits_blank_response_text () =
   Alcotest.(check (option string))
     "blank replay response is not captured"
     None
-    (Finalize.replay_response_text_for_capture
+    (consume_response
        ~suppress_visible_response:false
        ~response_text:"   ")
 ;;
@@ -93,7 +100,7 @@ let test_replay_capture_preserves_model_reply_before_visible_capture () =
   Alcotest.(check (option string))
     "visible finalized response is captured"
     (Some "First line from model\nVisible reply")
-    (Finalize.replay_response_text_for_capture
+    (consume_response
        ~suppress_visible_response:false
        ~response_text:finalized.response_text)
 ;;
@@ -140,7 +147,7 @@ let () =
             `Quick
             test_wire_capture_suppression_reasons_emit_control_metric
         ] )
-    ; ( "replay_response_text_for_capture"
+    ; ( "consume_replay_response"
       , [ Alcotest.test_case
             "keeps visible response text"
             `Quick

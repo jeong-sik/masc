@@ -389,9 +389,12 @@ let adapter_loop_with_transport
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)
     | Text_message_start { message_id = _; role = _ } ->
         loop ~acc_text ~acc_blocks ~run_id_opt
-    | Custom { name; value = _ } ->
-        Log.Keeper.debug "keeper_chat_slack: custom event %s" name;
-        loop ~acc_text ~acc_blocks ~run_id_opt
+    | Queue_request _
+    | Request_terminal _
+    | Queued_turn_deferred _
+    | Chat_queued _
+    | Reply_details _
+    | Continuation_checkpoint _
     | Oas_stream_connected
     | Oas_stream_message_start _
     | Oas_stream_message_delta _

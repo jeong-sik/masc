@@ -25,6 +25,7 @@ import {
 } from './core'
 import { refreshDevTokenAfterAuthError } from './dev-token'
 import { isKeeperChatReceiptId, parseKeeperQueueRevision } from '../lib/keeper-chat-receipt'
+import type { KeeperChatStreamEvent } from '../lib/keeper-chat-stream-contract'
 import type {
   KeeperCompositeSnapshot,
   FleetCompositeSnapshot,
@@ -285,23 +286,10 @@ export function isTerminalQueuedKeeperMessage(result: QueuedKeeperMessageResult)
 // Keeper turn/token/cost fields are observability data; lifecycle control is explicit.
 // Client-side abort via AbortSignal is the recommended cancellation path.
 
-export interface KeeperChatStreamEvent {
-  type: string
-  threadId?: string
-  runId?: string
-  messageId?: string
-  role?: string
-  delta?: string
-  snapshot?: string
-  message?: string
-  code?: string
-  name?: string
-  value?: unknown
-  timestamp?: number
-  // AG-UI tool call fields (TOOL_CALL_START / TOOL_CALL_ARGS / TOOL_CALL_END)
-  toolCallId?: string
-  toolCallName?: string
-}
+export type {
+  KeeperChatCustomEventName,
+  KeeperChatStreamEvent,
+} from '../lib/keeper-chat-stream-contract'
 
 // --- Direct and operator-mediated messaging ---
 

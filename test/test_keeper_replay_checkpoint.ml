@@ -4,7 +4,7 @@
     assistant response is durable conversation state even when the autonomous
     cycle has no external effect. *)
 
-module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
+module Finalize = Masc.Keeper_replay_checkpoint
 module Replay_prefix = Masc.Keeper_replay_prefix
 
 let message role content =
@@ -508,9 +508,10 @@ let test_autonomous_response_is_durable_conversation () =
   Alcotest.(check (option string))
     "assistant response is durable without an external effect"
     (Some "I will inspect the queue next.")
-    (Finalize.replay_response_text_for_persistence
+    (Finalize.consume_replay_response
        ~suppress_visible_response:false
-       ~response_text:"I will inspect the queue next.")
+       ~response_text:"I will inspect the queue next."
+       ~consume:(fun ~response_text -> response_text))
 ;;
 
 let test_autonomous_turn_persists_cue_and_assistant () =

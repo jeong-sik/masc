@@ -166,6 +166,39 @@ let test_default_instructions_pin_start_transition_workflow () =
        "masc_transition(claim) -> work in a repo-local worktree")
 ;;
 
+let test_full_profile_admission_uses_catalog_direct_call_policy () =
+  let state =
+    Masc.Mcp_server.For_testing.create_state
+      ~base_path:(Filename.get_temp_dir_name ())
+  in
+  let hidden_disallowed = ref 0 in
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+      let metadata = Masc.Tool_catalog.metadata schema.name in
+      if
+        metadata.visibility = Masc.Tool_catalog.Hidden
+        && not metadata.allow_direct_call_when_hidden
+      then incr hidden_disallowed;
+      let expected =
+        Masc.Tool_catalog.is_visible ~include_hidden:true schema.name
+        && Masc.Tool_catalog.allow_direct_call schema.name
+      in
+      check
+        bool
+        (schema.name ^ " Full-profile admission follows catalog policy")
+        expected
+        (Masc.Mcp_server_eio_tool_profile.tool_allowed_in_profile
+           state
+           Masc.Mcp_server_eio_tool_profile.Full
+           schema.name))
+    Masc.Config.raw_all_tool_schemas;
+  check
+    bool
+    "contract corpus includes a hidden direct-call denial"
+    true
+    (!hidden_disallowed > 0)
+;;
+
 let () =
   run
     "mcp-server-eio-tool-profile-capability"
@@ -194,6 +227,10 @@ let () =
             "default-instructions-pin-start-transition-workflow"
             `Quick
             test_default_instructions_pin_start_transition_workflow
+        ; test_case
+            "full-profile-admission-uses-catalog-direct-call-policy"
+            `Quick
+            test_full_profile_admission_uses_catalog_direct_call_policy
         ] )
     ]
 ;;

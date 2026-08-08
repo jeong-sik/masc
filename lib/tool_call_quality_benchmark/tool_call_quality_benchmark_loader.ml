@@ -135,9 +135,9 @@ let benchmark_case_of_yojson json =
   let* forbidden_selectors = selector_list_field json "forbidden_selectors" in
   let* required_selectors = selector_list_field json "required_selectors" in
   let* category =
-    Json_util.get_string json "category"
-    |> Option.value ~default:"tool_use"
-    |> case_category_of_string
+    match Json_util.get_string json "category" with
+    | Some raw -> case_category_of_string raw
+    | None -> Error "tool-call-quality case: category is required"
   in
   let* arg_check_items = list_field json "arg_checks" in
   let* arg_checks = map_m parse_arg_check arg_check_items in

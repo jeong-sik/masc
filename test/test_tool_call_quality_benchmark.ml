@@ -1,6 +1,12 @@
 open Alcotest
 open Masc
 
+let contains_sub haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
+;;
+
 let fixture_cases repo_root =
   Tool_call_quality_benchmark.default_case_set_path ~repo_root
 
@@ -14,6 +20,22 @@ let fixture_runs repo_root =
    workspace source root as DUNE_SOURCEROOT; resolve fixtures against it and
    fall back to cwd for direct (non-dune) invocation. Mirrors
    test_disk_hygiene_script.ml / test_ci_run_tests_script.ml. *)
+let test_loader_requires_case_category () =
+  let path = Filename.temp_file "tcq_cases" ".json" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+       let oc = open_out path in
+       output_string
+         oc
+         {|{"cases":[{"id":"c","prompt":"p","keeper_profiles":["k"],"success_checks":[{"path":"$.status","equals":"completed"}],"expected_tools":[],"forbidden_tools":[],"arg_checks":[]}]}|};
+       close_out oc;
+       match Tool_call_quality_benchmark.load_cases_from_file path with
+       | Ok _ -> fail "a case without a category must not load"
+       | Error msg ->
+         check bool ("names category: " ^ msg) true (contains_sub msg "category"))
+;;
+
 let repo_source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with Some root -> root | None -> Sys.getcwd ()
 
@@ -641,5 +663,7 @@ let () =
              test_case_selectors_resolve_to_live_descriptors;
            test_case "arg check paths exist in descriptor schema" `Quick
              test_arg_check_paths_exist_in_descriptor_schema;
+           test_case "loader requires a case category" `Quick
+             test_loader_requires_case_category;
          ]);
     ]

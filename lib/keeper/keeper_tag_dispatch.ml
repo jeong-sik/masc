@@ -52,7 +52,13 @@ let dispatch
   : Tool_result.result option
   =
   let start_time = Time_compat.now () in
-  let err msg = Tool_result.error ~tool_name:name ~start_time msg in
+  let err msg =
+    Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
+      ~tool_name:name
+      ~start_time
+      msg
+  in
   (* RFC-0189: separate *deliberate caller-misuse rejections* (wrong
      client, wrong surface, deprecated tool) from *runtime/dispatch
      errors* (Tool_local_runtime non-zero exit, try-catch fallback).
@@ -62,7 +68,7 @@ let dispatch
      boundary has no typed failure variant; message text remains opaque. *)
   let workflow_err msg =
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name:name ~start_time msg
   in
   (* Wrap dispatch in try-catch to normalize exceptions into error results.

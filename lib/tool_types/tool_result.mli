@@ -139,10 +139,10 @@ val is_failed : result -> bool
     must use {!make_ok} and pass [~data] directly. *)
 val ok : tool_name:string -> start_time:float -> string -> result
 
-(** Failure result with an opaque string body.  An absent explicit class
-    defaults to [Runtime_failure]; message contents never affect the class. *)
+(** Failure result with an opaque string body.  The producer must supply the
+    failure class explicitly; message contents never affect the class. *)
 val error
-  :  ?failure_class:tool_failure_class option
+  :  failure_class:tool_failure_class
   -> tool_name:string
   -> start_time:float
   -> string

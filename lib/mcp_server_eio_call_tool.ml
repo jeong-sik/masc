@@ -552,7 +552,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Auth.Auth_config_error _ ->
       Tool_result.error
-        ~failure_class:(Some Tool_result.Runtime_failure)
+        ~failure_class:Tool_result.Runtime_failure
         ~tool_name:name
         ~start_time
         "Authentication configuration unavailable"
@@ -561,7 +561,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
          System NotInitialized.  [Runtime_failure] (caller
          cannot fix; the operator must initialise MASC). *)
       Tool_result.error
-        ~failure_class:(Some Tool_result.Runtime_failure)
+        ~failure_class:Tool_result.Runtime_failure
         ~tool_name:name ~start_time
         (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
     | exn ->
@@ -576,7 +576,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             now blanket Runtime preserves operator-visible
             severity (the existing log line stays ERROR). *)
          Tool_result.error
-           ~failure_class:(Some Tool_result.Runtime_failure)
+           ~failure_class:Tool_result.Runtime_failure
            ~tool_name:name ~start_time
            (Printf.sprintf "Internal error: %s" err_detail))
   in

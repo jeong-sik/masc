@@ -494,7 +494,7 @@ let handle_heartbeat ~tool_name ~start_time ctx _args =
        resolve (bind the session, refresh credentials).
        [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time message
 ;;
 

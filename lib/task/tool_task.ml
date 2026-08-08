@@ -89,7 +89,7 @@ and handle_transition ~tool_name ~start_time ctx args =
     (* RFC-0189: schema-rejection — operator passed an unknown
        argument name. [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
         names (String.concat ", " transition_known_args))
@@ -102,7 +102,7 @@ and handle_transition ~tool_name ~start_time ctx args =
   if String.equal action_raw "" then
     (* RFC-0189: required-field violation. [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "action is required (%s)" (String.concat ", " Masc_domain.valid_task_action_strings))
   else
@@ -110,7 +110,7 @@ and handle_transition ~tool_name ~start_time ctx args =
   | Error msg ->
       (* RFC-0189: caller passed an unknown action enum value. *)
       Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time msg
   | Ok action ->
   let action_s = Masc_domain.task_action_to_string action in
@@ -218,7 +218,7 @@ and handle_transition ~tool_name ~start_time ctx args =
       (* RFC-0189: handoff_context parse error — caller passed
          malformed payload. *)
       Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time error
   | Ok handoff_context ->
   if (=) action Masc_domain.Release && strict_release_requires_handoff task_opt
@@ -226,7 +226,7 @@ and handle_transition ~tool_name ~start_time ctx args =
   then
     (* RFC-0189: strict-release-without-handoff = workflow violation. *)
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       "Strict task release requires handoff_context.summary"
   else
@@ -413,38 +413,38 @@ let handle_update_priority ~tool_name ~start_time ctx args =
       (Printf.sprintf "Task %s priority: P%d → P%d" task_id old_priority new_priority)
   | Ok (Workspace.Not_found { task_id }) ->
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name
       ~start_time
       (Printf.sprintf "Task %s not found" task_id)
   | Error Workspace.Not_initialized ->
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name
       ~start_time
       "MASC workspace is not initialized"
   | Error (Workspace.Backlog_read_error detail) ->
     Tool_result.error
-      ~failure_class:(Some Tool_result.Transient_error)
+      ~failure_class:Tool_result.Transient_error
       ~tool_name
       ~start_time
       (Printf.sprintf "Task priority update could not read the backlog: %s" detail)
   | Error (Workspace.Backlog_write_error detail) ->
     Tool_result.error
-      ~failure_class:(Some Tool_result.Transient_error)
+      ~failure_class:Tool_result.Transient_error
       ~tool_name
       ~start_time
       (Printf.sprintf "Task priority update could not commit the backlog: %s" detail)
   | Error (Workspace.Lock_error error) ->
     Tool_result.error
-      ~failure_class:(Some Tool_result.Transient_error)
+      ~failure_class:Tool_result.Transient_error
       ~tool_name
       ~start_time
       (Printf.sprintf "Task priority update could not acquire the backlog lock: %s"
          (Masc_domain.masc_error_to_string error))
   | Error (Workspace.Unexpected_error detail) ->
     Tool_result.error
-      ~failure_class:(Some Tool_result.Runtime_failure)
+      ~failure_class:Tool_result.Runtime_failure
       ~tool_name
       ~start_time
       (Printf.sprintf "Task priority update failed: %s" detail)

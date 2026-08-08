@@ -30,7 +30,7 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
        The producer supplies [Workflow_rejection] explicitly; message text
        never participates in classification. *)
     Some (Tool_result.error
-            ~failure_class:(Some Tool_result.Workflow_rejection)
+            ~failure_class:Tool_result.Workflow_rejection
             ~tool_name ~start_time
             "Broadcast message cannot be empty")
   else
@@ -42,7 +42,7 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
        [tool_misc_web_fetch] / [tool_misc_web_search] for rate
        limits. *)
     Some (Tool_result.error
-            ~failure_class:(Some Tool_result.Transient_error)
+            ~failure_class:Tool_result.Transient_error
             ~tool_name ~start_time
             (Printf.sprintf "Rate limited. %d sec remaining." wait_secs))
   else

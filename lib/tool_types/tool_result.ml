@@ -215,12 +215,11 @@ let ok ~tool_name ~start_time message_str : result =
   Completed { data = `String message_str; metadata = None; tool_name; duration_ms }
 ;;
 
-let error ?(failure_class = None) ~tool_name ~start_time message_str : result =
+let error ~failure_class ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
-  let class_ = Option.value ~default:Runtime_failure failure_class in
   Failed
-    { class_
+    { class_ = failure_class
     ; message = message_str
     ; data = `String message_str
     ; tool_name

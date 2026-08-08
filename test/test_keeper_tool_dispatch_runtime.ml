@@ -3052,6 +3052,7 @@ let workflow_rejection_message =
 let test_tool_result_does_not_infer_task_fsm_rejections_from_message () =
   let result =
     Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"masc_transition"
       ~start_time:(Unix.gettimeofday ())
       workflow_rejection_message
@@ -3273,7 +3274,7 @@ let register_workflow_rejection_probe () =
     ~tool_name:workflow_rejection_probe_tool
     ~handler:(fun ~name ~args:_ ->
       Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~failure_class:Tool_result.Workflow_rejection
         ~tool_name:name
         ~start_time:(Unix.gettimeofday ())
         workflow_rejection_message)

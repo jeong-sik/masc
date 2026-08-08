@@ -22,7 +22,7 @@ let mk_validation_failure ~tool_name =
   (* Mirrors the result Tool_input_validation.validate_args returns: an
      Error with class_ = Policy_rejection. *)
   Tool_result.error
-    ~failure_class:(Some Tool_result.Policy_rejection)
+    ~failure_class:Tool_result.Policy_rejection
     ~tool_name
     ~start_time:(Unix.gettimeofday ())
     "validation_failed: missing required field"

@@ -140,7 +140,6 @@ export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
  *  completed turn observations and never recoverable blocker classes. */
 const WAKEUP_RECOVERABLE_BLOCKERS = new Set<string>([
   'runtime_exhausted',
-  'turn_timeout',
 ])
 
 export function keeperIsStuckOnRecoverableBlocker(keeper: Keeper): boolean {

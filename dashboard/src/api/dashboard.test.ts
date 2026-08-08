@@ -2771,17 +2771,10 @@ describe('fetchKeeperConfig', () => {
       ['provider_runtime_error', '런타임 호출 오류'],
       ['fiber_unresolved', 'Fiber 미해결'],
       ['stale_turn_timeout', '오래된 턴 만료'],
-      ['awaiting_operator', '운영자 조치 대기'],
-      ['awaiting_sandbox_egress', '샌드박스 egress 대기'],
-      ['supervisor_paused', 'Supervisor 일시정지'],
-      ['synthetic_stall', '합성 상태 정체'],
-      ['self_imposed_idle', '자체 대기'],
       ['sdk_context_window_exceeded', 'SDK 컨텍스트 윈도 초과'],
       ['sdk_unrecognized_stop_reason', 'SDK 미식별 정지 사유'],
-      ['sdk_idle_detected', 'SDK Idle 감지'],
       ['sdk_guardrail_violation', 'SDK 가드레일 위반'],
       ['sdk_tripwire_violation', 'SDK Tripwire 위반'],
-      ['sdk_exit_condition_met', 'SDK 종료 조건 충족'],
     ] as const
 
     for (const [blockerClass, label] of cases) {

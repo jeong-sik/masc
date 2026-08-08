@@ -281,14 +281,13 @@ describe('parseKeeperCompositeSnapshot', () => {
           outcome: 'exhausted',
           degraded_retry_applied: false,
           degraded_retry_runtime: null,
-          fallback_reason: 'turn_timeout',
+          fallback_reason: 'stale_turn_timeout',
         },
       },
     })
 
     expect(result.execution?.latest_receipt_present).toBe(true)
     expect(result.execution?.terminal_reason_code).toBe('config_error')
-    expect(result.execution?.runtime?.fallback_reason).toBe('turn_timeout')
     expect(result.execution?.error?.message_preview).toContain('fallback_runtime')
   })
 

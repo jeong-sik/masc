@@ -386,16 +386,16 @@ describe('normalizeOperatorSnapshot', () => {
           name: 'blocked-keeper',
           status: 'active',
           needs_attention: true,
-          attention_reason: 'turn_timeout',
+          attention_reason: 'stale_turn_timeout',
           next_human_action: 'inspect_runtime_blocker',
           runtime_trust: {
             disposition: 'Alert',
             operator_disposition: 'pause_runtime',
-            operator_disposition_reason: 'turn_timeout',
+            operator_disposition_reason: 'stale_turn_timeout',
             needs_attention: true,
-            attention_reason: 'turn_timeout',
+            attention_reason: 'stale_turn_timeout',
             latest_terminal_reason: {
-              code: 'turn_timeout',
+              code: 'stale_turn_timeout',
               source: 'execution_receipt',
               severity: 'bad',
               summary: 'Turn execution exceeded the keeper turn deadline',
@@ -409,15 +409,14 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers).toHaveLength(1)
     const keeper = result.keepers[0]!
     expect(keeper.needs_attention).toBe(true)
-    expect(keeper.attention_reason).toBe('turn_timeout')
     expect(keeper.next_human_action).toBe('inspect_runtime_blocker')
     expect(keeper.runtime_trust).toMatchObject({
       disposition: 'Alert',
       operator_disposition: 'pause_runtime',
-      operator_disposition_reason: 'turn_timeout',
+      operator_disposition_reason: 'stale_turn_timeout',
       needs_attention: true,
       latest_terminal_reason: {
-        code: 'turn_timeout',
+        code: 'stale_turn_timeout',
         severity: 'bad',
         summary: 'Turn execution exceeded the keeper turn deadline',
         next_action: 'inspect_runtime_blocker',

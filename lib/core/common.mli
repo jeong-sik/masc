@@ -54,8 +54,10 @@ type keeper_runtime_store =
   | Keeper_tool_usage
   | Keeper_runtime_manifests
   | Keeper_metrics
+  | Keeper_crash_events
   | Keeper_execution_receipts
   | Keeper_turn_records
+  | Keeper_raw_traces
   | Keeper_reaction_ledger
   | Keeper_trajectories
 (** Canonical child-store names under {!keepers_runtime_dirname}. *)

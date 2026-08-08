@@ -60,8 +60,10 @@ type keeper_runtime_store =
   | Keeper_tool_usage
   | Keeper_runtime_manifests
   | Keeper_metrics
+  | Keeper_crash_events
   | Keeper_execution_receipts
   | Keeper_turn_records
+  | Keeper_raw_traces
   | Keeper_reaction_ledger
   | Keeper_trajectories
 
@@ -69,8 +71,10 @@ let keeper_runtime_store_dirname = function
   | Keeper_tool_usage -> "tool_usage"
   | Keeper_runtime_manifests -> "runtime-manifests"
   | Keeper_metrics -> "metrics"
+  | Keeper_crash_events -> "crash-events"
   | Keeper_execution_receipts -> "execution-receipts"
   | Keeper_turn_records -> "turn-records"
+  | Keeper_raw_traces -> "raw-traces"
   | Keeper_reaction_ledger -> "reaction-ledger"
   | Keeper_trajectories -> "trajectories"
 
@@ -78,8 +82,10 @@ let keeper_runtime_stores =
   [ Keeper_tool_usage
   ; Keeper_runtime_manifests
   ; Keeper_metrics
+  ; Keeper_crash_events
   ; Keeper_execution_receipts
   ; Keeper_turn_records
+  ; Keeper_raw_traces
   ; Keeper_reaction_ledger
   ; Keeper_trajectories
   ]

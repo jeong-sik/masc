@@ -94,7 +94,7 @@ let keeper_runtime_dir config name =
    trace cannot block keeper dispatch and per-turn sink creation stays
    O(1) in lifetime trace volume.  Each turn's [run_ref] (path + seq
    range) recorded in the run result is the index into this store. *)
-let raw_traces_dirname = "raw-traces"
+let raw_traces_dirname = Common.keeper_runtime_store_dirname Common.Keeper_raw_traces
 let raw_trace_file_extension = ".jsonl"
 
 let keeper_raw_trace_dir config name =

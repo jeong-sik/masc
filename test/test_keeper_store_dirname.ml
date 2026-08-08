@@ -19,8 +19,10 @@ let all_stores =
   [ C.Keeper_tool_usage
   ; C.Keeper_runtime_manifests
   ; C.Keeper_metrics
+  ; C.Keeper_crash_events
   ; C.Keeper_execution_receipts
   ; C.Keeper_turn_records
+  ; C.Keeper_raw_traces
   ; C.Keeper_reaction_ledger
   ; C.Keeper_trajectories
   ]
@@ -28,7 +30,9 @@ let all_stores =
 
 let names_are_unchanged () =
   check string "metrics" "metrics" (name C.Keeper_metrics);
+  check string "crash events" "crash-events" (name C.Keeper_crash_events);
   check string "turn records" "turn-records" (name C.Keeper_turn_records);
+  check string "raw traces" "raw-traces" (name C.Keeper_raw_traces);
   check string "execution receipts" "execution-receipts" (name C.Keeper_execution_receipts);
   check string "reaction ledger" "reaction-ledger" (name C.Keeper_reaction_ledger);
   check string "runtime manifests" "runtime-manifests" (name C.Keeper_runtime_manifests);

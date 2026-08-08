@@ -127,6 +127,7 @@ describe('InternalAgentsMonitor', () => {
     expect(container.textContent).toContain('새 기억')
     expect(container.textContent).toContain('낡은 기억')
     expect(container.textContent).toContain('새 근거로 대체됨')
+    expect(screen.getByRole('button', { name: '이 실행의 FULL RAW 열기' })).toBeTruthy()
     expect(memoryApi.fetchKeeperMemoryJournal).toHaveBeenCalledWith(
       'kidsnote',
       500,

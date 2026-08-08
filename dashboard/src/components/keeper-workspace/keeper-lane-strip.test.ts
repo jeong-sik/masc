@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { DashboardKeeperWaitingInventory, DashboardKeeperWaitingRow } from '../../api'
 import type { Keeper } from '../../types'
@@ -119,6 +119,7 @@ describe('KeeperLaneStrip', () => {
       host.remove()
       host = null
     }
+    vi.useRealTimers()
   })
 
   function mount(node: ReturnType<typeof html>): HTMLDivElement {
@@ -145,6 +146,83 @@ describe('KeeperLaneStrip', () => {
     expect(text).toContain('chat_lane')
     expect(text).toContain('keeper finish in flight turn')
     expect(el.querySelector('[data-missing="keeper-lane"]')).toBeNull()
+  })
+
+  it('renders a git-log style timeline newest first without claiming processing priority', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-09T00:00:00Z'))
+    const inventory = inventoryFixture()
+    inventory.keepers[0]!.waiting_on = [
+      {
+        keeper_name: 'sangsu',
+        source: 'external_attention',
+        waiting_on: 'discord-old',
+        wake_producer: 'external_attention_store',
+        since_iso: '2026-08-06T03:59:42Z',
+        next_action: 'keeper_process_external_attention',
+        detail: { event_id: 'evt-old' },
+      },
+      {
+        keeper_name: 'sangsu',
+        source: 'external_attention',
+        waiting_on: 'discord-new',
+        wake_producer: 'external_attention_store',
+        since_iso: '2026-08-08T10:12:03Z',
+        next_action: 'keeper_process_external_attention',
+        detail: { event_id: 'evt-new' },
+      },
+      {
+        keeper_name: 'sangsu',
+        source: 'schedule_waiting',
+        waiting_on: 'masc.keeper_wake',
+        wake_producer: 'schedule_runner',
+        since_iso: '2026-08-08T06:39:09Z',
+        due_at_iso: '2026-08-09T07:29:34Z',
+        next_action: 'wait_until_due',
+        detail: { schedule_id: 'daily-news' },
+      },
+    ]
+    inventory.keepers[0]!.waiting_count = 3
+
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${inventory}
+        ready=${true}
+        loading=${false}
+        error=${null}
+      />
+    `)
+    const rows = Array.from(el.querySelectorAll('[data-testid="keeper-lane-waiting-row"]'))
+    expect(rows.map(row => row.getAttribute('data-waiting-on'))).toEqual([
+      'discord-new',
+      'masc.keeper_wake',
+      'discord-old',
+    ])
+    expect(el.querySelector('[data-testid="keeper-lane-graph"]')).not.toBeNull()
+    expect(el.textContent ?? '').toContain('최신 관측 → 오래된 관측')
+    expect(el.textContent ?? '').toContain('처리 우선순위를 뜻하지 않습니다')
+    expect(el.textContent ?? '').toContain('실행 예정')
+    expect(el.textContent ?? '').toContain('7시간 후')
+    expect(el.textContent ?? '').not.toContain('실행 예정 · 지금')
+  })
+
+  it('discloses the typed evidence carried by one queue node', () => {
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${inventoryFixture()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+      />
+    `)
+    const disclosure = el.querySelector<HTMLDetailsElement>('[data-testid="keeper-lane-waiting-row"] details')
+    expect(disclosure).not.toBeNull()
+    disclosure!.open = true
+    disclosure!.dispatchEvent(new Event('toggle'))
+    expect(disclosure!.textContent ?? '').toContain('wake producer')
+    expect(disclosure!.textContent ?? '').toContain('keeper_chat_queue')
   })
 
   it('marks a server-capped count as a lower bound instead of a total', () => {

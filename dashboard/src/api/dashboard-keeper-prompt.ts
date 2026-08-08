@@ -95,6 +95,7 @@ export async function fetchKeeperLastPrompt(
 
 export type RawTraceTurn = {
   readonly file: string
+  readonly traceId: string | null
   readonly bytes: number
   readonly records: number
   readonly modifiedAt: number
@@ -103,12 +104,20 @@ export type RawTraceTurn = {
 function decodeTurnSummary(raw: unknown): RawTraceTurn | null {
   if (!isRecord(raw)) return null
   const file = asString(raw.file)
+  if (!Object.hasOwn(raw, 'trace_id')) return null
+  let traceId: string | null
+  if (raw.trace_id === null) traceId = null
+  else {
+    const decoded = asString(raw.trace_id)
+    if (decoded == null) return null
+    traceId = decoded
+  }
   const bytes = asNumber(raw.bytes)
   const records = asNumber(raw.records)
   const modifiedAt = asNumber(raw.modified_at)
   if (file == null || bytes == null || records == null || modifiedAt == null) return null
   if (!Number.isSafeInteger(bytes) || !Number.isSafeInteger(records)) return null
-  return { file, bytes, records, modifiedAt }
+  return { file, traceId, bytes, records, modifiedAt }
 }
 
 export async function fetchKeeperRawTraces(
@@ -138,8 +147,8 @@ export async function fetchKeeperRawTraces(
 // A line the server could not parse keeps its position and says so. Collapsing
 // it to an omission would make a damaged trace read as a shorter one.
 export type RawTraceRecord =
-  | { readonly ok: true; readonly record: Record<string, unknown> }
-  | { readonly ok: false; readonly error: string }
+  | { readonly ok: true; readonly raw: string; readonly record: Record<string, unknown> }
+  | { readonly ok: false; readonly raw: string; readonly error: string }
 
 export type RawTracePage = {
   readonly file: string
@@ -150,12 +159,14 @@ export type RawTracePage = {
 
 function decodeRawRecord(raw: unknown): RawTraceRecord | null {
   if (!isRecord(raw)) return null
+  const literal = asString(raw.raw)
+  if (literal == null) return null
   if (raw.ok === true) {
-    return isRecord(raw.record) ? { ok: true, record: raw.record } : null
+    return isRecord(raw.record) ? { ok: true, raw: literal, record: raw.record } : null
   }
   if (raw.ok === false) {
     const error = asString(raw.error)
-    return error == null ? null : { ok: false, error }
+    return error == null ? null : { ok: false, raw: literal, error }
   }
   return null
 }

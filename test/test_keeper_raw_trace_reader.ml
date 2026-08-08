@@ -62,19 +62,29 @@ let with_traces turns f =
   f config trace_dir
 ;;
 
-let line seq record_type =
-  Printf.sprintf {|{"seq":%d,"record_type":"%s"}|} seq record_type
+let line ?session_id seq record_type =
+  let session =
+    match session_id with
+    | None -> ""
+    | Some value -> Printf.sprintf {|,"session_id":"%s"|} value
+  in
+  Printf.sprintf {|{"seq":%d,"record_type":"%s"%s}|} seq record_type session
 ;;
 
 let ok_records records =
-  List.filter_map (function Ok json -> Some json | Error _ -> None) records
+  List.filter_map
+    (fun (record : Reader.turn_record) ->
+       match record.parsed with
+       | Ok json -> Some json
+       | Error _ -> None)
+    records
 ;;
 
 let test_lists_turns_newest_first () =
   with_traces
     [ "turn-100" ^ Support.raw_trace_file_extension, [ line 1 "run_started" ]
     ; ( "turn-300" ^ Support.raw_trace_file_extension
-      , [ line 1 "run_started"; line 2 "run_finished" ] )
+      , [ line ~session_id:"trace-300" 1 "run_started"; line 2 "run_finished" ] )
     ]
     (fun config trace_dir ->
        (* mtime decides the order, so make the intended newest actually newer
@@ -93,7 +103,11 @@ let test_lists_turns_newest_first () =
          Alcotest.(check int)
            "record count is non-blank lines"
            2
-           (match turns with t :: _ -> t.records | [] -> -1))
+           (match turns with t :: _ -> t.records | [] -> -1);
+         Alcotest.(check (option string))
+           "listing carries the exact retained session id"
+           (Some "trace-300")
+           (match turns with t :: _ -> t.trace_id | [] -> None))
 ;;
 
 let test_absent_keeper_directory_is_empty_not_error () =
@@ -105,6 +119,25 @@ let test_absent_keeper_directory_is_empty_not_error () =
       Alcotest.failf
         "a keeper that never ran must not be an error: %s"
         (Reader.read_error_to_string error))
+;;
+
+let test_mixed_session_ids_do_not_claim_an_exact_trace () =
+  with_traces
+    [ ( "turn-mixed" ^ Support.raw_trace_file_extension
+      , [ line ~session_id:"trace-a" 1 "run_started"
+        ; line ~session_id:"trace-b" 2 "run_finished"
+        ] )
+    ]
+    (fun config _trace_dir ->
+       match Reader.list_turns ~config ~keeper ~limit:10 with
+       | Error error ->
+         Alcotest.failf "list failed: %s" (Reader.read_error_to_string error)
+       | Ok [ turn ] ->
+         Alcotest.(check (option string))
+           "mixed sessions fail closed instead of joining the first"
+           None
+           turn.trace_id
+       | Ok turns -> Alcotest.failf "expected one turn, got %d" (List.length turns))
 ;;
 
 (* The file name is a handle, not a path. Every shape below would reach outside
@@ -188,9 +221,29 @@ let test_unparseable_line_keeps_its_position () =
          Alcotest.(check int) "total counts the torn line" 3 records.total_records;
          Alcotest.(check int) "all three positions returned" 3 (List.length records.records);
          Alcotest.(check int) "exactly one is unparseable" 2 (List.length (ok_records records.records));
-         (match records.records with
+         (match List.map (fun (record : Reader.turn_record) -> record.parsed) records.records with
           | [ Ok _; Error _; Ok _ ] -> ()
           | _ -> Alcotest.fail "the torn line must occupy position 2"))
+;;
+
+let test_literal_raw_line_is_retained_before_decode () =
+  let raw = {|{"seq":1, "record_type":"assistant_block", "text":"spacing stays"}|} in
+  with_traces
+    [ "turn-raw" ^ Support.raw_trace_file_extension, [ raw ] ]
+    (fun config _dir ->
+       match
+         Reader.read_turn
+           ~config
+           ~keeper
+           ~file:("turn-raw" ^ Support.raw_trace_file_extension)
+           ~offset:0
+           ~limit:10
+       with
+       | Error error -> Alcotest.failf "read failed: %s" (Reader.read_error_to_string error)
+       | Ok { records = [ record ]; _ } ->
+         Alcotest.(check string) "literal JSONL survives" raw record.raw
+       | Ok records ->
+         Alcotest.failf "expected one record, got %d" (List.length records.records))
 ;;
 
 let test_offset_and_limit_window_the_file () =
@@ -248,12 +301,16 @@ let () =
             test_lists_turns_newest_first
         ; Alcotest.test_case "absent keeper directory is empty, not error" `Quick
             test_absent_keeper_directory_is_empty_not_error
+        ; Alcotest.test_case "mixed session ids have no exact trace" `Quick
+            test_mixed_session_ids_do_not_claim_an_exact_trace
         ] )
     ; ( "reading"
       , [ Alcotest.test_case "missing turn is its own error" `Quick
             test_missing_turn_is_its_own_error
         ; Alcotest.test_case "unparseable line keeps its position" `Quick
             test_unparseable_line_keeps_its_position
+        ; Alcotest.test_case "literal raw line survives decoding" `Quick
+            test_literal_raw_line_is_retained_before_decode
         ; Alcotest.test_case "offset and limit window the file" `Quick
             test_offset_and_limit_window_the_file
         ] )

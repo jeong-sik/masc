@@ -160,9 +160,13 @@ let build_guild_member_request ~token ~guild_id ~user_id () =
 let parse_json_safe s =
   try Some (Yojson.Safe.from_string s) with Yojson.Json_error _ -> None
 
-let field_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
+let unique_field_opt name = function
+  | `Assoc fields ->
+    (match List.filter (fun (key, _) -> String.equal key name) fields with
+     | [] -> Ok None
+     | [ (_, value) ] -> Ok (Some value)
+     | _ -> Error (Printf.sprintf "duplicate response field %S" name))
+  | _ -> Ok None
 
 let error_of_non2xx ~request_id ~status ~body =
   match parse_json_safe body with
@@ -170,13 +174,13 @@ let error_of_non2xx ~request_id ~status ~body =
     Http_status { request_id; code = status; body_bytes = String.length body }
   | Some json ->
       let code =
-        match field_opt "code" json with
-        | Some (`Int c) -> c
-        | _ -> status
+        match unique_field_opt "code" json with
+        | Ok (Some (`Int c)) -> c
+        | Ok _ | Error _ -> status
       in
-      (match field_opt "message" json with
-       | Some (`String _) -> Discord_api { request_id; code }
-       | _ ->
+      (match unique_field_opt "message" json with
+       | Ok (Some (`String _)) -> Discord_api { request_id; code }
+       | Ok _ | Error _ ->
          Http_status
            { request_id; code = status; body_bytes = String.length body })
 
@@ -194,9 +198,16 @@ let parse_response ?request_id ~status ~body () =
              ; body_bytes = String.length body
              })
     | Some json ->
-        (match field_opt "id" json with
-         | Some (`String id) -> Ok id
-         | _ ->
+        (match unique_field_opt "id" json with
+         | Ok (Some (`String id)) -> Ok id
+         | Error reason ->
+           Error
+             (Other
+                { request_id
+                ; reason
+                ; body_bytes = String.length body
+                })
+         | Ok _ ->
            Error
              (Other
                 { request_id

@@ -7,6 +7,8 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+module String_set = Set.Make (String)
+
 let handle_time_now ~args:_ =
   let now_unix = Time_compat.now () in
   let now_iso = Masc_domain.now_iso () in
@@ -435,35 +437,78 @@ let discord_optional_snowflake ~field = function
      | Ok value -> Ok (Some value)
      | Error message -> Error message)
 
+let discord_validate_unique_fields ~context fields =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (key, _) :: rest ->
+      if String_set.mem key seen then
+        Error (Printf.sprintf "%s contains duplicate field %S" context key)
+      else loop (String_set.add key seen) rest
+  in
+  loop String_set.empty fields
+
+let discord_validate_unique_object ~context = function
+  | `Assoc fields -> discord_validate_unique_fields ~context fields
+  | _ -> Error (Printf.sprintf "%s is not an object" context)
+;;
+
 let discord_object_field_string key = function
   | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) when value <> "" -> Ok value
-     | Some `Null | None -> Error (Printf.sprintf "Discord response has no %s" key)
-     | Some _ -> Error (Printf.sprintf "Discord response field %s is not a string" key))
+    (match
+       discord_validate_unique_fields ~context:"Discord response object" fields
+     with
+     | Error message -> Error message
+     | Ok () ->
+       (match List.assoc_opt key fields with
+        | Some (`String value) when value <> "" -> Ok value
+        | Some `Null | None ->
+          Error (Printf.sprintf "Discord response has no %s" key)
+        | Some _ ->
+          Error (Printf.sprintf "Discord response field %s is not a string" key)))
   | _ -> Error "Discord channel response is not an object"
 ;;
 
 let discord_required_snowflake_field ~field key = function
   | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) -> discord_snowflake ~field value
-     | Some _ ->
-       Error (Printf.sprintf "Discord response field %s is not a string" key)
-     | None -> Error (Printf.sprintf "Discord response has no %s" key))
+    (match
+       discord_validate_unique_fields ~context:"Discord response object" fields
+     with
+     | Error message -> Error message
+     | Ok () ->
+       (match List.assoc_opt key fields with
+        | Some (`String value) -> discord_snowflake ~field value
+        | Some _ ->
+          Error (Printf.sprintf "Discord response field %s is not a string" key)
+        | None -> Error (Printf.sprintf "Discord response has no %s" key)))
   | _ -> Error "Discord response item is not an object"
+
+let discord_channel_guild_id json =
+  match discord_required_snowflake_field ~field:"id" "id" json with
+  | Error message -> Error ("Discord channel response: " ^ message)
+  | Ok _ -> discord_object_field_string "guild_id" json
 
 let discord_member_user_id json =
   match json with
   | `Assoc fields ->
-    (match List.assoc_opt "user" fields with
-     | Some (`Assoc user_fields) ->
-       (match List.assoc_opt "id" user_fields with
-        | Some (`String value) -> discord_snowflake ~field:"user.id" value
-        | Some _ -> Error "Discord member user.id is not a string"
-        | None -> Error "Discord member user has no id")
-     | Some _ -> Error "Discord member user is not an object"
-     | None -> Error "Discord member has no user")
+    (match
+       discord_validate_unique_fields ~context:"Discord member object" fields
+     with
+     | Error message -> Error message
+     | Ok () ->
+       (match List.assoc_opt "user" fields with
+        | Some (`Assoc user_fields) ->
+          (match
+             discord_validate_unique_fields
+               ~context:"Discord member user object" user_fields
+           with
+           | Error message -> Error message
+           | Ok () ->
+             (match List.assoc_opt "id" user_fields with
+              | Some (`String value) -> discord_snowflake ~field:"user.id" value
+              | Some _ -> Error "Discord member user.id is not a string"
+              | None -> Error "Discord member user has no id"))
+        | Some _ -> Error "Discord member user is not an object"
+        | None -> Error "Discord member has no user"))
   | _ -> Error "Discord member response item is not an object"
 
 let discord_require_items ~kind validate = function
@@ -650,7 +695,7 @@ let handle_discord_surface_read ~meta ~args ~mode =
                  (Format.asprintf "%a" Discord_rest_client.pp_error error);
                discord_rest_error error
              | Ok channel ->
-               (match discord_object_field_string "guild_id" channel with
+               (match discord_channel_guild_id channel with
                 | Error message ->
                   discord_tool_error ~code:Tool_args.Not_found message
                 | Ok raw_guild_id ->
@@ -736,32 +781,37 @@ let handle_discord_surface_read ~meta ~args ~mode =
 ;;
 
 let handle_surface_read ~config ~(meta : keeper_meta) ~args =
-  match surface_read_mode_of_args args with
+  match
+    discord_validate_unique_object ~context:"keeper_surface_read arguments" args
+  with
   | Error message -> discord_tool_error ~code:Tool_args.Validation_error message
-  | Ok (Discord_channel | Discord_messages | Discord_members | Discord_member as mode) ->
-    handle_discord_surface_read ~meta ~args ~mode
-  | Ok Local_lane ->
-  let surface = Safe_ops.json_string ~default:"" "surface" args in
-  let limit =
-    Safe_ops.json_int ~default:Keeper_surface_read.default_limit "limit" args
-  in
-  let before = Safe_ops.json_float_opt "before" args in
-  let page =
-    Keeper_chat_store.load_page
-      ~base_dir:config.Workspace.base_path
-      ~keeper_name:meta.name
-      ?before
-      ()
-  in
-  let notes =
-    Keeper_person_notes.notes
-      ~base_dir:config.Workspace.base_path
-      ~keeper_name:meta.name
-  in
-  Keeper_surface_read.respond ~surface ~limit
-    ~has_more:page.Keeper_chat_store.has_more
-    ~notes
-    page.Keeper_chat_store.messages
+  | Ok () ->
+    (match surface_read_mode_of_args args with
+     | Error message -> discord_tool_error ~code:Tool_args.Validation_error message
+     | Ok (Discord_channel | Discord_messages | Discord_members | Discord_member as mode) ->
+       handle_discord_surface_read ~meta ~args ~mode
+     | Ok Local_lane ->
+       let surface = Safe_ops.json_string ~default:"" "surface" args in
+       let limit =
+         Safe_ops.json_int ~default:Keeper_surface_read.default_limit "limit" args
+       in
+       let before = Safe_ops.json_float_opt "before" args in
+       let page =
+         Keeper_chat_store.load_page
+           ~base_dir:config.Workspace.base_path
+           ~keeper_name:meta.name
+           ?before
+           ()
+       in
+       let notes =
+         Keeper_person_notes.notes
+           ~base_dir:config.Workspace.base_path
+           ~keeper_name:meta.name
+       in
+       Keeper_surface_read.respond ~surface ~limit
+         ~has_more:page.Keeper_chat_store.has_more
+         ~notes
+         page.Keeper_chat_store.messages)
 ;;
 
 let handle_person_note_set_with_outcome ~config ~(meta : keeper_meta) ~args =

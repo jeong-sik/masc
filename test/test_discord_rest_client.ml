@@ -243,6 +243,17 @@ let test_parse_response_2xx_without_id_is_other () =
       failf "expected Other, got %s"
         (Format.asprintf "%a" R.pp_error e)
 
+let test_parse_response_rejects_duplicate_id () =
+  let body = {|{"id":"first","id":"second"}|} in
+  match R.parse_response ~status:200 ~body () with
+  | Error (R.Other { reason; _ }) ->
+    check bool "duplicate id is named" true
+      (contains_substring ~needle:"duplicate response field \"id\"" reason)
+  | Ok _ -> fail "duplicate response id must not be selected"
+  | Error error ->
+    failf "expected duplicate id rejection, got %s"
+      (Format.asprintf "%a" R.pp_error error)
+
 let test_parse_response_2xx_non_json_is_other () =
   match R.parse_response ~status:200 ~body:"<html>oops</html>" () with
   | Error (R.Other _) -> ()
@@ -589,6 +600,8 @@ let () =
             test_parse_response_2xx_with_id_returns_ok
         ; test_case "2xx without id => Other" `Quick
             test_parse_response_2xx_without_id_is_other
+        ; test_case "duplicate response id => Other" `Quick
+            test_parse_response_rejects_duplicate_id
         ; test_case "2xx non-JSON => Other" `Quick
             test_parse_response_2xx_non_json_is_other
         ; test_case "Discord error envelope => Discord_api" `Quick

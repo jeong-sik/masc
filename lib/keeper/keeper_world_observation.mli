@@ -140,9 +140,10 @@ type world_observation = {
   unclaimed_task_count : int;
   (** Number of unclaimed tasks in the workspace backlog. *)
 
-  claimable_task_count : int;
-  (** Number of unclaimed tasks this keeper can claim with its current tool
-      surface. This is a matched subset of [unclaimed_task_count]. *)
+  claimable_tasks : Keeper_world_observation_inputs.claimable_task_summary list;
+  (** Bounded title projections of the tasks this keeper can claim with its
+      current tool surface, from the same authoritative backlog read as
+      [unclaimed_task_count]. *)
 
   failed_task_count : int;
   (** Number of failed/cancelled tasks in the workspace backlog. *)
@@ -177,6 +178,10 @@ type world_observation = {
       past them, so without this field a keeper never observes its own
       published posts in-prompt. Raw observation only — no dedup gate. *)
 }
+
+val claimable_task_count : world_observation -> int
+(** The exact derived count of [claimable_tasks]. It is not stored separately,
+    so count and rows cannot represent different snapshots. *)
 
 type keeper_cycle_channel =
   | Reactive

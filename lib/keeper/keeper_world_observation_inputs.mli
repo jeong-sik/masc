@@ -20,6 +20,24 @@ type current_task_observation =
       ; error : string
       }
 
+type claimable_task_summary =
+  { task_id : string
+  ; title_preview : string
+  }
+
+type backlog_snapshot =
+  { unclaimed_count : int
+  ; claimable_tasks : claimable_task_summary list
+  ; failed_count : int
+  ; revision : int option
+  }
+
+val read_backlog_snapshot : config:Workspace.config -> meta:keeper_meta -> backlog_snapshot
+(** One source-preserving primary backlog read. [claimable_tasks] and its count,
+    [unclaimed_count], [failed_count], and [revision] therefore cannot describe
+    different backlog revisions. Titles are normalized to one line and bounded
+    to 160 UTF-8-safe bytes for prompt projection. *)
+
 val read_backlog_counts
   :  config:Workspace.config
   -> meta:keeper_meta
@@ -44,11 +62,6 @@ val read_backlog_counts
     {!read_backlog_counts}. A task with no [created_by] has no known author and
     is never excluded. *)
 val task_is_self_authored_todo : meta:keeper_meta -> Masc_domain.task -> bool
-
-val claimable_task_summaries :
-  config:Workspace.config -> meta:keeper_meta -> (string * string) list
-(** The tasks behind [claimable_task_count] -- the same predicates, keeping the
-    rows instead of counting them. A count says work exists and not which work. *)
 
 val read_current_task
   :  config:Workspace.config

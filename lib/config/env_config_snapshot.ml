@@ -470,8 +470,6 @@ let tool_entries =
       "Tool list page size (clamped 10-1024)";
     entry ~default:"(none)" "MASC_PLACEHOLDER_TOOLS_ENABLED"
       "Enable placeholder tool exposure";
-    entry ~default:"(none)" "MASC_PUBLIC_TOOLS_EXTRA"
-      "Extra public tools (comma-separated names); None when unset";
   ]
 
 let web_search_entries =

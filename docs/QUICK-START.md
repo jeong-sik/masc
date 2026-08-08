@@ -219,9 +219,6 @@ masc_claim_next()
 `tools/list`는 기본 공개 surface만 보여준다. hidden/internal tool도 `tools/call`로는 호출 가능하다.
 
 ```bash
-# Add specific tools to the public surface
-MASC_PUBLIC_TOOLS_EXTRA=masc_board_search,masc_pause
-
 # Web search provider control
 MASC_WEB_SEARCH_PROVIDER=brave
 MASC_WEB_SEARCH_FALLBACKS=ddg,bing_rss

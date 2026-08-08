@@ -105,11 +105,26 @@ let test_exec_home_guard ~op path =
           then String.sub trimmed 0 (len - 1)
           else trimmed
         in
+        (* Compare on the separator boundary.  A bare [starts_with
+           ~prefix:home_norm] also fires for a sibling whose name extends
+           HOME's: with HOME=/home/runner it blocked /home/runner-cache, which
+           is not under HOME.
+
+           [home_norm] can already end in a separator -- the normalization above
+           only strips one when the value is longer than one character, so
+           HOME=/ stays "/".  Appending unconditionally would look for a "//"
+           prefix there and block nothing, so append only when it is missing.
+           The equality arm keeps HOME itself blocked, as the bare prefix did. *)
         let home_len = String.length home_norm in
+        let home_prefix =
+          if home_len > 0 && Char.equal home_norm.[home_len - 1] '/'
+          then home_norm
+          else home_norm ^ "/"
+        in
         if
           home_len > 0
-          && String.length path >= home_len
-          && String.starts_with path ~prefix:home_norm
+          && (String.equal path home_norm
+              || String.starts_with path ~prefix:home_prefix)
         then
           raise
             (Test_isolation_breach

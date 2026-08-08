@@ -69,6 +69,69 @@ let test_tmp_write_allowed () =
   (try Sys.remove path with Sys_error _ -> ());
   (try Unix.rmdir dir with Unix.Unix_error _ -> ())
 
+(* A sibling whose name merely extends HOME's is not under HOME.  Matching on
+   the bare prefix also fired for it: with HOME=/home/runner the guard blocked
+   /home/runner-cache and told the author to fix a test setup that was already
+   correct.  HOME is repointed at a temp directory so the probe stays inside the
+   temp tree. *)
+let test_home_sibling_allowed () =
+  disable_escape_hatch ();
+  let real_home = home () in
+  let base =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-9921-sibling-%d" (Unix.getpid ()))
+  in
+  let fake_home = Filename.concat base "home" in
+  let sibling = fake_home ^ "-cache" in
+  let path = Filename.concat sibling "probe.txt" in
+  FC.mkdir_p fake_home;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "HOME" real_home;
+      (try Sys.remove path with Sys_error _ -> ());
+      (try Unix.rmdir sibling with Unix.Unix_error _ -> ());
+      (try Unix.rmdir fake_home with Unix.Unix_error _ -> ());
+      try Unix.rmdir base with Unix.Unix_error _ -> ())
+    (fun () ->
+      Unix.putenv "HOME" fake_home;
+      try
+        FC.mkdir_p sibling;
+        FC.append_file path "ok\n";
+        Alcotest.(check bool) "sibling write succeeded" true (Sys.file_exists path)
+      with FC.Test_isolation_breach msg ->
+        Alcotest.failf
+          "guard fired for %S, which is a sibling of HOME=%S and not under it: %s"
+          path
+          fake_home
+          msg)
+
+(* [HOME=/] is the case a separator boundary can silently open.  The
+   normalization only strips a trailing slash when the value is longer than one
+   character, so HOME stays "/" and every absolute path is under it.  A guard
+   that appends a separator before comparing would look for a "//" prefix and
+   block nothing.  Containers running as root with no home set do use HOME=/. *)
+let test_home_root_blocks_everything () =
+  disable_escape_hatch ();
+  let real_home = home () in
+  let path =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-9921-root-%d.txt" (Unix.getpid ()))
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "HOME" real_home;
+      try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+      Unix.putenv "HOME" "/";
+      try
+        FC.append_file path "must not be written\n";
+        Alcotest.failf
+          "expected Test_isolation_breach with HOME=/, but wrote %S"
+          path
+      with FC.Test_isolation_breach _ -> ())
+
 let test_escape_hatch_allows_home () =
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "1";
   let path = guard_path "_9921_guard_probe_bypass.jsonl" in
@@ -101,6 +164,10 @@ let () =
         test_mkdir_under_home_raises;
       Alcotest.test_case "tmp write allowed" `Quick
         test_tmp_write_allowed;
+      Alcotest.test_case "HOME sibling allowed" `Quick
+        test_home_sibling_allowed;
+      Alcotest.test_case "HOME=/ blocks everything" `Quick
+        test_home_root_blocks_everything;
       Alcotest.test_case "escape hatch allows HOME" `Quick
         test_escape_hatch_allows_home;
     ];

@@ -40,8 +40,6 @@ type t = {
   is_idempotent : bool;
   visibility : Tool_catalog.visibility;
   implementation_status : Tool_catalog.implementation_status;
-  canonical_name : string option;
-  replacement : string option;
   reason : string option;
   allow_direct_call_when_hidden : bool;
   title : string option;
@@ -60,8 +58,6 @@ val create :
   ?is_idempotent:bool ->
   ?visibility:Tool_catalog.visibility ->
   ?implementation_status:Tool_catalog.implementation_status ->
-  ?canonical_name:string ->
-  ?replacement:string ->
   ?reason:string ->
   ?allow_direct_call_when_hidden:bool ->
   ?title:string ->

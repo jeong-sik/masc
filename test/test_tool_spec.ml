@@ -42,8 +42,6 @@ let () =
               spec.mcp_context_required;
             check bool "is_idempotent default" false spec.is_idempotent;
             check bool "allow_direct_call default" false spec.allow_direct_call_when_hidden;
-            check bool "canonical_name default" true (Option.is_none spec.canonical_name);
-            check bool "replacement default" true (Option.is_none spec.replacement);
             check bool "reason default" true (Option.is_none spec.reason);
             check bool "title default" true (Option.is_none spec.title));
           test_case "create with optional args" `Quick (fun () ->

@@ -119,18 +119,26 @@ let test_projection_covers_thinking_and_tool_args () =
     (Some "TOOL_CALL_ARGS")
     (Yojson.Safe.Util.member "type" tool_args |> Yojson.Safe.Util.to_string_option)
 
-let test_projection_rejects_unknown_custom_event () =
+let test_projection_encodes_typed_terminal_event () =
   let _, projected =
     project P.initial
-      (E.Custom { name = "KEEPER_UNTYPED_EVENT"; value = `Null })
+      (E.Request_terminal
+         { request_id = Some "kmsg-request-1"
+         ; keeper_name = "taskmaster"
+         ; status = E.Error
+         ; message = Some "typed failure"
+         })
   in
   let projected = Ag_ui.event_to_json (projected_exn (P.initial, projected)) in
-  Alcotest.(check (option string)) "unsupported event becomes run error"
-    (Some "RUN_ERROR")
-    (Yojson.Safe.Util.member "type" projected |> Yojson.Safe.Util.to_string_option);
-  Alcotest.(check (option string)) "unsupported event is operator-visible"
-    (Some "Unsupported Keeper chat event: KEEPER_UNTYPED_EVENT")
-    (Yojson.Safe.Util.member "message" projected |> Yojson.Safe.Util.to_string_option)
+  Alcotest.(check (option string)) "typed event name"
+    (Some "KEEPER_REQUEST_TERMINAL")
+    (Yojson.Safe.Util.member "name" projected |> Yojson.Safe.Util.to_string_option);
+  let value = Yojson.Safe.Util.member "value" projected in
+  Alcotest.(check (option string)) "typed terminal status"
+    (Some "error")
+    (Yojson.Safe.Util.member "status" value |> Yojson.Safe.Util.to_string_option);
+  Alcotest.(check bool) "typed terminal success" false
+    (Yojson.Safe.Util.member "ok" value |> Yojson.Safe.Util.to_bool)
 
 let () =
   Alcotest.run "keeper_chat_broadcast"
@@ -143,7 +151,7 @@ let () =
             test_projection_preserves_stream_identity
         ; Alcotest.test_case "projection covers thinking and tool args" `Quick
             test_projection_covers_thinking_and_tool_args
-        ; Alcotest.test_case "projection rejects unknown custom event" `Quick
-            test_projection_rejects_unknown_custom_event
+        ; Alcotest.test_case "projection encodes typed terminal event" `Quick
+            test_projection_encodes_typed_terminal_event
         ] )
     ]

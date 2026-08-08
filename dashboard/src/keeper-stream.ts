@@ -42,7 +42,8 @@ import { updatePendingKeeperChatAssistantDraft } from './keeper-chat-pending'
 import { isKeeperChatReceiptId, parseKeeperQueueRevision } from './lib/keeper-chat-receipt'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
-export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
+export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'cancelled', 'rejected'])
+const NON_TERMINAL_REQUEST_STATUSES = new Set(['queued', 'deferred', 'acceptance_uncertain'])
 export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 
 const pendingOasToolBlockIndexes = new Map<string, number>()
@@ -663,7 +664,7 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_CONTENT_BLOCK_START') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
-        const oasBlockIndex = asNumber(value?.index) ?? asNumber(value?.block_index)
+        const oasBlockIndex = asNumber(value?.index)
         const contentType = asString(value?.content_type)
         const toolCallId = asString(value?.tool_call_id)
         const toolName = asString(value?.tool_call_name)
@@ -688,7 +689,7 @@ export function applyKeeperStreamEvent(
         forgetOasToolBlockIndexByIndex(
           keeperName,
           assistantEntryId,
-          asNumber(value?.index) ?? asNumber(value?.block_index),
+          asNumber(value?.index),
         )
         setAssistantStreamState(
           keeperName,
@@ -701,18 +702,10 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_THINKING_DELTA') {
         const value = isRecord(event.value) ? event.value : null
-        const delta = value
-          ? (typeof value.delta === 'string'
-              ? value.delta
-              : typeof value.text === 'string'
-                ? value.text
-                : undefined)
-          : typeof event.value === 'string'
-            ? event.value
-            : undefined
-        const oasBlockIndex = value
-          ? asNumber(value.index) ?? asNumber(value.block_index)
+        const delta = value && typeof value.delta === 'string'
+          ? value.delta
           : undefined
+        const oasBlockIndex = value ? asNumber(value.index) : undefined
         if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { oasBlockIndex })
         else {
           setAssistantStreamState(
@@ -731,7 +724,7 @@ export function applyKeeperStreamEvent(
         forgetOasToolBlockIndexByIndex(
           keeperName,
           assistantEntryId,
-          asNumber(value?.index) ?? asNumber(value?.block_index),
+          asNumber(value?.index),
         )
         recordStreamProtocolError(
           keeperName,
@@ -919,8 +912,11 @@ export function applyKeeperStreamEvent(
         if (currentRequestId && terminalRequestId !== currentRequestId) {
           return null
         }
-        if (!TERMINAL_REQUEST_STATUSES.has(status)) {
+        if (NON_TERMINAL_REQUEST_STATUSES.has(status)) {
           return null
+        }
+        if (!TERMINAL_REQUEST_STATUSES.has(status)) {
+          return 'Keeper request terminal event has invalid status.'
         }
         clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
         if (terminalRequestId) releaseActiveStreamRequestId(terminalRequestId)
@@ -944,7 +940,7 @@ export function applyKeeperStreamEvent(
           return null
         }
         const failed =
-          !ok && ['error', 'lost'].includes(status)
+          !ok && ['error', 'rejected'].includes(status)
         if (failed) {
           const message =
             asString(terminal?.message, '').trim() || 'Keeper request failed'
@@ -988,6 +984,14 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_REPLY_DETAILS') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const details = normalizeKeeperConversationDetails(event.value)
+        if (
+          !details
+          || typeof event.value.reply !== 'string'
+          || !details.turnOutcome
+          || !details.turnRef
+        ) {
+          return 'Keeper reply details event is malformed.'
+        }
         if (details) {
           updateThreadEntry(keeperName, assistantEntryId, entry => {
             const mergedDetails: KeeperConversationDetails = {

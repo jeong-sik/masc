@@ -16,6 +16,9 @@ import {
   applyKeeperStreamEvent,
 } from './keeper-stream'
 import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
+import type { KeeperChatStreamEvent } from './api'
+import { parseSSEMessage } from './schemas/sse'
+import { isRecord } from './lib/type-guards'
 
 function assistantEntry(): void {
   appendThreadEntry('sangsu', {
@@ -199,7 +202,7 @@ describe('applyKeeperStreamEvent', () => {
         type: 'CUSTOM',
         name: 'KEEPER_CHAT_QUEUED',
         value,
-      })).toBe('Keeper queue acceptance has invalid shutdown operation metadata.')
+      } as unknown as KeeperChatStreamEvent)).toBe('Keeper queue acceptance has invalid shutdown operation metadata.')
     }
   })
 
@@ -257,9 +260,9 @@ describe('applyKeeperStreamEvent', () => {
       type: 'CUSTOM',
       name: 'KEEPER_REPLY_DETAILS',
       value: {
-        request_id: 'kmsg_current',
         reply: '완료했습니다.',
         turn_outcome: 'visible_reply',
+        turn_ref: 'trace-current#1',
       },
     })
 
@@ -300,9 +303,9 @@ describe('applyKeeperStreamEvent', () => {
       type: 'CUSTOM',
       name: 'KEEPER_REPLY_DETAILS',
       value: {
-        request_id: 'kmsg_current',
         reply: '큐에서 완료했습니다.',
         turn_outcome: 'visible_reply',
+        turn_ref: 'trace-current#2',
       },
     })
 
@@ -369,9 +372,9 @@ describe('applyKeeperStreamEvent', () => {
       type: 'CUSTOM',
       name: 'KEEPER_REPLY_DETAILS',
       value: {
-        request_id: 'kmsg_current',
         reply: 'posted the answer to #ops on Slack',
         turn_outcome: 'external_effect_completed',
+        turn_ref: 'trace-current#3',
       },
     })
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
@@ -473,7 +476,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(activeStreamRequestId('sangsu')).toBe('kmsg_current')
   })
 
-  it('ignores non-terminal request status events', () => {
+  it('surfaces an invalid request terminal status', () => {
     assistantEntry()
     setActiveStreamRequestId('sangsu', 'kmsg_current')
 
@@ -486,7 +489,7 @@ describe('applyKeeperStreamEvent', () => {
         ok: false,
         message: 'not terminal yet',
       },
-    })).toBeNull()
+    } as unknown as KeeperChatStreamEvent)).toBe('Keeper request terminal event has invalid status.')
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('sending')
@@ -503,6 +506,7 @@ describe('applyKeeperStreamEvent', () => {
       value: {
         reply: 'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
         turn_outcome: 'continuation_checkpoint',
+        turn_ref: 'trace-checkpoint#1',
       },
     })).toBeNull()
 
@@ -520,6 +524,8 @@ describe('applyKeeperStreamEvent', () => {
       name: 'KEEPER_REPLY_DETAILS',
       value: {
         reply: 'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
+        turn_outcome: 'visible_reply',
+        turn_ref: 'trace-visible#1',
       },
     })).toBeNull()
 
@@ -535,6 +541,7 @@ describe('applyKeeperStreamEvent', () => {
       name: 'KEEPER_REPLY_DETAILS',
       value: {
         reply: 'done',
+        turn_outcome: 'visible_reply',
         turn_ref: 'trace-live#42',
       },
     })).toBeNull()
@@ -579,6 +586,7 @@ describe('applyKeeperStreamEvent', () => {
       name: 'KEEPER_REPLY_DETAILS',
       value: {
         reply: 'done',
+        turn_outcome: 'visible_reply',
         turn_ref: 'trace-live#43',
       },
     })).toBeNull()
@@ -608,6 +616,7 @@ describe('applyKeeperStreamEvent', () => {
       value: {
         reply: '작업을 완료했습니다.',
         turn_outcome: 'continuation_checkpoint',
+        turn_ref: 'trace-checkpoint#2',
       },
     })).toBeNull()
 
@@ -624,6 +633,7 @@ describe('applyKeeperStreamEvent', () => {
       value: {
         reply: 'hidden runtime-only observation',
         turn_outcome: 'no_visible_reply',
+        turn_ref: 'trace-no-visible#1',
       },
     })).toBeNull()
 
@@ -920,22 +930,37 @@ describe('applyKeeperQueuedTurnEvent', () => {
     expect(entry?.text).toBe('중간부터 표시')
   })
 
-  it('surfaces a projected unsupported event as a terminal queued error', () => {
+  it.each([
+    ['terminal', { name: 'KEEPER_REQUEST_TERMINAL', value: { status: 'done', ok: true } }],
+    ['reply', { name: 'KEEPER_REPLY_DETAILS', value: { reply: 'done', turn_outcome: 'visible_reply' } }],
+    ['queue', { name: 'KEEPER_CHAT_QUEUED', value: { status: 'queued' } }],
+  ])('terminalizes malformed %s payloads after schema projection', (_label, custom) => {
     queuedEntry('first', firstReceipt, 'queued first')
+    const parsed = parseSSEMessage({
+      type: 'keeper_chat_turn_event',
+      name: 'sangsu',
+      receipt_id: firstReceipt,
+      ts_unix: 1_712_000_000,
+      ag_ui_event: {
+        type: 'CUSTOM',
+        threadId: 'keeper-consumer:sangsu',
+        timestamp: 1_712_000_000,
+        ...custom,
+      },
+    })
+    const projected = parsed && isRecord(parsed.ag_ui_event)
+      ? parsed.ag_ui_event
+      : null
+    expect(projected?.type).toBe('RUN_ERROR')
 
     const error = applyKeeperQueuedTurnEvent('sangsu', {
       receiptId: firstReceipt,
-      event: {
-        type: 'RUN_ERROR',
-        message: 'Unsupported Keeper chat event: KEEPER_UNTYPED_EVENT',
-      },
+      event: projected as unknown as KeeperChatStreamEvent,
     })
-
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'first')
-    expect(error).toBe('Unsupported Keeper chat event: KEEPER_UNTYPED_EVENT')
+    expect(error).toContain('Keeper stream protocol error')
     expect(entry?.delivery).toBe('error')
     expect(entry?.streamState).toBeNull()
-    expect(entry?.text).toContain('KEEPER_UNTYPED_EVENT')
   })
 
   it('does not reopen a terminal history row when a delayed event arrives', () => {

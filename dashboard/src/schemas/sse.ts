@@ -13,8 +13,9 @@ import type {
   SSEEvent,
   SSEEventType,
 } from '../types/sse'
-import { isKeeperChatReceiptId } from '../lib/keeper-chat-receipt'
+import { isKeeperChatReceiptId, parseKeeperQueueRevision } from '../lib/keeper-chat-receipt'
 import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from '../lib/keeper-chat-stream-contract'
+import { isRecord } from '../lib/type-guards'
 
 type SchemaIssue = { path?: string; message: string }
 type SafeParseSuccess<T> = { success: true; data: T }
@@ -221,6 +222,307 @@ function fail<T = never>(path: string | undefined, message: string): SafeParseRe
   return { success: false, error: { issues: [{ path, message }] } }
 }
 
+const KEEPER_STREAM_PROTOCOL_ERROR_KINDS = new Set([
+  'tool_start_duplicate_index',
+  'tool_start_missing_identity',
+  'tool_args_without_start',
+  'tool_stop_without_start',
+  'media_delta_invalid_block',
+  'media_source_unsupported',
+  'media_decode_failed',
+  'media_payload_too_large',
+  'media_persist_failed',
+  'sse_error',
+  'ndjson_error',
+  'sse_parse_failed',
+  'ndjson_parse_failed',
+  'sse_unknown_event_type',
+  'sse_unsupported_part',
+  'sse_unsupported_response',
+  'sse_stream_incomplete',
+])
+const KEEPER_REQUEST_TERMINAL_STATUSES = new Set([
+  'deferred',
+  'queued',
+  'done',
+  'error',
+  'cancelled',
+  'rejected',
+  'acceptance_uncertain',
+])
+const KEEPER_TURN_OUTCOMES = new Set([
+  'visible_reply',
+  'continuation_checkpoint',
+  'external_effect_completed',
+  'external_effect_pending',
+  'no_visible_reply',
+])
+
+function exactCustomObject(
+  value: unknown,
+  name: string,
+  allowedFields: readonly string[],
+): SafeParseResult<Record<string, unknown>> {
+  if (!isRecord(value)) {
+    return fail('ag_ui_event.value', `Expected ${name} object payload`)
+  }
+  const allowed = new Set(allowedFields)
+  const unknown = Object.keys(value).find(key => !allowed.has(key))
+  return unknown
+    ? fail(`ag_ui_event.value.${unknown}`, `Unexpected ${name} payload field`)
+    : ok(value)
+}
+
+function requiredString(
+  value: Record<string, unknown>,
+  field: string,
+): SafeParseResult<true> {
+  return typeof value[field] === 'string' && value[field].trim() !== ''
+    ? ok(true)
+    : fail(`ag_ui_event.value.${field}`, `Expected non-empty ${field}`)
+}
+
+function requiredInteger(
+  value: Record<string, unknown>,
+  field: string,
+  minimum = 0,
+): SafeParseResult<true> {
+  const fieldValue = value[field]
+  return typeof fieldValue === 'number'
+    && Number.isSafeInteger(fieldValue)
+    && fieldValue >= minimum
+    ? ok(true)
+    : fail(`ag_ui_event.value.${field}`, `Expected ${field} integer >= ${minimum}`)
+}
+
+function optionalString(
+  value: Record<string, unknown>,
+  field: string,
+): SafeParseResult<true> {
+  return value[field] === undefined || (typeof value[field] === 'string' && value[field].trim() !== '')
+    ? ok(true)
+    : fail(`ag_ui_event.value.${field}`, `Expected non-empty optional ${field}`)
+}
+
+function validateUsage(value: unknown): SafeParseResult<true> {
+  const result = exactCustomObject(value, 'usage', [
+    'input_tokens',
+    'output_tokens',
+    'total_tokens',
+    'cache_creation_input_tokens',
+    'cache_read_input_tokens',
+    'cost_usd',
+  ])
+  if (!result.success) return result
+  for (const field of [
+    'input_tokens',
+    'output_tokens',
+    'total_tokens',
+    'cache_creation_input_tokens',
+    'cache_read_input_tokens',
+  ]) {
+    const valid = requiredInteger(result.data, field)
+    if (!valid.success) return valid
+  }
+  return result.data.cost_usd === undefined
+    || (typeof result.data.cost_usd === 'number' && Number.isFinite(result.data.cost_usd))
+    ? ok(true)
+    : fail('ag_ui_event.value.usage.cost_usd', 'Expected finite cost_usd')
+}
+
+function validateInFlightPair(value: Record<string, unknown>): SafeParseResult<true> {
+  const hasLane = value.in_flight_lane !== undefined
+  const hasStartedAt = value.in_flight_started_at !== undefined
+  if (hasLane !== hasStartedAt) {
+    return fail('ag_ui_event.value', 'Expected complete in-flight lane and timestamp pair')
+  }
+  if (!hasLane) return ok(true)
+  if (value.in_flight_lane !== 'autonomous' && value.in_flight_lane !== 'chat') {
+    return fail('ag_ui_event.value.in_flight_lane', 'Expected typed in-flight lane')
+  }
+  return typeof value.in_flight_started_at === 'number'
+    && Number.isFinite(value.in_flight_started_at)
+    && value.in_flight_started_at >= 0
+    ? ok(true)
+    : fail('ag_ui_event.value.in_flight_started_at', 'Expected non-negative in-flight timestamp')
+}
+
+function validateKeeperCustomPayload(name: string, payload: unknown): SafeParseResult<true> {
+  if ([
+    'KEEPER_CONNECTED',
+    'KEEPER_STREAM_MESSAGE_STOP',
+    'KEEPER_STREAM_PING',
+    'KEEPER_EXTERNAL_EFFECT_COMPLETED',
+  ].includes(name)) {
+    return payload === null
+      ? ok(true)
+      : fail('ag_ui_event.value', `Expected null ${name} payload`)
+  }
+
+  const allowedFields: Record<string, readonly string[]> = {
+    KEEPER_STREAM_MESSAGE_START: ['provider_message_id', 'model', 'usage'],
+    KEEPER_STREAM_MESSAGE_DELTA: ['stop_reason', 'usage'],
+    KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
+    KEEPER_CONTENT_BLOCK_STOP: ['index'],
+    KEEPER_THINKING_DELTA: ['index', 'delta'],
+    KEEPER_THINKING_SIGNATURE_DELTA: ['index', 'signature_bytes'],
+    KEEPER_MEDIA_DELTA: ['index', 'media_type', 'source_type', 'media_ref'],
+    KEEPER_STREAM_PROTOCOL_ERROR: ['kind', 'index', 'tool_call_id', 'event_type', 'reason', 'raw_bytes'],
+    KEEPER_QUEUE_REQUEST: ['request_id', 'destination_type', 'destination_id', 'channel', 'actor_id', 'status', 'modalities', 'transport', 'metadata'],
+    KEEPER_CHAT_QUEUED: ['keeper_name', 'status', 'queue', 'pending_count', 'inflight_count', 'recovery_required_count', 'chat_waiting', 'receipt_id', 'queue_revision', 'shutdown_operation_id', 'in_flight_lane', 'in_flight_started_at'],
+    KEEPER_QUEUED_TURN_DEFERRED: ['waiting', 'shutdown_operation_id', 'in_flight_lane', 'in_flight_started_at'],
+    KEEPER_CONTINUATION_CHECKPOINT: ['message', 'request_id'],
+    KEEPER_REQUEST_TERMINAL: ['request_id', 'keeper_name', 'status', 'ok', 'message'],
+    KEEPER_REPLY_DETAILS: ['reply', 'turn_outcome', 'turn_ref'],
+  }
+  const object = exactCustomObject(payload, name, allowedFields[name] ?? [])
+  if (!object.success) return object
+  const value = object.data
+
+  switch (name) {
+    case 'KEEPER_STREAM_MESSAGE_START': {
+      const provider = requiredString(value, 'provider_message_id')
+      if (!provider.success) return provider
+      const model = requiredString(value, 'model')
+      if (!model.success) return model
+      return value.usage === undefined ? ok(true) : validateUsage(value.usage)
+    }
+    case 'KEEPER_STREAM_MESSAGE_DELTA': {
+      const stopReason = optionalString(value, 'stop_reason')
+      if (!stopReason.success) return stopReason
+      return value.usage === undefined ? ok(true) : validateUsage(value.usage)
+    }
+    case 'KEEPER_CONTENT_BLOCK_START': {
+      const index = requiredInteger(value, 'index')
+      if (!index.success) return index
+      const contentType = requiredString(value, 'content_type')
+      if (!contentType.success) return contentType
+      const toolId = optionalString(value, 'tool_call_id')
+      return toolId.success ? optionalString(value, 'tool_call_name') : toolId
+    }
+    case 'KEEPER_CONTENT_BLOCK_STOP':
+      return requiredInteger(value, 'index')
+    case 'KEEPER_THINKING_DELTA': {
+      const index = requiredInteger(value, 'index')
+      return index.success ? requiredString(value, 'delta') : index
+    }
+    case 'KEEPER_THINKING_SIGNATURE_DELTA': {
+      const index = requiredInteger(value, 'index')
+      return index.success ? requiredInteger(value, 'signature_bytes') : index
+    }
+    case 'KEEPER_MEDIA_DELTA': {
+      const index = requiredInteger(value, 'index')
+      if (!index.success) return index
+      for (const field of ['media_type', 'media_ref']) {
+        const valid = requiredString(value, field)
+        if (!valid.success) return valid
+      }
+      return value.source_type === 'base64'
+        || value.source_type === 'url'
+        || value.source_type === 'file_id'
+        ? ok(true)
+        : fail('ag_ui_event.value.source_type', 'Expected typed media source')
+    }
+    case 'KEEPER_STREAM_PROTOCOL_ERROR': {
+      if (typeof value.kind !== 'string' || !KEEPER_STREAM_PROTOCOL_ERROR_KINDS.has(value.kind)) {
+        return fail('ag_ui_event.value.kind', 'Expected typed stream protocol error kind')
+      }
+      for (const field of ['tool_call_id', 'event_type', 'reason']) {
+        const valid = optionalString(value, field)
+        if (!valid.success) return valid
+      }
+      if (value.index !== undefined) {
+        const index = requiredInteger(value, 'index')
+        if (!index.success) return index
+      }
+      return value.raw_bytes === undefined ? ok(true) : requiredInteger(value, 'raw_bytes')
+    }
+    case 'KEEPER_QUEUE_REQUEST': {
+      for (const field of ['request_id', 'destination_id', 'channel']) {
+        const valid = requiredString(value, field)
+        if (!valid.success) return valid
+      }
+      if (value.destination_type !== 'keeper' || value.status !== 'queued' || value.transport !== 'sse') {
+        return fail('ag_ui_event.value', 'Expected fixed Keeper queue request discriminants')
+      }
+      if (value.actor_id !== null && (typeof value.actor_id !== 'string' || value.actor_id.trim() === '')) {
+        return fail('ag_ui_event.value.actor_id', 'Expected actor_id string or null')
+      }
+      if (!Array.isArray(value.modalities) || !value.modalities.every(item => typeof item === 'string' && item.trim() !== '')) {
+        return fail('ag_ui_event.value.modalities', 'Expected non-empty string modalities')
+      }
+      if (!isRecord(value.metadata) || !Object.values(value.metadata).every(item => typeof item === 'string')) {
+        return fail('ag_ui_event.value.metadata', 'Expected string metadata object')
+      }
+      return ok(true)
+    }
+    case 'KEEPER_CHAT_QUEUED': {
+      for (const field of ['keeper_name', 'receipt_id', 'queue_revision']) {
+        const valid = requiredString(value, field)
+        if (!valid.success) return valid
+      }
+      if (typeof value.receipt_id !== 'string' || !isKeeperChatReceiptId(value.receipt_id)) {
+        return fail('ag_ui_event.value.receipt_id', 'Expected durable Keeper receipt ID')
+      }
+      if (typeof value.queue_revision !== 'string' || parseKeeperQueueRevision(value.queue_revision) === null) {
+        return fail('ag_ui_event.value.queue_revision', 'Expected Keeper queue revision')
+      }
+      if (value.status !== 'queued' || value.queue !== 'keeper_chat_queue') {
+        return fail('ag_ui_event.value', 'Expected fixed Keeper queued discriminants')
+      }
+      for (const field of ['pending_count', 'inflight_count', 'recovery_required_count']) {
+        const valid = requiredInteger(value, field)
+        if (!valid.success) return valid
+      }
+      if (typeof value.pending_count !== 'number' || value.pending_count < 1 || typeof value.chat_waiting !== 'boolean') {
+        return fail('ag_ui_event.value', 'Expected pending queued inventory')
+      }
+      if (value.shutdown_operation_id !== null && (typeof value.shutdown_operation_id !== 'string' || value.shutdown_operation_id.trim() === '')) {
+        return fail('ag_ui_event.value.shutdown_operation_id', 'Expected shutdown operation ID or null')
+      }
+      return validateInFlightPair(value)
+    }
+    case 'KEEPER_QUEUED_TURN_DEFERRED': {
+      const waiting = requiredInteger(value, 'waiting')
+      if (!waiting.success) return waiting
+      if (value.shutdown_operation_id !== null && (typeof value.shutdown_operation_id !== 'string' || value.shutdown_operation_id.trim() === '')) {
+        return fail('ag_ui_event.value.shutdown_operation_id', 'Expected shutdown operation ID or null')
+      }
+      return validateInFlightPair(value)
+    }
+    case 'KEEPER_CONTINUATION_CHECKPOINT': {
+      const message = requiredString(value, 'message')
+      return message.success ? optionalString(value, 'request_id') : message
+    }
+    case 'KEEPER_REQUEST_TERMINAL': {
+      const keeperName = requiredString(value, 'keeper_name')
+      if (!keeperName.success) return keeperName
+      const requestId = optionalString(value, 'request_id')
+      if (!requestId.success) return requestId
+      const message = optionalString(value, 'message')
+      if (!message.success) return message
+      if (typeof value.status !== 'string' || !KEEPER_REQUEST_TERMINAL_STATUSES.has(value.status)) {
+        return fail('ag_ui_event.value.status', 'Expected typed terminal status')
+      }
+      const expectedOk = ['deferred', 'queued', 'done', 'acceptance_uncertain'].includes(value.status)
+      return value.ok === expectedOk
+        ? ok(true)
+        : fail('ag_ui_event.value.ok', 'Terminal ok flag does not match status')
+    }
+    case 'KEEPER_REPLY_DETAILS': {
+      if (typeof value.reply !== 'string') {
+        return fail('ag_ui_event.value.reply', 'Expected reply string')
+      }
+      const turnRef = requiredString(value, 'turn_ref')
+      if (!turnRef.success) return turnRef
+      return typeof value.turn_outcome === 'string' && KEEPER_TURN_OUTCOMES.has(value.turn_outcome)
+        ? ok(true)
+        : fail('ag_ui_event.value.turn_outcome', 'Expected typed Keeper turn outcome')
+    }
+  }
+  return fail('ag_ui_event.name', 'Expected a supported Keeper custom event name')
+}
+
 function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseResult<true> {
   if (
     typeof value.type !== 'string'
@@ -301,14 +603,13 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
       ) {
         return fail('ag_ui_event.name', 'Expected a supported Keeper custom event name')
       }
-      return Object.prototype.hasOwnProperty.call(value, 'value')
-        ? ok(true)
-        : fail('ag_ui_event.value', 'Expected Keeper custom event value')
+      if (!Object.prototype.hasOwnProperty.call(value, 'value')) {
+        return fail('ag_ui_event.value', 'Expected Keeper custom event value')
+      }
+      return validateKeeperCustomPayload(value.name, value.value)
   }
   return fail('ag_ui_event.type', 'Expected a supported AG-UI event type')
 }
-
-import { isRecord } from '../lib/type-guards'
 
 function isOptionalString(value: unknown): boolean {
   return value == null || typeof value === 'string'
@@ -423,6 +724,32 @@ export const AttributionSchema = schema<Attribution>((value) => {
 export type { Attribution }
 
 export type SSEMessage = SSEEvent
+
+function malformedKeeperTurnProjection(
+  raw: unknown,
+  issues: SchemaIssue[],
+): SSEMessage | null {
+  if (!isRecord(raw) || raw.type !== 'keeper_chat_turn_event') return null
+  if (typeof raw.name !== 'string' || raw.name.trim() === '') return null
+  if (typeof raw.receipt_id !== 'string' || !isKeeperChatReceiptId(raw.receipt_id)) return null
+  const detail = issues[0]?.message ?? 'invalid Keeper turn event'
+  const timestamp = typeof raw.ts_unix === 'number' && Number.isFinite(raw.ts_unix)
+    ? raw.ts_unix
+    : Date.now() / 1000
+  return {
+    type: 'keeper_chat_turn_event',
+    name: raw.name,
+    receipt_id: raw.receipt_id,
+    ts_unix: timestamp,
+    ag_ui_event: {
+      type: 'RUN_ERROR',
+      threadId: `keeper-consumer:${raw.name}`,
+      timestamp,
+      message: `Keeper stream protocol error: ${detail}`,
+      code: 'invalid_event_payload',
+    },
+  } as SSEMessage
+}
 
 export const SSEMessageSchema = schema<SSEMessage>((value) => {
   if (!isRecord(value)) return fail(undefined, 'Expected SSE message object')
@@ -644,5 +971,7 @@ export function parseSSEMessage(raw: unknown): SSEMessage | null {
   const result = SSEMessageSchema.safeParse(raw)
   if (result.success) return result.data
   logSchemaDrift(raw, result.error.issues)
+  const protocolError = malformedKeeperTurnProjection(raw, result.error.issues)
+  if (protocolError) return protocolError
   return null
 }

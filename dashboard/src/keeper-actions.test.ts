@@ -1658,7 +1658,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       opts.onEvent({
         type: 'CUSTOM',
         name: 'KEEPER_QUEUE_REQUEST',
-        value: { request_id: 'kmsg_echo_signal', status: 'running' },
+        value: { request_id: 'kmsg_echo_signal', status: 'queued' },
       })
       throw abortError()
     })
@@ -2033,9 +2033,9 @@ describe('sendKeeperThreadMessage stream outcome', () => {
         type: 'CUSTOM',
         name: 'KEEPER_REPLY_DETAILS',
         value: {
-          runtime_class: 'keeper',
           reply: '',
           turn_outcome: 'no_visible_reply',
+          turn_ref: 'trace-no-visible#1',
         },
       },
       { type: 'RUN_FINISHED' },

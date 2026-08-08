@@ -776,7 +776,6 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
         (String.concat ", "
            (List.map
               (function
-                | Keeper_chat_events.Custom { name; _ } -> "custom:" ^ name
                 | Keeper_chat_events.Oas_content_block_start _ ->
                     "oas_block_start"
                 | Keeper_chat_events.Oas_content_block_stop _ ->
@@ -879,7 +878,6 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
         (String.concat ", "
            (List.map
               (function
-                | Keeper_chat_events.Custom { name; _ } -> "custom:" ^ name
                 | Keeper_chat_events.Oas_content_block_start _ ->
                     "oas_block_start"
                 | Keeper_chat_events.Oas_content_block_stop _ ->

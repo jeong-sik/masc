@@ -108,7 +108,12 @@ function finishFirstTurn(): void {
     event: {
       type: 'CUSTOM',
       name: 'KEEPER_REQUEST_TERMINAL',
-      value: { request_id: 'kmsg-fixture-1', status: 'done', ok: true },
+      value: {
+        request_id: 'kmsg-fixture-1',
+        keeper_name: KEEPER,
+        status: 'done',
+        ok: true,
+      },
     },
   })
 }

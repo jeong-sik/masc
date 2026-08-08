@@ -41,9 +41,13 @@ grep -oE '\(name test_[a-z_0-9]+\)' test/dune | sed 's/(name //;s/)//' >> "$decl
 # Explicitly named aliases, e.g. (alias runtest-dashboard-http-behavior-contracts).
 grep -oE '\(alias runtest-[a-z_0-9-]+\)' test/dune \
   | sed 's/(alias runtest-//;s/)//' >> "$declared"
-# Stanzas pulled in through include files.
+# Stanzas pulled in through include files. A .inc file that test/dune does not
+# (include ...) declares nothing: dune answers "Alias ... specified on the
+# command line is empty" for its target, which is the failure this check
+# exists to catch, so existence on disk is not enough.
 for inc in test/stanzas/*.inc; do
   [ -e "$inc" ] || continue
+  grep -qF "(include stanzas/$(basename "$inc"))" test/dune || continue
   grep -oE '\(name test_[a-z_0-9]+\)' "$inc" | sed 's/(name //;s/)//' >> "$declared"
 done
 sort -u -o "$declared" "$declared"

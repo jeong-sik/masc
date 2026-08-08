@@ -1375,7 +1375,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          constraint_targets="@test/runtest-test_tool_schema_constraint_enforcement @test/runtest-test_keeper_artifact_read_request @test/runtest-test_tool_input_validation"
+          constraint_targets="@test/runtest-test_tool_schema_constraint_enforcement @test/runtest-test_keeper_artifact_read_request @test/runtest-test_tool_input_validation @test/runtest-test_tool_schema_oas_boundary"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${constraint_targets}"
 
       # The tool-call quality benchmark scores keeper runs against selectors

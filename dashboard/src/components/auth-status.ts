@@ -61,7 +61,7 @@ function authBadgeSummary(): {
   const summary = shellAuthSummary.value
   const remote = isRemoteAccess()
   const validated = summary?.token_valid === true
-  const role = summary?.effective_role ?? summary?.default_role ?? 'unknown'
+  const role = summary?.effective_role ?? 'unknown'
   const actor = summary?.effective_agent ?? summary?.token_agent ?? currentDashboardActor()
   // `missing_token` says no credential was sent. That is the operator's next
   // action, not a broken system, and it already has a label below. Folding it
@@ -136,7 +136,7 @@ async function handleSetToken(): Promise<void> {
   popoverOpen.value = false
   if (summary?.token_valid) {
     const actor = summary.effective_agent ?? summary.token_agent ?? currentDashboardActor()
-    const role = summary.effective_role ?? summary.default_role ?? 'unknown'
+    const role = summary.effective_role ?? 'unknown'
     showToast(`Verified @${actor} · ${role}`, 'success')
     return
   }
@@ -279,7 +279,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
   const storedActor = readStoredDashboardActorName()
   const requestedActor = summary?.requested_agent ?? resolveDashboardActorName() ?? 'dashboard'
   const effectiveActor = summary?.effective_agent ?? summary?.token_agent ?? requestedActor
-  const effectiveRole = summary?.effective_role ?? summary?.default_role ?? 'unknown'
+  const effectiveRole = summary?.effective_role ?? 'unknown'
   const mutationAccess = dashboardAuthAccess(summary, 'worker')
   const blockReason = cleanErrorMessage(summary?.auth_error_detail ?? summary?.keeper_msg_error ?? mutationAccess.reason)
     ?? 'None'

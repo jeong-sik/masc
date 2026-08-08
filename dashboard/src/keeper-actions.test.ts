@@ -5,7 +5,7 @@ const { runOperatorAction } = vi.hoisted(() => ({ runOperatorAction: vi.fn() }))
 const { invalidateDashboardCache, refreshDashboard, shellAuthSummary } = vi.hoisted(() => ({
   invalidateDashboardCache: vi.fn(),
   refreshDashboard: vi.fn(async () => undefined),
-  shellAuthSummary: { value: { effective_role: 'admin', default_role: 'admin' } },
+  shellAuthSummary: { value: { effective_role: 'admin' } },
 }))
 const {
   cancelKeeperChatPendingReceipt,
@@ -129,7 +129,7 @@ import type { ToolCallEntry } from './api/dashboard'
 import type { ChatBlock, KeeperConversationAttachment, KeeperStatusDetail } from './types'
 
 beforeEach(() => {
-  shellAuthSummary.value = { effective_role: 'admin', default_role: 'admin' }
+  shellAuthSummary.value = { effective_role: 'admin' }
   fetchKeeperChatPending.mockReset()
   fetchKeeperChatPending.mockImplementation(async (keeperName: string) => ({
     keeperName,
@@ -260,7 +260,7 @@ describe('reconcileKeeperChatReceipts', () => {
   })
 
   it('does not call the Admin-only receipt endpoint for a Worker session', async () => {
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' }
+    shellAuthSummary.value = { effective_role: 'worker' }
 
     await reconcileKeeperChatReceipts('echo')
 

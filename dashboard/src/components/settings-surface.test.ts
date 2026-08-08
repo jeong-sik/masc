@@ -440,8 +440,6 @@ describe('SettingsSurface', () => {
       status: 'ready',
       warnings: [],
       config_root: { path: '/workspace/.masc/config', exists: true, source: 'derived' },
-      runtime_authoring: { path: '/workspace/.masc/config/runtime.toml', exists: true, source: 'derived' },
-      runtime: { path: MOCK_RUNTIME_PATH, exists: true, source: 'runtime.toml' },
       prompts: { path: '/workspace/.masc/config/prompts', exists: true, source: 'derived' },
       keepers: { path: '/workspace/.masc/keepers', exists: true, source: 'derived' },
     }
@@ -762,7 +760,10 @@ describe('SettingsSurface', () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain('/workspace/.masc')
-      expect(container.textContent).toContain(MOCK_RUNTIME_PATH)
+      // The Runtime TOML row has no item in config_resolution — the server's
+      // resolution record has no such field — so it renders the resolved
+      // runtime config_path, which is what production shows.
+      expect(container.textContent).toContain('/cfg/runtime.toml')
       expect(container.textContent).toContain('MASC_BASE_PATH')
     })
     expect(container.textContent).not.toContain('format-checked only')

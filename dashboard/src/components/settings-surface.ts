@@ -413,7 +413,7 @@ function AccountSettingsSection() {
   const [clearing, setClearing] = useState(false)
   const summary = shellAuthSummary.value
   const actor = summary?.effective_agent ?? summary?.token_agent ?? currentDashboardActor()
-  const role = summary?.effective_role ?? summary?.default_role ?? 'unknown'
+  const role = summary?.effective_role ?? 'unknown'
   const tokenPresent = dashboardBearerToken() !== null
   const tokenMeta = getStoredTokenMeta()
   const tokenState = summary?.token_valid === true
@@ -1684,7 +1684,7 @@ export function SettingsSurface() {
                   ${hasConfigPathResolution || runtimeConfigPath
                     ? html`
                       <div class="set-sub-h">Config path resolution</div>
-                      <${PathTruthRow} label="Runtime TOML" item=${configResolution?.runtime ?? null} fallback=${runtimeConfigPath} />
+                      <${PathTruthRow} label="Runtime TOML" fallback=${runtimeConfigPath} />
                       ${hasConfigPathResolution || dashboardConfigStatus === 'ready'
                         ? html`<${PathTruthRow} label="Config root" item=${configResolution?.config_root ?? null} fallback=${concreteConfigValue(configDirEntry)} />`
                         : null}

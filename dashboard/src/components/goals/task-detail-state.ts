@@ -340,7 +340,7 @@ async function loadActivity(task: Task): Promise<void> {
   try {
     const keeper = findKeeper(task.assignee)
     const timelineName = keeper?.agent_name ?? task.assignee
-    const isKeeper = task.assignee_kind === 'keeper' || keeper !== null
+    const isKeeper = keeper !== null
     const trajectoryName = isKeeper ? task.assignee : null
 
     const [timeline, trajectory] = await Promise.all([
@@ -365,7 +365,7 @@ export function hasActivityTab(task: Task): boolean {
 
 /** Whether the assignee is a keeper (affects tool call visibility). */
 export function isKeeperAssignee(task: Task): boolean {
-  return task.assignee_kind === 'keeper' || (task.assignee ? findKeeper(task.assignee) !== null : false)
+  return task.assignee ? findKeeper(task.assignee) !== null : false
 }
 
 // -- Goal relationship (keeper's active goals) ----------------------

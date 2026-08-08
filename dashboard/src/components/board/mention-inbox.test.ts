@@ -11,7 +11,6 @@ function auth(overrides: Partial<DashboardShellAuthSummary> = {}): DashboardShel
   return {
     enabled: true,
     require_token: false,
-    default_role: null,
     token_present: true,
     token_valid: true,
     token_agent: 'dashboard',

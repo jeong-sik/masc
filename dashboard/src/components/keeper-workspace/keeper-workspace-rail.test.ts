@@ -873,7 +873,7 @@ describe('KeeperWorkspaceRail', () => {
   })
 
   it('runs overflow compaction without force through the existing MCP tool', async () => {
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
     // Use lifecycle_phase (the canonical wire field per Keeper type —
     // `phaseTokenFromKeeper` reads `keeperDisplayStatus(keeper)` which
     // routes through `lifecycle_phase`, not the deprecated `phase` alias).
@@ -890,7 +890,7 @@ describe('KeeperWorkspaceRail', () => {
   })
 
   it('confirms before forcing compaction on running keepers', async () => {
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
     const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Running' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
@@ -908,7 +908,7 @@ describe('KeeperWorkspaceRail', () => {
 
   it('does not compact running keepers when force confirmation is cancelled', async () => {
     vi.mocked(requestConfirm).mockResolvedValueOnce(false)
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
     const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Running' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
@@ -924,7 +924,7 @@ describe('KeeperWorkspaceRail', () => {
     vi.mocked(callMcpTool).mockResolvedValueOnce(
       '{"name":"masc-improver","queued":true,"queue_outcome":"enqueued","stimulus":"manual_compaction_requested"}',
     )
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
     const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
@@ -947,7 +947,7 @@ describe('KeeperWorkspaceRail', () => {
 
   it('reports completion only when the tool returns measured before/after tokens', async () => {
     vi.mocked(callMcpTool).mockResolvedValueOnce('{"before_tokens":1000,"after_tokens":800}')
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
     const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 

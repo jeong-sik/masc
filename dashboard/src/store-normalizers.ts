@@ -71,7 +71,7 @@ export function normalizeAgent(raw: unknown): Agent | null {
     keeper_id: asString(raw.keeper_id) ?? null,
     status: normalizeAgentStatus(raw.status),
     current_task: asString(raw.current_task) ?? null,
-    joined_at: asString(raw.joined_at),
+    session_bound_at: asString(raw.session_bound_at),
     last_seen: asString(raw.last_seen),
     capabilities: asStringArray(raw.capabilities),
     emoji: asString(raw.emoji),
@@ -119,7 +119,6 @@ export function normalizeTask(raw: unknown): Task | null {
     status_raw: asString(raw.status_raw) ?? null,
     priority: asNumber(raw.priority),
     assignee: asString(raw.assignee),
-    assignee_kind: asString(raw.assignee_kind) ?? null,
     description: asString(raw.description),
     created_at: asString(raw.created_at),
     updated_at: asString(raw.updated_at),
@@ -141,7 +140,7 @@ export function normalizeMessage(raw: unknown): Message | null {
   const from = asString(raw.from) ?? asString(raw.from_agent)
   const content = asString(raw.content) ?? ''
   const timestamp = asString(raw.timestamp)
-  const workspace = asString(raw.workspace) ?? asString(raw.workspace_id) ?? asString(raw.channel) ?? asString(raw.channel_name)
+  const workspace = asString(raw.workspace) ?? asString(raw.workspace_id) ?? asString(raw.channel)
   return {
     id: asString(raw.id),
     seq: asNumber(raw.seq),
@@ -162,15 +161,10 @@ export function normalizeExecutionSummary(raw: unknown): DashboardExecutionSumma
   return {
     active_operations: asNumber(raw.active_operations),
     blocked_operations: asNumber(raw.blocked_operations),
-    runtime_pressure: asNumber(raw.runtime_pressure),
     worker_alerts: asNumber(raw.worker_alerts),
     continuity_alerts: asNumber(raw.continuity_alerts),
     priority_items: asNumber(raw.priority_items),
-    todo_tasks: asNumber(raw.todo_tasks),
-    claimed_tasks: asNumber(raw.claimed_tasks),
-    running_tasks: asNumber(raw.running_tasks),
     done_tasks: asNumber(raw.done_tasks),
-    cancelled_tasks: asNumber(raw.cancelled_tasks),
     keepers: asNumber(raw.keepers),
   }
 }
@@ -222,7 +216,6 @@ export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQue
     next_human_action: asString(raw.next_human_action) ?? null,
     terminal_reason_code: terminalReasonCode,
     stop_cause: normalizeStopCause({
-      stop_cause: raw.stop_cause,
       runtime_blocker_class: asString(raw.runtime_blocker_class) ?? asString(raw.runtime_blocker) ?? null,
       runtime_blocker_summary: asString(raw.runtime_blocker_summary) ?? null,
       terminal_reason_code: terminalReasonCode,
@@ -329,17 +322,13 @@ export function normalizeDashboardConfigResolution(
   if (!isRecord(raw)) return null
   const status = asString(raw.status)
   const configRoot = normalizeDashboardConfigResolutionItem(raw.config_root)
-  const runtimeAuthoring = normalizeDashboardConfigResolutionItem(raw.runtime_authoring)
-  const runtime = normalizeDashboardConfigResolutionItem(raw.runtime)
   const prompts = normalizeDashboardConfigResolutionItem(raw.prompts)
   const keepers = normalizeDashboardConfigResolutionItem(raw.keepers)
-  if (!status || !configRoot || !runtimeAuthoring || !runtime || !prompts || !keepers) return null
+  if (!status || !configRoot || !prompts || !keepers) return null
   return {
     status: status as DashboardConfigResolution['status'],
     warnings: asStringArray(raw.warnings),
     config_root: configRoot,
-    runtime_authoring: runtimeAuthoring,
-    runtime,
     prompts,
     keepers,
   }

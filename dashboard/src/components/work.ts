@@ -326,7 +326,6 @@ function mergeTaskRecord(goalStoreTask: Task, executionTask: Task): Task {
     status: executionTask.status || goalStoreTask.status,
     priority: executionTask.priority ?? goalStoreTask.priority,
     assignee: executionTask.assignee?.trim() ? executionTask.assignee : goalStoreTask.assignee,
-    assignee_kind: executionTask.assignee_kind ?? goalStoreTask.assignee_kind,
     description: executionTask.description?.trim() ? executionTask.description : goalStoreTask.description,
     created_at: executionTask.created_at || goalStoreTask.created_at,
     updated_at: executionTask.updated_at || goalStoreTask.updated_at,

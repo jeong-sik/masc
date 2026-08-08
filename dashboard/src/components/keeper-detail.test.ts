@@ -314,7 +314,7 @@ describe('KeeperDetailPage', () => {
         status: 'active',
         capabilities: ['keeper', 'research'],
         current_task: null,
-        joined_at: '2026-05-01T00:46:51Z',
+        session_bound_at: '2026-05-01T00:46:51Z',
         last_seen: '2026-05-01T00:48:26Z',
         age_s: 1206,
         last_seen_ago_s: 1111,

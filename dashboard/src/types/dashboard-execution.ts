@@ -25,7 +25,6 @@ export type DashboardAuthErrorCode =
 export interface DashboardShellAuthSummary {
   enabled: boolean
   require_token: boolean
-  default_role?: string | null
   token_present: boolean
   token_valid: boolean
   token_agent?: string | null
@@ -48,8 +47,6 @@ export interface DashboardConfigResolution {
   status: 'ready' | 'warn' | 'invalid_env' | 'missing'
   warnings: string[]
   config_root: DashboardConfigResolutionItem
-  runtime_authoring: DashboardConfigResolutionItem
-  runtime: DashboardConfigResolutionItem
   prompts: DashboardConfigResolutionItem
   keepers: DashboardConfigResolutionItem
 }
@@ -460,21 +457,12 @@ type DashboardExecutionContinuityState = 'healthy' | 'warning' | 'critical'
 type DashboardExecutionQueueKind = 'operation' | 'keeper'
 
 export interface DashboardExecutionSummary {
-  // `active_sessions` / `blocked_sessions` were the session-era pair, replaced
-  // by the `*_operations` fields below. Their producers went with the team
-  // session surfaces in #6363, so both had been permanently absent from every
-  // response since — declared, normalized, and never populated.
   active_operations?: number
   blocked_operations?: number
-  runtime_pressure?: number
   worker_alerts?: number
   continuity_alerts?: number
   priority_items?: number
-  todo_tasks?: number
-  claimed_tasks?: number
-  running_tasks?: number
   done_tasks?: number
-  cancelled_tasks?: number
   keepers?: number
 }
 

@@ -52,7 +52,6 @@ export interface KeeperPauseDisplay {
 
 type KeeperRuntimeDisplaySource = {
   runtime_id?: string | null
-  runtime_ref?: { group?: string | null; item?: string | null } | null
   runtime_canonical?: string | null
   selected_runtime_canonical?: string | null
 }
@@ -97,10 +96,7 @@ export function keeperDisplayRuntime(
   const runtimeId = trimmed(source?.runtime_id)
   if (runtimeId) return { label: 'Runtime', value: runtimeId }
 
-  const group = trimmed(source?.runtime_ref?.group)
-  if (!group) return null
-  const item = trimmed(source?.runtime_ref?.item)
-  return { label: 'Runtime', value: item ? `${group}.${item}` : group }
+  return null
 }
 
 function timestampCandidate(

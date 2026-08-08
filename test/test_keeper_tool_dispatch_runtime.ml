@@ -3486,7 +3486,7 @@ let test_surface_post_bundle_names_reader_and_repeat_cost () =
            ()
        in
        let description =
-         (terminal_surface_post bundle.tools).Agent_sdk.Tool.schema.description
+         (terminal_surface_post bundle.tools).Masc_agent_core.Tool.schema.description
        in
        let help_description =
          match

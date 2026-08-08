@@ -27,7 +27,7 @@ let test_pre_hook_observes () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       Some (tool_ok "ok"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_test" ~tag:Mod_misc;
+  Tool_dispatch.For_testing.register_name_tag ~tool_name:"__hook_test" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
     Tool_dispatch.Pass);
@@ -45,7 +45,7 @@ let test_pre_hook_short_circuits () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       Some (tool_ok "should not reach"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_blocked" ~tag:Mod_misc;
+  Tool_dispatch.For_testing.register_name_tag ~tool_name:"__hook_blocked" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
     log_call "pre_block";
     Tool_dispatch.Reject
@@ -74,7 +74,7 @@ let test_multiple_pre_hooks_first_wins () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       Some (tool_ok "ok"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_multi" ~tag:Mod_misc;
+  Tool_dispatch.For_testing.register_name_tag ~tool_name:"__hook_multi" ~tag:Mod_misc;
   (* First hook: observe only *)
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre1";
@@ -109,7 +109,7 @@ let test_dispatch_observer_observes () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       Some (tool_ok "original"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_observer" ~tag:Mod_misc;
+  Tool_dispatch.For_testing.register_name_tag ~tool_name:"__hook_observer" ~tag:Mod_misc;
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some _ -> log_call "observer"
@@ -128,7 +128,7 @@ let test_dispatch_observers_chain () =
     ~tool_name:"__hook_chain"
     ~handler:(fun ~name:_ ~args:_ ->
       Some (tool_ok "0"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_chain" ~tag:Mod_misc;
+  Tool_dispatch.For_testing.register_name_tag ~tool_name:"__hook_chain" ~tag:Mod_misc;
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some _ -> log_call "observer1"
@@ -155,7 +155,7 @@ let test_full_lifecycle () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       Some (tool_ok "data"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_full" ~tag:Mod_misc;
+  Tool_dispatch.For_testing.register_name_tag ~tool_name:"__hook_full" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
     Tool_dispatch.Pass);
@@ -175,7 +175,7 @@ let test_no_hooks_default () =
     ~tool_name:"__hook_none"
     ~handler:(fun ~name ~args:_ ->
       Some (tool_ok ~tool_name:name "plain"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_none" ~tag:Mod_misc;
+  Tool_dispatch.For_testing.register_name_tag ~tool_name:"__hook_none" ~tag:Mod_misc;
   let token = match Tool_dispatch.mint_token ~name:"__hook_none" with Ok t -> t | Error e -> Alcotest.fail e in
   match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->

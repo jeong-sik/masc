@@ -161,8 +161,11 @@ type module_tag =
 val register_module_tag : schemas:Masc_domain.tool_schema list -> tag:module_tag -> unit
 (** Register tool names from a schema list with a module tag. *)
 
-val register_name_tag : tool_name:string -> tag:module_tag -> unit
-(** Register a single tool name with a tag. *)
+module For_testing : sig
+  val register_name_tag : tool_name:string -> tag:module_tag -> unit
+  (** Register a tag without a schema for isolated dispatch-hook tests. This
+      deliberately cannot be called through the production API surface. *)
+end
 
 val lookup_tag : string -> module_tag option
 (** Look up the module tag for a tool name. *)

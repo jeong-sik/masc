@@ -904,6 +904,7 @@ let run_turn
                       ?goal_blocks:user_blocks
                       ~session_id:
                         (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                      ~keeper_session_dir:session.session_dir
                       ?raw_trace
                       ~system_prompt:turn_system_prompt
                       ~tools

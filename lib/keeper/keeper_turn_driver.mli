@@ -87,6 +87,7 @@ val run_named :
   goal:string ->
   ?goal_blocks:Agent_sdk.Types.content_block list ->
   ?session_id:string ->
+  ?keeper_session_dir:string ->
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->
   ?initial_messages:Agent_sdk.Types.message list ->

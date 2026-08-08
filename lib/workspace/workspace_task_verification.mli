@@ -1,11 +1,6 @@
 (** Verification-evidence helpers for task lifecycle.
 
-    Substring-classifier predicates were retired in Phase E (RFC-0109
-    closeout). The legacy [text_has_verification_artifact_ref] /
-    [evidence_ref_has_verification_artifact_ref] /
-    [notes_have_verification_artifact_ref] /
-    [verification_evidence_error_message] are gone. Completion judgment lives
-    at the LLM Task-review boundary. *)
+    Completion judgment lives at the LLM Task-review boundary. *)
 
 val flatten_lock_result : (('a, 'b) result, 'b) result -> ('a, 'b) result
 

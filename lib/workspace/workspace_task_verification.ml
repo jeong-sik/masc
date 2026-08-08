@@ -1,8 +1,4 @@
-(** Verification-evidence helpers for task lifecycle,
-    extracted from task_state.ml.
-
-    Legacy substring classifiers that rejected empty or analysis-only
-    submissions at the transition layer are retired.
+(** Verification-evidence helpers for task lifecycle.
 
     Evidence refs are collected from the producer's typed handoff refs.
     Narrative summaries are represented explicitly as [note:] evidence so the

@@ -126,7 +126,7 @@ server runs its serialize+compress path as production browsers trigger; set empt
 and `MASC_HARNESS_SERVER_EXE` (pin a specific binary so two builds can be A/B-compared without
 overwriting `_build`).
 
-The booted server runs with `MASC_AUTONOMY_ENABLED=0` (harness lib default): **no keepers run**, so
+The booted server runs with `MASC_KEEPER_AUTONOMOUS_ENABLED=0` (harness lib default): **no keepers run**, so
 the in-process axis is the only "busy domain" source. To exercise the keeper axis, use `--base-url`
 against a live runtime (see below).
 
@@ -177,8 +177,7 @@ that prompt into its ephemeral base path from the explicit root.
 3. **The keeper TOML must set `sandbox_profile = "local"`** (or `"docker"`) — boot rejects without it.
 4. Boot env: `MASC_KEEPER_BOOTSTRAP_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
    `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`. Boot the exe directly —
-   **not** via `harness_start_server`, which hardcodes the bootstrap off. (`MASC_AUTONOMY_ENABLED`
-   does not exist in the code; the lib sets it as a harmless no-op.)
+   **not** via `harness_start_server`, which disables Keeper bootstrap and autonomous activation.
 5. Every generated Keeper has a non-empty
    `$BASE/.masc/config/keepers/<keeper>/AGENT.md`; the gate copies a checked-in
    Keeper prompt as the source.

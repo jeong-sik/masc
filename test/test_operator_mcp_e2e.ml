@@ -403,7 +403,7 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   let env =
     merge_env_overrides ~remove:[ "OAS_MODEL_CATALOG" ]
       [
-        ("MASC_AUTONOMY_ENABLED", "0");
+        ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
         ("MASC_HOST", host);

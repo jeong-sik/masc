@@ -305,7 +305,7 @@ start_live_server() {
   (
     export MASC_CONFIG_DIR="${CONFIG_DIR}"
     export MASC_LOG_FILE="${SERVER_LOG}"
-    export MASC_AUTONOMY_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
     export GRAPHQL_API_KEY=""
@@ -319,7 +319,7 @@ start_live_server() {
   (
     export MASC_CONFIG_DIR="${CONFIG_DIR}"
     export MASC_LOG_FILE="${SERVER_LOG}"
-    export MASC_AUTONOMY_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
     export GRAPHQL_API_KEY=""

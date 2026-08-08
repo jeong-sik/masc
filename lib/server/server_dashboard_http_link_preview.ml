@@ -74,7 +74,27 @@ let is_http_scheme = function
 let is_loopback_or_unspecified_host host =
   Server_auth.is_loopback_host host || Server_auth.is_unspecified_host host
 
-let ipaddr_is_private_or_reserved = function
+(* An IPv4 address carried inside a V6 one is invisible to the V6 range checks
+   below, because those match on the rendered text and every carrier form
+   renders starting with "::".  [::ffff:169.254.169.254] renders as
+   "::ffff:169.254.169.254", matches no prefix in that list, and so passed a
+   filter whose V4 rules reject 169.254.0.0/16.  Hand both the mapped form and
+   the deprecated compatible form (RFC 4291 §2.5.5.1) back to the V4 rules
+   rather than restating those ranges here. *)
+let embedded_v4 addr =
+  match Ipaddr.v4_of_v6 addr with
+  | Some _ as mapped -> mapped
+  | None ->
+    let octets = Ipaddr.V6.to_octets addr in
+    let rec leading_zeros i = i >= 12 || (Char.code octets.[i] = 0 && leading_zeros (i + 1)) in
+    if leading_zeros 0
+    then (
+      match Ipaddr.V4.of_octets (String.sub octets 12 4) with
+      | Ok v4 -> Some v4
+      | Error _ -> None)
+    else None
+
+let rec ipaddr_is_private_or_reserved = function
   | Ipaddr.V4 addr ->
       let octets = Ipaddr.V4.to_octets addr in
       let byte idx = Char.code octets.[idx] in
@@ -92,17 +112,20 @@ let ipaddr_is_private_or_reserved = function
       || (b0 = 203 && b1 = 0)
       || b0 >= 224
   | Ipaddr.V6 addr ->
-      let text = Ipaddr.V6.to_string addr |> String.lowercase_ascii in
-      Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
-      || Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
-      || String.starts_with ~prefix:"fc" text
-      || String.starts_with ~prefix:"fd" text
-      || String.starts_with ~prefix:"fe8" text
-      || String.starts_with ~prefix:"fe9" text
-      || String.starts_with ~prefix:"fea" text
-      || String.starts_with ~prefix:"feb" text
-      || String.starts_with ~prefix:"ff" text
-      || String.starts_with ~prefix:"2001:db8" text
+    (match embedded_v4 addr with
+     | Some v4 -> ipaddr_is_private_or_reserved (Ipaddr.V4 v4)
+     | None ->
+       let text = Ipaddr.V6.to_string addr |> String.lowercase_ascii in
+       Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
+       || Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
+       || String.starts_with ~prefix:"fc" text
+       || String.starts_with ~prefix:"fd" text
+       || String.starts_with ~prefix:"fe8" text
+       || String.starts_with ~prefix:"fe9" text
+       || String.starts_with ~prefix:"fea" text
+       || String.starts_with ~prefix:"feb" text
+       || String.starts_with ~prefix:"ff" text
+       || String.starts_with ~prefix:"2001:db8" text)
 
 let eio_ipaddr_is_private_or_reserved ip =
   let rendered = Fmt.str "%a" Eio.Net.Ipaddr.pp ip in
@@ -269,16 +292,33 @@ let fetch_response ~net:_ ~url =
       ]
     ()
 
+(* A [Location] target is a URL this process will fetch, so it has to clear the
+   same admission the caller-supplied URL cleared. Only the first URL was
+   checked, so a public host could answer 302 and send the fetch to an address
+   the filter exists to keep it away from. Scheme and userinfo are re-checked
+   too: [normalize_request_url] guards those for the first URL only, and a
+   redirect can name any scheme. *)
+let admit_redirect_target ~net ~base_url location =
+  let next_url = resolve_relative_url ~base_url location in
+  match normalize_request_url next_url with
+  | Error reason -> Error reason
+  | Ok normalized -> (
+      match validate_resolved_host ~net (Uri.of_string normalized) with
+      | Error reason -> Error reason
+      | Ok () -> Ok normalized)
+
 let rec fetch_response_following_redirects ~net ~url ~remaining_redirects =
   match fetch_response ~net ~url with
   | Error _ as error -> error
   | Ok response when is_redirect_status response.status && remaining_redirects > 0
     ->
       (match list_header_ci response.headers "location" with
-       | Some location when Option.is_some (String_util.trim_to_option location) ->
-           let next_url = resolve_relative_url ~base_url:url location in
-           fetch_response_following_redirects ~net ~url:next_url
-             ~remaining_redirects:(remaining_redirects - 1)
+       | Some location when Option.is_some (String_util.trim_to_option location) -> (
+           match admit_redirect_target ~net ~base_url:url location with
+           | Error reason -> Error reason
+           | Ok next_url ->
+               fetch_response_following_redirects ~net ~url:next_url
+                 ~remaining_redirects:(remaining_redirects - 1))
        | _ -> Ok response)
   | Ok response -> Ok response
 

@@ -623,7 +623,8 @@
   test_workspace_handoff_boundary
   test_exec_command_gate_log_sink)
  (libraries
-  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref))
+  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  ipaddr eio_main))
 
 ; Repository catalog tests depend only on the focused repo_manager library.
 (test

@@ -39,6 +39,33 @@ type preview_extract = {
 
 (** {1 URL helpers} *)
 
+val ipaddr_is_private_or_reserved : Ipaddr.t -> bool
+(** [true] when the address must not be fetched: loopback,
+    RFC 1918, link-local, carrier-grade NAT, multicast, and
+    the documentation ranges.  A [false] here is what lets a
+    request leave the process.
+
+    A V6 address carrying an IPv4 one — the mapped
+    [::ffff:a.b.c.d] form or the deprecated compatible
+    [::a.b.c.d] form — is judged by the IPv4 rules, since the
+    V6 ranges cannot see the address inside it. *)
+
+val admit_redirect_target
+  :  net:_ Eio.Net.t
+  -> base_url:string
+  -> string
+  -> (string, string) result
+(** [admit_redirect_target ~net ~base_url location] resolves a
+    [Location] value against [base_url] and applies the same
+    admission the first URL gets: http/https only, no
+    userinfo, and no resolved address that
+    {!ipaddr_is_private_or_reserved} rejects.  Returns the
+    absolute URL to fetch next, or [Error reason].
+
+    The fetcher follows redirects, so each hop passes through
+    here; checking only the first URL let a public host
+    redirect the fetch to an internal address. *)
+
 val normalize_request_url : string -> (string, string) result
 (** Trims, parses, and normalizes a request URL.  Returns
     [Error reason] when the input is empty, missing a host,

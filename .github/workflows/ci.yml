@@ -924,6 +924,15 @@ jobs:
             @test/runtest-test_tool_task_coverage \
             @test/runtest-test_tool_workspace_coverage
 
+      - name: Run link preview address admission suite
+        # The admission decides whether a dashboard-supplied URL may leave the
+        # process, and it now runs on every redirect hop rather than the first
+        # URL only. @check compiles these cases but does not run them, and the
+        # suite had no address cases at all before this.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_dashboard_link_preview
+
       - name: Run completion-authority lookup surface suite
         # The judge's lookup tools reach the filesystem and Git inside a
         # producer's root. @check compiles the containment cases but does not

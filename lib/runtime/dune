@@ -12,9 +12,9 @@
   unix
   logs
   eio
-  agent_sdk
-  agent_sdk.base
-  agent_sdk.llm_provider
+  masc.agent_core
+  masc.agent_core.base
+  masc.agent_core.llm_provider
   masc.masc_core
   masc.masc_types
   uri

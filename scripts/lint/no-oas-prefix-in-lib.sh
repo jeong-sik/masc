@@ -2,26 +2,19 @@
 # RFC-0047 Phase 7: prevent reintroduction of `oas_*` prefix in masc lib/.
 #
 # Why this gate exists:
-#   Real OAS lives in a separate repository (~/me/workspace/yousleepwhen/oas)
-#   exposed as the agent_sdk opam library. masc is a *consumer* of
-#   agent_sdk. The `oas_*` prefix in masc's own lib/ historically
-#   accumulated as a dumping ground that conflated three concerns
-#   (Agent SDK invocation / runtime strategy / keeper bookkeeping) into
-#   a single layer. RFC-0047 retired the prefix across 9 phases (16
-#   files redistributed to lib/runtime/, lib/keeper/, or renamed to
-#   agent_sdk_*). This gate prevents recurrence.
+#   The internal agent engine lives under packages/agent_core and exposes the
+#   masc.agent_core library. The `oas_*` prefix in masc's coordinator lib/
+#   historically accumulated as a dumping ground that conflated agent-core
+#   invocation, runtime strategy, and Keeper bookkeeping. RFC-0047 retired
+#   that prefix across 9 phases. This gate prevents recurrence.
 #
 # Signal:
 #   Any tracked source file matching `lib/**/oas_*.{ml,mli}`. Such a file
 #   would imply masc consumer code is being labeled as if it were
 #   OAS itself.
 #
-# Allowed location for OAS code: ~/me/workspace/yousleepwhen/oas/ (separate repo).
-# Allowed prefixes in masc lib/ for agent_sdk-adjacent code:
-#   agent_sdk_call.ml (Phase 4b-split target, deferred)
-#   agent_sdk_response.ml
-#   agent_sdk_log_bridge.ml
-#   agent_sdk_metrics_bridge.ml
+# Allowed location for the internal engine: packages/agent_core/.
+# Coordinator adapters use explicit masc_agent_core_* names.
 #
 # RFC: docs/rfc/RFC-0047-oas-adapter-decomposition.md
 
@@ -37,8 +30,8 @@ violations=$(find lib -type f \( -name 'oas_*.ml' -o -name 'oas_*.mli' \) 2>/dev
 
 if [ -n "$violations" ]; then
   echo "ERROR: lib/**/oas_*.{ml,mli} files reintroduced. The oas_* prefix in"
-  echo "masc/lib/ was retired by RFC-0047. Real OAS lives in a separate"
-  echo "repository (~/me/workspace/yousleepwhen/oas, agent_sdk opam library)."
+  echo "masc/lib/ was retired by RFC-0047. The agent engine lives under"
+  echo "packages/agent_core and is owned by the masc.agent_core library."
   echo ""
   echo "Violating files:"
   echo "$violations" | sed 's/^/  - /'
@@ -46,7 +39,7 @@ if [ -n "$violations" ]; then
   echo "Move into the layer where the file actually belongs:"
   echo "  - Runtime strategy           -> lib/runtime/runtime_*.ml"
   echo "  - Keeper bookkeeping         -> lib/keeper/keeper_*.ml"
-  echo "  - Pure agent_sdk wrapping    -> lib/agent_sdk_*.ml"
+  echo "  - Agent-core wrapping        -> an explicit coordinator bridge"
   echo ""
   echo "See docs/rfc/RFC-0047-oas-adapter-decomposition.md."
   exit 1

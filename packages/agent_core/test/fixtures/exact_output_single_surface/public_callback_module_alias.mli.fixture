@@ -1,0 +1,3 @@
+module Callback = External.Callback
+
+val measure : request:string -> callback:Callback.hook -> unit

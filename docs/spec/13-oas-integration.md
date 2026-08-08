@@ -1,41 +1,46 @@
 ---
 status: reference
-last_verified: 2026-07-19
+last_verified: 2026-08-08
 code_refs:
   - lib/keeper/keeper_event_bridge.ml
   - lib/agent_sdk_response.ml
   - lib/masc_oas_bridge.ml
-  - lib/agent_sdk_compat/agent_sdk_compat.ml
+  - packages/agent_core/lib/agent_sdk.mli
   - lib/keeper/keeper_agent_error.ml
   - lib/keeper/keeper_compact_policy.ml
   - lib/keeper/keeper_manual_compaction.ml
 ---
 
-# OAS Integration
+# MASC Agent Core Integration
 
 | 항목 | 값 |
 |------|-----|
 | Status | Draft |
-| Team | OAS Bridge |
-| Maps to | `lib/keeper/keeper_event_bridge.ml`, `lib/agent_sdk_response.ml`, `lib/masc_oas_bridge.ml`, `lib/agent_sdk_compat/agent_sdk_compat.ml` |
+| Team | Agent Core Bridge |
+| Maps to | `packages/agent_core/`, `lib/agent_sdk_response.ml`, `lib/masc_oas_bridge.ml` |
 | Dependencies | 02-types-and-invariants |
-| OAS Version | `agent_sdk` library (OCaml, in-tree dependency) |
+| Version | MASC build identity; no separately released SDK version |
 
 ---
 
 ## 1. Purpose
 
-OAS (OCaml Agent SDK)는 MASC 외부의 범용 에이전트 런타임 라이브러리다. MASC는 OAS를 소비자(consumer)로서 사용하며, OAS는 MASC를 알지 못한다.
+과거 OAS 저장소의 에이전트 실행 코드는 `packages/agent_core`로 흡수되었다.
+이 코어는 MASC 내부 구현이며 독립 SDK나 외부 호환성 표면이 아니다.
 
-이 문서는 MASC가 OAS에 의존하는 모든 접점(bridge, adapter, wrapper)을 정의한다. MASC 측 turn lifecycle(heartbeat → scheduling → `Agent.run` → receipt)의 권위 정의는 [`04-turn-lifecycle.md`](./04-turn-lifecycle.md)에 있으며, 이 문서는 OAS bridge 본연의 역할에 집중한다.
+이 문서는 MASC coordinator와 내부 agent core 사이의 접점(bridge, adapter,
+wrapper)을 정의한다. MASC 측 turn lifecycle(heartbeat → scheduling →
+`Agent.run` → receipt)의 권위 정의는
+[`04-turn-lifecycle.md`](./04-turn-lifecycle.md)에 있다.
 
 **의존 방향** (불변):
 ```
-MASC ──depends on──> OAS (agent_sdk)
-OAS  ──does not know──> MASC
+MASC coordinator ──depends on──> masc.agent_core
+masc.agent_core   ──does not import──> coordinator / Keeper / Board / Gate
 ```
 
-MASC 전용 요구가 생기면 MASC adapter/bridge로 먼저 해결하고, OAS 공개 API 확장은 모든 OAS 소비자에게 유익한 경우에만 제안한다.
+MASC 정책·인증·배포 요구는 coordinator adapter/bridge에 둔다. Provider codec,
+typed tool execution, checkpoint처럼 실행 엔진 자체의 계약만 agent core에 둔다.
 
 ---
 
@@ -53,15 +58,14 @@ MASC 전용 요구가 생기면 MASC adapter/bridge로 먼저 해결하고, OAS 
 
 ```mermaid
 graph TB
-  subgraph "MASC (Consumer)"
+  subgraph "MASC coordinator"
     KEB[keeper_event_bridge.ml]
     ASR[agent_sdk_response.ml]
     MOB[masc_oas_bridge.ml]
-    OC[agent_sdk_compat.ml]
     CI[runtime_inference.ml]
     TB[tool_bridge.ml]
   end
-  subgraph "OAS (agent_sdk)"
+  subgraph "packages/agent_core (masc.agent_core)"
     AG[Agent.t / Agent.run]
     BU[Builder]
     PR[Provider]
@@ -75,7 +79,6 @@ graph TB
   MOB -->|"run_safe boundary"| AG
   KEB -->|"subscribe + relay"| EB
   ASR -->|"read api_response"| AG
-  OC -->|"classify sdk_error"| AG
   CI -->|"read params"| CC2
 ```
 

@@ -115,13 +115,11 @@ let run_process ?(env = []) ?(unset_env = []) ~cwd prog argv =
 
 (** Set up a minimal fake repo under [base]:
     - scripts/dune-local.sh  (copy of real script)
-    - scripts/check-oas-pin.sh  (caller-supplied fake)
     - bin/dune  (fake: logs invocations, exits 0)
     - bin/opam  (fake: exists, exits 0)
 
     Returns [(bin_dir, dune_log)] where [dune_log] records each dune call. *)
-let setup_fake_repo ?(ocaml_version = "5.5.0") base ~pin_check_exit_code
-    ~pin_check_stderr_msg =
+let setup_fake_repo ?(ocaml_version = "5.5.0") base =
   let scripts_dir = Filename.concat base "scripts" in
   let bin_dir = Filename.concat base "bin" in
   mkdir_p scripts_dir;
@@ -139,25 +137,9 @@ let setup_fake_repo ?(ocaml_version = "5.5.0") base ~pin_check_exit_code
   write_executable
     (Filename.concat scripts_dir "dune-local.sh")
     (read_file (dune_local_script_path ()));
-  (* Fake check-oas-pin.sh — honours --local-only but ignores it *)
-  let pin_check_content =
-    Printf.sprintf
-      {|#!/usr/bin/env bash
-if [ %d -ne 0 ]; then
-  printf '%%s\n' %s >&2
-  exit %d
-fi
-printf 'OAS pin verified: main@e3e6683\n'
-exit 0
-|}
-      pin_check_exit_code
-      (quote pin_check_stderr_msg)
-      pin_check_exit_code
-  in
-  write_executable (Filename.concat scripts_dir "check-oas-pin.sh") pin_check_content;
   (* Fake opam: present in PATH and echoes back the queried package
      for `opam list --installed --short PKG` so the deps-installed
-     guard treats core deps (httpun/agent_sdk/...) as present.  Other
+     guard treats core deps as present. Other
      subcommands return 0 with empty stdout. *)
   write_executable (Filename.concat bin_dir "opam")
     {|#!/bin/sh
@@ -167,10 +149,10 @@ fi
 if [ "$1" = "switch" ] && [ "$2" = "show" ]; then printf 'fake-switch\n'; exit 0; fi
 exit 0
 |};
-  (* Fake findlib/ocamlobjinfo for the installed-agent-sdk interface marker.
-     Keep this deterministic so tests never inspect the real opam switch. *)
+  (* Fake findlib/ocamlobjinfo provider surface. Keep this deterministic so
+     tests never inspect the real opam switch. *)
   let fake_llm_provider_dir =
-    Filename.concat (Filename.concat base "fake-agent-sdk") "llm_provider"
+    Filename.concat (Filename.concat base "fake-agent-core") "llm_provider"
   in
   mkdir_p fake_llm_provider_dir;
   write_file
@@ -183,7 +165,7 @@ exit 0
     (Filename.concat bin_dir "ocamlfind")
     (Printf.sprintf
        {|#!/bin/sh
-if [ "$1" = "query" ] && [ "$2" = "agent_sdk.llm_provider" ]; then
+if [ "$1" = "query" ] && [ "$2" = "masc.agent_core.llm_provider" ]; then
   printf '%%s\n' %s
   exit 0
 fi
@@ -279,122 +261,9 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
 
 (* --- tests ------------------------------------------------------------ *)
 
-let test_pin_drift_aborts_build () =
-  with_temp_dir "dune-local-pin-drift" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:
-            "agent_sdk pin source does not match SSOT\nrepair: bash scripts/opam-pin-external-deps.sh"
-      in
-      let code, _stdout, stderr =
-        run_dune_local dir bin_dir
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
-          "build"
-      in
-      check int "exits non-zero on pin drift" 1 code;
-      check bool "drift message present" true
-        (contains_substring stderr "pin drift detected");
-      check bool "repair hint present" true
-        (contains_substring stderr "opam-pin-external-deps.sh");
-      check bool "skip hint present" true
-        (contains_substring stderr "MASC_SKIP_PIN_CHECK=1");
-      check bool "dune not invoked" false (Sys.file_exists dune_log))
-
-let test_skip_pin_check_env_bypasses_guard () =
-  with_temp_dir "dune-local-skip-pin" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
-      in
-      let code, _stdout, _stderr =
-        run_dune_local dir bin_dir
-          ~env:[ ("MASC_SKIP_PIN_CHECK", "1") ]
-          ~unset_env:[ "GITHUB_ACTIONS" ]
-          "build"
-      in
-      check int "exits zero when MASC_SKIP_PIN_CHECK=1" 0 code;
-      check bool "dune was invoked" true (Sys.file_exists dune_log))
-
-let test_skip_pin_check_still_cleans_on_provider_config_crc_change () =
-  with_temp_dir "dune-local-provider-config-crc" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
-      in
-      let build_dir = Filename.concat dir "_build" in
-      mkdir_p build_dir;
-      write_file (Filename.concat build_dir ".last-agent-sdk-provider-config-crc")
-        "oldcrc";
-      write_file (Filename.concat build_dir "stale-object") "stale";
-      let code, _stdout, stderr =
-        run_dune_local dir bin_dir
-          ~env:
-            [
-              ("MASC_SKIP_PIN_CHECK", "1");
-              ("MASC_TEST_PROVIDER_CONFIG_CRC", "newcrc");
-            ]
-          ~unset_env:[ "GITHUB_ACTIONS" ]
-          "build"
-      in
-      check int "exits zero when pin guard is skipped" 0 code;
-      check bool "crc change message present" true
-        (contains_substring stderr "Provider_config interface changed");
-      check bool "stale build artifact removed" false
-        (Sys.file_exists (Filename.concat build_dir "stale-object"));
-      check string "crc marker refreshed" "newcrc"
-        (read_file
-           (Filename.concat build_dir ".last-agent-sdk-provider-config-crc"));
-      check bool "dune was invoked after cleanup" true (Sys.file_exists dune_log))
-
-let test_skip_pin_check_still_cleans_on_provider_kind_crc_change () =
-  with_temp_dir "dune-local-provider-kind-crc" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
-      in
-      let build_dir = Filename.concat dir "_build" in
-      mkdir_p build_dir;
-      write_file (Filename.concat build_dir ".last-agent-sdk-provider-kind-crc")
-        "oldcrc";
-      write_file (Filename.concat build_dir "stale-object") "stale";
-      let code, _stdout, stderr =
-        run_dune_local dir bin_dir
-          ~env:
-            [
-              ("MASC_SKIP_PIN_CHECK", "1");
-              ("MASC_TEST_PROVIDER_KIND_CRC", "newcrc");
-            ]
-          ~unset_env:[ "GITHUB_ACTIONS" ]
-          "build"
-      in
-      check int "exits zero when pin guard is skipped" 0 code;
-      check bool "crc change message present" true
-        (contains_substring stderr "Provider_kind interface changed");
-      check bool "stale build artifact removed" false
-        (Sys.file_exists (Filename.concat build_dir "stale-object"));
-      check string "crc marker refreshed" "newcrc"
-        (read_file
-           (Filename.concat build_dir ".last-agent-sdk-provider-kind-crc"));
-      check bool "dune was invoked after cleanup" true (Sys.file_exists dune_log))
-
-let test_github_actions_bypasses_pin_guard () =
-  with_temp_dir "dune-local-ci-bypass" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
-      in
-      let code, _stdout, _stderr =
-        run_dune_local dir bin_dir
-          ~env:[ ("GITHUB_ACTIONS", "true") ]
-          ~unset_env:[ "MASC_SKIP_PIN_CHECK" ]
-          "build"
-      in
-      check int "exits zero when GITHUB_ACTIONS=true" 0 code;
-      check bool "dune was invoked" true (Sys.file_exists dune_log))
-
-let test_opam_absent_aborts_before_pin_guard () =
+let test_opam_absent_aborts_before_dune () =
   with_temp_dir "dune-local-no-opam" (fun dir ->
-      (* Set up repo with failing pin check but no fake opam in PATH *)
+      (* Set up a repo with no fake opam in PATH. *)
       let scripts_dir = Filename.concat dir "scripts" in
       let bin_dir = Filename.concat dir "bin" in
       mkdir_p scripts_dir;
@@ -409,10 +278,6 @@ let test_opam_absent_aborts_before_pin_guard () =
       write_executable
         (Filename.concat scripts_dir "dune-local.sh")
         (read_file (dune_local_script_path ()));
-      (* Failing pin check: should never be called when opam is absent. *)
-      write_executable
-        (Filename.concat scripts_dir "check-oas-pin.sh")
-        "#!/bin/sh\necho 'pin mismatch' >&2\nexit 1\n";
       let dune_log = Filename.concat dir "dune-calls.log" in
       write_executable
         (Filename.concat bin_dir "dune")
@@ -461,7 +326,7 @@ exec "$@"
               ("MASC_OPAM_LOCK_PATH", opam_lock_path);
               ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
             ]
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          ~unset_env:[ "GITHUB_ACTIONS" ]
           [| "/bin/bash"; script; "build" |]
       in
       check int "exits non-zero when opam absent" 1 code;
@@ -477,8 +342,7 @@ exec "$@"
 let test_dune_lock_wait_reports_holder () =
   with_temp_dir "dune-local-lock-diag" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0
-          ~pin_check_stderr_msg:"pin ok"
+        setup_fake_repo dir
       in
       let dune_lock_path = Filename.concat dir "dune-local.lock" in
       let lockf_log = Filename.concat dir "lockf-calls.log" in
@@ -531,8 +395,7 @@ exit 1
 let test_live_build_lock_aborts_before_dune () =
   with_temp_dir "dune-local-live-build-lock" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0
-          ~pin_check_stderr_msg:"pin ok"
+        setup_fake_repo dir
       in
       let build_dir = Filename.concat dir "_build" in
       mkdir_p build_dir;
@@ -591,8 +454,7 @@ exit 1
 let test_bare_dune_bypass_aborts_before_dune () =
   with_temp_dir "dune-local-bare-dune-bypass" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0
-          ~pin_check_stderr_msg:"pin ok"
+        setup_fake_repo dir
       in
       write_bare_dune_ps bin_dir;
       let code, _stdout, stderr =
@@ -619,8 +481,7 @@ let test_bare_dune_bypass_aborts_before_dune () =
 let test_bare_dune_bypass_can_be_overridden () =
   with_temp_dir "dune-local-bare-dune-override" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0
-          ~pin_check_stderr_msg:"pin ok"
+        setup_fake_repo dir
       in
       write_bare_dune_ps bin_dir;
       let code, _stdout, _stderr =
@@ -634,8 +495,7 @@ let test_bare_dune_bypass_can_be_overridden () =
 let test_opam_lockf_reexec_env_passthrough () =
   with_temp_dir "dune-local-opam-lockf" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0
-          ~pin_check_stderr_msg:"pin ok"
+        setup_fake_repo dir
       in
       let lockf_log = Filename.concat dir "lockf-calls.log" in
       write_executable
@@ -683,8 +543,7 @@ exec "$@"
 let test_opam_lock_timeout_releases_dune_lock () =
   with_temp_dir "dune-local-opam-lock-timeout" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0
-          ~pin_check_stderr_msg:"pin ok"
+        setup_fake_repo dir
       in
       let lockf_log = Filename.concat dir "lockf-calls.log" in
       let opam_lock_path = Filename.concat dir "opam.lock" in
@@ -725,8 +584,7 @@ exec "$@"
 let test_unset_opam_lock_timeout_waits_forever () =
   with_temp_dir "dune-local-opam-lock-timeout-unset" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0
-          ~pin_check_stderr_msg:"pin ok"
+        setup_fake_repo dir
       in
       let lockf_log = Filename.concat dir "lockf-calls.log" in
       write_executable
@@ -765,8 +623,7 @@ exec "$@"
 let test_zero_like_opam_lock_timeout_waits_forever () =
   with_temp_dir "dune-local-opam-lock-timeout-zero-like" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0
-          ~pin_check_stderr_msg:"pin ok"
+        setup_fake_repo dir
       in
       let lockf_log = Filename.concat dir "lockf-calls.log" in
       write_executable
@@ -798,41 +655,10 @@ exec "$@"
         (contains_substring stderr "releasing Dune lock");
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
-let test_opam_lockf_wrapped_failure_does_not_claim_timeout () =
-  with_temp_dir "dune-local-opam-lock-wrapped-failure" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:42
-          ~pin_check_stderr_msg:"pin check failed after opam lock"
-      in
-      write_executable
-        (Filename.concat bin_dir "lockf")
-        {|#!/bin/sh
-while [ "${1#-}" != "$1" ]; do
-  case "$1" in
-    -t) shift 2 ;;
-    *) shift ;;
-  esac
-done
-shift
-exec "$@"
-|};
-      let code, _stdout, stderr =
-        run_dune_local dir bin_dir
-          ~env:[ ("MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT", "1") ]
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
-          "build"
-      in
-      check int "wrapped command status propagates" 1 code;
-      check bool "timeout message suppressed for wrapped failure" false
-        (contains_substring stderr "releasing Dune lock");
-      check bool "dune was not invoked after pin failure" false
-        (Sys.file_exists dune_log))
-
 let test_opam_lock_timeout_env_must_be_numeric () =
   with_temp_dir "dune-local-opam-timeout-invalid" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0
-          ~pin_check_stderr_msg:"pin ok"
+        setup_fake_repo dir
       in
       write_executable (Filename.concat bin_dir "lockf")
         {|#!/bin/sh
@@ -859,8 +685,7 @@ exec "$@"
 let test_missing_lock_tools_warn_once () =
   with_temp_dir "dune-local-no-lock-tools" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0
-          ~pin_check_stderr_msg:"pin ok"
+        setup_fake_repo dir
       in
       write_executable (Filename.concat bin_dir "dirname")
         {|#!/bin/sh
@@ -898,7 +723,6 @@ exit 1
               ("GIT_CEILING_DIRECTORIES", dir);
               ("DUNE_LOCAL_LOCK", Filename.concat dir "dune-local.lock");
               ("DUNE_BUILD_DIR", build_dir);
-              ("MASC_SKIP_PIN_CHECK", "1");
               ("MASC_SKIP_DEPS_CHECK", "1");
               ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
               ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
@@ -926,8 +750,7 @@ exit 1
 let test_opam_flock_reexec_env_passthrough () =
   with_temp_dir "dune-local-opam-flock" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0
-          ~pin_check_stderr_msg:"pin ok"
+        setup_fake_repo dir
       in
       write_executable (Filename.concat bin_dir "dirname")
         {|#!/bin/sh
@@ -989,8 +812,7 @@ exec "$@"
 let test_opam_flock_timeout_releases_dune_lock () =
   with_temp_dir "dune-local-opam-flock-timeout" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0
-          ~pin_check_stderr_msg:"pin ok"
+        setup_fake_repo dir
       in
       write_executable (Filename.concat bin_dir "dirname")
         {|#!/bin/sh
@@ -1059,15 +881,14 @@ exec "$@"
       check bool "dune was not invoked after opam timeout" false
         (Sys.file_exists dune_log))
 
-let test_clean_subcommand_skips_pin_guard () =
+let test_clean_subcommand_reaches_dune () =
   with_temp_dir "dune-local-clean" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
+        setup_fake_repo dir
       in
       let code, _stdout, _stderr =
         run_dune_local dir bin_dir
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          ~unset_env:[ "GITHUB_ACTIONS" ]
           "clean"
       in
       check int "exits zero for clean subcommand" 0 code;
@@ -1075,38 +896,36 @@ let test_clean_subcommand_skips_pin_guard () =
 
 (* PR #13117 review (P2): the original guards checked args[0], so prefixing
    global options like `--root .` before `clean` misclassified the call as
-   a non-clean target and ran pin/deps/ocaml-version guards on a target
+   a non-clean target and ran compile-time guards on a target
    that does not compile.  Pin the new subcommand-detection helper so
    guard-skipping still kicks in. *)
-let test_clean_subcommand_with_global_flag_skips_pin_guard () =
+let test_clean_subcommand_with_global_flag_reaches_dune () =
   with_temp_dir "dune-local-clean-flag" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
+        setup_fake_repo dir
       in
       let code, _stdout, _stderr =
         run_dune_local dir bin_dir
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          ~unset_env:[ "GITHUB_ACTIONS" ]
           "--root . clean"
       in
       check int
-        "exits zero for `--root . clean` even when pin guard would fail"
+        "exits zero for `--root . clean` even when compile guards are skipped"
         0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
-let test_clean_subcommand_with_eq_flag_skips_pin_guard () =
+let test_clean_subcommand_with_eq_flag_reaches_dune () =
   with_temp_dir "dune-local-clean-eq-flag" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
+        setup_fake_repo dir
       in
       let code, _stdout, _stderr =
         run_dune_local dir bin_dir
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          ~unset_env:[ "GITHUB_ACTIONS" ]
           "--display=quiet clean"
       in
       check int
-        "exits zero for `--display=quiet clean` even when pin guard would fail"
+        "exits zero for `--display=quiet clean` even when compile guards are skipped"
         0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
@@ -1117,15 +936,14 @@ let test_clean_subcommand_with_eq_flag_skips_pin_guard () =
    - `-p PACKAGES` and `-x VAL` are SHORT value-taking common
      options; the original `[[ "$a" == -* ]]` fallback consumed
      only the flag and misread the value as the subcommand. *)
-let test_clean_subcommand_after_auto_promote_skips_pin_guard () =
+let test_clean_subcommand_after_auto_promote_reaches_dune () =
   with_temp_dir "dune-local-clean-auto-promote" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
+        setup_fake_repo dir
       in
       let code, _stdout, _stderr =
         run_dune_local dir bin_dir
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          ~unset_env:[ "GITHUB_ACTIONS" ]
           "--auto-promote clean"
       in
       check int
@@ -1133,15 +951,14 @@ let test_clean_subcommand_after_auto_promote_skips_pin_guard () =
         0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
-let test_clean_subcommand_after_short_packages_flag_skips_pin_guard () =
+let test_clean_subcommand_after_short_packages_flag_reaches_dune () =
   with_temp_dir "dune-local-clean-short-p" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
+        setup_fake_repo dir
       in
       let code, _stdout, _stderr =
         run_dune_local dir bin_dir
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          ~unset_env:[ "GITHUB_ACTIONS" ]
           "-p mypkg clean"
       in
       check int
@@ -1149,30 +966,28 @@ let test_clean_subcommand_after_short_packages_flag_skips_pin_guard () =
         0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
-let test_clean_subcommand_after_short_x_flag_skips_pin_guard () =
+let test_clean_subcommand_after_short_x_flag_reaches_dune () =
   with_temp_dir "dune-local-clean-short-x" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
+        setup_fake_repo dir
       in
       let code, _stdout, _stderr =
         run_dune_local dir bin_dir
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          ~unset_env:[ "GITHUB_ACTIONS" ]
           "-x dev clean"
       in
       check int "`-x dev clean` (short value-taking flag) skips guards" 0
         code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
-let test_clean_subcommand_after_cache_storage_mode_skips_pin_guard () =
+let test_clean_subcommand_after_cache_storage_mode_reaches_dune () =
   with_temp_dir "dune-local-clean-cache-storage-mode" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
+        setup_fake_repo dir
       in
       let code, _stdout, _stderr =
         run_dune_local dir bin_dir
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          ~unset_env:[ "GITHUB_ACTIONS" ]
           "--cache-storage-mode copy clean"
       in
       check int
@@ -1180,15 +995,14 @@ let test_clean_subcommand_after_cache_storage_mode_skips_pin_guard () =
         0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
-let test_clean_subcommand_after_cache_check_probability_skips_pin_guard () =
+let test_clean_subcommand_after_cache_check_probability_reaches_dune () =
   with_temp_dir "dune-local-clean-cache-check-probability" (fun dir ->
       let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
+        setup_fake_repo dir
       in
       let code, _stdout, _stderr =
         run_dune_local dir bin_dir
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          ~unset_env:[ "GITHUB_ACTIONS" ]
           "--cache-check-probability 0.5 clean"
       in
       check int
@@ -1196,44 +1010,13 @@ let test_clean_subcommand_after_cache_check_probability_skips_pin_guard () =
         0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
-let test_pin_ok_build_proceeds () =
-  with_temp_dir "dune-local-pin-ok" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:0 ~pin_check_stderr_msg:""
-      in
-      let code, _stdout, stderr =
-        run_dune_local dir bin_dir
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
-          "build"
-      in
-      check int "exits zero when pin OK" 0 code;
-      check bool "dune was invoked" true (Sys.file_exists dune_log);
-      check bool "pin OK message present" true
-        (contains_substring stderr "agent_sdk pin OK"))
-
-let test_dry_run_skips_pin_check () =
-  with_temp_dir "dune-local-dry-run" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir ~pin_check_exit_code:1
-          ~pin_check_stderr_msg:"pin mismatch"
-      in
-      let code, _stdout, _stderr =
-        run_dune_local dir bin_dir
-          ~env:[ ("MASC_DUNE_DRY_RUN", "1") ]
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
-          "build"
-      in
-      check int "exits zero for dry run" 0 code;
-      check bool "dune not actually invoked" false (Sys.file_exists dune_log))
-
 (* --- required findlib guard tests -------------------------------------
    Helper: fake a dependency environment where opam package installation
    may have succeeded but [ocamlfind query] resolves no public libraries.
-   The pin check passes so the test isolates the findlib guard. *)
+   The wrapper preflight passes so the test isolates the findlib guard. *)
 
 let setup_repo_with_missing_deps base =
-  let bin_dir, dune_log = setup_fake_repo base ~pin_check_exit_code:0
-                            ~pin_check_stderr_msg:"" in
+  let bin_dir, dune_log = setup_fake_repo base in
   let opam_path = Filename.concat bin_dir "opam" in
   let opam_script =
     {|#!/bin/sh
@@ -1256,7 +1039,7 @@ let test_missing_deps_aborts_build () =
     let bin_dir, dune_log = setup_repo_with_missing_deps dir in
     let code, _stdout, stderr =
       run_dune_local dir bin_dir
-        ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK"; "MASC_SKIP_DEPS_CHECK" ]
+        ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_DEPS_CHECK" ]
         "build"
     in
     check int "exits non-zero on missing deps" 1 code;
@@ -1277,7 +1060,7 @@ let test_skip_deps_check_env_bypasses_guard () =
     let code, _stdout, _stderr =
       run_dune_local dir bin_dir
         ~env:[ ("MASC_SKIP_DEPS_CHECK", "1") ]
-        ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+        ~unset_env:[ "GITHUB_ACTIONS" ]
         "build"
     in
     check int "exits zero when MASC_SKIP_DEPS_CHECK=1" 0 code;
@@ -1288,8 +1071,7 @@ let test_skip_deps_check_env_bypasses_guard () =
 let setup_repo_with_ocaml ?(required_version = "5.5.0")
     ?(ocaml_version = "5.4.0") base =
   let bin_dir, dune_log =
-    setup_fake_repo base ~ocaml_version:required_version ~pin_check_exit_code:0
-      ~pin_check_stderr_msg:""
+    setup_fake_repo base ~ocaml_version:required_version
   in
   (* The exact-toolchain tests exercise opam prefix identity before any
      dependency checks, so provide one coherent fake switch and prefix. *)
@@ -1323,7 +1105,7 @@ let test_old_ocaml_aborts_build () =
       run_dune_local dir bin_dir
         ~env:[ ("OPAM_SWITCH_PREFIX", dir) ]
         ~unset_env:
-          [ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK"
+          [ "GITHUB_ACTIONS"
           ; "MASC_SKIP_DEPS_CHECK"; "MASC_SKIP_OCAML_VERSION_CHECK" ]
         "build"
     in
@@ -1340,7 +1122,7 @@ let test_skip_ocaml_version_env_bypasses_guard () =
     let code, _stdout, _stderr =
       run_dune_local dir bin_dir
         ~env:[ ("MASC_SKIP_OCAML_VERSION_CHECK", "1") ]
-        ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+        ~unset_env:[ "GITHUB_ACTIONS" ]
         "build"
     in
     check int "exits zero when MASC_SKIP_OCAML_VERSION_CHECK=1" 0 code;
@@ -1356,7 +1138,7 @@ let test_ocaml_version_comes_from_dune_project () =
       run_dune_local dir bin_dir
         ~env:[ ("OPAM_SWITCH_PREFIX", dir) ]
         ~unset_env:
-          [ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK"
+          [ "GITHUB_ACTIONS"
           ; "MASC_SKIP_DEPS_CHECK"; "MASC_SKIP_OCAML_VERSION_CHECK" ]
         "build"
     in
@@ -1375,7 +1157,7 @@ let test_split_opam_prefix_aborts_build () =
       run_dune_local dir bin_dir
         ~env:[ ("OPAM_SWITCH_PREFIX", wrong_prefix) ]
         ~unset_env:
-          [ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK"
+          [ "GITHUB_ACTIONS"
           ; "MASC_SKIP_OCAML_VERSION_CHECK" ]
         "build"
     in
@@ -1391,24 +1173,10 @@ let test_split_opam_prefix_aborts_build () =
 let () =
   run "dune_local_script"
     [
-      ( "pin_guard",
+      ( "wrapper_guard",
         [
-          test_case "pin drift aborts build with clear message" `Quick
-            test_pin_drift_aborts_build;
-          test_case "MASC_SKIP_PIN_CHECK=1 bypasses pin guard" `Quick
-            test_skip_pin_check_env_bypasses_guard;
-          test_case
-            "MASC_SKIP_PIN_CHECK=1 still cleans on Provider_config CRC change"
-            `Quick
-            test_skip_pin_check_still_cleans_on_provider_config_crc_change;
-          test_case
-            "MASC_SKIP_PIN_CHECK=1 still cleans on Provider_kind CRC change"
-            `Quick
-            test_skip_pin_check_still_cleans_on_provider_kind_crc_change;
-          test_case "GITHUB_ACTIONS=true bypasses pin guard" `Quick
-            test_github_actions_bypasses_pin_guard;
-          test_case "opam absent aborts before pin guard" `Quick
-            test_opam_absent_aborts_before_pin_guard;
+          test_case "opam absent aborts before Dune" `Quick
+            test_opam_absent_aborts_before_dune;
           test_case "Dune lock wait reports holder" `Quick
             test_dune_lock_wait_reports_holder;
           test_case "live build-dir lock aborts before Dune" `Quick
@@ -1425,8 +1193,6 @@ let () =
             test_unset_opam_lock_timeout_waits_forever;
           test_case "zero-like opam lock timeout waits forever" `Quick
             test_zero_like_opam_lock_timeout_waits_forever;
-          test_case "opam lock wrapped failure is not labeled timeout" `Quick
-            test_opam_lockf_wrapped_failure_does_not_claim_timeout;
           test_case "opam lock timeout env must be numeric" `Quick
             test_opam_lock_timeout_env_must_be_numeric;
           test_case "missing lock tools warn once" `Quick
@@ -1435,38 +1201,32 @@ let () =
             test_opam_flock_reexec_env_passthrough;
           test_case "opam flock timeout releases Dune lock" `Quick
             test_opam_flock_timeout_releases_dune_lock;
-          test_case "clean subcommand skips pin guard" `Quick
-            test_clean_subcommand_skips_pin_guard;
+          test_case "clean subcommand reaches Dune" `Quick
+            test_clean_subcommand_reaches_dune;
           test_case
-            "`--root . clean` (global flag before subcommand) skips pin guard"
-            `Quick test_clean_subcommand_with_global_flag_skips_pin_guard;
+            "`--root . clean` (global flag before subcommand) reaches Dune"
+            `Quick test_clean_subcommand_with_global_flag_reaches_dune;
           test_case
-            "`--display=quiet clean` (--flag=value before subcommand) skips \
-             pin guard"
-            `Quick test_clean_subcommand_with_eq_flag_skips_pin_guard;
+            "`--display=quiet clean` (--flag=value before subcommand) reaches Dune"
+            `Quick test_clean_subcommand_with_eq_flag_reaches_dune;
           test_case
-            "`--auto-promote clean` (boolean flag is NOT value-taking) skips \
-             pin guard"
-            `Quick test_clean_subcommand_after_auto_promote_skips_pin_guard;
+            "`--auto-promote clean` (boolean flag) reaches Dune"
+            `Quick test_clean_subcommand_after_auto_promote_reaches_dune;
           test_case
-            "`-p mypkg clean` (short -p IS value-taking) skips pin guard"
+            "`-p mypkg clean` (short -p is value-taking) reaches Dune"
             `Quick
-            test_clean_subcommand_after_short_packages_flag_skips_pin_guard;
+            test_clean_subcommand_after_short_packages_flag_reaches_dune;
           test_case
-            "`-x dev clean` (short -x IS value-taking) skips pin guard"
-            `Quick test_clean_subcommand_after_short_x_flag_skips_pin_guard;
+            "`-x dev clean` (short -x is value-taking) reaches Dune"
+            `Quick test_clean_subcommand_after_short_x_flag_reaches_dune;
           test_case
-            "`--cache-storage-mode copy clean` skips pin guard"
+            "`--cache-storage-mode copy clean` reaches Dune"
             `Quick
-            test_clean_subcommand_after_cache_storage_mode_skips_pin_guard;
+            test_clean_subcommand_after_cache_storage_mode_reaches_dune;
           test_case
-            "`--cache-check-probability 0.5 clean` skips pin guard"
+            "`--cache-check-probability 0.5 clean` reaches Dune"
             `Quick
-            test_clean_subcommand_after_cache_check_probability_skips_pin_guard;
-          test_case "pin OK allows build to proceed" `Quick
-            test_pin_ok_build_proceeds;
-          test_case "MASC_DUNE_DRY_RUN=1 skips pin check" `Quick
-            test_dry_run_skips_pin_check;
+            test_clean_subcommand_after_cache_check_probability_reaches_dune;
         ] );
       ( "deps_guard",
         [

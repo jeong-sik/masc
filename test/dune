@@ -1335,7 +1335,7 @@
 (test
  (name test_keeper_stream_tool_accum)
  (modules test_keeper_stream_tool_accum)
- (libraries alcotest masc masc_server agent_sdk unix))
+ (libraries alcotest masc masc_server masc.agent_core unix))
 
 (test
  (name test_keeper_stream_media_accum)
@@ -1344,7 +1344,7 @@
   alcotest
   masc
   masc_server
-  agent_sdk
+  masc.agent_core
   base64
   digestif
   eio_main
@@ -2496,7 +2496,7 @@
 (test
  (name test_keeper_global_shared_refs_atomic)
  (modules test_keeper_global_shared_refs_atomic)
- (libraries alcotest agent_sdk masc masc.compaction_trigger))
+ (libraries alcotest masc.agent_core masc masc.compaction_trigger))
 
 ; RFC-keeper-vision-delegation-tool §2.6 — analyze_image pure core
 

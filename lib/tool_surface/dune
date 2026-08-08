@@ -36,8 +36,8 @@
   masc.tool_catalog_surfaces
   masc.masc_tool_dispatch
   masc.masc_exec
-  agent_sdk
-  agent_sdk.base
+  masc.agent_core
+  masc.agent_core.base
   mcp_protocol
   time_compat
   fs_compat

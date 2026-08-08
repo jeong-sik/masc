@@ -1,20 +1,21 @@
 ---
 status: reference
-last_verified: 2026-07-17
+last_verified: 2026-08-08
 code_refs:
   - lib/keeper/keeper_compact_policy.ml
   - lib/keeper/keeper_manual_compaction.ml
   - lib/keeper/keeper_context_runtime.ml
 ---
 
-# OAS-MASC Boundary Contract
+# MASC Agent Core Boundary Contract
 
-OAS (OCaml Agent SDK)와 MASC 사이의 역할 경계를 정의한다.
+MASC agent core와 MASC 사이의 역할 경계를 정의한다.
 
-**원칙**: OAS는 MASC를 모른다. OAS의 변경은 모든 소비자에게 유익해야 한다.
+**원칙**: agent core는 MASC coordinator를 모른다. 재사용 가능한 실행 계약만
+내부 core에 두고 MASC 제품 의미는 coordinator에 남긴다.
 
 ```
-consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime)
+consumer → MASC coordinator → masc.agent_core
 ```
 
 ## 문서 역할 (SSOT)
@@ -27,7 +28,7 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 
 ## 역할 분리
 
-| 관심사 | OAS | MASC |
+| 관심사 | Agent core | MASC coordinator |
 |--------|-----|------|
 | 단일 에이전트 실행 | `Agent.run`, `Builder`, `Hooks`, `Guardrails`, `Checkpoint` | 언제/왜/어떤 agent를 돌릴지 결정 |
 | 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | workspace, board, workflow, policies, operator surfaces |
@@ -41,13 +42,14 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 ## 의존 방향
 
 ```
-MASC ──depends on──→ OAS
-OAS  ──does not know──→ MASC
+MASC coordinator ──depends on──→ masc.agent_core
+masc.agent_core ──does not know──→ MASC coordinator
 ```
 
-- MASC는 OAS 공개 API를 소비한다.
+- MASC는 저장소 내부 `masc.agent_core` 계약을 소비한다.
 - MASC 전용 요구가 생겨도, 먼저 MASC adapter/bridge로 해결 가능한지 본다.
-- OAS에 기능을 추가하더라도 MASC 전용 개념을 새 public contract로 밀어넣지 않는다.
+- agent core에 기능을 추가하더라도 MASC 전용 개념을 core contract로
+  밀어넣지 않는다.
 
 ## Config Ownership
 
@@ -55,18 +57,18 @@ OAS  ──does not know──→ MASC
   in-memory JSON representation을 렌더해 dashboard 등 소비자에게 제공한다.
 - MASC owns keeper-facing logical runtime configuration: named runtime/profile,
   declared capabilities, typed tool visibility, and lane/status projections.
-- OAS owns concrete provider/model identity and execution. MASC must not branch
+- Agent core owns concrete provider/model identity and execution. MASC must not branch
   on vendor/model literals or surface concrete provider/model ids in keeper
   runtime products; compatibility fields are redacted to `runtime`, `null`, or
   empty collections at MASC boundaries.
-- OAS provider capability manifest / pricing override는 generic
+- Agent-core provider capability manifest / pricing override는 generic
   provider runtime contract다. MASC may pass logical runtime intent and
-  capability requirements into those OAS contracts, but OAS must not learn MASC routes,
+  capability requirements into those contracts, but agent core must not learn MASC routes,
   keeper phases, runtimes, Board/Goal/Task/Gate semantics, or dashboard policy.
 - `provider/model-free` in MASC means MASC policy code routes by logical use,
   declared capability, profile order, health, capacity, and receipt state; it
   does not branch on vendor/model literals. Provider/model ids remain
-  OAS-owned runtime data, not MASC product data.
+  agent-core-owned runtime data, not MASC product data.
 - 따라서 checked-in repo defaults는 review-stable pinning이 중요할 때 explicit `provider:model_id`를 쓰고, adapter default 자체를 계약으로 삼을 때만 `provider:auto`를 쓴다.
 
 ## Current Integration Status
@@ -74,12 +76,12 @@ OAS  ──does not know──→ MASC
 | Area | Status | Notes |
 |------|--------|-------|
 | Context compaction | MASC-owned, manual only | The explicit path is `masc_keeper_compact`. #26545 bounds conversation history; #26551 tracks whole-request provider fit. |
-| ContextOverflow ownership | Boundary aligned | OAS reports typed capacity/overflow. MASC routes it through the ordinary typed failure route (terminalizing the selected stimulus unless a deferred runtime lane is pending) and owns Keeper continuation. |
+| ContextOverflow ownership | Boundary aligned | Agent core reports typed capacity/overflow. MASC routes it through the ordinary typed failure route (terminalizing the selected stimulus unless a deferred runtime lane is pending) and owns Keeper continuation. |
 | Event bus bridge | Complete for current native/custom flow | `oas_event_bridge.ml` relays both OAS native events and `masc:*` custom events, persists them under `.masc/oas-events/`, and feeds dashboard SSE |
 | Dashboard OAS runtime health | Complete with replay/live split | dashboard health SSOT is `durable oas_event replay + live SSE tail`, not live-only counters |
 | Dashboard runtime counts | Complete with truth split | dashboard `counts` means active runtimes; configured keeper inventory is exposed separately as `configured_keepers` |
-| Checkpoint integration | OAS-owned transcript state | OAS checkpoint is used in shared worker/runtime paths. MASC does not derive checkpoint state from assistant prose or maintain a duplicate prose-derived sidecar. Feature adapters may use typed, owner-specific checkpoint metadata only where the OAS contract explicitly exposes it. |
-| Provider/model identity ownership | OAS-owned | MASC resolves logical `runtime_id` / runtime lane intent only; concrete provider/model selection and cost identity are OAS-owned. |
+| Checkpoint integration | Agent-core-owned transcript state | The agent-core checkpoint is used in shared worker/runtime paths. MASC does not derive checkpoint state from assistant prose or maintain a duplicate prose-derived sidecar. Feature adapters may use typed, owner-specific checkpoint metadata only where the core contract explicitly exposes it. |
+| Provider/model identity ownership | Agent-core-owned | MASC resolves logical `runtime_id` / runtime lane intent only; concrete provider/model selection and cost identity are agent-core-owned. |
 
 ## Boundary Audit Snapshot
 
@@ -268,66 +270,20 @@ Use this checklist when reviewing boundary-touching PRs:
 3. If a bridge is lossy, fix the MASC-side adapter first before proposing OAS API expansion.
 4. Do not claim a subsystem is “migrated” if the runtime path works but key semantics are still dropped.
 
-## OAS API Surface Drift — Detection & Repair
+## Agent-core boundary detection
 
-Three complementary mechanisms keep the OAS/MASC boundary honest. The first keeps upstream OAS agent-stream-agnostic; the other two keep MASC's consumer-side type boundary honest.
-
-### Layer 0 — SDK independence gate (`scripts/ci/check-masc-oas-boundary.sh`)
-
-MASC's boundary guard resolves an OAS checkout and, when that checkout provides `scripts/check-sdk-independence.sh`, delegates upstream vocabulary scanning to OAS itself. This prevents the downstream repo from proving independence by scanning MASC-side adapters such as `lib/oas_*.ml`.
+The source is part of this repository, so cross-repository pin and fingerprint
+gates are retired. The boundary is enforced directly against the checked-in
+tree.
 
 ```bash
-AGENT_SDK_LOCAL_REPO=/path/to/oas \
-MASC_STRICT_OAS_INDEPENDENCE=1 \
-bash scripts/ci/check-masc-oas-boundary.sh
+bash scripts/check-agent-core-boundary.sh
+bash test/test_agent_core_boundary.sh
+dune build --root . @packages/agent_core/test/runtest
 ```
 
-Without `MASC_STRICT_OAS_INDEPENDENCE=1`, the guard warns and continues when the OAS checkout or OAS-owned script is unavailable. That keeps downstream PR ordering decoupled while still giving local reviewers a strict mode.
-
-### Layer 1 — Fingerprint gate (`scripts/oas-drift-check.sh`)
-
-Dumps OAS public types at the pinned SHA (Event_bus variants / Http_client error variants / Metrics.t fields) and diffs against `scripts/oas-api-surface.json`. Runs automatically as a one-line summary inside `make diagnostics-oas-pin`:
-
-```
-OAS pin verified: main@92c3077a (base version v0.155.1)
-OAS API surface: ✓ matches fingerprint
-```
-
-Drift shows as `⚠ drift (added N, removed M) — run 'make diagnostics-oas-drift' for detail`. `make diagnostics-oas-drift` prints the section-grouped added/removed lists and the repair sequence.
-
-### Layer 2 — Type adapter (`lib/agent_sdk_compat/`)
-
-Consumer-side pattern matches against OAS variants and record literals against OAS records are consolidated in `lib/agent_sdk_compat/agent_sdk_compat.ml` (Http_client + Metrics so far; Event_bus pending). When OAS adds a variant or field, only this module fails to compile, not every consumer. Adding a new surface to the adapter requires both:
-
-1. Extend `agent_sdk_compat.mli` / `.ml` with the new projection
-2. Migrate call sites to use the adapter (one line each, usually)
-
-### Repair flow when drift is reported
-
-```bash
-# 1. Investigate: what actually changed upstream?
-make diagnostics-oas-drift             # section-grouped added/removed
-
-# 2. Fix the consumer side (usually: update lib/agent_sdk_compat/agent_sdk_compat.ml
-#    so the adapter compiles against the new OAS; migrate any remaining
-#    call sites that match OAS types directly)
-
-# 3. Verify build is clean
-dune build @check
-
-# 4. Refresh the fingerprint and commit it together with the consumer change
-bash scripts/oas-drift-check.sh --regenerate
-git add scripts/oas-api-surface.json lib/
-git commit -m 'chore(oas): adopt <variant/field>, refresh surface fingerprint'
-```
-
-Regenerate-before-fix is an anti-pattern: the fingerprint must always describe a state where MASC consumers compile cleanly.
-
-### Source resolution (no manual config for common cases)
-
-`oas-drift-check.sh` auto-discovers the OAS checkout in this order:
-
-1. `$AGENT_SDK_LOCAL_REPO` (explicit override)
-2. `<masc-parent>/oas` (sibling checkout)
-
-Each candidate must be a git checkout at the pinned SHA. If none qualifies, the script falls back to `git fetch` into a temp bare clone from the upstream URL. Network is required only for that fallback.
+The gate fails closed when the core tree is absent, rejects independent package
+or release metadata, rejects dependencies on MASC coordinator libraries, and
+rejects direct imports of Keeper, Board, Gate, Server, Operator, workspace, or
+runtime-configuration modules. CI runs the full imported behavior suite whenever
+`packages/agent_core` or its integration metadata changes.

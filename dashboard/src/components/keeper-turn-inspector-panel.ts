@@ -1,4 +1,4 @@
-// MASC Dashboard — what a keeper actually sent, and what it will send next.
+// MASC Dashboard — retained redacted execution records and the next prompt.
 //
 // The server has carried these four views since RFC-0366 and the raw-trace
 // reader landed, but nothing rendered them: the routes, the decoders and their
@@ -26,9 +26,10 @@ import { relativeTime } from '../lib/format-time'
 import { JsonViewerCard } from './common/json-viewer'
 
 type Tab = 'raw' | 'prompt' | 'note'
+type RawView = 'text' | 'tree'
 
 const TABS: Array<{ id: Tab; label: string; hint: string }> = [
-  { id: 'raw', label: 'RAW provider turns', hint: 'RAW · 프로바이더로 나간 요청·응답 원문' },
+  { id: 'raw', label: 'Retained trace records', hint: 'REDACTED TRACE · 보존된 실행 레코드' },
   { id: 'prompt', label: 'Typed next prompt', hint: 'TYPED · 다음 턴에 조립될 시스템 컨텍스트' },
   { id: 'note', label: 'Operator input', hint: 'OPERATOR INPUT · 다음 턴 한 번에만 실리는 문장' },
 ]
@@ -73,12 +74,14 @@ function Pre({ text }: { text: string }) {
   `
 }
 
-/** Every request and response for one turn, as it went to the provider. */
+/** Redacted semantic execution records retained for one keeper turn. */
 function RawTurns({ keeper }: { keeper: string }) {
   const [turns, setTurns] = useState<readonly RawTraceTurn[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [page, setPage] = useState<RawTracePage | null>(null)
   const [offset, setOffset] = useState(0)
+  const [view, setView] = useState<RawView>('text')
+  const [copyState, setCopyState] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -100,6 +103,7 @@ function RawTurns({ keeper }: { keeper: string }) {
     if (selected === null) return
     const controller = new AbortController()
     setPage(null)
+    setCopyState(null)
     fetchKeeperRawTrace(keeper, selected, {
       signal: controller.signal,
       offset,
@@ -119,6 +123,16 @@ function RawTurns({ keeper }: { keeper: string }) {
     return html`<${Muted}>이 keeper 는 아직 저장된 턴 원문이 없습니다.<//>`
   }
 
+  const copyPage = async () => {
+    if (page === null) return
+    try {
+      await navigator.clipboard.writeText(page.records.map(record => record.raw).join('\n'))
+      setCopyState(`${page.records.length}개 literal JSONL 행 복사됨`)
+    } catch (cause) {
+      setCopyState(`복사 실패: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+  }
+
   return html`
     <div class="grid gap-2">
       <div class="max-h-40 overflow-auto rounded border border-[var(--color-border-subtle)]">
@@ -132,6 +146,9 @@ function RawTurns({ keeper }: { keeper: string }) {
             onClick=${() => { setSelected(turn.file); setOffset(0) }}
           >
             <span class="font-mono">${turn.file}</span>
+            ${turn.traceId == null
+              ? html`<span class="text-[var(--color-fg-disabled)]">trace 없음</span>`
+              : html`<span class="min-w-0 truncate font-mono text-[var(--color-fg-muted)]" title=${turn.traceId}>${turn.traceId}</span>`}
             <span class="ml-auto tabular-nums text-[var(--color-fg-muted)]">
               ${turn.records}건 · ${formatBytes(turn.bytes)} · ${ago(turn.modifiedAt)}
             </span>
@@ -159,10 +176,40 @@ function RawTurns({ keeper }: { keeper: string }) {
                 onClick=${() => setOffset(page.offset + RECORDS_PER_PAGE)}
               >다음<//>
             </div>
+            <div class="flex flex-wrap items-center gap-1" role="group" aria-label="Trace 표시 방식">
+              <button
+                type="button"
+                class=${`rounded border px-2 py-1 text-3xs ${view === 'text' ? 'border-[var(--status-warn)] text-[var(--status-warn)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'}`}
+                aria-pressed=${view === 'text'}
+                onClick=${() => setView('text')}
+              >Literal JSONL</button>
+              <button
+                type="button"
+                class=${`rounded border px-2 py-1 text-3xs ${view === 'tree' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'}`}
+                aria-pressed=${view === 'tree'}
+                onClick=${() => setView('tree')}
+              >JSON tree</button>
+              <${Btn} class="ml-auto" onClick=${() => void copyPage()}>현재 페이지 복사<//>
+              ${copyState === null ? null : html`<span role="status" class="text-3xs text-[var(--color-fg-muted)]">${copyState}</span>`}
+            </div>
+            <p class="text-3xs text-[var(--color-fg-muted)]">
+              ${view === 'text'
+                ? 'REDACTED TRACE · retained JSONL의 literal 행을 변환 없이 표시합니다.'
+                : 'PARSED TREE · 같은 행을 JSON으로 해석한 탐색용 보기입니다.'}
+            </p>
             ${page.records.map((record, index) => html`
-              <div key=${page.offset + index}>
+              <div key=${page.offset + index} class="grid gap-1" data-testid="raw-trace-record">
+                <div class="flex items-center gap-2 text-3xs">
+                  <span class="w-fit rounded border border-[var(--status-warn)] px-1.5 py-0.5 font-semibold text-[var(--status-warn)]">REDACTED TRACE</span>
+                  <span class="font-mono text-[var(--color-fg-muted)]">line ${page.offset + index + 1}</span>
+                </div>
+                ${view === 'text'
+                  ? html`<${Pre} text=${record.raw} />`
+                  : record.ok
+                    ? html`<${JsonViewerCard} data=${record.record} title=${`Provider record ${page.offset + index + 1}`} />`
+                    : html`<${Pre} text=${record.raw} />`}
                 ${record.ok
-                  ? html`<div class="grid gap-1"><span class="w-fit rounded border border-[var(--status-warn)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--status-warn)]">RAW</span><${JsonViewerCard} data=${record.record} title=${`Provider record ${page.offset + index + 1}`} /></div>`
+                  ? null
                   // A torn line keeps its position rather than being skipped:
                   // a damaged trace must not read as a shorter one.
                   : html`<${Danger}>레코드 ${page.offset + index + 1} 를 읽지 못했습니다: ${record.error}<//>`}

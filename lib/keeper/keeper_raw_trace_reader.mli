@@ -18,6 +18,10 @@
 
 type turn_summary =
   { file : string (** Bare file name, the handle later reads take. *)
+  ; trace_id : string option
+        (** Unique typed session identifier shared by every retained record.
+            [None] is possible only for an empty file; malformed, missing,
+            duplicate, invalid, or mixed identities reject the listing. *)
   ; bytes : int
   ; modified_at : float
   ; records : int (** Non-blank JSONL lines. *)
@@ -27,6 +31,7 @@ type read_error =
   | Unknown_keeper of string
   | Invalid_file_name of string
   | No_such_turn of string
+  | Invalid_trace_record of { file : string; line : int; detail : string }
   | Read_failed of { file : string; detail : string }
 
 val read_error_to_string : read_error -> string
@@ -40,11 +45,17 @@ val list_turns :
   -> limit:int
   -> (turn_summary list, read_error) result
 
+type turn_record =
+  { raw : string (** Literal non-blank JSONL line, before decoding. *)
+  ; parsed : (Yojson.Safe.t, string) result
+        (** Typed view of the same line, or its exact decode failure. *)
+  }
+
 type turn_records =
   { file : string
   ; total_records : int (** Non-blank lines in the file, independent of [limit]. *)
   ; offset : int
-  ; records : (Yojson.Safe.t, string) result list
+  ; records : turn_record list
   }
 
 (** One turn's records in file order, at most [limit] starting at [offset].

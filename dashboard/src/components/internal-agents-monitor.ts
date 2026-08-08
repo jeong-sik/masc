@@ -191,7 +191,7 @@ function LibrarianJournal({
           ? html`<span class="text-[var(--color-danger)]"> · 읽지 못한 줄 ${journal.undecodableLines}</span>`
           : null}
       </div>
-      <p class="text-xs text-[var(--color-fg-muted)]">정규화된 commit journal입니다. Provider RAW 요청·응답은 아래 Turn inspector의 RAW 탭에서 별도로 확인합니다.</p>
+      <p class="text-xs text-[var(--color-fg-muted)]">정규화된 commit journal입니다. Redaction된 retained 실행 레코드는 아래 Turn inspector에서 별도로 확인합니다.</p>
       ${related.length === 0
         ? html`<p class="rounded border border-[var(--color-border-default)] p-3 text-xs text-[var(--color-fg-muted)]">정확히 조인되는 journal 행이 없습니다. trace만 같거나 시간상 가까운 행을 추정해서 붙이지 않았습니다.</p>`
         : null}
@@ -316,7 +316,10 @@ function Details({ row }: { row: Row }) {
           <${JsonViewerCard} title="입력값 · typed preview" data=${row.run.input} />
           <${JsonViewerCard} title="출력값 · typed preview" data=${output} />
         </div>
-        <p class="text-xs text-[var(--color-fg-muted)]">이 lane은 한 번의 structured model execution이며 MASC tool dispatch를 수행하지 않습니다. Provider 요청·응답 원문은 RAW turn evidence로 분리됩니다.</p>
+        <p class="text-xs text-[var(--color-fg-muted)]">
+          <span class="mr-2 inline-flex rounded border border-[var(--color-danger)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-danger)]">TRACE JOIN UNAVAILABLE</span>
+          이 registry는 retained trace run ref를 보존하지 않습니다. 시간이나 subject 문자열로 실행 레코드를 추정 연결하지 않습니다.
+        </p>
         ${row.run.lane === 'librarian_exact'
           ? html`<div class="border-t border-[var(--color-border-default)] pt-3">
               <${LibrarianJournal}
@@ -439,7 +442,7 @@ export function InternalAgentsMonitor() {
       <div class="flex flex-wrap items-start gap-3">
         <div>
           <h2 class="text-lg font-semibold text-[var(--color-fg-primary)]">Internal execution evidence</h2>
-          <p class="mt-1 text-xs text-[var(--color-fg-muted)]">Run registry, Memory OS journal, Keeper RAW trace를 출처별로 분리하고 동일한 owner·trace·revision·시간축으로 읽습니다.</p>
+          <p class="mt-1 text-xs text-[var(--color-fg-muted)]">Run registry, Memory OS journal, Keeper retained trace를 출처별로 분리하고 producer가 보존한 typed identity만으로 읽습니다.</p>
         </div>
         <span class="rounded border border-[var(--color-border-default)] px-2 py-1 text-xs text-[var(--color-fg-muted)]">${rows.length} runs · ${keepers.length} owners</span>
         <${Btn} class="v2-monitoring-action ml-auto" onClick=${() => void refresh()} disabled=${loading}>
@@ -448,7 +451,7 @@ export function InternalAgentsMonitor() {
       </div>
 
       <div class="v2-monitoring-card flex flex-wrap gap-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-xs">
-        <span class="flex items-center gap-2"><${EvidenceBadge} kind="raw" /> Provider 요청·응답 원문</span>
+        <span class="flex items-center gap-2"><${EvidenceBadge} kind="raw" /> Redaction된 retained 실행 레코드</span>
         <span class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /> 정규화·redaction된 구조화 evidence</span>
         <span class="flex items-center gap-2"><${EvidenceBadge} kind="excerpt" /> 원문 전체가 아닌 제한된 출력</span>
       </div>

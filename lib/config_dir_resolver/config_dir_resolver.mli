@@ -97,10 +97,6 @@ val keepers_dir_for_base_path : base_path:string -> string
 (** [keepers_dir_for_base_path ~base_path] returns the keepers directory for an
     explicit workspace base path. *)
 
-val keeper_runtime_store_of_dirname : string -> Common.keeper_runtime_store option
-(** Base-path-independent resolver for canonical child-store names under
-    [Common.keepers_runtime_dirname]. *)
-
 val keeper_toml_path_opt_for_base_path :
   base_path:string -> string -> string option
 (** Base-path-scoped variant of {!keeper_toml_path_opt}. *)

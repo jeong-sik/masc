@@ -79,13 +79,19 @@ let json_list_field key fields =
 
 (* ── store paths (mirror Common.*_from_base_path) ────────────────── *)
 
-let masc base = Filename.concat base ".masc"
-let keepers base = Filename.concat (masc base) "keepers"
+let masc base = Filename.concat base Common.masc_dirname
+let keepers base = Filename.concat (masc base) Common.keepers_runtime_dirname
 let keeper_local base store = Filename.concat (Filename.concat (keepers base) keeper) store
-let turn_dir base = keeper_local base "turn-records"
-let crash_dir base = keeper_local base "crash-events"
-(* Fixtures land where the owning module says its store lives, so a rename
-   moves the writer, the digest's reader and this test together. *)
+let turn_dir base =
+  keeper_local base
+    (Common.keeper_runtime_store_dirname Common.Keeper_turn_records)
+;;
+
+let crash_dir base =
+  keeper_local base
+    (Common.keeper_runtime_store_dirname Common.Keeper_crash_events)
+;;
+
 let audit_dir base = Filename.concat (masc base) Masc.Audit_log.store_dirname
 
 let activity_dir base =

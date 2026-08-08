@@ -337,9 +337,6 @@ let resolve_for_base_path ~base_path =
 let keepers_dir_for_base_path ~base_path =
   (resolve_for_base_path ~base_path).keepers.path
 
-let keeper_runtime_store_of_dirname =
-  Common.keeper_runtime_store_of_dirname
-
 let keeper_toml_path_opt name =
   let path = Filename.concat (keepers_dir ()) (name ^ ".toml") in
   if existing_file path then Some path else None

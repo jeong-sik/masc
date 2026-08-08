@@ -58,7 +58,7 @@ let base_observation : WO.world_observation =
     idle_seconds = 0;
     active_goals = [];
     unclaimed_task_count = 0;
-    claimable_task_count = 0;
+    claimable_tasks = [];
     failed_task_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
     backlog_revision = Some 1;
@@ -284,11 +284,19 @@ let test_backlog_with_rows_omits_readable_empty_statement () =
       {
         base_observation with
         unclaimed_task_count = 3;
-        claimable_task_count = 1;
+        claimable_tasks =
+          [ { Keeper_world_observation_inputs.task_id = "task-claimable"
+            ; title_preview = "Claimable task"
+            }
+          ];
       }
   in
   check bool "counted rows rendered" true
     (contains ~needle:"- Unclaimed tasks: 3" user);
+  check bool "claimable count is derived from rows" true
+    (contains ~needle:"- Claimable tasks for this keeper: 1" user);
+  check bool "claimable row reaches the prompt" true
+    (contains ~needle:"task-claimable — Claimable task" user);
   check bool "readable empty statement absent" false
     (contains ~needle:readable_empty_line user);
   check bool "unavailable wording absent" false

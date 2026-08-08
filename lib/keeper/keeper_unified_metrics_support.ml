@@ -378,7 +378,7 @@ let work_kind_of_json = Turn_mode_codec.work_kind_of_json
 
 let claim_backlog_actionable
     (observation : Keeper_world_observation.world_observation) : bool =
-  observation.claimable_task_count > 0
+  Keeper_world_observation.claimable_task_count observation > 0
 
 let singleton_when condition label =
   if condition then [ label ] else []

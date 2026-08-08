@@ -28,7 +28,7 @@ let of_keeper_world_observation
   : world_observation
   =
   {
-    unclaimed_task_count = observation.claimable_task_count;
+    unclaimed_task_count = Keeper_world_observation.claimable_task_count observation;
     board_activity_count =
       List.fold_left
         (fun count event ->

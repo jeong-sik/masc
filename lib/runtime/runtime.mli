@@ -12,7 +12,7 @@ type t =
   ; provider : provider
   ; model : model_spec
   ; binding : binding
-  ; provider_config : Llm_provider.Provider_config.t
+  ; execution : Runtime_execution.t
   }
 
 val id_of_binding : binding -> string

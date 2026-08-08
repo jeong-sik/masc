@@ -774,15 +774,17 @@ let dashboard_runtime_append_probe_path base ~suffix =
 
 let dashboard_runtime_probe_url ~(api_format : Runtime_schema.api_format) base_url =
   match api_format with
+  | Runtime_schema.Codex_app_server_runtime -> None
   | Runtime_schema.Ollama_api ->
     let base = dashboard_runtime_trim_trailing_slashes base_url in
-    if String.ends_with ~suffix:"/api/tags" base
-    then base
-    else if String.ends_with ~suffix:"/api" base
-    then base ^ "/tags"
-    else base ^ "/api/tags"
+    Some
+      (if String.ends_with ~suffix:"/api/tags" base
+       then base
+       else if String.ends_with ~suffix:"/api" base
+       then base ^ "/tags"
+       else base ^ "/api/tags")
   | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
-      dashboard_runtime_append_probe_path base_url ~suffix:"/models"
+    Some (dashboard_runtime_append_probe_path base_url ~suffix:"/models")
 ;;
 
 let dashboard_runtime_url_for_json raw =
@@ -882,6 +884,7 @@ let dashboard_runtime_model_count_of_body ~(api_format : Runtime_schema.api_form
   try
     let json = Yojson.Safe.from_string body in
     match api_format with
+    | Runtime_schema.Codex_app_server_runtime -> None
     | Runtime_schema.Ollama_api -> dashboard_runtime_list_member_len "models" json
     | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
       (match dashboard_runtime_list_member_len "data" json with
@@ -981,19 +984,28 @@ let dashboard_runtime_provider_probe_json
       ~error:"CLI runtimes do not expose an HTTP reachability endpoint"
       ()
   | Runtime_schema.Http endpoint_url ->
-    let probe_url = dashboard_runtime_probe_url ~api_format:rt.provider.api_format endpoint_url in
-    let probe_url_json = dashboard_runtime_url_for_json probe_url in
-    if not (dashboard_runtime_http_url_valid probe_url)
-    then
+    begin match dashboard_runtime_probe_url ~api_format:rt.provider.api_format endpoint_url with
+     | None ->
       make
-        ~probe_url:probe_url_json
         ~auth_present:false
-        ~status:"invalid_endpoint"
+        ~status:"invalid_execution_transport"
         ~reachable:(Some false)
         ~skipped:false
-        ~error:"runtime endpoint is not an absolute http(s) URL"
+        ~error:"codex-app-server must use the official CLI transport"
         ()
-    else (
+     | Some probe_url ->
+      let probe_url_json = dashboard_runtime_url_for_json probe_url in
+      if not (dashboard_runtime_http_url_valid probe_url)
+      then
+        make
+          ~probe_url:probe_url_json
+          ~auth_present:false
+          ~status:"invalid_endpoint"
+          ~reachable:(Some false)
+          ~skipped:false
+          ~error:"runtime endpoint is not an absolute http(s) URL"
+          ()
+      else (
       match dashboard_runtime_probe_headers rt.provider with
       | Error error ->
         make
@@ -1042,6 +1054,7 @@ let dashboard_runtime_provider_probe_json
              ~skipped:false
              ~error
              ()))
+    end
 ;;
 
 let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
@@ -1524,8 +1537,17 @@ let response_format_json : Llm_provider.Types.response_format -> Yojson.Safe.t =
 ;;
 
 let runtime_request_config_json (rt : Runtime.t) =
-  let cfg = rt.provider_config in
-  `Assoc
+  match rt.execution with
+  | Runtime_execution.Codex_app_server config ->
+    `Assoc
+      [ "source", `String "official-client-runtime"
+      ; "execution", `String "codex_app_server"
+      ; "model", Json_util.string_opt_to_json config.model
+      ; "timeout_s", `Float config.timeout_s
+      ; "verified", `Bool false
+      ]
+  | Runtime_execution.Agent_core cfg ->
+    `Assoc
     [ "source", `String "oas-provider-config"
     ; "provider_kind", `String (Llm_provider.Provider_config.string_of_provider_kind cfg.kind)
     ; "request_path", `String cfg.request_path
@@ -1568,6 +1590,7 @@ let runtime_api_format_wire : Runtime_schema.api_format -> string = function
   | Runtime_schema.Messages_api -> "messages"
   | Runtime_schema.Chat_completions_api -> "chat-completions"
   | Runtime_schema.Ollama_api -> "ollama"
+  | Runtime_schema.Codex_app_server_runtime -> "codex-app-server"
 ;;
 
 let runtime_provider_behavior_capabilities_json
@@ -1670,7 +1693,15 @@ let runtime_declared_spec_json (rt : Runtime.t) =
 ;;
 
 let effective_capabilities_json (rt : Runtime.t) =
-  match Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config with
+  match rt.execution with
+  | Runtime_execution.Codex_app_server _ ->
+    `Assoc
+      [ "source", `String "unverified"
+      ; "execution", `String "codex_app_server"
+      ; "verified", `Bool false
+      ]
+  | Runtime_execution.Agent_core provider_config ->
+   (match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
   | None -> `Null
   | Some caps ->
     let accepted_reasoning_efforts =
@@ -1733,7 +1764,7 @@ let effective_capabilities_json (rt : Runtime.t) =
       ; "supports_code_execution", `Bool caps.supports_code_execution
       ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
       ; "supported_models", supported_models
-      ]
+      ])
 ;;
 
 let runtime_parameter_policy_json (rt : Runtime.t) =
@@ -1743,19 +1774,26 @@ let runtime_parameter_policy_json (rt : Runtime.t) =
     |> List.map Llm_provider.Capabilities.sampling_parameter_to_string
     |> Json_util.json_string_list
   in
-  let dialect = RD.for_provider_config rt.provider_config in
-  let sampling_candidates = RD.sampling_params_ignored_when_thinking dialect in
-  let ignored_sampling_params =
-    List.filter
-      (fun field -> RD.ignores_sampling_param dialect ~enable_thinking:None field)
-      sampling_candidates
-  in
-  let always_ignored_sampling_params =
-    List.filter
-      (fun field -> RD.ignores_sampling_param dialect ~enable_thinking:(Some false) field)
-      sampling_candidates
-  in
-  `Assoc
+  match rt.execution with
+  | Runtime_execution.Codex_app_server _ ->
+    `Assoc
+      [ "source", `String "official-client-owned"
+      ; "execution", `String "codex_app_server"
+      ]
+  | Runtime_execution.Agent_core provider_config ->
+    let dialect = RD.for_provider_config provider_config in
+    let sampling_candidates = RD.sampling_params_ignored_when_thinking dialect in
+    let ignored_sampling_params =
+      List.filter
+        (fun field -> RD.ignores_sampling_param dialect ~enable_thinking:None field)
+        sampling_candidates
+    in
+    let always_ignored_sampling_params =
+      List.filter
+        (fun field -> RD.ignores_sampling_param dialect ~enable_thinking:(Some false) field)
+        sampling_candidates
+    in
+    `Assoc
     [ "reasoning_toggle_wire", `String (RD.toggle_wire_to_string dialect.toggle_wire)
     ; "reasoning_replay_policy", `String (RD.replay_policy_to_string dialect.replay_policy)
     ; "requires_reasoning_replay_on_tool_call", `Bool (RD.requires_reasoning_replay_on_tool_call dialect)
@@ -1767,6 +1805,14 @@ let runtime_parameter_policy_json (rt : Runtime.t) =
 
 let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
   let runtime_kind = runtime_kind_of_transport rt.provider.transport in
+  let is_official_client_runtime =
+    match rt.execution with
+    | Runtime_execution.Codex_app_server _ -> true
+    | Runtime_execution.Agent_core _ -> false
+  in
+  let runtime_status =
+    if is_official_client_runtime then "configured_unverified" else "configured"
+  in
   let models = [ rt.model.api_name ] in
   let capabilities_declared, caps =
     match rt.model.capabilities with
@@ -1790,13 +1836,13 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "kind", `String (runtime_dashboard_kind_of_runtime_kind runtime_kind)
     ; "runtime_kind", `String (runtime_kind_to_string runtime_kind)
     ; "auth_kind", `String (runtime_auth_kind_of_credential rt.provider.credentials)
-    ; "status", `String "configured"
-    ; "available", `Bool true
+    ; "status", `String runtime_status
+    ; "available", `Bool (not is_official_client_runtime)
     ; "is_default_runtime", `Bool (Option.equal String.equal default_id (Some rt.id))
     ; "max_context", `Int (Runtime.max_context_of_runtime rt)
-    ; "tools_support", `Bool rt.model.tools_support
-    ; "thinking_support", `Bool rt.model.thinking_support
-    ; "streaming", `Bool rt.model.streaming
+    ; "tools_support", `Bool (rt.model.tools_support && not is_official_client_runtime)
+    ; "thinking_support", `Bool (rt.model.thinking_support && not is_official_client_runtime)
+    ; "streaming", `Bool (rt.model.streaming && not is_official_client_runtime)
       (* Per-model sampling temperature override ([models.<id>].temperature).
          [`Null] when unset (the runtime keeps the fleet fallback). Read-only
          projection for the dashboard runtime capability card. *)
@@ -1840,6 +1886,16 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "effective_capabilities", effective_capabilities_json rt
     ; "parameter_policy", runtime_parameter_policy_json rt
     ; "request_config", runtime_request_config_json rt
+    ; ( "verification"
+      , if is_official_client_runtime
+        then
+          `Assoc
+            [ "status", `String "unverified"
+            ; "measured", `Bool false
+            ; "evidence", `Null
+            ; "reason", `String "no_successful_runtime_observation"
+            ]
+        else `Null )
     ; "declared_spec", runtime_declared_spec_json rt
     ; "model_count", `Int (List.length models)
     ; "models", Json_util.json_string_list models

@@ -56,6 +56,12 @@ type try_provider_ctx =
   ; seq_ref : int ref
   }
 
+val apply_accept :
+  runtime_id:string ->
+  accept:(Agent_sdk.Types.api_response -> bool) ->
+  Runtime_agent.run_result ->
+  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
 val observe_checkpoint_stage :
   bool Atomic.t -> Agent_sdk.Agent.checkpoint_stage -> unit
 

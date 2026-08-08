@@ -344,9 +344,19 @@ let finalize
        assistant_msg;
      capture_replay_response ~response_text
    | _ -> ());
-  let saved_checkpoint_result =
-    match result.checkpoint with
-    | Some result_checkpoint ->
+  let checkpoint_owner_result =
+    match Runtime.get_runtime_by_id runtime_id_string with
+    | Some runtime -> Ok (Runtime_execution.checkpoint_owner runtime.execution)
+    | None ->
+      Error
+        (checkpoint_persistence_error
+           ~keeper_name:meta.name
+           ~detail:
+             (Printf.sprintf
+                "runtime disappeared before checkpoint finalization: %s"
+                runtime_id_string))
+  in
+  let save_oas_checkpoint result_checkpoint =
       let checkpoint, source_already_persisted =
         select_finalization_checkpoint
           ~last_persisted_checkpoint
@@ -440,7 +450,8 @@ let finalize
            (checkpoint_persistence_error
               ~keeper_name:meta.name
               ~detail:("OAS checkpoint save failed: " ^ e))))
-    | None ->
+  in
+  let missing_oas_checkpoint () =
       Log.Keeper.error ~keeper_name:meta.name
         "runtime=%s missing OAS checkpoint after run"
         (Keeper_meta_contract.runtime_id_of_meta meta);
@@ -452,6 +463,29 @@ let finalize
         (checkpoint_persistence_error
            ~keeper_name:meta.name
            ~detail:"missing OAS checkpoint after run")
+  in
+  let unexpected_oas_checkpoint () =
+    Log.Keeper.error ~keeper_name:meta.name
+      "runtime=%s official-client runtime returned an OAS checkpoint"
+      (Keeper_meta_contract.runtime_id_of_meta meta);
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string CheckpointFailures)
+      ~labels:[ "keeper", meta.name; "site", "owner_mismatch" ]
+      ();
+    Error
+      (checkpoint_persistence_error
+         ~keeper_name:meta.name
+         ~detail:"official-client runtime returned an OAS checkpoint")
+  in
+  let saved_checkpoint_result =
+    match checkpoint_owner_result, result.checkpoint with
+    | Error error, _ -> Error error
+    | Ok Runtime_execution.Masc_oas, Some result_checkpoint ->
+      save_oas_checkpoint result_checkpoint
+    | Ok Runtime_execution.Masc_oas, None -> missing_oas_checkpoint ()
+    | Ok Runtime_execution.Official_client, Some _ ->
+      unexpected_oas_checkpoint ()
+    | Ok Runtime_execution.Official_client, None -> Ok None
   in
   match saved_checkpoint_result with
   | Error e -> Error e

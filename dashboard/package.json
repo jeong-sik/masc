@@ -16,6 +16,7 @@
     "preview": "vite preview",
     "test": "vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1",
     "test:serial": "pnpm test",
+    "test:e2e:queued-stream": "../scripts/harness_dashboard_keeper_queued_stream_e2e.sh",
     "test:watch": "vitest",
     "tokens:build": "tsx design-system/tokens/build.ts",
     "tokens:check": "node design-system/tokens/scripts/check-equivalence.mjs"
@@ -61,6 +62,7 @@
     "happy-dom": "^20.9.0",
     "jest-axe": "^9.0.0",
     "jsdom": "^29.1.1",
+    "playwright": "1.61.1",
     "postcss": "^8.5.23",
     "rollup-plugin-visualizer": "^6.0.5",
     "tailwindcss": "^4.2.4",

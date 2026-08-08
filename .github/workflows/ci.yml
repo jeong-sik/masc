@@ -1925,6 +1925,24 @@ jobs:
         working-directory: dashboard
         run: pnpm test
 
+      - name: Install Playwright Chromium
+        working-directory: dashboard
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run Keeper queued-stream Playwright E2E
+        working-directory: dashboard
+        env:
+          KEEPER_QUEUED_STREAM_ARTIFACT_DIR: ${{ runner.temp }}/keeper-queued-stream
+        run: pnpm test:e2e:queued-stream
+
+      - name: Upload Keeper queued-stream screenshots
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: keeper-queued-stream-screenshots
+          path: ${{ runner.temp }}/keeper-queued-stream/*.png
+          if-no-files-found: error
+
   structure-ratchet:
     name: OCaml Structure Ratchet
     runs-on: ubuntu-latest

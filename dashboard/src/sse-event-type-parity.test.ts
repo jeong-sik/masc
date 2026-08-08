@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 
 import * as ts from 'typescript'
 import { describe, expect, it } from 'vitest'
+import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from './lib/keeper-chat-stream-contract'
 
 // Cross-boundary parity gate for the SSE event-type strings the dashboard
 // routes by EXACT MATCH (`event.type === 'X'` in sse-store.ts). These are the
@@ -238,5 +239,32 @@ describe('SSE event-type cross-boundary parity (exact-match routes)', () => {
       unrouted,
       `backend emits these approval events but sse-store.ts never routes them, so the HITL queue will not refresh on them: ${unrouted.join(', ')}`,
     ).toEqual([])
+  })
+})
+
+describe('Keeper chat custom-event cross-language parity', () => {
+  const projectorSource = readFileSync(
+    resolve(process.cwd(), '../lib/server/server_keeper_chat_agui_projection.ml'),
+    'utf8',
+  )
+  const mappingStart = projectorSource.indexOf('let custom_event_name_to_string = function')
+  const mappingEnd = projectorSource.indexOf('\nlet custom ', mappingStart)
+  const mappingSource = projectorSource.slice(mappingStart, mappingEnd)
+  const ocamlNames = [...mappingSource.matchAll(/"(KEEPER_[A-Z_]+)"/g)]
+    .map(match => match[1])
+    .filter((name): name is string => name !== undefined)
+
+  it('binds the OCaml wire codec to the Dashboard vocabulary', () => {
+    expect(mappingStart).toBeGreaterThanOrEqual(0)
+    expect(mappingEnd).toBeGreaterThan(mappingStart)
+    expect([...new Set(ocamlNames)].sort()).toEqual([...KEEPER_CHAT_CUSTOM_EVENT_NAMES].sort())
+  })
+
+  it('has no open Keeper_chat_events custom constructor', () => {
+    const eventSource = readFileSync(
+      resolve(process.cwd(), '../lib/keeper/keeper_chat_events.ml'),
+      'utf8',
+    )
+    expect(eventSource).not.toMatch(/\|\s*Custom\s+of/)
   })
 })

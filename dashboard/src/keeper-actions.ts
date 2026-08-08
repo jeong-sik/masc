@@ -406,7 +406,7 @@ function toolOutputCoveredSinceMs(entries: readonly { ts: number }[]): number {
  *  chat ToolCallBubble can join results onto transcript rows by tool_use_id.
  *  Failures are swallowed (logged): the transcript must render with or without
  *  tool outputs. */
-async function hydrateKeeperToolOutputs(keeperName: string): Promise<void> {
+export async function hydrateKeeperToolOutputs(keeperName: string): Promise<void> {
   const coveredThroughMs = markToolCallOutputsHydrating(keeperName)
   try {
     const response = await fetchKeeperToolCalls(keeperName, TOOL_OUTPUT_FETCH_LIMIT)

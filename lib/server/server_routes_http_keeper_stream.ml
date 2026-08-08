@@ -145,6 +145,40 @@ type dashboard_deferred_chat =
   ; queue_revision : int64
   }
 
+let chat_event_lane = function
+  | Keeper_turn_admission.Autonomous -> Keeper_chat_events.Autonomous_lane
+  | Keeper_turn_admission.Chat -> Keeper_chat_events.Chat_lane
+
+let chat_queued_event ~keeper_name
+    ({ in_flight
+     ; chat_waiting
+     ; pending_count
+     ; inflight_count
+     ; recovery_required_count
+     ; receipt_id
+     ; shutdown_operation_id
+     ; queue_revision
+     } : dashboard_deferred_chat) =
+  let in_flight =
+    match in_flight with
+    | None -> None
+    | Some { Keeper_turn_admission.lane; started_at } ->
+        Some { Keeper_chat_events.lane = chat_event_lane lane; started_at }
+  in
+  Keeper_chat_events.Chat_queued
+    { keeper_name
+    ; pending_count
+    ; inflight_count
+    ; recovery_required_count
+    ; chat_waiting
+    ; receipt_id
+    ; queue_revision
+    ; shutdown_operation_id =
+        Option.map Keeper_shutdown_types.Operation_id.to_string
+          shutdown_operation_id
+    ; in_flight
+    }
+
 let dashboard_busy_queue_state ~base_path ~keeper_name =
   let admission = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
   let in_flight = admission.snapshot_in_flight in
@@ -935,13 +969,6 @@ let execute_keeper_stream_tool_streaming_if_free
         ();
       `Ran (success, body)
 
-(** Send a Run_error AG-UI event with the given message. *)
-let send_keeper_error ?on_closed writer mutex closed ~thread_id ~run_id err =
-  ignore
-    (keeper_stream_send_event ?on_closed writer mutex closed
-       Ag_ui.(
-         run_error ~thread_id ~run_id ~message:err ()))
-
 type canonical_reply_payload_error =
   | Malformed_reply_json of { parser_detail : string }
   | Reply_payload_not_object
@@ -1119,15 +1146,6 @@ let keeper_request_terminal_status_to_string = function
   | Request_stream status -> keeper_stream_terminal_status_to_string status
 ;;
 
-let keeper_request_terminal_status_ok = function
-  | Request_deferred
-  | Request_queued
-  | Request_stream (Stream_done | Stream_reconciliation_required) ->
-    true
-  | Request_stream (Stream_error | Stream_cancelled | Stream_rejected) ->
-    false
-;;
-
 let keeper_request_terminal_status_is_routine = function
   | Request_deferred
   | Request_queued
@@ -1136,25 +1154,16 @@ let keeper_request_terminal_status_is_routine = function
   | Request_stream (Stream_error | Stream_rejected) -> false
 ;;
 
-let keeper_request_terminal_payload ?request_id ~keeper_name ~status
-    ?(message = "") () =
-  let status_label = keeper_request_terminal_status_to_string status in
-  let fields =
-    [ ("keeper_name", `String keeper_name)
-    ; ("status", `String status_label)
-    ; ("ok", `Bool (keeper_request_terminal_status_ok status))
-    ]
-  in
-  let fields =
-    match request_id with
-    | Some request_id -> ("request_id", `String request_id) :: fields
-    | None -> fields
-  in
-  let fields =
-    if String.trim message = "" then fields
-    else ("message", `String message) :: fields
-  in
-  `Assoc fields
+let chat_request_terminal_status = function
+  | Request_deferred -> Keeper_chat_events.Deferred
+  | Request_queued -> Keeper_chat_events.Queued
+  | Request_stream Stream_done -> Keeper_chat_events.Done
+  | Request_stream Stream_error -> Keeper_chat_events.Error
+  | Request_stream Stream_cancelled -> Keeper_chat_events.Cancelled
+  | Request_stream Stream_rejected -> Keeper_chat_events.Rejected
+  | Request_stream Stream_reconciliation_required ->
+      Keeper_chat_events.Acceptance_uncertain
+;;
 
 type keeper_stream_worker_event =
   | Stream_event of Agent_sdk.Types.sse_event
@@ -1342,6 +1351,25 @@ let admission_rejection_to_json
      ]
      @ in_flight_fields)
 
+let queued_turn_deferred_event
+    ({ Keeper_turn_admission.waiting
+     ; in_flight
+     ; shutdown_operation_id
+     } : Keeper_turn_admission.rejection) =
+  let in_flight =
+    match in_flight with
+    | None -> None
+    | Some { Keeper_turn_admission.lane; started_at } ->
+        Some { Keeper_chat_events.lane = chat_event_lane lane; started_at }
+  in
+  Keeper_chat_events.Queued_turn_deferred
+    { waiting
+    ; in_flight
+    ; shutdown_operation_id =
+        Option.map Keeper_shutdown_types.Operation_id.to_string
+          shutdown_operation_id
+    }
+
 let queued_turn_failure_kind_to_string = function
   | Turn_failed -> "turn_failed"
   | Turn_cancelled -> "turn_cancelled"
@@ -1415,7 +1443,6 @@ let process_single_turn ~user_row_origin ~submission
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
   in
   let redact_text = Keeper_secret_redaction.redact_text redaction in
-  let redact_json = Keeper_secret_redaction.redact_json redaction in
   Keeper_chat_events.publish events
     (Run_started { run_id; thread_id });
   Keeper_chat_events.publish events
@@ -2588,34 +2615,23 @@ let process_single_turn ~user_row_origin ~submission
          payload.name request_id
          (if has_connector_context payload then payload.channel else "dashboard");
        Keeper_chat_events.publish events
-         (Custom
-            { name = "KEEPER_QUEUE_REQUEST"
-            ; value =
-                Gate_protocol.message_request_to_json
-                  { request_id
-                  ; destination_type = "keeper"
-                  ; destination_id = payload.name
-                  ; channel =
-                      (if has_connector_context payload then payload.channel
-                       else "dashboard")
-                  ; actor_id = Some agent_name
-                  ; status = Gate_protocol.Queued
-                  ; modalities = modalities_for_request payload
-                  ; transport = Some "sse"
-                  ; metadata =
-                      [ ("projection", "keeper_chat_stream")
-                      ; ("protocol", "gate_message_request")
-                      ]
-                  }
+         (Queue_request
+            { request_id
+            ; destination_id = payload.name
+            ; channel =
+                (if has_connector_context payload then payload.channel
+                 else "dashboard")
+            ; actor_id = Some agent_name
+            ; modalities = modalities_for_request payload
+            ; metadata =
+                [ ("projection", "keeper_chat_stream")
+                ; ("protocol", "gate_message_request")
+                ]
             }))
     (if durably_accepted then request_id else None);
   let publish_terminal ~status ?(message = "") () =
     let message = redact_text message in
     let status_label = keeper_request_terminal_status_to_string status in
-    let payload_json =
-      keeper_request_terminal_payload ?request_id ~keeper_name:payload.name
-        ~status ~message ()
-    in
     if keeper_request_terminal_status_is_routine status
     then
       (match request_id with
@@ -2638,7 +2654,12 @@ let process_single_turn ~user_row_origin ~submission
            "keeper_stream: request rejected before acceptance keeper=%s status=%s message=%s"
            payload.name status_label message);
       Keeper_chat_events.publish events
-        (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
+        (Request_terminal
+           { request_id
+           ; keeper_name = payload.name
+           ; status = chat_request_terminal_status status
+           ; message = String_util.trim_to_option message
+           })
   in
   let next_worker_projection () =
     if Atomic.get client_disconnected
@@ -2676,17 +2697,6 @@ let process_single_turn ~user_row_origin ~submission
                   | `Stream_event of Agent_sdk.Types.sse_event
                   ])))
   in
-  (* Queue-lane producer identity shared with the persisted transcript row;
-     lets the dashboard fold a live progress placeholder into the canonical
-     history entry at turn end. *)
-  let progress_receipt_ids =
-    match submission with
-    | Queued_receipt { receipt_ids; _ } ->
-        List.map
-          Keeper_chat_delivery_identity.Receipt_id.to_string
-          (Keeper_chat_delivery_identity.Receipt_ids.to_list receipt_ids)
-    | Direct_request -> []
-  in
   let rec consume_worker_events bridge_state =
     match next_worker_projection () with
     | `Client_disconnected -> None
@@ -2695,27 +2705,7 @@ let process_single_turn ~user_row_origin ~submission
           translate_oas_stream_event ~redact_text
             ~base_dir:base_path bridge_state evt
         in
-        List.iter
-          (fun event ->
-            Keeper_chat_events.publish events event;
-            (* Tap tool-call progress for dashboard clients watching a
-               queued/consumer-side turn: their chat body stays silent until
-               the terminal transcript commit otherwise. Idempotent on the
-               dashboard keyed by [tool_call_id], so direct-stream turns may
-               broadcast as well. *)
-            (match event with
-             | Keeper_chat_events.Tool_call_start
-                 { tool_call_id; tool_call_name } ->
-                 Keeper_chat_broadcast.turn_progress ~keeper_name:agent_name
-                   ~run_id ~kind:Keeper_chat_broadcast.Tool_call_started
-                   ~tool_call_id ~tool_name:tool_call_name
-                   ~receipt_ids:progress_receipt_ids ()
-             | Keeper_chat_events.Tool_call_end { tool_call_id } ->
-                 Keeper_chat_broadcast.turn_progress ~keeper_name:agent_name
-                   ~run_id ~kind:Keeper_chat_broadcast.Tool_call_ended
-                   ~tool_call_id ~receipt_ids:progress_receipt_ids ()
-             | _ -> ()))
-          translated.chat_events;
+        List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
     | `Completion (Completion_queued_turn_deferred rejection) ->
         let message =
@@ -2733,10 +2723,7 @@ let process_single_turn ~user_row_origin ~submission
         in
         publish_terminal ~status:Request_deferred ~message ();
         Keeper_chat_events.publish events
-          (Custom
-             { name = "KEEPER_QUEUED_TURN_DEFERRED"
-             ; value = admission_rejection_to_json rejection
-             });
+          (queued_turn_deferred_event rejection);
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         Some (Deferred { rejection })
@@ -2757,10 +2744,7 @@ let process_single_turn ~user_row_origin ~submission
         publish_terminal ~status:Request_queued ~message ();
         Keeper_chat_events.publish events (Text_delta message);
         Keeper_chat_events.publish events
-          (Custom
-             { name = "KEEPER_CHAT_QUEUED";
-               value = dashboard_deferred_chat_to_json ~keeper_name:payload.name queued
-             });
+          (chat_queued_event ~keeper_name:payload.name queued);
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         None
@@ -2808,7 +2792,6 @@ let process_single_turn ~user_row_origin ~submission
             | Ok canonical_reply -> canonical_reply
             | Error error -> raise (Canonical_reply_payload_rejected error)
           in
-          let payload_json_opt = Some canonical_reply.payload_json in
           let visible_reply = canonical_reply.visible_reply in
           let turn_outcome = canonical_reply.turn_outcome in
           let suppress_terminal_reply =
@@ -2829,13 +2812,12 @@ let process_single_turn ~user_row_origin ~submission
             split_keeper_reply_chunks visible_reply
             |> List.iter (fun chunk ->
                    Keeper_chat_events.publish events (Text_delta chunk));
-          (match payload_json_opt with
-           | Some payload_json ->
-               Keeper_chat_events.publish events
-                 (Custom
-                    { name = "KEEPER_REPLY_DETAILS";
-                      value = redact_json payload_json })
-           | None -> ());
+          Keeper_chat_events.publish events
+            (Reply_details
+               { reply = visible_reply
+               ; turn_outcome
+               ; turn_ref = canonical_reply.turn_ref
+               });
           if
             Keeper_turn_outcome.equal turn_outcome
               Keeper_turn_outcome.External_effect_completed
@@ -2857,16 +2839,8 @@ let process_single_turn ~user_row_origin ~submission
                 (Status_block
                    { kind = Keeper_chat_blocks.Continuation_checkpoint });
               Keeper_chat_events.publish events
-                (Custom
-                   { name = "KEEPER_CONTINUATION_CHECKPOINT";
-                     value =
-                       `Assoc
-                         (("message", `String visible_reply)
-                          :: (match request_id with
-                              | Some request_id ->
-                                  [ ("request_id", `String request_id) ]
-                              | None -> []))
-                   })
+                (Continuation_checkpoint
+                   { message = visible_reply; request_id })
             end;
           publish_terminal ~status:(Request_stream Stream_done) ();
           Keeper_chat_events.publish events Text_message_end;
@@ -2960,229 +2934,25 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
   in
 
   let sse_adapter_loop ~events ~writer ~mutex ~closed ~on_closed ~on_finished =
-    let current_thread_id = ref Ag_ui.default_thread_id in
-    let current_run_id = ref None in
-    let current_message_id = ref None in
-    let ag_role (role : Keeper_chat_events.role) =
-      match role with
-      | Keeper_chat_events.User -> Ag_ui.User
-      | Keeper_chat_events.Assistant -> Ag_ui.Assistant
+    let rec loop projection =
+      if not !closed then begin
+        let event = Keeper_chat_events.subscribe events in
+        let projection, projected =
+          Server_keeper_chat_agui_projection.project
+            ~timestamp:(Time_compat.now ())
+            ~redact_text ~redact_json projection event
+        in
+        let sent =
+          match projected with
+          | None -> true
+          | Some event ->
+              keeper_stream_send_event ~on_closed writer mutex closed event
+        in
+        if sent && not (Server_keeper_chat_agui_projection.is_terminal event)
+        then loop projection
+      end
     in
-    let send_error message =
-      let message = redact_text message in
-      match !current_run_id with
-      | Some run_id ->
-          send_keeper_error ~on_closed writer mutex closed
-            ~thread_id:!current_thread_id ~run_id message
-      | None ->
-          ignore
-            (keeper_stream_send_event ~on_closed writer mutex closed
-               Ag_ui.(
-                 run_error
-                   ~thread_id:!current_thread_id
-                   ?run_id:!current_run_id
-                   ~message
-                   ()))
-    in
-    let json_opt key value =
-      match value with
-      | None -> []
-      | Some value -> [ (key, value) ]
-    in
-    let send_custom name value =
-      keeper_stream_send_event ~on_closed writer mutex closed
-        Ag_ui.(
-          make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-            ~custom_name:(Some name)
-            ~custom_value:(Some (redact_json value))
-            Custom)
-    in
-    let rec loop () =
-      if not !closed then
-        match Keeper_chat_events.subscribe events with
-        | Run_started { run_id; thread_id } ->
-            current_thread_id := thread_id;
-            current_run_id := Some run_id;
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(make_event ~thread_id ~run_id:(Some run_id) Run_started)
-            then loop ()
-        | Text_message_start { message_id; role } ->
-            current_message_id := Some message_id;
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~message_id:(Some message_id) ~role:(Some (ag_role role))
-                    Text_message_start)
-            then loop ()
-        | Text_delta text ->
-            (* [text] is already redacted by the typed OAS stream bridge, or
-               is a terminal-reply chunk split from a whole-redacted
-               [visible_reply].  Re-redacting here doubled the per-token
-               regex cost with no effect (redact is idempotent on already-
-               redacted text).  Do not re-redact. *)
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~message_id:!current_message_id
-                    ~delta:(Some text)
-                    Text_message_content)
-            then loop ()
-        | Text_message_end ->
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~message_id:!current_message_id Text_message_end)
-            then loop ()
-        | External_effect_completed ->
-            if send_custom "KEEPER_EXTERNAL_EFFECT_COMPLETED" `Null then loop ()
-        | Oas_stream_connected ->
-            if send_custom "KEEPER_CONNECTED" `Null then loop ()
-        | Oas_stream_message_start { provider_message_id; model; usage } ->
-            let value =
-              `Assoc
-                ([
-                   ("provider_message_id", `String provider_message_id);
-                   ("model", `String model);
-                 ]
-                @ json_opt "usage"
-                    (Option.map Keeper_chat_events.api_usage_to_json usage))
-            in
-            if send_custom "KEEPER_STREAM_MESSAGE_START" value then loop ()
-        | Oas_stream_message_delta { stop_reason; usage } ->
-            let value =
-              `Assoc
-                (json_opt "stop_reason"
-                   (Option.map
-                      (fun reason ->
-                        `String (Agent_sdk.Types.stop_reason_to_string reason))
-                      stop_reason)
-                @ json_opt "usage"
-                    (Option.map Keeper_chat_events.api_usage_to_json usage))
-            in
-            if send_custom "KEEPER_STREAM_MESSAGE_DELTA" value then loop ()
-        | Oas_stream_message_stop ->
-            if send_custom "KEEPER_STREAM_MESSAGE_STOP" `Null then loop ()
-        | Oas_stream_ping ->
-            if send_custom "KEEPER_STREAM_PING" `Null then loop ()
-        | Oas_content_block_start
-            { index; content_type; tool_call_id; tool_call_name } ->
-            if
-              send_custom "KEEPER_CONTENT_BLOCK_START"
-                (`Assoc
-                  ([
-                     ("index", `Int index);
-                     ("content_type", `String content_type);
-                   ]
-                  @ json_opt "tool_call_id"
-                      (Option.map (fun value -> `String value) tool_call_id)
-                  @ json_opt "tool_call_name"
-                      (Option.map (fun value -> `String value) tool_call_name)))
-            then loop ()
-        | Oas_content_block_stop { index } ->
-            if
-              send_custom "KEEPER_CONTENT_BLOCK_STOP"
-                (`Assoc [ ("index", `Int index) ])
-            then loop ()
-        | Oas_thinking_delta { index; delta } ->
-            if
-              send_custom "KEEPER_THINKING_DELTA"
-                (`Assoc [ ("index", `Int index); ("delta", `String delta) ])
-            then loop ()
-        | Oas_thinking_signature_delta { index; signature_bytes } ->
-            if
-              send_custom "KEEPER_THINKING_SIGNATURE_DELTA"
-                (`Assoc
-                  [
-                    ("index", `Int index);
-                    ("signature_bytes", `Int signature_bytes);
-                  ])
-            then loop ()
-        | Oas_media_delta { index; media_type; source_type; media_ref } ->
-            (* RFC-0301: emit the reader-facing media URL so the dashboard can
-               fetch + render the payload (GET /api/v1/media/<token>), replacing
-               the pre-RFC byte count. *)
-            if
-              send_custom "KEEPER_MEDIA_DELTA"
-                (`Assoc
-                  [
-                    ("index", `Int index);
-                    ("media_type", `String media_type);
-                    ( "source_type",
-                      `String
-                        (Agent_sdk.Types.media_source_kind_to_string source_type)
-                    );
-                    ("media_ref", `String media_ref);
-                  ])
-            then loop ()
-        | Oas_stream_protocol_error error ->
-            if
-              send_custom "KEEPER_STREAM_PROTOCOL_ERROR"
-                (Keeper_chat_events.stream_protocol_error_to_json error)
-            then loop ()
-        | Custom { name; value } ->
-            if send_custom name value then loop ()
-        | Tool_call_start { tool_call_id; tool_call_name } ->
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~tool_call_id:(Some tool_call_id) ~tool_call_name:(Some tool_call_name)
-                    Tool_call_start)
-            then loop ()
-        | Tool_call_args { tool_call_id; delta } ->
-            (* [delta] is already redacted at publish
-               ([Tool_call_args { delta = redact_text args; _ }]).  *)
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~tool_call_id:(Some tool_call_id)
-                    ~delta:(Some delta)
-                    Tool_call_args)
-            then loop ()
-        | Tool_call_args_snapshot { tool_call_id; snapshot } ->
-            (* [snapshot] is already redacted at publish. OAS
-               [InputJsonSnapshot] is a whole replacement value, not an
-               append fragment, so preserve that distinction on the wire. *)
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~tool_call_id:(Some tool_call_id)
-                    ~snapshot:(Some (`String snapshot))
-                    Tool_call_args)
-            then loop ()
-        | Tool_call_end { tool_call_id } ->
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~tool_call_id:(Some tool_call_id)
-                    Tool_call_end)
-            then loop ()
-        | Link_block _
-        | Image_block _
-        | Status_block _
-        | Audio_block _
-        | Tool_context_block _ ->
-            (* Connector rich blocks are delivered by non-dashboard adapters;
-               the SSE stream already receives the underlying text/audio
-               through other events. *)
-            loop ()
-        | Event_error { message } -> send_error message
-        | Run_finished { run_id } ->
-            current_run_id := Some run_id;
-            ignore
-              (keeper_stream_send_event ~on_closed writer mutex closed
-                 Ag_ui.(
-                   make_event ~thread_id:!current_thread_id ~run_id:(Some run_id)
-                     Run_finished))
-    in
-    match loop () with
+    match loop Server_keeper_chat_agui_projection.initial with
     | () -> on_finished ()
     | exception exn ->
         on_finished ();
@@ -3266,12 +3036,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                          ~keeper_name:payload.name
                          queued));
                  Keeper_chat_events.publish events
-                   (Custom
-                      { name = "KEEPER_CHAT_QUEUED";
-                        value =
-                          dashboard_deferred_chat_to_json
-                            ~keeper_name:payload.name queued
-                 });
+                   (chat_queued_event ~keeper_name:payload.name queued);
                  Keeper_chat_events.publish events Text_message_end;
                  Keeper_chat_events.publish events (Run_finished { run_id });
                  wait_for_adapter_finished ()

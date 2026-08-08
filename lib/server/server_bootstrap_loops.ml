@@ -1753,6 +1753,37 @@ let start_keeper_loops_owned
                in
                loop ()
              in
+             let broadcast_dashboard_events () =
+               let receipt_ids =
+                 Keeper_chat_delivery_identity.Receipt_ids.to_list receipt_ids
+                 |> List.map
+                      Keeper_chat_delivery_identity.Receipt_id.to_string
+               in
+               let redaction =
+                 Keeper_secret_redaction.snapshot ~base_path ~keeper_name
+               in
+               let redact_text = Keeper_secret_redaction.redact_text redaction in
+               let redact_json = Keeper_secret_redaction.redact_json redaction in
+               let rec loop projection =
+                 let event = Keeper_chat_events.subscribe events in
+                 let projection, projected =
+                   Server_keeper_chat_agui_projection.project
+                     ~timestamp:(Time_compat.now ())
+                     ~redact_text ~redact_json projection event
+                 in
+                 Option.iter
+                   (fun projected ->
+                      List.iter
+                        (fun receipt_id ->
+                           Keeper_chat_broadcast.turn_event ~keeper_name
+                             ~receipt_id ~event:projected)
+                        receipt_ids)
+                   projected;
+                 if not (Server_keeper_chat_agui_projection.is_terminal event)
+                 then loop projection
+               in
+               loop Server_keeper_chat_agui_projection.initial
+             in
              let fork_delivery_adapter ~label ~run =
                fork_logged_fiber ~sw
                  ~on_error:(fun exn ->
@@ -1795,7 +1826,7 @@ let start_keeper_loops_owned
                                "dashboard event drain crashed for keeper=%s: %s"
                                keeper_name (Printexc.to_string exn) )))
                     (fun () ->
-                      drain_events ();
+                      broadcast_dashboard_events ();
                       resolve_delivery (Ok ()))
               | Keeper_chat_queue.Discord { channel_id; _ } ->
                   Log.Keeper.info

@@ -8,6 +8,7 @@ import type { KeeperChatStreamEvent } from './api'
 import type { KeeperConversationDetails } from './types'
 import {
   appendAssistantDelta,
+  appendThreadEntry,
   promoteAssistantTextToProgress,
   appendAssistantToolTraceArgsDelta,
   setAssistantToolTraceArgsSnapshot,
@@ -41,7 +42,8 @@ import { updatePendingKeeperChatAssistantDraft } from './keeper-chat-pending'
 import { isKeeperChatReceiptId, parseKeeperQueueRevision } from './lib/keeper-chat-receipt'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
-export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
+export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'cancelled', 'rejected'])
+const NON_TERMINAL_REQUEST_STATUSES = new Set(['queued', 'deferred', 'acceptance_uncertain'])
 export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 
 const pendingOasToolBlockIndexes = new Map<string, number>()
@@ -362,10 +364,109 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
   }
 }
 
+export interface KeeperQueuedTurnEvent {
+  receiptId: string
+  event: KeeperChatStreamEvent
+}
+
+type KeeperStreamEventSource =
+  | { kind: 'direct' }
+  | { kind: 'queued_turn'; receiptId: string }
+
+function entryHasQueueReceipt(
+  entry: { queueReceiptIds?: string[]; details?: KeeperConversationDetails | null },
+  receiptId: string,
+): boolean {
+  return entry.queueReceiptIds?.includes(receiptId) === true
+    || entry.details?.queueReceiptId === receiptId
+}
+
+/** Apply a queued turn's server-pushed AG-UI event to the assistant bubble
+ *  owning the exact durable receipt. A browser that did not submit the turn
+ *  gets a synthetic receipt-keyed bubble, which the existing history merge
+ *  folds into the committed transcript row. */
+export function applyKeeperQueuedTurnEvent(
+  name: string,
+  queued: KeeperQueuedTurnEvent,
+): string | null {
+  const keeperName = name.trim()
+  const receiptId = queued.receiptId.trim()
+  if (!keeperName || !isKeeperChatReceiptId(receiptId)) return null
+
+  const entries = keeperThreads.value[keeperName] ?? []
+  const matched = [...entries].reverse().find(
+    entry => entry.role === 'assistant' && entryHasQueueReceipt(entry, receiptId),
+  )
+  if (
+    matched
+    && matched.delivery !== 'queued'
+    && matched.delivery !== 'sending'
+    && matched.delivery !== 'streaming'
+  ) {
+    return null
+  }
+  const entryId = matched?.id ?? `queued-turn-${receiptId}`
+
+  if (!matched) {
+    appendThreadEntry(keeperName, {
+      id: entryId,
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: keeperName,
+      text: '',
+      rawText: null,
+      timestamp: null,
+      delivery: 'sending',
+      streamState: 'opening',
+      streamContract: keeperClientObservedSseStreamContract(
+        'sse_event',
+        'backend_stream_event',
+        { eventName: 'keeper_chat_turn_event' },
+      ),
+      queueReceiptIds: [receiptId],
+      details: {
+        queueReceiptId: receiptId,
+        queueState: 'inflight',
+      },
+    })
+  } else {
+    updateThreadEntry(keeperName, entryId, entry => ({
+      ...entry,
+      ...(entry.delivery === 'queued'
+        ? { text: '', rawText: null, delivery: 'sending' as const, streamState: 'opening' as const }
+        : {}),
+      details: {
+        ...(entry.details ?? {}),
+        queueReceiptId: receiptId,
+        queueState: 'inflight',
+      },
+    }))
+  }
+
+  const error = applyKeeperStreamEvent(
+    keeperName,
+    entryId,
+    queued.event,
+    { kind: 'queued_turn', receiptId },
+  )
+  if (error) {
+    finalizeAssistantEntry(keeperName, entryId, {
+      text: `Keeper request failed: ${error}`,
+      rawText: error,
+      delivery: 'error',
+      streamState: null,
+      error,
+      timestamp: new Date().toISOString(),
+    })
+  }
+  return error
+}
+
 export function applyKeeperStreamEvent(
   keeperName: string,
   assistantEntryId: string,
   event: KeeperChatStreamEvent,
+  source: KeeperStreamEventSource = { kind: 'direct' },
 ): string | null {
   const applyTextDelta = (payload: unknown): void => {
     if (typeof payload !== 'string') return
@@ -423,7 +524,7 @@ export function applyKeeperStreamEvent(
     case 'TOOL_CALL_START': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       const toolCallId = nonBlankToolCallId(event.toolCallId)
-      const toolName = (event.toolCallName ?? event.name)?.trim()
+      const toolName = event.toolCallName?.trim()
       if (!toolCallId || !toolName) {
         recordStreamProtocolError(
           keeperName,
@@ -508,7 +609,18 @@ export function applyKeeperStreamEvent(
       }
       return null
     }
-    case 'CUSTOM':
+    case 'CUSTOM': {
+      const customEventName: string = event.name
+      if (event.name === 'KEEPER_CONNECTED') {
+        setAssistantStreamState(
+          keeperName,
+          assistantEntryId,
+          'streaming',
+          'streaming',
+          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONNECTED' }),
+        )
+        return null
+      }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
@@ -562,7 +674,7 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_CONTENT_BLOCK_START') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
-        const oasBlockIndex = asNumber(value?.index) ?? asNumber(value?.block_index)
+        const oasBlockIndex = asNumber(value?.index)
         const contentType = asString(value?.content_type)
         const toolCallId = asString(value?.tool_call_id)
         const toolName = asString(value?.tool_call_name)
@@ -587,7 +699,7 @@ export function applyKeeperStreamEvent(
         forgetOasToolBlockIndexByIndex(
           keeperName,
           assistantEntryId,
-          asNumber(value?.index) ?? asNumber(value?.block_index),
+          asNumber(value?.index),
         )
         setAssistantStreamState(
           keeperName,
@@ -600,18 +712,10 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_THINKING_DELTA') {
         const value = isRecord(event.value) ? event.value : null
-        const delta = value
-          ? (typeof value.delta === 'string'
-              ? value.delta
-              : typeof value.text === 'string'
-                ? value.text
-                : undefined)
-          : typeof event.value === 'string'
-            ? event.value
-            : undefined
-        const oasBlockIndex = value
-          ? asNumber(value.index) ?? asNumber(value.block_index)
+        const delta = value && typeof value.delta === 'string'
+          ? value.delta
           : undefined
+        const oasBlockIndex = value ? asNumber(value.index) : undefined
         if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { oasBlockIndex })
         else {
           setAssistantStreamState(
@@ -630,7 +734,7 @@ export function applyKeeperStreamEvent(
         forgetOasToolBlockIndexByIndex(
           keeperName,
           assistantEntryId,
-          asNumber(value?.index) ?? asNumber(value?.block_index),
+          asNumber(value?.index),
         )
         recordStreamProtocolError(
           keeperName,
@@ -672,6 +776,23 @@ export function applyKeeperStreamEvent(
           'queued',
           keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', { eventName: 'KEEPER_QUEUE_REQUEST' }),
         )
+        return null
+      }
+      if (event.name === 'KEEPER_QUEUED_TURN_DEFERRED') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({
+          ...entry,
+          text: entry.text || `${keeperName}가 다른 작업을 처리 중이에요. 메시지는 대기 중입니다.`,
+          delivery: 'queued',
+          streamState: null,
+          details: {
+            ...(entry.details ?? {}),
+            queueState: 'pending',
+          },
+          streamContract: keeperClientObservedSseStreamContract('queue_event', 'backend_stream_event', {
+            eventName: 'KEEPER_QUEUED_TURN_DEFERRED',
+          }),
+        }))
         return null
       }
       if (event.name === 'KEEPER_CHAT_QUEUED') {
@@ -801,8 +922,11 @@ export function applyKeeperStreamEvent(
         if (currentRequestId && terminalRequestId !== currentRequestId) {
           return null
         }
-        if (!TERMINAL_REQUEST_STATUSES.has(status)) {
+        if (NON_TERMINAL_REQUEST_STATUSES.has(status)) {
           return null
+        }
+        if (!TERMINAL_REQUEST_STATUSES.has(status)) {
+          return 'Keeper request terminal event has invalid status.'
         }
         clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
         if (terminalRequestId) releaseActiveStreamRequestId(terminalRequestId)
@@ -826,7 +950,7 @@ export function applyKeeperStreamEvent(
           return null
         }
         const failed =
-          !ok && ['error', 'lost'].includes(status)
+          !ok && ['error', 'rejected'].includes(status)
         if (failed) {
           const message =
             asString(terminal?.message, '').trim() || 'Keeper request failed'
@@ -870,6 +994,14 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_REPLY_DETAILS') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const details = normalizeKeeperConversationDetails(event.value)
+        if (
+          !details
+          || typeof event.value.reply !== 'string'
+          || !details.turnOutcome
+          || !details.turnRef
+        ) {
+          return 'Keeper reply details event is malformed.'
+        }
         if (details) {
           updateThreadEntry(keeperName, assistantEntryId, entry => {
             const mergedDetails: KeeperConversationDetails = {
@@ -905,12 +1037,39 @@ export function applyKeeperStreamEvent(
             }
           })
         }
+        return null
       }
-      return null
+      return `Unsupported Keeper custom event: ${customEventName}`
+    }
     case 'RUN_FINISHED':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
       clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
+      if (source.kind !== 'queued_turn') return null
+      updateThreadEntry(keeperName, assistantEntryId, entry => {
+        if (!entryHasQueueReceipt(entry, source.receiptId)) return entry
+        const delivery =
+          entry.delivery === 'no_reply'
+            || (entry.delivery === 'queued'
+              && keeperTurnOutcomeSuppressesReply(entry.details?.turnOutcome))
+            ? entry.delivery
+            : 'delivered'
+        return {
+          ...entry,
+          delivery,
+          streamState: null,
+          error: null,
+          details: {
+            ...(entry.details ?? {}),
+            queueState: 'delivered',
+          },
+          streamContract: keeperClientObservedSseStreamContract(
+            'queue_event',
+            'backend_terminal_event',
+            { eventName: 'RUN_FINISHED' },
+          ),
+        }
+      })
       return null
     case 'RUN_ERROR':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
@@ -918,6 +1077,6 @@ export function applyKeeperStreamEvent(
       clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
       return asString(event.message, '').trim() || 'Keeper stream failed'
     default:
-      return null
+      return 'Unsupported Keeper stream event'
   }
 }

@@ -21,6 +21,7 @@
  (libraries
   digestif
   masc_workspace
+  masc.tool_schemas_specs
   dated_jsonl
   masc_log
   masc_core

@@ -9,8 +9,6 @@ type actor =
   ; display_name : string option
   }
 
-let all_actor_kinds = [ Human_operator; Automated_actor; System ]
-
 type schedule_status =
   | Scheduled
   | Due
@@ -35,8 +33,6 @@ type schedule_source =
   | Operator_request
   | Automated_request
   | System_request
-
-let all_schedule_sources = [ Operator_request; Automated_request; System_request ]
 
 type recurrence =
   | One_shot
@@ -127,7 +123,7 @@ let actor_kind_of_string = function
   | other ->
     unknown_value
       ~field:"actor_kind"
-      ~accepted:(List.map actor_kind_to_string all_actor_kinds)
+      ~accepted:Schedule_contract_values.actor_kinds
       other
 ;;
 
@@ -152,7 +148,7 @@ let schedule_status_of_string = function
   | other ->
     unknown_value
       ~field:"schedule_status"
-      ~accepted:(List.map schedule_status_to_string all_schedule_statuses)
+      ~accepted:Schedule_contract_values.schedule_statuses
       other
 ;;
 
@@ -169,7 +165,7 @@ let schedule_source_of_string = function
   | other ->
     unknown_value
       ~field:"schedule_source"
-      ~accepted:(List.map schedule_source_to_string all_schedule_sources)
+      ~accepted:Schedule_contract_values.schedule_sources
       other
 ;;
 
@@ -194,8 +190,6 @@ let wake_status_to_string = function
   | Wake_failed -> "failed"
 ;;
 
-let wake_statuses = [ Wake_running; Wake_succeeded; Wake_failed ]
-
 let wake_status_of_string = function
   | "running" -> Ok Wake_running
   | "succeeded" -> Ok Wake_succeeded
@@ -203,7 +197,7 @@ let wake_status_of_string = function
   | other ->
     unknown_value
       ~field:"wake_status"
-      ~accepted:(List.map wake_status_to_string wake_statuses)
+      ~accepted:Schedule_contract_values.wake_statuses
       other
 ;;
 

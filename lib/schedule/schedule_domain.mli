@@ -15,8 +15,6 @@ type actor =
   ; display_name : string option
   }
 
-val all_actor_kinds : actor_kind list
-
 type schedule_status =
   | Scheduled
   | Due
@@ -32,8 +30,6 @@ type schedule_source =
   | Operator_request
   | Automated_request
   | System_request
-
-val all_schedule_sources : schedule_source list
 
 (** Recurrence contract.
 

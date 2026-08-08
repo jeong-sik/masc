@@ -29,8 +29,3 @@ let lookup_schemas_by_name_exn ~label all_schemas values =
          (String.concat ", " missing)));
   (* Guard above ensures all names exist *)
   requested |> List.filter_map (Hashtbl.find_opt by_name)
-
-let spawned_agent_public_tool_names : string list =
-  Tool_catalog_surfaces.spawned_agent_surface_tools
-
-

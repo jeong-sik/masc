@@ -27,10 +27,3 @@ val lookup_schemas_by_name_exn :
     Raises rather than returning [Result] because every caller in
     this module uses it during static initialisation; an unknown
     name there is a developer error, not a runtime condition. *)
-
-(** {1 Spawned-agent surface} *)
-
-val spawned_agent_public_tool_names : string list
-(** SSOT: {!Tool_catalog_surfaces.spawned_agent_surface_tools}.  The small
-    set of tools a spawned scripting agent can use. *)
-

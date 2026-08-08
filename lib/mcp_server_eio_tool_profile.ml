@@ -24,7 +24,7 @@ let managed_agent_instructions =
 Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
 
 let managed_agent_passthrough_tool_names =
-  Keeper_tool_surfaces.spawned_agent_public_tool_names
+  Tool_catalog_surfaces.spawned_agent_surface_tools
 
 (* O(1) membership view of [managed_agent_passthrough_tool_names].
    Used by [tool_schemas_for_profile Managed_agent] to filter

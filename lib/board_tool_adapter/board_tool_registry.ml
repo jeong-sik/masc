@@ -6,7 +6,7 @@
     when the original board_tool.ml grew. Order in {!tools} matches the
     original advertisement order from the pre-split board_tool.ml.
 
-    Stage 10 split of lib/board_tool.ml. *)
+    Stage 10 split of lib/board_tool_adapter/board_tool.ml. *)
 
 (** {1 Inline schemas} *)
 

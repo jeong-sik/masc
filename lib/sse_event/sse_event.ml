@@ -91,10 +91,8 @@ let agent_started
     payload_json
 ;;
 
-(** Emit a [tool_called] envelope.  Matches runtime arm at
-    lib/runtime/runtime_event_bridge.ml:599-603 (pre-PR-3): envelope
-    populates ~agent_name ~tool_name; payload mirrors the same two
-    fields. *)
+(** Emit a [tool_called] envelope: it populates ~agent_name ~tool_name
+    and the payload mirrors the same two fields. *)
 let tool_called
       ~(ts_unix : float)
       ~(correlation_id : string)

@@ -107,12 +107,10 @@ let annotation_to_json (a : annotation) : Yojson.Safe.t =
 
 (* Local kind diagnostic — masc_ide is RFC-0056 yojson-only leaf, so the
    canonical [Json_util.kind_name] in masc_core is not reachable without
-   breaking dep isolation.  Name [kind_label] (not [json_kind_name])
-   slips the no-inline-json-kind-name lint regex while preserving the
-   same total mapping.  RFC pile is now 7 inline copies — RFC candidate
-   noted in PR #16915 body (lib/shared_types/json_kind.ml) for promoting
-   to a yojson-only micro-leaf library shared across these isolation
-   boundaries. *)
+   breaking dep isolation.  no-inline-json-kind-name matches this shape
+   whatever the value is named, and carries this file in its allowlist
+   with the dependency reason.  The standing candidate is a yojson-only
+   micro-leaf library shared across these isolation boundaries. *)
 let kind_label : Yojson.Safe.t -> string = function
   | `Null -> "null"
   | `Bool _ -> "bool"

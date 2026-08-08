@@ -6,7 +6,7 @@
     {!Board_tool_registry.tools} into the global {!Tool_dispatch}
     registry via {!Tool_spec.register_all}.
 
-    Stage 10 split of lib/board_tool.ml. *)
+    Stage 10 split of lib/board_tool_adapter/board_tool.ml. *)
 
 (* RFC-0189 PR-1b.4 — [handle_tool] is now typed end-to-end:
    board handler modules (PR-1b.1/2/3) all return [Tool_result.result]

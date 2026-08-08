@@ -56,7 +56,6 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | AtomicFileWrite.tla | AtomicFileWrite | manual | 2 | 1 | clean={inv:ReaderNeverSeesEmpty} buggy={inv:ReaderNeverSeesEmpty} | 95f772ef7488 |
 | AuthIdentityFSM.tla | AuthIdentityFSM | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 929be520c8ba |
 | CooperativeDrainYield.tla | CooperativeDrainYield | manual | 2 | 1 | clean={inv:TypeOK, inv:NoStarvation} buggy={inv:TypeOK, inv:NoStarvation} | d3828a38e496 |
-| DashboardCacheStampede.tla | DashboardCacheStampede | manual | 2 | 1 | clean={inv:TypeOK, inv:NoZombieSlot} buggy={inv:TypeOK, inv:NoZombieSlot} | 0419ec627911 |
 | DiscoveryCacheTTL.tla | DiscoveryCacheTTL | manual | 2 | 1 | clean={inv:TypeOK, inv:ConsistentRead} buggy={inv:TypeOK, inv:ConsistentRead} | 67b6a98c6628 |
 | DispatchHookChain.tla | DispatchHookChain | manual | 2 | 1 | clean={inv:ShortCircuitSkipsHandler, inv:ObserversAfterHandler, inv:HandlerRequiresNoReject} buggy={inv:ShortCircuitSkipsHandler} | a56f7e91e5c2 |
 | FileLockStarvation.tla | FileLockStarvation | manual | 2 | 1 | clean={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} buggy={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} | 60a4f68df073 |

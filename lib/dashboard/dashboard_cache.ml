@@ -396,9 +396,9 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
               Eio.Fiber.fork ~sw (fun () ->
                 try do_bg_compute ()
                 with
-                | Eio.Cancel.Cancelled _ as e ->
+                | Eio.Cancel.Cancelled _ as exn ->
                     restore_stale_ready ();
-                    raise e)
+                    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ()))
             with
             | Invalid_argument _ ->
                 restore_stale_ready ()
@@ -440,9 +440,9 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       let run_compute () =
         try result_ref := Some (Ok (compute ()))
         with
-        | Eio.Cancel.Cancelled _ as e ->
+        | Eio.Cancel.Cancelled _ as exn ->
             release_on_cancel ();
-            raise e
+            Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
         | exn -> result_ref := Some (Error exn)
       in
       (* The caller already wraps [compute] in [Eio.Time.with_timeout]

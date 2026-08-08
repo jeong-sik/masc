@@ -76,7 +76,6 @@ Scanning `specs/INDEX.md` for `clean={X} buggy={X}` matches:
 | `boundary/KeeperTurnScheduler.tla` | `{SafetyInvariant}` |
 | `boundary/KeeperTurnTerminal.tla` | `{Safety}` |
 | `bug-models/AuthIdentityFSM.tla` | `{TypeOK, SafetyInvariant}` |
-| `bug-models/DashboardCacheStampede.tla` | `{TypeOK, NoZombieSlot}` |
 | `bug-models/DiscoveryCacheTTL.tla` | `{TypeOK, ConsistentRead}` |
 | `bug-models/DispatchCoverage.tla` | `{TypeOK, DataFsmConsistent, PhaseConsistent, NeverStuckFailing}` |
 | `bug-models/FileLockStarvation.tla` | `{TypeOK, FlockMutex, SingleMutexPerPath}` |

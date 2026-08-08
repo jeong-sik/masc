@@ -41,7 +41,6 @@ Necessary condition: different `SPECIFICATION` name. Sufficient confirmation: sp
 | boundary/KeeperTurnScheduler | Spec | SpecBuggy | **VALID** |
 | boundary/KeeperTurnTerminal | Spec | SpecBuggy | **VALID** |
 | bug-models/AuthIdentityFSM | Spec | SpecBuggy | **VALID** |
-| bug-models/DashboardCacheStampede | SpecClean | SpecBuggy | **VALID** |
 | bug-models/DiscoveryCacheTTL | SpecClean | SpecBuggy | **VALID** |
 | bug-models/DispatchCoverage | Spec | SpecBuggy | **VALID** |
 | bug-models/FileLockStarvation | SpecClean | SpecBuggy | **VALID** |

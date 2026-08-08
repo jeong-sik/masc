@@ -70,6 +70,35 @@ let test_schema_set_equals_tag_registry_set () =
     ~actual:schemas
 ;;
 
+let rec canonical_json = function
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> List.map (fun (name, value) -> name, canonical_json value)
+       |> List.sort (fun (left, _) (right, _) -> String.compare left right))
+  | `List values -> `List (List.map canonical_json values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+    value
+;;
+
+let canonical_json_string value =
+  value |> canonical_json |> Yojson.Safe.to_string
+;;
+
+let test_schema_inventory_matches_dispatch_validation_registry () =
+  init ();
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+      match Tool_dispatch.lookup_schema schema.name with
+      | None -> Alcotest.failf "%s missing from dispatch schema registry" schema.name
+      | Some registered_schema ->
+        Alcotest.(check string)
+          (schema.name ^ " advertised and validation schemas match")
+          (canonical_json_string schema.input_schema)
+          (canonical_json_string registered_schema))
+    Config.raw_all_tool_schemas
+;;
+
 let test_workspace_schemas_route_to_state () =
   init ();
   Tool_schemas_workspace.schemas
@@ -227,6 +256,10 @@ let () =
     [ ( "registry_sets"
       , [ test_case "schema set equals tag_registry set" `Quick
             test_schema_set_equals_tag_registry_set
+        ; test_case
+            "schema inventory matches dispatch validation registry"
+            `Quick
+            test_schema_inventory_matches_dispatch_validation_registry
         ] )
     ; ( "workspace_tools"
       , [ test_case "workspace schemas route to Mod_state" `Quick

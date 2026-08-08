@@ -262,14 +262,26 @@ let snapshot_revision result =
   Tool_result.data result |> Yojson.Safe.Util.member "revision" |> Yojson.Safe.Util.to_string
 ;;
 
+(* This asserted that masc_status initializes the workspace, and raised
+   "MASC not initialized" instead. Initializing is masc_start's job: no tool in
+   Tool_workspace calls Workspace.init, and status_summary_string opens with
+   ensure_initialized, which is the contract refusing to invent a workspace as
+   a side effect of a read.
+
+   So the name described a behaviour that never existed. What is worth pinning
+   is the refusal itself, and that the read leaves nothing behind. *)
 let () =
-  test "dispatch_status_initializes_before_revision" (fun () ->
+  test "dispatch_status_refuses an uninitialized workspace" (fun () ->
     let ctx = make_test_ctx () in
-    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some result ->
-      assert (Tool_result.is_success result);
-      assert (Sys.file_exists (Workspace_utils_paths_backend.state_path ctx.config))
-    | None -> failwith "dispatch returned None")
+    let raised =
+      match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+      | (_ : Tool_result.result option) -> false
+      | exception Workspace.Not_initialized -> true
+    in
+    assert raised;
+    (* A read that refuses must not have created the state it was refusing to
+       read. *)
+    assert (not (Sys.file_exists (Workspace_utils_paths_backend.state_path ctx.config))))
 ;;
 
 let () =

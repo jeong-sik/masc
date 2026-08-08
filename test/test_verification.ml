@@ -53,6 +53,17 @@ let with_eio_temp_dir_and_clock f =
     ~finally:Fs_compat.clear_fs
     (fun () -> with_temp_dir (f ~clock:(Eio.Stdenv.clock env)))
 
+let ensure_keeper_meta config name =
+  match
+    Result.bind
+      (Masc_test_deps.meta_of_json_fixture
+         (`Assoc [ "name", `String name; "always_allow", `Bool true ]))
+      (Masc.Keeper_meta_store.write_meta config)
+  with
+  | Ok _ -> ()
+  | Error detail -> Alcotest.failf "write keeper meta failed: %s" detail
+;;
+
 let contains_substring text needle =
   let text_len = String.length text in
   let needle_len = String.length needle in
@@ -721,6 +732,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                Eio.Promise.resolve resolve_verdict_committed ());
           let config = W.default_config base_path in
           ignore (W.init config ~agent_name:(Some "system-test-worker"));
+          ensure_keeper_meta config "system-test-worker";
           ignore
             (W.add_task
                config
@@ -744,9 +756,10 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            with
            | Ok _ -> ()
            | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
-          Eio.Promise.await reviewer_called;
-          Eio.Promise.await verdict_committed;
-          Eio.Promise.await run_completed;
+          Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+            Eio.Promise.await reviewer_called;
+            Eio.Promise.await verdict_committed;
+            Eio.Promise.await run_completed);
           let verification_id =
             match !committed_verification_id with
             | Some verification_id -> verification_id
@@ -842,7 +855,8 @@ let test_system_llm_agent_rejects_invalid_contract_without_stalling () =
             ~task
             ~assignee:"contract-retry-worker"
             ~verification_id;
-          Eio.Promise.await verdict_committed;
+          Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+            Eio.Promise.await verdict_committed);
           match W.get_tasks_raw config with
           | [ { task_status = Masc_domain.InProgress { assignee; started_at }; _ } ] ->
             Alcotest.(check string)
@@ -914,6 +928,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           in
           let config = W.default_config base_path in
           ignore (W.init config ~agent_name:(Some "snapshot-test-worker"));
+          ensure_keeper_meta config "snapshot-test-worker";
           ignore
             (W.add_task
                config
@@ -955,8 +970,9 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           in
           W.write_backlog config { backlog with tasks };
           CA.start ~sw ~clock ~config;
-          Eio.Promise.await reviewer_called;
-          Eio.Promise.await verdict_committed;
+          Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+            Eio.Promise.await reviewer_called;
+            Eio.Promise.await verdict_committed);
           (match !captured_prompt with
            | None -> Alcotest.fail "system LLM reviewer did not receive a prompt"
            | Some prompt ->

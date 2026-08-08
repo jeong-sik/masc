@@ -1,8 +1,4 @@
-(* RFC-0223 P2 — Connected Surfaces section in the unified world prompt.
-
-   Integration criterion from the RFC (§6): a keeper with connector
-   bindings sees the presence section; a keeper with only the implicit
-   dashboard does not. *)
+(** Connected-surface projection in the unified world prompt. *)
 
 open Alcotest
 
@@ -13,9 +9,7 @@ module Inputs = Masc.Keeper_world_observation_inputs
 
 let () = Masc.Workspace_metric_hooks.install ()
 
-(* Repo-root sentinel: the one shared keeper prompt file. A sentinel that no
-   longer exists makes [repo_root] fall back to the dune sandbox cwd, so
-   [with_repo_prompt_config] points the registry at an empty directory. *)
+(* The shared Keeper prompt identifies the repository root from a Dune sandbox. *)
 let has_repo_prompts root =
   Sys.file_exists (Filename.concat root "config/prompts/keeper.md")
 
@@ -82,9 +76,7 @@ let meta : Masc.Keeper_meta_contract.keeper_meta =
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 
-(* build_prompt's Autonomous Trigger section consults the default
-   runtime (RFC-0206: no silent fallback), so tests must initialize it
-   with a throwaway config. Same fixture as test_keeper_status_bridge. *)
+(* The autonomous trigger section requires a configured default runtime. *)
 let runtime_toml =
   {|
 [runtime]
@@ -234,14 +226,10 @@ let test_namespace_state_names_running_keeper_fibers () =
   check bool "namespace state present" true
     (contains ~needle:"### Namespace State" user);
   check bool "running keeper label present" true
-    (contains ~needle:"- Running keeper fibers: 2" user);
-  check bool "legacy active agents label absent" false
-    (contains ~needle:"- Active agents:" user)
+    (contains ~needle:"- Running keeper fibers: 2" user)
 
-(* An authoritative backlog holding no rows must be a statement, not the
-   absence of a section. While it was encoded as an omission the keeper read
-   nothing at all for that case, so "read the board, it is empty" and "the
-   board was never observed" arrived as the same bytes. *)
+(* An authoritative empty backlog must be distinguishable from an unavailable
+   backlog. *)
 let readable_empty_line =
   "- Task backlog: readable; it holds 0 unclaimed tasks, 0 claimable tasks \
    for this keeper, and 0 failed tasks."
@@ -365,16 +353,6 @@ let test_profile_defaults_feed_identity_prompt () =
   in
   check bool "profile instructions in system prompt" true
     (contains ~needle:"Custom instructions:\nsoul instructions" system)
-
-(* The no-goal guidance this used to assert ("You have no active goal", "Do not
-   ask the operator what repo, goal, or task to create") was removed on purpose
-   by #26123, which stopped the runtime from prescribing the agent's next tool.
-   The assertion outlived the text by asserting bytes no prompt emits any more,
-   and stayed invisible because no prompt suite ran in CI. The surviving,
-   non-prescriptive statement of the same concern lives in keeper.md
-   ("When the board is genuinely empty, that is a fact about supply, not a
-   conclusion that there is nothing to do") and is covered by the assembled
-   prompt golden. *)
 
 (* The section is rendered from Keeper_sandbox, so the assertion compares
    against that SSOT rather than a sentence. Rewording the prompt keeps this

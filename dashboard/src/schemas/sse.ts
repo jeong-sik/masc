@@ -13,6 +13,7 @@ import type {
   SSEEvent,
   SSEEventType,
 } from '../types/sse'
+import { isKeeperChatReceiptId } from '../lib/keeper-chat-receipt'
 
 type SchemaIssue = { path?: string; message: string }
 type SafeParseSuccess<T> = { success: true; data: T }
@@ -58,6 +59,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_phase_changed',
   'keeper_composite_changed',
   'keeper_chat_appended',
+  'keeper_chat_turn_event',
   'keeper_waiting_inventory_changed',
   'keeper_compaction_snapshots_changed',
   'oas_telemetry_sample',
@@ -148,6 +150,7 @@ const STRING_FIELDS = new Set([
   'model_used',
   'correlation_id',
   'run_id',
+  'receipt_id',
   // gate_mode_changed
   'mode',
   'previous_mode',
@@ -181,12 +184,124 @@ const NUMBER_FIELDS = new Set([
 
 const BOOLEAN_FIELDS = new Set(['success', 'reacted', 'tool_io_redacted'])
 
+const KEEPER_CHAT_AG_UI_EVENT_TYPES = new Set([
+  'RUN_STARTED',
+  'RUN_FINISHED',
+  'RUN_ERROR',
+  'TEXT_MESSAGE_START',
+  'TEXT_MESSAGE_CONTENT',
+  'TEXT_MESSAGE_END',
+  'TOOL_CALL_START',
+  'TOOL_CALL_ARGS',
+  'TOOL_CALL_END',
+  'CUSTOM',
+])
+
+const KEEPER_CHAT_AG_UI_FIELDS = new Set([
+  'type',
+  'threadId',
+  'timestamp',
+  'runId',
+  'messageId',
+  'role',
+  'delta',
+  'stepName',
+  'toolCallId',
+  'toolCallName',
+  'snapshot',
+  'message',
+  'code',
+  'name',
+  'value',
+])
+
 function ok<T>(data: T): SafeParseSuccess<T> {
   return { success: true, data }
 }
 
 function fail<T = never>(path: string | undefined, message: string): SafeParseResult<T> {
   return { success: false, error: { issues: [{ path, message }] } }
+}
+
+function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseResult<true> {
+  const unknown = Object.keys(value).find(key => !KEEPER_CHAT_AG_UI_FIELDS.has(key))
+  if (unknown) return fail(`ag_ui_event.${unknown}`, 'Unexpected AG-UI event field')
+  if (
+    typeof value.type !== 'string'
+    || !KEEPER_CHAT_AG_UI_EVENT_TYPES.has(value.type)
+  ) {
+    return fail('ag_ui_event.type', 'Expected a supported AG-UI event type')
+  }
+  if (typeof value.threadId !== 'string' || value.threadId.trim() === '') {
+    return fail('ag_ui_event.threadId', 'Expected non-empty AG-UI threadId')
+  }
+  if (typeof value.timestamp !== 'number' || !Number.isFinite(value.timestamp)) {
+    return fail('ag_ui_event.timestamp', 'Expected finite AG-UI timestamp')
+  }
+  for (const key of [
+    'runId',
+    'messageId',
+    'delta',
+    'stepName',
+    'toolCallId',
+    'toolCallName',
+    'message',
+    'code',
+    'name',
+  ]) {
+    if (value[key] != null && typeof value[key] !== 'string') {
+      return fail(`ag_ui_event.${key}`, `Expected AG-UI ${key} to be a string`)
+    }
+  }
+  switch (value.type) {
+    case 'RUN_STARTED':
+    case 'RUN_FINISHED':
+      return typeof value.runId === 'string' && value.runId.trim() !== ''
+        ? ok(true)
+        : fail('ag_ui_event.runId', 'Expected non-empty AG-UI runId')
+    case 'RUN_ERROR':
+      return typeof value.message === 'string' && value.message.trim() !== ''
+        ? ok(true)
+        : fail('ag_ui_event.message', 'Expected non-empty AG-UI error message')
+    case 'TEXT_MESSAGE_START':
+      if (typeof value.messageId !== 'string' || value.messageId.trim() === '') {
+        return fail('ag_ui_event.messageId', 'Expected non-empty AG-UI messageId')
+      }
+      return value.role === 'assistant' || value.role === 'user'
+        ? ok(true)
+        : fail('ag_ui_event.role', 'Expected assistant or user AG-UI role')
+    case 'TEXT_MESSAGE_CONTENT':
+      return typeof value.delta === 'string'
+        ? ok(true)
+        : fail('ag_ui_event.delta', 'Expected AG-UI text delta')
+    case 'TEXT_MESSAGE_END':
+      return typeof value.messageId === 'string' && value.messageId.trim() !== ''
+        ? ok(true)
+        : fail('ag_ui_event.messageId', 'Expected non-empty AG-UI messageId')
+    case 'TOOL_CALL_START':
+      if (typeof value.toolCallId !== 'string' || value.toolCallId.trim() === '') {
+        return fail('ag_ui_event.toolCallId', 'Expected non-empty AG-UI toolCallId')
+      }
+      return typeof value.toolCallName === 'string' && value.toolCallName.trim() !== ''
+        ? ok(true)
+        : fail('ag_ui_event.toolCallName', 'Expected non-empty AG-UI toolCallName')
+    case 'TOOL_CALL_ARGS':
+      if (typeof value.toolCallId !== 'string' || value.toolCallId.trim() === '') {
+        return fail('ag_ui_event.toolCallId', 'Expected non-empty AG-UI toolCallId')
+      }
+      return typeof value.delta === 'string' || typeof value.snapshot === 'string'
+        ? ok(true)
+        : fail('ag_ui_event', 'Expected AG-UI tool args delta or snapshot')
+    case 'TOOL_CALL_END':
+      return typeof value.toolCallId === 'string' && value.toolCallId.trim() !== ''
+        ? ok(true)
+        : fail('ag_ui_event.toolCallId', 'Expected non-empty AG-UI toolCallId')
+    case 'CUSTOM':
+      return typeof value.name === 'string' && value.name.trim() !== ''
+        ? ok(true)
+        : fail('ag_ui_event.name', 'Expected non-empty AG-UI custom event name')
+  }
+  return fail('ag_ui_event.type', 'Expected a supported AG-UI event type')
 }
 
 import { isRecord } from '../lib/type-guards'
@@ -343,6 +458,23 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
   }
   if (value.audio != null && !isSSEAudioClip(value.audio)) {
     return fail('audio', 'Expected audio clip object')
+  }
+
+  if (value.type === 'keeper_chat_turn_event') {
+    if (typeof value.name !== 'string' || value.name.trim() === '') {
+      return fail('name', 'Expected non-empty Keeper name')
+    }
+    if (
+      typeof value.receipt_id !== 'string'
+      || !isKeeperChatReceiptId(value.receipt_id)
+    ) {
+      return fail('receipt_id', 'Expected a valid Keeper chat receipt ID')
+    }
+    if (!isRecord(value.ag_ui_event)) {
+      return fail('ag_ui_event', 'Expected an AG-UI event object')
+    }
+    const agUiEvent = validateKeeperChatAgUiEvent(value.ag_ui_event)
+    if (!agUiEvent.success) return agUiEvent
   }
 
   if (value.type === 'keeper_waiting_inventory_changed') {

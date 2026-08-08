@@ -42,44 +42,27 @@ val chat_appended :
 val chat_appended_with_audio :
   keeper_name:string -> source:string -> audio:audio_clip -> ?content:string -> unit -> unit
 
-(** Kind of a [keeper_chat_turn_progress] event. *)
-type turn_progress_kind =
-  | Tool_call_started
-  | Tool_call_ended
-
-val turn_progress_kind_to_string : turn_progress_kind -> string
-
-(** Serialize a [keeper_chat_turn_progress] event. Exposed for unit tests. *)
-val turn_progress_to_json :
+(** Serialize a queued Dashboard turn event. The outer envelope carries the
+    durable queue identity; [event] is the same AG-UI payload used by the
+    direct chat stream. Exposed for unit tests. *)
+val turn_event_to_json :
   keeper_name:string ->
-  run_id:string ->
-  kind:turn_progress_kind ->
-  tool_call_id:string ->
-  tool_name:string option ->
-  receipt_ids:string list ->
+  receipt_id:string ->
+  event:Ag_ui.event ->
   Yojson.Safe.t
 
-(** Broadcast a [keeper_chat_turn_progress] SSE event when a turn executes a
-    tool call, so dashboard clients watching a queued/consumer-side turn see
-    live progress in the chat thread instead of a silent gap until
-    {!chat_appended}. Slice-less like {!chat_appended}: it rides the WS
-    raw-forward catch-all to every authenticated session, and the dashboard
-    applies it idempotently keyed by [tool_call_id].
+(** Broadcast an AG-UI event produced by a queued Dashboard turn to observer
+    sessions. Slice-less like {!chat_appended}, it rides the Dashboard WS
+    raw-forward catch-all. The Dashboard applies it only to the assistant
+    entry with the exact [receipt_id], so concurrent Keeper turns and browser
+    sessions cannot cross-wire their streams.
 
-    [receipt_ids] carries the queue-lane producer identity for queued turns
-    so the dashboard's history-convergence machinery can fold a live progress
-    placeholder into the canonical transcript row at turn end.
-
-    Carries tool identity only — never args or results — so no redaction is
-    needed at this boundary. Exceptions from [Sse.broadcast] are counted on
-    the [keeper_sse_broadcast_failures] counter (site [chat_turn_progress])
-    and logged at WARN. {!Eio.Cancel.Cancelled} propagates. *)
-val turn_progress :
+    The projected event must already be redacted. Exceptions from
+    [Sse.broadcast] are counted on the [keeper_sse_broadcast_failures] counter
+    (site [chat_turn_event]) and logged at WARN. {!Eio.Cancel.Cancelled}
+    propagates. *)
+val turn_event :
   keeper_name:string ->
-  run_id:string ->
-  kind:turn_progress_kind ->
-  tool_call_id:string ->
-  ?tool_name:string ->
-  ?receipt_ids:string list ->
-  unit ->
+  receipt_id:string ->
+  event:Ag_ui.event ->
   unit

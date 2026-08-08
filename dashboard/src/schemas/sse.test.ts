@@ -231,6 +231,49 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
+  it('accepts a receipt-keyed queued Keeper AG-UI event', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_turn_event',
+      name: 'sangsu',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      ts_unix: 1_712_000_000,
+      ag_ui_event: {
+        type: 'TEXT_MESSAGE_CONTENT',
+        threadId: 'keeper-consumer:sangsu',
+        runId: 'run-1',
+        messageId: 'message-1',
+        delta: '안녕하세요',
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('rejects the removed tool-only queued progress envelope', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_turn_progress',
+      name: 'sangsu',
+      run_id: 'run-1',
+      kind: 'tool_call_start',
+      tool_call_id: 'tc-1',
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it('rejects a queued turn event without an exact durable receipt', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_turn_event',
+      name: 'sangsu',
+      receipt_id: 'not-a-receipt',
+      ag_ui_event: {
+        type: 'RUN_STARTED',
+        threadId: 'keeper-consumer:sangsu',
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(r.success).toBe(false)
+  })
+
   it('accepts a typed Keeper waiting-inventory invalidation', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'keeper_waiting_inventory_changed',

@@ -8,6 +8,7 @@ import type { KeeperChatStreamEvent } from './api'
 import type { KeeperConversationDetails } from './types'
 import {
   appendAssistantDelta,
+  appendThreadEntry,
   promoteAssistantTextToProgress,
   appendAssistantToolTraceArgsDelta,
   setAssistantToolTraceArgsSnapshot,
@@ -360,6 +361,95 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
     requestId,
     controllerAborted: Boolean(controller),
   }
+}
+
+export interface KeeperQueuedTurnEvent {
+  receiptId: string
+  event: KeeperChatStreamEvent
+}
+
+function entryHasQueueReceipt(
+  entry: { queueReceiptIds?: string[]; details?: KeeperConversationDetails | null },
+  receiptId: string,
+): boolean {
+  return entry.queueReceiptIds?.includes(receiptId) === true
+    || entry.details?.queueReceiptId === receiptId
+}
+
+/** Apply a queued turn's server-pushed AG-UI event to the assistant bubble
+ *  owning the exact durable receipt. A browser that did not submit the turn
+ *  gets a synthetic receipt-keyed bubble, which the existing history merge
+ *  folds into the committed transcript row. */
+export function applyKeeperQueuedTurnEvent(
+  name: string,
+  queued: KeeperQueuedTurnEvent,
+): string | null {
+  const keeperName = name.trim()
+  const receiptId = queued.receiptId.trim()
+  if (!keeperName || !isKeeperChatReceiptId(receiptId)) return null
+
+  const entries = keeperThreads.value[keeperName] ?? []
+  const matched = [...entries].reverse().find(
+    entry => entry.role === 'assistant' && entryHasQueueReceipt(entry, receiptId),
+  )
+  if (
+    matched
+    && matched.delivery !== 'queued'
+    && matched.delivery !== 'sending'
+    && matched.delivery !== 'streaming'
+  ) {
+    return null
+  }
+  const entryId = matched?.id ?? `queued-turn-${receiptId}`
+
+  if (!matched) {
+    appendThreadEntry(keeperName, {
+      id: entryId,
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: keeperName,
+      text: '',
+      rawText: null,
+      timestamp: null,
+      delivery: 'sending',
+      streamState: 'opening',
+      streamContract: keeperClientObservedSseStreamContract(
+        'sse_event',
+        'backend_stream_event',
+        { eventName: 'keeper_chat_turn_event' },
+      ),
+      queueReceiptIds: [receiptId],
+      details: {
+        queueReceiptId: receiptId,
+        queueState: 'inflight',
+      },
+    })
+  } else {
+    updateThreadEntry(keeperName, entryId, entry => ({
+      ...entry,
+      ...(entry.delivery === 'queued'
+        ? { text: '', rawText: null, delivery: 'sending' as const, streamState: 'opening' as const }
+        : {}),
+      details: {
+        ...(entry.details ?? {}),
+        queueReceiptId: receiptId,
+        queueState: 'inflight',
+      },
+    }))
+  }
+
+  const error = applyKeeperStreamEvent(keeperName, entryId, queued.event)
+  if (error) {
+    finalizeAssistantEntry(keeperName, entryId, {
+      text: `Keeper request failed: ${error}`,
+      rawText: error,
+      delivery: 'error',
+      streamState: null,
+      error,
+      timestamp: new Date().toISOString(),
+    })
+  }
+  return error
 }
 
 export function applyKeeperStreamEvent(

@@ -113,6 +113,84 @@ let test_schemas_are_the_keeper_schemas () =
       offered)
 ;;
 
+(* The argument name the surface advertises has to be the one the handler
+   reads, and only a call proves that. [test_schemas_are_the_keeper_schemas]
+   above compares the offered schema to [Tool_shard] -- the same list
+   [schema_of_tool] reads -- so it pins the source and says nothing about
+   whether that source describes the handler behind [dispatch].
+
+   It does, and the other catalog does not. [handle_read_file_with_outcome]
+   reads "path"; the descriptor a Keeper is shown asks for "file_path".
+   Sourcing [schemas] from [Keeper_tool_descriptor] to make a judge and a Keeper
+   read one description compiles and passes every case that only inspects
+   schemas: the advertised name would become "file_path", the handler would
+   resolve "path" through its [~default:""], and each read would inspect an
+   empty path and report it as a result (#27563).
+
+   So this reads a real file under the producer's playground both ways. The
+   advertised name returns its contents; the descriptor's name is not a second
+   spelling that happens to work. *)
+let test_the_advertised_argument_is_the_one_the_handler_reads () =
+  with_surface (fun config surface ->
+    let playground =
+      Keeper_sandbox_config.host_root_abs_of_agent
+        ~base_path:
+          (Workspace_verification_store.project_root_of_base_path config.base_path)
+        ~agent_name:producer
+    in
+    let rec mkdir_p path =
+      if not (Sys.file_exists path)
+      then (
+        mkdir_p (Filename.dirname path);
+        try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+    in
+    mkdir_p playground;
+    let file = Filename.concat playground "advertised-argument-probe.txt" in
+    let contents = "written by the probe" in
+    (try Out_channel.with_open_text file (fun oc -> output_string oc contents) with
+     | Sys_error err -> Alcotest.failf "probe file could not be written: %s" err);
+    let read key =
+      VAT.dispatch
+        surface
+        ~name:"tool_read_file"
+        ~args:(`Assoc [ key, `String "advertised-argument-probe.txt" ])
+    in
+    let required_name =
+      match
+        List.find_opt
+          (fun (schema : Masc_domain.tool_schema) ->
+             String.equal schema.name "tool_read_file")
+          (VAT.schemas surface)
+      with
+      | Some { input_schema = `Assoc fields; _ } ->
+        (match List.assoc_opt "required" fields with
+         | Some (`List (`String name :: _)) -> name
+         | _ -> Alcotest.fail "tool_read_file advertises no required argument")
+      | _ -> Alcotest.fail "tool_read_file is not offered"
+    in
+    (match read required_name with
+     | Error detail ->
+       Alcotest.failf
+         "the advertised required argument %S did not reach the handler: %s"
+         required_name
+         detail
+     | Ok output ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%S returns the file's contents" required_name)
+         true
+         (Astring.String.is_infix ~affix:contents output));
+    let other = if String.equal required_name "path" then "file_path" else "path" in
+    match read other with
+    | Error _ -> ()
+    | Ok output when Astring.String.is_infix ~affix:contents output ->
+      Alcotest.failf
+        "%S also reads the file, so the advertised name %S is not load-bearing \
+         and a catalog swap would go unnoticed"
+        other
+        required_name
+    | Ok _ -> ())
+;;
+
 (* A judge that calls a name this surface does not offer must be told so. A
    dropped call would read to the model as a tool that returned nothing. *)
 let test_unknown_tool_name_is_an_error () =
@@ -305,6 +383,8 @@ let () =
     [ ( "surface"
       , [ Alcotest.test_case "schemas are the keeper schemas" `Quick
             test_schemas_are_the_keeper_schemas
+        ; Alcotest.test_case "the advertised argument is the one the handler reads"
+            `Quick test_the_advertised_argument_is_the_one_the_handler_reads
         ; Alcotest.test_case "unknown producer yields no surface" `Quick
             test_unknown_producer_yields_no_surface
         ] )

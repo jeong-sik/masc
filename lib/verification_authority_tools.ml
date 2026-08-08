@@ -55,9 +55,15 @@ let ownership_root t = t.ownership_root
 (* Schemas                                                          *)
 (* ================================================================ *)
 
-(* The keeper catalog is the source. Restating a description here would let a
-   judge and a producer read different documentation for the same tool, and the
-   one that drifts is always the copy. *)
+(* [Tool_shard] is the source because it documents handler inputs, and [run]
+   below calls those handlers directly. Restating a description here would let
+   this surface drift from the arguments the handlers actually read.
+
+   It is not the catalog a Keeper is shown. Those two disagree on purpose:
+   [handle_read_file_with_outcome] reads "path", the Keeper's descriptor asks
+   for "file_path". Sourcing this from [Keeper_tool_descriptor] to make the two
+   descriptions match compiles, and turns every judge read into "path" resolving
+   to its ~default:"" — an empty path, inspected without error (#27563). *)
 let schema_of_tool tool : Types_core.tool_schema option =
   List.find_opt
     (fun (schema : Types_core.tool_schema) ->

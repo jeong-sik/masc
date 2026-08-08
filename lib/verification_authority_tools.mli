@@ -78,9 +78,21 @@ val ownership_root : t -> string
     calls resolve through the sandbox jail rather than this string. *)
 
 val schemas : t -> Types_core.tool_schema list
-(** The tool schemas to hand the evaluator, in a stable order. These are the
-    keeper schemas verbatim: a judge and a producer read the same description of
-    the same tool. *)
+(** The tool schemas to hand the evaluator, in a stable order.
+
+    These come from [Tool_shard], which documents handler inputs, because
+    [dispatch] calls the runtime handlers directly. That is a different entry
+    point from a Keeper's, and the two spell the same work differently:
+    [Keeper_tool_filesystem_runtime.handle_read_file_with_outcome] reads
+    ["path"], while the descriptor a Keeper is shown asks for ["file_path"] and
+    offers [cwd], [offset] and [limit] — arguments no caller on this path can
+    supply.
+
+    A judge and a Keeper are therefore shown different text for the same tool
+    name, and the descriptions differ because the arguments do. Serving these
+    from [Keeper_tool_descriptor] instead type-checks and builds; it also makes
+    every judge read resolve ["path"] to its [~default:""] and inspect nothing
+    (#27563). Read the handler before assuming the two catalogs should agree. *)
 
 val dispatch : t -> name:string -> args:Yojson.Safe.t -> (string, string) result
 (** Run one call against the producer's tree. [Error] carries a message meant

@@ -162,7 +162,6 @@ module Transport = struct
     | Ws
     | Webrtc
     | Local
-    | Unknown_agent_transport of string
 
   let agent_transport_of_string raw =
     match normalize_token raw with
@@ -171,7 +170,15 @@ module Transport = struct
     | "ws" | "websocket" -> Ws
     | "webrtc" -> Webrtc
     | "local" -> Local
-    | other -> Unknown_agent_transport other
+    | _ ->
+      (* Carrying the raw text let an unrecognized setting reach
+         Masc_grpc_transport, which folded it into Local alongside "unset" —
+         a typo and a deliberate default became the same state. *)
+      Env_config_core.reject_malformed_env
+        ~name:"MASC_AGENT_TRANSPORT"
+        ~raw
+        ~type_name:"http|grpc|ws|websocket|webrtc|local";
+      Local
 
   let agent_transport_to_string = function
     | Http -> "http"
@@ -179,7 +186,6 @@ module Transport = struct
     | Ws -> "ws"
     | Webrtc -> "webrtc"
     | Local -> "local"
-    | Unknown_agent_transport value -> value
 
   (** gRPC server port. Default: 8936. *)
   let grpc_port = get_port ~default:8936 "MASC_GRPC_PORT"

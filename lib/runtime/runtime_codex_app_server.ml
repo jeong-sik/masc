@@ -73,6 +73,19 @@ let error_to_string = function
     Printf.sprintf "Codex app-server turn timed out after %.3fs" seconds
 ;;
 
+let error_kind = function
+  | Invalid_config _ -> "invalid_config"
+  | Spawn_failed _ -> "spawn_failed"
+  | Protocol_error _ -> "protocol_error"
+  | Rpc_error _ -> "rpc_error"
+  | Subscription_required _ -> "subscription_required"
+  | Unsupported_server_request _ -> "unsupported_server_request"
+  | Turn_failed _ -> "turn_failed"
+  | Turn_interrupted -> "turn_interrupted"
+  | Process_exited _ -> "process_exited"
+  | Timeout _ -> "timeout"
+;;
+
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
 
 let assoc_at stage = function
@@ -452,6 +465,37 @@ let drain_stderr flow tail =
   | _ -> ()
 ;;
 
+let terminate_spawned_process ~clock proc stdin_w =
+  let owning_switch_cancelled = Eio.Fiber.is_cancelled () in
+  Eio.Cancel.protect (fun () ->
+    (try Eio.Flow.close stdin_w with
+     | exn ->
+       Log.Runtime_agent.debug
+         "Codex app-server stdin close failed: %s"
+         (Printexc.to_string exn));
+    (try Eio.Process.signal proc Sys.sigterm with
+     | exn ->
+       Log.Runtime_agent.debug
+         "Codex app-server termination signal failed: %s"
+         (Printexc.to_string exn));
+    if not owning_switch_cancelled
+    then
+      try Eio.Time.with_timeout_exn clock 2.0 (fun () -> Eio.Process.await proc |> ignore) with
+      | Eio.Time.Timeout ->
+        (try
+           Eio.Process.signal proc Sys.sigkill;
+           Eio.Process.await proc |> ignore
+         with
+         | exn ->
+           Log.Runtime_agent.warn
+             "Codex app-server forced reap failed: %s"
+             (Printexc.to_string exn))
+      | exn ->
+        Log.Runtime_agent.debug
+          "Codex app-server reap observed an already-closed process: %s"
+          (Printexc.to_string exn))
+;;
+
 let run_spawned ~mgr ~clock config ~prompt =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
@@ -481,10 +525,12 @@ let run_spawned ~mgr ~clock config ~prompt =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
+    (* Cleanup must run before [Switch.run] waits for the stderr drainer. The
+       child can be waiting for more stdin on typed early returns, so a switch
+       release hook alone deadlocks. [Eio.Cancel.protect] inside the finalizer
+       preserves cleanup across fiber cancellation. *)
     Fun.protect
-      ~finally:(fun () ->
-        (try Eio.Flow.close stdin_w with _ -> ());
-        (try Eio.Process.signal proc Sys.sigterm with _ -> ()))
+      ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
       (fun () ->
         Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
           run_protocol { send; receive } config ~prompt)))
@@ -503,11 +549,29 @@ let validate_config config ~prompt =
 ;;
 
 let run_turn ~mgr ~clock config ~prompt =
-  match validate_config config ~prompt with
-  | Error _ as error -> error
-  | Ok () ->
-    (try run_spawned ~mgr ~clock config ~prompt with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
-     | exn -> Error (Spawn_failed (Printexc.to_string exn)))
+  let result =
+    match validate_config config ~prompt with
+    | Error _ as error -> error
+    | Ok () ->
+      let model = Option.value config.model ~default:"default" in
+      Log.Runtime_agent.info
+        "Codex app-server subscription turn starting (model=%s)"
+        model;
+      (try run_spawned ~mgr ~clock config ~prompt with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+       | exn -> Error (Spawn_failed (Printexc.to_string exn)))
+  in
+  (match result with
+   | Ok turn ->
+     Log.Runtime_agent.info
+       "Codex app-server subscription turn completed (thread_id=%s turn_id=%s model=%s)"
+       turn.thread_id
+       turn.turn_id
+       turn.model
+   | Error error ->
+     Log.Runtime_agent.warn
+       "Codex app-server subscription turn failed (kind=%s)"
+       (error_kind error));
+  result
 ;;

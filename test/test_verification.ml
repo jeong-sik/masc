@@ -728,14 +728,23 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                  ~task_id
                  ~authority
                  ~verification_id
-                 ~decision;
+               ~decision;
                Eio.Promise.resolve resolve_verdict_committed ());
+          let contract : Masc_domain.task_contract =
+            { strict = true
+            ; completion_contract = [ "system evaluator approves the submitted evidence" ]
+            ; required_evidence = [ "system review evidence" ]
+            ; inspect_gate_evidence = []
+            ; verify_gate_evidence = []
+            }
+          in
           let config = W.default_config base_path in
           ignore (W.init config ~agent_name:(Some "system-test-worker"));
           ensure_keeper_meta config "system-test-worker";
           ignore
             (W.add_task
                config
+               ~contract
                ~title:"system authority test"
                ~priority:1
                ~description:"the system LLM must review this evidence");

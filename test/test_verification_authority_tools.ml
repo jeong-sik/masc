@@ -8,7 +8,7 @@
    that could be mistaken for a clean result. *)
 
 module Keeper_meta_store = Masc.Keeper_meta_store
-module Tool_shard = Masc.Tool_shard
+module Descriptor = Masc.Keeper_tool_descriptor
 module VAT = Masc.Verification_authority_tools
 module AR = Masc.Task.Anti_rationalization
 
@@ -82,10 +82,12 @@ let with_surface f =
   | Ok surface -> f config surface
 ;;
 
-(* The judge and the producer must read one description of one tool. A schema
-   restated here would drift from the catalog, and the copy is always the one
-   that drifts. *)
-let test_schemas_are_the_keeper_schemas () =
+(* The judge and the producer must read one description of one tool, and
+   [Keeper_tool_descriptor] is where a model-facing description lives. Sourcing
+   this surface from [Tool_shard] instead gave the same handlers two model
+   vocabularies -- the judge was shown "path" and a Keeper "file_path" -- and
+   the copy is always the one that drifts. *)
+let test_schemas_are_the_descriptor_schemas () =
   with_surface (fun _config surface ->
     let offered = VAT.schemas surface in
     let names =
@@ -97,20 +99,98 @@ let test_schemas_are_the_keeper_schemas () =
       names;
     List.iter
       (fun (schema : Masc_domain.tool_schema) ->
-         match
-           List.find_opt
-             (fun (catalog : Masc_domain.tool_schema) ->
-                String.equal catalog.name schema.name)
-             Tool_shard.all_keeper_tool_schemas
-         with
-         | None ->
-           Alcotest.failf "%s is not in the keeper catalog" schema.name
-         | Some catalog ->
+         match Descriptor.descriptors_for_internal schema.name with
+         | [ descriptor ] ->
            Alcotest.(check string)
-             (schema.name ^ " description is the catalog's")
-             catalog.description
-             schema.description)
+             (schema.name ^ " description is the descriptor's")
+             descriptor.Descriptor.description
+             schema.description;
+           Alcotest.(check bool)
+             (schema.name ^ " input schema is the descriptor's")
+             true
+             (Yojson.Safe.equal descriptor.Descriptor.input_schema schema.input_schema)
+         | found ->
+           Alcotest.failf
+             "%s resolves to %d descriptors; the surface needs exactly one"
+             schema.name
+             (List.length found))
       offered)
+;;
+
+(* Every argument the surface advertises is the model's, not the handler's, and
+   the gap between them is real: [handle_read_file_with_outcome] reads "path"
+   while the advertised schema asks for "file_path". [dispatch] closes it by
+   running the descriptor's own validation and translation, the same pair a
+   Keeper's call passes through.
+
+   Both halves are asserted because either alone passes for the wrong reason. A
+   read that succeeds proves translation happened; it does not prove a bad call
+   is refused. And "the bad call returned no contents" is not refusal -- that
+   was the state this replaces, where the handler defaulted the missing required
+   string to "" and returned Ok, so a verdict reached without opening the file
+   looked exactly like one reached by reading it (#27605). The malformed case
+   therefore asserts [Error], not merely the absence of the file's text. *)
+let test_read_translates_the_advertised_argument_and_refuses_a_malformed_one () =
+  with_surface (fun config surface ->
+    let playground =
+      Keeper_sandbox_config.host_root_abs_of_agent
+        ~base_path:
+          (Workspace_verification_store.project_root_of_base_path config.base_path)
+        ~agent_name:producer
+    in
+    let rec mkdir_p path =
+      if not (Sys.file_exists path)
+      then (
+        mkdir_p (Filename.dirname path);
+        try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+    in
+    mkdir_p playground;
+    let name = "advertised-argument-probe.txt" in
+    let contents = "written by the probe" in
+    (try
+       Out_channel.with_open_text (Filename.concat playground name) (fun oc ->
+         output_string oc contents)
+     with
+     | Sys_error err -> Alcotest.failf "probe file could not be written: %s" err);
+    let read key =
+      VAT.dispatch surface ~name:"tool_read_file" ~args:(`Assoc [ key, `String name ])
+    in
+    let required =
+      match
+        List.find_opt
+          (fun (schema : Masc_domain.tool_schema) ->
+             String.equal schema.name "tool_read_file")
+          (VAT.schemas surface)
+      with
+      | Some { input_schema = `Assoc fields; _ } ->
+        (match List.assoc_opt "required" fields with
+         | Some (`List (`String field :: _)) -> field
+         | _ -> Alcotest.fail "tool_read_file advertises no required argument")
+      | _ -> Alcotest.fail "tool_read_file is not offered"
+    in
+    (match read required with
+     | Error detail ->
+       Alcotest.failf
+         "the advertised required argument %S did not reach the handler: %s"
+         required
+         detail
+     | Ok output ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%S returns the file's contents" required)
+         true
+         (Astring.String.is_infix ~affix:contents output));
+    match VAT.dispatch surface ~name:"tool_read_file" ~args:(`Assoc []) with
+    | Ok output ->
+      Alcotest.failf
+        "a read with no %S resolved instead of being refused, so an unopened \
+         file reads as an answer: %s"
+        required
+        output
+    | Error detail ->
+      Alcotest.(check bool)
+        "the refusal names the missing argument"
+        true
+        (Astring.String.is_infix ~affix:required detail))
 ;;
 
 (* A judge that calls a name this surface does not offer must be told so. A
@@ -303,8 +383,12 @@ let () =
   Alcotest.run
     "verification authority tools"
     [ ( "surface"
-      , [ Alcotest.test_case "schemas are the keeper schemas" `Quick
-            test_schemas_are_the_keeper_schemas
+      , [ Alcotest.test_case "schemas are the descriptor schemas" `Quick
+            test_schemas_are_the_descriptor_schemas
+        ; Alcotest.test_case
+            "read translates the advertised argument and refuses a malformed one"
+            `Quick
+            test_read_translates_the_advertised_argument_and_refuses_a_malformed_one
         ; Alcotest.test_case "unknown producer yields no surface" `Quick
             test_unknown_producer_yields_no_surface
         ] )

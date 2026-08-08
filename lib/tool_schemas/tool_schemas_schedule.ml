@@ -67,19 +67,17 @@ let object_schema ?(required = []) properties =
 ;;
 
 let statuses =
-  [ "scheduled"
-  ; "due"
-  ; "running"
-  ; "succeeded"
-  ; "failed"
-  ; "cancelled"
-  ; "expired"
-  ]
+  List.map Schedule_domain.schedule_status_to_string Schedule_domain.all_schedule_statuses
 ;;
 
-let actor_kinds = [ "human_operator"; "automated_actor"; "system" ]
+let actor_kinds =
+  List.map Schedule_domain.actor_kind_to_string Schedule_domain.all_actor_kinds
+;;
 
-let sources = [ "operator_request"; "automated_request"; "system_request" ]
+let sources =
+  List.map Schedule_domain.schedule_source_to_string Schedule_domain.all_schedule_sources
+;;
+
 let recurrence_kinds = [ "one_shot"; "interval"; "daily"; "cron" ]
 
 let create_schema =

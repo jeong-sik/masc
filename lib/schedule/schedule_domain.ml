@@ -9,6 +9,8 @@ type actor =
   ; display_name : string option
   }
 
+let all_actor_kinds = [ Human_operator; Automated_actor; System ]
+
 type schedule_status =
   | Scheduled
   | Due
@@ -33,6 +35,8 @@ type schedule_source =
   | Operator_request
   | Automated_request
   | System_request
+
+let all_schedule_sources = [ Operator_request; Automated_request; System_request ]
 
 type recurrence =
   | One_shot
@@ -116,14 +120,15 @@ let actor_kind_to_string = function
   | System -> "system"
 ;;
 
-let actor_kinds = [ Human_operator; Automated_actor; System ]
-
 let actor_kind_of_string = function
   | "human_operator" -> Ok Human_operator
   | "automated_actor" -> Ok Automated_actor
   | "system" -> Ok System
   | other ->
-    unknown_value ~field:"actor_kind" ~accepted:(List.map actor_kind_to_string actor_kinds) other
+    unknown_value
+      ~field:"actor_kind"
+      ~accepted:(List.map actor_kind_to_string all_actor_kinds)
+      other
 ;;
 
 let schedule_status_to_string = function
@@ -134,10 +139,6 @@ let schedule_status_to_string = function
   | Failed -> "failed"
   | Cancelled -> "cancelled"
   | Expired -> "expired"
-;;
-
-let schedule_statuses =
-  [ Scheduled; Due; Running; Succeeded; Failed; Cancelled; Expired ]
 ;;
 
 let schedule_status_of_string = function
@@ -151,7 +152,7 @@ let schedule_status_of_string = function
   | other ->
     unknown_value
       ~field:"schedule_status"
-      ~accepted:(List.map schedule_status_to_string schedule_statuses)
+      ~accepted:(List.map schedule_status_to_string all_schedule_statuses)
       other
 ;;
 
@@ -161,8 +162,6 @@ let schedule_source_to_string = function
   | System_request -> "system_request"
 ;;
 
-let schedule_sources = [ Operator_request; Automated_request; System_request ]
-
 let schedule_source_of_string = function
   | "operator_request" -> Ok Operator_request
   | "automated_request" -> Ok Automated_request
@@ -170,7 +169,7 @@ let schedule_source_of_string = function
   | other ->
     unknown_value
       ~field:"schedule_source"
-      ~accepted:(List.map schedule_source_to_string schedule_sources)
+      ~accepted:(List.map schedule_source_to_string all_schedule_sources)
       other
 ;;
 

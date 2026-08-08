@@ -64,15 +64,10 @@ type calibration_example = {
 val get_store : unit -> Dated_jsonl.t
 (** Get or create the global verdict store at [data/verdicts/]. *)
 
-val reset_store_for_testing : unit -> unit
-(** Reset the store reference.  For testing only. *)
-
-(** Set the process-local verdict store to an explicit isolated directory.
-    Used by offline eval tooling after verdict-store isolation checks and by
-    tests through [set_store_for_testing]. *)
-
-val set_store_for_testing : base_dir:string -> unit
-(** Compatibility alias for [set_store] used by tests. *)
+module For_testing : sig
+  val reset_store : unit -> unit
+  val set_store : base_dir:string -> unit
+end
 
 val absolute_workspace_base_path : ?cwd:string -> string -> string
 (** Normalize a workspace base path into the absolute path expected by offline

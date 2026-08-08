@@ -71,6 +71,14 @@ let contains haystack needle =
   n = 0 || go 0
 ;;
 
+let test_blocking_resource_io_uses_systhread () =
+  Eio_main.run
+  @@ fun _env ->
+  match Lib.Mcp_server_eio_resource.For_testing.blocking_io_execution_context () with
+  | Eio_guard.Non_eio -> ()
+  | Eio_fiber -> fail "blocking resource I/O remained on the Eio fiber"
+;;
+
 let test_topic_in_the_library_is_served () =
   with_library (fun state ->
     match served_text (read_resource state "masc://library/topic") with
@@ -107,6 +115,10 @@ let () =
     "library_resource_topic"
     [ ( "topic resolution"
       , [ test_case "a topic in the listing is served" `Quick test_topic_in_the_library_is_served
+        ; test_case
+            "blocking resource I/O uses a system thread"
+            `Quick
+            test_blocking_resource_io_uses_systhread
         ; test_case
             "a topic cannot climb out of docs/library"
             `Quick

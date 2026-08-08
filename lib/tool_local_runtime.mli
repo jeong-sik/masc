@@ -20,35 +20,11 @@
     kept on {!Tool_local_runtime_core}; this top-level module no
     longer re-exports that surface.
 
-    Internal: the two [handle_*] functions [dispatch] routes to
+    The two [handle_*] functions [dispatch] routes to
     ([handle_runtime_verify], [handle_runtime_ollama_probe]) plus the
     [Tool_spec.register] side-effect block stay private.  The .mli pins
-    the dispatch / schemas contract — handler bodies are free to
-    refactor.
-
-    The re-exports left below are the ones tests reach through this
-    facade; the status / verify / bench adapters had no consumer at
-    all. *)
-
-(** {1 Status / verify / probe / bench re-exports} *)
-
-val ollama_loaded_models_of_ps_json :
-  Yojson.Safe.t -> [> `Assoc of (string * Yojson.Safe.t) list ] list
-(** Re-export of
-    {!Tool_local_runtime_probe.ollama_loaded_models_of_ps_json}. *)
-
-val ollama_probe_run_of_generate_json :
-  run_index:int ->
-  http_status:int option ->
-  wall_clock_ms:int ->
-  Yojson.Safe.t ->
-  Tool_local_runtime_probe.ollama_probe_run
-(** Re-export of
-    {!Tool_local_runtime_probe.ollama_probe_run_of_generate_json}. *)
-
-val kv_cache_assessment_json : Yojson.Safe.t list -> Yojson.Safe.t
-(** Re-export of
-    {!Tool_local_runtime_probe.kv_cache_assessment_json}. *)
+    the dispatch / schemas contract. Probe and verification helpers remain on
+    their owning modules instead of being re-exported here. *)
 
 (** {1 MCP dispatch contract} *)
 

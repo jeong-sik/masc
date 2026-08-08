@@ -401,6 +401,22 @@ let codex_error_to_sdk_error = function
   | error -> Agent_sdk.Error.Internal (Runtime_codex_app_server.error_to_string error)
 ;;
 
+let recovery_failure_of_client_error = function
+  | Runtime_codex_app_server.Spawn_failed _
+  | Runtime_codex_app_server.Turn_interrupted
+  | Runtime_codex_app_server.Process_exited _
+  | Runtime_codex_app_server.Timeout _ ->
+    Keeper_codex_session_store.Transport_interrupted
+  | Runtime_codex_app_server.Invalid_config _
+  | Runtime_codex_app_server.Protocol_error _
+  | Runtime_codex_app_server.Rpc_error _
+  | Runtime_codex_app_server.Unsupported_server_request _ ->
+    Keeper_codex_session_store.Protocol_failed
+  | Runtime_codex_app_server.Subscription_required _
+  | Runtime_codex_app_server.Turn_failed _ ->
+    Keeper_codex_session_store.Provider_rejected
+;;
+
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~event_bus ~enable_thinking
@@ -443,6 +459,13 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       | Some { phase = Settled { thread_id; _ }; turn_count; _ } ->
         Ok
           (Runtime_codex_app_server.Resume { thread_id }, turn_count + 1)
+      | Some { phase = Ready; turn_count; _ } when turn_count < Int.max_int ->
+        Ok (Runtime_codex_app_server.Start, turn_count + 1)
+      | Some { phase = Ready; _ } ->
+        Error
+          (config_error
+             ~field:"codex_session.turn_count"
+             "ready Codex session turn count cannot be incremented")
       | Some { phase = Start _; _ } ->
         Error
           (config_error
@@ -458,6 +481,13 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           (config_error
              ~field:"codex_session.phase"
              "stored Codex session has an in-flight turn; refusing duplicate execution")
+      | Some { phase = Recovery_required recovery; _ } ->
+        Error
+          (config_error
+             ~field:"codex_session.recovery_id"
+             (Printf.sprintf
+                "Codex session recovery %s requires an explicit operator resolution"
+                recovery.recovery_id))
     in
     let* prepared =
       prepare_turn
@@ -475,7 +505,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     in
     let* () =
       match stored_session with
-      | None -> Ok ()
+      | None | Some { phase = Ready; _ } -> Ok ()
       | Some session
         when String.equal session.tool_surface_sha256 tool_surface_sha256 ->
         Ok ()
@@ -535,15 +565,44 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         Error (internal_error ("Codex session claim failed: " ^ detail))
     in
     let session_state = ref claimed_session in
+    let recovery_failure =
+      ref Keeper_codex_session_store.Transport_interrupted
+    in
     let update_session label transition =
       match transition !session_state with
       | Ok next ->
         session_state := next;
         Ok ()
-      | Error detail -> Error (Printf.sprintf "Codex session %s failed: %s" label detail)
+      | Error detail ->
+        recovery_failure := Keeper_codex_session_store.State_persistence_failed;
+        Error (Printf.sprintf "Codex session %s failed: %s" label detail)
+    in
+    let require_recovery detail =
+      match !session_state with
+      | { Keeper_codex_session_store.phase =
+            (Ready | Settled _ | Recovery_required _)
+        ; _
+        } ->
+        Ok ()
+      | expected ->
+        (match
+           Keeper_codex_session_store.require_recovery
+             ~base_path
+             ~keeper_name
+             ~expected
+             ~failure:!recovery_failure
+             ~detail
+             ~required_at:(Time_compat.now ())
+         with
+         | Ok recovery ->
+           session_state := recovery;
+           Ok ()
+         | Error detail -> Error detail)
     in
     let started_at = Time_compat.now () in
-    (match
+    let turn_result =
+      try
+        (match
        Runtime_codex_app_server.run_turn
          ~mgr:(Eio.Stdenv.process_mgr env)
          ~clock
@@ -580,8 +639,11 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          client_config
          ~prompt
      with
-     | Error error -> Error (codex_error_to_sdk_error error)
+     | Error error ->
+       recovery_failure := recovery_failure_of_client_error error;
+       Error (codex_error_to_sdk_error error)
      | Ok turn ->
+       recovery_failure := Keeper_codex_session_store.Protocol_failed;
        let expected_resumed =
          match thread_mode with
          | Runtime_codex_app_server.Start -> false
@@ -595,6 +657,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              (internal_error
                 "Codex app-server reported a thread mode different from the requested session plan")
        in
+       recovery_failure := Keeper_codex_session_store.Host_hook_failed;
        let* () =
          match !terminal_error with
          | None -> Ok ()
@@ -645,6 +708,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
            Error (hook_error ~hook_name:"on_stop" ~stage detail)
          | decision -> Error (illegal_hook_decision ~hook_name:"on_stop" decision)
        in
+       recovery_failure := Keeper_codex_session_store.State_persistence_failed;
        let* () =
          match
            Keeper_codex_session_store.settle
@@ -696,4 +760,31 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          ; runtime_observation = Some runtime_observation
          ; stop_reason = Completed
          })
+      with
+      | Eio.Cancel.Cancelled _ as exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        recovery_failure := Keeper_codex_session_store.Transport_interrupted;
+        let detail = "Codex turn cancelled: " ^ Printexc.to_string exn in
+        (match Eio.Cancel.protect (fun () -> require_recovery detail) with
+         | Ok () -> ()
+         | Error recovery_detail ->
+           Log.Keeper.error
+             ~keeper_name
+             "Codex cancellation recovery persistence failed: %s"
+             recovery_detail);
+        Printexc.raise_with_backtrace exn backtrace
+    in
+    (match turn_result with
+     | Ok _ -> turn_result
+     | Error original_error ->
+       let original_detail = Agent_sdk.Error.to_string original_error in
+       (match Eio.Cancel.protect (fun () -> require_recovery original_detail) with
+        | Ok () -> turn_result
+        | Error recovery_detail ->
+          Error
+            (internal_error
+               (Printf.sprintf
+                  "Codex turn failed and recovery state persistence also failed: original=%s recovery=%s"
+                  original_detail
+                  recovery_detail))))
 ;;

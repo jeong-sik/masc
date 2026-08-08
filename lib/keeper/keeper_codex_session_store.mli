@@ -4,23 +4,62 @@
     the exact settlement phase needed to resume without silently duplicating an
     externally admitted turn. *)
 
+type settlement =
+  { thread_id : string
+  ; turn_id : string
+  }
+
+type recovery_failure =
+  | Transport_interrupted
+  | Protocol_failed
+  | Provider_rejected
+  | Host_hook_failed
+  | State_persistence_failed
+
+type recovery_required =
+  { recovery_id : string
+  ; previous_settlement : settlement option
+  ; observed_thread_id : string option
+  ; observed_turn_id : string option
+  ; failure : recovery_failure
+  ; detail : string
+  ; required_at : float
+  }
+
 type phase =
-  | Start of { previous_thread_id : string option }
-  | Active of { thread_id : string }
+  | Ready
+  | Start of { previous_settlement : settlement option }
+  | Active of
+      { thread_id : string
+      ; previous_settlement : settlement option
+      }
   | Turn_inflight of
       { thread_id : string
       ; turn_id : string option
+      ; previous_settlement : settlement option
       }
-  | Settled of
-      { thread_id : string
-      ; turn_id : string
-      }
+  | Recovery_required of recovery_required
+  | Settled of settlement
+
+type recovery_resolution =
+  | Retry_previous
+  | Restart_fresh
+  | Adopt_verified of settlement
+
+type recovery_resolution_record =
+  { recovery_id : string
+  ; failure : recovery_failure
+  ; resolution : recovery_resolution
+  ; resolved_by : string
+  ; resolved_at : float
+  }
 
 type t =
   { runtime_id : string
   ; phase : phase
   ; turn_count : int
   ; tool_surface_sha256 : string
+  ; last_recovery_resolution : recovery_resolution_record option
   ; updated_at : float
   }
 
@@ -77,5 +116,30 @@ val settle :
   turn_id:string ->
   updated_at:float ->
   (t, string) result
+
+val require_recovery :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  failure:recovery_failure ->
+  detail:string ->
+  required_at:float ->
+  (t, string) result
+(** Convert the exact incomplete claim into an explicit operator-visible
+    recovery state. This never retries or clears a possibly executed turn. *)
+
+val resolve_recovery :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  recovery_id:string ->
+  resolution:recovery_resolution ->
+  resolved_by:string ->
+  resolved_at:float ->
+  (t, string) result
+(** Resolve one exact recovery claim with compare-and-swap authority.
+    [Retry_previous] restores the last settled thread, [Restart_fresh] makes
+    the next claim start a new thread, and [Adopt_verified] records an
+    operator-verified terminal turn. *)
 (** Every phase change is a process-safe durable compare-and-swap followed by
     exact read-back. Any incomplete phase blocks a later automatic claim. *)

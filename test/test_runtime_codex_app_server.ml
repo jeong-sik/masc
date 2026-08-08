@@ -588,6 +588,301 @@ let test_codex_inflight_session_blocks_duplicate_claim () =
        | Ok None | Ok (Some _) -> fail "duplicate claim changed the in-flight phase")
 ;;
 
+let test_codex_recovery_requires_exact_operator_resolution () =
+  let base_path = temp_workspace "masc-codex-recovery-exact-" in
+  let keeper_name = "recovery-exact" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let claim =
+         Keeper_codex_session_store.claim
+           ~base_path
+           ~keeper_name
+           ~expected:None
+           ~runtime_id:"codex.codex"
+           ~tool_surface_sha256:
+             (Keeper_codex_session_store.tool_surface_sha256 [])
+           ~updated_at:1.0
+         |> Result.get_ok
+       in
+       let active =
+         Keeper_codex_session_store.mark_active
+           ~base_path
+           ~keeper_name
+           ~expected:claim
+           ~thread_id:"thread-recovery"
+           ~updated_at:2.0
+         |> Result.get_ok
+       in
+       let starting =
+         Keeper_codex_session_store.mark_turn_starting
+           ~base_path
+           ~keeper_name
+           ~expected:active
+           ~thread_id:"thread-recovery"
+           ~updated_at:3.0
+         |> Result.get_ok
+       in
+       let started =
+         Keeper_codex_session_store.mark_turn_started
+           ~base_path
+           ~keeper_name
+           ~expected:starting
+           ~thread_id:"thread-recovery"
+           ~turn_id:"turn-recovery"
+           ~updated_at:4.0
+         |> Result.get_ok
+       in
+       let recovery =
+         Keeper_codex_session_store.require_recovery
+           ~base_path
+           ~keeper_name
+           ~expected:started
+           ~failure:Keeper_codex_session_store.Provider_rejected
+           ~detail:"subscription provider rejected the turn"
+           ~required_at:5.0
+         |> Result.get_ok
+       in
+       let recovery_id =
+         match recovery.phase with
+         | Recovery_required required ->
+           check
+             (option string)
+             "observed thread"
+             (Some "thread-recovery")
+             required.observed_thread_id;
+           check
+             (option string)
+             "observed turn"
+             (Some "turn-recovery")
+             required.observed_turn_id;
+           check bool
+             "typed provider failure"
+             true
+             (required.failure = Provider_rejected);
+           required.recovery_id
+         | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+           fail "failed Codex turn did not enter recovery-required"
+       in
+       (match
+          Keeper_codex_session_store.claim
+            ~base_path
+            ~keeper_name
+            ~expected:(Some recovery)
+            ~runtime_id:"codex.codex"
+            ~tool_surface_sha256:recovery.tool_surface_sha256
+            ~updated_at:6.0
+        with
+        | Error _ -> ()
+        | Ok _ -> fail "recovery-required Codex session admitted execution");
+       (match
+          Keeper_codex_session_store.resolve_recovery
+            ~base_path
+            ~keeper_name
+            ~expected:recovery
+            ~recovery_id:"00000000-0000-4000-8000-000000000000"
+            ~resolution:Restart_fresh
+            ~resolved_by:"dashboard-operator"
+            ~resolved_at:7.0
+        with
+        | Error _ -> ()
+        | Ok _ -> fail "stale recovery identity resolved the Codex session");
+       let resolved =
+         Keeper_codex_session_store.resolve_recovery
+           ~base_path
+           ~keeper_name
+           ~expected:recovery
+           ~recovery_id
+           ~resolution:Restart_fresh
+           ~resolved_by:"dashboard-operator"
+           ~resolved_at:8.0
+         |> Result.get_ok
+       in
+       check int "failed turn is not counted" 0 resolved.turn_count;
+       (match resolved.phase with
+        | Ready -> ()
+        | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+          fail "restart-fresh did not return the session to ready");
+       (match resolved.last_recovery_resolution with
+        | Some record ->
+          check string "recorded recovery id" recovery_id record.recovery_id;
+          check string "recorded actor" "dashboard-operator" record.resolved_by;
+          check bool
+            "recorded decision"
+            true
+            (record.resolution = Restart_fresh)
+        | None -> fail "operator recovery resolution was not durably recorded");
+       let reclaimed =
+         Keeper_codex_session_store.claim
+           ~base_path
+           ~keeper_name
+           ~expected:(Some resolved)
+           ~runtime_id:"codex.codex"
+           ~tool_surface_sha256:resolved.tool_surface_sha256
+           ~updated_at:9.0
+         |> Result.get_ok
+       in
+       check int "fresh retry ordinal" 1 reclaimed.turn_count;
+       check bool
+         "resolution audit survives the next claim"
+         true
+         (reclaimed.last_recovery_resolution = resolved.last_recovery_resolution))
+;;
+
+let test_codex_recovery_retry_and_adopt_paths () =
+  let base_path = temp_workspace "masc-codex-recovery-paths-" in
+  let keeper_name = "recovery-paths" in
+  let advance_and_settle expected ~thread_id ~turn_id ~at =
+    let claim =
+      Keeper_codex_session_store.claim
+        ~base_path
+        ~keeper_name
+        ~expected
+        ~runtime_id:"codex.codex"
+        ~tool_surface_sha256:
+          (Option.fold
+             ~none:(Keeper_codex_session_store.tool_surface_sha256 [])
+             ~some:(fun (state : Keeper_codex_session_store.t) ->
+               state.tool_surface_sha256)
+             expected)
+        ~updated_at:at
+      |> Result.get_ok
+    in
+    let active =
+      Keeper_codex_session_store.mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:claim
+        ~thread_id
+        ~updated_at:(at +. 0.1)
+      |> Result.get_ok
+    in
+    let starting =
+      Keeper_codex_session_store.mark_turn_starting
+        ~base_path
+        ~keeper_name
+        ~expected:active
+        ~thread_id
+        ~updated_at:(at +. 0.2)
+      |> Result.get_ok
+    in
+    let started =
+      Keeper_codex_session_store.mark_turn_started
+        ~base_path
+        ~keeper_name
+        ~expected:starting
+        ~thread_id
+        ~turn_id
+        ~updated_at:(at +. 0.3)
+      |> Result.get_ok
+    in
+    Keeper_codex_session_store.settle
+      ~base_path
+      ~keeper_name
+      ~expected:started
+      ~thread_id
+      ~turn_id
+      ~updated_at:(at +. 0.4)
+    |> Result.get_ok
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let settled =
+         advance_and_settle None ~thread_id:"thread-1" ~turn_id:"turn-1" ~at:1.0
+       in
+       let second_claim =
+         Keeper_codex_session_store.claim
+           ~base_path
+           ~keeper_name
+           ~expected:(Some settled)
+           ~runtime_id:"codex.codex"
+           ~tool_surface_sha256:settled.tool_surface_sha256
+           ~updated_at:2.0
+         |> Result.get_ok
+       in
+       let retry_recovery =
+         Keeper_codex_session_store.require_recovery
+           ~base_path
+           ~keeper_name
+           ~expected:second_claim
+           ~failure:Keeper_codex_session_store.Transport_interrupted
+           ~detail:"process exited before thread identity"
+           ~required_at:3.0
+         |> Result.get_ok
+       in
+       let retry_recovery_id =
+         match retry_recovery.phase with
+         | Recovery_required required -> required.recovery_id
+         | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+           fail "second claim did not require recovery"
+       in
+       let retriable =
+         Keeper_codex_session_store.resolve_recovery
+           ~base_path
+           ~keeper_name
+           ~expected:retry_recovery
+           ~recovery_id:retry_recovery_id
+           ~resolution:Retry_previous
+           ~resolved_by:"operator-retry"
+           ~resolved_at:4.0
+         |> Result.get_ok
+       in
+       (match retriable.phase with
+        | Settled { thread_id; turn_id } ->
+          check string "retry thread" "thread-1" thread_id;
+          check string "retry turn" "turn-1" turn_id
+        | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+          fail "retry-previous did not restore the last settlement");
+       check int "retry does not count failed turn" 1 retriable.turn_count;
+       let third_claim =
+         Keeper_codex_session_store.claim
+           ~base_path
+           ~keeper_name
+           ~expected:(Some retriable)
+           ~runtime_id:"codex.codex"
+           ~tool_surface_sha256:retriable.tool_surface_sha256
+           ~updated_at:5.0
+         |> Result.get_ok
+       in
+       let adopt_recovery =
+         Keeper_codex_session_store.require_recovery
+           ~base_path
+           ~keeper_name
+           ~expected:third_claim
+           ~failure:Keeper_codex_session_store.Protocol_failed
+           ~detail:"terminal event was observed outside the client parser"
+           ~required_at:6.0
+         |> Result.get_ok
+       in
+       let adopt_recovery_id =
+         match adopt_recovery.phase with
+         | Recovery_required required -> required.recovery_id
+         | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+           fail "third claim did not require recovery"
+       in
+       let adopted_settlement : Keeper_codex_session_store.settlement =
+         { thread_id = "thread-verified"; turn_id = "turn-verified" }
+       in
+       let adopted =
+         Keeper_codex_session_store.resolve_recovery
+           ~base_path
+           ~keeper_name
+           ~expected:adopt_recovery
+           ~recovery_id:adopt_recovery_id
+           ~resolution:(Adopt_verified adopted_settlement)
+           ~resolved_by:"operator-adopt"
+           ~resolved_at:7.0
+         |> Result.get_ok
+       in
+       check int "adopt counts verified turn" 2 adopted.turn_count;
+       (match adopted.phase with
+        | Settled settlement ->
+          check bool "adopted settlement" true (settlement = adopted_settlement)
+        | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+          fail "adopt-verified did not settle the verified turn"))
+;;
+
 let test_codex_tool_surface_fingerprint_is_exact () =
   let alpha = fixture_tool ~name:"alpha" ~description:"first" () in
   let beta = fixture_tool ~name:"beta" ~description:"second" () in
@@ -762,6 +1057,63 @@ let test_keeper_dispatches_codex_turn_runtime () =
        | Ok result ->
          check string "Keeper response" "MASC_SUBSCRIPTION_OK" (keeper_response_text result);
          check bool "measured observation" true (Option.is_some result.runtime_observation))
+;;
+
+let test_keeper_protocol_failure_enters_recovery () =
+  let base_path = temp_workspace "masc-codex-runtime-recovery-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ "not-json"
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            (match
+               run_keeper_turn
+                 ~base_path
+                 ~cli_path
+                 ~model:"gpt-fixture"
+                 ()
+             with
+             | Error _ -> ()
+             | Ok _ -> fail "malformed official-client response completed the Keeper turn");
+            let recovery =
+              match
+                Keeper_codex_session_store.load
+                  ~base_path
+                  ~keeper_name:"codex-fixture"
+              with
+              | Error detail -> fail detail
+              | Ok None -> fail "failed Codex turn left no durable recovery state"
+              | Ok (Some state) -> state
+            in
+            (match recovery.phase with
+             | Recovery_required required ->
+               check bool
+                 "runtime failure class"
+                 true
+                 (required.failure = Protocol_failed);
+               check (option string) "no observed thread" None required.observed_thread_id
+             | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+               fail "failed Codex runtime claim was not converted to recovery-required");
+            (match
+               run_keeper_turn
+                 ~base_path
+                 ~cli_path
+                 ~model:"gpt-fixture"
+                 ()
+             with
+             | Error
+                 (Agent_sdk.Error.Config
+                   (Agent_sdk.Error.InvalidConfig { field; _ })) ->
+               check string "recovery gate field" "codex_session.recovery_id" field
+             | Error error -> fail (Agent_sdk.Error.to_string error)
+             | Ok _ -> fail "unresolved Codex recovery admitted a duplicate turn")))
 ;;
 
 let test_keeper_resumes_persisted_codex_thread () =
@@ -984,7 +1336,7 @@ let test_production_keeper_resumes_across_trace_rotation () =
          (match state.phase with
           | Settled { thread_id; _ } ->
             check string "production thread" "thread-1" thread_id
-          | Start _ | Active _ | Turn_inflight _ ->
+          | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
             fail "production Codex state did not settle"))
 ;;
 
@@ -1380,6 +1732,14 @@ let () =
             `Quick
             test_codex_inflight_session_blocks_duplicate_claim
         ; test_case
+            "Codex recovery requires exact operator resolution"
+            `Quick
+            test_codex_recovery_requires_exact_operator_resolution
+        ; test_case
+            "Codex recovery retry and adopt paths"
+            `Quick
+            test_codex_recovery_retry_and_adopt_paths
+        ; test_case
             "Codex tool fingerprint is exact"
             `Quick
             test_codex_tool_surface_fingerprint_is_exact
@@ -1387,6 +1747,10 @@ let () =
             "Keeper dispatches Codex runtime"
             `Quick
             test_keeper_dispatches_codex_turn_runtime
+        ; test_case
+            "Keeper protocol failure enters recovery"
+            `Quick
+            test_keeper_protocol_failure_enters_recovery
         ; test_case
             "Keeper resumes persisted Codex thread"
             `Quick

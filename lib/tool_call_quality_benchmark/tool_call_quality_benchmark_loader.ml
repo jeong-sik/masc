@@ -17,12 +17,15 @@ let rec map_m f = function
       let* ys = map_m f xs in
       Ok (y :: ys)
 
+(* Every summary compares status by equality against a known constructor, so a
+   status outside this set leaves the run out of every total. Reject it here,
+   the way the sibling category parser below does. *)
 let run_status_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
-  | "" | "ok" -> Run_ok
-  | "unsupported" -> Run_unsupported
-  | "runtime_unreachable" -> Run_runtime_unreachable
-  | other -> Run_other other
+  | "" | "ok" -> Ok Run_ok
+  | "unsupported" -> Ok Run_unsupported
+  | "runtime_unreachable" -> Ok Run_runtime_unreachable
+  | other -> errorf "unknown tool-call-quality run status: %s" other
 
 let case_category_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
@@ -179,6 +182,9 @@ let evidence_run_of_yojson json =
   let* model = required_string_field json "model" in
   let* keeper_profile = required_string_field json "keeper_profile" in
   let* tool_call_items = list_field json "tool_calls" in
+  let* status =
+    Json_util.get_string json "status" |> Option.value ~default:"ok" |> run_status_of_string
+  in
   Ok {
     case_id;
     provider;
@@ -194,9 +200,7 @@ let evidence_run_of_yojson json =
     input_tokens = Json_util.get_int json "input_tokens";
     output_tokens = Json_util.get_int json "output_tokens";
     cost_usd = Json_util.get_float json "cost_usd";
-    status =
-      Json_util.get_string json "status" |> Option.value ~default:"ok"
-      |> run_status_of_string;
+    status;
     tool_calls = List.map tool_call_of_yojson tool_call_items;
   }
 

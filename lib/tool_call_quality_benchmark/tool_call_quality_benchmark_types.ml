@@ -54,7 +54,6 @@ type run_status =
   | Run_ok
   | Run_unsupported
   | Run_runtime_unreachable
-  | Run_other of string
 
 type evidence_run = {
   case_id : string;

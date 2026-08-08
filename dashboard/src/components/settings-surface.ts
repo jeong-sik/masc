@@ -1684,7 +1684,7 @@ export function SettingsSurface() {
                   ${hasConfigPathResolution || runtimeConfigPath
                     ? html`
                       <div class="set-sub-h">Config path resolution</div>
-                      <${PathTruthRow} label="Runtime TOML" item=${configResolution?.runtime ?? null} fallback=${runtimeConfigPath} />
+                      <${PathTruthRow} label="Runtime TOML" fallback=${runtimeConfigPath} />
                       ${hasConfigPathResolution || dashboardConfigStatus === 'ready'
                         ? html`<${PathTruthRow} label="Config root" item=${configResolution?.config_root ?? null} fallback=${concreteConfigValue(configDirEntry)} />`
                         : null}

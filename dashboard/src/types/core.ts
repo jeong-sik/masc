@@ -52,7 +52,6 @@ export interface Task {
   status_raw?: string | null
   priority?: number
   assignee?: string
-  assignee_kind?: string | null
   description?: string
   created_at?: string
   updated_at?: string

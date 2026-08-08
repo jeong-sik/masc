@@ -4,6 +4,7 @@ import {
   mergeMessages,
   normalizeDashboardRuntimeResolution,
   normalizeAgent,
+  normalizeDashboardConfigResolution,
   normalizeExecutionQueueItem,
   normalizeMessage,
   normalizeTask,
@@ -112,6 +113,23 @@ describe('normalizeAgent', () => {
   it('reads the bind time the server sends', () => {
     const agent = normalizeAgent({ name: 'garnet', session_bound_at: '2026-06-01T00:00:00Z' })
     expect(agent?.session_bound_at).toBe('2026-06-01T00:00:00Z')
+  })
+})
+
+describe('normalizeDashboardConfigResolution', () => {
+  // Config_dir_resolver.to_json sends exactly these five keys. The normalizer
+  // also required runtime_authoring and runtime, which are not fields of the
+  // server's resolution record, so every real response normalized to null and
+  // the config resolution panel never received data.
+  it('accepts the payload Config_dir_resolver actually sends', () => {
+    const resolution = normalizeDashboardConfigResolution({
+      status: 'ready',
+      warnings: [],
+      config_root: { path: '/w/.masc/config', exists: true, source: 'derived' },
+      prompts: { path: '/w/.masc/config/prompts', exists: true, source: 'derived' },
+      keepers: { path: '/w/.masc/keepers', exists: true, source: 'derived' },
+    })
+    expect(resolution?.config_root.path).toBe('/w/.masc/config')
   })
 })
 

@@ -21,26 +21,35 @@ set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-UNWIRED_BASELINE=9
+# Measured, not computed: 14 is what the widened scan reports on main. The
+# previous 9 came from a narrower pattern that skipped scripts/ci/ entirely
+# and did not match lint-* names, so three self-declared gates
+# (check-logging-consistency, lint-cancel-guard, tla-mutation-lint-ratchet)
+# were invisible to it. See #27626.
+UNWIRED_BASELINE=14
 
 all="$(mktemp)"
 called="$(mktemp)"
 trap 'rm -f "$all" "$called"' EXIT
 
-ls scripts/*.sh scripts/*.py 2>/dev/null | xargs -n1 basename | sort -u > "$all"
+# scripts/ci/ holds guards too — check-logging-consistency.sh lives there
+# and was invisible to this count.
+ls scripts/*.sh scripts/*.py scripts/ci/*.sh scripts/ci/*.py 2>/dev/null \
+  | xargs -n1 basename | sort -u > "$all"
 
 # Names appear either as scripts/<name> or bare inside a for-loop list.
-grep -ohE "scripts/[a-z0-9_.-]+\.(sh|py)|^[[:space:]]+(audit|check|verify|guard)[a-z0-9_.-]*\.(sh|py)" \
-  .github/workflows/*.yml 2>/dev/null \
-  | sed 's|scripts/||; s/^[[:space:]]*//' \
+grep -ohE "scripts/(ci/)?[a-z0-9_.-]+\.(sh|py)|^[[:space:]]+(audit|check|verify|guard|lint)[a-z0-9_.-]*\.(sh|py)" \
+  .github/workflows/*.yml scripts/ci/run-lint-suite.sh 2>/dev/null \
+  | sed 's|scripts/ci/||; s|scripts/||; s/^[[:space:]]*//' \
   | sort -u > "$called"
 
-unwired="$(comm -23 "$all" "$called" | grep -cE '^(audit|check|verify|guard)' || true)"
+GUARD_NAME_RE='^(audit|check|verify|guard|lint)|lint'
+unwired="$(comm -23 "$all" "$called" | grep -cE "$GUARD_NAME_RE" || true)"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then
   echo "[unwired-audits] FAIL - ${unwired} audit scripts are never run by CI (baseline ${UNWIRED_BASELINE})"
   echo
-  comm -23 "$all" "$called" | grep -E '^(audit|check|verify|guard)' | sed 's/^/  - /'
+  comm -23 "$all" "$called" | grep -E "$GUARD_NAME_RE" | sed 's/^/  - /'
   echo
   echo "A guard CI does not run cannot fail, so it does not guard anything."
   echo "Wire it into .github/workflows/ci.yml, or record here why it cannot run"

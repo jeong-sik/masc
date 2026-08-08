@@ -10,6 +10,10 @@ type lookup_error =
   | Owner_not_found of string
   | Inventory_stopping
 
+type command_error =
+  | Command_lookup_failed of lookup_error
+  | Command_rejected of Keeper_owner.error
+
 exception Install_failed of install_error
 
 type pool =
@@ -46,6 +50,11 @@ let lookup_error_to_string = function
   | Owner_not_found keeper_name ->
     Printf.sprintf "Keeper owner not found: %s" keeper_name
   | Inventory_stopping -> "Keeper owner inventory is stopping"
+;;
+
+let command_error_to_string = function
+  | Command_lookup_failed error -> lookup_error_to_string error
+  | Command_rejected error -> Keeper_owner.error_to_string error
 ;;
 
 let () =
@@ -213,6 +222,18 @@ let get ~base_path ~keeper_name =
       match Hashtbl.find_opt pool.owners keeper_name with
       | Some owner -> Ok owner
       | None -> Error (Owner_not_found keeper_name))
+;;
+
+let apply_meta ~base_path ~keeper_name command =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    (match Keeper_owner.apply_meta owner command with
+     | Error error -> Error (Command_rejected error)
+     | Ok (Some meta) ->
+       Keeper_registry.update_meta_from_persisted ~base_path keeper_name meta;
+       Ok (Some meta)
+     | Ok None -> Ok None)
 ;;
 
 let all_projections ~base_path =

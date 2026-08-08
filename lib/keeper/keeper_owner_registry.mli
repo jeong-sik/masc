@@ -15,6 +15,10 @@ type lookup_error =
   | Owner_not_found of string
   | Inventory_stopping
 
+type command_error =
+  | Command_lookup_failed of lookup_error
+  | Command_rejected of Keeper_owner.error
+
 exception Install_failed of install_error
 
 val install_from_store
@@ -36,6 +40,14 @@ val get
   -> keeper_name:string
   -> (Keeper_owner.t, lookup_error) result
 
+val apply_meta
+  :  base_path:string
+  -> keeper_name:string
+  -> Keeper_owner_reducer.meta_command
+  -> (Keeper_meta_contract.keeper_meta option, command_error) result
+(** Mailbox-linearized metadata mutation.  Registry metadata is refreshed only
+    from the committed owner projection. *)
+
 val all_projections
   :  base_path:string
   -> (Keeper_owner_reducer.projection list, lookup_error) result
@@ -43,6 +55,7 @@ val all_projections
 
 val install_error_to_string : install_error -> string
 val lookup_error_to_string : lookup_error -> string
+val command_error_to_string : command_error -> string
 
 module For_testing : sig
   val installed_owner_count : base_path:string -> int

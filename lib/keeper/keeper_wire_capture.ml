@@ -149,7 +149,7 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
     best_effort ~site:Request_capture ~masc_root ~keeper_name ~turn_id (fun () ->
       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
       let raw_tools =
-        List.map Agent_sdk.Tool.schema_to_json tools
+        List.map Masc_agent_core.Tool.schema_to_json tools
       in
       let tool_schema_bytes =
         Yojson.Safe.to_string (`List raw_tools) |> String.length

@@ -1,6 +1,6 @@
 open Alcotest
 open Llm_provider
-module EO = Agent_sdk.Exact_output
+module EO = Masc_agent_core.Exact_output
 
 exception Advance_committed_before_successor
 

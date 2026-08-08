@@ -5,7 +5,7 @@
 
     Pattern: test_integration.ml (OpenAI-compatible mock) *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (* ── Mock HTTP Server ────────────────────────────────── *)

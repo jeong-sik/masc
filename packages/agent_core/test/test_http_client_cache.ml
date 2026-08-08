@@ -3,7 +3,7 @@
     These tests exercise the reusable TCP/TLS connection cache through both
     the high-level {!Complete} API and direct {!Http_client} calls. *)
 
-open Agent_sdk
+open Masc_agent_core
 open Llm_provider
 
 exception Lifecycle_watchdog

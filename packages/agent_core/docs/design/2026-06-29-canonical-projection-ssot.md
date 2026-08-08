@@ -51,7 +51,7 @@ downstream consumer that *also* re-implements these projections
 (`keeper_hooks_oas_types.stop_reason_to_label`,
 `keeper_event_bridge_error_json.stop_reason_to_wire`, `inference_utils.zero_usage`,
 `summarize_thinking_blocks`, …). Every projection OAS exposes lets a MASC copy be
-deleted in favor of `Agent_sdk.*` — the dependency direction stays MASC→OAS.
+deleted in favor of `Masc_agent_core.*` — the dependency direction stays MASC→OAS.
 What stays in MASC is policy: identity redaction, Otel label keys, per-keeper
 routing headers, cost-ledger and operator-alert routing.
 

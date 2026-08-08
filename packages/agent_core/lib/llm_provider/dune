@@ -2,7 +2,7 @@
 
 (library
  (name llm_provider)
- (public_name agent_sdk.llm_provider)
+ (public_name masc.agent_core.llm_provider)
  (private_modules
   complete_stream_error
   model_catalog_embedded
@@ -43,12 +43,16 @@
   unix
   str
   cohttp-eio
+  cohttp
+  http
   tls
   tls-eio
   ca-certs
   digestif
   cstruct
   mirage-crypto-rng.unix
+  mtime.clock.os
+  domain-name
   uri)
  (inline_tests)
  (preprocess

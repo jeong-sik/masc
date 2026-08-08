@@ -23,14 +23,14 @@ let test_elapsed_duration_ms_rejects_non_finite () =
 
 let test_zero_usage_tracks_oas_canonical () =
   check bool "Inference_utils.zero_usage = OAS zero_api_usage" true
-    (Inference_utils.zero_usage = Agent_sdk.Types.zero_api_usage);
+    (Inference_utils.zero_usage = Masc_agent_core.Types.zero_api_usage);
   check bool "Keeper_hooks_oas_types.zero_usage = OAS zero_api_usage" true
-    (Keeper_hooks_oas_types.zero_usage = Agent_sdk.Types.zero_api_usage)
+    (Keeper_hooks_oas_types.zero_usage = Masc_agent_core.Types.zero_api_usage)
 
 let test_total_tokens_parity_and_excludes_cache () =
-  let sample : Agent_sdk.Types.api_usage =
+  let sample : Masc_agent_core.Types.api_usage =
     {
-      Agent_sdk.Types.input_tokens = 7;
+      Masc_agent_core.Types.input_tokens = 7;
       output_tokens = 5;
       cache_creation_input_tokens = 3;
       cache_read_input_tokens = 2;
@@ -41,11 +41,11 @@ let test_total_tokens_parity_and_excludes_cache () =
   check int "total_tokens excludes cache tokens" 12
     (Inference_utils.total_tokens sample);
   check int "total_tokens parity with OAS projection"
-    (Agent_sdk.Types.total_tokens sample)
+    (Masc_agent_core.Types.total_tokens sample)
     (Inference_utils.total_tokens sample)
 
 let test_utf8_sanitization_preserves_tool_failure_provenance () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let message : message =
     {
       role = Tool;

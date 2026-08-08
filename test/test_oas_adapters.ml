@@ -7,55 +7,55 @@ open Masc
 (* ================================================================ *)
 
 let test_roundtrip_user_msg () =
-  let msg = Agent_sdk.Types.user_msg "hello world" in
-  match (fun (m : Agent_sdk.Types.message) -> match m.role with Agent_sdk.Types.System -> None | _ -> Some m) msg with
+  let msg = Masc_agent_core.Types.user_msg "hello world" in
+  match (fun (m : Masc_agent_core.Types.message) -> match m.role with Masc_agent_core.Types.System -> None | _ -> Some m) msg with
   | None -> Alcotest.fail "user message should not be dropped"
   | Some oas ->
     let rt = Fun.id oas in
     Alcotest.(check string) "role preserved" "user"
-      (match rt.role with Agent_sdk.Types.User -> "user" | _ -> "other");
+      (match rt.role with Masc_agent_core.Types.User -> "user" | _ -> "other");
     Alcotest.(check string) "content preserved"
-      "hello world" (Agent_sdk.Types.text_of_message rt)
+      "hello world" (Masc_agent_core.Types.text_of_message rt)
 
 let test_roundtrip_assistant_msg () =
-  let msg = Agent_sdk.Types.assistant_msg "The answer is 42." in
-  match (fun (m : Agent_sdk.Types.message) -> match m.role with Agent_sdk.Types.System -> None | _ -> Some m) msg with
+  let msg = Masc_agent_core.Types.assistant_msg "The answer is 42." in
+  match (fun (m : Masc_agent_core.Types.message) -> match m.role with Masc_agent_core.Types.System -> None | _ -> Some m) msg with
   | None -> Alcotest.fail "assistant message should not be dropped"
   | Some oas ->
     let rt = Fun.id oas in
     Alcotest.(check string) "role preserved" "assistant"
-      (match rt.role with Agent_sdk.Types.Assistant -> "assistant" | _ -> "other");
+      (match rt.role with Masc_agent_core.Types.Assistant -> "assistant" | _ -> "other");
     Alcotest.(check string) "content preserved"
-      "The answer is 42." (Agent_sdk.Types.text_of_message rt)
+      "The answer is 42." (Masc_agent_core.Types.text_of_message rt)
 
 let test_roundtrip_system_msg_dropped () =
-  let msg = Agent_sdk.Types.system_msg "system prompt" in
-  let result = (fun (m : Agent_sdk.Types.message) -> match m.role with Agent_sdk.Types.System -> None | _ -> Some m) msg in
+  let msg = Masc_agent_core.Types.system_msg "system prompt" in
+  let result = (fun (m : Masc_agent_core.Types.message) -> match m.role with Masc_agent_core.Types.System -> None | _ -> Some m) msg in
   Alcotest.(check bool) "system message dropped (belongs in system_prompt)"
     true (Option.is_none result)
 
 let test_roundtrip_tool_msg () =
-  let msg : Agent_sdk.Types.message =
-    { role = Agent_sdk.Types.Tool;
+  let msg : Masc_agent_core.Types.message =
+    { role = Masc_agent_core.Types.Tool;
       content =
-        [ Agent_sdk.Types.ToolResult
+        [ Masc_agent_core.Types.ToolResult
             { tool_use_id = "tc-1"
             ; content = "tool output here"
-            ; outcome = Agent_sdk.Types.Tool_succeeded
+            ; outcome = Masc_agent_core.Types.Tool_succeeded
             ; json = None
             ; content_blocks = None
             }
         ];
       name = None; tool_call_id = None; metadata = [] } in
-  match (fun (m : Agent_sdk.Types.message) -> match m.role with Agent_sdk.Types.System -> None | _ -> Some m) msg with
+  match (fun (m : Masc_agent_core.Types.message) -> match m.role with Masc_agent_core.Types.System -> None | _ -> Some m) msg with
   | None -> Alcotest.fail "tool message should not be dropped"
   | Some oas ->
     let rt = Fun.id oas in
-    (* MASC and OAS share the same Agent_sdk.Types.message type. *)
+    (* MASC and OAS share the same Masc_agent_core.Types.message type. *)
     Alcotest.(check string) "tool role preserved"
       "tool"
-      (match rt.role with Agent_sdk.Types.Tool -> "tool" | _ -> "other");
-    let text = Agent_sdk.Types.text_of_message rt in
+      (match rt.role with Masc_agent_core.Types.Tool -> "tool" | _ -> "other");
+    let text = Masc_agent_core.Types.text_of_message rt in
     Alcotest.(check bool) "content preserved"
       true (String.length text > 0)
 
@@ -64,41 +64,41 @@ let test_roundtrip_tool_msg () =
 (* ================================================================ *)
 
 let test_restore_messages_all_roles () =
-  let oas_msgs : Agent_sdk.Types.message list = [
-    { Agent_sdk.Types.role = Agent_sdk.Types.User;
-      content = [Agent_sdk.Types.Text "user question"]; name = None; tool_call_id = None; metadata = [] };
-    { Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
-      content = [Agent_sdk.Types.Text "assistant answer"]; name = None; tool_call_id = None; metadata = [] };
+  let oas_msgs : Masc_agent_core.Types.message list = [
+    { Masc_agent_core.Types.role = Masc_agent_core.Types.User;
+      content = [Masc_agent_core.Types.Text "user question"]; name = None; tool_call_id = None; metadata = [] };
+    { Masc_agent_core.Types.role = Masc_agent_core.Types.Assistant;
+      content = [Masc_agent_core.Types.Text "assistant answer"]; name = None; tool_call_id = None; metadata = [] };
   ] in
   let masc_msgs = List.map Fun.id oas_msgs in
   Alcotest.(check int) "2 messages restored" 2 (List.length masc_msgs);
   let first = List.hd masc_msgs in
   Alcotest.(check string) "first is user" "user"
-    (match first.role with Agent_sdk.Types.User -> "user" | _ -> "other");
+    (match first.role with Masc_agent_core.Types.User -> "user" | _ -> "other");
   Alcotest.(check string) "first content" "user question"
-    (Agent_sdk.Types.text_of_message first);
+    (Masc_agent_core.Types.text_of_message first);
   let second = List.nth masc_msgs 1 in
   Alcotest.(check string) "second is assistant" "assistant"
-    (match second.role with Agent_sdk.Types.Assistant -> "assistant" | _ -> "other")
+    (match second.role with Masc_agent_core.Types.Assistant -> "assistant" | _ -> "other")
 
-let test_agent_sdk_response_visible_text_excludes_non_answer_blocks () =
-  let response : Agent_sdk.Types.api_response =
+let test_agent_core_response_visible_text_excludes_non_answer_blocks () =
+  let response : Masc_agent_core.Types.api_response =
     { id = "resp"
     ; model = "model"
-    ; stop_reason = Agent_sdk.Types.EndTurn
+    ; stop_reason = Masc_agent_core.Types.EndTurn
     ; content =
-        [ Agent_sdk.Types.Text "visible"
-        ; Agent_sdk.Types.Thinking { signature = None; content = "private reasoning" }
-        ; Agent_sdk.Types.ToolResult
+        [ Masc_agent_core.Types.Text "visible"
+        ; Masc_agent_core.Types.Thinking { signature = None; content = "private reasoning" }
+        ; Masc_agent_core.Types.ToolResult
             { tool_use_id = "tool-1"
             ; content = "tool payload"
-            ; outcome = Agent_sdk.Types.Tool_succeeded
+            ; outcome = Masc_agent_core.Types.Tool_succeeded
             ; json = None
-            ; content_blocks = Some [ Agent_sdk.Types.Text "structured tool payload" ]
+            ; content_blocks = Some [ Masc_agent_core.Types.Text "structured tool payload" ]
             }
-        ; Agent_sdk.Types.Image
-            { media_type = "image/png"; data = "bytes"; source_type = Agent_sdk.Types.Base64 }
-        ; Agent_sdk.Types.Text "tail"
+        ; Masc_agent_core.Types.Image
+            { media_type = "image/png"; data = "bytes"; source_type = Masc_agent_core.Types.Base64 }
+        ; Masc_agent_core.Types.Text "tail"
         ]
     ; usage = None
     ; telemetry = None
@@ -107,7 +107,7 @@ let test_agent_sdk_response_visible_text_excludes_non_answer_blocks () =
   Alcotest.(check string)
     "visible answer text"
     "visible\ntail"
-    (Agent_sdk_response.text_of_response response)
+    (Masc_agent_core_response.text_of_response response)
 
 (* ================================================================ *)
 (* Runner                                                           *)
@@ -131,6 +131,6 @@ let () =
     ];
     "response_projection", [
       Alcotest.test_case "visible text excludes non-answer blocks" `Quick
-        test_agent_sdk_response_visible_text_excludes_non_answer_blocks;
+        test_agent_core_response_visible_text_excludes_non_answer_blocks;
     ];
   ]

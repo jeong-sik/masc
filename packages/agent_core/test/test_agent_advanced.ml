@@ -1,6 +1,6 @@
 (** Typed cooperative tool-boundary execution tests. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let mock_provider =
   Llm_provider.Provider_config.make

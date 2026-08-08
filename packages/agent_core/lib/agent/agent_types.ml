@@ -176,7 +176,7 @@ let update_state t f =
 ;;
 
 let description t = t.options.description
-let sdk_version = Sdk_version.version
+let core_version = Core_version.version
 
 let typed_provider_name (cfg : Llm_provider.Provider_config.t) =
   Provider_runtime_binding.provider_id_of_provider_config cfg
@@ -199,7 +199,7 @@ let card ~supported_interfaces t =
   Agent_card.of_info
     { agent_name = t.state.config.name
     ; agent_description = t.options.description
-    ; version = sdk_version
+    ; version = core_version
     ; config = t.state.config
     ; tool_schemas =
         List.map (fun (tool : Tool.t) -> tool.schema) (Tool_set.to_list t.tools)

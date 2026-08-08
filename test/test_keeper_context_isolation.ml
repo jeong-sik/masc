@@ -11,7 +11,7 @@
 
 open Alcotest
 
-module Ctx = Agent_sdk.Context
+module Ctx = Masc_agent_core.Context
 
 (* ── Helpers ─────────────────────────────────────── *)
 

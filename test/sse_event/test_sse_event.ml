@@ -7,7 +7,7 @@
 
    The baseline is hand-replicated below using the same algorithm as
    wrap_event/json_string_opt — this avoids linking the heavy
-   runtime dependency chain (Agent_sdk, Eio, etc.) into the test
+   runtime dependency chain (Masc_agent_core, Eio, etc.) into the test
    binary.  In PR-2 (runtime migration) we replace the runtime arm
    itself, at which point the wrap_event replica below is removed
    and the test pins against the runtime output directly. *)

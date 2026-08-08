@@ -1,7 +1,7 @@
 (** Keeper Hooks (OAS bridge) — runtime telemetry, cost ledger, and
     pre-/post-tool observation factory.
 
-    Bridges OAS [Agent_sdk.Hooks] callbacks with MASC's keeper accounting:
+    Bridges OAS [Masc_agent_core.Hooks] callbacks with MASC's keeper accounting:
     records OAS-reported usage/cost with explicit unknowns, records
     Otel_metric_store metrics, and records tool timing without making an
     execution decision.
@@ -23,13 +23,13 @@ val record_tool_use_failure : keeper_name:string -> tool_name:string -> unit
 (** {1 Runtime-lane normalisation} *)
 
 val resolve_after_turn_model :
-  keeper_name:string -> response:Agent_sdk.Types.api_response -> string
+  keeper_name:string -> response:Masc_agent_core.Types.api_response -> string
 (** Return the neutral runtime lane after a turn completes; emits quality
     metrics when OAS omits [response.model] or returns a selector alias,
     without exposing concrete model identity. *)
 
 val record_response_content_quality_metric :
-  keeper_name:string -> Agent_sdk.Types.api_response -> unit
+  keeper_name:string -> Masc_agent_core.Types.api_response -> unit
 (** Count after-turn responses that contain no visible assistant text and no
     tool progress.  Tool-use responses are progress, even when textual content
     is empty. *)
@@ -46,7 +46,7 @@ val record_response_content_quality_metric :
     accounting can opt out of mis-reported numbers. *)
 
 val classify_usage_trust :
-  ?usage:Agent_sdk.Types.api_usage ->
+  ?usage:Masc_agent_core.Types.api_usage ->
   unit -> Keeper_usage_trust.t
 (** Validate objective non-negative usage-counter invariants.  A usage
     record without any token evidence (e.g. cost-only) is [Usage_missing],
@@ -76,11 +76,11 @@ val record_keeper_tool_duration_metric :
 (** {1 Throughput metrics} *)
 
 val record_llm_tok_s_metrics :
-  telemetry:Agent_sdk.Types.inference_telemetry option -> unit
+  telemetry:Masc_agent_core.Types.inference_telemetry option -> unit
 (** Record provider-reported tokens-per-second when telemetry exposes it. *)
 
 val record_llm_inference_latency_metric :
-  telemetry:Agent_sdk.Types.inference_telemetry option -> unit
+  telemetry:Masc_agent_core.Types.inference_telemetry option -> unit
 (** Record after-turn inference latency. [request_latency_ms <= 0] is counted
     by [masc_after_turn_telemetry_zero_latency_total] and floored to 1ms in
     [masc_llm_inference_duration_seconds] so a live hook does not leave the
@@ -89,7 +89,7 @@ val record_llm_inference_latency_metric :
 val wall_tokens_per_second :
   usage_missing:bool ->
   output_tokens:int ->
-  telemetry:Agent_sdk.Types.inference_telemetry option -> float option
+  telemetry:Masc_agent_core.Types.inference_telemetry option -> float option
 (** Output tokens/sec computed from telemetry latency, subtracting
     [ttfrc_ms] when available so the fallback approximates decode
     throughput instead of first-token wait time. Returns [None] when usage
@@ -127,7 +127,7 @@ val cost_event_payload :
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
-  ?telemetry:Agent_sdk.Types.inference_telemetry -> unit -> Yojson.Safe.t
+  ?telemetry:Masc_agent_core.Types.inference_telemetry -> unit -> Yojson.Safe.t
 (** Assemble the structured cost-ledger event without writing it. *)
 
 val emit_cost_event :
@@ -145,7 +145,7 @@ val emit_cost_event :
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
-  ?telemetry:Agent_sdk.Types.inference_telemetry -> unit -> unit
+  ?telemetry:Masc_agent_core.Types.inference_telemetry -> unit -> unit
 (** Append a structured cost-ledger event to [costs/YYYY-MM/DD.jsonl]. *)
 
 (** PR-review / PR-work metric event types live in Keeper_hooks_oas_types
@@ -168,8 +168,8 @@ val make_hooks :
                      duration_ms:float -> provider:string ->
                      typed_outcome:Keeper_tool_outcome.t option -> unit) ->
   ?trajectory_acc:Trajectory.accumulator ->
-  unit -> Agent_sdk.Hooks.hooks
-(** Build the [Agent_sdk.Hooks.hooks] record used by the keeper turn loop:
+  unit -> Masc_agent_core.Hooks.hooks
+(** Build the [Masc_agent_core.Hooks.hooks] record used by the keeper turn loop:
     passive pre-tool timing, post-tool accounting, idle detection, and
     trajectory hooks wired together. Cost remains part of post-turn
     observation. *)
@@ -183,6 +183,6 @@ module For_testing : sig
   val tool_input_keys_for_log : Yojson.Safe.t -> string
   val cost_usd_json : float option -> Yojson.Safe.t
   (** Exact projection used by the turn-complete SSE payload. *)
-  val usage_missing_of_usage : Agent_sdk.Types.api_usage option -> bool
+  val usage_missing_of_usage : Masc_agent_core.Types.api_usage option -> bool
   (** Hook usage-evidence decision delegated to {!usage_has_tokens}. *)
 end

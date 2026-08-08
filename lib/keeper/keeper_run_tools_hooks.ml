@@ -11,12 +11,12 @@ open Keeper_agent_prompt_metrics
 type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator
 
 type agent_setup =
-  { tools : Agent_sdk.Tool.t list
+  { tools : Masc_agent_core.Tool.t list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
   ; user_message : string
-  ; hooks : Agent_sdk.Hooks.hooks
-  ; model_input_projection : Agent_sdk.Agent.model_input_projection
+  ; hooks : Masc_agent_core.Hooks.hooks
+  ; model_input_projection : Masc_agent_core.Agent.model_input_projection
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
@@ -33,7 +33,7 @@ type ctx =
   ; agent_name : string
   ; all_tool_names : string list
   ; compute_tool_surface :
-      turn:int -> current_tool_choice:Agent_sdk.Types.tool_choice option -> unit ->
+      turn:int -> current_tool_choice:Masc_agent_core.Types.tool_choice option -> unit ->
       string list * turn_lane
   ; record_tool_assignment :
       turn:int -> tool_list:string list -> lane:turn_lane -> unit
@@ -51,12 +51,12 @@ type ctx =
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
-  ; tools : Agent_sdk.Tool.t list
+  ; tools : Masc_agent_core.Tool.t list
   }
 
 let relax_strict_tool_choice_for_keeper = function
-  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
-    Some Agent_sdk.Types.Auto
+  | Some (Masc_agent_core.Types.Any | Masc_agent_core.Types.Tool _) ->
+    Some Masc_agent_core.Types.Auto
   | other -> other
 
 let project_model_input ~base_path ~gate_replay_evidence messages =
@@ -135,9 +135,9 @@ let assemble_hooks
       ~(turn_system_prompt : string)
       ~(user_message : string)
       ~(dynamic_context : string)
-      ~(history_messages : Agent_sdk.Types.message list)
+      ~(history_messages : Masc_agent_core.Types.message list)
       ~(prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics)
-      ~(shared_context : Agent_sdk.Context.t)
+      ~(shared_context : Masc_agent_core.Context.t)
       ~(start_turn_count : int)
       ~(generation : int)
       ~(runtime_id_string : string)
@@ -149,7 +149,7 @@ let assemble_hooks
       ?runtime_manifest_context
       ?runtime_manifest_append
       ()
-  : (agent_setup, Agent_sdk.Error.sdk_error) result
+  : (agent_setup, Masc_agent_core.Error.sdk_error) result
   =
   let acc = ctx.acc in
   let compute_tool_surface = ctx.compute_tool_surface in
@@ -301,13 +301,13 @@ let assemble_hooks
              ()))
         ()
     in
-    let before_turn_hook : Agent_sdk.Hooks.hooks =
-      { Agent_sdk.Hooks.empty with
+    let before_turn_hook : Masc_agent_core.Hooks.hooks =
+      { Masc_agent_core.Hooks.empty with
         before_turn_params =
           Some
             (fun event ->
               match event with
-              | Agent_sdk.Hooks.BeforeTurnParams
+              | Masc_agent_core.Hooks.BeforeTurnParams
                   { turn; current_params; messages; last_tool_results; _ } ->
                 let hook_t0 = Time_compat.now () in
                 acc.current_turn <- turn;
@@ -316,7 +316,7 @@ let assemble_hooks
                   are reset before the hook writes [Runtime_selecting] /
                   [Decision_tool_policy_selected] / [Turn_prompting] below.
                   The MASC keeper-turn boundary ([mark_turn_started]) only
-                  fires once per [Agent_sdk.run_loop] call; every additional
+                  fires once per [Masc_agent_core.run_loop] call; every additional
                   SDK turn inside that loop must use this entry point or
                   [validate_turn_phase_transition] rejects the transition
                   from the previous SDK turn's [Turn_finalizing] terminal. *)
@@ -460,7 +460,7 @@ let assemble_hooks
                     (Option.map
                        (fun choice ->
                           Yojson.Safe.to_string
-                            (Agent_sdk.Types.tool_choice_to_json choice))
+                            (Masc_agent_core.Types.tool_choice_to_json choice))
                        tool_choice)
                   ~thinking_enabled:thinking_enabled_effective
                   ?thinking_budget:current_params.thinking_budget
@@ -591,15 +591,15 @@ let assemble_hooks
                   ~tools
                   ();
                 Eio.Fiber.yield ();
-                Agent_sdk.Hooks.AdjustParams
+                Masc_agent_core.Hooks.AdjustParams
                   { current_params with
                     extra_system_context = ctx
                   ; tool_choice
                   }
-              | _event -> Agent_sdk.Hooks.Continue)
+              | _event -> Masc_agent_core.Hooks.Continue)
       }
     in
-    let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
+    let hooks = Masc_agent_core.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
     let model_input_projection messages =
       (* Stored Tool results are already the canonical provider-bound
          representation. Fetching their bytes here would undo externalization

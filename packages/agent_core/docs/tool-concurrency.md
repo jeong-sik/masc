@@ -13,7 +13,7 @@ path, input, effect, or product identity to choose a mode.
 ## Declaring a mode
 
 ```ocaml
-open Agent_sdk
+open Masc_agent_core
 
 let lookup_tool =
   let descriptor = Tool.ordinary_descriptor Tool.Concurrent in

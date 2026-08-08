@@ -51,7 +51,7 @@ let media_degrade_manifest_decision ~(runtime_id : string)
       ])
 
 type provider_run_result =
-  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+  (Runtime_agent.run_result, Masc_agent_core.Error.sdk_error) result
 
 type provider_attempt_outcomes =
   { provider_result : provider_run_result
@@ -67,7 +67,7 @@ type deferred_runtime_lane =
   ; failed_runtime_id : string
   ; next_runtime_id : string
   ; later_runtime_ids : string list
-  ; failure : Agent_sdk.Error.sdk_error
+  ; failure : Masc_agent_core.Error.sdk_error
   }
 
 let deferred_runtime_ids hint =
@@ -99,7 +99,7 @@ let project_provider_attempt_result ~replay_prefix_projection provider_result =
               }
           | Error error ->
             Error
-              (Agent_sdk.Error.Internal
+              (Masc_agent_core.Error.Internal
                  (Keeper_replay_prefix.restore_error_to_string error))))
   in
   { provider_result; turn_result }
@@ -113,7 +113,10 @@ let runtime_failed_decision ~idx ~runtime_id error =
     [
       ("idx", `Int idx);
       ("runtime_id", `String runtime_id);
-      ("error_kind", `String (Agent_sdk_compat.error_kind error));
+      ( "error_kind"
+      , `String
+          (Masc_agent_core.Error.category error
+           |> Masc_agent_core.Error.category_label) );
     ]
 
 let lane_should_retry
@@ -170,7 +173,7 @@ let attempt_runtime_candidates
        | Some overflow_error -> Error overflow_error
        | None ->
          Error
-           (Agent_sdk.Error.Internal
+           (Masc_agent_core.Error.Internal
               (Printf.sprintf
                  "runtime lane %S exhausted all candidates"
                  runtime_id)))
@@ -260,14 +263,14 @@ let attempt_runtime_candidates
   loop ~observed_overflow:None 0 candidates
 
 let runtime_candidate_missing_error id =
-  Agent_sdk.Error.Internal
+  Masc_agent_core.Error.Internal
     (Printf.sprintf
        "keeper_turn_driver: lane candidate %S disappeared from runtimes"
        id)
 
 let runtime_candidate_missing_request_cap_error error =
-  Agent_sdk.Error.Config
-    (Agent_sdk.Error.InvalidConfig
+  Masc_agent_core.Error.Config
+    (Masc_agent_core.Error.InvalidConfig
        { field = "max-request-body-bytes"
        ; detail = Runtime.request_body_cap_error_to_string error
        })
@@ -374,7 +377,7 @@ let run_named
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?temperature
-    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
+    ?(accept = fun (_ : Masc_agent_core_response.api_response) -> true)
     ?hooks
     ?raw_trace
     ?on_event
@@ -404,7 +407,7 @@ let run_named
     ?sw
     ?net
     ()
-  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Runtime_agent.run_result, Masc_agent_core.Error.sdk_error) result =
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
@@ -471,7 +474,7 @@ let run_named
   if lane_candidate_ids = []
   then
     Error
-      (Agent_sdk.Error.Internal
+      (Masc_agent_core.Error.Internal
          (Printf.sprintf
             "requested runtime or lane %S not found among configured runtimes"
             runtime_id))
@@ -487,7 +490,7 @@ let run_named
   let checkpoint_messages =
     match oas_checkpoint with
     | None -> []
-    | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
+    | Some (checkpoint : Masc_agent_core.Checkpoint.t) -> checkpoint.messages
   in
   (* [initial_messages] is the caller's canonical pre-turn history and is the
      exact prefix checked later by replay persistence.  A resumed checkpoint is
@@ -588,7 +591,7 @@ let run_named
       let stripped_checkpoint, checkpoint_dropped =
         match oas_checkpoint with
         | None -> None, []
-        | Some (checkpoint : Agent_sdk.Checkpoint.t) ->
+        | Some (checkpoint : Masc_agent_core.Checkpoint.t) ->
           let messages, dropped =
             Runtime_agent.strip_unsupported_modality_messages
               caps
@@ -617,11 +620,11 @@ let run_named
            ~decision:(media_degrade_manifest_decision ~runtime_id:first_runtime_id dropped)
            Keeper_runtime_manifest.Runtime_routed;
          let goal_with_note =
-           stripped_goal @ [ Agent_sdk.Types.text_block note ]
+           stripped_goal @ [ Masc_agent_core.Types.text_block note ]
          in
          let dispatch_prefix =
            match stripped_checkpoint with
-           | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
+           | Some (checkpoint : Masc_agent_core.Checkpoint.t) -> checkpoint.messages
            | None -> stripped_initial
          in
          ( Some goal_with_note
@@ -657,7 +660,8 @@ let run_named
           keeper_name
           attempt_runtime_id
           attempt
-          (Agent_sdk_compat.error_kind error);
+          (Masc_agent_core.Error.category error
+           |> Masc_agent_core.Error.category_label);
       allowed)
     ~runtime_id:
       (match deferred_runtime_lane with

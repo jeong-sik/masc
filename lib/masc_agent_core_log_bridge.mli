@@ -1,4 +1,4 @@
-(** Forward records emitted through [Agent_sdk.Log] into the masc
+(** Forward records emitted through [Masc_agent_core.Log] into the masc
     structured log ring / JSONL sink.
 
     Without this bridge the OAS global sink registry is empty and all

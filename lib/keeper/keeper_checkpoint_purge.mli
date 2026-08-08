@@ -77,13 +77,13 @@ type purge_error =
 
 val purge_messages
   :  config:config
-  -> Agent_sdk.Types.message list
-  -> (Agent_sdk.Types.message list * report, purge_error) result
+  -> Masc_agent_core.Types.message list
+  -> (Masc_agent_core.Types.message list * report, purge_error) result
 (** Pure message-list transform behind {!purge}. Exposed for tests. *)
 
 val purge
   :  config:config
-  -> Agent_sdk.Checkpoint.t
-  -> (Agent_sdk.Checkpoint.t * report, purge_error) result
+  -> Masc_agent_core.Checkpoint.t
+  -> (Masc_agent_core.Checkpoint.t * report, purge_error) result
 (** Apply {!purge_messages} to [ckpt.messages], leaving every other field
     unchanged. *)

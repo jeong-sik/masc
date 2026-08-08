@@ -2,7 +2,7 @@
 
     Extracted from [Keeper_agent_run] so the arithmetic is unit-testable
     without standing up a live keeper. The functions here operate purely
-    on [Agent_sdk] values and return plain records/ints; they never
+    on [Masc_agent_core] values and return plain records/ints; they never
     touch stores, logs, or side effects. Callers (currently
     [Keeper_agent_run]) feed every result to
     [Dashboard_harness_health.record_wake_payload].
@@ -12,7 +12,7 @@
     Both include the pending user turn that OAS will synthesize from
     [~goal_blocks] when present, or [~goal] otherwise. *)
 
-module Canonical_tool = Agent_sdk.Canonical_tool
+module Canonical_tool = Masc_agent_core.Canonical_tool
 
 type sizes = {
   system_prompt_bytes : int;
@@ -23,9 +23,9 @@ type sizes = {
   tool_count : int;
 }
 
-let role_key : Agent_sdk.Types.role -> string = Agent_sdk.Types.role_to_string
+let role_key : Masc_agent_core.Types.role -> string = Masc_agent_core.Types.role_to_string
 
-let bytes_of_content_block (block : Agent_sdk.Types.content_block) : int =
+let bytes_of_content_block (block : Masc_agent_core.Types.content_block) : int =
   match Canonical_tool.tool_result_of_block block with
   | Some result ->
     String.length result.Canonical_tool.call_id
@@ -38,32 +38,32 @@ let bytes_of_content_block (block : Agent_sdk.Types.content_block) : int =
       + String.length (Yojson.Safe.to_string call.Canonical_tool.input)
     | None -> (
       match block with
-      | Agent_sdk.Types.Text s -> String.length s
-      | Agent_sdk.Types.Thinking { content; _ } -> String.length content
-      | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
-        Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
+      | Masc_agent_core.Types.Text s -> String.length s
+      | Masc_agent_core.Types.Thinking { content; _ } -> String.length content
+      | Masc_agent_core.Types.ReasoningDetails { reasoning_content; details } ->
+        Masc_agent_core.Types.reasoning_details_text ~reasoning_content ~details
         |> String.length
-      | Agent_sdk.Types.RedactedThinking s -> String.length s
-      | Agent_sdk.Types.ToolResult _ ->
+      | Masc_agent_core.Types.RedactedThinking s -> String.length s
+      | Masc_agent_core.Types.ToolResult _ ->
         invalid_arg
           "keeper_wake_telemetry: OAS canonical tool-result projection unavailable"
-      | Agent_sdk.Types.ToolUse _ ->
+      | Masc_agent_core.Types.ToolUse _ ->
         invalid_arg
           "keeper_wake_telemetry: OAS canonical tool-call projection unavailable"
-      | Agent_sdk.Types.Image { data; _ }
-      | Agent_sdk.Types.Document { data; _ }
-      | Agent_sdk.Types.Audio { data; _ } -> String.length data))
+      | Masc_agent_core.Types.Image { data; _ }
+      | Masc_agent_core.Types.Document { data; _ }
+      | Masc_agent_core.Types.Audio { data; _ } -> String.length data))
 
-let bytes_of_message_content (m : Agent_sdk.Types.message) : int =
+let bytes_of_message_content (m : Masc_agent_core.Types.message) : int =
   List.fold_left
     (fun acc b -> acc + bytes_of_content_block b)
     0 m.content
 
-let bytes_of_tool_schema_json (tools : Agent_sdk.Tool.t list) : int =
+let bytes_of_tool_schema_json (tools : Masc_agent_core.Tool.t list) : int =
   List.fold_left
     (fun acc t ->
       acc
-      + String.length (Yojson.Safe.to_string (Agent_sdk.Tool.schema_to_json t)))
+      + String.length (Yojson.Safe.to_string (Masc_agent_core.Tool.schema_to_json t)))
     0 tools
 
 (** Count role occurrences across [history_messages], then add [+1] to
@@ -71,7 +71,7 @@ let bytes_of_tool_schema_json (tools : Agent_sdk.Tool.t list) : int =
     [~goal]. Returned as a stable-sorted assoc list for deterministic
     JSON output. *)
 let role_counts_with_pending_user
-    (history_messages : Agent_sdk.Types.message list) :
+    (history_messages : Masc_agent_core.Types.message list) :
     (string * int) list =
   let tbl = Hashtbl.create 5 in
   let increment_role key =
@@ -80,17 +80,17 @@ let role_counts_with_pending_user
     | Some count -> Hashtbl.replace tbl key (count + 1)
   in
   List.iter
-    (fun (m : Agent_sdk.Types.message) ->
+    (fun (m : Masc_agent_core.Types.message) ->
       increment_role (role_key m.role))
     history_messages;
-  increment_role (role_key Agent_sdk.Types.User);
+  increment_role (role_key Masc_agent_core.Types.User);
   Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl []
   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
 
 let compute_sizes
     ~(system_prompt : string)
-    ~(tools : Agent_sdk.Tool.t list)
-    ~(history_messages : Agent_sdk.Types.message list)
+    ~(tools : Masc_agent_core.Tool.t list)
+    ~(history_messages : Masc_agent_core.Types.message list)
     ?user_blocks
     ~(user_message : string)
     () : sizes =
@@ -104,7 +104,7 @@ let compute_sizes
   let pending_user_blocks =
     match user_blocks with
     | Some blocks -> blocks
-    | None -> [ Agent_sdk.Types.Text user_message ]
+    | None -> [ Masc_agent_core.Types.Text user_message ]
   in
   let pending_user_content_bytes =
     List.fold_left

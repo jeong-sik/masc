@@ -20,20 +20,20 @@ let checkpoint_write_error_to_string ~persistence_error_to_string = function
   | Persistence_error error -> persistence_error_to_string error
 ;;
 
-let resume_checkpoint_of_context (ctx : working_context) : Agent_sdk.Checkpoint.t =
-  let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
+let resume_checkpoint_of_context (ctx : working_context) : Masc_agent_core.Checkpoint.t =
+  let checkpoint_context = Masc_agent_core.Context.copy ~eio:true (oas_context_of_context ctx) in
   {
     ctx.checkpoint with
-    version = Agent_sdk.Checkpoint.checkpoint_version;
+    version = Masc_agent_core.Checkpoint.checkpoint_version;
     system_prompt = Some (system_prompt_of_context ctx);
     messages = messages_of_context ctx;
     context = checkpoint_context;
   }
 
-let context_of_oas_checkpoint (cp : Agent_sdk.Checkpoint.t) : working_context =
+let context_of_oas_checkpoint (cp : Masc_agent_core.Checkpoint.t) : working_context =
   let system_prompt = Option.value ~default:"" cp.system_prompt in
   let messages = cp.messages in
-  let context = Agent_sdk.Context.copy ~eio:true cp.context in
+  let context = Masc_agent_core.Context.copy ~eio:true cp.context in
   let checkpoint =
     { cp with system_prompt = Some system_prompt; messages; context }
   in
@@ -46,9 +46,9 @@ let checkpoint_for_persistence
     ~(agent_name : string)
     ~(ctx : working_context)
     ~(generation : int)
-  : (Agent_sdk.Checkpoint.t, Keeper_compaction_unit.structural_error) result =
-  let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
-  Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
+  : (Masc_agent_core.Checkpoint.t, Keeper_compaction_unit.structural_error) result =
+  let checkpoint_context = Masc_agent_core.Context.copy ~eio:true (oas_context_of_context ctx) in
+  Masc_agent_core.Context.set_scoped checkpoint_context Masc_agent_core.Context.Session
     Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
   let checkpoint_messages = messages_of_context ctx in
   (* RFC vision-delegation §2.3 site 2 (checkpoint write boundary). For a
@@ -74,7 +74,7 @@ let checkpoint_for_persistence
     Ok
       {
         ctx.checkpoint with
-        version = Agent_sdk.Checkpoint.checkpoint_version;
+        version = Masc_agent_core.Checkpoint.checkpoint_version;
         session_id = session.session_id;
         agent_name;
         model = Boundary_redaction.to_string Boundary_redaction.runtime_model_label;
@@ -191,9 +191,9 @@ let save_oas_checkpoint
   | Ok (checkpoint, Keeper_checkpoint_store.Stale_noop _) -> Ok checkpoint
   | Error e -> Error e
 
-let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
+let checkpoint_generation (cp : Masc_agent_core.Checkpoint.t) ~(fallback : int) : int =
   match
-    Agent_sdk.Context.get_scoped cp.context Agent_sdk.Context.Session
+    Masc_agent_core.Context.get_scoped cp.context Masc_agent_core.Context.Session
       Keeper_checkpoint_store.keeper_generation_context_key
   with
   | Some (`Int value) -> value
@@ -262,30 +262,30 @@ let load_context_from_checkpoint ~trace_id ~base_dir =
     typed content blocks; MASC only edits the visible text projection. New
     writes keep the checkpoint [working_context] empty. *)
 let patch_checkpoint_last_assistant
-    (cp : Agent_sdk.Checkpoint.t) ~session_id ~response_text
-  : Agent_sdk.Checkpoint.t =
+    (cp : Masc_agent_core.Checkpoint.t) ~session_id ~response_text
+  : Masc_agent_core.Checkpoint.t =
   let visible_response_text = response_text in
-  let patch_assistant_message (msg : Agent_sdk.Types.message) =
+  let patch_assistant_message (msg : Masc_agent_core.Types.message) =
     let visible_is_blank = String.trim visible_response_text = "" in
     let rec patch_content replaced acc = function
       | [] ->
           if replaced || visible_is_blank then List.rev acc
-          else List.rev (Agent_sdk.Types.Text visible_response_text :: acc)
-      | Agent_sdk.Types.Text _ :: rest when not replaced ->
+          else List.rev (Masc_agent_core.Types.Text visible_response_text :: acc)
+      | Masc_agent_core.Types.Text _ :: rest when not replaced ->
           let acc =
             if visible_is_blank then acc
-            else Agent_sdk.Types.Text visible_response_text :: acc
+            else Masc_agent_core.Types.Text visible_response_text :: acc
           in
           patch_content true acc rest
-      | Agent_sdk.Types.Text _ :: rest -> patch_content replaced acc rest
+      | Masc_agent_core.Types.Text _ :: rest -> patch_content replaced acc rest
       | block :: rest -> patch_content replaced (block :: acc) rest
     in
-    let content = patch_content false [] msg.Agent_sdk.Types.content in
+    let content = patch_content false [] msg.Masc_agent_core.Types.content in
     let rec content_unchanged left right =
       match left, right with
       | [], [] -> true
-      | Agent_sdk.Types.Text left :: left_rest,
-        Agent_sdk.Types.Text right :: right_rest
+      | Masc_agent_core.Types.Text left :: left_rest,
+        Masc_agent_core.Types.Text right :: right_rest
         when String.equal left right ->
         content_unchanged left_rest right_rest
       | left_block :: left_rest, right_block :: right_rest
@@ -293,19 +293,19 @@ let patch_checkpoint_last_assistant
         content_unchanged left_rest right_rest
       | _ -> false
     in
-    if content_unchanged content msg.Agent_sdk.Types.content
+    if content_unchanged content msg.Masc_agent_core.Types.content
        && Option.is_none msg.name
        && Option.is_none msg.tool_call_id
        && msg.metadata = []
     then msg
     else
-      Agent_sdk.Types.make_message
-        ~role:Agent_sdk.Types.Assistant
+      Masc_agent_core.Types.make_message
+        ~role:Masc_agent_core.Types.Assistant
         content
   in
   let rec patch_last_assistant suffix_rev = function
     | [] -> cp.messages
-    | msg :: older_rev when msg.Agent_sdk.Types.role = Agent_sdk.Types.Assistant ->
+    | msg :: older_rev when msg.Masc_agent_core.Types.role = Masc_agent_core.Types.Assistant ->
         let patched = patch_assistant_message msg in
         if patched == msg
         then cp.messages
@@ -315,6 +315,6 @@ let patch_checkpoint_last_assistant
   let messages =
     patch_last_assistant [] (List.rev cp.messages)
   in
-  { cp with Agent_sdk.Checkpoint.session_id;
+  { cp with Masc_agent_core.Checkpoint.session_id;
             messages;
             working_context = None }

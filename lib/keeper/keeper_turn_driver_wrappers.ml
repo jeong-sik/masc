@@ -21,7 +21,7 @@ let config_for_label
     ~(name : string)
     ~(model_label : string)
     ~(system_prompt : string)
-    ~(tools : Agent_sdk.Tool.t list)
+    ~(tools : Masc_agent_core.Tool.t list)
     ~(max_tokens : int option)
     ~(temperature : float option)
     ?stream_idle_timeout_s
@@ -29,7 +29,7 @@ let config_for_label
     ?enable_thinking
     ?provider_config_transform
     ~(description : string option)
-    () : (Runtime_agent.config, Agent_sdk.Error.sdk_error) result =
+    () : (Runtime_agent.config, Masc_agent_core.Error.sdk_error) result =
   let* provider =
     Runtime_agent.resolve_provider_config_of_label model_label
     |> Result.map_error Runtime_agent.label_resolution_error_to_sdk_error
@@ -62,7 +62,7 @@ let config_for_label
 (* RFC-0206: the runtime CLI-preflight wrapper is gone; run the attempt
    directly.  Kept as a thin pass-through so the two call sites read unchanged. *)
 let with_cli_preflight ~scope:(_ : string) ~config:(_ : Runtime_agent.config)
-    ~goal:(_ : string) (f : unit -> ('a, Agent_sdk.Error.sdk_error) result) =
+    ~goal:(_ : string) (f : unit -> ('a, Masc_agent_core.Error.sdk_error) result) =
   f ()
 
 let run_model_by_label
@@ -73,7 +73,7 @@ let run_model_by_label
     ?stream_idle_timeout_s
     ?temperature
     ?max_tokens
-    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
+    ?(accept = fun (_ : Masc_agent_core_response.api_response) -> true)
     ?hooks
     ?enable_thinking
     ?provider_config_transform
@@ -82,7 +82,7 @@ let run_model_by_label
     ?sw
     ?net
     ()
-  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Runtime_agent.run_result, Masc_agent_core.Error.sdk_error) result =
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_tokens ~temperature ?stream_idle_timeout_s ?hooks
@@ -156,7 +156,7 @@ let run_named_with_masc_tools
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
     ?temperature
-    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
+    ?(accept = fun (_ : Masc_agent_core_response.api_response) -> true)
     ?hooks
     ?raw_trace
     ?on_event
@@ -168,7 +168,7 @@ let run_named_with_masc_tools
     ?sw
     ?net
     ()
-  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Runtime_agent.run_result, Masc_agent_core.Error.sdk_error) result =
   let oas_tools = List.map (fun (td : Masc_domain.tool_schema) ->
     Tool_bridge.oas_tool_of_masc
       ~base_path
@@ -201,7 +201,7 @@ let run_model_with_masc_tools
     ?sw
     ?net
     ()
-  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Runtime_agent.run_result, Masc_agent_core.Error.sdk_error) result =
   let* config =
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_tokens ~temperature

@@ -97,11 +97,11 @@ let test_oas_cost_json_preserves_omission () =
     (H.For_testing.cost_usd_json (Some 0.0) = `Float 0.0)
 
 let test_hook_usage_missing_uses_token_evidence () =
-  let cost_only : Agent_sdk.Types.api_usage =
-    { Agent_sdk.Types.zero_api_usage with cost_usd = Some 0.25 }
+  let cost_only : Masc_agent_core.Types.api_usage =
+    { Masc_agent_core.Types.zero_api_usage with cost_usd = Some 0.25 }
   in
-  let cache_creation_only : Agent_sdk.Types.api_usage =
-    { Agent_sdk.Types.zero_api_usage with cache_creation_input_tokens = 1 }
+  let cache_creation_only : Masc_agent_core.Types.api_usage =
+    { Masc_agent_core.Types.zero_api_usage with cache_creation_input_tokens = 1 }
   in
   check bool "cost-only Some usage remains missing" true
     (H.For_testing.usage_missing_of_usage (Some cost_only));
@@ -113,11 +113,11 @@ let test_cost_only_usage_trust_matches_missing () =
      contradictory pair usage_trust=trusted + usage_missing=true.  Trust
      classification delegates to the same token evidence as
      [usage_missing_of_usage]. *)
-  let cost_only : Agent_sdk.Types.api_usage =
-    { Agent_sdk.Types.zero_api_usage with cost_usd = Some 0.25 }
+  let cost_only : Masc_agent_core.Types.api_usage =
+    { Masc_agent_core.Types.zero_api_usage with cost_usd = Some 0.25 }
   in
-  let real_usage : Agent_sdk.Types.api_usage =
-    { Agent_sdk.Types.zero_api_usage with
+  let real_usage : Masc_agent_core.Types.api_usage =
+    { Masc_agent_core.Types.zero_api_usage with
       input_tokens = 10;
       output_tokens = 5;
     }

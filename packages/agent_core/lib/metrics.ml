@@ -315,7 +315,7 @@ let to_otlp_json t =
   with_lock t (fun () ->
     let scope_metrics =
       `Assoc
-        [ "scope", `Assoc [ "name", `String "agent_sdk.metrics" ]
+        [ "scope", `Assoc [ "name", `String "masc.agent_core.metrics" ]
         ; ( "metrics"
           , `List
               (List.map counter_to_json t.counters
@@ -332,7 +332,7 @@ let to_otlp_json t =
                         , `List
                             [ `Assoc
                                 [ "key", `String "service.name"
-                                ; "value", `Assoc [ "stringValue", `String "agent_sdk" ]
+                                ; "value", `Assoc [ "stringValue", `String "masc.agent_core" ]
                                 ]
                             ] )
                       ] )

@@ -226,8 +226,8 @@ let enabled_writes_redacted () =
     install_projected_secret ~base_path:base ~keeper_name:"sangsu";
     let history =
       [
-        Agent_sdk.Types.assistant_msg "좋아, 연구 시작한다";
-        Agent_sdk.Types.user_msg "continue";
+        Masc_agent_core.Types.assistant_msg "좋아, 연구 시작한다";
+        Masc_agent_core.Types.user_msg "continue";
       ]
     in
     Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
@@ -291,7 +291,7 @@ let record_size_is_independent_of_history_length () =
     in
     let long_history =
       List.init 2000 (fun i ->
-        Agent_sdk.Types.assistant_msg
+        Masc_agent_core.Types.assistant_msg
           (Printf.sprintf "replayed turn %d: %s" i (String.make 200 'x')))
     in
     let short = capture ~history_messages:[] in
@@ -309,19 +309,19 @@ let request_captures_exact_redacted_tool_schemas () =
     let base = Filename.temp_dir "wirecap_tools" "" in
     install_projected_secret ~base_path:base ~keeper_name:"sangsu";
     let tool =
-      Agent_sdk.Tool.create
+      Masc_agent_core.Tool.create
         ~name:"probe_tool"
         ~description:("search with " ^ projected_secret)
         ~parameters:
-          [ { Agent_sdk.Types.name = "query"
+          [ { Masc_agent_core.Types.name = "query"
             ; description = "query " ^ projected_secret
-            ; param_type = Agent_sdk.Types.String
+            ; param_type = Masc_agent_core.Types.String
             ; required = true
             }
           ]
-        (fun _input -> Ok { Agent_sdk.Types.content = "ok"; _meta = None })
+        (fun _input -> Ok { Masc_agent_core.Types.content = "ok"; _meta = None })
     in
-    let raw_tools = `List [ Agent_sdk.Tool.schema_to_json tool ] in
+    let raw_tools = `List [ Masc_agent_core.Tool.schema_to_json tool ] in
     Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
       ~turn_id:8
       ~sdk_turn:2 ~system_prompt:"sys" ~extra_system_context:None

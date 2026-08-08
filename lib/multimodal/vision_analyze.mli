@@ -45,6 +45,6 @@ val classify
 
     [truncated] is the provider's terminal-reason collapsed to a single bit. This
     module stays free of any provider/SDK type: the caller (keeper layer, which
-    has the typed {!Agent_sdk.Types.stop_reason}) maps [MaxTokens -> true] and
+    has the typed {!Masc_agent_core.Types.stop_reason}) maps [MaxTokens -> true] and
     every other reason to [false] before calling. Keeping the typed [stop_reason]
     out of here avoids a string-classifier duplicate of an existing closed sum. *)

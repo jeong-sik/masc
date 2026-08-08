@@ -2,7 +2,7 @@
     Targets: json_extractor, text_extractor, schema_to_json_schema. *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 (* ── schema_to_json_schema ─────────────────────────────── *)
 

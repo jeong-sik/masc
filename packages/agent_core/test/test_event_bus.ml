@@ -1,7 +1,7 @@
 (** Tests for Event_bus — typed publish/subscribe for agent lifecycle events. *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Helpers ──────────────────────────────────────────────────────── *)
 

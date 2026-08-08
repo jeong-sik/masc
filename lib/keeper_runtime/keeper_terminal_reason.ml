@@ -12,7 +12,7 @@
 
 (* SSOT for the two retry-recoverable transient wire codes inside the
    [api_error_*] / [Provider_runtime_failure] family. These are the wire
-   forms of exactly the [Agent_sdk.Error] variants that
+   forms of exactly the [Masc_agent_core.Error] variants that
    [Keeper_error_classify.is_transient_network_error] reports as transient:
    a plain (non-structural) [Api.Timeout] and an [Api.NetworkError]. The
    producer [Keeper_agent_error.api_error_terminal_reason_code] builds the

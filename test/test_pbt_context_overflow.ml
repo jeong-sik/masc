@@ -12,7 +12,7 @@ let gen_context_overflow_error =
   QCheck.Gen.(
     map
       (fun limit ->
-      Agent_sdk.Error.Api
+      Masc_agent_core.Error.Api
         (ContextOverflow { message = "exceeded"; limit }))
       (option gen_positive_int))
 
@@ -25,7 +25,7 @@ let prop_overflow_preserves_provider_limit =
     (fun err ->
       let expected_limit =
         match err with
-        | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) -> limit
+        | Masc_agent_core.Error.Api (ContextOverflow { limit; _ }) -> limit
         | _ -> assert false
       in
       match
@@ -38,28 +38,28 @@ let prop_overflow_preserves_provider_limit =
       | Masc.Keeper_unified_turn_execution.For_testing
         .Declared_runtime_lane_exhausted -> false)
 
-let user_text text : Agent_sdk.Types.message =
-  { role = Agent_sdk.Types.User
-  ; content = [ Agent_sdk.Types.Text text ]
+let user_text text : Masc_agent_core.Types.message =
+  { role = Masc_agent_core.Types.User
+  ; content = [ Masc_agent_core.Types.Text text ]
   ; name = None
   ; tool_call_id = None
   ; metadata = []
   }
 
-let text_blocks (messages : Agent_sdk.Types.message list) =
+let text_blocks (messages : Masc_agent_core.Types.message list) =
   List.concat_map
-    (fun (msg : Agent_sdk.Types.message) ->
+    (fun (msg : Masc_agent_core.Types.message) ->
        List.filter_map
          (function
-           | Agent_sdk.Types.Text text -> Some text
-           | Agent_sdk.Types.Thinking _
-           | Agent_sdk.Types.ReasoningDetails _
-           | Agent_sdk.Types.RedactedThinking _
-           | Agent_sdk.Types.ToolUse _
-           | Agent_sdk.Types.ToolResult _
-           | Agent_sdk.Types.Image _
-           | Agent_sdk.Types.Document _
-           | Agent_sdk.Types.Audio _ -> None)
+           | Masc_agent_core.Types.Text text -> Some text
+           | Masc_agent_core.Types.Thinking _
+           | Masc_agent_core.Types.ReasoningDetails _
+           | Masc_agent_core.Types.RedactedThinking _
+           | Masc_agent_core.Types.ToolUse _
+           | Masc_agent_core.Types.ToolResult _
+           | Masc_agent_core.Types.Image _
+           | Masc_agent_core.Types.Document _
+           | Masc_agent_core.Types.Audio _ -> None)
          msg.content)
     messages
 
@@ -67,11 +67,11 @@ let text_contains needle texts =
   List.exists (fun text -> Astring.String.is_infix ~affix:needle text) texts
 
 let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
-  let assistant : Agent_sdk.Types.message =
-    { role = Agent_sdk.Types.Assistant
+  let assistant : Masc_agent_core.Types.message =
+    { role = Masc_agent_core.Types.Assistant
     ; content =
-        [ Agent_sdk.Types.Text "old visible reply"
-        ; Agent_sdk.Types.Thinking
+        [ Masc_agent_core.Types.Text "old visible reply"
+        ; Masc_agent_core.Types.Thinking
             { signature = Some "sig"; content = "typed reasoning block" }
         ]
     ; name = None
@@ -86,7 +86,7 @@ let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
   let checkpoint = KC.checkpoint_of_context context in
   let checkpoint =
     { checkpoint with
-      Agent_sdk.Checkpoint.working_context =
+      Masc_agent_core.Checkpoint.working_context =
         Some (`Assoc [ "runtime_payload", `String "stale" ])
     }
   in
@@ -99,12 +99,12 @@ let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
   Alcotest.(check string)
     "session id"
     "unified-session"
-    patched.Agent_sdk.Checkpoint.session_id;
+    patched.Masc_agent_core.Checkpoint.session_id;
   Alcotest.(check bool)
     "working context is cleared after finalization"
     true
-    (Option.is_none patched.Agent_sdk.Checkpoint.working_context);
-  let texts = text_blocks patched.Agent_sdk.Checkpoint.messages in
+    (Option.is_none patched.Masc_agent_core.Checkpoint.working_context);
+  let texts = text_blocks patched.Masc_agent_core.Checkpoint.messages in
   Alcotest.(check bool)
     "final visible reply replaces prior assistant text"
     true
@@ -115,18 +115,18 @@ let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
     (text_contains "old visible reply" texts);
   let thinking_preserved =
     (* The param annotation is load-bearing: [message] and [api_response] both
-       declare a [content] field in Agent_sdk.Types, and an unannotated
-       [message.Agent_sdk.Types.content] projection resolves to whichever
+       declare a [content] field in Masc_agent_core.Types, and an unannotated
+       [message.Masc_agent_core.Types.content] projection resolves to whichever
        record OCaml saw last — which flipped to [api_response] under the
        OAS 0.209 pin and broke this test's compile. *)
-    patched.Agent_sdk.Checkpoint.messages
-    |> List.exists (fun (message : Agent_sdk.Types.message) ->
+    patched.Masc_agent_core.Checkpoint.messages
+    |> List.exists (fun (message : Masc_agent_core.Types.message) ->
       List.exists
         (function
-          | Agent_sdk.Types.Thinking { content; _ } ->
+          | Masc_agent_core.Types.Thinking { content; _ } ->
             String.equal content "typed reasoning block"
           | _ -> false)
-        message.Agent_sdk.Types.content)
+        message.Masc_agent_core.Types.content)
   in
   Alcotest.(check bool) "typed non-text block preserved" true thinking_preserved
 

@@ -15,7 +15,7 @@
     parse paths (both OpenAI-compatible and GLM) and asserts the resulting
     typed [stop_reason] reaches the classifier as [ContextOverflow]. *)
 
-open Agent_sdk
+open Masc_agent_core
 module Http = Llm_provider.Http_client
 module Types = Llm_provider.Types
 module Wire = Llm_provider.Stop_reason_wire

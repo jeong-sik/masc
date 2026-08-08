@@ -28,13 +28,13 @@ type usage_trust = Keeper_usage_trust.t =
 
 val classify_usage_trust :
   usage_reported:bool ->
-  usage:Agent_sdk.Types.api_usage ->
+  usage:Masc_agent_core.Types.api_usage ->
   usage_trust
 (** Classify usage counters without reconstructing concrete provider/model
     identity. *)
 
 val estimate_usage_cost_usd :
-  Agent_sdk.Types.api_usage ->
+  Masc_agent_core.Types.api_usage ->
   float
 (** Return the OAS-reported turn cost verbatim. cost_usd is the provider's authoritative
     cost field and is accounted independently of token-count trust (token⊥cost).
@@ -143,7 +143,7 @@ val update_metrics_from_failure :
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
   reason:string ->
-  ?sdk_error:Agent_sdk.Error.sdk_error ->
+  ?sdk_error:Masc_agent_core.Error.sdk_error ->
   unit ->
   Keeper_meta_contract.keeper_meta
 
@@ -191,7 +191,7 @@ val broadcast_compaction :
 val has_substantive_tool_calls : string list -> bool
 
 val visible_run_validation :
-  Keeper_agent_run.run_result -> Agent_sdk.Raw_trace.run_validation option
+  Keeper_agent_run.run_result -> Masc_agent_core.Raw_trace.run_validation option
 
 val turn_mode_of_result : Keeper_agent_run.run_result -> turn_mode
 
@@ -209,7 +209,7 @@ val accountability_evidence_refs :
   trace_id:string ->
   turn_number:int ->
   result:Keeper_agent_run.run_result ->
-  validated_evidence:Agent_sdk.Raw_trace.run_validation option ->
+  validated_evidence:Masc_agent_core.Raw_trace.run_validation option ->
   string list
 
 val decision_channel_of_observation :

@@ -13,7 +13,7 @@
     runs under bisect don't multiply io_uring instances past the
     memlock limit. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let read_file path =
   try Some (Eio.Path.load path) with

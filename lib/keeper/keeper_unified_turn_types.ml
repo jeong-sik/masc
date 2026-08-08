@@ -26,10 +26,10 @@ let require_last_execution_for_finalize ~keeper_name turn_state =
   | Some exec -> Ok exec
   | None ->
     let err =
-      Agent_sdk.Error.Internal
+      Masc_agent_core.Error.Internal
         (Printf.sprintf "%s: last_execution missing at turn finalize" keeper_name)
     in
-    Log.Keeper.error "%s" (Agent_sdk.Error.to_string err);
+    Log.Keeper.error "%s" (Masc_agent_core.Error.to_string err);
     Error err
 ;;
 
@@ -172,7 +172,7 @@ let registry_failure_reason_of_terminal_reason
 type turn_tool_event_tracker =
   { pending_tool_inputs : Yojson.Safe.t list StringMap.t
   ; tool_completed_count : int
-  ; integrity_error : Agent_sdk.Error.sdk_error option
+  ; integrity_error : Masc_agent_core.Error.sdk_error option
   }
 
 let create_turn_tool_event_tracker () =
@@ -226,21 +226,21 @@ let record_unmatched_tool_completed
   match tracker.integrity_error with
   | Some _ -> tracker
   | None ->
-    { tracker with integrity_error = Some (Agent_sdk.Error.Internal message) }
+    { tracker with integrity_error = Some (Masc_agent_core.Error.Internal message) }
 ;;
 
 let record_turn_tool_events
       ~(keeper_name : string)
       (tracker : turn_tool_event_tracker)
-      (events : Agent_sdk.Event_bus.event list)
+      (events : Masc_agent_core.Event_bus.event list)
   : turn_tool_event_tracker
   =
   List.fold_left
-    (fun tracker (evt : Agent_sdk.Event_bus.event) ->
+    (fun tracker (evt : Masc_agent_core.Event_bus.event) ->
        match evt.payload with
-       | Agent_sdk.Event_bus.ToolCalled { tool_name; input; _ } ->
+       | Masc_agent_core.Event_bus.ToolCalled { tool_name; input; _ } ->
          push_turn_tool_input tracker tool_name input
-       | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Ok _; _ } ->
+       | Masc_agent_core.Event_bus.ToolCompleted { tool_name; output = Ok _; _ } ->
          let tracker =
            { tracker with tool_completed_count = tracker.tool_completed_count + 1 }
          in
@@ -252,7 +252,7 @@ let record_turn_tool_events
               ~keeper_name
               ~tool_name
               ~outcome:"ok")
-       | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Error _; _ } ->
+       | Masc_agent_core.Event_bus.ToolCompleted { tool_name; output = Error _; _ } ->
          let tracker =
            { tracker with tool_completed_count = tracker.tool_completed_count + 1 }
          in

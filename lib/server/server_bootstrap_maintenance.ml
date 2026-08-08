@@ -483,12 +483,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      the same env-var that MASC's own OTLP client uses. *)
   (match Sys.getenv_opt "OTEL_EXPORTER_OTLP_ENDPOINT" with
    | Some endpoint ->
-     let config = Agent_sdk.Otel_export.default_export_config ~endpoint in
-     let instance = Agent_sdk.Otel_tracer.create_instance_eio () in
-     let tracer = Agent_sdk.Otel_tracer.tracer_of_instance instance in
+     let config = Masc_agent_core.Otel_export.default_export_config ~endpoint in
+     let instance = Masc_agent_core.Otel_tracer.create_instance_eio () in
+     let tracer = Masc_agent_core.Otel_tracer.tracer_of_instance instance in
      Runtime_agent_context.set_oas_tracer tracer;
-     let (_state : Agent_sdk.Otel_export.t) =
-       Agent_sdk.Otel_export.start_daemon ~sw ~clock:env#clock ~net:env#net ~config instance
+     let (_state : Masc_agent_core.Otel_export.t) =
+       Masc_agent_core.Otel_export.start_daemon ~sw ~clock:env#clock ~net:env#net ~config instance
      in
      Log.Server.info "OAS OTLP exporter daemon started (endpoint=%s)" endpoint
    | None ->

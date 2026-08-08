@@ -9,7 +9,7 @@
     2. Read side   — before_turn_params hook observes the key on turn 1
     3. LLM delivery — the API request body on turn 1 contains the context string *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (* ── Mock HTTP helpers ──────────────────────────────────── *)

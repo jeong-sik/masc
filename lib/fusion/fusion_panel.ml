@@ -22,7 +22,7 @@
    thinking 오염 분리는 OAS 소관이며 이미 동작한다(reasoning은 별도 채널,
    [Fusion_oas.answer_text]는 visible text만 투영 — #22854). *)
 let outcome_of_result ~(panelist : string) ~(model : string)
-    (res : (Agent_sdk.Types.api_response, Agent_sdk.Error.sdk_error) result)
+    (res : (Masc_agent_core.Types.api_response, Masc_agent_core.Error.sdk_error) result)
   : Fusion_types.panel_outcome
   =
   match res with
@@ -36,13 +36,13 @@ let outcome_of_result ~(panelist : string) ~(model : string)
     else
       Fusion_types.Answered
         { model = panelist; answer; usage = Fusion_oas.usage_of resp }
-  | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _)) ->
+  | Error (Masc_agent_core.Error.Api (Masc_agent_core.Retry.Timeout _)) ->
     (* per-agent HTTP 타임아웃을 typed [Timeout]으로. 이전에는 to_string 직렬화로
        [Provider_error]에 뭉개져, 외곽 붕괴(전 패널 동시 [Timeout])와 개별 HTTP
        타임아웃을 board 증거에서 구분할 수 없었다. [bridge_failure_of_error]·
        [Fusion_judge.failure_of_sdk_error]와 대칭. *)
     Fusion_types.Failed { failed_model = panelist; reason = Fusion_types.Timeout }
-  | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) ->
+  | Error (Masc_agent_core.Error.Provider (Llm_provider.Error.Timeout _)) ->
     (* provider-level 타임아웃. 비스트리밍 sync 경로의 connect_timeout(기본 60s)이
        응답 본문 전체를 바운드해 발생하며 detail은 "timeout phase=http_operation"으로
        렌더된다. [Api (Retry.Timeout _)] 외곽 래퍼와 다른 variant라 위 arm이 잡지
@@ -57,14 +57,14 @@ let outcome_of_result ~(panelist : string) ~(model : string)
       ; reason =
           Fusion_types.Provider_error
             (Fusion_oas.provider_error_detail ~runtime_id:model
-               (Agent_sdk.Error.to_string e))
+               (Masc_agent_core.Error.to_string e))
       }
 
-let bridge_failure_of_error (error : Agent_sdk.Error.sdk_error) : Fusion_types.panel_failure =
+let bridge_failure_of_error (error : Masc_agent_core.Error.sdk_error) : Fusion_types.panel_failure =
   match error with
-  | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _)
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Fusion_types.Timeout
-  | _ -> Fusion_types.Bridge_error (Agent_sdk.Error.to_string error)
+  | Masc_agent_core.Error.Api (Masc_agent_core.Retry.Timeout _)
+  | Masc_agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> Fusion_types.Timeout
+  | _ -> Fusion_types.Bridge_error (Masc_agent_core.Error.to_string error)
 
 let run ~sw ~net ~groups ~prompt ()
   : Fusion_types.panel_outcome list
@@ -106,7 +106,7 @@ let run ~sw ~net ~groups ~prompt ()
     match
       Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Fusion_panel (fun () ->
         Ok
-          (Agent_sdk.Async_agent.all ~sw
+          (Masc_agent_core.Async_agent.all ~sw
              (List.map (fun (agent, _panelist, _model) -> (agent, prompt)) built)))
     with
     | Ok run_results ->

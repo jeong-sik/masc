@@ -16,7 +16,7 @@
     per-turn context metrics. Explicit compaction has its own request path. *)
 type post_turn_lifecycle =
   { updated_meta : Keeper_meta_contract.keeper_meta
-  ; checkpoint : Agent_sdk.Checkpoint.t option
+  ; checkpoint : Masc_agent_core.Checkpoint.t option
   ; handoff_json : Yojson.Safe.t option
   ; handoff_attempted : bool
   ; handoff_failure_reason : string option
@@ -28,7 +28,7 @@ type post_turn_lifecycle =
 (** Recovered checkpoint after a durably applied explicit compaction request.
     Manual and provider-overflow callers consume the same result. *)
 type compaction_recovery =
-  { checkpoint : Agent_sdk.Checkpoint.t
+  { checkpoint : Masc_agent_core.Checkpoint.t
   ; checkpoint_installation : Keeper_checkpoint_store.installed_checkpoint
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
@@ -67,7 +67,7 @@ val apply_post_turn_lifecycle_with_resilience_handles :
   resilience_audit_store:Shared_audit.Store.t option ->
   resilience_strategy_executor:Resilience.Recovery.strategy_executor option ->
   meta:Keeper_meta_contract.keeper_meta ->
-  checkpoint:Agent_sdk.Checkpoint.t option ->
+  checkpoint:Masc_agent_core.Checkpoint.t option ->
   post_turn_lifecycle
 (** Apply the keeper post-turn lifecycle with explicit resilience handles.
 
@@ -126,7 +126,7 @@ module For_testing : sig
   val commit_prepared_compaction_with_history :
     ?after_checkpoint_installed:(unit -> unit) ->
     save_oas_history:
-      (session_dir:string -> Agent_sdk.Checkpoint.t -> unit) ->
+      (session_dir:string -> Masc_agent_core.Checkpoint.t -> unit) ->
     prepared_compaction ->
     prepared_commit_outcome
 end

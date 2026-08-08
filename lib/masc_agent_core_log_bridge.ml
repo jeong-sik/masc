@@ -26,18 +26,18 @@
            oas#816 (per-turn timing) + this bridge *)
 
 (** Convert an OAS field into a (key, Yojson.Safe.t) pair for the
-    [details] object.  Delegates to [Agent_sdk.Log.field_to_json] for the
+    [details] object.  Delegates to [Masc_agent_core.Log.field_to_json] for the
     shared arms, but keeps the masc ["[REDACTED]"] placeholder for
     [Secret]: the OAS helper renders ["<redacted>"] (oas/lib/log.mli
     documents that contract), while every other masc redactor in this
     JSONL stream writes ["[REDACTED]"].  Mixing placeholders in one
     stream would break grep-ability, so the divergence is deliberate. *)
-let field_to_json (field : Agent_sdk.Log.field) : string * Yojson.Safe.t =
+let field_to_json (field : Masc_agent_core.Log.field) : string * Yojson.Safe.t =
   match field with
-  | Agent_sdk.Log.Secret (k, _) -> (k, `String "[REDACTED]")
-  | field -> Agent_sdk.Log.field_to_json field
+  | Masc_agent_core.Log.Secret (k, _) -> (k, `String "[REDACTED]")
+  | field -> Masc_agent_core.Log.field_to_json field
 
-let details_of_fields (fields : Agent_sdk.Log.field list)
+let details_of_fields (fields : Masc_agent_core.Log.field list)
     : (string * Yojson.Safe.t) list =
   List.map field_to_json fields
 
@@ -101,11 +101,11 @@ let interpolate_printf_message message details =
     in
     List.fold_left replace_first_placeholder message replacements
 
-let render_record_message (record : Agent_sdk.Log.record) : string =
+let render_record_message (record : Masc_agent_core.Log.record) : string =
   let details = details_of_fields record.fields in
   interpolate_printf_message record.message details
 
-let level_to_masc (level : Agent_sdk.Log.level) : Log.level =
+let level_to_masc (level : Masc_agent_core.Log.level) : Log.level =
   match level with
   | Debug -> Log.Debug
   | Info -> Log.Info
@@ -132,7 +132,7 @@ let preferred_summary_keys message =
   | _ ->
       [ "agent_name"; "agent"; "task_id"; "turn"; "tool_name"; "model"; "stop" ]
 
-let summarize_fields ~message (fields : Agent_sdk.Log.field list) : string list =
+let summarize_fields ~message (fields : Masc_agent_core.Log.field list) : string list =
   let assoc = List.map field_to_json fields in
   preferred_summary_keys message
   |> List.filter_map (fun key ->
@@ -143,7 +143,7 @@ let summarize_fields ~message (fields : Agent_sdk.Log.field list) : string list 
            | Some rendered -> Some (Printf.sprintf "%s=%s" key rendered)
            | None -> None))
 
-let render_message_with_summary (record : Agent_sdk.Log.record) =
+let render_message_with_summary (record : Masc_agent_core.Log.record) =
   let base_message = render_record_message record in
   if not (String.equal base_message record.message) then
     base_message
@@ -154,10 +154,10 @@ let render_message_with_summary (record : Agent_sdk.Log.record) =
         Printf.sprintf "%s %s" base_message (String.concat " " summary)
 
 (** Build the sink function.  Prefix the module name with ["oas:"] so a
-    record emitted by [Agent_sdk.Log.create ~module_name:"agent"] lands
+    record emitted by [Masc_agent_core.Log.create ~module_name:"agent"] lands
     as ["oas:agent"] in the masc log stream, distinct from any
     masc module called "agent". *)
-let make_sink () : Agent_sdk.Log.sink =
+let make_sink () : Masc_agent_core.Log.sink =
  fun record ->
   let message = render_message_with_summary record in
   let details =
@@ -172,7 +172,7 @@ let make_sink () : Agent_sdk.Log.sink =
 
 (** Process-wide latch to make [install] idempotent.  Unlike
     [Llm_metric_bridge] which uses [set_global] (replacement semantics),
-    [Agent_sdk.Log.add_sink] appends to a sink list, so a naive double
+    [Masc_agent_core.Log.add_sink] appends to a sink list, so a naive double
     call would forward every record twice.  Bootstrap is the only
     documented caller today, but test harnesses, in-process restarts,
     or a future supervisor reconnect could all re-enter bootstrap.
@@ -185,4 +185,4 @@ let installed = Atomic.make false
     turn fires an LLM call. *)
 let install () : unit =
   if Atomic.compare_and_set installed false true then
-    Agent_sdk.Log.add_sink (make_sink ())
+    Masc_agent_core.Log.add_sink (make_sink ())

@@ -73,7 +73,7 @@ type deferred_runtime_lane = private
   ; failed_runtime_id : string
   ; next_runtime_id : string
   ; later_runtime_ids : string list
-  ; failure : Agent_sdk.Error.sdk_error
+  ; failure : Masc_agent_core.Error.sdk_error
   }
 
 val deferred_runtime_ids : deferred_runtime_lane -> string list
@@ -85,34 +85,34 @@ val run_named :
   ?keeper_name:string ->
   base_path:string ->
   goal:string ->
-  ?goal_blocks:Agent_sdk.Types.content_block list ->
+  ?goal_blocks:Masc_agent_core.Types.content_block list ->
   ?session_id:string ->
   ?system_prompt:string ->
-  ?tools:Agent_sdk.Tool.t list ->
-  ?initial_messages:Agent_sdk.Types.message list ->
-  ?model_input_projection:Agent_sdk.Agent.model_input_projection ->
+  ?tools:Masc_agent_core.Tool.t list ->
+  ?initial_messages:Masc_agent_core.Types.message list ->
+  ?model_input_projection:Masc_agent_core.Agent.model_input_projection ->
   ?stream_idle_timeout_s:float ->
   ?body_timeout_s:float ->
   ?temperature:float ->
-  ?accept:(Agent_sdk_response.api_response -> bool) ->
-  ?hooks:Agent_sdk.Hooks.hooks ->
-  ?raw_trace:Agent_sdk.Raw_trace.t ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?accept:(Masc_agent_core_response.api_response -> bool) ->
+  ?hooks:Masc_agent_core.Hooks.hooks ->
+  ?raw_trace:Masc_agent_core.Raw_trace.t ->
+  ?on_event:(Masc_agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
-  ?agent_ref:Agent_sdk.Agent.t option ref ->
+  ?agent_ref:Masc_agent_core.Agent.t option ref ->
   ?transport:Masc_grpc_transport.t ->
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
-  ?checkpoint_sink:Agent_sdk.Agent.checkpoint_sink ->
-  ?context_injector:Agent_sdk.Hooks.context_injector ->
-  ?context:Agent_sdk.Context.t ->
+  ?checkpoint_sink:Masc_agent_core.Agent.checkpoint_sink ->
+  ?context_injector:Masc_agent_core.Hooks.context_injector ->
+  ?context:Masc_agent_core.Context.t ->
   ?enable_thinking:bool ->
   ?cooperative_yield_probe:Runtime_agent.cooperative_yield_probe ->
-  ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
+  ?oas_checkpoint:Masc_agent_core.Checkpoint.t ->
   ?trace_link:string * string ->
-  ?event_bus:Agent_sdk.Event_bus.t ->
+  ?event_bus:Masc_agent_core.Event_bus.t ->
   ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->
   ?on_request_wire_observation:
     (runtime_id:string ->
@@ -126,11 +126,11 @@ val run_named :
   ?on_deferred_runtime_consumed:(unit -> unit) ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
-    (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
+    (Llm_provider.Provider_config.t, Masc_agent_core.Error.sdk_error) result) ->
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->
-  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+  (Runtime_agent.run_result, Masc_agent_core.Error.sdk_error) result
 (** Run a single [Agent.run] call with MASC-driven runtime model fallback.
     MASC drives the runtime FSM directly: resolves runtime providers,
     resolves each candidate's model temperature before trying it with OAS, and
@@ -148,36 +148,36 @@ module For_testing : sig
     failed_runtime_id:string ->
     next_runtime_id:string ->
     later_runtime_ids:string list ->
-    failure:Agent_sdk.Error.sdk_error ->
+    failure:Masc_agent_core.Error.sdk_error ->
     deferred_runtime_lane
 
   type provider_attempt_outcomes
 
   val project_provider_attempt_result :
     replay_prefix_projection:Keeper_replay_prefix.projection ->
-    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result ->
+    (Runtime_agent.run_result, Masc_agent_core.Error.sdk_error) result ->
     provider_attempt_outcomes
 
   val provider_result :
     provider_attempt_outcomes ->
-    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+    (Runtime_agent.run_result, Masc_agent_core.Error.sdk_error) result
 
   val turn_result :
     provider_attempt_outcomes ->
-    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+    (Runtime_agent.run_result, Masc_agent_core.Error.sdk_error) result
 
   val checkpoint_after_attempt :
-    ?agent_ref:Agent_sdk.Agent.t option ref ->
-    Agent_sdk.Agent.t option ->
-    Agent_sdk.Checkpoint.t option
+    ?agent_ref:Masc_agent_core.Agent.t option ref ->
+    Masc_agent_core.Agent.t option ->
+    Masc_agent_core.Checkpoint.t option
 
   val success_selected_model_raw : Runtime_candidate.t -> string option
 
   val apply_accept :
     runtime_id:string ->
-    accept:(Agent_sdk_response.api_response -> bool) ->
+    accept:(Masc_agent_core_response.api_response -> bool) ->
     Runtime_agent.run_result ->
-    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+    (Runtime_agent.run_result, Masc_agent_core.Error.sdk_error) result
 
   val first_runtime_after_modality_reroute :
     keeper_name:string ->
@@ -188,9 +188,9 @@ module For_testing : sig
     string * Runtime.t
 
   val lane_modality_reroute_decision :
-    checkpoint_messages:Agent_sdk.Types.message list ->
-    initial_messages:Agent_sdk.Types.message list ->
-    goal_blocks:Agent_sdk.Types.content_block list ->
+    checkpoint_messages:Masc_agent_core.Types.message list ->
+    initial_messages:Masc_agent_core.Types.message list ->
+    goal_blocks:Masc_agent_core.Types.content_block list ->
     first_candidate:Runtime.t ->
     remaining_runtimes:Runtime.t list ->
     Runtime_agent.reroute_decision
@@ -198,12 +198,12 @@ module For_testing : sig
   val dedupe_runtimes_preserve_order : Runtime.t list -> Runtime.t list
   val resolve_runtime_candidates :
     string list ->
-    (Runtime.t list, Agent_sdk.Error.sdk_error) result
+    (Runtime.t list, Masc_agent_core.Error.sdk_error) result
 
   val resolve_runtime_candidate_for_attempt :
     ?on_missing:(unit -> unit) ->
     string ->
-    (Runtime.t, Agent_sdk.Error.sdk_error) result
+    (Runtime.t, Masc_agent_core.Error.sdk_error) result
 
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
@@ -216,9 +216,9 @@ module For_testing : sig
 
   val attempt_runtime_candidates :
     ?allow_retry:
-      (runtime_id:string -> attempt:int -> Agent_sdk.Error.sdk_error -> bool) ->
+      (runtime_id:string -> attempt:int -> Masc_agent_core.Error.sdk_error -> bool) ->
     ?allow_accept_no_progress_retry:
-      (runtime_id:string -> attempt:int -> Agent_sdk.Error.sdk_error -> bool) ->
+      (runtime_id:string -> attempt:int -> Masc_agent_core.Error.sdk_error -> bool) ->
     ?lane_id:string ->
     ?on_retry_deferred:(deferred_runtime_lane -> unit) ->
     runtime_id:string ->
@@ -232,15 +232,15 @@ module For_testing : sig
       (idx:int ->
       runtime_id:string ->
       'candidate ->
-      ('result, Agent_sdk.Error.sdk_error) result * Agent_sdk.Checkpoint.t option) ->
+      ('result, Masc_agent_core.Error.sdk_error) result * Masc_agent_core.Checkpoint.t option) ->
     'candidate list ->
-    ('result, Agent_sdk.Error.sdk_error) result
+    ('result, Masc_agent_core.Error.sdk_error) result
 
   val observe_checkpoint_stage :
-    bool Atomic.t -> Agent_sdk.Agent.checkpoint_stage -> unit
+    bool Atomic.t -> Masc_agent_core.Agent.checkpoint_stage -> unit
 
   val same_run_retry_allowed : bool Atomic.t -> bool
 
-  val accept_no_progress_should_try_next : Agent_sdk.Error.sdk_error -> bool
+  val accept_no_progress_should_try_next : Masc_agent_core.Error.sdk_error -> bool
 
 end

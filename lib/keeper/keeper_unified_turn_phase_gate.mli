@@ -17,7 +17,7 @@ type phase_gate_outcome =
   | Phase_gate_skipped of Keeper_meta_contract.keeper_meta
     (** Cooperative early-exit in a non-executable registry phase. The caller
         must retain this skip as a typed outcome; it is not completed work. *)
-  | Phase_gate_terminal_error of Agent_sdk.Error.sdk_error
+  | Phase_gate_terminal_error of Masc_agent_core.Error.sdk_error
     (** Hard early-exit: registry phase missing. [run_keeper_cycle]
         returns [Error err]. *)
 

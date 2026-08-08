@@ -72,21 +72,21 @@ let offload_checkpoint_cpu (f : unit -> 'a) : 'a =
   Domain_pool_ref.submit_cpu_or_inline f
 
 let decode_checkpoint_off_scheduler (content : string) :
-    (Agent_sdk.Checkpoint.t, Agent_sdk.Error.sdk_error) result =
-  offload_checkpoint_cpu (fun () -> Agent_sdk.Checkpoint.of_string content)
+    (Masc_agent_core.Checkpoint.t, Masc_agent_core.Error.sdk_error) result =
+  offload_checkpoint_cpu (fun () -> Masc_agent_core.Checkpoint.of_string content)
 
-let encode_checkpoint_string_off_scheduler (ckpt : Agent_sdk.Checkpoint.t) :
+let encode_checkpoint_string_off_scheduler (ckpt : Masc_agent_core.Checkpoint.t) :
     string =
-  offload_checkpoint_cpu (fun () -> Agent_sdk.Checkpoint.to_string ckpt)
+  offload_checkpoint_cpu (fun () -> Masc_agent_core.Checkpoint.to_string ckpt)
 
 let keeper_generation_context_key = "keeper_generation"
 let compaction_commit_count_context_key = "masc_compaction_commit_count"
 
 let compaction_commit_count_of_context context =
   match
-    Agent_sdk.Context.get_scoped
+    Masc_agent_core.Context.get_scoped
       context
-      Agent_sdk.Context.Session
+      Masc_agent_core.Context.Session
       compaction_commit_count_context_key
   with
   | None -> Ok 0
@@ -99,16 +99,16 @@ let compaction_commit_count_of_context context =
   | Some _ -> Error "checkpoint compaction commit count is not an integer"
 ;;
 
-let keeper_generation_of_context (context : Agent_sdk.Context.t) : int =
+let keeper_generation_of_context (context : Masc_agent_core.Context.t) : int =
   match
-    Agent_sdk.Context.get_scoped context Agent_sdk.Context.Session
+    Masc_agent_core.Context.get_scoped context Masc_agent_core.Context.Session
       keeper_generation_context_key
   with
   | Some (`Int n) -> n
   | Some (`Intlit raw) -> Option.value ~default:0 (int_of_string_opt raw)
   | _ -> 0
 
-let oas_history_snapshot_id_of_checkpoint (ckpt : Agent_sdk.Checkpoint.t) : string =
+let oas_history_snapshot_id_of_checkpoint (ckpt : Masc_agent_core.Checkpoint.t) : string =
   let generation = keeper_generation_of_context ckpt.context in
   let created_ms = max 0 (int_of_float (ckpt.created_at *. 1000.0)) in
   Printf.sprintf "%s%013d-g%d%s"
@@ -148,7 +148,7 @@ let hardlink_oas_history_from_canonical
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Error (Printexc.to_string exn)
 
-let save_oas_history ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : unit =
+let save_oas_history ~(session_dir : string) (ckpt : Masc_agent_core.Checkpoint.t) : unit =
   let snapshot_id = oas_history_snapshot_id_of_checkpoint ckpt in
   let save_snapshot_file () =
     Keeper_fs.save_atomic
@@ -205,7 +205,7 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
     snapshot_ids
   |> fun (deleted, missing) -> (List.rev deleted, List.rev missing)
 
-(* Delta Checkpoint Shadow-Apply removed: Agent_sdk.Checkpoint.delta
+(* Delta Checkpoint Shadow-Apply removed: Masc_agent_core.Checkpoint.delta
    type was removed upstream. Functions had zero callers. *)
 
 type checkpoint_load_error =
@@ -224,25 +224,25 @@ type checkpoint_load_error =
    string-matched against [FileOpFailed.detail] across four prefixes
    ("no_such_file", "no such file", "unix_error (enoent", "eio.io fs
    not_found") + a substring fallback. This was a string classifier
-   workaround (CLAUDE.md §워크어라운드 #2): [Agent_sdk.Error] is already a
+   workaround (CLAUDE.md §워크어라운드 #2): [Masc_agent_core.Error] is already a
    closed sum type, but [FileOpFailed.detail] flattens the underlying
    filesystem exception via [Printexc.to_string], throwing away typed
    provenance.
 
    Root fix: lift ENOENT detection to the OS boundary *before* invoking
-   the SDK. [Agent_sdk.Checkpoint_store.exists : t -> string -> bool] gives
+   the SDK. [Masc_agent_core.Checkpoint_store.exists : t -> string -> bool] gives
    us a typed presence check, so the cold-start "file absent" case is now
    first-class [bool] and never reaches [classify_sdk_error]. Any SDK error
    that *does* surface from [load] is, by construction, a real I/O /
    serialization / SDK fault and routes to [Io_error] / [Store_error] /
    [Parse_error] / [Sdk_other_error] without inspecting strings.
 
-   #8605 family: exhaustive on [Agent_sdk.Error.sdk_error] top-level
+   #8605 family: exhaustive on [Masc_agent_core.Error.sdk_error] top-level
    variants. The wildcards on Io _ and Serialization _ remain narrow (one
    level deep) so a future inner variant lands in the semantically correct
    category, and a future top-level sdk_error variant becomes a build
    error forcing a deliberate routing decision. *)
-let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
+let classify_sdk_error (e : Masc_agent_core.Error.sdk_error) : checkpoint_load_error =
   match e with
   | Io (FileOpFailed r) ->
       Io_error (sprintf "file %s failed on %s: %s" r.op r.path r.detail)
@@ -254,10 +254,10 @@ let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
       Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
   | Api _ | Provider _ | Agent _ | Mcp _ | Config _
   | Orchestration _ | Internal _ ->
-      Sdk_other_error (Agent_sdk.Error.to_string e)
+      Sdk_other_error (Masc_agent_core.Error.to_string e)
 
 let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
-    (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =
+    (Masc_agent_core.Checkpoint.t, checkpoint_load_error) result =
   (* [snapshot_id] reaches this entry point from the dashboard HTTP
      surface; a non-segment id ("../..") would read outside the session
      directory, so it is refused as absent before any filesystem access. *)
@@ -275,7 +275,7 @@ let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
     else Error Not_found)
 
 let load_oas ~(session_dir : string) ~(session_id : string) :
-    (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =
+    (Masc_agent_core.Checkpoint.t, checkpoint_load_error) result =
   (* RFC-0089 G4: typed ENOENT classification at the OS boundary.
      [Fs_compat.file_exists] answers cold-start absence as a [bool] before
      any read, so a missing checkpoint is never inferred from a stringified
@@ -284,7 +284,7 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
      One read path for Eio and non-Eio contexts: [Fs_compat.load_file] is
      Eio-native when the fs capability is installed, and the decode is
      routed off the calling fiber (#25077). The previous
-     [Agent_sdk.Checkpoint_store.load] branch read the same file but
+     [Masc_agent_core.Checkpoint_store.load] branch read the same file but
      decoded the 0.7-1.4MB payload inline in the SDK on the calling fiber
      (oas#2676), and its [create] could mkdir on a pure read. The SDK
      branch also validated [session_id] (empty / separator / NUL); the
@@ -517,7 +517,7 @@ let known_watermark ~canonical_path
   : (watermark option, checkpoint_load_error) result =
   load_canonical_strict canonical_path
   |> Result.map
-       (Option.map (fun (existing : Agent_sdk.Checkpoint.t) ->
+       (Option.map (fun (existing : Masc_agent_core.Checkpoint.t) ->
           { session_id = existing.session_id; turn_count = existing.turn_count }))
 
 type checkpoint_identity_error =
@@ -537,7 +537,7 @@ type checkpoint_ref_load_error =
   | Ref_lock_failed of string
 
 type exact_checkpoint_snapshot =
-  { checkpoint : Agent_sdk.Checkpoint.t
+  { checkpoint : Masc_agent_core.Checkpoint.t
   ; reference : Keeper_checkpoint_ref.t
   ; canonical_bytes : string
   }
@@ -601,10 +601,10 @@ let append_installation_auxiliary installation auxiliary =
       }
 ;;
 
-let checkpoint_generation_strict (checkpoint : Agent_sdk.Checkpoint.t) =
+let checkpoint_generation_strict (checkpoint : Masc_agent_core.Checkpoint.t) =
   match
-    Agent_sdk.Context.get_scoped checkpoint.Agent_sdk.Checkpoint.context
-      Agent_sdk.Context.Session keeper_generation_context_key
+    Masc_agent_core.Context.get_scoped checkpoint.Masc_agent_core.Checkpoint.context
+      Masc_agent_core.Context.Session keeper_generation_context_key
   with
   | None -> Error Generation_missing
   | Some (`Int generation) -> Ok generation
@@ -615,8 +615,8 @@ let checkpoint_generation_strict (checkpoint : Agent_sdk.Checkpoint.t) =
   | Some _ -> Error Generation_not_integer
 
 let checkpoint_ref_of_canonical_bytes canonical_bytes
-    (checkpoint : Agent_sdk.Checkpoint.t) =
-  match Keeper_id.Trace_id.of_string checkpoint.Agent_sdk.Checkpoint.session_id with
+    (checkpoint : Masc_agent_core.Checkpoint.t) =
+  match Keeper_id.Trace_id.of_string checkpoint.Masc_agent_core.Checkpoint.session_id with
   | Error reason -> Error (Session_id_invalid reason)
   | Ok trace_id ->
     (match checkpoint_generation_strict checkpoint with
@@ -716,10 +716,10 @@ let save_oas_if_source_with
     ~(on_checkpoint_commit_observer : Keeper_checkpoint_ref.t -> unit)
     ~session_dir
     ~(expected_source_ref : Keeper_checkpoint_ref.t)
-    (candidate : Agent_sdk.Checkpoint.t) =
+    (candidate : Masc_agent_core.Checkpoint.t) =
   let candidate_bytes =
     offload_checkpoint_cpu (fun () ->
-      Yojson.Safe.to_string (Agent_sdk.Checkpoint.to_json candidate))
+      Yojson.Safe.to_string (Masc_agent_core.Checkpoint.to_json candidate))
   in
   match checkpoint_ref_of_canonical_bytes candidate_bytes candidate with
   | Error error -> not_installed (Candidate_identity_invalid error)
@@ -944,7 +944,7 @@ end
 
 let save_oas_classified_typed
     ~(session_dir : string)
-    (ckpt : Agent_sdk.Checkpoint.t)
+    (ckpt : Masc_agent_core.Checkpoint.t)
   : (save_oas_outcome, save_oas_error) result =
   match Keeper_id.Trace_id.of_string ckpt.session_id with
   | Error reason -> Error (Invalid_session_id reason)
@@ -982,7 +982,7 @@ let save_oas_classified_typed
              ~ownership_root
              ~pretty:false
              canonical_path
-             (fun () -> Agent_sdk.Checkpoint.to_json ckpt)
+             (fun () -> Masc_agent_core.Checkpoint.to_json ckpt)
          with
          | Error error -> Error (Canonical_write_failed error)
          | Ok () ->
@@ -993,7 +993,7 @@ let save_oas_classified_typed
                 ; turn_count = ckpt.turn_count
                 })))
 
-let save_oas_classified ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
+let save_oas_classified ~(session_dir : string) (ckpt : Masc_agent_core.Checkpoint.t)
   : (save_oas_outcome, string) result =
   save_oas_classified_typed ~session_dir ckpt
   |> Result.map_error save_oas_error_to_string

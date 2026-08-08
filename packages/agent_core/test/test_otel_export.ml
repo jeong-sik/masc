@@ -4,7 +4,7 @@
     via Eio mock network where possible, and unit tests for serialization
     and batch logic. *)
 
-open Agent_sdk
+open Masc_agent_core
 open Otel_export
 
 (* ── Test helpers ────────────────────────────────────────────── *)

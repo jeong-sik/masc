@@ -1,6 +1,6 @@
 (** Unit tests for SSE streaming types and usage tracking. *)
 
-open Agent_sdk.Types
+open Masc_agent_core.Types
 
 (* Helper: create api_usage from input/output token counts *)
 let make_usage inp out =
@@ -117,7 +117,7 @@ let test_parse_message_start () =
   let data =
     {|{"type":"message_start","message":{"id":"msg_01","model":"claude-3-7-sonnet-20250219","usage":{"input_tokens":42}}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (MessageStart { id; model; usage }) ->
     Alcotest.(check string) "id" "msg_01" id;
     Alcotest.(check string) "model" "claude-3-7-sonnet-20250219" model;
@@ -132,7 +132,7 @@ let test_parse_content_block_start () =
   let data =
     {|{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (ContentBlockStart { index; content_type; _ }) ->
     Alcotest.(check int) "index" 0 index;
     Alcotest.(check string) "content_type" "text" content_type
@@ -144,7 +144,7 @@ let test_parse_content_block_delta_text () =
   let data =
     {|{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (ContentBlockDelta { index; delta = TextDelta s }) ->
     Alcotest.(check int) "index" 0 index;
     Alcotest.(check string) "text" "hello" s
@@ -156,7 +156,7 @@ let test_parse_content_block_delta_thinking () =
   let data =
     {|{"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"I think..."}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (ContentBlockDelta { index = 1; delta = ThinkingDelta s }) ->
     Alcotest.(check string) "thinking" "I think..." s
   | Some _ -> Alcotest.fail "unexpected event type"
@@ -167,7 +167,7 @@ let test_parse_content_block_delta_signature () =
   let data =
     {|{"type":"content_block_delta","index":1,"delta":{"type":"signature_delta","signature":"sig_opaque"}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (ContentBlockDelta { index = 1; delta = ThinkingSignatureDelta s }) ->
     Alcotest.(check string) "signature" "sig_opaque" s
   | Some _ -> Alcotest.fail "unexpected event type"
@@ -178,7 +178,7 @@ let test_parse_redacted_thinking_block_start () =
   let data =
     {|{"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"opaque_data"}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (ContentBlockStart { index = 0; content_type; tool_id = Some data; _ }) ->
     Alcotest.(check string) "content_type" "redacted_thinking" content_type;
     Alcotest.(check string) "data carrier" "opaque_data" data
@@ -190,7 +190,7 @@ let test_parse_content_block_delta_input_json () =
   let data =
     {|{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"k\":"}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (ContentBlockDelta { index = 2; delta = InputJsonDelta s }) ->
     Alcotest.(check string) "partial_json" {|{"k":|} s
   | Some _ -> Alcotest.fail "unexpected event type"
@@ -201,7 +201,7 @@ let test_parse_content_block_delta_unknown_fails_closed () =
   let data =
     {|{"type":"content_block_delta","index":2,"delta":{"type":"future_delta","value":"do not drop"}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (SSEParseFailed { raw; reason }) ->
     Alcotest.(check string) "raw preserved" data raw;
     Alcotest.(check bool)
@@ -216,7 +216,7 @@ let test_parse_content_block_delta_unknown_fails_closed () =
 
 let test_parse_content_block_stop () =
   let data = {|{"type":"content_block_stop","index":0}|} in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (ContentBlockStop { index }) -> Alcotest.(check int) "index" 0 index
   | Some _ -> Alcotest.fail "unexpected event type"
   | None -> Alcotest.fail "parse returned None"
@@ -226,7 +226,7 @@ let test_parse_message_delta_end_turn () =
   let data =
     {|{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":57}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (MessageDelta { stop_reason; usage }) ->
     (match stop_reason with
      | Some EndTurn -> ()
@@ -240,7 +240,7 @@ let test_parse_message_delta_end_turn () =
 
 let test_parse_message_stop () =
   let data = {|{"type":"message_stop"}|} in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some MessageStop -> ()
   | Some _ -> Alcotest.fail "unexpected event type"
   | None -> Alcotest.fail "parse returned None"
@@ -248,7 +248,7 @@ let test_parse_message_stop () =
 
 let test_parse_ping () =
   let data = {|{"type":"ping"}|} in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some Ping -> ()
   | Some _ -> Alcotest.fail "unexpected event type"
   | None -> Alcotest.fail "parse returned None"
@@ -258,7 +258,7 @@ let test_parse_error_event () =
   let data =
     {|{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (SSEError { message; error_type; _ }) ->
     Alcotest.(check string) "error message" "Overloaded" message;
     Alcotest.(check (option string)) "error type" (Some "overloaded_error") error_type
@@ -267,7 +267,7 @@ let test_parse_error_event () =
 ;;
 
 let test_parse_invalid_json () =
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None "not json at all" with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None "not json at all" with
   | Some (SSEParseFailed { raw; reason }) ->
     Alcotest.(check string) "raw" "not json at all" raw;
     Alcotest.(check bool) "reason is present" true (String.length reason > 0)
@@ -277,7 +277,7 @@ let test_parse_invalid_json () =
 
 let test_parse_unknown_event_type () =
   let data = {|{"type":"unknown_future_event","data":"x"}|} in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (SSEUnknownEventType { event_type; raw }) ->
     Alcotest.(check string) "event_type" "unknown_future_event" event_type;
     Alcotest.(check string) "raw" data raw
@@ -289,7 +289,7 @@ let test_parse_message_start_with_cache () =
   let data =
     {|{"type":"message_start","message":{"id":"msg_cache","model":"claude-sonnet-4","usage":{"input_tokens":100,"cache_creation_input_tokens":50,"cache_read_input_tokens":30}}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (MessageStart { id; usage; _ }) ->
     Alcotest.(check string) "id" "msg_cache" id;
     (match usage with
@@ -307,7 +307,7 @@ let test_message_delta_with_cache_usage () =
   let data =
     {|{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":0,"output_tokens":150,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (MessageDelta { stop_reason; usage }) ->
     (match stop_reason with
      | Some EndTurn -> ()
@@ -326,7 +326,7 @@ let test_message_start_missing_output_tokens () =
   let data =
     {|{"type":"message_start","message":{"id":"msg_partial","model":"claude-sonnet-4-6","usage":{"input_tokens":500}}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event None data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (MessageStart { id; usage; _ }) ->
     Alcotest.(check string) "id" "msg_partial" id;
     (match usage with
@@ -341,7 +341,7 @@ let test_parse_with_explicit_event_type () =
   let data =
     {|{"message":{"id":"msg_02","model":"claude-haiku-4-5-20251001","usage":{"input_tokens":10}}}|}
   in
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event (Some "message_start") data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event (Some "message_start") data with
   | Some (MessageStart { id; _ }) ->
     Alcotest.(check string) "id via explicit event type" "msg_02" id
   | Some _ -> Alcotest.fail "unexpected event type"
@@ -349,12 +349,12 @@ let test_parse_with_explicit_event_type () =
 ;;
 
 let parse_openai_chunk_exn data =
-  match Agent_sdk.Llm_provider.Streaming.parse_openai_sse_chunk data with
-  | Agent_sdk.Llm_provider.Streaming.Openai_chunk chunk -> chunk
-  | Agent_sdk.Llm_provider.Streaming.Openai_done
-  | Agent_sdk.Llm_provider.Streaming.Openai_empty
-  | Agent_sdk.Llm_provider.Streaming.Openai_provider_error _
-  | Agent_sdk.Llm_provider.Streaming.Openai_parse_failed _ ->
+  match Masc_agent_core.Llm_provider.Streaming.parse_openai_sse_chunk data with
+  | Masc_agent_core.Llm_provider.Streaming.Openai_chunk chunk -> chunk
+  | Masc_agent_core.Llm_provider.Streaming.Openai_done
+  | Masc_agent_core.Llm_provider.Streaming.Openai_empty
+  | Masc_agent_core.Llm_provider.Streaming.Openai_provider_error _
+  | Masc_agent_core.Llm_provider.Streaming.Openai_parse_failed _ ->
     Alcotest.fail "expected OpenAI-compatible stream chunk"
 ;;
 
@@ -364,7 +364,7 @@ let test_openai_compat_interleaved_reasoning_and_tool_deltas () =
      argument JSON. They must become separate content blocks, not one visible
      assistant text buffer and not one shared argument buffer. *)
   let state =
-    Agent_sdk.Llm_provider.Streaming.create_openai_stream_state
+    Masc_agent_core.Llm_provider.Streaming.create_openai_stream_state
       ~provider:"ollama_cloud"
       ~model:"qwen3.5:397b"
       ()
@@ -374,7 +374,7 @@ let test_openai_compat_interleaved_reasoning_and_tool_deltas () =
       {|{"id":"chatcmpl-1","model":"qwen3.5:397b","choices":[{"delta":{"reasoning_content":"plan-","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"city\":"}}]},"finish_reason":null}]}|}
   in
   let first_events, first_telemetry =
-    Agent_sdk.Llm_provider.Streaming.openai_chunk_to_events state first
+    Masc_agent_core.Llm_provider.Streaming.openai_chunk_to_events state first
   in
   Alcotest.(check bool) "no first telemetry" true (Option.is_none first_telemetry);
   (match first_events with
@@ -394,20 +394,20 @@ let test_openai_compat_interleaved_reasoning_and_tool_deltas () =
       {|{"id":"chatcmpl-1","model":"qwen3.5:397b","choices":[{"delta":{"reasoning_content":"done","content":"visible","tool_calls":[{"index":0,"function":{"arguments":"\"Seoul\"}"}}]},"finish_reason":null}]}|}
   in
   let second_events, _ =
-    Agent_sdk.Llm_provider.Streaming.openai_chunk_to_events state second
+    Masc_agent_core.Llm_provider.Streaming.openai_chunk_to_events state second
   in
   let finish =
     parse_openai_chunk_exn
       {|{"id":"chatcmpl-1","model":"qwen3.5:397b","choices":[{"delta":{},"finish_reason":"tool_calls"}]}|}
   in
   let finish_events, _ =
-    Agent_sdk.Llm_provider.Streaming.openai_chunk_to_events state finish
+    Masc_agent_core.Llm_provider.Streaming.openai_chunk_to_events state finish
   in
-  let acc = Agent_sdk.Llm_provider.Complete_stream_acc.create_stream_acc () in
+  let acc = Masc_agent_core.Llm_provider.Complete_stream_acc.create_stream_acc () in
   List.iter
-    (Agent_sdk.Llm_provider.Complete_stream_acc.accumulate_event acc)
+    (Masc_agent_core.Llm_provider.Complete_stream_acc.accumulate_event acc)
     (first_events @ second_events @ finish_events);
-  match Agent_sdk.Llm_provider.Complete_stream_acc.finalize_stream_acc acc with
+  match Masc_agent_core.Llm_provider.Complete_stream_acc.finalize_stream_acc acc with
   | Error _ -> Alcotest.fail "expected finalized interleaved stream"
   | Ok result ->
     Alcotest.(check bool) "stop reason" true (result.stop_reason = StopToolUse);
@@ -422,13 +422,13 @@ let test_openai_compat_interleaved_reasoning_and_tool_deltas () =
 ;;
 
 let parse_anthropic_event_exn ?event_type data =
-  match Agent_sdk.Llm_provider.Streaming.parse_sse_event event_type data with
+  match Masc_agent_core.Llm_provider.Streaming.parse_sse_event event_type data with
   | Some event -> event
   | None -> Alcotest.fail "expected Anthropic SSE event"
 ;;
 
 let test_anthropic_interleaved_thinking_tool_text_finalizes () =
-  let module Acc = Agent_sdk.Llm_provider.Complete_stream_acc in
+  let module Acc = Masc_agent_core.Llm_provider.Complete_stream_acc in
   let raw_events =
     [ parse_anthropic_event_exn
         {|{"type":"message_start","message":{"id":"msg_anth","model":"claude-sonnet-4-6","usage":{"input_tokens":11}}}|}
@@ -475,7 +475,7 @@ let test_anthropic_interleaved_thinking_tool_text_finalizes () =
 
 let collect_events response =
   let events = ref [] in
-  Agent_sdk.Llm_provider.Streaming.emit_synthetic_events response (fun evt ->
+  Masc_agent_core.Llm_provider.Streaming.emit_synthetic_events response (fun evt ->
     events := evt :: !events);
   List.rev !events
 ;;

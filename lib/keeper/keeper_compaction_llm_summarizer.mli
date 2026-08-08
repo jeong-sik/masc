@@ -111,14 +111,14 @@ val exact_execution_terminal
 (** Pure typed projection of the OAS receipt identity retained by a successful
     exact execution. It owns no claim, lock, waiter, or lifecycle state. *)
 
-val apply : compaction_plan -> Agent_sdk.Types.message list
+val apply : compaction_plan -> Masc_agent_core.Types.message list
 val summarized_indices : compaction_plan -> int list
 val dropped_indices : compaction_plan -> int list
 val has_changes : compaction_plan -> bool
 
 module For_testing : sig
   val messages_for_plan
-    :  window:planning_window -> Agent_sdk.Types.message list
+    :  window:planning_window -> Masc_agent_core.Types.message list
 
   val planning_window_for_units
     :  Keeper_compaction_unit.closed_unit list

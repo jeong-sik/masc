@@ -275,7 +275,7 @@ let make_tool_bundle
                (fun execution_env input ->
                  h
                    ?oas_invocation:
-                     (Agent_sdk.Tool.Execution_env.invocation execution_env)
+                     (Masc_agent_core.Tool.Execution_env.invocation execution_env)
                    input)))
       model_visible_descriptors
   in
@@ -296,7 +296,7 @@ let make_tools
       ~(ctx_snapshot : Keeper_types.working_context)
       ?clock
       ()
-  : Agent_sdk.Tool.t list
+  : Masc_agent_core.Tool.t list
   =
   (make_tool_bundle
      ~config

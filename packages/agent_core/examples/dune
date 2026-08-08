@@ -9,4 +9,4 @@
   error_handling
   observable_agent
   builder_patterns)
- (libraries agent_sdk eio eio_main yojson unix str))
+ (libraries masc.agent_core cohttp-eio eio eio_main yojson unix str))

@@ -5,10 +5,10 @@ open Keeper_types_profile
 module StringMap = Set_util.StringMap
 
 (** Inject the shared Event_bus for keeper snapshot publishing. *)
-val set_bus : Agent_sdk.Event_bus.t -> unit
+val set_bus : Masc_agent_core.Event_bus.t -> unit
 
 (** Retrieve the shared Event_bus, if set. *)
-val get_bus : unit -> Agent_sdk.Event_bus.t option
+val get_bus : unit -> Masc_agent_core.Event_bus.t option
 
 val register_grpc_heartbeat_starter : Keeper_keepalive_signal.grpc_heartbeat_starter_fn -> unit
 

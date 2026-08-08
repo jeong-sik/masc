@@ -23,7 +23,7 @@
     emerges. *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 (* Canonical Types values used for payload construction *)
 let stub_api_response : Types.api_response =

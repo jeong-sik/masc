@@ -81,7 +81,7 @@ val direct_message_attachments :
   direct_message -> Keeper_chat_store.attachment list
 
 val direct_message_user_oas_blocks :
-  direct_message -> Agent_sdk.Types.content_block list option
+  direct_message -> Masc_agent_core.Types.content_block list option
 
 val request_of_json : Yojson.Safe.t -> (request, request_error) result
 val request_error_to_string : request_error -> string

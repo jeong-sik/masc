@@ -26,21 +26,21 @@ let accept_no_progress_should_try_next error =
    reach it without a module cycle. Api variants are enumerated so a new
    variant forces a compile-time walk decision instead of a silent [false]. *)
 let context_overflow_should_try_next = function
-  | Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow _) -> true
-  | Agent_sdk.Error.Api
-      ( Agent_sdk.Retry.RateLimited _ | Agent_sdk.Retry.Overloaded _
-      | Agent_sdk.Retry.ServerError _ | Agent_sdk.Retry.AuthError _
-      | Agent_sdk.Retry.AuthorizationError _
-      | Agent_sdk.Retry.PaymentRequired _ | Agent_sdk.Retry.InvalidRequest _
-      | Agent_sdk.Retry.NotFound _ | Agent_sdk.Retry.InputCapacity _
-      | Agent_sdk.Retry.NetworkError _
-      | Agent_sdk.Retry.Timeout _ )
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ -> false
+  | Masc_agent_core.Error.Api (Masc_agent_core.Retry.ContextOverflow _) -> true
+  | Masc_agent_core.Error.Api
+      ( Masc_agent_core.Retry.RateLimited _ | Masc_agent_core.Retry.Overloaded _
+      | Masc_agent_core.Retry.ServerError _ | Masc_agent_core.Retry.AuthError _
+      | Masc_agent_core.Retry.AuthorizationError _
+      | Masc_agent_core.Retry.PaymentRequired _ | Masc_agent_core.Retry.InvalidRequest _
+      | Masc_agent_core.Retry.NotFound _ | Masc_agent_core.Retry.InputCapacity _
+      | Masc_agent_core.Retry.NetworkError _
+      | Masc_agent_core.Retry.Timeout _ )
+  | Masc_agent_core.Error.Provider _
+  | Masc_agent_core.Error.Agent _
+  | Masc_agent_core.Error.Mcp _
+  | Masc_agent_core.Error.Config _
+  | Masc_agent_core.Error.Serialization _
+  | Masc_agent_core.Error.Io _
+  | Masc_agent_core.Error.Orchestration _
+  | Masc_agent_core.Error.Internal _ -> false
 ;;

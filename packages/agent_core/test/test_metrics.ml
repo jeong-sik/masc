@@ -1,7 +1,7 @@
 (** Tests for metrics.ml — SDK metrics collection. *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 let with_eio f () = Eio_main.run (fun _env -> f ())
 

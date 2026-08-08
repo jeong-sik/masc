@@ -1,10 +1,10 @@
 (include_subdirs no)
 
 (library
- (name agent_sdk_base)
- (public_name agent_sdk.base)
+ (name masc_agent_core_base)
+ (public_name masc.agent_core.base)
  (wrapped true)
- (libraries llm_provider yojson eio)
+ (libraries llm_provider yojson eio str)
  (inline_tests)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let))

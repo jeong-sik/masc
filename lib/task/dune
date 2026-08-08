@@ -42,6 +42,6 @@
   masc.config_dir_resolver
   masc.prompt_registry
   masc_goal
-  agent_sdk)
+  masc.agent_core)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_tla)))

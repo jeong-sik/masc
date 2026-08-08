@@ -3,7 +3,7 @@
     message_to_json, SSE event parsing, and the api_common string helpers. *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 let rec find_repo_root dir =
   if Sys.file_exists (Filename.concat dir "dune-project")
@@ -25,7 +25,7 @@ let source_path path =
 ;;
 
 let install_repo_model_catalog () =
-  let path = source_path "models.toml" in
+  let path = source_path "packages/agent_core/models.toml" in
   match Llm_provider.Model_catalog.load_file path with
   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
   | Error message -> fail (Printf.sprintf "failed to load %s: %s" path message)

@@ -63,7 +63,7 @@ let assemble_cost_event_payload
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
     ?usage_trust
-    ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ?(telemetry : Masc_agent_core.Types.inference_telemetry option)
     () : assembled_cost_event_payload =
   let int_field name = function
     | Some n -> [ (name, `Int n) ]
@@ -73,7 +73,7 @@ let assemble_cost_event_payload
     | Some v -> [ (name, `Float v) ]
     | None -> []
   in
-  let usage_for_trust : Agent_sdk.Types.api_usage =
+  let usage_for_trust : Masc_agent_core.Types.api_usage =
     {
       input_tokens;
       output_tokens;
@@ -215,7 +215,7 @@ let cost_event_payload
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
     ?usage_trust
-    ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ?(telemetry : Masc_agent_core.Types.inference_telemetry option)
     () : Yojson.Safe.t =
   (assemble_cost_event_payload
      ~agent_name
@@ -249,7 +249,7 @@ let emit_cost_event
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
     ?usage_trust
-    ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ?(telemetry : Masc_agent_core.Types.inference_telemetry option)
     () : unit =
   let store = Cost_ledger.store_of_masc_root masc_root in
   let assembled =

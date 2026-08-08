@@ -145,7 +145,7 @@ module For_testing : sig
   (** Dependency injection over the same [spawn_with] lifecycle used by
       production [spawn]; the worker does not depend on test-only queue APIs. *)
 
-  val flow_evidence : prepared_flow -> Agent_sdk.Exact_output.flow_evidence
+  val flow_evidence : prepared_flow -> Masc_agent_core.Exact_output.flow_evidence
 
   val summary_version : int
   val lane_id : string

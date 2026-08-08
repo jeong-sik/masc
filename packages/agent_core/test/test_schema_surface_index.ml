@@ -12,7 +12,11 @@ let rec find_repo_root dir =
     else find_repo_root parent)
 ;;
 
-let source_path rel = Filename.concat (find_repo_root (Sys.getcwd ())) rel
+let source_path rel =
+  Filename.concat
+    (Filename.concat (find_repo_root (Sys.getcwd ())) "packages/agent_core")
+    rel
+;;
 
 let member name = function
   | `Assoc fields -> List.assoc_opt name fields

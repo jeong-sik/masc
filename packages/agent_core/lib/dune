@@ -1,8 +1,8 @@
 (include_subdirs unqualified)
 
 (library
- (name agent_sdk)
- (public_name agent_sdk)
+ (name masc_agent_core)
+ (public_name masc.agent_core)
  (modules_without_implementation agent_execution_projection_intf)
  (private_modules
   execution_id
@@ -35,17 +35,19 @@
   agent_execution_event_writer)
  (libraries
   llm_provider
-  (re_export agent_sdk_base)
-  (re_export agent_sdk.protocol)
+  (re_export masc_agent_core_base)
+  (re_export masc.agent_core.protocol)
   eio
   eio.unix
   eio_main
+  cohttp
   cohttp-eio
   tls
   tls-eio
   ca-certs
   mtime.clock.os
   digestif
+  dune-build-info
   cstruct
   optint
   yojson
@@ -56,7 +58,7 @@
   str
   mcp_protocol_bundle)
  (flags
-  (:standard -open Agent_sdk_base -open Agent_sdk_protocol))
+  (:standard -open Masc_agent_core_base -open Masc_agent_core_protocol))
  (inline_tests)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let))

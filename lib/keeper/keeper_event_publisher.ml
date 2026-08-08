@@ -17,7 +17,7 @@
    bus. *)
 let masc_publish event =
   match Event_bus_slots.get_masc () with
-  | Some mb -> Agent_sdk_metrics_bridge.publish mb event
+  | Some mb -> Masc_agent_core_metrics_bridge.publish mb event
   | None ->
     Log.Misc.warn "MASC observation event was not published: event bus is not initialized"
 
@@ -68,7 +68,7 @@ let publish_keeper_lifecycle
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
+    (Masc_agent_core.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
 
 (** {1 Audit Ledger Events} *)
 
@@ -97,7 +97,7 @@ let publish_audit_event ~id ~ts ~actor ~kind ?target ~summary ~severity
     ("severity", `String severity);
     ("payload", payload_json);
   ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.audit_event", event_payload)))
+  masc_publish (Masc_agent_core.Event_bus.mk_event (Custom ("masc.audit_event", event_payload)))
 
 (** {1 Runtime Execution Telemetry Events} *)
 
@@ -128,4 +128,4 @@ let publish_runtime_execution_built
       ]
   in
   masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload)))
+    (Masc_agent_core.Event_bus.mk_event (Custom ("telemetry_event", payload)))

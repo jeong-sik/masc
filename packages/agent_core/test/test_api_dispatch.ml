@@ -1,7 +1,7 @@
 (** Tests for API dispatch: response parsing per provider and pricing. *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Helpers ─────────────────────────────────────────────────── *)
 

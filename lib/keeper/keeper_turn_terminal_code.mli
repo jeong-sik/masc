@@ -29,7 +29,7 @@ type t =
   (** [Keeper_registry.Exception]: payload is the exception
           message. *)
   | Sdk_error of string
-  (** Catch-all for [Agent_sdk.Error.t] wire strings (agent / api /
+  (** Catch-all for [Masc_agent_core.Error.t] wire strings (agent / api /
           mcp / config / serialization / io / orchestration / a2a /
           internal). The payload is the existing parametrised wire
           format produced by [Keeper_agent_error.terminal_reason_code_of_sdk_error]
@@ -52,7 +52,7 @@ val to_wire : t -> string
     failure; this function never invents missing evidence. *)
 val of_wire_exact : string -> t option
 
-(** Wrap an [Agent_sdk.Error.t] wire string produced by
+(** Wrap an [Masc_agent_core.Error.t] wire string produced by
     [Keeper_agent_error.terminal_reason_code_of_sdk_error] /
     [agent_error_terminal_reason_code] /
     [api_error_terminal_reason_code]. Returns [Sdk_error s] verbatim;

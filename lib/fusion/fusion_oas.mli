@@ -24,18 +24,18 @@ val build_agent
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> system_prompt:string
-  -> ?tools:Agent_sdk.Tool.t list
+  -> ?tools:Masc_agent_core.Tool.t list
   -> ?max_tokens:int
   -> ?name:string
   -> ?provider_config_transform:
        (Llm_provider.Provider_config.t
         -> (Llm_provider.Provider_config.t, string) result)
   -> string
-  -> (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
+  -> (Masc_agent_core.Agent.t, Fusion_types.panel_failure) result
 
 (** Test seam for Fusion-local response diagnostics. *)
 module For_testing : sig
-  val empty_response_detail : Agent_sdk.Types.api_response -> string
+  val empty_response_detail : Masc_agent_core.Types.api_response -> string
 end
 
 (** Attach Fusion's runtime id to an OAS provider error string.
@@ -57,14 +57,14 @@ val panel_failure_text : Fusion_types.panel_failure -> string
 
 (** Empty text response diagnostics. This records stop_reason, token usage, and
     content block counts only; it never exposes reasoning/thinking content. *)
-val empty_response_detail : Agent_sdk.Types.api_response -> string
+val empty_response_detail : Masc_agent_core.Types.api_response -> string
 
-(** [masc_web_search] / [masc_web_fetch]를 [Agent_sdk.Tool.t]로 변환한 목록.
+(** [masc_web_search] / [masc_web_fetch]를 [Masc_agent_core.Tool.t]로 변환한 목록.
     [Keeper_tool_descriptor]에서 descriptor를 찾지 못하면 빈 목록을 반환한다. *)
-val web_tool_bundle : unit -> Agent_sdk.Tool.t list
+val web_tool_bundle : unit -> Masc_agent_core.Tool.t list
 
 (** api_response의 [Text] 블록만 모아 답 텍스트로 (Thinking/ToolUse 제외). *)
-val answer_text : Agent_sdk.Types.api_response -> string
+val answer_text : Masc_agent_core.Types.api_response -> string
 
 (** api_response의 토큰 사용량 → [Fusion_types.usage] (없으면 0). *)
-val usage_of : Agent_sdk.Types.api_response -> Fusion_types.usage
+val usage_of : Masc_agent_core.Types.api_response -> Fusion_types.usage

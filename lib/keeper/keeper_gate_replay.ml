@@ -547,12 +547,12 @@ let append_model_evidence ~approval_id ~user_message = function
 
 let append_model_evidence_block evidence blocks =
   blocks
-  @ [ Agent_sdk.Types.Text (canonical_replay_evidence_fragment evidence) ]
+  @ [ Masc_agent_core.Types.Text (canonical_replay_evidence_fragment evidence) ]
 ;;
 
 let project_model_input ~base_path:_ evidence messages =
   let referenced = replay_evidence_fragment evidence in
-  Ok (messages @ [ Agent_sdk.Types.user_msg referenced ])
+  Ok (messages @ [ Masc_agent_core.Types.user_msg referenced ])
 ;;
 
 let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =

@@ -82,7 +82,7 @@ let make_meta_ref (name : string) : Masc.Keeper_meta_contract.keeper_meta ref =
   | Ok meta -> ref meta
   | Error e -> failwith ("make_meta_ref: " ^ e)
 
-let make_runtime_hooks () : Agent_sdk.Hooks.hooks =
+let make_runtime_hooks () : Masc_agent_core.Hooks.hooks =
   let base_path =
     Filename.concat
       (Filename.get_temp_dir_name ())
@@ -101,7 +101,7 @@ let make_runtime_hooks () : Agent_sdk.Hooks.hooks =
     ~on_after_turn_ordinal:ignore
     ()
 
-let runtime_slots_of (hooks : Agent_sdk.Hooks.hooks) =
+let runtime_slots_of (hooks : Masc_agent_core.Hooks.hooks) =
   [
     "before_turn", Option.is_some hooks.before_turn;
     "after_turn", Option.is_some hooks.after_turn;
@@ -125,25 +125,25 @@ let test_runtime_active_claims_match_make_hooks () =
 let test_pre_tool_use_is_observation_only () =
   let hooks = make_runtime_hooks () in
   let event =
-    Agent_sdk.Hooks.PreToolUse
+    Masc_agent_core.Hooks.PreToolUse
       { invocation =
-          Agent_sdk.Tool_contract.Invocation.create
+          Masc_agent_core.Tool_contract.Invocation.create
             ~tool_use_id:"toolu_observation_only"
             ~turn:7
-            ~completion:Agent_sdk.Tool_contract.Continue_after_success
+            ~completion:Masc_agent_core.Tool_contract.Continue_after_success
             ~schedule:
               { planned_index = 0
               ; batch_index = 0
               ; batch_size = 1
-              ; execution_mode = Agent_sdk.Tool_contract.Serial
+              ; execution_mode = Masc_agent_core.Tool_contract.Serial
               }
       ; tool_name = "opaque_internal_name"
       ; input = `Assoc [ "command", `String "opaque external effect" ]
       ; accumulated_cost_usd = 1234.0
       }
   in
-  match Agent_sdk.Hooks.invoke_validated hooks.pre_tool_use event with
-  | Agent_sdk.Hooks.Continue -> ()
+  match Masc_agent_core.Hooks.invoke_validated hooks.pre_tool_use event with
+  | Masc_agent_core.Hooks.Continue -> ()
   | AdjustParams _ -> fail "pre_tool_use timing hook adjusted parameters"
   | ElicitInput _ -> fail "pre_tool_use timing hook elicited input"
   | ElicitToolApproval _ ->

@@ -151,7 +151,7 @@ let () =
     (match Purge.purge ~config:!config checkpoint with
      | Error purge_error -> error (purge_error_text purge_error)
      | Ok (purged, report) ->
-       let purged_bytes = Agent_sdk.Checkpoint.to_string purged in
+       let purged_bytes = Masc_agent_core.Checkpoint.to_string purged in
        let before_len = String.length original_bytes in
        let after_len = String.length purged_bytes in
        Printf.printf "trace: %s\n" trace;

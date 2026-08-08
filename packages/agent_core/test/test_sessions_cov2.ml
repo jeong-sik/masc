@@ -5,7 +5,7 @@
     - Every record type round-trip
     - Large composite types (proof_bundle) *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Helpers ────────────────────────────────────────────────────── *)
 

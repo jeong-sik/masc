@@ -9,7 +9,7 @@
     A [limit] property had been widened to ["type": ["integer","string"]] to
     accept numeric-string arguments (Issue #18472). But
     [Tool_bridge.params_of_json_schema] delegates to
-    [Agent_sdk.Mcp.json_schema_to_params] (OAS #2343, fail-closed on schema
+    [Masc_agent_core.Mcp.json_schema_to_params] (OAS #2343, fail-closed on schema
     types it cannot map to a single param type), which raises Invalid_argument
     on a multi-non-null-type union. The uncaught exception took down the whole
     keeper turn — every tool, not just the offending one.

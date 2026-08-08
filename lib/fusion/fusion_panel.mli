@@ -37,6 +37,6 @@ module For_testing : sig
   val outcome_of_result
     :  panelist:string
     -> model:string
-    -> (Agent_sdk.Types.api_response, Agent_sdk.Error.sdk_error) result
+    -> (Masc_agent_core.Types.api_response, Masc_agent_core.Error.sdk_error) result
     -> Fusion_types.panel_outcome
 end

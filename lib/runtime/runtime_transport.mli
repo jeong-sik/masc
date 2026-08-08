@@ -12,7 +12,7 @@ val label_resolution_error_to_string : label_resolution_error -> string
 
 (** Lift a label-resolution error into the OAS SDK error envelope. *)
 val label_resolution_error_to_sdk_error :
-  label_resolution_error -> Agent_sdk.Error.sdk_error
+  label_resolution_error -> Masc_agent_core.Error.sdk_error
 
 (** Resolve a model label string to a provider config via the MASC runtime
     parser.  Explicit labels never silently fall through to discovery-only
@@ -20,9 +20,9 @@ val label_resolution_error_to_sdk_error :
 val resolve_provider_config_of_label :
   string -> (Llm_provider.Provider_config.t, label_resolution_error) result
 
-(** Construct an [Agent_sdk.Error.InvalidConfig] with the supplied [field] name and
+(** Construct an [Masc_agent_core.Error.InvalidConfig] with the supplied [field] name and
     [detail] text. *)
-val invalid_runtime_config : string -> string -> Agent_sdk.Error.sdk_error
+val invalid_runtime_config : string -> string -> Masc_agent_core.Error.sdk_error
 
 (** OAS capability snapshot for a provider config.  Alias for
     {!Provider_tool_support.oas_capabilities_of_config}. *)

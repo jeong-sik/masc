@@ -1,7 +1,7 @@
 (** Keeper_error_classify — Error classification
     and retry constants for the unified keeper cycle.
 
-    Pure predicates and classification functions over [Agent_sdk.Error.sdk_error].
+    Pure predicates and classification functions over [Masc_agent_core.Error.sdk_error].
     No I/O, no state mutation.
 
     Extracted from keeper_unified_turn.ml.
@@ -14,7 +14,7 @@ open Keeper_types_profile
 open Keeper_context_runtime
 
 (** Detect transient network errors that warrant retry with short backoff.
-    Uses structured [Agent_sdk.Error.sdk_error] pattern matching instead of
+    Uses structured [Masc_agent_core.Error.sdk_error] pattern matching instead of
     substring matching on stringified error messages. *)
 let is_transient_internal_transport_error = function
   | Llm_provider.Http_client.Tls_error -> true
@@ -27,7 +27,7 @@ let is_transient_internal_transport_error = function
     false
 ;;
 
-let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_transient_internal_runner_error (err : Masc_agent_core.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
       (Keeper_turn_driver.Internal_unhandled_exception
@@ -50,40 +50,40 @@ let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool 
 
 (** {1 Typed retry classification} *)
 
-let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_transient_network_error (err : Masc_agent_core.Error.sdk_error) : bool =
   if is_transient_internal_runner_error err
   then true
   else match err with
-  | Agent_sdk.Error.Api (NetworkError _) -> true
-  | Agent_sdk.Error.Api (Timeout _) -> true
-  | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError
+  | Masc_agent_core.Error.Api (NetworkError _) -> true
+  | Masc_agent_core.Error.Api (Timeout _) -> true
+  | Masc_agent_core.Error.Provider (Llm_provider.Error.NetworkError
       { kind = Llm_provider.Http_client.Tls_error
              | Llm_provider.Http_client.Local_resource_exhaustion; _ }) ->
       false
-  | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError _) -> true
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
-  | Agent_sdk.Error.Api (Overloaded _) -> true
-  | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
+  | Masc_agent_core.Error.Provider (Llm_provider.Error.NetworkError _) -> true
+  | Masc_agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> true
+  | Masc_agent_core.Error.Api (Overloaded _) -> true
+  | Masc_agent_core.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
       transient
   (* Non-transient API errors. *)
-  | Agent_sdk.Error.Api (ServerError _)
-  | Agent_sdk.Error.Api (RateLimited _)
-  | Agent_sdk.Error.Api (AuthError _)
-  | Agent_sdk.Error.Api (AuthorizationError _)
-  | Agent_sdk.Error.Api (PaymentRequired _)
-  | Agent_sdk.Error.Api (InvalidRequest _)
-  | Agent_sdk.Error.Api (NotFound _)
-  | Agent_sdk.Error.Api (ContextOverflow _)
-  | Agent_sdk.Error.Api (InputCapacity _) -> false
+  | Masc_agent_core.Error.Api (ServerError _)
+  | Masc_agent_core.Error.Api (RateLimited _)
+  | Masc_agent_core.Error.Api (AuthError _)
+  | Masc_agent_core.Error.Api (AuthorizationError _)
+  | Masc_agent_core.Error.Api (PaymentRequired _)
+  | Masc_agent_core.Error.Api (InvalidRequest _)
+  | Masc_agent_core.Error.Api (NotFound _)
+  | Masc_agent_core.Error.Api (ContextOverflow _)
+  | Masc_agent_core.Error.Api (InputCapacity _) -> false
   (* Non-API error families are by definition not transient network errors. *)
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ -> false
+  | Masc_agent_core.Error.Provider _
+  | Masc_agent_core.Error.Agent _
+  | Masc_agent_core.Error.Mcp _
+  | Masc_agent_core.Error.Config _
+  | Masc_agent_core.Error.Serialization _
+  | Masc_agent_core.Error.Io _
+  | Masc_agent_core.Error.Orchestration _
+  | Masc_agent_core.Error.Internal _ -> false
 
 (** Detect typed server-side request body parse errors.  The LLM API never
     processed the request, so committed tool results are not at risk of
@@ -99,10 +99,10 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
     errors.  If OAS needs to recover these cases, it must expose a structured
     parse-error constructor before MASC classifies them here. *)
 
-let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_provider_rejected_parse_error (err : Masc_agent_core.Error.sdk_error) : bool =
   match err with
-  | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> true
-  | Agent_sdk.Error.Provider
+  | Masc_agent_core.Error.Provider (Llm_provider.Error.ParseError _) -> true
+  | Masc_agent_core.Error.Provider
       ( Llm_provider.Error.InvalidRequest _
       | Llm_provider.Error.NetworkError _
       | Llm_provider.Error.Timeout _
@@ -118,27 +118,27 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
       | Llm_provider.Error.ProviderReportedError _
       | Llm_provider.Error.InvalidConfig _
       | Llm_provider.Error.UnknownVariant _) -> false
-  | Agent_sdk.Error.Api _ -> false
-  | Agent_sdk.Error.Agent _ -> false
-  | Agent_sdk.Error.Mcp _ -> false
-  | Agent_sdk.Error.Config _ -> false
-  | Agent_sdk.Error.Serialization _ -> false
-  | Agent_sdk.Error.Io _ -> false
-  | Agent_sdk.Error.Orchestration _ -> false
-  | Agent_sdk.Error.Internal _ -> false
+  | Masc_agent_core.Error.Api _ -> false
+  | Masc_agent_core.Error.Agent _ -> false
+  | Masc_agent_core.Error.Mcp _ -> false
+  | Masc_agent_core.Error.Config _ -> false
+  | Masc_agent_core.Error.Serialization _ -> false
+  | Masc_agent_core.Error.Io _ -> false
+  | Masc_agent_core.Error.Orchestration _ -> false
+  | Masc_agent_core.Error.Internal _ -> false
 
-let is_provider_wire_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_provider_wire_error (err : Masc_agent_core.Error.sdk_error) : bool =
   match err with
-  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderWireError _) -> true
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Api _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ -> false
+  | Masc_agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _) -> true
+  | Masc_agent_core.Error.Provider _
+  | Masc_agent_core.Error.Api _
+  | Masc_agent_core.Error.Agent _
+  | Masc_agent_core.Error.Mcp _
+  | Masc_agent_core.Error.Config _
+  | Masc_agent_core.Error.Serialization _
+  | Masc_agent_core.Error.Io _
+  | Masc_agent_core.Error.Orchestration _
+  | Masc_agent_core.Error.Internal _ -> false
 
 (** 0-byte empty completion: the provider ended the turn with a modeled,
     non-overflow stop_reason but returned no thinking, text, or tool calls
@@ -167,12 +167,12 @@ let is_provider_wire_error (err : Agent_sdk.Error.sdk_error) : bool =
       classification source (see [is_provider_rejected_parse_error]).
     - ["Context overflow: empty completion"] — a context-overflow diagnostic,
       already classified by [is_context_overflow] on the typed path. *)
-let is_empty_completion_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_empty_completion_error (err : Masc_agent_core.Error.sdk_error) : bool =
   match err with
-  | Agent_sdk.Error.Provider
+  | Masc_agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable { detail; _ }) ->
       String.starts_with ~prefix:"empty completion (stop_reason=" detail
-  | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError { detail }) ->
+  | Masc_agent_core.Error.Provider (Llm_provider.Error.ParseError { detail }) ->
       (* Defensive: no production producer at pinned SDK 5851df2e.  The
          marker is rendered only by backend_openai_parse.ml
          [parse_error_to_string], whose callers are all test-only; production
@@ -182,47 +182,47 @@ let is_empty_completion_error (err : Agent_sdk.Error.sdk_error) : bool =
          failures.  Kept as a bounded guard (exemption budget caps the blast
          radius) in case a future SDK promotes this shape to [ParseError]. *)
       String_util.contains_substring detail "empty completion (no thinking"
-  | Agent_sdk.Error.Provider _ -> false
-  | Agent_sdk.Error.Api _ -> false
-  | Agent_sdk.Error.Agent _ -> false
-  | Agent_sdk.Error.Mcp _ -> false
-  | Agent_sdk.Error.Config _ -> false
-  | Agent_sdk.Error.Serialization _ -> false
-  | Agent_sdk.Error.Io _ -> false
-  | Agent_sdk.Error.Orchestration _ -> false
-  | Agent_sdk.Error.Internal _ -> false
+  | Masc_agent_core.Error.Provider _ -> false
+  | Masc_agent_core.Error.Api _ -> false
+  | Masc_agent_core.Error.Agent _ -> false
+  | Masc_agent_core.Error.Mcp _ -> false
+  | Masc_agent_core.Error.Config _ -> false
+  | Masc_agent_core.Error.Serialization _ -> false
+  | Masc_agent_core.Error.Io _ -> false
+  | Masc_agent_core.Error.Orchestration _ -> false
+  | Masc_agent_core.Error.Internal _ -> false
 
-let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_model_rejected_parse_error (err : Masc_agent_core.Error.sdk_error) : bool =
   match err with
-  | Agent_sdk.Error.Api (InvalidRequest _ | NetworkError _ | Timeout _
+  | Masc_agent_core.Error.Api (InvalidRequest _ | NetworkError _ | Timeout _
     | Overloaded _ | ServerError _ | RateLimited _ | AuthError _
     | AuthorizationError _ | NotFound _ | PaymentRequired _ | ContextOverflow _
     | InputCapacity _) ->
       false
-  | Agent_sdk.Error.Provider _ -> false
-  | Agent_sdk.Error.Agent _ -> false
-  | Agent_sdk.Error.Mcp _ -> false
-  | Agent_sdk.Error.Config _ -> false
-  | Agent_sdk.Error.Serialization _ -> false
-  | Agent_sdk.Error.Io _ -> false
-  | Agent_sdk.Error.Orchestration _ -> false
-  | Agent_sdk.Error.Internal _ -> false
+  | Masc_agent_core.Error.Provider _ -> false
+  | Masc_agent_core.Error.Agent _ -> false
+  | Masc_agent_core.Error.Mcp _ -> false
+  | Masc_agent_core.Error.Config _ -> false
+  | Masc_agent_core.Error.Serialization _ -> false
+  | Masc_agent_core.Error.Io _ -> false
+  | Masc_agent_core.Error.Orchestration _ -> false
+  | Masc_agent_core.Error.Internal _ -> false
 
-let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_server_rejected_parse_error (err : Masc_agent_core.Error.sdk_error) : bool =
   is_provider_rejected_parse_error err || is_model_rejected_parse_error err
 
 (** Receipt I/O failure: the turn body succeeded but the authoritative
     receipt could not be persisted. The producer carries a typed MASC error;
     free-form error prose is never used as a behavioral discriminator. *)
-let is_receipt_lost_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_receipt_lost_error (err : Masc_agent_core.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Receipt_persistence_failed _) -> true
   | Some _ | None -> false
 
-let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_provider_timeout_error (err : Masc_agent_core.Error.sdk_error) : bool =
   Keeper_provider_runtime_boundary.is_provider_timeout_error err
 
-let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_auto_recoverable_runtime_exhausted_error (err : Masc_agent_core.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
       (Keeper_turn_driver.Runtime_exhausted
@@ -251,7 +251,7 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
   | None ->
       false
 
-let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_accept_no_usable_progress_error (err : Masc_agent_core.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
       (Keeper_turn_driver.Accept_rejected
@@ -338,7 +338,7 @@ let fallback_runtime_for_unavailable_profile
 
 let degraded_retry_after_recoverable_error
     ~(effective_runtime : string)
-    (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
+    (err : Masc_agent_core.Error.sdk_error) : degraded_retry option =
   let normalized_effective =
     String.trim effective_runtime
   in
@@ -395,7 +395,7 @@ let degraded_retry_after_recoverable_error
     | None ->
         None
 
-let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
+let recoverable_runtime_failure_reason (err : Masc_agent_core.Error.sdk_error) =
   if Keeper_runtime_failure_route.sdk_error_is_hard_quota err then
     Some Hard_quota
   else
@@ -454,29 +454,29 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
            [sdk_error_is_hard_quota]. Rate limits intentionally keep [Rate_limit]
            so declared runtime fallback remains available. *)
         (match err with
-         | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
+         | Masc_agent_core.Error.Api (Llm_provider.Retry.RateLimited _) ->
              Some Rate_limit
-         | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _) ->
+         | Masc_agent_core.Error.Api (Llm_provider.Retry.Overloaded _) ->
              Some Capacity_backpressure
-         | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _) ->
+         | Masc_agent_core.Error.Api (Llm_provider.Retry.ServerError _) ->
              Some Server_error
-         | Agent_sdk.Error.Api
+         | Masc_agent_core.Error.Api
              ( Llm_provider.Retry.AuthError _
              | Llm_provider.Retry.AuthorizationError _ ) ->
              Some Auth_error
-         | Agent_sdk.Error.Provider
+         | Masc_agent_core.Error.Provider
              (Llm_provider.Error.RateLimit _) ->
              Some Rate_limit
-         | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
+         | Masc_agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
              Some Capacity_backpressure
-         | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
+         | Masc_agent_core.Error.Provider (Llm_provider.Error.HardQuota _) ->
              Some Hard_quota
-         | Agent_sdk.Error.Provider
+         | Masc_agent_core.Error.Provider
              (Llm_provider.Error.ServerError { transient = true; _ }) ->
              Some Server_error
-         | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
+         | Masc_agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
              Some Server_error
-         | Agent_sdk.Error.Provider
+         | Masc_agent_core.Error.Provider
              ( Llm_provider.Error.AuthError _
              | Llm_provider.Error.AuthorizationError _
              | Llm_provider.Error.MissingApiKey _ ) ->
@@ -488,7 +488,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
             [ProviderFailure]. Reclassifying them here would conflate the two
             boundaries and schedule a second whole-runtime wake for the same
             malformed provider response. *)
-         | Agent_sdk.Error.Provider
+         | Masc_agent_core.Error.Provider
              (Llm_provider.Error.ServerError _
              | Llm_provider.Error.InvalidConfig _
              | Llm_provider.Error.InvalidRequest _
@@ -501,23 +501,23 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              | Llm_provider.Error.UnknownVariant _
              | Llm_provider.Error.ProviderTerminal _) ->
              None
-         | Agent_sdk.Error.Api (Llm_provider.Retry.PaymentRequired _)
-         | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
-         | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
-         | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
-         | Agent_sdk.Error.Api (Llm_provider.Retry.InputCapacity _)
-         | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
-         | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) -> None
+         | Masc_agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _)
+         | Masc_agent_core.Error.Api (Llm_provider.Retry.InvalidRequest _)
+         | Masc_agent_core.Error.Api (Llm_provider.Retry.NotFound _)
+         | Masc_agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)
+         | Masc_agent_core.Error.Api (Llm_provider.Retry.InputCapacity _)
+         | Masc_agent_core.Error.Api (Llm_provider.Retry.NetworkError _)
+         | Masc_agent_core.Error.Api (Llm_provider.Retry.Timeout _) -> None
          (* Non-API error families have no rotation reason here: structured
             MASC internal errors are handled by [classify_masc_internal_error]
             above; agent / mcp / config / etc. are not provider-level rotations. *)
-         | Agent_sdk.Error.Agent _
-         | Agent_sdk.Error.Mcp _
-         | Agent_sdk.Error.Config _
-         | Agent_sdk.Error.Serialization _
-         | Agent_sdk.Error.Io _
-         | Agent_sdk.Error.Orchestration _
-         | Agent_sdk.Error.Internal _ -> None)
+         | Masc_agent_core.Error.Agent _
+         | Masc_agent_core.Error.Mcp _
+         | Masc_agent_core.Error.Config _
+         | Masc_agent_core.Error.Serialization _
+         | Masc_agent_core.Error.Io _
+         | Masc_agent_core.Error.Orchestration _
+         | Masc_agent_core.Error.Internal _ -> None)
 
 let normalized_runtime_id ~catalog_names name =
   let trimmed = String.trim name in
@@ -617,7 +617,7 @@ let degraded_rotation_after_recoverable_error
       ~(base_runtime : string)
       ~(effective_runtime : string)
     ~(attempted_runtimes : string list)
-    (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
+    (err : Masc_agent_core.Error.sdk_error) : degraded_retry option =
   match recoverable_runtime_failure_reason err with
   | None -> None
   | Some fallback_reason ->
@@ -653,8 +653,8 @@ let degraded_rotation_after_recoverable_error
 
 (** [true] only for the typed API-side 400 rejection. Rendered provider text
     carries no recovery authority. *)
-let is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool = function
-  | Agent_sdk.Error.Api (InvalidRequest _) -> true
+let is_invalid_request_error : Masc_agent_core.Error.sdk_error -> bool = function
+  | Masc_agent_core.Error.Api (InvalidRequest _) -> true
   | _ -> false
 
 (** [true] when a structured error indicates context overflow.
@@ -672,10 +672,10 @@ let is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool = function
     [Keeper_turn_driver_try_runtime]) already treat every [Error.Agent _] as
     not-overflow. Routing an Ollama-dialect overflow belongs in OAS, at the
     decoders that bypass [stop_reason_of_string]. *)
-let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
+let is_context_overflow (err : Masc_agent_core.Error.sdk_error) : bool =
   match err with
-  | Agent_sdk.Error.Api (ContextOverflow _) -> true
-  | Agent_sdk.Error.Api (InputCapacity _) -> false
+  | Masc_agent_core.Error.Api (ContextOverflow _) -> true
+  | Masc_agent_core.Error.Api (InputCapacity _) -> false
   | _ -> false
 
 (* Invariant for this predicate: the exemption gate is
@@ -734,13 +734,13 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
    counter never advanced. They are no longer exempt, so the ordinary
    consecutive-failure threshold bounds them; an isolated malformed response
    still costs nothing, because a later success resets the counter. *)
-let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_auto_recoverable_turn_error (err : Masc_agent_core.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_auto_recoverable_runtime_exhausted_error err
   || is_empty_completion_error err
   || is_invalid_request_error err
 
-let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
+let should_warn_keeper_cycle_failed (err : Masc_agent_core.Error.sdk_error) : bool =
   if Keeper_provider_runtime_boundary.is_provider_timeout_error err
   then true
   else
@@ -769,38 +769,38 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
     Typed companion to {!is_input_required_error}; callers that need
     the [input_required] record use this option-returning function so
     a [match ... | _ -> assert false] tail is no longer required. *)
-let extract_input_required (err : Agent_sdk.Error.sdk_error)
-  : Agent_sdk.Error.input_required option
+let extract_input_required (err : Masc_agent_core.Error.sdk_error)
+  : Masc_agent_core.Error.input_required option
   =
   match err with
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired ir) -> Some ir
+  | Masc_agent_core.Error.Agent (Masc_agent_core.Error.InputRequired ir) -> Some ir
   | _ -> None
 ;;
 
 (** [true] when the error is an OAS [InputRequired] — the agent paused
     to request human input.  Not a failure; a special stop condition. *)
-let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_input_required_error (err : Masc_agent_core.Error.sdk_error) : bool =
   match err with
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> true
-  | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
-  | Agent_sdk.Error.Agent (HookExecutionFailed _)
-  | Agent_sdk.Error.Agent (TerminalToolEffectFailed _)
-  | Agent_sdk.Error.Agent (TerminalToolDurabilityFailed _)
-  | Agent_sdk.Error.Agent (GuardrailViolation _)
-  | Agent_sdk.Error.Agent (TripwireViolation _) -> false
-  | Agent_sdk.Error.Api _
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ -> false
+  | Masc_agent_core.Error.Agent (Masc_agent_core.Error.InputRequired _) -> true
+  | Masc_agent_core.Error.Agent (UnrecognizedStopReason _)
+  | Masc_agent_core.Error.Agent (HookExecutionFailed _)
+  | Masc_agent_core.Error.Agent (TerminalToolEffectFailed _)
+  | Masc_agent_core.Error.Agent (TerminalToolDurabilityFailed _)
+  | Masc_agent_core.Error.Agent (GuardrailViolation _)
+  | Masc_agent_core.Error.Agent (TripwireViolation _) -> false
+  | Masc_agent_core.Error.Api _
+  | Masc_agent_core.Error.Provider _
+  | Masc_agent_core.Error.Mcp _
+  | Masc_agent_core.Error.Config _
+  | Masc_agent_core.Error.Serialization _
+  | Masc_agent_core.Error.Io _
+  | Masc_agent_core.Error.Orchestration _
+  | Masc_agent_core.Error.Internal _ -> false
 
 (** [true] when an error represents terminal runtime exhaustion. Accept
     rejection is an accept-contract result; no-progress accept rejection is
     classified separately so it does not masquerade as all-runtimes-exhausted. *)
-let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_runtime_exhausted_error (err : Masc_agent_core.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> true

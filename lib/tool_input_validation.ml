@@ -1,6 +1,6 @@
 (** Tool_input_validation — Pre-dispatch validation via OAS Tool_middleware.
 
-    Delegates to [Agent_sdk.Tool_middleware.make_validation_hook] for strict
+    Delegates to [Masc_agent_core.Tool_middleware.make_validation_hook] for strict
     schema checking and structured error feedback. OAS 0.212 removed implicit
     type coercion: a mistyped scalar (e.g. string for integer) is a
     deterministic Reject carrying the field name, not a silent repair.
@@ -821,16 +821,16 @@ let pass_reason ~schema ~args ~prepared_args =
   | None -> "missing_schema"
 ;;
 
-let validation_schema_of_json ~name json_schema : Agent_sdk.Types.tool_schema =
+let validation_schema_of_json ~name json_schema : Masc_agent_core.Types.tool_schema =
   let params = Tool_bridge.params_of_json_schema json_schema in
   let json =
     `Assoc
       [ ("name", `String name)
       ; ("description", `String "")
-      ; ("parameters", `List (List.map Agent_sdk.Types.tool_param_to_json params))
+      ; ("parameters", `List (List.map Masc_agent_core.Types.tool_param_to_json params))
       ]
   in
-  match Agent_sdk.Types.tool_schema_of_json json with
+  match Masc_agent_core.Types.tool_schema_of_json json with
   | Ok schema -> schema
   | Error err -> failwith ("validation_schema_of_json: " ^ err)
 ;;
@@ -953,12 +953,12 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
            in
            Option.map (validation_schema_of_json ~name:lookup_name) schema_opt
          in
-         let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
+         let hook = Masc_agent_core.Tool_middleware.make_validation_hook ~lookup in
          (* Declared ranges are checked only once the SDK has accepted the
             declared types, so a mistyped value reports its type error
             rather than a confusing range error. *)
          (match hook ~name ~args:prepared_args with
-    | Agent_sdk.Tool_middleware.Pass ->
+    | Masc_agent_core.Tool_middleware.Pass ->
       (match schema_constraint_failure schema prepared_args with
        | Some (Argument_out_of_range message) ->
          reject_validation
@@ -980,7 +980,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
              "tool_input_validation normalized args for %s"
              name;
            Tool_dispatch.Proceed prepared_args))
-    | Agent_sdk.Tool_middleware.Reject { message; _ } ->
+    | Masc_agent_core.Tool_middleware.Reject { message; _ } ->
       emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
       Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
       (* Input-schema / policy rejection — classify so the

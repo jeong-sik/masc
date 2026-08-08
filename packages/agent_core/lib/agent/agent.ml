@@ -66,10 +66,6 @@ let open_execution_projection ~runtime ~dir locator =
     ()
 ;;
 
-let replace_projected_error error detailed =
-  { detailed with Provider_failure_attribution.error }
-;;
-
 let project_detailed_error result =
   Result.map_error (fun detailed -> detailed.error) result
 ;;
@@ -119,11 +115,6 @@ let run_turn_core_detailed
        | Ok (Pipeline.TerminalToolCompleted completion) ->
          Ok (`TerminalToolCompleted completion)
        | Error error -> Error { error; provider_failure = !provider_failure })
-;;
-
-let run_turn_core ~sw ?clock ~api_strategy ?raw_trace_run agent =
-  run_turn_core_detailed ~sw ?clock ~api_strategy ?raw_trace_run agent
-  |> project_detailed_error
 ;;
 
 (* Original run_turn_core implementation removed — now in Pipeline.run_turn.
@@ -280,28 +271,6 @@ let run_loop_detailed
       agent
   in
   run_with_execution_scope ~sw ?execution_store agent run
-;;
-
-let run_loop
-      ~sw
-      ?clock
-      ~api_strategy
-      ?on_yield
-      ?on_resume
-      ?execution_store
-      agent
-      user_blocks
-  =
-  run_loop_detailed
-    ~sw
-    ?clock
-    ~api_strategy
-    ?on_yield
-    ?on_resume
-    ?execution_store
-    agent
-    user_blocks
-  |> project_detailed_error
 ;;
 
 (* Start periodic callback fibers, return a stop function *)

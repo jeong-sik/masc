@@ -219,12 +219,12 @@ type judge_role =
     를 추가로 담는다. [panel_failure]를 literal하게 공유하지 않는 이유: 판(panel) 전용인
     [Invalid_max_output_tokens]가 심판에서 dead variant가 되기 때문이다.
 
-    근원에서 typed로 propagate한다: [Fusion_judge.run] 계열이 {!Agent_sdk.Error}의
+    근원에서 typed로 propagate한다: [Fusion_judge.run] 계열이 {!Masc_agent_core.Error}의
     [Timeout] variant를 match에서 잡아 [Timeout]으로, provider/transport 에러를
     [Provider_error]로 반환한다. 호출자는 [string]을 역분류하지 않고 exhaustive match로
     분류한다. *)
 type judge_failure =
-  | Timeout  (** 구조적 타임아웃 — Agent_sdk.Error.Api (Retry.Timeout _)에서 propagate *)
+  | Timeout  (** 구조적 타임아웃 — Masc_agent_core.Error.Api (Retry.Timeout _)에서 propagate *)
   | Provider_error of string  (** provider/transport 에러, to_string 보존 *)
   | Empty_response of string  (** 모델이 빈 응답 *)
   | Empty_result  (** Async_agent.all 이 빈 결과를 반환 *)

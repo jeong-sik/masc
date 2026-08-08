@@ -9,7 +9,7 @@
     adversarial review — to break that direction. *)
 
 module Demotion = Masc.Keeper_model_input_demotion
-module Types = Agent_sdk.Types
+module Types = Masc_agent_core.Types
 module Window = Runtime_model_input_tail_window
 
 (* The production encoder, not a test-local one: the bound is only meaningful

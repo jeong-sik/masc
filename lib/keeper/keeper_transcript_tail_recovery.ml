@@ -53,11 +53,11 @@ let recover_keeper config name =
     (match Store.load_oas_with_ref ~session_dir ~session_id with
      | Error error -> Checkpoint_unavailable error
      | Ok (checkpoint, expected_source_ref) ->
-       (match Unit_.close_open_tail checkpoint.Agent_sdk.Checkpoint.messages with
+       (match Unit_.close_open_tail checkpoint.Masc_agent_core.Checkpoint.messages with
         | Error structural -> Unparseable structural
         | Ok { Unit_.closed_tool_use_ids = []; _ } -> Already_dispatchable
         | Ok { Unit_.messages; closed_tool_use_ids } ->
-          let candidate = { checkpoint with Agent_sdk.Checkpoint.messages } in
+          let candidate = { checkpoint with Masc_agent_core.Checkpoint.messages } in
           (match Store.save_oas_if_source ~session_dir ~expected_source_ref candidate with
            | Store.Installed _ -> Closed { tool_use_ids = closed_tool_use_ids }
            | Store.Not_installed { cause; _ } -> Commit_rejected cause)))

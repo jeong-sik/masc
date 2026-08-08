@@ -35,7 +35,7 @@ let alias_counter_for ~keeper ~alias ~source =
     ()
 ;;
 
-let make_zero_usage : Agent_sdk.Types.api_usage =
+let make_zero_usage : Masc_agent_core.Types.api_usage =
   { input_tokens = 0
   ; output_tokens = 0
   ; cache_creation_input_tokens = 0
@@ -44,7 +44,7 @@ let make_zero_usage : Agent_sdk.Types.api_usage =
   }
 ;;
 
-let make_response ?(model = "") ?telemetry () : Agent_sdk.Types.api_response =
+let make_response ?(model = "") ?telemetry () : Masc_agent_core.Types.api_response =
   { id = "msg-test-10083"
   ; model
   ; stop_reason = EndTurn
@@ -54,7 +54,7 @@ let make_response ?(model = "") ?telemetry () : Agent_sdk.Types.api_response =
   }
 ;;
 
-let make_telemetry ?canonical_model_id () : Agent_sdk.Types.inference_telemetry =
+let make_telemetry ?canonical_model_id () : Masc_agent_core.Types.inference_telemetry =
   { system_fingerprint = None
   ; timings = None
   ; reasoning_tokens = None

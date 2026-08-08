@@ -1,6 +1,6 @@
 (** Error_domain tests — roundtrip conversion and retryability. *)
 
-open Agent_sdk
+open Masc_agent_core
 module Http_client = Llm_provider.Http_client
 module Retry = Llm_provider.Retry
 

@@ -1,7 +1,7 @@
 (** Roundtrip tests for Runtime ppx-generated yojson/show functions.
     Targets the ~270 uncovered points in runtime.ml from ppx codegen. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let roundtrip
       (type a)
@@ -176,8 +176,8 @@ let test_init_request () =
 
 let test_init_response () =
   let v : Runtime.init_response =
-    { sdk_name = "oas"
-    ; sdk_version = Agent_sdk.Sdk_version.version
+    { core_name = "masc.agent_core"
+    ; core_version = Masc_agent_core.Core_version.version
     ; runtime_version = "1.0"
     ; protocol_version = "1"
     ; capabilities = [ "streaming"; "tools" ]

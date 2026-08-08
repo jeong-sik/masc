@@ -5,7 +5,7 @@ open Server_routes_http
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 module Config_root_bootstrap = Server_runtime_config_root_bootstrap
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Masc_agent_core.Exact_output
 
 let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
@@ -844,9 +844,9 @@ let initialize_owner_state_blocking
       | Fd_accountant.Storage_space_exhausted ->
         Keeper_disk_pressure.note_exception ~site exn);
   Log.Server.info "Fd_accountant OS resource observers installed";
-  Agent_sdk_log_bridge.install ();
+  Masc_agent_core_log_bridge.install ();
   Log.Server.info
-    "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
+    "Masc_agent_core_log_bridge installed (agent_sdk.Log -> masc structured log)";
   let state =
     create_server_state
       ~sw
@@ -1308,7 +1308,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
   in
   (* Route OAS provider diagnostics into the structured log before any
      provider call runs (#25148). *)
-  Agent_sdk_diag_sink.install ();
+  Masc_agent_core_diag_sink.install ();
   (* 0. Dashboard bundle freshness — a stale bundle silently keeps calling
      routes the current binary already removed (#24332 governance->gate:
      the served SPA still called DELETE'd /api/v1/dashboard/governance for

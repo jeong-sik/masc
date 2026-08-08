@@ -1,4 +1,4 @@
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Masc_agent_core.Exact_output
 
 let ( let* ) = Result.bind
 let lane_id = "board_attention_exact"
@@ -61,7 +61,7 @@ type prepared =
   }
 
 let message role text =
-  Agent_sdk.Types.make_message ~role [ Agent_sdk.Types.Text text ]
+  Masc_agent_core.Types.make_message ~role [ Masc_agent_core.Types.Text text ]
 ;;
 
 let messages candidate =
@@ -73,7 +73,7 @@ let messages candidate =
       Prompt_names.judge_board
       [ "judgment_request_json", Yojson.Safe.to_string request ]
   in
-  Ok [ message Agent_sdk.Types.User prompt ]
+  Ok [ message Masc_agent_core.Types.User prompt ]
 ;;
 
 let flow_candidates selected_slots =

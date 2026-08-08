@@ -84,15 +84,15 @@ let replace_fragments t index snapshot =
    start (not deliverable): the bridge tombstones the former
    (Tool_start_missing_identity, keeper_chat_oas_stream_bridge.ml's
    ContentBlockStart handler) and leaves the latter's index untouched. *)
-let stream_start_is_tool_progress (evt : Agent_sdk.Types.sse_event) =
+let stream_start_is_tool_progress (evt : Masc_agent_core.Types.sse_event) =
   match evt with
-  | Agent_sdk.Types.ContentBlockStart _ ->
-    Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal evt
+  | Masc_agent_core.Types.ContentBlockStart _ ->
+    Masc_agent_core.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal evt
   | _ -> false
 
-let stream_start_has_tool_identity (evt : Agent_sdk.Types.sse_event) =
+let stream_start_has_tool_identity (evt : Masc_agent_core.Types.sse_event) =
   match evt with
-  | Agent_sdk.Types.ContentBlockStart { tool_id; tool_name; _ } -> (
+  | Masc_agent_core.Types.ContentBlockStart { tool_id; tool_name; _ } -> (
     match tool_id, tool_name with
     | Some tid, Some tname
       when String.trim tid <> "" && String.trim tname <> "" -> true
@@ -102,9 +102,9 @@ let stream_start_has_tool_identity (evt : Agent_sdk.Types.sse_event) =
 let stream_start_is_tool evt =
   stream_start_is_tool_progress evt && stream_start_has_tool_identity evt
 
-let on_event t (evt : Agent_sdk.Types.sse_event) =
+let on_event t (evt : Masc_agent_core.Types.sse_event) =
   match evt with
-  | Agent_sdk.Types.ContentBlockStart { index; tool_id; tool_name; _ } ->
+  | Masc_agent_core.Types.ContentBlockStart { index; tool_id; tool_name; _ } ->
     if List.mem index t.invalid_indices
     then ()
     else if stream_start_is_tool evt then (
@@ -163,13 +163,13 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
          (* The live bridge tombstones a non-tool block carrying tool identity
             until its stop, so it cannot be reopened as a valid tool block. *)
          invalidate_index t index)
-  | Agent_sdk.Types.ContentBlockDelta
-      { index; delta = Agent_sdk.Types.InputJsonDelta fragment } ->
+  | Masc_agent_core.Types.ContentBlockDelta
+      { index; delta = Masc_agent_core.Types.InputJsonDelta fragment } ->
     append_fragment t index fragment
-  | Agent_sdk.Types.ContentBlockDelta
-      { index; delta = Agent_sdk.Types.InputJsonSnapshot snapshot } ->
+  | Masc_agent_core.Types.ContentBlockDelta
+      { index; delta = Masc_agent_core.Types.InputJsonSnapshot snapshot } ->
     replace_fragments t index snapshot
-  | Agent_sdk.Types.ContentBlockDelta { index; delta = Agent_sdk.Types.MediaDelta _ } ->
+  | Masc_agent_core.Types.ContentBlockDelta { index; delta = Masc_agent_core.Types.MediaDelta _ } ->
     (* The SSE bridge opens an [Active_media] block straight from a bare
        [MediaDelta] — no [ContentBlockStart] announces it — and then rejects a
        tool start at that index as a protocol error without emitting
@@ -182,11 +182,11 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
     (match block_for_index t index with
      | Some _ -> ()
      | None -> invalidate_index t index)
-  | Agent_sdk.Types.ContentBlockStop { index } ->
+  | Masc_agent_core.Types.ContentBlockStop { index } ->
     if List.mem index t.invalid_indices
     then clear_invalid_index t index
     else finalize_block t index
-  | Agent_sdk.Types.MessageStop ->
+  | Masc_agent_core.Types.MessageStop ->
     List.iter (fun (index, _) -> finalize_block t index) t.blocks;
     t.invalid_indices <- []
   | _ -> ()

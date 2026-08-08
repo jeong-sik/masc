@@ -155,7 +155,7 @@ let record_pre_compact
 ;;
 
 type requested_compaction =
-  { messages : Agent_sdk.Types.message list
+  { messages : Masc_agent_core.Types.message list
   ; exact_execution_evidence :
       Keeper_compaction_llm_summarizer.exact_execution_evidence
   ; summarized_message_count : int
@@ -186,23 +186,23 @@ let tool_block_counts messages =
   let rec count_blocks (uses, results) blocks =
     List.fold_left
       (fun (uses, results) -> function
-         | Agent_sdk.Types.ToolUse _ -> uses + 1, results
-         | Agent_sdk.Types.ToolResult { content_blocks; _ } ->
+         | Masc_agent_core.Types.ToolUse _ -> uses + 1, results
+         | Masc_agent_core.Types.ToolResult { content_blocks; _ } ->
            let counts = uses, results + 1 in
            Option.fold ~none:counts ~some:(count_blocks counts) content_blocks
-         | Agent_sdk.Types.Text _
-         | Agent_sdk.Types.Thinking _
-         | Agent_sdk.Types.ReasoningDetails _
-         | Agent_sdk.Types.RedactedThinking _
-         | Agent_sdk.Types.Image _
-         | Agent_sdk.Types.Document _
-         | Agent_sdk.Types.Audio _ ->
+         | Masc_agent_core.Types.Text _
+         | Masc_agent_core.Types.Thinking _
+         | Masc_agent_core.Types.ReasoningDetails _
+         | Masc_agent_core.Types.RedactedThinking _
+         | Masc_agent_core.Types.Image _
+         | Masc_agent_core.Types.Document _
+         | Masc_agent_core.Types.Audio _ ->
            uses, results)
       (uses, results)
       blocks
   in
   List.fold_left
-    (fun counts (message : Agent_sdk.Types.message) ->
+    (fun counts (message : Masc_agent_core.Types.message) ->
        count_blocks counts message.content)
     (0, 0)
     messages

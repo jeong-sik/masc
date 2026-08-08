@@ -27,7 +27,7 @@ type measurement_receipt_phase =
 
 (** Provider-neutral, exact structured-output Single Surface.
 
-    The canonical downstream path is [Agent_sdk.Exact_output]. The
+    The canonical downstream path is [Masc_agent_core.Exact_output]. The
     [Llm_provider.Exact_output] path is the same packaged module, not a second
     contract or entrypoint.
 

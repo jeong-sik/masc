@@ -92,7 +92,7 @@ val sample_of_response :
   ?serialization_ms:float ->
   ?retry_count:int ->
   status:status ->
-  Agent_sdk.Types.api_response ->
+  Masc_agent_core.Types.api_response ->
   sample
 (** [sample_of_response ~provider_id ~model_id ?total_duration_ms
     ?serialization_ms response] projects an OAS [api_response] into the
@@ -127,7 +127,7 @@ val record_response :
   ?serialization_ms:float ->
   ?retry_count:int ->
   status:status ->
-  Agent_sdk.Types.api_response ->
+  Masc_agent_core.Types.api_response ->
   unit
 (** Convert an OAS response with {!sample_of_response}, then {!record} it. *)
 

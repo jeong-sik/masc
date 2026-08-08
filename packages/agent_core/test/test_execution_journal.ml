@@ -1,6 +1,6 @@
 open Alcotest
-open Agent_sdk
-module Internal = Agent_sdk__
+open Masc_agent_core
+module Internal = Masc_agent_core__
 module Event = Internal.Execution_event
 module Journal = Internal.Execution_journal
 

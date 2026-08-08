@@ -87,12 +87,12 @@ val redact_inference_telemetry_json : Yojson.Safe.t -> Yojson.Safe.t
     preserving non-identifying runtime counters and timings. *)
 
 val inference_telemetry_to_runtime_json :
-  Agent_sdk.Types.inference_telemetry -> Yojson.Safe.t
+  Masc_agent_core.Types.inference_telemetry -> Yojson.Safe.t
 (** JSON projection for keeper-facing persistence/API surfaces.  Concrete
     provider/model identity is collapsed before leaving the OAS boundary. *)
 
 val context_max_of_telemetry :
-  Agent_sdk.Types.inference_telemetry option -> int
+  Masc_agent_core.Types.inference_telemetry option -> int
 (** Provider-reported context window max, or [0] when telemetry omits it. *)
 
 type thinking_log_summary =
@@ -107,7 +107,7 @@ type thinking_log_summary =
     in this summary. *)
 
 val summarize_thinking_blocks :
-  Agent_sdk.Types.content_block list -> thinking_log_summary
+  Masc_agent_core.Types.content_block list -> thinking_log_summary
 (** Summarize thinking block presence for logs/metrics without exposing raw
     thinking content. *)
 
@@ -129,7 +129,7 @@ val tool_execution_summary :
   model:string -> success:bool -> duration_ms:float -> tool_execution_summary
 (** Build a [tool_execution_summary] from raw turn fields. *)
 
-val usage_has_tokens : Agent_sdk.Types.api_usage -> bool
+val usage_has_tokens : Masc_agent_core.Types.api_usage -> bool
 (** [true] when the usage record carries a non-zero token count. *)
 
 (** [true] when the tool writes to the shared MASC board; subject to
@@ -139,21 +139,21 @@ val current_keeper_model : 'a -> string
 (** Neutral runtime lane used for keeper-facing tool-call telemetry.
     Concrete provider/model identity is OAS-owned. *)
 
-val stop_reason_to_label : Agent_sdk.Types.stop_reason -> string
+val stop_reason_to_label : Masc_agent_core.Types.stop_reason -> string
 (** Canonical telemetry/metric label for an OAS stop reason.  Delegates to
     OAS so [keeper_hooks_oas] finish-reason fields and response metrics share
     the provider/model stop-reason SSOT. *)
 
-val zero_usage : Agent_sdk.Types.api_usage
+val zero_usage : Masc_agent_core.Types.api_usage
 (** Internal: zero-token api_usage marker used by classify_usage_trust
     when telemetry is missing. *)
 
 val telemetry_has_canonical_model_id :
-  Agent_sdk.Types.inference_telemetry option -> bool
+  Masc_agent_core.Types.inference_telemetry option -> bool
 (** Internal: true when telemetry carries a non-empty canonical_model_id. *)
 
 val canonical_model_id_of_telemetry :
-  Agent_sdk.Types.inference_telemetry option -> string option
+  Masc_agent_core.Types.inference_telemetry option -> string option
 (** Internal: returns the canonical model id when telemetry carries a
     non-empty one, [None] otherwise. *)
 
@@ -167,5 +167,5 @@ val cost_source_unmetered_provider : string
 val cost_source_computed : string
 (** Internal: cost-source labels used by classify_cost_usd_source. *)
 
-val oas_reported_cost : Agent_sdk.Types.api_usage -> float
+val oas_reported_cost : Masc_agent_core.Types.api_usage -> float
 (** Internal: preserve a reported cost verbatim; missing uses [0.0]. *)

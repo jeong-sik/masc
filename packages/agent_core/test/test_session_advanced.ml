@@ -6,7 +6,7 @@
     - JSON edge cases *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Session metadata ────────────────────────────────── *)
 

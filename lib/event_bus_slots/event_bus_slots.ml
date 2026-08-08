@@ -1,5 +1,5 @@
 (** Event_bus_slots — process-wide holders for the two
-    [Agent_sdk.Event_bus.t] instances masc keeps at server bootstrap.
+    [Masc_agent_core.Event_bus.t] instances masc keeps at server bootstrap.
 
     masc uses two distinct buses with deliberately different storage
     policies; both live here so the holder story is in one place and
@@ -25,7 +25,7 @@
     ([Eio.Switch.t], [Eio.Net.t], clocks); those remain per-domain via
     {!Masc_eio_env}.
 
-    Both slots hold the same type, [Agent_sdk.Event_bus.t] — we re-use
+    Both slots hold the same type, [Masc_agent_core.Event_bus.t] — we re-use
     the library rather than re-inventing the transport.  Different
     instances, different subscribers, different lifecycles.
 
@@ -35,16 +35,16 @@
 (* masc slot — process-wide Atomic policy.  Do not merge this storage
    with the keeper slot: the DLS-vs-Atomic difference is semantic, not
    stylistic. *)
-let masc_bus_ref : Agent_sdk.Event_bus.t option Atomic.t = Atomic.make None
+let masc_bus_ref : Masc_agent_core.Event_bus.t option Atomic.t = Atomic.make None
 
 let set_masc bus = Atomic.set masc_bus_ref (Some bus)
 let get_masc () = Atomic.get masc_bus_ref
 
 (* keeper slot — domain-local preference with process fallback. *)
-let keeper_bus_key : Agent_sdk.Event_bus.t option Domain.DLS.key =
+let keeper_bus_key : Masc_agent_core.Event_bus.t option Domain.DLS.key =
   Domain.DLS.new_key (fun () -> None)
 
-let keeper_process_bus : Agent_sdk.Event_bus.t option Atomic.t =
+let keeper_process_bus : Masc_agent_core.Event_bus.t option Atomic.t =
   Atomic.make None
 
 let set_keeper bus =

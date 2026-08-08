@@ -1,6 +1,6 @@
 (** Test Types parsing, especially Unknown stop_reason variant. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let test_known_stop_reasons () =
   Alcotest.(check string)
@@ -418,7 +418,7 @@ let test_tool_param_manual_json_helpers () =
      Alcotest.(check bool)
        "mentions param_type"
        true
-       (Agent_sdk.Util.contains_substring_ci ~haystack:msg ~needle:"param_type")
+       (Masc_agent_core.Util.contains_substring_ci ~haystack:msg ~needle:"param_type")
    | Ok _ -> Alcotest.fail "expected bad param type");
   let tool_schema =
     Types.tool_schema_of_params ~name:"search" ~description:"Search" ~parameters:params ()
@@ -475,7 +475,7 @@ let test_tool_schema_manual_json_rejects_bad_param () =
     Alcotest.(check bool)
       "propagates bad param"
       true
-      (Agent_sdk.Util.contains_substring_ci ~haystack:msg ~needle:"not-a-type")
+      (Masc_agent_core.Util.contains_substring_ci ~haystack:msg ~needle:"not-a-type")
   | Ok _ -> Alcotest.fail "expected tool_schema_of_json error"
 ;;
 

@@ -1,11 +1,11 @@
-(** OCaml Agent SDK
+(** OCaml MASC agent core
 
     A type-safe, Eio-based single-provider agent runtime.
 
     Example usage (the same provider wiring is compiled by
     [examples/basic_agent.ml]):
     {[
-      open Agent_sdk
+      open Masc_agent_core
 
       let weather_tool = Tool.create
         ~name:"get_weather"
@@ -47,18 +47,18 @@
 *)
 
 (** Re-export all modules (dependency-safe order) *)
-module Sdk_version = Sdk_version
+module Core_version = Core_version
 
 (** Wrapped namespaces for the underlying libraries. *)
-module Base = Agent_sdk_base
+module Base = Masc_agent_core_base
 
 module Llm_provider = Llm_provider
-module Result_syntax = Agent_sdk_base.Result_syntax
-module Types = Agent_sdk_base.Types
-module Util = Agent_sdk_base.Util
+module Result_syntax = Masc_agent_core_base.Result_syntax
+module Types = Masc_agent_core_base.Types
+module Util = Masc_agent_core_base.Util
 module Fs_result = Fs_result
 module Fs_atomic_eio = Fs_atomic_eio
-module Context = Agent_sdk_base.Context
+module Context = Masc_agent_core_base.Context
 module Provider_runtime_binding = Provider_runtime_binding
 module Exact_output = Llm_provider.Exact_output
 module Binding_identity = Binding_identity
@@ -66,12 +66,12 @@ module Provider_failure_attribution = Provider_failure_attribution
 module Image_generation = Llm_provider.Image_generation
 module Speech_generation = Llm_provider.Speech_generation
 module Retry = Llm_provider.Retry
-module Error = Agent_sdk_base.Error
+module Error = Masc_agent_core_base.Error
 module Error_domain = Error_domain
-module Hooks = Agent_sdk_base.Hooks
+module Hooks = Masc_agent_core_base.Hooks
 module Tracing = Tracing
-module Tool_contract = Agent_sdk_base.Tool_contract
-module Tool = Agent_sdk_base.Tool
+module Tool_contract = Masc_agent_core_base.Tool_contract
+module Tool = Masc_agent_core_base.Tool
 module Typed_tool = Typed_tool
 module Mcp = Mcp
 module Mcp_http = Mcp_http
@@ -127,6 +127,6 @@ module Journal_bridge = Journal_bridge
 (* runtime_query/query removed — CLI Runtime purge *)
 
 (** Version info *)
-let version = Sdk_version.version
+let version = Core_version.version
 
-let sdk_name = Sdk_version.sdk_name
+let core_name = Core_version.core_name

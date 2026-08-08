@@ -2,7 +2,7 @@
     Covers server_spec, managed types, merge_env, connect_all,
     close_all, and Agent integration with MCP clients. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Helpers ───────────────────────────────────────────────────── *)
 

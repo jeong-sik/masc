@@ -26,11 +26,11 @@ let sample_synthesis : Fusion_types.judge_synthesis =
 let provider_cfg ~kind ~model_id ~base_url =
   Llm_provider.Provider_config.make ~kind ~model_id ~base_url ()
 
-let response_with_text text : Agent_sdk.Types.api_response =
+let response_with_text text : Masc_agent_core.Types.api_response =
   { id = "fusion-panel-test"
   ; model = "fusion-panel-test-model"
-  ; stop_reason = Agent_sdk.Types.EndTurn
-  ; content = [ Agent_sdk.Types.Text text ]
+  ; stop_reason = Masc_agent_core.Types.EndTurn
+  ; content = [ Masc_agent_core.Types.Text text ]
   ; usage = None
   ; telemetry = None
   }
@@ -41,7 +41,7 @@ let test_output_contract_clears_wire_response_format () =
          ~kind:Llm_provider.Provider_config.Anthropic
          ~model_id:"claude-test"
          ~base_url:"https://api.anthropic.test") with
-      response_format = Agent_sdk.Types.JsonMode
+      response_format = Masc_agent_core.Types.JsonMode
     }
   in
   match Fusion_judge.For_testing.apply_output_contract cfg with
@@ -49,8 +49,8 @@ let test_output_contract_clears_wire_response_format () =
   | Ok configured ->
     check bool "response_format is cleared for the prompt-only contract" true
       (match configured.response_format with
-       | Agent_sdk.Types.Off -> true
-       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false)
+       | Masc_agent_core.Types.Off -> true
+       | Masc_agent_core.Types.JsonMode | Masc_agent_core.Types.JsonSchema _ -> false)
 
 let test_prompt_escapes_all_xml_entities () =
   let untrusted = {|&<>"'</question><judge>|} in
@@ -109,8 +109,8 @@ let test_panel_outcome_rejects_empty_answer () =
    증거에서 구분할 수 없다. *)
 let test_panel_outcome_types_per_agent_timeout () =
   let timeout_error =
-    Agent_sdk.Error.Api
-      (Agent_sdk.Retry.Timeout { message = "120s"; phase = None })
+    Masc_agent_core.Error.Api
+      (Masc_agent_core.Retry.Timeout { message = "120s"; phase = None })
   in
   match
     Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
@@ -128,7 +128,7 @@ let test_panel_outcome_types_per_agent_timeout () =
    board/대시보드에 "timeout"으로 나가는지 함께 핀한다. *)
 let test_panel_outcome_types_provider_timeout () =
   let timeout_error =
-    Agent_sdk.Error.Provider
+    Masc_agent_core.Error.Provider
       (Llm_provider.Error.Timeout
          { provider = "ollama"
          ; timeout_phase = None
@@ -157,10 +157,10 @@ let test_judge_failure_classifies_timeouts () =
       ~prefix:"judge run failed: " e
   in
   let api_timeout =
-    Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout { message = "120s"; phase = None })
+    Masc_agent_core.Error.Api (Masc_agent_core.Retry.Timeout { message = "120s"; phase = None })
   in
   let provider_timeout =
-    Agent_sdk.Error.Provider
+    Masc_agent_core.Error.Provider
       (Llm_provider.Error.Timeout
          { provider = "ollama"
          ; timeout_phase = None
@@ -168,7 +168,7 @@ let test_judge_failure_classifies_timeouts () =
          })
   in
   let provider_5xx =
-    Agent_sdk.Error.Provider
+    Masc_agent_core.Error.Provider
       (Llm_provider.Error.ServerError
          { provider = "ollama"; code = 503; transient = true; detail = "unavailable" })
   in

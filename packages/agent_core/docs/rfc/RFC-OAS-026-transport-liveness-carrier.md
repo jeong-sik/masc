@@ -208,7 +208,7 @@ With the field set and a clock present, `read_sse`/`read_ndjson` reach the `Some
 
 1. `Eio.Time.Timeout` raised by `with_timeout_exn` (http_client.ml:772).
 2. Caught at `complete_stream_http` (complete.ml:1500) → mapped to `Http_client.TimeoutError { phase; message = "stream_idle_timeout_s deadline exceeded while …" }` (complete.ml:1521-1525). Telemetry `Telemetry_event.Timeout { timeout_type = Stream_idle … }` emitted (complete.ml:1505-1509).
-3. `Http_client.TimeoutError` / `Eio.Time.Timeout` map to `Llm_provider.Error.Timeout` (verified consumer: `masc lib/keeper/keeper_error_classify.ml:185-188`, `Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true`).
+3. `Http_client.TimeoutError` / `Eio.Time.Timeout` map to `Llm_provider.Error.Timeout` (verified consumer: `masc lib/keeper/keeper_error_classify.ml:185-188`, `Masc_agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> true`).
 4. `masc lib/keeper/keeper_unified_turn.ml:624-631`: `if EC.is_provider_timeout_error err then emit_transition … (Cancelled Cancelled_provider_timeout)`.
 
 Every link in this chain already exists and is exercised by the `None` arm today. F1 only routes the `Some t` arm into it. The only timeout armed is the inter-chunk idle detector — I2-legitimate (a progress-based detector on transport silence, not a heuristic turn budget).

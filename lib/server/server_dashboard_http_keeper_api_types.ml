@@ -200,13 +200,13 @@ let truncate_text ~max_chars text =
     String_util.utf8_safe ~max_bytes:max_chars ~suffix:"…" text
     |> String_util.to_string
 
-let latest_preview_of_messages (messages : Agent_sdk.Types.message list) =
+let latest_preview_of_messages (messages : Masc_agent_core.Types.message list) =
   messages
   |> List.rev
-  |> List.find_map (fun (message : Agent_sdk.Types.message) ->
-       if message.role = Agent_sdk.Types.System then None
+  |> List.find_map (fun (message : Masc_agent_core.Types.message) ->
+       if message.role = Masc_agent_core.Types.System then None
        else
-         Agent_sdk.Types.text_of_message message
+         Masc_agent_core.Types.text_of_message message
          |> trim_to_opt
          |> Option.map (truncate_text ~max_chars:180))
 

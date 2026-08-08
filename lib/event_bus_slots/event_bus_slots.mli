@@ -1,5 +1,5 @@
 (** Event_bus_slots — process-wide holders for the two
-    [Agent_sdk.Event_bus.t] instances masc keeps at server bootstrap.
+    [Masc_agent_core.Event_bus.t] instances masc keeps at server bootstrap.
 
     {b masc slot} — MASC-owned bus, separate from the shared OAS
     Event_bus. MASC domain events such as [masc.keeper.lifecycle] are
@@ -20,21 +20,21 @@
 
 (** {1 masc slot — MASC-owned bus, process-wide [Atomic.t]} *)
 
-val set_masc : Agent_sdk.Event_bus.t -> unit
+val set_masc : Masc_agent_core.Event_bus.t -> unit
 (** Install the MASC Event_bus instance.  Called once at server
     bootstrap. *)
 
-val get_masc : unit -> Agent_sdk.Event_bus.t option
+val get_masc : unit -> Masc_agent_core.Event_bus.t option
 (** [get_masc ()] returns the installed MASC Event_bus, or [None]
     before bootstrap (e.g. in unit tests that skip server bringup). *)
 
 (** {1 keeper slot — shared OAS bus, [Domain.DLS] + process fallback} *)
 
-val set_keeper : Agent_sdk.Event_bus.t -> unit
+val set_keeper : Masc_agent_core.Event_bus.t -> unit
 (** Install the event bus for the current domain and process fallback.
     Call once at bootstrap; re-install in a domain that owns a separate
     bus. *)
 
-val get_keeper : unit -> Agent_sdk.Event_bus.t option
+val get_keeper : unit -> Masc_agent_core.Event_bus.t option
 (** Read the installed event bus for the current domain, falling back
     to the process-level bus when the domain has no override. *)

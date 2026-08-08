@@ -17,7 +17,7 @@
     Usage:
       dune exec examples/tool_use.exe *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (** A pure tool whose implementation explicitly permits overlapping calls. *)

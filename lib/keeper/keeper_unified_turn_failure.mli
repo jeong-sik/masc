@@ -25,7 +25,7 @@ val note_turn_success : string -> unit
 val account_failure_counting
   :  keeper_name:string
   -> is_auto_recoverable:bool
-  -> Agent_sdk.Error.sdk_error
+  -> Masc_agent_core.Error.sdk_error
   -> bool
 (** Compute whether this failure observation advances the crash counter,
     consuming empty-completion exemption budget or invalid-request budget
@@ -36,7 +36,7 @@ val record_failure_observation
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> counts_toward_crash:bool
-  -> err:Agent_sdk.Error.sdk_error
+  -> err:Masc_agent_core.Error.sdk_error
   -> error_text:string
   -> unit
 (** Record explicit failure evidence without rewriting Keeper lifecycle or

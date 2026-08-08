@@ -83,7 +83,7 @@ emit_rule_matches() {
 current_entries() {
   local keeper_pattern oas_provider_pattern workspace_task_pattern db_pattern
   keeper_pattern='\b(Keeper_[A-Za-z0-9_]+|Agent_tool_descriptor|Agent_tool_descriptor_resolution|Agent_tool_dispatch_runtime|Keeper_tool_alias|Keeper_types_profile|Task_keeper_backend)\b'
-  oas_provider_pattern='\b(Agent_sdk|Provider_runtime_binding|Provider_kind_resolver|Provider_adapter|Masc_oas_bridge)\b|\bOas\.'
+  oas_provider_pattern='\b(Masc_agent_core|Provider_runtime_binding|Provider_kind_resolver|Provider_adapter|Masc_oas_bridge)\b|\bOas\.'
   workspace_task_pattern='\b(Workspace_query|Masc_domain\.task)\b'
   db_pattern='(?i)\b(qdrant|pgvector|postgres|postgresql|supabase|sqlite|database)\b'
 

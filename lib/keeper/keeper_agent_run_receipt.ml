@@ -67,7 +67,7 @@ let finalize
    | Error err ->
      let status, exception_kind =
        match err with
-       | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
+       | Masc_agent_core.Error.Api (Llm_provider.Retry.Timeout _) ->
          "timeout", Some "outer_oas_timeout"
        | _ -> "error", Some "outer_oas_error"
      in
@@ -77,7 +77,7 @@ let finalize
          config
          runtime_manifest_context
          ~status
-         ~error:(Agent_sdk.Error.to_string err)
+         ~error:(Masc_agent_core.Error.to_string err)
          ?exception_kind
          ());
   let receipt_ended_at = Masc_domain.now_iso () in
@@ -86,7 +86,7 @@ let finalize
     | Ok _ -> None, None
     | Error err ->
       ( Some (Keeper_agent_error.sdk_error_kind_for_receipt err)
-      , Some (Agent_sdk.Error.to_string err) )
+      , Some (Masc_agent_core.Error.to_string err) )
   in
   let completion_contract_result
       : Keeper_execution_receipt.completion_contract_result =

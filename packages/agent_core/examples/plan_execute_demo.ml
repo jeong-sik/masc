@@ -11,7 +11,7 @@
     Usage:
       dune exec examples/plan_execute_demo.exe *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Helper: execute a plan step by step ──────────── *)
 

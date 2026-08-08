@@ -28,7 +28,7 @@ type publication_error =
       { lane_id : string
       ; position : int
       ; slot_id : string
-      ; cause : Agent_sdk.Exact_output.target_ref_error
+      ; cause : Masc_agent_core.Exact_output.target_ref_error
       }
   | Unknown_lane_slot of
       { lane_id : string
@@ -45,7 +45,7 @@ type ('not_committed, 'committed) replacement_effect =
 
 type selected_slot =
   { slot_id : string
-  ; admitted_target : Agent_sdk.Exact_output.admitted_target
+  ; admitted_target : Masc_agent_core.Exact_output.admitted_target
   }
 
 type resolved_lane =
@@ -57,7 +57,7 @@ type lane_resolution_error =
 
 val publish
   :  lanes:Runtime_schema.exact_output_lane_decl list
-  -> Agent_sdk.Exact_output.resolver_snapshot
+  -> Masc_agent_core.Exact_output.resolver_snapshot
   -> (t, publication_error) result
 (** Validate and atomically publish one complete resolver-and-lane registry.
     Each successful publication advances the MASC-local generation

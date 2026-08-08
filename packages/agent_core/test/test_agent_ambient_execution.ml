@@ -1,6 +1,6 @@
-open Agent_sdk
+open Masc_agent_core
 open Alcotest
-module Internal = Agent_sdk__
+module Internal = Masc_agent_core__
 module Context = Internal.Execution_context
 module Scope = Internal.Execution_agent_scope
 

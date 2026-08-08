@@ -2,7 +2,7 @@
 
 open Keeper_hooks_oas_types
 
-module Response_shape = Agent_sdk.Response_shape
+module Response_shape = Masc_agent_core.Response_shape
 
 (* #9919: counter for post_tool_use_failure events.
 
@@ -41,7 +41,7 @@ let empty_response_content_metric =
 (* #10083: keep the missing/alias observability, but return the keeper-facing
    runtime lane instead of reconstructing OAS-owned model identity. *)
 let resolve_after_turn_model ~keeper_name
-    ~(response : Agent_sdk.Types.api_response) =
+    ~(response : Masc_agent_core.Types.api_response) =
   let raw_model = String.trim response.model in
   if String.equal raw_model "" then begin
     let source =
@@ -81,7 +81,7 @@ let resolve_after_turn_model ~keeper_name
    Keeper_hooks_oas_types] above brings stop_reason_to_label into scope. *)
 
 let record_response_content_quality_metric ~keeper_name
-    (response : Agent_sdk.Types.api_response) =
+    (response : Masc_agent_core.Types.api_response) =
   let shape = Response_shape.summarize response in
   if not (Response_shape.has_deliverable_content shape) then
     let content_shape = Response_shape.content_shape response shape in
@@ -187,9 +187,9 @@ let record_keeper_tool_duration_metric
     mixes prefill and decode phases.
 
     Extracted so the after_turn hook is unit-testable without
-    constructing a full [Agent_sdk.Hooks.AfterTurn] event. *)
+    constructing a full [Masc_agent_core.Hooks.AfterTurn] event. *)
 let record_llm_tok_s_metrics
-    ~(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ~(telemetry : Masc_agent_core.Types.inference_telemetry option)
   : unit =
   let prompt_tok_s_opt, decode_tok_s_opt =
     match telemetry with
@@ -221,7 +221,7 @@ let record_llm_tok_s_metrics
     zero-latency counter remains the alertable signal; the histogram receives
     a 1ms floor to avoid "hook ran but latency count stayed zero" dashboards. *)
 let record_llm_inference_latency_metric
-    ~(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ~(telemetry : Masc_agent_core.Types.inference_telemetry option)
   : unit =
   let labels = [("model", runtime_lane_label)] in
   Otel_metric_store.inc_counter Otel_metric_store.metric_after_turn_hook ~labels ();
@@ -248,7 +248,7 @@ let record_llm_inference_latency_metric
 let wall_tokens_per_second
     ~(usage_missing : bool)
     ~(output_tokens : int)
-    ~(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ~(telemetry : Masc_agent_core.Types.inference_telemetry option)
   : float option =
   match telemetry with
   | Some t when not usage_missing && output_tokens > 0 -> (

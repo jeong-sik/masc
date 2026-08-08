@@ -9,7 +9,7 @@
 
     Pattern: test_integration.ml (Anthropic Messages API mock) *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (* ── Mock HTTP helpers ───────────────────────────────── *)

@@ -1,6 +1,6 @@
 (** Standalone LLM completion: build request, send via transport, parse response.
 
-    Self-contained in llm_provider -- no agent_sdk dependency.
+    Self-contained in llm_provider -- no masc.agent_core dependency.
     Consumers can call these functions directly.
 
     @since 0.46.0  Sync completion

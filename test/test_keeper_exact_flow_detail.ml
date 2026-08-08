@@ -1,7 +1,7 @@
 (** Unit tests for the shared exact-output flow error rendering. *)
 
 module Detail = Masc.Keeper_exact_flow_detail
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Masc_agent_core.Exact_output
 
 let test_execution_cause_detail () =
   Alcotest.(check string)

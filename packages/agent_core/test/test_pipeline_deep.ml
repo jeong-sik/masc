@@ -8,7 +8,7 @@
     - Error_domain.tag_error pattern (coordinator)
     - Pipeline.run_turn via mock HTTP (Stages 1-6) *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let invocation tool_use_id =
   let schedule : Tool_contract.schedule =

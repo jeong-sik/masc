@@ -3,7 +3,7 @@
 
     OAS's provider-specific serialization observer measures admitted requests;
     a refused request instead carries the same exact size in
-    [Agent_sdk.Retry.Request_body_too_large.actual_bytes]. Nothing MASC already
+    [Masc_agent_core.Retry.Request_body_too_large.actual_bytes]. Nothing MASC already
     computes substitutes:
     [Keeper_context_core_accessors.serialize_context] covers
     [{system_prompt, messages}] and excludes tool schemas and every
@@ -39,7 +39,7 @@ val observer :
   keeper_name:string ->
   runtime_id:string ->
   max_request_body_bytes:int ->
-  Agent_sdk.Agent.pre_dispatch_serialization_observer
+  Masc_agent_core.Agent.pre_dispatch_serialization_observer
 (** [observer ?on_observation ~keeper_name ~runtime_id
     ~max_request_body_bytes] records [body_bytes] under {!metric}, forwards the
     same exact boundary value to [on_observation], and admits the observation.

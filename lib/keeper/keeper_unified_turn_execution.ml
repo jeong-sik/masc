@@ -52,7 +52,7 @@ let run_provider_dispatch_if_authorized ~before_dispatch_authority dispatch =
   match before_dispatch_authority () with
   | Error reason ->
     Error
-      (Agent_sdk.Error.Internal
+      (Masc_agent_core.Error.Internal
          ("keeper provider dispatch authority rejected: " ^ reason))
   | Ok () -> dispatch ()
 ;;
@@ -64,7 +64,7 @@ type ctx =
   { attempt : int
   ; base_dir : string
   ; build_turn_prompt :
-      base_system_prompt:string -> messages:Agent_sdk.Types.message list ->
+      base_system_prompt:string -> messages:Masc_agent_core.Types.message list ->
       Keeper_agent_run.turn_prompt
   ; channel : Keeper_world_observation.keeper_cycle_channel
   ; continuation_delivery_channel : Keeper_continuation_channel.t option
@@ -77,8 +77,8 @@ type ctx =
   ; cleanup : unit -> unit
   ; config : Workspace.config
   ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_runtime_budget.turn_event_bus_summary
-  ; event_bus : Agent_sdk.Event_bus.t option
-  ; event_bus_integrity_error_snapshot : unit -> Agent_sdk.Error.sdk_error option
+  ; event_bus : Masc_agent_core.Event_bus.t option
+  ; event_bus_integrity_error_snapshot : unit -> Masc_agent_core.Error.sdk_error option
   ; tool_completed_count_snapshot : unit -> int
   ; generation : int
   ; keeper_turn_id : int
@@ -88,7 +88,7 @@ type ctx =
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
   ; publication_recovery :
       Keeper_publication_recovery_availability.turn_context
-  ; shared_context : Agent_sdk.Context.t option
+  ; shared_context : Masc_agent_core.Context.t option
   ; trajectory_acc : Trajectory.accumulator
   ; turn_id : int
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
@@ -107,7 +107,7 @@ let run (ctx : ctx)
       ~(record_streaming_cancelled_observation : config:Workspace.config -> run_meta:keeper_meta -> run_generation:int -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
       ~(runtime_id_of_meta : keeper_meta -> string)
       ~(start_background_turn_event_bus_drain : clock:float Eio.Time.clock_ty Eio.Resource.t -> unit)
-  : (Keeper_agent_run.run_result, Agent_sdk.Error.sdk_error) result * turn_state
+  : (Keeper_agent_run.run_result, Masc_agent_core.Error.sdk_error) result * turn_state
 =
   let { config
       ; meta
@@ -137,7 +137,7 @@ let run (ctx : ctx)
     ctx
   in
   (match Eio_context.get_clock () with
-   | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
+   | Error msg -> Error (Masc_agent_core.Error.Internal msg), turn_state
    | Ok clock ->
    (* Same-run retry authority comes from OAS's typed checkpoint boundary.
       OAS invokes the sink only after mutating the agent state at a declared
@@ -288,8 +288,8 @@ let run (ctx : ctx)
           "[input_required] keeper=%s agent paused: request_id=%s \
            question=%s"
           meta.name
-          ir.Agent_sdk.Error.request_id
-          (let q = ir.Agent_sdk.Error.question in
+          ir.Masc_agent_core.Error.request_id
+          (let q = ir.Masc_agent_core.Error.question in
            if String.length q > 80
            then String.sub q 0 80 ^ "…"
            else q);
@@ -383,7 +383,7 @@ let run (ctx : ctx)
           ~next_runtime:None
           ~attempt
           ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-          ~error_message:(Some (Agent_sdk.Error.to_string err));
+          ~error_message:(Some (Masc_agent_core.Error.to_string err));
         mark_terminal_error err;
         Error err, turn_state
       | None ->
@@ -397,7 +397,7 @@ let run (ctx : ctx)
             ~next_runtime:None
             ~attempt
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-            ~error_message:(Some (Agent_sdk.Error.to_string err));
+            ~error_message:(Some (Masc_agent_core.Error.to_string err));
           let current_turn_event_bus =
             drain_turn_event_bus ~site:"context_overflow_capture" ()
           in
@@ -414,7 +414,7 @@ let run (ctx : ctx)
                         ^ ": "
                         ^ overflow_evidence_detail
                         ^ ": "
-                        ^ Agent_sdk.Error.to_string err)
+                        ^ Masc_agent_core.Error.to_string err)
                      Sdk_context_window_exceeded)
             }
           in
@@ -431,7 +431,7 @@ let run (ctx : ctx)
             "%s: provider returned typed context overflow after runtime \
              rotation: %s"
             meta.name
-            (short_preview (Agent_sdk.Error.to_string err));
+            (short_preview (Masc_agent_core.Error.to_string err));
           (* Automatic overflow-compaction recovery was removed (#26546)
              after producing no committed compaction. This attempt returns
              its typed provider error and marks it terminal; no recovery is
@@ -447,7 +447,7 @@ let run (ctx : ctx)
             ~next_runtime:None
             ~attempt
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-            ~error_message:(Some (Agent_sdk.Error.to_string err));
+            ~error_message:(Some (Masc_agent_core.Error.to_string err));
           mark_terminal_error err;
           Error err, turn_state)
   in

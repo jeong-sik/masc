@@ -1,7 +1,7 @@
 (** Unit tests for Guardrails_async (v0.67.0). *)
 open Alcotest
 
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Helpers ──────────────────────────────────────── *)
 

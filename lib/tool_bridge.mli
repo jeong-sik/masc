@@ -2,10 +2,10 @@
 (** OAS boundary adapter for tool results, schemas, and tool definitions.
 
     Converts between MASC {!Tool_result.result} and
-    OAS [{!Agent_sdk.Types.tool_result}].
+    OAS [{!Masc_agent_core.Types.tool_result}].
 
-    Also converts MASC JSON schemas to OAS [{!Agent_sdk.Types.tool_param}] lists,
-    and creates OAS [{!Agent_sdk.Tool.t}] from MASC handler functions.
+    Also converts MASC JSON schemas to OAS [{!Masc_agent_core.Types.tool_param}] lists,
+    and creates OAS [{!Masc_agent_core.Tool.t}] from MASC handler functions.
 
     @since 2.95.1 — result conversion
     @since 2.110.0 — schema conversion + OAS Tool.t creation *)
@@ -55,7 +55,7 @@ val to_oas_typed_result :
   ?on_externalization_error:(externalization_error -> unit) ->
   ?externalization_error_recoverable:bool ->
   Tool_result.result ->
-  Agent_sdk.Types.tool_result
+  Masc_agent_core.Types.tool_result
 (** Convert a {!Tool_result.result} to OAS [tool_result].  [Completed] and
     [Deferred] project one-way to OAS [Ok]; [Deferred] carries an opaque MASC
     disposition marker in [_meta].  The adapter never parses that metadata
@@ -67,7 +67,7 @@ val to_oas_typed_result :
 
 (** {1 Schema Conversion} *)
 
-val params_of_json_schema : Yojson.Safe.t -> Agent_sdk.Types.tool_param list
+val params_of_json_schema : Yojson.Safe.t -> Masc_agent_core.Types.tool_param list
 (** Convert a MASC [input_schema] with the OAS schema-conversion SSOT.
     Raises [Invalid_argument] when a property type is missing, unsupported, or
     ambiguous; no local default or union-member selection is applied. *)
@@ -75,7 +75,7 @@ val params_of_json_schema : Yojson.Safe.t -> Agent_sdk.Types.tool_param list
 (** {1 OAS Tool.t Creation} *)
 
 val oas_tool_of_masc :
-  ?descriptor:Agent_sdk.Tool.descriptor ->
+  ?descriptor:Masc_agent_core.Tool.descriptor ->
   ?base_path:string ->
   ?model_projection:Tool_output.model_projection ->
   ?on_externalization_error:(externalization_error -> unit) ->
@@ -84,7 +84,7 @@ val oas_tool_of_masc :
   description:string ->
   input_schema:Yojson.Safe.t ->
   (Yojson.Safe.t -> Tool_result.result) ->
-  Agent_sdk.Tool.t
+  Masc_agent_core.Tool.t
 (** Create an OAS [Tool.t] from a MASC tool name, description,
     JSON input schema, and typed handler function.
 
@@ -97,7 +97,7 @@ val oas_tool_of_masc :
     sequential default. *)
 
 val oas_tool_of_masc_with_execution_env :
-  ?descriptor:Agent_sdk.Tool.descriptor ->
+  ?descriptor:Masc_agent_core.Tool.descriptor ->
   ?base_path:string ->
   ?model_projection:Tool_output.model_projection ->
   ?on_externalization_error:(externalization_error -> unit) ->
@@ -105,8 +105,8 @@ val oas_tool_of_masc_with_execution_env :
   name:string ->
   description:string ->
   input_schema:Yojson.Safe.t ->
-  (Agent_sdk.Tool.Execution_env.t -> Yojson.Safe.t -> Tool_result.result) ->
-  Agent_sdk.Tool.t
+  (Masc_agent_core.Tool.Execution_env.t -> Yojson.Safe.t -> Tool_result.result) ->
+  Masc_agent_core.Tool.t
 (** Create an OAS [Tool.t] whose handler also receives the exact OAS execution
     environment. This is for correlation and observability; callers must not
     treat invocation metadata as authorization. *)

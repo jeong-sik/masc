@@ -405,7 +405,7 @@ let install () =
       (match !protocol_error_ref with
        | Some detail ->
          Error
-           (Agent_sdk.Error.Internal
+           (Masc_agent_core.Error.Internal
               ("task completion verdict protocol violation: " ^ detail))
        | None -> Ok !verdict_ref)
     | Error err ->

@@ -10,7 +10,7 @@
     directory-size caps. *)
 
 type persist_error =
-  | Unsupported_source_type of Agent_sdk.Types.media_source_kind
+  | Unsupported_source_type of Masc_agent_core.Types.media_source_kind
   | Invalid_base64 of string
   | Media_too_large of { size_bytes : int; max_bytes : int }
   | Write_failed of string
@@ -76,6 +76,6 @@ val persist_error_to_string : persist_error -> string
 val persist_media_source_result :
   base_dir:string ->
   media_type:string ->
-  source_type:Agent_sdk.Types.media_source_kind ->
+  source_type:Masc_agent_core.Types.media_source_kind ->
   data:string ->
   (string * string, persist_error) result

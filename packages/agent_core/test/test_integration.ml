@@ -1,4 +1,4 @@
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (** Mock Server Logic — Openai Chat Completions format *)

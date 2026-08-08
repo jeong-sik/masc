@@ -3,9 +3,9 @@ type complete_fn =
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
+  messages:Masc_agent_core.Types.message list ->
   unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
+  (Masc_agent_core.Types.api_response, Llm_provider.Http_client.http_error) result
 
 let complete ?override ~sw ~net ?clock ~config ~messages () =
   match override with

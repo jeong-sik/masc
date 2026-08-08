@@ -116,7 +116,7 @@ external consumers should not depend on directly.
 #### Execution-journal migration boundary
 
 `Execution_event` and `Execution_journal` are private implementation modules.
-They are not re-exported by `Agent_sdk`, are not an external extension point,
+They are not re-exported by `Masc_agent_core`, are not an external extension point,
 and have no supported writer API. Their repository-local regression suite uses
 Dune's internal library alias; that alias is not a supported external API
 contract.

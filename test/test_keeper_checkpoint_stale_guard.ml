@@ -42,19 +42,19 @@ let cleanup_dir dir =
 
 let make_checkpoint ~session_id ~turn_count ~marker =
   let messages = [
-    Agent_sdk.Types.{ role = User; content = [Text "hello"]; name = None;
+    Masc_agent_core.Types.{ role = User; content = [Text "hello"]; name = None;
                       tool_call_id = None; metadata = [] };
-    Agent_sdk.Types.{ role = Assistant; content = [Text marker]; name = None;
+    Masc_agent_core.Types.{ role = Assistant; content = [Text marker]; name = None;
                       tool_call_id = None; metadata = [] };
   ] in
-  Agent_sdk.Checkpoint.{
+  Masc_agent_core.Checkpoint.{
     version = checkpoint_version;
     session_id;
     agent_name = "test-agent";
     model = "test-model";
     system_prompt = None;
     messages;
-    usage = Agent_sdk.Types.empty_usage;
+    usage = Masc_agent_core.Types.empty_usage;
     turn_count;
     created_at = 1000.0;
     tools = [];
@@ -67,18 +67,18 @@ let make_checkpoint ~session_id ~turn_count ~marker =
     reasoning_effort = None;
     enable_thinking = None;
     preserve_thinking = None;
-    response_format = Agent_sdk.Types.Off;
+    response_format = Masc_agent_core.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
 
-    context = Agent_sdk.Context.create_sync ();
+    context = Masc_agent_core.Context.create_sync ();
     mcp_sessions = [];
     working_context = None;
   }
 
-let with_generation generation (checkpoint : Agent_sdk.Checkpoint.t) =
-  let context = Agent_sdk.Context.copy ~eio:false checkpoint.context in
-  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+let with_generation generation (checkpoint : Masc_agent_core.Checkpoint.t) =
+  let context = Masc_agent_core.Context.copy ~eio:false checkpoint.context in
+  Masc_agent_core.Context.set_scoped context Masc_agent_core.Context.Session
     Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
   { checkpoint with context }
 
@@ -101,7 +101,7 @@ let test_run_context_binds_generation_before_oas_checkpoint () =
     | Ok meta -> meta
     | Error detail -> fail ("meta fixture failed: " ^ detail)
   in
-  let shared_context = Agent_sdk.Context.create () in
+  let shared_context = Masc_agent_core.Context.create () in
   let run_context =
     Keeper_run_context.prepare_run_context
       ~config:(Workspace.default_config base_dir)
@@ -116,15 +116,15 @@ let test_run_context_binds_generation_before_oas_checkpoint () =
   check bool "caller-owned context remains the OAS context" true
     (run_context.shared_context == shared_context);
   let agent =
-    Agent_sdk.Agent.create
+    Masc_agent_core.Agent.create
       ~net:(Eio.Stdenv.net env)
-      ~config:(Agent_sdk.Types.default_config ~model:"test-model")
+      ~config:(Masc_agent_core.Types.default_config ~model:"test-model")
       ~context:run_context.shared_context
       ()
   in
-  let checkpoint = Agent_sdk.Agent.checkpoint agent in
+  let checkpoint = Masc_agent_core.Agent.checkpoint agent in
   match
-    Agent_sdk.Context.get_scoped checkpoint.context Agent_sdk.Context.Session
+    Masc_agent_core.Context.get_scoped checkpoint.context Masc_agent_core.Context.Session
       Keeper_checkpoint_store.keeper_generation_context_key
   with
   | Some (`Int generation) ->
@@ -157,7 +157,7 @@ let test_forward_equal_and_stale () =
     match Keeper_checkpoint_store.load_oas ~session_dir ~session_id:sid with
     | Ok on_disk ->
       check int "disk keeps the newest turn_count" 6
-        on_disk.Agent_sdk.Checkpoint.turn_count
+        on_disk.Masc_agent_core.Checkpoint.turn_count
     | Error _ -> fail "load after rejection failed")
 
 (* The canonical checkpoint file is the only durable admission watermark
@@ -196,7 +196,7 @@ let test_externally_replaced_canonical_is_the_watermark () =
       "seed save";
     Fs_compat.save_file canonical_path
       (make_checkpoint ~session_id ~turn_count:9 ~marker:"external-v9"
-       |> Agent_sdk.Checkpoint.to_string);
+       |> Masc_agent_core.Checkpoint.to_string);
     match
       Keeper_checkpoint_store.save_oas_classified ~session_dir
         (make_checkpoint ~session_id ~turn_count:7 ~marker:"stale-v7")
@@ -243,7 +243,7 @@ let test_empty_session_id_rejected () =
     match Keeper_checkpoint_store.load_oas ~session_dir ~session_id:"trace-1-0000a" with
     | Ok on_disk ->
       check string "round-trips the stamped session_id" "trace-1-0000a"
-        on_disk.Agent_sdk.Checkpoint.session_id
+        on_disk.Masc_agent_core.Checkpoint.session_id
     | Error _ -> fail "load after stamped save failed")
 
 (* Issue #25077 item 1: [canonical_session_location] is the containment
@@ -360,7 +360,7 @@ let test_invalid_existing_checkpoint_fails_closed () =
     let mismatched =
       make_checkpoint ~session_id:"another-session" ~turn_count:10
         ~marker:"wrong-identity"
-      |> Agent_sdk.Checkpoint.to_string
+      |> Masc_agent_core.Checkpoint.to_string
     in
     Fs_compat.save_file path mismatched;
     (match
@@ -413,7 +413,7 @@ let test_multi_domain_writers_leave_max_turn_on_disk () =
     | Error _ -> fail "load after concurrent saves failed"
     | Ok checkpoint ->
       check int "canonical disk retains the maximum turn" expected
-        checkpoint.Agent_sdk.Checkpoint.turn_count)
+        checkpoint.Masc_agent_core.Checkpoint.turn_count)
 
 (* The canonical checkpoint file is written compact (Yojson.Safe.to_string),
    not pretty-printed, to cut idle-CPU serialization cost. The read path is a
@@ -435,14 +435,14 @@ let test_canonical_checkpoint_is_written_compact () =
     | Error _ -> fail "load after compact save failed"
     | Ok on_disk ->
       check string "session_id round-trips through compact encoding" sid
-        on_disk.Agent_sdk.Checkpoint.session_id;
+        on_disk.Masc_agent_core.Checkpoint.session_id;
       check int "turn_count round-trips through compact encoding" 7
-        on_disk.Agent_sdk.Checkpoint.turn_count;
+        on_disk.Masc_agent_core.Checkpoint.turn_count;
       let marker_present =
         List.exists
-          (fun (msg : Agent_sdk.Types.message) ->
-             String.equal (Agent_sdk.Types.text_of_message msg) "compact-marker")
-          on_disk.Agent_sdk.Checkpoint.messages
+          (fun (msg : Masc_agent_core.Types.message) ->
+             String.equal (Masc_agent_core.Types.text_of_message msg) "compact-marker")
+          on_disk.Masc_agent_core.Checkpoint.messages
       in
       check bool "message content round-trips through compact encoding" true
         marker_present)
@@ -581,8 +581,8 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
          | None -> false);
       check bool "installed payload belongs to the winning writer" true
         (List.exists
-           (fun (message : Agent_sdk.Types.message) ->
-             String.equal (Agent_sdk.Types.text_of_message message) winner)
+           (fun (message : Masc_agent_core.Types.message) ->
+             String.equal (Masc_agent_core.Types.text_of_message message) winner)
            checkpoint.messages)
     | _ -> fail "CAS winner did not round-trip")
 

@@ -1,6 +1,6 @@
 (** Tests for turn_params, BeforeTurnParams hook, and related features. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Turn params types ───────────────────────────────────────── *)
 

@@ -8,7 +8,7 @@
     2. Endpoint handoff: fake primary → real local fallback
     3. Context injection: injector updates context + appends messages *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 let base_url = "http://127.0.0.1:8085"

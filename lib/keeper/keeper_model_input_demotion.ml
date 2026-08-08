@@ -12,12 +12,12 @@ type pending =
   }
 
 type plan_result =
-  { messages : Agent_sdk.Types.message list
+  { messages : Masc_agent_core.Types.message list
   ; pending : pending list
   }
 
 type materialize_outcome =
-  { messages : Agent_sdk.Types.message list
+  { messages : Masc_agent_core.Types.message list
   ; reverted : int
   }
 
@@ -29,28 +29,28 @@ type materialize_outcome =
    materialized request exceed the cap. [Invalid_marker] is marker-shaped
    content that failed to parse; storing it would give a corrupt payload a
    permanent content address, so it is left untouched and stays visible. *)
-let demotable_body (block : Agent_sdk.Types.content_block) =
+let demotable_body (block : Masc_agent_core.Types.content_block) =
   match block with
-  | Agent_sdk.Types.ToolResult { tool_use_id; content; content_blocks = None; _ }
+  | Masc_agent_core.Types.ToolResult { tool_use_id; content; content_blocks = None; _ }
     ->
     (match Tool_output.decode_from_oas content with
      | Tool_output.Not_marker -> Some (tool_use_id, content)
      | Tool_output.Decoded _ | Tool_output.Invalid_marker _ -> None)
-  | Agent_sdk.Types.ToolResult { content_blocks = Some _; _ }
-  | Agent_sdk.Types.Text _
-  | Agent_sdk.Types.Thinking _
-  | Agent_sdk.Types.ReasoningDetails _
-  | Agent_sdk.Types.RedactedThinking _
-  | Agent_sdk.Types.ToolUse _
-  | Agent_sdk.Types.Image _
-  | Agent_sdk.Types.Document _
-  | Agent_sdk.Types.Audio _ -> None
+  | Masc_agent_core.Types.ToolResult { content_blocks = Some _; _ }
+  | Masc_agent_core.Types.Text _
+  | Masc_agent_core.Types.Thinking _
+  | Masc_agent_core.Types.ReasoningDetails _
+  | Masc_agent_core.Types.RedactedThinking _
+  | Masc_agent_core.Types.ToolUse _
+  | Masc_agent_core.Types.Image _
+  | Masc_agent_core.Types.Document _
+  | Masc_agent_core.Types.Audio _ -> None
 ;;
 
-let with_content (block : Agent_sdk.Types.content_block) replacement =
+let with_content (block : Masc_agent_core.Types.content_block) replacement =
   match block with
-  | Agent_sdk.Types.ToolResult fields ->
-    Agent_sdk.Types.ToolResult { fields with content = replacement }
+  | Masc_agent_core.Types.ToolResult fields ->
+    Masc_agent_core.Types.ToolResult { fields with content = replacement }
   | other -> other
 ;;
 
@@ -85,7 +85,7 @@ let plan ~measure_message_bytes ~demote_before messages =
     let changed = ref false in
     let rewritten =
       List.map
-        (fun ((message : Agent_sdk.Types.message), label) ->
+        (fun ((message : Masc_agent_core.Types.message), label) ->
            let aged =
              match label with
              | Runtime_model_input_tail_window.Pinned -> false
@@ -145,12 +145,12 @@ let materialize ~store ~pending messages =
     let reverted = ref 0 in
     let messages =
       List.map
-        (fun (message : Agent_sdk.Types.message) ->
+        (fun (message : Masc_agent_core.Types.message) ->
            let content =
              List.map
                (fun block ->
                   match block with
-                  | Agent_sdk.Types.ToolResult
+                  | Masc_agent_core.Types.ToolResult
                       { tool_use_id; content; content_blocks = None; _ }
                     when Tool_output.is_marker content ->
                     (match body_of tool_use_id with

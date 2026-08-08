@@ -36,6 +36,6 @@ val make_keeper_tool_handler
   -> ?prepare_input:
        (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)
   -> unit
-  -> ?oas_invocation:Agent_sdk.Tool_contract.Invocation.t
+  -> ?oas_invocation:Masc_agent_core.Tool_contract.Invocation.t
   -> Yojson.Safe.t
   -> Tool_result.result

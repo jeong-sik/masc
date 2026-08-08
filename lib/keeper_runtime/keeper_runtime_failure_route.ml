@@ -59,20 +59,20 @@ type route =
       ; detail : string
       }
 
-let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) =
+let sdk_error_is_hard_quota (err : Masc_agent_core.Error.sdk_error) =
   match err with
-  | Agent_sdk.Error.Api (Llm_provider.Retry.PaymentRequired _)
-  | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
+  | Masc_agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _)
+  | Masc_agent_core.Error.Provider (Llm_provider.Error.HardQuota _) ->
     true
-  | Agent_sdk.Error.Api _
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ ->
+  | Masc_agent_core.Error.Api _
+  | Masc_agent_core.Error.Provider _
+  | Masc_agent_core.Error.Agent _
+  | Masc_agent_core.Error.Mcp _
+  | Masc_agent_core.Error.Config _
+  | Masc_agent_core.Error.Serialization _
+  | Masc_agent_core.Error.Io _
+  | Masc_agent_core.Error.Orchestration _
+  | Masc_agent_core.Error.Internal _ ->
     false
 ;;
 
@@ -82,7 +82,7 @@ let observe_retry ?retry_after retry_class =
 let rotate rotate_class = Rotate_now { rotate = rotate_class }
 
 let failure_detail err =
-  Keeper_internal_error.cap_blocker_detail (Agent_sdk.Error.to_string err)
+  Keeper_internal_error.cap_blocker_detail (Masc_agent_core.Error.to_string err)
 
 let exhaust ~err ~provenance terminal_class =
   Exhausted_visible_alive
@@ -195,30 +195,30 @@ let provenance_for_boundary boundary oas_provenance =
   | Masc_execution -> Masc_internal_error
 ;;
 
-let route_of_error_family ~boundary (err : Agent_sdk.Error.sdk_error) : route =
+let route_of_error_family ~boundary (err : Masc_agent_core.Error.sdk_error) : route =
   let exhaust_failure provenance terminal =
     exhaust ~err ~provenance:(provenance_for_boundary boundary provenance) terminal
   in
   match err with
-  | Agent_sdk.Error.Api api -> route_of_api_error ~err api
-  | Agent_sdk.Error.Provider p -> route_of_provider_error ~err p
-  | Agent_sdk.Error.Mcp _ ->
+  | Masc_agent_core.Error.Api api -> route_of_api_error ~err api
+  | Masc_agent_core.Error.Provider p -> route_of_provider_error ~err p
+  | Masc_agent_core.Error.Mcp _ ->
     exhaust_failure Oas_mcp_error Protocol_error
-  | Agent_sdk.Error.Config _ ->
+  | Masc_agent_core.Error.Config _ ->
     exhaust_failure Oas_config_error Config_mismatch
-  | Agent_sdk.Error.Agent _ ->
+  | Masc_agent_core.Error.Agent _ ->
     exhaust_failure Oas_agent_error Internal_opaque
-  | Agent_sdk.Error.Serialization _ ->
+  | Masc_agent_core.Error.Serialization _ ->
     exhaust_failure Oas_serialization_error Internal_opaque
-  | Agent_sdk.Error.Io _ ->
+  | Masc_agent_core.Error.Io _ ->
     exhaust_failure Oas_io_error Internal_opaque
-  | Agent_sdk.Error.Orchestration _ ->
+  | Masc_agent_core.Error.Orchestration _ ->
     exhaust_failure Oas_orchestration_error Internal_opaque
-  | Agent_sdk.Error.Internal _ ->
+  | Masc_agent_core.Error.Internal _ ->
     exhaust_failure Oas_internal_error Internal_opaque
 ;;
 
-let route_of_error ~boundary (err : Agent_sdk.Error.sdk_error) : route =
+let route_of_error ~boundary (err : Masc_agent_core.Error.sdk_error) : route =
   match Keeper_internal_error.classify_masc_internal_error err with
   | Some (Keeper_internal_error.Terminal_effect_failed _ as internal) ->
     route_of_masc_internal ~err internal

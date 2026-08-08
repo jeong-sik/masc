@@ -1,5 +1,5 @@
 (** Structured keeper-internal error envelopes carried through
-    [Agent_sdk.Error.Internal]. *)
+    [Masc_agent_core.Error.Internal]. *)
 
 (** Canonical wire kind emitted for {!Capacity_backpressure}.  Receipt
     terminal projection and decoding consume this same value. *)
@@ -88,7 +88,7 @@ type accept_response_shape =
 val accept_response_shape_to_string : accept_response_shape -> string
 val accept_response_shape_of_string : string -> accept_response_shape option
 val accept_response_shape_of_agent_sdk :
-  Agent_sdk.Response_shape.content_shape -> accept_response_shape
+  Masc_agent_core.Response_shape.content_shape -> accept_response_shape
 
 type transcript_quarantine_reason =
   | Structurally_invalid
@@ -131,7 +131,7 @@ type masc_internal_error =
          [MaxTokens] on an empty/thinking_only shape marks a truncation, distinct
          from a clean [EndTurn] no-progress terminal. Groundwork slice: threaded
          and serialized, not yet consumed by classification. *)
-      stop_reason : Agent_sdk.Types.stop_reason option;
+      stop_reason : Masc_agent_core.Types.stop_reason option;
       reason : string;
     }
   | Internal_unhandled_exception of {
@@ -191,7 +191,7 @@ val accept_no_progress_retry_kind :
 val accept_rejection_has_no_progress_retry_hint : masc_internal_error -> bool
 
 val sdk_error_of_masc_internal_error :
-  masc_internal_error -> Agent_sdk.Error.sdk_error
+  masc_internal_error -> Masc_agent_core.Error.sdk_error
 
 val parse_masc_internal_error_json :
   Yojson.Safe.t -> masc_internal_error option
@@ -200,4 +200,4 @@ val classify_masc_internal_error_of_string :
   string -> masc_internal_error option
 
 val classify_masc_internal_error :
-  Agent_sdk.Error.sdk_error -> masc_internal_error option
+  Masc_agent_core.Error.sdk_error -> masc_internal_error option

@@ -7,7 +7,7 @@
     - Type roundtrips *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Config defaults ────────────────────────────────────── *)
 

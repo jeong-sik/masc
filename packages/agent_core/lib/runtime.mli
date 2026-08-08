@@ -120,8 +120,8 @@ type init_request =
 [@@deriving yojson, show]
 
 type init_response =
-  { sdk_name : string
-  ; sdk_version : string
+  { core_name : string
+  ; core_version : string
   ; runtime_version : string
   ; protocol_version : string
   ; capabilities : string list

@@ -31,10 +31,6 @@ type turn_outcome = Pipeline_terminal_tool.turn_outcome =
 
 let persist_turn_checkpoint_for_state = Pipeline_checkpoint.persist_for_state
 
-let persist_turn_checkpoint agent stage =
-  persist_turn_checkpoint_for_state agent stage agent.state
-;;
-
 (** Set lifecycle to Ready, invoke BeforeTurn hook, handle elicitation. *)
 let stage_input = Pipeline_stage_prepare.stage_input
 
@@ -45,8 +41,6 @@ let last_tool_results_from = Pipeline_stage_prepare.last_tool_results_from
 (** Prepare the turn using current [agent.state.messages] and the given
     [turn_params].  Centralises the [Agent_turn.prepare_turn] parameter
     list to keep preparation behind one typed boundary. *)
-let prepare_turn_for_agent = Pipeline_stage_prepare.prepare_turn_for_agent
-
 (** Invoke BeforeTurnParams hook and prepare the immutable per-turn config and
     tools. Returns (turn_preparation, turn_config, turn_params). *)
 let stage_parse = Pipeline_stage_prepare.stage_parse
@@ -62,8 +56,6 @@ let stage_parse = Pipeline_stage_prepare.stage_parse
     HTTP status codes are re-classified via
     {!Llm_provider.Retry.classify_error} so
     ContextOverflow/RateLimited/etc. still map to the same variants. *)
-let sdk_error_of_http_error = Pipeline_stage_route.sdk_error_of_http_error
-
 (** Sync dispatch via {!Llm_provider.Complete.complete}.  Routes all
     provider kinds through the consolidated path so [on_request_end]
     metrics fire and [Llm_transport.t] (set via [agent.options.transport])

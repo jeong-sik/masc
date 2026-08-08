@@ -23,7 +23,7 @@ type source_disposition =
   | Pause_after_transcript_corruption of { detail : string }
 
 type turn_failure =
-  { error : Agent_sdk.Error.sdk_error
+  { error : Masc_agent_core.Error.sdk_error
   ; runtime_id : string
   ; route : Keeper_runtime_failure_route.route
   ; source_disposition : source_disposition
@@ -80,7 +80,7 @@ let execution_boundary_of_turn_failure ~transcript_corruption error =
     Keeper_runtime_failure_route.Masc_execution
   | None, Some (Keeper_internal_error.Gate_replay_repair_required _) ->
     (* This failure is produced by MASC after host replay and before provider
-       dispatch. The shared [Agent_sdk.Error.Internal] carrier must not
+       dispatch. The shared [Masc_agent_core.Error.Internal] carrier must not
        misattribute that local replay boundary to OAS. *)
     Keeper_runtime_failure_route.Masc_execution
   | None,
@@ -279,8 +279,8 @@ let run_keeper_cycle
   with
   | Error failure ->
     let error =
-      Agent_sdk.Error.Config
-        (Agent_sdk.Error.InvalidConfig
+      Masc_agent_core.Error.Config
+        (Masc_agent_core.Error.InvalidConfig
            { field = "keeper.publication_recovery_scope"
            ; detail =
                Keeper_publication_recovery_scope.failure_to_string failure
@@ -385,7 +385,7 @@ let run_keeper_cycle
 
      State-aware runtime routing resumes inside [main_path]. *)
   let main_path (turn_state : Keeper_unified_turn_execution.turn_state)
-    : (turn_success, Agent_sdk.Error.sdk_error) result
+    : (turn_success, Masc_agent_core.Error.sdk_error) result
       * Keeper_unified_turn_execution.turn_state
     =
       let effective_runtime_id =
@@ -452,7 +452,7 @@ let run_keeper_cycle
                 "pre_dispatch_%s"
                 (Keeper_agent_error.terminal_reason_code_of_sdk_error err)
             in
-            let error_message = Agent_sdk.Error.to_string err in
+            let error_message = Masc_agent_core.Error.to_string err in
             Log.Keeper.error
               ~keeper_name:meta.name
               "%s: pre_dispatch failed: %s"
@@ -714,7 +714,7 @@ let run_keeper_cycle
                  match
                    Keeper_context_runtime.timed (fun () ->
                      match Eio_context.get_clock () with
-                     | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
+                     | Error msg -> Error (Masc_agent_core.Error.Internal msg), turn_state
                      | Ok clock ->
                        start_background_turn_event_bus_drain ~clock;
                        let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms }
@@ -852,11 +852,11 @@ let run_keeper_cycle
                        ~config
                        ~keeper_name:meta.name
                        trajectory_acc
-                       (Trajectory.Failed (Agent_sdk.Error.to_string err));
-                  let e_str = Agent_sdk.Error.to_string err in
+                       (Trajectory.Failed (Masc_agent_core.Error.to_string err));
+                  let e_str = Masc_agent_core.Error.to_string err in
                   let is_transient = EC.is_transient_network_error err in
                   (match err with
-                      | Agent_sdk.Error.Api (Timeout _) ->
+                      | Masc_agent_core.Error.Api (Timeout _) ->
                         Otel_metric_store.inc_counter
                           Keeper_metrics.(to_string OasTimeoutClassifications)
                           ~labels:[ "classification", "transient_network" ]
@@ -949,7 +949,7 @@ let run_keeper_cycle
                       ~sdk_error:err
                       ()
                   in
-                  let e_str = Agent_sdk.Error.to_string err in
+                  let e_str = Masc_agent_core.Error.to_string err in
                   let terminal_reason =
                     Keeper_turn_terminal.of_failure
                       ~raw_error:e_str

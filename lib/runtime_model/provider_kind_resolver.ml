@@ -55,7 +55,7 @@ let uses_anthropic_caching_for_kind kind =
     Llm_provider.Provider_config.make ~kind ~model_id:"auto" ~base_url:"" ()
   in
   let caps =
-    Agent_sdk.Provider_runtime_binding.capabilities_for_provider_config cfg
+    Masc_agent_core.Provider_runtime_binding.capabilities_for_provider_config cfg
   in
   caps.supports_prompt_caching || caps.supports_caching
 

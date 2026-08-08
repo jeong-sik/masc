@@ -22,5 +22,5 @@ val handle
   -> keeper_name:string
   -> attempt:int
   -> attempted_runtimes:string list
-  -> Agent_sdk.Error.sdk_error
+  -> Masc_agent_core.Error.sdk_error
   -> unit

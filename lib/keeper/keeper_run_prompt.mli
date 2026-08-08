@@ -13,7 +13,7 @@ type turn_prompt_context =
   ; memory_context : string
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
-  ; history_messages : Agent_sdk.Types.message list
+  ; history_messages : Masc_agent_core.Types.message list
   ; ctx_work : Keeper_context_runtime.working_context
   }
 
@@ -51,7 +51,7 @@ val assemble_extra_system_context :
 
 val build_turn_context
   :  ctx:Keeper_run_context.run_context
-  -> build_turn_prompt:(base_system_prompt:string -> messages:Agent_sdk.Types.message list -> Keeper_agent_prompt_metrics.turn_prompt)
+  -> build_turn_prompt:(base_system_prompt:string -> messages:Masc_agent_core.Types.message list -> Keeper_agent_prompt_metrics.turn_prompt)
   -> user_message:string
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

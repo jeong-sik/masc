@@ -28,7 +28,7 @@ open Keeper_context_core
 
 type post_turn_lifecycle = {
   updated_meta : keeper_meta;
-  checkpoint : Agent_sdk.Checkpoint.t option;
+  checkpoint : Masc_agent_core.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
@@ -38,7 +38,7 @@ type post_turn_lifecycle = {
 }
 
 type compaction_recovery = {
-  checkpoint : Agent_sdk.Checkpoint.t;
+  checkpoint : Masc_agent_core.Checkpoint.t;
   checkpoint_installation : Keeper_checkpoint_store.installed_checkpoint;
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
@@ -189,12 +189,12 @@ let apply_resilience_wirein
           let outcome =
             Resilience.Keeper_bridge.apply_post_turn_resilience
               witness ?audit_store ?strategy_executor ~now
-              ~working_context:cp.Agent_sdk.Checkpoint.working_context
+              ~working_context:cp.Masc_agent_core.Checkpoint.working_context
               ~maybe_error ()
           in
           let new_cp =
             { cp with
-              Agent_sdk.Checkpoint.working_context = outcome.working_context
+              Masc_agent_core.Checkpoint.working_context = outcome.working_context
             }
           in
           { lifecycle with checkpoint = Some new_cp }
@@ -249,10 +249,10 @@ let apply_tool_emission_wirein
           let new_wc =
             Keeper_tool_emission_hook.drain_into_working_context
               acc
-              ~working_context:cp.Agent_sdk.Checkpoint.working_context
+              ~working_context:cp.Masc_agent_core.Checkpoint.working_context
           in
           let new_cp =
-            { cp with Agent_sdk.Checkpoint.working_context = new_wc }
+            { cp with Masc_agent_core.Checkpoint.working_context = new_wc }
           in
           { lifecycle with checkpoint = Some new_cp }
         with
@@ -276,7 +276,7 @@ let apply_multimodal_wirein
   | Some cp ->
     (match
        Multimodal.Wirein_helpers.extract_raw_artifacts
-         cp.Agent_sdk.Checkpoint.working_context
+         cp.Masc_agent_core.Checkpoint.working_context
      with
      | Error detail ->
        Log.Keeper.warn
@@ -327,7 +327,7 @@ let apply_multimodal_wirein
               meta
           in
           let new_cp =
-            { cp with Agent_sdk.Checkpoint.working_context = new_wc }
+            { cp with Masc_agent_core.Checkpoint.working_context = new_wc }
           in
           { lifecycle with checkpoint = Some new_cp }
         with
@@ -346,7 +346,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
     ~(resilience_audit_store : Shared_audit.Store.t option)
     ~(resilience_strategy_executor : Resilience.Recovery.strategy_executor option)
     ~(meta : keeper_meta)
-    ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
+    ~(checkpoint : Masc_agent_core.Checkpoint.t option) : post_turn_lifecycle =
   (* Reviewer #13214: an executor without an audit store would let
      retry/fallback/handoff/abort callbacks mutate live state
      without the pre-flight RecoveryAttempted envelope that
@@ -676,11 +676,11 @@ let commit_prepared_compaction_with
     | Ok source_commit_count ->
       let commit_count = source_commit_count + 1 in
       let stamped_context =
-        Agent_sdk.Context.copy ~eio:true candidate_context
+        Masc_agent_core.Context.copy ~eio:true candidate_context
       in
-      Agent_sdk.Context.set_scoped
+      Masc_agent_core.Context.set_scoped
         stamped_context
-        Agent_sdk.Context.Session
+        Masc_agent_core.Context.Session
         Keeper_checkpoint_store.compaction_commit_count_context_key
         (`Int commit_count);
       let commit_context =

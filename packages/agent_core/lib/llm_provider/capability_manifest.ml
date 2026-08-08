@@ -90,11 +90,10 @@ type entry =
 type t = entry list
 
 (* Local result-syntax bindings so this file can use [let*] / [let+]
-   without depending on [agent_sdk.base] (which would create a circular
+   without depending on [masc.agent_core.base] (which would create a circular
    library dependency). *)
 module Result_syntax = struct
   let ( let* ) = Result.bind
-  let ( let+ ) x f = Result.map f x
 end
 
 (* ── JSON parsing helpers ───────────────────────────────── *)

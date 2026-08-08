@@ -54,11 +54,11 @@ type keeper_chat_event =
   | Oas_stream_message_start of
       { provider_message_id : string
       ; model : string
-      ; usage : Agent_sdk.Types.api_usage option
+      ; usage : Masc_agent_core.Types.api_usage option
       }
   | Oas_stream_message_delta of
-      { stop_reason : Agent_sdk.Types.stop_reason option
-      ; usage : Agent_sdk.Types.api_usage option
+      { stop_reason : Masc_agent_core.Types.stop_reason option
+      ; usage : Masc_agent_core.Types.api_usage option
       }
   | Oas_stream_message_stop
   | Oas_stream_ping
@@ -74,7 +74,7 @@ type keeper_chat_event =
   | Oas_media_delta of
       { index : int
       ; media_type : string
-      ; source_type : Agent_sdk.Types.media_source_kind
+      ; source_type : Masc_agent_core.Types.media_source_kind
       ; media_ref : string
           (** RFC-0301: reader-facing URL of the persisted media
               ([/api/v1/media/<token>]), replacing the pre-RFC byte count. *)
@@ -120,7 +120,7 @@ val publish : keeper_chat_event Eio.Stream.t -> keeper_chat_event -> unit
 (** [subscribe stream] blocks until an event is available, then returns it. *)
 val subscribe : keeper_chat_event Eio.Stream.t -> keeper_chat_event
 
-val api_usage_to_json : Agent_sdk.Types.api_usage -> Yojson.Safe.t
+val api_usage_to_json : Masc_agent_core.Types.api_usage -> Yojson.Safe.t
 val stream_protocol_error_kind_to_string : stream_protocol_error_kind -> string
 val stream_protocol_error_summary : stream_protocol_error -> string
 val stream_protocol_error_to_json : stream_protocol_error -> Yojson.Safe.t

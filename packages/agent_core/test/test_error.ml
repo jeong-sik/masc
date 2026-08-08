@@ -1,7 +1,7 @@
 (** Tests for error.ml — structured SDK error types *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 module Retry = Llm_provider.Retry
 
 let sdk_error_testable =

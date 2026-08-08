@@ -25,7 +25,7 @@ type t =
       }
       (** The serialized request body exceeded the byte capacity the target
           declares. Both integers are measured, never estimated:
-          [Agent_sdk.Retry.Request_body_too_large] carries them from the
+          [Masc_agent_core.Retry.Request_body_too_large] carries them from the
           serialization OAS performs before any HTTP call, so
           [actual_bytes > limit_bytes] already held upstream and
           {!of_detail_json} rejects a record where it does not.

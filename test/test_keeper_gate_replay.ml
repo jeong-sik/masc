@@ -38,10 +38,10 @@ let projected_model_text ~base_path
        Masc.Keeper_gate_replay.project_model_input
          ~base_path
          evidence
-         [ Agent_sdk.Types.user_msg message.text ]
+         [ Masc_agent_core.Types.user_msg message.text ]
      with
      | Ok [ _canonical; projected ] ->
-       Agent_sdk.Types.text_of_content projected.content
+       Masc_agent_core.Types.text_of_content projected.content
      | Ok _ -> Alcotest.fail "replay projection did not append exact evidence"
      | Error detail -> Alcotest.fail detail)
 ;;
@@ -524,24 +524,24 @@ let test_multimodal_goal_projects_replay_reference () =
          | None -> Alcotest.fail "multimodal replay evidence is absent"
        in
        let image =
-         Agent_sdk.Types.Image
+         Masc_agent_core.Types.Image
            { media_type = "image/png"
            ; data = "aW1hZ2U="
-           ; source_type = Agent_sdk.Types.Base64
+           ; source_type = Masc_agent_core.Types.Base64
            }
        in
        let canonical_blocks =
          Masc.Keeper_gate_replay.append_model_evidence_block evidence [ image ]
        in
        let canonical_message =
-         Agent_sdk.Types.user_msg_blocks canonical_blocks
+         Masc_agent_core.Types.user_msg_blocks canonical_blocks
        in
        Alcotest.check
          Alcotest.bool
          "multimodal canonical goal keeps only the artifact identity"
          false
          (String_util.contains_substring
-            (Agent_sdk.Types.text_of_content canonical_message.content)
+            (Masc_agent_core.Types.text_of_content canonical_message.content)
             raw_output);
        match
          Masc.Keeper_gate_replay.project_model_input
@@ -552,8 +552,8 @@ let test_multimodal_goal_projects_replay_reference () =
        | Error detail -> Alcotest.fail detail
        | Ok [ original; projected ] ->
          (match original.content, projected.content with
-          | ( Agent_sdk.Types.Image _ :: Agent_sdk.Types.Text _ :: []
-            , [ Agent_sdk.Types.Text evidence_text ] ) ->
+          | ( Masc_agent_core.Types.Image _ :: Masc_agent_core.Types.Text _ :: []
+            , [ Masc_agent_core.Types.Text evidence_text ] ) ->
             Alcotest.check
               Alcotest.bool
               "media block survives replay projection"
@@ -598,7 +598,7 @@ let test_replay_projection_recovers_when_canonical_reference_is_absent () =
          Masc.Keeper_gate_replay.project_model_input
            ~base_path
            evidence
-           [ Agent_sdk.Types.user_msg "reference was dropped" ]
+           [ Masc_agent_core.Types.user_msg "reference was dropped" ]
        with
        | Error detail -> Alcotest.fail detail
        | Ok [ original; recovered ] ->
@@ -606,13 +606,13 @@ let test_replay_projection_recovers_when_canonical_reference_is_absent () =
            Alcotest.string
            "original provider input is preserved"
            "reference was dropped"
-           (Agent_sdk.Types.text_of_content original.content);
+           (Masc_agent_core.Types.text_of_content original.content);
          Alcotest.check
            Alcotest.bool
            "replay reference is appended independently of text layout"
            true
            (String_util.contains_substring
-              (Agent_sdk.Types.text_of_content recovered.content)
+              (Masc_agent_core.Types.text_of_content recovered.content)
               artifact.sha256)
        | Ok _ ->
          Alcotest.fail

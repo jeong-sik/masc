@@ -516,7 +516,7 @@ let mimo_capabilities =
    chat template) owns that policy. This is stricter than LiteLLM's
    static-table approach, which requires JSON edits + redeploy to
    flip capability, and avoids the fragile model_id pattern match that
-   the Claude Agent SDK sidesteps by being single-provider. *)
+   the Claude MASC agent core sidesteps by being single-provider. *)
 (* NVIDIA NIM Nvidia: Llama-based OpenAI-compatible endpoint.
    Thinking uses chat_template_kwargs (same wire format as Ollama's
    llama-server backend). VL variants add image input.

@@ -1,4 +1,4 @@
-open Agent_sdk
+open Masc_agent_core
 
 let () =
   let open Alcotest in

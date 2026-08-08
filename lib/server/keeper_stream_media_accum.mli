@@ -14,7 +14,7 @@ type t
 
 val create : unit -> t
 
-val on_event : t -> Agent_sdk.Types.sse_event -> unit
+val on_event : t -> Masc_agent_core.Types.sse_event -> unit
 (** Feed one raw OAS stream event. Media deltas accumulate per block index;
     [ContentBlockStop] finalizes one index and [MessageStop] finalizes all still
     open media. Non-media events are ignored except tool starts, which mark their

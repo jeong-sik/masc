@@ -90,10 +90,10 @@ let of_failure ?(tool_call_count = 0) ~raw_error err =
            (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err))
     | None ->
       (* The driver classifier returned None, meaning err is a generic
-         [Agent_sdk.Error.t] not in the masc_internal_error family.
+         [Masc_agent_core.Error.t] not in the masc_internal_error family.
          Route through the typed bridge instead of catching [_ ->
          ...] silently (anti-pattern #2). The bridge matches every
-         [Agent_sdk.Error.t] variant exhaustively. *)
+         [Masc_agent_core.Error.t] variant exhaustively. *)
       of_disposition
         ~source:"typed_error"
         (Keeper_turn_disposition.Provider_error

@@ -197,8 +197,6 @@ let pp_node formatter node =
     node.kind
 ;;
 
-let show_node node = Format.asprintf "%a" pp_node node
-
 type node_update =
   | Provider_event of Yojson.Safe.t
   | Provider_response_snapshot of Llm_provider.Types.api_response

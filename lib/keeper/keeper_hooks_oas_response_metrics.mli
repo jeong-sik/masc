@@ -6,16 +6,16 @@ val record_tool_use_failure : keeper_name:string -> tool_name:string -> unit
 
 val resolve_after_turn_model
   :  keeper_name:string
-  -> response:Agent_sdk.Types.api_response
+  -> response:Masc_agent_core.Types.api_response
   -> string
 
 val record_response_content_quality_metric
   :  keeper_name:string
-  -> Agent_sdk.Types.api_response
+  -> Masc_agent_core.Types.api_response
   -> unit
 
 val classify_usage_trust
-  :  ?usage:Agent_sdk.Types.api_usage
+  :  ?usage:Masc_agent_core.Types.api_usage
   -> unit
   -> Keeper_usage_trust.t
 
@@ -28,15 +28,15 @@ val record_keeper_tool_duration_metric
   -> unit
 
 val record_llm_tok_s_metrics
-  :  telemetry:Agent_sdk.Types.inference_telemetry option
+  :  telemetry:Masc_agent_core.Types.inference_telemetry option
   -> unit
 
 val record_llm_inference_latency_metric
-  :  telemetry:Agent_sdk.Types.inference_telemetry option
+  :  telemetry:Masc_agent_core.Types.inference_telemetry option
   -> unit
 
 val wall_tokens_per_second
   :  usage_missing:bool
   -> output_tokens:int
-  -> telemetry:Agent_sdk.Types.inference_telemetry option
+  -> telemetry:Masc_agent_core.Types.inference_telemetry option
   -> float option

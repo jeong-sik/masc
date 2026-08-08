@@ -20,10 +20,10 @@ module EC = Masc.Keeper_error_classify
 module KFR = Keeper_runtime_failure_route
 module KTD = Masc.Keeper_turn_driver
 module RC = Runtime_candidate
-module SdkE = Agent_sdk.Error
-module Retry = Agent_sdk.Retry
+module SdkE = Masc_agent_core.Error
+module Retry = Masc_agent_core.Retry
 module Http = Llm_provider.Http_client
-module Tool_contract = Agent_sdk.Tool_contract
+module Tool_contract = Masc_agent_core.Tool_contract
 
 let typed_wire t = Code.to_wire t
 let unknown_invalid_request message =
@@ -337,7 +337,7 @@ let test_user_message_of_network_errors () =
   in
   Alcotest.(check string)
     "non-network errors preserve SDK message"
-    (Agent_sdk.Error.to_string guardrail)
+    (Masc_agent_core.Error.to_string guardrail)
     (AE.user_message_of_sdk_error guardrail);
   (* The raw overflow diagnostic must not reach chat verbatim (2026-07-21:
      "Context overflow: empty completion (stop_reason=…)" was stored in
@@ -345,7 +345,7 @@ let test_user_message_of_network_errors () =
      Provider path collapses overflow into InvalidRequest (RFC-0353). *)
   let overflow =
     SdkE.Api
-      (Agent_sdk.Retry.ContextOverflow
+      (Masc_agent_core.Retry.ContextOverflow
          { message =
              "Context overflow: empty completion \
               (stop_reason=model_context_window_exceeded): provider returned \

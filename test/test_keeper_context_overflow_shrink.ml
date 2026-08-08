@@ -22,12 +22,12 @@ module Shrink_state = Masc.Keeper_context_overflow_shrink_state
 open Alcotest
 
 let context_overflow ?(limit = Some 32_768) () =
-  Agent_sdk.Error.Api
+  Masc_agent_core.Error.Api
     (ContextOverflow { message = "exceeded"; limit })
 ;;
 
 let network_error () =
-  Agent_sdk.Error.Api
+  Masc_agent_core.Error.Api
     (NetworkError
        { message = "Connection_reset"
        ; kind = Llm_provider.Http_client.Connection_refused
@@ -88,7 +88,7 @@ let test_stops_at_the_named_attempt_cap_then_falls_through () =
   in
   check bool "the last (unshrinkable) overflow is returned unchanged" true
     (match result with
-     | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow _)) -> true
+     | Error (Masc_agent_core.Error.Api (Masc_agent_core.Retry.ContextOverflow _)) -> true
      | Error _ | Ok _ -> false);
   check int "exactly the named cap worth of shrink retries fired"
     Try_provider.For_testing.context_overflow_shrink_max_attempts
@@ -126,7 +126,7 @@ let test_non_overflow_error_never_shrinks () =
   check int "attempted exactly once" 1 !attempts;
   check bool "the network error propagates unchanged" true
     (match result with
-     | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.NetworkError _)) -> true
+     | Error (Masc_agent_core.Error.Api (Masc_agent_core.Retry.NetworkError _)) -> true
      | _ -> false)
 ;;
 
@@ -153,7 +153,7 @@ let test_checkpoint_boundary_blocks_shrink_even_on_overflow () =
   check int "attempted exactly once" 1 !attempts;
   check bool "the overflow propagates unchanged" true
     (match result with
-     | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow _)) -> true
+     | Error (Masc_agent_core.Error.Api (Masc_agent_core.Retry.ContextOverflow _)) -> true
      | _ -> false)
 ;;
 

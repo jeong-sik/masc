@@ -5,7 +5,7 @@
     - [with_skill] / [with_skills] DOES inject skills into the system prompt.
     - Both paths coexist on the same agent without interference. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let card_interfaces =
   Agent_card.create_supported_interface

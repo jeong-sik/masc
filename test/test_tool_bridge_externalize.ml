@@ -98,7 +98,7 @@ let test_bounded_inline_rejects_oversized_result () =
       message;
     Alcotest.(check bool) "bounded projection is not retryable" false recoverable;
     (match error_class with
-     | Some Agent_sdk.Types.Deterministic -> ()
+     | Some Masc_agent_core.Types.Deterministic -> ()
      | _ -> Alcotest.fail "bounded projection failure is not deterministic")
 
 let test_artifact_reader_owns_inline_projection () =
@@ -159,7 +159,7 @@ let test_to_oas_typed_error_ignores_json_metadata () =
       Alcotest.(check string) "message" msg message;
       Alcotest.(check bool) "runtime failure stays non-recoverable" false recoverable;
       (match error_class with
-       | Some Agent_sdk.Types.Unknown -> ()
+       | Some Masc_agent_core.Types.Unknown -> ()
        | _ -> Alcotest.fail "expected typed runtime failure mapping")
 
 let test_to_oas_typed_result_preserves_workflow_rejection () =
@@ -175,7 +175,7 @@ let test_to_oas_typed_result_preserves_workflow_rejection () =
   | Error { recoverable; error_class; _ } ->
     Alcotest.(check bool) "workflow rejection is non-recoverable" false recoverable;
     (match error_class with
-     | Some Agent_sdk.Types.Deterministic -> ()
+     | Some Masc_agent_core.Types.Deterministic -> ()
      | _ -> Alcotest.fail "expected deterministic error_class")
 
 let test_to_oas_typed_result_preserves_transient_failure_class () =
@@ -191,7 +191,7 @@ let test_to_oas_typed_result_preserves_transient_failure_class () =
   | Error { recoverable; error_class; _ } ->
     Alcotest.(check bool) "transient remains recoverable" true recoverable;
     (match error_class with
-     | Some Agent_sdk.Types.Transient -> ()
+     | Some Masc_agent_core.Types.Transient -> ()
      | _ -> Alcotest.fail "expected transient error_class")
 
 let test_round_trip_through_oas () =
@@ -218,22 +218,22 @@ let test_execution_env_preserves_exact_invocation () =
       ~description:"capture exact OAS invocation"
       ~input_schema:(`Assoc [ "type", `String "object" ])
       (fun execution_env _input ->
-         seen_invocation := Agent_sdk.Tool.Execution_env.invocation execution_env;
+         seen_invocation := Masc_agent_core.Tool.Execution_env.invocation execution_env;
          tool_ok ~tool_name:"occurrence_probe" "ok")
   in
   let invocation =
-    Agent_sdk.Tool_contract.Invocation.create
+    Masc_agent_core.Tool_contract.Invocation.create
       ~tool_use_id:""
       ~turn:7
-      ~completion:Agent_sdk.Tool_contract.Continue_after_success
+      ~completion:Masc_agent_core.Tool_contract.Continue_after_success
       ~schedule:
         { planned_index = 2
         ; batch_index = 0
         ; batch_size = 1
-        ; execution_mode = Agent_sdk.Tool_contract.Serial
+        ; execution_mode = Masc_agent_core.Tool_contract.Serial
         }
   in
-  (match Agent_sdk.Tool.execute ~invocation tool (`Assoc []) with
+  (match Masc_agent_core.Tool.execute ~invocation tool (`Assoc []) with
    | Ok _ -> ()
    | Error _ -> Alcotest.fail "expected successful bridge execution");
   match !seen_invocation with
@@ -242,12 +242,12 @@ let test_execution_env_preserves_exact_invocation () =
     Alcotest.(check string)
       "blank provider id preserved"
       ""
-      (Agent_sdk.Tool_contract.Invocation.tool_use_id seen);
-    Alcotest.(check int) "turn preserved" 7 (Agent_sdk.Tool_contract.Invocation.turn seen);
+      (Masc_agent_core.Tool_contract.Invocation.tool_use_id seen);
+    Alcotest.(check int) "turn preserved" 7 (Masc_agent_core.Tool_contract.Invocation.turn seen);
     Alcotest.(check int)
       "planned index preserved"
       2
-      (Agent_sdk.Tool_contract.Invocation.planned_index seen)
+      (Masc_agent_core.Tool_contract.Invocation.planned_index seen)
 
 (* --- Marker encoding round-trip via the bridge --- *)
 
@@ -341,7 +341,7 @@ let test_blob_store_failure_is_typed () =
            message;
          Alcotest.(check bool) "provider may retry" true recoverable;
          (match error_class with
-          | Some Agent_sdk.Types.Transient -> ()
+          | Some Masc_agent_core.Types.Transient -> ()
           | _ -> Alcotest.fail "expected transient storage failure"));
       (match !observed with
        | Some diagnostic ->
@@ -363,7 +363,7 @@ let test_blob_store_failure_is_typed () =
            false
            recoverable;
          (match error_class with
-          | Some Agent_sdk.Types.Unknown -> ()
+          | Some Masc_agent_core.Types.Unknown -> ()
           | _ -> Alcotest.fail "expected unknown post-effect failure class")))
 
 let () =

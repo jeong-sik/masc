@@ -34,7 +34,7 @@ type pending
     [tool_use_id], which is stable across the cut. *)
 
 type plan_result =
-  { messages : Agent_sdk.Types.message list
+  { messages : Masc_agent_core.Types.message list
         (** [messages] with each planned demotion replaced by a saturating
             placeholder marker. Physically the input list when nothing was
             planned. *)
@@ -42,9 +42,9 @@ type plan_result =
   }
 
 val plan
-  :  measure_message_bytes:(Agent_sdk.Types.message -> int)
+  :  measure_message_bytes:(Masc_agent_core.Types.message -> int)
   -> demote_before:int
-  -> Agent_sdk.Types.message list
+  -> Masc_agent_core.Types.message list
   -> plan_result
 (** Choose demotions and substitute upper-bound placeholders. Pure: no I/O or
     hashing. The byte budget stays in the cut; this function receives only the
@@ -77,7 +77,7 @@ val plan
     by restating the marker's format here. *)
 
 type materialize_outcome =
-  { messages : Agent_sdk.Types.message list
+  { messages : Masc_agent_core.Types.message list
   ; reverted : int
         (** Planned demotions whose blob write failed and whose body was
             restored. Non-zero means the list is larger than the plan the cut
@@ -87,7 +87,7 @@ type materialize_outcome =
 val materialize
   :  store:Tool_blob_store.t
   -> pending:pending list
-  -> Agent_sdk.Types.message list
+  -> Masc_agent_core.Types.message list
   -> materialize_outcome
 (** Store the bodies of the demotions still present in [messages] and swap
     their placeholders for real markers. Demotions the cut removed are not

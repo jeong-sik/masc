@@ -21,7 +21,7 @@ type input =
   ; max_recall_fact_bytes : int
     (** Maximum UTF-8 bytes for the exact rendered fact lines. The prompt states
         this capacity and the parser rejects an oversized selection. *)
-  ; messages : Agent_sdk.Types.message list
+  ; messages : Masc_agent_core.Types.message list
   }
 
 type selection =

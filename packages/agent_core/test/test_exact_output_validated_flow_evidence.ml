@@ -1,6 +1,6 @@
 open Alcotest
 open Llm_provider
-module EO = Agent_sdk.Exact_output
+module EO = Masc_agent_core.Exact_output
 
 let msg text : Types.message =
   { role = Types.User

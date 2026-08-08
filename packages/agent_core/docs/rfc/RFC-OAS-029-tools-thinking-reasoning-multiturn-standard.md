@@ -33,7 +33,7 @@ OAS의 Tools / Thinking / Reasoning / Multi-turn 처리는 **코어는 견고하
 - **closed sum이 가능한 자리의 string 판별 + silent `_ -> None` drop.** historical stream finalizer drift는 `content_type` raw-string match + catch-all drop이었다. Current branch ancestry already adds `block_kind`, `Unknown_block`, and typed SSE parse/unknown-event errors, so remaining D3 work must be policy-specific rather than a wholesale redo.
 - **같은 사실의 두 번째 SSOT.** Historical: `lib/streaming.ml` carried a
   duplicate stream accumulator that lacked reconcile + partial-tool-drop fixes.
-  Current code routes the legacy `Agent_sdk.Streaming` surface through
+  Current code routes the legacy `Masc_agent_core.Streaming` surface through
   `Complete_stream_acc`; the remaining guard is to re-export the canonical
   signature, not copy the record shape.
 - **doc/typed surface가 배포 모델에 뒤처짐.** GLM이 Kimi `No_thinking_control`로 오모델링; MiniMax M2/M3 catalog rows exist but replay/tool-choice facts are under-sourced; Claude `tool_choice`-forcing-400 미모델, audit-reported `thinking.display` gap(공식 source refresh 필요), `Reasoning_effort` enum에 stale `Minimal`, `none` 누락.
@@ -177,7 +177,7 @@ RFC 컬럼: **RFC** = dialect/capability *type shape* 변경 또는 N-of-M resha
 5. Anthropic thinking drift + `tool_choice`-400 (P1×2) — forced tool + thinking hard-400 is verified; `thinking.display` visibility drift needs official source refresh before code changes.
 6. MiniMax replay/tool-choice evidence + catalog field fix (P1) — catalog rows already exist; do not add a duplicate provider. First capture official/live evidence, then update the existing capability/replay rows instead of relying on `No_replay` defaults that can silently break interleaved thinking.
 7. ~~중복 stream accumulator 제거 (D4, P2)~~ — resolved: legacy
-   `Agent_sdk.Streaming` accumulation functions route to `Complete_stream_acc`,
+   `Masc_agent_core.Streaming` accumulation functions route to `Complete_stream_acc`,
    and the public wrapper re-exports the canonical signature instead of copying
    the record shape.
 

@@ -153,7 +153,7 @@ val init_default : config_path:string -> (unit, string) result
 
 val publish_exact_output_registry :
   lanes:Runtime_schema.exact_output_lane_decl list ->
-  Agent_sdk.Exact_output.resolver_snapshot ->
+  Masc_agent_core.Exact_output.resolver_snapshot ->
   (Runtime_exact_output_registry.t, string) result
 (** Publish one immutable OAS resolver-and-lane snapshot and return that exact
     publication. Startup callers validate mandatory lanes against this value,

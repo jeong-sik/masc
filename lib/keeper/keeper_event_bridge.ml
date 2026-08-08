@@ -42,12 +42,12 @@ let payload_agent_name payload =
 ;;
 
 let tool_approval_label = function
-  | Agent_sdk.Hooks.Approved -> "approved"
-  | Agent_sdk.Hooks.Denied -> "denied"
-  | Agent_sdk.Hooks.Timed_out -> "timed_out"
+  | Masc_agent_core.Hooks.Approved -> "approved"
+  | Masc_agent_core.Hooks.Denied -> "denied"
+  | Masc_agent_core.Hooks.Timed_out -> "timed_out"
 ;;
 
-let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.t) =
+let emit_native_event_log (evt : Masc_agent_core.Event_bus.event) (json : Yojson.Safe.t) =
   let log_at level message =
     Log.Oas_event.emit level ~details:json message
   in
@@ -69,25 +69,25 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
      stay at Info (no keeper-hook duplicate, low frequency). [TurnReady] already
      uses [log_routine] for the same reason. *)
   match evt.payload with
-  | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->
+  | Masc_agent_core.Event_bus.AgentStarted { agent_name; task_id } ->
     log (Printf.sprintf "agent started agent=%s task_id=%s" agent_name task_id)
-  | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; _ } ->
+  | Masc_agent_core.Event_bus.AgentCompleted { agent_name; task_id; elapsed; _ } ->
     log
       (Printf.sprintf
          "agent completed agent=%s task_id=%s elapsed_s=%.3f"
          agent_name
          task_id
          elapsed)
-  | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
+  | Masc_agent_core.Event_bus.TurnStarted { agent_name; turn } ->
     log_routine (Printf.sprintf "turn started agent=%s turn=%d" agent_name turn)
-  | Agent_sdk.Event_bus.TurnCompleted { agent_name; turn } ->
+  | Masc_agent_core.Event_bus.TurnCompleted { agent_name; turn } ->
     log_routine (Printf.sprintf "turn completed agent=%s turn=%d" agent_name turn)
-  | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
+  | Masc_agent_core.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
     log_routine (Printf.sprintf "tool called agent=%s tool_name=%s" agent_name tool_name)
-  | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
+  | Masc_agent_core.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
     log_routine
       (Printf.sprintf "tool completed agent=%s tool_name=%s" agent_name tool_name)
-  | Agent_sdk.Event_bus.ToolApprovalCompleted
+  | Masc_agent_core.Event_bus.ToolApprovalCompleted
       { agent_name; tool_name; approval; _ } ->
     log_routine
       (Printf.sprintf
@@ -95,7 +95,7 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
          agent_name
          tool_name
          (tool_approval_label approval))
-  | Agent_sdk.Event_bus.TurnReady { agent_name; turn; tool_names } ->
+  | Masc_agent_core.Event_bus.TurnReady { agent_name; turn; tool_names } ->
     (* [substrate:tool_surface] — deterministic per-turn snapshot of the
          tool list the LLM actually sees this turn (after guardrails,
          and operator policy).  Emitted as a single
@@ -111,14 +111,14 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
          (List.length tool_names)
          (String.sub names_hash 0 16))
   (* Variants below previously absorbed by [_ -> ()] catch-all.  Each is
-     enumerated explicitly so adding a new [Agent_sdk.Event_bus.payload]
+     enumerated explicitly so adding a new [Masc_agent_core.Event_bus.payload]
      variant fails the build instead of silently dropping the log line. *)
-  | Agent_sdk.Event_bus.AgentFailed _
-  | Agent_sdk.Event_bus.HandoffRequested _
-  | Agent_sdk.Event_bus.HandoffCompleted _
-  | Agent_sdk.Event_bus.ElicitationCompleted _
-  | Agent_sdk.Event_bus.InferenceTelemetry _
-  | Agent_sdk.Event_bus.Custom _ -> ()
+  | Masc_agent_core.Event_bus.AgentFailed _
+  | Masc_agent_core.Event_bus.HandoffRequested _
+  | Masc_agent_core.Event_bus.HandoffCompleted _
+  | Masc_agent_core.Event_bus.ElicitationCompleted _
+  | Masc_agent_core.Event_bus.InferenceTelemetry _
+  | Masc_agent_core.Event_bus.Custom _ -> ()
 ;;
 
 (** Build the SSE JSON wrapper. [correlation_id] and [run_id] are
@@ -160,7 +160,7 @@ let wrap_event
 
     The match below intentionally combines explicit per-variant arms
     with a final [other] catch-all that produces a kind-only fallback
-    via [Agent_sdk.Event_bus.payload_kind].  The catch-all is "redundant" at
+    via [Masc_agent_core.Event_bus.payload_kind].  The catch-all is "redundant" at
     every individual snapshot of the OAS variant set (warning 11), but
     it is a deliberate future-proof against the OAS pin-bump P0 class
     (#10490, #10574, #10584).  Without the catch-all, every new
@@ -182,25 +182,25 @@ let wrap_event
     point of this function's shape — do not remove it without also
     removing the catch-all. *)
 let invocation_payload_fields invocation =
-  let tool_use_id = Agent_sdk.Tool_contract.Invocation.tool_use_id invocation in
-  [ "turn", `Int (Agent_sdk.Tool_contract.Invocation.turn invocation)
-  ; "planned_index", `Int (Agent_sdk.Tool_contract.Invocation.planned_index invocation)
+  let tool_use_id = Masc_agent_core.Tool_contract.Invocation.tool_use_id invocation in
+  [ "turn", `Int (Masc_agent_core.Tool_contract.Invocation.turn invocation)
+  ; "planned_index", `Int (Masc_agent_core.Tool_contract.Invocation.planned_index invocation)
   ]
   @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ])
 ;;
 
-let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t option =
-  let { Agent_sdk.Event_bus.correlation_id; run_id; ts; caused_by; _ } = evt.meta in
+let native_event_to_json (evt : Masc_agent_core.Event_bus.event) : Yojson.Safe.t option =
+  let { Masc_agent_core.Event_bus.correlation_id; run_id; ts; caused_by; _ } = evt.meta in
   let wrap = wrap_event ~ts ~correlation_id ~run_id ?caused_by in
   match[@warning "-11"] evt.payload with
-  | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->
+  | Masc_agent_core.Event_bus.AgentStarted { agent_name; task_id } ->
     let payload =
       `Assoc [ "agent_name", `String agent_name; "task_id", `String task_id ]
     in
     Some (wrap ~event_type:"agent_started" ~payload ~agent_name ~task_id ())
-  | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
+  | Masc_agent_core.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
     (match result with
-     | Ok (response : Agent_sdk.Types.api_response) ->
+     | Ok (response : Masc_agent_core.Types.api_response) ->
        let provider =
          inference_provider_bucket ~provider:"" ~model:response.model
        in
@@ -214,7 +214,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
      | Error error ->
        Log.Oas_event.routine
          "agent completion has no inference cost observation because the run failed: %s"
-         (Agent_sdk.Error.to_string error));
+         (Masc_agent_core.Error.to_string error));
     let payload =
       `Assoc
         ([ "agent_name", `String agent_name
@@ -224,7 +224,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          @ agent_completed_result_fields result)
     in
     Some (wrap ~event_type:"agent_completed" ~payload ~agent_name ~task_id ())
-  | Agent_sdk.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
+  | Masc_agent_core.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
     let projection = agent_failed_error_projection error in
     Some
       (Sse_event.agent_failed
@@ -241,7 +241,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          ~error_retryable:projection.error_retryable
          ~error_detail:projection.error_detail
          ())
-  | Agent_sdk.Event_bus.ToolCalled { invocation; agent_name; tool_name; _ } ->
+  | Masc_agent_core.Event_bus.ToolCalled { invocation; agent_name; tool_name; _ } ->
     (* tool_called publishes before execution, so the keeper hook has not
        minted an execution_id yet — this row carries the provider call id
        only; the matching tool_completed row carries both. *)
@@ -251,12 +251,12 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          @ invocation_payload_fields invocation)
     in
     Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
-  | Agent_sdk.Event_bus.ToolCompleted { invocation; agent_name; tool_name; _ } ->
+  | Masc_agent_core.Event_bus.ToolCompleted { invocation; agent_name; tool_name; _ } ->
     (* RFC-0233 PR-2: the keeper post_tool_use hook registered the
        tool_use_id ↔ execution_id pair before OAS published this event,
        so the lookup is deterministic. A miss means the execution did not
        go through a keeper hook (worker/eval lanes), not a failure. *)
-    let tool_use_id = Agent_sdk.Tool_contract.Invocation.tool_use_id invocation in
+    let tool_use_id = Masc_agent_core.Tool_contract.Invocation.tool_use_id invocation in
     let execution_id_fields =
       match
         if tool_use_id = "" then None
@@ -272,7 +272,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          @ execution_id_fields)
     in
     Some (wrap ~event_type:"tool_completed" ~payload ~agent_name ~tool_name ())
-  | Agent_sdk.Event_bus.ToolApprovalCompleted
+  | Masc_agent_core.Event_bus.ToolApprovalCompleted
       { invocation; agent_name; tool_name; approval } ->
     let payload =
       `Assoc
@@ -289,13 +289,13 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          ~agent_name
          ~tool_name
          ())
-  | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
+  | Masc_agent_core.Event_bus.TurnStarted { agent_name; turn } ->
     let payload = `Assoc [ "agent_name", `String agent_name; "turn", `Int turn ] in
     Some (wrap ~event_type:"turn_started" ~payload ~agent_name ~turn ())
-  | Agent_sdk.Event_bus.TurnCompleted { agent_name; turn } ->
+  | Masc_agent_core.Event_bus.TurnCompleted { agent_name; turn } ->
     let payload = `Assoc [ "agent_name", `String agent_name; "turn", `Int turn ] in
     Some (wrap ~event_type:"turn_completed" ~payload ~agent_name ~turn ())
-  | Agent_sdk.Event_bus.TurnReady { agent_name; turn; tool_names } ->
+  | Masc_agent_core.Event_bus.TurnReady { agent_name; turn; tool_names } ->
     let names_hash = Digest.to_hex (Digest.string (String.concat "\n" tool_names)) in
     let payload =
       `Assoc
@@ -307,7 +307,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
         ]
     in
     Some (wrap ~event_type:"turn_ready" ~payload ~agent_name ~turn ())
-  | Agent_sdk.Event_bus.HandoffRequested { from_agent; to_agent; reason } ->
+  | Masc_agent_core.Event_bus.HandoffRequested { from_agent; to_agent; reason } ->
     let payload =
       `Assoc
         [ "from_agent", `String from_agent
@@ -316,7 +316,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
         ]
     in
     Some (wrap ~event_type:"handoff_requested" ~payload ~agent_name:from_agent ())
-  | Agent_sdk.Event_bus.HandoffCompleted { from_agent; to_agent; elapsed } ->
+  | Masc_agent_core.Event_bus.HandoffCompleted { from_agent; to_agent; elapsed } ->
     let payload =
       `Assoc
         [ "from_agent", `String from_agent
@@ -325,8 +325,8 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
         ]
     in
     Some (wrap ~event_type:"handoff_completed" ~payload ~agent_name:from_agent ())
-  | Agent_sdk.Event_bus.ElicitationCompleted _ -> None (* Internal; no SSE relay needed *)
-  | Agent_sdk.Event_bus.Custom (name, payload) ->
+  | Masc_agent_core.Event_bus.ElicitationCompleted _ -> None (* Internal; no SSE relay needed *)
+  | Masc_agent_core.Event_bus.Custom (name, payload) ->
     (* Custom event names use dots internally.
          Translate dots to the public SSE separator for [masc.*] events.
          Internally MASC emits dot-separated names per OAS Custom convention.
@@ -345,7 +345,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          ?turn:(Json_util.assoc_int_opt "turn" payload)
          ?tool_name:(Json_util.assoc_string_opt "tool_name" payload)
          ())
-  | Agent_sdk.Event_bus.InferenceTelemetry
+  | Masc_agent_core.Event_bus.InferenceTelemetry
       { provider
       ; model
       ; prompt_tokens
@@ -375,7 +375,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          [InferenceTelemetry] (#10490) and [Stale_turn_timeout] (#10574)
          broke main with [-warn-error +8] partial-match errors.
 
-         [Agent_sdk.Event_bus.payload_kind] is co-located with the [payload]
+         [Masc_agent_core.Event_bus.payload_kind] is co-located with the [payload]
          variant in OAS — adding a new variant upstream forces an
          entry there in the same patch, so the snake_case label is
          always accurate.  Emit a kind-only SSE event so subscribers
@@ -391,7 +391,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          [masc_oas_bridge_unmigrated_payload_kind_total{kind}] counter
          gives them the per-process *rate*, surfaced by Otel_metric_store
          export so dashboards can alert without log scraping. *)
-    let kind = Agent_sdk.Event_bus.payload_kind other in
+    let kind = Masc_agent_core.Event_bus.payload_kind other in
     Otel_metric_store.inc_counter
       Otel_metric_store.metric_oas_bridge_unmigrated_payload_kind
       ~labels:[ "kind", kind ]
@@ -656,14 +656,14 @@ let oas_event_store ~config =
 let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
   let store = ref (oas_event_store ~config) in
   let sub =
-    Agent_sdk_metrics_bridge.subscribe
+    Masc_agent_core_metrics_bridge.subscribe
       ~capacity:256
-      ~overflow:Agent_sdk.Event_bus.Drop_oldest
+      ~overflow:Masc_agent_core.Event_bus.Drop_oldest
       ~purpose:"sse_bridge"
-      ~filter:Agent_sdk.Event_bus.accept_all
+      ~filter:Masc_agent_core.Event_bus.accept_all
       bus
   in
-  Eio.Switch.on_release sw (fun () -> Agent_sdk_metrics_bridge.unsubscribe bus sub);
+  Eio.Switch.on_release sw (fun () -> Masc_agent_core_metrics_bridge.unsubscribe bus sub);
   let pending = ref [] in
   update_relay_queue_depth !pending;
   Eio.Fiber.fork ~sw (fun () ->
@@ -672,7 +672,7 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
          pending := process_pending ~store_ref:store [] !pending;
          if should_drain_subscription !pending
          then (
-           let events = Agent_sdk_metrics_bridge.drain sub in
+           let events = Masc_agent_core_metrics_bridge.drain sub in
            pending := prepare_pending_events events;
            pending := process_pending ~store_ref:store [] !pending);
          update_relay_queue_depth !pending

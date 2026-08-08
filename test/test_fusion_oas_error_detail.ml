@@ -74,12 +74,12 @@ let test_panel_failure_text_no_reattribution () =
 ;;
 
 let test_empty_response_detail_summarizes_shape () =
-  let response : Agent_sdk.Types.api_response =
+  let response : Masc_agent_core.Types.api_response =
     { id = "r"
     ; model = "m"
-    ; stop_reason = Agent_sdk.Types.MaxTokens
+    ; stop_reason = Masc_agent_core.Types.MaxTokens
     ; content =
-        [ Agent_sdk.Types.Thinking { signature = None; content = "secret chain" } ]
+        [ Masc_agent_core.Types.Thinking { signature = None; content = "secret chain" } ]
     ; usage =
         Some
           { input_tokens = 21
@@ -107,10 +107,10 @@ let test_empty_response_detail_summarizes_shape () =
 ;;
 
 let test_empty_response_detail_uses_canonical_unknown_stop_reason () =
-  let response : Agent_sdk.Types.api_response =
+  let response : Masc_agent_core.Types.api_response =
     { id = "r"
     ; model = "m"
-    ; stop_reason = Agent_sdk.Types.Unknown "line\nquote\""
+    ; stop_reason = Masc_agent_core.Types.Unknown "line\nquote\""
     ; content = []
     ; usage = None
     ; telemetry = None
@@ -125,13 +125,13 @@ let test_empty_response_detail_uses_canonical_unknown_stop_reason () =
 
 let test_empty_response_detail_counts_via_canonical_projection () =
   (* 비-thinking 카운트가 OAS canonical projection
-     [Agent_sdk.Response_shape.summarize_blocks]에서 산출됨을 증명한다(로컬 fold 제거 후).
+     [Masc_agent_core.Response_shape.summarize_blocks]에서 산출됨을 증명한다(로컬 fold 제거 후).
      text_chars는 OAS 규약대로 trim 후 길이다: "  hi  "(2) + "yo"(2) = 4. *)
-  let response : Agent_sdk.Types.api_response =
+  let response : Masc_agent_core.Types.api_response =
     { id = "r"
     ; model = "m"
-    ; stop_reason = Agent_sdk.Types.MaxTokens
-    ; content = [ Agent_sdk.Types.Text "  hi  "; Agent_sdk.Types.Text "yo" ]
+    ; stop_reason = Masc_agent_core.Types.MaxTokens
+    ; content = [ Masc_agent_core.Types.Text "  hi  "; Masc_agent_core.Types.Text "yo" ]
     ; usage = None
     ; telemetry = None
     }

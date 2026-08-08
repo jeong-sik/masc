@@ -80,10 +80,10 @@ let project_replay_message_exn ~base_path
        Masc.Keeper_gate_replay.project_model_input
          ~base_path
          evidence
-         [ Agent_sdk.Types.user_msg message.text ]
+         [ Masc_agent_core.Types.user_msg message.text ]
      with
      | Ok [ _canonical; projected ] ->
-       Agent_sdk.Types.text_of_content projected.content
+       Masc_agent_core.Types.text_of_content projected.content
      | Ok _ -> fail "replay projection did not append exact evidence"
      | Error detail -> fail detail)
 ;;
@@ -3423,7 +3423,7 @@ let test_descriptor_route_miss_payload_is_typed_runtime_failure () =
 
 let check_no_inferred_descriptor ~msg name =
   let tool = make_dummy_oas_tool name in
-  match Agent_sdk.Tool.descriptor tool with
+  match Masc_agent_core.Tool.descriptor tool with
   | None -> ()
   | Some _ -> fail (Printf.sprintf "%s: inferred descriptor for %s" msg name)
 ;;
@@ -3436,7 +3436,7 @@ let test_catalog_metadata_does_not_infer_oas_descriptors () =
 
 let find_tool_by_name tools name =
   List.find_opt
-    (fun (t : Agent_sdk.Tool.t) -> String.equal t.Agent_sdk.Tool.schema.Agent_sdk.Types.name name)
+    (fun (t : Masc_agent_core.Tool.t) -> String.equal t.Masc_agent_core.Tool.schema.Masc_agent_core.Types.name name)
     tools
 ;;
 
@@ -3444,7 +3444,7 @@ let check_bundle_has_no_inferred_descriptor ~msg tools name =
   match find_tool_by_name tools name with
   | None -> fail (Printf.sprintf "%s: %s not in bundle" msg name)
   | Some t ->
-    (match Agent_sdk.Tool.descriptor t with
+    (match Masc_agent_core.Tool.descriptor t with
      | None -> ()
      | Some _ -> fail (Printf.sprintf "%s: %s has inferred descriptor" msg name))
 ;;
@@ -3488,7 +3488,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
        in
        let surface_post = terminal_surface_post bundle.tools in
        (match
-          Agent_sdk.Tool.execute
+          Masc_agent_core.Tool.execute
             surface_post
             (`Assoc
                [ "surface", `String "dashboard"
@@ -3508,7 +3508,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
           fail "invalid terminal input poisoned the terminal effect");
        (match
-          Agent_sdk.Tool.execute
+          Masc_agent_core.Tool.execute
             surface_post
             (`Assoc
                [ "surface", `String "dashboard"
@@ -3517,7 +3517,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         with
         | Ok _ -> ()
         | Error error ->
-          failf "corrected terminal input failed: %s" error.Agent_sdk.Types.message);
+          failf "corrected terminal input failed: %s" error.Masc_agent_core.Types.message);
        (match bundle.terminal_effect_state () with
         | Masc.Keeper_tools_oas.Terminal_effect_completed -> ()
         | Masc.Keeper_tools_oas.Terminal_effect_open ->
@@ -3538,7 +3538,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
        Unix.unlink chat_path;
        Unix.mkdir chat_path 0o755;
        (match
-          Agent_sdk.Tool.execute
+          Masc_agent_core.Tool.execute
             surface_post
             (`Assoc
                [ "surface", `String "dashboard"
@@ -3692,7 +3692,7 @@ let test_deferred_web_search_yields_before_provider_retry () =
            ~cooperative_yield_probe:(fun _boundary ->
              Masc.Keeper_agent_run.terminal_effect_boundary_decision
                (bundle.terminal_effect_state ()))
-           [ Agent_sdk.Types.Text "search for the tool" ]
+           [ Masc_agent_core.Types.Text "search for the tool" ]
        in
        check int
          "deferred effect stops before a second provider call"
@@ -3725,7 +3725,7 @@ let test_deferred_web_search_yields_before_provider_retry () =
         | Error error ->
           failf
             "deferred effect failed instead of yielding: %s"
-            (Agent_sdk.Error.to_string error));
+            (Masc_agent_core.Error.to_string error));
        match bundle.terminal_effect_state () with
        | Masc.Keeper_tools_oas.External_effect_deferred -> ()
        | Masc.Keeper_tools_oas.Deferred_tool_result ->
@@ -3778,7 +3778,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
          ~finally:(fun () -> Masc.Sse.unsubscribe_external subscriber_id)
          (fun () ->
             let result =
-              Agent_sdk.Tool.execute
+              Masc_agent_core.Tool.execute
                 surface_post
                 (`Assoc
                    [ "surface", `String "dashboard"
@@ -3790,11 +3790,11 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                check bool
                  "append failure is an OAS runtime error"
                  true
-                 (error.Agent_sdk.Types.error_class
-                  = Some Agent_sdk.Types.Unknown);
+                 (error.Masc_agent_core.Types.error_class
+                  = Some Masc_agent_core.Types.Unknown);
                let error_detail =
                  Yojson.Safe.Util.
-                   (parse_json error.Agent_sdk.Types.message
+                   (parse_json error.Masc_agent_core.Types.message
                     |> member "error"
                     |> to_string)
                in
@@ -3842,7 +3842,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
             in
             Unix.rmdir chat_path;
             (match
-               Agent_sdk.Tool.execute
+               Masc_agent_core.Tool.execute
                  surface_post
                  (`Assoc
                     [ "surface", `String "dashboard"
@@ -3853,7 +3853,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              | Error error ->
                failf
                  "later successful terminal call failed: %s"
-                 error.Agent_sdk.Types.message);
+                 error.Masc_agent_core.Types.message);
             (match bundle.terminal_effect_state () with
              | Masc.Keeper_tools_oas.Terminal_effect_failed failure ->
                check bool
@@ -3912,7 +3912,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                   ~cooperative_yield_probe:(fun _boundary ->
                     Masc.Keeper_agent_run.terminal_effect_boundary_decision
                       (runtime_bundle.terminal_effect_state ()))
-                  [ Agent_sdk.Types.Text "deliver the dashboard reply" ]
+                  [ Masc_agent_core.Types.Text "deliver the dashboard reply" ]
               with
               | Error error -> error
               | Ok _ -> fail "terminal failure reached ordinary provider completion"

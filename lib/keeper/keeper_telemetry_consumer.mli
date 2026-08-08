@@ -9,7 +9,7 @@
 val spawn_subscriber
   :  sw:Eio.Switch.t
   -> clock:[> float Eio.Time.clock_ty ] Eio.Std.r
-  -> bus:Agent_sdk.Event_bus.t
+  -> bus:Masc_agent_core.Event_bus.t
   -> unit
 (** [spawn_subscriber ~sw ~clock ~bus] forks a fiber that drains
     [Custom("telemetry_event", json)] payloads from [bus] and increments

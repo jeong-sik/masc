@@ -4,7 +4,7 @@
     Focuses on schema property ordering, complex parse functions, and error
     path classification. *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (* ── Helpers ────────────────────────────────────────────────── *)

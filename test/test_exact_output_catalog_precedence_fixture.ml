@@ -1,4 +1,4 @@
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Masc_agent_core.Exact_output
 module Registry = struct
   include Runtime_exact_output_registry
   include Runtime_exact_output_registry.For_testing

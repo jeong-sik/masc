@@ -18,7 +18,7 @@ val start :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   config:Workspace.config ->
-  bus:Agent_sdk.Event_bus.t ->
+  bus:Masc_agent_core.Event_bus.t ->
   unit
 
 val start_with_interval :
@@ -26,7 +26,7 @@ val start_with_interval :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   config:Workspace.config ->
-  bus:Agent_sdk.Event_bus.t ->
+  bus:Masc_agent_core.Event_bus.t ->
   unit
 (** Start the bridge fiber with an explicit drain interval.
     Test-only surface — production uses [start] which reads
@@ -34,5 +34,5 @@ val start_with_interval :
 
 (** Serialize a single OAS event to SSE JSON.
     Exposed for unit testing. *)
-val native_event_to_json : Agent_sdk.Event_bus.event -> Yojson.Safe.t option
+val native_event_to_json : Masc_agent_core.Event_bus.event -> Yojson.Safe.t option
 

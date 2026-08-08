@@ -375,14 +375,14 @@ let make_checkpoint_inventory_meta ~name ~trace_id =
 ;;
 
 let make_inventory_checkpoint ~session_id ~turn_count ~created_at =
-  Agent_sdk.Checkpoint.
+  Masc_agent_core.Checkpoint.
     { version = checkpoint_version
     ; session_id
     ; agent_name = "checkpoint-inventory-test"
     ; model = "opaque-runtime"
     ; system_prompt = None
     ; messages = []
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Masc_agent_core.Types.empty_usage
     ; turn_count
     ; created_at
     ; tools = []
@@ -395,10 +395,10 @@ let make_inventory_checkpoint ~session_id ~turn_count ~created_at =
     ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.Off
+    ; response_format = Masc_agent_core.Types.Off
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Masc_agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }

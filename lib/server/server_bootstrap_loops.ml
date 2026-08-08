@@ -1023,7 +1023,7 @@ let start_keeper_loops_owned
   Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
   (* Bus creation carries no queue policy. Each subscriber owns its bounded,
      non-blocking queue contract. *)
-  let event_bus = Agent_sdk.Event_bus.create () in
+  let event_bus = Masc_agent_core.Event_bus.create () in
   (* Eio fiber isolation: each subsystem runs in its own fiber.
      If one crashes, others keep running — Eio's structured concurrency.
      Subsystem_health tracks liveness at module level (no init timing dependency). *)
@@ -1166,7 +1166,7 @@ let start_keeper_loops_owned
      boundary. Dashboard SSE consumers see both channels as one stream
      — the relay translates masc.* →
      masc:* on the wire for backward compatibility. *)
-  let masc_event_bus = Agent_sdk.Event_bus.create () in
+  let masc_event_bus = Masc_agent_core.Event_bus.create () in
   Event_bus_slots.set_masc masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:event_bus;
@@ -1175,15 +1175,15 @@ let start_keeper_loops_owned
      deserializing provider/model-bearing payloads. *)
   Keeper_telemetry_consumer.spawn_subscriber ~sw ~clock ~bus:event_bus;
   let keeper_lifecycle_sub =
-    Agent_sdk_metrics_bridge.subscribe
+    Masc_agent_core_metrics_bridge.subscribe
       ~capacity:256
-      ~overflow:Agent_sdk.Event_bus.Drop_oldest
+      ~overflow:Masc_agent_core.Event_bus.Drop_oldest
       ~purpose:"lifecycle_listener"
-      ~filter:(Agent_sdk.Event_bus.filter_topic "masc.keeper.lifecycle")
+      ~filter:(Masc_agent_core.Event_bus.filter_topic "masc.keeper.lifecycle")
       masc_event_bus
   in
   Eio.Switch.on_release sw (fun () ->
-    Agent_sdk_metrics_bridge.unsubscribe masc_event_bus keeper_lifecycle_sub);
+    Masc_agent_core_metrics_bridge.unsubscribe masc_event_bus keeper_lifecycle_sub);
   (* Replay durable completion receipts only after the MASC event bus has its
      SSE/metrics subscribers and lifecycle hooks are installed. Otherwise a
      boot-time [Dead_cleaned] publish can return successfully while every
@@ -1243,11 +1243,11 @@ let start_keeper_loops_owned
     (fun () ->
     let rec loop () =
       (try
-         let events = Agent_sdk_metrics_bridge.drain keeper_lifecycle_sub in
+         let events = Masc_agent_core_metrics_bridge.drain keeper_lifecycle_sub in
          List.iter
-           (fun (evt : Agent_sdk.Event_bus.event) ->
+           (fun (evt : Masc_agent_core.Event_bus.event) ->
               match evt.payload with
-              | Agent_sdk.Event_bus.Custom ("masc.keeper.lifecycle", payload) ->
+              | Masc_agent_core.Event_bus.Custom ("masc.keeper.lifecycle", payload) ->
                 (match
                    ( Safe_ops.json_string_opt "event" payload
                    , Safe_ops.json_string_opt "keeper_name" payload )

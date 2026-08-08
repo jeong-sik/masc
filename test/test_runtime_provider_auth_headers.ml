@@ -1273,12 +1273,12 @@ let test_runtime_agent_context_preserves_max_tokens_intent () =
             ~config
             ()
         in
-        match Agent_sdk.Builder.build_safe builder with
-        | Error err -> fail (Agent_sdk.Error.to_string err)
+        match Masc_agent_core.Builder.build_safe builder with
+        | Error err -> fail (Masc_agent_core.Error.to_string err)
         | Ok agent ->
           check (option int) "builder max_tokens intent" expected
-            (Agent_sdk.Agent.state agent).config.max_tokens;
-          Eio.Switch.on_release sw (fun () -> Agent_sdk.Agent.close agent)
+            (Masc_agent_core.Agent.state agent).config.max_tokens;
+          Eio.Switch.on_release sw (fun () -> Masc_agent_core.Agent.close agent)
       in
       check_builder_max_tokens None None;
       check_builder_max_tokens (Some 2048) (Some 2048)))
@@ -1339,25 +1339,25 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
           ~config
           ()
       in
-      match Agent_sdk.Builder.build_safe builder with
-      | Error err -> fail (Agent_sdk.Error.to_string err)
+      match Masc_agent_core.Builder.build_safe builder with
+      | Error err -> fail (Masc_agent_core.Error.to_string err)
       | Ok agent ->
-        let agent_config = (Agent_sdk.Agent.state agent).config in
+        let agent_config = (Masc_agent_core.Agent.state agent).config in
         check (option (float 0.0001)) "builder top_p" (Some 0.91)
           agent_config.top_p;
         check (option int) "builder top_k" (Some 42) agent_config.top_k;
         check (option (float 0.0001)) "builder min_p" (Some 0.07)
           agent_config.min_p;
         Eio.Switch.on_release sw (fun () ->
-          Agent_sdk.Agent.close agent)));
+          Masc_agent_core.Agent.close agent)));
   let checkpoint =
-    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+    { Masc_agent_core.Checkpoint.version = Masc_agent_core.Checkpoint.checkpoint_version
     ; session_id = "session"
     ; agent_name = "oas-runpod_mtp.qwen"
     ; model = "qwen"
     ; system_prompt = Some ""
     ; messages = []
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Masc_agent_core.Types.empty_usage
     ; turn_count = 3
     ; created_at = 0.0
     ; tools = []
@@ -1370,10 +1370,10 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
     ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = (Agent_sdk.Types.default_config ~model:"qwen").response_format
+    ; response_format = (Masc_agent_core.Types.default_config ~model:"qwen").response_format
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Masc_agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }
@@ -1396,7 +1396,7 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
   let provider_cfg_with_response_format =
     let base = provider_cfg () in
     { base with
-      Llm_provider.Provider_config.response_format = Agent_sdk.Types.JsonMode
+      Llm_provider.Provider_config.response_format = Masc_agent_core.Types.JsonMode
     }
   in
   let config =
@@ -1407,13 +1407,13 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
       ~tools:[]
   in
   let checkpoint =
-    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+    { Masc_agent_core.Checkpoint.version = Masc_agent_core.Checkpoint.checkpoint_version
     ; session_id = "session"
     ; agent_name = "oas-runpod_mtp.qwen"
     ; model = "qwen"
     ; system_prompt = Some ""
     ; messages = []
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Masc_agent_core.Types.empty_usage
     ; turn_count = 3
     ; created_at = 0.0
     ; tools = []
@@ -1426,10 +1426,10 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
     ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.Off
+    ; response_format = Masc_agent_core.Types.Off
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Masc_agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }
@@ -1439,12 +1439,12 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
     provider_cfg_with_response_format.Llm_provider.Provider_config.response_format
   in
   check bool "resume patches checkpoint response_format to base contract" true
-    (prepared.patched_checkpoint.Agent_sdk.Checkpoint.response_format
+    (prepared.patched_checkpoint.Masc_agent_core.Checkpoint.response_format
      = expected_response_format)
 
 let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
   let tool =
-    Agent_sdk.Tool.create
+    Masc_agent_core.Tool.create
       ~name:"probe_tool"
       ~description:"probe tool"
       ~parameters:[]
@@ -1465,17 +1465,17 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
           ~config
           ()
       in
-      match Agent_sdk.Builder.build_safe builder with
-      | Error err -> fail (Agent_sdk.Error.to_string err)
+      match Masc_agent_core.Builder.build_safe builder with
+      | Error err -> fail (Masc_agent_core.Error.to_string err)
       | Ok agent ->
-        let agent_config = (Agent_sdk.Agent.state agent).config in
+        let agent_config = (Masc_agent_core.Agent.state agent).config in
         check
           (option string)
           "tool_choice remains unset"
           None
-          (Option.map Agent_sdk.Types.show_tool_choice agent_config.tool_choice);
+          (Option.map Masc_agent_core.Types.show_tool_choice agent_config.tool_choice);
         Eio.Switch.on_release sw (fun () ->
-          Agent_sdk.Agent.close agent)))
+          Masc_agent_core.Agent.close agent)))
 
 let fresh_loopback_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -1587,13 +1587,13 @@ let context_fit_runtime_config base_url =
     ~tools:[]
 
 let context_fit_checkpoint () =
-  { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+  { Masc_agent_core.Checkpoint.version = Masc_agent_core.Checkpoint.checkpoint_version
   ; session_id = "context-fit-session"
   ; agent_name = "context-fit-fixture"
   ; model = "context-fit-fixture"
   ; system_prompt = Some "stale"
   ; messages = []
-  ; usage = Agent_sdk.Types.empty_usage
+  ; usage = Masc_agent_core.Types.empty_usage
   ; turn_count = 3
   ; created_at = 0.0
   ; tools = []
@@ -1606,18 +1606,18 @@ let context_fit_checkpoint () =
   ; reasoning_effort = None
   ; enable_thinking = None
   ; preserve_thinking = None
-  ; response_format = Agent_sdk.Types.Off
+  ; response_format = Masc_agent_core.Types.Off
   ; thinking_budget = None
   ; cache_system_prompt = false
-  ; context = Agent_sdk.Context.create_sync ()
+  ; context = Masc_agent_core.Context.create_sync ()
   ; mcp_sessions = []
   ; working_context = None
   }
 
 let check_context_fit_overflow = function
-  | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow { limit = Some 512; _ })) ->
+  | Error (Masc_agent_core.Error.Api (Masc_agent_core.Retry.ContextOverflow { limit = Some 512; _ })) ->
     ()
-  | Error error -> fail (Agent_sdk.Error.to_string error)
+  | Error error -> fail (Masc_agent_core.Error.to_string error)
   | Ok _ -> fail "overflowed request must not reach completion dispatch"
 
 let test_runtime_agent_fresh_build_enforces_native_context_fit () =
@@ -1628,11 +1628,11 @@ let test_runtime_agent_fresh_build_enforces_native_context_fit () =
     let agent =
       match Runtime_agent.build ~sw ~net ~config with
       | Ok agent -> agent
-      | Error error -> fail (Agent_sdk.Error.to_string error)
+      | Error error -> fail (Masc_agent_core.Error.to_string error)
     in
     Fun.protect
-      ~finally:(fun () -> Agent_sdk.Agent.close agent)
-      (fun () -> Agent_sdk.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
+      ~finally:(fun () -> Masc_agent_core.Agent.close agent)
+      (fun () -> Masc_agent_core.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
   in
   check (list string) "fresh request paths" [ "/v1/messages/count_tokens" ] paths
 
@@ -1650,21 +1650,21 @@ let test_runtime_agent_resume_enforces_native_context_fit () =
           ~checkpoint:(context_fit_checkpoint ())
       with
       | Ok agent -> agent
-      | Error error -> fail (Agent_sdk.Error.to_string error)
+      | Error error -> fail (Masc_agent_core.Error.to_string error)
     in
     Fun.protect
-      ~finally:(fun () -> Agent_sdk.Agent.close agent)
-      (fun () -> Agent_sdk.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
+      ~finally:(fun () -> Masc_agent_core.Agent.close agent)
+      (fun () -> Masc_agent_core.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
   in
   check (list string) "resumed request paths" [ "/v1/messages/count_tokens" ] paths
 
 let projection_messages marker messages =
   let project_block = function
-    | Agent_sdk.Types.Text _ -> Agent_sdk.Types.Text marker
+    | Masc_agent_core.Types.Text _ -> Masc_agent_core.Types.Text marker
     | block -> block
   in
   List.map
-    (fun (message : Agent_sdk.Types.message) ->
+    (fun (message : Masc_agent_core.Types.message) ->
       { message with content = List.map project_block message.content })
     messages
 
@@ -1697,14 +1697,14 @@ let run_projection_case ~resume =
     let agent =
       match agent with
       | Ok agent -> agent
-      | Error error -> fail (Agent_sdk.Error.to_string error)
+      | Error error -> fail (Masc_agent_core.Error.to_string error)
     in
     Fun.protect
-      ~finally:(fun () -> Agent_sdk.Agent.close agent)
+      ~finally:(fun () -> Masc_agent_core.Agent.close agent)
       (fun () ->
-         match Agent_sdk.Agent.run ~sw agent canonical_marker with
+         match Masc_agent_core.Agent.run ~sw agent canonical_marker with
          | Ok _ -> ()
-         | Error error -> fail (Agent_sdk.Error.to_string error))
+         | Error error -> fail (Masc_agent_core.Error.to_string error))
   in
   check int "projection executes once" 1 !projection_calls;
   check
@@ -1755,14 +1755,14 @@ let run_pre_dispatch_serialization_observer_case ~resume =
     let agent =
       match agent with
       | Ok agent -> agent
-      | Error error -> fail (Agent_sdk.Error.to_string error)
+      | Error error -> fail (Masc_agent_core.Error.to_string error)
     in
     Fun.protect
-      ~finally:(fun () -> Agent_sdk.Agent.close agent)
+      ~finally:(fun () -> Masc_agent_core.Agent.close agent)
       (fun () ->
-         match Agent_sdk.Agent.run ~sw agent "observe exact request bytes" with
+         match Masc_agent_core.Agent.run ~sw agent "observe exact request bytes" with
          | Ok _ -> ()
-         | Error error -> fail (Agent_sdk.Error.to_string error))
+         | Error error -> fail (Masc_agent_core.Error.to_string error))
   in
   let completion_body = List.assoc "/v1/messages" requests in
   check
@@ -1787,7 +1787,7 @@ let test_clock_failfast_returns_typed_error_when_idle_set_without_clock () =
       ~process_clock:(Error "process runtime not initialised")
       ~ctx_clock:None
   with
-  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })) ->
+  | Error (Masc_agent_core.Error.Config (Masc_agent_core.Error.InvalidConfig { field; detail })) ->
     check string "field" "stream_idle_timeout_s" field;
     check
       bool
@@ -1800,7 +1800,7 @@ let test_clock_failfast_returns_typed_error_when_idle_set_without_clock () =
     fail
       (Printf.sprintf
          "expected InvalidConfig stream_idle_timeout_s, got %s"
-         (Agent_sdk.Error.to_string err))
+         (Masc_agent_core.Error.to_string err))
   | Ok _ -> fail "expected typed error when idle is configured but no clock resolves"
 
 let test_clock_failfast_opt_out_when_no_idle_no_clock () =

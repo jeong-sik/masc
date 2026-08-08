@@ -1157,7 +1157,7 @@ let keeper_request_terminal_payload ?request_id ~keeper_name ~status
   `Assoc fields
 
 type keeper_stream_worker_event =
-  | Stream_event of Agent_sdk.Types.sse_event
+  | Stream_event of Masc_agent_core.Types.sse_event
   | Stream_client_disconnected
   | Stream_dashboard_queued of dashboard_deferred_chat
   | Stream_queued_turn_deferred of Keeper_turn_admission.rejection
@@ -2673,7 +2673,7 @@ let process_single_turn ~user_row_origin ~submission
              (completion_or_disconnect
               :> [ `Client_disconnected
                   | `Completion of keeper_stream_completion
-                  | `Stream_event of Agent_sdk.Types.sse_event
+                  | `Stream_event of Masc_agent_core.Types.sse_event
                   ])))
   in
   (* Queue-lane producer identity shared with the persisted transcript row;
@@ -3054,7 +3054,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                 (json_opt "stop_reason"
                    (Option.map
                       (fun reason ->
-                        `String (Agent_sdk.Types.stop_reason_to_string reason))
+                        `String (Masc_agent_core.Types.stop_reason_to_string reason))
                       stop_reason)
                 @ json_opt "usage"
                     (Option.map Keeper_chat_events.api_usage_to_json usage))
@@ -3109,7 +3109,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                     ("media_type", `String media_type);
                     ( "source_type",
                       `String
-                        (Agent_sdk.Types.media_source_kind_to_string source_type)
+                        (Masc_agent_core.Types.media_source_kind_to_string source_type)
                     );
                     ("media_ref", `String media_ref);
                   ])

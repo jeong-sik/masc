@@ -502,7 +502,7 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Log.Keeper.info ~keeper_name:updated_meta.name
       "typed input required after %d turn(s), checkpoint saved request_id=%s"
       turns_used
-      request.Agent_sdk.Error.request_id;
+      request.Masc_agent_core.Error.request_id;
     reset_failure_state ()
   | Runtime_agent.Completed -> reset_failure_state ()
 ;;

@@ -14,7 +14,7 @@ let oas_checkpoint_summary_json
       ~(path : string)
       ~(is_current : bool)
       ~(fallback_generation : int)
-      (checkpoint : Agent_sdk.Checkpoint.t)
+      (checkpoint : Masc_agent_core.Checkpoint.t)
   =
   let generation =
     Keeper_context_core.checkpoint_generation checkpoint ~fallback:fallback_generation

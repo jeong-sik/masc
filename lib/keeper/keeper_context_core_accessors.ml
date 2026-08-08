@@ -13,7 +13,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 module Message_json = Keeper_context_core_message_json
-module Canonical_tool = Agent_sdk.Canonical_tool
+module Canonical_tool = Masc_agent_core.Canonical_tool
 
 (* ================================================================ *)
 (* Working Context Types (re-exported from Keeper_types)             *)
@@ -28,7 +28,7 @@ type session_context = Keeper_types.session_context
 (* Working Context Operations (inlined from Keeper_working_context)  *)
 (* ================================================================ *)
 
-let text_of_message = Agent_sdk.Types.text_of_message
+let text_of_message = Masc_agent_core.Types.text_of_message
 
 let ensure_dir path =
   (* ensure_dir returns the created path; fire-and-forget *)
@@ -45,15 +45,15 @@ let messages_of_context (ctx : working_context) =
   ctx.checkpoint.messages
 
 let empty_runtime_checkpoint ~system_prompt ~messages
-    ~(context : Agent_sdk.Context.t) : Agent_sdk.Checkpoint.t =
+    ~(context : Masc_agent_core.Context.t) : Masc_agent_core.Checkpoint.t =
   {
-    Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
+    Masc_agent_core.Checkpoint.version = Masc_agent_core.Checkpoint.checkpoint_version;
     session_id = "";
     agent_name = "";
     model = "";
     system_prompt = Some system_prompt;
     messages;
-    usage = Agent_sdk.Types.empty_usage;
+    usage = Masc_agent_core.Types.empty_usage;
     turn_count = 0;
     created_at = Time_compat.now ();
     tools = [];
@@ -66,7 +66,7 @@ let empty_runtime_checkpoint ~system_prompt ~messages
     reasoning_effort = None;
     enable_thinking = None;
     preserve_thinking = None;
-    response_format = Agent_sdk.Types.Off;
+    response_format = Masc_agent_core.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
     context;
@@ -78,7 +78,7 @@ let message_count (ctx : working_context) =
   List.length (messages_of_context ctx)
 
 let create_oas_context ~eio =
-  if eio then Agent_sdk.Context.create () else Agent_sdk.Context.create_sync ()
+  if eio then Masc_agent_core.Context.create () else Masc_agent_core.Context.create_sync ()
 
 let create ~eio ~system_prompt =
   let context = create_oas_context ~eio in
@@ -90,9 +90,9 @@ let create ~eio ~system_prompt =
 let set_system_prompt (ctx : working_context) ~system_prompt =
   let messages =
     List.map
-      (fun (m : Agent_sdk.Types.message) ->
-        if m.role = Agent_sdk.Types.System
-        then { m with role = Agent_sdk.Types.Assistant }
+      (fun (m : Masc_agent_core.Types.message) ->
+        if m.role = Masc_agent_core.Types.System
+        then { m with role = Masc_agent_core.Types.Assistant }
         else m)
       (messages_of_context ctx)
   in
@@ -101,7 +101,7 @@ let set_system_prompt (ctx : working_context) ~system_prompt =
   in
   { checkpoint }
 
-let append ctx (msg : Agent_sdk.Types.message) =
+let append ctx (msg : Masc_agent_core.Types.message) =
   let checkpoint =
     { ctx.checkpoint with messages = messages_of_context ctx @ [ msg ] }
   in
@@ -113,7 +113,7 @@ let append_many ctx msgs =
 let sync_oas_context (ctx : working_context) : working_context =
   let context = oas_context_of_context ctx in
   let message_count = message_count ctx in
-  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+  Masc_agent_core.Context.set_scoped context Masc_agent_core.Context.Session
     "message_count" (`Int message_count);
   ctx
 

@@ -29,7 +29,7 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
     let now_iso = Masc_domain.now_iso () in
     List.iter
       (function
-        | Agent_sdk.Types.Thinking { content; _ } ->
+        | Masc_agent_core.Types.Thinking { content; _ } ->
           let entry : Trajectory.thinking_entry =
             { ts = now
             ; ts_iso = now_iso
@@ -40,9 +40,9 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
             }
           in
           append_entry ~keeper_name ~failure_label:"thinking" acc entry
-        | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
+        | Masc_agent_core.Types.ReasoningDetails { reasoning_content; details } ->
           let content =
-            Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
+            Masc_agent_core.Types.reasoning_details_text ~reasoning_content ~details
           in
           if not (String.equal (String.trim content) "") then
             let entry : Trajectory.thinking_entry =
@@ -55,7 +55,7 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
               }
             in
             append_entry ~keeper_name ~failure_label:"reasoning details" acc entry
-        | Agent_sdk.Types.RedactedThinking _ ->
+        | Masc_agent_core.Types.RedactedThinking _ ->
           let entry : Trajectory.thinking_entry =
             { ts = now
             ; ts_iso = now_iso

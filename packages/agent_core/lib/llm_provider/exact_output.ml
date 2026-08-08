@@ -1658,10 +1658,6 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
               })))
 ;;
 
-let execute_once ~net ?clock attempt =
-  execute_once_with_publication ~publish:ignore ~net ?clock attempt
-;;
-
 let execution_failure_may_advance (error : execution_error) =
   match error.cause, receipt_phase error.receipt with
   | Completion_failed, Before_dispatch -> receipt_dispatch_count error.receipt = 0

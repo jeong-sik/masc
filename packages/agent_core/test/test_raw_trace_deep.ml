@@ -11,7 +11,7 @@
     - create (which exercises ensure_dir internally)
     - Error paths: bad JSON, unknown record_type *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let tmpdir () =
   let dir =
@@ -147,7 +147,7 @@ let mk_record
   ; record_type
   ; prompt
   ; model = Some "glm-5.1"
-  ; tool_choice = Some (Agent_sdk.Types.tool_choice_to_json Agent_sdk.Types.Any)
+  ; tool_choice = Some (Masc_agent_core.Types.tool_choice_to_json Masc_agent_core.Types.Any)
   ; enable_thinking = Some false
   ; preserve_thinking = None
   ; thinking_budget = Some 2048
@@ -418,7 +418,7 @@ let test_record_json_all_fields_populated () =
     ; prompt = Some "test prompt"
     ; model = Some "glm-5.1"
     ; tool_choice =
-        Some (Agent_sdk.Types.tool_choice_to_json (Agent_sdk.Types.Tool "complex_tool"))
+        Some (Masc_agent_core.Types.tool_choice_to_json (Masc_agent_core.Types.Tool "complex_tool"))
     ; enable_thinking = Some true
     ; preserve_thinking = Some true
     ; thinking_budget = Some 8192

@@ -52,7 +52,7 @@ After `Pipeline.run_turn` returns, we:
 
 ```
 test_telemetry_pipeline.ml
-  ├── Agent_sdk
+  ├── Masc_agent_core
   ├── Llm_provider.Telemetry_event
   ├── Telemetry_bus
   ├── Pipeline

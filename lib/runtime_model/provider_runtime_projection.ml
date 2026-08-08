@@ -1,11 +1,11 @@
 (** Runtime provider projection for MASC-owned model labels.
 
-    OAS owns provider identity through [Agent_sdk.Provider_runtime_binding].
+    OAS owns provider identity through [Masc_agent_core.Provider_runtime_binding].
     This module only projects those bindings into MASC's local label and
     fallback conventions, so runtime callers do not depend on a MASC-owned
     provider adapter boundary. *)
 
-module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module Runtime_binding = Masc_agent_core.Provider_runtime_binding
 
 type runtime_kind =
   | Local

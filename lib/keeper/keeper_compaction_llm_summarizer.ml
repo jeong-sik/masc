@@ -3,11 +3,11 @@
     OAS owns frozen target admission, dispatch, and receipt provenance. *)
 
 module Schema = Keeper_structured_output_schema
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Masc_agent_core.Exact_output
 module String_set = Set.Make (String)
 
 type message_text_source =
-  { role : Agent_sdk.Types.role
+  { role : Masc_agent_core.Types.role
   ; text_blocks : string list
   }
 
@@ -85,7 +85,7 @@ type summarizer =
 
 let compaction_summary_metadata_key = "masc.compaction.bounded_summary"
 
-let message role text : Agent_sdk.Types.message = Agent_sdk.Types.text_message role text
+let message role text : Masc_agent_core.Types.message = Masc_agent_core.Types.text_message role text
 
 let messages_of_unit = function
   | Keeper_compaction_unit.Ordinary_message message -> [ message ]
@@ -109,20 +109,20 @@ let option_json project = function
   | Some value -> project value
 
 let tool_failure_kind_string = function
-  | Agent_sdk.Types.Validation_error -> "validation_error"
-  | Agent_sdk.Types.Recoverable_tool_error -> "recoverable_tool_error"
-  | Agent_sdk.Types.Non_retryable_tool_error -> "non_retryable_tool_error"
-  | Agent_sdk.Types.Reported_tool_error -> "reported_tool_error"
-  | Agent_sdk.Types.Unattributed_tool_error -> "unattributed_tool_error"
+  | Masc_agent_core.Types.Validation_error -> "validation_error"
+  | Masc_agent_core.Types.Recoverable_tool_error -> "recoverable_tool_error"
+  | Masc_agent_core.Types.Non_retryable_tool_error -> "non_retryable_tool_error"
+  | Masc_agent_core.Types.Reported_tool_error -> "reported_tool_error"
+  | Masc_agent_core.Types.Unattributed_tool_error -> "unattributed_tool_error"
 
 let tool_error_class_string = function
-  | Agent_sdk.Types.Transient -> "transient"
-  | Agent_sdk.Types.Deterministic -> "deterministic"
-  | Agent_sdk.Types.Unknown -> "unknown"
+  | Masc_agent_core.Types.Transient -> "transient"
+  | Masc_agent_core.Types.Deterministic -> "deterministic"
+  | Masc_agent_core.Types.Unknown -> "unknown"
 
 let tool_result_outcome_json = function
-  | Agent_sdk.Types.Tool_succeeded -> `Assoc [ "kind", `String "succeeded" ]
-  | Agent_sdk.Types.Tool_failed { failure_kind; error_class } ->
+  | Masc_agent_core.Types.Tool_succeeded -> `Assoc [ "kind", `String "succeeded" ]
+  | Masc_agent_core.Types.Tool_failed { failure_kind; error_class } ->
     `Assoc
       [ "kind", `String "failed"
       ; "failure_kind", `String (tool_failure_kind_string failure_kind)
@@ -136,16 +136,16 @@ type semantic_projection_error =
 let rec semantic_content_blocks_json blocks =
   let rec loop projected_rev = function
     | [] -> Ok (`List (List.rev projected_rev))
-    | Agent_sdk.Types.Text text :: rest ->
+    | Masc_agent_core.Types.Text text :: rest ->
       loop
         (`Assoc [ "type", `String "text"; "text", `String text ] :: projected_rev)
         rest
-    | ( Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.ReasoningDetails _
-      | Agent_sdk.Types.RedactedThinking _ )
+    | ( Masc_agent_core.Types.Thinking _
+      | Masc_agent_core.Types.ReasoningDetails _
+      | Masc_agent_core.Types.RedactedThinking _ )
       :: rest ->
       loop projected_rev rest
-    | Agent_sdk.Types.ToolUse { id; name; input } :: rest ->
+    | Masc_agent_core.Types.ToolUse { id; name; input } :: rest ->
       loop
         (`Assoc
            [ "type", `String "tool_use"
@@ -155,7 +155,7 @@ let rec semantic_content_blocks_json blocks =
            ]
          :: projected_rev)
         rest
-    | Agent_sdk.Types.ToolResult
+    | Masc_agent_core.Types.ToolResult
         { tool_use_id; content; outcome; json; content_blocks }
       :: rest ->
       (match semantic_optional_content_blocks_json content_blocks with
@@ -172,7 +172,7 @@ let rec semantic_content_blocks_json blocks =
               ]
             :: projected_rev)
            rest)
-    | (Agent_sdk.Types.Image _ | Agent_sdk.Types.Document _ | Agent_sdk.Types.Audio _)
+    | (Masc_agent_core.Types.Image _ | Masc_agent_core.Types.Document _ | Masc_agent_core.Types.Audio _)
       :: _ ->
       Error Unsupported_media
   in
@@ -182,13 +182,13 @@ and semantic_optional_content_blocks_json = function
   | None -> Ok `Null
   | Some blocks -> semantic_content_blocks_json blocks
 
-let semantic_message_json (message : Agent_sdk.Types.message) =
+let semantic_message_json (message : Masc_agent_core.Types.message) =
   match semantic_content_blocks_json message.content with
   | Error _ as error -> error
   | Ok content_blocks ->
     Ok
       (`Assoc
-         [ "role", `String (Agent_sdk.Types.role_to_string message.role)
+         [ "role", `String (Masc_agent_core.Types.role_to_string message.role)
          ; "content_blocks", content_blocks
          ; "name", option_json (fun value -> `String value) message.name
          ; "tool_call_id", option_json (fun value -> `String value) message.tool_call_id
@@ -211,18 +211,18 @@ let message_text_source role blocks =
       if List.exists (fun text -> String.trim text <> "") text_blocks
       then Some { role; text_blocks }
       else None
-    | Agent_sdk.Types.Text text :: rest ->
+    | Masc_agent_core.Types.Text text :: rest ->
       loop (text :: text_blocks_rev) rest
-    | ( Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.ReasoningDetails _
-      | Agent_sdk.Types.RedactedThinking _ )
+    | ( Masc_agent_core.Types.Thinking _
+      | Masc_agent_core.Types.ReasoningDetails _
+      | Masc_agent_core.Types.RedactedThinking _ )
       :: rest ->
       loop text_blocks_rev rest
-    | ( Agent_sdk.Types.ToolUse _
-      | Agent_sdk.Types.ToolResult _
-      | Agent_sdk.Types.Image _
-      | Agent_sdk.Types.Document _
-      | Agent_sdk.Types.Audio _ )
+    | ( Masc_agent_core.Types.ToolUse _
+      | Masc_agent_core.Types.ToolResult _
+      | Masc_agent_core.Types.Image _
+      | Masc_agent_core.Types.Document _
+      | Masc_agent_core.Types.Audio _ )
       :: _ ->
       None
   in
@@ -231,17 +231,17 @@ let message_text_source role blocks =
 let cycle_has_tool_protocol messages =
   let has_tool_use =
     List.exists
-      (fun (message : Agent_sdk.Types.message) ->
+      (fun (message : Masc_agent_core.Types.message) ->
         List.exists
-          (function Agent_sdk.Types.ToolUse _ -> true | _ -> false)
+          (function Masc_agent_core.Types.ToolUse _ -> true | _ -> false)
           message.content)
       messages
   in
   let has_tool_result =
     List.exists
-      (fun (message : Agent_sdk.Types.message) ->
+      (fun (message : Masc_agent_core.Types.message) ->
         List.exists
-          (function Agent_sdk.Types.ToolResult _ -> true | _ -> false)
+          (function Masc_agent_core.Types.ToolResult _ -> true | _ -> false)
           message.content)
       messages
   in
@@ -249,13 +249,13 @@ let cycle_has_tool_protocol messages =
 
 let eligible_source ~first_user_seen source_index = function
   | Keeper_compaction_unit.Ordinary_message
-      ({ role = (Agent_sdk.Types.User | Agent_sdk.Types.Assistant)
+      ({ role = (Masc_agent_core.Types.User | Masc_agent_core.Types.Assistant)
        ; content
        ; name = None
        ; tool_call_id = None
        ; metadata = []
        } as message)
-    when message.role <> Agent_sdk.Types.User || first_user_seen ->
+    when message.role <> Masc_agent_core.Types.User || first_user_seen ->
     (match message_text_source message.role content with
      | Some source -> Some { source_index; payload = Message_text source }
      | None -> None)
@@ -288,7 +288,7 @@ let eligible_sources units =
         ||
         match unit_ with
         | Keeper_compaction_unit.Ordinary_message
-            { role = Agent_sdk.Types.User; _ } -> true
+            { role = Masc_agent_core.Types.User; _ } -> true
         | Keeper_compaction_unit.Ordinary_message _
         | Keeper_compaction_unit.Closed_tool_cycle _ ->
           false
@@ -306,8 +306,8 @@ let has_eligible_units units = eligible_sources units <> []
 
 let prior_summary source_index = function
   | Keeper_compaction_unit.Ordinary_message
-      { role = Agent_sdk.Types.Assistant
-      ; content = [ Agent_sdk.Types.Text text ]
+      { role = Masc_agent_core.Types.Assistant
+      ; content = [ Masc_agent_core.Types.Text text ]
       ; name = None
       ; tool_call_id = None
       ; metadata = [ key, `Bool true ]
@@ -396,7 +396,7 @@ let eligible_units_json (sources : eligible_source list) =
              ; "kind", `String "message_text"
              ; ( "role"
                , `String
-                   (Agent_sdk.Types.role_to_string role) )
+                   (Masc_agent_core.Types.role_to_string role) )
              ; "text_blocks", `List (List.map (fun text -> `String text) text_blocks)
              ]
          | Closed_tool_cycle { semantic_json; _ } ->
@@ -454,7 +454,7 @@ let messages_for_plan ~window =
       (first_index + 1)
       max_keep_from
   in
-  [ message Agent_sdk.Types.System system; message Agent_sdk.Types.User user ]
+  [ message Masc_agent_core.Types.System system; message Masc_agent_core.Types.User user ]
 
 let ( let* ) = Result.bind
 
@@ -530,7 +530,7 @@ let summary_message summary =
   (* Current-format derived state, not a compatibility marker. The exact field
      identifies the one rolling summary consumed by [planning_window_for_units].
      Its blast radius is planning and in-place replacement only. *)
-  { (message Agent_sdk.Types.Assistant summary) with
+  { (message Masc_agent_core.Types.Assistant summary) with
     metadata = [ compaction_summary_metadata_key, `Bool true ]
   }
 

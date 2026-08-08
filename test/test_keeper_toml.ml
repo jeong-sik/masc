@@ -1042,13 +1042,13 @@ let test_invalid_child_profile_fails_closed_before_dispatch () =
   with
   | Ok _ -> fail "invalid profile reached runtime execution construction"
   | Error
-      (Agent_sdk.Error.Config
-         (Agent_sdk.Error.InvalidConfig { field; detail })) ->
+      (Masc_agent_core.Error.Config
+         (Masc_agent_core.Error.InvalidConfig { field; detail })) ->
     check string "typed SDK config field" "keeper.profile" field;
     check bool "SDK error retains failing path" true
       (contains_substring detail keeper_path)
   | Error err ->
-    failf "expected typed InvalidConfig, got %s" (Agent_sdk.Error.to_string err)
+    failf "expected typed InvalidConfig, got %s" (Masc_agent_core.Error.to_string err)
 
 let test_default_source_snapshot_uses_explicit_base_path () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->

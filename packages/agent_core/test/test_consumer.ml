@@ -2,7 +2,7 @@
 
     Uses mock HTTP server for Agent.run, no real LLM. *)
 
-open Agent_sdk
+open Masc_agent_core
 open Alcotest
 
 (* ── Mock server ──────────────────────────────────────────────── *)

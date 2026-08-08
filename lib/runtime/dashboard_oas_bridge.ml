@@ -160,7 +160,7 @@ let positive_ms = function
   | Some ms when ms > 0.0 && Float.is_finite ms -> Some ms
   | _ -> None
 
-let ttfb_from_telemetry (telemetry : Agent_sdk.Types.inference_telemetry) =
+let ttfb_from_telemetry (telemetry : Masc_agent_core.Types.inference_telemetry) =
   match positive_ms telemetry.ttfrc_ms with
   | Some _ as value -> value
   | None -> (
@@ -172,8 +172,8 @@ let ttfb_from_telemetry (telemetry : Agent_sdk.Types.inference_telemetry) =
           | None -> None))
 
 let duration_from_response ?total_duration_ms
-    (response : Agent_sdk.Types.api_response) =
-  let duration_from_telemetry (telemetry : Agent_sdk.Types.inference_telemetry) =
+    (response : Masc_agent_core.Types.api_response) =
+  let duration_from_telemetry (telemetry : Masc_agent_core.Types.inference_telemetry) =
     let decode_ms =
       match telemetry.timings with
       | Some { predicted_ms; _ } -> positive_ms predicted_ms
@@ -193,16 +193,16 @@ let duration_from_response ?total_duration_ms
       | _ -> duration_from_telemetry telemetry)
   | _ -> default_ttfb_ms
 
-let ttfb_from_response (response : Agent_sdk.Types.api_response) =
+let ttfb_from_response (response : Masc_agent_core.Types.api_response) =
   match response.telemetry with
   | Some telemetry -> Option.value ~default:default_ttfb_ms (ttfb_from_telemetry telemetry)
   | _ -> default_ttfb_ms
 
-let cache_hit_from_response ~(usage : Agent_sdk.Types.api_usage option)
-    (response : Agent_sdk.Types.api_response) =
+let cache_hit_from_response ~(usage : Masc_agent_core.Types.api_usage option)
+    (response : Masc_agent_core.Types.api_response) =
   let usage_cache_hit =
     Option.map
-      (fun (usage : Agent_sdk.Types.api_usage) ->
+      (fun (usage : Masc_agent_core.Types.api_usage) ->
         usage.cache_read_input_tokens > 0)
       usage
   in
@@ -216,15 +216,15 @@ let cache_hit_from_response ~(usage : Agent_sdk.Types.api_usage option)
   | Some false, _ | _, Some false -> Some false
   | None, None -> None
 
-let throughput_from_response ~(usage : Agent_sdk.Types.api_usage option)
+let throughput_from_response ~(usage : Masc_agent_core.Types.api_usage option)
     ~ttfb_ms
-    ~total_duration_ms (response : Agent_sdk.Types.api_response) =
+    ~total_duration_ms (response : Masc_agent_core.Types.api_response) =
   match response.telemetry with
   | Some { timings = Some { predicted_per_second = Some v; _ }; _ }
     when v > 0.0 -> Some v
   | _ ->
       Option.map
-        (fun (usage : Agent_sdk.Types.api_usage) ->
+        (fun (usage : Masc_agent_core.Types.api_usage) ->
           if usage.output_tokens <= 0 then 0.0
           else
             let decode_ms = Float.max 1.0 (total_duration_ms -. ttfb_ms) in
@@ -233,7 +233,7 @@ let throughput_from_response ~(usage : Agent_sdk.Types.api_usage option)
 
 let sample_of_response ~provider_id:_ ~model_id:_ ?total_duration_ms
     ?(serialization_ms = 0.0) ?(retry_count = 0) ~status
-    (response : Agent_sdk.Types.api_response) =
+    (response : Masc_agent_core.Types.api_response) =
   let usage = response.usage in
   let total_duration_ms =
     duration_from_response ?total_duration_ms response
@@ -248,16 +248,16 @@ let sample_of_response ~provider_id:_ ~model_id:_ ?total_duration_ms
     usage_reported = Option.is_some usage;
     input_tokens =
       Option.map
-        (fun (usage : Agent_sdk.Types.api_usage) -> usage.input_tokens)
+        (fun (usage : Masc_agent_core.Types.api_usage) -> usage.input_tokens)
         usage;
     output_tokens =
       Option.map
-        (fun (usage : Agent_sdk.Types.api_usage) -> usage.output_tokens)
+        (fun (usage : Masc_agent_core.Types.api_usage) -> usage.output_tokens)
         usage;
     throughput_tokens_per_s =
       throughput_from_response ~usage ~ttfb_ms ~total_duration_ms response;
     cost_usd =
-      Option.bind usage (fun (usage : Agent_sdk.Types.api_usage) ->
+      Option.bind usage (fun (usage : Masc_agent_core.Types.api_usage) ->
           usage.cost_usd);
     cache_hit = cache_hit_from_response ~usage response;
     status;

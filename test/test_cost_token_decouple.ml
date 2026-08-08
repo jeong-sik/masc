@@ -210,7 +210,7 @@ let test_missing_usage_is_explicit_null () =
   check_null_field missing "cache_read_tokens"
 
 let test_native_decode_rate_uses_current_field_only () =
-  let timings : Agent_sdk.Types.inference_timings =
+  let timings : Masc_agent_core.Types.inference_timings =
     { prompt_n = None
     ; prompt_ms = None
     ; prompt_per_second = None
@@ -220,7 +220,7 @@ let test_native_decode_rate_uses_current_field_only () =
     ; cache_n = None
     }
   in
-  let telemetry : Agent_sdk.Types.inference_telemetry =
+  let telemetry : Masc_agent_core.Types.inference_telemetry =
     { system_fingerprint = None
     ; timings = Some timings
     ; reasoning_tokens = None

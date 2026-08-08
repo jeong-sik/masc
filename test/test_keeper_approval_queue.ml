@@ -1222,10 +1222,10 @@ let test_resolution_is_durable_and_origin_scoped () =
               Masc.Keeper_gate_replay.project_model_input
                 ~base_path
                 evidence
-                [ Agent_sdk.Types.user_msg retry_text ]
+                [ Masc_agent_core.Types.user_msg retry_text ]
             with
             | Ok [ _canonical; projected ] ->
-              Agent_sdk.Types.text_of_content projected.content
+              Masc_agent_core.Types.text_of_content projected.content
             | Ok _ ->
               Alcotest.fail "replay projection did not append exact evidence"
             | Error detail -> Alcotest.fail detail)

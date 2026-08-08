@@ -8,7 +8,7 @@
        each completed turn onto that default bus, carrying the provider, turn,
        model, token counts, and decode timings reported for the call. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* The agent's exact provider config selects [OpenAI_compat], so
    [Complete_common.patch_telemetry] stamps the response telemetry with that kind.

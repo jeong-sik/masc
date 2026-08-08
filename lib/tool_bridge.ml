@@ -2,7 +2,7 @@
 
     MASC dispatch uses typed [Tool_result.result] internally.  This module is the
     boundary adapter that converts typed MASC results to/from
-    [Agent_sdk.Types.tool_result = (tool_output, tool_error) Result.t].
+    [Masc_agent_core.Types.tool_result = (tool_output, tool_error) Result.t].
 
     Central [Tool_dispatch.handler] implementations should return
     [Tool_result.result] directly rather than reintroducing tuple dispatch.
@@ -73,8 +73,8 @@ let maybe_externalize ?base_path ?(mime = "text/plain")
 (** {1 Result Conversion} *)
 
 let make_tool_error ?(recoverable = false) ?error_class message
-  : Agent_sdk.Types.tool_result =
-  Error { Agent_sdk.Types.message; recoverable; error_class }
+  : Masc_agent_core.Types.tool_result =
+  Error { Masc_agent_core.Types.message; recoverable; error_class }
 
 let project_content ?base_path ~model_projection message =
   match model_projection with
@@ -101,22 +101,22 @@ let externalization_tool_error ~recoverable error =
       ~recoverable
       ~error_class:
         (if recoverable
-         then Agent_sdk.Types.Transient
-         else Agent_sdk.Types.Unknown)
+         then Masc_agent_core.Types.Transient
+         else Masc_agent_core.Types.Unknown)
       "tool output artifact storage failed"
   | Inline_budget_exceeded ->
     make_tool_error
       ~recoverable:false
-      ~error_class:Agent_sdk.Types.Deterministic
+      ~error_class:Masc_agent_core.Types.Deterministic
       "tool output exceeds descriptor budget"
 ;;
 
 let oas_error_class_of_tool_failure_class = function
-  | Tool_result.Transient_error -> Agent_sdk.Types.Transient
+  | Tool_result.Transient_error -> Masc_agent_core.Types.Transient
   | Tool_result.Policy_rejection
   | Tool_result.Workflow_rejection ->
-    Agent_sdk.Types.Deterministic
-  | Tool_result.Runtime_failure -> Agent_sdk.Types.Unknown
+    Masc_agent_core.Types.Deterministic
+  | Tool_result.Runtime_failure -> Masc_agent_core.Types.Unknown
 ;;
 
 (** {1 Schema Conversion}
@@ -126,7 +126,7 @@ let oas_error_class_of_tool_failure_class = function
     as strings or reduced to the first union member. *)
 
 let params_of_json_schema schema =
-  Agent_sdk.Mcp.json_schema_to_params schema
+  Masc_agent_core.Mcp.json_schema_to_params schema
 ;;
 
 (** {1 OAS Tool.t Creation}
@@ -141,7 +141,7 @@ let project_result
       ~model_projection
       message
       on_content
-  : Agent_sdk.Types.tool_result
+  : Masc_agent_core.Types.tool_result
   =
   match project_content ?base_path ~model_projection message with
   | Ok content -> on_content content
@@ -158,7 +158,7 @@ let to_oas_typed_result
       ?on_externalization_error
       ?(externalization_error_recoverable = true)
       (tr : Tool_result.result)
-  : Agent_sdk.Types.tool_result
+  : Masc_agent_core.Types.tool_result
   =
   match tr with
   | Tool_result.Completed output ->
@@ -169,7 +169,7 @@ let to_oas_typed_result
       ~model_projection
       (Tool_result.message tr)
       (fun content ->
-         Ok { Agent_sdk.Types.content; _meta = output.metadata })
+         Ok { Masc_agent_core.Types.content; _meta = output.metadata })
   | Tool_result.Deferred output ->
     let disposition_field =
       "masc.tool_disposition", `String (Tool_result.string_of_disposition tr)
@@ -187,7 +187,7 @@ let to_oas_typed_result
       ~model_projection
       (Tool_result.message tr)
       (fun content ->
-         Ok { Agent_sdk.Types.content; _meta = Some metadata })
+         Ok { Masc_agent_core.Types.content; _meta = Some metadata })
   | Tool_result.Failed { class_; message; _ } ->
     project_result
       ?base_path
@@ -222,7 +222,7 @@ let oas_tool_of_masc
     ~name
     ~description
     ~input_schema
-    handler : Agent_sdk.Tool.t =
+    handler : Masc_agent_core.Tool.t =
   let parameters = params_of_json_schema input_schema in
   let oas_handler json_args =
     to_oas_typed_result
@@ -232,7 +232,7 @@ let oas_tool_of_masc
       ?externalization_error_recoverable
       (handler json_args)
   in
-  Agent_sdk.Tool.create ?descriptor ~name ~description ~parameters oas_handler
+  Masc_agent_core.Tool.create ?descriptor ~name ~description ~parameters oas_handler
 
 let oas_tool_of_masc_with_execution_env
     ?descriptor
@@ -244,9 +244,8 @@ let oas_tool_of_masc_with_execution_env
     ~description
     ~input_schema
     handler
-  : Agent_sdk.Tool.t
+  : Masc_agent_core.Tool.t
   =
-  let parameters = params_of_json_schema input_schema in
   let oas_handler execution_env json_args =
     to_oas_typed_result
       ?base_path
@@ -255,12 +254,16 @@ let oas_tool_of_masc_with_execution_env
       ?externalization_error_recoverable
       (handler execution_env json_args)
   in
-  Agent_sdk_base.Tool.create_with_execution_env
-    ?descriptor
-    ~name
-    ~description
-    ~parameters
-    oas_handler
+  match
+    Masc_agent_core.Types.tool_schema_of_input_schema
+      ~name
+      ~description
+      ~input_schema
+      ()
+  with
+  | Ok schema -> Masc_agent_core.Base.Tool.of_schema ?descriptor schema oas_handler
+  | Error detail ->
+    invalid_arg (Printf.sprintf "tool %S schema invalid: %s" name detail)
 
 let () =
   Runtime_agent.set_oas_tool_of_masc_hook (fun ~name ~description ~input_schema handler ->

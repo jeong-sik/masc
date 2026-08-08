@@ -162,7 +162,7 @@ Drop `module Mcp = Mcp` etc. from `agent_sdk.ml` so the **public facade** doesn'
 - A project that wants MCP installs `agent_sdk_mcp` (or whatever the optional package is named) and gets identical functionality to today.
 - `rg 'Mcp_protocol' lib/` returns matches only in the new `agent_sdk.mcp` sub-library; `rg 'Mcp_protocol' lib/base lib/agent lib/pipeline lib/llm_provider` returns nothing.
 - Existing checkpoints (pre-refactor) deserialize correctly (the `Mcp_session.info` field becomes `Mcp_handle.session_info`; codec compatibility verified by replaying a saved checkpoint).
-- `agent_sdk_mcp` exports identical user-facing API to today's `Mcp` / `Mcp_http` / `Mcp_session` so existing consumers migrate by `s/Agent_sdk.Mcp/Agent_sdk_mcp.Mcp/g`.
+- `agent_sdk_mcp` exports identical user-facing API to today's `Mcp` / `Mcp_http` / `Mcp_session` so existing consumers migrate by `s/Masc_agent_core.Mcp/Masc_agent_core_mcp.Mcp/g`.
 
 ## 7. Risk register
 

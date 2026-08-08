@@ -71,7 +71,7 @@ val recent_lines_or_record :
 (** {1 User Message Extraction} *)
 
 val recent_user_messages :
-  Agent_sdk.Types.message list -> max_n:int -> string list
+  Masc_agent_core.Types.message list -> max_n:int -> string list
 
 val load_history_user_messages_result :
   path:string ->

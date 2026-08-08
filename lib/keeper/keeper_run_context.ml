@@ -11,14 +11,14 @@ open Keeper_types_profile
 type run_context =
   { meta : keeper_meta
   ; temperature : float
-  ; context_injector : Agent_sdk.Hooks.context_injector
-  ; shared_context : Agent_sdk.Context.t
+  ; context_injector : Masc_agent_core.Hooks.context_injector
+  ; shared_context : Masc_agent_core.Context.t
   ; session_dir : string
   ; session : Keeper_types.session_context
   ; loaded_checkpoint_present : bool
   ; base_system_prompt : string
   ; ctx_work : working_context
-  ; resume_oas_checkpoint : Agent_sdk.Checkpoint.t option
+  ; resume_oas_checkpoint : Masc_agent_core.Checkpoint.t option
   ; start_turn_count : int
   ; receipt_started_at : string
   ; config_root : string
@@ -79,12 +79,12 @@ let prepare_run_context
   let shared_context =
     match shared_context with
     | Some ctx -> ctx
-    | None -> Agent_sdk.Context.create ()
+    | None -> Masc_agent_core.Context.create ()
   in
   (* OAS uses the caller-supplied context as the checkpoint context for both
      new and resumed agents. Bind MASC's generation before dispatch so every
      OAS-produced checkpoint carries the current keeper identity. *)
-  Agent_sdk.Context.set_scoped shared_context Agent_sdk.Context.Session
+  Masc_agent_core.Context.set_scoped shared_context Masc_agent_core.Context.Session
     Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
   (* 1. Ensure session directory tree exists *)
   let session_dir =

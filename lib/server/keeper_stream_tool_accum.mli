@@ -19,7 +19,7 @@ type t
 
 val create : unit -> t
 
-val on_event : t -> Agent_sdk.Types.sse_event -> unit
+val on_event : t -> Masc_agent_core.Types.sse_event -> unit
 (** Feed one raw OAS stream event. A tool-bearing [ContentBlockStart] opens a
     block, argument deltas append to it, and [ContentBlockStop] / [MessageStop]
     finalize. Snapshots replace the accumulated fragments rather than appending,

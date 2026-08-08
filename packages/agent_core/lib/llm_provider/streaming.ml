@@ -1,7 +1,7 @@
 (** SSE event parsing and synthetic event emission.
 
-    Pure functions operating on {!Llm_provider.Types}. No agent_sdk coupling.
-    The streaming HTTP client (create_message_stream) remains in agent_sdk. *)
+    Pure functions operating on {!Llm_provider.Types}. No masc.agent_core coupling.
+    The streaming HTTP client (create_message_stream) remains in masc.agent_core. *)
 
 open Types
 

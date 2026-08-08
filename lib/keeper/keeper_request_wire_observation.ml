@@ -35,7 +35,7 @@ let record ~keeper_name ~runtime_id ~max_request_body_bytes ~body_bytes =
 ;;
 
 let observer ?on_observation ~keeper_name ~runtime_id ~max_request_body_bytes
-  : Agent_sdk.Agent.pre_dispatch_serialization_observer
+  : Masc_agent_core.Agent.pre_dispatch_serialization_observer
   =
   fun observation ->
   let body_bytes = observation.Llm_provider.Request_wire_observer.body_bytes in

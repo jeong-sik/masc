@@ -51,12 +51,12 @@ val freeze : hook_accumulator -> hook_outputs
     facade post-processing writes, and [agent_ref] is created locally
     at the OAS call site. *)
 type agent_setup =
-  { tools : Agent_sdk.Tool.t list
+  { tools : Masc_agent_core.Tool.t list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
   ; user_message : string
-  ; hooks : Agent_sdk.Hooks.hooks
-  ; model_input_projection : Agent_sdk.Agent.model_input_projection
+  ; hooks : Masc_agent_core.Hooks.hooks
+  ; model_input_projection : Masc_agent_core.Agent.model_input_projection
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
@@ -80,9 +80,9 @@ val prepare_agent_setup
   -> turn_system_prompt:string
   -> user_message:string
   -> dynamic_context:string
-  -> history_messages:Agent_sdk.Types.message list
-  -> shared_context:Agent_sdk.Context.t
-  -> context_injector:Agent_sdk.Hooks.context_injector
+  -> history_messages:Masc_agent_core.Types.message list
+  -> shared_context:Masc_agent_core.Context.t
+  -> context_injector:Masc_agent_core.Hooks.context_injector
   -> start_turn_count:int
   -> generation:int
   -> keeper_turn_id:int
@@ -96,4 +96,4 @@ val prepare_agent_setup
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> unit
-  -> (agent_setup, Agent_sdk.Error.sdk_error) result
+  -> (agent_setup, Masc_agent_core.Error.sdk_error) result

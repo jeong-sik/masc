@@ -32,7 +32,7 @@ type stop_reason =
        The exact post-tool checkpoint is retained for a later cycle. *)
   | InputRequired of
       { turns_used : int
-      ; request : Agent_sdk.Error.input_required
+      ; request : Masc_agent_core.Error.input_required
       }
     (* OAS ended the current run with a typed elicitation request. The host
        must surface [request.question] and persist the checkpoint before
@@ -44,7 +44,7 @@ type config =
   ; provider_cfg : Llm_provider.Provider_config.t
   ; model_id : string
   ; system_prompt : string
-  ; tools : Agent_sdk.Tool.t list
+  ; tools : Masc_agent_core.Tool.t list
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
     (** Total HTTP body-consumption ceiling for non-streaming OAS completion
@@ -59,16 +59,16 @@ type config =
         [Some n] is an operator/profile override or a non-keeper caller's
         deliberate request budget. *)
   ; temperature : float option
-  ; hooks : Agent_sdk.Hooks.hooks option
-  ; event_bus : Agent_sdk.Event_bus.t option
+  ; hooks : Masc_agent_core.Hooks.hooks option
+  ; event_bus : Masc_agent_core.Event_bus.t option
   ; session_id : string option
   ; description : string option
-  ; initial_messages : Agent_sdk.Types.message list
-  ; model_input_projection : Agent_sdk.Agent.model_input_projection option
+  ; initial_messages : Masc_agent_core.Types.message list
+  ; model_input_projection : Masc_agent_core.Agent.model_input_projection option
     (** Caller-owned projection applied only to provider-bound messages.
         Agent state and checkpoints retain their canonical persisted form. *)
   ; pre_dispatch_serialization_observer :
-      Agent_sdk.Agent.pre_dispatch_serialization_observer option
+      Masc_agent_core.Agent.pre_dispatch_serialization_observer option
     (** Caller-owned observer for the exact serialized request body, invoked by
         OAS after every stream-field injection and after the serialized-body
         admission check. This is the only place MASC can read the byte quantity
@@ -78,7 +78,7 @@ type config =
         request is the only path that reports a size today. The observation is
         diagnostic and non-authoritative — OAS reports a rejection or a raised
         callback as typed failure evidence without rewriting the result. *)
-  ; raw_trace : Agent_sdk.Raw_trace.t option
+  ; raw_trace : Masc_agent_core.Raw_trace.t option
   ; trace_link : (string * string) option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
@@ -86,8 +86,8 @@ type config =
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
-  ; context_injector : Agent_sdk.Hooks.context_injector option
-  ; context : Agent_sdk.Context.t option
+  ; context_injector : Masc_agent_core.Hooks.context_injector option
+  ; context : Masc_agent_core.Context.t option
   ; thinking_budget : int option
     (** Token budget for extended thinking, forwarded to OAS
         [Builder.with_thinking_budget]. Only meaningful when
@@ -106,7 +106,7 @@ type config =
     (** Callback invoked when an OAS run finishes (success or failure).
         Forwarded to [Builder.with_on_run_complete]. Useful for emitting
         telemetry, flushing OTel spans, or finalizing receipts. *)
-  ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
+  ; checkpoint_sink : Masc_agent_core.Agent.checkpoint_sink option
     (** Caller-owned turn-boundary checkpoint sink, forwarded to
         [Builder.with_checkpoint_sink]. Allows consumers to persist
         checkpoints at OAS turn boundaries. *)
@@ -154,10 +154,10 @@ let default_config
   }
 ;;
 
-let oas_tracer_ref = Atomic.make Agent_sdk.Tracing.null
+let oas_tracer_ref = Atomic.make Masc_agent_core.Tracing.null
 let set_oas_tracer tracer = Atomic.set oas_tracer_ref tracer
 
-let context_fit_admission = Agent_sdk.Agent.Enforce_when_supported
+let context_fit_admission = Masc_agent_core.Agent.Enforce_when_supported
 
 let configured_or_inherited configured inherited =
   match configured with
@@ -169,9 +169,9 @@ let configured_or_inherited configured inherited =
    explicit Runtime_agent overrides. Resume must use that same resolution:
    otherwise an absent caller override clears provider-owned request fields
    such as Anthropic's required [max_tokens] and changes admission semantics. *)
-let agent_config_for_request (config : config) : Agent_sdk.Types.agent_config =
+let agent_config_for_request (config : config) : Masc_agent_core.Types.agent_config =
   let provider = config.provider_cfg in
-  { (Agent_sdk.Types.default_config ~model:config.model_id) with
+  { (Masc_agent_core.Types.default_config ~model:config.model_id) with
     name = config.name
   ; model = config.model_id
   ; system_prompt = Some config.system_prompt
@@ -205,19 +205,19 @@ let builder
       ~(config : config)
       ?transport
       ()
-  : Agent_sdk.Builder.t
+  : Masc_agent_core.Builder.t
   =
   let builder =
-    Agent_sdk.Builder.create ~net ~model:config.model_id
-    |> Agent_sdk.Builder.with_provider_config config.provider_cfg
-    |> Agent_sdk.Builder.with_name config.name
-    |> Agent_sdk.Builder.with_system_prompt config.system_prompt
-    |> Agent_sdk.Builder.with_tools config.tools
-    |> Agent_sdk.Builder.with_context_fit_admission context_fit_admission
+    Masc_agent_core.Builder.create ~net ~model:config.model_id
+    |> Masc_agent_core.Builder.with_provider_config config.provider_cfg
+    |> Masc_agent_core.Builder.with_name config.name
+    |> Masc_agent_core.Builder.with_system_prompt config.system_prompt
+    |> Masc_agent_core.Builder.with_tools config.tools
+    |> Masc_agent_core.Builder.with_context_fit_admission context_fit_admission
   in
   let builder =
     match config.temperature with
-    | Some temperature -> Agent_sdk.Builder.with_temperature temperature builder
+    | Some temperature -> Masc_agent_core.Builder.with_temperature temperature builder
     | None -> builder
   in
   let builder =
@@ -225,137 +225,137 @@ let builder
        [max_tokens] field at all — [Builder.with_max_tokens] is simply not
        called, rather than filling in a synthesized default. *)
     match config.max_tokens with
-    | Some max_tokens -> Agent_sdk.Builder.with_max_tokens max_tokens builder
+    | Some max_tokens -> Masc_agent_core.Builder.with_max_tokens max_tokens builder
     | None -> builder
   in
   let builder =
     match config.stream_idle_timeout_s with
-    | Some timeout_s -> Agent_sdk.Builder.with_stream_idle_timeout timeout_s builder
+    | Some timeout_s -> Masc_agent_core.Builder.with_stream_idle_timeout timeout_s builder
     | None -> builder
   in
   let builder =
     match config.body_timeout_s with
-    | Some s -> Agent_sdk.Builder.with_body_timeout s builder
+    | Some s -> Masc_agent_core.Builder.with_body_timeout s builder
     | None -> builder
   in
   let builder =
     match config.hooks with
-    | Some h -> Agent_sdk.Builder.with_hooks h builder
+    | Some h -> Masc_agent_core.Builder.with_hooks h builder
     | None -> builder
   in
   let builder =
     match config.description with
-    | Some d -> Agent_sdk.Builder.with_description d builder
+    | Some d -> Masc_agent_core.Builder.with_description d builder
     | None -> builder
   in
   let builder =
     match config.raw_trace with
-    | Some raw_trace -> Agent_sdk.Builder.with_raw_trace raw_trace builder
+    | Some raw_trace -> Masc_agent_core.Builder.with_raw_trace raw_trace builder
     | None -> builder
   in
   let builder =
     match config.enable_thinking with
-    | Some enabled -> Agent_sdk.Builder.with_enable_thinking enabled builder
+    | Some enabled -> Masc_agent_core.Builder.with_enable_thinking enabled builder
     | None -> builder
   in
   let builder =
     match config.preserve_thinking with
-    | Some preserve -> Agent_sdk.Builder.with_preserve_thinking preserve builder
+    | Some preserve -> Masc_agent_core.Builder.with_preserve_thinking preserve builder
     | None -> builder
   in
   let builder =
     if config.cache_system_prompt
-    then Agent_sdk.Builder.with_cache_system_prompt true builder
+    then Masc_agent_core.Builder.with_cache_system_prompt true builder
     else builder
   in
   let builder =
     if config.yield_on_tool
-    then Agent_sdk.Builder.with_yield_on_tool true builder
+    then Masc_agent_core.Builder.with_yield_on_tool true builder
     else builder
   in
   let builder =
     if config.initial_messages <> []
-    then Agent_sdk.Builder.with_initial_messages config.initial_messages builder
+    then Masc_agent_core.Builder.with_initial_messages config.initial_messages builder
     else builder
   in
   let builder =
     match config.model_input_projection with
-    | Some project -> Agent_sdk.Builder.with_model_input_projection project builder
+    | Some project -> Masc_agent_core.Builder.with_model_input_projection project builder
     | None -> builder
   in
   let builder =
     match config.pre_dispatch_serialization_observer with
     | Some observe ->
-      Agent_sdk.Builder.with_pre_dispatch_serialization_observer observe builder
+      Masc_agent_core.Builder.with_pre_dispatch_serialization_observer observe builder
     | None -> builder
   in
   let builder =
     match config.context_injector with
-    | Some injector -> Agent_sdk.Builder.with_context_injector injector builder
+    | Some injector -> Masc_agent_core.Builder.with_context_injector injector builder
     | None -> builder
   in
   let builder =
     match config.context with
-    | Some ctx -> Agent_sdk.Builder.with_context ctx builder
+    | Some ctx -> Masc_agent_core.Builder.with_context ctx builder
     | None -> builder
   in
   let builder =
     match config.thinking_budget with
-    | Some budget -> Agent_sdk.Builder.with_thinking_budget budget builder
+    | Some budget -> Masc_agent_core.Builder.with_thinking_budget budget builder
     | None -> builder
   in
   let builder =
     match config.top_p with
-    | Some top_p -> Agent_sdk.Builder.with_top_p top_p builder
+    | Some top_p -> Masc_agent_core.Builder.with_top_p top_p builder
     | None -> builder
   in
   let builder =
     match config.top_k with
-    | Some top_k -> Agent_sdk.Builder.with_top_k top_k builder
+    | Some top_k -> Masc_agent_core.Builder.with_top_k top_k builder
     | None -> builder
   in
   let builder =
     match config.min_p with
-    | Some min_p -> Agent_sdk.Builder.with_min_p min_p builder
+    | Some min_p -> Masc_agent_core.Builder.with_min_p min_p builder
     | None -> builder
   in
   let builder =
     match config.event_bus with
-    | Some bus -> Agent_sdk.Builder.with_event_bus bus builder
+    | Some bus -> Masc_agent_core.Builder.with_event_bus bus builder
     | None -> builder
   in
   let builder =
     match config.on_run_complete with
-    | Some cb -> Agent_sdk.Builder.with_on_run_complete cb builder
+    | Some cb -> Masc_agent_core.Builder.with_on_run_complete cb builder
     | None -> builder
   in
   let builder =
     match config.checkpoint_sink with
-    | Some sink -> Agent_sdk.Builder.with_checkpoint_sink sink builder
+    | Some sink -> Masc_agent_core.Builder.with_checkpoint_sink sink builder
     | None -> builder
   in
   let builder =
-    Agent_sdk.Builder.with_tracer (Atomic.get oas_tracer_ref) builder
+    Masc_agent_core.Builder.with_tracer (Atomic.get oas_tracer_ref) builder
   in
   match transport with
-  | Some transport -> Agent_sdk.Builder.with_transport transport builder
+  | Some transport -> Masc_agent_core.Builder.with_transport transport builder
   | None -> builder
 ;;
 
 type prepared_resume =
-  { patched_checkpoint : Agent_sdk.Checkpoint.t
-  ; agent_config : Agent_sdk.Types.agent_config
-  ; options : Agent_sdk.Agent.options
-  ; context_fit_admission : Agent_sdk.Agent.context_fit_admission
+  { patched_checkpoint : Masc_agent_core.Checkpoint.t
+  ; agent_config : Masc_agent_core.Types.agent_config
+  ; options : Masc_agent_core.Agent.options
+  ; context_fit_admission : Masc_agent_core.Agent.context_fit_admission
   }
 
-let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
+let prepare_resume ~(config : config) ~(checkpoint : Masc_agent_core.Checkpoint.t)
   : prepared_resume
   =
   let agent_config = agent_config_for_request config in
   let patched_checkpoint =
     { checkpoint with
-      Agent_sdk.Checkpoint.model = config.model_id
+      Masc_agent_core.Checkpoint.model = config.model_id
     ; system_prompt = agent_config.system_prompt
     ; tool_choice = agent_config.tool_choice
     ; disable_parallel_tool_use = agent_config.disable_parallel_tool_use
@@ -371,9 +371,9 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; response_format = agent_config.response_format
     }
   in
-  let options : Agent_sdk.Agent.options =
-    { Agent_sdk.Agent.default_options with
-      hooks = Option.value ~default:Agent_sdk.Hooks.empty config.hooks
+  let options : Masc_agent_core.Agent.options =
+    { Masc_agent_core.Agent.default_options with
+      hooks = Option.value ~default:Masc_agent_core.Hooks.empty config.hooks
     ; provider_config = Some config.provider_cfg
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
     ; body_timeout_s = config.body_timeout_s

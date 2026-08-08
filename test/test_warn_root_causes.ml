@@ -105,7 +105,7 @@ let test_web_tools_are_bundle_visible () =
         (fun () ->
           let names =
             bundle.tools
-            |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+            |> List.map (fun (tool : Masc_agent_core.Tool.t) -> tool.schema.name)
           in
           check bool "WebSearch remains bundle-visible" true
             (List.mem "WebSearch" names);
@@ -152,7 +152,7 @@ let test_fusion_default_descriptor_is_bundle_visible () =
         (fun () ->
           let names =
             bundle.tools
-            |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+            |> List.map (fun (tool : Masc_agent_core.Tool.t) -> tool.schema.name)
           in
           check bool "masc_fusion is in the executable OAS tool bundle" true
             (List.mem "masc_fusion" names)))
@@ -194,7 +194,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
           in
           let actual_names =
             bundle.tools
-            |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+            |> List.map (fun (tool : Masc_agent_core.Tool.t) -> tool.schema.name)
             |> List.sort_uniq String.compare
           in
           check
@@ -247,7 +247,7 @@ let test_missing_current_task_reconciled_before_transition_hint () =
         (fun () ->
           let description =
             bundle.tools
-            |> List.find_map (fun (tool : Agent_sdk.Tool.t) ->
+            |> List.find_map (fun (tool : Masc_agent_core.Tool.t) ->
                  if String.equal tool.schema.name "masc_transition"
                  then Some tool.schema.description
                  else None)

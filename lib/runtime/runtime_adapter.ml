@@ -16,7 +16,7 @@
 
     @stability Internal *)
 
-module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module Runtime_binding = Masc_agent_core.Provider_runtime_binding
 module Provider_binding = Runtime_provider_binding
 
 (* --- Inlined from the deleted [Runtime_config_provider_binding] --- *)

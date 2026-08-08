@@ -1,6 +1,6 @@
 (** Runtime adapter for LLM-owned current Memory OS selection. *)
 
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Masc_agent_core.Exact_output
 
 let exact_lane_id = "librarian_exact"
 
@@ -84,7 +84,7 @@ let select_recent_messages ~max_messages messages =
 ;;
 
 let message role text =
-  Agent_sdk.Types.make_message ~role [ Agent_sdk.Types.Text text ]
+  Masc_agent_core.Types.make_message ~role [ Masc_agent_core.Types.Text text ]
 ;;
 
 type exact_setup_error =
@@ -206,7 +206,7 @@ let messages_and_input_for_librarian (inp : Keeper_librarian.input) =
       Prompt_names.librarian
       (Keeper_librarian.prompt_variables input)
   in
-  input, [ message Agent_sdk.Types.User user ]
+  input, [ message Masc_agent_core.Types.User user ]
 ;;
 
 let messages_for_librarian inp =

@@ -24,7 +24,7 @@ let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_sche
   match !reviewer_response with
   | Reviewer_verdict verdict -> Ok (Some verdict)
   | Reviewer_unavailable ->
-    Error (Agent_sdk.Error.Internal "test evaluator unavailable")
+    Error (Masc_agent_core.Error.Internal "test evaluator unavailable")
 ;;
 
 let temp_dir prefix =

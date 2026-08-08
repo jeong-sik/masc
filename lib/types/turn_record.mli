@@ -51,7 +51,7 @@ type usage =
   ; cache_creation_input_tokens : int option
   ; cache_read_input_tokens : int option
     (* The provider reports these alongside [input_tokens]
-       (Agent_sdk.Types.api_usage) and this record used to drop them, so a reader
+       (Masc_agent_core.Types.api_usage) and this record used to drop them, so a reader
        could not tell whether a large [input_tokens] was mostly cache reads. That
        matters against [context_window] below: the fill percentage it denominates is
        read as pressure on the compaction ceiling, and cache-heavy turns and

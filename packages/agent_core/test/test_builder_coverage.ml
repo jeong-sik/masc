@@ -8,7 +8,7 @@
     - Agent.default_options fields
     - Agent.clone *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let card_interfaces =
   Agent_card.create_supported_interface
@@ -233,10 +233,10 @@ let test_agent_clone_copy_context () =
   | Error e -> Alcotest.fail (Error.to_string e)
 ;;
 
-(* ── Agent.sdk_version ────────────────────────────────────── *)
+(* ── Agent.core_version ───────────────────────────────────── *)
 
-let test_sdk_version () =
-  let v = Agent.sdk_version in
+let test_core_version () =
+  let v = Agent.core_version in
   Alcotest.(check bool) "non-empty" true (String.length v > 0)
 ;;
 
@@ -300,7 +300,7 @@ let () =
     ; ( "agent_accessors"
       , [ Alcotest.test_case "state/tools/context/desc" `Quick test_agent_accessors
         ; Alcotest.test_case "default_options" `Quick test_agent_default_options
-        ; Alcotest.test_case "sdk_version" `Quick test_sdk_version
+        ; Alcotest.test_case "core_version" `Quick test_core_version
         ; Alcotest.test_case "agent card" `Quick test_agent_card
         ] )
     ; ( "clone"

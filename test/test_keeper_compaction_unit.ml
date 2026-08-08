@@ -1,5 +1,5 @@
 module U = Masc.Keeper_compaction_unit
-module T = Agent_sdk.Types
+module T = Masc_agent_core.Types
 
 let message ?tool_call_id role content : T.message =
   { role; content; name = None; tool_call_id; metadata = [] }

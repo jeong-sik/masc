@@ -341,7 +341,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
        let reason =
          Keeper_turn_fsm.Failure_provider_error
            { kind = Keeper_agent_error.sdk_error_kind err
-           ; detail = Agent_sdk.Error.to_string err
+           ; detail = Masc_agent_core.Error.to_string err
            }
        in
        Keeper_turn_fsm.emit_transition
@@ -406,9 +406,9 @@ let run_keeper_invocation_turn_admitted_inner
     | None ->
         (match on_text_delta with
          | None -> None
-         | Some cb -> Some (fun (evt : Agent_sdk.Types.sse_event) ->
+         | Some cb -> Some (fun (evt : Masc_agent_core.Types.sse_event) ->
              match evt with
-             | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
+             | Masc_agent_core.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
              | _ -> ()))
   in
   let name = Keeper_invocation_contract.target_name request in
@@ -452,7 +452,7 @@ let run_keeper_invocation_turn_admitted_inner
            ~base_path:ctx.config.base_path
            ~keeper_name:meta.name
        with
-       | Error err -> tool_result_error (Agent_sdk.Error.to_string err)
+       | Error err -> tool_result_error (Masc_agent_core.Error.to_string err)
        | Ok profile_defaults ->
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a Delegate keeper,
          evict each image to the artifact store + an eager analyze_image reading
@@ -511,7 +511,7 @@ let run_keeper_invocation_turn_admitted_inner
        with
 	         | Error error ->
 	           Progress.stop_tracking turn_task_id;
-	           tool_result_error (Agent_sdk.Error.to_string error)
+	           tool_result_error (Masc_agent_core.Error.to_string error)
 	         | Ok initial_execution ->
             let base_dir =
               let root = session_base_dir ctx.config in
@@ -612,7 +612,7 @@ let run_keeper_invocation_turn_admitted_inner
 	            let run_result, latency_ms =
 	              Keeper_context_runtime.timed (fun () ->
 	                  match Eio_context.get_clock () with
-	                  | Error msg -> Error (Agent_sdk.Error.Internal msg)
+	                  | Error msg -> Error (Masc_agent_core.Error.Internal msg)
 	                  | Ok clock ->
 	                  let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms
 	                      ; _
@@ -636,7 +636,7 @@ let run_keeper_invocation_turn_admitted_inner
 	                      ~next_runtime
 	                      ~attempt
 	                      ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-	                      ~error_message:(Some (Agent_sdk.Error.to_string err))
+	                      ~error_message:(Some (Masc_agent_core.Error.to_string err))
 	                  in
 	                  let setup_direct_retry_runtime runtime_id =
 	                    Keeper_unified_turn_pre_dispatch.build_runtime_execution
@@ -687,7 +687,7 @@ let run_keeper_invocation_turn_admitted_inner
 		                                retry.next_runtime
 		                                reason
 		                                (short_preview
-		                                   (Agent_sdk.Error.to_string
+		                                   (Masc_agent_core.Error.to_string
 		                                      fail_open_err));
 		                              Keeper_turn_helpers.record_pre_dispatch_terminal_observation
 		                                ~config:ctx.config
@@ -705,14 +705,14 @@ let run_keeper_invocation_turn_admitted_inner
 		                                  "direct_no_progress_retry_setup"
 		                                ~trajectory_outcome:
 		                                  (Trajectory.Failed
-		                                     (Agent_sdk.Error.to_string
+		                                     (Masc_agent_core.Error.to_string
 		                                        fail_open_err))
 		                                ~error_kind:
 		                                  (Keeper_agent_error
 		                                   .sdk_error_kind_for_receipt
 		                                     fail_open_err)
 		                                ~error_message:
-		                                  (Agent_sdk.Error.to_string fail_open_err)
+		                                  (Masc_agent_core.Error.to_string fail_open_err)
 		                                ~degraded_retry_applied:true
 		                                ~degraded_retry_runtime:retry.next_runtime
 		                                ~fallback_reason:retry.fallback_reason
@@ -755,7 +755,7 @@ let run_keeper_invocation_turn_admitted_inner
 		            in
 		            match run_result with
             | Error err ->
-              let e_str = Agent_sdk.Error.to_string err in
+              let e_str = Masc_agent_core.Error.to_string err in
               let user_message = Keeper_agent_error.user_message_of_sdk_error err in
               (try
                  let _ = Trajectory.finalize trajectory_acc

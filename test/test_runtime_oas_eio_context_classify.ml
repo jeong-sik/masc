@@ -5,7 +5,7 @@
     ([keeper_heartbeat_loop_cycle.ml]) decided whether a failed keeper cycle
     was a fatal-environment error — and therefore whether to promote it to
     [Keeper_registry.Keeper_fiber_crash] for the supervisor — by
-    substring-scanning [Agent_sdk.Error.to_string]:
+    substring-scanning [Masc_agent_core.Error.to_string]:
 
       String_util.contains_substring e_str "Eio switch not available"
 
@@ -53,7 +53,7 @@ let test_other_config_field_excluded () =
    contains the phrase. *)
 let test_non_config_errors_excluded () =
   assert (
-    not (R.is_eio_context_error (Agent_sdk.Error.Internal "Eio switch not available")))
+    not (R.is_eio_context_error (Masc_agent_core.Error.Internal "Eio switch not available")))
 
 let () =
   test_tagged_error_is_eio_context ();

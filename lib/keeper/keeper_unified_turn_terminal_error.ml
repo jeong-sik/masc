@@ -15,7 +15,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
       "%s: all runtimes exhausted (terminal) — last_err=%s attempt=%d \
        attempted_runtimes=[%s]"
       keeper_name
-      (Agent_sdk.Error.to_string err)
+      (Masc_agent_core.Error.to_string err)
       attempt
       (String.concat ", " attempted_runtimes);
     Otel_metric_store.inc_counter
@@ -42,5 +42,5 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
       ~keeper_name
       "%s: turn terminal (non-exhaustion error) — err=%s attempt=%d"
       keeper_name
-      (Agent_sdk.Error.to_string err)
+      (Masc_agent_core.Error.to_string err)
       attempt)

@@ -1,8 +1,8 @@
 (** Anthropic Claude API response parsing and request building.
 
     Pure functions operating on {!Llm_provider.Types}.
-    {!build_request} uses {!Provider_config.t} (no agent_sdk coupling).
-    The legacy [build_body_assoc] in agent_sdk delegates here. *)
+    {!build_request} uses {!Provider_config.t} (no masc.agent_core coupling).
+    The legacy [build_body_assoc] in masc.agent_core delegates here. *)
 
 open Types
 
@@ -411,7 +411,7 @@ let build_request_payload
      caller with [disable_parallel_tool_use = true] and
      tools was still receiving parallel tool calls. Same class of
      silent-drop bug as #834 but for a different field; also fixes
-     the drift with the agent_sdk path in lib/api_anthropic.ml which
+     the drift with the masc.agent_core path in lib/api_anthropic.ml which
      already nests correctly. *)
   let tool_choice_json_with_disable choice =
     let base = tool_choice_to_json choice in
@@ -430,7 +430,7 @@ let build_request_payload
       then (
         (* No explicit tool_choice but caller still wants to disable
            parallel tool use — synthesize an [auto] choice to carry
-           the flag, matching the agent_sdk path at
+           the flag, matching the masc.agent_core path at
            lib/api_anthropic.ml. *)
         let tc =
           `Assoc [ "type", `String "auto"; "disable_parallel_tool_use", `Bool true ]

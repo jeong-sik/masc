@@ -13,7 +13,7 @@
     Usage:
       dune exec examples/builder_patterns.exe *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 let local_provider_config ~model_id =

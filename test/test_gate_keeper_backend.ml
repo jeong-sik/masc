@@ -433,12 +433,12 @@ let test_keeper_multimodal_input_converts_user_blocks_to_oas_blocks () =
   with
   | Ok
       [
-        Agent_sdk.Types.Image { media_type; data; source_type };
-        Agent_sdk.Types.Text text;
+        Masc_agent_core.Types.Image { media_type; data; source_type };
+        Masc_agent_core.Types.Text text;
       ] ->
       check string "media type" "image/png" media_type;
       check string "data" "abc123" data;
-      check bool "source type" true (source_type = Agent_sdk.Types.Base64);
+      check bool "source type" true (source_type = Masc_agent_core.Types.Base64);
       check string "text" "describe this" text
   | Ok _ -> fail "expected image then text OAS blocks"
   | Error err -> fail ("expected OAS block conversion: " ^ err)
@@ -486,7 +486,7 @@ let test_keeper_multimodal_input_projects_text_documents_as_text () =
          Keeper_multimodal_input.to_oas_blocks ~attachments
            [ Keeper_multimodal_input.User_document media ]
        with
-       | Ok [ Agent_sdk.Types.Text projected ] ->
+       | Ok [ Masc_agent_core.Types.Text projected ] ->
            let metadata =
              Yojson.Safe.to_string
                (`Assoc
@@ -512,10 +512,10 @@ let test_keeper_multimodal_input_preserves_binary_document () =
     Keeper_multimodal_input.to_oas_blocks ~attachments
       [ Keeper_multimodal_input.User_document media ]
   with
-  | Ok [ Agent_sdk.Types.Document { media_type; data; source_type } ] ->
+  | Ok [ Masc_agent_core.Types.Document { media_type; data; source_type } ] ->
       check string "media type" "application/pdf" media_type;
       check string "base64 payload" payload data;
-      check bool "source type" true (source_type = Agent_sdk.Types.Base64)
+      check bool "source type" true (source_type = Masc_agent_core.Types.Base64)
   | Ok _ -> fail "PDF should remain one OAS document block"
   | Error err -> fail ("PDF document projection failed: " ^ err)
 
@@ -581,10 +581,10 @@ let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
     Keeper_multimodal_input.to_oas_blocks ~attachments
       [ Keeper_multimodal_input.User_image media ]
   with
-  | Ok [ Agent_sdk.Types.Image { media_type; data; source_type } ] ->
+  | Ok [ Masc_agent_core.Types.Image { media_type; data; source_type } ] ->
       check string "media type" "image/png" media_type;
       check string "data" "abc123" data;
-      check bool "source type" true (source_type = Agent_sdk.Types.Base64)
+      check bool "source type" true (source_type = Masc_agent_core.Types.Base64)
   | Ok _ -> fail "expected image OAS block"
   | Error err -> fail ("expected mixed-case data URL conversion: " ^ err)
 
@@ -613,10 +613,10 @@ let test_keeper_multimodal_input_normalizes_inferred_data_url_mime () =
     Keeper_multimodal_input.to_oas_blocks ~attachments
       [ Keeper_multimodal_input.User_image media ]
   with
-  | Ok [ Agent_sdk.Types.Image { media_type; data; source_type } ] ->
+  | Ok [ Masc_agent_core.Types.Image { media_type; data; source_type } ] ->
       check string "media type" "image/png" media_type;
       check string "data" "abc123" data;
-      check bool "source type" true (source_type = Agent_sdk.Types.Base64)
+      check bool "source type" true (source_type = Masc_agent_core.Types.Base64)
   | Ok _ -> fail "expected image OAS block"
   | Error err -> fail ("expected inferred data URL MIME conversion: " ^ err)
 
@@ -725,7 +725,7 @@ let test_keeper_stream_args_preserve_user_blocks () =
      |> Option.value ~default:0)
 
 let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [
@@ -793,7 +793,7 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
               events))
 
 let test_keeper_stream_bridge_projects_reasoning_details_delta () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let detail : reasoning_detail =
     { raw = `Assoc [ "text", `String "detail thinking" ]
     ; text = Some "detail thinking"
@@ -825,7 +825,7 @@ let test_keeper_stream_bridge_projects_reasoning_details_delta () =
               events))
 
 let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [
@@ -895,27 +895,27 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
                 | _ -> "other")
               events))
 
-let provider_kind_label (call : Agent_sdk.Canonical_tool.provider_tool_call) =
+let provider_kind_label (call : Masc_agent_core.Canonical_tool.provider_tool_call) =
   Option.map Llm_provider.Provider_config.string_of_provider_kind
     call.provider_kind
 
 let check_visible_reasoning label expected_order expected_signature
-    (block : Agent_sdk.Canonical_tool.provider_reasoning_block) =
+    (block : Masc_agent_core.Canonical_tool.provider_reasoning_block) =
   check int (label ^ " order") expected_order block.order_index;
   check (option string) (label ^ " signature") expected_signature
     block.signature;
   match block.kind with
-  | Agent_sdk.Canonical_tool.Visible_thinking -> ()
-  | Agent_sdk.Canonical_tool.Redacted_thinking ->
+  | Masc_agent_core.Canonical_tool.Visible_thinking -> ()
+  | Masc_agent_core.Canonical_tool.Redacted_thinking ->
       fail (label ^ " expected visible thinking")
 
 let check_redacted_reasoning label expected_order
-    (block : Agent_sdk.Canonical_tool.provider_reasoning_block) =
+    (block : Masc_agent_core.Canonical_tool.provider_reasoning_block) =
   check int (label ^ " order") expected_order block.order_index;
   check (option string) (label ^ " signature") None block.signature;
   match block.kind with
-  | Agent_sdk.Canonical_tool.Redacted_thinking -> ()
-  | Agent_sdk.Canonical_tool.Visible_thinking ->
+  | Masc_agent_core.Canonical_tool.Redacted_thinking -> ()
+  | Masc_agent_core.Canonical_tool.Visible_thinking ->
       fail (label ^ " expected redacted thinking")
 
 let oas_interleaving_event_label = function
@@ -938,7 +938,7 @@ let trajectory_interleaving_label = function
   | Trajectory.Tool_call entry -> "tool:" ^ entry.Trajectory.tool_name
 
 let receipt_detail_of_provider_call
-    (call : Agent_sdk.Canonical_tool.provider_tool_call)
+    (call : Masc_agent_core.Canonical_tool.provider_tool_call)
   : Keeper_agent_result.tool_call_detail =
   let provider =
     match provider_kind_label call with
@@ -957,7 +957,7 @@ let receipt_detail_of_provider_call
   }
 
 let trajectory_entry_of_provider_call ~ts ~turn ~round
-    (call : Agent_sdk.Canonical_tool.provider_tool_call)
+    (call : Masc_agent_core.Canonical_tool.provider_tool_call)
   : Trajectory.tool_call_entry =
   { ts
   ; ts_iso = Types_core.iso8601_of_unix_seconds ts
@@ -973,7 +973,7 @@ let trajectory_entry_of_provider_call ~ts ~turn ~round
   }
 
 let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let response : api_response =
     {
       id = "resp-interleaving";
@@ -1015,7 +1015,7 @@ let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
           };
     }
   in
-  let calls = Agent_sdk.Canonical_tool.tool_calls_of_response response in
+  let calls = Masc_agent_core.Canonical_tool.tool_calls_of_response response in
   match calls with
   | [ first; second; third ] ->
       check string "first call id" "tc-1" first.call_id;
@@ -1026,27 +1026,27 @@ let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
       check (option string) "first provider" (Some "openai_compat")
         (provider_kind_label first);
       (match first.adjacent_reasoning with
-      | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r0; r1 ] ->
+      | Masc_agent_core.Canonical_tool.Adjacent_reasoning [ r0; r1 ] ->
           check_visible_reasoning "first reasoning 0" 0 None r0;
           check_redacted_reasoning "first reasoning 1" 1 r1
       | _ -> fail "first tool call should carry contiguous adjacent reasoning");
       check string "second call id" "tc-2" second.call_id;
       check int "second order" 1 second.order_index;
       (match second.adjacent_reasoning with
-      | Agent_sdk.Canonical_tool.No_adjacent_reasoning -> ()
-      | Agent_sdk.Canonical_tool.Adjacent_reasoning _ ->
+      | Masc_agent_core.Canonical_tool.No_adjacent_reasoning -> ()
+      | Masc_agent_core.Canonical_tool.Adjacent_reasoning _ ->
           fail "intervening text must break reasoning adjacency");
       check string "third call id" "tc-3" third.call_id;
       check int "third order" 2 third.order_index;
       (match third.adjacent_reasoning with
-      | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r0 ] ->
+      | Masc_agent_core.Canonical_tool.Adjacent_reasoning [ r0 ] ->
           check_visible_reasoning "third reasoning" 7 (Some "sig-2.1") r0
       | _ -> fail "third tool call should carry only its adjacent thinking")
   | _ ->
       failf "expected three projected tool calls, got %d" (List.length calls)
 
 let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let thinking_before_read =
     Thinking { content = "inspect board first"; signature = Some "sig-read" }
   in
@@ -1128,20 +1128,20 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
     ; "tool_end:tc-done"
     ]
     (List.filter_map oas_interleaving_event_label stream_events);
-  let calls = Agent_sdk.Canonical_tool.tool_calls_of_response response in
+  let calls = Masc_agent_core.Canonical_tool.tool_calls_of_response response in
   match calls with
   | [ first; second ] ->
       check string "first canonical call" "masc_board_list" first.name;
       check int "first canonical order" 0 first.order_index;
       (match first.adjacent_reasoning with
-       | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r ] ->
+       | Masc_agent_core.Canonical_tool.Adjacent_reasoning [ r ] ->
            check_visible_reasoning "first adjacent thinking" 0
              (Some "sig-read") r
        | _ -> fail "first call should carry preceding thinking");
       check string "second canonical call" "keeper_task_done" second.name;
       check int "second canonical order" 1 second.order_index;
       (match second.adjacent_reasoning with
-       | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r ] ->
+       | Masc_agent_core.Canonical_tool.Adjacent_reasoning [ r ] ->
            check_visible_reasoning "second adjacent thinking" 2
              (Some "sig-done") r
        | _ -> fail "second call should carry preceding thinking");
@@ -1194,7 +1194,7 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
   | _ -> failf "expected two projected tool calls, got %d" (List.length calls)
 
 let test_keeper_stream_bridge_ignores_replayed_tool_start () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [
@@ -1238,7 +1238,7 @@ let test_keeper_stream_bridge_ignores_replayed_tool_start () =
         "expected replayed block start, one tool start, one args delta, and one end"
 
 let test_keeper_stream_bridge_rejects_replayed_tool_name_drift () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [
@@ -1290,7 +1290,7 @@ let test_keeper_stream_bridge_rejects_replayed_tool_name_drift () =
         "expected same-id different-name tool start replay to fail closed"
 
 let test_keeper_stream_bridge_rejects_conflicting_tool_index_reuse () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [
@@ -1369,7 +1369,7 @@ let test_keeper_stream_bridge_rejects_conflicting_tool_index_reuse () =
         "expected conflicting reused-index tool start to fail closed without forged tool events"
 
 let test_keeper_stream_bridge_isolates_tool_blocks_across_messages () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   (* A keeper dispatch is a multi-turn tool loop: each OAS call is a SEPARATE
      provider message whose block indices restart at 0, and the OpenAI-compat
      path carries no wire content_block_stop. The MessageStop ending message 1
@@ -1429,7 +1429,7 @@ let test_keeper_stream_bridge_isolates_tool_blocks_across_messages () =
     [ "{\"b\":2}" ] second_args
 
 let test_keeper_stream_bridge_surfaces_oas_message_metadata () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let usage_start =
     { input_tokens = 10;
       output_tokens = 1;
@@ -1461,18 +1461,18 @@ let test_keeper_stream_bridge_surfaces_oas_message_metadata () =
       check string "model" "gpt-5.5" model;
       check int "start input tokens" 10 start_usage.input_tokens;
       check int "start total tokens" 11
-        (Agent_sdk.Types.total_tokens start_usage);
+        (Masc_agent_core.Types.total_tokens start_usage);
       check int "cache creation tokens" 3
         start_usage.cache_creation_input_tokens;
       check string "stop reason" "end_turn"
-        (Agent_sdk.Types.stop_reason_to_string stop_reason);
+        (Masc_agent_core.Types.stop_reason_to_string stop_reason);
       check int "delta output tokens" 2 delta_usage.output_tokens;
       check int "delta total tokens" 12
-        (Agent_sdk.Types.total_tokens delta_usage)
+        (Masc_agent_core.Types.total_tokens delta_usage)
   | _ -> fail "expected OAS message lifecycle metadata events"
 
 let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let message_start id =
     MessageStart { id; model = "provider-model"; usage = None }
   in
@@ -1520,7 +1520,7 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
     (Keeper_chat_oas_stream_bridge.terminal_message_had_text final_text)
 
 let test_keeper_stream_bridge_preserves_typed_media_source () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let raw_media = "raw image bytes" in
   let encoded_media = Base64.encode_string raw_media in
   (* RFC-0301: media chunks are accumulated and surfaced as a single
@@ -1562,7 +1562,7 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
   | _ -> fail "expected typed OAS media delta carrying the persisted URL"
 
 let test_keeper_stream_bridge_rejects_media_delta_for_tool_block () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [
@@ -1607,7 +1607,7 @@ let test_keeper_stream_bridge_rejects_media_delta_for_tool_block () =
   | _ -> fail "expected media delta to error without clobbering the tool block"
 
 let test_keeper_stream_bridge_surfaces_bad_media_base64 () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [
@@ -1636,7 +1636,7 @@ let test_keeper_stream_bridge_surfaces_bad_media_base64 () =
 
 let test_keeper_stream_bridge_rejects_oversize_media_payload () =
   with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
-    let open Agent_sdk.Types in
+    let open Masc_agent_core.Types in
     let oversized = String.make (Keeper_chat_media_store.max_wire_bytes () + 1) 'A' in
     let events =
       translate_oas_stream_events
@@ -1670,7 +1670,7 @@ let test_keeper_stream_bridge_rejects_oversize_media_payload () =
 
 let test_keeper_stream_bridge_suppresses_media_after_oversize () =
   with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
-    let open Agent_sdk.Types in
+    let open Masc_agent_core.Types in
     let oversized = String.make (Keeper_chat_media_store.max_wire_bytes () + 1) 'A' in
     let events =
       translate_oas_stream_events
@@ -1722,7 +1722,7 @@ let test_keeper_stream_bridge_suppresses_media_after_oversize () =
     | _ -> fail "expected oversize media block to remain suppressed until stop")
 
 let test_keeper_stream_bridge_rejects_unsupported_media_source () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [
@@ -1753,7 +1753,7 @@ let test_keeper_stream_bridge_rejects_unsupported_media_source () =
   | _ -> fail "expected unsupported media source to surface as a protocol error"
 
 let test_keeper_stream_bridge_masks_media_write_failure_reason () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let base_file = temp_base_path "gate-keeper-stream-bridge-base-file" in
   let oc = open_out_bin base_file in
   close_out_noerr oc;
@@ -1786,7 +1786,7 @@ let test_keeper_stream_bridge_masks_media_write_failure_reason () =
       | _ -> fail "expected media write failure to surface with a masked reason")
 
 let test_keeper_stream_bridge_preserves_non_tool_block_lifecycle () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [
@@ -1812,7 +1812,7 @@ let test_keeper_stream_bridge_preserves_non_tool_block_lifecycle () =
   | _ -> fail "expected non-tool OAS block start and stop events"
 
 let test_keeper_stream_bridge_rejects_tool_start_missing_identity () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [
@@ -1841,7 +1841,7 @@ let test_keeper_stream_bridge_rejects_tool_start_missing_identity () =
   | _ -> fail "expected tool-use start without identity to fail closed"
 
 let test_keeper_stream_bridge_rejects_non_tool_start_with_tool_identity () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [
@@ -1880,7 +1880,7 @@ let test_keeper_stream_bridge_rejects_non_tool_start_with_tool_identity () =
   | _ -> fail "expected non-tool start with tool identity to fail closed"
 
 let test_keeper_stream_bridge_rejects_tool_args_without_start () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [ ContentBlockDelta { index = 7; delta = InputJsonSnapshot "{\"x\":1}" } ]
@@ -1924,7 +1924,7 @@ let test_stream_protocol_error_summary_includes_diagnostics () =
   check bool "raw bytes" true (string_contains summary "raw_bytes=7")
 
 let test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let events =
     translate_oas_stream_events
       [
@@ -1948,8 +1948,8 @@ let test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events () =
   | _ -> fail "expected visible events for unknown/incomplete provider stream"
 
 let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
-  let open Agent_sdk.Types in
-  let provider_kind = Agent_sdk.Llm_provider.Provider_kind.Gemini in
+  let open Masc_agent_core.Types in
+  let provider_kind = Masc_agent_core.Llm_provider.Provider_kind.Gemini in
   let part_raw = "{\"inlineData\":{}}" in
   let response_raw = "{\"promptFeedback\":{}}" in
   let events =
@@ -1994,7 +1994,7 @@ let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
   | _ -> fail "expected typed visible failures for unsupported provider shapes"
 
 let test_keeper_stream_bridge_preserves_ndjson_parse_failure () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let raw = "not-json" in
   let reason = "ollama_ndjson_chunk_parse_failure" in
   let events =
@@ -2014,7 +2014,7 @@ let test_keeper_stream_bridge_preserves_ndjson_parse_failure () =
   | _ -> fail "expected NDJSON parse failure to remain a typed visible error"
 
 let test_keeper_stream_bridge_preserves_ndjson_provider_error () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let message = "request rejected" in
   let raw = "{\"error\":\"request rejected\"}" in
   let events =
@@ -2402,8 +2402,8 @@ let test_runtime_run_blocks_appends_multimodal_input_to_oas_agent () =
   let agent_ref = ref None in
   let blocks =
     [
-      Agent_sdk.Types.Text "Inspect this";
-      Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"img" ();
+      Masc_agent_core.Types.Text "Inspect this";
+      Masc_agent_core.Types.image_block ~media_type:"image/png" ~data:"img" ();
     ]
   in
   (match
@@ -2415,22 +2415,22 @@ let test_runtime_run_blocks_appends_multimodal_input_to_oas_agent () =
        | stop_reason ->
            failf "unexpected stop reason after exit-condition proof: %s"
              (Keeper_execution_receipt_types.stop_reason_to_string stop_reason))
-   | Error err -> ignore (Agent_sdk.Error.to_string err));
+   | Error err -> ignore (Masc_agent_core.Error.to_string err));
   match !agent_ref with
   | None -> fail "expected Runtime_agent.run_blocks to expose built OAS agent"
   | Some agent -> (
-      match List.rev (Agent_sdk.Agent.state agent).messages with
-      | { Agent_sdk.Types.role = User; content; _ } :: _ -> (
+      match List.rev (Masc_agent_core.Agent.state agent).messages with
+      | { Masc_agent_core.Types.role = User; content; _ } :: _ -> (
           check int "stored blocks" 2 (List.length content);
           match content with
           | [
-              Agent_sdk.Types.Text text;
-              Agent_sdk.Types.Image { media_type; data; source_type };
+              Masc_agent_core.Types.Text text;
+              Masc_agent_core.Types.Image { media_type; data; source_type };
             ] ->
               check string "text preserved" "Inspect this" text;
               check string "image media type" "image/png" media_type;
               check string "image data" "img" data;
-              check bool "source type" true (source_type = Agent_sdk.Types.Base64)
+              check bool "source type" true (source_type = Masc_agent_core.Types.Base64)
           | _ -> fail "stored user input lost multimodal block shape")
       | _ -> fail "missing appended OAS user message")
 
@@ -2455,7 +2455,7 @@ let test_runtime_multimodal_gate_model_caps_fail_closed () =
       model_caps
   in
   let blocks =
-    [ Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" () ]
+    [ Masc_agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" () ]
   in
   match
     Runtime_agent.For_testing.validate_content_blocks_against_capabilities
@@ -2465,20 +2465,20 @@ let test_runtime_multimodal_gate_model_caps_fail_closed () =
   with
   | Ok () -> fail "expected runtime model capability to veto image input"
   | Error
-      (Agent_sdk.Error.Config
-         (Agent_sdk.Error.InvalidConfig { detail; _ })) ->
+      (Masc_agent_core.Error.Config
+         (Masc_agent_core.Error.InvalidConfig { detail; _ })) ->
       check bool "mentions unsupported image" true
         (String_util.string_contains_substring
            ~needle:"unsupported image input"
            detail)
-  | Error err -> fail ("unexpected error shape: " ^ Agent_sdk.Error.to_string err)
+  | Error err -> fail ("unexpected error shape: " ^ Masc_agent_core.Error.to_string err)
 
 let test_runtime_multimodal_gate_lists_required_modalities () =
   let blocks =
     [
-      Agent_sdk.Types.Text "describe these";
-      Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ();
-      Agent_sdk.Types.audio_block ~media_type:"audio/wav" ~data:"def" ();
+      Masc_agent_core.Types.Text "describe these";
+      Masc_agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ();
+      Masc_agent_core.Types.audio_block ~media_type:"audio/wav" ~data:"def" ();
     ]
   in
   check (list string) "required modalities" [ "image"; "audio" ]
@@ -2487,11 +2487,11 @@ let test_runtime_multimodal_gate_lists_required_modalities () =
 let test_runtime_multimodal_gate_includes_initial_messages () =
   let initial_messages =
     [
-      { Agent_sdk.Types.role = Agent_sdk.Types.User;
+      { Masc_agent_core.Types.role = Masc_agent_core.Types.User;
         content =
           [
-            Agent_sdk.Types.Text "previous image turn";
-            Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ();
+            Masc_agent_core.Types.Text "previous image turn";
+            Masc_agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ();
           ];
         name = None;
         tool_call_id = None;
@@ -2503,11 +2503,11 @@ let test_runtime_multimodal_gate_includes_initial_messages () =
   check (list string) "run required modalities" [ "image" ]
     (Runtime_agent.For_testing.required_modalities_for_run
        ~initial_messages
-       ~goal_blocks:[ Agent_sdk.Types.Text "text-only follow-up" ]);
+       ~goal_blocks:[ Masc_agent_core.Types.Text "text-only follow-up" ]);
   let blocks =
     Runtime_agent.For_testing.content_blocks_for_run
       ~initial_messages
-      ~goal_blocks:[ Agent_sdk.Types.Text "text-only follow-up" ]
+      ~goal_blocks:[ Masc_agent_core.Types.Text "text-only follow-up" ]
   in
   match
     Runtime_agent.For_testing.validate_content_blocks_against_capabilities
@@ -2517,17 +2517,17 @@ let test_runtime_multimodal_gate_includes_initial_messages () =
   with
   | Ok () -> fail "expected image retained in history to be rejected"
   | Error
-      (Agent_sdk.Error.Config
-         (Agent_sdk.Error.InvalidConfig { detail; _ })) ->
+      (Masc_agent_core.Error.Config
+         (Masc_agent_core.Error.InvalidConfig { detail; _ })) ->
       check bool "mentions unsupported history image" true
         (String_util.string_contains_substring
            ~needle:"unsupported image input"
            detail)
-  | Error err -> fail ("unexpected error shape: " ^ Agent_sdk.Error.to_string err)
+  | Error err -> fail ("unexpected error shape: " ^ Masc_agent_core.Error.to_string err)
 
 let test_runtime_multimodal_gate_rejects_unsupported_image () =
   let blocks =
-    [ Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" () ]
+    [ Masc_agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" () ]
   in
   match
     Runtime_agent.For_testing.validate_content_blocks_against_capabilities
@@ -2537,8 +2537,8 @@ let test_runtime_multimodal_gate_rejects_unsupported_image () =
   with
   | Ok () -> fail "expected image input to be rejected for text-only provider"
   | Error
-      (Agent_sdk.Error.Config
-         (Agent_sdk.Error.InvalidConfig { field; detail })) ->
+      (Masc_agent_core.Error.Config
+         (Masc_agent_core.Error.InvalidConfig { field; detail })) ->
       check string "field" "multimodal_input" field;
       check bool "mentions image" true
         (String_util.string_contains_substring
@@ -2548,13 +2548,13 @@ let test_runtime_multimodal_gate_rejects_unsupported_image () =
         (String_util.string_contains_substring
            ~needle:"test:text-only"
            detail)
-  | Error err -> fail ("unexpected error shape: " ^ Agent_sdk.Error.to_string err)
+  | Error err -> fail ("unexpected error shape: " ^ Masc_agent_core.Error.to_string err)
 
 let test_runtime_multimodal_gate_allows_supported_image () =
   let blocks =
     [
-      Agent_sdk.Types.Text "describe this";
-      Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ();
+      Masc_agent_core.Types.Text "describe this";
+      Masc_agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ();
     ]
   in
   match
@@ -2565,12 +2565,12 @@ let test_runtime_multimodal_gate_allows_supported_image () =
   with
   | Ok () -> ()
   | Error err -> fail ("expected image-capable provider to pass: "
-                       ^ Agent_sdk.Error.to_string err)
+                       ^ Masc_agent_core.Error.to_string err)
 
 let test_runtime_multimodal_gate_requires_multimodal_for_document () =
   let blocks =
     [
-      Agent_sdk.Types.document_block
+      Masc_agent_core.Types.document_block
         ~media_type:"application/pdf"
         ~data:"abc"
         ();
@@ -2590,18 +2590,18 @@ let test_runtime_multimodal_gate_requires_multimodal_for_document () =
   in
   (match rejected with
    | Error
-       (Agent_sdk.Error.Config
-          (Agent_sdk.Error.InvalidConfig { detail; _ })) ->
+       (Masc_agent_core.Error.Config
+          (Masc_agent_core.Error.InvalidConfig { detail; _ })) ->
        check bool "mentions document" true
          (String_util.string_contains_substring
             ~needle:"unsupported document input"
             detail)
    | Ok () -> fail "expected document to require multimodal capability"
-   | Error err -> fail ("unexpected error shape: " ^ Agent_sdk.Error.to_string err));
+   | Error err -> fail ("unexpected error shape: " ^ Masc_agent_core.Error.to_string err));
   match accepted with
   | Ok () -> ()
   | Error err -> fail ("expected multimodal provider to accept document: "
-                       ^ Agent_sdk.Error.to_string err)
+                       ^ Masc_agent_core.Error.to_string err)
 
 let test_surface_context_to_instructions_formats_copilot_context () =
   let ctx =

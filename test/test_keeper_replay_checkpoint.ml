@@ -8,20 +8,20 @@ module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
 module Replay_prefix = Masc.Keeper_replay_prefix
 
 let message role content =
-  Agent_sdk.Types.{ role; content; name = None; tool_call_id = None; metadata = [] }
+  Masc_agent_core.Types.{ role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
-let text_of_message = Agent_sdk.Types.text_of_message
+let text_of_message = Masc_agent_core.Types.text_of_message
 
 let checkpoint ?(working_context = Some (`Assoc [])) messages =
-  Agent_sdk.Checkpoint.
+  Masc_agent_core.Checkpoint.
     { version = checkpoint_version
     ; session_id = "old-session"
     ; agent_name = "test-agent"
     ; model = "test-model"
     ; system_prompt = Some "system"
     ; messages
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Masc_agent_core.Types.empty_usage
     ; turn_count = 1
     ; created_at = 1_000.0
     ; tools = []
@@ -34,15 +34,15 @@ let checkpoint ?(working_context = Some (`Assoc [])) messages =
     ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.Off
+    ; response_format = Masc_agent_core.Types.Off
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Masc_agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context
   }
 
-let input_required_request () : Agent_sdk.Error.input_required =
+let input_required_request () : Masc_agent_core.Error.input_required =
   { request_id = "recovery-input-1"
   ; participant_name = Some "operator"
   ; question = "Which repository should I inspect?"
@@ -64,14 +64,14 @@ let prune_reason_to_string =
 let text_of_last_assistant messages =
   messages
   |> List.rev
-  |> List.find_opt (fun (msg : Agent_sdk.Types.message) ->
-    msg.role = Agent_sdk.Types.Assistant)
-  |> Option.map Agent_sdk.Types.text_of_message
+  |> List.find_opt (fun (msg : Masc_agent_core.Types.message) ->
+    msg.role = Masc_agent_core.Types.Assistant)
+  |> Option.map Masc_agent_core.Types.text_of_message
 ;;
 
 let has_content predicate messages =
   List.exists
-    (fun (msg : Agent_sdk.Types.message) -> List.exists predicate msg.content)
+    (fun (msg : Masc_agent_core.Types.message) -> List.exists predicate msg.content)
     messages
 ;;
 
@@ -90,7 +90,7 @@ let with_temp_dir f =
 ;;
 
 let test_patch_last_assistant_preserves_typed_reasoning () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let cp =
     checkpoint
       [ message User [ Text "question" ]
@@ -116,7 +116,7 @@ let test_patch_last_assistant_preserves_typed_reasoning () =
 ;;
 
 let test_finalization_reuses_matching_pipeline_checkpoint () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let history = [ message User [ Text "question" ] ] in
   let messages = history @ [ message Assistant [ Text "final" ] ] in
   let persisted =
@@ -128,7 +128,7 @@ let test_finalization_reuses_matching_pipeline_checkpoint () =
     { persisted with
       messages = List.map Fun.id persisted.messages
     ; created_at = persisted.created_at +. 1.0
-    ; context = Agent_sdk.Context.copy persisted.context
+    ; context = Masc_agent_core.Context.copy persisted.context
     }
   in
   let selected, source_already_persisted =
@@ -163,7 +163,7 @@ let test_finalization_reuses_matching_pipeline_checkpoint () =
 ;;
 
 let test_finalization_does_not_reuse_distinct_message_state () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let persisted =
     checkpoint ~working_context:None
       [ message User [ Text "question" ]; message Assistant [ Text "old" ] ]
@@ -190,7 +190,7 @@ let test_finalization_does_not_reuse_distinct_message_state () =
 ;;
 
 let test_contract_observation_preserves_current_turn_suffix () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let history =
     [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
   in
@@ -231,7 +231,7 @@ let test_contract_observation_preserves_current_turn_suffix () =
 ;;
 
 let test_contract_observation_rejects_mismatched_history_prefix () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let expected_history =
     [ message User [ Text "expected" ]; message Assistant [ Text "old answer" ] ]
   in
@@ -252,7 +252,7 @@ let test_contract_observation_rejects_mismatched_history_prefix () =
 ;;
 
 let test_success_preserves_typed_replay_suffix () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let history =
     [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
   in
@@ -303,7 +303,7 @@ let test_success_preserves_typed_replay_suffix () =
 ;;
 
 let test_success_appends_missing_final_assistant () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let history =
     [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
   in
@@ -322,7 +322,7 @@ let test_success_appends_missing_final_assistant () =
 ;;
 
 let test_empty_success_preserves_recorded_user_turn () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let history =
     [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
   in
@@ -344,7 +344,7 @@ let test_empty_success_preserves_recorded_user_turn () =
 ;;
 
 let test_empty_success_preserves_tool_execution_suffix () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let history =
     [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
   in
@@ -386,7 +386,7 @@ let test_empty_success_preserves_tool_execution_suffix () =
 ;;
 
 let test_input_required_preserves_exact_tool_failure_suffix () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let history =
     [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
   in
@@ -434,7 +434,7 @@ let test_input_required_preserves_exact_tool_failure_suffix () =
 ;;
 
 let test_media_degraded_projection_persists_canonical_checkpoint () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let canonical_history =
     [ message User
         [ Text "canonical history"
@@ -502,7 +502,7 @@ let wake_persistence ~history_messages ~response_text messages =
     (checkpoint messages)
 ;;
 
-let history_seed = [ message Agent_sdk.Types.User [ Agent_sdk.Types.Text "seed" ] ]
+let history_seed = [ message Masc_agent_core.Types.User [ Masc_agent_core.Types.Text "seed" ] ]
 
 let test_autonomous_response_is_durable_conversation () =
   Alcotest.(check (option string))
@@ -514,7 +514,7 @@ let test_autonomous_response_is_durable_conversation () =
 ;;
 
 let test_autonomous_turn_persists_cue_and_assistant () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let suffix =
     [ message User [ Text wake_marker_text ]
     ; message Assistant [ Text "I will inspect the queue next." ]
@@ -544,7 +544,7 @@ let test_autonomous_turn_persists_cue_and_assistant () =
 ;;
 
 let test_two_autonomous_cycles_continue_same_conversation () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let first_response = "I will inspect the queue next." in
   let first_suffix =
     [ message User [ Text wake_marker_text ]
@@ -595,7 +595,7 @@ let test_two_autonomous_cycles_continue_same_conversation () =
 ;;
 
 let test_non_marker_user_turn_is_untouched () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let suffix =
     [ message User [ Text "an actual user question" ]
     ; message Assistant [ Text "reply" ]
@@ -615,7 +615,7 @@ let test_non_marker_user_turn_is_untouched () =
 ;;
 
 let test_blank_response_drops_only_blank_assistant () =
-  let open Agent_sdk.Types in
+  let open Masc_agent_core.Types in
   let suffix =
     [ message User [ Text wake_marker_text ]; message Assistant [ Text "" ] ]
   in

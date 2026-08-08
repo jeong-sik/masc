@@ -176,18 +176,18 @@ let make_meta
   | Error detail -> failf "keeper meta fixture failed: %s" detail
 
 let make_checkpoint () =
-  Agent_sdk.Checkpoint.
+  Masc_agent_core.Checkpoint.
     { version = checkpoint_version
     ; session_id = "trace-post-turn-no-auto-compact"
     ; agent_name = "post-turn-no-auto-compact"
     ; model = "test-model"
     ; system_prompt = None
     ; messages =
-        [ Agent_sdk.Types.text_message Agent_sdk.Types.User "keep"
-        ; Agent_sdk.Types.text_message Agent_sdk.Types.Assistant (String.make 2048 'x')
-        ; Agent_sdk.Types.text_message Agent_sdk.Types.User (String.make 2048 'y')
+        [ Masc_agent_core.Types.text_message Masc_agent_core.Types.User "keep"
+        ; Masc_agent_core.Types.text_message Masc_agent_core.Types.Assistant (String.make 2048 'x')
+        ; Masc_agent_core.Types.text_message Masc_agent_core.Types.User (String.make 2048 'y')
         ]
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Masc_agent_core.Types.empty_usage
     ; turn_count = 7
     ; created_at = 1_700_000_000.0
     ; tools = []
@@ -199,24 +199,24 @@ let make_checkpoint () =
     ; min_p = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.Off
+    ; response_format = Masc_agent_core.Types.Off
     ; thinking_budget = None
     ; reasoning_effort = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Masc_agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }
 
-let block_message role content : Agent_sdk.Types.message =
+let block_message role content : Masc_agent_core.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 
 let tool_use id =
-  Agent_sdk.Types.ToolUse
+  Masc_agent_core.Types.ToolUse
     { id; name = "test_tool"; input = `Assoc [ "id", `String id ] }
 
 let tool_result id =
-  Agent_sdk.Types.ToolResult
+  Masc_agent_core.Types.ToolResult
     { tool_use_id = id
     ; content = "result:" ^ id
     ; outcome = Tool_succeeded
@@ -272,14 +272,14 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
       run_case
         ~name:"atomic-cycle-evidence"
         ~messages:
-          [ block_message Agent_sdk.Types.User [ Agent_sdk.Types.Text "prompt" ]
-          ; block_message Agent_sdk.Types.Assistant
-              [ Agent_sdk.Types.Thinking
+          [ block_message Masc_agent_core.Types.User [ Masc_agent_core.Types.Text "prompt" ]
+          ; block_message Masc_agent_core.Types.Assistant
+              [ Masc_agent_core.Types.Thinking
                   { content = "private"; signature = None }
               ; tool_use "atomic"
               ]
-          ; block_message Agent_sdk.Types.Tool
-              [ Agent_sdk.Types.ToolResult
+          ; block_message Masc_agent_core.Types.Tool
+              [ Masc_agent_core.Types.ToolResult
                   { tool_use_id = "atomic"
                   ; content = String.make 4096 'r'
                   ; outcome = Tool_succeeded
@@ -287,21 +287,21 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
                   ; content_blocks = None
                   }
               ]
-          ; block_message Agent_sdk.Types.Assistant
-              [ Agent_sdk.Types.Text "raw suffix" ]
+          ; block_message Masc_agent_core.Types.Assistant
+              [ Masc_agent_core.Types.Text "raw suffix" ]
           ]
         (summarize_response "done");
       run_case
         ~name:"reasoning-normalization-evidence"
         ~messages:
-          [ block_message Agent_sdk.Types.User [ Agent_sdk.Types.Text "prompt" ]
-          ; block_message Agent_sdk.Types.Assistant
-              [ Agent_sdk.Types.Thinking
+          [ block_message Masc_agent_core.Types.User [ Masc_agent_core.Types.Text "prompt" ]
+          ; block_message Masc_agent_core.Types.Assistant
+              [ Masc_agent_core.Types.Thinking
                   { content = String.make 4096 'p'; signature = None }
-              ; Agent_sdk.Types.Text "visible"
+              ; Masc_agent_core.Types.Text "visible"
               ]
-          ; block_message Agent_sdk.Types.User
-              [ Agent_sdk.Types.Text "follow-up" ]
+          ; block_message Masc_agent_core.Types.User
+              [ Masc_agent_core.Types.Text "follow-up" ]
           ]
         (summarize_response "visible"))
 ;;

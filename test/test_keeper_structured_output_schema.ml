@@ -63,8 +63,8 @@ let allows_additional_properties schema =
 
 let has_no_response_format provider_cfg =
   match provider_cfg.Llm_provider.Provider_config.response_format with
-  | Agent_sdk.Types.Off -> true
-  | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false
+  | Masc_agent_core.Types.Off -> true
+  | Masc_agent_core.Types.JsonMode | Masc_agent_core.Types.JsonSchema _ -> false
 ;;
 let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
   let schema_names =
@@ -223,7 +223,7 @@ let test_anti_rationalization_reviewer_config_reaches_glm () =
 let test_anti_rationalization_reviewer_config_clears_preset_response_format () =
   let preset =
     { (glm_provider_config ()) with
-      response_format = Agent_sdk.Types.JsonMode
+      response_format = Masc_agent_core.Types.JsonMode
     }
   in
   let reviewer =

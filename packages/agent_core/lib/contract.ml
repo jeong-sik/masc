@@ -23,7 +23,7 @@ type t =
   ; skills : Skill.t list
   }
 
-let context_key = "agent_sdk.contract"
+let context_key = "masc.agent_core.contract"
 
 let empty =
   { runtime_awareness = None; trigger = None; instruction_layers = []; skills = [] }

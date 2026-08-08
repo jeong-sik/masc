@@ -1,6 +1,6 @@
 (** Unit tests for Structured output module. *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (* --- Test schema --- *)

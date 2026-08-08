@@ -5,7 +5,7 @@
 let label = Alcotest.(check string)
 let to_label = Keeper_hooks_oas_types.stop_reason_to_label
 
-let response stop_reason : Agent_sdk.Types.api_response =
+let response stop_reason : Masc_agent_core.Types.api_response =
   { id = "resp-stop-reason"
   ; model = "model-stop-reason"
   ; content = []
@@ -15,28 +15,28 @@ let response stop_reason : Agent_sdk.Types.api_response =
   }
 
 let test_all_variants () =
-  label "EndTurn" "end_turn" (to_label Agent_sdk.Types.EndTurn);
-  label "StopToolUse" "tool_use" (to_label Agent_sdk.Types.StopToolUse);
-  label "MaxTokens" "max_tokens" (to_label Agent_sdk.Types.MaxTokens);
+  label "EndTurn" "end_turn" (to_label Masc_agent_core.Types.EndTurn);
+  label "StopToolUse" "tool_use" (to_label Masc_agent_core.Types.StopToolUse);
+  label "MaxTokens" "max_tokens" (to_label Masc_agent_core.Types.MaxTokens);
   label "StopSequence" "stop_sequence"
-    (to_label Agent_sdk.Types.StopSequence);
-  label "Refusal" "refusal" (to_label Agent_sdk.Types.Refusal);
+    (to_label Masc_agent_core.Types.StopSequence);
+  label "Refusal" "refusal" (to_label Masc_agent_core.Types.Refusal);
   label "ContentFilter" "content_filter"
-    (to_label Agent_sdk.Types.ContentFilter);
+    (to_label Masc_agent_core.Types.ContentFilter);
   label "RepetitionTruncation" "repetition_truncation"
-    (to_label Agent_sdk.Types.RepetitionTruncation);
-  label "PauseTurn" "pause_turn" (to_label Agent_sdk.Types.PauseTurn);
-  label "Compaction" "compaction" (to_label Agent_sdk.Types.Compaction);
+    (to_label Masc_agent_core.Types.RepetitionTruncation);
+  label "PauseTurn" "pause_turn" (to_label Masc_agent_core.Types.PauseTurn);
+  label "Compaction" "compaction" (to_label Masc_agent_core.Types.Compaction);
   label "ContextWindowExceeded" "model_context_window_exceeded"
-    (to_label Agent_sdk.Types.ContextWindowExceeded);
+    (to_label Masc_agent_core.Types.ContextWindowExceeded);
   label "UnmatchedToolCalls" "unmatched_tool_calls"
-    (to_label Agent_sdk.Types.UnmatchedToolCalls);
-  label "Unknown" "unknown" (to_label (Agent_sdk.Types.Unknown "anything"))
+    (to_label Masc_agent_core.Types.UnmatchedToolCalls);
+  label "Unknown" "unknown" (to_label (Masc_agent_core.Types.Unknown "anything"))
 
 let test_agent_completed_stop_reason_wire_uses_oas_string () =
   let fields =
     Masc.Keeper_event_bridge_error_json.agent_completed_result_fields
-      (Ok (response (Agent_sdk.Types.Unknown "provider_raw_stop")))
+      (Ok (response (Masc_agent_core.Types.Unknown "provider_raw_stop")))
   in
   match List.assoc_opt "stop_reason" fields with
   | Some (`String value) ->

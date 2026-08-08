@@ -36,35 +36,35 @@ let require_eio ?sw ?net () =
 let eio_context_field = "eio_context"
 
 let eio_context_error_to_sdk_error detail =
-  Agent_sdk.Error.Config
-    (Agent_sdk.Error.InvalidConfig { field = eio_context_field; detail })
+  Masc_agent_core.Error.Config
+    (Masc_agent_core.Error.InvalidConfig { field = eio_context_field; detail })
 
 (* [true] iff [err] is the "Eio switch/net unavailable" config error this
    module produces (running outside a server context). Matched structurally
    on the typed [Config (InvalidConfig { field })] tag — NOT by substring-
-   scanning [Agent_sdk.Error.to_string]: the rendered Eio wording is not a
+   scanning [Masc_agent_core.Error.to_string]: the rendered Eio wording is not a
    contract and a wording change must not silently drop the fatal-environment
    promotion in the heartbeat loop. The producer and this predicate live in
    one module so the [field] tag is the single source of truth. The [when]
    guard keeps the [Config _] arm reachable regardless of how many
    constructors the wrapped config-error type carries. *)
-let is_eio_context_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_eio_context_error (err : Masc_agent_core.Error.sdk_error) : bool =
   match err with
-  | Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; _ })
+  | Masc_agent_core.Error.Config (Masc_agent_core.Error.InvalidConfig { field; _ })
     when String.equal field eio_context_field -> true
-  | Agent_sdk.Error.Config _ -> false
-  | Agent_sdk.Error.Provider _ -> false
-  | Agent_sdk.Error.Api _ -> false
-  | Agent_sdk.Error.Agent _ -> false
-  | Agent_sdk.Error.Mcp _ -> false
-  | Agent_sdk.Error.Serialization _ -> false
-  | Agent_sdk.Error.Io _ -> false
-  | Agent_sdk.Error.Orchestration _ -> false
-  | Agent_sdk.Error.Internal _ -> false
+  | Masc_agent_core.Error.Config _ -> false
+  | Masc_agent_core.Error.Provider _ -> false
+  | Masc_agent_core.Error.Api _ -> false
+  | Masc_agent_core.Error.Agent _ -> false
+  | Masc_agent_core.Error.Mcp _ -> false
+  | Masc_agent_core.Error.Serialization _ -> false
+  | Masc_agent_core.Error.Io _ -> false
+  | Masc_agent_core.Error.Orchestration _ -> false
+  | Masc_agent_core.Error.Internal _ -> false
 
 let runtime_catalog_error_to_sdk_error detail =
-  Agent_sdk.Error.Config
-    (Agent_sdk.Error.InvalidConfig { field = "runtime_id"; detail })
+  Masc_agent_core.Error.Config
+    (Masc_agent_core.Error.InvalidConfig { field = "runtime_id"; detail })
 
 (** Resolve runtime provider configs via MASC Runtime_config.
     Returns Provider_config.t list for the downstream OAS runtime,

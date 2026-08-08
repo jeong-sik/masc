@@ -4,18 +4,18 @@
    OAS 범용 함수만 소비: Runtime_oas_runner(id→provider) → Runtime_agent(build).
    fusion 개념은 OAS에 노출하지 않는다. *)
 
-let answer_text (resp : Agent_sdk.Types.api_response) : string =
-  Agent_sdk_response.text_of_response resp
+let answer_text (resp : Masc_agent_core.Types.api_response) : string =
+  Masc_agent_core_response.text_of_response resp
 
 let stop_reason_label = Keeper_hooks_oas_types.stop_reason_to_label
 
 (* 콘텐츠 블록 카운팅은 OAS canonical projection
-   [Agent_sdk.Response_shape.summarize_blocks]에 위임한다. 로컬 fold를 재구현하지 않는다
+   [Masc_agent_core.Response_shape.summarize_blocks]에 위임한다. 로컬 fold를 재구현하지 않는다
    (keeper_hooks_oas_types.ml의 F2 canonical projection 원칙과 동일 — 미이행 사이트였다).
    thinking_kind 분류만 MASC가 소유한다: OAS는 model-family thinking 의미를 의도적으로
    노출하지 않으므로 [summarize_thinking_blocks]로 별도 산출한다. *)
-let empty_response_detail (resp : Agent_sdk.Types.api_response) : string =
-  let shape = Agent_sdk.Response_shape.summarize_blocks resp.content in
+let empty_response_detail (resp : Masc_agent_core.Types.api_response) : string =
+  let shape = Masc_agent_core.Response_shape.summarize_blocks resp.content in
   let thinking = Keeper_hooks_oas_types.summarize_thinking_blocks resp.content in
   let input_tokens, output_tokens =
     match resp.usage with
@@ -30,25 +30,25 @@ let empty_response_detail (resp : Agent_sdk.Types.api_response) : string =
      output_tokens=%s)"
     (stop_reason_label resp.stop_reason)
     (List.length resp.content)
-    shape.Agent_sdk.Response_shape.text_blocks
-    shape.Agent_sdk.Response_shape.text_chars
+    shape.Masc_agent_core.Response_shape.text_blocks
+    shape.Masc_agent_core.Response_shape.text_chars
     thinking.Keeper_hooks_oas_types.thinking_kind
     thinking.Keeper_hooks_oas_types.thinking_blocks
     thinking.Keeper_hooks_oas_types.thinking_chars
     thinking.Keeper_hooks_oas_types.redacted_thinking_blocks
-    shape.Agent_sdk.Response_shape.tool_use_count
-    shape.Agent_sdk.Response_shape.tool_result_count
-    shape.Agent_sdk.Response_shape.image_count
-    shape.Agent_sdk.Response_shape.document_count
-    shape.Agent_sdk.Response_shape.audio_count
+    shape.Masc_agent_core.Response_shape.tool_use_count
+    shape.Masc_agent_core.Response_shape.tool_result_count
+    shape.Masc_agent_core.Response_shape.image_count
+    shape.Masc_agent_core.Response_shape.document_count
+    shape.Masc_agent_core.Response_shape.audio_count
     input_tokens
     output_tokens
 
-let usage_of (resp : Agent_sdk.Types.api_response) : Fusion_types.usage =
+let usage_of (resp : Masc_agent_core.Types.api_response) : Fusion_types.usage =
   match resp.usage with
   | Some u ->
-    { Fusion_types.input_tokens = u.Agent_sdk.Types.input_tokens
-    ; output_tokens = u.Agent_sdk.Types.output_tokens
+    { Fusion_types.input_tokens = u.Masc_agent_core.Types.input_tokens
+    ; output_tokens = u.Masc_agent_core.Types.output_tokens
     }
   | None -> Fusion_types.zero_usage
 
@@ -105,9 +105,9 @@ let panel_failure_text (failure : Fusion_types.panel_failure) : string =
     Printf.sprintf "invalid max_output_tokens %d" n
 
 (** [Keeper_tool_descriptor]에서 날것의 web tool descriptor를 찾아
-    [Agent_sdk.Tool.t]로 변환한다. 패널/심판이 web_search/web_fetch를
+    [Masc_agent_core.Tool.t]로 변환한다. 패널/심판이 web_search/web_fetch를
     호출할 수 있게 하는 목적으로만 쓰인다. *)
-let oas_tool_of_descriptor (d : Keeper_tool_descriptor.t) : Agent_sdk.Tool.t option =
+let oas_tool_of_descriptor (d : Keeper_tool_descriptor.t) : Masc_agent_core.Tool.t option =
   let handler args =
     let start_time = Unix.gettimeofday () in
     match d.Keeper_tool_descriptor.internal_name with
@@ -129,7 +129,7 @@ let oas_tool_of_descriptor (d : Keeper_tool_descriptor.t) : Agent_sdk.Tool.t opt
        ~input_schema:d.input_schema
        handler)
 
-let web_tool_bundle () : Agent_sdk.Tool.t list =
+let web_tool_bundle () : Masc_agent_core.Tool.t list =
   [ "masc_web_search"; "masc_web_fetch" ]
   |> List.map Keeper_tool_descriptor.descriptors_for_internal
   |> List.concat
@@ -144,7 +144,7 @@ let build_agent
     ?name
     ?provider_config_transform
     (model : string)
-  : (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
+  : (Masc_agent_core.Agent.t, Fusion_types.panel_failure) result
   =
   (* 카드명(Async_agent.all이 결과 키로 반환)은 패널 정체성([name], 예 "skeptic (claude)").
      provider 라우팅·에러 귀속은 원 [model]로 따로 한다 — 정체성과 routable model을 한
@@ -198,7 +198,7 @@ let build_agent
                ((Fusion_types.Provider_error
                    (provider_error_detail
                       ~runtime_id:model
-                      (Agent_sdk.Error.to_string e))
+                      (Masc_agent_core.Error.to_string e))
                  : Fusion_types.panel_failure))))
 
 module For_testing = struct

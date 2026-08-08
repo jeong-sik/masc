@@ -1,4 +1,4 @@
-(** Total typed failure routing over [Agent_sdk.Error.sdk_error].
+(** Total typed failure routing over [Masc_agent_core.Error.sdk_error].
 
     Every turn-failure error maps to exactly one typed route; there is no
     [None] family and no catch-all arm. A route is an observation for telemetry
@@ -34,7 +34,7 @@ type retry_class =
   | Network_transient  (** transport-level network failure *)
   | Provider_timeout  (** provider or transport deadline expiry *)
 
-val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
+val sdk_error_is_hard_quota : Masc_agent_core.Error.sdk_error -> bool
 (** True only for the typed [PaymentRequired] and provider [HardQuota]
     constructors. Free-form messages and numeric status codes are ignored. *)
 
@@ -108,7 +108,7 @@ type route =
         (** Display-only bounded failure summary. Never matched. *)
       }
 
-val route_of_error : boundary:error_boundary -> Agent_sdk.Error.sdk_error -> route
+val route_of_error : boundary:error_boundary -> Masc_agent_core.Error.sdk_error -> route
 (** Total over every [sdk_error] class. The caller supplies the actual execution
     boundary so constructors shared by MASC and OAS are never used as provenance
     inference. MASC-internal typed envelopes are decoded only at

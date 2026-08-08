@@ -19,8 +19,8 @@ module Turn_helpers = Keeper_agent_run_turn_helpers
     [None] for that turn) — trace-store state never fails a turn
     pre-dispatch. *)
 type raw_trace_sink_outcome =
-  | Sink_ready of Agent_sdk.Raw_trace.t
-  | Sink_degraded of Agent_sdk.Error.sdk_error
+  | Sink_ready of Masc_agent_core.Raw_trace.t
+  | Sink_degraded of Masc_agent_core.Error.sdk_error
 
 (** Typed reason for an autonomous Keeper run to release its lane after OAS
     completes a tool boundary. *)
@@ -55,7 +55,7 @@ val durable_stimulus_summary_to_string : durable_stimulus_summary -> string
 
 val terminal_effect_boundary_decision
   :  Keeper_tools_oas.terminal_effect_state
-  -> (Runtime_agent.cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
+  -> (Runtime_agent.cooperative_yield_decision, Masc_agent_core.Error.sdk_error) result
 (** Production boundary projection for Keeper tool results. Generic deferred
     tool transitions retain the normal durable-stimulus checkpoint; deferred
     external effects yield the current provider loop so their durable
@@ -64,13 +64,13 @@ val terminal_effect_boundary_decision
     envelope. *)
 
 module For_testing : sig
-  val sse_event_progress_kind : Agent_sdk.Types.sse_event -> string option
+  val sse_event_progress_kind : Masc_agent_core.Types.sse_event -> string option
   val sse_event_watchdog_progress_kind :
-    Agent_sdk.Types.sse_event -> string option
+    Masc_agent_core.Types.sse_event -> string option
   val registry_progress_on_event
     :  record_turn_progress:(string -> unit)
-    -> (Agent_sdk.Types.sse_event -> unit) option
-    -> Agent_sdk.Types.sse_event
+    -> (Masc_agent_core.Types.sse_event -> unit) option
+    -> Masc_agent_core.Types.sse_event
     -> unit
   val progress_keeper_tool_names_for_contract
     :  actual_keeper_tool_names:string list
@@ -79,12 +79,12 @@ module For_testing : sig
 
   val normalize_response_text_for_finalization
     :  runtime_id:string
-    -> initial_messages:Agent_sdk.Types.message list
+    -> initial_messages:Masc_agent_core.Types.message list
     -> run_result:Runtime_agent.run_result
     -> text:string
     -> tool_names:string list
     -> unit
-    -> (string, Agent_sdk.Error.sdk_error) result
+    -> (string, Masc_agent_core.Error.sdk_error) result
 
   (** OAS raw-trace sink for keeper turns: a fresh per-turn file under
       [Keeper_types_support.keeper_raw_trace_dir]. The dispatch section passes
@@ -102,7 +102,7 @@ module For_testing : sig
   val raw_trace_for_dispatch
     :  config:Workspace.config
     -> meta:Keeper_meta_contract.keeper_meta
-    -> Agent_sdk.Raw_trace.t option
+    -> Masc_agent_core.Raw_trace.t option
 
   (** Run reference-aware cleanup only after the current TurnRecord commit
       attempt. A missing/degraded sink is a no-op; cleanup failure is logged
@@ -110,7 +110,7 @@ module For_testing : sig
   val prune_raw_traces_after_turn_record
     :  config:Workspace.config
     -> meta:Keeper_meta_contract.keeper_meta
-    -> Agent_sdk.Raw_trace.t option
+    -> Masc_agent_core.Raw_trace.t option
     -> unit
 
   val runtime_yield_reason
@@ -123,9 +123,9 @@ module For_testing : sig
     -> (string * int) option
 
   val dispatch_after_provider_transcript_admission
-    :  messages:Agent_sdk.Types.message list
-    -> dispatch:(unit -> ('a, Agent_sdk.Error.sdk_error) result)
-    -> ('a, Agent_sdk.Error.sdk_error) result
+    :  messages:Masc_agent_core.Types.message list
+    -> dispatch:(unit -> ('a, Masc_agent_core.Error.sdk_error) result)
+    -> ('a, Masc_agent_core.Error.sdk_error) result
 
   (** Exact-run reference recorded on the turn record. Accepts a reference
       whose session identity matches the keeper trace; the OAS runtime
@@ -133,7 +133,7 @@ module For_testing : sig
       names a different identity space than the keeper agent name. *)
   val turn_record_raw_trace_run_ref
     :  expected_session_id:string
-    -> Agent_sdk.Raw_trace.run_ref
+    -> Masc_agent_core.Raw_trace.run_ref
     -> (Turn_record.raw_trace_run_ref, string) result
 
 end
@@ -177,10 +177,10 @@ val run_turn
   -> base_dir:string
   -> max_context:int
   -> build_turn_prompt:
-       (base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
+       (base_system_prompt:string -> messages:Masc_agent_core.Types.message list -> turn_prompt)
   -> user_message:string
   -> turn_kind:Turn_record.turn_kind
-  -> ?user_blocks:Agent_sdk.Types.content_block list
+  -> ?user_blocks:Masc_agent_core.Types.content_block list
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
   -> generation:int
@@ -188,7 +188,7 @@ val run_turn
   -> ?user_turn_record:Keeper_run_prompt.user_turn_record
   -> ?history_assistant_source:string
   -> ?temperature:float
-  -> ?on_event:(Agent_sdk.Types.sse_event -> unit)
+  -> ?on_event:(Masc_agent_core.Types.sse_event -> unit)
   -> ?trajectory_acc:Trajectory.accumulator
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_runtime:string
@@ -199,8 +199,8 @@ val run_turn
        (Keeper_turn_driver.deferred_runtime_lane -> unit)
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?is_retry:bool
-  -> ?shared_context:Agent_sdk.Context.t
-  -> ?event_bus:Agent_sdk.Event_bus.t
+  -> ?shared_context:Masc_agent_core.Context.t
+  -> ?event_bus:Masc_agent_core.Event_bus.t
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?continuation_delivery_channel:Keeper_continuation_channel.t
@@ -209,6 +209,6 @@ val run_turn
        (unit -> (autonomous_yield_request option, string) result)
        (* Evaluated only after a typed OAS tool boundary. Snapshot failures
           remain explicit errors. The chat lane never receives this hook. *)
-  -> ?on_checkpoint_stage:(Agent_sdk.Agent.checkpoint_stage -> unit)
+  -> ?on_checkpoint_stage:(Masc_agent_core.Agent.checkpoint_stage -> unit)
   -> unit
-  -> (run_result, Agent_sdk.Error.sdk_error) result
+  -> (run_result, Masc_agent_core.Error.sdk_error) result

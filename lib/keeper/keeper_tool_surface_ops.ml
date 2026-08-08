@@ -102,7 +102,7 @@ let submit_keeper_msg_with_captured_event_bus
       ~caller
       ~request
       ~(f :
-          ?event_bus:Agent_sdk.Event_bus.t
+          ?event_bus:Masc_agent_core.Event_bus.t
           -> Keeper_invocation_contract.request
           -> Eio.Switch.t
           -> tool_result)

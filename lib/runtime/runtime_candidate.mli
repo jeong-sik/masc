@@ -9,6 +9,6 @@ val model_health_key : t -> string
 val default_config :
   name:string ->
   system_prompt:string ->
-  tools:Agent_sdk.Tool.t list ->
+  tools:Masc_agent_core.Tool.t list ->
   t ->
   Runtime_agent.config

@@ -1,4 +1,4 @@
-(** Core types for Anthropic Agent SDK.
+(** Core types for MASC agent core.
 
     LLM-level types (role, message, content_block, etc.) are defined in
     {!Llm_provider.Types} and re-exported here for backward compatibility.

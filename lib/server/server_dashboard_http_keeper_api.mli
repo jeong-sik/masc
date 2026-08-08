@@ -98,7 +98,7 @@ val oas_checkpoint_summary_json :
   path:string ->
   is_current:bool ->
   fallback_generation:int ->
-  Agent_sdk.Checkpoint.t ->
+  Masc_agent_core.Checkpoint.t ->
   Yojson.Safe.t
 (** JSON summary of an OAS checkpoint, used by the inventory listing. *)
 

@@ -8,7 +8,7 @@
     - MCP tool -> SDK Tool.t bridge
     - SDK Mcp_types.tool -> oas mcp_tool conversion *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let make_tool_result ?is_error ?structured_content content =
   let fields =

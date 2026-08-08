@@ -11,7 +11,7 @@
     - snapshot_path: path generation with label sanitization
     - save_artifact_text: artifact file creation *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Temp dir helper ─────────────────────────────────────────── *)
 

@@ -1,6 +1,6 @@
 open Alcotest
 
-module EO = Agent_sdk.Exact_output
+module EO = Masc_agent_core.Exact_output
 module F = Compaction_exact_output_fixture
 module Gate = Masc.Keeper_gate
 module Q = Masc.Keeper_approval_queue

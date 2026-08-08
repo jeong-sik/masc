@@ -15,7 +15,7 @@
 let media_subdir = "media"
 
 type persist_error =
-  | Unsupported_source_type of Agent_sdk.Types.media_source_kind
+  | Unsupported_source_type of Masc_agent_core.Types.media_source_kind
   | Invalid_base64 of string
   | Media_too_large of { size_bytes : int; max_bytes : int }
   | Write_failed of string
@@ -244,7 +244,7 @@ let persist ~base_dir ~media_type ~data =
 let persist_error_to_string = function
   | Unsupported_source_type source_type ->
       Printf.sprintf "unsupported media source_type: %s"
-        (Agent_sdk.Types.media_source_kind_to_string source_type)
+        (Masc_agent_core.Types.media_source_kind_to_string source_type)
   | Invalid_base64 msg ->
       "invalid base64 media payload: " ^ msg
   | Media_too_large { size_bytes; max_bytes } ->
@@ -256,11 +256,11 @@ let persist_error_to_string = function
 
 let raw_data_of_source ~source_type ~data =
   match source_type with
-  | Agent_sdk.Types.Base64 -> (
+  | Masc_agent_core.Types.Base64 -> (
       match Base64.decode data with
       | Ok raw -> Ok raw
       | Error (`Msg msg) -> Error (Invalid_base64 msg))
-  | Agent_sdk.Types.Url | Agent_sdk.Types.File_id ->
+  | Masc_agent_core.Types.Url | Masc_agent_core.Types.File_id ->
       Error (Unsupported_source_type source_type)
 
 let persist_media_source_result ~base_dir ~media_type ~source_type ~data =

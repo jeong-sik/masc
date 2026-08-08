@@ -33,18 +33,6 @@ let find_string_field ~entry_id key toml =
     Error (Printf.sprintf "provider entry %S field %S expected string" entry_id key)
 ;;
 
-let non_empty_string_field ~entry_id key toml =
-  match find_string_field ~entry_id key toml with
-  | Error _ as e -> e
-  | Ok None -> Ok None
-  | Ok (Some raw) ->
-    let value = String.lowercase_ascii (String.trim raw) in
-    if value = ""
-    then
-      Error (Printf.sprintf "provider entry %S field %S must not be empty" entry_id key)
-    else Ok (Some value)
-;;
-
 let exact_non_empty_string_field ~entry_id key toml =
   match find_string_field ~entry_id key toml with
   | Error _ as e -> e

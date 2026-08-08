@@ -1,5 +1,5 @@
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 let with_env key value f =
@@ -88,8 +88,8 @@ let test_agent_accessors () =
 ;;
 
 let test_version_info () =
-  Alcotest.(check string) "version" Agent_sdk.Sdk_version.version Agent_sdk.version;
-  Alcotest.(check string) "sdk_name" "agent_sdk" Agent_sdk.sdk_name
+  Alcotest.(check string) "version" Masc_agent_core.Core_version.version Masc_agent_core.version;
+  Alcotest.(check string) "core_name" "masc.agent_core" Masc_agent_core.core_name
 ;;
 
 let test_build_safe_valid () =
@@ -117,7 +117,7 @@ let test_build_safe_explicit_thinking_budget () =
 
 let () =
   run
-    "Agent SDK"
+    "MASC agent core"
     [ ( "types"
       , [ test_case "model_string" `Quick test_model_string
         ; test_case "role_string" `Quick test_role_string

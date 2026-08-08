@@ -523,18 +523,18 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
   let input_messages =
     [
       {
-        Agent_sdk.Types.role = Agent_sdk.Types.User;
-        content = [Agent_sdk.Types.Text "Earlier user request"];
+        Masc_agent_core.Types.role = Masc_agent_core.Types.User;
+        content = [Masc_agent_core.Types.Text "Earlier user request"];
         name = None;
         tool_call_id = None;
         metadata = [];
       };
       {
-        Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
+        Masc_agent_core.Types.role = Masc_agent_core.Types.Assistant;
         content =
           [
-            Agent_sdk.Types.Text "Investigating the issue";
-            Agent_sdk.Types.ToolUse
+            Masc_agent_core.Types.Text "Investigating the issue";
+            Masc_agent_core.Types.ToolUse
               {
                 id = "call-1";
                 name = "masc_board_get";
@@ -546,14 +546,14 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
         metadata = [];
       };
       {
-        Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+        Masc_agent_core.Types.role = Masc_agent_core.Types.Tool;
         content =
           [
-            Agent_sdk.Types.ToolResult
+            Masc_agent_core.Types.ToolResult
               {
                 tool_use_id = "call-1";
                 content = "Fetched board post body";
-                outcome = Agent_sdk.Types.Tool_succeeded;
+                outcome = Masc_agent_core.Types.Tool_succeeded;
                 json = None;
                 content_blocks = None;
               };
@@ -563,8 +563,8 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
         metadata = [];
       };
       {
-        Agent_sdk.Types.role = Agent_sdk.Types.User;
-        content = [Agent_sdk.Types.Text "Current user message"];
+        Masc_agent_core.Types.role = Masc_agent_core.Types.User;
+        content = [Masc_agent_core.Types.Text "Current user message"];
         name = None;
         tool_call_id = None;
         metadata = [];
@@ -578,7 +578,7 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
     }
   in
   let tool =
-    Agent_sdk.Tool.create
+    Masc_agent_core.Tool.create
       ~name:"probe_tool"
       ~description:"probe tool"
       ~parameters:[]
@@ -621,11 +621,11 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
        metrics.segments)
     metrics.attributed_bytes
 
-let message text : Agent_sdk.Types.message = Agent_sdk.Types.user_msg text
+let message text : Masc_agent_core.Types.message = Masc_agent_core.Types.user_msg text
 
 let prompt_carrier text =
   { (message text) with
-    metadata = Agent_sdk.Types.Extra_system_context_provenance.metadata
+    metadata = Masc_agent_core.Types.Extra_system_context_provenance.metadata
   }
 ;;
 
@@ -635,8 +635,8 @@ let test_provider_content_messages_removes_typed_prompt_carrier () =
   let gate_evidence = message "typed gate replay payload" in
   let message_texts =
     Option.map
-      (List.map (fun (message : Agent_sdk.Types.message) ->
-         Agent_sdk.Types.text_of_content message.Agent_sdk.Types.content))
+      (List.map (fun (message : Masc_agent_core.Types.message) ->
+         Masc_agent_core.Types.text_of_content message.Masc_agent_core.Types.content))
   in
   check
     (option (list string))
@@ -674,15 +674,15 @@ let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
   let plain = message "[system context] same text without typed identity" in
   let marked = prompt_carrier "typed prompt context" in
   let invalid =
-    match Agent_sdk.Types.Extra_system_context_provenance.metadata with
+    match Masc_agent_core.Types.Extra_system_context_provenance.metadata with
     | [ key, _ ] -> { marked with metadata = [ key, `Bool false ] }
     | _ -> fail "OAS prompt carrier metadata must contain exactly one field"
   in
   let duplicate =
     { marked with
       metadata =
-        Agent_sdk.Types.Extra_system_context_provenance.metadata
-        @ Agent_sdk.Types.Extra_system_context_provenance.metadata
+        Masc_agent_core.Types.Extra_system_context_provenance.metadata
+        @ Masc_agent_core.Types.Extra_system_context_provenance.metadata
     }
   in
   let unavailable ~prompt_context_present messages =

@@ -17,7 +17,7 @@ type direct_message =
   ; channel : string
   ; user_blocks : Keeper_multimodal_input.user_input_block list
   ; attachments : Keeper_chat_store.attachment list
-  ; user_oas_blocks : Agent_sdk.Types.content_block list option
+  ; user_oas_blocks : Masc_agent_core.Types.content_block list option
   }
 
 type run_ref =

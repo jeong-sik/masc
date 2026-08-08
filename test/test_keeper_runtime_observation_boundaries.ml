@@ -5,7 +5,7 @@ module KTD = Keeper_turn_driver
 module EC = Keeper_error_classify
 
 let raw_provider_timeout_error ~phase =
-  Agent_sdk.Error.Provider
+  Masc_agent_core.Error.Provider
     (Llm_provider.Error.Timeout
        { provider = "test_provider"
        ; timeout_phase = phase
@@ -13,7 +13,7 @@ let raw_provider_timeout_error ~phase =
        })
 
 let raw_api_timeout_error () =
-  Agent_sdk.Error.Api
+  Masc_agent_core.Error.Api
     (Llm_provider.Retry.Timeout
        { message = "Per-provider timeout after 90.0s"; phase = None })
 
@@ -80,7 +80,7 @@ let test_tls_handshake_internal_error_is_transient () =
    forever with [consecutive] pinned at 0. *)
 let test_provider_parse_rejection_counts_toward_crash () =
   let err =
-    Agent_sdk.Error.Provider
+    Masc_agent_core.Error.Provider
       (Llm_provider.Error.ParseError
          { detail = "sse: SSE parse failed: malformed_delta_tool_call" })
   in
@@ -95,7 +95,7 @@ let test_provider_parse_rejection_counts_toward_crash () =
 
 let test_provider_wire_error_is_not_rate_limit_or_request_parse () =
   let err =
-    Agent_sdk.Error.Provider
+    Masc_agent_core.Error.Provider
       (Llm_provider.Error.ProviderWireError
          { provider = "glm"
          ; format = Llm_provider.Http_client.Sse
@@ -123,7 +123,7 @@ let test_provider_wire_error_is_not_rate_limit_or_request_parse () =
    model answering with an empty assistant turn. *)
 let test_attributed_empty_completion_is_auto_recoverable () =
   let err =
-    Agent_sdk.Error.Provider
+    Masc_agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "ollama-cloud"
          ; detail =
@@ -152,7 +152,7 @@ let test_attributed_empty_completion_is_auto_recoverable () =
    auto-recoverable and budget-bounded. *)
 let test_parse_error_empty_completion_is_auto_recoverable () =
   let err =
-    Agent_sdk.Error.Provider
+    Masc_agent_core.Error.Provider
       (Llm_provider.Error.ParseError
          { detail =
              "openai_parse: empty completion (no thinking, text, or tool \
@@ -185,7 +185,7 @@ let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
   let keeper_name = "test-keeper-unmodeled-stop-reason" in
   KUF.note_turn_success keeper_name;
   let err =
-    Agent_sdk.Error.Api
+    Masc_agent_core.Error.Api
       (Llm_provider.Retry.InvalidRequest
          { message =
              "empty completion with unmodeled stop_reason=\"glmtoken\": \
@@ -217,7 +217,7 @@ let test_generic_invalid_request_is_not_empty_completion () =
   let keeper_name = "test-keeper-generic-invalid-request" in
   KUF.note_turn_success keeper_name;
   let err =
-    Agent_sdk.Error.Api
+    Masc_agent_core.Error.Api
       (Llm_provider.Retry.InvalidRequest
          { message = "invalid request body"
          ; reason = Llm_provider.Retry.Unknown_invalid_request
@@ -241,14 +241,14 @@ let test_empty_completion_exemption_budget_is_bounded () =
   let keeper_name = "test-keeper-empty-completion-budget" in
   KUF.note_turn_success keeper_name;
   let empty_err =
-    Agent_sdk.Error.Provider
+    Masc_agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "ollama-cloud"
          ; detail = "empty completion (stop_reason=end_turn): empty turn"
          })
   in
   let transient_err =
-    Agent_sdk.Error.Api
+    Masc_agent_core.Error.Api
       (Llm_provider.Retry.Timeout { message = "timeout"; phase = None })
   in
   for i = 1 to KUF.empty_completion_exemption_budget do

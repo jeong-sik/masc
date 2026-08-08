@@ -45,7 +45,7 @@ let test_unknown_label_is_none () =
     [ ""; "completed"; "checkpoint"; "Visible_reply"; "VISIBLE_REPLY" ]
 
 let test_of_stop_reason () =
-  let request : Agent_sdk.Error.input_required =
+  let request : Masc_agent_core.Error.input_required =
     { request_id = "outcome-input-1"
     ; participant_name = None
     ; question = "Which repository?"
@@ -185,7 +185,7 @@ let test_terminal_effect_defer_kinds_remain_distinct () =
          | Runtime_agent.Repeated_tool_call _ -> "repeated_tool_call"
          | Runtime_agent.Terminal_tool_completed -> "terminal_tool_completed")
     | Ok Runtime_agent.Continue -> fail (label ^ " unexpectedly continued")
-    | Error error -> fail (label ^ ": " ^ Agent_sdk.Error.to_string error)
+    | Error error -> fail (label ^ ": " ^ Masc_agent_core.Error.to_string error)
   in
   expect_yield
     "generic deferred tool preserves existing checkpoint"

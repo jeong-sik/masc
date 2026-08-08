@@ -7,7 +7,7 @@
     - finalize_stream_acc with various event sequences
     - accumulate_event for each event type *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* [lib/streaming.ml]'s stream-accumulator/SSE-parse surface was a
    straight re-export of these two modules; call sites below still read

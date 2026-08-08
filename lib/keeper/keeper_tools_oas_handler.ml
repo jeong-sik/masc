@@ -33,7 +33,7 @@ let make_keeper_tool_handler
           ~args:input
           ())
       ()
-  : ?oas_invocation:Agent_sdk.Tool_contract.Invocation.t -> Yojson.Safe.t -> Tool_result.result
+  : ?oas_invocation:Masc_agent_core.Tool_contract.Invocation.t -> Yojson.Safe.t -> Tool_result.result
   =
   let record_result ~input result =
     Option.iter

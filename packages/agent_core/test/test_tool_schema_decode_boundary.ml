@@ -12,7 +12,7 @@
     asserts an [Error] value {e and} that nothing was raised. *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 let input_schema_error =
   testable Types.pp_input_schema_error Types.equal_input_schema_error

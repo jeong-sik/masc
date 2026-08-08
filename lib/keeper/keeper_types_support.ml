@@ -78,7 +78,7 @@ let keeper_runtime_dir config name =
 
 (* Per-keeper OAS raw-trace store: one JSONL file per keeper turn under
    [.masc/keepers/<name>/raw-traces/].  A fresh file per turn keeps
-   [Agent_sdk.Raw_trace.create] from ever scanning previous turns' data
+   [Masc_agent_core.Raw_trace.create] from ever scanning previous turns' data
    (OAS [create -> scan_next_seq -> read_all] parses the whole target
    file to resume its seq counter), so a corrupt or oversized historical
    trace cannot block keeper dispatch and per-turn sink creation stays

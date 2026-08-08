@@ -1,7 +1,7 @@
 (** Test harness framework for agent verification.
 
     Provides pluggable verification layers inspired by:
-    - Claude Agent SDK Workshop: "rule-based verification"
+    - Claude MASC agent core Workshop: "rule-based verification"
     - Agent Harness Principles: "Harness > Model", "Swiss Cheese Model"
 
     Each harness type implements the HARNESS module type with specific

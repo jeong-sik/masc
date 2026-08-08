@@ -113,7 +113,7 @@ let sdk_error_to_runtime_outcome err =
   | Some _
   | None ->
     (match err with
-     | Agent_sdk.Error.Api api_err ->
+     | Masc_agent_core.Error.Api api_err ->
        let http_err =
          match api_err with
          | Llm_provider.Retry.InvalidRequest { message; _ } ->
@@ -157,21 +157,21 @@ let sdk_error_to_runtime_outcome err =
              }
        in
        Some (Runtime_attempt_fsm.Call_err http_err)
-     | Agent_sdk.Error.Provider provider_err ->
+     | Masc_agent_core.Error.Provider provider_err ->
        Some (Runtime_attempt_fsm.Call_err (provider_error_to_http_error provider_err))
-     | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason { reason }) ->
+     | Masc_agent_core.Error.Agent (Masc_agent_core.Error.UnrecognizedStopReason { reason }) ->
        Some
          (Runtime_attempt_fsm.Call_err
             (Llm_provider.Http_client.AcceptRejected { reason }))
-    | Agent_sdk.Error.Config
-        (Agent_sdk.Error.InvalidConfig { field = "runtime_mcp_auth"; detail }) ->
+    | Masc_agent_core.Error.Config
+        (Masc_agent_core.Error.InvalidConfig { field = "runtime_mcp_auth"; detail }) ->
        Some
          (Runtime_attempt_fsm.Call_err
             (Llm_provider.Http_client.AcceptRejected { reason = detail }))
-     | Agent_sdk.Error.Agent _
-     | Agent_sdk.Error.Config _
-     | Agent_sdk.Error.Mcp _
-     | Agent_sdk.Error.Serialization _
-     | Agent_sdk.Error.Io _
-     | Agent_sdk.Error.Orchestration _
-     | Agent_sdk.Error.Internal _ -> None)
+     | Masc_agent_core.Error.Agent _
+     | Masc_agent_core.Error.Config _
+     | Masc_agent_core.Error.Mcp _
+     | Masc_agent_core.Error.Serialization _
+     | Masc_agent_core.Error.Io _
+     | Masc_agent_core.Error.Orchestration _
+     | Masc_agent_core.Error.Internal _ -> None)

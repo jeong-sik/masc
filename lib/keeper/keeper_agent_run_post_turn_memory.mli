@@ -15,9 +15,9 @@ val run :
   turn:int ->
   oas_turn_count:int ->
   actual_tools:string list ->
-  librarian_messages:Agent_sdk.Types.message list ->
+  librarian_messages:Masc_agent_core.Types.message list ->
   post_turn_t0:float ->
-  inference_telemetry:Agent_sdk.Types.inference_telemetry option ->
+  inference_telemetry:Masc_agent_core.Types.inference_telemetry option ->
   unit ->
   unit
 (** Run the full post-turn memory series.

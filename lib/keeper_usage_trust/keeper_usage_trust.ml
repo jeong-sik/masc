@@ -38,7 +38,7 @@ let add_reason reason reasons =
   if List.mem reason reasons then reasons else reason :: reasons
 
 let classify ~(usage_reported : bool)
-    ~(usage : Agent_sdk.Types.api_usage) : t =
+    ~(usage : Masc_agent_core.Types.api_usage) : t =
   if not usage_reported then Usage_missing
   else
     let reasons = ref [] in

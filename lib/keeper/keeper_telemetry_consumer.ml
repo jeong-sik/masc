@@ -1,6 +1,6 @@
 (** Keeper_telemetry_consumer — MASC-side observer for OAS telemetry events.
 
-    Subscribes to the OAS event bus via [Agent_sdk_metrics_bridge],
+    Subscribes to the OAS event bus via [Masc_agent_core_metrics_bridge],
     filters [Custom("telemetry_event", json)] payloads, and increments
     an OTel counter for dashboard visibility.
 
@@ -23,23 +23,23 @@ let drain_interval_s = 0.1
 
 let spawn_subscriber ~sw ~clock ~bus =
   let sub =
-    Agent_sdk_metrics_bridge.subscribe
+    Masc_agent_core_metrics_bridge.subscribe
       ~capacity:256
-      ~overflow:Agent_sdk.Event_bus.Drop_oldest
+      ~overflow:Masc_agent_core.Event_bus.Drop_oldest
       ~purpose:"telemetry_consumer"
-      ~filter:(Agent_sdk.Event_bus.filter_topic "telemetry_event")
+      ~filter:(Masc_agent_core.Event_bus.filter_topic "telemetry_event")
       bus
   in
   Eio.Switch.on_release sw (fun () ->
-    Agent_sdk_metrics_bridge.unsubscribe bus sub);
+    Masc_agent_core_metrics_bridge.unsubscribe bus sub);
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       (try
-         let events = Agent_sdk_metrics_bridge.drain sub in
+         let events = Masc_agent_core_metrics_bridge.drain sub in
          List.iter
-           (fun (evt : Agent_sdk.Event_bus.event) ->
+           (fun (evt : Masc_agent_core.Event_bus.event) ->
               match evt.payload with
-              | Agent_sdk.Event_bus.Custom ("telemetry_event", _json) ->
+              | Masc_agent_core.Event_bus.Custom ("telemetry_event", _json) ->
                   Otel_metric_store.inc_counter
                     telemetry_event_counter
                     ~labels:[ "result", "observed" ]

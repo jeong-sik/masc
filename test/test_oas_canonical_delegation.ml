@@ -17,23 +17,23 @@ let check_no_binding ~file ~name =
 let test_masc_delegates_canonical_oas_projections () =
   check_calls
     ~file:"lib/keeper/keeper_context_core_message_json.ml"
-    ~callee:"Agent_sdk.Types.role_to_string"
+    ~callee:"Masc_agent_core.Types.role_to_string"
     ~expected:1;
   check_calls
     ~file:"lib/keeper/keeper_context_core_message_json.ml"
-    ~callee:"Agent_sdk.Types.role_of_string"
+    ~callee:"Masc_agent_core.Types.role_of_string"
     ~expected:1;
   check_calls
     ~file:"lib/keeper/keeper_event_bridge_error_json.ml"
-    ~callee:"Agent_sdk.Types.total_tokens"
+    ~callee:"Masc_agent_core.Types.total_tokens"
     ~expected:1;
   check_calls
     ~file:"lib/keeper/keeper_run_tools_setup.ml"
-    ~callee:"Agent_sdk.Types.params_to_input_schema"
+    ~callee:"Masc_agent_core.Types.params_to_input_schema"
     ~expected:1;
   check_calls
     ~file:"lib/tool_bridge.ml"
-    ~callee:"Agent_sdk.Mcp.json_schema_to_params"
+    ~callee:"Masc_agent_core.Mcp.json_schema_to_params"
     ~expected:1
 ;;
 
@@ -41,7 +41,7 @@ let test_masc_delegates_oas_stream_progress_predicates () =
   check_calls
     ~file:"lib/keeper/keeper_chat_oas_stream_bridge.ml"
     ~callee:
-      "Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal"
+      "Masc_agent_core.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal"
     ~expected:1
 ;;
 
@@ -55,16 +55,16 @@ let test_masc_delegates_oas_response_shape_metrics () =
 
 let test_masc_routes_response_text_projection_through_adapter () =
   check_calls
-    ~file:"lib/agent_sdk_response.ml"
-    ~callee:"Agent_sdk.Types.visible_text_of_response"
+    ~file:"lib/masc_agent_core_response.ml"
+    ~callee:"Masc_agent_core.Types.visible_text_of_response"
     ~expected:1;
   check_calls
     ~file:"lib/fusion/fusion_oas.ml"
-    ~callee:"Agent_sdk.Types.visible_text_of_response"
+    ~callee:"Masc_agent_core.Types.visible_text_of_response"
     ~expected:0;
   check_calls
     ~file:"lib/worker_oas.ml"
-    ~callee:"Agent_sdk.Types.visible_text_of_response"
+    ~callee:"Masc_agent_core.Types.visible_text_of_response"
     ~expected:0
 ;;
 
@@ -86,15 +86,15 @@ let test_masc_delegates_oas_tool_call_projection () =
 let test_masc_delegates_oas_reasoning_details_projection () =
   check_calls
     ~file:"lib/keeper/keeper_chat_oas_stream_bridge.ml"
-    ~callee:"Agent_sdk.Types.reasoning_details_text"
+    ~callee:"Masc_agent_core.Types.reasoning_details_text"
     ~expected:1;
   check_calls
     ~file:"lib/keeper/keeper_wake_telemetry.ml"
-    ~callee:"Agent_sdk.Types.reasoning_details_text"
+    ~callee:"Masc_agent_core.Types.reasoning_details_text"
     ~expected:1;
   check_calls
     ~file:"lib/keeper/keeper_agent_run_thinking_trajectory.ml"
-    ~callee:"Agent_sdk.Types.reasoning_details_text"
+    ~callee:"Masc_agent_core.Types.reasoning_details_text"
     ~expected:1
 ;;
 
@@ -102,7 +102,7 @@ let test_hand_rolled_tool_schema_projection_is_not_reintroduced () =
   check_no_binding ~file:"lib/keeper/keeper_run_tools_setup.ml" ~name:"param_type_str";
   check_calls
     ~file:"lib/keeper/keeper_run_tools_setup.ml"
-    ~callee:"Agent_sdk.Types.param_type_to_string"
+    ~callee:"Masc_agent_core.Types.param_type_to_string"
     ~expected:0
 ;;
 

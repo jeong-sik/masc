@@ -16,7 +16,7 @@
     - Assert transport was invoked once and metrics.on_request_end fired
       exactly once with matching [latency_ms >= 0]. *)
 
-open Agent_sdk
+open Masc_agent_core
 module Retry = Llm_provider.Retry
 
 let mk_mock_response () : Types.api_response =

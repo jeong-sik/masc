@@ -16,7 +16,7 @@
     Usage:
       dune exec examples/async_agent_demo.exe *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 let read_only_tool =

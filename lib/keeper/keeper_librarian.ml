@@ -2,7 +2,7 @@
 
 open Keeper_memory_os_types
 
-module Canonical_tool = Agent_sdk.Canonical_tool
+module Canonical_tool = Masc_agent_core.Canonical_tool
 module String_map = Map.Make (String)
 module String_set = Set.Make (String)
 
@@ -19,7 +19,7 @@ type input =
   ; keeper_instructions : string
   ; current : current_selection option
   ; max_recall_fact_bytes : int
-  ; messages : Agent_sdk.Types.message list
+  ; messages : Masc_agent_core.Types.message list
   }
 
 type selection =
@@ -46,7 +46,7 @@ let trim_nonempty s =
   if String.equal s "" then None else Some s
 ;;
 
-let role_to_string = Agent_sdk.Types.role_to_string
+let role_to_string = Masc_agent_core.Types.role_to_string
 
 let text_of_content block =
   match Canonical_tool.tool_result_of_block block with
@@ -55,7 +55,7 @@ let text_of_content block =
       (Printf.sprintf
          "[tool result omitted: id=%s is_error=%b]"
          result.Canonical_tool.call_id
-         (Agent_sdk.Types.tool_result_outcome_is_error
+         (Masc_agent_core.Types.tool_result_outcome_is_error
             result.Canonical_tool.outcome))
   | None -> (
     match Canonical_tool.tool_call_of_block block with
@@ -67,22 +67,22 @@ let text_of_content block =
            call.Canonical_tool.name)
     | None -> (
       match block with
-      | Agent_sdk.Types.Text s -> trim_nonempty s
-      | Agent_sdk.Types.ToolResult _ ->
+      | Masc_agent_core.Types.Text s -> trim_nonempty s
+      | Masc_agent_core.Types.ToolResult _ ->
         invalid_arg
           "keeper_librarian: OAS canonical tool-result projection unavailable"
-      | Agent_sdk.Types.ToolUse _ ->
+      | Masc_agent_core.Types.ToolUse _ ->
         invalid_arg
           "keeper_librarian: OAS canonical tool-call projection unavailable"
-      | Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.ReasoningDetails _
-      | Agent_sdk.Types.RedactedThinking _ -> None
-      | Agent_sdk.Types.Image _ -> Some "[image omitted]"
-      | Agent_sdk.Types.Document _ -> Some "[document omitted]"
-      | Agent_sdk.Types.Audio _ -> Some "[audio omitted]"))
+      | Masc_agent_core.Types.Thinking _
+      | Masc_agent_core.Types.ReasoningDetails _
+      | Masc_agent_core.Types.RedactedThinking _ -> None
+      | Masc_agent_core.Types.Image _ -> Some "[image omitted]"
+      | Masc_agent_core.Types.Document _ -> Some "[document omitted]"
+      | Masc_agent_core.Types.Audio _ -> Some "[audio omitted]"))
 ;;
 
-let message_to_text ~turn (m : Agent_sdk.Types.message) : string =
+let message_to_text ~turn (m : Masc_agent_core.Types.message) : string =
   let parts = List.filter_map text_of_content m.content in
   let body = String.concat "\n" parts |> String.trim in
   let header = Printf.sprintf "turn=%d role=%s" turn (role_to_string m.role) in

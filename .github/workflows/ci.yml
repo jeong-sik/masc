@@ -165,7 +165,7 @@ jobs:
       lib_deps: ${{ steps.scope.outputs.lib_deps }}
       doc_truth: ${{ steps.scope.outputs.doc_truth }}
       tla: ${{ steps.scope.outputs.tla }}
-      oas_pin: ${{ steps.scope.outputs.oas_pin }}
+      agent_core: ${{ steps.scope.outputs.agent_core }}
       spec_refs: ${{ steps.scope.outputs.spec_refs }}
       nav_event_parity: ${{ steps.scope.outputs.nav_event_parity }}
       shell_ir: ${{ steps.scope.outputs.shell_ir }}
@@ -189,7 +189,7 @@ jobs:
           set -euo pipefail
 
           emit_all_true() {
-            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla oas_pin spec_refs nav_event_parity shell_ir keeper_cwd; do
+            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla agent_core spec_refs nav_event_parity shell_ir keeper_cwd; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
           }
@@ -244,7 +244,7 @@ jobs:
           lib_deps=false
           doc_truth=false
           tla=false
-          oas_pin=false
+          agent_core=false
           spec_refs=false
           nav_event_parity=false
           shell_ir=false
@@ -312,7 +312,7 @@ jobs:
             lib_deps=true
           fi
 
-          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/sync-oas-pin-manifests\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$)'; then
+          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$)'; then
             doc_truth=true
           fi
 
@@ -320,8 +320,8 @@ jobs:
             tla=true
           fi
 
-          if has_match '^(ci/check-oas-pin\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/oas-drift-check\.sh$|scripts/oas-api-surface\.json$|scripts/sync-oas-pin-docs\.sh$|scripts/sync-oas-pin-manifests\.sh$|lib/keeper/keeper_event_bridge\.ml$|test/test_keeper_execution_join\.ml$|test/test_keeper_hooks_oas_introspection\.ml$|dune-project$|.*\.opam$|masc\.opam\.locked$|docs/KEEPER-USER-MANUAL\.md$|docs/OAS-UTILIZATION-AUDIT\.md$)'; then
-            oas_pin=true
+          if has_match '^(packages/agent_core/|lib/keeper/keeper_event_bridge\.ml$|test/test_keeper_execution_join\.ml$|test/test_keeper_hooks_oas_introspection\.ml$|dune-project$|.*\.opam$|masc\.opam\.locked$)'; then
+            agent_core=true
           fi
 
           if has_match '^(specs/.*\.tla$|lib/.*\.mli?$|test/.*\.mli?$|src/.*\.mli?$|scripts/lint/spec-line-refs\.(sh|allowlist)$)'; then
@@ -351,7 +351,7 @@ jobs:
             health_snapshot=true
             lib_deps=true
             doc_truth=true
-            oas_pin=true
+            agent_core=true
             shell_ir=true
             keeper_cwd=true
             # Note: dashboard/spec_refs/tla stay path-scoped. Pure CI
@@ -368,14 +368,14 @@ jobs:
           echo "lib_deps=${lib_deps}" >> "$GITHUB_OUTPUT"
           echo "doc_truth=${doc_truth}" >> "$GITHUB_OUTPUT"
           echo "tla=${tla}" >> "$GITHUB_OUTPUT"
-          echo "oas_pin=${oas_pin}" >> "$GITHUB_OUTPUT"
+          echo "agent_core=${agent_core}" >> "$GITHUB_OUTPUT"
           echo "spec_refs=${spec_refs}" >> "$GITHUB_OUTPUT"
           echo "nav_event_parity=${nav_event_parity}" >> "$GITHUB_OUTPUT"
           echo "shell_ir=${shell_ir}" >> "$GITHUB_OUTPUT"
           echo "keeper_cwd=${keeper_cwd}" >> "$GITHUB_OUTPUT"
 
-          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s oas_pin=%s nav_event_parity=%s shell_ir=%s keeper_cwd=%s\n' \
-            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${oas_pin}" "${nav_event_parity}" "${shell_ir}" "${keeper_cwd}"
+          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s agent_core=%s nav_event_parity=%s shell_ir=%s keeper_cwd=%s\n' \
+            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${agent_core}" "${nav_event_parity}" "${shell_ir}" "${keeper_cwd}"
 
   meta:
     name: Meta Guards
@@ -528,31 +528,9 @@ jobs:
       - name: Check doc truth
         if: needs.changes.outputs.doc_truth == 'true'
         run: |
-          chmod +x scripts/check-doc-truth.sh scripts/sync-oas-pin-docs.sh scripts/audit-keeper-tool-boundary-matrix.sh
+          chmod +x scripts/check-doc-truth.sh scripts/audit-keeper-tool-boundary-matrix.sh
           scripts/check-doc-truth.sh
-          scripts/sync-oas-pin-docs.sh --check
           scripts/audit-keeper-tool-boundary-matrix.sh
-
-      - name: Check OAS pin manifests
-        if: needs.changes.outputs.oas_pin == 'true'
-        run: |
-          chmod +x scripts/check-oas-pin.sh
-          bash test/test_oas_pin_ref.sh
-          bash test/test_check_oas_pin_exact.sh
-          scripts/check-oas-pin.sh --local-only
-
-      - name: Check OAS API surface source
-        if: needs.changes.outputs.oas_pin == 'true'
-        env:
-          ALLOW_REVIEW_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true && contains(github.event.pull_request.labels.*.name, 'blocked-on-oas') }}
-        run: |
-          chmod +x scripts/oas-drift-check.sh
-          if [[ "$ALLOW_REVIEW_REF" == "true" ]]; then
-            echo "::notice::Draft PR blocked on OAS: validating the explicit upstream review ref"
-            scripts/oas-drift-check.sh --allow-review-ref
-          else
-            scripts/oas-drift-check.sh
-          fi
 
       - name: Run report self-test
         if: needs.changes.outputs.lib_deps == 'true'
@@ -1266,9 +1244,9 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-dashboard-http-behavior-contracts"
 
-      - name: Run OAS pin behavior suite
-        id: oas_pin_behavior_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' && needs.changes.outputs.oas_pin == 'true' }}
+      - name: Run agent core behavior suite
+        id: agent_core_behavior_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' && needs.changes.outputs.agent_core == 'true' }}
         env:
           ME_ROOT: /tmp/me
           CI_TEST_HEARTBEAT_SEC: 15
@@ -1276,8 +1254,8 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          oas_pin_targets="@test/runtest-test_keeper_hooks_oas_introspection @test/runtest-test_keeper_execution_join @test/runtest-test_hitl_summary_worker"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${oas_pin_targets}"
+          agent_core_targets="@test/runtest-test_keeper_hooks_oas_introspection @test/runtest-test_keeper_execution_join @test/runtest-test_hitl_summary_worker"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${agent_core_targets}"
 
       - name: Run model inference metrics suite
         id: model_inference_metrics_suite

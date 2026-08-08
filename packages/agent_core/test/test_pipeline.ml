@@ -3,10 +3,10 @@
     Pipeline is internal, so we test correctness through
     Provider_mock.next_response and agent state inspection. *)
 
-open Agent_sdk
-module Internal = Agent_sdk__
-module Internal_agent = Agent_sdk__Agent_types
-module Internal_pipeline = Agent_sdk__Pipeline
+open Masc_agent_core
+module Internal = Masc_agent_core__
+module Internal_agent = Masc_agent_core__Agent_types
+module Internal_pipeline = Masc_agent_core__Pipeline
 module Internal_runtime = Internal.Execution_runtime
 module Internal_codec = Internal.Execution_codec_executor
 module Internal_writer = Internal.Execution_lane_writer

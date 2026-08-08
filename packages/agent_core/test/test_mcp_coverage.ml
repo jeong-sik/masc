@@ -8,7 +8,7 @@
     - MCP HTTP explicit config type verification
     - Mcp_http.parse/SSE body parsing (internal but covered via connect path) *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Helpers ──────────────────────────────────────────────── *)
 

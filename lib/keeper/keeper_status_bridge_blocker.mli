@@ -15,7 +15,7 @@ type runtime_blocker_surface = {
 }
 
 val blocker_class_of_sdk_error :
-  Agent_sdk.Error.sdk_error -> blocker_class option
+  Masc_agent_core.Error.sdk_error -> blocker_class option
 
 val runtime_blocker_surface_of_typed_class :
   ?summary:string -> blocker_class -> runtime_blocker_surface

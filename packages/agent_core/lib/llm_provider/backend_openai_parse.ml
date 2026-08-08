@@ -1,7 +1,7 @@
 (** OpenAI-compatible response parsing.
 
     Parses JSON responses from Openai Chat Completions API into
-    agent_sdk Types (api_response, api_usage).
+    masc.agent_core Types (api_response, api_usage).
 
     @since 0.92.0 extracted from Backend_openai *)
 
@@ -83,20 +83,6 @@ let reasoning_details_of_message msg =
     loop 0 [] details
   | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) ->
     Error "malformed_reasoning_details:not_list"
-;;
-
-let reasoning_texts_of_block = function
-  | Thinking { content; _ } -> [ content ]
-  | ReasoningDetails { reasoning_content; details } ->
-    let content = reasoning_details_text ~reasoning_content ~details in
-    if Api_common.string_is_blank content then [] else [ content ]
-  | Text _
-  | RedactedThinking _
-  | ToolUse _
-  | ToolResult _
-  | Image _
-  | Document _
-  | Audio _ -> []
 ;;
 
 let reasoning_content_blocks_of_message_result msg =

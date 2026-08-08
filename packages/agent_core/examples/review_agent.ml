@@ -12,7 +12,7 @@
     Usage:
       dune exec examples/review_agent.exe -- jeong-sik/oas 115 *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (* ── Tools ─────────────────────────────────────────────────── *)

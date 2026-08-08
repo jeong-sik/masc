@@ -85,16 +85,16 @@ type run_result =
   ; runtime_observation : Runtime_observation.runtime_observation option
   ; turn_count : int
   ; final_oas_turn_ordinal : int
-  ; usage : Agent_sdk.Types.api_usage
+  ; usage : Masc_agent_core.Types.api_usage
   ; usage_reported : bool
   ; tool_calls : tool_call_detail list
   ; completion_contract_result : Keeper_execution_receipt.completion_contract_result
   ; operator_disposition : operator_disposition option
-  ; checkpoint : Agent_sdk.Checkpoint.t option
-  ; trace_ref : Agent_sdk.Raw_trace.run_ref option
-  ; run_validation : Agent_sdk.Raw_trace.run_validation option
+  ; checkpoint : Masc_agent_core.Checkpoint.t option
+  ; trace_ref : Masc_agent_core.Raw_trace.run_ref option
+  ; run_validation : Masc_agent_core.Raw_trace.run_validation option
   ; stop_reason : Runtime_agent.stop_reason
-  ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
+  ; inference_telemetry : Masc_agent_core.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
   }
 

@@ -6,7 +6,7 @@ val next_fail_open_runtime_for_turn
   :  base_runtime:string
   -> effective_runtime:string
   -> attempted_runtimes:string list
-  -> Agent_sdk.Error.sdk_error
+  -> Masc_agent_core.Error.sdk_error
   -> EC.degraded_retry option
 
-val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
+val sdk_error_kind : Masc_agent_core.Error.sdk_error -> string

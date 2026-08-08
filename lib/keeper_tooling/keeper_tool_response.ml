@@ -20,7 +20,7 @@ type accept_rejection_kind =
 type accept_rejection =
   { kind : accept_rejection_kind
   ; reason : string
-  ; response_shape : Agent_sdk.Response_shape.content_shape option
+  ; response_shape : Masc_agent_core.Response_shape.content_shape option
   }
 
 let accept_rejection_kind_to_string = function
@@ -28,13 +28,13 @@ let accept_rejection_kind_to_string = function
   | Predicate_rejected -> "predicate_rejected"
 ;;
 
-let response_accept_rejection (response : Agent_sdk.Types.api_response) =
-  let shape = Agent_sdk.Response_shape.summarize response in
-  let response_shape = Agent_sdk.Response_shape.content_shape response shape in
-  if not (Agent_sdk.Response_shape.has_deliverable_content shape) then
+let response_accept_rejection (response : Masc_agent_core.Types.api_response) =
+  let shape = Masc_agent_core.Response_shape.summarize response in
+  let response_shape = Masc_agent_core.Response_shape.content_shape response shape in
+  if not (Masc_agent_core.Response_shape.has_deliverable_content shape) then
     Some
       { kind = No_usable_progress
-      ; reason = Agent_sdk.Response_shape.diagnostic_summary response
+      ; reason = Masc_agent_core.Response_shape.diagnostic_summary response
       ; response_shape = Some response_shape
       }
   else None
@@ -51,7 +51,7 @@ let accept_rejection_of_response ~runtime_id response =
           rejection.reason
     }
   | None ->
-    let shape = Agent_sdk.Response_shape.summarize response in
+    let shape = Masc_agent_core.Response_shape.summarize response in
     { kind = Predicate_rejected
     ; reason =
         Printf.sprintf
@@ -59,10 +59,10 @@ let accept_rejection_of_response ~runtime_id response =
            built_in_progress_contract=accepted"
           runtime_id
     ; response_shape =
-        Some (Agent_sdk.Response_shape.content_shape response shape)
+        Some (Masc_agent_core.Response_shape.content_shape response shape)
     }
 ;;
 
-let response_has_text_or_tool_progress (response : Agent_sdk.Types.api_response) =
+let response_has_text_or_tool_progress (response : Masc_agent_core.Types.api_response) =
   Option.is_none (response_accept_rejection response)
 ;;

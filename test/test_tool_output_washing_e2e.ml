@@ -5,7 +5,7 @@
 
       [Tool_bridge.maybe_externalize]
         \u2193 sha256 + blob marker
-      [Agent_sdk.Types.ToolResult { content = marker }]
+      [Masc_agent_core.Types.ToolResult { content = marker }]
         \u2193 provider-bound message keeps marker
       [Keeper_artifact_read.handle]
         \u2193 one bounded typed page
@@ -22,7 +22,7 @@ module Bridge = Masc.Tool_bridge
 module K = Masc.Keeper_run_tools_hooks
 module R = Masc.Keeper_artifact_read
 module E = Masc.Keeper_tool_execution
-module T = Agent_sdk.Types
+module T = Masc_agent_core.Types
 
 let project_completed_exn ?model_projection ~base_path ~tool_name data =
   let result =

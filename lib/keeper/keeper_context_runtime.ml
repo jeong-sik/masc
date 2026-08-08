@@ -79,7 +79,7 @@ let compaction_decision_prepared =
 
 type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   updated_meta : keeper_meta;
-  checkpoint : Agent_sdk.Checkpoint.t option;
+  checkpoint : Masc_agent_core.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;

@@ -1,6 +1,6 @@
-open Agent_sdk
-module Internal_agent = Agent_sdk__Agent_types
-module Pipeline_common = Agent_sdk__Pipeline_common
+open Masc_agent_core
+module Internal_agent = Masc_agent_core__Agent_types
+module Pipeline_common = Masc_agent_core__Pipeline_common
 
 let check_bool = Alcotest.(check bool)
 let check_int = Alcotest.(check int)

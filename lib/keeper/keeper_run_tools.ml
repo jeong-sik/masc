@@ -50,12 +50,12 @@ let freeze = Keeper_run_tools_hook_accumulator.freeze
     facade post-processing writes, and [agent_ref] is created locally
     at the OAS call site. *)
 type agent_setup = Keeper_run_tools_hooks.agent_setup =
-  { tools : Agent_sdk.Tool.t list
+  { tools : Masc_agent_core.Tool.t list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
   ; user_message : string
-  ; hooks : Agent_sdk.Hooks.hooks
-  ; model_input_projection : Agent_sdk.Agent.model_input_projection
+  ; hooks : Masc_agent_core.Hooks.hooks
+  ; model_input_projection : Masc_agent_core.Agent.model_input_projection
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list

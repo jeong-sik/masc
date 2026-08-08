@@ -393,7 +393,7 @@ check_forbidden_active "V7aa-retired-multimodal-rollout-gates" \
 # V8: Direct OAS Agent.state mutation from keeper code
 # Baseline 0: legacy keeper_extend_turns.ml was removed.
 check "V8-agent-state-mutation" 0 \
-  'Agent\.set_state\|Agent_sdk\.Agent\.state[^_]' \
+  'Agent\.set_state\|Masc_agent_core\.Agent\.state[^_]' \
   "lib/keeper/"
 
 # V9: MASC_LLAMA env var coupling (should migrate to MASC_LOCAL_*)

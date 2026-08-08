@@ -134,12 +134,12 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ( "trace_ref",
           match result.trace_ref with
           | Some trace_ref ->
-              Agent_sdk.Raw_trace.run_ref_to_yojson trace_ref
+              Masc_agent_core.Raw_trace.run_ref_to_yojson trace_ref
           | None -> `Null );
         ( "run_validation",
           match result.run_validation with
           | Some validation ->
-              Agent_sdk.Raw_trace.run_validation_to_yojson validation
+              Masc_agent_core.Raw_trace.run_validation_to_yojson validation
           | None -> `Null );
         ("inference_telemetry",
          match result.inference_telemetry with

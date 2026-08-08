@@ -5,28 +5,28 @@ open Alcotest
 
 module CP = Runtime_oas_checkpoint
 
-let custom_payload_fields expected_topic (event : Agent_sdk.Event_bus.event) =
+let custom_payload_fields expected_topic (event : Masc_agent_core.Event_bus.event) =
   match event.payload with
-  | Agent_sdk.Event_bus.Custom (topic, `Assoc fields) ->
+  | Masc_agent_core.Event_bus.Custom (topic, `Assoc fields) ->
     check string "lifecycle topic" expected_topic topic;
     fields
-  | Agent_sdk.Event_bus.Custom (topic, _) ->
+  | Masc_agent_core.Event_bus.Custom (topic, _) ->
     failf "expected object payload for %s" topic
   | _ -> fail "expected custom lifecycle event"
 
 let test_publish_lifecycle_reaches_masc_bus_with_max_tokens_intent () =
   Eio_main.run @@ fun _env ->
-  let bus = Agent_sdk.Event_bus.create () in
+  let bus = Masc_agent_core.Event_bus.create () in
   let subscription =
-    Agent_sdk_metrics_bridge.subscribe
+    Masc_agent_core_metrics_bridge.subscribe
       ~capacity:256
-      ~overflow:Agent_sdk.Event_bus.Drop_oldest
+      ~overflow:Masc_agent_core.Event_bus.Drop_oldest
       ~purpose:"runtime-lifecycle-test"
       bus
   in
   Event_bus_slots.set_masc bus;
   Fun.protect
-    ~finally:(fun () -> Agent_sdk_metrics_bridge.unsubscribe bus subscription)
+    ~finally:(fun () -> Masc_agent_core_metrics_bridge.unsubscribe bus subscription)
     (fun () ->
       CP.publish_lifecycle
         ~name:"keeper-a"
@@ -40,7 +40,7 @@ let test_publish_lifecycle_reaches_masc_bus_with_max_tokens_intent () =
         ~detail:"explicit"
         ~attrs:(Runtime_max_tokens.telemetry_fields (Some 4096))
         ();
-      match Agent_sdk_metrics_bridge.drain subscription with
+      match Masc_agent_core_metrics_bridge.drain subscription with
       | [ omitted; explicit ] ->
         let omitted_fields =
           custom_payload_fields "masc.oas_worker.build" omitted

@@ -1,4 +1,4 @@
-open Agent_sdk
+open Masc_agent_core
 
 let skill_a =
   Skill.of_markdown "---\nname: greet\ndescription: Say hello\n---\nHello $ARGUMENTS"

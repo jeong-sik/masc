@@ -55,7 +55,7 @@ val of_disposition
 val of_failure
   :  ?tool_call_count:int
   -> raw_error:string
-  -> Agent_sdk.Error.sdk_error
+  -> Masc_agent_core.Error.sdk_error
   -> t
 
 val to_json : t -> Yojson.Safe.t

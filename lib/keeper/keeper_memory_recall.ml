@@ -157,12 +157,12 @@ let recent_lines_or_record
      | _ -> [])
 ;;
 
-let recent_user_messages (msgs : Agent_sdk.Types.message list) ~(max_n : int) : string list =
+let recent_user_messages (msgs : Masc_agent_core.Types.message list) ~(max_n : int) : string list =
   msgs
   |> List.rev
-  |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
-       if m.role = Agent_sdk.Types.User then
-         let c = String.trim (Agent_sdk.Types.text_of_message m) in
+  |> List.filter_map (fun (m : Masc_agent_core.Types.message) ->
+       if m.role = Masc_agent_core.Types.User then
+         let c = String.trim (Masc_agent_core.Types.text_of_message m) in
          if c = "" then None else Some c
        else None)
   |> take max_n

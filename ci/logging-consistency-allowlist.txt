@@ -65,11 +65,11 @@ lib/mcp_server_eio_resource.ml
 lib/config_dir_resolver/config_dir_resolver.ml
 
 # --- Runtime-computed component on Log.emit ---
-# agent_sdk_log_bridge.ml uses Log.emit with ~module_name:("oas:" ^
+# masc_agent_core_log_bridge.ml uses Log.emit with ~module_name:("oas:" ^
 # record.module_name) — the component is built at runtime from a per-record
 # value, so no static module preserves it. The top-level Log.emit is required
 # here to carry the dynamic component string.
 # (keeper_event_bridge.ml previously appeared here for ~module_name:"oas:event";
 #  that is a static literal and is now the Oas_event module — a module name
 #  string may contain a colon even though the OCaml identifier cannot.)
-lib/agent_sdk_log_bridge.ml
+lib/masc_agent_core_log_bridge.ml

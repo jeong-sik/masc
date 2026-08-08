@@ -1,7 +1,7 @@
 (** OAS message smart-constructor contract (masc axis-1b — under-wired OAS
     consumption).
 
-    Seven MASC sites delegated hand-rolled [Agent_sdk.Types.message] record
+    Seven MASC sites delegated hand-rolled [Masc_agent_core.Types.message] record
     literals to the OAS smart constructors instead of re-spelling the
     [{ role; content; name = None; tool_call_id = None; metadata = [] }] shape:
     [user_msg], [user_msg_blocks], [assistant_msg], [text_message],
@@ -14,7 +14,7 @@
     document the byte-identical equivalence each delegation relies on. *)
 
 open Alcotest
-module T = Agent_sdk.Types
+module T = Masc_agent_core.Types
 
 (* Canonical message shape the delegated sites previously hand-rolled. *)
 let msg ?(role = T.User) ?(name = None) ?(tool_call_id = None) ?(metadata = [])

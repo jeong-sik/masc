@@ -1,6 +1,6 @@
 (** Tests for Log module — structured logging. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Helpers ──────────────────────────────────────────────────── *)
 

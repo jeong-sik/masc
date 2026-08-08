@@ -115,17 +115,17 @@ let attach_usage
   | Ok synthesis -> Ok (synthesis, usage)
   | Error msg -> Error (Fusion_types.Parse_error msg, usage)
 
-let sdk_error_detail (e : Agent_sdk.Error.sdk_error) : string =
+let sdk_error_detail (e : Masc_agent_core.Error.sdk_error) : string =
   match e with
-  | Agent_sdk.Error.Api api_error -> Agent_sdk.Error.Retry.error_message api_error
-  | Agent_sdk.Error.Provider provider_error ->
+  | Masc_agent_core.Error.Api api_error -> Masc_agent_core.Error.Retry.error_message api_error
+  | Masc_agent_core.Error.Provider provider_error ->
     Llm_provider.Error.to_string provider_error
-  | Agent_sdk.Error.Agent _ | Agent_sdk.Error.Mcp _ | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _ | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _ | Agent_sdk.Error.Internal _ ->
-    Agent_sdk.Error.to_string e
+  | Masc_agent_core.Error.Agent _ | Masc_agent_core.Error.Mcp _ | Masc_agent_core.Error.Config _
+  | Masc_agent_core.Error.Serialization _ | Masc_agent_core.Error.Io _
+  | Masc_agent_core.Error.Orchestration _ | Masc_agent_core.Error.Internal _ ->
+    Masc_agent_core.Error.to_string e
 
-(* [Agent_sdk.Error.sdk_error]를 typed {!judge_failure}로 변환한다. 두 타임아웃 variant를
+(* [Masc_agent_core.Error.sdk_error]를 typed {!judge_failure}로 변환한다. 두 타임아웃 variant를
    모두 [Timeout]으로 propagate한다: 외곽 실행 래퍼 [Api (Retry.Timeout _)]와
    provider-level [Provider (Llm_provider.Error.Timeout _)](비스트리밍 sync 경로의
    connect_timeout이 본문 전체를 바운드해 발생, detail "timeout phase=http_operation").
@@ -136,11 +136,11 @@ let sdk_error_detail (e : Agent_sdk.Error.sdk_error) : string =
    유지한다. 이 match가 "to_string 직렬화 → substring 역분류" round-trip 안티패턴의 근본
    해소다: timeout 분류가 컴파일 타입에 묶인다. [prefix]는 호출 context(run 실패 vs
    provider 에러)의 로그/관측 prefix를 보존한다. *)
-let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
+let failure_of_sdk_error ~runtime_id ~prefix (e : Masc_agent_core.Error.sdk_error) :
     Fusion_types.judge_failure =
   match e with
-  | Agent_sdk.Error.Api (Agent_sdk.Error.Retry.Timeout _)
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Timeout
+  | Masc_agent_core.Error.Api (Masc_agent_core.Error.Retry.Timeout _)
+  | Masc_agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> Timeout
   | _ ->
     Provider_error
       (prefix ^ Fusion_oas.provider_error_detail ~runtime_id (sdk_error_detail e))
@@ -192,7 +192,7 @@ let run_composed ~sw ~net ?max_tokens ~judge_system_prompt ~judge_model
   | Ok agent ->
     (match
        Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Fusion_judge (fun () ->
-         Ok (Agent_sdk.Async_agent.all ~sw [ (agent, prompt) ]))
+         Ok (Masc_agent_core.Async_agent.all ~sw [ (agent, prompt) ]))
      with
      | Error e ->
        Error

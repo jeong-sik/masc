@@ -2,7 +2,7 @@
     and request building.
 
     Pure functions operating on {!Llm_provider.Types}.
-    {!build_request} uses {!Provider_config.t} (no agent_sdk coupling).
+    {!build_request} uses {!Provider_config.t} (no masc.agent_core coupling).
 
     @since 0.92.0 decomposed into Backend_openai_serialize,
     Backend_openai_parse *)
@@ -29,11 +29,7 @@ let parse_openai_response_result = Backend_openai_parse.parse_openai_response_re
 
 let warn_capability_drop = Backend_openai_request.warn_capability_drop
 let effective_tool_choice = Backend_openai_request.effective_tool_choice
-let effective_tools = Backend_openai_request.effective_tools
-let structured_schema_of_config = Backend_openai_request.structured_schema_of_config
-let openai_json_schema_payload = Backend_openai_request.openai_json_schema_payload
 let response_format_to_openai_json = Backend_openai_request.response_format_to_openai_json
-let response_format_of_config = Backend_openai_request.response_format_of_config
 
 type request_artifact =
   | Openai_request_artifact of Backend_openai_request.request_artifact

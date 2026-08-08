@@ -141,7 +141,7 @@ let make_hooks
         fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
     ?(trajectory_acc : Trajectory.accumulator option)
     ()
-  : Agent_sdk.Hooks.hooks =
+  : Masc_agent_core.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
   let tool_start_time = ref 0.0 in
   (* Per-turn tool call counter for SSE enrichment.
@@ -154,24 +154,24 @@ let make_hooks
       ~event_kind
   in
   let hooks =
-    { Agent_sdk.Hooks.empty with
+    { Masc_agent_core.Hooks.empty with
     pre_tool_use = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.PreToolUse _ ->
+      | Masc_agent_core.Hooks.PreToolUse _ ->
         tool_start_time := Time_compat.now ();
-        Agent_sdk.Hooks.Continue
-      | _event -> Agent_sdk.Hooks.Continue);
+        Masc_agent_core.Hooks.Continue
+      | _event -> Masc_agent_core.Hooks.Continue);
 
     before_turn = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.BeforeTurn _ ->
+      | Masc_agent_core.Hooks.BeforeTurn _ ->
         record_progress "sdk_before_turn";
-        Agent_sdk.Hooks.Continue
-      | _event -> Agent_sdk.Hooks.Continue);
+        Masc_agent_core.Hooks.Continue
+      | _event -> Masc_agent_core.Hooks.Continue);
 
     after_turn = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.AfterTurn { turn; response } ->
+      | Masc_agent_core.Hooks.AfterTurn { turn; response } ->
         on_after_turn_ordinal turn;
         record_progress "sdk_after_turn";
         let meta = !meta_ref in
@@ -398,12 +398,12 @@ let make_hooks
                "turn=%d sse_turn_complete broadcast failed: %s"
                turn (Printexc.to_string exn));
         tool_call_count_ref := 0;
-        Agent_sdk.Hooks.Continue
-      | _event -> Agent_sdk.Hooks.Continue);
+        Masc_agent_core.Hooks.Continue
+      | _event -> Masc_agent_core.Hooks.Continue);
 
     post_tool_use = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.PostToolUse
+      | Masc_agent_core.Hooks.PostToolUse
           { invocation
           ; tool_name
           ; input
@@ -420,13 +420,13 @@ let make_hooks
            content. *)
         let output_text, typed_outcome =
           match output with
-          | Ok { Agent_sdk.Types.content; _ } -> content, None
-          | Error { Agent_sdk.Types.message; _ } -> (message, None)
+          | Ok { Masc_agent_core.Types.content; _ } -> content, None
+          | Error { Masc_agent_core.Types.message; _ } -> (message, None)
         in
         let input_keys = tool_input_keys_for_log input in
         let outcome, out_len = match output with
-          | Ok { Agent_sdk.Types.content; _ } -> Tool_result.Ok, String.length content
-          | Error { Agent_sdk.Types.message; _ } -> Tool_result.Error, String.length message
+          | Ok { Masc_agent_core.Types.content; _ } -> Tool_result.Ok, String.length content
+          | Error { Masc_agent_core.Types.message; _ } -> Tool_result.Error, String.length message
         in
         let outcome_s = Tool_result.string_of_tool_call_outcome outcome in
         let input_shape = tool_input_shape_for_log input in
@@ -480,8 +480,8 @@ let make_hooks
           Keeper_tool_call_log_context.get_turn_context_record
             ~cell:turn_ctx_cell ()
         in
-        let tool_use_id = Agent_sdk.Tool_contract.Invocation.tool_use_id invocation in
-        let invocation_turn = Some (Agent_sdk.Tool_contract.Invocation.turn invocation) in
+        let tool_use_id = Masc_agent_core.Tool_contract.Invocation.tool_use_id invocation in
+        let invocation_turn = Some (Masc_agent_core.Tool_contract.Invocation.turn invocation) in
         (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
            the log_call row and the trajectory entry below share the value
            so downstream views can join the two stores on a single key. *)
@@ -505,7 +505,7 @@ let make_hooks
              ?prompt_fingerprint:tctx.prompt_fingerprint
              ~execution_id
              ~tool_use_id
-             ~planned_index:(Agent_sdk.Tool_contract.Invocation.planned_index invocation)
+             ~planned_index:(Masc_agent_core.Tool_contract.Invocation.planned_index invocation)
              ?trace_id:tctx.trace_id ?session_id:tctx.session_id
              ?generation:tctx.generation
              ?turn:invocation_turn ?keeper_turn_id:tctx.keeper_turn_id
@@ -613,12 +613,12 @@ let make_hooks
                 ();
               Log.Keeper.error ~keeper_name:(!meta_ref).name "on_tool_executed callback failed for %s: %s"
                 tool_name (Printexc.to_string exn));
-        Agent_sdk.Hooks.Continue
-      | _event -> Agent_sdk.Hooks.Continue);
+        Masc_agent_core.Hooks.Continue
+      | _event -> Masc_agent_core.Hooks.Continue);
 
     on_stop = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.OnStop { reason; _ } ->
+      | Masc_agent_core.Hooks.OnStop { reason; _ } ->
         Otel_metric_store.inc_counter Keeper_metrics.(to_string OasOnStop)
           ~labels:
             [
@@ -626,22 +626,22 @@ let make_hooks
               (label_stop_reason, stop_reason_to_label reason);
             ]
           ();
-        Agent_sdk.Hooks.Continue
-      | _event -> Agent_sdk.Hooks.Continue);
+        Masc_agent_core.Hooks.Continue
+      | _event -> Masc_agent_core.Hooks.Continue);
 
     on_error = Some (function
-      | Agent_sdk.Hooks.OnError { detail; context = err_ctx; _ } ->
+      | Masc_agent_core.Hooks.OnError { detail; context = err_ctx; _ } ->
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string LifecycleCallbackFailures)
           ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_error)]
           ();
         Log.Keeper.error ~keeper_name:(!meta_ref).name "on_error: %s (context: %s)"
           detail err_ctx;
-        Agent_sdk.Hooks.Continue
-      | _event -> Agent_sdk.Hooks.Continue);
+        Masc_agent_core.Hooks.Continue
+      | _event -> Masc_agent_core.Hooks.Continue);
 
     on_tool_error = Some (function
-      | Agent_sdk.Hooks.OnToolError { tool_name; error; _ } ->
+      | Masc_agent_core.Hooks.OnToolError { tool_name; error; _ } ->
         let keeper_name = (!meta_ref).name in
         (* [OnToolError] carries opaque text but no typed MASC failure class.
            Do not reclassify it by decoding a JSON-looking message. *)
@@ -653,11 +653,11 @@ let make_hooks
             ]
           ();
         Log.Keeper.error ~keeper_name "tool_error: %s — %s" tool_name error;
-        Agent_sdk.Hooks.Continue
-      | _event -> Agent_sdk.Hooks.Continue);
+        Masc_agent_core.Hooks.Continue
+      | _event -> Masc_agent_core.Hooks.Continue);
 
     post_tool_use_failure = Some (function
-      | Agent_sdk.Hooks.PostToolUseFailure { tool_name; error; _ } ->
+      | Masc_agent_core.Hooks.PostToolUseFailure { tool_name; error; _ } ->
         let meta = !meta_ref in
         (* The richer counterpart
              "tool <name> returned error result (n/max): <detail>"
@@ -669,8 +669,8 @@ let make_hooks
           tool_name error;
         (* #9919: this path is a count event, not a heuristic decision. *)
         record_tool_use_failure ~keeper_name:meta.name ~tool_name;
-        Agent_sdk.Hooks.Continue
-      | _event -> Agent_sdk.Hooks.Continue);
+        Masc_agent_core.Hooks.Continue
+      | _event -> Masc_agent_core.Hooks.Continue);
   }
   in
   hooks

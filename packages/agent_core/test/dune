@@ -1,12 +1,36 @@
+(library
+ (name agent_core_test_deps)
+ (modules agent_core_test_deps)
+ (wrapped false)
+ (libraries
+  (re_export masc.agent_core)
+  (re_export masc.agent_core.llm_provider)
+  (re_export eio)
+  (re_export eio.unix)
+  (re_export eio_main)
+  (re_export yojson)
+  (re_export unix)
+  (re_export str)
+  (re_export fmt)
+  (re_export uri)
+  (re_export cohttp)
+  (re_export cohttp-eio)
+  (re_export mcp_protocol)
+  (re_export digestif)
+  (re_export optint)
+  (re_export re)
+  (re_export mirage-crypto-rng.unix)
+  (re_export ppx_deriving_yojson.runtime)))
+
 (executable
  (name test_local_llm)
  (modules test_local_llm)
- (libraries agent_sdk eio eio_main yojson))
+ (libraries agent_core_test_deps masc.agent_core eio eio_main yojson))
 
 (executable
  (name model_catalog_standalone_probe)
  (modules model_catalog_standalone_probe)
- (libraries agent_sdk.llm_provider))
+ (libraries agent_core_test_deps masc.agent_core.llm_provider))
 
 ; --- AUTO-WIRED ORPHANS (fix/test-dune-orphans) ---
 ; ---- (1) compile failures — not wired until bodies are fixed ----
@@ -29,7 +53,7 @@
   test_agent_pipeline
   test_agent_periodic_cleanup
   test_agent_race
-  test_agent_sdk
+  test_masc_agent_core
   test_agent_stream
   test_agent_tool
   test_agent_turn
@@ -169,7 +193,7 @@
   test_agent_pipeline
   test_agent_periodic_cleanup
   test_agent_race
-  test_agent_sdk
+  test_masc_agent_core
   test_agent_stream
   test_agent_tool
   test_agent_turn
@@ -297,19 +321,19 @@
   test_types
   test_usability_v030
   test_util)
- (libraries agent_sdk agent_sdk.llm_provider alcotest eio_main)
+ (libraries agent_core_test_deps masc.agent_core masc.agent_core.llm_provider alcotest eio_main)
  (deps ../docs/example-capability-manifest.json ../models.toml)
  (action
   (run %{test})))
 
 ; The recursive execution foundation is deliberately private until OAS owns
 ; its production writer. This regression suite uses Dune's library-internal
-; alias only inside the repository; no installed Agent_sdk API exposes it.
+; alias only inside the repository; no installed Masc_agent_core API exposes it.
 
 (test
  (name test_execution_journal)
  (modules test_execution_journal)
- (libraries agent_sdk agent_sdk.llm_provider alcotest eio_main)
+ (libraries agent_core_test_deps masc.agent_core masc.agent_core.llm_provider alcotest eio_main)
  (flags
   (:standard -alias-deps))
  (deps ../models.toml)
@@ -319,7 +343,7 @@
 (test
  (name test_execution_codec_executor)
  (modules test_execution_codec_executor)
- (libraries agent_sdk agent_sdk.llm_provider alcotest eio_main)
+ (libraries agent_core_test_deps masc.agent_core masc.agent_core.llm_provider alcotest eio_main)
  (flags
   (:standard -alias-deps))
  (deps ../models.toml)
@@ -329,7 +353,7 @@
 (test
  (name test_execution_event_store)
  (modules test_execution_event_store)
- (libraries agent_sdk agent_sdk.llm_provider alcotest digestif eio_main)
+ (libraries agent_core_test_deps masc.agent_core masc.agent_core.llm_provider alcotest digestif eio_main)
  (flags
   (:standard -alias-deps))
  (deps ../models.toml)
@@ -339,7 +363,7 @@
 (test
  (name test_execution_projection)
  (modules test_execution_projection)
- (libraries agent_sdk agent_sdk.llm_provider alcotest eio_main)
+ (libraries agent_core_test_deps masc.agent_core masc.agent_core.llm_provider alcotest eio_main)
  (flags
   (:standard -alias-deps))
  (deps ../models.toml)
@@ -349,7 +373,7 @@
 (test
  (name test_agent_ambient_execution)
  (modules test_agent_ambient_execution)
- (libraries agent_sdk agent_sdk.llm_provider alcotest eio_main)
+ (libraries agent_core_test_deps masc.agent_core masc.agent_core.llm_provider alcotest eio_main)
  (flags
   (:standard -alias-deps))
  (deps ../models.toml)
@@ -359,7 +383,7 @@
 (test
  (name test_execution_lane_writer)
  (modules test_execution_lane_writer)
- (libraries agent_sdk agent_sdk.llm_provider alcotest eio_main)
+ (libraries agent_core_test_deps masc.agent_core masc.agent_core.llm_provider alcotest eio_main)
  (flags
   (:standard -alias-deps))
  (deps ../models.toml)
@@ -381,7 +405,7 @@
   test_property
   test_property_advanced
   test_tool_set)
- (libraries agent_sdk alcotest qcheck-core qcheck-alcotest)
+ (libraries agent_core_test_deps masc.agent_core alcotest qcheck-core qcheck-alcotest)
  (deps ../models.toml)
  (action
   (run %{test})))
@@ -393,49 +417,49 @@
 (test
  (name test_streaming)
  (modules test_streaming)
- (libraries agent_sdk alcotest))
+ (libraries agent_core_test_deps masc.agent_core alcotest))
 
 (test
  (name test_provider_complete)
  (modules test_provider_complete)
  (deps ../models.toml)
- (libraries agent_sdk llm_provider alcotest eio_main))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio_main))
 
 (test
  (name test_output_token_receipt)
  (modules test_output_token_receipt)
  (deps ../models.toml)
- (libraries llm_provider alcotest))
+ (libraries agent_core_test_deps llm_provider alcotest))
 
 (test
  (name test_input_token_count)
  (modules test_input_token_count)
- (libraries llm_provider alcotest))
+ (libraries agent_core_test_deps llm_provider alcotest))
 
 (test
  (name test_anthropic_input_token_count)
  (modules test_anthropic_input_token_count)
- (libraries agent_sdk llm_provider alcotest eio_main))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio_main))
 
 (test
  (name test_exact_output_single_surface)
  (modules test_exact_output_single_surface)
- (libraries agent_sdk llm_provider alcotest eio_main))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio_main))
 
 (test
  (name test_exact_output_flow)
  (modules test_exact_output_flow)
- (libraries agent_sdk llm_provider alcotest eio_main))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio_main))
 
 (test
  (name test_exact_output_validated_flow_evidence)
  (modules test_exact_output_validated_flow_evidence)
- (libraries agent_sdk llm_provider alcotest digestif eio_main))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest digestif eio_main))
 
 (test
  (name test_exact_output_resolver_snapshot)
  (modules test_exact_output_resolver_snapshot)
- (libraries agent_sdk llm_provider alcotest eio_main))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio_main))
 
 (executable
  (name check_public_mli_callbacks)
@@ -674,12 +698,12 @@
 (test
  (name test_complete_http)
  (modules test_complete_http)
- (libraries agent_sdk llm_provider alcotest eio_main eio.mock))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio_main eio.mock))
 
 (test
  (name test_http_client_cache)
  (modules test_http_client_cache)
- (libraries agent_sdk llm_provider alcotest eio_main eio.mock))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio_main eio.mock))
 
 ; Own stanza: needs the mock clock/flow to drive deadline arithmetic without
 ; wall-clock sleeping, and runs entirely on Eio_mock.Backend (no real IO).
@@ -687,104 +711,104 @@
 (test
  (name test_sse_budget_anchor)
  (modules test_sse_budget_anchor)
- (libraries agent_sdk llm_provider alcotest eio.mock))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio.mock))
 
 (test
  (name test_tls_config_cache)
  (modules test_tls_config_cache)
- (libraries agent_sdk llm_provider alcotest))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest))
 
 (test
  (name test_llm_provider_cov)
  (modules test_llm_provider_cov)
- (libraries agent_sdk llm_provider alcotest))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest))
 
 (test
  (name test_stop_reason_ssot)
  (modules test_stop_reason_ssot)
- (libraries agent_sdk llm_provider alcotest))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest))
 
 (test
  (name test_anthropic_reconcile)
  (modules test_anthropic_reconcile)
- (libraries agent_sdk llm_provider alcotest))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest))
 
 (test
  (name test_overflow_wire_e2e)
  (modules test_overflow_wire_e2e)
- (libraries agent_sdk llm_provider alcotest))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest))
 
 (test
  (name test_canonical_projections)
  (modules test_canonical_projections)
- (libraries agent_sdk llm_provider alcotest))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest))
 
 (test
  (name test_telemetry_event)
  (modules test_telemetry_event)
- (libraries agent_sdk llm_provider alcotest eio_main))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio_main))
 
 (test
  (name test_telemetry_pipeline)
  (modules test_telemetry_pipeline)
- (libraries agent_sdk llm_provider alcotest eio_main))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio_main))
 
 (test
  (name test_observability_default)
  (modules test_observability_default)
- (libraries agent_sdk llm_provider alcotest eio_main))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio_main))
 
 (test
  (name test_agent_advanced)
  (modules test_agent_advanced)
- (libraries agent_sdk llm_provider alcotest eio_main))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio_main))
 
 (test
  (name test_api)
  (modules test_api)
- (libraries agent_sdk alcotest))
+ (libraries agent_core_test_deps masc.agent_core alcotest))
 
 (test
  (name test_builder)
  (modules test_builder)
- (libraries agent_sdk alcotest eio_main))
+ (libraries agent_core_test_deps masc.agent_core alcotest eio_main))
 
 (test
  (name test_full_pipeline_cov)
  (modules test_full_pipeline_cov)
- (libraries agent_sdk alcotest cohttp-eio eio eio_main unix yojson))
+ (libraries agent_core_test_deps masc.agent_core alcotest cohttp-eio eio eio_main unix yojson))
 
 (test
  (name test_event_integration)
  (modules test_event_integration)
- (libraries agent_sdk alcotest cohttp-eio eio eio_main unix yojson))
+ (libraries agent_core_test_deps masc.agent_core alcotest cohttp-eio eio eio_main unix yojson))
 
 (test
  (name test_guardrails_async)
  (modules test_guardrails_async)
- (libraries agent_sdk alcotest eio eio_main))
+ (libraries agent_core_test_deps masc.agent_core alcotest eio eio_main))
 
 (test
  (name test_agent_cancellation_tla_parity)
  (modules test_agent_cancellation_tla_parity)
- (libraries agent_sdk alcotest))
+ (libraries agent_core_test_deps masc.agent_core alcotest))
 
 (tests
  (names test_runtime_store_unit test_runtime_types)
  (modules test_runtime_store_unit test_runtime_types)
- (libraries agent_sdk alcotest eio eio_main unix yojson)
+ (libraries agent_core_test_deps masc.agent_core alcotest eio eio_main unix yojson)
  (action
   (run %{test})))
 
 (test
  (name test_streaming_cut_cleanup)
  (modules test_streaming_cut_cleanup)
- (libraries agent_sdk llm_provider alcotest eio eio_main))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest eio eio_main))
 
 (test
  (name test_otel_tracer_fiber)
  (modules test_otel_tracer_fiber)
- (libraries agent_sdk alcotest eio_main))
+ (libraries agent_core_test_deps masc.agent_core alcotest eio_main))
 
 (test
  (name test_tls_cancellability)
@@ -792,6 +816,7 @@
  (libraries
   alcotest
   eio
+  eio.unix
   eio_main
   tls
   tls-eio
@@ -803,4 +828,4 @@
 (test
  (name test_media_document_admission)
  (modules test_media_document_admission)
- (libraries agent_sdk llm_provider alcotest fmt yojson))
+ (libraries agent_core_test_deps masc.agent_core llm_provider alcotest fmt yojson))

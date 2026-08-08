@@ -358,7 +358,7 @@ let test_to_harness_verdict_approve () =
     timestamp = 0.0;
   } in
   let hv = Cal.to_harness_verdict record in
-  check bool "passed" true hv.Agent_sdk.Harness.passed;
+  check bool "passed" true hv.Masc_agent_core.Harness.passed;
   check (option (float 0.01)) "score 1.0" (Some 1.0) hv.score;
   check bool "evidence has gate" true
     (List.exists (fun s -> contains ~sub:"gate=structured_tool" s) hv.evidence);
@@ -394,7 +394,7 @@ let test_on_harness_verdict_callback () =
   (match !received with
    | None -> Alcotest.fail "on_harness_verdict not called"
    | Some hv ->
-     check bool "passed" true hv.Agent_sdk.Harness.passed;
+     check bool "passed" true hv.Masc_agent_core.Harness.passed;
      check (option (float 0.01)) "score" (Some 1.0) hv.score);
   Cal.reset_store_for_testing ()
 
@@ -403,13 +403,13 @@ let test_on_harness_verdict_with_collector () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
-  let collector = Agent_sdk.Eval.create_collector
+  let collector = Masc_agent_core.Eval.create_collector
     ~agent_name:"test-agent" ~run_id:"run-1" in
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"col-1" ~req ~result
-    ~on_harness_verdict:(Agent_sdk.Eval.add_verdict collector) ();
-  let metrics = Agent_sdk.Eval.finalize collector in
+    ~on_harness_verdict:(Masc_agent_core.Eval.add_verdict collector) ();
+  let metrics = Masc_agent_core.Eval.finalize collector in
   check int "1 harness verdict" 1 (List.length metrics.harness_verdicts);
   let hv = List.hd metrics.harness_verdicts in
   check bool "passed" true hv.passed;

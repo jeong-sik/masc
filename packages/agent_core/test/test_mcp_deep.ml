@@ -6,7 +6,7 @@
     - mcp_tool_of_json: JSON tool definition parsing
     - merge_env: environment variable merging *)
 
-open Agent_sdk
+open Masc_agent_core
 module Sdk_types = Mcp_protocol.Mcp_types
 
 let make_tool_result ?is_error ?structured_content content =

@@ -26,7 +26,7 @@ val keeper_generation_context_key : string
 val compaction_commit_count_context_key : string
 
 val compaction_commit_count_of_context :
-  Agent_sdk.Context.t -> (int, string) result
+  Masc_agent_core.Context.t -> (int, string) result
 (** Read the checkpoint-authoritative compaction commit count. Absence means
     zero for a checkpoint that has not yet been compacted; malformed or
     negative values fail closed. *)
@@ -34,13 +34,13 @@ val compaction_commit_count_of_context :
 (** Compose an OAS history archive snapshot id from a checkpoint
     (created_at_ms + keeper_generation suffix). *)
 val oas_history_snapshot_id_of_checkpoint :
-  Agent_sdk.Checkpoint.t -> string
+  Masc_agent_core.Checkpoint.t -> string
 
 (** Save [ckpt] to the OAS history archive in [session_dir],
     pruning to [max_oas_history_retained] entries. Logs and
     swallows write failures. *)
 val save_oas_history :
-  session_dir:string -> Agent_sdk.Checkpoint.t -> unit
+  session_dir:string -> Masc_agent_core.Checkpoint.t -> unit
 
 (** Delete OAS history archive entries by [snapshot_ids]. Returns
     [(deleted, missing)] in input-order, with [missing] containing
@@ -80,7 +80,7 @@ type save_oas_outcome =
     is never treated as a cold store. *)
 val save_oas_classified :
   session_dir:string ->
-  Agent_sdk.Checkpoint.t ->
+  Masc_agent_core.Checkpoint.t ->
   (save_oas_outcome, string) result
 
 (** Run [f] under the stable checkpoint lock for [session_dir]. The lock inode
@@ -99,7 +99,7 @@ type checkpoint_load_error =
   | Io_error of string
   | Sdk_other_error of string
 
-(** Project an [Agent_sdk.Error.sdk_error] to [checkpoint_load_error].
+(** Project an [Masc_agent_core.Error.sdk_error] to [checkpoint_load_error].
 
     RFC-0089 G4: this no longer classifies [Not_found] from string-matched
     [FileOpFailed.detail]. Cold-start "checkpoint absent" is detected at
@@ -107,7 +107,7 @@ type checkpoint_load_error =
     load, so any [sdk_error] reaching this function is a real
     I/O / parse / SDK fault and routes accordingly. *)
 val classify_sdk_error :
-  Agent_sdk.Error.sdk_error -> checkpoint_load_error
+  Masc_agent_core.Error.sdk_error -> checkpoint_load_error
 
 (** Load a single OAS history archive entry. Returns [Not_found]
     when the file does not exist or [snapshot_id] is not one real path
@@ -116,7 +116,7 @@ val classify_sdk_error :
 val load_oas_history_file :
   session_dir:string ->
   snapshot_id:string ->
-  (Agent_sdk.Checkpoint.t, checkpoint_load_error) result
+  (Masc_agent_core.Checkpoint.t, checkpoint_load_error) result
 
 (** Load the canonical OAS checkpoint for [session_id]. One read path
     for Eio and non-Eio contexts: presence is a typed
@@ -127,7 +127,7 @@ val load_oas_history_file :
 val load_oas :
   session_dir:string ->
   session_id:string ->
-  (Agent_sdk.Checkpoint.t, checkpoint_load_error) result
+  (Masc_agent_core.Checkpoint.t, checkpoint_load_error) result
 
 type checkpoint_identity_error =
   | Session_id_invalid of string
@@ -173,7 +173,7 @@ val load_oas_exact_snapshot :
 val load_oas_with_ref :
   session_dir:string ->
   session_id:string ->
-  ( Agent_sdk.Checkpoint.t * Keeper_checkpoint_ref.t
+  ( Masc_agent_core.Checkpoint.t * Keeper_checkpoint_ref.t
   , checkpoint_ref_load_error )
   result
 
@@ -238,7 +238,7 @@ type checkpoint_installation =
 val save_oas_if_source :
   session_dir:string ->
   expected_source_ref:Keeper_checkpoint_ref.t ->
-  Agent_sdk.Checkpoint.t ->
+  Masc_agent_core.Checkpoint.t ->
   checkpoint_installation
 
 module For_testing : sig
@@ -246,7 +246,7 @@ module For_testing : sig
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->
     expected_source_ref:Keeper_checkpoint_ref.t ->
-    Agent_sdk.Checkpoint.t ->
+    Masc_agent_core.Checkpoint.t ->
     checkpoint_installation
 
   val save_oas_if_source_with_release_failure :
@@ -254,7 +254,7 @@ module For_testing : sig
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->
     expected_source_ref:Keeper_checkpoint_ref.t ->
-    Agent_sdk.Checkpoint.t ->
+    Masc_agent_core.Checkpoint.t ->
     checkpoint_installation
 
   val save_oas_if_source_with_acquire_failure :
@@ -262,7 +262,7 @@ module For_testing : sig
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->
     expected_source_ref:Keeper_checkpoint_ref.t ->
-    Agent_sdk.Checkpoint.t ->
+    Masc_agent_core.Checkpoint.t ->
     checkpoint_installation
 
   val save_oas_if_source_with_writer :
@@ -275,7 +275,7 @@ module For_testing : sig
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->
     expected_source_ref:Keeper_checkpoint_ref.t ->
-    Agent_sdk.Checkpoint.t ->
+    Masc_agent_core.Checkpoint.t ->
     checkpoint_installation
 
   val save_oas_if_source_with_post_commit_unwind :
@@ -283,6 +283,6 @@ module For_testing : sig
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->
     expected_source_ref:Keeper_checkpoint_ref.t ->
-    Agent_sdk.Checkpoint.t ->
+    Masc_agent_core.Checkpoint.t ->
     checkpoint_installation
 end

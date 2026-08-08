@@ -11,7 +11,7 @@
     §워크어라운드 #2).
 
     Replacement (RFC-0089 G4): the SDK provides
-    [Agent_sdk.Checkpoint_store.exists : t -> string -> bool], so the
+    [Masc_agent_core.Checkpoint_store.exists : t -> string -> bool], so the
     keeper-side load path now branches on that [bool] *before* invoking
     [load]. Any [sdk_error] reaching [classify_sdk_error] is therefore by
     construction a real I/O / serialization / SDK fault, never a missing
@@ -46,7 +46,7 @@ let is_sdk_other = function Store.Sdk_other_error _ -> true | _ -> false
 (* ─── Invariant: classify_sdk_error never returns Not_found ──────── *)
 
 let check_not_not_found name detail =
-  let e = Agent_sdk.Error.Io (FileOpFailed { op = "load"; path = "p"; detail }) in
+  let e = Masc_agent_core.Error.Io (FileOpFailed { op = "load"; path = "p"; detail }) in
   Alcotest.(check bool) name false (is_not_found (Store.classify_sdk_error e))
 
 let test_legacy_no_such_file_underscore () =
@@ -77,7 +77,7 @@ let test_eio_io_fs_not_found_rendered () =
 
 let test_io_file_op_failed_routes_io_error () =
   let e =
-    Agent_sdk.Error.Io
+    Masc_agent_core.Error.Io
       (FileOpFailed { op = "load"; path = "/p/x"; detail = "EACCES" })
   in
   Alcotest.check load_err "FileOpFailed routes to Io_error"
@@ -85,20 +85,20 @@ let test_io_file_op_failed_routes_io_error () =
     (Store.classify_sdk_error e)
 
 let test_io_validation_failed_routes_store_error () =
-  let e = Agent_sdk.Error.Io (ValidationFailed { detail = "bad schema" }) in
+  let e = Masc_agent_core.Error.Io (ValidationFailed { detail = "bad schema" }) in
   Alcotest.(check bool) "ValidationFailed routes to Store_error" true
     (is_store_error (Store.classify_sdk_error e))
 
 let test_serialization_json_routes_parse_error () =
   let e =
-    Agent_sdk.Error.Serialization (JsonParseError { detail = "EOF" })
+    Masc_agent_core.Error.Serialization (JsonParseError { detail = "EOF" })
   in
   Alcotest.(check bool) "JsonParseError routes to Parse_error" true
     (is_parse_error (Store.classify_sdk_error e))
 
 let test_serialization_version_routes_parse_error () =
   let e =
-    Agent_sdk.Error.Serialization
+    Masc_agent_core.Error.Serialization
       (VersionMismatch { expected = 2; got = 1 })
   in
   Alcotest.(check bool) "VersionMismatch routes to Parse_error" true
@@ -106,14 +106,14 @@ let test_serialization_version_routes_parse_error () =
 
 let test_serialization_unknown_variant_routes_parse_error () =
   let e =
-    Agent_sdk.Error.Serialization
+    Masc_agent_core.Error.Serialization
       (UnknownVariant { type_name = "role"; value = "alien" })
   in
   Alcotest.(check bool) "UnknownVariant routes to Parse_error" true
     (is_parse_error (Store.classify_sdk_error e))
 
 let test_internal_routes_sdk_other_error () =
-  let e = Agent_sdk.Error.Internal "kaboom" in
+  let e = Masc_agent_core.Error.Internal "kaboom" in
   Alcotest.(check bool) "Internal routes to Sdk_other_error" true
     (is_sdk_other (Store.classify_sdk_error e))
 
@@ -121,7 +121,7 @@ let test_internal_routes_sdk_other_error () =
    Not_found, not Parse_error). *)
 let test_permission_denied_routes_io_error () =
   let e =
-    Agent_sdk.Error.Io
+    Masc_agent_core.Error.Io
       (FileOpFailed
          { op = "load"; path = "/p"; detail =
              "Unix_error (EACCES, \"openat\", \"/p/trace.json\")" })

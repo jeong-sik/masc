@@ -1,6 +1,6 @@
-(** Tests for [Agent_sdk_metrics_bridge].
+(** Tests for [Masc_agent_core_metrics_bridge].
 
-    Covers the compatibility wrapper around [Agent_sdk.Event_bus].
+    Covers the compatibility wrapper around [Masc_agent_core.Event_bus].
     The wrapper should forward subscribe/publish/drain semantics to the SDK
     bus without a parallel sampler surface.
 *)
@@ -8,18 +8,18 @@
 open Alcotest
 
 module I = struct
-  include Masc.Agent_sdk_metrics_bridge
+  include Masc.Masc_agent_core_metrics_bridge
 
-  let subscribe = subscribe ~capacity:3 ~overflow:Agent_sdk.Event_bus.Drop_oldest
+  let subscribe = subscribe ~capacity:3 ~overflow:Masc_agent_core.Event_bus.Drop_oldest
 end
 
-let mk_bus () = Agent_sdk.Event_bus.create ()
+let mk_bus () = Masc_agent_core.Event_bus.create ()
 
 let mk_custom_event tag =
-  Agent_sdk.Event_bus.mk_event
-    (Agent_sdk.Event_bus.Custom (tag, `Assoc []))
+  Masc_agent_core.Event_bus.mk_event
+    (Masc_agent_core.Event_bus.Custom (tag, `Assoc []))
 
-let topic_filter = Agent_sdk.Event_bus.filter_topic
+let topic_filter = Masc_agent_core.Event_bus.filter_topic
 
 let run_eio f =
   Eio_main.run (fun env ->
@@ -29,13 +29,13 @@ let test_subscribe_forwards_purpose_to_oas_stats () =
   run_eio (fun ~sw:_ ~env:_ ->
     let bus = mk_bus () in
     let h = I.subscribe ~purpose:"compact_audit" bus in
-    let stats = Agent_sdk.Event_bus.stats bus in
+    let stats = Masc_agent_core.Event_bus.stats bus in
     (match stats.subscriptions with
      | [ sub_stats ] ->
        check (option string) "oas purpose" (Some "compact_audit") sub_stats.purpose;
        check int "subscriber capacity" 3 sub_stats.capacity;
        check bool "subscriber overflow" true
-         (sub_stats.overflow = Agent_sdk.Event_bus.Drop_oldest)
+         (sub_stats.overflow = Masc_agent_core.Event_bus.Drop_oldest)
      | _ -> fail "expected one OAS subscription");
     I.unsubscribe bus h)
 

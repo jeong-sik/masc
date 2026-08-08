@@ -1,15 +1,15 @@
 (** Error translation helpers for keeper Agent.run orchestration. *)
 
 let sdk_error_kind = function
-  | Agent_sdk.Error.Api _ -> "api"
-  | Agent_sdk.Error.Provider _ -> "provider"
-  | Agent_sdk.Error.Agent _ -> "agent"
-  | Agent_sdk.Error.Mcp _ -> "mcp"
-  | Agent_sdk.Error.Config _ -> "config"
-  | Agent_sdk.Error.Serialization _ -> "serialization"
-  | Agent_sdk.Error.Io _ -> "io"
-  | Agent_sdk.Error.Orchestration _ -> "orchestration"
-  | Agent_sdk.Error.Internal _ -> "internal"
+  | Masc_agent_core.Error.Api _ -> "api"
+  | Masc_agent_core.Error.Provider _ -> "provider"
+  | Masc_agent_core.Error.Agent _ -> "agent"
+  | Masc_agent_core.Error.Mcp _ -> "mcp"
+  | Masc_agent_core.Error.Config _ -> "config"
+  | Masc_agent_core.Error.Serialization _ -> "serialization"
+  | Masc_agent_core.Error.Io _ -> "io"
+  | Masc_agent_core.Error.Orchestration _ -> "orchestration"
+  | Masc_agent_core.Error.Internal _ -> "internal"
 ;;
 
 let sdk_error_kind_for_receipt err =
@@ -69,8 +69,8 @@ let structured_internal_error_user_message err =
   | Some internal_error -> (
     match Keeper_internal_error.summary_of_masc_internal_error internal_error with
     | Some summary -> summary
-    | None -> Agent_sdk.Error.to_string err)
-  | None -> Agent_sdk.Error.to_string err
+    | None -> Masc_agent_core.Error.to_string err)
+  | None -> Masc_agent_core.Error.to_string err
 ;;
 
 (* The raw provider diagnostic ("Context overflow: empty completion
@@ -93,15 +93,15 @@ let context_overflow_user_message ~limit =
 ;;
 
 let user_message_of_sdk_error = function
-  | Agent_sdk.Error.Api (Agent_sdk.Retry.NetworkError { message; kind }) ->
+  | Masc_agent_core.Error.Api (Masc_agent_core.Retry.NetworkError { message; kind }) ->
     provider_network_user_message ~kind ~detail:message ()
-  | Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow { limit; _ }) ->
+  | Masc_agent_core.Error.Api (Masc_agent_core.Retry.ContextOverflow { limit; _ }) ->
     context_overflow_user_message ~limit
-  | Agent_sdk.Error.Api (Agent_sdk.Retry.InputCapacity _) ->
+  | Masc_agent_core.Error.Api (Masc_agent_core.Retry.InputCapacity _) ->
     "The runtime flow reported a typed input-capacity failure. MASC did not \
      infer a compaction or select another runtime; the failure is escalated as \
      a deterministic judgment."
-  | Agent_sdk.Error.Provider
+  | Masc_agent_core.Error.Provider
       (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
     provider_network_user_message ~provider ~kind ~detail ()
   | err -> structured_internal_error_user_message err
@@ -115,29 +115,29 @@ type sdk_termination_semantics =
   | Sdk_error_failure
 
 let sdk_termination_semantics = function
-  | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _) -> Provider_wall_clock_timeout
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)
-  | Agent_sdk.Error.Provider
+  | Masc_agent_core.Error.Api (Masc_agent_core.Retry.Timeout _) -> Provider_wall_clock_timeout
+  | Masc_agent_core.Error.Provider (Llm_provider.Error.Timeout _)
+  | Masc_agent_core.Error.Provider
       (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
     Provider_wall_clock_timeout
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.GuardrailViolation _) ->
+  | Masc_agent_core.Error.Agent (Masc_agent_core.Error.GuardrailViolation _) ->
     Oas_guardrail_violation
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) ->
+  | Masc_agent_core.Error.Agent (Masc_agent_core.Error.TripwireViolation _) ->
     Oas_tripwire_violation
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> Oas_input_required
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _)
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.HookExecutionFailed _)
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.TerminalToolEffectFailed _)
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.TerminalToolDurabilityFailed _) ->
+  | Masc_agent_core.Error.Agent (Masc_agent_core.Error.InputRequired _) -> Oas_input_required
+  | Masc_agent_core.Error.Agent (Masc_agent_core.Error.UnrecognizedStopReason _)
+  | Masc_agent_core.Error.Agent (Masc_agent_core.Error.HookExecutionFailed _)
+  | Masc_agent_core.Error.Agent (Masc_agent_core.Error.TerminalToolEffectFailed _)
+  | Masc_agent_core.Error.Agent (Masc_agent_core.Error.TerminalToolDurabilityFailed _) ->
     Sdk_error_failure
-  | Agent_sdk.Error.Provider _ -> Sdk_error_failure
-  | Agent_sdk.Error.Api _ -> Sdk_error_failure
-  | Agent_sdk.Error.Mcp _ -> Sdk_error_failure
-  | Agent_sdk.Error.Config _ -> Sdk_error_failure
-  | Agent_sdk.Error.Serialization _ -> Sdk_error_failure
-  | Agent_sdk.Error.Io _ -> Sdk_error_failure
-  | Agent_sdk.Error.Orchestration _ -> Sdk_error_failure
-  | Agent_sdk.Error.Internal _ -> Sdk_error_failure
+  | Masc_agent_core.Error.Provider _ -> Sdk_error_failure
+  | Masc_agent_core.Error.Api _ -> Sdk_error_failure
+  | Masc_agent_core.Error.Mcp _ -> Sdk_error_failure
+  | Masc_agent_core.Error.Config _ -> Sdk_error_failure
+  | Masc_agent_core.Error.Serialization _ -> Sdk_error_failure
+  | Masc_agent_core.Error.Io _ -> Sdk_error_failure
+  | Masc_agent_core.Error.Orchestration _ -> Sdk_error_failure
+  | Masc_agent_core.Error.Internal _ -> Sdk_error_failure
 ;;
 
 let sdk_termination_semantics_to_string = function
@@ -148,74 +148,74 @@ let sdk_termination_semantics_to_string = function
   | Sdk_error_failure -> "sdk_error_failure"
 ;;
 
-(* Per-variant terminal_reason_code for Agent_sdk.Error.Api.
+(* Per-variant terminal_reason_code for Masc_agent_core.Error.Api.
    Previously every API failure collapsed to "api_error", so 7 keepers
    stuck on different conditions (rate limit, overload, server fault,
    auth) all displayed the same dashboard chip and the broadcast
    payload could not differentiate them. Memory:
    no-collapse-richer-enum-at-sdk-boundary. *)
-let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
+let api_error_terminal_reason_code (err : Masc_agent_core.Error.api_error) : string =
   match err with
-  | Agent_sdk.Retry.RateLimited _ -> "api_error_rate_limited"
-  | Agent_sdk.Retry.Overloaded _ -> "api_error_overloaded"
-  | Agent_sdk.Retry.ServerError { status; _ } ->
+  | Masc_agent_core.Retry.RateLimited _ -> "api_error_rate_limited"
+  | Masc_agent_core.Retry.Overloaded _ -> "api_error_overloaded"
+  | Masc_agent_core.Retry.ServerError { status; _ } ->
     Printf.sprintf "api_error_server:%d" status
-  | Agent_sdk.Retry.AuthError _ -> "api_error_auth"
-  | Agent_sdk.Retry.AuthorizationError _ -> "api_error_authorization"
-  | Agent_sdk.Retry.PaymentRequired _ -> "api_error_payment_required"
-  | Agent_sdk.Retry.InvalidRequest _ -> "api_error_invalid_request"
-  | Agent_sdk.Retry.NotFound _ -> "api_error_not_found"
-  | Agent_sdk.Retry.ContextOverflow _ -> "api_error_context_overflow"
-  | Agent_sdk.Retry.InputCapacity { reason; _ } ->
+  | Masc_agent_core.Retry.AuthError _ -> "api_error_auth"
+  | Masc_agent_core.Retry.AuthorizationError _ -> "api_error_authorization"
+  | Masc_agent_core.Retry.PaymentRequired _ -> "api_error_payment_required"
+  | Masc_agent_core.Retry.InvalidRequest _ -> "api_error_invalid_request"
+  | Masc_agent_core.Retry.NotFound _ -> "api_error_not_found"
+  | Masc_agent_core.Retry.ContextOverflow _ -> "api_error_context_overflow"
+  | Masc_agent_core.Retry.InputCapacity { reason; _ } ->
     (match reason with
-     | Agent_sdk.Retry.Serving_constraint_rejected _ ->
+     | Masc_agent_core.Retry.Serving_constraint_rejected _ ->
        "api_error_input_capacity:serving_constraint_rejected"
-     | Agent_sdk.Retry.Token_measurement_unavailable _ ->
+     | Masc_agent_core.Retry.Token_measurement_unavailable _ ->
        "api_error_input_capacity:measurement_unavailable")
   (* SSOT: the two transient wire codes are owned by [Keeper_terminal_reason]
      so the consumer-side disposition classifier
      ([Keeper_terminal_reason.is_transient_provider_runtime_failure]) and this
      encoder cannot drift. Agent execution observations are represented by the
      typed Agent error constructors above this API layer. *)
-  | Agent_sdk.Retry.NetworkError _ -> Keeper_terminal_reason.wire_api_error_network
-  | Agent_sdk.Retry.Timeout _ -> Keeper_terminal_reason.wire_api_error_timeout
+  | Masc_agent_core.Retry.NetworkError _ -> Keeper_terminal_reason.wire_api_error_network
+  | Masc_agent_core.Retry.Timeout _ -> Keeper_terminal_reason.wire_api_error_timeout
 ;;
 
-(* Per-variant terminal_reason_code for Agent_sdk.Error.Agent.
+(* Per-variant terminal_reason_code for Masc_agent_core.Error.Agent.
    Previously every Agent failure collapsed to "agent_error", mirroring
    the old Api behaviour. Memory: no-collapse-richer-enum-at-sdk-boundary. *)
 let terminal_effect_disposition_to_wire effect_disposition =
-  match Agent_sdk.Error.terminal_effect_disposition effect_disposition with
-  | Agent_sdk.Tool_contract.Proven_pre_effect -> "proven_pre_effect"
-  | Agent_sdk.Tool_contract.Proven_post_effect -> "proven_post_effect"
-  | Agent_sdk.Tool_contract.Effect_outcome_unknown -> "effect_outcome_unknown"
+  match Masc_agent_core.Error.terminal_effect_disposition effect_disposition with
+  | Masc_agent_core.Tool_contract.Proven_pre_effect -> "proven_pre_effect"
+  | Masc_agent_core.Tool_contract.Proven_post_effect -> "proven_post_effect"
+  | Masc_agent_core.Tool_contract.Effect_outcome_unknown -> "effect_outcome_unknown"
 ;;
 
 let agent_error_terminal_reason_code = function
-  | Agent_sdk.Error.UnrecognizedStopReason { reason } ->
+  | Masc_agent_core.Error.UnrecognizedStopReason { reason } ->
     Printf.sprintf "agent_error_unrecognized_stop_reason:%s" reason
-  | Agent_sdk.Error.HookExecutionFailed { hook_name; stage; _ } ->
+  | Masc_agent_core.Error.HookExecutionFailed { hook_name; stage; _ } ->
     Printf.sprintf
       "agent_error_hook_execution_failed:hook=%s,stage=%s"
       hook_name
       stage
-  | Agent_sdk.Error.TerminalToolEffectFailed
+  | Masc_agent_core.Error.TerminalToolEffectFailed
       { tool_use_id; effect_disposition; detail = _ } ->
     Printf.sprintf
       "agent_error_terminal_tool_effect_failed:tool_use_id=%s,effect_disposition=%s"
       tool_use_id
       (terminal_effect_disposition_to_wire effect_disposition)
-  | Agent_sdk.Error.TerminalToolDurabilityFailed
+  | Masc_agent_core.Error.TerminalToolDurabilityFailed
       { invocation; effect_disposition; detail = _ } ->
     Printf.sprintf
       "agent_error_terminal_tool_durability_failed:tool_use_id=%s,effect_disposition=%s"
-      (Agent_sdk.Tool_contract.Invocation.tool_use_id invocation)
+      (Masc_agent_core.Tool_contract.Invocation.tool_use_id invocation)
       (terminal_effect_disposition_to_wire effect_disposition)
-  | Agent_sdk.Error.GuardrailViolation { validator; reason = _ } ->
+  | Masc_agent_core.Error.GuardrailViolation { validator; reason = _ } ->
     Printf.sprintf "agent_error_guardrail_violation:validator=%s" validator
-  | Agent_sdk.Error.TripwireViolation { tripwire; reason = _ } ->
+  | Masc_agent_core.Error.TripwireViolation { tripwire; reason = _ } ->
     Printf.sprintf "agent_error_tripwire_violation:tripwire=%s" tripwire
-  | Agent_sdk.Error.InputRequired { request_id; question = _; _ } ->
+  | Masc_agent_core.Error.InputRequired { request_id; question = _; _ } ->
     Printf.sprintf "agent_error_input_required:request_id=%s" request_id
 ;;
 
@@ -269,15 +269,15 @@ let provider_error_terminal_reason_code = function
 ;;
 
 let terminal_reason_code_of_sdk_error = function
-  | Agent_sdk.Error.Agent err -> agent_error_terminal_reason_code err
-  | Agent_sdk.Error.Api err -> api_error_terminal_reason_code err
-  | Agent_sdk.Error.Provider err -> provider_error_terminal_reason_code err
-  | Agent_sdk.Error.Mcp _ -> "mcp_error"
-  | Agent_sdk.Error.Config _ -> "config_error"
-  | Agent_sdk.Error.Serialization _ -> "serialization_error"
-  | Agent_sdk.Error.Io _ -> "io_error"
-  | Agent_sdk.Error.Orchestration _ -> "orchestration_error"
-  | Agent_sdk.Error.Internal msg -> (
+  | Masc_agent_core.Error.Agent err -> agent_error_terminal_reason_code err
+  | Masc_agent_core.Error.Api err -> api_error_terminal_reason_code err
+  | Masc_agent_core.Error.Provider err -> provider_error_terminal_reason_code err
+  | Masc_agent_core.Error.Mcp _ -> "mcp_error"
+  | Masc_agent_core.Error.Config _ -> "config_error"
+  | Masc_agent_core.Error.Serialization _ -> "serialization_error"
+  | Masc_agent_core.Error.Io _ -> "io_error"
+  | Masc_agent_core.Error.Orchestration _ -> "orchestration_error"
+  | Masc_agent_core.Error.Internal msg -> (
     match Keeper_internal_error.classify_masc_internal_error_of_string msg with
     | Some err -> Keeper_internal_error.kind_of_masc_internal_error err
     | None -> "internal_error")
@@ -308,7 +308,7 @@ let receipt_outcome_kind_of_sdk_error err =
 ;;
 
 let checkpoint_persistence_error ~keeper_name ~detail =
-  Agent_sdk.Error.Internal
+  Masc_agent_core.Error.Internal
     (Printf.sprintf
        "keeper_checkpoint_persist_failed: keeper=%s detail=%s"
        keeper_name

@@ -391,7 +391,7 @@ let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       let names =
-        List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) tools
+        List.map (fun (tool : Masc_agent_core.Tool.t) -> tool.schema.name) tools
       in
       check bool "masc_fusion Tool.t is materialized" true
         (List.mem "masc_fusion" names))

@@ -4,7 +4,7 @@
     agent must stop that loop when the run exits normally or by cancellation so
     long-lived caller switches do not retain active callback loops. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let response : Types.api_response =
   { id = "periodic-cleanup-response"

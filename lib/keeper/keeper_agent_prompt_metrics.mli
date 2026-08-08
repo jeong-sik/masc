@@ -40,9 +40,9 @@ type ctx_composition_metrics =
     reorder, missing carrier, or duplicate/invalid carrier returns [None]. *)
 val provider_content_messages :
   prompt_context_present:bool ->
-  projection_input:Agent_sdk.Types.message list ->
-  projected_messages:Agent_sdk.Types.message list ->
-  Agent_sdk.Types.message list option
+  projection_input:Masc_agent_core.Types.message list ->
+  projected_messages:Masc_agent_core.Types.message list ->
+  Masc_agent_core.Types.message list option
 
 val empty_prompt_segment_metrics : prompt_segment_metrics
 
@@ -78,8 +78,8 @@ val prompt_metrics_to_json : prompt_metrics -> Yojson.Safe.t
     concrete content values; provider serialization metadata is not estimated. *)
 val build_ctx_composition_metrics :
   prompt_blocks:Turn_record.prompt_block list ->
-  tools:Agent_sdk.Tool.t list ->
-  input_messages:Agent_sdk.Types.message list ->
+  tools:Masc_agent_core.Tool.t list ->
+  input_messages:Masc_agent_core.Types.message list ->
   actual_input_tokens:int option ->
   ctx_composition_metrics
 

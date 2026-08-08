@@ -1,4 +1,4 @@
-open Agent_sdk
+open Masc_agent_core
 
 let expect_ok = function
   | Ok value -> value
@@ -28,7 +28,7 @@ let jsonrpc_interfaces url = Agent_card.supported_interfaces (jsonrpc_interface 
 let base_info : Agent_card.agent_info =
   { agent_name = "test-agent"
   ; agent_description = Some "A test agent"
-  ; version = Agent_sdk.Sdk_version.version
+  ; version = Masc_agent_core.Core_version.version
   ; config =
       { (Types.default_config ~model:"test-model") with
         name = "test-agent"
@@ -59,7 +59,7 @@ let test_of_info_basic () =
   let card = Agent_card.of_info base_info in
   Alcotest.(check string) "name" "test-agent" card.name;
   Alcotest.(check (option string)) "description" (Some "A test agent") card.description;
-  Alcotest.(check string) "version" Agent_sdk.Sdk_version.version card.version
+  Alcotest.(check string) "version" Masc_agent_core.Core_version.version card.version
 ;;
 
 let test_capabilities_tools () =

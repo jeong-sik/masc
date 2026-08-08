@@ -6,7 +6,7 @@
     We use fully qualified [Sessions.xxx] to avoid record field shadowing
     (e.g. telemetry_event_count.name vs structured_event_count.event_name). *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Helpers ────────────────────────────────────────────────────── *)
 

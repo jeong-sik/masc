@@ -24,7 +24,7 @@
       updated meta.
 
     Pure helper move — no callback injection, all references reach
-    external modules (Keeper_unified_turn, Agent_sdk, Log, Otel_metric_store,
+    external modules (Keeper_unified_turn, Masc_agent_core, Log, Otel_metric_store,
     Keeper_metrics, Keeper_registry) or other siblings
     ([Keeper_heartbeat_loop_in_turn_pulse], [Observations]). *)
 
@@ -144,7 +144,7 @@ let run_keeper_cycle_admitted
   match admitted_execution with
   | Error failure ->
     let err = failure.Keeper_unified_turn.error in
-    let e_str = Agent_sdk.Error.to_string err in
+    let e_str = Masc_agent_core.Error.to_string err in
     Log.Keeper.debug "%s: keeper cycle failed: %s" meta_after_triage.name e_str;
     (* Classify on the typed [Config (InvalidConfig { field = "eio_context" })]
        tag via [Runtime_oas_runner.is_eio_context_error], not by substring-

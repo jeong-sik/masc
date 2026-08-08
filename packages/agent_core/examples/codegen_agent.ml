@@ -13,7 +13,7 @@
       dune exec examples/codegen_agent.exe -- "Write a function that checks if a list is a palindrome"
       dune exec examples/codegen_agent.exe -- --file output.ml "Generate a binary search tree module" *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (* ── Tools ─────────────────────────────────────────────────── *)

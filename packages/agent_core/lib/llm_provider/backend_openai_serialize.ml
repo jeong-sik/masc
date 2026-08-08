@@ -1,6 +1,6 @@
 (** OpenAI-compatible request serialization.
 
-    Converts agent_sdk Types (content blocks, messages, tools) into
+    Converts masc.agent_core Types (content blocks, messages, tools) into
     Openai Chat Completions API JSON format.
 
     @since 0.92.0 extracted from Backend_openai *)

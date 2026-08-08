@@ -18,5 +18,5 @@
 let checkpoint_after_attempt ?agent_ref = function
   | Some agent ->
       (match agent_ref with Some r -> r := Some agent | None -> ());
-      Some (Agent_sdk.Agent.checkpoint agent)
+      Some (Masc_agent_core.Agent.checkpoint agent)
   | None -> None

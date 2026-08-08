@@ -3,7 +3,7 @@
     streaming, hooks, and context propagation.
     No real LLM — all responses are canned JSON. *)
 
-open Agent_sdk
+open Masc_agent_core
 open Alcotest
 
 (* ── Mock server: stateful, multi-response ──────────── *)

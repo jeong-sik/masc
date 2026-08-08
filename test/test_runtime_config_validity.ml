@@ -1,7 +1,7 @@
 open Alcotest
 open Masc
 
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Masc_agent_core.Exact_output
 
 let empty_env _name = None
 
@@ -1224,8 +1224,8 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
       ~minimum_guarantee:Exact_output.Json_syntax
   in
   let messages =
-    [ Agent_sdk.Types.text_message
-        Agent_sdk.Types.User
+    [ Masc_agent_core.Types.text_message
+        Masc_agent_core.Types.User
         "Return one JSON object."
     ]
   in
@@ -3071,7 +3071,7 @@ let test_runtime_max_context_override_above_cap_is_clamped () =
            | Error error ->
              failf
                "direct runtime execution should resolve: %s"
-               (Agent_sdk.Error.to_string error)
+               (Masc_agent_core.Error.to_string error)
            | Ok execution ->
              check int
                "direct first attempt receives the provider-effective budget"

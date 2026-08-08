@@ -27,7 +27,7 @@ let blocker_reason_of_turn_driver_reason
   | Keeper_turn_driver.Other_detail detail -> Other_detail detail
 ;;
 
-let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
+let blocker_class_of_sdk_error (err : Masc_agent_core.Error.sdk_error) : blocker_class option =
   match Keeper_error_classify.recoverable_runtime_failure_reason err with
   | Some Keeper_error_classify.Capacity_backpressure -> Some Capacity_backpressure
   | _ ->
@@ -56,26 +56,26 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
     Some Gate_replay_repair_required
   | None ->
     (match err with
-     | Agent_sdk.Error.Internal _ -> None
-     | Agent_sdk.Error.Agent
+     | Masc_agent_core.Error.Internal _ -> None
+     | Masc_agent_core.Error.Agent
          ( HookExecutionFailed _
          | TerminalToolEffectFailed _
          | TerminalToolDurabilityFailed _ ) ->
        None
-     | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
+     | Masc_agent_core.Error.Agent (UnrecognizedStopReason _) ->
        Some Sdk_unrecognized_stop_reason
-     | Agent_sdk.Error.Agent (GuardrailViolation _) -> Some Sdk_guardrail_violation
-     | Agent_sdk.Error.Agent (TripwireViolation _) -> Some Sdk_tripwire_violation
-     | Agent_sdk.Error.Agent (InputRequired _) -> Some Sdk_input_required
+     | Masc_agent_core.Error.Agent (GuardrailViolation _) -> Some Sdk_guardrail_violation
+     | Masc_agent_core.Error.Agent (TripwireViolation _) -> Some Sdk_tripwire_violation
+     | Masc_agent_core.Error.Agent (InputRequired _) -> Some Sdk_input_required
      (* Provider-level [Api] errors are surfaced via OAS retry / runtime
          layers and do not map to a typed blocker_class by themselves. *)
-     | Agent_sdk.Error.Api _
-     | Agent_sdk.Error.Provider _
-     | Agent_sdk.Error.Mcp _
-     | Agent_sdk.Error.Config _
-     | Agent_sdk.Error.Serialization _
-     | Agent_sdk.Error.Io _
-     | Agent_sdk.Error.Orchestration _ -> None)
+     | Masc_agent_core.Error.Api _
+     | Masc_agent_core.Error.Provider _
+     | Masc_agent_core.Error.Mcp _
+     | Masc_agent_core.Error.Config _
+     | Masc_agent_core.Error.Serialization _
+     | Masc_agent_core.Error.Io _
+     | Masc_agent_core.Error.Orchestration _ -> None)
 ;;
 
 (* ── Runtime blocker surface ───────────────────────────────── *)

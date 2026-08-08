@@ -1,7 +1,7 @@
 (** Unit tests for Plan module (v0.77.0). *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Basic creation ──────────────────────────────── *)
 

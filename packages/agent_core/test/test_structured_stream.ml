@@ -3,7 +3,7 @@
     Verifies that emit_synthetic_events and parse_sse_event compose correctly
     for the structured output streaming pattern (extract_stream). *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)

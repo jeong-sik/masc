@@ -1,7 +1,7 @@
 (** Tests for hooks.ml — lifecycle events and hook decisions *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 let default_schedule
       ?(planned_index = 0)

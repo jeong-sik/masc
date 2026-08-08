@@ -1,7 +1,7 @@
 (** Unit tests for Artifact_service — kind/mime coercion and persisted
     artifact descriptor behavior. *)
 
-open Agent_sdk
+open Masc_agent_core
 open Alcotest
 
 let with_temp_dir f =

@@ -11,7 +11,7 @@ module C = Keeper_compaction_llm_summarizer
 module F = Compaction_exact_output_fixture
 module Registry = Runtime_exact_output_registry
 module S = Keeper_structured_output_schema
-module T = Agent_sdk.Types
+module T = Masc_agent_core.Types
 module U = Keeper_compaction_unit
 
 exception Cancel_after_request_arrived
@@ -277,9 +277,9 @@ let test_preparation_bounds_oldest_window_by_exact_request_body () =
     | Ok _ | Error _ -> Alcotest.fail "fixture did not resolve both ordered slots"
   in
   let requirement =
-    Agent_sdk.Exact_output.make_output_requirement
+    Masc_agent_core.Exact_output.make_output_requirement
       ~schema:S.compaction_plan_output_schema
-      ~minimum_guarantee:Agent_sdk.Exact_output.Json_syntax
+      ~minimum_guarantee:Masc_agent_core.Exact_output.Json_syntax
   in
   let projection_bytes units =
     let window =
@@ -288,7 +288,7 @@ let test_preparation_bounds_oldest_window_by_exact_request_body () =
       | Error detail -> Alcotest.failf "projection window failed: %s" detail
     in
     match
-      Agent_sdk.Exact_output.project_request_body
+      Masc_agent_core.Exact_output.project_request_body
         ~target:admitted_target
         ~messages:(C.For_testing.messages_for_plan ~window)
         requirement
@@ -578,13 +578,13 @@ let test_summary_that_blocks_next_exact_fold_advances_to_successor () =
       Alcotest.failf "future-fold initial window failed: %s" detail
   in
   let requirement =
-    Agent_sdk.Exact_output.make_output_requirement
+    Masc_agent_core.Exact_output.make_output_requirement
       ~schema:S.compaction_plan_output_schema
-      ~minimum_guarantee:Agent_sdk.Exact_output.Json_syntax
+      ~minimum_guarantee:Masc_agent_core.Exact_output.Json_syntax
   in
   let initial_request_bytes =
     match
-      Agent_sdk.Exact_output.project_request_body
+      Masc_agent_core.Exact_output.project_request_body
         ~target:first_target
         ~messages:(C.For_testing.messages_for_plan ~window:initial_window)
         requirement

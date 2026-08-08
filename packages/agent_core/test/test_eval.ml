@@ -1,6 +1,6 @@
 (** Tests for Eval module — evaluation framework. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Helpers ──────────────────────────────────────────────────── *)
 

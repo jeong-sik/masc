@@ -12,7 +12,7 @@ type t
     sweep can exclude active tool execution from the no-progress window.
     Defaults to a no-op. *)
 val create :
-  ?event_bus:Agent_sdk.Event_bus.t
+  ?event_bus:Masc_agent_core.Event_bus.t
   -> ?on_pending_count_change:(int -> unit)
   -> keeper_name:string
   -> turn_id:int
@@ -24,7 +24,7 @@ val drain
   -> t
   -> Keeper_turn_runtime_budget.turn_event_bus_summary
 
-val integrity_error : t -> Agent_sdk.Error.sdk_error option
+val integrity_error : t -> Masc_agent_core.Error.sdk_error option
 val tool_completed_count : t -> int
 
 val start_background_drain
@@ -54,7 +54,7 @@ module For_testing : sig
     :  keeper_name:string
     -> turn_id:int
     -> int
-    -> Agent_sdk.Event_bus.event list
+    -> Masc_agent_core.Event_bus.event list
     -> int * fsm_transition list
 
   (** Test-only read accessor. *)

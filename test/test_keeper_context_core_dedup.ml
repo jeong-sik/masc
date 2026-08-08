@@ -6,7 +6,7 @@
        checkpoint content shape. *)
 
 module C = Masc.Keeper_context_core
-module T = Agent_sdk.Types
+module T = Masc_agent_core.Types
 
 let checkpoint_write_error_to_string =
   C.checkpoint_write_error_to_string ~persistence_error_to_string:Fun.id
@@ -233,11 +233,11 @@ let test_resume_checkpoint_preserves_all_messages_in_order () =
   Alcotest.(check int)
     "no fixed checkpoint message window"
     (List.length messages)
-    (List.length resumed.Agent_sdk.Checkpoint.messages);
+    (List.length resumed.Masc_agent_core.Checkpoint.messages);
   Alcotest.(check bool)
     "source order and oldest messages are preserved"
     true
-    (resumed.Agent_sdk.Checkpoint.messages = messages)
+    (resumed.Masc_agent_core.Checkpoint.messages = messages)
 
 let test_resume_checkpoint_preserves_full_tool_result () =
   let content = String.make 20_000 'x' in
@@ -266,7 +266,7 @@ let test_resume_checkpoint_preserves_full_tool_result () =
     |> fun context -> C.append context tool_result
   in
   let resumed = C.resume_checkpoint_of_context context in
-  match resumed.Agent_sdk.Checkpoint.messages with
+  match resumed.Masc_agent_core.Checkpoint.messages with
   | [ { T.content = [ T.ToolResult result ]; _ } ] ->
       Alcotest.(check string) "tool-result content is not stubbed" content
         result.content;
@@ -301,7 +301,7 @@ let test_checkpoint_save_load_preserves_exact_messages () =
        with
        | Ok checkpoint ->
          Alcotest.(check bool) "save returns exact source messages" true
-           (checkpoint.Agent_sdk.Checkpoint.messages = messages)
+           (checkpoint.Masc_agent_core.Checkpoint.messages = messages)
        | Error error ->
          Alcotest.failf
            "checkpoint save failed: %s"
@@ -351,7 +351,7 @@ let test_checkpoint_write_accepts_exact_open_tool_cycle () =
       with
       | Ok checkpoint ->
         Alcotest.(check bool) "open cycle is persisted exactly" true
-          (checkpoint.Agent_sdk.Checkpoint.messages = [ open_tool_use ])
+          (checkpoint.Masc_agent_core.Checkpoint.messages = [ open_tool_use ])
       | Error error ->
         Alcotest.failf
           "open tool cycle was rejected: %s"

@@ -19,5 +19,5 @@ val caller_key : caller -> string
     clock absence never refuses execution. *)
 val run_safe
   :  caller:caller
-  -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)
-  -> ('a, Agent_sdk.Error.sdk_error) result
+  -> (unit -> ('a, Masc_agent_core.Error.sdk_error) result)
+  -> ('a, Masc_agent_core.Error.sdk_error) result

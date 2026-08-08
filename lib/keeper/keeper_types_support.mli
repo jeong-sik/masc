@@ -38,7 +38,7 @@ val keeper_turn_record_store : Workspace.config -> string -> Dated_jsonl.t
 
 (** Per-keeper OAS raw-trace store directory:
     [.masc/keepers/<name>/raw-traces/]. One JSONL file per keeper turn —
-    a fresh file per turn keeps [Agent_sdk.Raw_trace.create] from scanning
+    a fresh file per turn keeps [Masc_agent_core.Raw_trace.create] from scanning
     previous turns' data, so a corrupt or oversized historical trace can
     never block keeper dispatch. Path derivation only; no filesystem
     effects. *)

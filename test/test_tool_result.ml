@@ -365,7 +365,7 @@ let test_deferred_is_distinct_and_projects_one_way () =
   Alcotest.(check bool) "deferred" true (Tool_result.is_deferred result);
   Alcotest.(check bool) "not failed" false (Tool_result.is_failed result);
   match Masc.Tool_bridge.to_oas_typed_result result with
-  | Ok { Agent_sdk.Types._meta = Some (`Assoc fields); _ } ->
+  | Ok { Masc_agent_core.Types._meta = Some (`Assoc fields); _ } ->
     Alcotest.(check (option string))
       "opaque OAS marker"
       (Some "deferred")

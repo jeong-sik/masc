@@ -1,6 +1,6 @@
 (** OAS canonical-delegation boundary contract (masc#22809).
 
-    Four MASC sites delegate to OAS [Agent_sdk.Types] canonical projections
+    Four MASC sites delegate to OAS [Masc_agent_core.Types] canonical projections
     instead of hand-rolling them:
     - [keeper_event_bridge_error_json]: [total_tokens]
     - [context_compact_oas]: [role_to_string]
@@ -18,7 +18,7 @@ open Alcotest
 
 (* keeper_event_bridge_error_json.ml:12 — billable total excludes cache tokens. *)
 let test_total_tokens () =
-  let usage : Agent_sdk.Types.api_usage =
+  let usage : Masc_agent_core.Types.api_usage =
     { input_tokens = 30
     ; output_tokens = 12
     ; cache_creation_input_tokens = 7
@@ -27,22 +27,22 @@ let test_total_tokens () =
     }
   in
   check int "billable = input + output (cache excluded)" 42
-    (Agent_sdk.Types.total_tokens usage)
+    (Masc_agent_core.Types.total_tokens usage)
 
 (* context_compact_oas.ml:85 — every role variant maps to its canonical wire string. *)
 let test_role_to_string () =
-  check string "system" "system" (Agent_sdk.Types.role_to_string Agent_sdk.Types.System);
-  check string "user" "user" (Agent_sdk.Types.role_to_string Agent_sdk.Types.User);
+  check string "system" "system" (Masc_agent_core.Types.role_to_string Masc_agent_core.Types.System);
+  check string "user" "user" (Masc_agent_core.Types.role_to_string Masc_agent_core.Types.User);
   check string "assistant" "assistant"
-    (Agent_sdk.Types.role_to_string Agent_sdk.Types.Assistant);
-  check string "tool" "tool" (Agent_sdk.Types.role_to_string Agent_sdk.Types.Tool)
+    (Masc_agent_core.Types.role_to_string Masc_agent_core.Types.Assistant);
+  check string "tool" "tool" (Masc_agent_core.Types.role_to_string Masc_agent_core.Types.Tool)
 
 (* keeper_run_tools_setup.ml:168 — input schema shape equals the prior hand-built JSON:
    ordered properties, {type; description} per param, required = required names. *)
 let test_params_to_input_schema_shape () =
-  let params : Agent_sdk.Types.tool_param list =
-    [ { name = "path"; description = "file path"; param_type = Agent_sdk.Types.String; required = true }
-    ; { name = "limit"; description = "max rows"; param_type = Agent_sdk.Types.Integer; required = false }
+  let params : Masc_agent_core.Types.tool_param list =
+    [ { name = "path"; description = "file path"; param_type = Masc_agent_core.Types.String; required = true }
+    ; { name = "limit"; description = "max rows"; param_type = Masc_agent_core.Types.Integer; required = false }
     ]
   in
   let expected =
@@ -57,16 +57,16 @@ let test_params_to_input_schema_shape () =
       ]
   in
   check bool "params_to_input_schema matches hand-rolled shape" true
-    (Agent_sdk.Types.params_to_input_schema params = expected)
+    (Masc_agent_core.Types.params_to_input_schema params = expected)
 
 let test_tool_call_of_block_shape () =
   let input = `Assoc [ "path", `String "lib/" ] in
-  let block = Agent_sdk.Types.ToolUse { id = "call_read"; name = "read"; input } in
-  match Agent_sdk.Canonical_tool.tool_call_of_block block with
+  let block = Masc_agent_core.Types.ToolUse { id = "call_read"; name = "read"; input } in
+  match Masc_agent_core.Canonical_tool.tool_call_of_block block with
   | Some call ->
-      check string "call_id" "call_read" call.Agent_sdk.Canonical_tool.call_id;
-      check string "name" "read" call.Agent_sdk.Canonical_tool.name;
-      check bool "input preserved" true (call.Agent_sdk.Canonical_tool.input = input)
+      check string "call_id" "call_read" call.Masc_agent_core.Canonical_tool.call_id;
+      check string "name" "read" call.Masc_agent_core.Canonical_tool.name;
+      check bool "input preserved" true (call.Masc_agent_core.Canonical_tool.input = input)
   | None -> fail "ToolUse block must project to a canonical tool call"
 
 let suite =

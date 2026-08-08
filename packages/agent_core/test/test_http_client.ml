@@ -1,6 +1,6 @@
 (** Tests for Http_client pure functions. *)
 
-open Agent_sdk
+open Masc_agent_core
 open Llm_provider
 
 let test_inject_stream_param_basic () =
@@ -657,21 +657,21 @@ let test_api_common_content_block_roundtrip () =
 ;;
 
 let test_error_domain_full_roundtrip () =
-  let errors : Agent_sdk.Error.sdk_error list =
-    [ Agent_sdk.Error.Api (Retry.RateLimited { retry_after = Some 2.0; message = "slow" })
-    ; Agent_sdk.Error.Api (Retry.AuthError { message = "bad key" })
-    ; Agent_sdk.Error.Api (Retry.ServerError { status = 500; message = "internal" })
-    ; Agent_sdk.Error.Config (MissingEnvVar { var_name = "API_KEY" })
-    ; Agent_sdk.Error.Config (UnsupportedProvider { detail = "unknown" })
-    ; Agent_sdk.Error.Config
+  let errors : Masc_agent_core.Error.sdk_error list =
+    [ Masc_agent_core.Error.Api (Retry.RateLimited { retry_after = Some 2.0; message = "slow" })
+    ; Masc_agent_core.Error.Api (Retry.AuthError { message = "bad key" })
+    ; Masc_agent_core.Error.Api (Retry.ServerError { status = 500; message = "internal" })
+    ; Masc_agent_core.Error.Config (MissingEnvVar { var_name = "API_KEY" })
+    ; Masc_agent_core.Error.Config (UnsupportedProvider { detail = "unknown" })
+    ; Masc_agent_core.Error.Config
         (InvalidConfig { field = "model"; detail = "must not be empty" })
-    ; Agent_sdk.Error.Mcp (ServerStartFailed { command = "node"; detail = "not found" })
-    ; Agent_sdk.Error.Mcp (InitializeFailed { detail = "timeout" })
-    ; Agent_sdk.Error.Mcp (ToolListFailed { detail = "parse" })
-    ; Agent_sdk.Error.Mcp (ToolCallFailed { tool_name = "fs_read"; detail = "denied" })
-    ; Agent_sdk.Error.Mcp
+    ; Masc_agent_core.Error.Mcp (ServerStartFailed { command = "node"; detail = "not found" })
+    ; Masc_agent_core.Error.Mcp (InitializeFailed { detail = "timeout" })
+    ; Masc_agent_core.Error.Mcp (ToolListFailed { detail = "parse" })
+    ; Masc_agent_core.Error.Mcp (ToolCallFailed { tool_name = "fs_read"; detail = "denied" })
+    ; Masc_agent_core.Error.Mcp
         (HttpTransportFailed { url = "http://x"; detail = "conn refused" })
-    ; Agent_sdk.Error.Internal "something broke"
+    ; Masc_agent_core.Error.Internal "something broke"
     ]
   in
   (* Roundtrip: sdk_error -> poly -> sdk_error.
@@ -682,8 +682,8 @@ let test_error_domain_full_roundtrip () =
     (fun err ->
        let poly = Error_domain.of_sdk_error err in
        let back = Error_domain.to_sdk_error poly in
-       let s1 = Agent_sdk.Error.to_string err in
-       let s2 = Agent_sdk.Error.to_string back in
+       let s1 = Masc_agent_core.Error.to_string err in
+       let s2 = Masc_agent_core.Error.to_string back in
        (* Verify both produce non-empty strings *)
        Alcotest.(check bool)
          "roundtrip non-empty"
@@ -692,8 +692,8 @@ let test_error_domain_full_roundtrip () =
        (* Verify is_retryable is preserved *)
        Alcotest.(check bool)
          "retryable preserved"
-         (Agent_sdk.Error.is_retryable err)
-         (Agent_sdk.Error.is_retryable back))
+         (Masc_agent_core.Error.is_retryable err)
+         (Masc_agent_core.Error.is_retryable back))
     errors
 ;;
 

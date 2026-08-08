@@ -1,4 +1,4 @@
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Masc_agent_core.Exact_output
 
 (* [Flow_exact_execution_failed] is the branch that carries the provider's own
    verdict. The typed cause alone ("completion failed") says nothing about

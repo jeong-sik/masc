@@ -219,7 +219,7 @@ type judge_node =
 
 (* 심판(judge) 실패의 닫힌 합. {!panel_failure}와 동형이되 심판 도메인 전용 사유
    ([Empty_result]/[Build_error]/[Parse_error])를 추가한다.
-   [Fusion_judge] 계열이 {!Agent_sdk.Error}의 [Timeout] variant를 match에서 잡아 typed로
+   [Fusion_judge] 계열이 {!Masc_agent_core.Error}의 [Timeout] variant를 match에서 잡아 typed로
    반환하므로, 호출자는 string substring 분류 없이 exhaustive match로 분류한다
    (CLAUDE.md §string-classifier 안티패턴 회피). [panel_failure]를 공유하지 않는 이유는
    mli 주석 참조. *)

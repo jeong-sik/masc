@@ -17,8 +17,8 @@ let publish_lifecycle ~name ~event ~detail ?error ?session_id ?status
         | Some value when String.trim value <> "" -> [ (key, `String value) ]
         | _ -> []
       in
-      Agent_sdk.Event_bus.publish mb
-        (Agent_sdk.Event_bus.mk_event
+      Masc_agent_core.Event_bus.publish mb
+        (Masc_agent_core.Event_bus.mk_event
            (Custom
               ( Printf.sprintf "masc.oas_worker.%s" event
               , `Assoc
@@ -31,28 +31,28 @@ let publish_lifecycle ~name ~event ~detail ?error ?session_id ?status
                    @ optional_string_field "status" status
                    @ attrs) )))
 
-let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Agent_sdk.Agent.t) =
+let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Masc_agent_core.Agent.t) =
   match checkpoint_sidecar with
-  | None -> Agent_sdk.Agent.checkpoint ~session_id agent
+  | None -> Masc_agent_core.Agent.checkpoint ~session_id agent
   | Some json ->
-      Agent_sdk.Agent_checkpoint.build_checkpoint
+      Masc_agent_core.Agent_checkpoint.build_checkpoint
         ~session_id ~working_context:json
-        ~state:(Agent_sdk.Agent.state agent)
-        ~tools:(Agent_sdk.Agent.tools agent)
-        ~context:(Agent_sdk.Agent.context agent)
-        ~mcp_clients:(Agent_sdk.Agent.options agent).mcp_clients
+        ~state:(Masc_agent_core.Agent.state agent)
+        ~tools:(Masc_agent_core.Agent.tools agent)
+        ~context:(Masc_agent_core.Agent.context agent)
+        ~mcp_clients:(Masc_agent_core.Agent.options agent).mcp_clients
         ()
 
 let partial_response_of_stop
     ~(session_id : string)
     ~(text : string)
-  : Agent_sdk.Types.api_response =
+  : Masc_agent_core.Types.api_response =
   (* RFC-0132 PR-2: api_response model surface = external boundary; redact via SSOT. *)
   {
     id = session_id;
     model = Boundary_redaction.to_string Boundary_redaction.runtime_model_label;
-    stop_reason = Agent_sdk.Types.EndTurn;
-    content = [ Agent_sdk.Types.Text text ];
+    stop_reason = Masc_agent_core.Types.EndTurn;
+    content = [ Masc_agent_core.Types.Text text ];
     usage = None;
     telemetry = None;
   }

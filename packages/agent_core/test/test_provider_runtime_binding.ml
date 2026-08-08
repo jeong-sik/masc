@@ -1,4 +1,4 @@
-open Agent_sdk
+open Masc_agent_core
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in

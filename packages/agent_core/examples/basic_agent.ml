@@ -6,7 +6,7 @@
     Usage:
       dune exec examples/basic_agent.exe *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 let () =

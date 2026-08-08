@@ -9,9 +9,9 @@ let preamble_text =
    request. The full history is preserved in the durable checkpoint and \
    surfaces through the memory system when relevant."
 
-let preamble_message : Agent_sdk.Types.message =
-  { role = Agent_sdk.Types.User
-  ; content = [ Agent_sdk.Types.Text preamble_text ]
+let preamble_message : Masc_agent_core.Types.message =
+  { role = Masc_agent_core.Types.User
+  ; content = [ Masc_agent_core.Types.Text preamble_text ]
   ; name = None
   ; tool_call_id = None
   ; metadata = [ (preamble_marker_key, `Bool true) ]
@@ -30,7 +30,7 @@ type budget_error =
       }
 
 type projection =
-  { messages : Agent_sdk.Types.message list
+  { messages : Masc_agent_core.Types.message list
   ; dropped_atoms : int
   }
 
@@ -57,14 +57,14 @@ let budget_error_to_string = function
    provenance still means the per-turn context assembler authored the
    message, so it is pinned rather than exposed to the cut on a malformed
    tag. *)
-let is_extra_context (msg : Agent_sdk.Types.message) =
+let is_extra_context (msg : Masc_agent_core.Types.message) =
   match
-    Agent_sdk.Types.Extra_system_context_provenance.classify msg.metadata
+    Masc_agent_core.Types.Extra_system_context_provenance.classify msg.metadata
   with
-  | Agent_sdk.Types.Extra_system_context_provenance.Absent -> false
-  | Agent_sdk.Types.Extra_system_context_provenance.Present
-  | Agent_sdk.Types.Extra_system_context_provenance.Invalid
-  | Agent_sdk.Types.Extra_system_context_provenance.Duplicate -> true
+  | Masc_agent_core.Types.Extra_system_context_provenance.Absent -> false
+  | Masc_agent_core.Types.Extra_system_context_provenance.Present
+  | Masc_agent_core.Types.Extra_system_context_provenance.Invalid
+  | Masc_agent_core.Types.Extra_system_context_provenance.Duplicate -> true
 ;;
 
 type label =
@@ -77,20 +77,20 @@ type label =
    orphan [Tool] run (possible only on a history that was already cut
    upstream of OAS) becomes atom 0 so it is dropped with the first cut
    rather than transmitted headless. *)
-let annotate (messages : Agent_sdk.Types.message list) :
-  (Agent_sdk.Types.message * label) list * int
+let annotate (messages : Masc_agent_core.Types.message list) :
+  (Masc_agent_core.Types.message * label) list * int
   =
   let labelled_rev, atom_count =
     List.fold_left
-      (fun (acc, count) (msg : Agent_sdk.Types.message) ->
+      (fun (acc, count) (msg : Masc_agent_core.Types.message) ->
          if is_extra_context msg
          then ((msg, Pinned) :: acc, count)
          else (
            match msg.role with
-           | Agent_sdk.Types.System -> ((msg, Pinned) :: acc, count)
-           | Agent_sdk.Types.User | Agent_sdk.Types.Assistant ->
+           | Masc_agent_core.Types.System -> ((msg, Pinned) :: acc, count)
+           | Masc_agent_core.Types.User | Masc_agent_core.Types.Assistant ->
              ((msg, Atom count) :: acc, count + 1)
-           | Agent_sdk.Types.Tool ->
+           | Masc_agent_core.Types.Tool ->
              if count = 0
              then ((msg, Atom 0) :: acc, 1)
              else ((msg, Atom (count - 1)) :: acc, count)))
@@ -163,7 +163,7 @@ let assemble ~drop ~messages labelled =
     in
     let first_kept_atom_role =
       List.find_map
-        (fun ((msg : Agent_sdk.Types.message), label) ->
+        (fun ((msg : Masc_agent_core.Types.message), label) ->
            match label with
            | Atom _ -> Some msg.role
            | Pinned -> None)
@@ -171,17 +171,17 @@ let assemble ~drop ~messages labelled =
     in
     let kept = List.map fst kept_labelled in
     match first_kept_atom_role with
-    | Some Agent_sdk.Types.User | None -> kept
-    | Some Agent_sdk.Types.Assistant
-    | Some Agent_sdk.Types.Tool
-    | Some Agent_sdk.Types.System -> preamble_message :: kept)
+    | Some Masc_agent_core.Types.User | None -> kept
+    | Some Masc_agent_core.Types.Assistant
+    | Some Masc_agent_core.Types.Tool
+    | Some Masc_agent_core.Types.System -> preamble_message :: kept)
 ;;
 
 let project_with_drop
     ~measure_message_bytes
     ~capacity_bytes
     ~reserved_bytes
-    (messages : Agent_sdk.Types.message list)
+    (messages : Masc_agent_core.Types.message list)
   : (projection, budget_error) result
   =
   let labelled, atom_count = annotate messages in

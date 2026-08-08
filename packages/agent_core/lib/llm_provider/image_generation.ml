@@ -157,13 +157,6 @@ let int_field name json =
   | _ -> parse_failure (Printf.sprintf "image response usage.%s must be an integer" name)
 ;;
 
-let optional_int_field name json =
-  match Yojson.Safe.Util.member name json with
-  | `Null -> Ok None
-  | `Int value -> Ok (Some value)
-  | _ -> parse_failure (Printf.sprintf "image response usage.%s must be an integer" name)
-;;
-
 let usage_of_json json =
   match Yojson.Safe.Util.member "usage" json with
   | `Null -> Ok None

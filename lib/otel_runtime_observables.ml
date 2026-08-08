@@ -150,16 +150,16 @@ let fd_samples () =
 ;;
 
 let bus_samples_of ~bus_label bus =
-  let stats = Agent_sdk.Event_bus.stats bus in
+  let stats = Masc_agent_core.Event_bus.stats bus in
   let by_contract =
     (* Aggregate identical contracts so label sets stay unique. *)
     List.fold_left
-      (fun acc (s : Agent_sdk.Event_bus.subscription_stats) ->
+      (fun acc (s : Masc_agent_core.Event_bus.subscription_stats) ->
         let purpose = Option.value s.purpose ~default:"unspecified" in
         let overflow =
           match s.overflow with
-          | Agent_sdk.Event_bus.Drop_oldest -> "drop_oldest"
-          | Agent_sdk.Event_bus.Drop_newest -> "drop_newest"
+          | Masc_agent_core.Event_bus.Drop_oldest -> "drop_oldest"
+          | Masc_agent_core.Event_bus.Drop_newest -> "drop_newest"
         in
         let key = purpose, s.capacity, overflow in
         let count, depth, dropped =

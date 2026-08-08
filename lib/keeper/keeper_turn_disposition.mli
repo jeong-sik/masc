@@ -9,7 +9,7 @@
     The two layers are deliberately separate types:
     - [Keeper_turn_terminal_code.t] stays narrow (RFC-0042 §3.1) and
       is sourced from [Keeper_registry.failure_reason] /
-      [Agent_sdk.Error.sdk_error].
+      [Masc_agent_core.Error.sdk_error].
     - [Keeper_turn_disposition.t] is a display and operator-action
       projection. It never grants runtime failure authority to an opaque wire
       string. *)

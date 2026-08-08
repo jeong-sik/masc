@@ -224,25 +224,25 @@ let classify_provider_error = function
     Not_provider_runtime_failure
 ;;
 
-let classify_sdk_error (err : Agent_sdk.Error.sdk_error) : t =
+let classify_sdk_error (err : Masc_agent_core.Error.sdk_error) : t =
   match Keeper_internal_error.classify_masc_internal_error err with
   | Some _ as internal_error -> classify_masc_internal_error internal_error
   | None ->
     (match err with
-     | Agent_sdk.Error.Api (Timeout _) ->
+     | Masc_agent_core.Error.Api (Timeout _) ->
        provider_timeout ~source:Oas_api ~phase:None
-     | Agent_sdk.Error.Provider provider_error ->
+     | Masc_agent_core.Error.Provider provider_error ->
        classify_provider_error provider_error
-     | Agent_sdk.Error.Api (NetworkError _ | Overloaded _ | ServerError _
+     | Masc_agent_core.Error.Api (NetworkError _ | Overloaded _ | ServerError _
        | RateLimited _ | AuthError _ | AuthorizationError _ | PaymentRequired _
        | InvalidRequest _ | NotFound _ | ContextOverflow _ | InputCapacity _)
-     | Agent_sdk.Error.Agent _
-     | Agent_sdk.Error.Mcp _
-     | Agent_sdk.Error.Config _
-     | Agent_sdk.Error.Serialization _
-     | Agent_sdk.Error.Io _
-     | Agent_sdk.Error.Orchestration _
-     | Agent_sdk.Error.Internal _ ->
+     | Masc_agent_core.Error.Agent _
+     | Masc_agent_core.Error.Mcp _
+     | Masc_agent_core.Error.Config _
+     | Masc_agent_core.Error.Serialization _
+     | Masc_agent_core.Error.Io _
+     | Masc_agent_core.Error.Orchestration _
+     | Masc_agent_core.Error.Internal _ ->
        Not_provider_runtime_failure)
 ;;
 

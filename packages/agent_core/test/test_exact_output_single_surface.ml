@@ -1,6 +1,6 @@
 open Alcotest
 open Llm_provider
-module EO = Agent_sdk.Exact_output
+module EO = Masc_agent_core.Exact_output
 
 let _preserve_public_raw_sync_response_surface
       ({ status = _; body = _; retry_after_header = _ } : Http_client.raw_sync_response)

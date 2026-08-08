@@ -1,7 +1,7 @@
 (** Tests for tool.ml -- handler execution, context passing, schema generation *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 let test_simple_handler_ok () =
   let tool =

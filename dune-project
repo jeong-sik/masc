@@ -56,11 +56,8 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; The exact OAS release pin carries typed recovery, response-shape, and
-  ;; ordered multimodal delivery contracts;
-  ;; its SHA and rationale live in scripts/oas-agent-sdk-pin.sh (SSOT).
-  ;; See check-oas-pin.sh.
-  (agent_sdk (>= 0.231.13))
+  ;; MASC agent execution/provider core lives in [packages/agent_core] and is
+  ;; built atomically in this project. There is no external package pin.
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))
@@ -69,6 +66,7 @@
   (ppx_deriving_yojson (>= 3.6))
   (ppx_enumerate (>= v0.17.0))
   (ppx_let (>= v0.17.0))
+  (ppx_inline_test (>= v0.17.0))
   (ppx_deriving (>= 5.2))
   (ppxlib (>= 0.30))
   (sqlite3 (>= 5.1))

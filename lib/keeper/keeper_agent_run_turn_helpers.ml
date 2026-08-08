@@ -67,55 +67,55 @@ let task_link_already_recorded ~keeper ~task_id ~trace_id =
 [@@@warning "-11"]
 
 let sdk_stream_event_is_first_token =
-  Agent_sdk.Llm_provider.Streaming.sse_event_is_first_token_signal
+  Masc_agent_core.Llm_provider.Streaming.sse_event_is_first_token_signal
 
 let sdk_stream_event_is_deliverable =
-  Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
+  Masc_agent_core.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
 
-let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
+let sse_event_progress_kind (event : Masc_agent_core.Types.sse_event) =
   match event with
-  | Agent_sdk.Types.MessageStart _ -> Some "sse_message_start"
-  | Agent_sdk.Types.ContentBlockStart _ when sdk_stream_event_is_deliverable event ->
+  | Masc_agent_core.Types.MessageStart _ -> Some "sse_message_start"
+  | Masc_agent_core.Types.ContentBlockStart _ when sdk_stream_event_is_deliverable event ->
       Some "sse_tool_block_start"
-  | Agent_sdk.Types.ContentBlockStart _ -> Some "sse_content_block_start"
-  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.TextDelta _; _ }
+  | Masc_agent_core.Types.ContentBlockStart _ -> Some "sse_content_block_start"
+  | Masc_agent_core.Types.ContentBlockDelta { delta = Masc_agent_core.Types.TextDelta _; _ }
     when sdk_stream_event_is_deliverable event ->
       Some "sse_text_delta"
-  | Agent_sdk.Types.ContentBlockDelta
+  | Masc_agent_core.Types.ContentBlockDelta
       {
         delta =
-          ( Agent_sdk.Types.ThinkingDelta _
-          | Agent_sdk.Types.ReasoningDetailsDelta _ );
+          ( Masc_agent_core.Types.ThinkingDelta _
+          | Masc_agent_core.Types.ReasoningDetailsDelta _ );
         _;
       }
     when sdk_stream_event_is_first_token event ->
       Some "sse_thinking_delta"
-  | Agent_sdk.Types.ContentBlockDelta
-      { delta = Agent_sdk.Types.InputJsonDelta _ | Agent_sdk.Types.InputJsonSnapshot _; _ }
+  | Masc_agent_core.Types.ContentBlockDelta
+      { delta = Masc_agent_core.Types.InputJsonDelta _ | Masc_agent_core.Types.InputJsonSnapshot _; _ }
     when sdk_stream_event_is_deliverable event ->
       Some "sse_tool_arg_delta"
-  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.MediaDelta _; _ }
+  | Masc_agent_core.Types.ContentBlockDelta { delta = Masc_agent_core.Types.MediaDelta _; _ }
     when sdk_stream_event_is_deliverable event ->
       Some "sse_media_delta"
-  | Agent_sdk.Types.ContentBlockDelta _ ->
+  | Masc_agent_core.Types.ContentBlockDelta _ ->
       (* Future OAS carrier deltas, such as provider-private reasoning signatures,
          are diagnostic stream evidence only. They must not be promoted to
          text/tool progress, keeper-visible output, or watchdog progress. *)
       Some "sse_content_delta"
-  | Agent_sdk.Types.ContentBlockStop _ -> Some "sse_content_block_stop"
-  | Agent_sdk.Types.MessageDelta _ -> Some "sse_message_delta"
-  | Agent_sdk.Types.MessageStop -> Some "sse_message_stop"
-  | Agent_sdk.Types.Ping -> None
-  | Agent_sdk.Types.SSEError _ -> Some "sse_error"
-  | Agent_sdk.Types.NDJSONError _ -> Some "ndjson_error"
-  | Agent_sdk.Types.SSEParseFailed _ -> Some "sse_parse_failed"
-  | Agent_sdk.Types.NDJSONParseFailed _ -> Some "ndjson_parse_failed"
-  | Agent_sdk.Types.SSEUnknownEventType _ -> Some "sse_unknown_event_type"
-  | Agent_sdk.Types.SSEUnsupportedPart _ -> Some "sse_unsupported_part"
-  | Agent_sdk.Types.SSEUnsupportedResponse _ -> Some "sse_unsupported_response"
-  | Agent_sdk.Types.StreamIncomplete _ -> Some "sse_stream_incomplete"
-  | Agent_sdk.Types.Connected -> Some "sse_connected"
-  | Agent_sdk.Types.Timeout _ -> Some "sse_timeout"
+  | Masc_agent_core.Types.ContentBlockStop _ -> Some "sse_content_block_stop"
+  | Masc_agent_core.Types.MessageDelta _ -> Some "sse_message_delta"
+  | Masc_agent_core.Types.MessageStop -> Some "sse_message_stop"
+  | Masc_agent_core.Types.Ping -> None
+  | Masc_agent_core.Types.SSEError _ -> Some "sse_error"
+  | Masc_agent_core.Types.NDJSONError _ -> Some "ndjson_error"
+  | Masc_agent_core.Types.SSEParseFailed _ -> Some "sse_parse_failed"
+  | Masc_agent_core.Types.NDJSONParseFailed _ -> Some "ndjson_parse_failed"
+  | Masc_agent_core.Types.SSEUnknownEventType _ -> Some "sse_unknown_event_type"
+  | Masc_agent_core.Types.SSEUnsupportedPart _ -> Some "sse_unsupported_part"
+  | Masc_agent_core.Types.SSEUnsupportedResponse _ -> Some "sse_unsupported_response"
+  | Masc_agent_core.Types.StreamIncomplete _ -> Some "sse_stream_incomplete"
+  | Masc_agent_core.Types.Connected -> Some "sse_connected"
+  | Masc_agent_core.Types.Timeout _ -> Some "sse_timeout"
 
 [@@@warning "+11"]
 

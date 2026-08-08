@@ -140,6 +140,6 @@ module For_testing : sig
   val failure_of_sdk_error
     :  runtime_id:string
     -> prefix:string
-    -> Agent_sdk.Error.sdk_error
+    -> Masc_agent_core.Error.sdk_error
     -> Fusion_types.judge_failure
 end

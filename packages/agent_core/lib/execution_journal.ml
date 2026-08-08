@@ -503,7 +503,6 @@ module Reducer = struct
   ;;
 
   let last_seq state = state.last_seq
-  let correlation_id state = state.correlation_id
   let find_node_record state node_id = Node_id_map.find_opt node_id state.nodes
 
   let materialized (record : node_record) =

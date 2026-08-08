@@ -325,7 +325,7 @@ let run_keepalive_unified_turn
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
       ~(reactive_wake : bool)
-      ~(shared_context : Agent_sdk.Context.t)
+      ~(shared_context : Masc_agent_core.Context.t)
       ~(deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option)
       ~(on_deferred_runtime_consumed : unit -> unit)
       ~(record_deferred_runtime_lane :
@@ -951,7 +951,7 @@ let run_heartbeat_loop
      metadata across turns, but per-turn context_injector-local timing
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
-  let shared_context = Agent_sdk.Context.create () in
+  let shared_context = Masc_agent_core.Context.create () in
   let deferred_runtime_lane_ref = ref None in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when

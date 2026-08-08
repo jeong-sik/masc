@@ -44,7 +44,7 @@ let make_sample
 let setup () = DOB.clear ()
 
 let make_usage ?cost ?(cache_creation = 0) ?(cache_read = 0) ~input ~output ()
-  : Agent_sdk.Types.api_usage
+  : Masc_agent_core.Types.api_usage
   =
   { input_tokens = input
   ; output_tokens = output
@@ -55,7 +55,7 @@ let make_usage ?cost ?(cache_creation = 0) ?(cache_read = 0) ~input ~output ()
 ;;
 
 let make_telemetry ?timings ?(request_latency_ms = 0) ?ttfrc_ms ?prefill_ms ()
-  : Agent_sdk.Types.inference_telemetry
+  : Masc_agent_core.Types.inference_telemetry
   =
   { system_fingerprint = None
   ; timings
@@ -74,11 +74,11 @@ let make_telemetry ?timings ?(request_latency_ms = 0) ?ttfrc_ms ?prefill_ms ()
 ;;
 
 let make_response ?usage ?telemetry ?(model = "claude-opus") ()
-  : Agent_sdk.Types.api_response
+  : Masc_agent_core.Types.api_response
   =
   { id = "resp-1"
   ; model
-  ; stop_reason = Agent_sdk.Types.EndTurn
+  ; stop_reason = Masc_agent_core.Types.EndTurn
   ; content = []
   ; usage
   ; telemetry
@@ -322,7 +322,7 @@ let test_clear_provider () =
 
 let test_sample_of_response_uses_usage_and_native_telemetry () =
   let usage = make_usage ~input:11 ~output:5 ~cache_read:7 ~cost:0.12 () in
-  let timings : Agent_sdk.Types.inference_timings =
+  let timings : Masc_agent_core.Types.inference_timings =
     { prompt_n = Some 11
     ; prompt_ms = Some 510.0
     ; prompt_per_second = Some 21.55
@@ -376,7 +376,7 @@ let test_sample_of_response_derives_wall_throughput () =
 
 let test_sample_of_response_prefers_ttfrc_for_ttfb () =
   let usage = make_usage ~input:100 ~output:50 () in
-  let timings : Agent_sdk.Types.inference_timings =
+  let timings : Masc_agent_core.Types.inference_timings =
     { prompt_n = Some 100
     ; prompt_ms = Some 510.0
     ; prompt_per_second = Some 196.0
@@ -409,7 +409,7 @@ let test_sample_of_response_prefers_ttfrc_for_ttfb () =
 
 let test_sample_of_response_derives_duration_from_timing_components () =
   let usage = make_usage ~input:100 ~output:88 () in
-  let timings : Agent_sdk.Types.inference_timings =
+  let timings : Masc_agent_core.Types.inference_timings =
     { prompt_n = None
     ; prompt_ms = Some 120.0
     ; prompt_per_second = None
@@ -444,7 +444,7 @@ let test_sample_of_response_derives_duration_from_timing_components () =
 
 let test_sample_of_response_uses_ttfrc_for_duration_fallback () =
   let usage = make_usage ~input:100 ~output:88 () in
-  let timings : Agent_sdk.Types.inference_timings =
+  let timings : Masc_agent_core.Types.inference_timings =
     { prompt_n = None
     ; prompt_ms = Some 120.0
     ; prompt_per_second = None

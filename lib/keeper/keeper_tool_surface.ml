@@ -366,7 +366,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             if preserve_system then
               (* Keep only system-role messages *)
               List.filter
-                (fun (m : Agent_sdk.Types.message) ->
+                (fun (m : Masc_agent_core.Types.message) ->
                    (=) m.role Llm_provider.Types.System)
                 existing_messages
             else

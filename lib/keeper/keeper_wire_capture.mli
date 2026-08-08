@@ -6,7 +6,7 @@
     input rather than from digests/sizes. These are the parameters no other
     durable store holds: the OAS checkpoint keeps [system_prompt] and the
     replayed messages, but nothing else keeps the per-turn injected context.
-    Tool schemas use the same {!Agent_sdk.Tool.schema_to_json} projection OAS
+    Tool schemas use the same {!Masc_agent_core.Tool.schema_to_json} projection OAS
     prepares for the provider. String content is passed through
     {!Llm_provider.Secret_redactor} and the exact {!Keeper_secret_redaction}
     projection snapshot before it is written.
@@ -72,8 +72,8 @@ val capture_request :
   system_prompt:string ->
   extra_system_context:string option ->
   user_message:string ->
-  history_messages:Agent_sdk.Types.message list ->
-  tools:Agent_sdk.Tool.t list ->
+  history_messages:Masc_agent_core.Types.message list ->
+  tools:Masc_agent_core.Tool.t list ->
   ?trace_id:Keeper_id.Trace_id.t ->
   unit ->
   unit

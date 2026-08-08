@@ -3,7 +3,7 @@ module Types = Masc_domain
 (** Unit tests for Tool_input_validation — OAS-delegated strict validation.
 
     Tests the integration: MASC JSON Schema -> Tool_bridge.params_of_json_schema
-    -> Agent_sdk.Tool_input_validation.validate -> pre_hook_action mapping.
+    -> Masc_agent_core.Tool_input_validation.validate -> pre_hook_action mapping.
 
     OAS 0.212 (oas@6f3648d6, "hard-cut implicit agent governance") removed
     implicit type coercion from validate: a string value for an
@@ -43,21 +43,21 @@ let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t
       `Assoc
         [ ("name", `String tool_name)
         ; ("description", `String "")
-        ; ("parameters", `List (List.map Agent_sdk.Types.tool_param_to_json parameters))
+        ; ("parameters", `List (List.map Masc_agent_core.Types.tool_param_to_json parameters))
         ]
     in
-    let oas_schema : Agent_sdk.Types.tool_schema =
-      match Agent_sdk.Types.tool_schema_of_json json with
+    let oas_schema : Masc_agent_core.Types.tool_schema =
+      match Masc_agent_core.Types.tool_schema_of_json json with
       | Ok s -> s
       | Error err -> failwith ("test_tool_input_validation: " ^ err)
     in
-    match Agent_sdk.Tool_input_validation.validate oas_schema args with
-    | Agent_sdk.Tool_input_validation.Valid coerced ->
+    match Masc_agent_core.Tool_input_validation.validate oas_schema args with
+    | Masc_agent_core.Tool_input_validation.Valid coerced ->
       if Yojson.Safe.equal coerced args then Pass
       else Proceed coerced
-    | Agent_sdk.Tool_input_validation.Invalid errors ->
+    | Masc_agent_core.Tool_input_validation.Invalid errors ->
       let msg =
-        Agent_sdk.Tool_input_validation.format_errors ~tool_name errors
+        Masc_agent_core.Tool_input_validation.format_errors ~tool_name errors
       in
       Reject
         (Tool_result.Failed
@@ -354,11 +354,11 @@ let test_schema_nullable_union_preserves_non_null_type () =
       ]
   in
   match Tool_bridge.params_of_json_schema schema with
-  | [ (param : Agent_sdk.Types.tool_param) ] ->
+  | [ (param : Masc_agent_core.Types.tool_param) ] ->
       Alcotest.(check string) "name" "payload" param.name;
       Alcotest.(check bool) "optional" false param.required;
       (match param.param_type with
-       | Agent_sdk.Types.Object -> ()
+       | Masc_agent_core.Types.Object -> ()
        | _ -> Alcotest.fail "nullable object must remain object")
   | params ->
       Alcotest.failf "expected one converted parameter, got %d"
@@ -808,7 +808,7 @@ let test_validate_args_keeper_memory_search_rejects_removed_kind () =
    breaking cat/pwd/find/head/tail/wc/git_log/git_diff. *)
 let param_by_name name params =
   List.find_opt
-    (fun (param : Agent_sdk.Types.tool_param) -> String.equal param.name name)
+    (fun (param : Masc_agent_core.Types.tool_param) -> String.equal param.name name)
     params
 
 let legacy_background_flag_name = "run_" ^ "in_background"
@@ -824,7 +824,7 @@ let execute_async_lifecycle_field_names =
 
 let check_param_type name expected params =
   match param_by_name name params with
-  | Some (param : Agent_sdk.Types.tool_param) ->
+  | Some (param : Masc_agent_core.Types.tool_param) ->
     Alcotest.(check bool)
       (name ^ " is optional at OAS boundary")
       false
@@ -833,7 +833,7 @@ let check_param_type name expected params =
       (name ^ " param type")
       expected
       (match param.param_type with
-       | Agent_sdk.Types.String -> "string"
+       | Masc_agent_core.Types.String -> "string"
        | Integer -> "integer"
        | Number -> "number"
        | Boolean -> "boolean"

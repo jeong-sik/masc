@@ -1,6 +1,6 @@
 (** Tests for Agent_tool — agent-as-tool wrapper. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Mock runners ────────────────────────────────────────────── *)
 

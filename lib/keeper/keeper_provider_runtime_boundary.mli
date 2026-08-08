@@ -43,7 +43,7 @@ type t =
   | Provider_timeout of provider_timeout
   | Not_provider_runtime_failure
 
-val classify_sdk_error : Agent_sdk.Error.sdk_error -> t
+val classify_sdk_error : Masc_agent_core.Error.sdk_error -> t
 
 val classify_provider_runtime_error_record
   :  code:string
@@ -55,4 +55,4 @@ val classify_provider_runtime_error_record
     ["provider_error_timeout:http_operation"]. [detail] remains in the
     signature for existing callers, but is not trusted for classification. *)
 
-val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
+val is_provider_timeout_error : Masc_agent_core.Error.sdk_error -> bool

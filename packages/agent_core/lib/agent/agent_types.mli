@@ -193,9 +193,9 @@ val set_state : t -> Types.agent_state -> unit
 val update_state : t -> (Types.agent_state -> Types.agent_state) -> unit
 val description : t -> string option
 
-(** {1 SDK version} *)
+(** {1 Core version} *)
 
-val sdk_version : string
+val core_version : string
 
 (** {1 Construction} *)
 

@@ -13,7 +13,7 @@ module Ops = Masc.Keeper_tool_surface_ops
 module Turn_outcome = Masc.Keeper_turn_outcome
 
 let dummy_event payload =
-  { Agent_sdk.Event_bus.meta =
+  { Masc_agent_core.Event_bus.meta =
       { correlation_id = "c"
       ; run_id = "r"
       ; ts = 0.0
@@ -24,21 +24,21 @@ let dummy_event payload =
 ;;
 
 let invocation name =
-  Agent_sdk.Tool_contract.Invocation.create
+  Masc_agent_core.Tool_contract.Invocation.create
     ~tool_use_id:name
     ~turn:0
-    ~completion:Agent_sdk.Tool_contract.Continue_after_success
+    ~completion:Masc_agent_core.Tool_contract.Continue_after_success
     ~schedule:
       { planned_index = 0
       ; batch_index = 0
       ; batch_size = 1
-      ; execution_mode = Agent_sdk.Tool_contract.Serial
+      ; execution_mode = Masc_agent_core.Tool_contract.Serial
       }
 ;;
 
 let tool_called name =
   dummy_event
-    (Agent_sdk.Event_bus.ToolCalled
+    (Masc_agent_core.Event_bus.ToolCalled
        { invocation = invocation name
        ; agent_name = "a"
        ; tool_name = name
@@ -48,11 +48,11 @@ let tool_called name =
 
 let tool_completed name =
   dummy_event
-    (Agent_sdk.Event_bus.ToolCompleted
+    (Masc_agent_core.Event_bus.ToolCompleted
        { invocation = invocation name
        ; agent_name = "a"
        ; tool_name = name
-       ; output = Ok { Agent_sdk.Types.content = "done"; _meta = None }
+       ; output = Ok { Masc_agent_core.Types.content = "done"; _meta = None }
        })
 ;;
 
@@ -171,7 +171,7 @@ let test_state_pending_count_integrity_under_concurrent_updates () =
 ;;
 
 let test_keeper_event_bus_is_intentionally_process_wide () =
-  let bus = Agent_sdk.Event_bus.create () in
+  let bus = Masc_agent_core.Event_bus.create () in
   Event_bus_slots.set_keeper bus;
   let worker = Domain.spawn (fun () -> Event_bus_slots.get_keeper ()) in
   check
@@ -183,8 +183,8 @@ let test_keeper_event_bus_is_intentionally_process_wide () =
 
 let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
   Eio_main.run @@ fun _env ->
-  let captured_bus = Agent_sdk.Event_bus.create () in
-  let later_bus = Agent_sdk.Event_bus.create () in
+  let captured_bus = Masc_agent_core.Event_bus.create () in
+  let later_bus = Masc_agent_core.Event_bus.create () in
   Event_bus_slots.set_keeper captured_bus;
   let t = EB.create ~keeper_name:"a" ~turn_id:1 () in
   let unsubscribed = ref false in
@@ -200,8 +200,8 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
       Event_bus_slots.set_keeper captured_bus)
     (fun () ->
        Event_bus_slots.set_keeper later_bus;
-       Agent_sdk.Event_bus.publish captured_bus (tool_called "captured");
-       Agent_sdk.Event_bus.publish later_bus (tool_called "later");
+       Masc_agent_core.Event_bus.publish captured_bus (tool_called "captured");
+       Masc_agent_core.Event_bus.publish later_bus (tool_called "later");
        let summary = EB.drain ~site:"test_creation_bus" t in
        check int "captured bus only" 1 summary.event_count;
        check
@@ -210,7 +210,7 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
          1
          (EB.For_testing.get_state t).pending_tool_count;
        unsubscribe_once ();
-       Agent_sdk.Event_bus.publish captured_bus (tool_called "after-unsubscribe");
+       Masc_agent_core.Event_bus.publish captured_bus (tool_called "after-unsubscribe");
        let summary_after_unsubscribe =
          EB.drain ~site:"test_after_unsubscribe" t
        in
@@ -223,8 +223,8 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
 
 let test_turn_event_bus_prefers_injected_bus_over_fallback () =
   Eio_main.run @@ fun _env ->
-  let injected_bus = Agent_sdk.Event_bus.create () in
-  let fallback_bus = Agent_sdk.Event_bus.create () in
+  let injected_bus = Masc_agent_core.Event_bus.create () in
+  let fallback_bus = Masc_agent_core.Event_bus.create () in
   Event_bus_slots.set_keeper fallback_bus;
   let t = EB.create ~event_bus:injected_bus ~keeper_name:"a" ~turn_id:1 () in
   Fun.protect
@@ -232,8 +232,8 @@ let test_turn_event_bus_prefers_injected_bus_over_fallback () =
       EB.unsubscribe t;
       Event_bus_slots.set_keeper fallback_bus)
     (fun () ->
-       Agent_sdk.Event_bus.publish fallback_bus (tool_called "fallback");
-       Agent_sdk.Event_bus.publish injected_bus (tool_called "injected");
+       Masc_agent_core.Event_bus.publish fallback_bus (tool_called "fallback");
+       Masc_agent_core.Event_bus.publish injected_bus (tool_called "injected");
        let summary = EB.drain ~site:"test_injected_bus" t in
        check int "injected bus only" 1 summary.event_count;
        check
@@ -272,8 +272,8 @@ let test_keeper_msg_async_submit_uses_captured_event_bus () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir "keeper-msg-event-bus-" in
-  let captured_bus = Agent_sdk.Event_bus.create () in
-  let later_bus = Agent_sdk.Event_bus.create () in
+  let captured_bus = Masc_agent_core.Event_bus.create () in
+  let later_bus = Masc_agent_core.Event_bus.create () in
   let observed_bus = ref None in
   let request =
     match Invocation.request ~keeper_name:"event-bus-test" ~prompt:"run" with
@@ -568,7 +568,7 @@ let test_background_drain_continues_across_multiple_polls () =
     ~mono_clock:env#mono_clock
     ~sw
   @@ fun () ->
-  let bus = Agent_sdk.Event_bus.create () in
+  let bus = Masc_agent_core.Event_bus.create () in
   Event_bus_slots.set_keeper bus;
   let t = EB.create ~keeper_name:"a" ~turn_id:1 () in
   let interval = Masc.Keeper_turn_helpers.turn_event_bus_drain_interval_sec () in
@@ -587,12 +587,12 @@ let test_background_drain_continues_across_multiple_polls () =
       | None -> ()
       | Some cc -> Eio.Cancel.cancel cc (Failure "background_drain_test_done"))
     (fun () ->
-       Agent_sdk.Event_bus.publish bus (tool_called "first");
+       Masc_agent_core.Event_bus.publish bus (tool_called "first");
        EB.start_background_drain ~clock:env#clock t;
        check bool "first event drained" true (wait_for_event_count 1 20);
-       Agent_sdk.Event_bus.publish bus (tool_called "second");
+       Masc_agent_core.Event_bus.publish bus (tool_called "second");
        check bool "second event drained" true (wait_for_event_count 2 20);
-       Agent_sdk.Event_bus.publish bus (tool_called "third");
+       Masc_agent_core.Event_bus.publish bus (tool_called "third");
        check bool "background drain keeps polling" true (wait_for_event_count 3 20))
 ;;
 

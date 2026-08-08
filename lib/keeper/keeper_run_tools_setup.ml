@@ -26,20 +26,20 @@ open Keeper_agent_prompt_metrics
    ~41 KB remainder of the bundle stays well below the nearest refusal. *)
 let gate_history_budget_bytes = 64 * 1024
 
-let tool_use_ids_of_message (message : Agent_sdk.Types.message) =
+let tool_use_ids_of_message (message : Masc_agent_core.Types.message) =
   List.filter_map
-    (fun (block : Agent_sdk.Types.content_block) ->
+    (fun (block : Masc_agent_core.Types.content_block) ->
        match block with
-       | Agent_sdk.Types.ToolUse { id; _ } -> Some id
+       | Masc_agent_core.Types.ToolUse { id; _ } -> Some id
        | _ -> None)
     message.content
 ;;
 
-let tool_result_ids_of_message (message : Agent_sdk.Types.message) =
+let tool_result_ids_of_message (message : Masc_agent_core.Types.message) =
   List.filter_map
-    (fun (block : Agent_sdk.Types.content_block) ->
+    (fun (block : Masc_agent_core.Types.content_block) ->
        match block with
-       | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+       | Masc_agent_core.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
        | _ -> None)
     message.content
 ;;
@@ -48,7 +48,7 @@ let tool_result_ids_of_message (message : Agent_sdk.Types.message) =
    out. The count is carried into the bundle: a judge that cannot tell it was
    handed a partial view weighs partial evidence as if it were complete, and
    the prompt already asks it to name absent context in its rationale. *)
-let gate_history_slice (messages : Agent_sdk.Types.message list) =
+let gate_history_slice (messages : Masc_agent_core.Types.message list) =
   let sized =
     List.map
       (fun message ->
@@ -102,9 +102,9 @@ let prepare_agent_setup
       ~(turn_system_prompt : string)
       ~(user_message : string)
       ~(dynamic_context : string)
-      ~(history_messages : Agent_sdk.Types.message list)
-      ~(shared_context : Agent_sdk.Context.t)
-      ~(context_injector : Agent_sdk.Hooks.context_injector)
+      ~(history_messages : Masc_agent_core.Types.message list)
+      ~(shared_context : Masc_agent_core.Context.t)
+      ~(context_injector : Masc_agent_core.Hooks.context_injector)
       ~(start_turn_count : int)
       ~(generation : int)
       ~(keeper_turn_id : int)
@@ -118,7 +118,7 @@ let prepare_agent_setup
       ?continuation_channel
       ?hitl_resolution
       ()
-  : (Keeper_run_tools_hooks.agent_setup, Agent_sdk.Error.sdk_error) result
+  : (Keeper_run_tools_hooks.agent_setup, Masc_agent_core.Error.sdk_error) result
   =
   let ( let* ) = Result.bind in
   let runtime_id_string = runtime_id in
@@ -288,7 +288,7 @@ let prepare_agent_setup
     - invalid_schema_count
   in
   let all_tool_names =
-    List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) keeper_tools
+    List.map (fun (tool : Masc_agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
   let expected_model_names =
     model_visible_descriptors
@@ -364,7 +364,7 @@ let prepare_agent_setup
       then Lane_tool_optional
       else (
         match current_tool_choice with
-        | Some Agent_sdk.Types.None_ -> Lane_tool_disabled
+        | Some Masc_agent_core.Types.None_ -> Lane_tool_disabled
         | _ -> Lane_text_only)
     in
     (schema_filter, lane)

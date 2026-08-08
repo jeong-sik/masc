@@ -1,6 +1,6 @@
 (** Tool_local_runtime_verify -- runtime contract verification. *)
 
-module Oas_types = Agent_sdk.Types
+module Oas_types = Masc_agent_core.Types
 
 
 (* http_error_message moved to Provider_http_error.to_message (SSOT,

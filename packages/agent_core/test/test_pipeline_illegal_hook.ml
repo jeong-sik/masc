@@ -4,7 +4,7 @@
     matrix for that stage, then asserts the pipeline returns a typed
     [Error.HookExecutionFailed] instead of raising. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let mock_response : Types.api_response =
   { id = "illegal-hook-mock"

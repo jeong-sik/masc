@@ -61,18 +61,18 @@ let make_meta () : Masc.Keeper_meta_contract.keeper_meta =
 ;;
 
 let make_checkpoint () =
-  Agent_sdk.Checkpoint.
+  Masc_agent_core.Checkpoint.
     { version = checkpoint_version
     ; session_id = "trace-clockless-exact-output"
     ; agent_name = "clockless-exact-output"
     ; model = "test-model"
     ; system_prompt = None
     ; messages =
-        [ Agent_sdk.Types.text_message Agent_sdk.Types.User "keep"
-        ; Agent_sdk.Types.text_message Agent_sdk.Types.Assistant (String.make 2048 'x')
-        ; Agent_sdk.Types.text_message Agent_sdk.Types.User (String.make 2048 'y')
+        [ Masc_agent_core.Types.text_message Masc_agent_core.Types.User "keep"
+        ; Masc_agent_core.Types.text_message Masc_agent_core.Types.Assistant (String.make 2048 'x')
+        ; Masc_agent_core.Types.text_message Masc_agent_core.Types.User (String.make 2048 'y')
         ]
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Masc_agent_core.Types.empty_usage
     ; turn_count = 7
     ; created_at = 1_700_000_000.0
     ; tools = []
@@ -84,11 +84,11 @@ let make_checkpoint () =
     ; min_p = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.Off
+    ; response_format = Masc_agent_core.Types.Off
     ; thinking_budget = None
     ; reasoning_effort = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Masc_agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }

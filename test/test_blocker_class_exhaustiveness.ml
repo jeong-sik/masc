@@ -96,28 +96,28 @@ let test_unknown_string () =
 
 (* ── SDK error → blocker_class mapping exhaustiveness ────────────── *)
 
-module SdkE = Agent_sdk.Error
-module SdkRetry = Agent_sdk.Retry
+module SdkE = Masc_agent_core.Error
+module SdkRetry = Masc_agent_core.Retry
 module KSB = Masc.Keeper_status_bridge_blocker
 module KTD = Masc.Keeper_turn_driver
 module Reg = Masc.Keeper_registry
 
 let terminal_invocation tool_use_id =
-  Agent_sdk.Tool_contract.Invocation.create
+  Masc_agent_core.Tool_contract.Invocation.create
     ~tool_use_id
     ~turn:3
     ~schedule:
       { planned_index = 1
       ; batch_index = 0
       ; batch_size = 1
-      ; execution_mode = Agent_sdk.Tool_contract.Serial
+      ; execution_mode = Masc_agent_core.Tool_contract.Serial
       }
     ~completion:
-      (Agent_sdk.Tool_contract.Terminal_after_success
-         Agent_sdk.Tool_contract.Effect_outcome_unknown)
+      (Masc_agent_core.Tool_contract.Terminal_after_success
+         Masc_agent_core.Tool_contract.Effect_outcome_unknown)
 ;;
 
-(** Every [Agent_sdk.Error.Agent _] sub-variant must have an explicit blocker
+(** Every [Masc_agent_core.Error.Agent _] sub-variant must have an explicit blocker
     decision through the two-layer pipeline in [blocker_class_of_sdk_error]:
     1. [classify_masc_internal_error] — for runtime-layer structured errors
     2. Direct SDK pattern match — for Agent sub-variants
@@ -323,7 +323,7 @@ let test_masc_accept_rejected_provider_record_does_not_reparse_detail () =
     provider_runtime_surface_exn
       ~reason:None
       ~code:"accept_rejected"
-      ~detail:(Agent_sdk.Error.to_string accept_error)
+      ~detail:(Masc_agent_core.Error.to_string accept_error)
       ()
   in
   check string

@@ -1,7 +1,7 @@
 (** Tests for context.ml — cross-turn shared state *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 let check_backend label expected ctx =
   check bool label true (Context.concurrency_backend ctx = expected)

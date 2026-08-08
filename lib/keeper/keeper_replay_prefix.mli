@@ -18,15 +18,15 @@ val unchanged : projection
 (** Record the exact canonical and projected prefixes used for a
     media-degraded dispatch. *)
 val media_degraded :
-  canonical_prefix:Agent_sdk.Types.message list ->
-  dispatch_prefix:Agent_sdk.Types.message list ->
+  canonical_prefix:Masc_agent_core.Types.message list ->
+  dispatch_prefix:Masc_agent_core.Types.message list ->
   projection
 
 (** Split [messages] after an exact structural [prefix]. *)
 val split :
-  prefix:Agent_sdk.Types.message list ->
-  Agent_sdk.Types.message list ->
-  (Agent_sdk.Types.message list, prefix_mismatch) result
+  prefix:Masc_agent_core.Types.message list ->
+  Masc_agent_core.Types.message list ->
+  (Masc_agent_core.Types.message list, prefix_mismatch) result
 
 (** Restore a projected provider checkpoint to its canonical replay prefix.
     An unchanged projection is returned verbatim.  A media-degraded projection
@@ -34,12 +34,12 @@ val split :
     and fails explicitly for every other checkpoint. *)
 val restore_messages :
   projection ->
-  Agent_sdk.Types.message list ->
-  (Agent_sdk.Types.message list, restore_error) result
+  Masc_agent_core.Types.message list ->
+  (Masc_agent_core.Types.message list, restore_error) result
 
 val restore_checkpoint :
   projection ->
-  Agent_sdk.Checkpoint.t ->
-  (Agent_sdk.Checkpoint.t, restore_error) result
+  Masc_agent_core.Checkpoint.t ->
+  (Masc_agent_core.Checkpoint.t, restore_error) result
 
 val restore_error_to_string : restore_error -> string

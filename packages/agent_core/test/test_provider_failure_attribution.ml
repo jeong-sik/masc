@@ -1,4 +1,4 @@
-open Agent_sdk
+open Masc_agent_core
 module Attribution = Provider_failure_attribution
 module Http = Llm_provider.Http_client
 module PC = Llm_provider.Provider_config

@@ -1,7 +1,7 @@
 (** Tests for otel_tracer.ml -- OTel-compatible TRACER implementation *)
 
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 (* -- Helpers ---------------------------------------------------------- *)
 

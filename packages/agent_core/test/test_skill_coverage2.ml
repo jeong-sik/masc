@@ -21,7 +21,7 @@
       skill_of_json with allowed_tools as non-list,
       of_json error paths *)
 
-open Agent_sdk
+open Masc_agent_core
 
 (* ── Skill: parse_frontmatter edge cases ──────────────── *)
 

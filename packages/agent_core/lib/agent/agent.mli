@@ -94,7 +94,7 @@ val description : t -> string option
 (** {1 Defaults} *)
 
 val default_options : options
-val sdk_version : string
+val core_version : string
 
 (** {1 Construction} *)
 

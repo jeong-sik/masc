@@ -1,17 +1,17 @@
 (** Error translation helpers for keeper Agent.run orchestration. *)
 
-(** Coarse categorisation of [Agent_sdk.Error.sdk_error] (for dashboards). *)
-val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
+(** Coarse categorisation of [Masc_agent_core.Error.sdk_error] (for dashboards). *)
+val sdk_error_kind : Masc_agent_core.Error.sdk_error -> string
 
 (** Typed receipt error-kind counterpart of {!sdk_error_kind}. *)
 val sdk_error_kind_for_receipt
-  :  Agent_sdk.Error.sdk_error
+  :  Masc_agent_core.Error.sdk_error
   -> Keeper_execution_receipt.error_kind
 
 (** User-facing SDK error message for keeper chat/tool surfaces.
     Keeps low-level SDK prefixes out of persisted keeper replies while
     telemetry and terminal reason codes continue to use structured errors. *)
-val user_message_of_sdk_error : Agent_sdk.Error.sdk_error -> string
+val user_message_of_sdk_error : Masc_agent_core.Error.sdk_error -> string
 
 (** Layer-aware termination semantics for SDK errors crossing the OAS ->
     keeper boundary.
@@ -27,7 +27,7 @@ type sdk_termination_semantics =
   | Sdk_error_failure
 
 val sdk_termination_semantics
-  :  Agent_sdk.Error.sdk_error
+  :  Masc_agent_core.Error.sdk_error
   -> sdk_termination_semantics
 
 val sdk_termination_semantics_to_string : sdk_termination_semantics -> string
@@ -44,7 +44,7 @@ val network_error_kind_to_wire : Llm_provider.Http_client.network_error_kind -> 
     tool effect: ["proven_pre_effect"], ["proven_post_effect"] or
     ["effect_outcome_unknown"]. *)
 val terminal_effect_disposition_to_wire
-  :  Agent_sdk.Error.closed_terminal_effect
+  :  Masc_agent_core.Error.closed_terminal_effect
   -> string
 
 (** RFC-0042 PR-2.5: typed bridge variants of the wire accessors.
@@ -59,22 +59,22 @@ val terminal_effect_disposition_to_wire
     Byte invariant guarded by [test_keeper_sdk_error_typed_bridge].
 
     @since 0.193.1 *)
-val terminal_reason_code_of_sdk_error : Agent_sdk.Error.sdk_error -> string
+val terminal_reason_code_of_sdk_error : Masc_agent_core.Error.sdk_error -> string
 
 val terminal_reason_code_of_sdk_error_typed
-  :  Agent_sdk.Error.sdk_error
+  :  Masc_agent_core.Error.sdk_error
   -> Keeper_turn_terminal_code.t
 
 (** Typed counterpart of [api_error_terminal_reason_code]. *)
 val api_error_terminal_reason_code_typed
-  :  Agent_sdk.Error.api_error
+  :  Masc_agent_core.Error.api_error
   -> Keeper_turn_terminal_code.t
 
 (** Receipt outcome for terminal SDK values. OAS turn-limit and execution-time
     observations remain successful even if they reach this defensive bridge;
     they are neither cancellation nor lifecycle-failure authority. *)
 val receipt_outcome_kind_of_sdk_error
-  :  Agent_sdk.Error.sdk_error
+  :  Masc_agent_core.Error.sdk_error
   -> Keeper_execution_receipt.outcome_kind
 
 (** Structured internal error for post-turn checkpoint persistence
@@ -83,7 +83,7 @@ val receipt_outcome_kind_of_sdk_error
 val checkpoint_persistence_error
   :  keeper_name:string
   -> detail:string
-  -> Agent_sdk.Error.sdk_error
+  -> Masc_agent_core.Error.sdk_error
 
 (** Map an optional runtime observation to a typed runtime outcome
     ([Runtime_passed_to_next_model] / [Runtime_completed] /

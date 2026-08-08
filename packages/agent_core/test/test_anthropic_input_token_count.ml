@@ -113,37 +113,37 @@ let build_admission_agent
       ()
   =
   let builder =
-    Agent_sdk.Builder.create ~net ~model:provider_config.Provider_config.model_id
-    |> Agent_sdk.Builder.with_provider_config provider_config
-    |> Agent_sdk.Builder.with_context_fit_admission Agent_sdk.Agent.Enforce_when_supported
-    |> Agent_sdk.Builder.without_event_bus
+    Masc_agent_core.Builder.create ~net ~model:provider_config.Provider_config.model_id
+    |> Masc_agent_core.Builder.with_provider_config provider_config
+    |> Masc_agent_core.Builder.with_context_fit_admission Masc_agent_core.Agent.Enforce_when_supported
+    |> Masc_agent_core.Builder.without_event_bus
   in
   let builder =
     match transport with
     | None -> builder
-    | Some transport -> Agent_sdk.Builder.with_transport transport builder
+    | Some transport -> Masc_agent_core.Builder.with_transport transport builder
   in
   let builder =
     match model_input_projection with
     | None -> builder
-    | Some project -> Agent_sdk.Builder.with_model_input_projection project builder
+    | Some project -> Masc_agent_core.Builder.with_model_input_projection project builder
   in
   let builder =
     match body_timeout_s with
     | None -> builder
-    | Some timeout_s -> Agent_sdk.Builder.with_body_timeout timeout_s builder
+    | Some timeout_s -> Masc_agent_core.Builder.with_body_timeout timeout_s builder
   in
   let builder =
     match pre_dispatch_serialization_observer with
     | None -> builder
     | Some observer ->
-      Agent_sdk.Builder.with_pre_dispatch_serialization_observer observer builder
+      Masc_agent_core.Builder.with_pre_dispatch_serialization_observer observer builder
   in
   builder
-  |> Agent_sdk.Builder.build_safe
+  |> Masc_agent_core.Builder.build_safe
   |> function
   | Ok agent -> agent
-  | Error error -> fail (Agent_sdk.Error.to_string error)
+  | Error error -> fail (Masc_agent_core.Error.to_string error)
 ;;
 
 let completion_request config : Llm_transport.completion_request =
@@ -734,7 +734,7 @@ let run_constrained_anthropic_count input_tokens =
   let dispatched = ref false in
   let transport = dispatch_tripwire dispatched in
   let result =
-    Agent_sdk.Agent.run
+    Masc_agent_core.Agent.run
       ~sw
       (build_admission_agent ~net ~provider_config ~transport ())
       "same exact provider request"
@@ -756,10 +756,10 @@ let test_serving_constraint_uses_exact_provider_count () =
     rejected_body;
   (match accepted with
    | Ok _ -> check bool "accepted observation dispatches" true accepted_dispatched
-   | Error error -> fail (Agent_sdk.Error.to_string error));
+   | Error error -> fail (Masc_agent_core.Error.to_string error));
   match rejected with
   | Error
-      (Agent_sdk.Error.Api
+      (Masc_agent_core.Error.Api
          (Retry.InputCapacity
             { reason =
                 Retry.Serving_constraint_rejected
@@ -771,7 +771,7 @@ let test_serving_constraint_uses_exact_provider_count () =
             ; _
             })) ->
     check bool "rejected observation is zero-dispatch" false rejected_dispatched
-  | Error error -> fail (Agent_sdk.Error.to_string error)
+  | Error error -> fail (Masc_agent_core.Error.to_string error)
   | Ok _ -> fail "rejected exact token observation was dispatched"
 ;;
 
@@ -789,7 +789,7 @@ let test_stale_serving_constraint_fails_before_measurement () =
              (serving_constraint ~expires_at_unix_s:1 ()))
         base_url
     in
-    Agent_sdk.Agent.run
+    Masc_agent_core.Agent.run
       ~sw
       (build_admission_agent
          ~net
@@ -800,13 +800,13 @@ let test_stale_serving_constraint_fails_before_measurement () =
   in
   (match result with
    | Error
-       (Agent_sdk.Error.Api
+       (Masc_agent_core.Error.Api
           (Retry.InputCapacity
              { reason =
                  Retry.Serving_constraint_rejected (Serving_constraint.Evidence_expired _)
              ; _
              })) -> ()
-   | Error error -> fail (Agent_sdk.Error.to_string error)
+   | Error error -> fail (Masc_agent_core.Error.to_string error)
    | Ok _ -> fail "stale serving evidence was admitted");
   check int "stale evidence makes no count request" 0 posts;
   check bool "stale evidence makes no completion request" false !dispatched
@@ -832,7 +832,7 @@ let test_unmeasurable_constraint_fails_typed_without_dispatch () =
     }
   in
   let result =
-    Agent_sdk.Agent.run
+    Masc_agent_core.Agent.run
       ~sw
       (build_admission_agent
          ~net:(Eio.Stdenv.net env)
@@ -843,10 +843,10 @@ let test_unmeasurable_constraint_fails_typed_without_dispatch () =
   in
   (match result with
    | Error
-       (Agent_sdk.Error.Api
+       (Masc_agent_core.Error.Api
           (Retry.InputCapacity { reason = Retry.Token_measurement_unavailable _; _ })) ->
      ()
-   | Error error -> fail (Agent_sdk.Error.to_string error)
+   | Error error -> fail (Masc_agent_core.Error.to_string error)
    | Ok _ -> fail "unmeasurable constrained request was dispatched");
   check bool "unmeasurable constraint is zero-dispatch" false !dispatched
 ;;
@@ -857,7 +857,7 @@ let test_unmeasurable_constraint_fails_typed_without_dispatch () =
    [Context_limit_unknown] surfaces without a wasted round-trip.
 
    These two tests drive the REAL production dispatch path via
-   [Agent_sdk.Agent.run] / [Agent_sdk.Agent.run_stream] (both route through
+   [Masc_agent_core.Agent.run] / [Masc_agent_core.Agent.run_stream] (both route through
    [Pipeline_stage_route]); they do NOT reconstruct the resolve/measure/admit
    sequence inline. That is what makes them guard the production ordering: the
    model has no catalog row and the config carries no [~max_context], so resolve
@@ -874,9 +874,9 @@ let test_unmeasurable_constraint_fails_typed_without_dispatch () =
 let expect_unknown_limit_failure label result =
   match result with
   | Error
-      (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field = "max_context"; _ }))
+      (Masc_agent_core.Error.Config (Masc_agent_core.Error.InvalidConfig { field = "max_context"; _ }))
     -> ()
-  | Error error -> fail (label ^ ": " ^ Agent_sdk.Error.to_string error)
+  | Error error -> fail (label ^ ": " ^ Masc_agent_core.Error.to_string error)
   | Ok _ -> fail (label ^ ": expected unknown-context-limit failure before measurement")
 ;;
 
@@ -892,7 +892,7 @@ let test_resolve_before_measure_skips_count_roundtrip () =
         ~transport:(dispatch_tripwire dispatched)
         ()
     in
-    Agent_sdk.Agent.run ~sw agent "resolve before measuring"
+    Masc_agent_core.Agent.run ~sw agent "resolve before measuring"
   in
   expect_unknown_limit_failure "sync" result;
   check bool "unknown limit must not dispatch (sync)" false !dispatched;
@@ -911,7 +911,7 @@ let test_resolve_before_measure_skips_count_roundtrip_stream () =
         ~transport:(dispatch_tripwire dispatched)
         ()
     in
-    Agent_sdk.Agent.run_stream
+    Masc_agent_core.Agent.run_stream
       ~sw
       ~on_event:(fun _ -> ())
       agent
@@ -924,13 +924,13 @@ let test_resolve_before_measure_skips_count_roundtrip_stream () =
 
 let expect_request_body_rejection label = function
   | Error
-      (Agent_sdk.Error.Api
+      (Masc_agent_core.Error.Api
          (Retry.InvalidRequest
             { reason = Retry.Request_body_too_large { actual_bytes; limit_bytes }; _ }))
     ->
     check int (label ^ " declared byte limit") 1 limit_bytes;
     check bool (label ^ " exact body exceeds limit") true (actual_bytes > limit_bytes)
-  | Error error -> fail (label ^ ": " ^ Agent_sdk.Error.to_string error)
+  | Error error -> fail (label ^ ": " ^ Masc_agent_core.Error.to_string error)
   | Ok _ -> fail (label ^ ": oversized completion body was admitted")
 ;;
 
@@ -948,12 +948,12 @@ let run_body_admission_before_measurement ~stream =
     in
     if stream
     then
-      Agent_sdk.Agent.run_stream
+      Masc_agent_core.Agent.run_stream
         ~sw
         ~on_event:(fun _ -> ())
         agent
         "admit exact streaming body before measurement"
-    else Agent_sdk.Agent.run ~sw agent "admit exact sync body before measurement"
+    else Masc_agent_core.Agent.run ~sw agent "admit exact sync body before measurement"
   in
   result, posts, !dispatched
 ;;
@@ -1027,11 +1027,11 @@ let test_agent_route_uses_prepared_admission () =
       }
     in
     let agent = build_admission_agent ~net ~provider_config ~transport () in
-    let result = Agent_sdk.Agent.run ~sw agent "measure this exact turn" in
+    let result = Masc_agent_core.Agent.run ~sw agent "measure this exact turn" in
     result, !dispatched
   in
   match result with
-  | Error error, _ -> fail (Agent_sdk.Error.to_string error)
+  | Error error, _ -> fail (Masc_agent_core.Error.to_string error)
   | Ok actual, None ->
     check string "response" "accepted" (Types.visible_text_of_response actual);
     fail "Agent route did not dispatch the admitted request"
@@ -1056,11 +1056,11 @@ let test_agent_stream_route_uses_prepared_admission () =
       }
     in
     let agent = build_admission_agent ~net ~provider_config ~transport () in
-    let result = Agent_sdk.Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "stream" in
+    let result = Masc_agent_core.Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "stream" in
     result, !dispatched
   in
   match result with
-  | Error error, _ -> fail (Agent_sdk.Error.to_string error)
+  | Error error, _ -> fail (Masc_agent_core.Error.to_string error)
   | Ok _, None -> fail "Agent stream route did not dispatch the admitted request"
   | Ok actual, Some request ->
     check string "stream response" "accepted" (Types.visible_text_of_response actual);
@@ -1086,18 +1086,18 @@ let run_admitted_agent_observer ~stream =
     let result =
       if stream
       then
-        Agent_sdk.Agent.run_stream
+        Masc_agent_core.Agent.run_stream
           ~sw
           ~on_event:(fun _ -> ())
           agent
           "observe admitted stream serialization"
-      else Agent_sdk.Agent.run ~sw agent "observe admitted sync serialization"
+      else Masc_agent_core.Agent.run ~sw agent "observe admitted sync serialization"
     in
     result, !observations
   in
   (match result with
    | Ok _ -> ()
-   | Error error -> fail (Agent_sdk.Error.to_string error));
+   | Error error -> fail (Masc_agent_core.Error.to_string error));
   match completion_body with
   | None -> fail "admitted Agent path did not reach completion dispatch"
   | Some body -> body, observations
@@ -1140,11 +1140,11 @@ let test_agent_projection_is_shared_by_measurement_and_dispatch () =
           Ok (provider_messages @ [ hydrated ]))
         ()
     in
-    let result = Agent_sdk.Agent.run ~sw agent "canonical input" in
+    let result = Masc_agent_core.Agent.run ~sw agent "canonical input" in
     result, !dispatched
   in
   match result, dispatched with
-  | Error error, _ -> fail (Agent_sdk.Error.to_string error)
+  | Error error, _ -> fail (Masc_agent_core.Error.to_string error)
   | Ok _, None -> fail "projected request was not dispatched"
   | Ok _, Some request ->
     check int "projection is applied exactly once" 1 !projection_calls;
@@ -1180,18 +1180,18 @@ let run_failing_projection projection =
       ~model_input_projection:projection
       ()
   in
-  Agent_sdk.Agent.run ~sw agent "canonical input"
+  Masc_agent_core.Agent.run ~sw agent "canonical input"
 ;;
 
 let check_projection_failure expected_detail = function
   | Error
-      (Agent_sdk.Error.Agent
+      (Masc_agent_core.Error.Agent
          (HookExecutionFailed
             { hook_name; stage; tool_name = None; tool_use_id = None; detail })) ->
     check string "projection hook name" "model_input_projection" hook_name;
     check string "projection stage" "turn:parse" stage;
     check string "projection detail" expected_detail detail
-  | Error error -> fail (Agent_sdk.Error.to_string error)
+  | Error error -> fail (Masc_agent_core.Error.to_string error)
   | Ok _ -> fail "failed projection must abort the turn"
 ;;
 
@@ -1224,7 +1224,7 @@ let test_agent_count_preflight_uses_completion_timeout () =
     let agent =
       build_admission_agent ~body_timeout_s:0.02 ~net ~provider_config ~transport ()
     in
-    let result = Agent_sdk.Agent.run ~sw ~clock agent "bounded count preflight" in
+    let result = Masc_agent_core.Agent.run ~sw ~clock agent "bounded count preflight" in
     result, !dispatched
   in
   match result, dispatched with
@@ -1238,11 +1238,11 @@ let test_agent_count_preflight_uses_completion_timeout () =
      "body_timeout_s total deadline exceeded". Http_operation for a body deadline was
      the older, contradictory labelling. *)
   | ( Error
-        (Agent_sdk.Error.Provider
+        (Masc_agent_core.Error.Provider
            (Llm_provider.Error.Timeout
               { timeout_phase = Some Llm_provider.Http_client.Wall_clock; _ }))
     , false ) -> ()
-  | Error error, _ -> fail (Agent_sdk.Error.to_string error)
+  | Error error, _ -> fail (Masc_agent_core.Error.to_string error)
   | Ok _, _ -> fail "stalled count preflight must time out before completion dispatch"
 ;;
 
@@ -1262,13 +1262,13 @@ let test_agent_overflow_blocks_dispatch () =
       }
     in
     let agent = build_admission_agent ~net ~provider_config ~transport () in
-    let result = Agent_sdk.Agent.run ~sw agent "overflow" in
+    let result = Masc_agent_core.Agent.run ~sw agent "overflow" in
     result, !dispatched
   in
   match result with
-  | Error (Agent_sdk.Error.Api (Retry.ContextOverflow { limit = Some 512; _ })), false ->
+  | Error (Masc_agent_core.Error.Api (Retry.ContextOverflow { limit = Some 512; _ })), false ->
     ()
-  | Error error, _ -> fail (Agent_sdk.Error.to_string error)
+  | Error error, _ -> fail (Masc_agent_core.Error.to_string error)
   | Ok _, _ -> fail "overflowed prepared request must not dispatch"
 ;;
 
@@ -1288,13 +1288,13 @@ let test_kimi_agent_overflow_blocks_dispatch () =
       }
     in
     let agent = build_admission_agent ~net ~provider_config ~transport () in
-    let result = Agent_sdk.Agent.run ~sw agent "overflow" in
+    let result = Masc_agent_core.Agent.run ~sw agent "overflow" in
     result, !dispatched
   in
   match result with
-  | Error (Agent_sdk.Error.Api (Retry.ContextOverflow { limit = Some 512; _ })), false ->
+  | Error (Masc_agent_core.Error.Api (Retry.ContextOverflow { limit = Some 512; _ })), false ->
     ()
-  | Error error, _ -> fail (Agent_sdk.Error.to_string error)
+  | Error error, _ -> fail (Masc_agent_core.Error.to_string error)
   | Ok _, _ -> fail "overflowed Kimi request must not dispatch"
 ;;
 
@@ -1312,17 +1312,17 @@ let test_invalid_count_response_is_provider_parse_failure () =
       }
     in
     let agent = build_admission_agent ~net ~provider_config ~transport () in
-    Agent_sdk.Agent.run_detailed ~sw agent "malformed count response"
+    Masc_agent_core.Agent.run_detailed ~sw agent "malformed count response"
   in
   match result with
   | Error
-      { Agent_sdk.Agent.error =
-          Agent_sdk.Error.Api
+      { Masc_agent_core.Agent.error =
+          Masc_agent_core.Error.Api
             (Retry.InvalidRequest { reason = Retry.Json_parse_error; _ })
       ; provider_failure =
-          Some { Agent_sdk.Provider_failure_attribution.evidence = Response_parse; _ }
+          Some { Masc_agent_core.Provider_failure_attribution.evidence = Response_parse; _ }
       } -> ()
-  | Error detailed -> fail (Agent_sdk.Error.to_string detailed.error)
+  | Error detailed -> fail (Masc_agent_core.Error.to_string detailed.error)
   | Ok _ -> fail "malformed provider count response must fail"
 ;;
 
@@ -1348,8 +1348,8 @@ let test_unsupported_provider_preserves_compatibility () =
     }
   in
   let agent = build_admission_agent ~net ~provider_config ~transport () in
-  match Agent_sdk.Agent.run ~sw agent "compatibility" with
-  | Error error -> fail (Agent_sdk.Error.to_string error)
+  match Masc_agent_core.Agent.run ~sw agent "compatibility" with
+  | Error error -> fail (Masc_agent_core.Error.to_string error)
   | Ok _ -> check bool "compatibility dispatch" true !dispatched
 ;;
 

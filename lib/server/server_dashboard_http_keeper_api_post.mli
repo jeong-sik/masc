@@ -62,7 +62,7 @@ val oas_checkpoint_summary_json :
   path:string ->
   is_current:bool ->
   fallback_generation:int ->
-  Agent_sdk.Checkpoint.t ->
+  Masc_agent_core.Checkpoint.t ->
   Yojson.Safe.t
 val keeper_checkpoint_inventory_json :
   Workspace.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t

@@ -12,7 +12,7 @@
     Usage:
       dune exec examples/error_handling.exe *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (* ── A tool that fails on certain inputs ─────────────── *)

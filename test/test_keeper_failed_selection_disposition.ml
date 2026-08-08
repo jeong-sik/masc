@@ -16,7 +16,7 @@ module Turn = Masc.Keeper_unified_turn
 module Loop = Masc.Keeper_heartbeat_loop
 
 let overflow_error =
-  Agent_sdk.Error.Api
+  Masc_agent_core.Error.Api
     (ContextOverflow { message = "exceeded"; limit = Some 32768 })
 ;;
 

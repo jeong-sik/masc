@@ -3,7 +3,7 @@
     Validates the field flow plus the operator-facing message contract
     for non-streaming [TimeoutError { phase = Non_streaming_body; _ }]. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let tc name f = Alcotest.test_case name `Quick f
 

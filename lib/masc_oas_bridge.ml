@@ -46,7 +46,7 @@ let run_safe ~caller fn =
       | None -> "Inner OAS timeout observed"
     in
     Error
-      (Agent_sdk.Error.Api
+      (Masc_agent_core.Error.Api
          (Timeout
             { message; phase = None }))
   | Eio.Cancel.Cancelled inner_exn as exn ->

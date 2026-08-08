@@ -52,7 +52,7 @@ type usage_trust = Keeper_usage_trust.t =
 let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime_lane_label
 
 let classify_usage_trust ~(usage_reported : bool)
-    ~(usage : Agent_sdk.Types.api_usage) : usage_trust =
+    ~(usage : Masc_agent_core.Types.api_usage) : usage_trust =
   Keeper_usage_trust.classify ~usage_reported ~usage
 
 (* #9953: bucket the raw [context_max] integer into a tightly
@@ -176,7 +176,7 @@ let record_turn_latency_by_model_bucket
    anomaly remains diagnosable instead of being silently rewritten. Missing is
    represented by the existing 0.0 aggregate identity. *)
 let estimate_usage_cost_usd usage =
-  match usage.Agent_sdk.Types.cost_usd with
+  match usage.Masc_agent_core.Types.cost_usd with
   | Some cost -> cost
   | None -> 0.0
 
@@ -262,7 +262,7 @@ let is_noop_cycle ~has_text ~(tools_used : string list) : bool =
   (not has_text) && tools_used = []
 
 let visible_run_validation (result : Keeper_agent_run.run_result) :
-    Agent_sdk.Raw_trace.run_validation option =
+    Masc_agent_core.Raw_trace.run_validation option =
   match result.run_validation with
   | Some v when v.ok && v.evidence <> [] -> Some v
   | _ -> None
@@ -304,7 +304,7 @@ let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
   || Option.is_some (visible_run_validation result)
 
 let validated_evidence_preview
-    (v : Agent_sdk.Raw_trace.run_validation) : string =
+    (v : Masc_agent_core.Raw_trace.run_validation) : string =
   match v.tool_names with
   | [] -> "(validated evidence)"
   | names ->
@@ -339,7 +339,7 @@ let accountability_evidence_refs
     ~(trace_id : string)
     ~(turn_number : int)
     ~(result : Keeper_agent_run.run_result)
-    ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option) =
+    ~(validated_evidence : Masc_agent_core.Raw_trace.run_validation option) =
   let tool_refs =
     Keeper_agent_result.tool_names result
     |> List.filter_map (fun tool_name ->

@@ -64,17 +64,6 @@ let contains_substring_ci s needle =
 
 let is_data_url_boundary s pos = pos = 0 || not (is_uri_scheme_char s.[pos - 1])
 
-let is_data_url_header_terminal ch =
-  Char.equal ch '"'
-  || Char.equal ch '\''
-  || Char.equal ch '<'
-  || Char.equal ch '>'
-  || Char.equal ch ' '
-  || Char.equal ch '\t'
-  || Char.equal ch '\n'
-  || Char.equal ch '\r'
-;;
-
 let find_data_url_comma s pos =
   let len = String.length s in
   let rec loop i =

@@ -102,12 +102,12 @@ type slot_scheduler_observed_payload = {
 
    agent_completed carries a variable-shape result tail beyond the
    three base fields (agent_name, task_id, elapsed_s).  The tail is
-   produced by a runtime-local helper that closes over Agent_sdk
-   variant types (Agent_sdk.Types.api_response), so the constructor
+   produced by a runtime-local helper that closes over Masc_agent_core
+   variant types (Masc_agent_core.Types.api_response), so the constructor
    in [Sse_event] keeps the caller-supplied addendum splice.
 
    agent_failed's five error fields are simple projections of
-   Agent_sdk.Error.t (string/bool/Yojson.Safe.t) and are encoded
+   Masc_agent_core.Error.t (string/bool/Yojson.Safe.t) and are encoded
    directly in the atd schema so the dashboard no longer drops them
    during typed parsing. *)
 

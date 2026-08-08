@@ -1,7 +1,7 @@
 (** Translate OAS typed stream events into keeper chat events.
 
     MASC owns the channel event surface, but the upstream stream semantics come
-    from OAS' closed {!Agent_sdk.Types.sse_event} sum. This module is the
+    from OAS' closed {!Masc_agent_core.Types.sse_event} sum. This module is the
     boundary adapter between those two domains. *)
 
 type state
@@ -24,7 +24,7 @@ val translate :
   redact_text:(string -> string) ->
   base_dir:string ->
   state ->
-  Agent_sdk.Types.sse_event ->
+  Masc_agent_core.Types.sse_event ->
   translated_event
 (** [base_dir] is the workspace base path used to persist RFC-0301 model-generated
     media (via {!Keeper_chat_media_store}) when a media block completes. *)

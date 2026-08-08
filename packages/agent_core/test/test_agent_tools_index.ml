@@ -1,5 +1,5 @@
 open Alcotest
-open Agent_sdk
+open Masc_agent_core
 
 let make_tool ?(content = "ok") name =
   Tool.create

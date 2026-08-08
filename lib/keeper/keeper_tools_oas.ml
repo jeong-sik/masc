@@ -1,7 +1,7 @@
 (** Keeper_tools_oas — Wrap keeper tools as OAS Tool.t for Agent.run().
 
     Bridges [Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] dispatch
-    to [Agent_sdk.Tool.t] list via [Tool_bridge.oas_tool_of_masc].
+    to [Masc_agent_core.Tool.t] list via [Tool_bridge.oas_tool_of_masc].
 
     Tool execution reads current context from [ctx_snapshot] (immutable),
     enabling Agent.run() to manage messages while keeper tools
@@ -28,7 +28,7 @@ type gate_replay_delivery =
   }
 
 type tool_bundle =
-  { tools : Agent_sdk.Tool.t list
+  { tools : Masc_agent_core.Tool.t list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option

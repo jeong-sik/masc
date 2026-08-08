@@ -20,7 +20,7 @@ caller-owned.
 An OpenAI-compatible vLLM endpoint needs no provider-specific SDK registration:
 
 ```ocaml
-open Agent_sdk
+open Masc_agent_core
 
 let provider_config =
   Llm_provider.Provider_config.make
@@ -91,7 +91,7 @@ Load the file explicitly during bootstrap. Parse failure, unknown provider,
 missing model, and missing credential are all errors:
 
 ```ocaml
-open Agent_sdk
+open Masc_agent_core
 
 let ( let* ) = Result.bind
 

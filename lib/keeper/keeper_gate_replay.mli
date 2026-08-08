@@ -85,8 +85,8 @@ val append_model_evidence :
 
 val append_model_evidence_block :
   model_evidence ->
-  Agent_sdk.Types.content_block list ->
-  Agent_sdk.Types.content_block list
+  Masc_agent_core.Types.content_block list ->
+  Masc_agent_core.Types.content_block list
 (** Append the same canonical replay reference to a structured user input.
     This keeps replay evidence live when a multimodal goal uses [goal_blocks]
     instead of the string [goal]. *)
@@ -94,8 +94,8 @@ val append_model_evidence_block :
 val project_model_input :
   base_path:string ->
   model_evidence ->
-  Agent_sdk.Types.message list ->
-  (Agent_sdk.Types.message list, string) result
+  Masc_agent_core.Types.message list ->
+  (Masc_agent_core.Types.message list, string) result
 (** Append the canonical typed artifact reference as an explicit provider-only
     message. Exact replay bytes remain in durable storage and are read through
     [keeper_artifact_read], so replay evidence cannot bypass provider-input

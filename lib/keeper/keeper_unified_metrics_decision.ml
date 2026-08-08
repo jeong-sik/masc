@@ -198,12 +198,12 @@ let append_decision_record
         ( "trace_ref",
           match result with
           | Some { trace_ref = Some trace_ref; _ } ->
-              Agent_sdk.Raw_trace.run_ref_to_yojson trace_ref
+              Masc_agent_core.Raw_trace.run_ref_to_yojson trace_ref
           | _ -> `Null );
         ( "run_validation",
           match result with
           | Some { run_validation = Some validation; _ } ->
-              Agent_sdk.Raw_trace.run_validation_to_yojson validation
+              Masc_agent_core.Raw_trace.run_validation_to_yojson validation
           | _ -> `Null );
         ( "telemetry",
           match result with

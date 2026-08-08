@@ -12,7 +12,7 @@
     Usage:
       dune exec examples/observable_agent.exe *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (* ── ANSI colors ─────────────────────────────────────── *)

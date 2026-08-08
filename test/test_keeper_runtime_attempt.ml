@@ -16,7 +16,7 @@ let retry_after_of_outcome = function
   | _ -> None
 
 let rate_limited retry_after =
-  Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited { message = "slow down"; retry_after })
+  Masc_agent_core.Error.Api (Llm_provider.Retry.RateLimited { message = "slow down"; retry_after })
 
 let test_429_threads_resolved_retry_after () =
   Alcotest.(check (option (option (float 0.0))))
@@ -43,7 +43,7 @@ let timeout_phase_label_of_outcome = function
   | _ -> None
 
 let api_timeout phase =
-  Agent_sdk.Error.Api
+  Masc_agent_core.Error.Api
     (Llm_provider.Retry.Timeout { message = "per-provider timeout after 90.0s"; phase })
 
 let test_timeout_threads_phase () =
@@ -65,7 +65,7 @@ let test_timeout_without_phase_is_unknown () =
     (timeout_phase_label_of_outcome (KRA.sdk_error_to_runtime_outcome (api_timeout None)))
 
 let provider_wire_error () =
-  Agent_sdk.Error.Provider
+  Masc_agent_core.Error.Provider
     (Llm_provider.Error.ProviderWireError
        { provider = "test-provider"
        ; format = Llm_provider.Http_client.Sse
@@ -74,7 +74,7 @@ let provider_wire_error () =
        })
 
 let provider_reported_error () =
-  Agent_sdk.Error.Provider
+  Masc_agent_core.Error.Provider
     (Llm_provider.Error.ProviderReportedError
        { provider = "test-provider"
        ; error_type = Some "overloaded"

@@ -9,7 +9,7 @@ type block_state =
   | Invalid_media_block
   | Active_media of
       { media_type : string
-      ; source_type : Agent_sdk.Types.media_source_kind
+      ; source_type : Masc_agent_core.Types.media_source_kind
       ; chunks : string list (* reversed: newest chunk first, concatenated at stop *)
       ; encoded_bytes : int
       }
@@ -66,8 +66,8 @@ let tool_start_is_replay existing tool =
   && String.equal existing.tool_call_name tool.tool_call_name
 
 let stream_start_is_tool ~index ~content_type ~tool_id ~tool_name =
-  Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
-    (Agent_sdk.Types.ContentBlockStart
+  Masc_agent_core.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
+    (Masc_agent_core.Types.ContentBlockStart
        { index; content_type; tool_id; tool_name })
 
 let has_any_tool_identity ~tool_id ~tool_name =
@@ -186,8 +186,8 @@ let tool_args_event ~redact_text ~snapshot bridge_state index args =
       }
 
 let translate ~redact_text ~base_dir bridge_state
-    (evt : Agent_sdk.Types.sse_event) =
-  let open Agent_sdk.Types in
+    (evt : Masc_agent_core.Types.sse_event) =
+  let open Masc_agent_core.Types in
   let open Keeper_chat_events in
   match evt with
   | Connected ->
@@ -271,7 +271,7 @@ let translate ~redact_text ~base_dir bridge_state
          through the thinking-delta lane so keepers surface it like other
          provider reasoning. OAS owns the typed text projection. *)
       let text =
-        Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
+        Masc_agent_core.Types.reasoning_details_text ~reasoning_content ~details
       in
       { bridge_state;
         chat_events = [ Oas_thinking_delta { index; delta = redact_text text } ]
@@ -513,7 +513,7 @@ let translate ~redact_text ~base_dir bridge_state
               Sse_unknown_event_type ]
       }
   | SSEUnsupportedPart { provider_kind; part; raw } ->
-      let provider = Agent_sdk.Llm_provider.Provider_kind.to_string provider_kind in
+      let provider = Masc_agent_core.Llm_provider.Provider_kind.to_string provider_kind in
       let reason = redact_text (Printf.sprintf "%s.part.%s" provider part) in
       { bridge_state;
         chat_events =
@@ -523,7 +523,7 @@ let translate ~redact_text ~base_dir bridge_state
               { message = "Provider stream capability unsupported: " ^ reason } ]
       }
   | SSEUnsupportedResponse { provider_kind; response; raw } ->
-      let provider = Agent_sdk.Llm_provider.Provider_kind.to_string provider_kind in
+      let provider = Masc_agent_core.Llm_provider.Provider_kind.to_string provider_kind in
       let reason = redact_text (Printf.sprintf "%s.response.%s" provider response) in
       { bridge_state;
         chat_events =

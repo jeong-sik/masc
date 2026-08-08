@@ -1,13 +1,13 @@
-(** Unit tests for [Agent_sdk_diag_sink] — the routing of OAS [Llm_provider.Diag]
+(** Unit tests for [Masc_agent_core_diag_sink] — the routing of OAS [Llm_provider.Diag]
     diagnostics into MASC's structured log (#25148).
 
     [route] is written as dependency injection so the level-to-emitter mapping
     and the [\[oas:ctx\]] message prefix are verifiable without capturing the
     global log sink. [masc.server] (an unwrapped library) and
     [agent_sdk.llm_provider] are re-exported by [masc_test_deps], so
-    [Agent_sdk_diag_sink] and [Llm_provider] are bound directly. *)
+    [Masc_agent_core_diag_sink] and [Llm_provider] are bound directly. *)
 
-module Sink = Agent_sdk_diag_sink
+module Sink = Masc_agent_core_diag_sink
 
 let test_format_line_prefixes_ctx () =
   Alcotest.(check string)

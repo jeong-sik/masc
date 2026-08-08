@@ -37,7 +37,7 @@ type 'a degraded_retry_prepare_result =
   | Degraded_retry_setup_failed of {
       retry : EC.degraded_retry;
       reason : string;
-      fail_open_err : Agent_sdk.Error.sdk_error;
+      fail_open_err : Masc_agent_core.Error.sdk_error;
     }
 
 type 'a degraded_retry_step =
@@ -45,7 +45,7 @@ type 'a degraded_retry_step =
   | Degraded_retry_step_setup_failed of {
       retry : EC.degraded_retry;
       reason : string;
-      fail_open_err : Agent_sdk.Error.sdk_error;
+      fail_open_err : Masc_agent_core.Error.sdk_error;
     }
   | Degraded_retry_step_prepared of {
       retry : EC.degraded_retry;
@@ -54,7 +54,7 @@ type 'a degraded_retry_step =
     }
 
 let empty_degraded_retry_runtime_error =
-  Agent_sdk.Error.Internal "degraded retry selected empty next_runtime"
+  Masc_agent_core.Error.Internal "degraded retry selected empty next_runtime"
 
 let prepare_degraded_retry_allowed
       ~current_runtime_id
@@ -105,7 +105,7 @@ let decide_degraded_retry
     ~(base_runtime : string)
     ~(effective_runtime : string)
     ~(attempted_runtimes : string list)
-    (err : Agent_sdk.Error.sdk_error) : degraded_retry_decision =
+    (err : Masc_agent_core.Error.sdk_error) : degraded_retry_decision =
   match
     next_fail_open_runtime_for_turn
       ~base_runtime ~effective_runtime
@@ -195,7 +195,7 @@ let run_direct_no_progress_retry_loop
       ~current_turn_phase_elapsed_ms
       ~now_s
       ~(setup_retry_runtime :
-         string -> (runtime_execution, Agent_sdk.Error.sdk_error) result)
+         string -> (runtime_execution, Masc_agent_core.Error.sdk_error) result)
       ~publish_cascade_resolution
       ~emit_runtime_selected
       ~emit_runtime_rotation
@@ -361,9 +361,9 @@ let add_payload_kind =
   Keeper_turn_runtime_budget_event_bus.add_payload_kind
 
 let summarize_turn_event_bus
-    (events : Agent_sdk.Event_bus.event list) : turn_event_bus_summary =
+    (events : Masc_agent_core.Event_bus.event list) : turn_event_bus_summary =
   List.fold_left
-    (fun acc (evt : Agent_sdk.Event_bus.event) ->
+    (fun acc (evt : Masc_agent_core.Event_bus.event) ->
       let correlation_id =
         match acc.correlation_id with
         | Some _ -> acc.correlation_id
@@ -385,7 +385,7 @@ let summarize_turn_event_bus
         event_count = acc.event_count + 1;
         payload_kinds =
           add_payload_kind acc.payload_kinds
-            (Agent_sdk.Event_bus.payload_kind evt.payload);
+            (Masc_agent_core.Event_bus.payload_kind evt.payload);
       })
     empty_turn_event_bus_summary
     events
@@ -422,25 +422,25 @@ type capacity_transition =
   | Capacity_non_compacting of capacity_non_compaction
 
 let capacity_transition_of_error
-    (err : Agent_sdk.Error.sdk_error) : capacity_transition =
+    (err : Masc_agent_core.Error.sdk_error) : capacity_transition =
   match err with
-  | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) ->
+  | Masc_agent_core.Error.Api (ContextOverflow { limit; _ }) ->
     Capacity_refusal_classified
       (Compaction_trigger.Provider_overflow { limit_tokens = limit })
-  | Agent_sdk.Error.Api
+  | Masc_agent_core.Error.Api
       (InvalidRequest
          { reason = Request_body_too_large { actual_bytes; limit_bytes }; _ })
     ->
     Capacity_refusal_classified
       (Compaction_trigger.Request_body_over_capacity
          { actual_bytes; limit_bytes })
-  | Agent_sdk.Error.Api
+  | Masc_agent_core.Error.Api
       (InvalidRequest
          { reason = Request_body_refused_by_provider { status }; _ })
     ->
     Capacity_refusal_classified
       (Compaction_trigger.Request_body_refused_by_provider { status })
-  | Agent_sdk.Error.Api
+  | Masc_agent_core.Error.Api
       (InputCapacity
          { reason =
              Serving_constraint_rejected
@@ -453,7 +453,7 @@ let capacity_transition_of_error
       (Compaction_trigger.Serving_input_capacity
          (Compaction_trigger.Boundary_unknown
             { input_tokens; accepted_through; rejected_from }))
-  | Agent_sdk.Error.Api
+  | Masc_agent_core.Error.Api
       (InputCapacity
          { reason =
              Serving_constraint_rejected
@@ -466,7 +466,7 @@ let capacity_transition_of_error
       (Compaction_trigger.Serving_input_capacity
          (Compaction_trigger.Input_rejected
             { input_tokens; accepted_through; rejected_from }))
-  | Agent_sdk.Error.Api
+  | Masc_agent_core.Error.Api
       (InputCapacity
          { reason =
              Serving_constraint_rejected
@@ -477,7 +477,7 @@ let capacity_transition_of_error
     ->
     Capacity_non_compacting
       (Serving_evidence_not_yet_valid { now_unix_s; checked_at_unix_s })
-  | Agent_sdk.Error.Api
+  | Masc_agent_core.Error.Api
       (InputCapacity
          { reason =
              Serving_constraint_rejected
@@ -488,23 +488,23 @@ let capacity_transition_of_error
     ->
     Capacity_non_compacting
       (Serving_evidence_expired { now_unix_s; expires_at_unix_s })
-  | Agent_sdk.Error.Api
+  | Masc_agent_core.Error.Api
       (InputCapacity { reason = Token_measurement_unavailable _; _ }) ->
     Capacity_non_compacting Token_measurement_unavailable
-  | Agent_sdk.Error.Api
+  | Masc_agent_core.Error.Api
       (InvalidRequest { reason = Json_parse_error | Unknown_invalid_request; _ })
-  | Agent_sdk.Error.Api
+  | Masc_agent_core.Error.Api
       ( RateLimited _ | Overloaded _ | ServerError _ | AuthError _
       | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _
       | Timeout _ )
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ ->
+  | Masc_agent_core.Error.Provider _
+  | Masc_agent_core.Error.Agent _
+  | Masc_agent_core.Error.Config _
+  | Masc_agent_core.Error.Mcp _
+  | Masc_agent_core.Error.Serialization _
+  | Masc_agent_core.Error.Io _
+  | Masc_agent_core.Error.Orchestration _
+  | Masc_agent_core.Error.Internal _ ->
     Not_capacity
 ;;
 
@@ -512,7 +512,7 @@ let capacity_transition_of_error
    classifier. This keeps one exhaustive SDK-error match while preserving the
    narrow token/byte API used by existing lifecycle projections. *)
 let capacity_refusal_of_error
-    (err : Agent_sdk.Error.sdk_error) : capacity_refusal option =
+    (err : Masc_agent_core.Error.sdk_error) : capacity_refusal option =
   match capacity_transition_of_error err with
   | Capacity_refusal_classified (Compaction_trigger.Provider_overflow { limit_tokens }) ->
     Some (Provider_context_window { limit_tokens })

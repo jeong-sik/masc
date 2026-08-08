@@ -9,7 +9,7 @@ type runtime_capabilities_override =
   }
 
 let oas_capabilities_of_config provider_cfg =
-  Agent_sdk.Provider_runtime_binding.capabilities_for_provider_config provider_cfg
+  Masc_agent_core.Provider_runtime_binding.capabilities_for_provider_config provider_cfg
 ;;
 
 let apply_override

@@ -455,7 +455,7 @@ let text_block_of_document
               ])
         in
         Ok
-          (Agent_sdk.Types.Text
+          (Masc_agent_core.Types.Text
              (Printf.sprintf
                 "User-provided attachment metadata: %s\n\n%s"
                 metadata
@@ -473,7 +473,7 @@ let document_block_to_oas ~attachments media =
              ~media_type
              data
        | Preserve_document ->
-           Ok (Agent_sdk.Types.document_block ~media_type ~data ()))
+           Ok (Masc_agent_core.Types.document_block ~media_type ~data ()))
 
 let to_oas_blocks ~attachments blocks =
   let rec loop acc = function
@@ -481,14 +481,14 @@ let to_oas_blocks ~attachments blocks =
     | User_text text :: rest ->
         let text = String.trim text in
         let acc =
-          if text = "" then acc else Agent_sdk.Types.Text text :: acc
+          if text = "" then acc else Masc_agent_core.Types.Text text :: acc
         in
         loop acc rest
     | User_image media :: rest -> (
         match
           media_block_to_oas ~attachments "image"
             (fun ~media_type ~data () ->
-               Agent_sdk.Types.image_block ~media_type ~data ())
+               Masc_agent_core.Types.image_block ~media_type ~data ())
             media
         with
         | Ok block -> loop (block :: acc) rest
@@ -501,7 +501,7 @@ let to_oas_blocks ~attachments blocks =
         match
           media_block_to_oas ~attachments "audio"
             (fun ~media_type ~data () ->
-               Agent_sdk.Types.audio_block ~media_type ~data ())
+               Masc_agent_core.Types.audio_block ~media_type ~data ())
             media
         with
         | Ok block -> loop (block :: acc) rest

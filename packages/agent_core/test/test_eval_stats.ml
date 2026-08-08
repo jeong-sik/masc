@@ -6,7 +6,7 @@
     are validated against hand-computed expected values within an
     epsilon, not against an external reference implementation. *)
 
-open Agent_sdk
+open Masc_agent_core
 open Alcotest
 
 let eps = 1e-6

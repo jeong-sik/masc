@@ -1,7 +1,7 @@
 (** Contract carries prompt/context composition only; it never filters tools or
     allocates execution budgets. *)
 
-open Agent_sdk
+open Masc_agent_core
 
 let tc name f = Alcotest.test_case name `Quick f
 

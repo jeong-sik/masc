@@ -1,7 +1,7 @@
 (** Property-based tests using QCheck.
     Tests round-trip properties, commutativity, and invariants. *)
 
-open Agent_sdk
+open Masc_agent_core
 open Types
 
 (* --- Generators --- *)

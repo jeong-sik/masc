@@ -1,6 +1,6 @@
 (** Mapping tests for [Keeper_runtime_failure_route].
 
-    Totality over [Agent_sdk.Error.sdk_error] is compiler-enforced (the
+    Totality over [Masc_agent_core.Error.sdk_error] is compiler-enforced (the
     route function has no catch-all); these tests pin the mapping opinion
     per class and the typed retry_after extraction so a refactor cannot
     silently move a class between routes. *)
@@ -25,13 +25,13 @@ let test_api_rate_limited_threads_hint () =
   check_route
     "soft 429 preserves provider retry-after"
     (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 30.0 })
-    (Agent_sdk.Error.Api
+    (Masc_agent_core.Error.Api
        (Llm_provider.Retry.RateLimited
           { retry_after = Some 30.0; message = "slow down" }))
 
 let test_api_quota_message_does_not_override_rate_limit () =
   let err =
-    Agent_sdk.Error.Api
+    Masc_agent_core.Error.Api
       (Llm_provider.Retry.RateLimited
          { retry_after = None; message = "You have exceeded your current quota." })
   in
@@ -42,7 +42,7 @@ let test_api_quota_message_does_not_override_rate_limit () =
   check_route
     "PaymentRequired is the typed API hard-quota signal"
     (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None })
-    (Agent_sdk.Error.Api
+    (Masc_agent_core.Error.Api
        (Llm_provider.Retry.PaymentRequired { message = "billing required" }))
 
 let test_api_overloaded_is_backpressure () =
@@ -50,39 +50,39 @@ let test_api_overloaded_is_backpressure () =
     "typed Overloaded stays transient backpressure (#23483)"
     (KFR.Retry_after_observed
        { retry_class = KFR.Capacity_backpressure; retry_after = None })
-    (Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded { message = "overloaded" }))
+    (Masc_agent_core.Error.Api (Llm_provider.Retry.Overloaded { message = "overloaded" }))
 
 let test_api_server_error_uses_typed_variant () =
   check_route
     "ServerError does not reinterpret status codes"
     (KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None })
-    (Agent_sdk.Error.Api
+    (Masc_agent_core.Error.Api
        (Llm_provider.Retry.ServerError { status = 524; message = "timeout" }));
   check_route
     "typed ServerError remains a server error for an unusual status"
     (KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None })
-    (Agent_sdk.Error.Api
+    (Masc_agent_core.Error.Api
        (Llm_provider.Retry.ServerError { status = 418; message = "teapot" }))
 
 let test_api_auth_rotates_invalid_request_judges () =
   check_route
     "auth error rotates (credentials differ per runtime)"
     (KFR.Rotate_now { rotate = KFR.Auth_failed })
-    (Agent_sdk.Error.Api (Llm_provider.Retry.AuthError { message = "401" }));
+    (Masc_agent_core.Error.Api (Llm_provider.Retry.AuthError { message = "401" }));
   check_route
     "authorization error rotates (credential scopes differ per runtime)"
     (KFR.Rotate_now { rotate = KFR.Auth_failed })
-    (Agent_sdk.Error.Api
+    (Masc_agent_core.Error.Api
        (Llm_provider.Retry.AuthorizationError { message = "403" }));
   check_route
     "provider authorization error rotates"
     (KFR.Rotate_now { rotate = KFR.Auth_failed })
-    (Agent_sdk.Error.Provider
+    (Masc_agent_core.Error.Provider
        (Llm_provider.Error.AuthorizationError
           { provider = "provider"; detail = "403" }));
   match
     route_of_oas_error
-      (Agent_sdk.Error.Api
+      (Masc_agent_core.Error.Api
          (Llm_provider.Retry.InvalidRequest
             { message = "bad body"
             ; reason = Llm_provider.Retry.Unknown_invalid_request
@@ -107,7 +107,7 @@ let test_api_input_capacity_is_terminal_judgment () =
     |> Result.get_ok
   in
   let error reason =
-    Agent_sdk.Error.Api
+    Masc_agent_core.Error.Api
       (Llm_provider.Retry.InputCapacity
          { message = "typed capacity"; constraint_; reason })
   in
@@ -117,7 +117,7 @@ let test_api_input_capacity_is_terminal_judgment () =
        { terminal = KFR.Deterministic_request
        ; provenance = KFR.Oas_api_error
        ; detail =
-           Agent_sdk.Error.to_string
+           Masc_agent_core.Error.to_string
              (error
                 (Llm_provider.Retry.Serving_constraint_rejected
                    (Llm_provider.Serving_constraint.Input_rejected
@@ -145,7 +145,7 @@ let test_api_input_capacity_is_terminal_judgment () =
        { terminal = KFR.Deterministic_request
        ; provenance = KFR.Oas_api_error
        ; detail =
-           Agent_sdk.Error.to_string measurement_unavailable
+           Masc_agent_core.Error.to_string measurement_unavailable
            |> Keeper_internal_error.cap_blocker_detail
        })
     measurement_unavailable
@@ -154,14 +154,14 @@ let test_provider_quota_family_threads_hint () =
   check_route
     "provider HardQuota preserves retry-after"
     (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 3600.0 })
-    (Agent_sdk.Error.Provider
+    (Masc_agent_core.Error.Provider
        (Llm_provider.Error.HardQuota
           { provider = "glm"; retry_after = Some 3600.0; detail = "balance 0" }));
   check_route
     "provider CapacityExhausted stays typed"
     (KFR.Retry_after_observed
        { retry_class = KFR.Capacity_backpressure; retry_after = None })
-    (Agent_sdk.Error.Provider
+    (Masc_agent_core.Error.Provider
        (Llm_provider.Error.CapacityExhausted
           { scope = Llm_provider.Error.CapacityUnknown
           ; affected = []
@@ -172,7 +172,7 @@ let test_provider_quota_family_threads_hint () =
 let test_provider_config_judges () =
   match
     route_of_oas_error
-      (Agent_sdk.Error.Provider
+      (Masc_agent_core.Error.Provider
          (Llm_provider.Error.MissingApiKey { var_name = "GLM_API_KEY" }))
   with
   | KFR.Exhausted_visible_alive { terminal = KFR.Config_mismatch; _ } -> ()
@@ -183,7 +183,7 @@ let test_provider_config_judges () =
 let test_provider_wire_error_is_provider_integration () =
   match
     route_of_oas_error
-      (Agent_sdk.Error.Provider
+      (Masc_agent_core.Error.Provider
          (Llm_provider.Error.ProviderWireError
             { provider = "glm"
             ; format = Llm_provider.Http_client.Sse
@@ -251,7 +251,7 @@ let test_masc_internal_terminal_classes () =
           { runtime_id = "r"; reason = Keeper_internal_error.Session_conflict }))
 
 let test_non_provider_families_judge () =
-  let raw_internal = Agent_sdk.Error.Internal "boom" in
+  let raw_internal = Masc_agent_core.Error.Internal "boom" in
   (match route_of_oas_error raw_internal with
    | KFR.Exhausted_visible_alive
        { terminal = KFR.Internal_opaque; provenance = KFR.Oas_internal_error; _ } ->
@@ -268,7 +268,7 @@ let test_non_provider_families_judge () =
        (KFR.route_kind_label other));
   match
     route_of_oas_error
-      (Agent_sdk.Error.Mcp (Agent_sdk.Error.InitializeFailed { detail = "handshake" }))
+      (Masc_agent_core.Error.Mcp (Masc_agent_core.Error.InitializeFailed { detail = "handshake" }))
   with
   | KFR.Exhausted_visible_alive { terminal = KFR.Protocol_error; _ } -> ()
   | other ->

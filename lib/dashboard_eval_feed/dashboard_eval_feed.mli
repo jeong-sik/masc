@@ -4,7 +4,7 @@
     harness and exposes eval snapshots for dashboard rendering.
 
     This module only reads.  It never writes or modifies eval data.
-    Data ownership belongs to OAS ({!Agent_sdk.Harness}). *)
+    Data ownership belongs to OAS ({!Masc_agent_core.Harness}). *)
 
 type layer_result_json = {
   layer_name : string;

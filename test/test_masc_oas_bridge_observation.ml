@@ -13,7 +13,7 @@ let test_clockless_execution () =
       Ok "clockless")
   with
   | Ok value -> Alcotest.(check string) "body result" "clockless" value
-  | Error error -> Alcotest.fail (Agent_sdk.Error.to_string error)
+  | Error error -> Alcotest.fail (Masc_agent_core.Error.to_string error)
 ;;
 
 let test_inner_timeout_observation () =
@@ -22,8 +22,8 @@ let test_inner_timeout_observation () =
     Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Fusion_judge (fun () ->
       raise Eio.Time.Timeout)
   with
-  | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _)) -> ()
-  | Error error -> Alcotest.fail (Agent_sdk.Error.to_string error)
+  | Error (Masc_agent_core.Error.Api (Masc_agent_core.Retry.Timeout _)) -> ()
+  | Error error -> Alcotest.fail (Masc_agent_core.Error.to_string error)
   | Ok _ -> Alcotest.fail "inner timeout returned success"
 ;;
 
@@ -55,7 +55,7 @@ let test_exception_isolation () =
        Alcotest.(check string) "typed caller" "fusion_judge" caller
      | Some other ->
        Alcotest.fail (Keeper_internal_error.kind_of_masc_internal_error other)
-     | None -> Alcotest.fail (Agent_sdk.Error.to_string error))
+     | None -> Alcotest.fail (Masc_agent_core.Error.to_string error))
   | Ok _ -> Alcotest.fail "unexpected exception escaped as success"
 ;;
 

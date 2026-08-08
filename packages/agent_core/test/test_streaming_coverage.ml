@@ -4,7 +4,7 @@
     accumulate_event, finalize_stream_acc) and map_http_error which
     are not exercised by the existing test_streaming.ml. *)
 
-open Agent_sdk
+open Masc_agent_core
 module Retry = Llm_provider.Retry
 open Types
 

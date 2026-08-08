@@ -137,13 +137,13 @@ let rec redact_inference_telemetry_json = function
 
 let inference_telemetry_to_runtime_json telemetry =
   telemetry
-  |> Agent_sdk.Types.inference_telemetry_to_yojson
+  |> Masc_agent_core.Types.inference_telemetry_to_yojson
   |> redact_inference_telemetry_json
 
 let default_context_max = 0
 
 let context_max_of_telemetry
-    (telemetry : Agent_sdk.Types.inference_telemetry option) =
+    (telemetry : Masc_agent_core.Types.inference_telemetry option) =
   match telemetry with
   | Some { effective_context_window = Some n; _ } when n > 0 -> n
   | _ -> default_context_max
@@ -164,12 +164,12 @@ let summarize_thinking_blocks content =
      (thinking_present + thinking_kind classifier). The leading qualified field
      anchors the pattern to [Response_shape.t] to disambiguate the shared
      thinking_* field names. *)
-  let { Agent_sdk.Response_shape.thinking_blocks
+  let { Masc_agent_core.Response_shape.thinking_blocks
       ; thinking_chars
       ; redacted_thinking_blocks
       ; _
       } =
-    Agent_sdk.Response_shape.summarize_blocks content
+    Masc_agent_core.Response_shape.summarize_blocks content
   in
   let thinking_kind =
     match thinking_blocks > 0, redacted_thinking_blocks > 0 with
@@ -200,7 +200,7 @@ let tool_execution_summary ~tool_name ~model ~success ~duration_ms :
   ; duration_ms = max 0.0 duration_ms
   }
 
-let usage_has_tokens (usage : Agent_sdk.Types.api_usage) =
+let usage_has_tokens (usage : Masc_agent_core.Types.api_usage) =
   usage.input_tokens > 0
   || usage.output_tokens > 0
   || usage.cache_creation_input_tokens > 0
@@ -209,17 +209,17 @@ let usage_has_tokens (usage : Agent_sdk.Types.api_usage) =
 let current_keeper_model _meta =
   runtime_lane_label
 
-let stop_reason_to_label = Agent_sdk.Types.stop_reason_to_metric_label
-let zero_usage = Agent_sdk.Types.zero_api_usage
+let stop_reason_to_label = Masc_agent_core.Types.stop_reason_to_metric_label
+let zero_usage = Masc_agent_core.Types.zero_api_usage
 
 let telemetry_has_canonical_model_id
-    (telemetry : Agent_sdk.Types.inference_telemetry option) =
+    (telemetry : Masc_agent_core.Types.inference_telemetry option) =
   match telemetry with
   | Some { canonical_model_id = Some id; _ } -> String.trim id <> ""
   | Some _ | None -> false
 
 let canonical_model_id_of_telemetry
-    (telemetry : Agent_sdk.Types.inference_telemetry option) =
+    (telemetry : Masc_agent_core.Types.inference_telemetry option) =
   match telemetry with
   | Some { canonical_model_id = Some id; _ } ->
       let trimmed = String.trim id in
@@ -243,7 +243,7 @@ let ms_per_second = 1000.0
 let cost_source_unmetered_provider = "unmetered_provider"
 let cost_source_computed = "computed"
 
-let oas_reported_cost (usage : Agent_sdk.Types.api_usage) : float =
+let oas_reported_cost (usage : Masc_agent_core.Types.api_usage) : float =
   match usage.cost_usd with
   | Some cost -> cost
   | None -> 0.0

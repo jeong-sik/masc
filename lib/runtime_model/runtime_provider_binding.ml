@@ -7,7 +7,7 @@
 
     @stability Internal *)
 
-module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module Runtime_binding = Masc_agent_core.Provider_runtime_binding
 
 let normalize_provider_id provider_id =
   String.trim provider_id

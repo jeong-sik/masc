@@ -275,7 +275,7 @@ let test_registry_failure_reason_does_not_classify_free_form_detail () =
              Keeper_internal_error.Other_detail
                "connection refused; HTTP 429; wall-clock timeout"
          })
-    |> Agent_sdk.Error.to_string
+    |> Masc_agent_core.Error.to_string
   in
   check_runtime_failure_reason raw_error "runtime_exhausted_provider_failure"
 ;;
@@ -302,7 +302,7 @@ let test_missing_last_execution_is_typed_error () =
       empty_turn_state
   with
   | Ok _ -> Alcotest.fail "expected missing last_execution to return a typed error"
-  | Error (Agent_sdk.Error.Internal message) ->
+  | Error (Masc_agent_core.Error.Internal message) ->
     Alcotest.(check string)
       "internal error message"
       "keeper_under_test: last_execution missing at turn finalize"
@@ -310,7 +310,7 @@ let test_missing_last_execution_is_typed_error () =
   | Error err ->
     Alcotest.failf
       "expected Internal error, got %s"
-      (Agent_sdk.Error.to_string err)
+      (Masc_agent_core.Error.to_string err)
 ;;
 
 let () =

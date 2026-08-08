@@ -15,7 +15,7 @@ val cadence_counter_entries : unit -> int
 val max_messages : unit -> int
 val messages_for_librarian
   :  Keeper_librarian.input
-  -> (Agent_sdk.Types.message list, string) result
+  -> (Masc_agent_core.Types.message list, string) result
 
 type extraction_error
 

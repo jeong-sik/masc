@@ -252,19 +252,9 @@ describe('App v2 header chrome', () => {
     window.innerWidth = 900
     renderApp()
 
-    // Mobile nav is now NavRailV2's always-present bottom tab bar
-    // (`nav.v2-nav.is-mnav`). The old drawer model (a 44x44 hamburger
-    // `button[aria-controls="dashboard-side-rail"]` toggling a side-rail
-    // drawer + `nav[aria-label="Primary mobile navigation"]`) was removed by
-    // the reskin; the prototype keeps a persistent bottom tab bar instead.
+    // Mobile navigation is NavRailV2's always-present bottom tab bar.
     expect(container.querySelector('nav.v2-nav.is-mnav')).not.toBeNull()
   })
-
-  // REMOVED: "hides mobile nav tabs when the mobile side-rail drawer is open" —
-  // the mobile side-rail drawer + hamburger toggle were removed by the v2 reskin.
-  // The bottom tab bar (`nav.v2-nav.is-mnav`) is always present on mobile, so
-  // there is no drawer-open state that hides it. Positive coverage that the
-  // bottom bar renders is kept in the test above.
 
   it('uses the header Copilot control instead of a floating FAB on mobile', () => {
     window.innerWidth = 900
@@ -286,9 +276,7 @@ describe('App v2 header chrome', () => {
     window.innerWidth = 1280
     renderApp()
 
-    // The desktop rail is now NavRailV2's `nav.v2-nav` (no `#dashboard-side-rail`
-    // id, no `.v2-shell-rail`). The mobile-hidden behaviour is no longer a class
-    // on the rail: on desktop the rail variant has no `.is-mnav`.
+    // The desktop rail is NavRailV2; its desktop variant has no `.is-mnav`.
     const rail = container.querySelector('nav.v2-nav')
     expect(rail).not.toBeNull()
     expect(rail?.classList.contains('is-mnav')).toBe(false)
@@ -326,12 +314,6 @@ describe('App v2 header chrome', () => {
     expect(scroll).not.toBeNull()
     expect(scroll?.classList.contains('h-full')).toBe(true)
   })
-
-  // REMOVED: "toggles the mobile side-rail drawer" — the v2 reskin removed the
-  // mobile side-rail drawer (`#dashboard-side-rail` block/hidden toggling) and its
-  // hamburger control (`button[aria-controls="dashboard-side-rail"]`). The mobile
-  // bottom tab bar (`nav.v2-nav.is-mnav`) is always present; there is no
-  // drawer-open/closed state to toggle. Positive bottom-bar coverage is kept above.
 
   it('hides floating status and focus chrome on prototype primary surfaces', () => {
     window.innerWidth = 1280

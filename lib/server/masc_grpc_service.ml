@@ -302,7 +302,7 @@ let handle_heartbeat
       Atomic.decr active_heartbeat_streams;
       Transport_metrics.set_grpc_active_streams (Atomic.get active_heartbeat_streams);
       (* Called from [End_of_file] at line 360 and the generic-[exn] handler
-         at line 371 — neither is a cancel handler. [with _ -> ()] would
+         at line 371 — neither is a cancel handler. [with _ -> ()] would (* cancel-guard-ok: prose; the code below re-raises *)
          swallow [Eio.Cancel.Cancelled] racing with [Stream.close], leaving
          the fiber to fall past the cancel boundary. The counters above are
          decremented first, so re-raising here is safe. *)

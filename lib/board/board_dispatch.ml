@@ -199,7 +199,7 @@ let ensure_flusher_actor store =
             in
             if cas_won then
               try start_flusher_actor ~sw store
-              with exn ->
+              with exn ->  (* cancel-guard-ok: re-raises after rolling the flag back *)
                 (* Roll the flag back so a future caller can retry.  Only
                    roll back if the state hasn't been swapped out from
                    under us. *)

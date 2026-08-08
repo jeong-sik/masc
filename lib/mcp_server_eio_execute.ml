@@ -399,7 +399,7 @@ let execute_tool_eio
                  | Mod_keeper_task ->
                    Some
                      (Tool_result.error
-                        ~failure_class:Tool_result.Workflow_rejection
+                        ~failure_class:Tool_result.Policy_rejection
                         ~tool_name:name
                         ~start_time
                         (Printf.sprintf

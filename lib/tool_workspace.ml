@@ -8,9 +8,6 @@ module Planning_eio = Task.Planning_eio
 open Workspace_types
 open Tool_args
 
-(* [type tool_result = Workspace_types.tool_result] DELETED in RFC-0062 Phase 4d-2.
-   All handlers now return Tool_result.result directly. *)
-
 type context = Workspace_types.context =
   { config : Workspace.config
   ; agent_name : string
@@ -76,10 +73,7 @@ let credential_state (ctx : context) ~actual_name =
          (fun name ->
             is_initial_admin name
             || internal_keeper_credential_available name
-            (* PR-3b1: ask Auth for the canonical [keeper-<n>-agent]
-              form so a configured keeper's credential is never
-              resolved through the bare-name redirect stub. Non-keeper
-              names pass through unchanged. Spec: AuthIdentityFSM I1. *)
+            (* Keeper credentials use their canonical agent identity. *)
             || Option.is_some
                  (Auth.load_credential
                     ctx.config.base_path
@@ -89,14 +83,8 @@ let credential_state (ctx : context) ~actual_name =
   { credential_required; credential_available; credential_candidates }
 ;;
 
-(* Asymmetric silent-failure unification: previously [Sys_error _ |
-   Yojson.Json_error _] (the *more common* read-side failure class —
-   missing file, malformed JSON) returned the default silently while
-   only the rare [exn] catch-all logged. Operators saw the loud path
-   but missed the common one. The three [safe_*] wrappers below now
-   share the single-warn-arm shape; [Eio.Cancel.Cancelled] is re-raised
-   explicitly so cancellation propagation is preserved across all of
-   them. *)
+(* Workspace read failures are logged once at this boundary. Cancellation is
+   always propagated. *)
 let safe_resolve_agent_name (ctx : context) ~session_bound =
   if not session_bound
   then ctx.agent_name
@@ -477,22 +465,13 @@ let inspect_state ctx =
 
 (* ── State check (assertion-based verification) ────────────────── *)
 
-(** Issue #8636: SSOT for [masc_check] assertion vocabulary. Schema
-    enum, handler match, and default fallback used to disagree on
-    which strings were valid. The Variant + helpers below give a
-    single witness that compile-fails when a constructor is added but
-    [assertion_kind_to_string] / [assertion_kind_of_string_lenient]
-    aren't updated. Same shape as #8546 / #8601 / #8592. *)
+(** [masc_check] assertion vocabulary is owned by [Workspace_assertions]. *)
 let handle_heartbeat ~tool_name ~start_time ctx _args =
   let outcome = Workspace.heartbeat ctx.config ~agent_name:ctx.agent_name in
   let message = Workspace.heartbeat_message outcome in
   match outcome with
   | Workspace.Heartbeat_updated _ -> Tool_result.ok ~tool_name ~start_time message
   | Workspace.Agent_not_found _ | Workspace.Agent_file_invalid _ ->
-    (* RFC-0189: heartbeat failure stems from agent-state issues
-       ("agent not found", "invalid file") that the caller can
-       resolve (bind the session, refresh credentials).
-       [Workflow_rejection]. *)
     Tool_result.error
       ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time message

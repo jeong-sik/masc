@@ -86,10 +86,8 @@ and handle_transition ~tool_name ~start_time ctx args =
   in
   if Stdlib.List.length unknown > 0 then
     let names = String.concat ", " (List.map fst unknown) in
-    (* RFC-0189: schema-rejection — operator passed an unknown
-       argument name. [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
         names (String.concat ", " transition_known_args))
@@ -100,17 +98,15 @@ and handle_transition ~tool_name ~start_time ctx args =
   | Ok task_id ->
   let action_raw = get_string args "action" "" in
   if String.equal action_raw "" then
-    (* RFC-0189: required-field violation. [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name ~start_time
       (Printf.sprintf "action is required (%s)" (String.concat ", " Masc_domain.valid_task_action_strings))
   else
   match Masc_domain.task_action_of_string action_raw with
   | Error msg ->
-      (* RFC-0189: caller passed an unknown action enum value. *)
       Tool_result.error
-        ~failure_class:Tool_result.Workflow_rejection
+        ~failure_class:Tool_result.Policy_rejection
         ~tool_name ~start_time msg
   | Ok action ->
   let action_s = Masc_domain.task_action_to_string action in
@@ -215,18 +211,15 @@ and handle_transition ~tool_name ~start_time ctx args =
   | None ->
   match handoff_context with
   | Error error ->
-      (* RFC-0189: handoff_context parse error — caller passed
-         malformed payload. *)
       Tool_result.error
-        ~failure_class:Tool_result.Workflow_rejection
+        ~failure_class:Tool_result.Policy_rejection
         ~tool_name ~start_time error
   | Ok handoff_context ->
   if (=) action Masc_domain.Release && strict_release_requires_handoff task_opt
      && Option.is_none handoff_context
   then
-    (* RFC-0189: strict-release-without-handoff = workflow violation. *)
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name ~start_time
       "Strict task release requires handoff_context.summary"
   else
@@ -413,13 +406,13 @@ let handle_update_priority ~tool_name ~start_time ctx args =
       (Printf.sprintf "Task %s priority: P%d → P%d" task_id old_priority new_priority)
   | Ok (Workspace.Not_found { task_id }) ->
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name
       ~start_time
       (Printf.sprintf "Task %s not found" task_id)
   | Error Workspace.Not_initialized ->
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Runtime_failure
       ~tool_name
       ~start_time
       "MASC workspace is not initialized"

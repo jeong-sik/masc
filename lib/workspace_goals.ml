@@ -3,15 +3,7 @@
 open Workspace_types
 open Tool_args
 
-(* Local helpers: build typed [Tool_result.result] from response helpers.
-   ~tool_name and ~start_time are threaded through from dispatch.
-
-   RFC-0189 PR-1b.8: handlers return [Tool_result.result]. Failure class is
-   [Workflow_rejection] for every error path: all call sites here surface
-   caller-input rejections (typed codes [Validation_error] / [Not_found] /
-   [Conflict], or [validation_error_response] from [Tool_args]) — none
-   originate from internal-state failures. The plain [error_result] helper
-   was dead (0 callers) and removed. *)
+(* Goal handlers build typed results at the dispatch boundary. *)
 let ok_result ~tool_name ~start_time fields : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:(ok_assoc fields) ()
 ;;

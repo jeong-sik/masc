@@ -1,18 +1,6 @@
 #!/usr/bin/env bash
-# Fail when ci.yml names a test target that the Dune test declarations cannot build.
-#
-# CI runs a hand-maintained allowlist of @test/runtest-<name> targets. Deleting
-# the test behind one is a normal cleanup, and nothing in the deleting PR looks
-# at ci.yml, so the stale target survives and dune hard-fails on the next run —
-# after the full build, on main, for everyone.
-#
-# It has happened twice. #24332 retired the shell_ir subsystem and left
-# @lib/exec/test/runtest-test_shell_ir_differential pointing at an empty alias,
-# which failed main until #24352 removed it. #26921 emptied
-# config/prompts/behavior, which killed Keeper_prompt_external and left its
-# suite in the prompt step failing.
-#
-# This turns that into a seconds-long check the deleting PR sees.
+# Keep every CI test target backed by a Dune declaration and ratchet down the
+# set of declared suites that CI never executes.
 #
 # A target is buildable when test/dune declares it directly, its dynamic
 # coverage-test manifest declares it, or an explicit alias declares it.
@@ -87,15 +75,8 @@ fi
 
 echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in Dune"
 
-# 714 -> 710: this PR wires test_tool_input_validation, and #27429,
-# #27433 and #27441 each wired a suite test/dune already declared without
-# lowering this number. Measured on the merged tree after all four, not
-# computed -- #27441 landed between this branch's first push and now.
-# 708 -> 706: this branch wires test_keeper_catchup_digest and #27525 wired
-# test_tool_workspace_coverage while it was open. Measured on the merged tree --
-# the audit reported "706 unwired, 707 baseline" so 707 would have passed while
-# leaving the ratchet a notch loose.
-UNWIRED_BASELINE=706
+# Measured by this script on the exact branch tree.
+UNWIRED_BASELINE=701
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

@@ -57,11 +57,6 @@ type tool_call_outcome = Ok | Error | Unknown
 val string_of_tool_call_outcome : tool_call_outcome -> string
 val log_level_of_tool_call_outcome : tool_call_outcome -> Log.level
 
-(** Classify a tool failure from an exception raised during execution.
-    Constructor-only fallback.  Semantic classes from exception messages must
-    be passed explicitly at the catch boundary. *)
-val classify_from_exception : exn -> tool_failure_class
-
 (** {1 Structured result (SSOT)} *)
 
 (** One authoritative execution disposition.  The type parameters let each
@@ -132,8 +127,7 @@ val is_failed : result -> bool
 (** {1 Handler constructors}
 
     Direct constructors for [Tool_*.dispatch] functions.  Callers provide
-    execution metadata at the boundary; zero-duration compatibility
-    constructors have been removed. *)
+    execution metadata and failure classification at the producing boundary. *)
 
 (** Completed result with an opaque string body.  Producers with typed JSON
     must use {!make_ok} and pass [~data] directly. *)
@@ -146,17 +140,6 @@ val error
   -> tool_name:string
   -> start_time:float
   -> string
-  -> result
-
-(** Build a failure result from a caught exception.  When [failure_class]
-    is provided it is trusted as the catch boundary's typed decision;
-    otherwise {!classify_from_exception} supplies a constructor-only
-    fallback. *)
-val of_exn
-  :  ?failure_class:tool_failure_class
-  -> tool_name:string
-  -> start_time:float
-  -> exn
   -> result
 
 (** {1 Typed constructors} *)
@@ -189,11 +172,10 @@ val make_err
   -> string
   -> result
 
-(** Typed failure constructor from a caught exception.  When [~class_] is
-    not provided, {!classify_from_exception} supplies the
-    constructor-only fallback. *)
+(** Typed failure constructor from a caught exception.  The catch boundary
+    supplies the failure class. *)
 val make_err_of_exn
-  :  ?class_:tool_failure_class
+  :  class_:tool_failure_class
   -> tool_name:string
   -> start_time:float
   -> exn

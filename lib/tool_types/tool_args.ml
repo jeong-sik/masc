@@ -11,8 +11,8 @@
 
     {b Error response format}:
     [error_response] and [ok_response] are serialized boundary helpers only.
-    New tool handlers returning [Tool_result.result] must use [error_result],
-    [error_result_typed], or [ok_result] so typed payloads never depend on
+    New tool handlers returning [Tool_result.result] must use
+    [error_result_typed] or [ok_result] so typed payloads never depend on
     parsing the human-readable message.
 
     TODO(M-2): Unify the existing error response formats across tool modules:
@@ -70,6 +70,13 @@ let error_code_to_string = function
   | Not_implemented -> "not_implemented"
   | Internal_error -> "internal_error"
   | Precondition_failed -> "precondition_failed"
+
+let failure_class_of_error_code = function
+  | Validation_error | Not_found | Auth_required | Permission_denied ->
+    Tool_result.Policy_rejection
+  | Conflict | Precondition_failed -> Tool_result.Workflow_rejection
+  | Rate_limited | Timeout -> Tool_result.Transient_error
+  | Not_implemented | Internal_error -> Tool_result.Runtime_failure
 
 (** {1 Raw JSON String Builders}
 
@@ -129,16 +136,6 @@ let ok_response fields =
     Handlers should use these directly — the dispatch boundary no longer
     needs [wrap_result] conversion. *)
 
-(** [Tool_result.result] error from a plain message string. *)
-let error_result ?tool_name ?start_time msg =
-  let tool_name = Option.value ~default:"" tool_name in
-  let start_time = Option.value ~default:(Time_compat.now ()) start_time in
-  Tool_result.error
-    ~failure_class:Tool_result.Workflow_rejection
-    ~tool_name
-    ~start_time
-    msg
-
 (** [Tool_result.result] error with machine-readable error code. *)
 let error_result_typed ?tool_name ?start_time ~code msg =
   let data =
@@ -151,7 +148,7 @@ let error_result_typed ?tool_name ?start_time ~code msg =
   let start_time = Option.value ~default:(Time_compat.now ()) start_time in
   Tool_result.make_err
     ~tool_name
-    ~class_:Tool_result.Runtime_failure
+    ~class_:(failure_class_of_error_code code)
     ~start_time
     ~data
     (Yojson.Safe.to_string data)
@@ -192,7 +189,7 @@ let ( let*! ) r f =
   | Ok v -> f v
   | Error e ->
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name:""
       ~start_time:(Time_compat.now ())
       e
@@ -269,7 +266,7 @@ let validation_error_result ?tool_name ?start_time errors =
   let start_time = Option.value ~default:(Time_compat.now ()) start_time in
   Tool_result.make_err
     ~tool_name
-    ~class_:Tool_result.Runtime_failure
+    ~class_:Tool_result.Policy_rejection
     ~start_time
     ~data
     (Yojson.Safe.to_string data)

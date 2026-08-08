@@ -330,7 +330,7 @@ let install () =
       match lookup_dispatch with
       | None ->
         Tool_result.error
-          ~failure_class:Tool_result.Workflow_rejection
+          ~failure_class:Tool_result.Policy_rejection
           ~tool_name:name
           ~start_time
           (Printf.sprintf
@@ -358,7 +358,7 @@ let install () =
         in
         protocol_error_ref := Some detail;
         Tool_result.error
-          ~failure_class:Tool_result.Workflow_rejection
+          ~failure_class:Tool_result.Policy_rejection
           ~tool_name:name
           ~start_time
           detail
@@ -378,7 +378,7 @@ let install () =
              "[anti-rationalization] structured verdict parse failed: %s"
              msg;
            Tool_result.error
-             ~failure_class:Tool_result.Workflow_rejection
+             ~failure_class:Tool_result.Policy_rejection
              ~tool_name:name
              ~start_time
              (Printf.sprintf "Invalid verdict format: %s" msg))

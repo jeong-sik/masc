@@ -75,6 +75,51 @@ let test_ok_assoc_drops_caller_status () =
       (Yojson.Safe.Util.(`Assoc fields |> member "status" |> to_string))
   | _ -> fail "expected assoc"
 
+let failure_class_name result =
+  match Tool_result.failure_class result with
+  | Some class_ -> Tool_result.tool_failure_class_to_string class_
+  | None -> fail "expected failed tool result"
+;;
+
+let test_typed_error_codes_select_failure_classes () =
+  let case code expected =
+    Tool_args.error_result_typed ~code "rejected"
+    |> failure_class_name
+    |> check string (Tool_args.error_code_to_string code) expected
+  in
+  case Validation_error "policy_rejection";
+  case Conflict "workflow_rejection";
+  case Timeout "transient_error";
+  case Internal_error "runtime_failure"
+;;
+
+let test_required_field_bind_is_policy_rejection () =
+  let result =
+    let open Tool_args in
+    let*! _task_id = get_string_required (`Assoc []) "task_id" in
+    Tool_result.make_ok ~tool_name:"test" ~start_time:0.0 ()
+  in
+  check string
+    "required field failure class"
+    "policy_rejection"
+    (failure_class_name result)
+;;
+
+let test_structured_validation_is_policy_rejection () =
+  let error : Tool_args.field_error =
+    { field = "task_id"
+    ; constraint_violated = Required
+    ; message = "task_id is required"
+    ; expected = Some "non-empty string"
+    ; received = None
+    }
+  in
+  check string
+    "structured validation failure class"
+    "policy_rejection"
+    (failure_class_name (Tool_args.validation_error_result [ error ]))
+;;
+
 let () =
   run "Tool_args_envelope"
     [
@@ -92,5 +137,11 @@ let () =
             test_error_response_with_drops_caller_status;
           test_case "caller status cannot override ok envelope" `Quick
             test_ok_assoc_drops_caller_status;
+          test_case "typed codes select failure classes" `Quick
+            test_typed_error_codes_select_failure_classes;
+          test_case "required field bind is policy rejection" `Quick
+            test_required_field_bind_is_policy_rejection;
+          test_case "structured validation is policy rejection" `Quick
+            test_structured_validation_is_policy_rejection;
         ] );
     ]

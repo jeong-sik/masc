@@ -1031,6 +1031,7 @@
   test_tool_dispatch
   test_tool_spec
   test_tool_result
+  test_tool_args_envelope
   test_tool_hooks
   test_sse_external_sub
   test_ws_transport
@@ -2217,9 +2218,7 @@
   masc.tool_types
   unix))
 
-; Regression: an OAS input-validation failure reaches the dispatch
-; observers (Tool_metrics) instead of being dropped by the prior
-; Handler_error arm.
+; Input-validation failures reach the dispatch observers as typed results.
 
 (test
  (name test_dispatch_observer_validation_failure)

@@ -1344,21 +1344,9 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_verification"
 
-      # Declared JSON-Schema bounds (minimum/maximum/exclusiveMinimum/
-      # exclusiveMaximum/minLength/maxLength/minItems/maxItems) are dropped
-      # by Tool_bridge.params_of_json_schema, so for a long time nothing
-      # read them: keeper_artifact_read answered max_bytes=565244 with a
-      # message naming sha256 (2026-08-05 20:06:36, keeper kidsnote). These
-      # suites assert the bounds are enforced pre-dispatch, that every
-      # declaration masc holds is reachable and readable by that
-      # enforcement, and that artifact-read rejections name the field that
-      # actually failed without changing which requests are served.
-      #
-      # test_tool_input_validation is the presence half of the same boundary:
-      # a missing required field is rejected, a tool with no registered schema
-      # is refused rather than dispatched, and declared types are coerced or
-      # rejected. It was declared in test/dune and named by no CI step, so
-      # those 86 assertions compiled and never ran.
+      # Tool schemas and typed result constructors form one admission boundary:
+      # declared constraints are enforced before dispatch, caller-input errors
+      # retain their policy class, and observers receive the handled failure.
       - name: Run tool input constraint enforcement suite
         id: tool_input_constraint_enforcement_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
@@ -1369,7 +1357,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          constraint_targets="@test/runtest-test_tool_schema_constraint_enforcement @test/runtest-test_keeper_artifact_read_request @test/runtest-test_tool_input_validation @test/runtest-test_tool_schema_oas_boundary"
+          constraint_targets="@test/runtest-test_tool_schema_constraint_enforcement @test/runtest-test_keeper_artifact_read_request @test/runtest-test_tool_input_validation @test/runtest-test_tool_schema_oas_boundary @test/runtest-test_tool_result @test/runtest-test_tool_args_envelope @test/runtest-test_dispatch_observer_validation_failure"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${constraint_targets}"
 
       # The tool-call quality benchmark scores keeper runs against selectors

@@ -171,7 +171,13 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
              (try Some (handler ~name ~args:coerced_args)
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn -> Some (Tool_result.make_err_of_exn ~tool_name:name ~start_time exn))
+              | exn ->
+                Some
+                  (Tool_result.make_err_of_exn
+                     ~class_:Tool_result.Runtime_failure
+                     ~tool_name:name
+                     ~start_time
+                     exn))
            | None -> None)
       in
       (* Finalization is done inline because [Tool_dispatch] cannot depend on

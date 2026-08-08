@@ -1,21 +1,12 @@
-(** Mcp_server_eio_call_tool — Tool call handler and result envelope
-
-    Extracted from mcp_server_eio.ml.
-    Handles tools/call JSON-RPC method: single dispatch, result envelope,
-    telemetry, and audit logging. Per-tool timeout was
-    removed (2026-06-08 fleet-wide cleanup); the tool itself is
-    responsible for any hang protection. *)
+(** MCP [tools/call] dispatch, result envelope, telemetry, and audit logging.
+    Each tool owns its execution timeout contract. *)
 
 type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
 
-(* Delegate to the single canonical definition rather than re-declaring the
-   exception→severity match (it previously drifted as a verbatim copy in two
-   modules; [Mcp_server_eio_execute] already delegates the same way). The
-   severity is derived from the exception class — see
-   [Mcp_server_eio_helpers.mcp_exn_level_and_tag]. *)
+(* Exception severity is owned by [Mcp_server_eio_helpers]. *)
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 
 let status_of_result : Tool_result.result -> string = function
@@ -557,9 +548,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         ~start_time
         "Authentication configuration unavailable"
     | Workspace.Not_initialized ->
-      (* RFC-0189: server bootstrap incomplete — Masc_domain
-         System NotInitialized.  [Runtime_failure] (caller
-         cannot fix; the operator must initialise MASC). *)
       Tool_result.error
         ~failure_class:Tool_result.Runtime_failure
         ~tool_name:name ~start_time
@@ -569,12 +557,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       let err = Printexc.to_string exn in
       let trace = Printexc.get_backtrace () in
       let err_detail = if String.length trace > 0 then err ^ "\n" ^ trace else err in
-      (Log.Mcp.error "tools/call crashed: %s" err_detail;
-         (* RFC-0189: catch-all for unexpected exceptions —
-            [Runtime_failure].  Could become more specific via
-            [of_exn] once the exception variants are typed; for
-            now blanket Runtime preserves operator-visible
-            severity (the existing log line stays ERROR). *)
+       (Log.Mcp.error "tools/call crashed: %s" err_detail;
          Tool_result.error
            ~failure_class:Tool_result.Runtime_failure
            ~tool_name:name ~start_time
@@ -658,11 +641,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       |> List.find_opt (fun (entry : Keeper_registry.registry_entry) ->
         String.equal entry.meta.agent_name agent_name)
   in
-  (* RFC-0233 PR-1: one mint per execution at this dispatch boundary. The
-     tool_calls row, the trajectory row and the [Tool_called] telemetry event
-     all carry this value, so a reader of two streams can tell one physical
-     call reported twice from two calls. Minted only when a keeper owns the
-     call, because that is when a tool_calls row is written. *)
+  (* One execution id correlates the tool-call row, trajectory, and telemetry
+     event for Keeper-owned calls. *)
   let execution_id =
     Option.map (fun _ -> Ids.Execution_id.generate ()) keeper_entry
   in
@@ -678,11 +658,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
        Keeper_registry_tool_usage_persistence.mark_dirty ~base_path:entry.base_path entry.name
    | None -> ());
 
-  (* #10358: classify failure mode at the dispatch boundary so
-     telemetry carries the diagnostic.  Mirrors the vocabulary
-     [Tool_assignment_telemetry.emit_completed] uses below; hoisted
-     here so [track_tool_called] can fan out a paired
-     [Error_occurred] event for the previously-dead ADT variant. *)
+  (* Failure classification is projected once into both tool-call and error
+     telemetry. *)
   let telemetry_error_kind =
     match failure_observation with
     | Some _ -> Some (Telemetry_eio.error_kind_of_string "tool_failure")

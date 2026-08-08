@@ -3,8 +3,7 @@
 type tool_failure_class =
   | Transient_error (** Network/timeout/rate-limit — retryable *)
   | Policy_rejection
-      (** Permission, guardrail, validation reject (RFC-0062 §3.2) — permanent.
-          Covers caller-input/argument validation, not only auth/boundary. *)
+      (** Permission, guardrail, and caller-input validation rejection. *)
   | Runtime_failure (** Internal error/bug — non-retryable *)
   | Workflow_rejection (** Business rule violation — non-retryable *)
 [@@deriving yojson, show]
@@ -66,18 +65,6 @@ let string_of_tool_call_outcome = function
 let log_level_of_tool_call_outcome = function
   | Error -> Log.Error
   | Ok | Unknown -> Log.Info
-;;
-
-(** Classify a tool failure from an exception raised during execution.
-    Constructor-only fallback.  Semantic classes from exception messages must
-    be passed explicitly at the catch boundary. *)
-let classify_from_exception (exn : exn) : tool_failure_class =
-  match exn with
-  | Eio.Time.Timeout -> Transient_error
-  | Eio.Cancel.Cancelled _ -> Transient_error
-  | Invalid_argument _ -> Runtime_failure
-  | Failure _ -> Runtime_failure
-  | _ -> Runtime_failure
 ;;
 
 type ('completed, 'deferred, 'failed) disposition =
@@ -205,9 +192,8 @@ let is_failed : result -> bool = function
 
 (** {1 Constructors}
 
-    Bodies return [result] directly.  Callers must provide execution
-    metadata at the boundary instead of falling back to zero-duration
-    compatibility constructors. *)
+    Bodies return [result] directly.  Callers provide execution metadata and
+    failure classification at the producing boundary. *)
 
 let ok ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
@@ -227,24 +213,7 @@ let error ~failure_class ~tool_name ~start_time message_str : result =
     }
 ;;
 
-let of_exn ?failure_class ~tool_name ~start_time exn : result =
-  let end_time = Time_compat.now () in
-  let duration_ms = (end_time -. start_time) *. 1000.0 in
-  let class_ =
-    match failure_class with
-    | Some cls -> cls
-    | None -> classify_from_exception exn
-  in
-  let message =
-    Printf.sprintf
-      "dispatch handler error for %s: %s"
-      tool_name
-      (Stdlib.Printexc.to_string exn)
-  in
-  Failed { class_; message; data = `String message; tool_name; duration_ms }
-;;
-
-(** {1 Typed constructors (RFC-0189)}
+(** {1 Typed constructors}
 
     Same intent as {!ok}/{!error} but with the [class_] requirement
     enforced positionally for new code that wants to commit to a
@@ -265,13 +234,8 @@ let make_err ~tool_name ~class_ ~start_time ?(data = `Null) message_str : result
   Failed { class_; message = message_str; data; tool_name; duration_ms }
 ;;
 
-let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
+let make_err_of_exn ~class_ ~tool_name ~start_time exn : result =
   let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
-  let class_ =
-    match class_ with
-    | Some c -> c
-    | None -> classify_from_exception exn
-  in
   let message =
     Printf.sprintf
       "dispatch handler error for %s: %s"

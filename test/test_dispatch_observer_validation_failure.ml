@@ -1,17 +1,7 @@
 open Alcotest
 
-(** Regression test for the OAS input-validation observer-drop bug.
-
-    Before the fix, [Keeper_tools_oas_handler] fired the dispatch
-    observers with [Dispatch_outcome.Handler_error] on an OAS
-    input-validation failure.  All three dispatch observers
-    (Tool_metrics / Tool_usage_log / Otel_dispatch_hook) match only
-    [Handled, Some _] and drop everything else via [_ -> ()], so the
-    failure never reached the unified observer view.
-
-    The fix emits [Handled (Some error_result)] — the same shape the
-    exec error path uses — so the failure is recorded.  These tests pin
-    that contract at the observer boundary:
+(** OAS input-validation failures are handled typed results and therefore
+    reach the unified dispatch observer view. These tests pin that boundary:
 
     1. A failure result delivered as [Handled (Some r)] reaches the
        [Tool_metrics] observer and is counted as a failure.
@@ -19,8 +9,6 @@ open Alcotest
        observers can still distinguish a validation rejection. *)
 
 let mk_validation_failure ~tool_name =
-  (* Mirrors the result Tool_input_validation.validate_args returns: an
-     Error with class_ = Policy_rejection. *)
   Tool_result.error
     ~failure_class:Tool_result.Policy_rejection
     ~tool_name

@@ -7,7 +7,7 @@
    had zero producers: capability rejection returns an error result
    (classified [Handled]), a pre-hook [Reject] becomes [Some error]
    (classified [Handled]), and handler exceptions are captured as
-   [Some (make_err_of_exn ...)] (classified [Handled]).  Keeping
+   [Some (make_err_of_exn ~class_ ...)] (classified [Handled]).  Keeping
    unproduced arms made illegal states representable but never reached
    (CLAUDE.md anti-pattern #4). *)
 

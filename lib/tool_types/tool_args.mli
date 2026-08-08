@@ -106,8 +106,6 @@ val ok_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
     constructors; absent metadata defaults to an empty tool name and the
     current timestamp. *)
 
-val error_result : ?tool_name:string -> ?start_time:float -> string -> Tool_result.result
-
 val error_result_typed :
   ?tool_name:string -> ?start_time:float -> code:error_code -> string -> Tool_result.result
 

@@ -59,16 +59,11 @@ let dispatch
       ~start_time
       msg
   in
-  (* RFC-0189: separate *deliberate caller-misuse rejections* (wrong
-     client, wrong surface, deprecated tool) from *runtime/dispatch
-     errors* (Tool_local_runtime non-zero exit, try-catch fallback).
-     The [workflow_err] sites below answer caller-misuse: keeper
-     used a tool from the wrong surface or context.  [err] uses the
-     constructor's explicit [Runtime_failure] fallback where the upstream
-     boundary has no typed failure variant; message text remains opaque. *)
-  let workflow_err msg =
+  (* Surface/context rejections are policy failures. Unexpected handler
+     exceptions and backend execution failures are runtime failures. *)
+  let policy_err msg =
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name:name ~start_time msg
   in
   (* Wrap dispatch in try-catch to normalize exceptions into error results.
@@ -137,32 +132,31 @@ let dispatch
          caller to the MCP client surface. Currently these are the
          keeper-management tools registered by [Keeper_tool_surface]. *)
       Some
-        (workflow_err
+        (policy_err
            (Printf.sprintf "tool '%s' is a keeper management tool (use MCP client)" name))
     | Mod_keeper_task ->
       Some
-        (workflow_err
+        (policy_err
            (Printf.sprintf
               "tool '%s' is a keeper task tool; use the keeper in-process task handler"
               name))
     | Mod_operator ->
       Some
-        (workflow_err
+        (policy_err
            (Printf.sprintf
-              "tool '%s' belongs to the removed operator surface; keeper runtime stays \
-               on OAS Agent.run"
+              "tool '%s' requires operator request context (use MCP client)"
               name))
     (* ── Tier C: MCP-state-dependent ───────────────────────────── *)
     | Mod_inline ->
       Some
-        (workflow_err
+        (policy_err
            (Printf.sprintf
               "tool '%s' requires MCP session context (not available in keeper)"
               name))
     (* ── Tier D: Cycle-breaking — runtime modules that back-reference dispatcher state *)
     | Mod_compact ->
       Some
-        (workflow_err
+        (policy_err
            (Printf.sprintf "tool '%s' is an internal context tool (use MCP client)" name))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

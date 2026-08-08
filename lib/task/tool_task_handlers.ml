@@ -6,8 +6,6 @@ module Workspace = Workspace_core
     done, release, task_history, tasks, transition, update_priority, archive_view
 *)
 
-(* Yojson.Safe.Util removed — use Json_util SSOT helpers instead *)
-
 let push_event_to_sessions_fn
   : (Yojson.Safe.t -> unit) Atomic.t
   = Atomic.make (fun _ -> ())
@@ -56,18 +54,46 @@ let task_agent_log_error ~agent_name fmt =
     (fun message -> Log.Task.error "agent_name=%s %s" agent_name message)
     fmt
 
-(* RFC-0189: [Masc_domain] backend Error variants (Task_error /
-   Agent_error / etc.) currently surface as caller-actionable
-   workflow violations ("task not found", "invalid transition",
-   "agent not in workspace") rather than transient/runtime failures.
-   Tag [Workflow_rejection] uniformly at the helper boundary —
-   when [Masc_domain] grows typed per-variant failure_class
-   assignment, this tag becomes per-call-site. *)
+let failure_class_of_masc_error = function
+  | Masc_domain.Task
+      (Masc_domain.Task_error.NotFound _ | Masc_domain.Task_error.InvalidId _)
+  | Masc_domain.Agent
+      (Masc_domain.Agent_error.NotFound _ | Masc_domain.Agent_error.InvalidName _)
+  | Masc_domain.Auth
+      ( Masc_domain.Auth_error.Unauthorized _
+      | Masc_domain.Auth_error.Forbidden _
+      | Masc_domain.Auth_error.SameOriginBlocked
+      | Masc_domain.Auth_error.InvalidToken _ )
+  | Masc_domain.System
+      ( Masc_domain.System_error.InvalidJson _
+      | Masc_domain.System_error.InvalidFilePath _
+      | Masc_domain.System_error.ValidationError _ ) ->
+    Tool_result.Policy_rejection
+  | Masc_domain.Task
+      ( Masc_domain.Task_error.AlreadyClaimed _
+      | Masc_domain.Task_error.NotClaimed _
+      | Masc_domain.Task_error.InvalidState _ )
+  | Masc_domain.System
+      (Masc_domain.System_error.NotInitialized | Masc_domain.System_error.AlreadyInitialized) ->
+    Tool_result.Workflow_rejection
+  | Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _)
+  | Masc_domain.System
+      ( Masc_domain.System_error.IoError _
+      | Masc_domain.System_error.StorageError _
+      | Masc_domain.System_error.LockContention _ )
+  | Masc_domain.RateLimitExceeded _ -> Tool_result.Transient_error
+  | Masc_domain.CacheError
+      ( Masc_domain.CacheReadFailed _
+      | Masc_domain.CacheWriteFailed _
+      | Masc_domain.CacheExpired _ ) -> Tool_result.Transient_error
+  | Masc_domain.CacheError (Masc_domain.CacheCorrupted _) -> Tool_result.Runtime_failure
+;;
+
 let result_to_response ~tool_name ~start_time = function
   | Ok msg -> Tool_result.ok ~tool_name ~start_time msg
   | Error e ->
       Tool_result.error
-        ~failure_class:Tool_result.Workflow_rejection
+        ~failure_class:(failure_class_of_masc_error e)
         ~tool_name ~start_time
         (Masc_domain.masc_error_to_string e)
 
@@ -122,16 +148,38 @@ include Tool_task_contract_gate
 
 (* Handlers *)
 
+let add_task_failure_class = function
+  | Workspace.Unknown_predecessor _ -> Tool_result.Policy_rejection
+  | Workspace.Predecessor_not_terminal _ -> Tool_result.Workflow_rejection
+  | Workspace.Backlog_read_failed _
+  | Workspace.Goal_link_write_failed _
+  | Workspace.Backlog_write_failed _ -> Tool_result.Transient_error
+  | Workspace.Unexpected_error _ -> Tool_result.Runtime_failure
+;;
+
+let set_task_goal_failure_class = function
+  | Task_goal_assignment.Unknown_task _ | Task_goal_assignment.Unknown_goal _ ->
+    Tool_result.Policy_rejection
+  | Task_goal_assignment.Already_assigned _ -> Tool_result.Workflow_rejection
+  | Task_goal_assignment.Backlog_read_failed _
+  | Task_goal_assignment.Link_write_failed _ -> Tool_result.Transient_error
+;;
+
+let batch_add_task_failure_class = function
+  | Workspace.Batch_backlog_read_failed _
+  | Workspace.Batch_goal_link_write_failed _
+  | Workspace.Batch_backlog_write_failed _ -> Tool_result.Transient_error
+  | Workspace.Batch_unexpected_error _ -> Tool_result.Runtime_failure
+;;
+
 let handle_add_task ?created_by ~tool_name ~start_time ctx args =
   let valid_keys =
     [ "title"; "priority"; "description"; "goal_id"; "contract"; "predecessor_task_id" ]
   in
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
-    (* RFC-0189: schema rejection — operator passed unknown
-       argument names. [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name ~start_time
       (Printf.sprintf
         "Unknown argument(s): %s. Valid: %s"
@@ -146,27 +194,22 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
     | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
     | _ -> None
   in
-  (* RFC-0323 W2: existence + terminal validation happens in
-     [Workspace.add_task_with_result] inside the backlog lock (typed
-     [Unknown_predecessor] / [Predecessor_not_terminal] errors). *)
+  (* Predecessor validation runs inside the authoritative backlog lock. *)
   let predecessor_task_id =
     match Safe_ops.json_string_opt "predecessor_task_id" args with
     | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
     | _ -> None
   in
   let contract_result = parse_task_contract args in
-  (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
-  (* RFC-0189: title/priority/goal_id/contract validation — all
-     caller-input violations. [Workflow_rejection]. *)
   if String.equal trimmed_title "" then
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name ~start_time
       "Task title cannot be empty or whitespace-only"
   else if priority < 1 || priority > 5 then
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
   else if Option.is_some goal_id
@@ -180,7 +223,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
                        String.equal goal.id (Option.value ~default:"" goal_id)))
   then
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name ~start_time
       (* DET-OK: same guarded branch — goal_id is [Some _]. *)
       (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
@@ -188,7 +231,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
     match contract_result with
     | Error error ->
         Tool_result.error
-          ~failure_class:Tool_result.Workflow_rejection
+          ~failure_class:Tool_result.Policy_rejection
           ~tool_name ~start_time error
     | Ok contract ->
         let add_result =
@@ -223,21 +266,18 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
              ()
          | Error err ->
            Tool_result.error
-             ~failure_class:Tool_result.Workflow_rejection
+             ~failure_class:(add_task_failure_class err)
              ~tool_name
              ~start_time
              (Workspace.add_task_error_to_string err))
 
-(* RFC-0267 Phase 2: assign an existing goalless task to a goal. Thin adapter
-   over [Task_goal_assignment.set_task_goal] — the single validated backend
-   shared with the dashboard HTTP route, so neither surface re-implements the
-   precondition checks. All caller-input violations are [Workflow_rejection]. *)
+(* Task-to-goal assignment uses the same validated backend as the dashboard. *)
 let handle_set_goal ~tool_name ~start_time ctx args =
   let valid_keys = [ "task_id"; "goal_id" ] in
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
         (String.concat ", " unknown)
@@ -247,12 +287,12 @@ let handle_set_goal ~tool_name ~start_time ctx args =
     let goal_id = String.trim (get_string args "goal_id" "") in
     if String.equal task_id "" then
       Tool_result.error
-        ~failure_class:Tool_result.Workflow_rejection
+        ~failure_class:Tool_result.Policy_rejection
         ~tool_name ~start_time
         "task_id is required and cannot be empty"
     else if String.equal goal_id "" then
       Tool_result.error
-        ~failure_class:Tool_result.Workflow_rejection
+        ~failure_class:Tool_result.Policy_rejection
         ~tool_name ~start_time
         "goal_id is required and cannot be empty"
     else (
@@ -270,7 +310,7 @@ let handle_set_goal ~tool_name ~start_time ctx args =
           ()
       | Error err ->
         Tool_result.error
-          ~failure_class:Tool_result.Workflow_rejection
+          ~failure_class:(set_task_goal_failure_class err)
           ~tool_name ~start_time
           (Task_goal_assignment.set_task_goal_error_to_string err))
 
@@ -282,7 +322,7 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
   in
   if Stdlib.List.length tasks_json = 0 then
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name ~start_time
       "tasks array is empty or missing"
   else
@@ -311,18 +351,8 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
     else
       match contract with
       | Ok contract ->
-          let has_removed_field name =
-            match Json_util.assoc_member_opt name t with
-            | None | Some `Null -> false
-            | Some _ -> true
-          in
           let unknown = unknown_args ~valid_keys:valid_item_keys t in
-          if has_removed_field "required_role" then
-            Error (Printf.sprintf "item[%d]: required_role is no longer supported" idx)
-          else if has_removed_field "required_verifier_role" then
-            Error
-              (Printf.sprintf "item[%d]: required_verifier_role is no longer supported" idx)
-          else if Stdlib.List.length unknown > 0 then
+          if Stdlib.List.length unknown > 0 then
             Error
               (Printf.sprintf "item[%d]: Unknown argument(s): %s. Valid: %s" idx
                  (String.concat ", " unknown)
@@ -334,7 +364,7 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
   let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in
   if Stdlib.List.length errors > 0 then
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Validation failed:\n%s" (String.concat "\n" errors))
   else
@@ -365,23 +395,20 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
          ()
      | Error err ->
        Tool_result.error
-         ~failure_class:Tool_result.Workflow_rejection
+         ~failure_class:(batch_add_task_failure_class err)
          ~tool_name
          ~start_time
          (Workspace.batch_add_tasks_error_to_string err))
 
 let handle_claim ~tool_name ~start_time ctx args =
-  (* #18965 — removed [is_agent_session_bound] hard gate.  Agent-internal tag
-     dispatch path bypasses MCP entry session binding, so this gate produced
-     false-negative rejects for every agent turn (fleet evidence:
-     <base-path>/.masc/agents/ empty while agents run normally; only
-     masc_claim/keeper_task_claim failed).  Workspace.claim_task_r works on
-     agent_name alone; gate added no real authorization. *)
-  if Option.is_some (Json_util.assoc_member_opt "agent_role" args) then
+  let unknown = unknown_args ~valid_keys:[ "task_id" ] args in
+  if Stdlib.List.length unknown > 0 then
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Policy_rejection
       ~tool_name ~start_time
-      "agent_role is no longer supported"
+      (Printf.sprintf
+         "Unknown argument(s): %s. Valid: task_id"
+         (String.concat ", " unknown))
   else
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
@@ -403,14 +430,8 @@ let handle_claim ~tool_name ~start_time ctx args =
    | Error e -> task_log_warn ~task_id "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
   result_to_response ~tool_name ~start_time result
 
-(* Look up the current Goal_store phase for each goal id in the agent's
-   active_goal_ids. Returns a list of "<goal_id>=<phase>" strings, e.g.
-   ["goal-1777967605002-004b=executing"; "goal-other=completed"].
-
-   This is consumed only by [format_no_eligible] below, to give the LLM
-   the *current* goal phase instead of letting it infer "completed goal"
-   from the bare excluded_count. See PR body for the velvet-hammer
-   misdiagnosis that motivated this surface. *)
+(* Current Goal_store phases make an empty claim pool explainable without
+   inferring goal completion from an aggregate exclusion count. *)
 let active_goal_phases_for_agent ctx =
   (current_task_owner_hooks ()).active_goal_phases_for_agent
     ctx.config
@@ -448,13 +469,18 @@ let format_no_eligible
         (String.concat ", " phases)
         diagnostics
 
-let handle_claim_next ~tool_name ~start_time ctx _args =
-  (* #18965 — removed [is_agent_session_bound] hard gate (same rationale as
-     [handle_claim] above).  Workspace.claim_next_r operates on
-     [~agent_name] alone; backlog read does not require an entry under
-     agents_dir. *)
-  let result = Workspace.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
-  match result with
+let handle_claim_next ~tool_name ~start_time ctx args =
+  let unknown = unknown_args ~valid_keys:[] args in
+  if Stdlib.List.length unknown > 0
+  then
+    Tool_result.error
+      ~failure_class:Tool_result.Policy_rejection
+      ~tool_name
+      ~start_time
+      (Printf.sprintf "Unknown argument(s): %s" (String.concat ", " unknown))
+  else
+    let result = Workspace.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
+    match result with
   | Workspace.Claim_next_claimed { message; task_id; scope_widened; _ } ->
     sync_owner_current_task_binding ctx;
     sync_planning_current_task_with_owned_task ctx;
@@ -489,11 +515,8 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
     in
     Tool_result.make_ok ~tool_name ~start_time ~data ()
   | Workspace.Claim_next_error e ->
-    (* RFC-0189: Claim_next_error wraps workspace-side reasons like
-       "no claimable task", "agent not allowed", "permission denied"
-       — all caller-actionable. [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
+      ~failure_class:Tool_result.Runtime_failure
       ~tool_name ~start_time
       (Printf.sprintf "Error: %s" e)
 
@@ -511,15 +534,14 @@ let handle_release ~tool_name ~start_time ctx args =
   in
   (match handoff_context with
    | Error error ->
-       (* RFC-0189: handoff_context parse error from caller payload. *)
        Tool_result.error
-         ~failure_class:Tool_result.Workflow_rejection
+         ~failure_class:Tool_result.Policy_rejection
          ~tool_name ~start_time error
    | Ok handoff_context ->
        if strict_release_requires_handoff task_opt && Option.is_none handoff_context
        then
          Tool_result.error
-           ~failure_class:Tool_result.Workflow_rejection
+           ~failure_class:Tool_result.Policy_rejection
            ~tool_name ~start_time
            "Strict task release requires handoff_context.summary"
        else

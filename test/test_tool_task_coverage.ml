@@ -767,10 +767,8 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
   | _ -> failwith "expected exactly one task"
 )
 
-(* RFC-0337 decision 4: blank evidence_refs entries were silently dropped by
-   [non_empty_trimmed_strings] (["", " "] collapsed to [] with no signal to
-   the caller). The boundary now rejects blank entries loudly, mirroring the
-   keeper_task_done parser; absent field and explicit [] stay accepted. *)
+(* Blank evidence references are caller-input rejections; an absent field and
+   an explicit empty list remain valid. *)
 let () = test "handle_transition_rejects_blank_evidence_ref_entries" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
@@ -793,15 +791,12 @@ let () = test "handle_transition_rejects_blank_evidence_ref_entries" (fun () ->
         ])
   in
   assert (not (Tool_result.is_success result));
-  assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+  assert ((Tool_result.failure_class result) = Some Tool_result.Policy_rejection);
   assert (str_contains (Tool_result.message result) "must contain only non-empty strings")
 )
 
-(* The same boundary rule for a reference the verification store cannot read.
-   Accepting it snapshots a payload-free invalid reference, and the reviewer
-   reads that as unavailable evidence — a verdict the submitter cannot act on
-   because nothing names the reference form as the fault. Live: task-174 resent
-   the same `board:p-…` entry and drew 59 rejections in two hours. *)
+(* Evidence references outside the accepted typed forms are caller-input
+   rejections. *)
 let () = test "handle_transition_rejects_unresolvable_evidence_ref_entries" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
@@ -825,10 +820,9 @@ let () = test "handle_transition_rejects_unresolvable_evidence_ref_entries" (fun
           ])
     in
     assert (not (Tool_result.is_success result));
-    assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+    assert ((Tool_result.failure_class result) = Some Tool_result.Policy_rejection);
     assert (str_contains (Tool_result.message result) "note:<text>")
   in
-  (* Every form the live workspace actually submitted and had rejected. *)
   reject "board:p-b8655a197dcf2f5da46655e10b3acbd1";
   reject "file:///Users/x/repo/out.diff";
   reject "https://github.com/o/r/pull/1";
@@ -885,7 +879,7 @@ let () = test "handle_transition_entry_action_rejects_blank_evidence_ref_entries
         ])
   in
   assert (not (Tool_result.is_success result));
-  assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+  assert ((Tool_result.failure_class result) = Some Tool_result.Policy_rejection);
   assert (str_contains (Tool_result.message result) "must contain only non-empty strings")
 )
 
@@ -2287,7 +2281,7 @@ let () = test "transition_missing_task_clears_stale_current_task" (fun () ->
       (`Assoc [("task_id", `String "task-1468"); ("action", `String "start")])
   in
   assert (not (Tool_result.is_success result));
-  assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+  assert (Tool_result.failure_class result = Some Tool_result.Policy_rejection);
   assert (Planning_eio.get_current_task ctx.config = None);
   let data = Tool_result.data result in
   assert (Json_util.get_bool data "stale_context" = Some true);

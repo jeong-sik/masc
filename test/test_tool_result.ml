@@ -95,41 +95,6 @@ let test_plain_dispatch_failure_honors_explicit_failure_class () =
      | None -> "none")
 ;;
 
-let test_exception_message_does_not_infer_failure_class () =
-  let r =
-    Tool_result.of_exn
-      ~tool_name:"masc_transition"
-      ~start_time:0.0
-      (Invalid_argument
-         "Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)")
-  in
-  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
-  Alcotest.(check string)
-    "failure class"
-    "runtime_failure"
-    (match (Tool_result.failure_class r) with
-     | Some cls -> Tool_result.tool_failure_class_to_string cls
-     | None -> "none")
-;;
-
-let test_exception_boundary_honors_explicit_failure_class () =
-  let r =
-    Tool_result.of_exn
-      ~failure_class:Tool_result.Transient_error
-      ~tool_name:"masc_transition"
-      ~start_time:0.0
-      (Invalid_argument
-         "Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)")
-  in
-  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
-  Alcotest.(check string)
-    "failure class"
-    "transient_error"
-    (match (Tool_result.failure_class r) with
-     | Some cls -> Tool_result.tool_failure_class_to_string cls
-     | None -> "none")
-;;
-
 let test_error_message_cannot_override_failure_class () =
   let message =
     {|{"ok":false,"error":"evidence is required","failure_class":"workflow_rejection"}|}
@@ -221,12 +186,10 @@ let test_to_json () =
   let json = Tool_result.to_json r in
   match json with
   | `Assoc fields ->
-    let has key = List.exists (fun (k, _) -> k = key) fields in
-    Alcotest.(check bool) "has disposition" true (has "disposition");
-    Alcotest.(check bool) "has no legacy success bool" false (has "success");
-    Alcotest.(check bool) "has data" true (has "data");
-    Alcotest.(check bool) "has tool_name" true (has "tool_name");
-    Alcotest.(check bool) "has duration_ms" true (has "duration_ms")
+    Alcotest.(check (list string))
+      "completed wire fields"
+      [ "disposition"; "data"; "tool_name"; "duration_ms" ]
+      (List.map fst fields)
   | _ -> Alcotest.fail "to_json should return Assoc"
 ;;
 
@@ -273,8 +236,6 @@ let test_dispatch_structured_unknown () =
   | Ok _ -> Alcotest.fail "mint_token should return Error for unknown tool"
 ;;
 
-(* ─── RFC-0189 — typed result variant ──────────────────────────────────── *)
-
 let test_make_ok_roundtrip () =
   let r =
     Tool_result.make_ok
@@ -296,9 +257,6 @@ let test_make_ok_roundtrip () =
 ;;
 
 let test_make_err_required_class () =
-  (* This test exists to document the API: ~class_ is required, not optional.
-     The compiler enforces this at every call site of make_err — there's no
-     [?class_:tool_failure_class option] pattern to defer to. *)
   let r =
     Tool_result.make_err
       ~tool_name:"masc_test"
@@ -318,9 +276,10 @@ let test_make_err_required_class () =
   | Tool_result.Deferred _ -> Alcotest.fail "make_err produced Deferred"
 ;;
 
-let test_make_err_of_exn_classifies_constructor () =
+let test_make_err_of_exn_honors_explicit_class () =
   let r =
     Tool_result.make_err_of_exn
+      ~class_:Tool_result.Transient_error
       ~tool_name:"test_tool"
       ~start_time:0.0
       Eio.Time.Timeout
@@ -328,7 +287,7 @@ let test_make_err_of_exn_classifies_constructor () =
   match r with
   | Tool_result.Failed f ->
     Alcotest.(check string)
-      "Timeout classified as transient"
+      "catch boundary class"
       "transient_error"
       (Tool_result.tool_failure_class_to_string f.class_)
   | Tool_result.Completed _ -> Alcotest.fail "make_err_of_exn returned Completed"
@@ -392,9 +351,9 @@ let test_disposition_wire_decoder_is_strict () =
   expect "completed" "completed";
   expect "deferred" "deferred";
   expect "failed" "failed";
-  match Tool_result.unit_disposition_of_string "success" with
+  match Tool_result.unit_disposition_of_string "unknown" with
   | Error _ -> ()
-  | Ok _ -> Alcotest.fail "legacy success label must not be migrated"
+  | Ok _ -> Alcotest.fail "unknown disposition label was accepted"
 ;;
 
 let test_gate_causal_context_preserves_deferred () =
@@ -424,10 +383,10 @@ let test_gate_causal_context_preserves_deferred () =
     "deferred stays distinct"
     "deferred"
     Yojson.Safe.Util.(call |> member "disposition" |> to_string);
-  Alcotest.(check bool)
-    "legacy succeeded bool is absent"
-    true
-    Yojson.Safe.Util.(call |> member "succeeded" = `Null)
+  Alcotest.(check string)
+    "operation is retained"
+    "keeper_file_write"
+    Yojson.Safe.Util.(call |> member "operation" |> to_string)
 ;;
 
 let keeper_taskboard_schema name =
@@ -495,14 +454,6 @@ let () =
             `Quick
             test_plain_dispatch_failure_honors_explicit_failure_class
         ; Alcotest.test_case
-            "exception message does not infer failure_class"
-            `Quick
-            test_exception_message_does_not_infer_failure_class
-        ; Alcotest.test_case
-            "exception boundary honors explicit failure_class"
-            `Quick
-            test_exception_boundary_honors_explicit_failure_class
-        ; Alcotest.test_case
             "failure message cannot override class"
             `Quick
             test_error_message_cannot_override_failure_class
@@ -532,13 +483,13 @@ let () =
       , [ Alcotest.test_case "registered tool" `Quick test_dispatch_structured
         ; Alcotest.test_case "unknown tool" `Quick test_dispatch_structured_unknown
         ] )
-    ; ( "rfc-0189 typed result"
+    ; ( "typed result"
       , [ Alcotest.test_case "make_ok round-trip" `Quick test_make_ok_roundtrip
         ; Alcotest.test_case "make_err required class" `Quick test_make_err_required_class
         ; Alcotest.test_case
-            "make_err_of_exn classifies by constructor"
+            "make_err_of_exn honors explicit class"
             `Quick
-            test_make_err_of_exn_classifies_constructor
+            test_make_err_of_exn_honors_explicit_class
         ; Alcotest.test_case
             "disposition preserves typed payload"
             `Quick

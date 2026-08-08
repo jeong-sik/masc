@@ -26,21 +26,13 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
   let message = arg_get_string ctx "message" "" in
   let trimmed = String.trim message in
   if String.equal trimmed "" then
-    (* RFC-0189: caller-input violation (empty broadcast message).
-       The producer supplies [Workflow_rejection] explicitly; message text
-       never participates in classification. *)
     Some (Tool_result.error
-            ~failure_class:Tool_result.Workflow_rejection
+            ~failure_class:Tool_result.Policy_rejection
             ~tool_name ~start_time
             "Broadcast message cannot be empty")
   else
   let allowed, wait_secs = Session.check_rate_limit registry ~agent_name in
   if not allowed then
-    (* RFC-0189: rate-limit hit — caller should retry after [wait_secs].
-       [Transient_error] is the closest existing variant for
-       retry-friendly failure, mirroring the same tag used by
-       [tool_misc_web_fetch] / [tool_misc_web_search] for rate
-       limits. *)
     Some (Tool_result.error
             ~failure_class:Tool_result.Transient_error
             ~tool_name ~start_time

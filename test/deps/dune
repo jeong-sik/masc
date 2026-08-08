@@ -135,8 +135,6 @@
   (re_export masc.tool_schemas_specs)
   (re_export masc.tool_catalog_surfaces)
   (re_export masc.config_dir_resolver)
-  ;; RFC-0163 Phase D1 — Runtime_name leaf extracted to lib/runtime_id/.
-  ;; Re-export so test code using bare `Runtime_name.X` resolves.
   ;; RFC-0086 PR-2H — Tool_args + Tool_result shared types extracted to
   ;; lib/tool_types/. Re-export so test code using bare
   ;; `Tool_args.X` / `Tool_result.X` resolves.

@@ -91,8 +91,8 @@
   ;; RFC-0056 Phase 1M — Execution policy extracted to lib/exec_policy/.
   ;; Owns Shell IR command/path policy and typed path-check errors.
   masc.exec_policy
-  ;; RFC-0056 Phase 1N — Keeper_state_* deterministic FSM cluster extracted to
-  ;; lib/keeper_state/. Parent still references bare Keeper_state_* modules.
+  ;; Holds the Keeper_state_* deterministic FSM cluster; the parent library
+  ;; references those modules unqualified.
   masc.keeper_registry
   masc.keeper_checkpoint_ref
   ;; Keeper-owned pure/type leaves extracted from lib/keeper/.
@@ -163,17 +163,7 @@
   ;; time_compat. Post_verifier and reward_advice_artifact were removed in
   ;; PR #21019; the library is now diagnostic-only.
   masc.tool_call_quality_benchmark
-  ;; RFC-0056 Phase 1I — Keeper_event_queue (first lib/keeper/ leaf)
-  ;; extracted to lib/keeper_event_queue/. 91+87 LoC, deps: stdlib +
-  ;; Unix only. Pure data structure (urgency variants + FIFO + dedup)
-  ;; backed by specs/keeper-state-machine/KeeperEventQueue.tla.
-  ;; Referenced by keeper_supervisor + keeper_registry godfiles.
-  ;; RFC-0056 Phase 1J — Keeper_invariant (second lib/keeper/ leaf)
-  ;; extracted to lib/keeper_invariant/. 119+77 LoC, stdlib-only
-  ;; (List/Printf/Set/String/StringSet/Result). Fan-in: 1 lib + 1 test.
-  ;; RFC-0056 Phase 1K — Compaction_trigger (third lib/keeper/ leaf)
-  ;; extracted to lib/compaction_trigger/. 94+45 LoC, deps: stdlib +
-  ;; Yojson + masc_log. Compaction trigger heuristic + JSON serializer.
+  ;; Compaction_trigger — compaction trigger heuristic + JSON serializer.
   masc.compaction_trigger
   ;; Bounded_event_dedupe — shared stdlib-only Hashtbl + Mutex +
   ;; threshold-once state machine for keeper/task log-noise reducers.
@@ -204,8 +194,6 @@
   ;; RFC-0058 Phase 1 — Declarative runtime TOML config. Separate sub-library
   ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
   ;; with identically-named types in the main library.
-  ;; RFC-0163 Phase D1 — Runtime_name leaf extraction (lib/runtime_id/).
-  ;; Pure canonical-name validation, stdlib-only.
   uri
   tls
   tls-eio

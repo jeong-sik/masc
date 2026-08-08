@@ -5,9 +5,9 @@
    cannot silently break KSM.phase_to_string / KSM.phase_of_string round-trip.
    If this test fails after adding a variant, update both functions.
 
-   Also checks that oas Runtime.phase yojson variants are recognized
-   by the masc bridge layer (cross-repo drift detection).
-   Reference: specs/AgentLifecycle.tla, specs/AgentCancellation.tla
+   Also checks that the masc bridge layer recognizes every oas
+   Runtime.phase spelling this file lists. The list is copied by hand, so
+   it detects drift only after someone updates it — it does not read oas.
 *)
 
 module KSM = Keeper_state_machine

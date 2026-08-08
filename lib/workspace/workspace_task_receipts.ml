@@ -146,7 +146,9 @@ let latest_execution_receipt_json config ~agent_name =
   keeper_receipt_candidate_names config ~agent_name
   |> List.filter_map (fun keeper_name ->
     let base_dir =
-      Filename.concat (Filename.concat keeper_root keeper_name) "execution-receipts"
+      Filename.concat
+        (Filename.concat keeper_root keeper_name)
+        (Common.keeper_runtime_store_dirname Common.Keeper_execution_receipts)
     in
     latest_json_in_receipt_dir base_dir)
   |> List.sort (fun a b -> compare (receipt_sort_key b) (receipt_sort_key a))

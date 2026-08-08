@@ -81,9 +81,21 @@ let source_dashboard_surface = function
   | Tool_metric -> "/api/v1/tool-metrics"
 
 let source_durable_store ~masc_root ~base_path = function
-  | Keeper_metric -> Filename.concat masc_root "keepers/*/metrics"
+  | Keeper_metric ->
+    Filename.concat
+      masc_root
+      (Printf.sprintf
+         "%s/*/%s"
+         Common.keepers_runtime_dirname
+         (Common.keeper_runtime_store_dirname Common.Keeper_metrics))
   | Trajectory_tool_call -> Filename.concat masc_root "trajectories/*/*.jsonl"
-  | Execution_receipt -> Filename.concat masc_root "keepers/*/execution-receipts"
+  | Execution_receipt ->
+    Filename.concat
+      masc_root
+      (Printf.sprintf
+         "%s/*/%s"
+         Common.keepers_runtime_dirname
+         (Common.keeper_runtime_store_dirname Common.Keeper_execution_receipts))
   | Goal_event -> Filename.concat masc_root "goal_events.jsonl"
   | source -> (
       match fixed_store_dir ~masc_root ~base_path source with
@@ -156,7 +168,11 @@ let discover_keeper_metric_dirs masc_root : (string * string) list =
         ~default:[] (fun () -> Array.to_list (Sys.readdir keepers_dir))
     in
     List.filter_map (fun name ->
-      let metrics_dir = Filename.concat keepers_dir (name ^ "/metrics") in
+      let metrics_dir =
+        Filename.concat
+          (Filename.concat keepers_dir name)
+          (Common.keeper_runtime_store_dirname Common.Keeper_metrics)
+      in
       if Sys.file_exists metrics_dir then Some (name, metrics_dir)
       else None
     ) entries
@@ -202,8 +218,9 @@ let discover_execution_receipt_dirs masc_root : (string * string) list =
       |> Array.to_list
       |> List.filter_map (fun name ->
            let dir =
-             Filename.concat (Filename.concat keepers_dir name)
-               "execution-receipts"
+             Filename.concat
+               (Filename.concat keepers_dir name)
+               (Common.keeper_runtime_store_dirname Common.Keeper_execution_receipts)
            in
            if
              is_directory Execution_receipt

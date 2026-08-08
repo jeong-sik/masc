@@ -20,7 +20,11 @@ let metrics_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
 let metrics_store_mu = Eio.Mutex.create ()
 
 let keeper_metrics_store config name : Dated_jsonl.t =
-  let dir = Filename.concat (keeper_dir_ config) (name ^ "/metrics") in
+  let dir =
+    Filename.concat
+      (Filename.concat (keeper_dir_ config) name)
+      (Common.keeper_runtime_store_dirname Common.Keeper_metrics)
+  in
   let lookup () =
     match Hashtbl.find_opt metrics_store_cache dir with
     | Some store -> store
@@ -40,7 +44,9 @@ let execution_receipt_store_cache : (string, Dated_jsonl.t) Hashtbl.t =
 let execution_receipt_store_mu = Eio.Mutex.create ()
 
 let execution_receipt_schema = "keeper.execution_receipt.v1"
-let execution_receipts_dirname = "execution-receipts"
+let execution_receipts_dirname =
+  Common.keeper_runtime_store_dirname Common.Keeper_execution_receipts
+;;
 
 let keeper_execution_receipt_store config name : Dated_jsonl.t =
   let dir =
@@ -61,7 +67,11 @@ let turn_record_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create
 let turn_record_store_mu = Eio.Mutex.create ()
 
 let keeper_turn_record_store config name : Dated_jsonl.t =
-  let dir = Filename.concat (keeper_dir_ config) (name ^ "/turn-records") in
+  let dir =
+    Filename.concat
+      (Filename.concat (keeper_dir_ config) name)
+      (Common.keeper_runtime_store_dirname Common.Keeper_turn_records)
+  in
   let lookup () =
     match Hashtbl.find_opt turn_record_store_cache dir with
     | Some store -> store

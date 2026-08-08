@@ -12,13 +12,31 @@ let filename = "codex-session.json"
 
 let path ~session_dir = Filename.concat session_dir filename
 
+let rec canonical_json = function
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> List.map (fun (name, value) -> name, canonical_json value)
+       |> List.sort (fun (left, _) (right, _) -> String.compare left right))
+  | `List values -> `List (List.map canonical_json values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+    value
+;;
+
 let tool_surface_sha256 tools =
   let tool_json (tool : Agent_sdk.Tool.t) =
+    let parameters =
+      List.sort
+        (fun (left : Agent_sdk.Types.tool_param) right ->
+           String.compare left.name right.name)
+        tool.schema.parameters
+    in
     `Assoc
       [ "description", `String tool.schema.description
-      ; "input_schema", Agent_sdk.Types.params_to_input_schema tool.schema.parameters
+      ; "input_schema", Agent_sdk.Types.params_to_input_schema parameters
       ; "name", `String tool.schema.name
       ]
+    |> canonical_json
   in
   tools
   |> List.sort (fun (left : Agent_sdk.Tool.t) right ->
@@ -107,7 +125,7 @@ let save ~session_dir binding =
   let* () = validate binding in
   let prepared =
     try
-      ignore (Keeper_fs.ensure_dir session_dir : string);
+      let (_ : string) = Keeper_fs.ensure_dir session_dir in
       Ok ()
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn

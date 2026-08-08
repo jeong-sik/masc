@@ -33,6 +33,11 @@ let cache_hint_fields ~scope ~ttl_ms =
    the calling fiber because it may yield through the registry mailbox. *)
 let run_blocking_resource_io f = Eio_unix.run_in_systhread f
 
+module For_testing = struct
+  let blocking_io_execution_context () =
+    run_blocking_resource_io Eio_guard.execution_context
+end
+
 let handle_read_resource_eio state id params =
   match params with
   | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"

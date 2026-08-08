@@ -207,7 +207,7 @@ describe('parseTransportHealthData', () => {
         supports_delete: true,
       },
       http2: {
-        listener_mode: 'prior_knowledge',
+        listener_mode: 'h2_only',
         multiplex_ready: true,
         prior_knowledge_path: '/mcp',
       },

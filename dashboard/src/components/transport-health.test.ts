@@ -113,7 +113,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       supports_delete: true,
     },
     http2: {
-      listener_mode: 'h2',
+      listener_mode: 'h2_only',
       multiplex_ready: true,
       prior_knowledge_path: '/mcp',
     },
@@ -746,7 +746,7 @@ function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData
       supports_delete: true,
     },
     http2: {
-      listener_mode: 'h2',
+      listener_mode: 'h2_only',
       multiplex_ready: true,
       prior_knowledge_path: '/mcp',
     },

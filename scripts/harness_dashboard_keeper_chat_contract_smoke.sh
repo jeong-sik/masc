@@ -192,14 +192,14 @@ if [ -x "$SERVER_EXE" ]; then
     MASC_BASE_PATH="$BASE_PATH" \
     MASC_CONFIG_DIR="$BASE_PATH/.masc/config" \
     MASC_ORCHESTRATOR_ENABLED=false \
-    MASC_AUTONOMY_ENABLED=false \
+    MASC_KEEPER_AUTONOMOUS_ENABLED=false \
     "$SERVER_EXE" --port "$PORT" --base-path "$BASE_PATH" >"$SERVER_LOG" 2>&1 &
 else
   nohup env \
     MASC_BASE_PATH="$BASE_PATH" \
     MASC_CONFIG_DIR="$BASE_PATH/.masc/config" \
     MASC_ORCHESTRATOR_ENABLED=false \
-    MASC_AUTONOMY_ENABLED=false \
+    MASC_KEEPER_AUTONOMOUS_ENABLED=false \
     "$REPO_ROOT/start-masc.sh" --port "$PORT" --base-path "$BASE_PATH" >"$SERVER_LOG" 2>&1 &
 fi
 SERVER_PID=$!

@@ -564,47 +564,47 @@ let test_continuation_status_uses_assistant_delivery_path () =
 let body fields = `Assoc fields
 
 let test_direct_reply_visible_text () =
-  check (option string) "declared checkpoint -> None" None
-    (Ops.direct_reply_visible_text
-       (body
-          [ ("reply", `String checkpoint_text);
-            ("turn_outcome", `String "continuation_checkpoint")
-          ]));
-  check (option string) "declared no visible reply -> None" None
-    (Ops.direct_reply_visible_text
-       (body
-          [ ("reply", `String "all done");
-            ("turn_outcome", `String "no_visible_reply")
-          ]));
-  check_raises
+  let check_ok label expected json =
+    match Ops.direct_reply_visible_text json with
+    | Ok actual -> check (option string) label expected actual
+    | Error error ->
+      failf "%s: %s" label (Ops.direct_reply_decode_error_to_string error)
+  in
+  let check_error label expected json =
+    match Ops.direct_reply_visible_text json with
+    | Ok _ -> failf "%s: expected decode error" label
+    | Error error ->
+      check string label expected
+        (Ops.direct_reply_decode_error_to_string error)
+  in
+  check_ok "declared checkpoint -> None" None
+    (body
+       [ ("reply", `String checkpoint_text);
+         ("turn_outcome", `String "continuation_checkpoint")
+       ]);
+  check_ok "declared no visible reply -> None" None
+    (body
+       [ ("reply", `String "all done");
+         ("turn_outcome", `String "no_visible_reply")
+       ]);
+  check_error
     "missing outcome is a direct-reply contract error"
-    (Invalid_argument "keeper reply payload is missing turn_outcome")
-    (fun () ->
-       ignore
-         (Ops.direct_reply_visible_text
-            (body [ ("reply", `String checkpoint_text) ])
-          : string option));
-  check (option string) "declared visible -> reply text" (Some "all done")
-    (Ops.direct_reply_visible_text
-       (body
-          [ ("reply", `String "all done");
-            ("turn_outcome", `String "visible_reply")
-          ]));
-  check (option string) "empty reply -> None" None
-    (Ops.direct_reply_visible_text
-       (body
-          [ ("reply", `String "   ");
-            ("turn_outcome", `String "visible_reply")
-          ]));
-  check_raises
+    "keeper reply payload is missing turn_outcome"
+    (body [ ("reply", `String checkpoint_text) ]);
+  check_ok "declared visible -> reply text" (Some "all done")
+    (body
+       [ ("reply", `String "all done");
+         ("turn_outcome", `String "visible_reply")
+       ]);
+  check_ok "empty reply -> None" None
+    (body
+       [ ("reply", `String "   ");
+         ("turn_outcome", `String "visible_reply")
+       ]);
+  check_error
     "visible outcome without reply is a direct-reply contract error"
-    (Invalid_argument
-       "keeper reply payload is missing reply for visible_reply")
-    (fun () ->
-       ignore
-         (Ops.direct_reply_visible_text
-            (body [ ("turn_outcome", `String "visible_reply") ])
-          : string option))
+    "keeper reply payload is missing reply for visible_reply"
+    (body [ ("turn_outcome", `String "visible_reply") ])
 
 let test_connector_projection_keeps_external_wait_typed () =
   match
@@ -646,10 +646,12 @@ let test_direct_reply_projection_keeps_external_wait_typed () =
          ; ("turn_outcome", `String "external_effect_pending")
          ])
   with
-  | Connector_status { kind = External_effect_pending } -> ()
-  | Connector_status { kind = Continuation_checkpoint }
-  | Connector_text _ | Connector_no_visible_reply ->
+  | Ok (Connector_status { kind = External_effect_pending }) -> ()
+  | Ok (Connector_status { kind = Continuation_checkpoint })
+  | Ok (Connector_text _ | Connector_no_visible_reply) ->
     fail "direct reply collapsed external-effect wait into silence"
+  | Error error ->
+    fail (Ops.direct_reply_decode_error_to_string error)
 
 let () =
   run "keeper_turn_outcome"

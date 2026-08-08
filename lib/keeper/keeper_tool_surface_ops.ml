@@ -468,31 +468,40 @@ let resolve_keeper_name ctx message =
     ~config:ctx.config
     (Keeper_invocation_contract.direct_message_target_name message)
 
+type direct_reply_decode_error =
+  | Turn_outcome_decode_error of Keeper_turn_outcome.decode_error
+  | Visible_reply_missing_reply
+
+let direct_reply_decode_error_to_string = function
+  | Turn_outcome_decode_error error ->
+    Keeper_turn_outcome.decode_error_to_string error
+  | Visible_reply_missing_reply ->
+    "keeper reply payload is missing reply for visible_reply"
+;;
+
 let direct_reply_projection json =
   match Keeper_turn_outcome.of_reply_payload (Some json) with
   | Ok Keeper_turn_outcome.Visible_reply ->
-    let reply =
-      match Json_util.get_string json "reply" with
-      | Some reply -> Some reply
-      | None ->
-        invalid_arg
-          "keeper reply payload is missing reply for visible_reply"
-    in
-    Keeper_chat_blocks.connector_projection
-      ~turn_outcome:Keeper_turn_outcome.Visible_reply
-      ~reply
+    (match Json_util.get_string json "reply" with
+     | Some reply ->
+       Ok
+         (Keeper_chat_blocks.connector_projection
+            ~turn_outcome:Keeper_turn_outcome.Visible_reply
+            ~reply:(Some reply))
+     | None -> Error Visible_reply_missing_reply)
   | Ok turn_outcome ->
-    Keeper_chat_blocks.connector_projection
-      ~turn_outcome
-      ~reply:(Json_util.get_string json "reply")
-  | Error error ->
-    invalid_arg (Keeper_turn_outcome.decode_error_to_string error)
+    Ok
+      (Keeper_chat_blocks.connector_projection
+         ~turn_outcome
+         ~reply:(Json_util.get_string json "reply"))
+  | Error error -> Error (Turn_outcome_decode_error error)
 ;;
 
 let direct_reply_visible_text json =
   match direct_reply_projection json with
-  | Keeper_chat_blocks.Connector_text text -> Some text
-  | Connector_status _ | Connector_no_visible_reply -> None
+  | Ok (Keeper_chat_blocks.Connector_text text) -> Ok (Some text)
+  | Ok (Connector_status _ | Connector_no_visible_reply) -> Ok None
+  | Error error -> Error error
 ;;
 
 let append_direct_chat_pair_if_reply
@@ -514,16 +523,19 @@ let append_direct_chat_pair_if_reply
       Keeper_turn_outcome.turn_ref_of_reply_payload
         (Some (Tool_result.data result))
     in
-    let projected_assistant =
-      match direct_reply_projection (Tool_result.data result) with
-      | Keeper_chat_blocks.Connector_text text -> Some (text, None)
-      | Connector_status status ->
-        Some ("", Some [ Keeper_chat_blocks.Status status ])
-      | Connector_no_visible_reply -> None
-    in
-    match user_content, projected_assistant with
-    | "", _ | _, None -> ()
-    | _, Some (assistant_content, blocks) ->
+    match direct_reply_projection (Tool_result.data result) with
+    | Error error -> Error error
+    | Ok projection ->
+      let projected_assistant =
+        match projection with
+        | Keeper_chat_blocks.Connector_text text -> Some (text, None)
+        | Connector_status status ->
+          Some ("", Some [ Keeper_chat_blocks.Status status ])
+        | Connector_no_visible_reply -> None
+      in
+      (match user_content, projected_assistant with
+       | "", _ | _, None -> Ok ()
+       | _, Some (assistant_content, blocks) ->
         (* Agent-initiated [masc_keeper_msg] path: only the final tool
            result is visible here (no stream events), so no tool lines
            are persisted for this surface. *)
@@ -562,7 +574,9 @@ let append_direct_chat_pair_if_reply
           Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:channel
             ~content:assistant_content
             ()
-        end)
+        end;
+        Ok ()))
+  else Ok ()
 ;;
 
 let submit_keeper_invocation
@@ -626,9 +640,13 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_res
                worker_ctx
                message
            in
-           append_direct_chat_pair_if_reply
-             ~config:ctx.config ~name ~message result;
-           result)
+           match
+             append_direct_chat_pair_if_reply
+               ~config:ctx.config ~name ~message result
+           with
+           | Ok () -> result
+           | Error error ->
+             tool_result_error (direct_reply_decode_error_to_string error))
          ctx ~request)
   with
   | Ok result -> result

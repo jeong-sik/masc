@@ -269,7 +269,13 @@ describe('normalizeNamespaceTruth', () => {
           hidden_count: 7,
           hidden_actors: ['agent-2', 'agent-3'],
           confirm_required_actions: [
-            { action_type: 'shutdown', target_type: 'keeper', description: 'Shutdown keeper', confirm_required: true },
+            {
+              action_type: 'keeper_recover',
+              tool_name: 'masc_keeper_recover',
+              target_type: 'keeper',
+              description: 'Safe down/up recovery for stale/degraded keeper.',
+              confirm_required: true,
+            },
           ],
         },
       },
@@ -281,7 +287,7 @@ describe('normalizeNamespaceTruth', () => {
     expect(pcs!.visible_count).toBe(3)
     expect(pcs!.hidden_actors).toEqual(['agent-2', 'agent-3'])
     expect(pcs!.confirm_required_actions).toHaveLength(1)
-    expect(pcs!.confirm_required_actions[0]!.action_type).toBe('shutdown')
+    expect(pcs!.confirm_required_actions[0]!.action_type).toBe('keeper_recover')
   })
 
   it('rejects a summary with an invalid action', () => {

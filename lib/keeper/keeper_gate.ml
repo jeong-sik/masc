@@ -1522,7 +1522,7 @@ let decide_from_selected_mode request = function
     let source = Workspace_always_allow in
     audit_allow
       request
-      ~decision_source:Keeper_approval_queue.Always_allowed
+      ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
       source;
     Allow { source }
 ;;
@@ -1533,7 +1533,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
     let source = Keeper_always_allow in
     audit_allow
       request
-      ~decision_source:Keeper_approval_queue.Always_allowed
+      ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
       source;
     Allow { source })
   else
@@ -1543,7 +1543,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
        let source = Workspace_always_allow in
        audit_allow
          request
-         ~decision_source:Keeper_approval_queue.Always_allowed
+         ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
          source;
        Allow { source }
      | Error _ | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Auto_judge) ->
@@ -1564,7 +1564,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
           audit_allow
             request
             ~rule_match
-            ~decision_source:Keeper_approval_queue.Always_allowed
+            ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
             source;
           Allow { source }
         | Ok (Keeper_approval_queue.Rule_match_expired rule_match) ->

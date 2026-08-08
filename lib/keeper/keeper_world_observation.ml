@@ -135,6 +135,8 @@ let empty_scheduled_automation_observation =
   }
 ;;
 
+module Inputs = Keeper_world_observation_inputs
+
 type world_observation =
   { pending_messages : Keeper_world_observation_message_scope.pending_message list
   ; pending_board_events : pending_board_event list
@@ -221,7 +223,6 @@ type board_signal_match = Board_signal.match_result =
   }
 
 module Message_scope = Keeper_world_observation_message_scope
-module Inputs = Keeper_world_observation_inputs
 
 let self_ids = Message_scope.self_ids
 let is_self_author = Message_scope.is_self_author

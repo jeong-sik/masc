@@ -14,6 +14,7 @@ import type {
   SSEEventType,
 } from '../types/sse'
 import { isKeeperChatReceiptId } from '../lib/keeper-chat-receipt'
+import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from '../lib/keeper-chat-stream-contract'
 
 type SchemaIssue = { path?: string; message: string }
 type SafeParseSuccess<T> = { success: true; data: T }
@@ -197,22 +198,19 @@ const KEEPER_CHAT_AG_UI_EVENT_TYPES = new Set([
   'CUSTOM',
 ])
 
-const KEEPER_CHAT_AG_UI_FIELDS = new Set([
-  'type',
-  'threadId',
-  'timestamp',
-  'runId',
-  'messageId',
-  'role',
-  'delta',
-  'stepName',
-  'toolCallId',
-  'toolCallName',
-  'snapshot',
-  'message',
-  'code',
-  'name',
-  'value',
+const KEEPER_CHAT_CUSTOM_EVENT_NAME_SET = new Set<string>(KEEPER_CHAT_CUSTOM_EVENT_NAMES)
+const KEEPER_CHAT_AG_UI_BASE_FIELDS = ['type', 'threadId', 'timestamp'] as const
+const KEEPER_CHAT_AG_UI_FIELDS_BY_TYPE = new Map<string, ReadonlySet<string>>([
+  ['RUN_STARTED', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId'])],
+  ['RUN_FINISHED', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId'])],
+  ['RUN_ERROR', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'message', 'code'])],
+  ['TEXT_MESSAGE_START', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'role'])],
+  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta'])],
+  ['TEXT_MESSAGE_END', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId'])],
+  ['TOOL_CALL_START', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'toolCallId', 'toolCallName'])],
+  ['TOOL_CALL_ARGS', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'toolCallId', 'delta', 'snapshot'])],
+  ['TOOL_CALL_END', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'toolCallId'])],
+  ['CUSTOM', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'name', 'value'])],
 ])
 
 function ok<T>(data: T): SafeParseSuccess<T> {
@@ -224,14 +222,15 @@ function fail<T = never>(path: string | undefined, message: string): SafeParseRe
 }
 
 function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseResult<true> {
-  const unknown = Object.keys(value).find(key => !KEEPER_CHAT_AG_UI_FIELDS.has(key))
-  if (unknown) return fail(`ag_ui_event.${unknown}`, 'Unexpected AG-UI event field')
   if (
     typeof value.type !== 'string'
     || !KEEPER_CHAT_AG_UI_EVENT_TYPES.has(value.type)
   ) {
     return fail('ag_ui_event.type', 'Expected a supported AG-UI event type')
   }
+  const allowedFields = KEEPER_CHAT_AG_UI_FIELDS_BY_TYPE.get(value.type)
+  const unknown = Object.keys(value).find(key => !allowedFields?.has(key))
+  if (unknown) return fail(`ag_ui_event.${unknown}`, `Unexpected ${value.type} event field`)
   if (typeof value.threadId !== 'string' || value.threadId.trim() === '') {
     return fail('ag_ui_event.threadId', 'Expected non-empty AG-UI threadId')
   }
@@ -242,7 +241,6 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
     'runId',
     'messageId',
     'delta',
-    'stepName',
     'toolCallId',
     'toolCallName',
     'message',
@@ -297,9 +295,15 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
         ? ok(true)
         : fail('ag_ui_event.toolCallId', 'Expected non-empty AG-UI toolCallId')
     case 'CUSTOM':
-      return typeof value.name === 'string' && value.name.trim() !== ''
+      if (
+        typeof value.name !== 'string'
+        || !KEEPER_CHAT_CUSTOM_EVENT_NAME_SET.has(value.name)
+      ) {
+        return fail('ag_ui_event.name', 'Expected a supported Keeper custom event name')
+      }
+      return Object.prototype.hasOwnProperty.call(value, 'value')
         ? ok(true)
-        : fail('ag_ui_event.name', 'Expected non-empty AG-UI custom event name')
+        : fail('ag_ui_event.value', 'Expected Keeper custom event value')
   }
   return fail('ag_ui_event.type', 'Expected a supported AG-UI event type')
 }

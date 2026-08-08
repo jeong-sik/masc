@@ -513,7 +513,7 @@ export function applyKeeperStreamEvent(
     case 'TOOL_CALL_START': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       const toolCallId = nonBlankToolCallId(event.toolCallId)
-      const toolName = (event.toolCallName ?? event.name)?.trim()
+      const toolName = event.toolCallName?.trim()
       if (!toolCallId || !toolName) {
         recordStreamProtocolError(
           keeperName,
@@ -598,7 +598,18 @@ export function applyKeeperStreamEvent(
       }
       return null
     }
-    case 'CUSTOM':
+    case 'CUSTOM': {
+      const customEventName: string = event.name
+      if (event.name === 'KEEPER_CONNECTED') {
+        setAssistantStreamState(
+          keeperName,
+          assistantEntryId,
+          'streaming',
+          'streaming',
+          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONNECTED' }),
+        )
+        return null
+      }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
@@ -762,6 +773,23 @@ export function applyKeeperStreamEvent(
           'queued',
           keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', { eventName: 'KEEPER_QUEUE_REQUEST' }),
         )
+        return null
+      }
+      if (event.name === 'KEEPER_QUEUED_TURN_DEFERRED') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({
+          ...entry,
+          text: entry.text || `${keeperName}가 다른 작업을 처리 중이에요. 메시지는 대기 중입니다.`,
+          delivery: 'queued',
+          streamState: null,
+          details: {
+            ...(entry.details ?? {}),
+            queueState: 'pending',
+          },
+          streamContract: keeperClientObservedSseStreamContract('queue_event', 'backend_stream_event', {
+            eventName: 'KEEPER_QUEUED_TURN_DEFERRED',
+          }),
+        }))
         return null
       }
       if (event.name === 'KEEPER_CHAT_QUEUED') {
@@ -995,8 +1023,10 @@ export function applyKeeperStreamEvent(
             }
           })
         }
+        return null
       }
-      return null
+      return `Unsupported Keeper custom event: ${customEventName}`
+    }
     case 'RUN_FINISHED':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
@@ -1008,6 +1038,6 @@ export function applyKeeperStreamEvent(
       clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
       return asString(event.message, '').trim() || 'Keeper stream failed'
     default:
-      return null
+      return 'Unsupported Keeper stream event'
   }
 }

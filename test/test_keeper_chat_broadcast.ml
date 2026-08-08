@@ -119,6 +119,19 @@ let test_projection_covers_thinking_and_tool_args () =
     (Some "TOOL_CALL_ARGS")
     (Yojson.Safe.Util.member "type" tool_args |> Yojson.Safe.Util.to_string_option)
 
+let test_projection_rejects_unknown_custom_event () =
+  let _, projected =
+    project P.initial
+      (E.Custom { name = "KEEPER_UNTYPED_EVENT"; value = `Null })
+  in
+  let projected = Ag_ui.event_to_json (projected_exn (P.initial, projected)) in
+  Alcotest.(check (option string)) "unsupported event becomes run error"
+    (Some "RUN_ERROR")
+    (Yojson.Safe.Util.member "type" projected |> Yojson.Safe.Util.to_string_option);
+  Alcotest.(check (option string)) "unsupported event is operator-visible"
+    (Some "Unsupported Keeper chat event: KEEPER_UNTYPED_EVENT")
+    (Yojson.Safe.Util.member "message" projected |> Yojson.Safe.Util.to_string_option)
+
 let () =
   Alcotest.run "keeper_chat_broadcast"
     [ ( "turn_event"
@@ -130,5 +143,7 @@ let () =
             test_projection_preserves_stream_identity
         ; Alcotest.test_case "projection covers thinking and tool args" `Quick
             test_projection_covers_thinking_and_tool_args
+        ; Alcotest.test_case "projection rejects unknown custom event" `Quick
+            test_projection_rejects_unknown_custom_event
         ] )
     ]

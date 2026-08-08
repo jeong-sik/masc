@@ -53,17 +53,6 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
   })
 
-  it('ignores retired TEXT_DELTA events', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'TEXT_DELTA',
-      delta: '안녕',
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('')
-  })
-
   it('ignores empty delta text events', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
@@ -929,6 +918,24 @@ describe('applyKeeperQueuedTurnEvent', () => {
     expect(entry?.id).toBe(`queued-turn-${firstReceipt}`)
     expect(entry?.queueReceiptIds).toEqual([firstReceipt])
     expect(entry?.text).toBe('중간부터 표시')
+  })
+
+  it('surfaces a projected unsupported event as a terminal queued error', () => {
+    queuedEntry('first', firstReceipt, 'queued first')
+
+    const error = applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: {
+        type: 'RUN_ERROR',
+        message: 'Unsupported Keeper chat event: KEEPER_UNTYPED_EVENT',
+      },
+    })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'first')
+    expect(error).toBe('Unsupported Keeper chat event: KEEPER_UNTYPED_EVENT')
+    expect(entry?.delivery).toBe('error')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.text).toContain('KEEPER_UNTYPED_EVENT')
   })
 
   it('does not reopen a terminal history row when a delayed event arrives', () => {

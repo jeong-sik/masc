@@ -249,13 +249,49 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
-  it('rejects the removed tool-only queued progress envelope', () => {
+  it('accepts an operator-visible projection error for a queued turn', () => {
     const r = SSEMessageSchema.safeParse({
-      type: 'keeper_chat_turn_progress',
+      type: 'keeper_chat_turn_event',
       name: 'sangsu',
-      run_id: 'run-1',
-      kind: 'tool_call_start',
-      tool_call_id: 'tc-1',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      ag_ui_event: {
+        type: 'RUN_ERROR',
+        threadId: 'keeper-consumer:sangsu',
+        message: 'Unsupported Keeper chat event: KEEPER_UNTYPED_EVENT',
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('rejects an untyped Keeper custom event name', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_turn_event',
+      name: 'sangsu',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      ag_ui_event: {
+        type: 'CUSTOM',
+        threadId: 'keeper-consumer:sangsu',
+        name: 'KEEPER_UNTYPED_EVENT',
+        value: null,
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it('rejects fields outside the exact AG-UI event variant', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_turn_event',
+      name: 'sangsu',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      ag_ui_event: {
+        type: 'TEXT_MESSAGE_CONTENT',
+        threadId: 'keeper-consumer:sangsu',
+        delta: 'hello',
+        toolCallId: 'not-valid-for-text',
+        timestamp: 1_712_000_000,
+      },
     })
     expect(r.success).toBe(false)
   })

@@ -5,9 +5,6 @@ type replay_suffix_prune_reason
 val replay_suffix_prune_reason_to_string :
   replay_suffix_prune_reason -> string
 
-val replay_response_text_for_capture :
-  suppress_visible_response:bool -> response_text:string -> string option
-
 val replay_response_text_for_persistence :
   suppress_visible_response:bool -> response_text:string -> string option
 

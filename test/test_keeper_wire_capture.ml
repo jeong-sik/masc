@@ -610,9 +610,9 @@ let capture_response_uses_finalized_replay_text () =
       "lib/keeper/keeper_agent_run_finalize_response.ml"
   in
   let replay_decision_line =
-    match last_line_of finalize_path "replay_response_text_for_capture" with
+    match last_line_of finalize_path "replay_response_text_for_persistence" with
     | Some n -> n
-    | None -> Alcotest.fail "replay_response_text_for_capture use not found"
+    | None -> Alcotest.fail "replay_response_text_for_persistence use not found"
   in
   let capture_callback_line =
     match last_line_of finalize_path "capture_replay_response ~response_text" with

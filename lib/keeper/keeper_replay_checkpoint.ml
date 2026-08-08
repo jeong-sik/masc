@@ -7,14 +7,10 @@ let replay_suffix_prune_reason_to_string = function
   | Canonical_success_replay -> "canonical_success_replay"
 ;;
 
-let replay_response_text_for_capture ~suppress_visible_response ~response_text =
+let replay_response_text_for_persistence ~suppress_visible_response ~response_text =
   if suppress_visible_response || String.trim response_text = ""
   then None
   else Some response_text
-;;
-
-let replay_response_text_for_persistence ~suppress_visible_response ~response_text =
-  replay_response_text_for_capture ~suppress_visible_response ~response_text
 ;;
 
 type wire_capture_response_suppression_reason =

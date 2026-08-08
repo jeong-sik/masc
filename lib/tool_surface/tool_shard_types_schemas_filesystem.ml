@@ -118,11 +118,7 @@ let filesystem_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_ide_annotate"
     ; description =
-        "Attach a keeper-authored annotation to a source file line range. Use this to \
-         leave durable IDE context linked to an optional goal, task, or opaque external \
-         reference. file_path, line_start, and content are required. The IDE transport \
-         stores and renders reference relation/value pairs without interpreting the \
-         producer's product vocabulary."
+        "Emit an IDE annotation event for the current keeper."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

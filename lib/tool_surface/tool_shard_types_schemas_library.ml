@@ -3,9 +3,7 @@
 let library_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_library_search"
     ; description =
-        "Search the knowledge library by keyword. Returns matching document titles, \
-         relevance scores (0-1), and text snippets. Use to discover relevant docs before \
-         reading full content with keeper_library_read."
+        "Search the keeper library catalog."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -24,9 +22,7 @@ let library_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_library_read"
     ; description =
-        "Read a full document from the knowledge library by exact topic name. Use after \
-         keeper_library_search identifies a relevant document, or with a known topic \
-         name. Returns full document text."
+        "Read a library entry by id."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

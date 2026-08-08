@@ -8,30 +8,22 @@ let base_tools : Masc_domain.tool_schema list =
   [ (* Time *)
     { name = "keeper_time_now"
     ; description =
-        "Get current server time. Returns now_iso (ISO8601) and now_unix (float). Use to \
-         timestamp events, check elapsed time, or include current time in reports."
+        "Return the current wall-clock time as ISO 8601 and Unix epoch \
+         seconds. No arguments."
     ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
     }
   ; (* Context status *)
     { name = "keeper_context_status"
     ; description =
-        "Check your own persisted checkpoint and session state. Returns: name (your \
-         keeper name), checkpoint_bytes, message_count, generation, memory fact counts, \
-         sandbox health, and canonical sandbox paths (sandbox_root, sandbox_repos) plus \
-         backend/profile metadata. Context-window occupancy is not \
-         currently observed and is not returned. sandbox paths are tool-ready and can be \
-         passed directly as path or cwd to keeper tools without prefix. Use when checking \
-         checkpoint/session continuity or resolving a path without string-interpolating \
-         your own keeper name."
+        "Return persisted checkpoint, recent-message, memory, and sandbox \
+         state for this keeper turn. Context-window occupancy is not \
+         currently observed."
     ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
     }
   ; (* Memory *)
     { name = "keeper_memory_search"
     ; description =
-        "Search your durable Memory OS facts or conversation history. \
-         Memory OS fact results preserve snapshot order and include category and \
-         insertion timestamp. Default searches the durable fact store. Use \
-         source='history' for raw user messages, source='all' for both."
+        "Search keeper memory or history; current facts use explicit substring filtering and snapshot order."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -84,11 +76,7 @@ let base_tools : Masc_domain.tool_schema list =
      Stage 4: the turn-scoped bank is gone). *)
     { name = "keeper_memory_write"
     ; description =
-        "Record a durable claim that later turns read back. Your context resets \
-         between turns, so a conclusion you leave only in this turn's reasoning is \
-         gone. Task sequencing and operating constraints belong to their typed domain \
-         stores, not memory prose. The runtime records explicit typed provenance and \
-         returns validation or persistence failures directly."
+        "Persist a memory entry for this keeper."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -116,13 +104,10 @@ let base_tools : Masc_domain.tool_schema list =
   ; (* Tool self-introspection — lets the keeper enumerate its own capabilities *)
     { name = "keeper_tools_list"
      ; description =
-         "List all tools currently available to you, grouped by category. Use when asked \
-         'what can you do?' or when you need to discover your capabilities. Do not use \
-         this to answer connector content questions or channel registry questions; use \
-         keeper_surface_read only for current conversation context and state \
-         the limitation if a connector-wide registry is unavailable. Returns tool names \
-         organized by category plus descriptor_surface metadata with executor, \
-         schema-shape, and typed usage examples."
+         "List the active keeper tool surface from descriptors and registered schemas. \
+          This is capability introspection, not connector content lookup. Use \
+          keeper_surface_read only for current conversation context. \
+          No arguments."
     ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
     }
   ]

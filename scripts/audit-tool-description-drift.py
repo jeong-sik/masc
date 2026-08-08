@@ -21,9 +21,11 @@ only the shard copy, and passed while the Keeper-facing description was
 unchanged -- the reviewer closed it for exactly that. This audit is that review,
 mechanised, and it also covers the judge side the review did not name.
 
-At the time of writing, 11 tools carry a description in both places and 9 of
-them already differ. That is the baseline: the number may not grow. Lowering it
-is the work; this only stops it rising.
+The nine that differed were synced to the Keeper-facing text in the same change
+that added this, so the baseline is 0: any divergence now fails. It is written
+as a constant rather than a hard zero because a deliberate per-audience
+difference, if one is ever argued for, should be recorded here with its reason
+rather than silently passing.
 
 Extraction is deliberately narrow -- name-literal descriptors with a literal
 description. Descriptors built by a helper (the Board family, the Library
@@ -46,7 +48,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Tools whose two descriptions already disagree. This is a ceiling, not a
 # target: a new divergence fails, and fixing one should lower the number.
-DRIFT_BASELINE = 9
+DRIFT_BASELINE = 0
 
 PRODUCTION = REPO_ROOT / "lib" / "keeper" / "keeper_tool_descriptor.ml"
 SHARD_GLOB = "lib/tool_surface/*.ml"

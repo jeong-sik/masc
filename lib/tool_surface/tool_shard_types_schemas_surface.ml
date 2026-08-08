@@ -86,9 +86,9 @@ let surface_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_person_note_set"
     ; description =
         "Remember (or clear) a note about a person met on a connected \
-         surface, keyed by their roster speaker_id (RFC-0229). The note \
-         survives after their messages age out of the log window and \
-         shows up on the keeper_surface_read roster."
+         surface, keyed by their roster speaker_id. Deliberate memory: \
+         the note survives after their chat rows age out of the log \
+         window and shows up on the keeper_surface_read roster."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

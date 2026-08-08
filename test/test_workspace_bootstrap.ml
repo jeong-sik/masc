@@ -23,8 +23,8 @@ module Types = Masc_domain
        on the same tmpdir leaves the seed files unchanged
        (mtime-stable) and produces no extra directories.
     3. {b ensure_workspace_bootstrap creates expected dirs} — after
-       a single call, [.masc/agents/], [.masc/tasks/],
-       [.masc/messages/] exist plus the root mirrors. *)
+    a single call, the agent, task, and message stores exist plus the root
+    mirrors. *)
 
 module B = Workspace_bootstrap
 (* [Workspace] is the wrapper module re-exported by [masc]; it
@@ -112,7 +112,7 @@ let test_ensure_workspace_bootstrap_creates_scoped_dirs () =
           let p = Filename.concat masc sub in
           assert (Sys.file_exists p);
           assert (Sys.is_directory p))
-        [ "agents"; "tasks"; "messages" ])
+        [ "agents"; Workspace_utils.tasks_dirname; "messages" ])
 
 let test_ensure_workspace_bootstrap_creates_root_dirs () =
   (* The root layout (under [.masc/] sibling) — agents / keepers /
@@ -128,7 +128,12 @@ let test_ensure_workspace_bootstrap_creates_root_dirs () =
           let p = Filename.concat root_dir sub in
           assert (Sys.file_exists p);
           assert (Sys.is_directory p))
-        [ "agents"; "keepers"; "traces"; "tasks"; "messages" ])
+        [ "agents"
+        ; "keepers"
+        ; "traces"
+        ; Workspace_utils.tasks_dirname
+        ; "messages"
+        ])
 
 let test_ensure_workspace_bootstrap_seeds_state_json () =
   (* The scoped state JSON file should be created. *)
@@ -140,6 +145,10 @@ let test_ensure_workspace_bootstrap_seeds_state_json () =
       let backlog_path =
         Workspace_utils.backlog_path config
       in
+      assert (Filename.basename backlog_path = Workspace_utils.backlog_filename);
+      assert (
+        Filename.basename (Filename.dirname backlog_path)
+        = Workspace_utils.tasks_dirname);
       assert (Sys.file_exists backlog_path))
 
 (* ── (3) idempotency ──────────────────────────────────────── *)

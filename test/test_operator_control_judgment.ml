@@ -321,8 +321,7 @@ let test_confirm_consumes_pending_token_before_delegated_action_fails () =
        | Ok () -> ()
        | Error err -> Alcotest.failf "failed to persist pending confirm fixture: %s" err);
       let initial_pending_confirms =
-        Operator_control.pending_confirms_json ~actor:"operator" config
-        |> Yojson.Safe.Util.to_list
+        (Operator_control.pending_confirm_scope ~actor:"operator" config).visible_entries
       in
       Alcotest.(check int)
         "pending confirm fixture persisted" 1
@@ -336,8 +335,7 @@ let test_confirm_consumes_pending_token_before_delegated_action_fails () =
       | Error err ->
           Alcotest.(check bool) "non-empty error" true (String.length err > 0));
       let pending_confirms =
-        Operator_control.pending_confirms_json ~actor:"operator" config
-        |> Yojson.Safe.Util.to_list
+        (Operator_control.pending_confirm_scope ~actor:"operator" config).visible_entries
       in
       Alcotest.(check int) "pending confirm consumed" 0 (List.length pending_confirms))
 

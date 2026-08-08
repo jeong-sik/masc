@@ -63,10 +63,8 @@ val remove_pending_confirms_by_typed_target :
 val normalize_pending_confirm_actor_filter : string option -> string option
 val pending_confirm_scope_of_entries : ?actor:string -> pending_confirm list -> pending_confirm_scope
 val pending_confirm_scope : ?actor:string -> Workspace.config -> pending_confirm_scope
-val pending_confirms_json : ?actor:string -> Workspace.config -> Yojson.Safe.t
 val available_actions : available_action list
 val available_action_to_yojson : available_action -> Yojson.Safe.t
 val available_actions_json : Yojson.Safe.t
 val pending_confirm_summary_json_of_scope : pending_confirm_scope -> Yojson.Safe.t
 val pending_confirm_summary_json : ?actor:string -> Workspace.config -> Yojson.Safe.t
-val pending_confirm_envelope_json : ?actor:string -> Workspace.config -> Yojson.Safe.t

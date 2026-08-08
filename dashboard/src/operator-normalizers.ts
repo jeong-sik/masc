@@ -1,9 +1,7 @@
 import { isRecord, asString, asNumber, asBoolean, asStringArray, extractArray } from './components/common/normalize'
 import {
   normalizeOperatorActionDescriptor,
-  normalizePendingConfirmation,
   normalizePendingConfirmEnvelope,
-  normalizePendingConfirmSummary,
 } from './pending-confirm'
 import {
   normalizeKeeperContextMetricsUnavailable,
@@ -26,7 +24,6 @@ import type {
   OperatorRecommendedAction,
   OperatorSnapshot,
   OperatorNamespaceSnapshot,
-  PendingConfirmation,
 } from './types'
 import { SYSTEM_ACTOR_NAME } from './types/core'
 
@@ -196,15 +193,9 @@ export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
     recent_messages: extractArray(root.recent_messages, ['messages'])
       .map(normalizeMessage)
       .filter((item): item is Message => item !== null),
-    pending_confirms: pendingConfirmEnvelope?.items
-      ?? extractArray(root.pending_confirms, ['items', 'confirms'])
-        .map(normalizePendingConfirmation)
-        .filter((item): item is PendingConfirmation => item !== null),
+    pending_confirms: pendingConfirmEnvelope?.items ?? [],
     pending_confirm_envelope: pendingConfirmEnvelope ?? undefined,
-    pending_confirm_summary:
-      pendingConfirmEnvelope?.summary
-      ?? normalizePendingConfirmSummary(root.pending_confirm_summary)
-      ?? undefined,
+    pending_confirm_summary: pendingConfirmEnvelope?.summary,
     available_actions: extractArray(root.available_actions, ['actions'])
       .map(normalizeOperatorActionDescriptor)
       .filter((item): item is OperatorActionDescriptor => item !== null),

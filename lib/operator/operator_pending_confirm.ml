@@ -301,10 +301,6 @@ let pending_confirm_scope_of_entries ?actor entries =
 let pending_confirm_scope ?actor config =
   pending_confirm_scope_of_entries ?actor (read_pending_confirms config)
 
-let pending_confirms_json ?actor config =
-  let scope = pending_confirm_scope ?actor config in
-  `List (List.map pending_confirm_to_yojson scope.visible_entries)
-
 let available_actions : available_action list =
   [
     make_available_action ~action_type:"broadcast" ~tool_name:"masc_broadcast"
@@ -370,11 +366,3 @@ let pending_confirm_summary_json_of_scope scope =
 
 let pending_confirm_summary_json ?actor config =
   pending_confirm_summary_json_of_scope (pending_confirm_scope ?actor config)
-
-let pending_confirm_envelope_json ?actor config =
-  let scope = pending_confirm_scope ?actor config in
-  `Assoc
-    [
-      ("items", `List (List.map pending_confirm_to_yojson scope.visible_entries));
-      ("summary", pending_confirm_summary_json_of_scope scope);
-    ]

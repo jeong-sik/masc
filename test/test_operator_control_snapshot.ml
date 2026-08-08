@@ -758,8 +758,8 @@ let test_snapshot_has_expected_sections () =
         (Yojson.Safe.Util.member "keepers" json <> `Null);
       Alcotest.(check bool) "recent_messages present" true
         (Yojson.Safe.Util.member "recent_messages" json <> `Null);
-      Alcotest.(check bool) "pending_confirms present" true
-        (Yojson.Safe.Util.member "pending_confirms" json <> `Null);
+      Alcotest.(check bool) "pending-confirm envelope present" true
+        (Yojson.Safe.Util.member "pending_confirm_envelope" json <> `Null);
       Alcotest.(check bool) "trace_id present" true
         (json |> Yojson.Safe.Util.member "trace_id" |> Yojson.Safe.Util.to_string
        <> "");
@@ -815,7 +815,9 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
       request_namespace_pause "operator-a";
       request_namespace_pause "operator-b";
       let snapshot = Operator_control.snapshot_json ~actor:"operator-a" ctx in
-      let summary = Yojson.Safe.Util.(snapshot |> member "pending_confirm_summary") in
+      let summary =
+        Yojson.Safe.Util.(snapshot |> member "pending_confirm_envelope" |> member "summary")
+      in
       Alcotest.(check string) "actor filter" "operator-a"
         Yojson.Safe.Util.(summary |> member "actor_filter" |> to_string);
       Alcotest.(check bool) "filter active" true

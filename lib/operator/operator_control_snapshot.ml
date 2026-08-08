@@ -690,9 +690,7 @@ in
          @ (let confirm_scope =
               timed "pending_confirms" (fun () -> pending_confirm_scope ?actor config)
             in
-            [ ( "pending_confirms"
-              , `List (List.map pending_confirm_to_yojson confirm_scope.visible_entries) )
-            ; ( "pending_confirm_envelope"
+            [ ( "pending_confirm_envelope"
               , `Assoc
                   [ ( "items"
                     , `List
@@ -700,8 +698,6 @@ in
                     )
                   ; "summary", pending_confirm_summary_json_of_scope confirm_scope
                   ] )
-            ; ( "pending_confirm_summary"
-              , pending_confirm_summary_json_of_scope confirm_scope )
             ])
          @ [ "available_actions", available_actions_json
            ; ( "recent_actions"

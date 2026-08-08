@@ -9,7 +9,7 @@
 // put a sentence in front of the next turn.
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useState } from 'preact/hooks'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import {
   fetchKeeperLastPrompt,
   fetchKeeperOperatorNote,
@@ -26,6 +26,13 @@ import { relativeTime } from '../lib/format-time'
 import { JsonViewerCard } from './common/json-viewer'
 
 type Tab = 'raw' | 'prompt' | 'note'
+type RawView = 'text' | 'tree'
+
+export type RawTraceTarget = {
+  readonly keeper: string
+  readonly traceId: string
+  readonly requestId: number
+}
 
 const TABS: Array<{ id: Tab; label: string; hint: string }> = [
   { id: 'raw', label: 'RAW provider turns', hint: 'RAW · 프로바이더로 나간 요청·응답 원문' },
@@ -74,11 +81,14 @@ function Pre({ text }: { text: string }) {
 }
 
 /** Every request and response for one turn, as it went to the provider. */
-function RawTurns({ keeper }: { keeper: string }) {
+function RawTurns({ keeper, target }: { keeper: string; target?: RawTraceTarget | null }) {
   const [turns, setTurns] = useState<readonly RawTraceTurn[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [page, setPage] = useState<RawTracePage | null>(null)
   const [offset, setOffset] = useState(0)
+  const [view, setView] = useState<RawView>('text')
+  const [copyState, setCopyState] = useState<string | null>(null)
+  const [targetError, setTargetError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -86,6 +96,7 @@ function RawTurns({ keeper }: { keeper: string }) {
     setTurns(null)
     setSelected(null)
     setPage(null)
+    setTargetError(null)
     setError(null)
     fetchKeeperRawTraces(keeper, 50, { signal: controller.signal })
       .then(setTurns)
@@ -97,9 +108,23 @@ function RawTurns({ keeper }: { keeper: string }) {
   }, [keeper])
 
   useEffect(() => {
+    if (turns === null || target == null || target.keeper !== keeper) return
+    const matched = turns.find(turn => turn.traceId === target.traceId)
+    if (matched == null) {
+      setTargetError(`trace ${target.traceId} 를 가리키는 retained RAW 파일이 없습니다.`)
+      return
+    }
+    setTargetError(null)
+    setSelected(matched.file)
+    setOffset(0)
+    setView('text')
+  }, [keeper, target?.requestId, turns])
+
+  useEffect(() => {
     if (selected === null) return
     const controller = new AbortController()
     setPage(null)
+    setCopyState(null)
     fetchKeeperRawTrace(keeper, selected, {
       signal: controller.signal,
       offset,
@@ -119,6 +144,16 @@ function RawTurns({ keeper }: { keeper: string }) {
     return html`<${Muted}>이 keeper 는 아직 저장된 턴 원문이 없습니다.<//>`
   }
 
+  const copyPage = async () => {
+    if (page === null) return
+    try {
+      await navigator.clipboard.writeText(page.records.map(record => record.raw).join('\n'))
+      setCopyState(`${page.records.length}개 literal JSONL 행 복사됨`)
+    } catch (cause) {
+      setCopyState(`복사 실패: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+  }
+
   return html`
     <div class="grid gap-2">
       <div class="max-h-40 overflow-auto rounded border border-[var(--color-border-subtle)]">
@@ -132,12 +167,17 @@ function RawTurns({ keeper }: { keeper: string }) {
             onClick=${() => { setSelected(turn.file); setOffset(0) }}
           >
             <span class="font-mono">${turn.file}</span>
+            ${turn.traceId == null
+              ? html`<span class="text-[var(--color-fg-disabled)]">trace 없음</span>`
+              : html`<span class="min-w-0 truncate font-mono text-[var(--color-fg-muted)]" title=${turn.traceId}>${turn.traceId}</span>`}
             <span class="ml-auto tabular-nums text-[var(--color-fg-muted)]">
               ${turn.records}건 · ${formatBytes(turn.bytes)} · ${ago(turn.modifiedAt)}
             </span>
           </button>
         `)}
       </div>
+
+      ${targetError === null ? null : html`<${Danger}>${targetError}<//>`}
 
       ${selected === null
         ? html`<${Muted}>턴을 고르면 원문이 열립니다.<//>`
@@ -159,10 +199,40 @@ function RawTurns({ keeper }: { keeper: string }) {
                 onClick=${() => setOffset(page.offset + RECORDS_PER_PAGE)}
               >다음<//>
             </div>
+            <div class="flex flex-wrap items-center gap-1" role="group" aria-label="RAW 표시 방식">
+              <button
+                type="button"
+                class=${`rounded border px-2 py-1 text-3xs ${view === 'text' ? 'border-[var(--status-warn)] text-[var(--status-warn)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'}`}
+                aria-pressed=${view === 'text'}
+                onClick=${() => setView('text')}
+              >RAW text</button>
+              <button
+                type="button"
+                class=${`rounded border px-2 py-1 text-3xs ${view === 'tree' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'}`}
+                aria-pressed=${view === 'tree'}
+                onClick=${() => setView('tree')}
+              >JSON tree</button>
+              <${Btn} class="ml-auto" onClick=${() => void copyPage()}>현재 페이지 복사<//>
+              ${copyState === null ? null : html`<span role="status" class="text-3xs text-[var(--color-fg-muted)]">${copyState}</span>`}
+            </div>
+            <p class="text-3xs text-[var(--color-fg-muted)]">
+              ${view === 'text'
+                ? 'FULL RAW · retained JSONL의 literal 행을 변환 없이 표시합니다.'
+                : 'PARSED TREE · 같은 행을 JSON으로 해석한 탐색용 보기입니다.'}
+            </p>
             ${page.records.map((record, index) => html`
-              <div key=${page.offset + index}>
+              <div key=${page.offset + index} class="grid gap-1" data-testid="raw-trace-record">
+                <div class="flex items-center gap-2 text-3xs">
+                  <span class="w-fit rounded border border-[var(--status-warn)] px-1.5 py-0.5 font-semibold text-[var(--status-warn)]">FULL RAW</span>
+                  <span class="font-mono text-[var(--color-fg-muted)]">line ${page.offset + index + 1}</span>
+                </div>
+                ${view === 'text'
+                  ? html`<${Pre} text=${record.raw} />`
+                  : record.ok
+                    ? html`<${JsonViewerCard} data=${record.record} title=${`Provider record ${page.offset + index + 1}`} />`
+                    : html`<${Pre} text=${record.raw} />`}
                 ${record.ok
-                  ? html`<div class="grid gap-1"><span class="w-fit rounded border border-[var(--status-warn)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--status-warn)]">RAW</span><${JsonViewerCard} data=${record.record} title=${`Provider record ${page.offset + index + 1}`} /></div>`
+                  ? null
                   // A torn line keeps its position rather than being skipped:
                   // a damaged trace must not read as a shorter one.
                   : html`<${Danger}>레코드 ${page.offset + index + 1} 를 읽지 못했습니다: ${record.error}<//>`}
@@ -335,9 +405,16 @@ function NoteEditor({ keeper }: { keeper: string }) {
   `
 }
 
-export function KeeperTurnInspectorPanel({ keepers }: { keepers: readonly string[] }) {
+export function KeeperTurnInspectorPanel({
+  keepers,
+  target,
+}: {
+  keepers: readonly string[]
+  target?: RawTraceTarget | null
+}) {
   const [keeper, setKeeper] = useState<string | null>(keepers[0] ?? null)
   const [tab, setTab] = useState<Tab>('raw')
+  const rootRef = useRef<HTMLElement | null>(null)
 
   // The roster arrives after the first render, so adopt the first keeper once
   // it does and drop a selection that is no longer in the roster.
@@ -345,6 +422,13 @@ export function KeeperTurnInspectorPanel({ keepers }: { keepers: readonly string
     if (keeper !== null && keepers.includes(keeper)) return
     setKeeper(keepers[0] ?? null)
   }, [keepers, keeper])
+
+  useEffect(() => {
+    if (target == null) return
+    setKeeper(target.keeper)
+    setTab('raw')
+    rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [target?.requestId])
 
   if (keeper === null) {
     return html`
@@ -357,7 +441,7 @@ export function KeeperTurnInspectorPanel({ keepers }: { keepers: readonly string
   const active = TABS.find(item => item.id === tab) ?? TABS[0]!
 
   return html`
-    <section class="grid gap-2" data-testid="keeper-turn-inspector">
+    <section ref=${rootRef} class="grid gap-2" data-testid="keeper-turn-inspector">
       <div class="flex flex-wrap items-center gap-2">
         <h3 class="text-xs font-semibold text-[var(--color-fg-primary)]">Turn inspector</h3>
         <label class="flex items-center gap-1 text-3xs text-[var(--color-fg-muted)]">
@@ -390,7 +474,7 @@ export function KeeperTurnInspectorPanel({ keepers }: { keepers: readonly string
       </div>
       <${Muted}>${active.hint}<//>
 
-      ${tab === 'raw' ? html`<${RawTurns} keeper=${keeper} />` : null}
+      ${tab === 'raw' ? html`<${RawTurns} keeper=${keeper} target=${target} />` : null}
       ${tab === 'prompt' ? html`<${NextPrompt} keeper=${keeper} />` : null}
       ${tab === 'note' ? html`<${NoteEditor} keeper=${keeper} />` : null}
     </section>

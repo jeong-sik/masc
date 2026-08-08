@@ -13,7 +13,10 @@ import {
   type MemoryJournal,
   type MemoryJournalEntry,
 } from '../api/dashboard-memory-journal'
-import { KeeperTurnInspectorPanel } from './keeper-turn-inspector-panel'
+import {
+  KeeperTurnInspectorPanel,
+  type RawTraceTarget,
+} from './keeper-turn-inspector-panel'
 import { registerInternalAgentRefresh } from '../sse-store'
 import { Btn } from './btn'
 import { EmptyState, ErrorState } from './common/feedback-state'
@@ -254,7 +257,13 @@ function LibrarianJournal({
   `
 }
 
-function Details({ row }: { row: Row }) {
+function Details({
+  row,
+  onOpenRawTrace,
+}: {
+  row: Row
+  onOpenRawTrace: (keeper: string, traceId: string) => void
+}) {
   if (row.source === 'verification') {
     const tools = row.run.tools ?? []
     return html`
@@ -304,6 +313,7 @@ function Details({ row }: { row: Row }) {
   }
   if (row.source === 'exact') {
     const output = row.run.output ?? { code: row.run.code, detail: row.run.detail }
+    const rawTraceId = row.run.lane === 'librarian_exact' ? row.run.subjectId : null
     return html`
       <div class="grid gap-3 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)]">
         <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -316,7 +326,20 @@ function Details({ row }: { row: Row }) {
           <${JsonViewerCard} title="입력값 · typed preview" data=${row.run.input} />
           <${JsonViewerCard} title="출력값 · typed preview" data=${output} />
         </div>
-        <p class="text-xs text-[var(--color-fg-muted)]">이 lane은 한 번의 structured model execution이며 MASC tool dispatch를 수행하지 않습니다. Provider 요청·응답 원문은 RAW turn evidence로 분리됩니다.</p>
+        ${rawTraceId == null
+          ? html`
+              <p class="text-xs text-[var(--color-fg-muted)]">
+                <span class="mr-2 inline-flex rounded border border-[var(--color-danger)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-danger)]">RAW JOIN UNAVAILABLE</span>
+                이 registry는 provider trace ref를 보존하지 않습니다. 시간이나 subject 문자열로 RAW를 추정 연결하지 않습니다.
+              </p>
+            `
+          : html`
+              <div class="flex flex-wrap items-center gap-2 rounded border border-[var(--status-warn)] p-2 text-xs">
+                <${EvidenceBadge} kind="raw" />
+                <code class="min-w-0 truncate" title=${rawTraceId}>${rawTraceId}</code>
+                <${Btn} class="ml-auto" onClick=${() => onOpenRawTrace(row.run.actor, rawTraceId)}>이 실행의 FULL RAW 열기<//>
+              </div>
+            `}
         ${row.run.lane === 'librarian_exact'
           ? html`<div class="border-t border-[var(--color-border-default)] pt-3">
               <${LibrarianJournal}
@@ -367,9 +390,15 @@ export function InternalAgentsMonitor() {
   const [rows, setRows] = useState<Row[]>([])
   const [filter, setFilter] = useState<Filter>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [rawTarget, setRawTarget] = useState<RawTraceTarget | null>(null)
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
   const refreshVersion = useRef(0)
+  const rawTargetVersion = useRef(0)
+
+  const openRawTrace = useCallback((keeper: string, traceId: string) => {
+    setRawTarget({ keeper, traceId, requestId: ++rawTargetVersion.current })
+  }, [])
 
   const refresh = useCallback(async () => {
     const version = ++refreshVersion.current
@@ -511,7 +540,7 @@ export function InternalAgentsMonitor() {
       </div>
       ${errors.length > 0 ? html`<${ErrorState}>${errors.join(' · ')}<//>` : null}
       <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
-        <${KeeperTurnInspectorPanel} keepers=${keepers} />
+        <${KeeperTurnInspectorPanel} keepers=${keepers} target=${rawTarget} />
       </div>
       <div class="flex items-end gap-2">
         <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">Run timeline</h3>
@@ -542,7 +571,7 @@ export function InternalAgentsMonitor() {
                       <span class="block">elapsed ${formatElapsed(elapsed(row))}</span>
                     </span>
                   </button>
-                  ${open ? html`<${Details} row=${row} />` : null}
+                  ${open ? html`<${Details} row=${row} onOpenRawTrace=${openRawTrace} />` : null}
                 </article>
               `
             })}

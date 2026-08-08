@@ -18,6 +18,10 @@
 
 type turn_summary =
   { file : string (** Bare file name, the handle later reads take. *)
+  ; trace_id : string option
+        (** Exact provider session identifier found in the retained JSONL. [None]
+            means the file has no decodable [session_id]; callers must not infer
+            a join from file time or name. *)
   ; bytes : int
   ; modified_at : float
   ; records : int (** Non-blank JSONL lines. *)
@@ -40,11 +44,17 @@ val list_turns :
   -> limit:int
   -> (turn_summary list, read_error) result
 
+type turn_record =
+  { raw : string (** Literal non-blank JSONL line, before decoding. *)
+  ; parsed : (Yojson.Safe.t, string) result
+        (** Typed view of the same line, or its exact decode failure. *)
+  }
+
 type turn_records =
   { file : string
   ; total_records : int (** Non-blank lines in the file, independent of [limit]. *)
   ; offset : int
-  ; records : (Yojson.Safe.t, string) result list
+  ; records : turn_record list
   }
 
 (** One turn's records in file order, at most [limit] starting at [offset].

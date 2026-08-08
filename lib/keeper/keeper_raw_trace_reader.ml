@@ -2,16 +2,22 @@
 
 type turn_summary =
   { file : string
+  ; trace_id : string option
   ; bytes : int
   ; modified_at : float
   ; records : int
+  }
+
+type turn_record =
+  { raw : string
+  ; parsed : (Yojson.Safe.t, string) result
   }
 
 type turn_records =
   { file : string
   ; total_records : int
   ; offset : int
-  ; records : (Yojson.Safe.t, string) result list
+  ; records : turn_record list
   }
 
 type read_error =
@@ -63,10 +69,22 @@ let nonblank_lines contents =
   |> List.filter (fun line -> not (String.equal (String.trim line) ""))
 ;;
 
-let count_records path =
+let trace_id_of_line line =
+  match Yojson.Safe.from_string line with
+  | `Assoc fields ->
+    (match List.assoc_opt "session_id" fields with
+     | Some (`String value) when not (String.equal value "") -> Some value
+     | Some _ | None -> None)
+  | _ -> None
+  | exception Yojson.Json_error _ -> None
+;;
+
+let summarize_records path =
   match Fs_compat.load_file_opt path with
-  | None -> 0
-  | Some contents -> List.length (nonblank_lines contents)
+  | None -> 0, None
+  | Some contents ->
+    let lines = nonblank_lines contents in
+    List.length lines, List.find_map trace_id_of_line lines
 ;;
 
 let list_turns ~config ~keeper ~limit =
@@ -92,11 +110,13 @@ let list_turns ~config ~keeper ~limit =
                let path = Filename.concat dir file in
                match Unix.stat path with
                | { Unix.st_kind = Unix.S_REG; st_size; st_mtime; _ } ->
+                 let records, trace_id = summarize_records path in
                  Some
                    { file
+                   ; trace_id
                    ; bytes = st_size
                    ; modified_at = st_mtime
-                   ; records = count_records path
+                   ; records
                    }
                | _ -> None
                | exception Unix.Unix_error _ -> None)
@@ -135,9 +155,12 @@ let read_turn ~config ~keeper ~file ~offset ~limit =
             lines
             |> List.filteri (fun index _ -> index >= offset && index < offset + limit)
             |> List.map (fun line ->
-              match Yojson.Safe.from_string line with
-              | json -> Ok json
-              | exception Yojson.Json_error message -> Error message)
+              let parsed =
+                match Yojson.Safe.from_string line with
+                | json -> Ok json
+                | exception Yojson.Json_error message -> Error message
+              in
+              { raw = line; parsed })
           in
           Ok { file; total_records; offset; records })
        | exception Sys_error detail -> Error (Read_failed { file; detail }))
@@ -146,6 +169,7 @@ let read_turn ~config ~keeper ~file ~offset ~limit =
 let turn_summary_to_json (summary : turn_summary) =
   `Assoc
     [ "file", `String summary.file
+    ; "trace_id", Json_util.string_opt_to_json summary.trace_id
     ; "bytes", `Int summary.bytes
     ; "modified_at", `Float summary.modified_at
     ; "records", `Int summary.records
@@ -154,9 +178,11 @@ let turn_summary_to_json (summary : turn_summary) =
 
 (* An unparseable line keeps its position and says so. Collapsing it to an
    omission would make a torn trace read as a shorter one. *)
-let record_to_json = function
-  | Ok json -> `Assoc [ "ok", `Bool true; "record", json ]
-  | Error message -> `Assoc [ "ok", `Bool false; "error", `String message ]
+let record_to_json record =
+  match record.parsed with
+  | Ok json -> `Assoc [ "ok", `Bool true; "raw", `String record.raw; "record", json ]
+  | Error message ->
+    `Assoc [ "ok", `Bool false; "raw", `String record.raw; "error", `String message ]
 ;;
 
 let turn_records_to_json records =

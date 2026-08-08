@@ -7,14 +7,40 @@ type t =
   | Webrtc
   | Local
 
-let from_env () =
-  match Env_config.Transport.agent_transport_opt () with
-  | Some Env_config.Transport.Grpc -> Grpc
-  | Some Env_config.Transport.Http -> Http
-  | Some Env_config.Transport.Ws -> Ws
-  | Some Env_config.Transport.Webrtc -> Webrtc
-  | Some Env_config.Transport.Local -> Local
+let of_env_value raw =
+  match raw with
+  | "http" -> Http
+  | "grpc" -> Grpc
+  | "ws" -> Ws
+  | "webrtc" -> Webrtc
+  | "local" -> Local
+  | _ ->
+    raise
+      (Env_config_core.Config_error
+         (Printf.sprintf
+            "malformed env MASC_AGENT_TRANSPORT=%S (expected http|grpc|ws|webrtc|local)"
+            raw))
+;;
+
+let read_env () =
+  match Sys.getenv_opt "MASC_AGENT_TRANSPORT" with
   | None -> Local
+  | Some raw -> of_env_value raw
+;;
+
+let configured = Atomic.make None
+
+let configure_from_env () =
+  let transport = read_env () in
+  Atomic.set configured (Some transport);
+  transport
+;;
+
+let from_env () =
+  match Atomic.get configured with
+  | Some transport -> transport
+  | None -> read_env ()
+;;
 
 let to_string = function
   | Http -> "http"
@@ -22,3 +48,4 @@ let to_string = function
   | Ws -> "ws"
   | Webrtc -> "webrtc"
   | Local -> "local"
+;;

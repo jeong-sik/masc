@@ -1,51 +1,66 @@
-(** [MASC_AGENT_TRANSPORT] carries a closed vocabulary.
-
-    An unrecognized value used to become [Unknown_agent_transport raw].
-    Masc_grpc_transport folded that into [Local] on the same arm as [None], so
-    a typo and "operator did not set it" reached the runtime as the same
-    state, with nothing reported. *)
+(** Exact [MASC_AGENT_TRANSPORT] admission and process snapshot contract. *)
 
 open Alcotest
 
-module T = Env_config.Transport
+module T = Masc_grpc_transport
 
-let spelling s = T.agent_transport_to_string (T.agent_transport_of_string s)
+let with_env value_opt f =
+  let name = "MASC_AGENT_TRANSPORT" in
+  let previous = Sys.getenv_opt name in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> Unix.putenv name value
+      | None -> Unix.unsetenv name)
+    (fun () ->
+      (match value_opt with
+       | Some value -> Unix.putenv name value
+       | None -> Unix.unsetenv name);
+      f ())
+;;
+
+let spelling () = T.from_env () |> T.to_string
 
 let accepted_spellings () =
   List.iter
-    (fun (raw, expected) -> check string raw expected (spelling raw))
-    [ "http", "http"
-    ; "grpc", "grpc"
-    ; "ws", "ws"
-    ; "websocket", "ws"
-    ; "webrtc", "webrtc"
-    ; "local", "local"
-    ; "  GRPC  ", "grpc"
-    ]
+    (fun raw ->
+       with_env (Some raw) (fun () -> check string raw raw (spelling ())))
+    [ "http"; "grpc"; "ws"; "webrtc"; "local" ]
 ;;
 
-(* Whatever the operator typed, the value leaving the parser must be one the
-   runtime knows. *)
-let unknown_input_stays_in_vocabulary () =
+let invalid_values_are_rejected () =
   List.iter
     (fun raw ->
-       check
-         bool
-         ("in vocabulary: " ^ raw)
-         true
-         (List.mem (spelling raw) [ "http"; "grpc"; "ws"; "webrtc"; "local" ]))
-    [ "gprc"; "web-rtc"; "tcp"; ""; "http2" ]
+       with_env (Some raw) (fun () ->
+         check_raises
+           ("reject " ^ raw)
+           (Env_config_core.Config_error
+              (Printf.sprintf
+                 "malformed env MASC_AGENT_TRANSPORT=%S (expected http|grpc|ws|webrtc|local)"
+                 raw))
+           (fun () -> ignore (T.from_env ()))))
+    [ ""; "gprc"; "websocket"; " GRPC "; "Grpc" ]
 ;;
 
-let unknown_reads_as_local () = check string "typo" "local" (spelling "gprc")
+let absent_value_selects_local () =
+  with_env None (fun () -> check string "absent" "local" (spelling ()))
+;;
+
+let configured_value_is_stable () =
+  with_env (Some "grpc") (fun () ->
+    check string "configured" "grpc" (T.configure_from_env () |> T.to_string));
+  with_env (Some "local") (fun () ->
+    check string "retained" "grpc" (T.from_env () |> T.to_string))
+;;
 
 let () =
   run
     "agent_transport_vocabulary"
     [ ( "vocabulary"
-      , [ test_case "accepted spellings map as documented" `Quick accepted_spellings
-        ; test_case "unknown input stays in vocabulary" `Quick unknown_input_stays_in_vocabulary
-        ; test_case "unknown input reads as local" `Quick unknown_reads_as_local
+      , [ test_case "accepted values" `Quick accepted_spellings
+        ; test_case "invalid present values fail" `Quick invalid_values_are_rejected
+        ; test_case "absent selects local" `Quick absent_value_selects_local
+        ; test_case "configured value is retained" `Quick configured_value_is_stable
         ] )
     ]
 ;;

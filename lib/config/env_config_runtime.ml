@@ -156,37 +156,6 @@ module Transport = struct
     | H1_only -> "h1_only"
     | H2_only -> "h2_only"
 
-  type agent_transport =
-    | Http
-    | Grpc
-    | Ws
-    | Webrtc
-    | Local
-
-  let agent_transport_of_string raw =
-    match normalize_token raw with
-    | "http" -> Http
-    | "grpc" -> Grpc
-    | "ws" | "websocket" -> Ws
-    | "webrtc" -> Webrtc
-    | "local" -> Local
-    | _ ->
-      (* Carrying the raw text let an unrecognized setting reach
-         Masc_grpc_transport, which folded it into Local alongside "unset" —
-         a typo and a deliberate default became the same state. *)
-      Env_config_core.reject_malformed_env
-        ~name:"MASC_AGENT_TRANSPORT"
-        ~raw
-        ~type_name:"http|grpc|ws|websocket|webrtc|local";
-      Local
-
-  let agent_transport_to_string = function
-    | Http -> "http"
-    | Grpc -> "grpc"
-    | Ws -> "ws"
-    | Webrtc -> "webrtc"
-    | Local -> "local"
-
   (** gRPC server port. Default: 8936. *)
   let grpc_port = get_port ~default:8936 "MASC_GRPC_PORT"
 
@@ -214,12 +183,6 @@ module Transport = struct
     match Sys.getenv_opt "MASC_USE_H2" with
     | Some raw -> h2_mode_of_string raw
     | None -> Auto
-
-  (** Agent transport type variant (e.g. "grpc", "http", "ws"). *)
-  let agent_transport_opt () =
-    Sys.getenv_opt "MASC_AGENT_TRANSPORT"
-    |> trim_opt
-    |> Option.map agent_transport_of_string
 
   (** Force strict auth for all HTTP endpoints. Default: false.
 

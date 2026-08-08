@@ -83,16 +83,6 @@ module Transport : sig
   val h2_mode_of_string : string -> h2_mode
   val h2_mode_to_string : h2_mode -> string
 
-  type agent_transport =
-    | Http
-    | Grpc
-    | Ws
-    | Webrtc
-    | Local
-
-  val agent_transport_of_string : string -> agent_transport
-  val agent_transport_to_string : agent_transport -> string
-
   val grpc_port : int
   val grpc_enabled : unit -> bool
   val grpc_target_opt : unit -> string option
@@ -100,7 +90,6 @@ module Transport : sig
   val ws_enabled : unit -> bool
   val webrtc_enabled : unit -> bool
   val use_h2 : unit -> h2_mode
-  val agent_transport_opt : unit -> agent_transport option
   val http_auth_strict_env_enabled : unit -> bool
   val startup_watchdog_sec : unit -> float
 end

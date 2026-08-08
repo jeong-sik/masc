@@ -92,12 +92,21 @@ let required_int args key =
 let validate_recurrence_arg recurrence = Schedule_domain.validate_recurrence recurrence
 
 let recurrence_of_arg args =
-  match string_opt args "recurrence_kind" with
-  | None | Some "one_shot" -> validate_recurrence_arg Schedule_domain.One_shot
-  | Some "interval" ->
+  let* recurrence_kind =
+    match string_opt args "recurrence_kind" with
+    | None -> Ok Schedule_contract_values.One_shot
+    | Some wire_value ->
+      (match Schedule_contract_values.recurrence_kind_of_string wire_value with
+       | Ok recurrence_kind -> Ok recurrence_kind
+       | Error message -> Error message)
+  in
+  match recurrence_kind with
+  | Schedule_contract_values.One_shot ->
+    validate_recurrence_arg Schedule_domain.One_shot
+  | Schedule_contract_values.Interval ->
     let* interval_sec = required_int args "recurrence_interval_sec" in
     validate_recurrence_arg (Schedule_domain.Interval { interval_sec })
-  | Some "daily" ->
+  | Schedule_contract_values.Daily ->
     let* hour = required_int args "recurrence_hour" in
     let* minute = required_int args "recurrence_minute" in
     let second =
@@ -109,18 +118,10 @@ let recurrence_of_arg args =
     in
     let* timezone = required_string args "recurrence_timezone" in
     validate_recurrence_arg (Schedule_domain.Daily { hour; minute; second; timezone })
-  | Some "cron" ->
+  | Schedule_contract_values.Cron ->
     let* expression = required_string args "recurrence_cron" in
     let* timezone = required_string args "recurrence_timezone" in
     validate_recurrence_arg (Schedule_domain.Cron { expression; timezone })
-  | Some other ->
-    (* [recurrence_kind] is a wire discriminator read off the arms above, so its
-       accepted set is owned by the schema that publishes the discriminator. *)
-    Error
-      (Printf.sprintf
-         "unknown recurrence_kind: %s; accepted: %s"
-         other
-         (String.concat ", " Schedule_contract_values.recurrence_kinds))
 ;;
 
 let actor_from_args args ~prefix ~default_id ~default_kind =

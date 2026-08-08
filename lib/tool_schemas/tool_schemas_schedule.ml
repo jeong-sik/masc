@@ -66,10 +66,10 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
-let statuses = Schedule_contract_values.schedule_statuses
-let actor_kinds = Schedule_contract_values.actor_kinds
-let sources = Schedule_contract_values.schedule_sources
-let recurrence_kinds = Schedule_contract_values.recurrence_kinds
+let statuses = Schedule_contract_values.schedule_status_strings
+let actor_kinds = Schedule_contract_values.actor_kind_strings
+let sources = Schedule_contract_values.schedule_source_strings
+let recurrence_kinds = Schedule_contract_values.recurrence_kind_strings
 
 let create_schema =
   object_schema

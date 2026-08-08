@@ -32,9 +32,8 @@ let all_schemas () =
   @ [ Tool_shard_types.tool_execute_schema ]
   @ board_schemas
   (* The Schedule tools publish from their own library rather than the keeper
-     shard, so they were outside this walk and their four hand-written enum
-     lists were unguarded. [schedule_status] is the one with an owner to
-     compare against. *)
+     shard. Include them so the typed contract's schema projection is observed
+     by the same boundary test. *)
   @ Tool_schemas_schedule.schemas
   (* [board_schemas] above is the eight curated Keeper projections. The other
      thirteen Board tools reach a Keeper through the canonical registry, which
@@ -125,7 +124,7 @@ let check_mirror_in_sync ?(copy_lives_in = "Tool_shard_types_enum_mirrors") ~lab
   then
     failf
       "%s: no published schema enum equals its owner's list %s.\n\
-       The hand-written copy in %s has drifted.\n\
+       The published enum contract in %s has drifted.\n\
        Published enums seen: %s"
       label
       (String.concat "|" owner)
@@ -133,19 +132,23 @@ let check_mirror_in_sync ?(copy_lives_in = "Tool_shard_types_enum_mirrors") ~lab
       (String.concat "  /  " (List.map (String.concat "|") published))
 ;;
 
-(* [Schedule_domain.all_schedule_statuses] is the owner: [test_schedule_domain]
-   pins that every constructor is in it, and the dashboard reads it. The tool
-   schema hand-wrote the same seven strings, so the enum an LLM is handed could
-   drift from the one the decoder takes without anything going red. *)
-let test_schedule_status_mirror () =
-  check_mirror_in_sync
-    ~copy_lives_in:"tool_schemas_schedule.ml"
-    ~label:"schedule_status_enum_strings"
-    ~owner:
-      (List.map
-         Schedule_domain.schedule_status_to_string
-         Schedule_domain.all_schedule_statuses)
-    ()
+(* The typed schedule contract projects each tool-facing vocabulary into the
+   domain decoder errors and the published schemas. *)
+let test_schedule_contract_mirrors () =
+  List.iter
+    (fun (label, owner) ->
+      check_mirror_in_sync
+        ~copy_lives_in:"Schedule_contract_values"
+        ~label
+        ~owner
+        ())
+    [ "schedule_status_enum_strings", Schedule_contract_values.schedule_status_strings
+    ; "schedule_actor_kind_enum_strings", Schedule_contract_values.actor_kind_strings
+    ; "schedule_source_enum_strings", Schedule_contract_values.schedule_source_strings
+    ; ( "schedule_recurrence_kind_enum_strings"
+      , Schedule_contract_values.recurrence_kind_strings )
+    ]
+;;
 (* Board sub-board access. [Masc.Board] owns the vocabulary through
    [sub_board_access_of_string_opt]; the schema writes the three strings by
    hand, in two places. *)
@@ -218,7 +221,7 @@ let () =
         ; test_case "fs write mode" `Quick test_fs_write_mode_mirror
         ; test_case "board sort order" `Quick test_sort_order_mirror
         ; test_case "board vote direction" `Quick test_vote_direction_mirror
-        ; test_case "schedule status" `Quick test_schedule_status_mirror
+        ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode
         ; test_case "reclaim_policy values decode" `Quick

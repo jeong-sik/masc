@@ -845,16 +845,6 @@ let test_prune_does_not_bind_orphan_receipt_to_reused_public_id () =
     (List.length state.wakes)
 ;;
 
-(* A rejection that names an accepted set is only useful if the decoder takes
-   every value it names. The sets are derived through [*_to_string] over a
-   constructor list, so the risk is the list, not the rendering: a constructor
-   dropped from it would vanish from the hint silently. Every value each
-   rejection offers is decoded back here.
-
-   Live cost of the message this replaces: "unknown actor_kind: operator" was
-   followed by "keeper", then the right value -- two wrong guesses over 2m24s.
-   The Goal validator, which already answers with its set, was corrected on the
-   first retry in 20s across three cases. *)
 let contains_sub haystack needle =
   let n = String.length needle and h = String.length haystack in
   let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
@@ -883,31 +873,43 @@ let rejection_message = function
   | Error message -> Some message
 ;;
 
-let test_rejections_name_only_values_the_decoder_takes () =
-  (* The expected sets are literals. Deriving them from the same constructor
-     list the hint renders would pass whatever that list became -- which is the
-     drift this guards. The first version of this test checked only that every
-     named value decodes, and dropping a constructor from the hint passed it. *)
+let test_contract_vocabularies_own_strings_and_errors () =
   let cases =
     [ ("actor_kind",
        [ "human_operator"; "automated_actor"; "system" ],
+       Schedule_contract_values.actor_kind_strings,
        (fun v -> Result.is_ok (Schedule_domain.actor_kind_of_string v)),
        rejection_message (Schedule_domain.actor_kind_of_string "nope"))
     ; ("schedule_status",
        [ "scheduled"; "due"; "running"; "succeeded"; "failed"; "cancelled"; "expired" ],
+       Schedule_contract_values.schedule_status_strings,
        (fun v -> Result.is_ok (Schedule_domain.schedule_status_of_string v)),
        rejection_message (Schedule_domain.schedule_status_of_string "nope"))
     ; ("schedule_source",
        [ "operator_request"; "automated_request"; "system_request" ],
+       Schedule_contract_values.schedule_source_strings,
        (fun v -> Result.is_ok (Schedule_domain.schedule_source_of_string v)),
        rejection_message (Schedule_domain.schedule_source_of_string "nope"))
+    ; ("recurrence_kind",
+       [ "one_shot"; "interval"; "daily"; "cron" ],
+       Schedule_contract_values.recurrence_kind_strings,
+       (fun v ->
+          Result.is_ok (Schedule_contract_values.recurrence_kind_of_string v)),
+       rejection_message
+         (Schedule_contract_values.recurrence_kind_of_string "nope"))
+    ; ("wake_status",
+       [ "running"; "succeeded"; "failed" ],
+       Schedule_contract_values.wake_status_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.wake_status_of_string v)),
+       rejection_message (Schedule_contract_values.wake_status_of_string "nope"))
     ]
-    (* [wake_status_of_string] carries the same hint and is not covered: it is
-       not exported, and exporting it only so a test could reach it would add
-       surface the dead-export ratchet exists to refuse. *)
   in
   List.iter
-    (fun (field, expected, decodes, rejection) ->
+    (fun (field, expected, contract_strings, decodes, rejection) ->
+      check (list string)
+        (Printf.sprintf "%s has one canonical wire vocabulary" field)
+        expected
+        contract_strings;
       match rejection with
       | None -> Alcotest.failf "%s must reject \"nope\"" field
       | Some message ->
@@ -928,7 +930,6 @@ let test_rejections_name_only_values_the_decoder_takes () =
               (decodes value))
           accepted)
     cases
-;;
 ;;
 
 let () =
@@ -1010,8 +1011,8 @@ let () =
             "prune scopes wake receipt ownership by schedule instance"
             `Quick
             test_prune_does_not_bind_orphan_receipt_to_reused_public_id;
-          test_case "rejections name only values the decoder takes" `Quick
-            test_rejections_name_only_values_the_decoder_takes;
+          test_case "contract vocabularies own strings and errors" `Quick
+            test_contract_vocabularies_own_strings_and_errors;
         ] );
     ]
 ;;

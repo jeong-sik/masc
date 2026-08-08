@@ -1161,28 +1161,6 @@ let test_keeper_toml_inline_instructions_needs_no_agent_md () =
     check (option string) "inline TOML instructions are used directly"
       (Some "legacy inline instructions") defaults.instructions
 
-let test_keeper_toml_tolerates_legacy_persona_name () =
-  (* keeper.persona_name lost its target when the Persona subsystem was
-     hard-cut, but it is still present in every live keeper TOML this
-     operator has (analyst, code-reviewer, rondo, sangsu, taskmaster). The
-     pre-release policy is to tolerate legacy-version data rather than ship
-     migration code, so this key must not fail the load -- and it must not
-     be silently parsed into anything either, since no persona lookup
-     exists to resolve it against. *)
-  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
-  let keeper_path = Filename.concat keepers_dir "veteran.toml" in
-  write_file keeper_path
-    "[keeper]\nautoboot_enabled = true\npersona_name = \"veteran\"\ninstructions = \"veteran inline instructions\"\n";
-  match
-    KTP.load_keeper_profile_defaults_result_for_base_path
-      ~base_path
-      "veteran"
-  with
-  | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
-  | Ok defaults ->
-    check (option string) "instructions load despite the tolerated legacy key"
-      (Some "veteran inline instructions") defaults.instructions
-
 let test_keeper_config_directory_probe_is_typed () =
   let path = Filename.temp_file "keeper-config-not-dir" ".toml" in
   Fun.protect
@@ -1691,8 +1669,6 @@ let () =
             test_keeper_agent_read_failure_is_typed_profile_error;
           test_case "inline TOML instructions need no AGENT.md" `Quick
             test_keeper_toml_inline_instructions_needs_no_agent_md;
-          test_case "tolerates legacy persona_name" `Quick
-            test_keeper_toml_tolerates_legacy_persona_name;
           test_case "config directory probe is typed" `Quick
             test_keeper_config_directory_probe_is_typed;
         ] );

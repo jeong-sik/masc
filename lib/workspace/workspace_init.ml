@@ -16,9 +16,9 @@ let init config ~agent_name =
   let root_agents_dir = Filename.concat root_dir "agents" in
   let root_keepers_dir = Filename.concat root_dir Common.keepers_runtime_dirname in
   let root_traces_dir = Filename.concat root_dir "traces" in
-  let root_tasks_dir = Filename.concat root_dir "tasks" in
+  let root_tasks_dir = Filename.concat root_dir Workspace_utils.tasks_dirname in
   let root_messages_dir = Filename.concat root_dir "messages" in
-  let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
+  let root_backlog_path = Filename.concat root_tasks_dir Workspace_utils.backlog_filename in
   List.iter
     mkdir_p
     [ root_agents_dir

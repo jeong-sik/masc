@@ -308,9 +308,9 @@ type workspace_state_mount_kind =
   | Workspace_state_dir
 
 let docker_workspace_state_mounts =
-  [ Workspace_state_dir, "tasks"
+  [ Workspace_state_dir, Workspace_utils.tasks_dirname
   ; Workspace_state_file, "tasks.json"
-  ; Workspace_state_file, "backlog.json"
+  ; Workspace_state_file, Workspace_utils.backlog_filename
   ; Workspace_state_file, "board_posts.jsonl"
   ; Workspace_state_file, "board_comments.jsonl"
   ; Workspace_state_file, "board_votes.jsonl"

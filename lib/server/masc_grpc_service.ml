@@ -365,7 +365,7 @@ let handle_heartbeat
                 then Array.length (Sys.readdir agents_dir)
                 else 0
               in
-              let tasks_dir = Filename.concat masc_dir "tasks" in
+              let tasks_dir = Filename.concat masc_dir Workspace_utils.tasks_dirname in
               let pending_count =
                 if Sys.file_exists tasks_dir
                 then

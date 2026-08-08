@@ -46,49 +46,6 @@ let routing_table : (string, route) Hashtbl.t =
 (** [is_known_public name] is [true] when [name] has a routing entry. *)
 let is_known_public name = Hashtbl.mem routing_table name
 
-let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
-  match d.runtime_handler with
-  | Tool_board_dispatch
-  | Tool_masc_task_dispatch
-  | Tool_masc_plan_dispatch
-  | Tool_masc_run_dispatch
-  | Tool_masc_agent_dispatch
-  | Tool_masc_workspace_dispatch
-  | Tool_masc_misc_dispatch
-  | Tool_masc_control_dispatch
-  | Tool_masc_agent_timeline_dispatch
-  | Tool_masc_schedule_dispatch
-  | Tool_masc_keeper_dispatch
-  | Tool_masc_library_dispatch
-  | Tool_masc_local_runtime_dispatch -> true
-  | Tool_execute
-  | Tool_search_files
-  | Tool_read_file
-  | Tool_edit_file
-  | Tool_write_file
-  | Tool_time_now
-  | Tool_tools_list
-  | Tool_context_status
-  | Tool_artifact_read
-  | Tool_memory_search
-  | Tool_memory_write
-  | Tool_library_search
-  | Tool_library_read
-  | Tool_surface_read
-  | Tool_surface_post
-  | Tool_person_note_set
-  | Tool_ide_annotate
-  | Tool_voice_dispatch
-  | Tool_task_dispatch
-  (* masc_fusion / masc_fusion_status are keeper-native in-process tools (own
-     orchestrator / registry read), not masc-MCP coordination proxies. *)
-  | Tool_masc_fusion_dispatch
-  | Tool_masc_fusion_status
-  | Tool_web_search
-  | Tool_web_fetch
-  | Tool_analyze_image -> false
-;;
-
 let add_internal_names t (d : Keeper_tool_descriptor.t) =
   List.iter
     (fun internal_name -> Hashtbl.replace t internal_name ())
@@ -108,9 +65,8 @@ let known_internal_names_tbl : (string, unit) Hashtbl.t =
     descriptors. *)
 let known_runtime_names_tbl : (string, unit) Hashtbl.t =
   let t = Hashtbl.create 128 in
-  List.iter (add_internal_names t) Keeper_tool_descriptor.public_descriptors;
   List.iter
-    (fun d -> if is_masc_mcp_descriptor d then add_internal_names t d)
+    (add_internal_names t)
     (Keeper_tool_descriptor.all_descriptors ());
   List.iter
     (fun (schema : Masc_domain.tool_schema) -> Hashtbl.replace t schema.name ())
@@ -172,34 +128,6 @@ let route name =
 let public_names = Keeper_tool_descriptor.public_names
 
 let public_name_for_internal = Keeper_tool_descriptor.public_name_for_internal
-
-(* ── MCP prefix normalisation ────────────────────────────────────── *)
-
-let strip_mcp_masc_prefix name =
-  if String.starts_with ~prefix:"mcp__masc__" name
-  then String.sub name 11 (String.length name - 11)
-  else name
-;;
-
-type canonical_resolution =
-  | Public_name of { internal : string }
-  | Internal of { canonical : string }
-  | Unknown
-
-let canonical_resolution name =
-  let stripped = strip_mcp_masc_prefix name in
-  match route stripped with
-  | Some r -> Public_name { internal = r.internal_name }
-  | None ->
-    if is_known_runtime_name stripped then Internal { canonical = stripped } else Unknown
-;;
-
-let canonical_internal_name name =
-  match canonical_resolution name with
-  | Public_name { internal } -> Some internal
-  | Internal { canonical } -> Some canonical
-  | Unknown -> None
-;;
 
 (** [public_input_schema public_name] returns the LLM-facing JSON schema
     for a known public tool name. [None] means no tailored schema exists. *)

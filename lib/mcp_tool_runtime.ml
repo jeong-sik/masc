@@ -41,19 +41,19 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
   let state = ctx.state in
   let arguments = ctx.arguments in
 
-  match name with
+  match Tool_schemas_misc.mcp_runtime_operation_of_tool_name name with
   (* ── Workspace lifecycle (delegated) ─────────────────────────────── *)
-  | "masc_start" ->
+  | Some Tool_schemas_misc.Start ->
       Mcp_tool_runtime_workspace.handle_start ~tool_name:name ~start_time:start ctx
 
   (* ── Communication (delegated) ──────────────────────────────── *)
-  | "masc_broadcast" ->
+  | Some Tool_schemas_misc.Broadcast ->
       Mcp_tool_runtime_comm.handle_broadcast ~tool_name:name ~start_time:start ctx
-  | "masc_messages" ->
+  | Some Tool_schemas_misc.Messages ->
       Mcp_tool_runtime_comm.handle_messages ~tool_name:name ~start_time:start ctx
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
-  | _ ->
+  | None ->
       Mcp_tool_runtime_board.dispatch ~config ~agent_name ~arguments ~state ~name ~start_time:start
 
 (* ================================================================ *)
@@ -69,29 +69,23 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
      them to Tool_spec.register requires authoring new input schemas
      and deciding visibility semantics for MCP exposure. *)
 
-let runtime_tool_specs =
-  [ "masc_start", false, true
-  ; "masc_broadcast", false, true
-  ; "masc_messages", true, true
-  ]
+let runtime_tool_policy = function
+  | Tool_schemas_misc.Start | Tool_schemas_misc.Broadcast -> false, true
+  | Tool_schemas_misc.Messages -> true, true
+;;
 
 let () =
-  runtime_tool_specs
-  |> List.iter (fun (name, is_read_only, mcp_context_required) ->
-    match
-      List.find_opt
-        (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
-        Tool_schemas_misc.mcp_runtime_schemas
-    with
-    | None -> invalid_arg ("missing MCP runtime schema: " ^ name)
-    | Some (schema : Masc_domain.tool_schema) ->
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:schema.name
-           ~description:schema.description
-           ~module_tag:Tool_dispatch.Mod_inline
-           ~input_schema:schema.input_schema
-           ~handler_binding:Tag_dispatch
-           ~is_read_only
-           ~mcp_context_required
-           ()))
+  Tool_schemas_misc.mcp_runtime_operations
+  |> List.iter (fun operation ->
+    let schema = Tool_schemas_misc.mcp_runtime_schema operation in
+    let is_read_only, mcp_context_required = runtime_tool_policy operation in
+    Tool_spec.register
+      (Tool_spec.create
+         ~name:schema.name
+         ~description:schema.description
+         ~module_tag:Tool_dispatch.Mod_inline
+         ~input_schema:schema.input_schema
+         ~handler_binding:Tag_dispatch
+         ~is_read_only
+         ~mcp_context_required
+         ()))

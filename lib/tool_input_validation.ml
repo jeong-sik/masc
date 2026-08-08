@@ -1,8 +1,9 @@
 (** Tool_input_validation — Pre-dispatch validation via OAS Tool_middleware.
 
     Delegates to [Agent_sdk.Tool_middleware.make_validation_hook] for strict
-    schema checking and structured error feedback. Mistyped scalar values are
-    deterministic rejections carrying the field name.
+    schema checking and structured error feedback. OAS 0.212 removed implicit
+    type coercion: a mistyped scalar (e.g. string for integer) is a
+    deterministic Reject carrying the field name, not a silent repair.
 
     @since 2.220.0 — OAS delegation
     @since 2.221.0 — use Tool_middleware.make_validation_hook *)
@@ -199,6 +200,23 @@ let unsupported_arg_names schema = function
   | _ -> []
 ;;
 
+let schema_has_property schema name = schema_has_property_name schema name
+
+let typed_shell_unsupported_field_hint schema names =
+  let has_shell_fields =
+    schema_has_property schema "argv" && schema_has_property schema "pipeline"
+  in
+  let has_legacy_shell_string =
+    List.exists (fun name -> String.equal name "cmd" || String.equal name "command") names
+  in
+  if has_shell_fields && has_legacy_shell_string
+  then
+    Some
+      "typed shell execution has no cmd/command field; use one non-empty argv \
+       process vector, e.g. argv=[\"git\",\"status\",\"--short\"]"
+  else None
+;;
+
 type one_of_branch = {
   required : string list;
   consts : (string * Yojson.Safe.t) list;
@@ -304,7 +322,12 @@ let schema_shape_error schema args =
   | name :: names ->
     let names = name :: names in
     let names_text = String.concat ", " names in
-    Some (Printf.sprintf "received unsupported field(s): %s" names_text)
+    let hint =
+      match typed_shell_unsupported_field_hint schema names with
+      | None -> ""
+      | Some hint -> "; " ^ hint
+    in
+    Some (Printf.sprintf "received unsupported field(s): %s%s" names_text hint)
   | [] -> one_of_required_shape_error schema args
 ;;
 
@@ -761,6 +784,15 @@ let constraint_declaration_paths schema =
   constraint_declaration_paths_at ~path:"" schema
 ;;
 
+let retired_transition_alias_names ~name = function
+  | `Assoc fields when String.equal name "masc_transition" ->
+    fields
+    |> List.filter_map (fun (field, _) ->
+      if String.equal field "to" || String.equal field "note" then Some field else None)
+    |> List.sort_uniq String.compare
+  | _ -> []
+;;
+
 let empty_tool_args = function
   | `Null | `Assoc [] -> true
   | _ -> false
@@ -893,6 +925,19 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
                "Tool '%s' declares no input fields but received arguments"
                name)
     | Some schema ->
+      (match retired_transition_alias_names ~name prepared_args with
+       | alias :: aliases ->
+         let aliases = String.concat ", " (alias :: aliases) in
+         reject_validation
+           ~name
+           ~reason:"invalid_args"
+           ~message:
+             (Printf.sprintf
+                "Tool '%s' received retired transition alias field(s): %s; use \
+                 action and notes"
+                name
+                aliases)
+       | [] ->
       (match schema_shape_error schema prepared_args with
        | Some message ->
          reject_validation
@@ -958,7 +1003,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
            ; tool_name = name
            ; duration_ms = 0.0
            })
-      ))
+      )))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> validation_exception_action ~name exn

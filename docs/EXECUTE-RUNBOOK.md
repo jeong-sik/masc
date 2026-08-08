@@ -109,8 +109,10 @@ scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_docker_streaming.ex
 ## Async Boundary Proof
 
 `Execute` remains synchronous at the callable-surface level. The public schema
-accepts exactly these typed fields: `argv`, `pipeline`, `env`, `cwd`,
-`timeout_sec`, `stdin`, `stdout`, and `stderr`.
+rejects legacy background flags and accepts only typed command fields:
+`executable`, `argv`, `pipeline`, `env`, `cwd`, `timeout_sec`, `stdin`,
+`stdout`, and `stderr`. It does not expose `job_id`, `request_id`, `poll`, or
+`cancel` fields.
 
 Keeper-turn async messaging is a separate surface (`keeper_msg`,
 `keeper_msg_result`, `keeper_msg_cancel`, `keeper_msg_list`) and is serialized

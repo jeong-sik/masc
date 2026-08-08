@@ -1,9 +1,10 @@
 (** Tool_shard_types_schemas_execute — [typed_execute_tools] tool_execute
     schema.
 
-    The public descriptor exposes a non-empty [argv] process vector for one
-    process, or [pipeline] containing non-empty [argv] vectors for explicit
-    Shell IR pipelines.
+    The public descriptor exposes one command SSOT: a non-empty [argv] process
+    vector for a single process, or [pipeline] containing non-empty [argv]
+    vectors for explicit Shell IR pipelines. Raw [cmd] strings and the retired
+    duplicate [executable] field are intentionally absent from the schema.
 
     Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout,
     stderr. This sentence is the contract line checked by
@@ -181,7 +182,9 @@ let tool_execute_stderr_field =
 let tool_execute_description =
   "Execute a typed process invocation inside the Keeper sandbox. Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr. Provide either \
    one non-empty argv process vector or an explicit pipeline of typed stages, \
-   never both. Shell metacharacters in argv are data, not syntax; use typed stdin/stdout/stderr \
+   never both; this tool does not expose background task lifecycle tools. The \
+   cmd and command string fields are rejected. Shell \
+   metacharacters in argv are data, not syntax; use typed stdin/stdout/stderr \
    objects for redirection and the pipeline field for pipelines. Use Grep for \
    structured file-content search. cwd must resolve inside the Keeper path jail. \
    Pass a relative cwd (typically '.') and relative filesystem operands, which \

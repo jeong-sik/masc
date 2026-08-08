@@ -83,11 +83,12 @@ describe('raw traces', () => {
   it('decodes the turn listing', async () => {
     stubFetch({
       keeper: 'kidsnote',
-      turns: [{ file: 'turn-1.jsonl', bytes: 2048, records: 218, modified_at: 1786000000 }],
+      turns: [{ file: 'turn-1.jsonl', trace_id: 'trace-kidsnote-1', bytes: 2048, records: 218, modified_at: 1786000000 }],
     })
     const turns = await fetchKeeperRawTraces('kidsnote', 25)
     expect(turns).toHaveLength(1)
     expect(turns[0]?.records).toBe(218)
+    expect(turns[0]?.traceId).toBe('trace-kidsnote-1')
   })
 
   // A torn line occupies its own position. Dropping it would make a damaged
@@ -98,15 +99,15 @@ describe('raw traces', () => {
       total_records: 3,
       offset: 0,
       records: [
-        { ok: true, record: { seq: 1, record_type: 'run_started' } },
-        { ok: false, error: 'Line 2: invalid token' },
-        { ok: true, record: { seq: 3, record_type: 'run_finished' } },
+        { ok: true, raw: '{"seq":1,"record_type":"run_started"}', record: { seq: 1, record_type: 'run_started' } },
+        { ok: false, raw: '{not json', error: 'Line 2: invalid token' },
+        { ok: true, raw: '{"seq":3,"record_type":"run_finished"}', record: { seq: 3, record_type: 'run_finished' } },
       ],
     })
     const page = await fetchKeeperRawTrace('kidsnote', 'turn-1.jsonl')
     expect(page.totalRecords).toBe(3)
     expect(page.records).toHaveLength(3)
-    expect(page.records[1]).toEqual({ ok: false, error: 'Line 2: invalid token' })
+    expect(page.records[1]).toEqual({ ok: false, raw: '{not json', error: 'Line 2: invalid token' })
   })
 
   it('rejects a record that is neither ok nor an error', async () => {

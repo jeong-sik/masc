@@ -203,6 +203,12 @@ let messages_api_compatible_provider_kind = function
 let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.provider)
     : (Llm_provider.Provider_config.provider_kind, string) result =
   match provider.api_format with
+  | Codex_app_server_runtime ->
+    Error
+      (Printf.sprintf
+         "provider %S uses codex-app-server and cannot be materialized as an \
+          HTTP provider"
+         provider.id)
   | Ollama_api -> Ok Llm_provider.Provider_config.Ollama
   | Chat_completions_api ->
     (* Chat-completions keeps the historical OpenAI-compatible fallback when
@@ -452,4 +458,52 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
          ?max_request_body_bytes:binding.max_request_body_bytes
          provider
          spec)
+;;
+
+let codex_app_server_execution (provider : Runtime_schema.provider)
+    (spec : Runtime_schema.model_spec) : (Runtime_execution.t, string) result =
+  match provider.transport with
+  | Http _ ->
+    Error
+      (Printf.sprintf
+         "provider %S uses protocol codex-app-server but declares an HTTP endpoint; \
+          an official Codex CLI command is required"
+         provider.id)
+  | Cli command when String.trim command = "" ->
+    Error (Printf.sprintf "provider %S declares an empty Codex CLI command" provider.id)
+  | Cli command ->
+    (match provider.credentials with
+     | Some _ ->
+       Error
+         (Printf.sprintf
+            "provider %S uses codex-app-server and must not declare credentials; \
+             the official Codex client owns subscription login"
+            provider.id)
+     | None when not provider.is_non_interactive ->
+       Error
+         (Printf.sprintf
+            "provider %S uses codex-app-server and must declare \
+             is-non-interactive = true"
+            provider.id)
+     | None ->
+       Ok
+         (Runtime_execution.Codex_app_server
+            { cli_path = command; model = Some spec.api_name; timeout_s = 300.0 }))
+;;
+
+let binding_to_execution (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
+    : (Runtime_execution.t, string) result =
+  match Runtime_schema.model_of_id cfg binding.model_id with
+  | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
+  | Some spec ->
+    (match Runtime_schema.provider_of_id cfg binding.provider_id with
+     | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
+     | Some provider ->
+       (match provider.api_format with
+        | Runtime_schema.Codex_app_server_runtime ->
+          codex_app_server_execution provider spec
+        | Messages_api | Chat_completions_api | Ollama_api ->
+          Result.map
+            (fun provider_config -> Runtime_execution.Agent_core provider_config)
+            (binding_to_provider_config cfg binding)))
 ;;

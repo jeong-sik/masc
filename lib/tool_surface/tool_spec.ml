@@ -64,12 +64,6 @@ let to_tool_schema (spec : t) : Masc_domain.tool_schema =
     input_schema = spec.input_schema }
 
 (* ================================================================ *)
-(* Registration tracking                                            *)
-(* ================================================================ *)
-
-let registered_names : (string, unit) Hashtbl.t = Hashtbl.create 256
-
-(* ================================================================ *)
 (* Registration                                                     *)
 (* ================================================================ *)
 
@@ -103,8 +97,6 @@ let register (spec : t) =
   (* 2. Tag + schema registry. An unclassified tool cannot reach this point. *)
   Tool_dispatch.register_module_tag
     ~schemas:[ to_tool_schema spec ] ~tag:spec.module_tag;
-  (* Track only successfully classified and registered specs. *)
-  Hashtbl.replace registered_names spec.name ();
   (* 3. Handler binding — auto-register Direct/Shared into Tool_dispatch *)
   (match spec.handler_binding with
    | Direct h | Shared h ->
@@ -113,6 +105,3 @@ let register (spec : t) =
 
 let register_all (specs : t list) =
   List.iter register specs
-
-let all_registered_names () =
-  Hashtbl.fold (fun name () acc -> name :: acc) registered_names []

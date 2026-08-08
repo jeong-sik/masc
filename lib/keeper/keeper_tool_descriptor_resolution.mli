@@ -31,3 +31,18 @@ val validated_descriptor_and_input_for_tool_call :
   ((Keeper_tool_descriptor.t * Yojson.Safe.t), Tool_result.result) result option
 
 val readonly_for_tool_call : tool_name:string -> input:Yojson.Safe.t -> bool option
+
+type runtime_decision_outcome =
+  | Route_hit of { internal : string }
+  | Already_internal of { canonical : string }
+  | Miss
+(** Typed runtime tool-name resolution over the descriptor-owned routes. *)
+
+val runtime_decision : string -> runtime_decision_outcome
+(** Resolve a runtime or model tool name without telemetry side effects. *)
+
+val canonical_tool_name : string -> string
+(** Pure canonical internal-name projection. Unknown names are unchanged. *)
+
+val canonical_tool_name_observed : string -> string
+(** Canonical projection that records exactly one bounded routing observation. *)

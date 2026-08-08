@@ -213,7 +213,7 @@ let find_tool fixture name =
   match by_name name with
   | Some _ as found -> found
   | None ->
-    (match Masc.Keeper_tool_alias.public_name_for_internal name with
+    (match Masc.Keeper_tool_descriptor_resolution.public_name_for_internal name with
      | Some public -> by_name public
      | None -> None)
 

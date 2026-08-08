@@ -72,7 +72,8 @@ let tool_call_detail_to_json (detail : tool_call_detail) =
 
 let tool_names_of_calls (tool_calls : tool_call_detail list) : string list =
   tool_calls
-  |> List.map (fun detail -> Keeper_tool_resolution.canonical_tool_name detail.tool_name)
+  |> List.map (fun detail ->
+    Keeper_tool_descriptor_resolution.canonical_tool_name detail.tool_name)
 ;;
 
 (** Result of a single Agent.run() keeper turn. *)

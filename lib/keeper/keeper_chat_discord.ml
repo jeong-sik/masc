@@ -356,7 +356,10 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
               if String.length acc_text = 0 then
                 Error
                   (Discord_rest_client.Other
-                     "primary final Discord reply contained no text")
+                     { request_id = "keeper_chat_discord.final_reply"
+                     ; reason = "primary final Discord reply contained no text"
+                     ; body_bytes = 0
+                     })
               else send_message ~content:acc_text
           | Some mid ->
               let head, overflow = final_head_and_overflow acc_text in
@@ -380,9 +383,12 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0
           ~last_edited_text:""
     | Text_message_start _ -> continue ()
-    | Custom { name; value = _ } ->
-        Log.Keeper.debug "keeper_chat_discord: custom event %s" name;
-        continue ()
+    | Queue_request _
+    | Request_terminal _
+    | Queued_turn_deferred _
+    | Chat_queued _
+    | Reply_details _
+    | Continuation_checkpoint _
     | Oas_stream_connected
     | Oas_stream_message_start _
     | Oas_stream_message_delta _

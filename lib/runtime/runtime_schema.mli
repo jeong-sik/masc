@@ -11,6 +11,7 @@ type api_format =
   | Messages_api
   | Chat_completions_api
   | Ollama_api
+  | Codex_app_server_runtime
 [@@deriving show, eq]
 
 type transport =

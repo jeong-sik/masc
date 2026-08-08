@@ -127,6 +127,9 @@ describe('InternalAgentsMonitor', () => {
     expect(container.textContent).toContain('새 기억')
     expect(container.textContent).toContain('낡은 기억')
     expect(container.textContent).toContain('새 근거로 대체됨')
+    expect(container.textContent).toContain('TRACE JOIN UNAVAILABLE')
+    expect(container.textContent).toContain('subject 문자열로 실행 레코드를 추정 연결하지 않습니다')
+    expect(screen.queryByRole('button', { name: /RAW 열기/ })).toBeNull()
     expect(memoryApi.fetchKeeperMemoryJournal).toHaveBeenCalledWith(
       'kidsnote',
       500,

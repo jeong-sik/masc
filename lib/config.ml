@@ -80,7 +80,7 @@ let () = validate_schemas raw_all_tool_schemas
 
 let all_tool_schemas : Masc_domain.tool_schema list =
   let schemas =
-    Capability_registry.public_tool_schemas_from front_door_tool_schemas
+    Capability_registry.canonical_tool_schemas_from front_door_tool_schemas
   in
   validate_schemas schemas;
   schemas
@@ -104,5 +104,5 @@ let is_raw_tool_name name = Hashtbl.mem raw_tool_name_set name
 
 let visible_tool_schemas ?(include_hidden = false) () :
     Masc_domain.tool_schema list =
-  Capability_registry.visible_public_tool_schemas_from ~include_hidden
+  Capability_registry.visible_tool_schemas_from ~include_hidden
     front_door_tool_schemas

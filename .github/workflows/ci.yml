@@ -1861,7 +1861,7 @@ jobs:
   dashboard:
     name: Dashboard
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: [pr-live-gate, changes]
     # PR mode: stay path-scoped (dashboard=true only when dashboard/ changes).
     # Non-PR events (push to main/develop, schedule, workflow_dispatch):
@@ -1913,6 +1913,25 @@ jobs:
       - name: Run dashboard tests
         working-directory: dashboard
         run: pnpm test
+
+      - name: Install Playwright Chromium
+        working-directory: dashboard
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run Keeper queued-stream Playwright E2E
+        id: keeper_queued_stream_e2e
+        working-directory: dashboard
+        env:
+          KEEPER_QUEUED_STREAM_ARTIFACT_DIR: ${{ runner.temp }}/keeper-queued-stream
+        run: pnpm test:e2e:queued-stream
+
+      - name: Upload Keeper queued-stream screenshots
+        if: ${{ always() && !cancelled() && steps.keeper_queued_stream_e2e.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: keeper-queued-stream-screenshots
+          path: ${{ runner.temp }}/keeper-queued-stream/*.png
+          if-no-files-found: warn
 
   structure-ratchet:
     name: OCaml Structure Ratchet

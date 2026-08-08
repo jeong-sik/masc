@@ -88,5 +88,3 @@ val register_all : t list -> unit
 
 val to_tool_schema : t -> Masc_domain.tool_schema
 (** Convert to [Masc_domain.tool_schema] for interop with existing schema-based APIs. *)
-
-val all_registered_names : unit -> string list

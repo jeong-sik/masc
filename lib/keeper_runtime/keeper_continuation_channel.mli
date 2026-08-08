@@ -41,6 +41,11 @@ val discord :
   user_id:string ->
   (t, string) result
 
+(** [discord_thread_parent channel ~parent_channel_id] preserves a Discord
+    continuation's concrete channel and marks it as a thread whose parent is
+    [parent_channel_id]. Other connector continuations are unchanged. *)
+val discord_thread_parent : t -> parent_channel_id:string -> t
+
 val slack :
   team_id:string option ->
   channel_id:string ->

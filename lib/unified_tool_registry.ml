@@ -45,7 +45,9 @@ let workspace_state_tool_names =
 let is_workspace_state_tool_name name = List.mem name workspace_state_tool_names
 
 let inline_runtime_tool_names =
-  Tool_schemas_misc.mcp_runtime_tool_names
+  List.map
+    Tool_schemas_misc.mcp_runtime_tool_name
+    Tool_schemas_misc.mcp_runtime_operations
 ;;
 
 let is_inline_runtime_tool_name name = List.mem name inline_runtime_tool_names

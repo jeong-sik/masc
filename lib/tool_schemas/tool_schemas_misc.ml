@@ -32,14 +32,35 @@ let control_schemas = List.map control_schema control_operations
    knows they exist without duplicating their schema ownership. *)
 let schemas : tool_schema list = Tool_descriptors_gen.schemas
 
-let mcp_runtime_tool_names =
-  [ "masc_start"
-  ; "masc_broadcast"
-  ; "masc_messages"
-  ]
+type mcp_runtime_operation =
+  | Start
+  | Broadcast
+  | Messages
 
-let mcp_runtime_schemas =
-  List.filter
-    (fun (schema : tool_schema) ->
-       List.mem schema.name mcp_runtime_tool_names)
-    schemas
+let mcp_runtime_operations = [ Start; Broadcast; Messages ]
+
+let mcp_runtime_tool_name = function
+  | Start -> "masc_start"
+  | Broadcast -> "masc_broadcast"
+  | Messages -> "masc_messages"
+;;
+
+let mcp_runtime_operation_of_tool_name = function
+  | "masc_start" -> Some Start
+  | "masc_broadcast" -> Some Broadcast
+  | "masc_messages" -> Some Messages
+  | _ -> None
+;;
+
+let mcp_runtime_schema operation =
+  let name = mcp_runtime_tool_name operation in
+  match
+    List.find_opt
+      (fun (schema : tool_schema) -> String.equal schema.name name)
+      schemas
+  with
+  | Some schema -> schema
+  | None -> invalid_arg ("missing MCP runtime schema: " ^ name)
+;;
+
+let mcp_runtime_schemas = List.map mcp_runtime_schema mcp_runtime_operations

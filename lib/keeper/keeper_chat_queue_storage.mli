@@ -1,4 +1,4 @@
-(** Private SQLite primitive boundary for the durable Keeper chat queue. *)
+(** Private storage boundary for the durable Keeper chat queue. *)
 
 val error : operation:string -> Sqlite3.db -> Sqlite3.Rc.t -> string
 
@@ -48,3 +48,26 @@ val single_int64 :
 
 val single_text :
   Sqlite3.db -> operation:string -> string -> (string, string) result
+
+type regular_path_observation =
+  | Path_absent
+  | Regular_path of Unix.stats
+
+val inspect_regular_or_absent :
+  string -> (regular_path_observation, string) result
+
+val same_regular_identity : Unix.stats -> Unix.stats -> bool
+
+val validate_owned_parent :
+  ownership_root:string -> string -> (unit, string) result
+
+val prepare_database_parent :
+  ownership_root:string ->
+  path:string ->
+  create_if_missing:bool ->
+  (unit, string) result
+
+val validate_database_paths :
+  ownership_root:string ->
+  string ->
+  (regular_path_observation, string) result

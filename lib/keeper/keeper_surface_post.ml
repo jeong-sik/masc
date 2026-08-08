@@ -13,21 +13,27 @@ let resolve_target ~surface ~channel_id ?continuation_channel
     ?(bound_discord_channels = [])
     ?(bound_slack_channels = []) () : (post_target, string) result =
   let surface = String.trim surface in
-  let continuation_channel_id =
+  let continuation_channel_id, continuation_parent_channel_id =
     match continuation_channel with
-    | Some (Keeper_continuation_channel.Discord { channel_id; _ })
+    | Some
+        (Keeper_continuation_channel.Discord
+           { channel_id; parent_channel_id; thread_id; _ })
       when String.equal surface discord_label ->
-      Some channel_id
+      ( Some channel_id
+      , (match thread_id, parent_channel_id with
+         | Some thread_id, Some parent_channel_id
+           when String.equal thread_id channel_id -> Some parent_channel_id
+         | _ -> None) )
     | Some (Keeper_continuation_channel.Slack { channel_id; _ })
       when String.equal surface slack_label ->
-      Some channel_id
+      Some channel_id, None
     | Some
         ( Keeper_continuation_channel.Dashboard _
         | Keeper_continuation_channel.Discord _
         | Keeper_continuation_channel.Slack _
         | Keeper_continuation_channel.Unrouted _ )
     | None ->
-      None
+      None, None
   in
   let channel_id =
     match channel_id with
@@ -37,6 +43,15 @@ let resolve_target ~surface ~channel_id ?continuation_channel
   if String.equal surface dashboard_label then Ok To_dashboard
   else if String.equal surface discord_label then
     let bound = List.map String.trim bound_discord_channels in
+    let is_bound_channel requested =
+      List.exists (String.equal requested) bound
+      ||
+      match continuation_channel_id, continuation_parent_channel_id with
+      | Some continuation_id, Some parent_id
+        when String.equal requested continuation_id ->
+        List.exists (String.equal parent_id) bound
+      | _ -> false
+    in
     match (channel_id, bound) with
     | _, [] ->
         Error
@@ -51,7 +66,7 @@ let resolve_target ~surface ~channel_id ?continuation_channel
              (String.concat ", " bound))
     | Some requested, bound ->
         let requested = String.trim requested in
-        if List.exists (String.equal requested) bound then
+        if is_bound_channel requested then
           Ok (To_discord { channel_id = requested })
         else
           Error

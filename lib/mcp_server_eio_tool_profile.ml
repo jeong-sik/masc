@@ -91,6 +91,7 @@ let tool_allowed_in_profile state profile tool_name =
          List.mem per dispatch. *)
       Config.is_raw_tool_name tool_name
       && Tool_catalog.is_visible ~include_hidden:true tool_name
+      && Tool_catalog.allow_direct_call tool_name
   | Managed_agent ->
       Option.is_some (Sdk_tool_contract.sdk_binding_by_name tool_name)
       || (tool_schemas_for_profile state Managed_agent

@@ -29,3 +29,12 @@ val binding_to_provider_config
     Returns [Error reason] (no silent fallback) when the provider or model id
     is unresolved, or when the provider transport/kind cannot be mapped to a
     concrete provider config. *)
+
+val binding_to_execution
+  :  Runtime_schema.config
+  -> Runtime_schema.binding
+  -> (Runtime_execution.t, string) result
+(** Materialize the owner of a complete turn. HTTP model APIs become
+    {!Runtime_execution.Agent_core}. The exact [codex-app-server] protocol over
+    a credential-free CLI transport becomes
+    {!Runtime_execution.Codex_app_server}. Other CLI protocols remain rejected. *)

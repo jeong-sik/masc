@@ -5,15 +5,13 @@
 // "where is the sidecar log?" and today the only answer is a code tour
 // or Slack. This strip surfaces four MASC-managed paths directly:
 //
-//   - Connectors dir : {mascRoot}/connectors/ — sidecar names.json /
-//                      status.json; derived from an observed connector's
-//                      `names_path` if available
-//   - Logs dir       : {mascRoot}/logs/       — sidecar log directory
-//   - Keepers dir    : config/keepers/         — keeper TOML (repo-relative)
-//   - Sidecars dir   : sidecars/               — sidecar run.sh scripts
-//                                                (repo-relative)
+//   - Connectors dir : the directory of an observed connector's
+//                      `names_path`, as the server reports it
+//   - Keepers dir    : config/keepers/  — keeper TOML (repo-relative)
+//   - Sidecars dir   : sidecars/        — sidecar run.sh scripts
+//                                         (repo-relative)
 //
-// The top two are derived from runtime; the bottom two are repo-relative
+// The first is derived from runtime; the other two are repo-relative
 // conventions and always shown. Collapsed by default so the main overview
 // strip stays dense.
 
@@ -31,7 +29,6 @@ export function _testResetPathsStrip() {
 
 export interface MascPaths {
   connectorsDir: string | null
-  logsDir: string | null
   keepersDir: string
   sidecarsDir: string
 }
@@ -45,7 +42,6 @@ export interface MascPaths {
 export function deriveMascPaths(connectors: GateConnectorInfo[]): MascPaths {
   const fallback: MascPaths = {
     connectorsDir: null,
-    logsDir: null,
     keepersDir: 'config/keepers/',
     sidecarsDir: 'sidecars/',
   }
@@ -53,12 +49,14 @@ export function deriveMascPaths(connectors: GateConnectorInfo[]): MascPaths {
     c => typeof c.names_path === 'string' && c.names_path.length > 0,
   )
   if (!withPath) return fallback
-  const match = withPath.names_path.match(/^(.*)\/connectors\/[^/]+\/names\.json$/)
-  if (!match) return fallback
-  const mascRoot = match[1] ?? ''
+  // The server sends the file it actually writes; take its directory rather
+  // than re-deriving a layout from the string. A regex for
+  // `<root>/connectors/<id>/names.json` never matched after the runtime moved
+  // to .gate/runtime/ in #7467, so both rows below stayed hidden.
+  const dir = withPath.names_path.replace(/\/[^/]*$/, '')
+  if (dir === '' || dir === withPath.names_path) return fallback
   return {
-    connectorsDir: `${mascRoot}/connectors/`,
-    logsDir: `${mascRoot}/logs/`,
+    connectorsDir: `${dir}/`,
     keepersDir: 'config/keepers/',
     sidecarsDir: 'sidecars/',
   }
@@ -105,9 +103,6 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
             <div id="connector-paths-body" class="space-y-1.5 border-t border-[var(--color-border-default)] px-3 py-2">
               ${paths.connectorsDir
                 ? html`<${PathRow} label="커넥터" value=${paths.connectorsDir} hint="sidecar names.json / status.json 위치" />`
-                : null}
-              ${paths.logsDir
-                ? html`<${PathRow} label="로그" value=${paths.logsDir} hint="sidecar 로그 디렉토리" />`
                 : null}
               <${PathRow} label="키퍼" value=${paths.keepersDir} hint="keeper TOML 설정 파일" />
               <${PathRow} label="사이드카" value=${paths.sidecarsDir} hint="sidecar 스크립트 (run.sh) 위치" />

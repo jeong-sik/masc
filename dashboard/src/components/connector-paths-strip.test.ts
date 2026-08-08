@@ -24,35 +24,35 @@ describe('deriveMascPaths', () => {
   it('falls back to repo-relative paths when no connector has names_path', () => {
     const paths = deriveMascPaths([])
     expect(paths.connectorsDir).toBeNull()
-    expect(paths.logsDir).toBeNull()
     expect(paths.keepersDir).toBe('config/keepers/')
     expect(paths.sidecarsDir).toBe('sidecars/')
   })
 
-  it('derives connectors + logs dir from standard names_path pattern', () => {
+  // What the server sends: Channel_gate_discord_names writes
+  // .gate/runtime/<id>/names.json. The old regex demanded
+  // <root>/connectors/<id>/names.json and so never matched.
+  it('takes the directory of the file the server reports', () => {
     const c = mkConnector({
-      names_path: '/Users/alice/.masc/connectors/discord/names.json',
+      names_path: '/Users/alice/.gate/runtime/discord/names.json',
     } as never)
     const paths = deriveMascPaths([c])
-    expect(paths.connectorsDir).toBe('/Users/alice/.masc/connectors/')
-    expect(paths.logsDir).toBe('/Users/alice/.masc/logs/')
+    expect(paths.connectorsDir).toBe('/Users/alice/.gate/runtime/discord/')
   })
 
-  it('falls back when names_path is non-standard', () => {
-    const c = mkConnector({ names_path: '/somewhere/else/names.json' } as never)
+  it('falls back when names_path has no directory', () => {
+    const c = mkConnector({ names_path: 'names.json' } as never)
     const paths = deriveMascPaths([c])
     expect(paths.connectorsDir).toBeNull()
-    expect(paths.logsDir).toBeNull()
   })
 
   it('ignores empty / whitespace names_path and falls through to next connector', () => {
     const c1 = mkConnector({ connector_id: 'discord', names_path: '' } as never)
     const c2 = mkConnector({
       connector_id: 'slack',
-      names_path: '/srv/project/.masc/connectors/slack/names.json',
+      names_path: '/srv/project/.gate/runtime/slack/names.json',
     } as never)
     const paths = deriveMascPaths([c1, c2])
-    expect(paths.connectorsDir).toBe('/srv/project/.masc/connectors/')
+    expect(paths.connectorsDir).toBe('/srv/project/.gate/runtime/slack/')
   })
 })
 
@@ -93,7 +93,7 @@ describe('ConnectorPathsStrip', () => {
 
   it('surfaces Connectors + Logs rows once a connector reports a names_path', async () => {
     const c = mkConnector({
-      names_path: '/Users/alice/.masc/connectors/discord/names.json',
+      names_path: '/Users/alice/.gate/runtime/discord/names.json',
     } as never)
     render(html`<${ConnectorPathsStrip} connectors=${[c]} />`, container)
     const toggle = container.querySelector<HTMLButtonElement>('[data-panel="connector-paths-strip"] button')!
@@ -104,7 +104,7 @@ describe('ConnectorPathsStrip', () => {
     }
     const rows = container.querySelectorAll('[data-paths-row]')
     const labels = Array.from(rows).map(r => r.getAttribute('data-paths-row'))
-    expect(labels).toEqual(['커넥터', '로그', '키퍼', '사이드카'])
+    expect(labels).toEqual(['커넥터', '키퍼', '사이드카'])
   })
 
   it('header shows runtime hint when no connector has names_path', () => {

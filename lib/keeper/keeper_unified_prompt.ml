@@ -822,7 +822,7 @@ let backlog_statement_of_observation
   | Some _ ->
     if
       observation.unclaimed_task_count = 0
-      && observation.claimable_task_count = 0
+      && Keeper_world_observation.claimable_task_count observation = 0
       && observation.failed_task_count = 0
     then Backlog_readable_empty
     else Backlog_readable_with_rows
@@ -1026,19 +1026,19 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
           Buffer.add_string ubuf
             (Printf.sprintf "- Unclaimed tasks: %d\n"
                observation.unclaimed_task_count);
-        if observation.claimable_task_count > 0 then
+        if Keeper_world_observation.claimable_task_count observation > 0 then
           Buffer.add_string ubuf
             (Printf.sprintf "- Claimable tasks for this keeper: %d\n"
-               observation.claimable_task_count);
+               (Keeper_world_observation.claimable_task_count observation));
         if observation.unclaimed_task_count > 0
-           && observation.claimable_task_count = 0
+           && Keeper_world_observation.claimable_task_count observation = 0
         then
           Buffer.add_string ubuf
             "- Claimable tasks for this keeper: 0\n";
         let keeper_or_scope_blocked =
           max 0
             (observation.unclaimed_task_count
-             - observation.claimable_task_count)
+             - Keeper_world_observation.claimable_task_count observation)
         in
         if keeper_or_scope_blocked > 0 then
           Buffer.add_string ubuf

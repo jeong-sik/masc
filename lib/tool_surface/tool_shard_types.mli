@@ -44,9 +44,11 @@ val voice_tools : Masc_domain.tool_schema list
 
 val library_tools : Masc_domain.tool_schema list
 
+val keeper_surface_post_description : string
+(** Canonical description projected into Keeper model and help surfaces. *)
+
 val surface_tools : Masc_domain.tool_schema list
-(** keeper_surface_read lane reading (RFC-0223 P3). *)
-(** Library tool schemas. *)
+(** Surface read/post schemas projected into help and dispatch registries. *)
 
 val taskboard_tools : Masc_domain.tool_schema list
 (** Taskboard tool schemas. *)

@@ -2,7 +2,7 @@ open Keeper_approval_queue_rules_types
 
 let record_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
   Keeper_fd_pressure.note_exception ~site:("approval_audit." ^ site) exn;
-  Otel_metric_store.inc_counter
+  Otel_metric_store_core.inc_counter
     Keeper_metrics.(to_string ApprovalQueueFailures)
     ~labels:[ "keeper", keeper_name; "site", site ]
     ();

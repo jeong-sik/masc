@@ -246,10 +246,6 @@ let register_module_tag ~(schemas : Masc_domain.tool_schema list) ~tag =
       Hashtbl.replace tag_registry s.name tag;
       Hashtbl.replace schema_registry s.name s.input_schema) schemas)
 
-(** Register a single tool name with a tag (for modules without schema exports). *)
-let register_name_tag ~tool_name ~tag =
-  with_dispatch_rw (fun () -> Hashtbl.replace tag_registry tool_name tag)
-
 let lookup_tag name = with_dispatch_ro (fun () -> Hashtbl.find_opt tag_registry name)
 
 let lookup_schema name = with_dispatch_ro (fun () -> Hashtbl.find_opt schema_registry name)

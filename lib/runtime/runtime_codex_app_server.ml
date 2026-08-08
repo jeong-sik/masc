@@ -736,22 +736,6 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~thread_mode ~histor
     }
 ;;
 
-let env_key entry =
-  match String.index_opt entry '=' with
-  | Some index -> String.sub entry 0 index
-  | None -> entry
-;;
-
-let subscription_only_environment () =
-  Unix.environment ()
-  |> Array.to_list
-  |> List.filter (fun entry ->
-    match env_key entry with
-    | "OPENAI_API_KEY" | "CODEX_API_KEY" -> false
-    | _ -> true)
-  |> Array.of_list
-;;
-
 let bounded_tail ~limit current addition =
   let combined = current ^ addition in
   let length = String.length combined in
@@ -818,7 +802,7 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort ~thread
     let stderr_tail = ref "" in
     let proc =
       Eio.Process.spawn ~sw mgr ~cwd
-        ~env:(subscription_only_environment ())
+        ~env:(Runtime_subscription_cli_env.environment ())
         ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
         [ config.cli_path; "app-server"; "--stdio" ]
     in

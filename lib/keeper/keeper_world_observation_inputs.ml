@@ -21,14 +21,12 @@ type current_task_observation =
       ; error : string
       }
 
-type claimable_task_summary =
-  { task_id : string
-  ; title_preview : string
-  }
+type claimable_task_identity =
+  { task_id : Keeper_id.Task_id.t }
 
 type backlog_snapshot =
   { unclaimed_count : int
-  ; claimable_tasks : claimable_task_summary list
+  ; claimable_tasks : claimable_task_identity list
   ; failed_count : int
   ; revision : int option
   }
@@ -37,13 +35,10 @@ let empty_backlog_snapshot =
   { unclaimed_count = 0; claimable_tasks = []; failed_count = 0; revision = None }
 ;;
 
-let claimable_task_title_max_bytes = 160
-
-let claimable_task_title_preview title =
-  title
-  |> Keeper_text_processing.normalize_proactive_text
-  |> String_util.utf8_safe ~max_bytes:claimable_task_title_max_bytes ~suffix:"..."
-  |> String_util.to_string
+let claimable_task_id (task : Masc_domain.task) =
+  match Keeper_id.Task_id.of_string task.id with
+  | Ok task_id -> task_id
+  | Error error -> failwith error
 ;;
 
 (* A keeper must not treat a task it authored itself as work waiting for it.
@@ -136,9 +131,7 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
               author as claimable work — that edge is the feedback loop. *)
            && not (task_is_self_authored_todo ~meta task))
       |> List.map (fun (task : Masc_domain.task) ->
-           { task_id = task.id
-           ; title_preview = claimable_task_title_preview task.title
-           })
+           { task_id = claimable_task_id task })
     in
     let failed =
       (* "Failed" here means still-auditable active work. Terminal Cancelled

@@ -1,6 +1,6 @@
 (* The turn frame said "Claimable tasks for this keeper: N" and nothing else.
    A count says work exists and not which work, so a keeper that wants to claim
-   has to decide to spend a tool call before it can even see a title.
+   has to decide to spend a tool call before it can identify a task.
 
    Measured over the ten hours after one server start: 2000 turns across seven
    keepers, 320 of them calling any tool at all. [lane-smith] ran 284 turns and
@@ -51,7 +51,16 @@ let make_meta () =
 ;;
 
 let add config ~title ~created_by =
-  ignore (Workspace.add_task ~created_by config ~title ~priority:2 ~description:"")
+  match
+    Workspace.add_task_with_result
+      ~created_by
+      config
+      ~title
+      ~priority:2
+      ~description:""
+  with
+  | Ok created -> Keeper_id.Task_id.of_string created.task_id |> Result.get_ok
+  | Error error -> failwith (Workspace.add_task_error_to_string error)
 ;;
 
 let snapshot config meta =
@@ -63,13 +72,19 @@ let with_config f =
   Fun.protect ~finally:(fun () -> cleanup config) (fun () -> f config (make_meta ()))
 ;;
 
-(* The point of the change: a title reaches the keeper, not only a number. *)
+(* The point of the change: a typed task identity reaches the keeper, not only
+   a count. Opaque titles remain behind the task-tool boundary. *)
 let test_a_claimable_task_is_named () =
   with_config (fun config meta ->
-    add config ~title:"Wire the timeline panel" ~created_by:"someone-else";
+    let expected =
+      add config ~title:"Wire the timeline panel" ~created_by:"someone-else"
+    in
     match (snapshot config meta).claimable_tasks with
-    | [ { title_preview; _ } ] ->
-      check string "the title is carried" "Wire the timeline panel" title_preview
+    | [ { task_id } ] ->
+      check string
+        "the typed task id is carried"
+        (Keeper_id.Task_id.to_string expected)
+        (Keeper_id.Task_id.to_string task_id)
     | rows -> failf "expected exactly one claimable row, got %d" (List.length rows))
 ;;
 
@@ -77,7 +92,7 @@ let test_a_claimable_task_is_named () =
 let test_the_list_and_the_count_agree () =
   with_config (fun config meta ->
     List.iter
-      (fun title -> add config ~title ~created_by:"someone-else")
+      (fun title -> ignore (add config ~title ~created_by:"someone-else"))
       [ "First"; "Second"; "Third" ];
     let observed = snapshot config meta in
     check int "one row per counted task" 3 (List.length observed.claimable_tasks))
@@ -88,16 +103,19 @@ let test_the_list_and_the_count_agree () =
    same exclusion, or the rows would advertise work the claim path refuses. *)
 let test_self_authored_tasks_are_not_offered_back () =
   with_config (fun config meta ->
-    add config ~title:"Mine" ~created_by:"claimable-probe";
-    add config ~title:"Theirs" ~created_by:"someone-else";
+    let _mine = add config ~title:"Mine" ~created_by:"claimable-probe" in
+    let theirs = add config ~title:"Theirs" ~created_by:"someone-else" in
     let observed = snapshot config meta in
-    let titles =
+    let task_ids =
       List.map
-        (fun (row : Keeper_world_observation_inputs.claimable_task_summary) ->
-           row.title_preview)
+        (fun (row : Keeper_world_observation_inputs.claimable_task_identity) ->
+           Keeper_id.Task_id.to_string row.task_id)
         observed.claimable_tasks
     in
-    check (list string) "only the other keeper's task is offered" [ "Theirs" ] titles;
+    check (list string)
+      "only the other keeper's task is offered"
+      [ Keeper_id.Task_id.to_string theirs ]
+      task_ids;
     check int "and the count agrees" 1 (List.length observed.claimable_tasks))
 ;;
 
@@ -106,27 +124,15 @@ let test_an_empty_backlog_offers_nothing () =
     let observed = snapshot config meta in
     check (list string) "no rows" []
       (List.map
-         (fun (row : Keeper_world_observation_inputs.claimable_task_summary) ->
-            row.task_id)
+         (fun (row : Keeper_world_observation_inputs.claimable_task_identity) ->
+            Keeper_id.Task_id.to_string row.task_id)
          observed.claimable_tasks);
     check int "no count" 0 (List.length observed.claimable_tasks))
 ;;
 
-let test_title_preview_is_one_line_utf8_and_byte_bounded () =
-  with_config (fun config meta ->
-    let oversized = String.concat "" (List.init 100 (fun _ -> "가")) ^ "\nsecond line" in
-    add config ~title:oversized ~created_by:"someone-else";
-    match (snapshot config meta).claimable_tasks with
-    | [ { title_preview; _ } ] ->
-      check bool "at most 160 bytes" true (String.length title_preview <= 160);
-      check bool "valid UTF-8" true (String.is_valid_utf_8 title_preview);
-      check bool "single line" false (String.contains title_preview '\n')
-    | rows -> failf "expected one bounded row, got %d" (List.length rows))
-;;
-
 let test_recovery_snapshot_is_not_claimable () =
   with_config (fun config meta ->
-    add config ~title:"Primary task" ~created_by:"someone-else";
+    ignore (add config ~title:"Primary task" ~created_by:"someone-else");
     Out_channel.with_open_text (Workspace.backlog_path config) (fun channel ->
       output_string channel {|{"tasks":"corrupt"}|});
     let observed = snapshot config meta in
@@ -145,8 +151,6 @@ let () =
             test_self_authored_tasks_are_not_offered_back
         ; test_case "an empty backlog offers nothing" `Quick
             test_an_empty_backlog_offers_nothing
-        ; test_case "title preview is bounded and valid" `Quick
-            test_title_preview_is_one_line_utf8_and_byte_bounded
         ; test_case "recovery snapshot is not claimable" `Quick
             test_recovery_snapshot_is_not_claimable
         ] )

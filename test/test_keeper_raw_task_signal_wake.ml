@@ -28,8 +28,8 @@ let test_task_signals_reach_the_keeper_without_local_tool_semantics () =
     "claimable task is an observation"
     { base_observation with
       claimable_tasks =
-        [ { Keeper_world_observation_inputs.task_id = "task-claimable"
-          ; title_preview = "Claimable task"
+        [ { Keeper_world_observation_inputs.task_id =
+              Keeper_id.Task_id.of_string "task-claimable" |> Result.get_ok
           }
         ]
     };

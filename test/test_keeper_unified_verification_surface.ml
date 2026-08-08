@@ -320,8 +320,8 @@ let test_task_claim_present_for_claimable_backlog () =
     { base_observation with
       unclaimed_task_count = 3;
       claimable_tasks =
-        [ { Masc.Keeper_world_observation_inputs.task_id = "task-claimable"
-          ; title_preview = "Claimable task"
+        [ { Masc.Keeper_world_observation_inputs.task_id =
+              Masc.Keeper_id.Task_id.of_string "task-claimable" |> Result.get_ok
           }
         ];
     }
@@ -335,8 +335,8 @@ let test_backlog_trigger_split () =
     { base_observation with
       unclaimed_task_count = 3;
       claimable_tasks =
-        [ { Masc.Keeper_world_observation_inputs.task_id = "task-claimable"
-          ; title_preview = "Claimable task"
+        [ { Masc.Keeper_world_observation_inputs.task_id =
+              Masc.Keeper_id.Task_id.of_string "task-claimable" |> Result.get_ok
           }
         ];
     }

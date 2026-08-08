@@ -143,7 +143,7 @@ type world_observation =
   ; idle_seconds : int
   ; active_goals : string list
   ; unclaimed_task_count : int
-  ; claimable_tasks : Inputs.claimable_task_summary list
+  ; claimable_tasks : Inputs.claimable_task_identity list
   ; failed_task_count : int
   ; scheduled_automation : scheduled_automation_observation
   ; backlog_revision : int option

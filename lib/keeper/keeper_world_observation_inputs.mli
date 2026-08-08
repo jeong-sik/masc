@@ -20,14 +20,12 @@ type current_task_observation =
       ; error : string
       }
 
-type claimable_task_summary =
-  { task_id : string
-  ; title_preview : string
-  }
+type claimable_task_identity =
+  { task_id : Keeper_id.Task_id.t }
 
 type backlog_snapshot =
   { unclaimed_count : int
-  ; claimable_tasks : claimable_task_summary list
+  ; claimable_tasks : claimable_task_identity list
   ; failed_count : int
   ; revision : int option
   }
@@ -35,8 +33,8 @@ type backlog_snapshot =
 val read_backlog_snapshot : config:Workspace.config -> meta:keeper_meta -> backlog_snapshot
 (** One source-preserving primary backlog read. [claimable_tasks] and its count,
     [unclaimed_count], [failed_count], and [revision] therefore cannot describe
-    different backlog revisions. Titles are normalized to one line and bounded
-    to 160 UTF-8-safe bytes for prompt projection. *)
+    different backlog revisions. Only typed task identities cross into prompt
+    observation; task titles remain behind the task-tool boundary. *)
 
 (** [task_is_self_authored_todo ~meta task] is true when an unclaimed [Todo]
     was authored by the keeper's own stable handle ([meta.name]).

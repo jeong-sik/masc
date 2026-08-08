@@ -140,9 +140,9 @@ type world_observation = {
   unclaimed_task_count : int;
   (** Number of unclaimed tasks in the workspace backlog. *)
 
-  claimable_tasks : Keeper_world_observation_inputs.claimable_task_summary list;
-  (** Bounded title projections of the tasks this keeper can claim with its
-      current tool surface, from the same authoritative backlog read as
+  claimable_tasks : Keeper_world_observation_inputs.claimable_task_identity list;
+  (** Typed identities of the tasks this keeper can claim with its current tool
+      surface, from the same authoritative backlog read as
       [unclaimed_task_count]. *)
 
   failed_task_count : int;

@@ -1429,7 +1429,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                   let data = Json_util.get_string_with_default att_json ~key:"data" ~default:"" in
                   if id = "" || data = "" then None
                   else Some { id; att_type; name; size; mime_type; data }
-                with _ -> None)
+                with _ -> None)  (* cancel-guard-ok: guards pure Json_util reads: no Eio cancellation point *)
             | _ -> None
           ) att_list in
           if atts = [] then None else Some atts

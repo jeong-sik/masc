@@ -169,7 +169,7 @@ let recent_user_messages (msgs : Agent_sdk.Types.message list) ~(max_n : int) : 
 
 (* RFC-0149 §3.1: pure list -> list filter extracted so the legacy
    silent-fallback path and the [_result] variant share the same
-   per-line parsing logic.  The per-line [try ... with exn -> log +
+   per-line parsing logic.  The per-line [try ... with exn -> log + (* cancel-guard-ok: prose *)
    counter + None] is preserved here — that is a separate boundary
    (JSONL corruption) from the file-read IO fault. *)
 let history_user_messages_from_lines

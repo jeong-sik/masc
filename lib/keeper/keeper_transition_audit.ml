@@ -67,6 +67,10 @@ let sink_path () =
   | _ -> None
 ;;
 
+(* The directory this store occupies under [.masc]. Exposed so readers of the
+   same store name it from here instead of spelling the literal. *)
+let store_dirname = "transition-audit"
+
 let default_store_ref : Dated_jsonl.t option ref = ref None
 
 let get_default_store () =
@@ -77,7 +81,7 @@ let get_default_store () =
        let dir =
          Filename.concat
            (Common.masc_dir_from_base_path ~base_path:(Env_config_core.base_path ()))
-           "transition-audit"
+           store_dirname
        in
        let store = Dated_jsonl.create ~base_dir:dir () in
        default_store_ref := Some store;

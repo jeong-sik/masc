@@ -7,8 +7,8 @@
     {!Provider_kind_resolver} existed only to dodge that cycle).
 
     This split lives strictly inside the OAS/runtime boundary. masc-core
-    consumers (auth, keeper dispatch) must not call it: per RFC-0211 a runtime id
-    is opaque to the masc core, and only OAS / the runtime adapter parses an id
+    consumers (auth, keeper dispatch) must not call it: a runtime id is
+    opaque to the masc core, and only OAS / the runtime adapter parses an id
     into a provider/model. *)
 
 (** [split_provider_model s] splits [s] at the first colon into

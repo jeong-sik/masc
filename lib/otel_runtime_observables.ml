@@ -44,7 +44,7 @@ let watched_store_dirs =
   ; "telemetry"
   ; "tool_usage"
   ; "trajectories"
-  ; "transition-audit"
+  ; Keeper_transition_audit.store_dirname
   ; "logs"
   ]
 ;;
@@ -71,7 +71,7 @@ let walk_dir_totals root =
   let files = ref 0 in
   let rec go path =
     match (Unix.LargeFile.lstat path : Unix.LargeFile.stats) with
-    | exception _ -> ()
+    | exception _ -> ()  (* cancel-guard-ok: guards Unix.stat: no Eio cancellation point *)
     | st ->
       (match st.st_kind with
        | Unix.S_REG ->
@@ -79,7 +79,7 @@ let walk_dir_totals root =
          incr files
        | Unix.S_DIR ->
          (match Sys.readdir path with
-          | exception _ -> ()
+          | exception _ -> ()  (* cancel-guard-ok: guards Sys.readdir: no Eio cancellation point *)
           | entries ->
             Array.iter (fun e -> go (Filename.concat path e)) entries)
        | _ -> ())

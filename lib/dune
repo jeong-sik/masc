@@ -3,9 +3,7 @@
  (name masc)
  (flags :standard)
  (public_name masc)
- (private_modules
-  keeper_chat_queue_paths
-  keeper_chat_queue_sqlite
+ (private_modules keeper_chat_queue_paths keeper_chat_queue_sqlite
   keeper_fs_durable_directory)
  (libraries
   mcp_protocol

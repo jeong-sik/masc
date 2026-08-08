@@ -178,7 +178,7 @@ module Transport = struct
       Accessor-shaped reader; listener lifecycle is still decided at boot. *)
   let webrtc_enabled () = Feature_flag_registry.get_bool "MASC_WEBRTC_ENABLED"
 
-  (** HTTP mode: typed variant for "auto", "h2_only", "h1_only". *)
+  (** HTTP mode: exact [auto|0|h1_only|1|h2_only] vocabulary. *)
   let use_h2 () =
     match Sys.getenv_opt "MASC_USE_H2" with
     | Some raw -> h2_mode_of_string raw

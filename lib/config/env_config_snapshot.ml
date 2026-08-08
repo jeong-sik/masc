@@ -107,11 +107,12 @@ let transport_entries =
        masc_ws_slice_fanout_skipped_total advances per skip. RFC #10119 \
        Phase 2. Set to false for emergency rollback only.";
     entry ~default:"true" "MASC_WEBRTC_ENABLED" "Enable WebRTC transport";
-    entry ~default:"auto" "MASC_USE_H2" "HTTP mode (auto|h2_only|h1_only)";
+    entry ~default:"auto" "MASC_USE_H2"
+      "HTTP mode (auto|0|h1_only|1|h2_only)";
     entry ~default:"240" "MASC_STARTUP_WATCHDOG_SEC"
       "Startup watchdog timeout (seconds)";
-    entry ~default:"(none)" "MASC_AGENT_TRANSPORT"
-      "Agent transport preference";
+    entry ~default:"local" "MASC_AGENT_TRANSPORT"
+      "Agent transport (http|grpc|ws|webrtc|local)";
     entry ~default:"32" "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION"
       "Maximum concurrent JSON-RPC request dispatch fibers admitted from one \
        WebSocket session. 0 disables the per-session admission gate.";

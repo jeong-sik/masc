@@ -25,6 +25,8 @@ type pending_confirm_scope = {
   hidden_entries : pending_confirm list;
 }
 
+exception Store_error of string
+
 type available_action = {
   action_type : string;
   tool_name : string;

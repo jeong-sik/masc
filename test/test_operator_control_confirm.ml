@@ -24,7 +24,7 @@ let test_confirm_rejects_expired_token () =
                  [
                    `Assoc
                      [
-                       ("token", `String "expired-token");
+                       ("confirm_token", `String "expired-token");
                        ("trace_id", `String "ops_expired");
                        ("actor", `String "operator");
                        ("action_type", `String "namespace_pause");

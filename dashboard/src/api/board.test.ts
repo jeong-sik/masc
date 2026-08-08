@@ -166,7 +166,7 @@ describe('normalizePendingConfirmation (board)', () => {
     expect(normalizePendingConfirmation(null)).toBeNull()
   })
 
-  it('returns null when no confirm_token or token', () => {
+  it('returns null when confirm_token is missing', () => {
     expect(normalizePendingConfirmation({ actor: 'a1' })).toBeNull()
   })
 
@@ -175,9 +175,8 @@ describe('normalizePendingConfirmation (board)', () => {
     expect(result!.confirm_token).toBe('tok-1')
   })
 
-  it('falls back to token field', () => {
-    const result = normalizePendingConfirmation({ token: 'tok-fallback' })
-    expect(result!.confirm_token).toBe('tok-fallback')
+  it('rejects a token-only item', () => {
+    expect(normalizePendingConfirmation({ token: 'noncanonical' })).toBeNull()
   })
 
   it('extracts all optional fields', () => {

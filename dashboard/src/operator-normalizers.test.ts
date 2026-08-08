@@ -1,5 +1,28 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeOperatorDigest, normalizeOperatorSnapshot } from './operator-normalizers'
+import {
+  normalizeOperatorDigest,
+  normalizeOperatorSnapshot as normalizeOperatorSnapshotWire,
+} from './operator-normalizers'
+
+const emptyPendingConfirmEnvelope = {
+  items: [],
+  summary: {
+    actor_filter: null,
+    filter_active: false,
+    visible_count: 0,
+    total_count: 0,
+    hidden_count: 0,
+    hidden_actors: [],
+    confirm_required_actions: [],
+  },
+}
+
+function normalizeOperatorSnapshot(raw: Record<string, unknown>) {
+  return normalizeOperatorSnapshotWire({
+    pending_confirm_envelope: emptyPendingConfirmEnvelope,
+    ...raw,
+  })
+}
 
 // ================================================================
 // normalizeOperatorDigest
@@ -143,20 +166,12 @@ describe('normalizeOperatorDigest', () => {
 // ================================================================
 
 describe('normalizeOperatorSnapshot', () => {
-  it('returns safe defaults for null', () => {
-    const result = normalizeOperatorSnapshot(null)
-    expect(result.root).toEqual({})
-    expect(result.keepers).toEqual([])
-    expect(result.persistent_agents).toEqual([])
-    expect(result.inference_inflight).toBeNull()
-    expect(result.recent_messages).toEqual([])
-    expect(result.pending_confirms).toEqual([])
-    expect(result.available_actions).toEqual([])
+  it('rejects null', () => {
+    expect(() => normalizeOperatorSnapshotWire(null)).toThrow('invalid operator snapshot')
   })
 
-  it('returns safe defaults for undefined', () => {
-    const result = normalizeOperatorSnapshot(undefined)
-    expect(result.keepers).toEqual([])
+  it('rejects undefined', () => {
+    expect(() => normalizeOperatorSnapshotWire(undefined)).toThrow('invalid operator snapshot')
   })
 
   it('extracts root namespace', () => {
@@ -467,29 +482,42 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.recent_messages[0]!.id).toBe('msg-1')
   })
 
-  it('derives pending_confirms from envelope items', () => {
+  it('keeps pending confirmations inside the envelope', () => {
     const result = normalizeOperatorSnapshot({
       pending_confirm_envelope: {
         items: [
           { confirm_token: 'tok-1', actor: 'agent-1', action_type: 'pause' },
         ],
-        summary: { visible_count: 1, total_count: 1 },
+        summary: {
+          ...emptyPendingConfirmEnvelope.summary,
+          visible_count: 1,
+          total_count: 1,
+        },
       },
     })
-    expect(result.pending_confirms).toHaveLength(1)
-    expect(result.pending_confirms[0]!.confirm_token).toBe('tok-1')
+    expect(result.pending_confirm_envelope.items).toHaveLength(1)
+    expect(result.pending_confirm_envelope.items[0]!.confirm_token).toBe('tok-1')
   })
 
-  it('filters envelope items without token', () => {
-    const result = normalizeOperatorSnapshot({
+  it('rejects a snapshot with an invalid envelope item', () => {
+    expect(() => normalizeOperatorSnapshotWire({
       pending_confirm_envelope: {
         items: [
-          { actor: 'agent-1' }, // no token
+          { actor: 'agent-1' },
         ],
-        summary: { visible_count: 1, total_count: 1 },
+        summary: {
+          ...emptyPendingConfirmEnvelope.summary,
+          visible_count: 1,
+          total_count: 1,
+        },
       },
-    })
-    expect(result.pending_confirms).toEqual([])
+    })).toThrow('invalid pending_confirm_envelope')
+  })
+
+  it('rejects a snapshot without the canonical envelope', () => {
+    expect(() => normalizeOperatorSnapshotWire({})).toThrow(
+      'invalid pending_confirm_envelope',
+    )
   })
 
   it('extracts available_actions', () => {
@@ -543,13 +571,14 @@ describe('normalizeOperatorSnapshot', () => {
           { confirm_token: 'tok-e1', actor: 'agent-1' },
         ],
         summary: {
+          ...emptyPendingConfirmEnvelope.summary,
           visible_count: 1,
           total_count: 5,
         },
       },
     })
-    expect(result.pending_confirms).toHaveLength(1)
-    expect(result.pending_confirms[0]!.confirm_token).toBe('tok-e1')
+    expect(result.pending_confirm_envelope.items).toHaveLength(1)
+    expect(result.pending_confirm_envelope.items[0]!.confirm_token).toBe('tok-e1')
   })
 
   it('extracts top-level needs_attention, attention_reason and next_human_action from keeper payload', () => {

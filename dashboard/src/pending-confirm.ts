@@ -1,4 +1,4 @@
-import { asBoolean, asNumber, asString, asStringArray, extractArray, isRecord } from './components/common/normalize'
+import { asBoolean, asString, isRecord } from './components/common/normalize'
 import type {
   OperatorActionDescriptor,
   PendingConfirmEnvelope,
@@ -21,7 +21,7 @@ export function normalizeOperatorActionDescriptor(raw: unknown): OperatorActionD
 
 export function normalizePendingConfirmation(raw: unknown): PendingConfirmation | null {
   if (!isRecord(raw)) return null
-  const confirmToken = asString(raw.confirm_token) ?? asString(raw.token)
+  const confirmToken = asString(raw.confirm_token)
   if (!confirmToken) return null
   return {
     confirm_token: confirmToken,
@@ -37,81 +37,41 @@ export function normalizePendingConfirmation(raw: unknown): PendingConfirmation 
 
 export function normalizePendingConfirmSummary(raw: unknown): PendingConfirmSummary | null {
   if (!isRecord(raw)) return null
+  const actorFilter = raw.actor_filter === null ? null : asString(raw.actor_filter)
+  const filterActive = asBoolean(raw.filter_active)
+  const counts = [raw.visible_count, raw.total_count, raw.hidden_count]
+  const hiddenActors = raw.hidden_actors
+  const actions = raw.confirm_required_actions
+  if (
+    actorFilter === undefined
+    || filterActive === undefined
+    || !counts.every(value => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
+    || !Array.isArray(hiddenActors)
+    || !hiddenActors.every(value => typeof value === 'string' && value.trim() !== '')
+    || !Array.isArray(actions)
+  ) return null
+  const normalizedActions = actions.map(normalizeOperatorActionDescriptor)
+  if (normalizedActions.some(action => action === null)) return null
   return {
-    actor_filter: asString(raw.actor_filter) ?? null,
-    filter_active: asBoolean(raw.filter_active) ?? false,
-    visible_count: asNumber(raw.visible_count) ?? 0,
-    total_count: asNumber(raw.total_count) ?? 0,
-    hidden_count: asNumber(raw.hidden_count) ?? 0,
-    hidden_actors: asStringArray(raw.hidden_actors),
-    confirm_required_actions: extractArray(raw.confirm_required_actions)
-      .map(normalizeOperatorActionDescriptor)
-      .filter((item): item is OperatorActionDescriptor => item !== null),
+    actor_filter: actorFilter,
+    filter_active: filterActive,
+    visible_count: counts[0] as number,
+    total_count: counts[1] as number,
+    hidden_count: counts[2] as number,
+    hidden_actors: hiddenActors,
+    confirm_required_actions: normalizedActions as OperatorActionDescriptor[],
   }
 }
 
 export function normalizePendingConfirmEnvelope(raw: unknown): PendingConfirmEnvelope | null {
   if (!isRecord(raw)) return null
-  const items = extractArray(raw.items, ['confirms'])
-    .map(normalizePendingConfirmation)
-    .filter((item): item is PendingConfirmation => item !== null)
+  if (!Array.isArray(raw.items)) return null
+  const items = raw.items.map(normalizePendingConfirmation)
+  if (items.some(item => item === null)) return null
   const summary = normalizePendingConfirmSummary(raw.summary)
-  if (!summary && items.length === 0) return null
+  if (!summary) return null
   return {
-    items,
-    summary: summary ?? {
-      actor_filter: null,
-      filter_active: false,
-      visible_count: items.length,
-      total_count: items.length,
-      hidden_count: 0,
-      hidden_actors: [],
-      confirm_required_actions: [],
-    },
-  }
-}
-
-interface PendingConfirmSource {
-  pending_confirm_envelope?: PendingConfirmEnvelope | null
-  pending_confirms?: PendingConfirmation[] | null
-  pending_confirm_summary?: PendingConfirmSummary | null
-  available_actions?: OperatorActionDescriptor[] | null
-}
-
-interface PendingConfirmState {
-  items: PendingConfirmation[]
-  summary: PendingConfirmSummary
-  actor_filter: string | null
-  visible_count: number
-  total_count: number
-  hidden_count: number
-  hidden_actors: string[]
-  confirm_required_actions: OperatorActionDescriptor[]
-}
-
-export function selectPendingConfirmState(source: PendingConfirmSource | null | undefined): PendingConfirmState {
-  const envelope = source?.pending_confirm_envelope ?? null
-  const items = envelope?.items ?? source?.pending_confirms ?? []
-  const summary = envelope?.summary ?? source?.pending_confirm_summary ?? {
-    actor_filter: null,
-    filter_active: false,
-    visible_count: items.length,
-    total_count: items.length,
-    hidden_count: 0,
-    hidden_actors: [],
-    confirm_required_actions: source?.available_actions?.filter(action => action.confirm_required) ?? [],
-  }
-  return {
-    items,
+    items: items as PendingConfirmation[],
     summary,
-    actor_filter: summary.actor_filter?.trim() || null,
-    visible_count: summary.visible_count ?? items.length,
-    total_count: summary.total_count ?? items.length,
-    hidden_count: summary.hidden_count ?? 0,
-    hidden_actors: summary.hidden_actors ?? [],
-    confirm_required_actions:
-      summary.confirm_required_actions?.length
-        ? summary.confirm_required_actions
-        : (source?.available_actions?.filter(action => action.confirm_required) ?? []),
   }
 }

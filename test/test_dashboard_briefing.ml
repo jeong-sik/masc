@@ -67,7 +67,6 @@ let write_pending_confirm config _session_id =
       [
         `Assoc
           [
-            ("token", `String "confirm-mission-test");
             ("confirm_token", `String "confirm-mission-test");
             ("trace_id", `String "ops_fixture_mission");
             ("actor", `String "dashboard-fixture");

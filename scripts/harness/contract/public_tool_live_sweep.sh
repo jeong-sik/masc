@@ -9,6 +9,7 @@ export MCP_SESSION_ID
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+# shellcheck source=scripts/harness/lib/test_framework.sh
 source "${SCRIPT_DIR}/../lib/test_framework.sh"
 
 STEP=0

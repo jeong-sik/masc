@@ -120,12 +120,15 @@ run_contract() {
   local step="$1"
   local total="$2"
   local script_name="$3"
+  local agent_name="${4:-$MCP_AGENT_NAME}"
+  local token="${5:-$MCP_TOKEN}"
   echo "[${step}/${total}] ${script_name}"
   if ! (
     cd "$ROOT_DIR"
     MCP_URL="$MCP_URL" \
-      MCP_TOKEN="${MCP_TOKEN:-}" \
-      MCP_AGENT_NAME="$MCP_AGENT_NAME" \
+      MCP_TOKEN="$token" \
+      MCP_AGENT_NAME="$agent_name" \
+      AGENT_NAME="$agent_name" \
       BASE_PATH="$BASE_PATH" \
       bash "scripts/harness/contract/${script_name}"
   ); then
@@ -162,6 +165,19 @@ unset MCP_AUTH_TOKEN
 unset MASC_ADMIN_TOKEN
 echo "[bootstrap] auth_token=workspace-local admin token minted"
 
+PUBLIC_TOOL_SWEEP_AGENT="public-tool-sweep-harness"
+if ! PUBLIC_TOOL_SWEEP_TOKEN="$(
+  harness_mint_admin_token "$SERVER_EXE" "$PORT" "$BASE_PATH" \
+    "$PUBLIC_TOOL_SWEEP_AGENT"
+)"; then
+  echo "FAIL: failed to mint public tool sweep token" >&2
+  exit 1
+fi
+if [[ -z "$PUBLIC_TOOL_SWEEP_TOKEN" ]]; then
+  echo "FAIL: public tool sweep token is empty" >&2
+  exit 1
+fi
+
 SERVER_PID="$(harness_start_server "$SERVER_EXE" "$PORT" "$BASE_PATH" "$LOG_FILE")"
 if ! harness_wait_for_health "$PORT" 25; then
   echo "FAIL: server did not become healthy on port ${PORT}" >&2
@@ -176,7 +192,8 @@ fi
 
 run_contract 1 4 "streamable_http_contract.sh"
 run_contract 2 4 "golden_path_1_contract.sh"
-run_contract 3 4 "public_tool_live_sweep.sh"
+run_contract 3 4 "public_tool_live_sweep.sh" \
+  "$PUBLIC_TOOL_SWEEP_AGENT" "$PUBLIC_TOOL_SWEEP_TOKEN"
 run_contract 4 4 "scheduler_live_supported_contract.sh"
 
 echo "PASS: contract harness suite"

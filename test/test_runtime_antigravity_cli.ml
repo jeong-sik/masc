@@ -287,6 +287,59 @@ let test_runtime_observation_retains_internal_measured_labels () =
   check (list string) "internal measured labels" labels observation.configured_labels
 ;;
 
+let test_runtime_observation_publishes_typed_official_client_snapshot () =
+  let capture, _metrics =
+    Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
+  in
+  let official_client : Runtime_observation.official_client_measurement =
+    { client = Antigravity
+    ; execution_mode = Plan_sandbox
+    ; tool_owner = Official_client
+    ; permission_mode = Some "always-proceed"
+    ; session_bound = true
+    ; resumed = false
+    ; turn_count = 1
+    ; tool_calls = 2
+    ; usage =
+        Some
+          { input_tokens = 20
+          ; output_tokens = 3
+          ; thinking_tokens = 1
+          ; cache_read_tokens = 5
+          ; total_tokens = 23
+          }
+    }
+  in
+  let observation =
+    Runtime_observation.runtime_observation_with_metrics
+      ~runtime_id:"antigravity.typed-snapshot"
+      ~configured_labels:[]
+      ~official_client
+      ~candidate_count:1
+      ~selected_model_raw:(Some "gemini-3.6-flash-low")
+      ~capture
+      ()
+  in
+  Runtime_observation.record_runtime
+    ~observation:(Some observation)
+    ~runtime_id:"antigravity.typed-snapshot"
+    ~outcome:`Success
+    ();
+  match
+    Runtime_observation.latest_official_client_snapshot
+      ~runtime_id:"antigravity.typed-snapshot"
+  with
+  | None -> fail "typed official-client snapshot was not published"
+  | Some snapshot ->
+    check string "runtime" "antigravity.typed-snapshot" snapshot.runtime_id;
+    check bool "measurement" true (snapshot.measurement = official_client);
+    let json = Runtime_observation.official_client_snapshot_to_json snapshot in
+    check string
+      "tool owner wire"
+      "official_client"
+      Yojson.Safe.Util.(json |> member "measurement" |> member "tool_owner" |> to_string)
+;;
+
 let () =
   run "runtime antigravity CLI"
     [ ( "typed stream-json boundary"
@@ -300,6 +353,10 @@ let () =
             "runtime observation keeps measured labels"
             `Quick
             test_runtime_observation_retains_internal_measured_labels
+        ; test_case
+            "runtime observation publishes typed official-client snapshot"
+            `Quick
+            test_runtime_observation_publishes_typed_official_client_snapshot
         ] )
     ; ( "live subscription"
       , [ test_case "official Antigravity CLI" `Slow test_live_subscription_client ] )

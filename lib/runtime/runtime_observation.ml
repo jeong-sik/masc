@@ -11,10 +11,43 @@
 (* Runtime types                                                     *)
 (* ================================================================ *)
 
+type official_client_kind =
+  | Codex
+  | Antigravity
+
+type official_client_execution_mode =
+  | App_server
+  | Plan_sandbox
+
+type official_client_tool_owner =
+  | Masc
+  | Official_client
+
+type official_client_usage =
+  { input_tokens : int
+  ; output_tokens : int
+  ; thinking_tokens : int
+  ; cache_read_tokens : int
+  ; total_tokens : int
+  }
+
+type official_client_measurement =
+  { client : official_client_kind
+  ; execution_mode : official_client_execution_mode
+  ; tool_owner : official_client_tool_owner
+  ; permission_mode : string option
+  ; session_bound : bool
+  ; resumed : bool
+  ; turn_count : int
+  ; tool_calls : int
+  ; usage : official_client_usage option
+  }
+
 type runtime_observation = {
   runtime_id : string;
   strategy : string option;
   configured_labels : string list;
+  official_client : official_client_measurement option;
   candidate_models : string list;
   primary_model : string option;
   selected_model : string option;
@@ -147,6 +180,7 @@ let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
 (* ================================================================ *)
 
 let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
+    ?official_client
     ~(candidate_count : int)
     ~(selected_model_raw : string option)
     ?(attempts = [])
@@ -183,6 +217,7 @@ let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
     runtime_id;
     strategy;
     configured_labels;
+    official_client;
     candidate_models;
     primary_model;
     selected_model;
@@ -404,6 +439,7 @@ let runtime_metrics_for_candidates ~candidate_count:(_ : int) () =
   (capture, metrics)
 
 let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
+    ?official_client
     ~(candidate_count : int)
     ~(selected_model_raw : string option) ~(capture : runtime_metrics_capture)
     ?(attempt_details_source = "oas_metrics_callbacks")
@@ -413,6 +449,7 @@ let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
     streaming_metrics_of_capture capture.streaming
   in
   runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
+    ?official_client
     ~candidate_count ~selected_model_raw
     ~attempts:(List.rev capture.attempts_rev)
     ~fallback_events:(List.rev capture.fallback_events_rev)
@@ -428,6 +465,51 @@ let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
 (* JSON serialization                                                *)
 (* ================================================================ *)
 
+let official_client_kind_to_string = function
+  | Codex -> "codex"
+  | Antigravity -> "antigravity"
+;;
+
+let official_client_execution_mode_to_string = function
+  | App_server -> "app_server"
+  | Plan_sandbox -> "plan_sandbox"
+;;
+
+let official_client_tool_owner_to_string = function
+  | Masc -> "masc"
+  | Official_client -> "official_client"
+;;
+
+let official_client_usage_to_json (usage : official_client_usage) =
+  `Assoc
+    [ "input_tokens", `Int usage.input_tokens
+    ; "output_tokens", `Int usage.output_tokens
+    ; "thinking_tokens", `Int usage.thinking_tokens
+    ; "cache_read_tokens", `Int usage.cache_read_tokens
+    ; "total_tokens", `Int usage.total_tokens
+    ]
+;;
+
+let official_client_measurement_to_json (measurement : official_client_measurement) =
+  `Assoc
+    [ "client", `String (official_client_kind_to_string measurement.client)
+    ; ( "execution_mode"
+      , `String
+          (official_client_execution_mode_to_string measurement.execution_mode) )
+    ; "tool_owner", `String (official_client_tool_owner_to_string measurement.tool_owner)
+    ; "permission_mode", Json_util.string_opt_to_json measurement.permission_mode
+    ; "session_bound", `Bool measurement.session_bound
+    ; "resumed", `Bool measurement.resumed
+    ; "turn_count", `Int measurement.turn_count
+    ; "tool_calls", `Int measurement.tool_calls
+    ; ( "usage"
+      , Option.fold
+          ~none:`Null
+          ~some:official_client_usage_to_json
+          measurement.usage )
+    ]
+;;
+
 let runtime_observation_to_json (obs : runtime_observation) : Yojson.Safe.t =
   let runtime_id =
     obs.runtime_id
@@ -438,6 +520,11 @@ let runtime_observation_to_json (obs : runtime_observation) : Yojson.Safe.t =
       ("strategy", Json_util.string_opt_to_json obs.strategy);
       ( "configured_labels",
         `List (List.map (fun label -> `String label) obs.configured_labels) );
+      ( "official_client",
+        Option.fold
+          ~none:`Null
+          ~some:official_client_measurement_to_json
+          obs.official_client );
       ( "candidate_models",
         `List (List.map (fun label -> `String label) obs.candidate_models) );
       ("primary_model", Json_util.string_opt_to_json obs.primary_model);
@@ -587,6 +674,35 @@ type state = {
   audit_store : Dated_jsonl.t option;
 }
 
+type official_client_snapshot =
+  { runtime_id : string
+  ; observed_at : float
+  ; outcome : [ `Success | `Failure | `Rejected ]
+  ; measurement : official_client_measurement
+  }
+
+let official_client_snapshots = Atomic.make StringMap.empty
+
+let rec publish_official_client_snapshot snapshot =
+  let current = Atomic.get official_client_snapshots in
+  let next = StringMap.add snapshot.runtime_id snapshot current in
+  if not (Atomic.compare_and_set official_client_snapshots current next)
+  then publish_official_client_snapshot snapshot
+;;
+
+let latest_official_client_snapshot ~runtime_id =
+  StringMap.find_opt runtime_id (Atomic.get official_client_snapshots)
+;;
+
+let official_client_snapshot_to_json snapshot =
+  `Assoc
+    [ "runtime_id", `String snapshot.runtime_id
+    ; "observed_at", `Float snapshot.observed_at
+    ; "outcome", `String (runtime_outcome_to_string snapshot.outcome)
+    ; "measurement", official_client_measurement_to_json snapshot.measurement
+    ]
+;;
+
 let stream = Eio.Stream.create 1024
 
 let handle_record state ~now ~keeper_name ~runtime_id ~observation ~outcome =
@@ -733,6 +849,11 @@ let start_actor_if_needed ~sw =
 
 let record_runtime ?keeper_name ~observation ~runtime_id ~outcome () =
   let now = Time_compat.now () in
+  Option.iter
+    (fun measurement ->
+      publish_official_client_snapshot
+        { runtime_id; observed_at = now; outcome; measurement })
+    (Option.bind observation (fun observed -> observed.official_client));
   Eio.Stream.add stream
     (Record_runtime { keeper_name; runtime_id; observation; outcome; now })
 

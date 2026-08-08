@@ -339,6 +339,150 @@ describe('RuntimeMonitor', () => {
     expect(container.querySelector('article.v2-monitoring-card')).not.toBeNull()
   })
 
+  it('renders typed official-client session and provider usage evidence', async () => {
+    apiMocks.fetchRuntimeProviders.mockResolvedValueOnce({
+      updated_at: '2026-08-09T06:30:00Z',
+      summary: { providers: 1, runtimes: 1, local_models: 0, cloud_models: 0, cli_models: 1 },
+      providers: [{
+        provider: 'antigravity_subscription.flash',
+        runtime_id: 'antigravity_subscription.flash',
+        provider_id: 'antigravity_subscription',
+        model_api_name: 'gemini-3.6-flash-low',
+        protocol: 'antigravity-cli',
+        transport: 'cli',
+        runtime_kind: 'cli',
+        auth_kind: 'none',
+        status: 'verified',
+        models: ['gemini-3.6-flash-low'],
+        verification: {
+          status: 'verified',
+          measured: true,
+          observed_at: 1786239000,
+          evidence: {
+            runtime_id: 'antigravity_subscription.flash',
+            observed_at: 1786239000,
+            outcome: 'success',
+            measurement: {
+              client: 'antigravity',
+              execution_mode: 'plan_sandbox',
+              tool_owner: 'official_client',
+              permission_mode: 'always-proceed',
+              session_bound: true,
+              resumed: true,
+              turn_count: 2,
+              tool_calls: 1,
+              usage: {
+                input_tokens: 21,
+                output_tokens: 4,
+                thinking_tokens: 2,
+                cache_read_tokens: 7,
+                total_tokens: 25,
+              },
+            },
+          },
+          reason: null,
+        },
+      }],
+    })
+    apiMocks.fetchDashboardRuntimeProbe.mockResolvedValueOnce({
+      probe: { summary: { runtimes: 1, reachable: 0, failed: 0, skipped: 1 }, providers: [] },
+    })
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('공식 구독 CLI · 실측 turn 성공') ?? false,
+      'official client evidence',
+    )
+
+    expect(container.textContent).toContain('measured')
+    expect(container.textContent).toContain('client · antigravity')
+    expect(container.textContent).toContain('mode · plan_sandbox')
+    expect(container.textContent).toContain('tool owner · official_client')
+    expect(container.textContent).toContain('permission · always-proceed')
+    expect(container.textContent).toContain('session · bound')
+    expect(container.textContent).toContain('turn · 2 · resumed')
+    expect(container.textContent).toContain('auth · official session measured')
+    expect(container.textContent).toContain('provider usage · in 21 · out 4 · thinking 2 · cache 7 · total 25')
+  })
+
+  it('labels configured official clients as unmeasured instead of inferring auth', async () => {
+    apiMocks.fetchRuntimeProviders.mockResolvedValueOnce({
+      providers: [{
+        provider: 'codex_subscription.spark',
+        runtime_id: 'codex_subscription.spark',
+        provider_id: 'codex_subscription',
+        model_api_name: 'gpt-5.3-codex-spark',
+        protocol: 'codex-app-server',
+        transport: 'cli',
+        runtime_kind: 'cli',
+        auth_kind: 'none',
+        status: 'configured_unverified',
+        models: ['gpt-5.3-codex-spark'],
+        verification: {
+          status: 'unverified',
+          measured: false,
+          observed_at: null,
+          evidence: null,
+          reason: 'no_successful_runtime_observation',
+        },
+      }],
+    })
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('공식 구독 CLI · 아직 실측 없음') ?? false,
+      'unmeasured official client',
+    )
+
+    expect(container.textContent).toContain('not measured')
+    expect(container.textContent).toContain('auth / usage / session unknown')
+    expect(container.textContent).toContain('auth · unknown until measured turn')
+    expect(container.textContent).not.toContain('auth evidence · successful official turn')
+  })
+
+  it('does not claim successful auth evidence for a rejected official-client turn', async () => {
+    apiMocks.fetchRuntimeProviders.mockResolvedValueOnce({
+      providers: [{
+        provider: 'codex_subscription.spark',
+        runtime_id: 'codex_subscription.spark',
+        status: 'configured_observed_failure',
+        models: ['gpt-5.3-codex-spark'],
+        verification: {
+          status: 'rejected',
+          measured: true,
+          observed_at: 1786239000,
+          evidence: {
+            runtime_id: 'codex_subscription.spark',
+            observed_at: 1786239000,
+            outcome: 'rejected',
+            measurement: {
+              client: 'codex',
+              execution_mode: 'app_server',
+              tool_owner: 'masc',
+              permission_mode: null,
+              session_bound: true,
+              resumed: false,
+              turn_count: 1,
+              tool_calls: 0,
+              usage: null,
+            },
+          },
+        },
+      }],
+    })
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('공식 구독 CLI · 실측 turn 거부') ?? false,
+      'rejected official client evidence',
+    )
+
+    expect(container.textContent).toContain('auth · not established (rejected turn)')
+    expect(container.textContent).toContain('auth evidence · not established by rejected turn')
+    expect(container.textContent).not.toContain('auth evidence · successful turn at observed time')
+  })
+
   it('surfaces declared and effective provider/model parameter facts', async () => {
     const { RuntimeMonitor } = await import('./runtime-monitor')
 

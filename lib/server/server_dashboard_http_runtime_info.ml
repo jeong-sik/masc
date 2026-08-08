@@ -1860,6 +1860,42 @@ let runtime_parameter_policy_json (rt : Runtime.t) =
     ]
 ;;
 
+let runtime_official_client_snapshot (rt : Runtime.t) =
+  match rt.execution with
+  | Runtime_execution.Agent_core _ -> None
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Antigravity_cli _ ->
+    Runtime_observation.latest_official_client_snapshot ~runtime_id:rt.id
+;;
+
+let runtime_official_client_verification_json (rt : Runtime.t) =
+  match rt.execution, runtime_official_client_snapshot rt with
+  | Runtime_execution.Agent_core _, _ -> `Null
+  | (Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _), None ->
+    `Assoc
+      [ "status", `String "unverified"
+      ; "measured", `Bool false
+      ; "observed_at", `Null
+      ; "evidence", `Null
+      ; "reason", `String "no_successful_runtime_observation"
+      ]
+  | ( Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _
+    ), Some snapshot ->
+    let status =
+      match snapshot.outcome with
+      | `Success -> "verified"
+      | `Failure -> "failed"
+      | `Rejected -> "rejected"
+    in
+    `Assoc
+      [ "status", `String status
+      ; "measured", `Bool true
+      ; "observed_at", `Float snapshot.observed_at
+      ; "evidence", Runtime_observation.official_client_snapshot_to_json snapshot
+      ; "reason", `Null
+      ]
+;;
+
 let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
   let runtime_kind = runtime_kind_of_transport rt.provider.transport in
   let is_official_client_runtime =
@@ -1870,7 +1906,11 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     | Runtime_execution.Agent_core _ -> false
   in
   let runtime_status =
-    if is_official_client_runtime then "configured_unverified" else "configured"
+    match runtime_official_client_snapshot rt with
+    | Some { outcome = `Success; _ } -> "verified"
+    | Some { outcome = (`Failure | `Rejected); _ } -> "configured_observed_failure"
+    | None when is_official_client_runtime -> "configured_unverified"
+    | None -> "configured"
   in
   let models = [ rt.model.api_name ] in
   let capabilities_declared, caps =
@@ -1946,15 +1986,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "parameter_policy", runtime_parameter_policy_json rt
     ; "request_config", runtime_request_config_json rt
     ; ( "verification"
-      , if is_official_client_runtime
-        then
-          `Assoc
-            [ "status", `String "unverified"
-            ; "measured", `Bool false
-            ; "evidence", `Null
-            ; "reason", `String "no_successful_runtime_observation"
-            ]
-        else `Null )
+      , runtime_official_client_verification_json rt )
     ; "declared_spec", runtime_declared_spec_json rt
     ; "model_count", `Int (List.length models)
     ; "models", Json_util.json_string_list models

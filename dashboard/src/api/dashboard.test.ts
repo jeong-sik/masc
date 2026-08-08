@@ -3426,6 +3426,97 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.effective_capabilities?.thinking_control_format).toBe('ollama-think')
     expect(result.providers[1]?.effective_capabilities?.thinking_control_format).toBe('future-undocumented-wire')
   })
+
+  it('decodes typed official-client measurement without inferring missing fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        providers: [{
+          provider: 'antigravity.flash',
+          runtime_id: 'antigravity.flash',
+          models: ['gemini-3.6-flash-low'],
+          verification: {
+            status: 'verified',
+            measured: true,
+            observed_at: 1786239000,
+            reason: null,
+            evidence: {
+              runtime_id: 'antigravity.flash',
+              observed_at: 1786239000,
+              outcome: 'success',
+              measurement: {
+                client: 'antigravity',
+                execution_mode: 'plan_sandbox',
+                tool_owner: 'official_client',
+                permission_mode: 'always-proceed',
+                session_bound: true,
+                resumed: false,
+                turn_count: 1,
+                tool_calls: 2,
+                usage: {
+                  input_tokens: 20,
+                  output_tokens: 3,
+                  thinking_tokens: 1,
+                  cache_read_tokens: 5,
+                  total_tokens: 23,
+                },
+              },
+            },
+          },
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchRuntimeProviders()
+    const verification = result.providers[0]?.verification
+    expect(verification?.status).toBe('verified')
+    expect(verification?.evidence?.measurement).toMatchObject({
+      client: 'antigravity',
+      execution_mode: 'plan_sandbox',
+      tool_owner: 'official_client',
+      permission_mode: 'always-proceed',
+      session_bound: true,
+      turn_count: 1,
+      tool_calls: 2,
+    })
+    expect(verification?.evidence?.measurement.usage?.thinking_tokens).toBe(1)
+  })
+
+  it('rejects verified official-client payloads whose typed evidence disagrees', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        providers: [{
+          provider: 'antigravity.flash',
+          runtime_id: 'antigravity.flash',
+          models: ['gemini-3.6-flash-low'],
+          verification: {
+            status: 'verified',
+            measured: true,
+            observed_at: 1786239000,
+            evidence: {
+              runtime_id: 'antigravity.flash',
+              observed_at: 1786239000,
+              outcome: 'failure',
+              measurement: {
+                client: 'antigravity',
+                execution_mode: 'plan_sandbox',
+                tool_owner: 'official_client',
+                permission_mode: 'always-proceed',
+                session_bound: true,
+                resumed: false,
+                turn_count: 1,
+                tool_calls: 0,
+                usage: null,
+              },
+            },
+          },
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchRuntimeProviders()).rejects.toThrow('유효하지 않은 runtime lanes payload')
+  })
 })
 
 describe('fetchRuntimeModelMetrics', () => {

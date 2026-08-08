@@ -870,7 +870,7 @@ describe('RuntimeTomlEditor', () => {
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })
 
-  it('offers only materializable HTTP protocols plus the typed Codex official client', async () => {
+  it('offers materializable HTTP protocols plus typed official clients', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
 
@@ -888,11 +888,44 @@ describe('RuntimeTomlEditor', () => {
       'ollama-http',
       'openai-compatible-cli',
       'codex-app-server',
+      'antigravity-cli',
     ])
     expect(protocolOptions).not.toContain('messages-http')
     expect(protocolOptions).not.toContain('messages-cli')
     // No transport-kind selector left to switch to 'command'.
     expect(container.querySelector('[aria-label="새 provider transport 종류"]')).toBeNull()
+  })
+
+  it('creates an Antigravity subscription provider with the enforced no-key boundary', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement, {
+      target: { value: 'antigravity_subscription' },
+    })
+    fireEvent.change(container.querySelector('[aria-label="새 provider protocol"]') as HTMLSelectElement, {
+      target: { value: 'antigravity-cli' },
+    })
+
+    const command = container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement
+    expect(command.placeholder).toBe('/absolute/path/to/agy')
+    expect((container.querySelector('[aria-label="새 provider credential 종류"]') as HTMLSelectElement).value).toBe('none')
+    fireEvent.input(command, { target: { value: '/opt/masc/bin/agy' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[providers.antigravity_subscription]')
+      expect(source).toContain('protocol = "antigravity-cli"')
+      expect(source).toContain('command = "/opt/masc/bin/agy"')
+      expect(source).toContain('is-non-interactive = true')
+      expect(source).not.toContain('[providers.antigravity_subscription.credentials]')
+    })
   })
 
   it('creates a Codex subscription provider and binding with the enforced no-key boundary', async () => {
@@ -917,7 +950,7 @@ describe('RuntimeTomlEditor', () => {
     expect(container.querySelector('[aria-label="새 provider credential 값"]')).toBeNull()
 
     fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
-      target: { value: '/Users/dancer/.local/bin/codex' },
+      target: { value: '/opt/masc/bin/codex' },
     })
     fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
 
@@ -925,7 +958,7 @@ describe('RuntimeTomlEditor', () => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('[providers.codex_subscription]')
       expect(source).toContain('protocol = "codex-app-server"')
-      expect(source).toContain('command = "/Users/dancer/.local/bin/codex"')
+      expect(source).toContain('command = "/opt/masc/bin/codex"')
       expect(source).toContain('is-non-interactive = true')
       expect(source).not.toContain('[providers.codex_subscription.credentials]')
     })

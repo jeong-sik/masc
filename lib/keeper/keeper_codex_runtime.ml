@@ -670,9 +670,22 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          ~latency_ms:(Some latency_ms)
          ~error:None;
        let runtime_observation =
+         let official_client : Runtime_observation.official_client_measurement =
+           { client = Codex
+           ; execution_mode = App_server
+           ; tool_owner = Masc
+           ; permission_mode = None
+           ; session_bound = true
+           ; resumed = turn.resumed
+           ; turn_count
+           ; tool_calls = turn.dynamic_tool_calls
+           ; usage = None
+           }
+         in
          Runtime_observation.runtime_observation_with_metrics
            ~runtime_id
            ~strategy:"official_client_runtime"
+           ~official_client
            ~configured_labels:
              [ "codex_app_server"
              ; Printf.sprintf "dynamic_tool_calls=%d" turn.dynamic_tool_calls

@@ -48,7 +48,6 @@
 @import "./v2-monitoring.css";
 @import "./v2-command.css";
 @import "./v2-workspace.css";
-@import "./v2-monitoring-leftovers.css";
 @import "./v2-lab.css";
 @import "./v2-ide.css";
 @import "./a11y.css"; /* after feature styles so reduced-motion overrides win */

@@ -1028,7 +1028,7 @@ let test_legitimate_metachar_still_allowed () =
     ]
 ;;
 
-(* RFC-0198 Phase B: typed [stdin]/[stdout]/[stderr] redirect fields. *)
+(* Typed [stdin]/[stdout]/[stderr] redirect fields. *)
 
 let mk_exec_with_redirects
       ?(executable = "rg")

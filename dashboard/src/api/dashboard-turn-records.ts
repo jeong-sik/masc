@@ -137,8 +137,8 @@ export type TurnRecordRow = {
   diff_vs_prev: TurnBlockDiff | null
 }
 
-// RFC-keeper-memory-panel-real-data §4a: the librarian taxonomy as a closed TS union mirroring the OCaml
-// `category` sum (keeper_memory_os_types.ml — category_to_string is the wire SSOT).
+// The librarian taxonomy mirrors the OCaml `category` sum in
+// keeper_memory_os_types.ml; category_to_string is the wire SSOT.
 // The wire carries a string token; it is parsed once at this decode boundary into
 // a tagged value. An out-of-vocabulary token is a contract error, matching the
 // backend's closed decoder.
@@ -201,7 +201,7 @@ export type MemoryOsTurnRecordSnapshot = {
   facts: {
     shown: number
     current: number
-    // RFC-keeper-memory-panel-real-data §4a: every persisted fact row.
+    // Every persisted fact row.
     items: MemoryOsFact[]
   }
   change: {

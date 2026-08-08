@@ -62,7 +62,7 @@ The second metric is the stronger gate — it asserts no domain regresses to zer
 
 ## 5. CI wire-up plan
 
-Mirroring OAS chain Phase 3 (#12119 wired `oas-boundary-ratchet.sh` into `.github/workflows/ci.yml`), the next PR adds:
+The next PR adds:
 
 ```yaml
 - name: Run TLA+ specs Bug Model ratchet
@@ -100,7 +100,6 @@ Both audits exhibit the same self-correcting structure: each phase narrows or ze
 - PR #12160, #12167, #12168, #12174, #12175, #12178, #12180, sibling Q2-3 — 8 implementation PRs
 - PR #12143 — sibling PPX adoption audit (MERGED)
 - PR #12151 — `tla-ppx-ratchet.sh` (Draft)
-- `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04-PHASE3.md` — sister chain Phase 3 (MERGED)
 - AGENT-LLM-A.md `TLA+ Bug Model 패턴`
 
 *Audit date: 2026-04-30 / Phase 3 closure / docs-only / 8/8 RFC implementation summary*

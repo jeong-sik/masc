@@ -865,7 +865,7 @@ sequenceDiagram
 | `server_routes_http_routes_dashboard.ml` | - | Keeper Gate dashboard routes |
 | `sse.ml` | 474 | SSE event registry + broadcast |
 | `sse_workspace_filter.ml` | 63 | Workspace별 SSE 필터링 |
-| `oas_event_bridge.ml` | 56 | OAS -> SSE 이벤트 브릿지 |
+| `keeper_event_bridge.ml` | - | Agent core Event_bus -> SSE 이벤트 브릿지 |
 | `transport.ml` | 674 | 프로토콜 바인딩 추상화 + OpenAPI 생성 |
 | `http_server_eio.ml` | 675 | httpun-eio 래퍼 (Router, Compression) |
 | `auth.ml` | 435 | 인증/인가 코어 |

@@ -121,12 +121,6 @@ check_forbidden_active "V4b-retired-state-protocol-zero-pin" \
   "config/prompts/" \
   "config/keepers/"
 
-# V6: OAS lifecycle orchestration from keeper_agent_run
-# Oas_worker.run_named calls should be isolated to a thin bridge.
-check "V6-oas-orchestration" 0 \
-  'Oas_worker\.run_named' \
-  "lib/keeper/keeper_agent_run.ml"
-
 # V7: retired command-semantics authorization must not return.
 check_forbidden_active "V7-retired-command-semantics-gates" \
   'Eval_gate|Destructive_ops_policy|Shell_safety_types|keeper_denied_tools' \

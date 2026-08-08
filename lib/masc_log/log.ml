@@ -1048,7 +1048,7 @@ module Jsonl_atomic = Make(struct let name = "jsonl_atomic" end)
 module Mcp_transport = Make(struct let name = "mcp_transport" end)
 module Startup = Make(struct let name = "startup" end)
 module Model_inference_metrics = Make(struct let name = "model_inference_metrics" end)
-module Oas_worker_exec = Make(struct let name = "oas_worker_exec" end)
+module Runtime_agent = Make(struct let name = "runtime_agent" end)
 module Oas_event = Make(struct let name = "oas:event" end)
 module H2_gateway = Make(struct let name = "h2_gateway" end)
 

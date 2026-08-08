@@ -468,7 +468,8 @@ let run_keeper_cycle
               ~activity_kind:"keeper.turn_blocked"
               ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
               ~error_kind:
-                (Keeper_execution_receipt.error_kind_of_string (sdk_error_kind err))
+                (Keeper_execution_receipt.error_kind_of_string
+                   Agent_sdk.Error.(category err |> category_label))
               ~error_message
               ~keeper_turn_id
               ();
@@ -481,7 +482,9 @@ let run_keeper_cycle
                   }
               | _ ->
                 Keeper_turn_fsm.Failure_provider_error
-                  { kind = sdk_error_kind err; detail = error_message }
+                  { kind = Agent_sdk.Error.(category err |> category_label)
+                  ; detail = error_message
+                  }
             in
             Keeper_turn_fsm.emit_transition
               ~keeper_name:meta.name
@@ -712,7 +715,7 @@ let run_keeper_cycle
                        ()
                  in
                  match
-                   Keeper_context_runtime.timed (fun () ->
+                   Inference_utils.timed (fun () ->
                      match Eio_context.get_clock () with
                      | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
                      | Ok clock ->
@@ -891,7 +894,9 @@ let run_keeper_cycle
                         match Keeper_turn_driver.classify_masc_internal_error err with
                          | _ ->
                            Keeper_turn_fsm.Failure_provider_error
-                             { kind = sdk_error_kind err; detail = short_preview e_str }
+                             { kind = Agent_sdk.Error.(category err |> category_label)
+                             ; detail = short_preview e_str
+                             }
                      in
                      Keeper_turn_fsm.emit_transition
                        ~keeper_name:meta.name

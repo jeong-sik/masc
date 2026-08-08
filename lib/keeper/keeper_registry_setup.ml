@@ -1192,7 +1192,8 @@ let record_turn_tool_inflight ~base_path name ~count =
   ()
 ;;
 
-(* RFC-0045: SDK-turn boundary reset.  Resets in-turn FSM fields without touching keeper-turn-scoped data ([turn_id], [started_at], [selected_model], [measurement], [measurement_bind_count]).  Bypasse... *)
+(* Reset the SDK-turn FSM fields while retaining Keeper-turn identity,
+   timing, model, and measurement state. *)
 let mark_sdk_turn_started ~base_path name =
   let now = Time_compat.now () in
   let changed =

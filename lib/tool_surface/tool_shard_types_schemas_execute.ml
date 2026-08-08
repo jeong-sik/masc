@@ -106,8 +106,8 @@ let tool_execute_timeout_sec_field =
       ] )
 ;;
 
-(* RFC-0198 Phase B: typed redirect fields.  Each is an optional
-   object choosing exactly one of [{discard: true}] (equivalent to
+(* Each redirect is an optional object choosing exactly one of
+   [{discard: true}] (equivalent to
    [/dev/null]) or [{file: "/abs/path"}].  Absent keeps the default
    [inherit] behaviour. *)
 let redirect_target_properties =
@@ -164,7 +164,7 @@ let tool_execute_stdout_field =
       "Optional typed stdout redirect: {discard:true} drops the output, \
        {file:\"/abs/path\"} writes to an absolute path. Use this instead \
        of putting shell syntax like '>/tmp/out' inside argv (which the \
-       typed gate rejects per RFC-0198 Phase A)."
+       typed gate rejects)."
 ;;
 
 let tool_execute_stderr_field =
@@ -175,7 +175,7 @@ let tool_execute_stderr_field =
        (equivalent to '2>/dev/null'), {file:\"/abs/path\"} writes to an \
        absolute path. Use this instead of putting '2>/dev/null' or \
        similar into argv — the typed gate rejects redirection-shape \
-       argv tokens per RFC-0198 Phase A and surfaces this field as the \
+       argv tokens and surfaces this field as the \
        alternative."
 ;;
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RFC-0139 — dashboard agent-status SSOT guard.
+# Dashboard agent-status SSOT guard.
 #
 # Block re-introduction of raw `agent.status === '<literal>'` direct
 # comparisons. The typed parser + predicates in
@@ -9,13 +9,6 @@
 # `lib/monitoring-runtime.ts`. After PR-2 (this lint guard) the
 # in-tree count of qualifying literal compares is zero — new
 # regressions are caught at lint time instead of audit time.
-#
-# Reference RFC: docs/rfc/RFC-0139-agent-status-vocabulary-ssot.md
-# That RFC is Withdrawn, and what it withdrew is the proposal to keep a
-# second status vocabulary in the dashboard. The rule this guard enforces
-# is the one the withdrawal states positively: the dashboard may project
-# typed source facts but must not infer lifecycle from presentation
-# labels. The guard outlives the proposal it came from.
 #
 # Signals checked:
 #   S-1    `<bound_name>.status === '<literal>'` where the bound name
@@ -106,7 +99,7 @@ if [[ -n "$allowlist_lines" ]]; then
 fi
 
 if (( ${#unmatched_violations[@]} > 0 )); then
-  echo "RFC-0139 SSOT guard — ${#unmatched_violations[@]} new violation(s):"
+  echo "Agent-status SSOT guard — ${#unmatched_violations[@]} new violation(s):"
   for v in "${unmatched_violations[@]}"; do
     echo "  $v"
   done
@@ -121,7 +114,7 @@ if (( ${#unmatched_violations[@]} > 0 )); then
 fi
 
 if (( ${#stale_allowlist[@]} > 0 )); then
-  echo "RFC-0139 SSOT guard — ${#stale_allowlist[@]} stale allowlist entry/entries:"
+  echo "Agent-status SSOT guard — ${#stale_allowlist[@]} stale allowlist entry/entries:"
   for entry in "${stale_allowlist[@]}"; do
     echo "  $entry"
   done
@@ -129,5 +122,5 @@ if (( ${#stale_allowlist[@]} > 0 )); then
 fi
 
 violations_count=${#violations[@]}
-echo "RFC-0139 SSOT guard: clean (${violations_count} allowlisted violation(s))"
+echo "Agent-status SSOT guard: clean (${violations_count} allowlisted violation(s))"
 exit 0

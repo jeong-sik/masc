@@ -15,14 +15,14 @@ This document is the operator-facing SSOT for:
 - Keeper composite signal path: `lib/keeper/keeper_registry.ml`
 - Keeper heartbeat snapshot path: `lib/keeper/keeper_keepalive.ml`
 - Server-push snapshot loops: `lib/server/server_dashboard_http_core.ml`, `lib/server/server_dashboard_http_execution_surfaces.ml`
-- OAS Event_bus bridge: `lib/oas_events.ml`, `lib/oas_event_bridge.ml`
+- Agent core Event_bus bridge: `lib/keeper/keeper_event_bridge.ml`
 
 ## Read Model Rules
 
 - SSE is freshness transport, not the authoritative read model.
 - `keeper_composite_changed` is signal-only. Consumers re-fetch `/api/v1/keepers/:name/composite`.
 - `operator_snapshot` and `operator_digest` are cached server-push surfaces. Default HTTP reads usually return the cache.
-- OAS bridge events are replayable because `oas_event_bridge` persists them under `.masc/oas-events/`.
+- Agent core events are replayable because `Keeper_event_bridge` persists them under `.masc/oas-events/`.
 - Keeper context occupancy and last-turn provider usage are separate observations.
   There is currently no owner-boundary context measurement, so
   operator/execution snapshots expose typed `not_observed`. They neither
@@ -215,9 +215,10 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 | OAS bridge | `oas:masc:keeper:lifecycle`, `oas:agent_started`, `oas:agent_completed`, `oas:tool_called`, `oas:tool_completed`, `oas:turn_started`, `oas:turn_completed`, `oas:context_compacted`, `oas:task_state_changed`, `oas:masc:harness:verdict_recorded`, `oas:masc:harness:pre_compact`, `oas:masc:harness:handoff` |
 | Server-push snapshots | `namespace_truth_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
 
-### 2. OAS custom events published by MASC
+### 2. Agent core custom events published by MASC
 
-These originate in `lib/oas_events.ml` and are later relayed by `oas_event_bridge`.
+Domain publishers emit typed `Agent_sdk.Event_bus.Custom` payloads and
+`Keeper_event_bridge` relays them.
 
 | Event name | Meaning |
 | --- | --- |
@@ -344,6 +345,6 @@ Meaning:
 - Composite signal router: `dashboard/src/sse-store.ts`, `dashboard/src/composite-signals.ts`
 - Composite producer: `lib/keeper/keeper_registry.ml`
 - Heartbeat snapshot writer: `lib/keeper/keeper_keepalive.ml`
-- OAS custom event publishers: `lib/oas_events.ml`
-- OAS bridge + durable replay: `lib/oas_event_bridge.ml`
+- MASC domain event publishers: `lib/keeper/keeper_event_publisher.ml`, `lib/runtime/runtime_oas_checkpoint.ml`
+- Agent core bridge + durable replay: `lib/keeper/keeper_event_bridge.ml`
 - Server-push snapshot loops: `lib/server/server_dashboard_http_core.ml`, `lib/server/server_dashboard_http_execution_surfaces.ml`, `lib/server/server_dashboard_http_namespace_truth.ml`

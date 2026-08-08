@@ -13,7 +13,7 @@
       sub-sum RFC-0042 §5.2 explicitly defers. Matching on [Sdk_error s]
       would force the substring re-parse back into the open, so it cannot
       be the consumer's parse target.
-    - [Keeper_turn_disposition] (RFC-0047) is the operator-facing layer;
+    - [Keeper_turn_disposition] is the operator-facing layer;
       its [of_termination_code] routes through the same producer collapse
       and produces a different output type.
 

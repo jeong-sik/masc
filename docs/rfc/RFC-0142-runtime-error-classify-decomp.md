@@ -163,8 +163,6 @@ These coexist with three distinct concerns intertwined in one module:
 - **Concern B** — SDK error (`Anthropic_sdk.Error.t`, `Openai_sdk.Error.t`) → `masc_internal_error` classification (lines ~300-650).
 - **Concern C** — agent-code CLI prompt preflight (lines ~650-873).
 
-The godfile header itself documents extraction from `oas_worker_named.ml`. A second extraction is overdue.
-
 ## 3. Why the catch-alls are dangerous
 
 The JSON extraction shape repeats:

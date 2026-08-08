@@ -744,7 +744,7 @@ describe('parseMemoryOsFactCategory (SSOT mirror of category_of_string)', () => 
   })
 })
 
-describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel-real-data §4a)', () => {
+describe('decodeMemoryOsFact via fetchKeeperTurnRecords', () => {
   function turnRecordsPayload() {
     const first = {
       memory_id: 'id:retention-d0',

@@ -4,11 +4,7 @@
 - **Author**: vincent (with Agent-LLM-A Opus 4.7)
 - **Created**: 2026-05-06
 - **Drives**: closes verification report items #30, #32, #34 (single coupled track)
-- **Related**:
-  - `RFC-0002-keeper-state-machine.md` — terminal state semantics (Dead/Zombie)
-  - `RFC-0003-keeper-composite-lifecycle.md` — composite observer extension point
-  - `RFC-0006-keeper-surface-and-sandbox.md` — `docker` profile, current sandbox boundary
-  - PR #13848 — P0/P1/P3 docker cleanup scaffolding (compose, prune, timers, tmp purge)
+- **Related**: PR #13848 — P0/P1/P3 docker cleanup scaffolding (compose, prune, timers, tmp purge)
 
 ## 1. Problem
 
@@ -28,7 +24,8 @@ The 2026-05-07 verification report (`docker_cleanup_code_verification.md`) ident
 - G1. Provide an opt-in `runtime_topology=multi-container` mode that runs each keeper in its own sandboxed container, gated on `Keeper_supervisor` FSM events.
 - G2. Define a single `lifecycle_cleanup_hook : keeper_id -> Phase -> unit` extension point in `Keeper_supervisor` so #30 and #32 share the same plumbing (no parallel hook systems).
 - G3. Make the `single-container` default unchanged for production. Multi-container is a host-level toggle, not a code-path replacement.
-- G4. Preserve all RFC-0002 phase-transition invariants (terminal states still reject events; Dead is still a tombstone).
+- G4. Preserve the typed phase-transition invariants: terminal states reject
+  events and Dead remains a tombstone.
 
 **Non-Goals**
 - Replace `Keeper_registry` or `Keeper_supervisor` core. Lifecycle FSM stays exactly as-is; only the hook fires.
@@ -120,11 +117,11 @@ Phase A is non-architectural — it's a hook plumbing addition that single-conta
 | Subprocess pid registry leaks pids if keeper crashes between spawn and register | Spawn site uses `Fun.protect` to register-then-spawn-then-unregister-on-exit. Lost pids age out via OS process death detection in cleanup hook. |
 | `docker rm -f` races with healthcheck or operator action | Single-fiber queue serializes removal; `docker rm` is itself idempotent on missing container (returns error code 1, swallowed). |
 | Container-per-keeper × DinD nesting on `docker` keepers (DinD-in-DinD) | Out of scope for Phase B; Phase C decides whether to disallow that combination or document the requirement (host docker socket mount). |
-| TLA spec coverage decay: RFC-0002 phase invariants vs new bridge | Phase C ships `KeeperDockerBridge.tla` mirroring the existing pattern (clean.cfg + buggy.cfg as in `KeeperOASAdvanced.tla`). |
+| TLA spec coverage decay across the new bridge | Phase C ships `KeeperDockerBridge.tla` with clean and buggy model configs. |
 
 ## 7. Open Questions
 
-1. Does `container-per-keeper` mode need its own admission controller, or can it reuse `keeper_turn_slot` semaphore? (RFC-0026 territory.)
+1. Does `container-per-keeper` mode need its own admission controller, or can it reuse `keeper_turn_slot` semaphore?
 2. How does `lib/runtime_routes` route turns when keepers are in different containers? Probably unchanged (HTTP → MCP socket), but worth confirming.
 3. Multi-keeper compose: per-keeper named services (declarative) vs `--scale keeper=N` (parameterized)? Phase B decision.
 

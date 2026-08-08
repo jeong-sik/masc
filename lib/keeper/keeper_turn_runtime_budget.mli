@@ -26,8 +26,6 @@ val next_fail_open_runtime_for_turn :
 (** Same-turn retries use the generic keeper-assignable rotation catalog plus
     any explicit [fallback_runtime] hint. *)
 
-val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
-
 type degraded_retry_decision =
   | No_degraded_retry
   | Degraded_retry_allowed of EC.degraded_retry

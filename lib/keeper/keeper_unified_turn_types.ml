@@ -120,7 +120,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
   | None -> None
 ;;
 
-(* RFC-0047 follow-up: exhaustive match on [Keeper_turn_disposition.t].
+(* Exhaustive match on [Keeper_turn_disposition.t].
    Pre-fix this used [String.starts_with ~prefix:"api_error_"] on the
    wire form of [terminal_reason.code]; that substring guard depended
    on SDK-error wires being routed through [Unknown { raw_error = _ }]

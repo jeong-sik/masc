@@ -81,8 +81,7 @@ val is_success : t -> bool
 
 (** {1 Layer projection} *)
 
-(** Canonical projection from runtime layer to operator layer. See
-    RFC-0047 §3.1 for the full mapping table.
+(** Canonical projection from runtime layer to operator layer.
 
     A runtime cause maps to a non-[Provider_error] disposition only
     when the runtime classification fully determines the operator

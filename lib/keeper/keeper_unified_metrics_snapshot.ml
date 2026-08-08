@@ -44,7 +44,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
           ("cache_creation_tokens", `Int result.usage.cache_creation_input_tokens);
           ("cache_read_tokens", `Int result.usage.cache_read_input_tokens);
           ("total_tokens",
-           `Int (Keeper_context_runtime.total_tokens result.usage));
+           `Int (Inference_utils.total_tokens result.usage));
         ]
         @ usage_trust_json_fields usage_trust)
     else

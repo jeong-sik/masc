@@ -54,11 +54,8 @@ type execute_input =
       stderr : redirect_target;
     }
       (** [stdin], [stdout], [stderr] default to {!Inherit} when absent
-          from JSON.  RFC-0198 Phase B introduced them so the LLM can
-          express "discard stderr" or "write stdout to an absolute path"
-          via typed schema, instead of attempting shell redirection
-          syntax inside an execve-style argv (which silently leaks as
-          a runtime [find: 2>/dev/null: unknown primary] failure). *)
+          from JSON. They express redirection in the typed schema rather
+          than as shell syntax inside an execve-style argv. *)
   | Pipeline of {
       stages : exec_stage list;
       cwd : string option;
@@ -80,8 +77,8 @@ type validation_error =
       fd : int;
       path : string;
     }
-      (** RFC-0198 Phase B.  A {!File} redirect target must be an
-          absolute filesystem path; relative paths are rejected to
+      (** A {!File} redirect target must be an absolute filesystem path;
+          relative paths are rejected to
           mirror {!Cwd_not_absolute} semantics. *)
   | Cwd_not_absolute of string
   | Pipeline_empty

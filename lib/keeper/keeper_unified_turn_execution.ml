@@ -382,7 +382,7 @@ let run (ctx : ctx)
           ~reason:"frozen_runtime_suffix_exhausted"
           ~next_runtime:None
           ~attempt
-          ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+          ~error_kind:(Some Agent_sdk.Error.(category err |> category_label))
           ~error_message:(Some (Agent_sdk.Error.to_string err));
         mark_terminal_error err;
         Error err, turn_state
@@ -396,7 +396,7 @@ let run (ctx : ctx)
             ~reason:"provider_context_overflow"
             ~next_runtime:None
             ~attempt
-            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+            ~error_kind:(Some Agent_sdk.Error.(category err |> category_label))
             ~error_message:(Some (Agent_sdk.Error.to_string err));
           let current_turn_event_bus =
             drain_turn_event_bus ~site:"context_overflow_capture" ()
@@ -446,7 +446,7 @@ let run (ctx : ctx)
             ~reason:"declared_runtime_lane_exhausted"
             ~next_runtime:None
             ~attempt
-            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+            ~error_kind:(Some Agent_sdk.Error.(category err |> category_label))
             ~error_message:(Some (Agent_sdk.Error.to_string err));
           mark_terminal_error err;
           Error err, turn_state)

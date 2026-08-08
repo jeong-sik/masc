@@ -113,6 +113,4 @@ Open Core 분리 시 EE(Enterprise Edition) tier로 이동 가능한 모듈을 *
 - LICENSE-AUDIT: `docs/legal/LICENSE-AUDIT-2026-04.md` §4 (CLA prerequisite)
 - IMPLEMENTATION-QUEUE: Q-P0-5
 - ch1 진단: `ch1_diagnosis_mapping.md` S6 (sandbox path leak)
-- RFC 0008: `docs/rfc/RFC-0008-credential-provider.md`
-
 *작성: 2026-04-29 / 분리 결정은 별도, 본 문서는 식별만*

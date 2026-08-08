@@ -464,7 +464,7 @@ let sdk_error_detail_fields (error : Agent_sdk.Error.sdk_error) =
 ;;
 
 let sdk_error_json error =
-  let domain = Keeper_agent_error.sdk_error_kind error in
+  let domain = Agent_sdk.Error.(category error |> category_label) in
   let code =
     Keeper_agent_error.terminal_reason_code_of_sdk_error_typed error
     |> Keeper_turn_terminal_code.to_wire
@@ -487,7 +487,7 @@ type agent_failed_error_projection =
 
 let agent_failed_error_projection error =
   { error = agent_failed_error_summary error
-  ; error_domain = Keeper_agent_error.sdk_error_kind error
+  ; error_domain = Agent_sdk.Error.(category error |> category_label)
   ; error_code =
       (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed error
        |> Keeper_turn_terminal_code.to_wire)

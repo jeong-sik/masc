@@ -765,7 +765,6 @@
 ### Changed
 - Bumped the downstream OAS `agent_sdk` pin to `main@5f8e07b7` (`v0.194.1`) and raised the dependency floor to `agent_sdk >= 0.194.1`.
 - Moved the OAS pin note out of the older 0.19.20 changelog section so release history matches merge chronology.
-- Captured the follow-on runtime wave: required-tool candidate hotfix, force-done/release schema-audit enforcement, dashboard A0.2 atdts PoC, current goal-loop verify fixture, and chunked first-flush for POST `/mcp` JSON responses.
 
 ## [0.19.21] - 2026-05-17
 
@@ -779,7 +778,6 @@
 - Runtime configuration now continues purging legacy path/default fallback surfaces, including repo-config fallback removal and legacy path default cleanup.
 - Log retention defaults are opt-in disabled as part of the RFC-0103 closeout path.
 - Runtime legacy-runner worker tuning constants are lifted to SSOT, and the obsolete swarm harness entrypoint is removed.
-- RFC-0004 docs now record Phase A0.1 completion and add the Phase A0.2 implementation plan while additional SSE event arms move onto typed emitters.
 
 ### Fixed
 - Keeper/tool gates: lane semaphores, generic required-tool gate behavior, typed handoff-context vocabulary, and tool-input validation exception qualification.
@@ -809,10 +807,8 @@
 ## [0.19.19] - 2026-05-17
 
 ### Added
-- `docs/rfc/0004-phase-a0-1-implementation-plan.md`: RFC-0004 Phase A0.1 implementation plan — sub-PR sequencing (PR-0 through PR-4), byte-equal golden test protocol, atd schema candidate for SSE wire envelope.
 - `lib/sse_event_poc/`: byte-equal PoC sublib (atdgen + atdgen-runtime, `(optional)`) demonstrating 3-way byte-equal output (`` `Assoc `` + `Yojson.Safe.to_string` vs hand-coded module vs atdgen `-j -j-std`) for `agent_started` payload. Gated behind `with-test` to avoid leaking atdgen into production opam install.
 - `test/sse_event_poc/test_sse_event_poc.ml`: 3-way byte-equal Alcotest fixture (PASS, single run, byte-identical across all three emit paths).
-- `docs/rfc/RFC-0004-shared-contract-ocaml-ts.md`: Resume note (2026-05-17), Phase A0 sprint A0.1-A0.5 분할 table, drift surface quantification (SSE event types 60+→68 over 12 months, 4 drift categories with 3 silent pass).
 
 ### Changed
 - `dashboard/src/components/ide/ide-context-lens.ts`: defensive `?? ''` null coalescing on `link.label.trim()` and `anchor.surface.trim()` to stop runtime crash from SSE schema drift (`TypeError: Cannot read properties of null (reading 'trim')`, observed 2026-05-17). Marked WORKAROUND; root removal once RFC-0004 Phase A0.4 (Zod-from-JSON-Schema payload nested validation) lands.

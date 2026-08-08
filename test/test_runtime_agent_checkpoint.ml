@@ -1,4 +1,4 @@
-(** Runtime lifecycle observations emitted alongside OAS checkpoints. *)
+(** Runtime lifecycle observations emitted alongside Agent core checkpoints. *)
 
 open Masc
 open Alcotest
@@ -13,6 +13,19 @@ let custom_payload_fields expected_topic (event : Agent_sdk.Event_bus.event) =
   | Agent_sdk.Event_bus.Custom (topic, _) ->
     failf "expected object payload for %s" topic
   | _ -> fail "expected custom lifecycle event"
+
+let bridged_payload_fields expected_event_type event =
+  match Keeper_event_bridge.native_event_to_json event with
+  | Some (`Assoc fields) ->
+    check (option string) "SSE event type" (Some expected_event_type)
+      (Option.bind
+         (List.assoc_opt "event_type" fields)
+         Yojson.Safe.Util.to_string_option);
+    (match List.assoc_opt "payload" fields with
+     | Some (`Assoc payload_fields) -> payload_fields
+     | _ -> fail "expected bridged lifecycle payload")
+  | Some _ -> fail "expected bridged lifecycle object"
+  | None -> fail "runtime lifecycle event must reach the bridge"
 
 let test_publish_lifecycle_reaches_masc_bus_with_max_tokens_intent () =
   Eio_main.run @@ fun _env ->
@@ -43,22 +56,34 @@ let test_publish_lifecycle_reaches_masc_bus_with_max_tokens_intent () =
       match Agent_sdk_metrics_bridge.drain subscription with
       | [ omitted; explicit ] ->
         let omitted_fields =
-          custom_payload_fields "masc.oas_worker.build" omitted
+          custom_payload_fields "masc.runtime_agent.build" omitted
+        in
+        let bridged_omitted_fields =
+          bridged_payload_fields "masc:runtime_agent:build" omitted
         in
         check (option (of_pp Yojson.Safe.pp)) "omitted value is observable null"
           (Some `Null)
           (List.assoc_opt "max_tokens" omitted_fields);
+        check (option (of_pp Yojson.Safe.pp)) "bridged omitted value"
+          (Some `Null)
+          (List.assoc_opt "max_tokens" bridged_omitted_fields);
         check (option string) "omitted source"
           (Some "omitted")
           (Option.bind
              (List.assoc_opt "max_tokens_source" omitted_fields)
              Yojson.Safe.Util.to_string_option);
         let explicit_fields =
-          custom_payload_fields "masc.oas_worker.completed" explicit
+          custom_payload_fields "masc.runtime_agent.completed" explicit
+        in
+        let bridged_explicit_fields =
+          bridged_payload_fields "masc:runtime_agent:completed" explicit
         in
         check (option (of_pp Yojson.Safe.pp)) "explicit value is preserved"
           (Some (`Int 4096))
           (List.assoc_opt "max_tokens" explicit_fields);
+        check (option (of_pp Yojson.Safe.pp)) "bridged explicit value"
+          (Some (`Int 4096))
+          (List.assoc_opt "max_tokens" bridged_explicit_fields);
         check (option string) "explicit source"
           (Some "explicit_override")
           (Option.bind
@@ -67,7 +92,7 @@ let test_publish_lifecycle_reaches_masc_bus_with_max_tokens_intent () =
       | events -> failf "expected two lifecycle events, got %d" (List.length events))
 
 let () =
-  run "oas_worker_exec_checkpoint"
+  run "runtime_agent_checkpoint"
     [
       ( "runtime_lifecycle",
         [

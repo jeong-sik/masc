@@ -22,8 +22,6 @@ type runtime_execution = {
 let next_fail_open_runtime_for_turn =
   Keeper_turn_runtime_budget_routing.next_fail_open_runtime_for_turn
 
-let sdk_error_kind = Keeper_turn_runtime_budget_routing.sdk_error_kind
-
 type degraded_retry_decision =
   | No_degraded_retry
   | Degraded_retry_allowed of EC.degraded_retry

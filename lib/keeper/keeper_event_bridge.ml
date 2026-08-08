@@ -154,33 +154,9 @@ let wrap_event
     ]
 ;;
 
-(** Serialize an OAS event to JSON for SSE relay + durable storage.
-    Reads envelope metadata ([correlation_id], [run_id], [ts]) from
-    [evt.meta] and includes them in every emitted JSON object.
-
-    The match below intentionally combines explicit per-variant arms
-    with a final [other] catch-all that produces a kind-only fallback
-    via [Agent_sdk.Event_bus.payload_kind].  The catch-all is "redundant" at
-    every individual snapshot of the OAS variant set (warning 11), but
-    it is a deliberate future-proof against the OAS pin-bump P0 class
-    (#10490, #10574, #10584).  Without the catch-all, every new
-    upstream variant breaks main with [-warn-error +8] until the
-    consumer is migrated; with it, the relay degrades to a
-    kind-labelled placeholder while emitting three operator signals:
-
-    - WARN log [oas_event_bridge: SSE-degraded ...] including the
-      offending [kind], correlation ids, timestamp, and the explicit
-      file:function where the migration arm should be added.
-    - Counter [masc_oas_bridge_unmigrated_payload_kind_total{kind}]
-      ({!Otel_metric_store.metric_oas_bridge_unmigrated_payload_kind}) so the
-      degradation rate is visible to Otel_metric_store without log scraping.
-    - SSE payload [note] + [migration_target] fields so dashboard code
-      can render the partial-data row distinctly and link the operator
-      back to the file that needs editing.
-
-    Suppressing warning 11 ([@warning "-11"]) is therefore the entire
-    point of this function's shape — do not remove it without also
-    removing the catch-all. *)
+(** Serialize an Agent core event to JSON for SSE relay and durable storage.
+    The exhaustive payload match makes every new Agent core constructor a
+    compile-time update requirement at this boundary. *)
 let invocation_payload_fields invocation =
   let tool_use_id = Agent_sdk.Tool_contract.Invocation.tool_use_id invocation in
   [ "turn", `Int (Agent_sdk.Tool_contract.Invocation.turn invocation)
@@ -192,7 +168,7 @@ let invocation_payload_fields invocation =
 let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t option =
   let { Agent_sdk.Event_bus.correlation_id; run_id; ts; caused_by; _ } = evt.meta in
   let wrap = wrap_event ~ts ~correlation_id ~run_id ?caused_by in
-  match[@warning "-11"] evt.payload with
+  match evt.payload with
   | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->
     let payload =
       `Assoc [ "agent_name", `String agent_name; "task_id", `String task_id ]
@@ -368,54 +344,6 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       ~decode_ms
       ~decode_tok_s;
     None
-  | other ->
-    (* Graceful fallback for OAS variants that ship before this consumer
-         is migrated to an explicit shape (#10584).  Pre-fix, the match
-         above was exhaustive and the OAS pin bump that introduced
-         [InferenceTelemetry] (#10490) and [Stale_turn_timeout] (#10574)
-         broke main with [-warn-error +8] partial-match errors.
-
-         [Agent_sdk.Event_bus.payload_kind] is co-located with the [payload]
-         variant in OAS — adding a new variant upstream forces an
-         entry there in the same patch, so the snake_case label is
-         always accurate.  Emit a kind-only SSE event so subscribers
-         see *something happened* (with stable [event_type] for
-         filtering) instead of having the whole stream fail to parse.
-
-         [note] + [migration_target] flag the partial-data shape so
-         dashboards can render it as a placeholder rather than treating
-         it as a complete payload, and tell the operator *where* to add
-         the explicit arm.  The warn log gives operators a per-process
-         signal that an OAS variant has shipped without a masc
-         consumer migration; the
-         [masc_oas_bridge_unmigrated_payload_kind_total{kind}] counter
-         gives them the per-process *rate*, surfaced by Otel_metric_store
-         export so dashboards can alert without log scraping. *)
-    let kind = Agent_sdk.Event_bus.payload_kind other in
-    Otel_metric_store.inc_counter
-      Otel_metric_store.metric_oas_bridge_unmigrated_payload_kind
-      ~labels:[ "kind", kind ]
-      ();
-    Log.Misc.warn
-      "oas_event_bridge: SSE-degraded to kind-only payload for unmigrated OAS \
-       variant kind=%s correlation_id=%s run_id=%s ts=%f fix: add explicit arm in \
-       lib/keeper/keeper_event_bridge.ml::native_event_to_json for this kind"
-      kind
-      correlation_id
-      run_id
-      ts;
-    let payload =
-      `Assoc
-        [ "kind", `String kind
-        ; ( "note"
-          , `String
-              "kind-only fallback; explicit arm not yet wired in \
-               keeper_event_bridge.native_event_to_json" )
-        ; ( "migration_target"
-          , `String "lib/keeper/keeper_event_bridge.ml::native_event_to_json" )
-        ]
-    in
-    Some (wrap ~event_type:kind ~payload ())
 ;;
 
 let relay_max_attempts = 3
@@ -465,7 +393,7 @@ let emit_relay_retry_log
       exn
   =
   Log.Misc.warn
-    "oas_event_bridge: retrying event_type=%s stage=%s attempt=%d/%d correlation_id=%s \
+    "keeper_event_bridge: retrying event_type=%s stage=%s attempt=%d/%d correlation_id=%s \
      run_id=%s error=%s"
     (relay_event_type pending.json)
     (relay_stage_to_string stage)
@@ -482,7 +410,7 @@ let emit_relay_drop_log
       ~(attempts : int)
   =
   Log.Server.error
-    "oas_event_bridge: dropping event_type=%s stage=%s attempts=%d correlation_id=%s \
+    "keeper_event_bridge: dropping event_type=%s stage=%s attempts=%d correlation_id=%s \
      run_id=%s"
     (relay_event_type pending.json)
     stage_label
@@ -527,7 +455,7 @@ let broadcast_drop_marker
          in isolation from normal broadcast failures. *)
     Transport_metrics.inc_relay_drop_marker_failure ();
     Log.Misc.warn
-      "oas_event_bridge: drop marker broadcast failed: %s"
+      "keeper_event_bridge: drop marker broadcast failed: %s"
       (Printexc.to_string exn)
 ;;
 
@@ -619,8 +547,8 @@ let rec process_pending ?store_ref acc = function
      | Delivered -> process_pending ?store_ref acc rest
      | Retryable_failure (pending, stage, exn) ->
        let attempt = pending.attempts + 1 in
-       Keeper_fd_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
-       Keeper_disk_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
+       Keeper_fd_pressure.note_exception ~site:"keeper_event_bridge.relay" exn;
+       Keeper_disk_pressure.note_exception ~site:"keeper_event_bridge.relay" exn;
        if attempt >= relay_max_attempts
        then (
          Otel_metric_store.inc_counter
@@ -680,7 +608,7 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Log.Misc.warn
-           "oas_event_bridge: relay iteration failed: %s"
+           "keeper_event_bridge: relay iteration failed: %s"
            (Printexc.to_string exn));
       Eio.Time.sleep clock interval_s;
       loop ()
@@ -691,14 +619,4 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
 (** Background fiber: drain events and relay to SSE. *)
 let start ~sw ~clock ~(config : Workspace.config) ~bus =
   start_impl ~interval_s:(drain_interval_s ()) ~sw ~clock ~config ~bus
-;;
-
-let start_with_interval
-      ~drain_interval_s:interval_s
-      ~sw
-      ~clock
-      ~(config : Workspace.config)
-      ~bus
-  =
-  start_impl ~interval_s ~sw ~clock ~config ~bus
 ;;

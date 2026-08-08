@@ -3,9 +3,7 @@
 - **Status**: Draft
 - **Author**: yousleepwhen (vincent)
 - **Created**: 2026-05-05
-- **Audit reference**: `docs/audit-responses/2026-05-05-integrated-improvement-design.md` §4-3, Phase 3 #15
-- **Related**: RFC-0030 (`masc create` CLI), RFC-0031 (3-tier disclosure),
-  `lib/env_config_core.ml`, `.github/workflows/ci.yml` (env knob catalog drift gate)
+- **Owners**: `lib/env_config_core.ml`, `.github/workflows/ci.yml`
 
 ## 1. Problem
 

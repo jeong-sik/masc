@@ -132,7 +132,6 @@ For future audits in this style, expect the second pass to delete more than it a
 - `specs/INDEX.md` — auto-generated, source for Phase 1 §3.2 candidate list
 - `/tmp/cycle11-tautology-sweep.sh` — sweep script (output reproduced in §3)
 - `specs/keeper-state-machine/KeeperOASAdvanced.tla` — canonical Bug Model example referenced in AGENT-LLM-A.md
-- `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04-PHASE2.md` — sister audit's Phase 2 (NEEDS SWEEP→PASS via C1–C4 taxonomy)
 - AGENT-LLM-A.md `TLA+ Bug Model 패턴` section
 - Memory: `feedback_self_confession_comments_must_be_measured` (don't trust prose alone — measure)
 

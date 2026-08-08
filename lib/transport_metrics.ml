@@ -136,7 +136,7 @@ let observe_external_subscriber_fanout_duration seconds =
 (* P2 silent-failure fix (transport scan):
    The OAS relay drop-marker is the operator-visible signal that an
    OAS event was dropped after exhausting retries.  If the drop marker
-   broadcast itself fails (oas_event_bridge.ml:430), operators get no
+   broadcast itself fails, operators get no
    indication a drop happened.  Distinct from inc_broadcast_failure
    so the recovery-path failure rate is isolated from normal broadcast
    failures. *)

@@ -81,8 +81,6 @@ val metric_oas_bus_capacity : string
 (** Gauge: total queue capacity for live subscribers grouped by
     [bus], [purpose], [capacity], and [overflow]. *)
 
-val metric_oas_bridge_unmigrated_payload_kind : string
-
 (** #9632: subprocess executions that exceeded their configured
     timeout. Labels: [program, timeout_sec]. *)
 val metric_process_timeout : string

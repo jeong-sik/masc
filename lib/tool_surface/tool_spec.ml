@@ -64,11 +64,10 @@ let to_tool_schema (spec : t) : Masc_domain.tool_schema =
     input_schema = spec.input_schema }
 
 (* ================================================================ *)
-(* Registration tracking (for verify_handler_coverage)              *)
+(* Registration tracking                                            *)
 (* ================================================================ *)
 
 let registered_names : (string, unit) Hashtbl.t = Hashtbl.create 256
-let expects_handler : (string, unit) Hashtbl.t = Hashtbl.create 256
 
 (* ================================================================ *)
 (* Registration                                                     *)
@@ -109,24 +108,11 @@ let register (spec : t) =
   (* 3. Handler binding — auto-register Direct/Shared into Tool_dispatch *)
   (match spec.handler_binding with
    | Direct h | Shared h ->
-     Tool_dispatch.register ~tool_name:spec.name ~handler:h;
-     Hashtbl.replace expects_handler spec.name ()
+     Tool_dispatch.register ~tool_name:spec.name ~handler:h
    | Tag_dispatch -> ())
 
 let register_all (specs : t list) =
   List.iter register specs
-
-(* ================================================================ *)
-(* Boot-time verification                                           *)
-(* ================================================================ *)
-
-let verify_handler_coverage () =
-  let missing = ref [] in
-  Hashtbl.iter (fun name () ->
-    if not (Tool_dispatch.is_registered name) then
-      missing := name :: !missing
-  ) expects_handler;
-  !missing
 
 let all_registered_names () =
   Hashtbl.fold (fun name () acc -> name :: acc) registered_names []

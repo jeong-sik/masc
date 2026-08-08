@@ -12,9 +12,7 @@ let keeper_dir_ (config : Workspace.config) =
   let d = Workspace.keepers_runtime_dir config in
   ensure_dir_ d
 
-let session_base_dir_ (config : Workspace.config) =
-  let d = Filename.concat (Workspace.masc_root_dir config) "traces" in
-  ensure_dir_ d
+let session_base_dir_ (config : Workspace.config) = Keeper_fs.session_base_dir config
 
 (** Date-split metrics store: [.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl].
     Cached per keeper name so all callers share the same Eio.Mutex. *)

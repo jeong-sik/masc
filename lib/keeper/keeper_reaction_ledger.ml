@@ -116,16 +116,10 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
          ])
 ;;
 
-let urgency_to_string = function
-  | Keeper_event_queue.Immediate -> "immediate"
-  | Normal -> "normal"
-  | Low -> "low"
-;;
-
 let store_dir ~masc_root ~keeper_name =
   Filename.concat
     (Filename.concat
-       (Filename.concat (Filename.concat masc_root "keepers") keeper_name)
+       (Filename.concat (Filename.concat masc_root Common.keepers_runtime_dirname) keeper_name)
        "reaction-ledger")
     storage_generation
 ;;
@@ -244,7 +238,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
              [ "kind", `String (stimulus_kind_to_string kind)
              ; "source", `String "keeper_event_queue"
              ; "post_id", `String stimulus.post_id
-             ; "urgency", `String (urgency_to_string stimulus.urgency)
+             ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
              ; "arrived_at_unix", `Float stimulus.arrived_at
              ; "board_updated_at_unix", Json_util.option_to_yojson (fun value -> `Float value) board_updated_at
              ; "payload_preview", `String (stimulus_payload_preview stimulus.payload)

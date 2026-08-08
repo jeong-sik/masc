@@ -9,7 +9,7 @@ let report path err =
 
 (** Load keepers from .masc/keepers/ *)
 let load_keepers (base_path : string) : keeper list =
-  let keepers_dir = Filename.concat (Filename.concat base_path Common.masc_dirname) "keepers" in
+  let keepers_dir = Filename.concat (Filename.concat base_path Common.masc_dirname) Common.keepers_runtime_dirname in
   if Sys.file_exists keepers_dir && Sys.is_directory keepers_dir then
     Sys.readdir keepers_dir
     |> Array.to_list

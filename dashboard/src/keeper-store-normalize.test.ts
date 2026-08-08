@@ -467,11 +467,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
         trust: {
           disposition: 'Alert',
           operator_disposition: 'pause_runtime',
-          operator_disposition_reason: 'turn_timeout',
+          operator_disposition_reason: 'stale_turn_timeout',
           needs_attention: true,
-          attention_reason: 'turn_timeout',
+          attention_reason: 'stale_turn_timeout',
           latest_terminal_reason: {
-            code: 'turn_timeout',
+            code: 'stale_turn_timeout',
             source: 'execution_receipt',
             severity: 'bad',
             summary: 'Turn execution exceeded the keeper turn deadline',
@@ -485,11 +485,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper?.trust).toMatchObject({
       disposition: 'Alert',
       operator_disposition: 'pause_runtime',
-      operator_disposition_reason: 'turn_timeout',
+      operator_disposition_reason: 'stale_turn_timeout',
       needs_attention: true,
-      attention_reason: 'turn_timeout',
+      attention_reason: 'stale_turn_timeout',
       latest_terminal_reason: {
-        code: 'turn_timeout',
+        code: 'stale_turn_timeout',
         source: 'execution_receipt',
         severity: 'bad',
         summary: 'Turn execution exceeded the keeper turn deadline',
@@ -498,7 +498,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       latest_next_action: 'inspect_runtime_blocker',
     })
     expect(keeper?.stop_cause).toMatchObject({
-      code: 'turn_timeout',
+      code: 'stale_turn_timeout',
       source: 'terminal_reason_code',
       summary: 'Turn execution exceeded the keeper turn deadline',
       next_action: 'inspect_runtime_blocker',
@@ -510,7 +510,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       {
         name: 'blocked-keeper',
         status: 'active',
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
         runtime_blocker_summary: 'turn has not made progress',
         trust: {
           latest_terminal_reason: {
@@ -524,7 +524,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     ])
 
     expect(keeper?.stop_cause).toMatchObject({
-      code: 'turn_timeout',
+      code: 'stale_turn_timeout',
       source: 'runtime_blocker_class',
       summary: 'turn has not made progress',
     })
@@ -633,7 +633,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
                 {
                   from_model_id: 'openai:gpt-5.4',
                   to_model_id: 'anthropic:claude-sonnet',
-                  reason: 'turn_timeout',
+                  reason: 'stale_turn_timeout',
                 },
               ],
             },
@@ -659,7 +659,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       runtime_strategy: 'round_robin',
       fallback_applied: true,
       fallback_hops: 1,
-      fallback_reason: 'turn_timeout',
+      fallback_reason: 'stale_turn_timeout',
     })
   })
 
@@ -796,7 +796,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
         keepalive_running: true,
         pause_state: 'paused',
         runtime_blocker_state: 'blocked',
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
         runtime_blocker_summary: 'Provider turn timed out.',
         last_blocker: 'missing social headers',
         last_autonomous_action_at: '2026-04-04T14:08:35Z',
@@ -811,7 +811,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       keepalive_running: true,
       pause_state: 'paused',
       runtime_blocker_state: 'blocked',
-      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_class: 'stale_turn_timeout',
       runtime_blocker_summary: 'Provider turn timed out.',
       last_blocker: 'missing social headers',
       last_autonomous_action_at: '2026-04-04T14:08:35Z',
@@ -837,14 +837,14 @@ describe('normalizeKeeperTrustTerminalReason — exported helper', () => {
 
   it('returns a full terminal reason when code is present', () => {
     const result = normalizeKeeperTrustTerminalReason({
-      code: 'turn_timeout',
+      code: 'stale_turn_timeout',
       source: 'execution_receipt',
       severity: 'bad',
       summary: 'keeper exceeded the turn deadline',
       next_action: 'inspect_runtime_blocker',
     })
     expect(result).toEqual({
-      code: 'turn_timeout',
+      code: 'stale_turn_timeout',
       source: 'execution_receipt',
       severity: 'bad',
       summary: 'keeper exceeded the turn deadline',

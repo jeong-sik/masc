@@ -168,7 +168,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
         stop_cause: {
-          code: 'turn_timeout',
+          code: 'stale_turn_timeout',
           source: 'runtime_blocker_class',
           label: 'Turn timeout',
           summary: 'turn wall clock exceeded before completion',
@@ -185,10 +185,10 @@ describe('KeeperRuntimeAlertStrip', () => {
     const text = container.textContent ?? ''
     // Per-turn stop cause is rendered through the canonical terminal code.
     expect(text).toContain('정지 원인')
-    expect(text).toContain('turn_timeout')
-    expect(text).toContain('turn_timeout')
+    expect(text).toContain('stale_turn_timeout')
+    expect(text).toContain('stale_turn_timeout')
     // Per-attempt success is gated out so the strip no longer shows
-    // "런타임 레인 · completed" next to "정지 원인 · turn_timeout".
+    // "런타임 레인 · completed" next to "정지 원인 · stale_turn_timeout".
     expect(text).not.toContain('런타임 레인')
     expect(text).not.toContain('마지막 시도')
   })
@@ -226,14 +226,14 @@ describe('KeeperRuntimeAlertStrip', () => {
         needs_attention: true,
         attention_reason: 'paused',
         next_human_action: 'inspect_blocker_before_resume',
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
         runtime_blocker_summary: 'Turn timeout fired before resume.',
       }),
     }))
 
     expect(container.textContent).toContain('일시정지')
     expect(container.textContent).toContain('일시정지 원인')
-    expect(container.textContent).toContain('턴 응답 만료')
+    expect(container.textContent).toContain('오래된 턴 만료')
     expect(container.textContent).toContain('Turn timeout fired before resume.')
     expect(container.textContent).not.toContain('OAS budget timeout fired before the keeper hard timeout.')
     expect(container.textContent).toContain('원인 확인 후 재개')
@@ -247,7 +247,7 @@ describe('KeeperRuntimeAlertStrip', () => {
         phase: 'Paused',
         paused: false,
         needs_attention: true,
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
       }),
     }))
 
@@ -263,7 +263,7 @@ describe('KeeperRuntimeAlertStrip', () => {
         phase: 'Running',
         paused: false,
         needs_attention: true,
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
       }),
     }))
 

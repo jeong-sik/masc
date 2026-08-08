@@ -397,7 +397,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
           pause_kind: 'operator_paused',
           paused_elapsed_sec: 12,
           last_blocker: {
-            klass: 'turn_timeout',
+            klass: 'stale_turn_timeout',
             detail: 'turn exceeded budget',
           },
           missing_pause_root_cause: false,
@@ -471,7 +471,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
           name: 'analyst',
           pause_kind: 'operator_paused',
           last_blocker: {
-            klass: 'turn_timeout',
+            klass: 'stale_turn_timeout',
           },
         }],
       },

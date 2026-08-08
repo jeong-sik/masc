@@ -210,10 +210,8 @@ describe('keeperRuntimeBlockerLabel', () => {
   it('labels the active SDK blocker variants', () => {
     expect(keeperRuntimeBlockerLabel('sdk_context_window_exceeded')).toBe('SDK 컨텍스트 윈도 초과')
     expect(keeperRuntimeBlockerLabel('sdk_unrecognized_stop_reason')).toBe('SDK 미식별 정지 사유')
-    expect(keeperRuntimeBlockerLabel('sdk_idle_detected')).toBe('SDK Idle 감지')
     expect(keeperRuntimeBlockerLabel('sdk_guardrail_violation')).toBe('SDK 가드레일 위반')
     expect(keeperRuntimeBlockerLabel('sdk_tripwire_violation')).toBe('SDK Tripwire 위반')
-    expect(keeperRuntimeBlockerLabel('sdk_exit_condition_met')).toBe('SDK 종료 조건 충족')
   })
 
   it('SSOT regression guard — every literal in KEEPER_RUNTIME_BLOCKER_CLASSES has a non-null label', () => {
@@ -258,26 +256,6 @@ describe('keeperRuntimeBlockerHint', () => {
     [
       'exception',
       'Keeper 런타임 예외가 기록되어 로그와 최근 turn 상태 확인이 필요합니다.',
-    ],
-    [
-      'awaiting_operator',
-      '진행을 위해 운영자의 승인, 결정, 또는 게이트 해제가 필요합니다.',
-    ],
-    [
-      'awaiting_sandbox_egress',
-      '샌드박스 네트워크 또는 push egress 정책 때문에 keeper가 진행하지 못하고 있습니다.',
-    ],
-    [
-      'supervisor_paused',
-      'Supervisor가 keeper를 일시정지한 상태라 재개 조건을 확인해야 합니다.',
-    ],
-    [
-      'synthetic_stall',
-      '실제 STATE 없이 합성된 진행 기록만 남아 최근 턴 산출물을 재확인해야 합니다.',
-    ],
-    [
-      'self_imposed_idle',
-      'Keeper가 관찰 또는 대기만 계획하고 있어 다음 실행 지시가 필요할 수 있습니다.',
     ],
   ]
 

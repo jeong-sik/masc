@@ -70,19 +70,11 @@ export interface KeeperAttentionReason {
 
 const DEFAULT_ATTENTION_REASON: KeeperAttentionReason = { sev: 'warn', text: '주의 사유 미보고', act: '상태 상세' }
 
-const OPERATOR_ATTENTION_BLOCKERS = new Set<KeeperRuntimeBlockerClass>([
-  'awaiting_operator',
-])
-
 const CRITICAL_ATTENTION_BLOCKERS = new Set<KeeperRuntimeBlockerClass>([
   'exception',
   'turn_failures',
   'heartbeat_failures',
 ])
-
-function hasOperatorAttentionBlocker(blockerClass: Keeper['runtime_blocker_class'] | null | undefined): boolean {
-  return blockerClass != null && OPERATOR_ATTENTION_BLOCKERS.has(blockerClass)
-}
 
 function hasCriticalAttentionBlocker(blockerClass: Keeper['runtime_blocker_class'] | null | undefined): boolean {
   return blockerClass != null && CRITICAL_ATTENTION_BLOCKERS.has(blockerClass)
@@ -103,10 +95,6 @@ export function deriveKeeperAttentionReason(keeper: Keeper): KeeperAttentionReas
   const nextActionRaw = keeper.next_human_action?.trim() || keeper.trust?.next_human_action?.trim() || null
   const attention = attentionReasonLabel(attentionRaw, false) ?? undefined
   const nextAction = nextHumanActionLabel(nextActionRaw) ?? undefined
-
-  if (hasOperatorAttentionBlocker(blockerClass)) {
-    return { sev: 'warn', text: attention ?? 'Human 판단 대기', act: nextAction ?? 'HITL 검토' }
-  }
 
   const isCritical = hasCriticalAttentionBlocker(blockerClass)
     || keeper.lifecycle_phase === 'Dead'
@@ -132,7 +120,6 @@ export function pickAttentionKeepers(keeperList: readonly Keeper[]): Keeper[] {
   return keeperList.filter(k =>
     k.needs_attention === true
     || k.trust?.needs_attention === true
-    || hasOperatorAttentionBlocker(k.runtime_blocker_class)
     || !!k.attention_reason?.trim()
     || !!k.trust?.attention_reason?.trim(),
   )

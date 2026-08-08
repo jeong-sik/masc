@@ -220,15 +220,6 @@ export function rosterStateNote(
     }
   }
 
-  if (state.kind === 'running' && keeper.runtime_blocker_class === 'synthetic_stall') {
-    const summary = keeper.runtime_blocker_summary?.trim()
-    return {
-      label: '상태 추정',
-      text: summary || '실제 STATE 없이 합성된 진행 기록만 남아 최근 턴 산출물 재확인이 필요합니다.',
-      kind: 'synthetic_stall',
-    }
-  }
-
   if (state.kind === 'offline' && keeper.agent?.current_task) {
     return { label: '작업 중단', text: `할당된 작업이 있으나 keeper가 ${state.cause} 상태입니다` }
   }

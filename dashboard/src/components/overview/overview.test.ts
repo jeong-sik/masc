@@ -558,7 +558,7 @@ describe('deriveKeeperAttentionReason', () => {
   it('uses runtime blocker semantics without a separate continuation approval state', () => {
     const reason = deriveKeeperAttentionReason(makeKeeper({
       name: 'gate',
-      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_class: 'stale_turn_timeout',
     }))
     expect(reason.sev).toBe('warn')
     expect(reason.act).toBe('상태 상세')
@@ -620,13 +620,6 @@ describe('pickAttentionKeepers', () => {
     expect(pickAttentionKeepers(keepers).map(k => k.name)).toEqual(['att'])
   })
 
-  it('selects keepers with runtime blocker awaiting_operator', () => {
-    const keepers = [
-      makeKeeper({ name: 'ok' }),
-      makeKeeper({ name: 'op', runtime_blocker_class: 'awaiting_operator' }),
-    ]
-    expect(pickAttentionKeepers(keepers).map(k => k.name)).toEqual(['op'])
-  })
 })
 
 describe('computeOverviewStats', () => {

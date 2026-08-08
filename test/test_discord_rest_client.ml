@@ -75,6 +75,64 @@ let test_build_typing_request_authorization_uses_bot_scheme () =
     (String.length ua >= 10
      && String.sub ua 0 10 = "DiscordBot")
 
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop offset =
+    if offset + needle_len > haystack_len then false
+    else if String.sub haystack offset needle_len = needle then true
+    else loop (offset + 1)
+  in
+  needle_len = 0 || loop 0
+
+let test_build_channel_read_request_url () =
+  let url, headers, body =
+    R.build_channel_request ~token:"sekret" ~channel_id:"CH123" ()
+  in
+  check string "channel read URL"
+    "https://discord.com/api/v10/channels/CH123" url;
+  check string "channel read auth" "Bot sekret"
+    (header_value headers "Authorization");
+  check string "channel read body" "" body
+
+let test_build_messages_read_request_query () =
+  let url, _, body =
+    R.build_channel_messages_request ~token:"t" ~channel_id:"CH"
+      ~limit:25 ~before:"MSG" ()
+  in
+  check bool "messages read path"
+    true (contains_substring ~needle:"/channels/CH/messages?" url);
+  check bool "messages limit" true
+    (contains_substring ~needle:"limit=25" url);
+  check bool "messages before" true
+    (contains_substring ~needle:"before=MSG" url);
+  check string "GET body" "" body
+
+let test_build_member_search_request_escapes_query () =
+  let url, _, _ =
+    R.build_guild_members_request ~token:"t" ~guild_id:"GUILD"
+      ~query:"min su" ~limit:10 ()
+  in
+  check bool "member search path" true
+    (contains_substring ~needle:"/guilds/GUILD/members/search?" url);
+  check bool "member search query" true
+    (contains_substring ~needle:"query=min%20su" url);
+  check bool "member search limit" true
+    (contains_substring ~needle:"limit=10" url)
+
+let test_build_member_request_url () =
+  let url, _, _ =
+    R.build_guild_member_request ~token:"t" ~guild_id:"GUILD" ~user_id:"USER" ()
+  in
+  check string "guild member URL"
+    "https://discord.com/api/v10/guilds/GUILD/members/USER" url
+
+let test_parse_json_response_accepts_array () =
+  match R.parse_json_response ~status:200 ~body:"[{\"id\":\"USER\"}]" with
+  | Ok (`List [ `Assoc [ ("id", `String "USER") ] ]) -> ()
+  | Ok json -> failf "unexpected JSON: %s" (Yojson.Safe.to_string json)
+  | Error _ -> fail "expected JSON response to parse"
+
 (* ---------------------------------------------------------------- *)
 (* build_edit_request                                               *)
 (* ---------------------------------------------------------------- *)
@@ -446,6 +504,14 @@ let () =
             test_build_typing_request_url_targets_channel
         ; test_case "typing Authorization uses Bot scheme" `Quick
             test_build_typing_request_authorization_uses_bot_scheme
+        ; test_case "channel read URL and headers" `Quick
+            test_build_channel_read_request_url
+        ; test_case "messages read query" `Quick
+            test_build_messages_read_request_query
+        ; test_case "member search query escaping" `Quick
+            test_build_member_search_request_escapes_query
+        ; test_case "guild member URL" `Quick
+            test_build_member_request_url
         ] )
     ; ( "build_edit_request"
       , [ test_case "URL targets channel/message" `Quick
@@ -512,5 +578,7 @@ let () =
             test_parse_empty_response_204_returns_ok
         ; test_case "empty non-2xx Discord envelope => Discord_api"
             `Quick test_parse_empty_response_discord_error_envelope
+        ; test_case "JSON response accepts array" `Quick
+            test_parse_json_response_accepts_array
         ] )
     ]

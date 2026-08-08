@@ -120,7 +120,7 @@ let recurrence_of_arg args =
       (Printf.sprintf
          "unknown recurrence_kind: %s; accepted: %s"
          other
-         (String.concat ", " Tool_schemas_schedule.recurrence_kinds))
+         (String.concat ", " Schedule_contract_values.recurrence_kinds))
 ;;
 
 let actor_from_args args ~prefix ~default_id ~default_kind =

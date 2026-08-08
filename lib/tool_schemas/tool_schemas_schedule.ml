@@ -66,19 +66,10 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
-let statuses =
-  List.map Schedule_domain.schedule_status_to_string Schedule_domain.all_schedule_statuses
-;;
-
-let actor_kinds =
-  List.map Schedule_domain.actor_kind_to_string Schedule_domain.all_actor_kinds
-;;
-
-let sources =
-  List.map Schedule_domain.schedule_source_to_string Schedule_domain.all_schedule_sources
-;;
-
-let recurrence_kinds = [ "one_shot"; "interval"; "daily"; "cron" ]
+let statuses = Schedule_contract_values.schedule_statuses
+let actor_kinds = Schedule_contract_values.actor_kinds
+let sources = Schedule_contract_values.schedule_sources
+let recurrence_kinds = Schedule_contract_values.recurrence_kinds
 
 let create_schema =
   object_schema

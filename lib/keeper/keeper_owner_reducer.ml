@@ -91,7 +91,7 @@ type projection =
 type persistence_intent =
   | No_persistence
   | Replace_snapshot of Keeper_meta_contract.keeper_meta
-  | Remove_snapshot
+  | Remove_snapshot of Keeper_meta_contract.keeper_meta
 
 type post_commit_effect =
   | Publish_projection of projection
@@ -220,7 +220,7 @@ let apply_existing (state : state) meta command =
   | Create _ -> Error Meta_already_exists
   | Delete ->
     let state = { state with meta = None } in
-    Ok (publish_transition state Remove_snapshot [])
+    Ok (publish_transition state (Remove_snapshot meta) [])
   | Pause { reason; updated_at } ->
     Ok (with_meta state { meta with paused = true; latched_reason = Some reason; updated_at })
   | Resume { updated_at } ->

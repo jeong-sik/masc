@@ -29,7 +29,11 @@ const committed = {
   recorded_at: 1786000000,
   revision: 223,
   source: { kind: 'librarian', trace_id: 'trace-a', generation: 1 },
-  change: { added: [{ claim: 'x' }], removed: [], retained: 3 },
+  change: {
+    added: [{ claim: 'x', category: 'fact', first_seen: 1785990000 }],
+    removed: [],
+    retained: 3,
+  },
   dropped: [{ memory_id: 'id:gone', reason: 'superseded by the openssl decision' }],
 }
 
@@ -70,6 +74,8 @@ describe('memory journal', () => {
     const journal = await fetchKeeperMemoryJournal('kidsnote')
     const entry = journal.entries[0]
     if (!entry?.ok || entry.outcome !== 'committed') throw new Error('expected a commit')
+    expect(entry.sourceKind).toBe('librarian')
+    expect(entry.added).toEqual([{ claim: 'x', category: 'fact', firstSeen: 1785990000 }])
     expect(entry.drops).toHaveLength(1)
     expect(entry.drops[0]?.reason).toBe('superseded by the openssl decision')
   })
@@ -91,6 +97,11 @@ describe('memory journal', () => {
   it('rejects a commit whose change block is missing', async () => {
     const { change: _change, ...withoutChange } = committed
     stubFetch(payload([withoutChange]))
+    await expect(fetchKeeperMemoryJournal('kidsnote')).rejects.toThrow('memory journal')
+  })
+
+  it('rejects a commit whose memory producer is unknown', async () => {
+    stubFetch(payload([{ ...committed, source: { ...committed.source, kind: 'legacy_writer' } }]))
     await expect(fetchKeeperMemoryJournal('kidsnote')).rejects.toThrow('memory journal')
   })
 })

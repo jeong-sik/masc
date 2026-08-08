@@ -31,6 +31,7 @@ export interface VerificationToolObservation {
   outputExcerpt: string
   outputTruncated: boolean
   durationMs: number
+  finishedAt: number
 }
 
 const BACKEND_STATUSES: readonly string[] = [
@@ -123,6 +124,7 @@ function parseTool(raw: unknown, context: string): VerificationToolObservation {
     'output_excerpt',
     'output_truncated',
     'duration_ms',
+    'finished_at',
   ], [], context)
   if (raw.disposition !== 'completed' && raw.disposition !== 'deferred' && raw.disposition !== 'failed') {
     protocolError(`${context}.disposition has unknown value ${JSON.stringify(raw.disposition)}`)
@@ -132,6 +134,8 @@ function parseTool(raw: unknown, context: string): VerificationToolObservation {
   }
   const durationMs = finiteNumber(raw.duration_ms, `${context}.duration_ms`)
   if (durationMs < 0) protocolError(`${context}.duration_ms must be non-negative`)
+  const finishedAt = finiteNumber(raw.finished_at, `${context}.finished_at`)
+  if (finishedAt < 0) protocolError(`${context}.finished_at must be non-negative`)
   return {
     toolName: nonEmptyString(raw.tool_name, `${context}.tool_name`),
     input: raw.input,
@@ -141,6 +145,7 @@ function parseTool(raw: unknown, context: string): VerificationToolObservation {
       : protocolError(`${context}.output_excerpt must be a string`),
     outputTruncated: raw.output_truncated,
     durationMs,
+    finishedAt,
   }
 }
 

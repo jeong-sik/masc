@@ -69,7 +69,8 @@ describe('KeeperTurnInspectorPanel', () => {
     fireEvent.click(await screen.findByText('turn-0008.jsonl'))
 
     expect(await screen.findByText(/레코드 2 를 읽지 못했습니다: not valid JSON/)).toBeTruthy()
-    expect(screen.getByText(/"kind": "request"/)).toBeTruthy()
+    expect(screen.getByTestId('json-viewer-card').textContent).toContain('kind')
+    expect(screen.getByTestId('json-viewer-card').textContent).toContain('request')
   })
 
   it('shows each prompt block with its own byte count', async () => {
@@ -87,7 +88,7 @@ describe('KeeperTurnInspectorPanel', () => {
     })
 
     render(html`<${KeeperTurnInspectorPanel} keepers=${KEEPERS} />`)
-    fireEvent.click(screen.getByRole('tab', { name: 'Next prompt' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Typed next prompt' }))
 
     expect(await screen.findByText('Operator_note')).toBeTruthy()
     expect(screen.getByText('1.0 KB')).toBeTruthy()
@@ -110,7 +111,7 @@ describe('KeeperTurnInspectorPanel', () => {
     })
 
     render(html`<${KeeperTurnInspectorPanel} keepers=${KEEPERS} />`)
-    fireEvent.click(screen.getByRole('tab', { name: 'Operator note' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Operator input' }))
     // Absence of a note is the ordinary state, not an error.
     expect(await screen.findByText('대기 중인 노트가 없습니다.')).toBeTruthy()
 
@@ -138,7 +139,7 @@ describe('KeeperTurnInspectorPanel', () => {
     )
 
     render(html`<${KeeperTurnInspectorPanel} keepers=${KEEPERS} />`)
-    fireEvent.click(screen.getByRole('tab', { name: 'Operator note' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Operator input' }))
     fireEvent.input(screen.getByRole('textbox'), { target: { value: 'too long' } })
     fireEvent.click(screen.getByRole('button', { name: '다음 턴에 싣기' }))
 

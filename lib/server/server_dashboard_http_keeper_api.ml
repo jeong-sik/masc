@@ -166,11 +166,13 @@ let memory_os_change_json (change : Keeper_memory_os_current.change) =
     ]
 ;;
 
+let memory_os_keepers_dir (config : Workspace.config) =
+  Config_dir_resolver.keepers_dir_for_base_path
+    ~base_path:config.Workspace.base_path
+;;
+
 let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path
-      ~base_path:config.Workspace.base_path
-  in
+  let keepers_dir = memory_os_keepers_dir config in
   let snapshot, read_error =
     match
       Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
@@ -1948,7 +1950,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Server_utils.int_query_param req "limit" ~default:50 |> max 1 |> min 500
       in
       let config = Mcp_server.workspace_config state in
-      let keepers_dir = Keeper_types_support.keeper_dir_ config in
+      let keepers_dir = memory_os_keepers_dir config in
       let lines =
         Keeper_memory_os_current.read_journal_tail
           ~keepers_dir

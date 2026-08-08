@@ -24,7 +24,7 @@ let stderr_tail_bytes = 4096
 let max_wire_line_bytes = 8 * 1024 * 1024
 let approval_policy = "never"
 let sandbox_mode = "read-only"
-let ephemeral_thread = true
+let thread_is_ephemeral = false
 
 let default_config ~cwd =
   { cli_path = "codex"
@@ -35,6 +35,10 @@ let default_config ~cwd =
   }
 ;;
 
+type thread_mode =
+  | Start
+  | Resume of { thread_id : string }
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
@@ -43,6 +47,7 @@ type turn_result =
   ; dynamic_tool_calls : int
   ; subscription : subscription
   ; user_agent : string option
+  ; resumed : bool
   }
 
 type dynamic_tool_result =
@@ -383,8 +388,7 @@ let parse_subscription result =
   | _ -> protocol_error stage "account must be an object or null"
 ;;
 
-let parse_thread_start result =
-  let stage = "thread/start" in
+let parse_thread_response ~stage result =
   let* fields = assoc_at stage result in
   let* thread_json = required_member stage "thread" fields in
   let* thread_fields = assoc_at stage thread_json in
@@ -597,7 +601,7 @@ let history_item (message : history_message) =
     ]
 ;;
 
-let run_protocol io config ~dynamic_tools ~reasoning_effort ~history ~prompt =
+let run_protocol io config ~dynamic_tools ~reasoning_effort ~thread_mode ~history ~prompt =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
       (`Assoc
@@ -616,26 +620,52 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~history ~prompt =
     ~params:(`Assoc [ "refreshToken", `Bool false ]);
   let* account = await_response io ~id:2 ~method_:"account/read" in
   let* subscription = parse_subscription account in
-  let thread_fields =
-    [ "cwd", `String config.cwd
-    ; "approvalPolicy", `String approval_policy
-    ; "sandbox", `String sandbox_mode
-    ; "ephemeral", `Bool ephemeral_thread
-    ]
-    @ optional_field "model" config.model
-    @ optional_field "developerInstructions" config.developer_instructions
-    @
-    match dynamic_tools with
-    | [] -> []
-    | tools -> [ "dynamicTools", `List (List.map dynamic_tool_spec tools) ]
+  let thread_method, thread_fields, resumed =
+    match thread_mode with
+    | Start ->
+      ( "thread/start"
+      , ([ "cwd", `String config.cwd
+         ; "approvalPolicy", `String approval_policy
+         ; "sandbox", `String sandbox_mode
+         ; "ephemeral", `Bool thread_is_ephemeral
+         ]
+         @ optional_field "model" config.model
+         @ optional_field "developerInstructions" config.developer_instructions
+         @
+         match dynamic_tools with
+         | [] -> []
+         | tools -> [ "dynamicTools", `List (List.map dynamic_tool_spec tools) ])
+      , false )
+    | Resume { thread_id } ->
+      ( "thread/resume"
+      , [ "threadId", `String thread_id
+        ; "cwd", `String config.cwd
+        ; "approvalPolicy", `String approval_policy
+        ; "sandbox", `String sandbox_mode
+        ]
+        @ optional_field "model" config.model
+        @ optional_field "developerInstructions" config.developer_instructions
+      , true )
   in
-  send_request io ~id:3 ~method_:"thread/start" ~params:(`Assoc thread_fields);
-  let* thread = await_response io ~id:3 ~method_:"thread/start" in
-  let* thread_id, model = parse_thread_start thread in
+  send_request io ~id:3 ~method_:thread_method ~params:(`Assoc thread_fields);
+  let* thread = await_response io ~id:3 ~method_:thread_method in
+  let* thread_id, model = parse_thread_response ~stage:thread_method thread in
+  let* () =
+    match thread_mode with
+    | Start -> Ok ()
+    | Resume { thread_id = expected } when String.equal expected thread_id -> Ok ()
+    | Resume { thread_id = expected } ->
+      protocol_error
+        thread_method
+        (Printf.sprintf
+           "resumed thread id mismatch: requested %S but server returned %S"
+           expected
+           thread_id)
+  in
   let turn_request_id =
-    match history with
-    | [] -> Ok 4
-    | messages ->
+    match thread_mode, history with
+    | Resume _, _ | Start, [] -> Ok 4
+    | Start, messages ->
       send_request io ~id:4 ~method_:"thread/inject_items"
         ~params:
           (`Assoc
@@ -679,6 +709,7 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~history ~prompt =
     ; dynamic_tool_calls = !tool_call_count
     ; subscription
     ; user_agent
+    ; resumed
     }
 ;;
 
@@ -755,7 +786,8 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
-let run_spawned ~mgr ~clock config ~dynamic_tools ~reasoning_effort ~history ~prompt =
+let run_spawned ~mgr ~clock config ~dynamic_tools ~reasoning_effort ~thread_mode ~history
+    ~prompt =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -797,11 +829,12 @@ let run_spawned ~mgr ~clock config ~dynamic_tools ~reasoning_effort ~history ~pr
             config
             ~dynamic_tools
             ~reasoning_effort
+            ~thread_mode
             ~history
             ~prompt)))
 ;;
 
-let validate_config config ~prompt =
+let validate_config config ~thread_mode ~prompt =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
   else if String.trim config.cwd = "" || Filename.is_relative config.cwd
@@ -810,7 +843,11 @@ let validate_config config ~prompt =
   then Error (Invalid_config "timeout_s must be positive and finite")
   else if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
-  else Ok ()
+  else
+    match thread_mode with
+    | Resume { thread_id } when String.equal (String.trim thread_id) "" ->
+      Error (Invalid_config "resume thread_id must not be empty")
+    | Start | Resume _ -> Ok ()
 ;;
 
 let validate_dynamic_tools tools =
@@ -827,10 +864,10 @@ let validate_dynamic_tools tools =
   loop [] tools
 ;;
 
-let run_turn ?(dynamic_tools = []) ?reasoning_effort ~mgr ~clock ?(history = []) config
-    ~prompt =
+let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock
+    ?(history = []) config ~prompt =
   let result =
-    match validate_config config ~prompt with
+    match validate_config config ~thread_mode ~prompt with
     | Error _ as error -> error
     | Ok () ->
       (match validate_dynamic_tools dynamic_tools with
@@ -844,6 +881,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ~mgr ~clock ?(history = [])
            config
            ~dynamic_tools
            ~reasoning_effort
+           ~thread_mode
            ~history
            ~prompt
        with

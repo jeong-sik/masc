@@ -19,6 +19,10 @@ type config =
 
 val default_config : cwd:string -> config
 
+type thread_mode =
+  | Start
+  | Resume of { thread_id : string }
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
@@ -27,6 +31,7 @@ type turn_result =
   ; dynamic_tool_calls : int
   ; subscription : subscription
   ; user_agent : string option
+  ; resumed : bool
   }
 
 type dynamic_tool_result =
@@ -74,6 +79,7 @@ val error_to_string : error -> string
 val run_turn :
   ?dynamic_tools:dynamic_tool list ->
   ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
+  ?thread_mode:thread_mode ->
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   ?history:history_message list ->

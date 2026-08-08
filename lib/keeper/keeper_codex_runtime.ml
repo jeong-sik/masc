@@ -97,11 +97,11 @@ let illegal_hook_decision ~hook_name decision =
           (Agent_sdk.Hooks.classify_decision decision)))
 ;;
 
-let invoke_turn_hook ~keeper_name ~hook_name hook event =
+let invoke_turn_hook ~keeper_name ~turn_count ~hook_name hook event =
   Agent_sdk.Agent_tools.invoke_hook
     ~tracer:Agent_sdk.Tracing.null
     ~agent_name:keeper_name
-    ~turn_count:1
+    ~turn_count
     ~hook_name
     hook
     event
@@ -114,15 +114,16 @@ type prepared_turn =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 
-let prepare_turn ~keeper_name ~system_prompt ~tools ~initial_messages
+let prepare_turn ~keeper_name ~turn_count ~system_prompt ~tools ~initial_messages
     ~model_input_projection ~hooks ~enable_thinking =
   let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
   let before_turn =
     invoke_turn_hook
       ~keeper_name
+      ~turn_count
       ~hook_name:"before_turn"
       hooks.before_turn
-      (Agent_sdk.Hooks.BeforeTurn { turn = 1; messages = initial_messages })
+      (Agent_sdk.Hooks.BeforeTurn { turn = turn_count; messages = initial_messages })
   in
   let* messages =
     match before_turn with
@@ -137,10 +138,11 @@ let prepare_turn ~keeper_name ~system_prompt ~tools ~initial_messages
   let before_turn_params =
     invoke_turn_hook
       ~keeper_name
+      ~turn_count
       ~hook_name:"before_turn_params"
       hooks.before_turn_params
       (Agent_sdk.Hooks.BeforeTurnParams
-         { turn = 1
+         { turn = turn_count
          ; messages
          ; last_tool_results = last_tool_results messages
          ; current_params
@@ -264,7 +266,7 @@ let apply_context_injection ~terminal_error ~context ~context_injector ~tool_nam
           ^ Printexc.to_string exn))
 ;;
 
-let dynamic_tool_of_oas ~keeper_name ~context ~tools
+let dynamic_tool_of_oas ~keeper_name ~turn_count ~context ~tools
     ~(hooks : Agent_sdk.Hooks.hooks) ~event_bus ~context_injector ~terminal_error
     (tool : Agent_sdk.Tool.t) =
   { Runtime_codex_app_server.name = tool.schema.name
@@ -282,13 +284,14 @@ let dynamic_tool_of_oas ~keeper_name ~context ~tools
         let invocation =
           Agent_sdk.Tool_contract.Invocation.create
             ~tool_use_id:call_id
-            ~turn:1
+            ~turn:turn_count
             ~schedule
             ~completion:(Agent_sdk.Tool.completion tool)
         in
         let pre_tool_use =
           invoke_turn_hook
             ~keeper_name
+            ~turn_count
             ~hook_name:"pre_tool_use"
             hooks.pre_tool_use
             (Agent_sdk.Hooks.PreToolUse
@@ -366,8 +369,8 @@ let dynamic_tool_of_oas ~keeper_name ~context ~tools
   }
 ;;
 
-let dynamic_tools ~keeper_name ~tools ~hooks ~event_bus ~context_injector ~context
-    ~terminal_error =
+let dynamic_tools ~keeper_name ~turn_count ~tools ~hooks ~event_bus ~context_injector
+    ~context ~terminal_error =
   match tools, context with
   | [], _ -> Ok []
   | _ :: _, None ->
@@ -380,6 +383,7 @@ let dynamic_tools ~keeper_name ~tools ~hooks ~event_bus ~context_injector ~conte
       (List.map
          (dynamic_tool_of_oas
             ~keeper_name
+            ~turn_count
             ~context
             ~tools
             ~hooks
@@ -397,9 +401,10 @@ let codex_error_to_sdk_error = function
   | error -> Agent_sdk.Error.Internal (Runtime_codex_app_server.error_to_string error)
 ;;
 
-let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~tools
-    ~initial_messages ~model_input_projection ~hooks ~context_injector ~context ~event_bus
-    ~enable_thinking ~(config : Runtime_execution.codex_app_server) =
+let run ~runtime_id ~keeper_name ~base_path ~session_dir ~goal ~goal_blocks
+    ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
+    ~context_injector ~context ~event_bus ~enable_thinking
+    ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -413,15 +418,61 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
          "Codex app-server runtime requires the initialized Eio clock")
   | Some env, Some clock ->
     let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
+    let* stored_session =
+      match Keeper_codex_session_store.load ~session_dir with
+      | Ok session -> Ok session
+      | Error detail ->
+        Error (internal_error ("Codex session binding load failed: " ^ detail))
+    in
+    let* thread_mode, turn_count =
+      match stored_session with
+      | None -> Ok (Runtime_codex_app_server.Start, 1)
+      | Some session when not (String.equal session.runtime_id runtime_id) ->
+        Error
+          (config_error
+             ~field:"codex_session.runtime_id"
+             (Printf.sprintf
+                "stored runtime %S does not match selected runtime %S"
+                session.runtime_id
+                runtime_id))
+      | Some session when session.turn_count = Int.max_int ->
+        Error
+          (config_error
+             ~field:"codex_session.turn_count"
+             "stored Codex session turn count cannot be incremented")
+      | Some session ->
+        Ok
+          ( Runtime_codex_app_server.Resume { thread_id = session.thread_id }
+          , session.turn_count + 1 )
+    in
     let* prepared =
       prepare_turn
         ~keeper_name
+        ~turn_count
         ~system_prompt
         ~tools
         ~initial_messages
         ~model_input_projection
         ~hooks:(Some hooks)
         ~enable_thinking
+    in
+    let tool_surface_sha256 =
+      Keeper_codex_session_store.tool_surface_sha256 prepared.tools
+    in
+    let* () =
+      match stored_session with
+      | None -> Ok ()
+      | Some session
+        when String.equal session.tool_surface_sha256 tool_surface_sha256 ->
+        Ok ()
+      | Some session ->
+        Error
+          (config_error
+             ~field:"codex_session.tool_surface_sha256"
+             (Printf.sprintf
+                "stored Codex thread tool surface %s does not match current surface %s; explicit session reset or migration is required"
+                session.tool_surface_sha256
+                tool_surface_sha256))
     in
     let* developer_messages, history = project_messages prepared.messages in
     let* prompt =
@@ -447,6 +498,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
     let* dynamic_tools =
       dynamic_tools
         ~keeper_name
+        ~turn_count
         ~tools:prepared.tools
         ~hooks
         ~event_bus
@@ -461,14 +513,46 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
          ~clock
          ~dynamic_tools
          ?reasoning_effort:prepared.reasoning_effort
+         ~thread_mode
          ~history
          client_config
          ~prompt
      with
      | Error error -> Error (codex_error_to_sdk_error error)
-     | Ok _ when Option.is_some !terminal_error ->
-       Error (internal_error (Option.get !terminal_error))
      | Ok turn ->
+       let expected_resumed =
+         match thread_mode with
+         | Runtime_codex_app_server.Start -> false
+         | Runtime_codex_app_server.Resume _ -> true
+       in
+       let* () =
+         if Bool.equal expected_resumed turn.resumed
+         then Ok ()
+         else
+           Error
+             (internal_error
+                "Codex app-server reported a thread mode different from the requested session plan")
+       in
+       let* () =
+         match
+           Keeper_codex_session_store.save
+             ~session_dir
+             { runtime_id
+             ; thread_id = turn.thread_id
+             ; turn_count
+             ; tool_surface_sha256
+             ; updated_at = Time_compat.now ()
+             }
+         with
+         | Ok () -> Ok ()
+         | Error detail ->
+           Error (internal_error ("Codex session binding save failed: " ^ detail))
+       in
+       let* () =
+         match !terminal_error with
+         | None -> Ok ()
+         | Some detail -> Error (internal_error detail)
+       in
        let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
        let response =
          { Agent_sdk.Types.id = turn.turn_id
@@ -487,9 +571,10 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
        let after_turn =
          invoke_turn_hook
            ~keeper_name
+           ~turn_count
            ~hook_name:"after_turn"
            hooks.after_turn
-           (Agent_sdk.Hooks.AfterTurn { turn = 1; response })
+           (Agent_sdk.Hooks.AfterTurn { turn = turn_count; response })
        in
        let* () =
          match after_turn with
@@ -501,6 +586,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
        let on_stop =
          invoke_turn_hook
            ~keeper_name
+           ~turn_count
            ~hook_name:"on_stop"
            hooks.on_stop
            (Agent_sdk.Hooks.OnStop { reason = response.stop_reason; response })
@@ -527,6 +613,8 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
            ~configured_labels:
              [ "codex_app_server"
              ; Printf.sprintf "dynamic_tool_calls=%d" turn.dynamic_tool_calls
+             ; Printf.sprintf "resumed=%b" turn.resumed
+             ; Printf.sprintf "turn_count=%d" turn_count
              ]
            ~candidate_count:1
            ~selected_model_raw:(Some turn.model)
@@ -539,7 +627,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
          { Runtime_agent.response
          ; checkpoint = None
          ; session_id = turn.thread_id
-         ; turns = 1
+         ; turns = turn_count
          ; trace_ref = None
          ; run_validation = None
          ; runtime_observation = Some runtime_observation

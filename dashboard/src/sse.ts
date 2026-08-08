@@ -20,7 +20,8 @@ import { appendLiveToolCall } from './components/session-trace/session-trace-liv
 import { scheduleSessionTraceReload } from './components/session-trace/session-trace-state'
 import { recordSseCompaction } from './components/keeper-workspace/compaction-snapshots'
 import { appendAuditEntry } from './live-store'
-import { applyKeeperTurnProgress } from './keeper-state'
+import { applyKeeperQueuedTurnEvent } from './keeper-stream'
+import type { KeeperChatStreamEvent } from './api'
 import { isCrashedPhase } from './lib/keeper-predicates'
 import {
   parseOasPayload,
@@ -598,23 +599,26 @@ function handleEvent(event: SSEEvent): void {
       }
       break
     }
-    case 'keeper_chat_turn_progress': {
-      // Live tool-call progress for queued/consumer-side turns — no journal
-      // entry (keeper_tool_call already journals completions); this feeds the
-      // chat thread directly.
+    case 'keeper_chat_turn_event': {
+      // The queue consumer uses the same AG-UI event contract as a direct
+      // chat stream. The durable receipt is the sole routing identity.
       const keeperName = event.name ?? agent
-      const runId = event.run_id?.trim()
-      const toolCallId = event.tool_call_id
-      const kind = event.kind
-      if (!keeperName || !runId || !toolCallId) break
-      if (kind !== 'tool_call_start' && kind !== 'tool_call_end') break
-      applyKeeperTurnProgress(keeperName, {
-        runId,
-        kind,
-        toolCallId,
-        toolName: event.tool_name ?? null,
-        receiptIds: event.receipt_ids,
+      const receiptId = event.receipt_id?.trim()
+      if (!keeperName || !receiptId || !isRecord(event.ag_ui_event)) break
+      applyKeeperQueuedTurnEvent(keeperName, {
+        receiptId,
+        event: event.ag_ui_event as unknown as KeeperChatStreamEvent,
       })
+      if (event.ag_ui_event.type === 'TOOL_CALL_END') {
+        void import('./keeper-runtime')
+          .then(mod => mod.hydrateKeeperToolOutputs(keeperName))
+          .catch(err => {
+            console.debug(
+              '[keeper-stream] queued tool output hydration unavailable',
+              err instanceof Error ? err.message : '',
+            )
+          })
+      }
       break
     }
     case 'keeper_tool_skipped': {

@@ -12,6 +12,7 @@ import {
   _flushPendingKeeperStreamDeltasForTests,
   _resetKeeperStreamBuffersForTests,
   abortKeeperThreadMessage,
+  applyKeeperQueuedTurnEvent,
   applyKeeperStreamEvent,
 } from './keeper-stream'
 import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
@@ -834,6 +835,121 @@ describe('applyKeeperStreamEvent', () => {
       { kind: 'think', text: 'checking tools', ts: expect.any(String), oasBlockIndex: 1 },
       { kind: 'think', text: 'next block', ts: expect.any(String), oasBlockIndex: 2 },
     ])
+  })
+})
+
+describe('applyKeeperQueuedTurnEvent', () => {
+  const firstReceipt = 'chatq_00000000-0000-4000-8000-000000000001'
+  const secondReceipt = 'chatq_00000000-0000-4000-8000-000000000002'
+
+  beforeEach(() => {
+    keeperThreads.value = {}
+    _resetKeeperStreamBuffersForTests()
+  })
+
+  function queuedEntry(id: string, receiptId: string, text: string): void {
+    appendThreadEntry('sangsu', {
+      id,
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text,
+      rawText: text,
+      timestamp: null,
+      delivery: 'queued',
+      streamState: null,
+      queueReceiptIds: [receiptId],
+      details: { queueReceiptId: receiptId, queueState: 'pending' },
+    })
+  }
+
+  it('streams thinking, tool args, and reply text into the exact queued bubble', () => {
+    queuedEntry('first', firstReceipt, 'queued first')
+    queuedEntry('second', secondReceipt, 'queued second')
+
+    applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: { type: 'RUN_STARTED', runId: 'run-1' },
+    })
+    applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: {
+        type: 'CUSTOM',
+        name: 'KEEPER_THINKING_DELTA',
+        value: { index: 0, delta: '검토 중' },
+      },
+    })
+    _flushPendingKeeperStreamDeltasForTests()
+    applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'Grep' },
+    })
+    applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: { type: 'TOOL_CALL_ARGS', toolCallId: 'tc-1', delta: '{"pattern":"x"}' },
+    })
+    applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: { type: 'TOOL_CALL_END', toolCallId: 'tc-1' },
+    })
+    applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: { type: 'TEXT_MESSAGE_START', messageId: 'message-1' },
+    })
+    applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: { type: 'TEXT_MESSAGE_CONTENT', messageId: 'message-1', delta: '완료했습니다.' },
+    })
+
+    const first = keeperThreads.value.sangsu?.find(entry => entry.id === 'first')
+    const second = keeperThreads.value.sangsu?.find(entry => entry.id === 'second')
+    expect(first?.text).toBe('완료했습니다.')
+    expect(first?.details?.queueState).toBe('inflight')
+    expect(first?.traceSteps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'think', text: '검토 중' }),
+      expect.objectContaining({
+        kind: 'tool',
+        toolCallId: 'tc-1',
+        name: 'Grep',
+        args: '{"pattern":"x"}',
+        status: 'ok',
+      }),
+    ]))
+    expect(second?.text).toBe('queued second')
+    expect(second?.delivery).toBe('queued')
+  })
+
+  it('creates a receipt-keyed bubble for a browser that joins mid-turn', () => {
+    applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: '중간부터 표시' },
+    })
+
+    const entry = keeperThreads.value.sangsu?.[0]
+    expect(entry?.id).toBe(`queued-turn-${firstReceipt}`)
+    expect(entry?.queueReceiptIds).toEqual([firstReceipt])
+    expect(entry?.text).toBe('중간부터 표시')
+  })
+
+  it('does not reopen a terminal history row when a delayed event arrives', () => {
+    queuedEntry('terminal', firstReceipt, '완료된 답변')
+    const entries = keeperThreads.value.sangsu ?? []
+    keeperThreads.value = {
+      sangsu: entries.map(entry => ({
+        ...entry,
+        delivery: 'history' as const,
+        streamState: null,
+        details: { ...(entry.details ?? {}), queueState: 'delivered' as const },
+      })),
+    }
+
+    applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: '늦은 델타' },
+    })
+
+    expect(keeperThreads.value.sangsu?.[0]?.text).toBe('완료된 답변')
+    expect(keeperThreads.value.sangsu?.[0]?.delivery).toBe('history')
   })
 })
 

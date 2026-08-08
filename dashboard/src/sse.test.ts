@@ -4,6 +4,48 @@ import {
   normalizeSSEDispatchType,
   recordServerPushEvent,
 } from './sse'
+import { appendThreadEntry, keeperThreads } from './keeper-state'
+
+describe('queued Keeper chat server push', () => {
+  const receiptId = 'chatq_00000000-0000-4000-8000-000000000001'
+
+  beforeEach(() => {
+    keeperThreads.value = {}
+    appendThreadEntry('sangsu', {
+      id: 'queued-reply',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '대기열에 추가했습니다.',
+      rawText: '대기열에 추가했습니다.',
+      timestamp: null,
+      delivery: 'queued',
+      streamState: null,
+      queueReceiptIds: [receiptId],
+      details: { queueReceiptId: receiptId, queueState: 'pending' },
+    })
+  })
+
+  it('routes the nested AG-UI delta to the exact queued bubble', () => {
+    recordServerPushEvent({
+      type: 'keeper_chat_turn_event',
+      name: 'sangsu',
+      receipt_id: receiptId,
+      ag_ui_event: {
+        type: 'TEXT_MESSAGE_CONTENT',
+        threadId: 'keeper-consumer:sangsu',
+        runId: 'run-1',
+        messageId: 'message-1',
+        delta: '실제 답변',
+        timestamp: 1,
+      },
+    })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'queued-reply')
+    expect(entry?.text).toBe('실제 답변')
+    expect(entry?.delivery).toBe('streaming')
+  })
+})
 
 describe('normalizeSSEDispatchType', () => {
   it('routes Event_bus audit events to the audit handler', () => {

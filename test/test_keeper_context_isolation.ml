@@ -25,6 +25,11 @@ let ctx_get_string ctx k =
   | Some (`String s) -> s
   | _ -> failwith ("expected string for key: " ^ k)
 
+let decode_ctx json =
+  match Ctx.of_json json with
+  | Ok ctx -> ctx
+  | Error error -> failf "context roundtrip decode failed: %s" (Ctx.decode_error_to_string error)
+
 (* ── Test: Basic Isolation ───────────────────────── *)
 
 let test_basic_isolation () =
@@ -55,8 +60,8 @@ let test_checkpoint_roundtrip_isolation () =
   let json_a = Ctx.to_json ctx_a in
   let json_b = Ctx.to_json ctx_b in
   (* Simulate resume: deserialize *)
-  let restored_a = Ctx.of_json json_a in
-  let restored_b = Ctx.of_json json_b in
+  let restored_a = decode_ctx json_a in
+  let restored_b = decode_ctx json_b in
   (* Mutate restored_a — should not affect restored_b *)
   Ctx.set restored_a "state" (`String "compacting");
   Ctx.set restored_a "new_key" (`String "from_a");

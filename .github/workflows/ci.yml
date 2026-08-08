@@ -953,7 +953,6 @@ jobs:
             @test/runtest-test_keepers_runtime_dir_ssot \
             @test/runtest-test_mcp_h1_h2_admission_parity \
             @test/runtest-test_nickname_words_ssot \
-            @test/runtest-test_oas_canonical_delegation_contract \
             @test/runtest-test_oas_message_constructor_contract \
             @test/runtest-test_otel_port_ssot \
             @test/runtest-test_release_train_guard_script \

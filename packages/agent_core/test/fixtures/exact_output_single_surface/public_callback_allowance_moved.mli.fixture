@@ -1,0 +1,1 @@
+val with_explicit_deadline : unit -> (unit -> 'a) -> (unit -> 'a) -> 'a

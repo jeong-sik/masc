@@ -1,0 +1,9 @@
+{
+  "_comment": "Code-smell monotone-decrease ratchet baseline. Source: docs/rfc/RFC-OAS-022-code-smell-monotone-decrease-ratchet.md §3 (Reproducibility commands). PRs may decrease or hold counts; increases fail unless PR body carries RATCHET-WAIVED: <reason>. Updated only on main via scripts/ci-code-smell-ratchet.sh --rebaseline.",
+  "godfile": 11,
+  "catch_all": 358,
+  "duplicate_helpers": 3,
+  "ignore_calls": 14,
+  "lastUpdated": "2026-07-16T19:28:05Z",
+  "lastUpdatedCommit": "9b5f0835a1c8d579ae53987c092c889617b7f8ea"
+}

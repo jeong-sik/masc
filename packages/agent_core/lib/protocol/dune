@@ -1,0 +1,14 @@
+(include_subdirs no)
+
+(library
+ (name agent_sdk_protocol)
+ (public_name agent_sdk.protocol)
+ (wrapped true)
+ (libraries agent_sdk.base yojson eio mcp_protocol_bundle)
+ (flags
+  (:standard -open Agent_sdk_base))
+ (inline_tests)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let))
+ (instrumentation
+  (backend bisect_ppx)))

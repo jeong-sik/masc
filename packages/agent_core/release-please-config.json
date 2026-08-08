@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true,
+  "packages": {
+    ".": {
+      "package-name": "agent_sdk",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "dune-project"
+        },
+        {
+          "type": "generic",
+          "path": "lib/sdk_version.ml"
+        },
+        {
+          "type": "generic",
+          "path": "agent_sdk.opam",
+          "pattern": "\nversion: \"(?<version>\\d+\\.\\d+\\.\\d+)\""
+        }
+      ]
+    }
+  }
+}

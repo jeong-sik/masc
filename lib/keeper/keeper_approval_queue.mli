@@ -4,7 +4,32 @@
     tool/product name. It records an exact request, accepts an explicit
     resolution, and wakes only the originating Keeper lane. *)
 
-include module type of Keeper_approval_queue_rules_types
+include
+  module type of Keeper_approval_queue_rules_types
+    with module Decision = Keeper_approval_queue_rules_types.Decision
+     and type advisory_judgment = Keeper_approval_queue_rules_types.advisory_judgment
+     and type hitl_context_summary = Keeper_approval_queue_rules_types.hitl_context_summary
+     and type summary_status = Keeper_approval_queue_rules_types.summary_status
+     and type exact_attempt_quarantine_cause =
+      Keeper_approval_queue_rules_types.exact_attempt_quarantine_cause
+     and type exact_attempt_status = Keeper_approval_queue_rules_types.exact_attempt_status
+     and type exact_attempt_binding = Keeper_approval_queue_rules_types.exact_attempt_binding
+     and type exact_attempt_state = Keeper_approval_queue_rules_types.exact_attempt_state
+     and type summary_attempt_pre_worker_unavailable_code =
+      Keeper_approval_queue_rules_types.summary_attempt_pre_worker_unavailable_code
+     and type summary_attempt_pre_worker_unavailable =
+      Keeper_approval_queue_rules_types.summary_attempt_pre_worker_unavailable
+     and type summary_attempt_disposition =
+      Keeper_approval_queue_rules_types.summary_attempt_disposition
+     and type pending_approval = Keeper_approval_queue_rules_types.pending_approval
+     and type decision = Keeper_approval_queue_rules_types.decision
+     and type decision_source = Keeper_approval_queue_rules_types.decision_source
+     and type authorization_source = Keeper_approval_queue_rules_types.authorization_source
+     and type approval_rule = Keeper_approval_queue_rules_types.approval_rule
+     and type rule_match = Keeper_approval_queue_rules_types.rule_match
+     and type rule_lookup = Keeper_approval_queue_rules_types.rule_lookup
+     and type rule_store_error = Keeper_approval_queue_rules_types.rule_store_error
+     and type resolution_result = Keeper_approval_queue_rules_types.resolution_result
 
 type storage_error =
   { path : string

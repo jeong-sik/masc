@@ -131,15 +131,34 @@ let test_tree_kill_escalates_to_sigkill () =
       check bool "SIGKILL reached stubborn child" true dead;
       Unix.close h.stdout_fd; Unix.close h.stderr_fd
 
-(* TODO (Tick 7): grandchild reach test.  A naive
+(* Tick 7: grandchild reach test with a waitpid reaper.  A naive
    [sh -c 'sleep 30 & wait'] keeps the shell as a zombie after
    SIGTERM, and [kill(-pgid, 0)] on macOS returns 0 on zombie
    pgroups, which makes [is_pgid_alive] report the group "alive"
-   indefinitely until someone waitpid's the leader.  Tick 7 will
-   introduce a dedicated waitpid reaper which resolves this
-   naturally; for Tick 5, the primitive layer has
-   been validated via the single-process SIGTERM and SIGKILL cases
-   above. *)
+   indefinitely until someone waitpid's the leader.  The dedicated
+   reaper in [Bg_task] reaps the leader, so the group is reported dead
+   as soon as the reaper runs. *)
+
+let test_grandchild_reach_after_reaper () =
+  let script = "sleep 30 & wait" in
+  match
+    Bg_task.spawn
+      ~argv:[ "/bin/sh"; "-c"; script ]
+      ~env:(env_of_current ()) ~cwd:""
+  with
+  | Error e -> failf "bg_task spawn failed: %s" e
+  | Ok t ->
+      let alive =
+        wait_until ~timeout_s:1.0 (fun () -> Bg_task.is_alive t)
+      in
+      check bool "pgroup reaches alive state" true alive;
+      Bg_task.kill t ~signal:Sys.sigterm ~grace_sec:2.0;
+      let reaped =
+        wait_until ~timeout_s:3.0 (fun () -> not (Bg_task.is_alive t))
+      in
+      check bool "pgroup dead after reaper cleans leader" true reaped;
+      let h = Bg_task.handle t in
+      Unix.close h.stdout_fd; Unix.close h.stderr_fd
 
 let test_empty_argv_rejected () =
   match P.spawn_detached ~argv:[] ~env:(env_of_current ()) ~cwd:"" with
@@ -221,6 +240,7 @@ let () =
           test_case "SIGTERM kills pgroup" `Quick test_tree_kill_sigterm;
           test_case "SIGKILL escalation after grace" `Quick
             test_tree_kill_escalates_to_sigkill;
-          (* grandchild coverage deferred to Tick 7 — see module-level TODO. *)
+          test_case "grandchild reach after reaper" `Quick
+            test_grandchild_reach_after_reaper;
         ] );
     ]

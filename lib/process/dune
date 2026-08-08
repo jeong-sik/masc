@@ -5,6 +5,7 @@
  (public_name masc.masc_process)
  (wrapped false)
  (modules
+  bg_task
   process_eio
   process_eio_detached
   process_eio_stderr

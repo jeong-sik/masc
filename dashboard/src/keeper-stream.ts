@@ -369,6 +369,10 @@ export interface KeeperQueuedTurnEvent {
   event: KeeperChatStreamEvent
 }
 
+type KeeperStreamEventSource =
+  | { kind: 'direct' }
+  | { kind: 'queued_turn'; receiptId: string }
+
 function entryHasQueueReceipt(
   entry: { queueReceiptIds?: string[]; details?: KeeperConversationDetails | null },
   receiptId: string,
@@ -439,7 +443,12 @@ export function applyKeeperQueuedTurnEvent(
     }))
   }
 
-  const error = applyKeeperStreamEvent(keeperName, entryId, queued.event)
+  const error = applyKeeperStreamEvent(
+    keeperName,
+    entryId,
+    queued.event,
+    { kind: 'queued_turn', receiptId },
+  )
   if (error) {
     finalizeAssistantEntry(keeperName, entryId, {
       text: `Keeper request failed: ${error}`,
@@ -457,6 +466,7 @@ export function applyKeeperStreamEvent(
   keeperName: string,
   assistantEntryId: string,
   event: KeeperChatStreamEvent,
+  source: KeeperStreamEventSource = { kind: 'direct' },
 ): string | null {
   const applyTextDelta = (payload: unknown): void => {
     if (typeof payload !== 'string') return
@@ -1035,6 +1045,31 @@ export function applyKeeperStreamEvent(
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
       clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
+      if (source.kind !== 'queued_turn') return null
+      updateThreadEntry(keeperName, assistantEntryId, entry => {
+        if (!entryHasQueueReceipt(entry, source.receiptId)) return entry
+        const delivery =
+          entry.delivery === 'no_reply'
+            || (entry.delivery === 'queued'
+              && keeperTurnOutcomeSuppressesReply(entry.details?.turnOutcome))
+            ? entry.delivery
+            : 'delivered'
+        return {
+          ...entry,
+          delivery,
+          streamState: null,
+          error: null,
+          details: {
+            ...(entry.details ?? {}),
+            queueState: 'delivered',
+          },
+          streamContract: keeperClientObservedSseStreamContract(
+            'queue_event',
+            'backend_terminal_event',
+            { eventName: 'RUN_FINISHED' },
+          ),
+        }
+      })
       return null
     case 'RUN_ERROR':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)

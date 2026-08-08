@@ -918,6 +918,53 @@ describe('applyKeeperQueuedTurnEvent', () => {
     expect(second?.delivery).toBe('queued')
   })
 
+  it('terminalizes the exact queued bubble when RUN_FINISHED is the only terminal event', () => {
+    queuedEntry('first', firstReceipt, 'queued first')
+
+    applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: {
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_QUEUED',
+        value: {
+          keeper_name: 'sangsu',
+          status: 'queued',
+          queue: 'keeper_chat_queue',
+          pending_count: 1,
+          inflight_count: 0,
+          recovery_required_count: 0,
+          chat_waiting: true,
+          receipt_id: firstReceipt,
+          queue_revision: '1',
+          shutdown_operation_id: null,
+        },
+      },
+    })
+    applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: '완료했습니다.' },
+    })
+
+    const streaming = keeperThreads.value.sangsu?.find(entry => entry.id === 'first')
+    expect(streaming?.delivery).toBe('streaming')
+    expect(streaming?.details?.queueState).toBe('inflight')
+
+    applyKeeperQueuedTurnEvent('sangsu', {
+      receiptId: firstReceipt,
+      event: { type: 'RUN_FINISHED', runId: 'run-1' },
+    })
+
+    const finished = keeperThreads.value.sangsu?.find(entry => entry.id === 'first')
+    expect(finished?.delivery).toBe('delivered')
+    expect(finished?.streamState).toBeNull()
+    expect(finished?.details?.queueState).toBe('delivered')
+    expect(finished?.streamContract).toMatchObject({
+      source: 'queue_event',
+      status: 'backend_terminal_event',
+      eventName: 'RUN_FINISHED',
+    })
+  })
+
   it('creates a receipt-keyed bubble for a browser that joins mid-turn', () => {
     applyKeeperQueuedTurnEvent('sangsu', {
       receiptId: firstReceipt,

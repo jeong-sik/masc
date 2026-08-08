@@ -137,16 +137,20 @@ let backend_cleanup_pubsub config ~days ~max_messages =
 (* ============================================ *)
 
 (** Generate a short hash prefix for project isolation.
-    Uses first 8 chars of MD5 hash of base_path.
-    This ensures different test directories get different keys. *)
+    Returns the first 8 hex chars of the MD5 digest of [base_path], so two
+    configs rooted at different paths get different key namespaces. The
+    truncation keeps 32 bits, which makes distinct prefixes overwhelmingly
+    likely rather than guaranteed; nothing here detects a collision. *)
 let project_prefix config =
   let hash = Digest.string config.base_path |> Digest.to_hex in
   String.sub hash 0 8
 
 (** Convert absolute path to backend key.
-    For distributed backends: includes project hash prefix for isolation.
+    [Memory] shares one process-wide store across configs, so its keys carry
+    the {!project_prefix} to keep separate roots apart.
     Example: /tmp/test-abc/.masc/state.json -> "a1b2c3d4:state.json"
-    For filesystem: returns relative path without prefix. *)
+    [FileSystem] is already scoped by its own root, so it returns the relative
+    path without a prefix. *)
 let key_of_path_from_root config ~root path =
   let prefix = root ^ "/" in
   if String.starts_with path ~prefix then

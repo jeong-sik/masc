@@ -43,8 +43,9 @@ val backlog_filename : string
 
 val root_state_path : config -> string
 
-(** Project-scoped key prefix for backend keys (e.g.
-    ["proj:default"]). Used by broadcast/pubsub channel naming. *)
+(** Project-scoped key prefix for backend keys: 8 hex chars of the MD5 digest
+    of the config's [base_path] (e.g. ["a1b2c3d4"]). Used by broadcast/pubsub
+    channel naming and by [Memory]-backend keys. *)
 val project_prefix : config -> string
 
 (** {1 Backend dispatch} *)

@@ -427,21 +427,26 @@ let base_path_prod_guard path =
       match home_dir_opt () with
       | None -> path
       | Some home ->
-        let home_norm = normalize_masc_base_path_input home in
-        if home_norm <> "" && String.length path >= String.length home_norm
-           && String.sub path 0 (String.length home_norm) = home_norm
-        then
+        let breach detail =
           raise (Config_error
             (Printf.sprintf
                "#9903 test isolation breach: Env_config_core.base_path() \
-                resolved to %S under HOME=%S in test executable %S. This \
+                resolved to %S — %s (HOME=%S) in test executable %S. This \
                 indicates a MASC_BASE_PATH override failure — writing to \
                 the production ledger under HOME would corrupt real data. \
                 Fix the override path in the test, or set \
                 MASC_TEST_ALLOW_HOME_BASE_PATH=1 to bypass (not \
                 recommended)."
-               path home_norm (Filename.basename Sys.executable_name)))
-        else path
+               path detail home (Filename.basename Sys.executable_name)))
+        in
+        (* Same owner as the Fs_compat mutation guard, so the two cannot drift
+           again. Undecidable takes the Inside exit: a base path whose
+           destination cannot be resolved is not known to be outside HOME. *)
+        (match Path_containment.classify ~root:home ~path with
+         | Path_containment.Outside -> path
+         | Path_containment.Inside -> breach "resolves under HOME"
+         | Path_containment.Undecidable reason ->
+           breach (Printf.sprintf "containment undecidable (%s)" reason))
   end
 
 (** Project base path. [MASC_BASE_PATH] is required. *)

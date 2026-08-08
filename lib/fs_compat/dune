@@ -37,6 +37,7 @@
   (:standard -w +4))
  (libraries
   fs_compat_internal
+  path_containment
   eio
   eio.unix
   unix

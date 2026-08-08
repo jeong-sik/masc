@@ -1,0 +1,12 @@
+(include_subdirs no)
+
+; Leaf on purpose. Both HOME guards must reach it, and they sit on opposite
+; sides of the graph: masc_config depends on masc_core, which depends on
+; fs_compat. Owning containment in either of those would make fs_compat depend
+; on something that depends on fs_compat.
+(library
+ (name path_containment)
+ (public_name masc.path_containment)
+ (wrapped true)
+ (modules path_containment)
+ (libraries unix))

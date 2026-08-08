@@ -98,29 +98,26 @@ let test_exec_home_guard ~op path =
       match Sys.getenv_opt "HOME" with
       | None | Some "" -> ()
       | Some home ->
-        let home_norm =
-          let trimmed = String.trim home in
-          let len = String.length trimmed in
-          if len > 1 && Char.equal trimmed.[len - 1] '/'
-          then String.sub trimmed 0 (len - 1)
-          else trimmed
-        in
-        let home_len = String.length home_norm in
-        if
-          home_len > 0
-          && String.length path >= home_len
-          && String.starts_with path ~prefix:home_norm
-        then
+        let breach detail =
           raise
             (Test_isolation_breach
                (Printf.sprintf
-                  "#9921 %s blocked under HOME=%S (path=%S) in test executable %S. \
+                  "#9921 %s blocked: %s (HOME=%S, path=%S) in test executable %S. \
                    MASC_BASE_PATH override did not apply — fix the test setup or set \
                    MASC_TEST_ALLOW_HOME_BASE_PATH=1."
                   op
-                  home_norm
+                  detail
+                  home
                   path
-                  (Stdlib.Filename.basename Stdlib.Sys.executable_name)))))
+                  (Stdlib.Filename.basename Stdlib.Sys.executable_name)))
+        in
+        (* Undecidable takes the same exit as Inside: a path whose destination
+           cannot be resolved is not known to be outside HOME. *)
+        (match Path_containment.classify ~root:home ~path with
+         | Path_containment.Outside -> ()
+         | Path_containment.Inside -> breach "resolves under HOME"
+         | Path_containment.Undecidable reason ->
+           breach (Printf.sprintf "containment undecidable (%s)" reason))))
 ;;
 
 let with_fs_or_fallback ~path ~fallback f =

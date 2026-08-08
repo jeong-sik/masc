@@ -534,25 +534,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-# The count `--exports` reports, frozen so it can only fall. Not a target of
-# zero: the docstring above lists five categories where unreachable is not
-# removable, so some of this number is load-bearing and the audit cannot tell
-# which. What the ratchet buys is that the number stops growing while nobody is
-# looking.
-#
-# Lower it in the PR that earns the reduction. Raising it needs a reason in the
-# PR body -- a new export with no caller is usually a surface someone meant to
-# wire and did not.
-# 658 -> 585: batch 4 removes 73 exports with no consumer. Measured on the
-# merged tree after main's batch-1..3 landed, not computed from the batch
-# size -- the merge also dropped should_use_dict, which lost its last
-# caller when batch 1 removed the dictionary helpers around it.
-# Unchanged at 561: workspace_recommendations had a caller
-# (operator_control_snapshot.ml), so it was never counted as a dead export.
-# Removing a live export and its only call site leaves the dead count where it
-# was. Measured with --exports on the merged tree -- 563 - 1 assumed the export
-# was dead, and it was not.
-DEAD_EXPORT_BASELINE = 556
+# The exact-tree dead-export count may only decrease.
+DEAD_EXPORT_BASELINE = 552
 
 
 def run_ratchet(count: int) -> int:

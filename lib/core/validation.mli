@@ -2,11 +2,9 @@
 
     Prevents path injection and invalid-input attacks for MCP tool
     arguments. Each validator returns a [Result] type and logs
-    rejections at WARN level for security monitoring (#9787 quote-strip
-    fallback applies for ID validators).
+    rejections at WARN level for security monitoring.
 
-    Internal helpers ([log_rejection], [try_strip_outer_quotes]) and
-    the rejection counters are hidden — callers interact with the
+    Internal helpers and the rejection counters are hidden — callers interact with the
     typed sub-modules and the two read-only stat accessors. *)
 
 (** {1 Rejection statistics (observability)} *)
@@ -24,8 +22,8 @@ module Agent_id : sig
   val validate : string -> (t, string) result
   (** Validates [a-zA-Z0-9_-]+ with optional single colon namespace
       ([keeper:keeper-test-X]), length 1–64. Rejects path separators
-      and traversal segments. On strict failure, retries after
-      stripping surrounding ASCII quotes (#9787 LLM behavior). *)
+      and traversal segments. Quoted or otherwise malformed values are
+      rejected unchanged. *)
 
   val to_string : t -> string
 
@@ -40,8 +38,8 @@ module Task_id : sig
   type t
 
   val validate : string -> (t, string) result
-  (** Validates [a-zA-Z0-9_:-]+, length 1–128. Same path-traversal
-      and quote-strip rules as {!Agent_id.validate}. *)
+  (** Validates [a-zA-Z0-9_:-]+, length 1–128. Quoted or otherwise
+      malformed values are rejected unchanged. *)
 
   val to_string : t -> string
 

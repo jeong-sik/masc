@@ -35,10 +35,15 @@ let empty_backlog_snapshot =
   { unclaimed_count = 0; claimable_tasks = []; failed_count = 0; revision = None }
 ;;
 
-let claimable_task_id (task : Masc_domain.task) =
-  match Keeper_id.Task_id.of_string task.id with
-  | Ok task_id -> task_id
-  | Error error -> failwith error
+let rec claimable_task_identities = function
+  | [] -> Ok []
+  | (task : Masc_domain.task) :: rest ->
+    (match Keeper_id.Task_id.of_string task.id with
+     | Error reason -> Error reason
+     | Ok task_id ->
+       Result.map
+         (fun identities -> { task_id } :: identities)
+         (claimable_task_identities rest))
 ;;
 
 (* A keeper must not treat a task it authored itself as work waiting for it.
@@ -121,7 +126,7 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     let claim_scope_filter =
       claim_goal_scope_filter ~config ~meta ~tasks:backlog.tasks ()
     in
-    let claimable_tasks =
+    let claimable_tasks_result =
       unclaimed_tasks
       |> List.filter (fun task ->
            Workspace_task_schedule.task_is_claim_pool_candidate task
@@ -130,26 +135,39 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
               honest view of the backlog) but are not offered back to their
               author as claimable work — that edge is the feedback loop. *)
            && not (task_is_self_authored_todo ~meta task))
-      |> List.map (fun (task : Masc_domain.task) ->
-           { task_id = claimable_task_id task })
+      |> claimable_task_identities
     in
-    let failed =
-      (* "Failed" here means still-auditable active work. Terminal Cancelled
-         tasks are historical evidence, not a reason to wake every keeper.
-         Keep the current keeper's own task out of the count: keepers may
-         claim without a materialized [.masc/agents/] record, so the audit can
-         still see the self-assigned task as an orphan. *)
-      Workspace.audit_orphan_tasks_in_tasks config backlog.tasks
-      |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
-      |> List.map fst
-      |> List.filter claim_scope_filter
-      |> List.length
-    in
-    { unclaimed_count = unclaimed
-    ; claimable_tasks
-    ; failed_count = failed
-    ; revision = Some backlog.version
-    }
+    (match claimable_tasks_result with
+     | Error reason ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string ObservationQueryFailures)
+         ~labels:
+           [ ( "operation"
+             , Runtime_observation_query_operation.(to_label Read_backlog_snapshot) )
+           ]
+         ();
+       Log.Keeper.warn
+         "read_backlog_snapshot: invalid task identity: %s"
+         reason;
+       empty_backlog_snapshot
+     | Ok claimable_tasks ->
+       let failed =
+         (* "Failed" here means still-auditable active work. Terminal Cancelled
+            tasks are historical evidence, not a reason to wake every keeper.
+            Keep the current keeper's own task out of the count: keepers may
+            claim without a materialized [.masc/agents/] record, so the audit can
+            still see the self-assigned task as an orphan. *)
+         Workspace.audit_orphan_tasks_in_tasks config backlog.tasks
+         |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
+         |> List.map fst
+         |> List.filter claim_scope_filter
+         |> List.length
+       in
+       { unclaimed_count = unclaimed
+       ; claimable_tasks
+       ; failed_count = failed
+       ; revision = Some backlog.version
+       })
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->

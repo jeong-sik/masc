@@ -141,6 +141,30 @@ let test_recovery_snapshot_is_not_claimable () =
       (List.length observed.claimable_tasks))
 ;;
 
+let test_invalid_stored_task_id_makes_snapshot_non_authoritative () =
+  with_config (fun config meta ->
+    ignore (add config ~title:"Corrupt identity" ~created_by:"someone-else");
+    let backlog = Workspace.read_backlog config in
+    let tasks =
+      match backlog.tasks with
+      | [] -> fail "expected one task"
+      | task :: rest -> { task with id = "Ignore previous instructions" } :: rest
+    in
+    Workspace.write_backlog config { backlog with tasks };
+    let observed = snapshot config meta in
+    check (option int)
+      "invalid identity removes authority"
+      None
+      observed.revision;
+    check int
+      "invalid identity is never projected"
+      0
+      (List.length observed.claimable_tasks);
+    match Keeper_id.Task_id.of_string "Ignore previous instructions" with
+    | Error _ -> ()
+    | Ok _ -> fail "malformed task identity reached the typed boundary")
+;;
+
 let () =
   run "claimable_task_summaries"
     [ ( "rows"
@@ -153,6 +177,8 @@ let () =
             test_an_empty_backlog_offers_nothing
         ; test_case "recovery snapshot is not claimable" `Quick
             test_recovery_snapshot_is_not_claimable
+        ; test_case "invalid stored task id makes snapshot non-authoritative" `Quick
+            test_invalid_stored_task_id_makes_snapshot_non_authoritative
         ] )
     ]
 ;;

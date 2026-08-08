@@ -75,12 +75,17 @@ let to_json t =
 ;;
 
 let of_json json =
+  let ( let* ) = Result.bind in
   try
     let open Yojson.Safe.Util in
-    let metadata =
+    let* metadata =
       match json |> member "metadata" with
-      | `Null -> Context.create_sync ()
-      | v -> Context.of_json v
+      | `Null -> Ok (Context.create_sync ())
+      | value ->
+        Context.of_json value
+        |> Result.map_error (fun error ->
+          Error.Serialization
+            (JsonParseError { detail = Context.decode_error_to_string error }))
     in
     Ok
       { id = json |> member "id" |> to_string

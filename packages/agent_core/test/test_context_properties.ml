@@ -70,10 +70,12 @@ let test_json_roundtrip =
        let ctx = Context.create_sync () in
        List.iter (fun (k, v) -> Context.set ctx k v) pairs;
        let json = Context.to_json ctx in
-       let restored = Context.of_json json in
-       let original_snapshot = Context.snapshot ctx in
-       let restored_snapshot = Context.snapshot restored in
-       original_snapshot = restored_snapshot)
+       match Context.of_json json with
+       | Error _ -> false
+       | Ok restored ->
+         let original_snapshot = Context.snapshot ctx in
+         let restored_snapshot = Context.snapshot restored in
+         original_snapshot = restored_snapshot)
 ;;
 
 (* ── Property 3: Scope Isolation — No Leakage ─────────── *)

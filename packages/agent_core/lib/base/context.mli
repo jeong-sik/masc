@@ -24,6 +24,10 @@ type concurrency_backend =
   | Stdlib_mutex
   | Eio_mutex
 
+type decode_error = Expected_object
+
+val decode_error_to_string : decode_error -> string
+
 (** Create a new context using {!Eio.Mutex}.
 
     This is the default for agent execution paths where the context may be
@@ -54,9 +58,9 @@ val concurrency_backend : t -> concurrency_backend
 (** Deserialize from a JSON object.
 
     [~eio:true] rehydrates the context with an {!Eio.Mutex}; the default
-    [~eio:false] is for synchronous decoding/storage code. Raises
-    [Invalid_argument] if [json] is not a JSON object. *)
-val of_json : ?eio:bool -> Yojson.Safe.t -> t
+    [~eio:false] is for synchronous decoding/storage code. Returns
+    [Error Expected_object] if [json] is not a JSON object. *)
+val of_json : ?eio:bool -> Yojson.Safe.t -> (t, decode_error) result
 
 (** Shallow-copy all entries into a fresh context.
     Values are [Yojson.Safe.t] (structurally immutable), so shallow copy

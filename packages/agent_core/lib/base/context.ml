@@ -31,6 +31,12 @@ type concurrency_backend =
   | Stdlib_mutex
   | Eio_mutex
 
+type decode_error = Expected_object
+
+let decode_error_to_string = function
+  | Expected_object -> "Context.of_json: expected JSON object"
+;;
+
 let create () : t = { mu = Eio_mu (Eio.Mutex.create ()); tbl = Hashtbl.create 16 }
 let create_sync () : t = { mu = Stdlib_mu (Mutex.create ()); tbl = Hashtbl.create 16 }
 
@@ -131,13 +137,13 @@ let to_json (ctx : t) : Yojson.Safe.t =
   `Assoc pairs
 ;;
 
-let of_json ?(eio = false) (json : Yojson.Safe.t) : t =
+let of_json ?(eio = false) (json : Yojson.Safe.t) : (t, decode_error) result =
   match json with
   | `Assoc pairs ->
     let ctx = if eio then create () else create_sync () in
     List.iter (fun (k, v) -> Hashtbl.replace ctx.tbl k v) pairs;
-    ctx
-  | _ -> invalid_arg "Context.of_json: expected JSON object"
+    Ok ctx
+  | _ -> Error Expected_object
 ;;
 
 let copy ?eio (ctx : t) : t =

@@ -781,13 +781,15 @@ let decode_current_json json =
     and* tools =
       json |> member "tools" |> to_list |> List.map tool_schema_of_json |> result_all
     and* context =
-      match json |> member "context" with
-      | `Assoc _ as value -> Ok (Context.of_json value)
-      | _ ->
-        Error
-          (Error.Serialization
-             (JsonParseError
-                { detail = "Checkpoint.of_json: context must be a JSON object" }))
+      Context.of_json (json |> member "context")
+      |> Result.map_error (fun error ->
+        Error.Serialization
+          (JsonParseError
+             { detail =
+                 Printf.sprintf
+                   "Checkpoint.of_json: %s"
+                   (Context.decode_error_to_string error)
+             }))
     and* mcp_sessions =
       match json |> member "mcp_sessions" with
       | `List _ as lst -> Mcp_session.info_list_of_json lst

@@ -39,6 +39,18 @@ type preview_extract = {
 
 (** {1 URL helpers} *)
 
+val ipaddr_is_private_or_reserved : Ipaddr.t -> bool
+(** [true] when the address must not be fetched: loopback,
+    RFC 1918, link-local, carrier-grade NAT, multicast, and
+    the documentation ranges.  The fetch path applies this to
+    every address the host resolves to, so a [false] here is
+    what lets a request leave the process.
+
+    A V6 address that carries an IPv4 one — the mapped
+    [::ffff:a.b.c.d] form or the deprecated compatible
+    [::a.b.c.d] form — is judged by the IPv4 rules, since the
+    V6 ranges cannot see the address inside it. *)
+
 val normalize_request_url : string -> (string, string) result
 (** Trims, parses, and normalizes a request URL.  Returns
     [Error reason] when the input is empty, missing a host,

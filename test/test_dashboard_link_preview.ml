@@ -50,6 +50,39 @@ let test_normalize_request_url_rejects_non_http () =
   | Ok value ->
       failf "expected non-http URL to be rejected, got %s" value
 
+let check_addr expected raw =
+  match Ipaddr.of_string raw with
+  | Error _ -> failf "test input %S did not parse as an IP address" raw
+  | Ok ip ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s blocked" raw)
+        expected
+        (Server_dashboard_http_link_preview.ipaddr_is_private_or_reserved ip)
+
+(* The V6 arm matched on the rendered address, and every IPv4-carrying form
+   renders starting with "::", so none of its prefixes could see the address
+   inside. ::ffff:169.254.169.254 reached the fetcher even though the V4 arm
+   rejects 169.254.0.0/16. *)
+let test_v4_inside_v6_is_blocked () =
+  List.iter (check_addr true)
+    [
+      "::ffff:127.0.0.1";
+      "::ffff:169.254.169.254";
+      "::ffff:10.0.0.1";
+      "::ffff:192.168.1.1";
+      "::ffff:172.16.0.1";
+      "::ffff:100.64.0.1";
+      "::127.0.0.1";
+    ]
+
+let test_native_v6_ranges_stay_blocked () =
+  List.iter (check_addr true)
+    [ "::1"; "::"; "fe80::1"; "febf::1"; "fc00::1"; "fd00::1"; "ff02::1"; "2001:db8::1" ]
+
+let test_public_addresses_stay_allowed () =
+  List.iter (check_addr false)
+    [ "8.8.8.8"; "1.1.1.1"; "2001:4860:4860::8888"; "::ffff:8.8.8.8" ]
+
 let () =
   Alcotest.run "dashboard_link_preview"
     [
@@ -60,5 +93,11 @@ let () =
           test_case "image url detection" `Quick test_image_url_detection;
           test_case "normalize rejects non-http" `Quick
             test_normalize_request_url_rejects_non_http;
+          test_case "IPv4 inside IPv6 is blocked" `Quick
+            test_v4_inside_v6_is_blocked;
+          test_case "native v6 ranges stay blocked" `Quick
+            test_native_v6_ranges_stay_blocked;
+          test_case "public addresses stay allowed" `Quick
+            test_public_addresses_stay_allowed;
         ] );
     ]

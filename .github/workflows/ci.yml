@@ -924,6 +924,16 @@ jobs:
             @test/runtest-test_tool_task_coverage \
             @test/runtest-test_tool_workspace_coverage
 
+      - name: Run link preview address filter suite
+        # The filter decides whether a dashboard-supplied URL may leave the
+        # process, so a false negative is a fetch to an internal address.
+        # @check compiles these cases but does not run them, and the suite had
+        # no address cases at all until ::ffff:169.254.169.254 was found to
+        # pass the V6 branch.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_dashboard_link_preview
+
       - name: Run completion-authority lookup surface suite
         # The judge's lookup tools reach the filesystem and Git inside a
         # producer's root. @check compiles the containment cases but does not

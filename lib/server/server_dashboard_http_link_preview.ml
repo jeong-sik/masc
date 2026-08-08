@@ -74,7 +74,27 @@ let is_http_scheme = function
 let is_loopback_or_unspecified_host host =
   Server_auth.is_loopback_host host || Server_auth.is_unspecified_host host
 
-let ipaddr_is_private_or_reserved = function
+(* An IPv4 address carried inside a V6 one is invisible to the V6 range checks
+   below, because those match on the rendered text and every carrier form
+   renders starting with "::".  [::ffff:169.254.169.254] renders as
+   "::ffff:169.254.169.254", matches no prefix in that list, and so reached the
+   fetcher even though the V4 rules reject 169.254.0.0/16.  Hand both the
+   mapped form and the deprecated compatible form (RFC 4291 §2.5.5.1) back to
+   the V4 rules rather than restating those ranges here. *)
+let embedded_v4 addr =
+  match Ipaddr.v4_of_v6 addr with
+  | Some _ as mapped -> mapped
+  | None ->
+    let octets = Ipaddr.V6.to_octets addr in
+    let rec leading_zeros i = i >= 12 || (Char.code octets.[i] = 0 && leading_zeros (i + 1)) in
+    if leading_zeros 0
+    then (
+      match Ipaddr.V4.of_octets (String.sub octets 12 4) with
+      | Ok v4 -> Some v4
+      | Error _ -> None)
+    else None
+
+let rec ipaddr_is_private_or_reserved = function
   | Ipaddr.V4 addr ->
       let octets = Ipaddr.V4.to_octets addr in
       let byte idx = Char.code octets.[idx] in
@@ -92,17 +112,20 @@ let ipaddr_is_private_or_reserved = function
       || (b0 = 203 && b1 = 0)
       || b0 >= 224
   | Ipaddr.V6 addr ->
-      let text = Ipaddr.V6.to_string addr |> String.lowercase_ascii in
-      Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
-      || Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
-      || String.starts_with ~prefix:"fc" text
-      || String.starts_with ~prefix:"fd" text
-      || String.starts_with ~prefix:"fe8" text
-      || String.starts_with ~prefix:"fe9" text
-      || String.starts_with ~prefix:"fea" text
-      || String.starts_with ~prefix:"feb" text
-      || String.starts_with ~prefix:"ff" text
-      || String.starts_with ~prefix:"2001:db8" text
+    (match embedded_v4 addr with
+     | Some v4 -> ipaddr_is_private_or_reserved (Ipaddr.V4 v4)
+     | None ->
+       let text = Ipaddr.V6.to_string addr |> String.lowercase_ascii in
+       Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
+       || Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
+       || String.starts_with ~prefix:"fc" text
+       || String.starts_with ~prefix:"fd" text
+       || String.starts_with ~prefix:"fe8" text
+       || String.starts_with ~prefix:"fe9" text
+       || String.starts_with ~prefix:"fea" text
+       || String.starts_with ~prefix:"feb" text
+       || String.starts_with ~prefix:"ff" text
+       || String.starts_with ~prefix:"2001:db8" text)
 
 let eio_ipaddr_is_private_or_reserved ip =
   let rendered = Fmt.str "%a" Eio.Net.Ipaddr.pp ip in

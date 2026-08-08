@@ -12,8 +12,10 @@ type t =
     present value must exactly match [http], [grpc], [ws], [webrtc], or [local]. *)
 val from_env : unit -> t
 
-(** Resolve [MASC_AGENT_TRANSPORT] and retain that typed value for subsequent
-    {!from_env} calls in this process. Server startup calls this once. *)
+(** Resolve [MASC_AGENT_TRANSPORT] and publish the first typed value for all
+    subsequent calls in this process. Concurrent or repeated calls return the
+    first published value. Server startup calls this before creating fibers or
+    listeners. *)
 val configure_from_env : unit -> t
 
 (** String representation for logging. *)

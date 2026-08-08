@@ -30,10 +30,14 @@ let read_env () =
 
 let configured = Atomic.make None
 
-let configure_from_env () =
-  let transport = read_env () in
-  Atomic.set configured (Some transport);
-  transport
+let rec configure_from_env () =
+  match Atomic.get configured with
+  | Some transport -> transport
+  | None ->
+    let transport = read_env () in
+    if Atomic.compare_and_set configured None (Some transport)
+    then transport
+    else configure_from_env ()
 ;;
 
 let from_env () =

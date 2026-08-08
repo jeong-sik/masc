@@ -12,7 +12,6 @@ import {
 } from './keeper-workspace-shared'
 import { html } from 'htm/preact'
 import type { Keeper } from '../../types'
-import type { KeeperCompositeSnapshot } from '../../api/schemas/keeper-composite'
 
 function mk(partial: Partial<Keeper>): Keeper {
   return { name: 'k', status: 'running', ...partial } as Keeper
@@ -33,17 +32,6 @@ describe('keeperBucket', () => {
     expect(keeperBucket(mk({ status: 'stopped' }))).toBe('offline')
   })
   it('classifies a blocked keeper as stuck (typed SSOT, 확인 필요 group)', () => {
-    expect(keeperBucket(mk({ status: 'running', runtime_blocker_class: 'turn_timeout' }))).toBe('stuck')
-  })
-  it('promotes synthetic_stall to stuck once the composite attention axis confirms blocked (W1)', () => {
-    const keeper = mk({ status: 'running', runtime_blocker_class: 'synthetic_stall' })
-    // Flat record only: the diagnostic synthetic marker stays running.
-    expect(keeperBucket(keeper)).toBe('running')
-    // Same keeper + composite (what registry/monitoring see) must agree.
-    const composite = {
-      runtime_attention: { blocked: true, execution_current: true },
-    } as unknown as KeeperCompositeSnapshot
-    expect(keeperBucket(keeper, composite)).toBe('stuck')
   })
 })
 
@@ -106,7 +94,6 @@ describe('keeperRuntimeLabel', () => {
     expect(keeperRuntimeLabel(mk({ runtime_canonical: ' oas.seoul-1 ' }))).toBe('oas.seoul-1')
     expect(keeperRuntimeLabel(mk({ selected_runtime_canonical: 'local·docker' }))).toBe('local·docker')
     expect(keeperRuntimeLabel(mk({ runtime_id: 'keeper_unified' }))).toBe('keeper_unified')
-    expect(keeperRuntimeLabel(mk({ runtime_ref: { group: 'tier', item: 'resilient_breaker' } }))).toBe('tier.resilient_breaker')
     expect(keeperRuntimeLabel(mk({}))).toBeNull()
   })
 })

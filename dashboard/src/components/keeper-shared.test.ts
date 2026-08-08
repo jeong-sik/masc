@@ -992,7 +992,7 @@ describe('KeeperConversationPanel', () => {
   })
 
   it('does not open Admin-only queue controls for the loopback Worker session', async () => {
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
     mockedToolsData.value = {
       keeper_waiting_inventory: {
         keepers: [{
@@ -1024,7 +1024,7 @@ describe('KeeperConversationPanel', () => {
   })
 
   it('opens an operator drawer with exact durable chat and event queue evidence', async () => {
-    shellAuthSummary.value = { effective_role: 'admin', default_role: 'admin' } as typeof shellAuthSummary.value
+    shellAuthSummary.value = { effective_role: 'admin' } as typeof shellAuthSummary.value
     const receiptId = 'chatq_00000000-0000-4000-8000-000000000022'
     fetchKeeperChatPending.mockResolvedValue({
       keeperName: 'sangsu',
@@ -1112,7 +1112,7 @@ describe('KeeperConversationPanel', () => {
   })
 
   it('shows exact inflight and recovery evidence and resolves recovery with a fresh receipt fence', async () => {
-    shellAuthSummary.value = { effective_role: 'admin', default_role: 'admin' } as typeof shellAuthSummary.value
+    shellAuthSummary.value = { effective_role: 'admin' } as typeof shellAuthSummary.value
     const inflightReceiptId = 'chatq_00000000-0000-4000-8000-000000000031'
     const recoveryReceiptId = 'chatq_00000000-0000-4000-8000-000000000032'
     fetchKeeperChatPending.mockResolvedValue({
@@ -1282,7 +1282,7 @@ describe('KeeperConversationPanel', () => {
   })
 
   it('replays an ambiguous event mutation with the exact preserved operation identity', async () => {
-    shellAuthSummary.value = { effective_role: 'admin', default_role: 'admin' } as typeof shellAuthSummary.value
+    shellAuthSummary.value = { effective_role: 'admin' } as typeof shellAuthSummary.value
     fetchKeeperChatPending.mockResolvedValue({
       keeperName: 'sangsu',
       revision: '22',

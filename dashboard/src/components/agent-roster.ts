@@ -220,15 +220,6 @@ export function rosterStateNote(
     }
   }
 
-  if (state.kind === 'running' && keeper.runtime_blocker_class === 'synthetic_stall') {
-    const summary = keeper.runtime_blocker_summary?.trim()
-    return {
-      label: '상태 추정',
-      text: summary || '실제 STATE 없이 합성된 진행 기록만 남아 최근 턴 산출물 재확인이 필요합니다.',
-      kind: 'synthetic_stall',
-    }
-  }
-
   if (state.kind === 'offline' && keeper.agent?.current_task) {
     return { label: '작업 중단', text: `할당된 작업이 있으나 keeper가 ${state.cause} 상태입니다` }
   }
@@ -644,7 +635,7 @@ function keeperRuntimeAgentProjection(source: Keeper): RosterAgent | null {
     status: (linkedAgent?.status as Agent['status'] | undefined) ?? (source.status as Agent['status'] | undefined),
     current_task: linkedAgent?.current_task ?? liveCurrentTask,
     context_ratio: source.context_ratio ?? undefined,
-    joined_at: linkedAgent?.joined_at,
+    session_bound_at: linkedAgent?.session_bound_at,
     last_seen: linkedAgent?.last_seen,
     capabilities: linkedAgent?.capabilities,
     emoji: source.emoji,
@@ -666,7 +657,7 @@ function mergeRosterAgent(existing: RosterAgent | undefined, next: RosterAgent):
     status: existing.status ?? next.status,
     current_task: existing.current_task ?? next.current_task,
     context_ratio: existing.context_ratio ?? next.context_ratio,
-    joined_at: existing.joined_at ?? next.joined_at,
+    session_bound_at: existing.session_bound_at ?? next.session_bound_at,
     last_seen: existing.last_seen ?? next.last_seen,
     capabilities: existing.capabilities?.length ? existing.capabilities : next.capabilities,
     emoji: existing.emoji ?? next.emoji,

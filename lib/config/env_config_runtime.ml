@@ -256,10 +256,6 @@ end
 (** {1 Tool Surface Configuration} *)
 
 module Tools = struct
-  (* RFC-0084 host-config-cleanup-J — [dispatch_v2_enabled] removed.
-     The [MASC_DISPATCH_V2] feature flag and the legacy match chain
-     it gated are gone; the Hashtbl dispatch path is the only path. *)
-
   (** Tool list page size, clamped to [10, 1024]. Default: 512.
       Re-readable within the process; not a guarantee of shell-level hot reload. *)
   let list_page_size () =

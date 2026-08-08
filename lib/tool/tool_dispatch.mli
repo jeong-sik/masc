@@ -132,11 +132,6 @@ val guarded_dispatch
 
 (** {1 Introspection} *)
 
-(* RFC-0084 host-config-cleanup-J — [val v2_enabled] removed.
-   The [MASC_DISPATCH_V2] feature flag (default ON since v2.102)
-   and the alternate match chain it gated are gone; the Hashtbl
-   dispatch path is the only path. *)
-
 val registered_count : unit -> int
 (** Number of registered tool names. *)
 

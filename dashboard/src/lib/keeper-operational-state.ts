@@ -59,7 +59,7 @@ import {
 } from './keeper-predicates'
 
 export type OfflineCause = 'unbooted' | 'shutdown' | 'crashed' | 'dead' | 'unknown'
-export type PausedCause = 'operator' | 'supervisor' | 'auto_recover' | 'unknown'
+export type PausedCause = 'operator' | 'auto_recover' | 'unknown'
 export type StuckReason = KeeperRuntimeBlockerClass | 'fiber_dead' | 'unknown'
 
 // RFC-0135 PR-14a — attention axis SSOT (Goal-2 typed-state expansion).
@@ -123,16 +123,6 @@ function canonicalRuntimeBlockerClass(
   return blockerClass
 }
 
-function runtimeBlockerDrivesStuck(
-  blockerClass: KeeperRuntimeBlockerClass,
-  attention: KeeperCompositeSnapshot['runtime_attention'] | null,
-): boolean {
-  if (blockerClass === 'synthetic_stall') {
-    return attention?.blocked === true
-  }
-  return true
-}
-
 export function deriveKeeperOperationalState(
   { keeper, composite }: DeriveInputs,
 ): KeeperOperationalState {
@@ -156,11 +146,7 @@ export function deriveKeeperOperationalState(
     attention?.execution_current === false
     || attention?.stale_execution_receipt === true
 
-  if (
-    blockerClass !== null
-    && !explicitlyStale
-    && runtimeBlockerDrivesStuck(blockerClass, attention)
-  ) {
+  if (blockerClass !== null && !explicitlyStale) {
     return { kind: 'stuck', ...axes, reason: blockerClass }
   }
 
@@ -196,7 +182,6 @@ function isPaused(k: Keeper, c: KeeperCompositeSnapshot | null): boolean {
 }
 
 function derivePausedCause(k: Keeper, c: KeeperCompositeSnapshot | null): PausedCause {
-  if (k.runtime_blocker_class === 'supervisor_paused') return 'supervisor'
   if (isKeeperAutoRecoverPause(k)) return 'auto_recover'
   if (c?.phase_diagnosis?.conditions.operator_paused === true) return 'operator'
   if (k.pause_state === 'paused') return 'operator'

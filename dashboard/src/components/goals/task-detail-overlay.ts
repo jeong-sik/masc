@@ -472,7 +472,7 @@ export function TaskDetailOverlay() {
   const p = effectiveTaskPriority(task)
   const keeper = findKeeper(task.assignee)
   const goalIds = assigneeGoalIds(task)
-  const assigneeKind = task.assignee_kind ?? (keeper ? 'keeper' : null)
+  const assigneeKind = keeper ? 'keeper' : null
 
   return html`
     <${DialogOverlay}

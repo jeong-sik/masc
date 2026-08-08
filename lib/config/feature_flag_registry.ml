@@ -60,9 +60,6 @@ let all_flags : flag list = [
     lifecycle = Active };
 
   (* ── Tool Surface ─────────────────────────────────────────── *)
-  (* RFC-0084 host-config-cleanup-J — MASC_DISPATCH_V2 entry removed.
-     The Hashtbl dispatch path is the only path. *)
-
   { env_name = Env_config_core.parse_warn_env_key;
     description = "Escalate malformed env parses to Config_error";
     default = false; category = "tool";

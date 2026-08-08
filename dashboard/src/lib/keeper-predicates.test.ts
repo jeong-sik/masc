@@ -135,12 +135,12 @@ describe('isCrashedPhase — SSE-safe casing checker', () => {
 
 describe('keeperIsStuckOnRecoverableBlocker', () => {
   it.each([
-    ['runtime_exhausted'], ['turn_timeout'],
+    ['runtime_exhausted'],
   ])('blocker_class=%s ⇒ stuck-recoverable', (cls) => {
     expect(keeperIsStuckOnRecoverableBlocker(k({ runtime_blocker_class: cls as Keeper['runtime_blocker_class'] }))).toBe(true)
   })
   it('other blocker classes are not in the wakeup-recoverable set', () => {
-    expect(keeperIsStuckOnRecoverableBlocker(k({ runtime_blocker_class: 'synthetic_stall' }))).toBe(false)
+    expect(keeperIsStuckOnRecoverableBlocker(k({ runtime_blocker_class: 'exception' }))).toBe(false)
   })
   it('null blocker is not stuck', () => {
     expect(keeperIsStuckOnRecoverableBlocker(k())).toBe(false)
@@ -149,7 +149,7 @@ describe('keeperIsStuckOnRecoverableBlocker', () => {
 
 describe('keeperCanWakeup', () => {
   it('stuck on canonical recoverable blocker ⇒ can wake', () => {
-    expect(keeperCanWakeup(k({ runtime_blocker_class: 'turn_timeout' }))).toBe(true)
+    expect(keeperCanWakeup(k({ runtime_blocker_class: 'stale_turn_timeout' }))).toBe(true)
   })
   it('plain running keeper ⇒ can wake (kick next turn)', () => {
     expect(keeperCanWakeup(k({ phase: 'Running' }))).toBe(true)
@@ -158,7 +158,7 @@ describe('keeperCanWakeup', () => {
     expect(keeperCanWakeup(k({ paused: true }))).toBe(false)
   })
   it('paused keeper with recoverable blocker ⇒ cannot wake', () => {
-    expect(keeperCanWakeup(k({ paused: true, runtime_blocker_class: 'turn_timeout' }))).toBe(false)
+    expect(keeperCanWakeup(k({ paused: true, runtime_blocker_class: 'stale_turn_timeout' }))).toBe(false)
   })
   it('offline keeper ⇒ cannot wake', () => {
     expect(keeperCanWakeup(k({ phase: 'Crashed' }))).toBe(false)

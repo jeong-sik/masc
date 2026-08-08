@@ -140,23 +140,10 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     }
   }
 
-  it('returns "상태 추정" for synthetic_stall when no composite is available', () => {
-    const note = rosterStateNote(
-      k({ runtime_blocker_class: 'synthetic_stall', runtime_blocker_summary: '합성 상태 정체' }),
-      null,
-      null,
-    )
-    expect(note).toEqual({
-      label: '상태 추정',
-      text: '합성 상태 정체',
-      kind: 'synthetic_stall',
-    })
-  })
-
   it('shows a pending approval gate before stale runtime blocker summaries', () => {
     const note = rosterStateNote(
       k({
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
         runtime_blocker_summary: '턴 응답 만료',
         current_gate: {
           kind: 'approval_required',
@@ -189,7 +176,7 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     const note = rosterStateNote(
       k({
         phase: 'Running',
-        runtime_blocker_class: 'synthetic_stall',
+        runtime_blocker_class: 'exception',
         runtime_blocker_summary: '잔여 marker',
       }),
       compositeWith(
@@ -204,8 +191,8 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     )
     expect(note).toEqual({
       label: '이전 차단',
-      text: '이전 턴 차단 (synthetic_stall) — 현재는 실행 중',
-      kind: 'synthetic_stall',
+      text: '이전 턴 차단 (exception) — 현재는 실행 중',
+      kind: 'exception',
     })
   })
 
@@ -285,14 +272,14 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
 
   it('paused keeper surfaces its blocker reason in the state note', () => {
     const note = rosterStateNote(
-      k({ paused: true, runtime_blocker_class: 'supervisor_paused' }),
+      k({ paused: true, runtime_blocker_class: 'runtime_exhausted' }),
       null,
       null,
     )
     expect(note).toEqual({
       label: '일시정지 원인',
-      text: 'Supervisor가 keeper를 일시정지한 상태라 재개 조건을 확인해야 합니다.',
-      kind: 'supervisor_paused',
+      text: '런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.',
+      kind: 'runtime_exhausted',
     })
   })
 

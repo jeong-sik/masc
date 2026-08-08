@@ -52,7 +52,6 @@ export interface KeeperPauseDisplay {
 
 type KeeperRuntimeDisplaySource = {
   runtime_id?: string | null
-  runtime_ref?: { group?: string | null; item?: string | null } | null
   runtime_canonical?: string | null
   selected_runtime_canonical?: string | null
 }
@@ -97,10 +96,7 @@ export function keeperDisplayRuntime(
   const runtimeId = trimmed(source?.runtime_id)
   if (runtimeId) return { label: 'Runtime', value: runtimeId }
 
-  const group = trimmed(source?.runtime_ref?.group)
-  if (!group) return null
-  const item = trimmed(source?.runtime_ref?.item)
-  return { label: 'Runtime', value: item ? `${group}.${item}` : group }
+  return null
 }
 
 function timestampCandidate(
@@ -333,9 +329,6 @@ function transientProviderRuntimeText(value: string | null | undefined): boolean
 export function isKeeperAutoRecoverPause(keeper: Keeper | null | undefined): boolean {
   if (!keeper || !isKeeperPaused(keeper)) return false
   const blockerClass = keeper.runtime_blocker_class
-  if (blockerClass === 'turn_timeout') {
-    return true
-  }
   if (blockerClass === 'provider_runtime_error') {
     return (
       transientProviderRuntimeText(keeper.runtime_blocker_summary)
@@ -450,7 +443,6 @@ function isHeartbeatAlive(heartbeat: string): boolean {
 }
 
 const runtimeBlockerLabels = {
-  turn_timeout: '턴 응답 만료',
   runtime_exhausted: '런타임 후보 소진',
   provider_runtime_error: '런타임 호출 오류',
   fiber_unresolved: 'Fiber 미해결',
@@ -459,17 +451,10 @@ const runtimeBlockerLabels = {
   heartbeat_failures: '하트비트 실패',
   turn_failures: '턴 실패 반복',
   exception: '런타임 예외',
-  awaiting_operator: '운영자 조치 대기',
-  awaiting_sandbox_egress: '샌드박스 egress 대기',
-  supervisor_paused: 'Supervisor 일시정지',
-  synthetic_stall: '합성 상태 정체',
-  self_imposed_idle: '자체 대기',
   sdk_context_window_exceeded: 'SDK 컨텍스트 윈도 초과',
   sdk_unrecognized_stop_reason: 'SDK 미식별 정지 사유',
-  sdk_idle_detected: 'SDK Idle 감지',
   sdk_guardrail_violation: 'SDK 가드레일 위반',
   sdk_tripwire_violation: 'SDK Tripwire 위반',
-  sdk_exit_condition_met: 'SDK 종료 조건 충족',
 } satisfies Record<KeeperRuntimeBlockerClass, string>
 
 export function keeperRuntimeBlockerLabel(
@@ -485,9 +470,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   const runtimeBlocker = normalizeKeeperBlockerText(keeper.runtime_blocker_summary)
   if (runtimeBlocker && runtimeBlocker !== blockerClass) {
     return runtimeBlocker
-  }
-  if (blockerClass === 'turn_timeout') {
-    return '턴 실행 시간이 제한 시간을 초과했습니다.'
   }
   if (blockerClass === 'runtime_exhausted') {
     return '런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.'
@@ -512,21 +494,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   }
   if (blockerClass === 'exception') {
     return 'Keeper 런타임 예외가 기록되어 로그와 최근 turn 상태 확인이 필요합니다.'
-  }
-  if (blockerClass === 'awaiting_operator') {
-    return '진행을 위해 운영자의 승인, 결정, 또는 게이트 해제가 필요합니다.'
-  }
-  if (blockerClass === 'awaiting_sandbox_egress') {
-    return '샌드박스 네트워크 또는 push egress 정책 때문에 keeper가 진행하지 못하고 있습니다.'
-  }
-  if (blockerClass === 'supervisor_paused') {
-    return 'Supervisor가 keeper를 일시정지한 상태라 재개 조건을 확인해야 합니다.'
-  }
-  if (blockerClass === 'synthetic_stall') {
-    return '실제 STATE 없이 합성된 진행 기록만 남아 최근 턴 산출물을 재확인해야 합니다.'
-  }
-  if (blockerClass === 'self_imposed_idle') {
-    return 'Keeper가 관찰 또는 대기만 계획하고 있어 다음 실행 지시가 필요할 수 있습니다.'
   }
   return null
 }

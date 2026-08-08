@@ -12,7 +12,6 @@ const missionAgentBriefs = signal<any[]>([])
 const missionKeeperBriefs = signal<any[]>([])
 const shellAuthSummary = signal<any>({
   effective_role: 'worker',
-  default_role: 'worker',
   auth_error_code: null,
   auth_error_detail: null,
 })
@@ -43,7 +42,6 @@ describe('CommandPalette', () => {
     route.value = { tab: 'code', params: { section: 'ide-shell' }, postId: null }
     shellAuthSummary.value = {
       effective_role: 'worker',
-      default_role: 'worker',
       auth_error_code: null,
       auth_error_detail: null,
     }
@@ -122,7 +120,6 @@ describe('CommandPalette', () => {
   it('runs maintenance actions only after confirmation', async () => {
     shellAuthSummary.value = {
       effective_role: 'admin',
-      default_role: 'worker',
       auth_error_code: null,
       auth_error_detail: null,
     }

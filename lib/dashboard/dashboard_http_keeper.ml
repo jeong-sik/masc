@@ -555,7 +555,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             | Some entry -> entry.last_error
             | None -> None
           in
-          (* reconcile_status removed with manual_reconcile blocker system. *)
           let runtime_blocker_fields =
             runtime_blocker_fields_json config m
           in

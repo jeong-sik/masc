@@ -33,7 +33,7 @@ export interface Agent {
   status?: 'active' | 'busy' | 'listening' | 'idle' | 'inactive' | 'offline'
   current_task: string | null
   context_ratio?: number
-  joined_at?: string
+  session_bound_at?: string
   last_seen?: string
   capabilities?: string[]
   emoji?: string
@@ -52,7 +52,6 @@ export interface Task {
   status_raw?: string | null
   priority?: number
   assignee?: string
-  assignee_kind?: string | null
   description?: string
   created_at?: string
   updated_at?: string
@@ -405,7 +404,6 @@ export interface ProviderHealth {
 }
 
 export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
-  'turn_timeout',
   'runtime_exhausted',
   'provider_runtime_error',
   'fiber_unresolved',
@@ -414,17 +412,10 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'heartbeat_failures',
   'turn_failures',
   'exception',
-  'awaiting_operator',
-  'awaiting_sandbox_egress',
-  'supervisor_paused',
-  'synthetic_stall',
-  'self_imposed_idle',
   'sdk_context_window_exceeded',
   'sdk_unrecognized_stop_reason',
-  'sdk_idle_detected',
   'sdk_guardrail_violation',
   'sdk_tripwire_violation',
-  'sdk_exit_condition_met',
 ] as const
 
 export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]
@@ -1172,7 +1163,6 @@ export interface Keeper {
    *  `keeper_briefs`. */
   exclusion_reason?: KeeperAutobootExclusionReason | null
   registered?: boolean
-  reconcile_status?: string | null
   emoji?: string
   koreanName?: string
   agent_name?: string
@@ -1292,7 +1282,7 @@ export interface Keeper {
     agent_type?: string
     status?: string
     current_task?: string | null
-    joined_at?: string
+    session_bound_at?: string
     last_seen?: string
     last_seen_ago_s?: number
     capabilities?: string[]

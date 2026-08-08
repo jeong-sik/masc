@@ -8,7 +8,6 @@ function makeSummary(
   return {
     enabled: true,
     require_token: true,
-    default_role: 'worker',
     token_present: true,
     token_valid: true,
     token_agent: 'codex',

@@ -92,7 +92,6 @@ export function normalizeAgentBrief(raw: unknown): DashboardMissionAgentBrief | 
     archived_reason: asString(raw.archived_reason) ?? null,
     status: asString(raw.status),
     where: asString(raw.where) ?? null,
-    with_whom: asStringArray(raw.with_whom),
     current_work: asString(raw.current_work) ?? null,
     related_attention_count: asNumber(raw.related_attention_count) ?? 0,
     last_activity_at: asString(raw.last_activity_at) ?? null,

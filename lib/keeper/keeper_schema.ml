@@ -305,7 +305,6 @@ let schemas : tool_schema list = [
       closed_object_schema ~required:[] [ "target", keeper_invocation_target_schema ]
   };
 
-  (* masc_keeper_reconcile removed with manual_reconcile blocker system. *)
 
   {
     name = "masc_keeper_down";

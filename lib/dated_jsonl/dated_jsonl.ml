@@ -1262,4 +1262,3 @@ module For_testing = struct
 
 end
 
-(* Duplicate count_entries removed — canonical definition at line 225 *)

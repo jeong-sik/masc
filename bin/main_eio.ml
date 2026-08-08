@@ -24,7 +24,6 @@ module Tool_operator = Masc.Tool_operator
 module Operator_control = Operator_control
 module Dashboard_execution = Dashboard_execution
 module Dashboard_briefing = Dashboard_briefing
-(* module Dashboard_proof removed *)
 module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Masc.Build_identity
 module Keeper_msg_async = Masc.Keeper_msg_async

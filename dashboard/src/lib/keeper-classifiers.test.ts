@@ -66,7 +66,6 @@ describe('classifyCrashReasonLib', () => {
     ['heartbeat_timeout', 'heartbeat'],
     ['HEARTBEAT_TIMEOUT', 'heartbeat'],
     ['turn', 'turn'],
-    ['turn_timeout', 'turn'],
     ['fiber', 'fiber'],
     ['fiber_cancel', 'fiber'],
     ['exception', 'exception'],

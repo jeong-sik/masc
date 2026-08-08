@@ -154,7 +154,6 @@ val record_measured_ceiling : int -> unit
     value unconditionally (no monotonic guard — the
     operator endpoint validates the value before calling). *)
 
-(* [acquire] / [release] removed 2026-05-05 — see header §Status. *)
 
 (** {1 Snapshot serialization} *)
 

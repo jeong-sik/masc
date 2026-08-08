@@ -17,12 +17,21 @@ type config =
   ; timeout_s : float
   }
 
+let default_timeout_s = 300.0
+let process_termination_grace_s = 2.0
+let stderr_chunk_bytes = 4096
+let stderr_tail_bytes = 4096
+let max_wire_line_bytes = 8 * 1024 * 1024
+let approval_policy = "never"
+let sandbox_mode = "read-only"
+let ephemeral_thread = true
+
 let default_config ~cwd =
   { cli_path = "codex"
   ; cwd
   ; model = None
   ; developer_instructions = None
-  ; timeout_s = 300.0
+  ; timeout_s = default_timeout_s
   }
 ;;
 
@@ -109,6 +118,43 @@ let error_kind = function
 ;;
 
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
+let ( let* ) result f = Result.bind result f
+
+let rec validate_unique_object_keys ~stage ~path = function
+  | `Assoc fields ->
+    let rec loop seen = function
+      | [] -> Ok ()
+      | (name, value) :: rest ->
+        if List.mem name seen
+        then
+          protocol_error
+            stage
+            (Printf.sprintf "duplicate object key %S at %s" name path)
+        else
+          let* () =
+            validate_unique_object_keys
+              ~stage
+              ~path:(path ^ "." ^ name)
+              value
+          in
+          loop (name :: seen) rest
+    in
+    loop [] fields
+  | `List values ->
+    let rec loop index = function
+      | [] -> Ok ()
+      | value :: rest ->
+        let* () =
+          validate_unique_object_keys
+            ~stage
+            ~path:(Printf.sprintf "%s[%d]" path index)
+            value
+        in
+        loop (index + 1) rest
+    in
+    loop 0 values
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Ok ()
+;;
 
 let assoc_at stage = function
   | `Assoc fields -> Ok fields
@@ -149,8 +195,6 @@ let required_int stage name fields =
   | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
 ;;
 
-let ( let* ) result f = Result.bind result f
-
 type wire_message =
   | Response of
       { id : int
@@ -187,6 +231,7 @@ let parse_wire_line line =
     | Yojson.Json_error detail -> protocol_error stage ("invalid JSON: " ^ detail)
   in
   let* json = json_result in
+  let* () = validate_unique_object_keys ~stage ~path:"$" json in
   let* fields = assoc_at stage json in
   match List.assoc_opt "id" fields, List.assoc_opt "method" fields with
   | Some id, Some (`String method_) ->
@@ -425,8 +470,11 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params =
       | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
 ;;
 
+let max_retry_notifications = 3
+let max_unknown_notifications = 128
+
 let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
-    ~seen_fallback =
+    ~seen_fallback ~retry_notifications ~unknown_notifications =
   let* message = io.receive () in
   match message with
   | Response _ | Response_error _ ->
@@ -450,6 +498,8 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~turn_id
       ~seen_final
       ~seen_fallback
+      ~retry_notifications
+      ~unknown_notifications
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
@@ -477,11 +527,13 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~turn_id
         ~seen_final
         ~seen_fallback
+        ~retry_notifications
+        ~unknown_notifications
   | Notification { method_ = "error"; params } ->
     let stage = "error notification" in
     let* fields = assoc_at stage params in
     let* will_retry = required_bool stage "willRetry" fields in
-    if will_retry
+    if will_retry && retry_notifications < max_retry_notifications
     then
       await_turn_terminal
         io
@@ -491,6 +543,10 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~turn_id
         ~seen_final
         ~seen_fallback
+        ~retry_notifications:(retry_notifications + 1)
+        ~unknown_notifications
+    else if will_retry
+    then Error (Turn_failed "app-server retry notification limit exceeded")
     else
       let* error_json = required_member stage "error" fields in
       let* error_fields = assoc_at stage error_json in
@@ -498,7 +554,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       Error (Turn_failed message)
   | Notification { method_ = "turn/completed"; params } ->
     terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params
-  | Notification _ ->
+  | Notification _ when unknown_notifications < max_unknown_notifications ->
     await_turn_terminal
       io
       ~tools
@@ -507,6 +563,14 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~turn_id
       ~seen_final
       ~seen_fallback
+      ~retry_notifications
+      ~unknown_notifications:(unknown_notifications + 1)
+  | Notification { method_; _ } ->
+    protocol_error
+      "turn"
+      (Printf.sprintf
+         "unknown notification limit exceeded (last method %S)"
+         method_)
 ;;
 
 let optional_field name = function
@@ -533,7 +597,7 @@ let history_item (message : history_message) =
     ]
 ;;
 
-let run_protocol io config ~dynamic_tools ~history ~prompt =
+let run_protocol io config ~dynamic_tools ~reasoning_effort ~history ~prompt =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
       (`Assoc
@@ -554,9 +618,9 @@ let run_protocol io config ~dynamic_tools ~history ~prompt =
   let* subscription = parse_subscription account in
   let thread_fields =
     [ "cwd", `String config.cwd
-    ; "approvalPolicy", `String "never"
-    ; "sandbox", `String "read-only"
-    ; "ephemeral", `Bool true
+    ; "approvalPolicy", `String approval_policy
+    ; "sandbox", `String sandbox_mode
+    ; "ephemeral", `Bool ephemeral_thread
     ]
     @ optional_field "model" config.model
     @ optional_field "developerInstructions" config.developer_instructions
@@ -585,10 +649,13 @@ let run_protocol io config ~dynamic_tools ~history ~prompt =
   send_request io ~id:turn_request_id ~method_:"turn/start"
     ~params:
       (`Assoc
-         [ "threadId", `String thread_id
-         ; ( "input"
-           , `List [ `Assoc [ "type", `String "text"; "text", `String prompt ] ] )
-         ]);
+         ([ "threadId", `String thread_id
+          ; ( "input"
+            , `List [ `Assoc [ "type", `String "text"; "text", `String prompt ] ] )
+          ]
+          @ optional_field
+              "effort"
+              (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)));
   let* turn = await_response io ~id:turn_request_id ~method_:"turn/start" in
   let* turn_id = parse_turn_start turn in
   let tool_call_count = ref 0 in
@@ -601,6 +668,8 @@ let run_protocol io config ~dynamic_tools ~history ~prompt =
       ~turn_id
       ~seen_final:None
       ~seen_fallback:None
+      ~retry_notifications:0
+      ~unknown_notifications:0
   in
   Ok
     { thread_id
@@ -636,17 +705,20 @@ let bounded_tail ~limit current addition =
 ;;
 
 let drain_stderr flow tail =
-  let chunk = Cstruct.create 4096 in
+  let chunk = Cstruct.create stderr_chunk_bytes in
   try
     while true do
       let count = Eio.Flow.single_read flow chunk in
       let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
-      tail := bounded_tail ~limit:4096 !tail text
+      tail := bounded_tail ~limit:stderr_tail_bytes !tail text
     done
   with
   | End_of_file -> ()
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> ()
+  | exn ->
+    Log.Runtime_agent.debug
+      "Codex app-server stderr drain failed: %s"
+      (Printexc.to_string exn)
 ;;
 
 let terminate_spawned_process ~clock proc stdin_w =
@@ -664,7 +736,10 @@ let terminate_spawned_process ~clock proc stdin_w =
          (Printexc.to_string exn));
     if not owning_switch_cancelled
     then
-      try Eio.Time.with_timeout_exn clock 2.0 (fun () -> Eio.Process.await proc |> ignore) with
+      try
+        Eio.Time.with_timeout_exn clock process_termination_grace_s (fun () ->
+          Eio.Process.await proc |> ignore)
+      with
       | Eio.Time.Timeout ->
         (try
            Eio.Process.signal proc Sys.sigkill;
@@ -680,7 +755,7 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
-let run_spawned ~mgr ~clock config ~dynamic_tools ~history ~prompt =
+let run_spawned ~mgr ~clock config ~dynamic_tools ~reasoning_effort ~history ~prompt =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -696,7 +771,7 @@ let run_spawned ~mgr ~clock config ~dynamic_tools ~history ~prompt =
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
-    let reader = Eio.Buf_read.of_flow ~max_size:(8 * 1024 * 1024) stdout_r in
+    let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let send json =
       Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
       Eio.Flow.copy_string "\n" stdin_w
@@ -717,7 +792,13 @@ let run_spawned ~mgr ~clock config ~dynamic_tools ~history ~prompt =
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
       (fun () ->
         Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
-          run_protocol { send; receive } config ~dynamic_tools ~history ~prompt)))
+          run_protocol
+            { send; receive }
+            config
+            ~dynamic_tools
+            ~reasoning_effort
+            ~history
+            ~prompt)))
 ;;
 
 let validate_config config ~prompt =
@@ -746,7 +827,8 @@ let validate_dynamic_tools tools =
   loop [] tools
 ;;
 
-let run_turn ?(dynamic_tools = []) ~mgr ~clock ?(history = []) config ~prompt =
+let run_turn ?(dynamic_tools = []) ?reasoning_effort ~mgr ~clock ?(history = []) config
+    ~prompt =
   let result =
     match validate_config config ~prompt with
     | Error _ as error -> error
@@ -755,7 +837,16 @@ let run_turn ?(dynamic_tools = []) ~mgr ~clock ?(history = []) config ~prompt =
        | Error _ as error -> error
        | Ok () ->
       Log.Runtime_agent.info "Codex app-server subscription turn starting";
-      (try run_spawned ~mgr ~clock config ~dynamic_tools ~history ~prompt with
+      (try
+         run_spawned
+           ~mgr
+           ~clock
+           config
+           ~dynamic_tools
+           ~reasoning_effort
+           ~history
+           ~prompt
+       with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
        | exn -> Error (Spawn_failed (Printexc.to_string exn))))

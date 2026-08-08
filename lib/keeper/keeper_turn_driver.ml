@@ -685,16 +685,60 @@ let run_named
           ()
       in
       match runtime.Runtime.execution with
-      | Runtime_execution.Codex_app_server _ ->
+      | Runtime_execution.Codex_app_server config ->
+        let codex_result =
+          match provider_config_transform, oas_checkpoint with
+          | Some _, _ ->
+            Error
+              (Agent_sdk.Error.Config
+                 (Agent_sdk.Error.InvalidConfig
+                    { field = "provider_config_transform"
+                    ; detail =
+                        "provider config transforms cannot target a \
+                         codex-app-server runtime"
+                    }))
+          | None, Some _ ->
+            Error
+              (Agent_sdk.Error.Config
+                 (Agent_sdk.Error.InvalidConfig
+                    { field = "oas_checkpoint"
+                    ; detail =
+                        "an OAS agent_core checkpoint cannot resume through a \
+                         codex-app-server runtime"
+                    }))
+          | None, None ->
+            Keeper_codex_runtime.run
+              ~runtime_id:attempt_runtime_id
+              ~keeper_name
+              ~base_path
+              ~goal
+              ~goal_blocks
+              ~system_prompt
+              ~tools
+              ~initial_messages
+              ~model_input_projection
+              ~hooks
+              ~context_injector
+              ~context
+              ~event_bus
+              ~enable_thinking:inference_policy.attempt_enable_thinking
+              ~config
+        in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
-        ( Error
-            (Agent_sdk.Error.Config
-               (Agent_sdk.Error.InvalidConfig
-                  { field = "runtime_execution"
-                  ; detail =
-                      "codex-app-server is materialized as an official-client runtime but is not yet admitted by the Keeper turn driver"
-                  }))
-        , None )
+        let codex_result =
+          Result.bind codex_result (fun run_result ->
+            Keeper_turn_driver_try_provider.apply_accept
+              ~runtime_id:attempt_runtime_id
+              ~accept
+              run_result)
+        in
+        (match codex_result with
+         | Ok run_result ->
+           Option.iter
+             (fun observe -> Option.iter observe run_result.Runtime_agent.runtime_observation)
+             on_runtime_observation
+         | Error _ -> ());
+        codex_result, None
       | Runtime_execution.Agent_core runtime_provider_config ->
        (match
           match provider_config_transform with
@@ -786,7 +830,8 @@ let run_named
               ~replay_prefix_projection
               provider_result
           in
-          outcomes.turn_result, checkpoint_after)))
+          outcomes.turn_result, checkpoint_after))
+       )
     attempt_candidates
 
 

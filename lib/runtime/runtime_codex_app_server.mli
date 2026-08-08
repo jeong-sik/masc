@@ -73,6 +73,7 @@ val error_to_string : error -> string
 
 val run_turn :
   ?dynamic_tools:dynamic_tool list ->
+  ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   ?history:history_message list ->

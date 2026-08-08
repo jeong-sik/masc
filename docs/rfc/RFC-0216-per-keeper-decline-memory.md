@@ -16,7 +16,7 @@ The decline signal is recorded but write-only — never read at the two decision
 
 - `task.cycle_count` (`lib/types/types_core.ml:535`) is incremented on every Release (`lib/workspace/workspace_task_transitions.ml:402`) and WARN-logged at 5/10/20, but `claim_next_r` (`lib/workspace/workspace_task_schedule.ml:314-388`) sorts by priority+age and never reads it.
 - `handoff_context.reason` (`types_core.ml:511-520`, the keeper's "unsuitable" rationale) is persisted but never consulted in selection — narrative text, not a typed signal.
-- Keeper `world_observation` (`lib/keeper/keeper_world_observation.ml:29-47`) carries only aggregate counts (`unclaimed_task_count`, `claimable_task_count`, ...) — no per-task decline history. `wip_rejections` is a turn-local `ref []` discarded at turn end (`lib/keeper/keeper_tool_task_runtime.ml:526-552`).
+- Keeper `world_observation` carries claimable task summaries, but no per-task decline history. `wip_rejections` is a turn-local `ref []` discarded at turn end (`lib/keeper/keeper_tool_task_runtime.ml:526-552`).
 
 Every keeper re-selects a declined task as if it were new: the system has the decline information but does not consult it when deciding what to offer.
 

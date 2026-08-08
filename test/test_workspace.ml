@@ -1547,7 +1547,11 @@ let test_audit_orphan_tasks () =
     Alcotest.(check int) "one orphan detected" 1 (List.length orphans_after);
     let (task, assignee) = List.hd orphans_after in
     Alcotest.(check string) "orphan assignee" test_agent_a assignee;
-    Alcotest.(check string) "orphan task id" "task-001" task.id
+    Alcotest.(check string) "orphan task id" "task-001" task.id;
+    Alcotest.(check int)
+      "provided task snapshot is authoritative"
+      0
+      (List.length (Workspace.audit_orphan_tasks_in_tasks config []))
   )
 
 let test_audit_orphan_awaiting_verification_tasks () =
@@ -1669,7 +1673,7 @@ let keeper_meta_for_goal_filter agent_name active_goal_ids =
 (* Keepers can claim without a materialized [.masc/agents/] record. The keeper
    backlog failed-task count must exclude the keeper's own claimed task so it
    does not re-trigger a self-wake loop. *)
-let test_read_backlog_counts_excludes_self_owned_orphan () =
+let test_read_backlog_snapshot_excludes_self_owned_orphan () =
   with_test_env (fun config ->
     let keeper = "keeper-self-filter-agent" in
     let _ = Workspace.bind_session config ~agent_name:keeper ~capabilities:[] () in
@@ -1677,13 +1681,16 @@ let test_read_backlog_counts_excludes_self_owned_orphan () =
     (* Remove the agent file to simulate a keeper with no active registry record. *)
     let _ = Workspace.end_session config ~agent_name:keeper in
     let meta = keeper_meta_for_self_filter keeper in
-    let _, _, failed, _ =
-      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    let snapshot =
+      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
     in
-    Alcotest.(check int) "keeper's own orphan excluded from failed count" 0 failed
+    Alcotest.(check int)
+      "keeper's own orphan excluded from failed count"
+      0
+      snapshot.failed_count
   )
 
-let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
+let test_read_backlog_snapshot_falls_back_to_unscoped_claimable_task () =
   with_test_env (fun config ->
     let keeper = "keeper-goal-filter-agent" in
     let _ =
@@ -1691,16 +1698,16 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
         ~priority:1 ~description:""
     in
     let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
-    let _, claimable, _, _ =
-      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    let snapshot =
+      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
     in
     Alcotest.(check int)
       "claimable count falls back to unscoped todo"
       1
-      claimable
+      (List.length snapshot.claimable_tasks)
   )
 
-let test_read_backlog_counts_preserves_unreadable_observation () =
+let test_read_backlog_snapshot_preserves_unreadable_observation () =
   with_test_env (fun config ->
     let task_id =
       match Keeper_id.Task_id.of_string "task-001" with
@@ -1730,28 +1737,37 @@ let test_read_backlog_counts_preserves_unreadable_observation () =
      | Keeper_world_observation_inputs.Current_task_unavailable _ ->
        Alcotest.fail "valid recovery source was not preserved");
     let meta = keeper_meta_for_self_filter "keeper-backlog-recovery-agent" in
-    let unclaimed, claimable, failed, revision =
-      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    let snapshot =
+      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
     in
-    Alcotest.(check int) "recovery unclaimed count is inert" 0 unclaimed;
-    Alcotest.(check int) "recovery claimable count is inert" 0 claimable;
-    Alcotest.(check int) "recovery failed count is inert" 0 failed;
+    Alcotest.(check int) "recovery unclaimed count is inert" 0 snapshot.unclaimed_count;
+    Alcotest.(check int)
+      "recovery claimable rows are inert"
+      0
+      (List.length snapshot.claimable_tasks);
+    Alcotest.(check int) "recovery failed count is inert" 0 snapshot.failed_count;
     Alcotest.(check (option int))
       "recovery has no authoritative revision"
       None
-      revision;
+      snapshot.revision;
     write_corrupt (Workspace.backlog_recovery_path config);
     let meta = keeper_meta_for_self_filter "keeper-backlog-failure-agent" in
-    let unclaimed, claimable, failed, revision =
-      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    let snapshot =
+      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
     in
-    Alcotest.(check int) "unreadable unclaimed count is inert" 0 unclaimed;
-    Alcotest.(check int) "unreadable claimable count is inert" 0 claimable;
-    Alcotest.(check int) "unreadable failed count is inert" 0 failed;
+    Alcotest.(check int)
+      "unreadable unclaimed count is inert"
+      0
+      snapshot.unclaimed_count;
+    Alcotest.(check int)
+      "unreadable claimable rows are inert"
+      0
+      (List.length snapshot.claimable_tasks);
+    Alcotest.(check int) "unreadable failed count is inert" 0 snapshot.failed_count;
     Alcotest.(check (option int))
       "unreadable backlog has no fabricated revision"
       None
-      revision;
+      snapshot.revision;
     let board_event : Keeper_world_observation.pending_board_event =
       { event_kind = Board_post_created
       ; post_id = "post-backlog-unreadable"
@@ -1855,48 +1871,50 @@ let test_self_authored_scoped_task_does_not_hide_peer_work () =
       Workspace.add_task config ~goal_id:"goal-b" ~created_by:"peer-keeper"
         ~title:"Peer work outside active goal" ~priority:1 ~description:""
     in
-    let _, claimable, _, _ =
-      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    let snapshot =
+      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
     in
     Alcotest.(check int)
       "self-authored scoped work does not suppress peer fallback"
       1
-      claimable)
+      (List.length snapshot.claimable_tasks))
 ;;
 
-(* The self-authored exclusion must hold through [read_backlog_counts], not
+(* The self-authored exclusion must hold through [read_backlog_snapshot], not
    only in [task_is_self_authored_todo]: dropping the filter clause leaves every
-   predicate-level test green while the feedback loop stays open. Counts are
+   predicate-level test green while the feedback loop stays open. Rows are
    compared against a baseline because the fixture seeds its own tasks. *)
-let test_read_backlog_counts_excludes_self_authored_task () =
+let test_read_backlog_snapshot_excludes_self_authored_task () =
   with_test_env (fun config ->
     let meta = keeper_meta_for_self_filter "keeper-self-filter-agent" in
-    let _, claimable_before, _, _ =
-      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
-    in
+    let before = Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta in
+    let claimable_before = List.length before.claimable_tasks in
     let _ =
       Workspace.add_task config ~created_by:meta.name
         ~title:"self-authored routing task" ~priority:3 ~description:""
     in
-    let unclaimed_after_self, claimable_after_self, _, _ =
-      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    let after_self =
+      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
     in
     Alcotest.(check int)
       "a keeper's own task is not offered back to it as claimable"
-      claimable_before claimable_after_self;
+      claimable_before
+      (List.length after_self.claimable_tasks);
     let _ =
       Workspace.add_task config ~created_by:"peer-keeper"
         ~title:"peer authored task" ~priority:3 ~description:""
     in
-    let unclaimed_after_peer, claimable_after_peer, _, _ =
-      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    let after_peer =
+      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
     in
     Alcotest.(check int)
       "a peer-authored task is still claimable"
-      (claimable_before + 1) claimable_after_peer;
+      (claimable_before + 1)
+      (List.length after_peer.claimable_tasks);
     Alcotest.(check int)
       "the unclaimed count still reports both tasks"
-      (unclaimed_after_self + 1) unclaimed_after_peer
+      (after_self.unclaimed_count + 1)
+      after_peer.unclaimed_count
   )
 
 let test_keeper_tasks_audit_excludes_self_owned_orphan () =
@@ -2314,21 +2332,21 @@ let () =
         test_audit_orphan_ignores_elapsed_last_seen_for_active_agent;
       Alcotest.test_case "audit orphan requires exact identity" `Quick
         test_audit_orphan_requires_exact_registered_identity;
-      Alcotest.test_case "read backlog counts excludes self-owned orphan" `Quick
-        test_read_backlog_counts_excludes_self_owned_orphan;
-      Alcotest.test_case "read backlog counts falls back to unscoped claimable"
+      Alcotest.test_case "backlog snapshot excludes self-owned orphan" `Quick
+        test_read_backlog_snapshot_excludes_self_owned_orphan;
+      Alcotest.test_case "backlog snapshot falls back to unscoped claimable"
         `Quick
-        test_read_backlog_counts_falls_back_to_unscoped_claimable_task;
-      Alcotest.test_case "read backlog counts preserves unreadable observation" `Quick
-        test_read_backlog_counts_preserves_unreadable_observation;
+        test_read_backlog_snapshot_falls_back_to_unscoped_claimable_task;
+      Alcotest.test_case "backlog snapshot preserves unreadable observation" `Quick
+        test_read_backlog_snapshot_preserves_unreadable_observation;
       Alcotest.test_case "read current task preserves unavailable and missing" `Quick
         test_read_current_task_preserves_unavailable_and_missing;
       Alcotest.test_case "self-authored scoped task does not hide peer work"
         `Quick
         test_self_authored_scoped_task_does_not_hide_peer_work;
-      Alcotest.test_case "read backlog counts excludes self-authored task"
+      Alcotest.test_case "backlog snapshot excludes self-authored task"
         `Quick
-        test_read_backlog_counts_excludes_self_authored_task;
+        test_read_backlog_snapshot_excludes_self_authored_task;
       Alcotest.test_case "keeper tasks audit excludes self-owned orphan" `Quick
         test_keeper_tasks_audit_excludes_self_owned_orphan;
     ];

@@ -907,7 +907,7 @@ let () =
       ; idle_seconds = 0
       ; active_goals = []
       ; unclaimed_task_count = 0
-      ; claimable_task_count = 0
+      ; claimable_tasks = []
       ; failed_task_count = 0
       ; scheduled_automation =
           Masc.Keeper_world_observation.empty_scheduled_automation_observation

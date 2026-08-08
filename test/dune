@@ -192,6 +192,7 @@
   test_ide_diagnostics
   test_keeper_runtime_contract
   test_goal_scope_terminal_phase
+  test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_accountability
   test_reputation_ledger_v2
@@ -491,6 +492,7 @@
   test_ide_diagnostics
   test_keeper_runtime_contract
   test_goal_scope_terminal_phase
+  test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_accountability
   test_reputation_ledger_v2

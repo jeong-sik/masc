@@ -9,7 +9,7 @@ let base_observation : WO.world_observation =
   ; idle_seconds = 0
   ; active_goals = []
   ; unclaimed_task_count = 0
-  ; claimable_task_count = 0
+  ; claimable_tasks = []
   ; failed_task_count = 0
   ; scheduled_automation = WO.empty_scheduled_automation_observation
   ; backlog_revision = Some 1
@@ -26,7 +26,13 @@ let test_task_signals_reach_the_keeper_without_local_tool_semantics () =
   in
   assert_wakes
     "claimable task is an observation"
-    { base_observation with claimable_task_count = 1 };
+    { base_observation with
+      claimable_tasks =
+        [ { Keeper_world_observation_inputs.task_id =
+              Keeper_id.Task_id.of_string "task-claimable" |> Result.get_ok
+          }
+        ]
+    };
   assert_wakes
     "failed task is an observation"
     { base_observation with failed_task_count = 1 }

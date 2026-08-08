@@ -28,6 +28,7 @@ let append_decision_record
     ?terminal_reason
     () : unit =
   let now_ts = Time_compat.now () in
+  let claimable_task_count = Keeper_world_observation.claimable_task_count observation in
   let trigger_signals = observed_triggers_of_observation observation in
   let affordances = observed_affordances_of_observation observation in
   let response_preview =
@@ -172,12 +173,12 @@ let append_decision_record
               ("active_goals", `Int (List.length observation.active_goals));
               ("idle_seconds", `Int observation.idle_seconds);
               ("unclaimed_task_count", `Int observation.unclaimed_task_count);
-              ("claimable_task_count", `Int observation.claimable_task_count);
+              ("claimable_task_count", `Int claimable_task_count);
               ( "claim_blocked_task_count",
                 `Int
                   (max 0
                      (observation.unclaimed_task_count
-                      - observation.claimable_task_count)) );
+                      - claimable_task_count)) );
               ("failed_task_count", `Int observation.failed_task_count);
               ( "scheduled_automation_active_count",
                 `Int observation.scheduled_automation.active_count );
@@ -186,8 +187,8 @@ let append_decision_record
               ("running_keeper_fiber_count", `Int observation.running_keeper_fiber_count);
             ] );
         ("claim_absolute_available", `Bool (observation.unclaimed_task_count > 0));
-        ("claim_matched_available", `Bool (observation.claimable_task_count > 0));
-        ("claim_was_available", `Bool (observation.claimable_task_count > 0));
+        ("claim_matched_available", `Bool (claimable_task_count > 0));
+        ("claim_was_available", `Bool (claimable_task_count > 0));
         ( "response_preview", Json_util.string_opt_to_json response_preview );
         ( "response_preview_2000",
           match result with

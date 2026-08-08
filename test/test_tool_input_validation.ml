@@ -3,13 +3,7 @@ module Types = Masc_domain
 (** Unit tests for Tool_input_validation — OAS-delegated strict validation.
 
     Tests the integration: MASC JSON Schema -> Tool_bridge.params_of_json_schema
-    -> Agent_sdk.Tool_input_validation.validate -> pre_hook_action mapping.
-
-    OAS 0.212 (oas@6f3648d6, "hard-cut implicit agent governance") removed
-    implicit type coercion from validate: a string value for an
-    integer/boolean/number parameter is now a deterministic Reject with a
-    typed error the caller can act on, not a silent repair. These tests
-    codify that strict contract. *)
+    -> Agent_sdk.Tool_input_validation.validate -> pre_hook_action mapping. *)
 
 open Masc
 
@@ -136,8 +130,7 @@ let test_no_required_fields () =
       (Yojson.Safe.to_string (Tool_result.data r)))
 
 (* ================================================================ *)
-(* Test: strict typing — string never repairs to a scalar type       *)
-(* (OAS 0.212 removed implicit coercion; Reject carries the field)   *)
+(* Test: strict scalar typing                                       *)
 (* ================================================================ *)
 
 let test_string_for_integer_rejected () =
@@ -504,9 +497,6 @@ let keeper_model_board_post_get_schema =
     "masc_board_post_get"
     (Keeper_tool_descriptor.model_visible_schemas ())
 
-let keeper_memory_search_schema =
-  find_schema_exn "keeper_memory_search" Config.raw_all_tool_schemas
-
 let keeper_task_done_schema =
   find_schema_exn "keeper_task_done" Config.raw_all_tool_schemas
 
@@ -787,21 +777,6 @@ let test_every_keeper_schema_forbids_additional_properties () =
         forbids)
     Masc.Keeper_schema.schemas
 
-let test_validate_args_keeper_memory_search_rejects_removed_kind () =
-  match
-    Tool_input_validation.validate_args
-      ~schema:keeper_memory_search_schema
-      ~name:"keeper_memory_search"
-      ~args:(`Assoc [ "query", `String "memory"; "kind", `String "durable_knowledge" ])
-      ()
-  with
-  | Ok forwarded ->
-    Alcotest.failf
-      "expected removed kind field to be rejected, but it passed: %s"
-      (Yojson.Safe.to_string forwarded)
-  | Error result ->
-    assert_policy_validation_payload ~label:"removed memory kind" result
-
 (* The op enum (derived from Keeper_workspace_op.valid_strings) must accept
    EVERY op the runtime dispatch handles. Guards the regression where the
    enum is hand-listed with only the directory-listing ops, silently
@@ -810,17 +785,6 @@ let param_by_name name params =
   List.find_opt
     (fun (param : Agent_sdk.Types.tool_param) -> String.equal param.name name)
     params
-
-let legacy_background_flag_name = "run_" ^ "in_background"
-
-let execute_async_lifecycle_field_names =
-  [ legacy_background_flag_name
-  ; "job_id"
-  ; "request_id"
-  ; "backgroundTaskId"
-  ; "poll"
-  ; "cancel"
-  ]
 
 let check_param_type name expected params =
   match param_by_name name params with
@@ -843,27 +807,24 @@ let check_param_type name expected params =
 
 let test_tool_execute_schema_exposes_typed_boundary () =
   let params = Tool_bridge.params_of_json_schema tool_execute_schema in
-  Alcotest.(check bool)
-    "retired executable field is not exposed"
-    true
-    (Option.is_none (param_by_name "executable" params));
+  let names =
+    params
+    |> List.map (fun (param : Agent_sdk.Types.tool_param) -> param.name)
+    |> List.sort String.compare
+  in
+  Alcotest.(check (list string))
+    "Execute exposes exactly its current fields"
+    (List.sort String.compare
+       [ "argv"; "cwd"; "env"; "pipeline"; "stderr"; "stdin"; "stdout"; "timeout_sec" ])
+    names;
   check_param_type "argv" "array" params;
   check_param_type "pipeline" "array" params;
   check_param_type "env" "object" params;
-  Alcotest.(check bool)
-    "stages alias rejected by schema" true
-    (Option.is_none (param_by_name "stages" params));
-  Alcotest.(check bool)
-    "legacy background flag not exposed"
-    true
-    (Option.is_none (param_by_name legacy_background_flag_name params));
-  List.iter
-    (fun field ->
-      Alcotest.(check bool)
-        (field ^ " async lifecycle field not exposed")
-        true
-        (Option.is_none (param_by_name field params)))
-    execute_async_lifecycle_field_names
+  check_param_type "cwd" "string" params;
+  check_param_type "timeout_sec" "number" params;
+  check_param_type "stdin" "object" params;
+  check_param_type "stdout" "object" params;
+  check_param_type "stderr" "object" params
 
 let test_validate_args_tool_execute_rejects_empty_object_with_policy_class () =
   let args = `Assoc [] in
@@ -886,8 +847,9 @@ let test_validate_args_tool_execute_rejects_empty_object_with_policy_class () =
       "expected empty tool_execute args to fail, got %s"
       (Yojson.Safe.to_string forwarded)
 
-let test_validate_args_tool_execute_rejects_cmd_string () =
-  let args = `Assoc [ "cmd", `String "pwd" ] in
+let test_validate_args_tool_execute_rejects_unknown_field () =
+  let field = "unexpected_input" in
+  let args = `Assoc [ "argv", `List [ `String "pwd" ]; field, `Bool true ] in
   match
     Tool_input_validation.validate_args
       ~schema:tool_execute_schema
@@ -895,89 +857,12 @@ let test_validate_args_tool_execute_rejects_cmd_string () =
       ~args
       ()
   with
-  | Ok _ -> Alcotest.fail "expected tool_execute cmd string to be rejected"
+  | Ok _ -> Alcotest.fail "expected tool_execute unknown field to be rejected"
   | Error result ->
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
-    Alcotest.(check bool)
-      "validation error returned"
-      true
-      (String.length msg > 0);
-    assert_policy_validation_payload ~label:"cmd string" result;
-    Alcotest.(check bool)
-      "validation error points to typed argv"
-      true
-      (string_contains msg "argv=[\\\"git\\\",\\\"status\\\",\\\"--short\\\"]")
-
-let test_validate_args_tool_execute_rejects_command_string () =
-  let args = `Assoc [ "command", `String "pwd" ] in
-  match
-    Tool_input_validation.validate_args
-      ~schema:tool_execute_schema
-      ~name:"tool_execute"
-      ~args
-      ()
-  with
-  | Ok _ -> Alcotest.fail "expected tool_execute command string to be rejected"
-  | Error result ->
-    let msg = Yojson.Safe.to_string (Tool_result.data result) in
-    Alcotest.(check bool)
-      "validation error mentions unsupported command field"
-      true
-      (string_contains msg "unsupported field(s): command");
-    Alcotest.(check bool)
-      "validation error says command field is unavailable"
-      true
-      (string_contains msg "no cmd/command field")
-
-let test_validate_args_tool_execute_rejects_background_flag () =
-  let args =
-    `Assoc
-      [ "argv", `List [ `String "pwd" ]; legacy_background_flag_name, `Bool true ]
-  in
-  match
-    Tool_input_validation.validate_args
-      ~schema:tool_execute_schema
-      ~name:"tool_execute"
-      ~args
-      ()
-  with
-  | Ok _ -> Alcotest.fail "expected tool_execute background flag to be rejected"
-  | Error result ->
-    let msg = Yojson.Safe.to_string (Tool_result.data result) in
-    Alcotest.(check bool) "mentions legacy background flag" true
-      (string_contains msg legacy_background_flag_name)
-
-let test_validate_args_tool_execute_rejects_async_lifecycle_fields () =
-  let cases =
-    [ legacy_background_flag_name, `Bool true
-    ; "job_id", `String "job-123"
-    ; "request_id", `String "req-123"
-    ; "backgroundTaskId", `String "bg-123"
-    ; "poll", `Bool true
-    ; "cancel", `Bool true
-    ]
-  in
-  List.iter
-    (fun (field, value) ->
-      let args = `Assoc [ "argv", `List [ `String "pwd" ]; field, value ] in
-      match
-        Tool_input_validation.validate_args
-          ~schema:tool_execute_schema
-          ~name:"tool_execute"
-          ~args
-          ()
-      with
-      | Ok _ ->
-          Alcotest.failf
-            "expected tool_execute async lifecycle field %s to be rejected"
-            field
-      | Error result ->
-          let msg = Yojson.Safe.to_string (Tool_result.data result) in
-          Alcotest.(check bool)
-            ("mentions async lifecycle field " ^ field)
-            true
-            (string_contains msg field))
-    cases
+    Alcotest.(check bool) "validation names the unknown field" true
+      (string_contains msg field);
+    assert_policy_validation_payload ~label:"unknown Execute field" result
 
 let test_validate_args_tool_execute_accepts_typed_exec () =
   let args =
@@ -1491,37 +1376,6 @@ let test_validation_telemetry_records_pass_and_fail_counters () =
               "expected empty schema no-arg pass, got %s"
               (Yojson.Safe.to_string (Tool_result.data result))))
 
-let test_validation_telemetry_rejects_retired_transition_aliases () =
-  check_validation_metric_increment
-    ~tool:"masc_transition"
-    ~result:"fail"
-    ~reason:"invalid_args"
-    (fun () ->
-       match
-         Tool_input_validation.validate_args
-           ~schema:masc_transition_schema
-           ~name:"masc_transition"
-           ~args:
-             (`Assoc
-                [
-                  "agent_name", `String "codex-local-admin";
-                  "task_id", `String "task-239";
-                  "action", `String "claim";
-                  "to", `String "claimed";
-                  "note", `String "PR #8308 Draft";
-                ])
-           ()
-       with
-       | Error result ->
-         let msg = Yojson.Safe.to_string (Tool_result.data result) in
-         Alcotest.(check bool) "mentions retired to" true (string_contains msg "to");
-         Alcotest.(check bool) "mentions retired note" true (string_contains msg "note")
-       | Ok forwarded ->
-         Alcotest.fail
-           (Printf.sprintf
-              "expected transition alias rejection, got %s"
-              (Yojson.Safe.to_string forwarded)))
-
 let test_validation_telemetry_emits_otel_event () =
   let tool = "__tool_input_validation_otel_event" in
   let schema = make_schema ~required:[ "path" ] [ "path", "string" ] in
@@ -1625,7 +1479,7 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
       ()
   in
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check bool) "_agent_name removed before schema validation" true
+  Alcotest.(check bool) "internal marker is not forwarded" true
     (Yojson.Safe.Util.member "_agent_name" forwarded = `Null);
   Alcotest.(check string) "agent_name preserved" "codex-local-admin"
     (assoc_string "agent_name" forwarded)
@@ -1746,11 +1600,11 @@ let test_typed_tool_contract_rejection_corpus () =
       , tool_execute_schema
       , `Assoc []
       , [ "exactly one of" ] )
-    ; ( "execute raw cmd string"
+    ; ( "execute unknown field"
       , "tool_execute"
       , tool_execute_schema
-      , `Assoc [ "cmd", `String "git status --short" ]
-      , [ "cmd"; "non-empty argv" ] )
+      , `Assoc [ "unexpected_input", `String "value" ]
+      , [ "unexpected_input" ] )
     ; ( "keeper_task_done notes-only drift"
       , "keeper_task_done"
       , keeper_task_done_schema
@@ -1769,17 +1623,6 @@ let test_typed_tool_contract_rejection_corpus () =
       , keeper_model_board_post_get_schema
       , `Assoc []
       , [ "post_id" ] )
-    ; ( "masc_transition retired alias fields"
-      , "masc_transition"
-      , masc_transition_schema
-      , `Assoc
-          [ "agent_name", `String "codex-local-admin"
-          ; "task_id", `String "task-239"
-          ; "action", `String "claim"
-          ; "to", `String "claimed"
-          ; "note", `String "PR #8308 Draft"
-          ]
-      , [ "to"; "note" ] )
     ]
 
 let test_keeper_tool_schemas_pin_required_fields () =
@@ -2172,8 +2015,6 @@ let () =
     ("telemetry", [
       Alcotest.test_case "records pass and fail counters" `Quick
         test_validation_telemetry_records_pass_and_fail_counters;
-      Alcotest.test_case "rejects retired transition aliases counter" `Quick
-        test_validation_telemetry_rejects_retired_transition_aliases;
       Alcotest.test_case "emits OTel validation event" `Quick
         test_validation_telemetry_emits_otel_event;
     ]);
@@ -2200,20 +2041,12 @@ let () =
         test_validate_args_masc_board_post_get_accepts_comment_page;
       Alcotest.test_case "masc_board_list still rejects unknown field" `Quick
         test_validate_args_masc_board_list_rejects_unknown_field;
-      Alcotest.test_case "keeper_memory_search rejects removed kind" `Quick
-        test_validate_args_keeper_memory_search_rejects_removed_kind;
       Alcotest.test_case "tool_execute exposes typed boundary" `Quick
         test_tool_execute_schema_exposes_typed_boundary;
       Alcotest.test_case "tool_execute rejects empty args with class" `Quick
         test_validate_args_tool_execute_rejects_empty_object_with_policy_class;
-      Alcotest.test_case "tool_execute rejects cmd string" `Quick
-        test_validate_args_tool_execute_rejects_cmd_string;
-      Alcotest.test_case "tool_execute rejects command string" `Quick
-        test_validate_args_tool_execute_rejects_command_string;
-      Alcotest.test_case "tool_execute rejects background flag" `Quick
-        test_validate_args_tool_execute_rejects_background_flag;
-      Alcotest.test_case "tool_execute rejects async lifecycle fields" `Quick
-        test_validate_args_tool_execute_rejects_async_lifecycle_fields;
+      Alcotest.test_case "tool_execute rejects unknown field" `Quick
+        test_validate_args_tool_execute_rejects_unknown_field;
       Alcotest.test_case "tool_execute accepts typed exec" `Quick
         test_validate_args_tool_execute_accepts_typed_exec;
       Alcotest.test_case "tool_execute rejects json-string argv" `Quick

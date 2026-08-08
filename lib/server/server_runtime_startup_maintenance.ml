@@ -28,7 +28,11 @@ let prune_children_dirs ~prune_dir root =
    layout, but absent from every prune list since introduction — ~4 MB/day
    fleet-wide with no bound. *)
 let keeper_scoped_dated_stores =
-  [ "metrics"; "crash-events"; "execution-receipts"; "turn-records" ]
+  [ Common.Keeper_metrics
+  ; Common.Keeper_crash_events
+  ; Common.Keeper_execution_receipts
+  ; Common.Keeper_turn_records
+  ]
 
 (* Fold [prune_dir] over every keeper-scoped dated store
    ([keepers/<name>/<store>] for each store in [keeper_scoped_dated_stores]).
@@ -38,7 +42,10 @@ let prune_keeper_scoped_stores ~prune_dir ~masc_root =
   prune_children_dirs
     ~prune_dir:(fun keeper_dir ->
       List.fold_left
-        (fun acc store -> acc + prune_dir (Filename.concat keeper_dir store))
+        (fun acc store ->
+          acc
+          + prune_dir
+              (Filename.concat keeper_dir (Common.keeper_runtime_store_dirname store)))
         0
         keeper_scoped_dated_stores)
     (Filename.concat masc_root Common.keepers_runtime_dirname)
@@ -93,14 +100,19 @@ let prune_flat_jsonl_older_than ~days dir =
    SSOT like [keeper_scoped_dated_stores]. Both stores had no retention
    since introduction (raw-traces: one file per turn; runtime-manifests:
    one rotated JSONL per trace). *)
-let keeper_scoped_flat_stores = [ "raw-traces"; "runtime-manifests" ]
+let keeper_scoped_flat_stores =
+  [ Common.Keeper_raw_traces; Common.Keeper_runtime_manifests ]
+;;
 
 let prune_keeper_scoped_flat_stores ~days ~masc_root =
   prune_children_dirs
     ~prune_dir:(fun keeper_dir ->
       List.fold_left
         (fun acc store ->
-          acc + prune_flat_jsonl_older_than ~days (Filename.concat keeper_dir store))
+          acc
+          + prune_flat_jsonl_older_than
+              ~days
+              (Filename.concat keeper_dir (Common.keeper_runtime_store_dirname store)))
         0
         keeper_scoped_flat_stores)
     (Filename.concat masc_root Common.keepers_runtime_dirname)

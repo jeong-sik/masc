@@ -69,7 +69,7 @@ let check_every_advertised_value_decodes ~label ~decodes ~advertised =
 
 (* The enum declared for one property name, across every schema that declares
    it, so a second copy of the same property is compared too. *)
-let advertised_values_for ~property =
+let advertised_values_for_schemas schemas ~property =
   let rec walk (json : Yojson.Safe.t) =
     match json with
     | `Assoc fields ->
@@ -86,9 +86,13 @@ let advertised_values_for ~property =
     | `List items -> List.concat_map walk items
     | _ -> []
   in
-  all_schemas ()
+  schemas
   |> List.concat_map (fun (t : Masc_domain.tool_schema) -> walk t.input_schema)
   |> List.sort_uniq String.compare
+;;
+
+let advertised_values_for ~property =
+  advertised_values_for_schemas (all_schemas ()) ~property
 ;;
 
 (* Collect every string list that appears under an "enum" key anywhere in a
@@ -132,21 +136,22 @@ let check_mirror_in_sync ?(copy_lives_in = "Tool_shard_types_enum_mirrors") ~lab
       (String.concat "  /  " (List.map (String.concat "|") published))
 ;;
 
-(* The typed schedule contract projects each tool-facing vocabulary into the
-   domain decoder errors and the published schemas. *)
+(* The typed schedule contract projects each tool-facing vocabulary into named
+   properties on the Schedule schemas. Check each property directly so one
+   matching enum elsewhere cannot hide a drifted Schedule field. *)
 let test_schedule_contract_mirrors () =
   List.iter
-    (fun (label, owner) ->
-      check_mirror_in_sync
-        ~copy_lives_in:"Schedule_contract_values"
-        ~label
-        ~owner
-        ())
-    [ "schedule_status_enum_strings", Schedule_contract_values.schedule_status_strings
-    ; "schedule_actor_kind_enum_strings", Schedule_contract_values.actor_kind_strings
-    ; "schedule_source_enum_strings", Schedule_contract_values.schedule_source_strings
-    ; ( "schedule_recurrence_kind_enum_strings"
-      , Schedule_contract_values.recurrence_kind_strings )
+    (fun (property, owner) ->
+      check (list string)
+        (Printf.sprintf "Schedule property %s matches its typed owner" property)
+        (List.sort_uniq String.compare owner)
+        (advertised_values_for_schemas Tool_schemas_schedule.schemas ~property))
+    [ "status", Schedule_contract_values.schedule_status_strings
+    ; "requested_by_kind", Schedule_contract_values.actor_kind_strings
+    ; "scheduled_by_kind", Schedule_contract_values.actor_kind_strings
+    ; "cancelled_by_kind", Schedule_contract_values.actor_kind_strings
+    ; "source", Schedule_contract_values.schedule_source_strings
+    ; "recurrence_kind", Schedule_contract_values.recurrence_kind_strings
     ]
 ;;
 (* Board sub-board access. [Masc.Board] owns the vocabulary through

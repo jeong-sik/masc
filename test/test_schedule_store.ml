@@ -845,32 +845,9 @@ let test_prune_does_not_bind_orphan_receipt_to_reused_public_id () =
     (List.length state.wakes)
 ;;
 
-let contains_sub haystack needle =
-  let n = String.length needle and h = String.length haystack in
-  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
-  n = 0 || go 0
-;;
-
-let accepted_after_marker message =
-  let marker = "accepted: " in
-  let n = String.length marker and h = String.length message in
-  let rec find i =
-    if i + n > h then None
-    else if String.sub message i n = marker then Some (i + n)
-    else find (i + 1)
-  in
-  match find 0 with
-  | None -> []
-  | Some start ->
-    String.sub message start (h - start)
-    |> String.split_on_char ','
-    |> List.map String.trim
-    |> List.filter (fun v -> v <> "")
-;;
-
-let rejection_message = function
+let rejection_error = function
   | Ok _ -> None
-  | Error message -> Some message
+  | Error error -> Some error
 ;;
 
 let test_contract_vocabularies_own_strings_and_errors () =
@@ -878,30 +855,30 @@ let test_contract_vocabularies_own_strings_and_errors () =
     [ ("actor_kind",
        [ "human_operator"; "automated_actor"; "system" ],
        Schedule_contract_values.actor_kind_strings,
-       (fun v -> Result.is_ok (Schedule_domain.actor_kind_of_string v)),
-       rejection_message (Schedule_domain.actor_kind_of_string "nope"))
+       (fun v -> Result.is_ok (Schedule_contract_values.actor_kind_of_string v)),
+       rejection_error (Schedule_contract_values.actor_kind_of_string "nope"))
     ; ("schedule_status",
        [ "scheduled"; "due"; "running"; "succeeded"; "failed"; "cancelled"; "expired" ],
        Schedule_contract_values.schedule_status_strings,
-       (fun v -> Result.is_ok (Schedule_domain.schedule_status_of_string v)),
-       rejection_message (Schedule_domain.schedule_status_of_string "nope"))
+       (fun v -> Result.is_ok (Schedule_contract_values.schedule_status_of_string v)),
+       rejection_error (Schedule_contract_values.schedule_status_of_string "nope"))
     ; ("schedule_source",
        [ "operator_request"; "automated_request"; "system_request" ],
        Schedule_contract_values.schedule_source_strings,
-       (fun v -> Result.is_ok (Schedule_domain.schedule_source_of_string v)),
-       rejection_message (Schedule_domain.schedule_source_of_string "nope"))
+       (fun v -> Result.is_ok (Schedule_contract_values.schedule_source_of_string v)),
+       rejection_error (Schedule_contract_values.schedule_source_of_string "nope"))
     ; ("recurrence_kind",
        [ "one_shot"; "interval"; "daily"; "cron" ],
        Schedule_contract_values.recurrence_kind_strings,
        (fun v ->
           Result.is_ok (Schedule_contract_values.recurrence_kind_of_string v)),
-       rejection_message
+       rejection_error
          (Schedule_contract_values.recurrence_kind_of_string "nope"))
     ; ("wake_status",
        [ "running"; "succeeded"; "failed" ],
        Schedule_contract_values.wake_status_strings,
        (fun v -> Result.is_ok (Schedule_contract_values.wake_status_of_string v)),
-       rejection_message (Schedule_contract_values.wake_status_of_string "nope"))
+       rejection_error (Schedule_contract_values.wake_status_of_string "nope"))
     ]
   in
   List.iter
@@ -912,23 +889,33 @@ let test_contract_vocabularies_own_strings_and_errors () =
         contract_strings;
       match rejection with
       | None -> Alcotest.failf "%s must reject \"nope\"" field
-      | Some message ->
-        check bool
-          (Printf.sprintf "%s names the value it refused" field)
-          true
-          (contains_sub message "nope");
-        let accepted = accepted_after_marker message in
+      | Some error ->
+        check string
+          (Printf.sprintf "%s names its field" field)
+          field
+          error.Schedule_contract_values.field;
+        check string
+          (Printf.sprintf "%s carries the rejected value" field)
+          "nope"
+          error.rejected;
         check (list string)
-          (Printf.sprintf "%s names exactly its accepted set" field)
+          (Printf.sprintf "%s carries exactly its accepted set" field)
           expected
-          accepted;
+          error.accepted;
+        check string
+          (Printf.sprintf "%s renders one correction hint" field)
+          (Printf.sprintf
+             "unknown %s: nope; accepted: %s"
+             field
+             (String.concat ", " expected))
+          (Schedule_contract_values.decode_error_to_string error);
         List.iter
           (fun value ->
             check bool
               (Printf.sprintf "%s offers %s, which decodes" field value)
               true
               (decodes value))
-          accepted)
+          error.accepted)
     cases
 ;;
 

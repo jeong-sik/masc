@@ -1,16 +1,6 @@
-(* The turn frame said "Claimable tasks for this keeper: N" and nothing else.
-   A count says work exists and not which work, so a keeper that wants to claim
-   has to decide to spend a tool call before it can identify a task.
-
-   Measured over the ten hours after one server start: 2000 turns across seven
-   keepers, 320 of them calling any tool at all. [lane-smith] ran 284 turns and
-   [taskmaster] 286 with zero tool calls, and taskmaster's turns reason each
-   time from a twelve-hour-old memory about which tasks were open -- while the
-   frame in front of it said only "3".
-
-   [read_backlog_snapshot] keeps the rows and revision from one authoritative
-   read. The count is derived from those rows, so a second read cannot silently
-   make the heading disagree with the rendered tasks. *)
+(* [read_backlog_snapshot] carries strict task identities and the revision from
+   one authoritative read. The claimable count is derived from those rows, so
+   the heading and rendered identities share one snapshot. *)
 
 open Alcotest
 open Masc

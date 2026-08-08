@@ -71,7 +71,6 @@ export interface DashboardMissionAgentBrief {
   archived_reason?: string | null
   status?: string
   where?: string | null
-  with_whom: string[]
   current_work?: string | null
   related_attention_count: number
   last_activity_at?: string | null

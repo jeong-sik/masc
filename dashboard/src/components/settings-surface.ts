@@ -413,7 +413,7 @@ function AccountSettingsSection() {
   const [clearing, setClearing] = useState(false)
   const summary = shellAuthSummary.value
   const actor = summary?.effective_agent ?? summary?.token_agent ?? currentDashboardActor()
-  const role = summary?.effective_role ?? summary?.default_role ?? 'unknown'
+  const role = summary?.effective_role ?? 'unknown'
   const tokenPresent = dashboardBearerToken() !== null
   const tokenMeta = getStoredTokenMeta()
   const tokenState = summary?.token_valid === true

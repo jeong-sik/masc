@@ -152,16 +152,6 @@ describe('keeperDisplayRuntime', () => {
     })
   })
 
-  it('falls back to runtime_ref group and item', () => {
-    expect(
-      keeperDisplayRuntime({ runtime_ref: { group: 'tier', item: 'resilient_breaker' } }),
-    ).toEqual({ label: 'Runtime', value: 'tier.resilient_breaker' })
-    expect(keeperDisplayRuntime({ runtime_ref: { group: 'tier', item: null } })).toEqual({
-      label: 'Runtime',
-      value: 'tier',
-    })
-  })
-
   it('returns null for missing or blank runtime evidence', () => {
     expect(keeperDisplayRuntime(null)).toBeNull()
     expect(
@@ -169,7 +159,6 @@ describe('keeperDisplayRuntime', () => {
         runtime_canonical: ' ',
         selected_runtime_canonical: '',
         runtime_id: ' ',
-        runtime_ref: { group: ' ', item: 'ignored' },
       }),
     ).toBeNull()
   })

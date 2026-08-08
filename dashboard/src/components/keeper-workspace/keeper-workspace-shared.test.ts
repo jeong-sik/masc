@@ -106,7 +106,6 @@ describe('keeperRuntimeLabel', () => {
     expect(keeperRuntimeLabel(mk({ runtime_canonical: ' oas.seoul-1 ' }))).toBe('oas.seoul-1')
     expect(keeperRuntimeLabel(mk({ selected_runtime_canonical: 'local·docker' }))).toBe('local·docker')
     expect(keeperRuntimeLabel(mk({ runtime_id: 'keeper_unified' }))).toBe('keeper_unified')
-    expect(keeperRuntimeLabel(mk({ runtime_ref: { group: 'tier', item: 'resilient_breaker' } }))).toBe('tier.resilient_breaker')
     expect(keeperRuntimeLabel(mk({}))).toBeNull()
   })
 })

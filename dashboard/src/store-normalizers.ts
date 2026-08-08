@@ -140,7 +140,7 @@ export function normalizeMessage(raw: unknown): Message | null {
   const from = asString(raw.from) ?? asString(raw.from_agent)
   const content = asString(raw.content) ?? ''
   const timestamp = asString(raw.timestamp)
-  const workspace = asString(raw.workspace) ?? asString(raw.workspace_id) ?? asString(raw.channel) ?? asString(raw.channel_name)
+  const workspace = asString(raw.workspace) ?? asString(raw.workspace_id) ?? asString(raw.channel)
   return {
     id: asString(raw.id),
     seq: asNumber(raw.seq),

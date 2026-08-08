@@ -25,7 +25,6 @@ export type DashboardAuthErrorCode =
 export interface DashboardShellAuthSummary {
   enabled: boolean
   require_token: boolean
-  default_role?: string | null
   token_present: boolean
   token_valid: boolean
   token_agent?: string | null

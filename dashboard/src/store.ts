@@ -766,7 +766,6 @@ function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | nu
   return {
     enabled: raw.enabled === true,
     require_token: raw.require_token === true,
-    default_role: asString(raw.default_role) ?? null,
     token_present: raw.token_present === true,
     token_valid: raw.token_valid === true,
     token_agent: asString(raw.token_agent) ?? null,

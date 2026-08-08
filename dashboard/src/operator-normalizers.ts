@@ -1,9 +1,7 @@
 import { isRecord, asString, asNumber, asBoolean, asStringArray, extractArray } from './components/common/normalize'
 import {
   normalizeOperatorActionDescriptor,
-  normalizePendingConfirmation,
   normalizePendingConfirmEnvelope,
-  normalizePendingConfirmSummary,
 } from './pending-confirm'
 import {
   normalizeKeeperContextMetricsUnavailable,
@@ -26,7 +24,6 @@ import type {
   OperatorRecommendedAction,
   OperatorSnapshot,
   OperatorNamespaceSnapshot,
-  PendingConfirmation,
 } from './types'
 import { SYSTEM_ACTOR_NAME } from './types/core'
 

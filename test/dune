@@ -1933,6 +1933,8 @@
 
 (include stanzas/test_keeper_replay_checkpoint.inc)
 
+(include stanzas/test_keeper_store_dirname.inc)
+
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)

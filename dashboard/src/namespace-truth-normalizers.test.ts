@@ -269,7 +269,13 @@ describe('normalizeNamespaceTruth', () => {
           hidden_count: 7,
           hidden_actors: ['agent-2', 'agent-3'],
           confirm_required_actions: [
-            { action_type: 'shutdown', target_type: 'keeper', description: 'Shutdown keeper', confirm_required: true },
+            {
+              action_type: 'keeper_recover',
+              tool_name: 'masc_keeper_recover',
+              target_type: 'keeper',
+              description: 'Safe down/up recovery for stale/degraded keeper.',
+              confirm_required: true,
+            },
           ],
         },
       },
@@ -281,39 +287,35 @@ describe('normalizeNamespaceTruth', () => {
     expect(pcs!.visible_count).toBe(3)
     expect(pcs!.hidden_actors).toEqual(['agent-2', 'agent-3'])
     expect(pcs!.confirm_required_actions).toHaveLength(1)
-    expect(pcs!.confirm_required_actions[0]!.action_type).toBe('shutdown')
+    expect(pcs!.confirm_required_actions[0]!.action_type).toBe('keeper_recover')
   })
 
-  it('filters out confirm_required_actions with missing required fields', () => {
+  it('rejects a summary with an invalid action', () => {
     const result = normalizeNamespaceTruth({
       operator: {
         pending_confirm_summary: {
+          actor_filter: null,
+          filter_active: false,
+          visible_count: 0,
+          total_count: 0,
+          hidden_count: 0,
+          hidden_actors: [],
           confirm_required_actions: [
-            { action_type: 'shutdown' }, // missing target_type
-            { target_type: 'keeper' }, // missing action_type
-            { action_type: 'restart', target_type: 'agent' }, // valid
+            { action_type: 'shutdown' },
           ],
         },
       },
     })
-    const pcs = result.operator?.pending_confirm_summary
-    expect(pcs!.confirm_required_actions).toHaveLength(1)
-    expect(pcs!.confirm_required_actions[0]!.action_type).toBe('restart')
+    expect(result.operator?.pending_confirm_summary).toBeNull()
   })
 
-  it('defaults pending_confirm_summary numeric fields', () => {
+  it('rejects an incomplete pending-confirm summary', () => {
     const result = normalizeNamespaceTruth({
       operator: {
         pending_confirm_summary: {},
       },
     })
-    const pcs = result.operator?.pending_confirm_summary
-    expect(pcs!.visible_count).toBe(0)
-    expect(pcs!.total_count).toBe(0)
-    expect(pcs!.hidden_count).toBe(0)
-    expect(pcs!.filter_active).toBe(false)
-    expect(pcs!.actor_filter).toBeNull()
-    expect(pcs!.hidden_actors).toEqual([])
+    expect(result.operator?.pending_confirm_summary).toBeNull()
   })
 
   it('extracts readiness summary and attention events', () => {

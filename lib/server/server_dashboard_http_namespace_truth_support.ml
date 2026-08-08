@@ -2,37 +2,8 @@
 
 open Dashboard_http_helpers
 
-let pending_confirm_summary_ttl = 10.0
-let pending_confirm_summary_stale_for = pending_confirm_summary_ttl *. 3.0
-
-let pending_confirm_summary_empty_json =
-  `Assoc
-    [
-      ("actor_filter", `Null);
-      ("filter_active", `Bool false);
-      ("visible_count", `Int 0);
-      ("total_count", `Int 0);
-      ("hidden_count", `Int 0);
-      ("hidden_actors", `List []);
-      ("confirm_required_actions", `List []);
-    ]
-
-let last_good_pending_confirm_summary : Yojson.Safe.t Atomic.t =
-  Atomic.make pending_confirm_summary_empty_json
-
-let pending_confirm_summary_cached (config : Workspace.config) =
-  let key = Printf.sprintf "pending_confirm_summary:%s" config.base_path in
-  let fallback = Atomic.get last_good_pending_confirm_summary in
-  let compute () =
-    let json = Operator_control.pending_confirm_summary_json config in
-    Atomic.set last_good_pending_confirm_summary json;
-    json
-  in
-  if Option.is_some (Eio_context.get_switch_opt ()) then
-    Dashboard_cache.seed_stale_if_missing key
-      ~stale_for:pending_confirm_summary_stale_for fallback;
-  let result = Dashboard_cache.get_or_compute key ~ttl:pending_confirm_summary_ttl compute in
-  if result = `Null then fallback else result
+let pending_confirm_summary_json (config : Workspace.config) =
+  Operator_control.pending_confirm_summary_json config
 
 let dashboard_namespace_truth_focus_json ~initialized ~runtime_count ~top_queue =
   let focus_of_queue queue =
@@ -133,12 +104,6 @@ let execution_summary_json execution_json =
   let execution_continuity = json_list_field "continuity_briefs" execution_json in
   let execution_keepers = json_list_field "keepers" execution_json in
   let has_text key json = json_string_field_opt key json |> Option.is_some in
-  (* This summary is always derived here. A pass-through arm used to return an
-     upstream [summary] whose [blocked_sessions] count was already an int, but
-     the team-session surfaces that produced that field were removed in #6363
-     and no producer has written it since — the arm could not be reached, so the
-     derivation below already ran on every request. Keeping the arm advertised a
-     pass-through path that does not exist. *)
   `Assoc
     [
       ("active_operations", `Int (List.length execution_operation_briefs));
@@ -569,7 +534,7 @@ let runtime_count_authority_json ~runtime_count ~shell_counts
 let compose_namespace_truth_snapshot ~(config : Workspace.config) ~initialized ~shell_json
     ~execution_json =
   let generated_at = Masc_domain.now_iso () in
-  let pending_confirm_summary = pending_confirm_summary_cached config in
+  let pending_confirm_summary = pending_confirm_summary_json config in
   let top_queue = execution_top_queue execution_json in
   let execution_summary = execution_summary_json execution_json in
   let readiness_json, attention_events_json =

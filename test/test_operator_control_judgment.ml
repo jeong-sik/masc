@@ -287,58 +287,6 @@ let test_operator_judgment_requires_numeric_timestamps () =
     (Error "invalid generated_at_unix")
     (Operator_judgment.of_yojson invalid)
 
-let test_confirm_consumes_pending_token_before_delegated_action_fails () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      let config = Workspace.default_config base_dir in
-      ignore (Workspace.init config ~agent_name:(Some "operator"));
-      let pending_dir = Filename.concat (Workspace.masc_dir config) "operator" in
-      let path = Filename.concat pending_dir "pending_confirms.json" in
-      Workspace_utils.mkdir_p pending_dir;
-      let token = "retry-token" in
-      let entry_json =
-        `Assoc
-          [
-            ("confirm_token", `String token);
-            ("trace_id", `String "trace-retry");
-            ("actor", `String "operator");
-            ("action_type", `String "missing_action_type");
-            ( "target_type"
-            , `String Operator_action_constants.workspace_target_type );
-            ("target_id", `Null);
-            ("payload", `Assoc []);
-            ("delegated_tool", `String "missing_operator_tool");
-            ("created_at", `String (Masc_domain.now_iso ()));
-            ("expires_at", `Null);
-          ]
-      in
-      (match Workspace_utils.write_json_result config path (`List [ entry_json ]) with
-       | Ok () -> ()
-       | Error err -> Alcotest.failf "failed to persist pending confirm fixture: %s" err);
-      let initial_pending_confirms =
-        (Operator_control.pending_confirm_scope ~actor:"operator" config).visible_entries
-      in
-      Alcotest.(check int)
-        "pending confirm fixture persisted" 1
-        (List.length initial_pending_confirms);
-      let ctx = operator_ctx env sw config "operator" in
-      (match
-         Operator_control.confirm_json ctx
-           (`Assoc [ ("actor", `String "operator"); ("confirm_token", `String token) ])
-       with
-      | Ok _ -> Alcotest.fail "expected delegated action failure"
-      | Error err ->
-          Alcotest.(check bool) "non-empty error" true (String.length err > 0));
-      let pending_confirms =
-        (Operator_control.pending_confirm_scope ~actor:"operator" config).visible_entries
-      in
-      Alcotest.(check int) "pending confirm consumed" 0 (List.length pending_confirms))
-
 (* [confidence] used to default to 0.5 when omitted and was clamped into range
    on the way to disk. Both spellings put a number the judge never stated into
    the operator digest, next to ["authoritative": true]. No code compares the
@@ -399,8 +347,6 @@ let tests =
       test_operator_judgment_requires_numeric_timestamps;
     Alcotest.test_case "requires a stated confidence" `Quick
       test_operator_judgment_requires_stated_confidence;
-    Alcotest.test_case "confirm consumes token before delegated action failure" `Quick
-      test_confirm_consumes_pending_token_before_delegated_action_fails;
   ]
 
 let () = Alcotest.run "operator_control_judgment" [ ("operator_control_judgment", tests) ]

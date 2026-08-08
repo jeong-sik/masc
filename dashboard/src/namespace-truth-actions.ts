@@ -63,6 +63,7 @@ async function doFetchNamespaceTruth(): Promise<void> {
   } catch (err) {
     const detail = err instanceof Error ? err.message : 'Failed to load project snapshot'
     console.warn('[project-snapshot] fetch failed:', detail)
+    namespaceTruth.value = null
     namespaceTruthError.value = detail
   } finally {
     namespaceTruthLoading.value = false

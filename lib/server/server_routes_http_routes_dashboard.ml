@@ -18,7 +18,6 @@ module Keeper_event_queue_operator =
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
-let realtime_cache_ttl_s = Server_dashboard_http_core_cache.realtime_cache_ttl_s
 let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
 
 let dashboard_actor_cache_segment state req =
@@ -1226,18 +1225,10 @@ let add_routes ~sw ~clock router =
              (handle_gate_rule_delete_body state request reqd))
          request reqd)
 
-  (* Dashboard SSE hydrates the same caches, so this path services HTTP
-     fallbacks before SSE attaches and explicit tab refreshes. *)
   |> Http.Router.get "/api/v1/operator" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let cache_key =
-           Printf.sprintf "operator_snapshot:%s"
-             (Mcp_server.workspace_config state).base_path
-         in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:realtime_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               operator_snapshot_http_json ~state ~sw ~clock req))
+           operator_snapshot_http_json ~state ~sw ~clock req
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

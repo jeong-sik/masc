@@ -77,7 +77,6 @@ describe('Ops surface', () => {
       sessions: [],
       keepers: [],
       recent_messages: [],
-      pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
     operatorWorkspaceDigest.value = {
@@ -137,7 +136,6 @@ describe('Ops surface', () => {
       sessions: [],
       keepers: [],
       recent_messages: [],
-      pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
     operatorWorkspaceDigest.value = {
@@ -191,7 +189,6 @@ describe('Ops surface', () => {
         },
       }],
       recent_messages: [],
-      pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
 
@@ -238,7 +235,6 @@ describe('Ops surface', () => {
       sessions: [],
       keepers: [{ name: 'keeper-a', status: 'online' }],
       recent_messages: [],
-      pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
     operatorWorkspaceDigest.value = {
@@ -295,7 +291,6 @@ describe('Ops surface', () => {
       sessions: [],
       keepers: [{ name: 'qa-king', status: 'online' }],
       recent_messages: [],
-      pending_confirms: [],
       available_actions: [
         { action_type: 'keeper_probe', target_type: 'keeper', description: 'probe from server' },
         { action_type: 'keeper_unknown_maintenance', target_type: 'keeper' },
@@ -341,7 +336,6 @@ describe('Ops surface', () => {
       sessions: [],
       keepers: [],
       recent_messages: [],
-      pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
     operatorWorkspaceDigest.value = {
@@ -388,7 +382,6 @@ describe('Ops surface', () => {
       sessions: [],
       keepers: [],
       recent_messages: [],
-      pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
     operatorWorkspaceDigest.value = {
@@ -429,7 +422,6 @@ describe('Ops surface', () => {
       sessions: [],
       keepers: [],
       recent_messages: [],
-      pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
     operatorWorkspaceDigest.value = {
@@ -473,7 +465,6 @@ describe('Ops surface', () => {
         },
       }],
       recent_messages: [],
-      pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
 
@@ -499,7 +490,6 @@ describe('Ops surface', () => {
         },
       }],
       recent_messages: [],
-      pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
 
@@ -529,7 +519,6 @@ describe('Ops surface', () => {
       ],
       persistent_agents: [],
       recent_messages: [],
-      pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
 
@@ -566,7 +555,6 @@ describe('Ops surface', () => {
       sessions: [],
       keepers: [],
       recent_messages: [],
-      pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
     operatorWorkspaceDigest.value = {

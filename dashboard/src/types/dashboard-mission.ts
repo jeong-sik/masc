@@ -7,7 +7,7 @@ import type {
   MissionSignalTruth,
   MissionEvidenceSource,
 } from './core'
-import type { PendingConfirmEnvelope, PendingConfirmation, OperatorActionDescriptor } from './gate'
+import type { PendingConfirmEnvelope, OperatorActionDescriptor } from './gate'
 
 export interface DashboardMissionSummary {
   workspace_health?: string
@@ -35,7 +35,6 @@ export interface DashboardMissionCommandFocus {
 
 export interface DashboardMissionTargets {
   keepers: OperatorKeeperSnapshot[]
-  pending_confirms: PendingConfirmation[]
   available_actions: OperatorActionDescriptor[]
 }
 

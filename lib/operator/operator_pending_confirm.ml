@@ -27,7 +27,7 @@ let normalized_actor ~context_actor = function
       if trimmed = "" || String.equal trimmed "unknown" then "unknown" else trimmed
 
 type pending_confirm = Workspace_hooks.operator_pending_confirm_request = {
-  token : string;
+  confirm_token : string;
   trace_id : string;
   actor : string;
   action_type : string;
@@ -69,12 +69,12 @@ type target =
   }
 
 let target_gate_callback
-    : (Workspace.config -> target -> (unit, string) result) Atomic.t
+    : (Workspace.config -> target -> (unit, string) result) option Atomic.t
   =
-  Atomic.make (fun _config _target -> Ok ())
+  Atomic.make None
 ;;
 
-let register_target_gate gate = Atomic.set target_gate_callback gate
+let register_target_gate gate = Atomic.set target_gate_callback (Some gate)
 
 let target_of_entry (entry : pending_confirm) =
   match Operator_action_constants.target_type_of_string entry.target_type with
@@ -86,16 +86,75 @@ let make_available_action ~action_type ~tool_name ~target_type ~description =
   { action_type; tool_name; target_type; description;
     confirm_required = Operator_action_catalog.requires_confirmation action_type }
 
-let preview_of_pending_confirm (entry : pending_confirm) =
-  `Assoc
-    [
-      ("trace_id", `String entry.trace_id);
-      ("actor", `String entry.actor);
-      ("action_type", `String entry.action_type);
-      ("target_type", `String entry.target_type);
-      ("target_id", Json_util.string_option_to_yojson entry.target_id);
-      ("payload", entry.payload);
-    ]
+let available_actions : available_action list =
+  [
+    make_available_action ~action_type:"broadcast" ~tool_name:"masc_broadcast"
+      ~target_type:Operator_action_constants.workspace_target_type
+      ~description:"Namespace-wide operator broadcast.";
+    make_available_action ~action_type:"namespace_pause" ~tool_name:"masc_pause"
+      ~target_type:Operator_action_constants.workspace_target_type
+      ~description:"Pause namespace automation and spawning.";
+    make_available_action ~action_type:"namespace_resume" ~tool_name:"masc_resume"
+      ~target_type:Operator_action_constants.workspace_target_type
+      ~description:"Resume a paused namespace.";
+    make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
+      ~target_type:Operator_action_constants.workspace_target_type
+      ~description:"Inject a backlog task into the namespace.";
+    make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_delegate"
+      ~target_type:Operator_action_constants.keeper_target_type
+      ~description:"Send a direct operator message to a keeper.";
+    make_available_action ~action_type:"keeper_probe" ~tool_name:"masc_keeper_status"
+      ~target_type:Operator_action_constants.keeper_target_type
+      ~description:"Immediate keeper diagnostic snapshot.";
+    make_available_action
+      ~action_type:Operator_action_constants.keeper_recover
+      ~tool_name:"masc_keeper_recover"
+      ~target_type:Operator_action_constants.keeper_target_type
+      ~description:"Safe down/up recovery for stale/degraded keeper.";
+  ]
+
+let validate_pending_confirm_identity
+      ~action_type
+      ~target_type
+      ~target_id
+      ~delegated_tool
+  =
+  let action =
+    match Operator_action_catalog.of_string action_type with
+    | None -> None
+    | Some _ ->
+      List.find_opt
+        (fun (action : available_action) ->
+           String.equal action.action_type action_type)
+        available_actions
+  in
+  match action with
+  | None ->
+    Error (Printf.sprintf "unsupported pending-confirm action_type: %S" action_type)
+  | Some action when not (String.equal action.tool_name delegated_tool) ->
+    Error
+      (Printf.sprintf
+         "pending-confirm delegated_tool mismatch for %s"
+         action_type)
+  | Some action when not (String.equal action.target_type target_type) ->
+    Error
+      (Printf.sprintf
+         "pending-confirm target_type mismatch for %s"
+         action_type)
+  | Some action ->
+    (match Operator_action_constants.target_type_of_string action.target_type, target_id with
+     | Some Operator_action_constants.Workspace, None -> Ok ()
+     | Some Operator_action_constants.Workspace, Some _ ->
+       Error "workspace pending-confirm must not carry target_id"
+     | Some Operator_action_constants.Keeper, Some keeper_name
+       when String.trim keeper_name <> "" -> Ok ()
+     | Some Operator_action_constants.Keeper, _ ->
+       Error "keeper pending-confirm requires a non-empty target_id"
+     | Some Operator_action_constants.Goal, Some goal_id
+       when String.trim goal_id <> "" -> Ok ()
+     | Some Operator_action_constants.Goal, _ ->
+       Error "goal pending-confirm requires a non-empty target_id"
+     | None, _ -> Error "pending-confirm action has an invalid target contract")
 
 let pending_confirm_common_fields (entry : pending_confirm) =
   [
@@ -112,12 +171,18 @@ let pending_confirm_common_fields (entry : pending_confirm) =
 
 let pending_confirm_to_yojson (entry : pending_confirm) =
   `Assoc
-    ( ("confirm_token", `String entry.token)
-    :: pending_confirm_common_fields entry
-    @ [ ("preview", preview_of_pending_confirm entry) ] )
+    (("confirm_token", `String entry.confirm_token)
+     :: pending_confirm_common_fields entry)
 
 let pending_confirm_store_to_yojson (entry : pending_confirm) =
-  `Assoc (("confirm_token", `String entry.token) :: pending_confirm_common_fields entry)
+  `Assoc
+    (("confirm_token", `String entry.confirm_token)
+     :: pending_confirm_common_fields entry)
+
+let parse_timestamp ~surface ~field value =
+  match Masc_domain.parse_iso8601_opt value with
+  | Some timestamp when Float.is_finite timestamp -> Ok timestamp
+  | _ -> Error (Printf.sprintf "%s.%s must be an RFC3339 timestamp" surface field)
 
 let pending_confirm_of_yojson = function
   | `Assoc fields ->
@@ -151,7 +216,7 @@ let pending_confirm_of_yojson = function
         Error (Printf.sprintf "%s.%s must be a string or null" surface field)
       | None -> Error (Printf.sprintf "%s.%s is required" surface field)
     in
-    let* token = required_string "confirm_token" in
+    let* confirm_token = required_string "confirm_token" in
     let* trace_id = required_string "trace_id" in
     let* actor = required_string "actor" in
     let* action_type = required_string "action_type" in
@@ -166,8 +231,29 @@ let pending_confirm_of_yojson = function
     let* delegated_tool = required_string "delegated_tool" in
     let* created_at = required_string "created_at" in
     let* expires_at = required_nullable_string "expires_at" in
+    let* created_at_timestamp =
+      parse_timestamp ~surface ~field:"created_at" created_at
+    in
+    let* () =
+      match expires_at with
+      | None -> Ok ()
+      | Some value ->
+        let* expires_at_timestamp =
+          parse_timestamp ~surface ~field:"expires_at" value
+        in
+        if Float.compare expires_at_timestamp created_at_timestamp > 0
+        then Ok ()
+        else Error "pending_confirm.expires_at must be later than created_at"
+    in
+    let* () =
+      validate_pending_confirm_identity
+        ~action_type
+        ~target_type
+        ~target_id
+        ~delegated_tool
+    in
     Ok
-      { token
+      { confirm_token
       ; trace_id
       ; actor
       ; action_type
@@ -181,11 +267,23 @@ let pending_confirm_of_yojson = function
   | _ -> Error "pending_confirm must be a JSON object"
 
 let decode_pending_confirm_entries entries =
-  let rec loop index acc = function
+  let module Confirm_token_set = Set.Make (String) in
+  let rec loop index seen acc = function
     | [] -> Ok (List.rev acc)
     | json :: rest ->
       (match pending_confirm_of_yojson json with
-       | Ok entry -> loop (index + 1) (entry :: acc) rest
+       | Ok entry when Confirm_token_set.mem entry.confirm_token seen ->
+         Error
+           (Printf.sprintf
+              "pending_confirms[%d] duplicates confirm_token %S"
+              index
+              entry.confirm_token)
+       | Ok entry ->
+         loop
+           (index + 1)
+           (Confirm_token_set.add entry.confirm_token seen)
+           (entry :: acc)
+           rest
        | Error msg ->
          Error
            (Printf.sprintf
@@ -193,7 +291,7 @@ let decode_pending_confirm_entries entries =
               index
               msg))
   in
-  loop 0 [] entries
+  loop 0 Confirm_token_set.empty [] entries
 
 let raw_pending_confirms_result config : (pending_confirm list, string) result =
   let path = pending_confirms_path config in
@@ -214,8 +312,14 @@ let pending_confirms_to_yojson entries =
   `List (List.map pending_confirm_store_to_yojson entries)
 
 let write_pending_confirms config (entries : pending_confirm list) =
-  Workspace_utils.write_json_result config (pending_confirms_path config)
-    (pending_confirms_to_yojson entries)
+  match
+    decode_pending_confirm_entries
+      (List.map pending_confirm_store_to_yojson entries)
+  with
+  | Error _ as error -> error
+  | Ok validated_entries ->
+    Workspace_utils.write_json_result config (pending_confirms_path config)
+      (pending_confirms_to_yojson validated_entries)
 
 let with_store_lock config f =
   File_lock_eio.with_mutex (pending_confirms_path config) f
@@ -223,7 +327,11 @@ let with_store_lock config f =
 
 let pending_confirm_expired (entry : pending_confirm) =
   match entry.expires_at with
-  | Some exp -> Masc_domain.now_iso () > exp
+  | Some value ->
+    (match parse_timestamp ~surface:"pending_confirm" ~field:"expires_at" value with
+     | Ok expires_at_timestamp ->
+       Float.compare (Time_compat.now ()) expires_at_timestamp >= 0
+     | Error reason -> raise_store_error reason)
   | None -> false
 
 let read_pending_confirms_result_unlocked config =
@@ -252,29 +360,31 @@ let read_pending_confirms config : pending_confirm list =
 
 let upsert_pending_confirm config entry =
   with_store_lock config (fun () ->
-    match target_of_entry entry with
-    | Error _ as error -> error
-    | Ok target ->
-      (match Atomic.get target_gate_callback config target with
-       | Error _ as error -> error
-       | Ok () ->
-         (match read_pending_confirms_result_unlocked config with
-          | Error _ as error -> error
-          | Ok entries ->
-            let remaining =
-              entries
-              |> List.filter (fun existing -> not (String.equal existing.token entry.token))
-            in
-            write_pending_confirms config (entry :: remaining))))
+    let ( let* ) = Result.bind in
+    let* target = target_of_entry entry in
+    let* target_gate =
+      match Atomic.get target_gate_callback with
+      | Some target_gate -> Ok target_gate
+      | None -> Error "pending-confirm target gate is not registered"
+    in
+    let* () = target_gate config target in
+    let* entries = read_pending_confirms_result_unlocked config in
+    let remaining =
+      entries
+      |> List.filter (fun existing ->
+             not (String.equal existing.confirm_token entry.confirm_token))
+    in
+    write_pending_confirms config (entry :: remaining))
 
-let remove_pending_confirm config token =
+let remove_pending_confirm config confirm_token =
   with_store_lock config (fun () ->
     match read_pending_confirms_result_unlocked config with
     | Error _ as error -> error
     | Ok entries ->
       let remaining =
         entries
-        |> List.filter (fun existing -> not (String.equal existing.token token))
+        |> List.filter (fun existing ->
+               not (String.equal existing.confirm_token confirm_token))
       in
       write_pending_confirms config remaining)
 
@@ -318,7 +428,17 @@ let pending_confirm_scope_of_entries ?actor entries =
   let all_entries =
     entries
     |> List.sort (fun (a : pending_confirm) (b : pending_confirm) ->
-           String.compare b.created_at a.created_at)
+           let timestamp entry =
+             match
+               parse_timestamp
+                 ~surface:"pending_confirm"
+                 ~field:"created_at"
+                 entry.created_at
+             with
+             | Ok value -> value
+             | Error reason -> raise_store_error reason
+           in
+           Float.compare (timestamp b) (timestamp a))
   in
   let visible_entries =
     match actor_filter with
@@ -336,33 +456,6 @@ let pending_confirm_scope_of_entries ?actor entries =
 
 let pending_confirm_scope ?actor config =
   pending_confirm_scope_of_entries ?actor (read_pending_confirms config)
-
-let available_actions : available_action list =
-  [
-    make_available_action ~action_type:"broadcast" ~tool_name:"masc_broadcast"
-      ~target_type:Operator_action_constants.workspace_target_type
-      ~description:"Namespace-wide operator broadcast.";
-    make_available_action ~action_type:"namespace_pause" ~tool_name:"masc_pause"
-      ~target_type:Operator_action_constants.workspace_target_type
-      ~description:"Pause namespace automation and spawning.";
-    make_available_action ~action_type:"namespace_resume" ~tool_name:"masc_resume"
-      ~target_type:Operator_action_constants.workspace_target_type
-      ~description:"Resume a paused namespace.";
-    make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
-      ~target_type:Operator_action_constants.workspace_target_type
-      ~description:"Inject a backlog task into the namespace.";
-    make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_delegate"
-      ~target_type:Operator_action_constants.keeper_target_type
-      ~description:"Send a direct operator message to a keeper.";
-    make_available_action ~action_type:"keeper_probe" ~tool_name:"masc_keeper_status"
-      ~target_type:Operator_action_constants.keeper_target_type
-      ~description:"Immediate keeper diagnostic snapshot.";
-    make_available_action
-      ~action_type:Operator_action_constants.keeper_recover
-      ~tool_name:"masc_keeper_recover"
-      ~target_type:Operator_action_constants.keeper_target_type
-      ~description:"Safe down/up recovery for stale/degraded keeper.";
-  ]
 
 let available_action_to_yojson (entry : available_action) =
   `Assoc

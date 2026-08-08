@@ -17,6 +17,19 @@ const emptyPendingConfirmEnvelope = {
   },
 }
 
+const validPendingConfirmation = {
+  confirm_token: 'tok-1',
+  trace_id: 'trace-1',
+  actor: 'agent-1',
+  action_type: 'keeper_probe',
+  target_type: 'keeper',
+  target_id: 'janitor',
+  payload: {},
+  delegated_tool: 'masc_keeper_status',
+  created_at: '2026-08-08T00:00:00Z',
+  expires_at: null,
+}
+
 function normalizeOperatorSnapshot(raw: Record<string, unknown>) {
   return normalizeOperatorSnapshotWire({
     pending_confirm_envelope: emptyPendingConfirmEnvelope,
@@ -486,7 +499,7 @@ describe('normalizeOperatorSnapshot', () => {
     const result = normalizeOperatorSnapshot({
       pending_confirm_envelope: {
         items: [
-          { confirm_token: 'tok-1', actor: 'agent-1', action_type: 'pause' },
+          validPendingConfirmation,
         ],
         summary: {
           ...emptyPendingConfirmEnvelope.summary,
@@ -523,11 +536,11 @@ describe('normalizeOperatorSnapshot', () => {
   it('extracts available_actions', () => {
     const result = normalizeOperatorSnapshot({
       available_actions: [
-        { action_type: 'pause', target_type: 'keeper', description: 'Pause' },
+        { action_type: 'keeper_probe', tool_name: 'masc_keeper_status', target_type: 'keeper', description: 'Immediate keeper diagnostic snapshot.', confirm_required: false },
       ],
     })
     expect(result.available_actions).toHaveLength(1)
-    expect(result.available_actions[0]!.action_type).toBe('pause')
+    expect(result.available_actions[0]!.action_type).toBe('keeper_probe')
   })
 
   it('normalizes the exact OAS inference observation', () => {
@@ -568,12 +581,13 @@ describe('normalizeOperatorSnapshot', () => {
     const result = normalizeOperatorSnapshot({
       pending_confirm_envelope: {
         items: [
-          { confirm_token: 'tok-e1', actor: 'agent-1' },
+          { ...validPendingConfirmation, confirm_token: 'tok-e1' },
         ],
         summary: {
           ...emptyPendingConfirmEnvelope.summary,
           visible_count: 1,
           total_count: 5,
+          hidden_count: 4,
         },
       },
     })

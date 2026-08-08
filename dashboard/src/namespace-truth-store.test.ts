@@ -74,4 +74,19 @@ describe('refreshNamespaceTruth', () => {
     })
   }, 20000)
 
+  it('clears a previous snapshot when the authoritative read fails', async () => {
+    apiMocks.fetchDashboardNamespaceTruth.mockRejectedValue(new Error('store unreadable'))
+    const namespaceTruthStore = await import('./namespace-truth-store')
+
+    namespaceTruthStore.namespaceTruth.value = {
+      generated_at: '2026-08-08T00:00:00Z',
+      root: { status: { project: 'default' } },
+    } as never
+
+    await namespaceTruthStore.refreshNamespaceTruth({ force: true })
+
+    expect(namespaceTruthStore.namespaceTruth.value).toBeNull()
+    expect(namespaceTruthStore.namespaceTruthError.value).toBe('store unreadable')
+  })
+
 })

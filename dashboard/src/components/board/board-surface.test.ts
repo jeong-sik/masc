@@ -135,7 +135,6 @@ function snapshotWithKeepers(keepers: Array<{
     sessions: [],
     keepers,
     recent_messages: [],
-    pending_confirms: [],
     available_actions: [],
   } as unknown as OperatorSnapshot
 }

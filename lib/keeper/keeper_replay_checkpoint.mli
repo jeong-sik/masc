@@ -5,8 +5,11 @@ type replay_suffix_prune_reason
 val replay_suffix_prune_reason_to_string :
   replay_suffix_prune_reason -> string
 
-val replay_response_text_for_persistence :
-  suppress_visible_response:bool -> response_text:string -> string option
+val consume_replay_response :
+  suppress_visible_response:bool ->
+  response_text:string ->
+  consume:(response_text:string -> 'a) ->
+  'a option
 
 type wire_capture_response_suppression_reason
 

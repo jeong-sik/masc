@@ -61,27 +61,23 @@ let finalize
       ()
   in
   receipt_response_text_present_ref := raw_response_text_present;
-  let replay_response_text =
-    Keeper_replay_checkpoint.replay_response_text_for_persistence
+  let assistant_msg =
+    Keeper_replay_checkpoint.consume_replay_response
       ~suppress_visible_response
       ~response_text
-  in
-  let assistant_msg =
-    Option.map
-      (fun replay_response_text ->
-         Agent_sdk.Types.make_message
+      ~consume:(fun ~response_text ->
+        let assistant_msg =
+          Agent_sdk.Types.make_message
            ~role:Agent_sdk.Types.Assistant
-           [ Agent_sdk.Types.Text replay_response_text ])
-      replay_response_text
+           [ Agent_sdk.Types.Text response_text ]
+        in
+        Keeper_context_runtime.persist_message
+          ~source:history_assistant_source
+          session
+          assistant_msg;
+        capture_replay_response ~response_text;
+        assistant_msg)
   in
-  (match replay_response_text, assistant_msg with
-   | Some response_text, Some assistant_msg ->
-     Keeper_context_runtime.persist_message
-       ~source:history_assistant_source
-       session
-       assistant_msg;
-     capture_replay_response ~response_text
-   | _ -> ());
   let checkpoint_owner_result =
     match Runtime.get_runtime_by_id runtime_id_string with
     | Some runtime -> Ok (Runtime_execution.checkpoint_owner runtime.execution)
@@ -95,7 +91,7 @@ let finalize
                 runtime_id_string))
   in
   let save_oas_checkpoint result_checkpoint =
-      let checkpoint, source_already_persisted =
+    let checkpoint, source_already_persisted =
         Keeper_replay_checkpoint.select_finalization_checkpoint
           ~last_persisted_checkpoint
           result_checkpoint

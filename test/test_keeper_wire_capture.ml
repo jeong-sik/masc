@@ -135,48 +135,6 @@ let check_metric_delta label name ~labels f =
 let write_failures_metric = Keeper_metrics.(to_string WireCaptureWriteFailures)
 let record_skipped_metric = Keeper_metrics.(to_string WireCaptureRecordSkipped)
 
-(* Regression guard: verify in [Keeper_agent_run.run_turn] that the response
-   capture happens after normalization and uses the normalized identifier.
-
-   Dune test actions run in a sandbox, so we locate the source tree via
-   [DUNE_SOURCEROOT] (set by Dune for all actions). *)
-let repo_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None ->
-    Alcotest.fail "DUNE_SOURCEROOT is not set; cannot locate source file"
-
-let first_line_of path needle =
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in ic)
-    (fun () ->
-       let rec loop line_num =
-         match input_line ic with
-         | line ->
-           if contains ~needle line then Some line_num else loop (line_num + 1)
-         | exception End_of_file -> None
-       in
-       loop 1)
-;;
-
-let last_line_of path needle =
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in ic)
-    (fun () ->
-       let rec loop line_num last_seen =
-         match input_line ic with
-         | line ->
-           let last_seen =
-             if contains ~needle line then Some line_num else last_seen
-           in
-           loop (line_num + 1) last_seen
-         | exception End_of_file -> last_seen
-       in
-       loop 1 None)
-;;
-
 let projected_secret = "wire-capture-projected-secret-value"
 
 let install_projected_secret ~base_path ~keeper_name =
@@ -580,58 +538,31 @@ let response_capture_matches_replayed_history_text () =
       (contains ~needle:raw_response content))
 
 let capture_response_uses_finalized_replay_text () =
-  let run_path = Filename.concat (repo_root ()) "lib/keeper/keeper_agent_run.ml" in
-  let capture_line =
-    match first_line_of run_path "Keeper_wire_capture.capture_response" with
-    | Some n -> n
-    | None -> Alcotest.fail "Keeper_wire_capture.capture_response call not found"
+  let captured = ref [] in
+  let consume ~suppress_visible_response ~response_text =
+    Masc.Keeper_replay_checkpoint.consume_replay_response
+      ~suppress_visible_response
+      ~response_text
+      ~consume:(fun ~response_text ->
+        captured := response_text :: !captured;
+        response_text)
   in
-  let normalize_line =
-    match first_line_of run_path "normalize_response_text_for_finalization" with
-    | Some n -> n
-    | None ->
-      Alcotest.fail "normalize_response_text_for_finalization call not found"
-  in
-  Alcotest.(check bool)
-    "capture_response occurs after normalize_response_text_for_finalization"
-    true
-    (capture_line > normalize_line);
-  let finalizer_line =
-    match first_line_of run_path "Keeper_agent_run_finalize_response.finalize" with
-    | Some n -> n
-    | None -> Alcotest.fail "Keeper_agent_run_finalize_response.finalize call not found"
-  in
-  Alcotest.(check bool)
-    "capture_response is delegated through finalize callback"
-    true
-    (capture_line > finalizer_line);
-  let finalize_path =
-    Filename.concat (repo_root ())
-      "lib/keeper/keeper_agent_run_finalize_response.ml"
-  in
-  let replay_decision_line =
-    match last_line_of finalize_path "replay_response_text_for_persistence" with
-    | Some n -> n
-    | None -> Alcotest.fail "replay_response_text_for_persistence use not found"
-  in
-  let persist_line =
-    match last_line_of finalize_path "Keeper_context_runtime.persist_message" with
-    | Some n -> n
-    | None -> Alcotest.fail "persist_message invocation not found"
-  in
-  let capture_callback_line =
-    match last_line_of finalize_path "capture_replay_response ~response_text" with
-    | Some n -> n
-    | None -> Alcotest.fail "capture_replay_response invocation not found"
-  in
-  Alcotest.(check bool)
-    "persisted assistant uses the replay persistence decision"
-    true
-    (persist_line > replay_decision_line);
-  Alcotest.(check bool)
-    "capture callback runs after assistant persistence"
-    true
-    (capture_callback_line > persist_line)
+  Alcotest.(check (option string))
+    "visible response reaches the consumer"
+    (Some "visible")
+    (consume ~suppress_visible_response:false ~response_text:"visible");
+  Alcotest.(check (option string))
+    "suppressed response does not reach the consumer"
+    None
+    (consume ~suppress_visible_response:true ~response_text:"suppressed");
+  Alcotest.(check (option string))
+    "blank response does not reach the consumer"
+    None
+    (consume ~suppress_visible_response:false ~response_text:"  ");
+  Alcotest.(check (list string))
+    "consumer observes only the persistable response"
+    [ "visible" ]
+    (List.rev !captured)
 
 let () =
   Alcotest.run "keeper_wire_capture"

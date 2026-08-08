@@ -13,6 +13,16 @@ let replay_response_text_for_persistence ~suppress_visible_response ~response_te
   else Some response_text
 ;;
 
+let consume_replay_response
+    ~suppress_visible_response
+    ~response_text
+    ~consume =
+  replay_response_text_for_persistence
+    ~suppress_visible_response
+    ~response_text
+  |> Option.map (fun response_text -> consume ~response_text)
+;;
+
 type wire_capture_response_suppression_reason =
   | Control_checkpoint
 

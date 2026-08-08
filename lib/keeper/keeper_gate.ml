@@ -289,9 +289,9 @@ let audit_authorization_source : authorization_source -> Keeper_approval_queue.a
 ;;
 
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
-  Keeper_approval_queue.audit_approval_event
+  Keeper_approval.Audit.record
     ~base_path:request.base_path
-    ~event_type:Keeper_approval_queue.Gate_allowed
+    ~event_type:Keeper_approval.Audit.Gate_allowed
     ~authorization_source:(audit_authorization_source source)
     ~id:
       (match source with
@@ -1109,10 +1109,10 @@ let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval)
   let event_type, outcome =
     match kind with
     | `Activate_worker ->
-      ( Keeper_approval_queue.Auto_judge_restart_worker_recovered
+      ( Keeper_approval.Audit.Auto_judge_restart_worker_recovered
       , "restart_worker_recovered" )
     | `Finalize_judgment ->
-      ( Keeper_approval_queue.Auto_judge_restart_judgment_recovered
+      ( Keeper_approval.Audit.Auto_judge_restart_judgment_recovered
       , "restart_judgment_recovered" )
   in
   Log.Keeper.warn
@@ -1125,7 +1125,7 @@ let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval)
     Keeper_metrics.(to_string HitlSummaryOutcomes)
     ~labels:[ "outcome", outcome ]
     ();
-  Keeper_approval_queue.audit_approval_event
+  Keeper_approval.Audit.record
     ~base_path:entry.audit_base_path
     ~event_type
     ~id:entry.id
@@ -1186,9 +1186,9 @@ let retry_blocked_auto_judge
             Keeper_metrics.(to_string HitlSummaryOutcomes)
             ~labels:[ "outcome", "operator_retry_started" ]
             ();
-       Keeper_approval_queue.audit_approval_event
+       Keeper_approval.Audit.record
          ~base_path:entry.audit_base_path
-         ~event_type:Keeper_approval_queue.Auto_judge_operator_retry_started
+         ~event_type:Keeper_approval.Audit.Auto_judge_operator_retry_started
          ~id:entry.id
          ~keeper_name:entry.keeper_name
          ~tool_name:entry.tool_name
@@ -1420,9 +1420,9 @@ let defer request reason =
          | Error (Keeper_approval_queue.Exact_attempt_storage_error error) ->
            Error error
          | Error (Keeper_approval_queue.Exact_attempt_rejected rejection) ->
-           Keeper_approval_queue.audit_approval_event
+           Keeper_approval.Audit.record
              ~base_path:request.base_path
-             ~event_type:Keeper_approval_queue.Auto_judge_block_observation_superseded
+             ~event_type:Keeper_approval.Audit.Auto_judge_block_observation_superseded
              ~id:approval_id
              ~keeper_name:request.keeper_name
              ~tool_name:request.operation
@@ -1472,9 +1472,9 @@ let observe_exact_rule_store_degraded (request : request) error =
     Keeper_metrics.(to_string ApprovalQueueFailures)
     ~labels:[ "keeper", request.keeper_name; "site", "exact_rule_lookup" ]
     ();
-  Keeper_approval_queue.audit_approval_event
+  Keeper_approval.Audit.record
     ~base_path:request.base_path
-    ~event_type:Keeper_approval_queue.Gate_exact_rule_store_degraded
+    ~event_type:Keeper_approval.Audit.Gate_exact_rule_store_degraded
     ~id:(Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
@@ -1493,9 +1493,9 @@ let observe_exact_rule_expired
     "exact Always Allowed rule %s expired operation=%s; continuing configured Gate mode"
     rule_match.rule_id
     request.operation;
-  Keeper_approval_queue.audit_approval_event
+  Keeper_approval.Audit.record
     ~base_path:request.base_path
-    ~event_type:Keeper_approval_queue.Gate_exact_rule_expired
+    ~event_type:Keeper_approval.Audit.Gate_exact_rule_expired
     ~id:(Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
@@ -1584,9 +1584,9 @@ let decide ?cycle_grant ~keeper_always_allow request =
       "one-shot Gate grant unavailable; preserving the unconsumed grant operation=%s reason=%s"
       request.operation
       (unavailable_reason_to_string reason);
-    Keeper_approval_queue.audit_approval_event
+    Keeper_approval.Audit.record
       ~base_path:request.base_path
-      ~event_type:Keeper_approval_queue.Gate_grant_unavailable
+      ~event_type:Keeper_approval.Audit.Gate_grant_unavailable
       ~id:approval_id
       ~keeper_name:request.keeper_name
       ~tool_name:request.operation

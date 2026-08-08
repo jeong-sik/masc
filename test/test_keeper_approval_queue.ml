@@ -3642,7 +3642,7 @@ let test_resolved_audit_event_carries_judge_evidence () =
   let keeper_name = "queue-judge-evidence" in
   Fun.protect
     ~finally:(fun () ->
-      AQ.For_testing.reset_audit_store ();
+      Keeper_approval.Audit.For_testing.reset_store ();
       cleanup_dir base_path)
     (fun () ->
        ignore (install_exn ~base_path);
@@ -3653,7 +3653,7 @@ let test_resolved_audit_event_carries_judge_evidence () =
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let history =
-         AQ.list_recent_resolved
+         Keeper_approval.Audit.list_recent_resolved
            ~base_path
            ~now_ts:(Unix.gettimeofday ())
            ~window_minutes:60

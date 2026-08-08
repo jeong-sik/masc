@@ -47,7 +47,7 @@ let hitl_status_json ~base_path =
 (* The page bounds travel with the rows. Without them a client cannot tell an
    empty window from a store it never reached, or a complete history from the
    newest slice of one. *)
-let recent_resolved_page_json (history : Keeper_approval_queue.resolved_history) =
+let recent_resolved_page_json (history : Keeper_approval.Audit.resolved_history) =
   `Assoc
     [ "returned", `Int (List.length history.resolved_rows)
     ; "matched", `Int history.resolved_matched
@@ -73,7 +73,7 @@ let dashboard_json ~base_path ~limit ~window_minutes =
      matching [Dashboard_gate_metrics.gate_tool_events_json]. *)
   let now_ts = Unix.gettimeofday () in
   let resolved_history =
-    Keeper_approval_queue.list_recent_resolved
+    Keeper_approval.Audit.list_recent_resolved
       ~base_path
       ~now_ts
       ~limit

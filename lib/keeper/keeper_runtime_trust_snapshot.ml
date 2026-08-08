@@ -701,7 +701,7 @@ let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let latest_receipt = latest_receipt_json ~config ~keeper_name:meta.name in
   let latest_approval_audit =
     match
-      Keeper_approval_queue.read_recent_audit ~base_path:config.base_path
+      Keeper_approval.Audit.read_recent ~base_path:config.base_path
         ~keeper_name:meta.name ~n:1 ()
     with
     | json :: _ -> Some json
@@ -802,7 +802,7 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
     |> List.filter_map tool_call_timeline_event
   in
   let approval_events =
-    Keeper_approval_queue.read_recent_audit ~base_path ~keeper_name:meta.name
+    Keeper_approval.Audit.read_recent ~base_path ~keeper_name:meta.name
       ~n:8 ()
     |> List.filter_map approval_event_timeline_event
   in
@@ -905,7 +905,7 @@ let snapshot_json_inner_with_pending_reader
   let latest_receipt = latest_receipt_json ~config ~keeper_name:meta.name in
   let latest_approval_audit =
     match
-      Keeper_approval_queue.read_recent_audit ~base_path:config.base_path
+      Keeper_approval.Audit.read_recent ~base_path:config.base_path
         ~keeper_name:meta.name ~n:1 ()
     with
     | json :: _ -> Some json

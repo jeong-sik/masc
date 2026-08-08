@@ -96,8 +96,8 @@
   ;; lib/keeper_state/. Parent still references bare Keeper_state_* modules.
   masc.keeper_registry
   masc.keeper_checkpoint_ref
-  ;; Keeper-owned pure/type leaves extracted from lib/keeper/.
   masc.keeper_contract
+  masc.keeper_approval
   masc.keeper_hooks_oas_types
   masc.keeper_runtime
   masc.keeper_toml

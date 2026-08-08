@@ -202,17 +202,17 @@ let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
     int_query_param
       request
       "limit"
-      ~default:Keeper_approval_queue.recent_resolved_history_limit
-    |> clamp ~min_v:1 ~max_v:Keeper_approval_queue.recent_resolved_max_limit
+      ~default:Keeper_approval.Audit.recent_resolved_history_limit
+    |> clamp ~min_v:1 ~max_v:Keeper_approval.Audit.recent_resolved_max_limit
   in
   let window_minutes =
     int_query_param
       request
       "window"
-      ~default:Keeper_approval_queue.recent_resolved_default_window_minutes
+      ~default:Keeper_approval.Audit.recent_resolved_default_window_minutes
     |> clamp
-         ~min_v:Keeper_approval_queue.recent_resolved_min_window_minutes
-         ~max_v:Keeper_approval_queue.recent_resolved_max_window_minutes
+         ~min_v:Keeper_approval.Audit.recent_resolved_min_window_minutes
+         ~max_v:Keeper_approval.Audit.recent_resolved_max_window_minutes
   in
   let force = bool_query_param request "force" ~default:false in
   let approval_queue_revision =
@@ -514,9 +514,9 @@ let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
   | Some id ->
     (match Keeper_approval_queue.delete_rule ~base_path ~id () with
      | Ok deleted ->
-         Keeper_approval_queue.audit_rule_event
+         Keeper_approval.Audit.record_rule
            ~base_path
-           ~event_type:Keeper_approval_queue.Rule_deleted
+           ~event_type:Keeper_approval.Audit.Rule_deleted
            deleted;
          Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
        | Error error ->

@@ -342,11 +342,11 @@ let gate_request ~base_path : Gate.request =
 let with_gate_fixture f =
   let base_path = temp_dir () in
   AQ.For_testing.reset_runtime_state ();
-  AQ.For_testing.reset_audit_store ();
+  Keeper_approval.Audit.For_testing.reset_store ();
   Fun.protect
     ~finally:(fun () ->
       AQ.For_testing.reset_runtime_state ();
-      AQ.For_testing.reset_audit_store ();
+      Keeper_approval.Audit.For_testing.reset_store ();
       cleanup_dir base_path)
     (fun () ->
        (match AQ.install_persistence ~base_path with
@@ -645,7 +645,7 @@ let test_manual_mode_continues_when_rule_store_is_unavailable () =
   let after = exact_rule_lookup_failure_count () in
   check bool "rule lookup degradation is metered" true (after -. before >= 1.0);
   let audited =
-    AQ.read_recent_audit ~base_path ~keeper_name:"keeper" ~n:20 ()
+    Keeper_approval.Audit.read_recent ~base_path ~keeper_name:"keeper" ~n:20 ()
     |> List.exists (fun json ->
       String.equal
         "gate_exact_rule_store_degraded"
@@ -732,7 +732,7 @@ let test_gate_defers_and_observes_expired_exact_rule () =
        ("expired exact rule blocked Manual HITL: "
         ^ Gate.unavailable_reason_to_string reason));
   let audited =
-    AQ.read_recent_audit ~base_path ~keeper_name:"keeper" ~n:20 ()
+    Keeper_approval.Audit.read_recent ~base_path ~keeper_name:"keeper" ~n:20 ()
     |> List.exists (fun json ->
       String.equal
         "gate_exact_rule_expired"

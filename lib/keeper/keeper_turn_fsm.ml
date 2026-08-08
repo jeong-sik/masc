@@ -79,7 +79,7 @@ let observe_phase_dwell ~keeper_name ~from_label =
   | Some prev_at ->
     let now = Unix.gettimeofday () in
     let dwell = Float.max 0.0 (now -. prev_at) in
-    (* Cancel-aware: bare [try ... with _ -> ()] would swallow (* cancel-guard-ok: prose; the code below routes through Safe_ops.protect *)
+    (* Cancel-aware: bare [try ... with _ -> ()] would swallow
        [Eio.Cancel.Cancelled] and break switch teardown. *)
     Safe_ops.protect ~default:() (fun () ->
       Otel_metric_store.observe_histogram

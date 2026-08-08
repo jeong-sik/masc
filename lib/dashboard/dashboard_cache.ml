@@ -390,24 +390,28 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           | _ -> ((), map)
         )
       in
+      let run_bg_compute () =
+        try do_bg_compute ()
+        with
+        | Eio.Cancel.Cancelled _ as exn ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            restore_stale_ready ();
+            Printexc.raise_with_backtrace exn backtrace
+      in
       (match Eio_context.get_switch_opt () with
        | Some sw ->
            (try
-              Eio.Fiber.fork ~sw (fun () ->
-                try do_bg_compute ()
-                with
-                | Eio.Cancel.Cancelled _ as exn ->
-                    restore_stale_ready ();
-                    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ()))
+              Eio.Fiber.fork ~sw run_bg_compute
             with
             | Invalid_argument _ ->
                 restore_stale_ready ()
             | Eio.Cancel.Cancelled _ as exn ->
+                let backtrace = Printexc.get_raw_backtrace () in
                 restore_stale_ready ();
-                Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ()))
+                Printexc.raise_with_backtrace exn backtrace)
        | None ->
            Log.Dashboard.warn "cache: no switch for background revalidation, computing inline";
-           do_bg_compute ());
+           run_bg_compute ());
       stale_value
     | `Compute token ->
       (* PR-0.2.A: cache miss observation (this fiber must compute). *)
@@ -441,8 +445,9 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
         try result_ref := Some (Ok (compute ()))
         with
         | Eio.Cancel.Cancelled _ as exn ->
+            let backtrace = Printexc.get_raw_backtrace () in
             release_on_cancel ();
-            Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+            Printexc.raise_with_backtrace exn backtrace
         | exn -> result_ref := Some (Error exn)
       in
       (* The caller already wraps [compute] in [Eio.Time.with_timeout]

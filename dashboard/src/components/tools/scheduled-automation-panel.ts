@@ -19,7 +19,9 @@ import {
   schedPayloadSpec,
   SCHED_TERMINAL,
   SCHED_TERMINAL_SET,
+  parseRecurrenceKind,
   schedStatusSpec,
+  type RecurrenceKind,
   type SchedStatusSpec,
 } from '../v2/schedule-constants'
 
@@ -135,7 +137,8 @@ function CountChip({ name, count }: { name: string; count: number }) {
 export function recurrenceLabel(request: DashboardScheduledAutomationRequest): string {
   if (request.recurrence_summary?.trim()) return request.recurrence_summary
   const recurrence = request.recurrence
-  const kind = recurrence?.kind ?? request.recurrence_kind ?? 'one_shot'
+  const rawKind = recurrence?.kind ?? request.recurrence_kind
+  const kind = parseRecurrenceKind(rawKind)
   if (kind === 'interval' && typeof recurrence?.interval_sec === 'number') {
     return `every ${recurrence.interval_sec}s`
   }
@@ -155,7 +158,7 @@ export function recurrenceLabel(request: DashboardScheduledAutomationRequest): s
     const timezone = recurrence.timezone
     return `cron ${recurrence.expression}${timezone ? ` ${timezone}` : ''}`
   }
-  return enumLabel(kind)
+  return enumLabel(rawKind)
 }
 
 /**
@@ -1456,16 +1459,13 @@ function schTabMatches(tab: SchTabDef, request: DashboardScheduledAutomationRequ
   return tab.statuses.includes(wireValue(effectiveStatus(request)))
 }
 
-function recurrenceKind(request: DashboardScheduledAutomationRequest): string | null {
-  const kind = request.recurrence?.kind ?? request.recurrence_kind ?? null
-  const value = wireValue(kind)
-  return value === '' ? null : value
+function recurrenceKind(request: DashboardScheduledAutomationRequest): RecurrenceKind | null {
+  return parseRecurrenceKind(request.recurrence?.kind ?? request.recurrence_kind)
 }
 
 function scheduleCadence(request: DashboardScheduledAutomationRequest): SchCadenceKey {
   switch (recurrenceKind(request)) {
     case 'one_shot':
-    case 'oneshot':
       return 'oneshot'
     case 'interval':
       return 'interval'

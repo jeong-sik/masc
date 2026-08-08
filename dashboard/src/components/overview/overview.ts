@@ -257,15 +257,10 @@ export interface OverviewScheduledAutomationDigest {
   tone: 'ok' | 'warn' | 'bad' | 'volt'
 }
 
-function normalizeScheduleStatus(value: string | undefined): string {
-  return value?.trim().toLowerCase() ?? ''
-}
-
 function requestCountByStatus(requests: readonly DashboardScheduledAutomationRequest[], target: string): number {
-  const key = normalizeScheduleStatus(target)
   let count = 0
   for (const request of requests) {
-    if (normalizeScheduleStatus(request.status) === key) count += 1
+    if (request.status === target) count += 1
   }
   return count
 }
@@ -287,12 +282,11 @@ function requestCountByProjectionCount(
   counts: Record<string, number> | undefined,
   target: string,
 ): number {
-  const key = normalizeScheduleStatus(target)
-  const projected = counts?.[key]
+  const projected = counts?.[target]
   if (typeof projected === 'number' && Number.isFinite(projected)) {
     return projected
   }
-  return requestCountByStatus(requests, key)
+  return requestCountByStatus(requests, target)
 }
 
 function sumTerminalCountFromProjection(counts: Record<string, number> | undefined): number {

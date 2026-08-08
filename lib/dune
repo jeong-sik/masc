@@ -298,7 +298,6 @@
   masc.masc_dashboard_api_types
   ;; MCP tool schema cluster (extracted sub-library)
   masc.tool_schemas
-  masc.tool_schemas_specs
   ;; Content-addressed blob store for externalizing large tool outputs.
   ;; Used by tool_bridge to keep ToolResult.content compact while moving
   ;; bytes into a sha256-addressed filesystem store.

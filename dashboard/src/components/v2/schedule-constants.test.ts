@@ -16,6 +16,7 @@ describe('parseRecurrenceKind', () => {
     expect(parseRecurrenceKind('interval')).toBe('interval')
     expect(parseRecurrenceKind('daily')).toBe('daily')
     expect(parseRecurrenceKind('cron')).toBe('cron')
+    expect(parseRecurrenceKind('oneshot')).toBeNull()
     expect(parseRecurrenceKind('Interval')).toBeNull()
     expect(parseRecurrenceKind('  daily ')).toBeNull()
   })

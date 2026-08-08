@@ -1,4 +1,4 @@
-// MASC Dashboard — what a keeper was told, and what it did with it.
+// MASC Dashboard — retained redacted execution records and keeper prompt state.
 //
 // Routes: GET /api/v1/keepers/:name/last-prompt    assembled context, as text
 //         GET /api/v1/keepers/:name/raw-traces     which turns exist

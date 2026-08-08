@@ -1,4 +1,4 @@
-// MASC Dashboard — what a keeper actually sent, and what it will send next.
+// MASC Dashboard — retained redacted execution records and the next prompt.
 //
 // The server has carried these four views since RFC-0366 and the raw-trace
 // reader landed, but nothing rendered them: the routes, the decoders and their
@@ -176,13 +176,13 @@ function RawTurns({ keeper }: { keeper: string }) {
                 onClick=${() => setOffset(page.offset + RECORDS_PER_PAGE)}
               >다음<//>
             </div>
-            <div class="flex flex-wrap items-center gap-1" role="group" aria-label="RAW 표시 방식">
+            <div class="flex flex-wrap items-center gap-1" role="group" aria-label="Trace 표시 방식">
               <button
                 type="button"
                 class=${`rounded border px-2 py-1 text-3xs ${view === 'text' ? 'border-[var(--status-warn)] text-[var(--status-warn)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'}`}
                 aria-pressed=${view === 'text'}
                 onClick=${() => setView('text')}
-              >RAW text</button>
+              >Literal JSONL</button>
               <button
                 type="button"
                 class=${`rounded border px-2 py-1 text-3xs ${view === 'tree' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'}`}

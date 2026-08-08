@@ -3257,14 +3257,13 @@ let register_registered_dispatch_probe () =
   Tool_dispatch.register
     ~tool_name:registered_dispatch_probe_tool
     ~handler:(fun ~name ~args:_ ->
-      Some
-        (tool_ok ~tool_name:name
-           (Yojson.Safe.to_string
-              (`Assoc
-                [ ("ok", `Bool true)
-                ; ("tool", `String name)
-                ; ("route", `String "registered")
-                ]))))
+      tool_ok ~tool_name:name
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ("ok", `Bool true)
+             ; ("tool", `String name)
+             ; ("route", `String "registered")
+             ])))
 
 let workflow_rejection_probe_tool = "test_keeper_workflow_rejection_probe"
 
@@ -3273,18 +3272,17 @@ let register_workflow_rejection_probe () =
   Tool_dispatch.register
     ~tool_name:workflow_rejection_probe_tool
     ~handler:(fun ~name ~args:_ ->
-      Some
-        (Tool_result.error
-           ~failure_class:(Some Tool_result.Workflow_rejection)
-           ~tool_name:name
-           ~start_time:(Unix.gettimeofday ())
-           workflow_rejection_message))
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~tool_name:name
+        ~start_time:(Unix.gettimeofday ())
+        workflow_rejection_message)
 
 let register_typed_outcome_probe name make_result =
   register_probe_schema name;
   Tool_dispatch.register
     ~tool_name:name
-    ~handler:(fun ~name ~args:_ -> Some (make_result name))
+    ~handler:(fun ~name ~args:_ -> make_result name)
 ;;
 
 let execute_registered_probe ~fixture ~name ~make_result =

@@ -255,15 +255,15 @@ let () =
                not put a name in the handler registry. *)
             check bool "Tag_dispatch registers no direct handler" false
               (Tool_dispatch.is_registered "__test_spec_tag_dispatch"));
-          test_case "Direct binding registers handler" `Quick (fun () ->
-            let name = "__test_spec_direct_handler" in
+          test_case "registered binding registers handler" `Quick (fun () ->
+            let name = "__test_spec_registered_handler" in
             let spec =
               Tool_spec.create
                 ~name
-                ~description:"direct handler test"
+                ~description:"registered handler test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
-                ~handler_binding:(Direct (fun ~name:_ ~args:_ -> Some (tool_ok "ok")))
+                ~handler_binding:(Registered (fun ~name:_ ~args:_ -> tool_ok "ok"))
                 ()
             in
             register_test_metadata name;

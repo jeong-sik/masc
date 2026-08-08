@@ -250,7 +250,7 @@ let test_message_json_roundtrip () =
 let test_dispatch_structured () =
   (* Register a test handler *)
   register_test_tool ~tool_name:"__test_tool" ~handler:(fun ~name ~args:_ ->
-    Some (tool_ok ~tool_name:name {|{"result":"ok"}|}));
+    tool_ok ~tool_name:name {|{"result":"ok"}|});
   let token =
     match Tool_dispatch.mint_token ~name:"__test_tool" with
     | Ok t -> t

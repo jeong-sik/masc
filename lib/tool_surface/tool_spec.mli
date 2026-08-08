@@ -1,10 +1,8 @@
 
 (** Tool_spec — Unified tool specification with compile-time safety.
 
-    Replaces scattered registration across 6 separate systems with a single
-    builder function and registration call. Required fields (name, description,
-    module_tag, input_schema) are mandatory labeled arguments — omitting any
-    of them is a compile error. Optional fields use fail-closed defaults.
+    Required fields (name, description, module_tag, input_schema) are mandatory
+    labeled arguments. Optional fields use fail-closed defaults.
 
     {b Usage:}
     {[
@@ -17,16 +15,13 @@
         ~is_idempotent:true
         ()
       let () = Tool_spec.register spec
-    ]}
-
-    @since 2.196.0 *)
+    ]} *)
 
 (** {1 Types} *)
 
 (** How a tool's handler is bound to the dispatch registry. *)
 type handler_binding =
-  | Direct of Tool_dispatch.handler
-  | Shared of Tool_dispatch.handler
+  | Registered of Tool_dispatch.handler
   | Tag_dispatch
 
 type t = {

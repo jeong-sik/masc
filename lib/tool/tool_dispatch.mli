@@ -5,26 +5,20 @@
     registry. Mutable handler registrations remain only for dispatch
     execution; they are not used for token validation or discovery. *)
 
-(** Unified handler type: every tool call is [name * args -> result option].
-    [None] means "this handler does not know this tool". Handlers return
-    the typed {!Tool_result.result} directly — the legacy {!Tool_result.result}
-    record was retired in PR-2 of RFC-0189. *)
-type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result option
+(** Registered handlers are total for their exact registry key. Missing
+    handlers are represented by the registry lookup performed by
+    {!guarded_dispatch}, not by the handler result. *)
+type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result
 
 (** {1 Registration} *)
 
 val register : tool_name:string -> handler:handler -> unit
 (** Register a single tool name to handler mapping. *)
 
-val register_module : schemas:Masc_domain.tool_schema list -> handler:handler -> unit
-(** Bulk-register every tool name from a schema list to the same handler. *)
-
 (** {1 Dispatch} *)
 
-(* RFC-0084 PR-11/14 — [dispatch] and [dispatch_structured] were removed from
-   the public surface and the file-private chain. External callers MUST use
-   [guarded_dispatch], which owns telemetry, pre-hooks, handler execution,
-   result transformation, and dispatch observer fan-out. *)
+(** [guarded_dispatch] owns telemetry, pre-hooks, handler execution, result
+    transformation, and dispatch observer fan-out. *)
 
 val mint_token : name:string -> (Tool_token.t, string) Result.t
 (** Mint a [Tool_token.t] whose name is present in the tag registry.
@@ -122,13 +116,12 @@ val guarded_dispatch
   -> args:Yojson.Safe.t
   -> unit
   -> Tool_result.result option
-(** RFC-0084 §2.2 — Single dispatch entry with 4-label telemetry.
+(** Single dispatch entry with typed telemetry.
 
     Owns the injected span wrapper ({!set_span_wrapper}, registered with
     [Tool_telemetry.with_span] at the composition root), the pre-hook chain,
     handler lookup, exception capture, result transformation, and observer
-    fan-out. The dispatch return is typed [Tool_result.result option]; the old
-    [dispatch]/[dispatch_structured] entry points are gone. *)
+    fan-out. [None] means that the token has no directly registered handler. *)
 
 (** {1 Introspection} *)
 

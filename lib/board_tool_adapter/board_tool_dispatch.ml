@@ -4,13 +4,8 @@
     {!Board_tool_handlers}, {!Board_tool_post}, {!Board_tool_curation},
     or {!Board_tool_sub_board}; and installs every schema from
     {!Board_tool_registry.tools} into the global {!Tool_dispatch}
-    registry via {!Tool_spec.register_all}.
-
-    Stage 10 split of lib/board_tool.ml. *)
-
-(* RFC-0189 PR-1b.4 — [handle_tool] is now typed end-to-end:
-   board handler modules (PR-1b.1/2/3) all return [Tool_result.result]
-   and the old per-arm projection pipes are gone. *)
+    registry via {!Tool_spec.register_all}. All handler arms return
+    {!Tool_result.result}. *)
 
 let handle_tool name args : Tool_result.result =
   let start_time = Time_compat.now () in
@@ -61,9 +56,7 @@ let handle_tool name args : Tool_result.result =
   | "masc_board_sub_board_delete" ->
     Board_tool_sub_board.handle_sub_board_delete ~tool_name:name ~start_time args
   | _ ->
-    (* RFC-0189 — unknown-tool fallback now carries an explicit
-       Workflow_rejection class (caller asked for a tool name not in
-       this dispatch table). *)
+    (* Direct callers receive a typed rejection for unrecognized names. *)
     Tool_result.make_err
       ~tool_name:name
       ~class_:Tool_result.Workflow_rejection
@@ -79,7 +72,7 @@ let tool_spec_read_only =
 ;;
 
 let register () =
-  let handler ~name ~args = Some (handle_tool name args) in
+  let handler ~name ~args = handle_tool name args in
   let make_spec board_name =
     let s = Board_tool_registry.schema_for_board_name board_name in
     let policy = Board_tool_registry.operation_policy board_name in
@@ -88,7 +81,7 @@ let register () =
       ~description:s.description
       ~module_tag:Tool_dispatch.Mod_inline
       ~input_schema:s.input_schema
-      ~handler_binding:(Shared handler)
+      ~handler_binding:(Registered handler)
       ~is_read_only:policy.readonly
       ~is_idempotent:policy.idempotent
       ~visibility:policy.visibility

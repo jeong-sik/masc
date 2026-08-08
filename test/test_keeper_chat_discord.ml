@@ -186,9 +186,9 @@ let test_adapter_empty_terminal_is_local_error () =
   in
   check int "empty terminal makes no Discord call" 0 !sends;
   match outcomes with
-  | [ Error (Discord_rest_client.Other message) ] ->
+  | [ Error (Discord_rest_client.Other { reason; _ }) ] ->
     check bool "empty terminal failure is explicit" true
-      (contains message "contained no text")
+      (contains reason "contained no text")
   | _ -> fail "empty terminal settles once with a local delivery error"
 
 let test_completed_external_effect_settles_without_duplicate_send () =

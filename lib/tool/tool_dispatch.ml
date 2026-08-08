@@ -2,11 +2,7 @@
 
     Production MCP tool names route through {!Tool_name} and the module-tag
     registry. Mutable handler registrations remain only for dispatch
-    execution; they are not used for token validation or discovery.
-
-    RFC-0084 host-config-cleanup-J removed the [MASC_DISPATCH_V2]
-    feature flag and the alternate match chain it gated.  The Hashtbl dispatch
-    path is now the only code path. *)
+    execution; they are not used for token validation or discovery. *)
 
 (** Unified handler type: every tool call is [name * args -> result option].
     [None] means "this handler does not know this tool" (should not happen

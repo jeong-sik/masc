@@ -221,7 +221,6 @@ let dashboard_shell_status_json =
 let dashboard_agent_json = Server_dashboard_http_core_entities.dashboard_agent_json
 let dashboard_message_json = Server_dashboard_http_core_entities.dashboard_message_json
 
-(* dashboard_current_workspace_id removed — namespace retired (#unify-namespace). *)
 
 let dashboard_tasks_safe = Server_dashboard_http_core_entities.dashboard_tasks_safe
 let dashboard_agents_safe = Server_dashboard_http_core_entities.dashboard_agents_safe

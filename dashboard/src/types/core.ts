@@ -1172,7 +1172,6 @@ export interface Keeper {
    *  `keeper_briefs`. */
   exclusion_reason?: KeeperAutobootExclusionReason | null
   registered?: boolean
-  reconcile_status?: string | null
   emoji?: string
   koreanName?: string
   agent_name?: string

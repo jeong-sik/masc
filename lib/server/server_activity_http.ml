@@ -28,7 +28,6 @@ let kind_filters deps request =
   in
   from_kinds @ from_kind |> List.sort_uniq String.compare
 
-(* workspace_filter removed — namespace retired (#unify-namespace). *)
 
 (* RFC-0201 Step 1.  Default-shaped queries (kinds=[], after_seq=0)
    read from [Dashboard_snapshot.current ()].activity_events_default —

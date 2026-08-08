@@ -2,7 +2,7 @@ let mailbox_capacity = 128
 
 type store =
   { replace : Keeper_meta_contract.keeper_meta -> (unit, string) result
-  ; remove : unit -> (unit, string) result
+  ; remove : Keeper_meta_contract.keeper_meta -> (unit, string) result
   }
 
 type error =
@@ -70,8 +70,8 @@ let commit store transition =
     (match store.replace meta with
      | Ok () -> Ok transition.state
      | Error detail -> Error (Store_unavailable detail))
-  | Remove_snapshot ->
-    (match store.remove () with
+  | Remove_snapshot meta ->
+    (match store.remove meta with
      | Ok () -> Ok transition.state
      | Error detail -> Error (Store_unavailable detail))
 ;;

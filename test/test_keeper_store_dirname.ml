@@ -2,10 +2,9 @@
     [<keepers>/<name>/<store>], and Common.keeper_runtime_store_dirname is
     the closed variant that names each [<store>].
 
-    Seven sites built those names from string literals instead — two of them
-    inside keeper_types_support, which used a named constant for
-    execution-receipts and an inline "/metrics" for the store beside it. These
-    pin the names, so a rename moves every reader with the variant. *)
+    Producers, readers, retention, and telemetry once built these names from
+    string literals independently. These tests pin the closed set and its
+    spellings so adding or renaming a store updates the shared owner first. *)
 
 open Alcotest
 

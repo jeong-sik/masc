@@ -46,9 +46,9 @@
   fmt
   cohttp
   cohttp-eio
-  agent_sdk
-  agent_sdk.base
-  agent_sdk.llm_provider
+  masc.agent_core
+  masc.agent_core.base
+  masc.agent_core.llm_provider
   masc.tool_types
   masc.time_codec
   masc.attribution

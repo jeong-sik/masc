@@ -26,8 +26,8 @@
  (flags
   (:standard -w +33))
  (libraries
-  agent_sdk
-  agent_sdk.llm_provider
+  masc.agent_core
+  masc.agent_core.llm_provider
   eio
   masc_eio_context
   masc.config

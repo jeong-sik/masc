@@ -243,7 +243,7 @@ Poll_snapshot         { request_id; turn_id option; status; latest_event_seq }
 **Finding:** The current MASC/OAS bridge makes it easy to collapse a provider response into plain text before connector renderers can use structured content. That is a MASC facade problem first. OAS already owns generic provider/model transport, Agent lifecycle, hooks, and tool-use surfaces; it must not grow keeper, board, fusion, connector, live runtime, or dashboard semantics just to satisfy MASC rendering.
 
 **MASC-first improvements:**
-- Extend `Agent_sdk_response` facade with MASC-local helpers that preserve the provider response shape available today, while still exposing `text_of_response` as fallback.
+- Add a connector-owned typed projection from agent-core response blocks to MASC `chat_block`; do not restore a generic response facade.
 - Carry `response_blocks : chat_block list` alongside `response_text` through `keeper_turn.ml` and `keeper_agent_run_response_text.ml`.
 - Convert generic OAS content blocks into MASC `chat_block` values at the MASC boundary; never expose `chat_block` back into OAS.
 - Store MASC connector artifacts in the MASC blob/artifact store and emit URL-bearing blocks for connectors that can render or link them.

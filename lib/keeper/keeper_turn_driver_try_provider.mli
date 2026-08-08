@@ -19,7 +19,7 @@ type try_provider_ctx =
   ; body_timeout_s : float option
   ; provider_call_deadline_sec : float option
   ; temperature : float option
-  ; accept : Agent_sdk_response.api_response -> bool
+  ; accept : Agent_sdk.Types.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
@@ -79,13 +79,13 @@ val run_try_provider_with_context_overflow_shrink :
 
 val accept_rejected_error :
   runtime_id:string ->
-  response:Agent_sdk_response.api_response ->
+  response:Agent_sdk.Types.api_response ->
   Agent_sdk.Error.sdk_error
 
 module For_testing : sig
   val apply_accept :
     runtime_id:string ->
-    accept:(Agent_sdk_response.api_response -> bool) ->
+    accept:(Agent_sdk.Types.api_response -> bool) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 

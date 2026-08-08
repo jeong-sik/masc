@@ -7,4 +7,4 @@
  (modules keeper_hooks_oas_types)
  (flags
   (:standard -w +4 -w +33))
- (libraries agent_sdk masc.keeper_tooling masc.types_boundary yojson))
+ (libraries masc.agent_core masc.keeper_tooling masc.types_boundary yojson))

@@ -7,4 +7,4 @@
  (modules event_bus_slots)
  (flags
   (:standard -w +4 -w +33))
- (libraries agent_sdk))
+ (libraries masc.agent_core))

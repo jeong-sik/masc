@@ -73,7 +73,7 @@ let run_model_by_label
     ?stream_idle_timeout_s
     ?temperature
     ?max_tokens
-    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
+    ?(accept = fun (_ : Agent_sdk.Types.api_response) -> true)
     ?hooks
     ?enable_thinking
     ?provider_config_transform
@@ -156,7 +156,7 @@ let run_named_with_masc_tools
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
     ?temperature
-    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
+    ?(accept = fun (_ : Agent_sdk.Types.api_response) -> true)
     ?hooks
     ?raw_trace
     ?on_event

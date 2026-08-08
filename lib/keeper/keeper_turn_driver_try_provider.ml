@@ -53,7 +53,7 @@ type try_provider_ctx =
        existed. See [run_try_provider]'s use of [Eio.Time.with_timeout_exn]. *)
     provider_call_deadline_sec : float option
   ; temperature : float option
-  ; accept : Agent_sdk_response.api_response -> bool
+  ; accept : Agent_sdk.Types.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
@@ -160,7 +160,7 @@ let emit_context_overflow_shrink_manifest
     Keeper_runtime_manifest.Provider_lane_resolved
 ;;
 
-let accept_rejected_error ~runtime_id ~(response : Agent_sdk_response.api_response) =
+let accept_rejected_error ~runtime_id ~(response : Agent_sdk.Types.api_response) =
   let rejection =
     Keeper_tool_response.accept_rejection_of_response ~runtime_id response
   in

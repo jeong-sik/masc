@@ -271,7 +271,11 @@ let entry_is_failure (e : tool_call_entry) : bool =
 (* ================================================================ *)
 
 let trajectories_dir (masc_root : string) (keeper_name : string) : string =
-  Filename.concat masc_root (Printf.sprintf "trajectories/%s" keeper_name)
+  Filename.concat
+    (Filename.concat
+       masc_root
+       (Common.keeper_runtime_store_dirname Common.Keeper_trajectories))
+    keeper_name
 
 let trajectory_path (masc_root : string) (keeper_name : string) (trace_id : string) : string =
   Filename.concat (trajectories_dir masc_root keeper_name)

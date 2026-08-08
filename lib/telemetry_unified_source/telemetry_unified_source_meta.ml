@@ -88,7 +88,12 @@ let source_durable_store ~masc_root ~base_path = function
          "%s/*/%s"
          Common.keepers_runtime_dirname
          (Common.keeper_runtime_store_dirname Common.Keeper_metrics))
-  | Trajectory_tool_call -> Filename.concat masc_root "trajectories/*/*.jsonl"
+  | Trajectory_tool_call ->
+    Filename.concat
+      masc_root
+      (Printf.sprintf
+         "%s/*/*.jsonl"
+         (Common.keeper_runtime_store_dirname Common.Keeper_trajectories))
   | Execution_receipt ->
     Filename.concat
       masc_root

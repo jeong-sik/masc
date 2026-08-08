@@ -60,7 +60,9 @@ type keeper_runtime_store =
   | Keeper_raw_traces
   | Keeper_reaction_ledger
   | Keeper_trajectories
-(** Canonical child-store names under {!keepers_runtime_dirname}. *)
+(** Canonical Keeper runtime store directory names. Placement is owned by each
+    store's path builder: some are keeper-scoped below
+    {!keepers_runtime_dirname}, while others are top-level or shared. *)
 
 val keeper_runtime_store_dirname : keeper_runtime_store -> string
 val keeper_runtime_store_of_dirname : string -> keeper_runtime_store option

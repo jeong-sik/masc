@@ -443,13 +443,33 @@ let discord_require_shape mode json =
   | Local_lane, _ -> Ok ()
 ;;
 
-let discord_success ~resource ~channel_id ?guild_id data =
-  let fields =
-    [ "resource", `String resource
+let surface_read_mode_label = function
+  | Local_lane -> "local"
+  | Discord_channel -> "channel"
+  | Discord_messages -> "messages"
+  | Discord_members -> "members"
+  | Discord_member -> "member"
+;;
+
+let discord_result_count (data : Yojson.Safe.t) =
+  match data with
+  | `List values -> Some (List.length values)
+  | `Assoc _ | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ -> None
+;;
+
+let discord_success ~mode ~resource ~channel_id ?guild_id
+    (data : Yojson.Safe.t) =
+  let fields : (string * Yojson.Safe.t) list =
+    [ "mode", `String (surface_read_mode_label mode)
+    ; "resource", `String resource
+    ; "scope", `String "bound_channel"
     ; "channel_id", `String channel_id
     ; "data", data
     ]
     @ match guild_id with Some id -> [ "guild_id", `String id ] | None -> []
+    @ match discord_result_count data with
+      | Some count -> [ "data_count", `Int count ]
+      | None -> []
   in
   Yojson.Safe.to_string (Tool_args.ok_assoc fields)
 ;;
@@ -465,11 +485,38 @@ let handle_discord_surface_read ~meta ~args ~mode =
       let clock = Eio_context.get_clock_opt () in
       let rest ?guild_id call resource =
         match call () with
-        | Error error -> discord_rest_error error
+        | Error error ->
+          Log.Keeper.warn
+            ~keeper_name:meta.name
+            "discord_surface_read failed mode=%s resource=%s channel=%s: %s"
+            (surface_read_mode_label mode)
+            resource
+            channel_id
+            (Format.asprintf "%a" Discord_rest_client.pp_error error);
+          discord_rest_error error
         | Ok data ->
           (match discord_require_shape mode data with
-           | Error message -> discord_tool_error ~code:Tool_args.Internal_error message
-           | Ok () -> discord_success ~resource ~channel_id ?guild_id data)
+           | Error message ->
+             Log.Keeper.warn
+               ~keeper_name:meta.name
+               "discord_surface_read invalid response mode=%s resource=%s channel=%s: %s"
+               (surface_read_mode_label mode)
+               resource
+               channel_id
+               message;
+             discord_tool_error ~code:Tool_args.Internal_error message
+           | Ok () ->
+             Log.Keeper.info
+               ~keeper_name:meta.name
+               "discord_surface_read mode=%s resource=%s channel=%s guild=%s count=%s"
+               (surface_read_mode_label mode)
+               resource
+               channel_id
+               (Option.value ~default:"-" guild_id)
+               (match discord_result_count data with
+                | Some count -> string_of_int count
+                | None -> "-");
+             discord_success ~mode ~resource ~channel_id ?guild_id data)
       in
       match mode with
       | Local_lane ->
@@ -503,7 +550,14 @@ let handle_discord_surface_read ~meta ~args ~mode =
                  "messages")
       | Discord_members | Discord_member ->
         (match Discord_rest_client.get_channel ?clock ~token ~channel_id () with
-         | Error error -> discord_rest_error error
+        | Error error ->
+          Log.Keeper.warn
+            ~keeper_name:meta.name
+            "discord_surface_read failed mode=%s resource=channel channel=%s: %s"
+            (surface_read_mode_label mode)
+            channel_id
+            (Format.asprintf "%a" Discord_rest_client.pp_error error);
+          discord_rest_error error
          | Ok channel ->
            (match discord_object_field_string "guild_id" channel with
             | Error message -> discord_tool_error ~code:Tool_args.Not_found message

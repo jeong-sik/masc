@@ -968,7 +968,7 @@ let () =
       }
   in
   match
-    Keeper_tool_execute_shell_ir.dispatch
+    Keeper_tooling.Execute_shell_ir.dispatch
       ~workdir:"/tmp"
       ~sandbox:(Masc_exec.Sandbox_target.host ())
       ir

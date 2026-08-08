@@ -377,7 +377,7 @@ let validate_docker_dispatch_context
         in
         match Exec_policy.parse_string_to_ir ~mode:Tool_execute validation_cmd with
         | Ok validation_ir ->
-          Keeper_tool_execute_shell_ir.validate_paths
+          Keeper_tooling.Execute_shell_ir.validate_paths
             ~workdir:cwd
             validation_ir
         | Error reason ->

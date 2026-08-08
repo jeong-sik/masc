@@ -393,7 +393,7 @@ let test_reject_reason_describes_thinking_only_response () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-model"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:
            [
@@ -1163,7 +1163,7 @@ let test_thinking_with_text_is_accepted () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-text"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:
            [
@@ -1184,7 +1184,7 @@ let test_thinking_with_tool_use_is_accepted () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-tool"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:
            [
@@ -1212,7 +1212,7 @@ let check_accept_matches_oas_shape label content =
   Alcotest.(check bool)
     label
     expected
-    (Keeper_tool_response.response_has_text_or_tool_progress response)
+    (Keeper_tooling.Response.response_has_text_or_tool_progress response)
 
 let test_accept_contract_delegates_to_oas_response_shape () =
   check_accept_matches_oas_shape "empty" [];
@@ -1256,7 +1256,7 @@ let test_thinking_only_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-stop-sequence"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:
            [
@@ -1284,7 +1284,7 @@ let test_thinking_only_no_tool_can_try_next_candidate () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-only-no-tool"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:
            [
@@ -1325,7 +1325,7 @@ let test_empty_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.empty-stop-sequence"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result ~stop_reason:Agent_sdk.Types.StopSequence ())
   in
   let err, reason_kind, reason = expect_accept_rejected result in
@@ -1389,7 +1389,7 @@ let test_blank_text_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.blank-max-tokens"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:[ Agent_sdk.Types.Text " \n\t " ]
          ~stop_reason:Agent_sdk.Types.MaxTokens
@@ -1438,7 +1438,7 @@ let test_media_with_tool_result_is_deliverable () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.mixed"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:
            [

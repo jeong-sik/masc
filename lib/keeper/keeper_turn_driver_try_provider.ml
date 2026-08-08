@@ -162,13 +162,13 @@ let emit_context_overflow_shrink_manifest
 
 let accept_rejected_error ~runtime_id ~(response : Agent_sdk.Types.api_response) =
   let rejection =
-    Keeper_tool_response.accept_rejection_of_response ~runtime_id response
+    Keeper_tooling.Response.accept_rejection_of_response ~runtime_id response
   in
   let reason_kind =
     match rejection.kind with
-    | Keeper_tool_response.No_usable_progress ->
+    | Keeper_tooling.Response.No_usable_progress ->
       Some Keeper_internal_error.Accept_no_usable_progress
-    | Keeper_tool_response.Predicate_rejected ->
+    | Keeper_tooling.Response.Predicate_rejected ->
       Some Keeper_internal_error.Accept_predicate_rejected
   in
   Keeper_internal_error.sdk_error_of_masc_internal_error

@@ -1,4 +1,4 @@
-(** Keeper_tool_response - provider response acceptance and keeper reply text
+(** Keeper_tooling.Response - provider response acceptance and keeper reply text
     normalization. *)
 
 let normalize_response_text ~(text : string) ~(tool_names : string list) ()

@@ -273,16 +273,16 @@ type task_op =
   | Task_done
 
 let task_op_of_keeper_tool = function
-  | Keeper_tool_name.Tasks_list -> Some Tasks_list
-  | Keeper_tool_name.Tasks_audit -> Some Tasks_audit
-  | Keeper_tool_name.Broadcast -> Some Broadcast
-  | Keeper_tool_name.Task_create -> Some Task_create
-  | Keeper_tool_name.Task_claim -> Some Task_claim
-  | Keeper_tool_name.Task_done -> Some Task_done
+  | Keeper_tooling.Name.Tasks_list -> Some Tasks_list
+  | Keeper_tooling.Name.Tasks_audit -> Some Tasks_audit
+  | Keeper_tooling.Name.Broadcast -> Some Broadcast
+  | Keeper_tooling.Name.Task_create -> Some Task_create
+  | Keeper_tooling.Name.Task_claim -> Some Task_claim
+  | Keeper_tooling.Name.Task_done -> Some Task_done
 ;;
 
 let task_op_of_name name =
-  match Keeper_tool_name.of_string name with
+  match Keeper_tooling.Name.of_string name with
   | Some tool -> task_op_of_keeper_tool tool
   | None -> None
 ;;

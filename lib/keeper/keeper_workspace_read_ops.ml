@@ -65,10 +65,10 @@ let try_handle_with_outcome
        | Error msg -> Read_target_error msg
        | Ok () -> Read_target target)
   in
-  (* TEL-OK: read-op adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch or the
+  (* TEL-OK: read-op adapter delegates to Keeper_tooling.Execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)
   let dispatch_host_shell_ir ~workdir ir =
-    Keeper_tool_execute_shell_ir.dispatch
+    Keeper_tooling.Execute_shell_ir.dispatch
       ~workdir
       ~sandbox:(Masc_exec.Sandbox_target.host ())
       ir
@@ -207,7 +207,7 @@ let try_handle_with_outcome
                 | Error (`Unknown executable) ->
                   path_error (Printf.sprintf "invalid executable: %S" executable)
                 | Ok bin ->
-                  let ir = Keeper_tool_execute_shell_ir.simple_bin bin argv in
+                  let ir = Keeper_tooling.Execute_shell_ir.simple_bin bin argv in
                   run_host_shell_ir
                     ~workdir:(host_search_workdir target)
                     ~cmd:op

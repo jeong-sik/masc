@@ -381,7 +381,7 @@ let shell_simple
   let ( let* ) = Result.bind in
   let* bin, arguments = shell_bin argv in
   Ok
-    (Keeper_tool_execute_shell_ir.simple_bin
+    (Keeper_tooling.Execute_shell_ir.simple_bin
        ?cwd_raw:cwd
        ?cwd_base:cwd
        ~sandbox
@@ -438,7 +438,7 @@ let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input 
       in
       loop [] stages
     in
-    Ok (Keeper_tool_execute_shell_ir.pipeline simples)
+    Ok (Keeper_tooling.Execute_shell_ir.pipeline simples)
 ;;
 
 let to_shell_ir ?sandbox input =

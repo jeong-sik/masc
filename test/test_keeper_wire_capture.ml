@@ -549,7 +549,7 @@ let response_capture_matches_replayed_history_text () =
     let tool_names = [ "keeper_web_fetch"; "keeper_file_read" ] in
     let history_text =
       match
-        Keeper_tool_response.normalize_response_text
+        Keeper_tooling.Response.normalize_response_text
           ~text:raw_response
           ~tool_names
           ()

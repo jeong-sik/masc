@@ -1566,6 +1566,7 @@ let runtime_request_config_json (rt : Runtime.t) =
       ; "execution", `String "claude_code"
       ; "model", Json_util.string_opt_to_json config.model
       ; "timeout_s", `Float config.timeout_s
+      ; "max_turns", `Int config.max_turns
       ; "execution_mode", `String "plan_read_only"
       ; "tool_owner", `String "official_client"
       ; "verified", `Bool false

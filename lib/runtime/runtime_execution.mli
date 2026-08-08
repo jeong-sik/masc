@@ -23,6 +23,7 @@ type claude_code =
   { cli_path : string
   ; model : string option
   ; timeout_s : float
+  ; max_turns : int
   }
 
 type t =

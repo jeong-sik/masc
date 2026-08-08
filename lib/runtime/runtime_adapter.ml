@@ -551,7 +551,11 @@ let claude_code_execution (provider : Runtime_schema.provider)
      | None ->
        Ok
          (Runtime_execution.Claude_code
-            { cli_path = command; model = Some spec.api_name; timeout_s = 300.0 }))
+            { cli_path = command
+            ; model = Some spec.api_name
+            ; timeout_s = 300.0
+            ; max_turns = 12
+            }))
 ;;
 
 let binding_to_execution (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)

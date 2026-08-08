@@ -1,0 +1,404 @@
+open Result.Syntax
+
+let config_error ~field detail =
+  Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })
+;;
+
+let internal_error detail = Agent_sdk.Error.Internal detail
+
+(* NDT-OK: the UUID is an opaque official-client session identity. *)
+let session_rng = Random.State.make_self_init ()
+let session_rng_mutex = Stdlib.Mutex.create ()
+
+let fresh_session_id () =
+  Stdlib.Mutex.protect session_rng_mutex (fun () ->
+    Uuidm.v4_gen session_rng () |> Uuidm.to_string)
+;;
+
+let text_of_blocks ~field blocks =
+  let rec loop texts = function
+    | [] -> Ok (String.concat "\n" (List.rev texts))
+    | Agent_sdk.Types.Text text :: rest -> loop (text :: texts) rest
+    | _ :: _ ->
+      Error
+        (config_error
+           ~field
+           "claude-code Keeper projection currently admits text blocks only")
+  in
+  loop [] blocks
+;;
+
+let user_message text : Agent_sdk.Types.message =
+  { role = User
+  ; content = [ Text text ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+let hook_error ~hook_name ~stage detail =
+  internal_error
+    (Printf.sprintf
+       "Claude Code runtime %s hook failed at %s: %s"
+       hook_name
+       (Agent_sdk.Hooks.hook_stage_to_string stage)
+       detail)
+;;
+
+let illegal_hook_decision ~hook_name decision =
+  config_error
+    ~field:"hooks"
+    (Printf.sprintf
+       "Claude Code runtime %s hook returned unsupported decision %s"
+       hook_name
+       (Agent_sdk.Hooks.decision_kind_to_string
+          (Agent_sdk.Hooks.classify_decision decision)))
+;;
+
+let invoke_turn_hook ~keeper_name ~turn_count ~hook_name hook event =
+  Agent_sdk.Agent_tools.invoke_hook
+    ~tracer:Agent_sdk.Tracing.null
+    ~agent_name:keeper_name
+    ~turn_count
+    ~hook_name
+    hook
+    event
+;;
+
+let render_message (message : Agent_sdk.Types.message) =
+  let* text = text_of_blocks ~field:"initial_messages" message.content in
+  let role =
+    match message.role with
+    | System -> "SYSTEM"
+    | User -> "USER"
+    | Assistant -> "ASSISTANT"
+    | Tool -> "TOOL"
+  in
+  if message.role = Tool
+  then
+    Error
+      (config_error
+         ~field:"initial_messages"
+         "claude-code history projection does not admit OAS tool messages")
+  else Ok (Printf.sprintf "%s:\n%s" role text)
+;;
+
+let render_messages messages =
+  let rec loop acc = function
+    | [] -> Ok (String.concat "\n\n" (List.rev acc))
+    | message :: rest ->
+      let* rendered = render_message message in
+      loop (rendered :: acc) rest
+  in
+  loop [] messages
+;;
+
+let prepare_prompt ~keeper_name ~turn_count ~is_resume ~goal ~system_prompt
+    ~initial_messages ~model_input_projection ~hooks =
+  let input_messages =
+    if is_resume then [ user_message goal ] else initial_messages @ [ user_message goal ]
+  in
+  let before_turn =
+    invoke_turn_hook
+      ~keeper_name
+      ~turn_count
+      ~hook_name:"before_turn"
+      hooks.Agent_sdk.Hooks.before_turn
+      (Agent_sdk.Hooks.BeforeTurn { turn = turn_count; messages = input_messages })
+  in
+  let* messages =
+    match before_turn with
+    | Continue -> Ok input_messages
+    | Nudge text -> Ok (input_messages @ [ user_message text ])
+    | HookFailed { stage; detail } -> Error (hook_error ~hook_name:"before_turn" ~stage detail)
+    | decision -> Error (illegal_hook_decision ~hook_name:"before_turn" decision)
+  in
+  let before_turn_params =
+    invoke_turn_hook
+      ~keeper_name
+      ~turn_count
+      ~hook_name:"before_turn_params"
+      hooks.before_turn_params
+      (Agent_sdk.Hooks.BeforeTurnParams
+         { turn = turn_count
+         ; messages
+         ; last_tool_results = []
+         ; current_params = Agent_sdk.Hooks.default_turn_params
+         ; reasoning = Agent_sdk.Hooks.empty_reasoning_summary
+         })
+  in
+  let* params =
+    match before_turn_params with
+    | Continue -> Ok Agent_sdk.Hooks.default_turn_params
+    | AdjustParams params -> Ok params
+    | HookFailed { stage; detail } ->
+      Error (hook_error ~hook_name:"before_turn_params" ~stage detail)
+    | decision -> Error (illegal_hook_decision ~hook_name:"before_turn_params" decision)
+  in
+  let unsupported field value =
+    match value with
+    | None -> Ok ()
+    | Some _ ->
+      Error
+        (config_error
+           ~field
+           "claude-code does not project this OAS turn parameter; select an exact Claude Code model id")
+  in
+  let* () = unsupported "temperature" params.temperature in
+  let* () = unsupported "thinking_budget" params.thinking_budget in
+  let* () = unsupported "reasoning_effort" params.reasoning_effort in
+  let* () = unsupported "enable_thinking" params.enable_thinking in
+  let* () = unsupported "preserve_thinking" params.preserve_thinking in
+  let* () = unsupported "tool_choice" params.tool_choice in
+  let* messages =
+    match model_input_projection with
+    | None -> Ok messages
+    | Some project ->
+      (try
+         match project messages with
+         | Ok projected -> Ok projected
+         | Error detail -> Error (config_error ~field:"model_input_projection" detail)
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Error
+           (internal_error
+              ("Claude Code runtime model input projection raised: "
+               ^ Printexc.to_string exn)))
+  in
+  let* rendered = render_messages messages in
+  let system_prompt =
+    Option.value params.system_prompt_override ~default:system_prompt
+  in
+  let system_context =
+    [ (if is_resume then None else String_util.trim_to_option system_prompt)
+    ; Option.bind params.extra_system_context String_util.trim_to_option
+    ]
+    |> List.filter_map Fun.id
+  in
+  Ok (String.concat "\n\n" (system_context @ [ rendered ]))
+;;
+
+let claude_code_error_to_sdk_error = function
+  | Runtime_claude_code_cli.Invalid_config detail ->
+    config_error ~field:"claude_code" detail
+  | Runtime_claude_code_cli.Turn_rejected { reset_at; detail; _ } ->
+    let retry_after =
+      Option.map
+        (fun timestamp -> Float.max 0.0 (Float.of_int timestamp -. Time_compat.now ()))
+        reset_at
+    in
+    Agent_sdk.Error.Api (Agent_sdk.Retry.RateLimited { retry_after; message = detail })
+  | Runtime_claude_code_cli.Timeout seconds ->
+    Agent_sdk.Error.Api
+      (Agent_sdk.Retry.Timeout
+         { message = Printf.sprintf "Claude Code turn timed out after %.3fs" seconds
+         ; phase = None
+         })
+  | error -> Agent_sdk.Error.Internal (Runtime_claude_code_cli.error_to_string error)
+;;
+
+let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
+    ~initial_messages ~model_input_projection ~hooks
+    ~(config : Runtime_execution.claude_code) =
+  let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
+  let* goal =
+    match goal_blocks with
+    | None -> Ok goal
+    | Some blocks -> text_of_blocks ~field:"goal_blocks" blocks
+  in
+  let* stored_session =
+    match Keeper_claude_code_session_store.load ~base_path ~keeper_name with
+    | Ok session -> Ok session
+    | Error detail ->
+      Error (internal_error ("Claude Code session binding load failed: " ^ detail))
+  in
+  let* session_mode, turn_count =
+    match stored_session with
+    | None -> Ok (Runtime_claude_code_cli.Start { session_id = fresh_session_id () }, 1)
+    | Some session when not (String.equal session.runtime_id runtime_id) ->
+      Error
+        (config_error
+           ~field:"claude_code_session.runtime_id"
+           (Printf.sprintf
+              "stored runtime %S does not match selected runtime %S"
+              session.runtime_id
+              runtime_id))
+    | Some { phase = Settled { session_id }; turn_count; _ }
+      when turn_count < Int.max_int ->
+      Ok (Runtime_claude_code_cli.Resume { session_id }, turn_count + 1)
+    | Some { phase = Settled _; _ } ->
+      Error
+        (config_error
+           ~field:"claude_code_session.turn_count"
+           "stored Claude Code session turn count cannot be incremented")
+    | Some { phase = Claimed _; _ } ->
+      Error
+        (config_error
+           ~field:"claude_code_session.phase"
+           "stored Claude Code session has an unsettled claim; refusing duplicate execution")
+  in
+  let is_resume =
+    match session_mode with
+    | Runtime_claude_code_cli.Start _ -> false
+    | Runtime_claude_code_cli.Resume _ -> true
+  in
+  let* prompt =
+    prepare_prompt
+      ~keeper_name
+      ~turn_count
+      ~is_resume
+      ~goal
+      ~system_prompt
+      ~initial_messages
+      ~model_input_projection
+      ~hooks
+  in
+  let client_config : Runtime_claude_code_cli.config =
+    { cli_path = config.cli_path
+    ; cwd = base_path
+    ; model = config.model
+    ; timeout_s = config.timeout_s
+    ; max_turns = config.max_turns
+    }
+  in
+  let* () =
+    match Runtime_claude_code_cli.validate_run ~session_mode client_config ~prompt with
+    | Ok () -> Ok ()
+    | Error error -> Error (claude_code_error_to_sdk_error error)
+  in
+  let* claimed =
+    match
+      Keeper_claude_code_session_store.claim
+        ~base_path
+        ~keeper_name
+        ~expected:stored_session
+        ~runtime_id
+        ~updated_at:(Time_compat.now ())
+    with
+    | Ok session -> Ok session
+    | Error detail -> Error (internal_error ("Claude Code session claim failed: " ^ detail))
+  in
+  let started_at = Time_compat.now () in
+  match Runtime_claude_code_cli.run_turn ~session_mode client_config ~prompt with
+  | Error error -> Error (claude_code_error_to_sdk_error error)
+  | Ok turn ->
+    let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
+    let usage : Agent_sdk.Types.api_usage =
+      { input_tokens = turn.usage.input_tokens
+      ; output_tokens = turn.usage.output_tokens
+      ; cache_creation_input_tokens = turn.usage.cache_creation_input_tokens
+      ; cache_read_input_tokens = turn.usage.cache_read_input_tokens
+      ; cost_usd = Some turn.usage.total_cost_usd
+      }
+    in
+    let response =
+      { Agent_sdk.Types.id =
+          Printf.sprintf "%s:%d" turn.session_id turn_count
+      ; model = turn.model
+      ; stop_reason = EndTurn
+      ; content = [ Text turn.text ]
+      ; usage = Some usage
+      ; telemetry =
+          Some
+            { Agent_sdk.Types.default_inference_telemetry with
+              request_latency_ms = Some latency_ms
+            ; canonical_model_id = Some turn.model
+            }
+      }
+    in
+    let after_turn =
+      invoke_turn_hook
+        ~keeper_name
+        ~turn_count
+        ~hook_name:"after_turn"
+        hooks.after_turn
+        (Agent_sdk.Hooks.AfterTurn { turn = turn_count; response })
+    in
+    let* () =
+      match after_turn with
+      | Continue -> Ok ()
+      | HookFailed { stage; detail } ->
+        Error (hook_error ~hook_name:"after_turn" ~stage detail)
+      | decision -> Error (illegal_hook_decision ~hook_name:"after_turn" decision)
+    in
+    let on_stop =
+      invoke_turn_hook
+        ~keeper_name
+        ~turn_count
+        ~hook_name:"on_stop"
+        hooks.on_stop
+        (Agent_sdk.Hooks.OnStop { reason = response.stop_reason; response })
+    in
+    let* () =
+      match on_stop with
+      | Continue -> Ok ()
+      | HookFailed { stage; detail } ->
+        Error (hook_error ~hook_name:"on_stop" ~stage detail)
+      | decision -> Error (illegal_hook_decision ~hook_name:"on_stop" decision)
+    in
+    let* _settled =
+      match
+        Keeper_claude_code_session_store.settle
+          ~base_path
+          ~keeper_name
+          ~expected:claimed
+          ~session_id:turn.session_id
+          ~usage:turn.usage
+          ~updated_at:(Time_compat.now ())
+      with
+      | Ok session -> Ok session
+      | Error detail ->
+        Error (internal_error ("Claude Code session settlement failed: " ^ detail))
+    in
+    let capture, _metrics =
+      Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
+    in
+    Runtime_observation.record_attempt_terminal
+      capture
+      ~model_id:turn.model
+      ~latency_ms:(Some latency_ms)
+      ~error:None;
+    let runtime_observation =
+      Runtime_observation.runtime_observation_with_metrics
+        ~runtime_id
+        ~strategy:"official_client_runtime"
+        ~configured_labels:
+          [ "claude_code"
+          ; "execution_mode=plan_read_only"
+          ; "tool_owner=official_client"
+          ; "masc_tool_hooks=unavailable"
+          ; Printf.sprintf "permission_mode=%s" turn.permission_mode
+          ; Printf.sprintf "tool_calls=%d" turn.tool_calls
+          ; Printf.sprintf "resumed=%b" turn.resumed
+          ; Printf.sprintf "turn_count=%d" turn_count
+          ; Printf.sprintf "client_turns=%d" turn.num_turns
+          ; Printf.sprintf "input_tokens=%d" turn.usage.input_tokens
+          ; Printf.sprintf "output_tokens=%d" turn.usage.output_tokens
+          ; Printf.sprintf
+              "cache_creation_input_tokens=%d"
+              turn.usage.cache_creation_input_tokens
+          ; Printf.sprintf
+              "cache_read_input_tokens=%d"
+              turn.usage.cache_read_input_tokens
+          ; Printf.sprintf "total_cost_usd=%.12g" turn.usage.total_cost_usd
+          ]
+        ~candidate_count:1
+        ~selected_model_raw:(Some turn.model)
+        ~capture
+        ~attempt_details_source:"claude_code"
+        ~oas_internal_runtime_allowed:false
+        ()
+    in
+    Ok
+      { Runtime_agent.response
+      ; checkpoint = None
+      ; session_id = turn.session_id
+      ; turns = turn_count
+      ; trace_ref = None
+      ; run_validation = None
+      ; runtime_observation = Some runtime_observation
+      ; stop_reason = Completed
+      }
+;;

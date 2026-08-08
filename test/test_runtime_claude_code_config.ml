@@ -48,6 +48,7 @@ let test_materializes_as_official_client_runtime () =
        | Runtime_execution.Claude_code config ->
          check string "cli path" "claude" config.cli_path;
          check (option string) "model" (Some "claude-opus-5") config.model;
+         check int "default client turns" 12 config.max_turns;
          check string "typed owner label" "claude_code"
            (Runtime_execution.label default.execution);
          check bool "agent_core config absent" true

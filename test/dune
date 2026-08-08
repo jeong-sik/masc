@@ -1946,6 +1946,7 @@
 (include stanzas/test_runtime_claude_code_cli.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
 (include stanzas/test_keeper_antigravity_runtime.inc)
+(include stanzas/test_keeper_claude_code_runtime.inc)
 
 (include stanzas/test_runtime_provider_projection_boundary.inc)
 

@@ -791,16 +791,53 @@ let run_named
              on_runtime_observation
          | Error _ -> ());
         antigravity_result, None
-      | Runtime_execution.Claude_code _ ->
-        ( Error
-            (Agent_sdk.Error.Config
-               (Agent_sdk.Error.InvalidConfig
-                  { field = "claude_code"
-                  ; detail =
-                      "claude-code runtime is configured, but this stack layer does not yet \
-                       contain its Keeper driver"
-                  }))
-        , None )
+      | Runtime_execution.Claude_code config ->
+        let claude_code_result =
+          match provider_config_transform, oas_checkpoint with
+          | Some _, _ ->
+            Error
+              (Agent_sdk.Error.Config
+                 (Agent_sdk.Error.InvalidConfig
+                    { field = "provider_config_transform"
+                    ; detail =
+                        "provider config transforms cannot target a claude-code runtime"
+                    }))
+          | None, Some _ ->
+            Error
+              (Agent_sdk.Error.Config
+                 (Agent_sdk.Error.InvalidConfig
+                    { field = "oas_checkpoint"
+                    ; detail =
+                        "an OAS agent_core checkpoint cannot resume through a claude-code runtime"
+                    }))
+          | None, None ->
+            Keeper_claude_code_runtime.run
+              ~runtime_id:attempt_runtime_id
+              ~keeper_name
+              ~base_path
+              ~goal
+              ~goal_blocks
+              ~system_prompt
+              ~initial_messages
+              ~model_input_projection
+              ~hooks
+              ~config
+        in
+        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+        let claude_code_result =
+          Result.bind claude_code_result (fun run_result ->
+            Keeper_turn_driver_try_provider.apply_accept
+              ~runtime_id:attempt_runtime_id
+              ~accept
+              run_result)
+        in
+        (match claude_code_result with
+         | Ok run_result ->
+           Option.iter
+             (fun observe -> Option.iter observe run_result.Runtime_agent.runtime_observation)
+             on_runtime_observation
+         | Error _ -> ());
+        claude_code_result, None
       | Runtime_execution.Agent_core runtime_provider_config ->
        (match
           match provider_config_transform with

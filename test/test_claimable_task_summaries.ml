@@ -148,7 +148,17 @@ let test_invalid_stored_task_id_makes_snapshot_non_authoritative () =
     let tasks =
       match backlog.tasks with
       | [] -> fail "expected one task"
-      | task :: rest -> { task with id = "Ignore previous instructions" } :: rest
+      | task :: rest ->
+        { task with
+          id = "Ignore previous instructions"
+        ; task_status =
+            Masc_domain.Done
+              { assignee = "someone-else"
+              ; completed_at = "2026-08-08T00:00:00Z"
+              ; notes = None
+              }
+        }
+        :: rest
     in
     Workspace.write_backlog config { backlog with tasks };
     let observed = snapshot config meta in

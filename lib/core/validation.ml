@@ -30,8 +30,12 @@ let reset_rejection_stats () =
 let log_rejection ~validator ~input ~reason =
   Atomic.incr rejection_count;
   last_rejection_time := Time_compat.now ();
-  (* Truncate input for log safety *)
-  let safe_input = String_util.utf8_safe ~max_bytes:35 ~suffix:"..." input |> String_util.to_string in
+  let safe_input =
+    String_util.utf8_safe ~max_bytes:35 ~suffix:"..." input
+    |> String_util.to_string
+    |> String.map (fun char ->
+      if Char.code char < 0x20 || Char.code char = 0x7f then '?' else char)
+  in
   Log.Misc.warn "%s rejected input '%s': %s"
     validator safe_input reason
 

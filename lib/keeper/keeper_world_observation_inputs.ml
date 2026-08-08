@@ -35,15 +35,15 @@ let empty_backlog_snapshot =
   { unclaimed_count = 0; claimable_tasks = []; failed_count = 0; revision = None }
 ;;
 
-let rec claimable_task_identities = function
+let rec tasks_with_identities = function
   | [] -> Ok []
   | (task : Masc_domain.task) :: rest ->
     (match Keeper_id.Task_id.of_string task.id with
      | Error reason -> Error reason
      | Ok task_id ->
        Result.map
-         (fun identities -> { task_id } :: identities)
-         (claimable_task_identities rest))
+         (fun tasks -> (task, task_id) :: tasks)
+         (tasks_with_identities rest))
 ;;
 
 (* A keeper must not treat a task it authored itself as work waiting for it.
@@ -117,27 +117,7 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         recovery.primary_error;
       empty_backlog_snapshot
     | Ok { Workspace.observed_backlog = backlog; recovered_from = None } ->
-    let unclaimed_tasks =
-      List.filter
-        (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
-        backlog.tasks
-    in
-    let unclaimed = List.length unclaimed_tasks in
-    let claim_scope_filter =
-      claim_goal_scope_filter ~config ~meta ~tasks:backlog.tasks ()
-    in
-    let claimable_tasks_result =
-      unclaimed_tasks
-      |> List.filter (fun task ->
-           Workspace_task_schedule.task_is_claim_pool_candidate task
-           && claim_scope_filter task
-           (* Self-authored tasks stay in [unclaimed] (the count stays an
-              honest view of the backlog) but are not offered back to their
-              author as claimable work — that edge is the feedback loop. *)
-           && not (task_is_self_authored_todo ~meta task))
-      |> claimable_task_identities
-    in
-    (match claimable_tasks_result with
+    (match tasks_with_identities backlog.tasks with
      | Error reason ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string ObservationQueryFailures)
@@ -150,7 +130,30 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
          "read_backlog_snapshot: invalid task identity: %s"
          reason;
        empty_backlog_snapshot
-     | Ok claimable_tasks ->
+     | Ok tasks_with_ids ->
+       let unclaimed_tasks =
+         List.filter
+           (fun ((task : Masc_domain.task), _) ->
+              task.task_status = Masc_domain.Todo)
+           tasks_with_ids
+       in
+       let unclaimed = List.length unclaimed_tasks in
+       let claim_scope_filter =
+         claim_goal_scope_filter ~config ~meta ~tasks:backlog.tasks ()
+       in
+       let claimable_tasks =
+         unclaimed_tasks
+         |> List.filter_map (fun (task, task_id) ->
+              if
+                Workspace_task_schedule.task_is_claim_pool_candidate task
+                && claim_scope_filter task
+                (* Self-authored tasks stay in [unclaimed] (the count stays an
+                   honest view of the backlog) but are not offered back to their
+                   author as claimable work — that edge is the feedback loop. *)
+                && not (task_is_self_authored_todo ~meta task)
+              then Some { task_id }
+              else None)
+       in
        let failed =
          (* "Failed" here means still-auditable active work. Terminal Cancelled
             tasks are historical evidence, not a reason to wake every keeper.

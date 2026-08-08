@@ -85,6 +85,21 @@ while IFS= read -r site; do
   same_line_ok=0
   prev_line_ok=0
 
+  # Shapes where discarding is the construct, not a dropped contract. The
+  # rule exists so a reader learns *why* a return value goes away; in these
+  # the code already says it.
+  #
+  #   Atomic.fetch_and_add / Atomic.exchange — the previous value is what
+  #     you throw away to use them as counters
+  #   ignore (e : t)                         — the annotation names exactly
+  #     what is dropped, which is the justification in typed form
+  #   Queue.pop / Stack.pop                  — popped for the side effect
+  #   force_link                             — referenced so the linker
+  #     keeps the module; discarding is the whole point
+  if printf '%s\n' "$body" | rg -qP '(Atomic\.(fetch_and_add|exchange|incr|decr)|Queue\.(pop|take)|Stack\.pop|force_link|:\s*[A-Za-z_\[][^)]*\)+\s*$)'; then
+    continue
+  fi
+
   if printf '%s\n' "$body" | rg -qP "$JUSTIFY_RE"; then
     same_line_ok=1
   fi

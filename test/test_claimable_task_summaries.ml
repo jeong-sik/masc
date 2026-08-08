@@ -133,8 +133,10 @@ let test_an_empty_backlog_offers_nothing () =
 let test_recovery_snapshot_is_not_claimable () =
   with_config (fun config meta ->
     ignore (add config ~title:"Primary task" ~created_by:"someone-else");
-    Out_channel.with_open_text (Workspace.backlog_path config) (fun channel ->
-      output_string channel {|{"tasks":"corrupt"}|});
+    Workspace.write_json
+      config
+      (Workspace.backlog_path config)
+      (`Assoc [ "tasks", `String "corrupt" ]);
     let observed = snapshot config meta in
     check (option int) "recovery has no authoritative revision" None observed.revision;
     check int "recovery exposes no claimable rows" 0

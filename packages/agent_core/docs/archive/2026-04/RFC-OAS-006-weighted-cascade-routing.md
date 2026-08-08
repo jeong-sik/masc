@@ -42,7 +42,7 @@ always receives 100% of initial traffic. This causes:
 
 ```
 Layer 1: Provider Inventory    — what exists (API keys, endpoints)
-Layer 2: Availability          — what works now (health, cooldown)  
+Layer 2: Availability          — what works now (health, cooldown)
 Layer 3: Selection Policy      — how to choose (weights, strategy)
 ```
 
@@ -81,7 +81,7 @@ Plain strings remain valid (weight defaults to equal):
 ```
 weights: [glm:50, haiku:30, ollama:20]
 → 50% chance: [glm, haiku, ollama]
-→ 30% chance: [haiku, glm, ollama]  
+→ 30% chance: [haiku, glm, ollama]
 → 20% chance: [ollama, glm, haiku]
 ```
 

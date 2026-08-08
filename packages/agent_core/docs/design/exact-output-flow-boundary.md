@@ -1,6 +1,6 @@
 # Exact-output outer-flow boundary
 
-Status: active pre-1.0 contract  
+Status: active pre-1.0 contract
 Effective: 2026-07-30
 
 ## Ownership

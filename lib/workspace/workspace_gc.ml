@@ -14,7 +14,6 @@ open Workspace_task_id
 (* Board artifact cleanup is wired via Workspace_hooks callbacks at startup. *)
 
 
-(* heartbeat_in_workspace removed — workspaces are flattened (#4638). Use heartbeat. *)
 
 type heartbeat_outcome =
   | Heartbeat_updated of string

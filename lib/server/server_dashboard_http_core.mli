@@ -133,7 +133,6 @@ val dashboard_briefing_sections_http_json :
 val dashboard_shell_status_json : Workspace.config -> Yojson.Safe.t
 val dashboard_agent_json : Masc_domain.agent -> Yojson.Safe.t
 val dashboard_message_json : Masc_domain.message -> Yojson.Safe.t
-(* dashboard_current_workspace_id removed — namespace retired (#unify-namespace). *)
 val dashboard_tasks_safe : Workspace.config -> Masc_domain.task list
 val dashboard_agents_safe : Workspace.config -> Masc_domain.agent list
 val dashboard_messages_safe :

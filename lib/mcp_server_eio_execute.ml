@@ -312,7 +312,6 @@ let execute_tool_eio
                       : Tool_local_runtime_core.context)
                      ~name
                      ~args:coerced_args
-                 (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
                  | Mod_compact -> None
                  | Mod_run ->
                    Tool_run.dispatch

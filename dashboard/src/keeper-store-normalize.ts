@@ -709,7 +709,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         paused: asBoolean(row.paused),
         registered:
           typeof row.registered === 'boolean' ? row.registered : undefined,
-        reconcile_status: asString(row.reconcile_status) ?? null,
         emoji: asString(row.emoji),
         koreanName: asString(row.koreanName) ?? asString(row.korean_name),
         keeper_id: asString(row.keeper_id) ?? null,

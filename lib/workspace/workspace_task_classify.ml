@@ -11,7 +11,6 @@ include Workspace_state
 include Workspace_broadcast
 open Workspace_backlog
 
-(* activity_workspace_id removed — namespace retired (#unify-namespace). *)
 
 type task_actor_kind =
   | Agent

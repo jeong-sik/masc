@@ -40,6 +40,7 @@ let finalize db stmt =
     | exception exn ->
       Error ("SQLite statement finalize raised: " ^ Printexc.to_string exn)
   in
+  (* See the statement-liveness invariant above. *)
   ignore (Sys.opaque_identity stmt);
   result
 

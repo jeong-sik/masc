@@ -1,7 +1,3 @@
-; Superset dependency library for MASC tests.
-; Tests depend on masc_test_deps instead of repeating 30+ libraries.
-; All deps use re_export so consumers see the modules directly.
-; Keep sorted. Add new deps here, not in individual test stanzas.
 
 (copy_files ../../lib/server/server_grpc_tool_dispatch.ml)
 
@@ -38,7 +34,6 @@
   (re_export masc_compression)
   (re_export masc_core)
   (re_export masc_eio_context)
-  ; RFC-0107 Phase D.2d — pool unit tests need access to Pool module.
   (re_export masc.http_client)
   (re_export masc.discovery_cache)
   (re_export masc.json_field)
@@ -60,38 +55,21 @@
   (re_export masc_log)
   (re_export masc)
   (re_export masc.activity_graph)
-  ;; Board handler shim removal — tests need direct access to
-  ;; Masc_board_handlers for modules no longer re-exported via masc.
   (re_export masc.masc_board)
   (re_export masc.board_handlers)
   (re_export masc.board_tool_adapter)
-  ;; RFC-0056 Phase 1A — Trajectory leaf module sub-library.
-  ;; Tests previously wrote `Masc.Trajectory.X` (wrapped pattern);
-  ;; after this re-export they use bare `Trajectory.X` per the
-  ;; G5 qualifier-removal budget.
   (re_export masc.trajectory)
-  ;; RFC-0056 keeper domain group libraries.
   (re_export masc.keeper_tooling)
-  ;; RFC-0056 Phase 1C — Host_config leaf utility sub-library.
   (re_export masc.host_config)
-  ;; RFC-0056 Phase 1D — Briefing_compactors leaf utility sub-library.
   (re_export masc.briefing_compactors)
-  ;; RFC-0056 Phase 1E — Dashboard_eval_feed leaf module sub-library.
   (re_export masc.dashboard_eval_feed)
-  ;; RFC-0056 Phase 1 — Dashboard_tla_specs leaf module sub-library.
-  ;; Re-exported so test_dashboard_tla_specs keeps resolving the module
-  ;; after the carve (test rewrites Masc.Dashboard_tla_specs -> bare per G5).
   (re_export masc.dashboard_tla_specs)
-  ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark family sub-library.
   (re_export masc.tool_call_quality_benchmark)
   (re_export masc.keeper_runtime)
   (re_export masc.keeper_chat_delivery_identity)
   (re_export masc.keeper_contract)
-  ;; RFC-0056 Phase 1K — Compaction_trigger leaf sub-library.
   (re_export masc.compaction_trigger)
-  ;; RFC-0056 Phase 1L — Attribution leaf sub-library.
   (re_export masc.attribution)
-  ;; RFC-0056 Phase 1M — Execution policy leaf sub-library.
   (re_export masc.exec_policy)
   (re_export masc.keeper_registry)
   (re_export masc.keeper_metrics)
@@ -101,11 +79,8 @@
   (re_export masc.keeper_usage_trust)
   (re_export masc.event_bus_slots)
   (re_export masc.keeper_toml)
-  ;; Model inference metrics + runtime provider label leaves + binding
-  ;; (Runtime_provider_binding.default_headers_for_kind, centralized by #26326).
   (re_export masc.runtime_model)
   (re_export masc.model_inference_metrics)
-  ;; RFC-0058 Phase 1 — Declarative runtime TOML parser sub-library.
   (re_export masc.ag_ui)
   (re_export masc.config)
   (re_export masc.fs_compat)
@@ -135,32 +110,16 @@
   (re_export masc.tool_schemas_specs)
   (re_export masc.tool_catalog_surfaces)
   (re_export masc.config_dir_resolver)
-  ;; RFC-0086 PR-2H — Tool_args + Tool_result shared types extracted to
-  ;; lib/tool_types/. Re-export so test code using bare
-  ;; `Tool_args.X` / `Tool_result.X` resolves.
   (re_export masc.tool_types)
   (re_export masc.masc_tool_blob_store)
   (re_export masc_process)
   (re_export masc.masc_exec)
-  ;; Exec shell command gate SSOT. Re-exported so test code can use
-  ;; [Masc_exec_command_gate.Shell_command_gate] directly.
   (re_export masc.masc_exec_command_gate)
   (re_export masc.masc_exec_bash_parser)
   (re_export masc_workspace)
-  ;; Goal domain extracted to lib/goal/ (masc_goal). Re-export so test code
-  ;; using bare Goal_store.X / Goal_phase.X resolves after decoupling.
   (re_export masc_goal)
-  ;; Pure Turn FSM extracted to lib/turn_fsm/ (masc_turn). Re-export so test
-  ;; code using bare Turn_fsm.X resolves after the FSM carve.
   (re_export masc_turn)
-  ;; Tool dispatch substrate extracted to lib/tool/ (masc_tool_dispatch, PR-S3).
-  ;; Re-export so test code using bare Tool_dispatch.X / Tool_catalog.X /
-  ;; Tool_registry.X / Tool_name.X / Tool_token.X / Dispatch_outcome.X resolves
-  ;; after the carve.
   (re_export masc.masc_tool_dispatch)
-  ;; Tool surface leaf extracted to lib/tool_surface/ (masc_tool_surface, RFC-0056
-  ;; Phase 2 / LANE 6). Re-export so test code using bare Tool_spec.X /
-  ;; Tool_capability.X / Tool_shard_types*.X / Board_tool.X etc. resolves.
   (re_export masc.masc_tool_surface)
   (re_export masc_types)
   (re_export mirage-crypto)
@@ -170,8 +129,6 @@
   (re_export ocaml-protoc-plugin)
   (re_export ocaml-webrtc)
   (re_export opentelemetry)
-  ; RFC-0129 — Pool.For_testing.read_body_with_idle tests build a mock
-  ; Piaf.Body via Piaf.Stream.create + Piaf.Body.of_string_stream.
   (re_export piaf)
   (re_export piaf.stream)
   (re_export qcheck-alcotest)

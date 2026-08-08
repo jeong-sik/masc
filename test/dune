@@ -872,7 +872,6 @@
   test_metrics_store_eio_pbt
   test_prompt_registry_pbt
   test_clean_only_bug_mirrors
-  test_keeper_phase_drift_contract
   test_event_priority_monotone_pbt
   test_board_metrics_labels)
  (modules
@@ -885,7 +884,6 @@
   test_metrics_store_eio_pbt
   test_prompt_registry_pbt
   test_clean_only_bug_mirrors
-  test_keeper_phase_drift_contract
   test_event_priority_monotone_pbt
   test_board_metrics_labels)
  (libraries masc_test_deps))

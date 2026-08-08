@@ -290,6 +290,13 @@ let audit_authorization_source
     Keeper_approval_queue_rules_types.Workspace_always_allow
 ;;
 
+let audit_rule_match
+      (rule_match : Keeper_approval_queue.rule_match)
+  : Keeper_approval_queue_rules_types.rule_match
+  =
+  { rule_id = rule_match.rule_id }
+;;
+
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
   Keeper_approval.Audit.record
     ~base_path:request.base_path
@@ -306,7 +313,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
     ?turn_id:(request_turn_id request)
     ?task_id:request.task_id
     ~goal_ids:request.goal_ids
-    ?rule_match
+    ?rule_match:(Option.map audit_rule_match rule_match)
     ?source_approval_id
     ?decision_source
     ()
@@ -1504,7 +1511,7 @@ let observe_exact_rule_expired
     ?turn_id:(request_turn_id request)
     ?task_id:request.task_id
     ~goal_ids:request.goal_ids
-    ~rule_match
+    ~rule_match:(audit_rule_match rule_match)
     ()
 ;;
 
@@ -1516,7 +1523,7 @@ let decide_from_selected_mode request = function
     let source = Workspace_always_allow in
     audit_allow
       request
-      ~decision_source:Keeper_approval_queue.Always_allowed
+      ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
       source;
     Allow { source }
 ;;
@@ -1527,7 +1534,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
     let source = Keeper_always_allow in
     audit_allow
       request
-      ~decision_source:Keeper_approval_queue.Always_allowed
+      ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
       source;
     Allow { source })
   else
@@ -1537,7 +1544,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
        let source = Workspace_always_allow in
        audit_allow
          request
-         ~decision_source:Keeper_approval_queue.Always_allowed
+         ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
          source;
        Allow { source }
      | Error _ | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Auto_judge) ->
@@ -1557,7 +1564,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
           audit_allow
             request
             ~rule_match
-            ~decision_source:Keeper_approval_queue.Always_allowed
+            ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
             source;
           Allow { source }
         | Ok (Keeper_approval_queue.Rule_match_expired rule_match) ->

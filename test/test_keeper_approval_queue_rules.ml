@@ -126,6 +126,61 @@ let test_equivalent_upsert_is_idempotent () =
        check string "same rule id" first.id second.id)
 ;;
 
+let test_dashboard_rule_delete_audits_typed_rule () =
+  let base_path = temp_dir () in
+  Keeper_approval.Audit.For_testing.reset_store ();
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_approval.Audit.For_testing.reset_store ();
+      cleanup_dir base_path)
+    (fun () ->
+       let rule, _ =
+         upsert_exn
+           ~base_path
+           ~input:(`Assoc [ "request", `String "delete-from-dashboard" ])
+       in
+       (match
+          Server_dashboard_http.dashboard_gate_rule_delete_http_json
+            ~base_path
+            ~args:(`Assoc [ "id", `String rule.id ])
+        with
+        | Ok (`Assoc fields) ->
+          check
+            (option string)
+            "deleted id response"
+            (Some rule.id)
+            (match List.assoc_opt "id" fields with
+             | Some (`String id) -> Some id
+             | Some _ | None -> None)
+        | Ok _ -> fail "dashboard delete returned a non-object response"
+        | Error error -> fail error);
+       let deleted_audit =
+         Keeper_approval.Audit.read_recent
+           ~base_path
+           ~keeper_name:rule.keeper_name
+           ~n:20
+           ()
+         |> List.find_opt (fun json ->
+           String.equal
+             "rule_deleted"
+             (Safe_ops.json_string ~default:"" "event" json)
+           && String.equal rule.id (Safe_ops.json_string ~default:"" "id" json))
+       in
+       match deleted_audit with
+       | None -> fail "dashboard deletion did not persist the typed rule audit"
+       | Some json ->
+         check
+           string
+           "audit keeper"
+           rule.keeper_name
+           (Safe_ops.json_string ~default:"" "keeper" json);
+         check
+           string
+           "audit tool"
+           rule.tool_name
+           (Safe_ops.json_string ~default:"" "tool" json))
+;;
+
 let test_gate_allows_only_the_exact_persisted_rule () =
   let base_path = temp_dir () in
   Fun.protect
@@ -794,6 +849,10 @@ let () =
             `Quick
             test_rule_matches_only_complete_exact_request
         ; test_case "idempotent upsert" `Quick test_equivalent_upsert_is_idempotent
+        ; test_case
+            "dashboard deletion audits typed rule"
+            `Quick
+            test_dashboard_rule_delete_audits_typed_rule
         ; test_case
             "Gate consumes exact persisted rule"
             `Quick

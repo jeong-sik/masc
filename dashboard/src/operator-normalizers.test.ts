@@ -467,21 +467,27 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.recent_messages[0]!.id).toBe('msg-1')
   })
 
-  it('extracts pending_confirms with confirm_token', () => {
+  it('derives pending_confirms from envelope items', () => {
     const result = normalizeOperatorSnapshot({
-      pending_confirms: [
-        { confirm_token: 'tok-1', actor: 'agent-1', action_type: 'pause' },
-      ],
+      pending_confirm_envelope: {
+        items: [
+          { confirm_token: 'tok-1', actor: 'agent-1', action_type: 'pause' },
+        ],
+        summary: { visible_count: 1, total_count: 1 },
+      },
     })
     expect(result.pending_confirms).toHaveLength(1)
     expect(result.pending_confirms[0]!.confirm_token).toBe('tok-1')
   })
 
-  it('filters pending_confirms without token', () => {
+  it('filters envelope items without token', () => {
     const result = normalizeOperatorSnapshot({
-      pending_confirms: [
-        { actor: 'agent-1' }, // no token
-      ],
+      pending_confirm_envelope: {
+        items: [
+          { actor: 'agent-1' }, // no token
+        ],
+        summary: { visible_count: 1, total_count: 1 },
+      },
     })
     expect(result.pending_confirms).toEqual([])
   })

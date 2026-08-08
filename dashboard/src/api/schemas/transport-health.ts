@@ -176,9 +176,9 @@ const ProjectionDiagnosticsSchema = strictObject({
   stale_age_ms: nullable(NonNegativeIntegerSchema),
 })
 
-// --- Outer schema: all subsections and cache metadata are required ---
+// --- Outer schemas ---
 
-const TransportHealthOuterSchema = strictObject({
+const TransportHealthReadySchema = strictObject({
   summary: SummarySchema,
   sse: SseOuterSchema,
   grpc: GrpcSchema,
@@ -187,8 +187,6 @@ const TransportHealthOuterSchema = strictObject({
   streamable_http: StreamableHttpSchema,
   http2: Http2Schema,
   agent_health: AgentHealthSchema,
-  // Prior decoder: `if (!generatedAt) return null` — empty string must
-  // also cause rejection, matching that guard exactly.
   generated_at: pipe(
     string(),
     check((s) => s.length > 0, 'generated_at must be non-empty'),
@@ -196,7 +194,36 @@ const TransportHealthOuterSchema = strictObject({
   projection_diagnostics: ProjectionDiagnosticsSchema,
 })
 
-export type TransportHealthData = InferOutput<typeof TransportHealthOuterSchema>
+const GeneratedAtSchema = pipe(
+  string(),
+  check((s) => s.length > 0, 'generated_at must be non-empty'),
+)
+
+const TransportHealthInitializingSchema = strictObject({
+  status: literal('initializing'),
+  generated_at: GeneratedAtSchema,
+  message: pipe(
+    string(),
+    check((s) => s.length > 0, 'message must be non-empty'),
+  ),
+  projection_diagnostics: ProjectionDiagnosticsSchema,
+})
+
+const TransportHealthSnapshotSchema = union([
+  TransportHealthReadySchema,
+  TransportHealthInitializingSchema,
+])
+
+export type TransportHealthData = InferOutput<typeof TransportHealthReadySchema>
+export type TransportHealthSnapshot = InferOutput<
+  typeof TransportHealthSnapshotSchema
+>
+
+export function isTransportHealthReady(
+  snapshot: TransportHealthSnapshot,
+): snapshot is TransportHealthData {
+  return !('status' in snapshot)
+}
 
 export class TransportHealthSchemaDriftError extends SchemaDriftError {
   constructor(issues: readonly BaseIssue<unknown>[]) {
@@ -204,10 +231,10 @@ export class TransportHealthSchemaDriftError extends SchemaDriftError {
   }
 }
 
-export function parseTransportHealthData(data: unknown): TransportHealthData {
+export function parseTransportHealthData(data: unknown): TransportHealthSnapshot {
   return parseOrThrow(
     TransportHealthSchemaDriftError,
-    TransportHealthOuterSchema,
+    TransportHealthSnapshotSchema,
     data,
   )
 }

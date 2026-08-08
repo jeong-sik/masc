@@ -26,9 +26,20 @@ let register_webrtc_metrics ~is_enabled ~pending_count ~peers_count ~live_count 
 
 (** {1 SSE Metrics} *)
 
+type sse_session_kind =
+  | Observer
+  | Agent_stream
+  | Presence
+
+let sse_session_kind_to_string = function
+  | Observer -> "observer"
+  | Agent_stream -> "agent_stream"
+  | Presence -> "presence"
+;;
+
 type hot_queue_session =
   { session_id : string
-  ; kind : string
+  ; kind : sse_session_kind
   ; queue_depth : int
   ; last_event_id : int
   ; idle_seconds : float
@@ -36,7 +47,40 @@ type hot_queue_session =
 
 let sse_hot_sessions : hot_queue_session list Atomic.t = Atomic.make []
 
+let sse_session_kinds = [ Observer; Agent_stream; Presence ]
+let relay_retry_stages = [ "append"; "broadcast" ]
+let relay_drop_stages = [ "queue"; "append"; "broadcast" ]
+
+let () =
+  List.iter
+    (fun kind ->
+      let kind = sse_session_kind_to_string kind in
+      Otel_metric_store.register_gauge
+        ~name:Otel_metric_store.metric_sse_sessions
+        ~help:Otel_metric_store.metric_sse_sessions
+        ~labels:[ "kind", kind ]
+        ())
+    sse_session_kinds;
+  List.iter
+    (fun stage ->
+      Otel_metric_store.register_counter
+        ~name:Otel_metric_store.metric_oas_sse_relay_retries
+        ~help:Otel_metric_store.metric_oas_sse_relay_retries
+        ~labels:[ "stage", stage ]
+        ())
+    relay_retry_stages;
+  List.iter
+    (fun stage ->
+      Otel_metric_store.register_counter
+        ~name:Otel_metric_store.metric_oas_sse_relay_drops
+        ~help:Otel_metric_store.metric_oas_sse_relay_drops
+        ~labels:[ "stage", stage ]
+        ())
+    relay_drop_stages
+;;
+
 let set_sse_sessions ~kind count =
+  let kind = sse_session_kind_to_string kind in
   Otel_metric_store.set_gauge
     Otel_metric_store.metric_sse_sessions
     ~labels:[ "kind", kind ]
@@ -421,34 +465,28 @@ let ws_same_origin_ready () =
 let hot_session_json (session : hot_queue_session) =
   `Assoc
     [ "session_id", `String session.session_id
-    ; "kind", `String session.kind
+    ; "kind", `String (sse_session_kind_to_string session.kind)
     ; "queue_depth", `Int session.queue_depth
     ; "last_event_id", `Int session.last_event_id
     ; "idle_seconds", `Float session.idle_seconds
     ]
 ;;
 
-type ws_delivery_metric_names =
-  { bytes_cache_hits : string
-  ; bytes_cache_misses : string
-  ; client_acks : string
-  ; throttled_deliveries : string
-  ; client_buffered_bytes : string
-  ; client_buffered_bytes_count : string
-  }
-
-let ws_delivery_metric_names =
-  { bytes_cache_hits = "masc_ws_bytes_cache_hits_total"
-  ; bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
-  ; client_acks = "masc_ws_client_acks_total"
-  ; throttled_deliveries = "masc_ws_throttled_deliveries_total"
-  ; client_buffered_bytes = "masc_ws_client_buffered_bytes"
-  ; client_buffered_bytes_count = "masc_ws_client_buffered_bytes_count"
-  }
+let required_metric_value name ?(labels = []) () =
+  match Otel_metric_store.get_metric_value name ~labels () with
+  | Some value -> value
+  | None ->
+    invalid_arg
+      (Printf.sprintf
+         "transport health metric cell is not registered: %s labels=%s"
+         name
+         (labels
+          |> List.map (fun (key, value) -> key ^ "=" ^ value)
+          |> String.concat ","))
 ;;
 
 let transport_health_json () =
-  let v name ?(labels = []) () = Otel_metric_store.metric_value_or_zero name ~labels () in
+  let v = required_metric_value in
   let sse_observer = v Otel_metric_store.metric_sse_sessions ~labels:[ "kind", "observer" ] () in
   let sse_agent_stream =
     v Otel_metric_store.metric_sse_sessions ~labels:[ "kind", "agent_stream" ] ()
@@ -489,14 +527,14 @@ let transport_health_json () =
     int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_oas_sse_relay_drops)
   in
   let broadcast_sum = v Otel_metric_store.metric_sse_broadcast_duration () in
-  let broadcast_count = v "masc_sse_broadcast_duration_seconds_count" () in
+  let broadcast_count = v Otel_metric_store.metric_sse_broadcast_duration_count () in
   let broadcast_avg =
     if broadcast_count > 0.0 then broadcast_sum /. broadcast_count else 0.0
   in
   let grpc_streams = v Otel_metric_store.metric_grpc_active_streams () in
   let grpc_subscribers = v Otel_metric_store.metric_grpc_subscribers () in
   let grpc_heartbeat_sum = v Otel_metric_store.metric_grpc_heartbeat_latency () in
-  let grpc_heartbeat_count = v "masc_grpc_heartbeat_latency_seconds_count" () in
+  let grpc_heartbeat_count = v Otel_metric_store.metric_grpc_heartbeat_latency_count () in
   let grpc_heartbeat_avg =
     if grpc_heartbeat_count > 0.0 then grpc_heartbeat_sum /. grpc_heartbeat_count else 0.0
   in
@@ -507,7 +545,6 @@ let transport_health_json () =
     int_of_float
       (Otel_metric_store.metric_total Keeper_metrics.(to_string LifecycleDispatchRejections))
   in
-  let ws_delivery_metrics = ws_delivery_metric_names in
   let ws_sessions = int_of_float (v Otel_metric_store.metric_ws_sessions ()) in
   let grpc_configured = grpc_enabled () in
   let grpc_live = grpc_listening () in
@@ -589,29 +626,28 @@ let transport_health_json () =
           ; "port", `Int (ws_port ())
           ; "sessions", `Int ws_sessions
           ; "relay_source", `String "sse_external_subscriber"
-          ; (* Diagnostic counters for the WS delivery path.  The metric names
-         are catalogued here so this surface does not take a compile-time
-         dependency on any particular WS perf/observability PR.  If a
-         producing PR has not registered a metric yet, [metric_value_or_zero]
-         returns 0.0, which reads naturally as "nothing has happened". *)
-            ( "delivery"
+          ; ( "delivery"
             , `Assoc
                 [ ( "bytes_cache_hits"
-                  , `Int (int_of_float (v ws_delivery_metrics.bytes_cache_hits ())) )
+                  , `Int
+                      (int_of_float
+                         (v Otel_metric_store.metric_ws_bytes_cache_hits ())) )
                 ; ( "bytes_cache_misses"
-                  , `Int (int_of_float (v ws_delivery_metrics.bytes_cache_misses ())) )
+                  , `Int
+                      (int_of_float
+                         (v Otel_metric_store.metric_ws_bytes_cache_misses ())) )
                 ; ( "client_acks"
-                  , `Int (int_of_float (v ws_delivery_metrics.client_acks ())) )
+                  , `Int (int_of_float (v Otel_metric_store.metric_ws_client_acks ())) )
                 ; ( "throttled_deliveries"
-                  , `Int (int_of_float (v ws_delivery_metrics.throttled_deliveries ())) )
-                ; (* Histogram sum + auto _count give operators enough to compute
-                     average buffered bytes per ack. *)
-                  ( "client_buffered_bytes_sum"
-                  , `Float (v ws_delivery_metrics.client_buffered_bytes ()) )
+                  , `Int
+                      (int_of_float
+                         (v Otel_metric_store.metric_ws_throttled_deliveries ())) )
+                ; ( "client_buffered_bytes_sum"
+                  , `Float (v Otel_metric_store.metric_ws_client_buffered_bytes ()) )
                 ; ( "client_buffered_bytes_count"
                   , `Int
                       (int_of_float
-                         (v ws_delivery_metrics.client_buffered_bytes_count ())) )
+                         (v Otel_metric_store.metric_ws_client_buffered_bytes_count ())) )
                 ] )
           ] )
     ; ( "webrtc"

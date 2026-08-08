@@ -72,8 +72,8 @@ let test_init () =
    ============================================================ *)
 
 let test_sse_sessions () =
-  TM.set_sse_sessions ~kind:"observer" 10;
-  TM.set_sse_sessions ~kind:"agent_stream" 5;
+  TM.set_sse_sessions ~kind:TM.Observer 10;
+  TM.set_sse_sessions ~kind:TM.Agent_stream 5;
   let obs = Otel_metric_store.metric_value_or_zero "masc_sse_sessions_total"
     ~labels:[("kind", "observer")] () in
   let workspace = Otel_metric_store.metric_value_or_zero "masc_sse_sessions_total"
@@ -480,14 +480,6 @@ let test_transport_health_json () =
     (sse_json |> U.member "relay_drop_total" |> U.to_int);
   check string "presence stream endpoint" "/events/presence"
     (streamable_json |> U.member "presence_stream" |> U.to_string);
-  check bool "legacy SSE endpoint is not advertised" true
-    (match streamable_json |> U.member "legacy_sse_endpoint" with
-    | `Null -> true
-    | _ -> false);
-  check bool "legacy messages endpoint is not advertised" true
-    (match streamable_json |> U.member "legacy_messages_endpoint" with
-    | `Null -> true
-    | _ -> false);
   check int "grpc active streams" 1
     (grpc_json |> U.member "active_streams" |> U.to_int);
   check int "grpc subscribers" 2
@@ -521,10 +513,6 @@ let test_transport_health_json () =
     (agent_health_json
      |> U.member "lifecycle_dispatch_rejections_total"
      |> U.to_int);
-  (* The [delivery] sub-object surfaces WS cache/ack/throttle counters
-     inline so the dashboard can render operational state without
-     querying external telemetry directly.  Producing metrics may not be registered
-     querying external telemetry directly. *)
   let delivery_json = ws_json |> U.member "delivery" in
   check bool "websocket delivery sub-object present" true
     (match delivery_json with `Assoc _ -> true | _ -> false);

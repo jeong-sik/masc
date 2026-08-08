@@ -220,8 +220,6 @@ module Transport = struct
     | Some resolution -> resolution
     | None -> resolve_h2_env ()
 
-  (** HTTP mode: exact [auto|0|h1_only|1|h2_only] vocabulary. *)
-  let use_h2 () = (resolve_h2_env ()).value
   let effective_h2_mode () = (effective_h2_resolution ()).value
 
   let h2_snapshot_entry =

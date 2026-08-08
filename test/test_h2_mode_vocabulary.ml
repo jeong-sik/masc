@@ -63,25 +63,13 @@ let with_env name value_opt f =
       f ())
 ;;
 
-let actual_env_admission_is_fail_closed () =
+let absent_value_projects_default () =
   with_env "MASC_USE_H2" None (fun () ->
-    check string "absent defaults" "auto" (T.use_h2 () |> T.h2_mode_to_string);
     let snapshot = snapshot_entry () in
     check string "default snapshot value" "auto"
       (snapshot |> Yojson.Safe.Util.member "value" |> Yojson.Safe.Util.to_string);
     check string "default snapshot source" "default"
-      (snapshot |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string));
-  List.iter
-    (fun raw ->
-       with_env "MASC_USE_H2" (Some raw) (fun () ->
-         check_raises
-           ("env rejects " ^ raw)
-           (Env_config_core.Config_error
-              (Printf.sprintf
-                 "malformed env MASC_USE_H2=%S (expected auto|0|h1_only|1|h2_only)"
-                 raw))
-           (fun () -> ignore (T.use_h2 ()))))
-    [ ""; "h2c" ]
+      (snapshot |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string))
 ;;
 
 let configured_value_drives_the_snapshot () =
@@ -95,7 +83,12 @@ let configured_value_drives_the_snapshot () =
     check string "snapshot value" "h1_only"
       (snapshot |> Yojson.Safe.Util.member "value" |> Yojson.Safe.Util.to_string);
     check string "snapshot source" "env"
-      (snapshot |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string))
+      (snapshot |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string);
+    let provenance = snapshot |> Yojson.Safe.Util.member "provenance" in
+    check bool "applied env remains present" true
+      (provenance |> Yojson.Safe.Util.member "raw_env_present" |> Yojson.Safe.Util.to_bool);
+    check bool "post-boot env is not reread as blank" false
+      (provenance |> Yojson.Safe.Util.member "raw_env_blank" |> Yojson.Safe.Util.to_bool))
 ;;
 
 let () =
@@ -104,8 +97,8 @@ let () =
     [ ( "vocabulary"
       , [ test_case "accepted spellings map as documented" `Quick accepted_spellings
         ; test_case "invalid values are rejected" `Quick invalid_values_are_rejected
-        ; test_case "actual env admission is fail closed" `Quick
-            actual_env_admission_is_fail_closed
+        ; test_case "absent value projects default" `Quick
+            absent_value_projects_default
         ; test_case "configured value drives the snapshot" `Quick
             configured_value_drives_the_snapshot
         ] )

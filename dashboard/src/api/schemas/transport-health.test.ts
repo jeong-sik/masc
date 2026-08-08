@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isTransportHealthReady,
   parseTransportHealthData,
+  type TransportHealthData,
   TransportHealthSchemaDriftError,
 } from './transport-health'
 
@@ -99,9 +101,17 @@ function expectDrift(value: unknown): void {
   )
 }
 
+function parseReady(value: unknown): TransportHealthData {
+  const snapshot = parseTransportHealthData(value)
+  if (!isTransportHealthReady(snapshot)) {
+    throw new Error('expected ready transport-health snapshot')
+  }
+  return snapshot
+}
+
 describe('parseTransportHealthData', () => {
   it('parses the complete current wire contract', () => {
-    const result = parseTransportHealthData(currentWire)
+    const result = parseReady(currentWire)
     expect(result.summary.primary_path).toBe('streamable_http')
     expect(result.sse.hot_sessions).toEqual([])
     expect(result.grpc.port).toBe(8936)
@@ -109,6 +119,25 @@ describe('parseTransportHealthData', () => {
     expect(result.webrtc.signaling_mode).toBe('shared_http')
     expect(result.http2.listener_mode).toBe('auto')
     expect(result.projection_diagnostics.source).toBe('cached_surface')
+  })
+
+  it('parses the exact initializing cache envelope', () => {
+    const result = parseTransportHealthData({
+      status: 'initializing',
+      generated_at: '2024-01-01T00:00:00Z',
+      message: 'Transport health data is warming up.',
+      projection_diagnostics: {
+        source: 'cached_surface',
+        cache_state: 'initializing',
+        last_success_at: null,
+        last_attempt_at: null,
+        last_error_at: null,
+        stale_reason: null,
+        stale_age_ms: null,
+      },
+    })
+    expect(isTransportHealthReady(result)).toBe(false)
+    expect('status' in result && result.status).toBe('initializing')
   })
 
   it.each([
@@ -128,7 +157,7 @@ describe('parseTransportHealthData', () => {
       { ...currentWire, grpc: { ...currentWire.grpc, subscribers: -1 } },
     ],
     [
-      'removed grpc field',
+      'unknown grpc field',
       { ...currentWire, grpc: { ...currentWire.grpc, enabled: false } },
     ],
     [
@@ -163,7 +192,7 @@ describe('parseTransportHealthData', () => {
       'streamable endpoint',
       {
         ...currentWire,
-        streamable_http: { ...currentWire.streamable_http, endpoint: '/legacy' },
+        streamable_http: { ...currentWire.streamable_http, endpoint: '/mcp-v2' },
       },
     ],
   ])('rejects invalid or missing %s', (_label, value) => {
@@ -180,7 +209,7 @@ describe('parseTransportHealthData', () => {
         idle_seconds: index + 0.5,
       }),
     )
-    const result = parseTransportHealthData({
+    const result = parseReady({
       ...currentWire,
       sse: { ...currentWire.sse, hot_sessions: hotSessions },
     })
@@ -249,7 +278,7 @@ describe('parseTransportHealthData', () => {
   it.each(['initializing', 'fresh', 'stale'])(
     'accepts %s cache state',
     (cache_state) => {
-      const result = parseTransportHealthData({
+      const result = parseReady({
         ...currentWire,
         projection_diagnostics: {
           ...currentWire.projection_diagnostics,

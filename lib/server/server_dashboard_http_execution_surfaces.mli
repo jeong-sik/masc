@@ -29,9 +29,7 @@
       ({!start_execution_refresh_loop},
       {!start_transport_health_refresh_loop},
       {!start_execution_trust_refresh_loop}).
-    - {b snapshot accessors}
-      ({!dashboard_execution_snapshot_json},
-      {!dashboard_transport_health_snapshot_json}).
+    - {b snapshot access} ({!dashboard_execution_snapshot_json}).
     - {b HTTP route entries}
       ({!dashboard_execution_cached_http_body},
       {!dashboard_execution_http_json},
@@ -173,10 +171,6 @@ val dashboard_execution_snapshot_json : unit -> Yojson.Safe.t
 (** Returns the most recent successful execution
     snapshot (or the initialization placeholder when no
     refresh has succeeded yet). *)
-
-val dashboard_transport_health_snapshot_json :
-  unit -> Yojson.Safe.t
-(** Returns the most recent transport-health snapshot. *)
 
 (** {1 HTTP route entries} *)
 

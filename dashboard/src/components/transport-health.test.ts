@@ -231,6 +231,63 @@ describe('TransportHealthPanel', () => {
     expect(container.textContent).toContain('last ok 2026-04-15T10:00:00Z')
   })
 
+  it('renders an initializing producer failure as an operator alert', async () => {
+    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue({
+      status: 'initializing',
+      generated_at: '2026-04-15T10:00:00Z',
+      message: 'transport health warming',
+      projection_diagnostics: {
+        source: 'cached_surface',
+        cache_state: 'initializing',
+        last_success_at: null,
+        last_attempt_at: '2026-04-15T10:00:00Z',
+        last_error_at: '2026-04-15T10:00:01Z',
+        stale_reason: 'transport metrics unavailable',
+        stale_age_ms: null,
+      },
+    })
+    const { TransportHealthPanel } = await loadComponentWithApi({
+      fetchTransportHealth,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${TransportHealthPanel} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'transport metrics unavailable',
+    )
+    expect(container.textContent).not.toContain('transport health warming')
+  })
+
+  it('replaces stale metrics with the producer failure', async () => {
+    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
+      sampleResponse({
+        projection_diagnostics: {
+          source: 'cached_surface',
+          cache_state: 'stale',
+          last_success_at: '2026-04-15T09:59:00Z',
+          last_attempt_at: '2026-04-15T10:00:00Z',
+          last_error_at: '2026-04-15T10:00:01Z',
+          stale_reason: 'transport metrics refresh failed',
+          stale_age_ms: 60_000,
+        },
+      }),
+    )
+    const { TransportHealthPanel } = await loadComponentWithApi({
+      fetchTransportHealth,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${TransportHealthPanel} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'transport metrics refresh failed',
+    )
+    expect(container.querySelector('.v2-monitoring-surface')).toBeNull()
+  })
+
   it('renders relay health rows and lifecycle rejects when boundary failures are present', async () => {
     const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
       sampleResponse({

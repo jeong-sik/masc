@@ -102,7 +102,7 @@ let run_test_hook hook =
   | Some fn -> fn ()
   | None -> ()
 
-type session_kind =
+type session_kind = Transport_metrics.sse_session_kind =
   | Observer [@tla.symbol "observer"]    (** Dashboard / read-only viewers *)
   | Agent_stream [@tla.symbol "agent_stream"] (** MCP agent connections *)
   | Presence [@tla.symbol "presence"]    (** Ephemeral liveness / awareness channel *)
@@ -187,10 +187,7 @@ type session_snapshot = {
   idle_seconds : float;
 }
 
-let session_kind_to_string = function
-  | Observer -> "observer"
-  | Agent_stream -> "agent_stream"
-  | Presence -> "presence"
+let session_kind_to_string = Transport_metrics.sse_session_kind_to_string
 
 (** Minimum interval between full transport snapshot computations (seconds).
     The snapshot iterates all SSE clients and builds per-session records;
@@ -261,6 +258,7 @@ let sync_transport_snapshot ?(force = false) () =
   in
   let hot_sessions =
     sessions
+    |> List.filter (fun session -> session.queue_depth > 0)
     |> List.sort (fun left right ->
          let by_queue = compare right.queue_depth left.queue_depth in
          if by_queue <> 0 then by_queue
@@ -272,15 +270,15 @@ let sync_transport_snapshot ?(force = false) () =
     |> List.map (fun (session : session_snapshot) ->
          {
            Transport_metrics.session_id = session.session_id;
-           kind = session_kind_to_string session.kind;
+           kind = session.kind;
            queue_depth = session.queue_depth;
            last_event_id = session.last_event_id;
            idle_seconds = session.idle_seconds;
          })
   in
-  Transport_metrics.set_sse_sessions ~kind:"observer" !observer;
-  Transport_metrics.set_sse_sessions ~kind:"agent_stream" !agent_stream;
-  Transport_metrics.set_sse_sessions ~kind:"presence" !presence;
+  Transport_metrics.set_sse_sessions ~kind:Observer !observer;
+  Transport_metrics.set_sse_sessions ~kind:Agent_stream !agent_stream;
+  Transport_metrics.set_sse_sessions ~kind:Presence !presence;
   Transport_metrics.set_sse_queue_snapshot ~avg_depth
     ~max_depth:!max_queue_depth ~hot_sessions
   end

@@ -73,7 +73,12 @@ let configured_value_is_stable () =
     check string "snapshot value" "grpc"
       (snapshot |> Yojson.Safe.Util.member "value" |> Yojson.Safe.Util.to_string);
     check string "snapshot source" "env"
-      (snapshot |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string))
+      (snapshot |> Yojson.Safe.Util.member "source" |> Yojson.Safe.Util.to_string);
+    let provenance = snapshot |> Yojson.Safe.Util.member "provenance" in
+    check bool "applied env remains present" true
+      (provenance |> Yojson.Safe.Util.member "raw_env_present" |> Yojson.Safe.Util.to_bool);
+    check bool "post-boot env is not reread as blank" false
+      (provenance |> Yojson.Safe.Util.member "raw_env_blank" |> Yojson.Safe.Util.to_bool))
 ;;
 
 let () =

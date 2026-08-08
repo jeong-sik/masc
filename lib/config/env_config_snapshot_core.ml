@@ -118,20 +118,15 @@ let source_provenance (e : entry) ~raw_env raw =
       let provenance = default_provenance e in
       { provenance with raw_env_present; raw_env_blank }
 
-let applied_provenance (e : entry) ~raw_env source =
-  let raw_env_present = Option.is_some raw_env in
-  let raw_env_blank =
-    match raw_env with
-    | Some value -> String.trim value = ""
-    | None -> false
-  in
+let applied_provenance (e : entry) source =
+  let raw_env_present = match source with Default -> false | Environment -> true in
   { kind = (match source with Default -> "default" | Environment -> "env")
   ; detail = "typed value resolved by the runtime owner"
   ; derived_from = []
   ; env_name = e.env_name
   ; raw_source = "applied_runtime"
   ; raw_env_present
-  ; raw_env_blank
+  ; raw_env_blank = false
   ; default_display = e.default_display
   ; sensitive = e.sensitive
   ; value_redacted = e.sensitive
@@ -155,15 +150,15 @@ let provenance_to_json p =
      else [ "derived_from", `List (List.map (fun v -> `String v) p.derived_from) ])
 
 let read_entry (e : entry) =
-  let raw_env = Sys.getenv_opt e.env_name in
-  let raw = Env_config_core.trim_opt raw_env in
   let provenance, display_value =
     match e.reader with
     | Effective read ->
       let value, source = read () in
       let value = if e.sensitive then mask_sensitive value else value in
-      applied_provenance e ~raw_env source, Some value
+      applied_provenance e source, Some value
     | Raw_env ->
+      let raw_env = Sys.getenv_opt e.env_name in
+      let raw = Env_config_core.trim_opt raw_env in
       let provenance = source_provenance e ~raw_env raw in
       let display_value =
         match raw with

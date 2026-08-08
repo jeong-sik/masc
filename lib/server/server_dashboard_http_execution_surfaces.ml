@@ -466,10 +466,6 @@ let with_transport_health_metadata json =
 
 let dashboard_execution_snapshot_json () = Server_dashboard_http_cache.cached_surface_json execution_cache
 
-let dashboard_transport_health_snapshot_json () =
-  Server_dashboard_http_cache.cached_surface_json transport_health_cache
-;;
-
 (* Cache patchers project a typed lifecycle transition onto dashboard row fields
    (keepalive_running / phase / pipeline_stage / paused). Phase-derived events
    and custom events arrive here only after the event-bus
@@ -915,11 +911,13 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
   in
   let compute () =
     Server_dashboard_http_cache.mark_cached_surface_attempt transport_health_cache;
-    try Transport_metrics.transport_health_json () with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache exn;
-      raise exn
+    Transport_metrics.transport_health_json ()
+  in
+  let broadcast_snapshot () =
+    broadcast_cached_surface
+      ~event_type:"transport_health_snapshot"
+      (Server_dashboard_http_cache.cached_surface_json transport_health_cache
+       |> with_transport_health_metadata)
   in
   let interval_s = 30.0 in
   Proactive_refresh.start
@@ -928,16 +926,17 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s) with
         timeout_s
-      ; on_error = Some (Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache)
+      ; on_error =
+          Some
+            (fun exn ->
+              Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache exn;
+              broadcast_snapshot ())
       ; warm_delay_s = 0.0
       }
     ~compute
     ~on_result:(fun json ->
       Server_dashboard_http_cache.mark_cached_surface_success transport_health_cache json;
-      broadcast_cached_surface
-        ~event_type:"transport_health_snapshot"
-        (Server_dashboard_http_cache.cached_surface_json transport_health_cache
-         |> with_transport_health_metadata))
+      broadcast_snapshot ())
 ;;
 
 let compute_execution_trust_json ~state ~sw ~clock =

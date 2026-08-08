@@ -9,7 +9,7 @@
 
 module SMap : Map.S with type key = string
 
-type session_kind =
+type session_kind = Transport_metrics.sse_session_kind =
   | Observer
   | Agent_stream
   | Presence

@@ -7,9 +7,11 @@ import { FetchScheduler } from '../lib/fetch-scheduler'
 import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from '../lib/format-time'
 import {
   fetchTransportHealth,
+  isTransportHealthReady,
   parseTransportHealthData,
   type HotSession,
   type TransportHealthData,
+  type TransportHealthSnapshot,
 } from '../api/transport-health'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { TextInput } from './common/input'
@@ -34,7 +36,7 @@ type PracticalCase = {
   live: (data: TransportHealthData) => string
 }
 
-const transportHealthResource = createManagedAsyncResource<TransportHealthData>()
+const transportHealthResource = createManagedAsyncResource<TransportHealthSnapshot>()
 const transportHealthWireError = signal<string | null>(null)
 let inflightTransportHealthRefresh: Promise<void> | null = null
 
@@ -405,8 +407,13 @@ export function TransportHealthPanel() {
   }
 
   if (!data) return null
-  if (!data.summary || !data.agent_health) {
-    return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 데이터 불완전. <${ActionButton} variant="subtle" size="sm" class="underline" onClick=${() => void refreshTransportHealth()}>재시도<//></div>`
+  const producerError = data.projection_diagnostics.stale_reason
+  if (producerError) {
+    const errorAt = data.projection_diagnostics.last_error_at
+    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${producerError}${errorAt ? ` · ${errorAt}` : ''}</div>`
+  }
+  if (!isTransportHealthReady(data)) {
+    return html`<div class="p-6 text-center text-text-muted text-sm" role="status">${data.message}</div>`
   }
 
   const sseStatus = sseTone(data)

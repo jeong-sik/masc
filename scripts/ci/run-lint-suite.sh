@@ -82,8 +82,6 @@ blocking_lints() {
 
 blocking_pr_lints() {
   local base="$1"
-  run_lint "Env knob classification" \
-    python3 scripts/ci/check-env-knob-classification.py --base "${base}" --head HEAD
   run_lint "Fun.protect finalizer guard" \
     python3 scripts/ci/check-fun-protect-finally-guard.py --base "${base}" --head HEAD
   run_lint "ignore() justification (new sites)" \

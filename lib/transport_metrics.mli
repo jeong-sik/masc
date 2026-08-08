@@ -13,13 +13,20 @@
 
 (** {1 SSE hot-queue snapshot} *)
 
+type sse_session_kind =
+  | Observer
+  | Agent_stream
+  | Presence
+
+val sse_session_kind_to_string : sse_session_kind -> string
+
 (** Per-session snapshot recorded into the SSE hot-queue
     Atomic ref by {!set_sse_queue_snapshot}.  Concrete record
     because callers construct + destructure it (notably the
     transport-health JSON renderer + tests). *)
 type hot_queue_session =
   { session_id : string
-  ; kind : string
+  ; kind : sse_session_kind
   ; queue_depth : int
   ; last_event_id : int
   ; idle_seconds : float
@@ -28,9 +35,8 @@ type hot_queue_session =
 (** {1 SSE metrics} *)
 
 (** [set_sse_sessions ~kind count] sets the [masc_sse_sessions]
-    gauge labelled with [kind] (typically ["observer"] /
-    ["agent_stream"]). *)
-val set_sse_sessions : kind:string -> int -> unit
+    gauge labelled with the canonical session kind. *)
+val set_sse_sessions : kind:sse_session_kind -> int -> unit
 
 (** [observe_broadcast_duration ?target seconds] records a
     broadcast histogram observation AND increments

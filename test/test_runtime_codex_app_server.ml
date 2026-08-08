@@ -112,6 +112,17 @@ let test_malformed_json_fails_closed () =
       | Ok _ -> fail "malformed JSON incorrectly admitted")
 ;;
 
+let test_notification_without_params_fails_closed () =
+  let missing_params = {|{"method":"item/completed"}|} in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; missing_params ]
+    (fun path ->
+      match run_fixture path with
+      | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "notification without params incorrectly admitted")
+;;
+
 let test_server_request_fails_closed () =
   let request =
     {|{"id":"approval-1","method":"item/commandExecution/requestApproval","params":{}}|}
@@ -173,6 +184,10 @@ let () =
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
         ; test_case "API key is rejected" `Quick test_api_key_account_is_rejected
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
+        ; test_case
+            "notification without params fails closed"
+            `Quick
+            test_notification_without_params_fails_closed
         ; test_case "server request fails closed" `Quick test_server_request_fails_closed
         ; test_case "failed turn stays failed" `Quick test_failed_turn_is_not_completion
         ] )

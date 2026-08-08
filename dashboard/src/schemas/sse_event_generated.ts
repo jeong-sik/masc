@@ -97,7 +97,26 @@ export type AgentCompletedPayload = {
   elapsed_s: number;
 }
 
+export type AgentYieldedPayload = {
+  agent_name: string;
+  task_id: string;
+  turn: number /*int*/;
+  elapsed_s: number;
+}
+
 export type JsonValue = any
+
+export type AgentInputRequiredPayload = {
+  agent_name: string;
+  task_id: string;
+  elapsed_s: number;
+  request_id: string;
+  participant_name: (string | null);
+  question: string;
+  schema: (JsonValue | null);
+  timeout_s: (number | null);
+  created_at: number;
+}
 
 export type AgentFailedPayload = {
   agent_name: string;
@@ -332,12 +351,58 @@ export function readAgentCompletedPayload(x: any, context: any = x): AgentComple
   };
 }
 
+export function writeAgentYieldedPayload(x: AgentYieldedPayload, context: any = x): any {
+  return {
+    'agent_name': _atd_write_required_field('AgentYieldedPayload', 'agent_name', _atd_write_string, x.agent_name, x),
+    'task_id': _atd_write_required_field('AgentYieldedPayload', 'task_id', _atd_write_string, x.task_id, x),
+    'turn': _atd_write_required_field('AgentYieldedPayload', 'turn', _atd_write_int, x.turn, x),
+    'elapsed_s': _atd_write_required_field('AgentYieldedPayload', 'elapsed_s', _atd_write_float, x.elapsed_s, x),
+  };
+}
+
+export function readAgentYieldedPayload(x: any, context: any = x): AgentYieldedPayload {
+  return {
+    agent_name: _atd_read_required_field('AgentYieldedPayload', 'agent_name', _atd_read_string, x['agent_name'], x),
+    task_id: _atd_read_required_field('AgentYieldedPayload', 'task_id', _atd_read_string, x['task_id'], x),
+    turn: _atd_read_required_field('AgentYieldedPayload', 'turn', _atd_read_int, x['turn'], x),
+    elapsed_s: _atd_read_required_field('AgentYieldedPayload', 'elapsed_s', _atd_read_float, x['elapsed_s'], x),
+  };
+}
+
 export function writeJsonValue(x: JsonValue, context: any = x): any {
   return ((x: any, context): any => x)(x, context);
 }
 
 export function readJsonValue(x: any, context: any = x): JsonValue {
   return ((x: any, context): any => x)(x, context);
+}
+
+export function writeAgentInputRequiredPayload(x: AgentInputRequiredPayload, context: any = x): any {
+  return {
+    'agent_name': _atd_write_required_field('AgentInputRequiredPayload', 'agent_name', _atd_write_string, x.agent_name, x),
+    'task_id': _atd_write_required_field('AgentInputRequiredPayload', 'task_id', _atd_write_string, x.task_id, x),
+    'elapsed_s': _atd_write_required_field('AgentInputRequiredPayload', 'elapsed_s', _atd_write_float, x.elapsed_s, x),
+    'request_id': _atd_write_required_field('AgentInputRequiredPayload', 'request_id', _atd_write_string, x.request_id, x),
+    'participant_name': _atd_write_required_field('AgentInputRequiredPayload', 'participant_name', _atd_write_nullable(_atd_write_string), x.participant_name, x),
+    'question': _atd_write_required_field('AgentInputRequiredPayload', 'question', _atd_write_string, x.question, x),
+    'schema': _atd_write_required_field('AgentInputRequiredPayload', 'schema', _atd_write_nullable(writeJsonValue), x.schema, x),
+    'timeout_s': _atd_write_required_field('AgentInputRequiredPayload', 'timeout_s', _atd_write_nullable(_atd_write_float), x.timeout_s, x),
+    'created_at': _atd_write_required_field('AgentInputRequiredPayload', 'created_at', _atd_write_float, x.created_at, x),
+  };
+}
+
+export function readAgentInputRequiredPayload(x: any, context: any = x): AgentInputRequiredPayload {
+  return {
+    agent_name: _atd_read_required_field('AgentInputRequiredPayload', 'agent_name', _atd_read_string, x['agent_name'], x),
+    task_id: _atd_read_required_field('AgentInputRequiredPayload', 'task_id', _atd_read_string, x['task_id'], x),
+    elapsed_s: _atd_read_required_field('AgentInputRequiredPayload', 'elapsed_s', _atd_read_float, x['elapsed_s'], x),
+    request_id: _atd_read_required_field('AgentInputRequiredPayload', 'request_id', _atd_read_string, x['request_id'], x),
+    participant_name: _atd_read_required_field('AgentInputRequiredPayload', 'participant_name', _atd_read_nullable(_atd_read_string), x['participant_name'], x),
+    question: _atd_read_required_field('AgentInputRequiredPayload', 'question', _atd_read_string, x['question'], x),
+    schema: _atd_read_required_field('AgentInputRequiredPayload', 'schema', _atd_read_nullable(readJsonValue), x['schema'], x),
+    timeout_s: _atd_read_required_field('AgentInputRequiredPayload', 'timeout_s', _atd_read_nullable(_atd_read_float), x['timeout_s'], x),
+    created_at: _atd_read_required_field('AgentInputRequiredPayload', 'created_at', _atd_read_float, x['created_at'], x),
+  };
 }
 
 export function writeAgentFailedPayload(x: AgentFailedPayload, context: any = x): any {

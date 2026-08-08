@@ -521,6 +521,8 @@ let test_provider_turn_identity_is_shared_across_multiturn_tool_loop () =
               started, ready, completed, Tool_contract.Invocation.turn invocation :: tools
             | AgentStarted _
             | AgentCompleted _
+            | AgentYielded _
+            | AgentInputRequired _
             | AgentFailed _
             | HandoffRequested _
             | HandoffCompleted _
@@ -1727,6 +1729,8 @@ let test_agent_run_uses_durable_tool_authority () =
            | ToolCalled _ | ToolCompleted _ -> true
            | AgentStarted _
            | AgentCompleted _
+           | AgentYielded _
+           | AgentInputRequired _
            | AgentFailed _
            | TurnStarted _
            | TurnReady _

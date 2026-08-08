@@ -66,6 +66,48 @@ describe('server-push OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Agent run completed · t1 · 12.5s')
   })
 
+  it('records a cooperative yield without calling it completion', () => {
+    emitEvent({
+      type: 'oas:agent_yielded',
+      event_type: 'agent_yielded',
+      ts_unix: 1_000,
+      correlation_id: 'c1',
+      run_id: 'r1',
+      agent_name: 'alpha',
+      task_id: 't1',
+      turn: 2,
+      tool_name: null,
+      payload: { agent_name: 'alpha', task_id: 't1', turn: 2, elapsed_s: 1.5 },
+    })
+    expect(lastJournalEntry()?.text).toBe('Agent run yielded · T2 · 1.5s')
+  })
+
+  it('records a typed input request without calling it failure', () => {
+    emitEvent({
+      type: 'oas:agent_input_required',
+      event_type: 'agent_input_required',
+      ts_unix: 1_000,
+      correlation_id: 'c1',
+      run_id: 'r1',
+      agent_name: 'alpha',
+      task_id: 't1',
+      turn: null,
+      tool_name: null,
+      payload: {
+        agent_name: 'alpha',
+        task_id: 't1',
+        elapsed_s: 1.5,
+        request_id: 'request-1',
+        participant_name: 'operator',
+        question: 'Continue?',
+        schema: null,
+        timeout_s: null,
+        created_at: 1_000,
+      },
+    })
+    expect(lastJournalEntry()?.text).toBe('Agent input required · request-1')
+  })
+
   it('creates a journal entry from a typed oas:agent_failed payload with all error fields', () => {
     emitEvent({
       type: 'oas:agent_failed',

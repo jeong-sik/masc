@@ -199,6 +199,60 @@ let test_empty_tool_use_id_omitted_from_payload () =
   check bool "empty provider id is omitted" true
     (payload_member "tool_use_id" json = None)
 
+let test_non_terminal_agent_outcomes_keep_distinct_wire_types () =
+  let yielded =
+    Bridge.native_event_to_json
+      (mk_event
+         (Agent_sdk.Event_bus.AgentYielded
+            { agent_name = "keeper-yield"
+            ; task_id = "run-yield"
+            ; turn = 4
+            ; elapsed = 2.5
+            }))
+    |> Option.get
+  in
+  check
+    (option string)
+    "yield wire kind"
+    (Some "agent_yielded")
+    (string_of_field (member "event_type" yielded));
+  check (option int) "yield turn" (Some 4) (int_of_field (payload_member "turn" yielded));
+  let request : Agent_sdk.Error.input_required =
+    { request_id = "request-1"
+    ; participant_name = Some "operator"
+    ; question = "Continue?"
+    ; schema = Some (`Assoc [ "type", `String "boolean" ])
+    ; timeout_s = Some 30.0
+    ; created_at = 1781200000.0
+    }
+  in
+  let input_required =
+    Bridge.native_event_to_json
+      (mk_event
+         (Agent_sdk.Event_bus.AgentInputRequired
+            { agent_name = "keeper-input"
+            ; task_id = "run-input"
+            ; request
+            ; elapsed = 3.5
+            }))
+    |> Option.get
+  in
+  check
+    (option string)
+    "input-required wire kind"
+    (Some "agent_input_required")
+    (string_of_field (member "event_type" input_required));
+  check
+    (option string)
+    "input request id"
+    (Some "request-1")
+    (string_of_field (payload_member "request_id" input_required));
+  check
+    (option string)
+    "input question"
+    (Some "Continue?")
+    (string_of_field (payload_member "question" input_required))
+
 let terminal_projection_string_field ~label key = function
   | `Assoc fields ->
     (match List.assoc_opt key fields with
@@ -536,6 +590,8 @@ let () =
             test_tool_approval_completed_preserves_exact_occurrence
         ; test_case "empty tool_use_id omitted" `Quick
             test_empty_tool_use_id_omitted_from_payload
+        ; test_case "non-terminal outcomes keep distinct wire types" `Quick
+            test_non_terminal_agent_outcomes_keep_distinct_wire_types
         ; test_case "agent_failed matches typed constructor" `Quick
             test_agent_failed_matches_typed_sse_event
         ; test_case "terminal agent failures redact raw detail" `Quick

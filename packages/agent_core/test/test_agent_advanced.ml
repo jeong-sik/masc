@@ -62,7 +62,7 @@ let sequence_transport ?(on_call = ignore) responses =
   transport, call_count
 ;;
 
-let make_agent
+let make_agent_with_options
       ?event_bus
       ~net
       ~transport
@@ -71,6 +71,7 @@ let make_agent
       ~context_injector
       ~on_run_complete
       ~tool
+      ()
   =
   let options =
     { Agent.default_options with
@@ -93,6 +94,19 @@ let make_agent
     }
   in
   Agent.create ~net ~config ~tools:[ tool ] ~options ~checkpoint_sink ()
+;;
+
+let make_agent ~net ~transport ~raw_trace ~checkpoint_sink ~context_injector
+      ~on_run_complete ~tool =
+  make_agent_with_options
+    ~net
+    ~transport
+    ~raw_trace
+    ~checkpoint_sink
+    ~context_injector
+    ~on_run_complete
+    ~tool
+    ()
 ;;
 
 let time_tool ?descriptor ?result on_execute =
@@ -168,7 +182,7 @@ let test_advanced_run_emits_lifecycle_events () =
   in
   let transport, _call_count = sequence_transport [ text_response "done" ] in
   let agent =
-    make_agent
+    make_agent_with_options
       ~event_bus
       ~net:env#net
       ~transport
@@ -177,6 +191,7 @@ let test_advanced_run_emits_lifecycle_events () =
       ~context_injector:None
       ~on_run_complete:None
       ~tool:(time_tool ignore)
+      ()
   in
   (match
      Agent.Advanced.run_blocks
@@ -213,6 +228,16 @@ let test_yield_after_context_checkpoint () =
   Eio.Switch.run
   @@ fun sw ->
   let trace = Raw_trace.create ~path:trace_path () |> Result.get_ok in
+  let event_bus = Event_bus.create () in
+  let subscription =
+    Event_bus.subscribe
+      ~config:
+        (Event_bus.subscription_config
+           ~capacity:16
+           ~overflow:Event_bus.Drop_newest
+         |> Result.get_ok)
+      event_bus
+  in
   let persisted = ref [] in
   let checkpoint_sink snapshot =
     persisted := snapshot :: !persisted;
@@ -236,7 +261,8 @@ let test_yield_after_context_checkpoint () =
       [ tool_use_response ]
   in
   let agent =
-    make_agent
+    make_agent_with_options
+      ~event_bus
       ~net:env#net
       ~transport
       ~raw_trace:trace
@@ -247,6 +273,7 @@ let test_yield_after_context_checkpoint () =
         (time_tool (fun () ->
            tool_executed := true;
            lease_events := "tool" :: !lease_events))
+      ()
   in
   let callback_count = ref 0 in
   let on_tool_boundary (boundary : Agent.Advanced.tool_boundary) =
@@ -311,6 +338,16 @@ let test_yield_after_context_checkpoint () =
     (List.rev !lease_events);
   Alcotest.(check int) "provider call count" 1 !call_count;
   Alcotest.(check (list bool)) "not terminal-complete" [] !completions;
+  let lifecycle_event_kinds =
+    Event_bus.drain subscription
+    |> List.map (fun (event : Event_bus.event) ->
+      Event_bus.payload_kind event.payload)
+    |> List.filter (fun kind -> String.starts_with ~prefix:"agent_" kind)
+  in
+  Alcotest.(check (list string))
+    "yield is not completion"
+    [ "agent_started"; "agent_yielded" ]
+    lifecycle_event_kinds;
   (match Agent.lifecycle agent with
    | Some snapshot ->
      Alcotest.(check bool) "lifecycle ready" true (snapshot.status = Agent.Ready);

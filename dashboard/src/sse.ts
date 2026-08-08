@@ -726,6 +726,44 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
+    case 'oas:agent_yielded': {
+      const parsed = parseOasPayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'agent_yielded') break
+      const { payload } = parsed
+      addTypedJournalEntry(
+        payload.agent_name,
+        `Agent run yielded · T${payload.turn} · ${payload.elapsed_s.toFixed(1)}s`,
+        'oas',
+        'oas_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(payload.agent_name)} agent run yielded at turn ${payload.turn}`,
+          preview: payload.task_id,
+          ...envelopeFromEvent(event),
+        },
+      )
+      break
+    }
+    case 'oas:agent_input_required': {
+      const parsed = parseOasPayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'agent_input_required') break
+      const { payload } = parsed
+      addTypedJournalEntry(
+        payload.agent_name,
+        `Agent input required · ${payload.request_id}`,
+        'oas',
+        'oas_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(payload.agent_name)} agent run requires input: ${payload.question}`,
+          preview: payload.question,
+          ...envelopeFromEvent(event),
+        },
+      )
+      break
+    }
     case 'oas:agent_failed': {
       const parsed = parseOasPayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'agent_failed') break

@@ -78,6 +78,21 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
          agent_name
          task_id
          elapsed)
+  | Agent_sdk.Event_bus.AgentYielded { agent_name; task_id; turn; elapsed } ->
+    log
+      (Printf.sprintf
+         "agent yielded agent=%s task_id=%s turn=%d elapsed_s=%.3f"
+         agent_name
+         task_id
+         turn
+         elapsed)
+  | Agent_sdk.Event_bus.AgentInputRequired { agent_name; task_id; request; _ } ->
+    log
+      (Printf.sprintf
+         "agent input required agent=%s task_id=%s request_id=%s"
+         agent_name
+         task_id
+         request.request_id)
   | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
     log_routine (Printf.sprintf "turn started agent=%s turn=%d" agent_name turn)
   | Agent_sdk.Event_bus.TurnCompleted { agent_name; turn } ->
@@ -200,6 +215,43 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          @ agent_completed_result_fields result)
     in
     Some (wrap ~event_type:"agent_completed" ~payload ~agent_name ~task_id ())
+  | Agent_sdk.Event_bus.AgentYielded { agent_name; task_id; turn; elapsed } ->
+    let payload =
+      `Assoc
+        [ "agent_name", `String agent_name
+        ; "task_id", `String task_id
+        ; "turn", `Int turn
+        ; "elapsed_s", `Float elapsed
+        ]
+    in
+    Some
+      (wrap
+         ~event_type:"agent_yielded"
+         ~payload
+         ~agent_name
+         ~task_id
+         ~turn
+         ())
+  | Agent_sdk.Event_bus.AgentInputRequired
+      { agent_name; task_id; request; elapsed } ->
+    let payload =
+      `Assoc
+        [ "agent_name", `String agent_name
+        ; "task_id", `String task_id
+        ; "elapsed_s", `Float elapsed
+        ; "request_id", `String request.request_id
+        ; "participant_name", Json_util.string_opt_to_json request.participant_name
+        ; "question", `String request.question
+        ; ( "schema"
+          , match request.schema with
+            | Some schema -> schema
+            | None -> `Null )
+        ; "timeout_s", Json_util.float_opt_to_json request.timeout_s
+        ; "created_at", `Float request.created_at
+        ]
+    in
+    Some
+      (wrap ~event_type:"agent_input_required" ~payload ~agent_name ~task_id ())
   | Agent_sdk.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
     let projection = agent_failed_error_projection error in
     Some

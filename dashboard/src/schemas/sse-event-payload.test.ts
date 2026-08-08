@@ -9,7 +9,9 @@ import {
 import {
   writeAgentCompletedPayload,
   writeAgentFailedPayload,
+  writeAgentInputRequiredPayload,
   writeAgentStartedPayload,
+  writeAgentYieldedPayload,
   writeContentReplacementKeptPayload,
   writeContentReplacementReplacedPayload,
   writeContextCompactStartedPayload,
@@ -33,6 +35,24 @@ const ALL_PAYLOAD_CASES: TypedOasPayload[] = [
   {
     kind: 'agent_completed',
     payload: { agent_name: 'a', task_id: 't', elapsed_s: 1 },
+  },
+  {
+    kind: 'agent_yielded',
+    payload: { agent_name: 'a', task_id: 't', turn: 1, elapsed_s: 1 },
+  },
+  {
+    kind: 'agent_input_required',
+    payload: {
+      agent_name: 'a',
+      task_id: 't',
+      elapsed_s: 1,
+      request_id: 'request-1',
+      participant_name: 'operator',
+      question: 'Continue?',
+      schema: null,
+      timeout_s: null,
+      created_at: 1,
+    },
   },
   {
     kind: 'agent_failed',
@@ -113,6 +133,10 @@ function serializePayload(payload: TypedOasPayload): Record<string, unknown> {
       return writeAgentStartedPayload(payload.payload)
     case 'agent_completed':
       return writeAgentCompletedPayload(payload.payload)
+    case 'agent_yielded':
+      return writeAgentYieldedPayload(payload.payload)
+    case 'agent_input_required':
+      return writeAgentInputRequiredPayload(payload.payload)
     case 'agent_failed':
       return writeAgentFailedPayload(payload.payload)
     case 'tool_called':
@@ -177,6 +201,62 @@ describe('parseOasPayload', () => {
     expect(data.payload.agent_name).toBe('beta')
     expect(data.payload.task_id).toBe('task_99')
     expect(data.payload.elapsed_s).toBe(12.5)
+  })
+
+  it('parses oas:agent_yielded without projecting completion', () => {
+    const result = parseOasPayload('oas:agent_yielded', {
+      agent_name: 'beta',
+      task_id: 'task_99',
+      turn: 3,
+      elapsed_s: 12.5,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success || result.data.kind !== 'agent_yielded') return
+    expect(result.data.payload).toEqual({
+      agent_name: 'beta',
+      task_id: 'task_99',
+      turn: 3,
+      elapsed_s: 12.5,
+    })
+  })
+
+  it('parses oas:agent_input_required with the typed request', () => {
+    const result = parseOasPayload('oas:agent_input_required', {
+      agent_name: 'beta',
+      task_id: 'task_99',
+      elapsed_s: 12.5,
+      request_id: 'request-1',
+      participant_name: 'operator',
+      question: 'Continue?',
+      schema: { type: 'boolean' },
+      timeout_s: 30,
+      created_at: 1_000,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success || result.data.kind !== 'agent_input_required') return
+    expect(result.data.payload.request_id).toBe('request-1')
+    expect(result.data.payload.question).toBe('Continue?')
+    expect(result.data.payload.schema).toEqual({ type: 'boolean' })
+  })
+
+  it('rejects malformed non-terminal agent outcomes', () => {
+    expect(parseOasPayload('oas:agent_yielded', {
+      agent_name: 'beta',
+      task_id: 'task_99',
+      turn: '3',
+      elapsed_s: 12.5,
+    }).success).toBe(false)
+    expect(parseOasPayload('oas:agent_input_required', {
+      agent_name: 'beta',
+      task_id: 'task_99',
+      elapsed_s: 12.5,
+      request_id: 'request-1',
+      participant_name: null,
+      question: 42,
+      schema: null,
+      timeout_s: null,
+      created_at: 1_000,
+    }).success).toBe(false)
   })
 
   it('parses oas:agent_failed payload with all typed error fields', () => {

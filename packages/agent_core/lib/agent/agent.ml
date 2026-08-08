@@ -334,14 +334,30 @@ let with_periodic_callbacks ~sw ?clock agent f =
        raise exn)
 ;;
 
-let with_run_lifecycle_events agent f =
+let lifecycle_outcome_of_error error =
+  match error with
+  | Error.Agent (Error.InputRequired request) ->
+    Agent_lifecycle_events.Input_required request
+  | error -> Agent_lifecycle_events.Failed error
+;;
+
+let with_classified_run_lifecycle_events agent ~classify_success f =
   Agent_lifecycle_events.with_run_lifecycle_events
     ~event_bus:agent.options.event_bus
     ~agent_name:agent.state.config.name
     ~raw_trace:agent.options.raw_trace
     ~current_run_id:(fun () ->
       Option.bind (lifecycle_snapshot agent) (fun s -> s.current_run_id))
-    ~project:(fun detailed -> detailed.Provider_failure_attribution.error)
+    ~classify:(function
+      | Ok success -> classify_success success
+      | Error detailed -> lifecycle_outcome_of_error detailed.Provider_failure_attribution.error)
+    f
+;;
+
+let with_run_lifecycle_events agent f =
+  with_classified_run_lifecycle_events
+    agent
+    ~classify_success:(fun response -> Agent_lifecycle_events.Completed response)
     f
 ;;
 
@@ -868,7 +884,14 @@ module Advanced = struct
         agent
         user_blocks
     =
-    with_run_lifecycle_events agent (fun () ->
+    with_classified_run_lifecycle_events
+      agent
+      ~classify_success:(function
+        | Completed response -> Agent_lifecycle_events.Completed response
+        | Yielded { turn; _ } -> Agent_lifecycle_events.Yielded { turn }
+        | Terminal_tool_completed { receipt; _ } ->
+          Agent_lifecycle_events.Completed receipt.response)
+    @@ fun () ->
       match validate_user_input_blocks user_blocks with
       | Error error -> Error (detailed_error_of_sdk_error error)
       | Ok () ->
@@ -885,7 +908,7 @@ module Advanced = struct
                ?execution_store
                ~on_tool_boundary
                agent
-               user_blocks)))
+               user_blocks))
   ;;
 
   let run_blocks

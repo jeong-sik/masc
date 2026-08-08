@@ -15,7 +15,9 @@ import { assertExhaustive } from '../lib/exhaustive'
 import {
   readAgentCompletedPayload,
   readAgentFailedPayload,
+  readAgentInputRequiredPayload,
   readAgentStartedPayload,
+  readAgentYieldedPayload,
   readContentReplacementKeptPayload,
   readContentReplacementReplacedPayload,
   readContextCompactStartedPayload,
@@ -30,7 +32,9 @@ import {
   readTurnStartedPayload,
   type AgentCompletedPayload,
   type AgentFailedPayload,
+  type AgentInputRequiredPayload,
   type AgentStartedPayload,
+  type AgentYieldedPayload,
   type ContentReplacementKeptPayload,
   type ContentReplacementReplacedPayload,
   type ContextCompactStartedPayload,
@@ -69,6 +73,8 @@ export type OasPayloadParseResult<T> =
 export type TypedOasPayload =
   | { kind: 'agent_started'; payload: AgentStartedPayload }
   | { kind: 'agent_completed'; payload: AgentCompletedPayload }
+  | { kind: 'agent_yielded'; payload: AgentYieldedPayload }
+  | { kind: 'agent_input_required'; payload: AgentInputRequiredPayload }
   | { kind: 'agent_failed'; payload: AgentFailedPayload }
   | { kind: 'tool_called'; payload: ToolCalledPayload }
   | { kind: 'tool_completed'; payload: ToolCompletedPayload }
@@ -100,6 +106,8 @@ type ReaderMap = {
 const READERS: ReaderMap = {
   agent_started: readAgentStartedPayload,
   agent_completed: readAgentCompletedPayload,
+  agent_yielded: readAgentYieldedPayload,
+  agent_input_required: readAgentInputRequiredPayload,
   agent_failed: readAgentFailedPayload,
   tool_called: readToolCalledPayload,
   tool_completed: readToolCompletedPayload,
@@ -171,6 +179,8 @@ export function parseOasPayload(
     case 'context_compacted':
     case 'agent_started':
     case 'agent_completed':
+    case 'agent_yielded':
+    case 'agent_input_required':
     case 'agent_failed':
     case 'tool_called':
     case 'tool_completed':

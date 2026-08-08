@@ -193,16 +193,27 @@ let test_agent_elicit_input_without_callback_pauses () =
     | Hooks.BeforeTurn _ -> Hooks.ElicitInput request
     | _ -> Hooks.Continue
   in
+  let event_bus = Event_bus.create () in
+  let subscription =
+    Event_bus.subscribe
+      ~config:
+        (Event_bus.subscription_config
+           ~capacity:8
+           ~overflow:Event_bus.Drop_newest
+         |> Result.get_ok)
+      event_bus
+  in
   let options =
     { Agent.default_options with
       hooks = { Hooks.empty with before_turn = Some before_turn }
+    ; event_bus = Some event_bus
     }
   in
   let config =
     { (Types.default_config ~model:"test-model") with name = "human-reviewer" }
   in
   let agent = Agent.create ~net:env#net ~config ~options () in
-  match Agent.run ~sw agent "deploy" with
+  (match Agent.run ~sw agent "deploy" with
   | Error (Error.Agent (Error.InputRequired input)) ->
     (match input.participant_name with
      | Some participant ->
@@ -225,7 +236,22 @@ let test_agent_elicit_input_without_callback_pauses () =
          text
      | _ -> Alcotest.fail "expected user input message")
   | Error err -> Alcotest.failf "expected InputRequired, got %s" (Error.to_string err)
-  | Ok _ -> Alcotest.fail "expected InputRequired"
+  | Ok _ -> Alcotest.fail "expected InputRequired");
+  let lifecycle_events =
+    Event_bus.drain subscription
+    |> List.filter (fun (event : Event_bus.event) ->
+      String.starts_with ~prefix:"agent_" (Event_bus.payload_kind event.payload))
+  in
+  Alcotest.(check (list string))
+    "input request is not failure"
+    [ "agent_started"; "agent_input_required" ]
+    (List.map
+       (fun (event : Event_bus.event) -> Event_bus.payload_kind event.payload)
+       lifecycle_events);
+  (match List.rev lifecycle_events with
+   | { Event_bus.payload = Event_bus.AgentInputRequired { request; _ }; _ } :: _ ->
+     Alcotest.(check string) "event question" "Which environment?" request.question
+   | _ -> Alcotest.fail "expected AgentInputRequired lifecycle event")
 ;;
 
 let () =

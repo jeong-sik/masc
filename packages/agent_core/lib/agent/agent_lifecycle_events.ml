@@ -1,17 +1,13 @@
-(** Run lifecycle events (AgentStarted/AgentCompleted/AgentFailed).
+(** Typed run lifecycle events.
 
-    The run-level lifecycle triple lost its only producer when the legacy
-    orchestrator was removed (#1755); the variants and downstream subscribers
-    stayed behind.  Envelope identity follows the removed producer's
-    derivation so the triple joins the surrounding event stream:
+    Envelope identity joins the surrounding event stream:
     [correlation_id] is the raw-trace session id when present (same source
     as turn-level events, see [Pipeline_common.event_envelope]);
-    [AgentStarted] opens a fresh run id; the terminal events reuse the
+    [AgentStarted] opens a fresh run id; the outcome event reuses the
     lifecycle [current_run_id] (raw-trace run id) when one is active; and
-    terminal [caused_by] points at the started event's run id (#877).
-    [task_id] carries the started run id — the only run-scoped identifier
-    available without an orchestrator task — so subscribers can group the
-    triple of one run invocation. *)
+    [caused_by] points at the started event's run id (#877).
+    [task_id] carries the started run id so subscribers can group one run
+    invocation. *)
 
 let _log = Log.create ~module_name:"agent_lifecycle_events" ()
 
@@ -42,7 +38,13 @@ let publish_started ~event_bus ~agent_name ~correlation_id =
     Some (correlation_id, run_id)
 ;;
 
-let publish_finished ~event_bus ~agent_name ~started ~current_run_id ~result ~elapsed =
+type outcome =
+  | Completed of Types.api_response
+  | Yielded of { turn : int }
+  | Input_required of Error.input_required
+  | Failed of Error.sdk_error
+
+let publish_finished ~event_bus ~agent_name ~started ~current_run_id ~outcome ~elapsed =
   match event_bus, started with
   | Some bus, Some (correlation_id, started_run_id) ->
     let run_id =
@@ -63,18 +65,28 @@ let publish_finished ~event_bus ~agent_name ~started ~current_run_id ~result ~el
           (Printf.sprintf "Event_bus.publish failed (%s)" label)
           [ Log.S ("error", Printexc.to_string exn) ]
     in
-    publish
-      "AgentCompleted"
-      (AgentCompleted { agent_name; task_id = started_run_id; result; elapsed });
-    (* [AgentFailed] is a companion emitted in addition to [AgentCompleted]
-       so failure-only subscribers match the variant directly instead of
-       destructuring [result]. *)
-    (match result with
-     | Error error ->
+    match outcome with
+     | Completed response ->
+       publish
+         "AgentCompleted"
+         (AgentCompleted
+            { agent_name; task_id = started_run_id; result = Ok response; elapsed })
+     | Yielded { turn } ->
+       publish
+         "AgentYielded"
+         (AgentYielded { agent_name; task_id = started_run_id; turn; elapsed })
+     | Input_required request ->
+       publish
+         "AgentInputRequired"
+         (AgentInputRequired { agent_name; task_id = started_run_id; request; elapsed })
+     | Failed error ->
+       publish
+         "AgentCompleted"
+         (AgentCompleted
+            { agent_name; task_id = started_run_id; result = Error error; elapsed });
        publish
          "AgentFailed"
          (AgentFailed { agent_name; task_id = started_run_id; error; elapsed })
-     | Ok _ -> ())
   | None, _ | Some _, None -> ()
 ;;
 
@@ -90,7 +102,13 @@ let validate_run_callbacks ~on_yield ~on_resume =
   | Some _, Some _ | None, None -> Ok ()
 ;;
 
-let with_run_lifecycle_events ~event_bus ~agent_name ~raw_trace ~current_run_id ~project f
+let with_run_lifecycle_events
+      ~event_bus
+      ~agent_name
+      ~raw_trace
+      ~current_run_id
+      ~classify
+      f
   =
   let started_at = Unix.gettimeofday () in
   let started =
@@ -99,13 +117,8 @@ let with_run_lifecycle_events ~event_bus ~agent_name ~raw_trace ~current_run_id 
       ~agent_name
       ~correlation_id:(Option.bind raw_trace Raw_trace.session_id)
   in
-  (* Mirror the [with_raw_trace_run_classified_result] exception arm in
-     [Agent_trace]: the terminal lifecycle transition must not be skipped
-     even when [f] raises (e.g. [Eio.Cancel.Cancelled] on switch failure
-     or any synchronous exn from the pipeline).  Subscribers always see
-     [AgentStarted] closed by [AgentCompleted]/[AgentFailed]; the original
-     exception is then re-raised with its backtrace so callers still
-     observe the failure. *)
+  (* A raised call must still publish its typed failure before the original
+     exception is re-raised with the captured backtrace. *)
   match f () with
   | result ->
     publish_finished
@@ -113,7 +126,7 @@ let with_run_lifecycle_events ~event_bus ~agent_name ~raw_trace ~current_run_id 
       ~agent_name
       ~started
       ~current_run_id:(current_run_id ())
-      ~result:(Result.map_error project result)
+      ~outcome:(classify result)
       ~elapsed:(Unix.gettimeofday () -. started_at);
     result
   | exception exn ->
@@ -126,7 +139,7 @@ let with_run_lifecycle_events ~event_bus ~agent_name ~raw_trace ~current_run_id 
       ~agent_name
       ~started
       ~current_run_id:(current_run_id ())
-      ~result:(Error error)
+      ~outcome:(Failed error)
       ~elapsed:(Unix.gettimeofday () -. started_at);
     Printexc.raise_with_backtrace exn backtrace
 ;;

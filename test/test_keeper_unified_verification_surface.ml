@@ -14,7 +14,7 @@ let base_observation : WO.world_observation =
     idle_seconds = 0;
     active_goals = [];
     unclaimed_task_count = 0;
-    claimable_task_count = 0;
+    claimable_tasks = [];
     failed_task_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
     backlog_revision = Some 1;
@@ -309,7 +309,7 @@ let test_observation_tool_names_are_preserved () =
 
 let test_task_claim_requires_matched_backlog () =
   let obs =
-    { base_observation with unclaimed_task_count = 3; claimable_task_count = 0 }
+    { base_observation with unclaimed_task_count = 3; claimable_tasks = [] }
   in
   let affordances = UM.observed_affordances_of_observation obs in
   check bool "task_claim absent for unclaimable backlog" false
@@ -317,7 +317,14 @@ let test_task_claim_requires_matched_backlog () =
 
 let test_task_claim_present_for_claimable_backlog () =
   let obs =
-    { base_observation with unclaimed_task_count = 3; claimable_task_count = 1 }
+    { base_observation with
+      unclaimed_task_count = 3;
+      claimable_tasks =
+        [ { Keeper_world_observation_inputs.task_id = "task-claimable"
+          ; title_preview = "Claimable task"
+          }
+        ];
+    }
   in
   let affordances = UM.observed_affordances_of_observation obs in
   check bool "task_claim present for matched backlog" true
@@ -325,7 +332,14 @@ let test_task_claim_present_for_claimable_backlog () =
 
 let test_backlog_trigger_split () =
   let obs =
-    { base_observation with unclaimed_task_count = 3; claimable_task_count = 1 }
+    { base_observation with
+      unclaimed_task_count = 3;
+      claimable_tasks =
+        [ { Keeper_world_observation_inputs.task_id = "task-claimable"
+          ; title_preview = "Claimable task"
+          }
+        ];
+    }
   in
   let triggers = UM.observed_triggers_of_observation obs in
   check bool "claimable backlog trigger remains visible" true
@@ -335,7 +349,7 @@ let test_backlog_trigger_split () =
 
 let test_unclaimable_backlog_is_not_a_claim_trigger () =
   let obs =
-    { base_observation with unclaimed_task_count = 3; claimable_task_count = 0 }
+    { base_observation with unclaimed_task_count = 3; claimable_tasks = [] }
   in
   let triggers = UM.observed_triggers_of_observation obs in
   check bool "unclaimable backlog is not a new task trigger" false

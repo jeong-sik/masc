@@ -634,13 +634,6 @@ function ConnectorLivePanel({
     gateHealthLabel = 'unhealthy'
   }
 
-  const sidecarLogPath = connector?.names_path
-    ? connector.names_path.replace(
-        /\/\.masc\/connectors\/[^/]+\/names\.json$/,
-        `/.masc/logs/${connectorId}-sidecar-YYYYMMDD.log`,
-      )
-    : ''
-
   // observedWorkspaces / bindingsByKeeper / knownNames / knownGroups form a
   // derivation chain over stable props (gate, connector, configuredBindings,
   // keepers). The panel re-renders on unrelated UI state (keeperQuery filter
@@ -810,9 +803,6 @@ function ConnectorLivePanel({
             ? html`<${SidecarLogToggle} connectorId=${connectorId} />`
             : null}
           <${ConnectorConfigToggle} connectorId=${connectorId} />
-          ${sidecarLogPath && !isInProcessConnector(connectorId)
-            ? html`<span class="cursor-help text-3xs text-[var(--color-fg-disabled)]" title=${sidecarLogPath} aria-hidden="true">↗</span>`
-            : null}
           <button
             type="button"
             class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
@@ -1280,9 +1270,6 @@ function ConnectorLivePanel({
             <div class="cn-runtime-paths mt-4 flex flex-wrap gap-3 text-3xs text-[var(--color-fg-disabled)]">
               ${connector.status_path
                 ? html`<span title=${connector.status_path}>runtime ${truncateMiddle(connector.status_path, 50)}</span>`
-                : null}
-              ${sidecarLogPath
-                ? html`<span title=${sidecarLogPath}>logs ${truncateMiddle(sidecarLogPath, 50)}</span>`
                 : null}
             </div>
           `

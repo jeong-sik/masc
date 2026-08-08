@@ -80,13 +80,22 @@ let resolve_runtime_providers ~runtime_id () =
      was ignored here and is deleted;
      each resolved runtime carries exactly one provider_config. *)
   let runtime_id = String.trim runtime_id in
+  let provider_config_of_runtime rt =
+    match rt.Runtime.execution with
+    | Runtime_execution.Agent_core provider_config -> Ok provider_config
+    | Runtime_execution.Codex_app_server _ ->
+      Error
+        (Printf.sprintf
+           "runtime %S is owned by codex-app-server, not the OAS agent_core"
+           rt.Runtime.id)
+  in
   if String.equal runtime_id "" then
     match Runtime.get_default_runtime () with
     | None -> Error "no default runtime configured"
-    | Some rt -> Ok [ rt.Runtime.provider_config ]
+    | Some rt -> Result.map (fun provider_config -> [ provider_config ]) (provider_config_of_runtime rt)
   else
     match Runtime.get_runtime_by_id runtime_id with
-    | Some rt -> Ok [ rt.Runtime.provider_config ]
+    | Some rt -> Result.map (fun provider_config -> [ provider_config ]) (provider_config_of_runtime rt)
     | None ->
       Error
         (Printf.sprintf

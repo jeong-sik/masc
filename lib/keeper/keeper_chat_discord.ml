@@ -356,7 +356,10 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
               if String.length acc_text = 0 then
                 Error
                   (Discord_rest_client.Other
-                     "primary final Discord reply contained no text")
+                     { request_id = "keeper_chat_discord.final_reply"
+                     ; reason = "primary final Discord reply contained no text"
+                     ; body_bytes = 0
+                     })
               else send_message ~content:acc_text
           | Some mid ->
               let head, overflow = final_head_and_overflow acc_text in

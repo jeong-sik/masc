@@ -28,19 +28,23 @@ function noTurns() {
 describe('KeeperTurnInspectorPanel', () => {
   it('lists a keeper\'s turn files and opens the one that is clicked', async () => {
     api.fetchKeeperRawTraces.mockResolvedValue([
-      { file: 'turn-0007.jsonl', bytes: 2048, records: 4, modifiedAt: 1786000000 },
+      { file: 'turn-0007.jsonl', traceId: 'trace-0007', bytes: 2048, records: 4, modifiedAt: 1786000000 },
     ])
+    const raw = '{"kind":"request","model":"qwen3-6-35b"}'
     api.fetchKeeperRawTrace.mockResolvedValue({
       file: 'turn-0007.jsonl',
       totalRecords: 1,
       offset: 0,
-      records: [{ ok: true, record: { kind: 'request', model: 'qwen3-6-35b' } }],
+      records: [{ ok: true, raw, record: { kind: 'request', model: 'qwen3-6-35b' } }],
     })
 
     render(html`<${KeeperTurnInspectorPanel} keepers=${KEEPERS} />`)
     fireEvent.click(await screen.findByText('turn-0007.jsonl'))
 
-    // The record body, not just the file name, is what makes this a viewer.
+    // Literal JSONL is the default. A RAW badge must not hide it behind a
+    // parsed disclosure tree.
+    expect(await screen.findByText(raw)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'JSON tree' }))
     expect(await screen.findByText(/qwen3-6-35b/)).toBeTruthy()
     expect(api.fetchKeeperRawTrace).toHaveBeenCalledWith(
       'analyst',
@@ -53,15 +57,15 @@ describe('KeeperTurnInspectorPanel', () => {
   // decode holds its position and says why, rather than being dropped.
   it('keeps an undecodable record in place with its reason', async () => {
     api.fetchKeeperRawTraces.mockResolvedValue([
-      { file: 'turn-0008.jsonl', bytes: 10, records: 2, modifiedAt: 1786000000 },
+      { file: 'turn-0008.jsonl', traceId: 'trace-0008', bytes: 10, records: 2, modifiedAt: 1786000000 },
     ])
     api.fetchKeeperRawTrace.mockResolvedValue({
       file: 'turn-0008.jsonl',
       totalRecords: 2,
       offset: 0,
       records: [
-        { ok: true, record: { kind: 'request' } },
-        { ok: false, error: 'not valid JSON' },
+        { ok: true, raw: '{"kind":"request"}', record: { kind: 'request' } },
+        { ok: false, raw: '{not valid JSON', error: 'not valid JSON' },
       ],
     })
 
@@ -69,8 +73,7 @@ describe('KeeperTurnInspectorPanel', () => {
     fireEvent.click(await screen.findByText('turn-0008.jsonl'))
 
     expect(await screen.findByText(/레코드 2 를 읽지 못했습니다: not valid JSON/)).toBeTruthy()
-    expect(screen.getByTestId('json-viewer-card').textContent).toContain('kind')
-    expect(screen.getByTestId('json-viewer-card').textContent).toContain('request')
+    expect(screen.getByText('{not valid JSON')).toBeTruthy()
   })
 
   it('shows each prompt block with its own byte count', async () => {

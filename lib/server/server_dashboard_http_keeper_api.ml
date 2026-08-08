@@ -1542,9 +1542,9 @@ let handle_keeper_get_subroutes state req request reqd =
               (keeper_chat_receipt_json ~keeper_name:name ~revision receipt)))
   | None ->
   if ends_with "/digest" then (
-    (* Keeper catch-up digest (since-last-seen). Inherits the enclosing
-       prefix_get "/api/v1/keepers/" + with_public_read gating, same as the
-       sibling arms below; no separate router wiring. *)
+    (* Keeper catch-up digest (since-last-seen). The enclosing keeper GET
+       router leaves this route on its public-read policy; sensitive sibling
+       routes declare a mandatory token-bound permission before dispatch. *)
     let name = extract_name "/digest" in
     if name = "" then
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd

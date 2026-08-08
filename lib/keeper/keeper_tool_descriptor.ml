@@ -992,11 +992,40 @@ let surface_read_schema =
          source: 'dashboard', 'discord', 'slack', or another connector's \
          channel label. Rows written before source labelling carry no label \
          and are not returned."
+    ; string_enum_property
+        "mode"
+        [ "local"; "channel"; "messages"; "members"; "member" ]
+        "Optional exact read mode. When absent, the request is exactly 'local' \
+         for the persisted lane; padded or unknown values are invalid. The \
+         other modes query Discord live and require surface='discord'."
     ; property
         "limit"
         "integer"
-        "Maximum lane messages to return (default 20, max 100). The \
-         participant roster always covers the whole loaded lane."
+        "Maximum messages or Discord members to return (default 20; messages: \
+         1-100; members: 1-1000). The local participant roster covers the \
+         whole loaded lane."
+    ; property
+        "channel_id"
+        "string"
+        "Bound Discord channel snowflake. Optional when this keeper has one \
+         bound channel; required when it has multiple."
+    ; property
+        "user_id"
+        "string"
+        "Discord user snowflake, required for mode='member'."
+    ; property
+        "query"
+        "string"
+        "Optional member username/nickname prefix for mode='members'."
+    ; property
+        "discord_before"
+        "string"
+        "Discord message snowflake for backward paging in mode='messages'."
+    ; property
+        "discord_after"
+        "string"
+        "Discord message/member snowflake for forward paging. Do not send it \
+         together with discord_before."
     ]
 ;;
 
@@ -1618,11 +1647,9 @@ let internal_descriptors : t list =
        ~description:
          "Read recent messages from one conversation endpoint (dashboard, \
           discord, slack, or another connector label) with speaker identity \
-          and a derived participant roster. Use when the user asks about a \
-          current connector lane, recent lane messages, or participants. This \
-          does not enumerate connector-wide channel registries; if asked for \
-          channels outside Connected Surfaces, read only visible lane evidence \
-          and state that the wider registry is unavailable."
+          and a derived participant roster. With mode='channel', 'messages', \
+          'members', or 'member', the Discord lane can also query its live \
+          channel and server read surface within the keeper's bound channels."
        ~input_schema:surface_read_schema
        ~policy:(read_only_in_process_policy ())
        ~handler:Tool_surface_read

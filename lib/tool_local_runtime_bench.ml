@@ -88,21 +88,30 @@ let finalize_runtime_breakdown json =
         ]
   | _ -> json
 
-let validate_requested_model (runtime : Runtime.t) = function
-  | None -> Ok runtime
-  | Some requested_model ->
+let validate_requested_model (runtime : Runtime.t) requested_model =
+  match runtime.execution with
+  | Runtime_execution.Codex_app_server _ ->
+    Error
+      (Printf.sprintf
+         "runtime %S is owned by codex-app-server; local_runtime_bench only \
+          measures OAS agent_core providers"
+         runtime.id)
+  | Runtime_execution.Agent_core provider_config ->
+    (match requested_model with
+     | None -> Ok (runtime, provider_config)
+     | Some requested_model ->
       let requested_model = String.trim requested_model in
       if String.equal requested_model "" then
         Error "model must be a non-empty configured model id"
-      else if String.equal requested_model runtime.provider_config.model_id then
-        Ok runtime
+      else if String.equal requested_model provider_config.model_id then
+        Ok (runtime, provider_config)
       else
         Error
           (Printf.sprintf
              "runtime %S is configured for model %S, not requested model %S"
              runtime.id
-             runtime.provider_config.model_id
-             requested_model)
+             provider_config.model_id
+             requested_model))
 
 let resolve_runtime ?model_id = function
   | None ->
@@ -124,12 +133,13 @@ let resolve_runtime ?model_id = function
                   "runtime %S is not materialized from runtime.toml"
                   runtime_id))
 
-let ensure_runtime_reachable (runtime : Runtime.t) ~timeout_sec =
+let ensure_runtime_reachable (runtime : Runtime.t)
+    (provider_config : Llm_provider.Provider_config.t) ~timeout_sec =
   match runtime.provider.healthcheck_path with
   | None -> Ok ()
   | Some healthcheck_path ->
       let health_url =
-        runtime.provider_config.base_url
+        provider_config.Llm_provider.Provider_config.base_url
         |> Uri.of_string
         |> fun base -> Uri.with_path base healthcheck_path
         |> Uri.to_string
@@ -151,7 +161,9 @@ let ensure_runtime_reachable (runtime : Runtime.t) ~timeout_sec =
        | Error err ->
            Error (Printf.sprintf "runtime %S unavailable: %s" runtime.id err))
 
-let oas_completion_at (runtime : Runtime.t) ~prompt ~max_tokens ~timeout_sec () =
+let oas_completion_at (runtime : Runtime.t)
+    (provider_config : Llm_provider.Provider_config.t) ~prompt ~max_tokens
+    ~timeout_sec () =
   match Masc_eio_env.get_opt () with
   | None ->
       (* MASC-OAS boundary: raw curl fallback removed.
@@ -162,7 +174,7 @@ let oas_completion_at (runtime : Runtime.t) ~prompt ~max_tokens ~timeout_sec () 
   | Some env -> (
       let started = Time_compat.now () in
       let provider_config =
-        { runtime.provider_config with max_tokens = Some max_tokens }
+        { provider_config with max_tokens = Some max_tokens }
       in
           let messages : Oas_types.message list = [ Oas_types.user_msg prompt ] in
           let run_completion () =
@@ -193,8 +205,8 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
     ~timeout_sec () =
   match resolve_runtime ?model_id runtime_pool with
   | Error _ as err -> err
-  | Ok runtime ->
-    (match ensure_runtime_reachable runtime ~timeout_sec with
+  | Ok (runtime, provider_config) ->
+    (match ensure_runtime_reachable runtime provider_config ~timeout_sec with
      | Error _ as err -> err
      | Ok () ->
       let total = parallelism * rounds in
@@ -206,7 +218,8 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
           (List.init parallelism (fun fiber_idx ->
                fun () ->
                  let sample, runtime_id =
-                   oas_completion_at runtime ~prompt ~max_tokens ~timeout_sec ()
+                   oas_completion_at runtime provider_config ~prompt ~max_tokens
+                     ~timeout_sec ()
                  in
                  update_runtime_breakdown runtime_breakdown ~runtime_id ~sample;
                  results.(offset + fiber_idx) <- Some sample))
@@ -237,9 +250,9 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
       Ok
         (`Assoc
           [
-            ("server_url", `String runtime.provider_config.base_url);
+            ("server_url", `String provider_config.base_url);
             ("source", `String "oas_complete");
-            ("model_id", `String runtime.provider_config.model_id);
+            ("model_id", `String provider_config.model_id);
             ("runtime_pool", `String runtime.id);
             ("parallelism", `Int parallelism);
             ("rounds", `Int rounds);

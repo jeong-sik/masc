@@ -345,6 +345,36 @@ let with_runtime_initialized f =
   with_runtime_file (fun _path -> f ())
 ;;
 
+let codex_runtime_config =
+  {|[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[models.codex]
+api-name = "gpt-5.6-sol"
+max-context = 400000
+
+[codex.codex]
+
+[runtime]
+default = "codex.codex"
+|}
+;;
+
+let with_codex_runtime_initialized f =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_temp_dir "runtime-codex-dashboard" @@ fun dir ->
+       let path = Filename.concat dir "runtime.toml" in
+       write_file path codex_runtime_config;
+       match Runtime.init_default ~config_path:path with
+       | Error msg -> Alcotest.failf "Codex runtime init failed: %s" msg
+       | Ok () -> f ())
+;;
+
 let test_messages_http_runtime_loads_and_assignment_resolves () =
   let snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
@@ -490,6 +520,47 @@ let test_runtime_inventory_surfaces_assignment_status () =
       (match gpt |> J.member "temperature" with
        | `Null -> true
        | _ -> false))
+;;
+
+let test_codex_runtime_inventory_is_unverified_until_measured () =
+  with_codex_runtime_initialized (fun () ->
+    let entry =
+      Server_dashboard_http_runtime_info.runtime_inventory_json ()
+      |> J.member "providers"
+      |> J.to_list
+      |> List.find (fun entry ->
+        String.equal
+          "codex.codex"
+          (entry |> J.member "runtime_id" |> J.to_string))
+    in
+    Alcotest.(check string)
+      "status"
+      "configured_unverified"
+      (entry |> J.member "status" |> J.to_string);
+    Alcotest.(check bool)
+      "not available without runtime evidence"
+      false
+      (entry |> J.member "available" |> J.to_bool);
+    let verification = entry |> J.member "verification" in
+    Alcotest.(check bool)
+      "not measured"
+      false
+      (verification |> J.member "measured" |> J.to_bool);
+    Alcotest.(check string)
+      "reason"
+      "no_successful_runtime_observation"
+      (verification |> J.member "reason" |> J.to_string))
+;;
+
+let test_codex_runtime_cannot_enter_oas_runner () =
+  with_codex_runtime_initialized (fun () ->
+    match Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"codex.codex" () with
+    | Ok _ -> Alcotest.fail "Codex official-client runtime entered the OAS runner"
+    | Error detail ->
+      Alcotest.(check bool)
+        "typed ownership diagnostic"
+        true
+        (string_contains detail "not the OAS agent_core"))
 ;;
 
 let test_runtime_inventory_surfaces_declared_model_capabilities () =
@@ -826,7 +897,10 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
 
 let provider_base_url_of_runtime_id runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
-  | Some rt -> rt.Runtime.provider_config.Llm_provider.Provider_config.base_url
+  | Some { Runtime.execution = Runtime_execution.Agent_core provider_config; _ } ->
+    provider_config.Llm_provider.Provider_config.base_url
+  | Some rt ->
+    Alcotest.failf "fixture runtime %s is not agent_core" rt.Runtime.id
   | None -> Alcotest.failf "fixture runtime %s missing from catalog" runtime_id
 ;;
 
@@ -1818,6 +1892,10 @@ let () =
             `Quick
             test_runtime_inventory_surfaces_assignment_status
         ; Alcotest.test_case
+            "dashboard Codex runtime stays unavailable until measured"
+            `Quick
+            test_codex_runtime_inventory_is_unverified_until_measured
+        ; Alcotest.test_case
             "dashboard runtime inventory reports transport kind"
             `Quick
             test_runtime_inventory_reports_transport_kind
@@ -1891,6 +1969,10 @@ let () =
             "of_meta projection prefers the routed runtime"
             `Quick
             test_of_meta_projection_budgets_against_routed_runtime
+        ; Alcotest.test_case
+            "Codex official-client runtime cannot enter OAS runner"
+            `Quick
+            test_codex_runtime_cannot_enter_oas_runner
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case

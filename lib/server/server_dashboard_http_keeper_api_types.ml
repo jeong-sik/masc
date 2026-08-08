@@ -14,6 +14,8 @@ let keeper_suffix_checkpoints = "/checkpoints"
 let keeper_suffix_runtime_trace = "/runtime-trace"
 let keeper_suffix_directive = "/directive"
 let keeper_suffix_paused_work = "/paused-work"
+let keeper_suffix_raw_traces = "/raw-traces"
+let keeper_suffix_raw_trace = "/raw-trace"
 let keeper_suffix_catchup_judge = "/catchup-judge"
 let keeper_suffix_operator_note = "/operator-note"
 
@@ -189,6 +191,17 @@ let is_keeper_checkpoints_get_path req_path =
 
 let is_keeper_paused_work_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_paused_work
+
+let keeper_get_permission req_path =
+  if
+    is_keeper_checkpoints_get_path req_path
+    || is_keeper_paused_work_get_path req_path
+  then Some Masc_domain.CanAdmin
+  else if
+    keeper_path_ends_with req_path keeper_suffix_raw_traces
+    || keeper_path_ends_with req_path keeper_suffix_raw_trace
+  then Some Masc_domain.CanReadState
+  else None
 
 let trim_to_opt = String_util.trim_to_option
 

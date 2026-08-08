@@ -65,7 +65,8 @@ let message_of_request (req : Va.request) : Agent_sdk.Types.message =
         ()
     ]
 
-let vision_runtime_candidates () : (string * Runtime.t) list =
+let vision_runtime_candidates ()
+  : (string * Runtime.t * Llm_provider.Provider_config.t) list =
   (* Delegate image-capability admission to the RFC-0265 SSOT
      [Runtime_agent.caps_admit_required_modalities] so a runtime surfaced to the
      vision tool is exactly one the dispatch capability gate would admit. Do NOT
@@ -85,13 +86,16 @@ let vision_runtime_candidates () : (string * Runtime.t) list =
   in
   from_failover @ rest
   |> List.filter_map (fun (rt : Runtime.t) ->
-       let caps = Runtime_agent.input_capabilities_of_runtime rt in
-       if Runtime_agent.caps_admit_required_modalities caps [ "image" ]
-       then Some (rt.Runtime.id, rt)
-       else None)
+       match rt.Runtime.execution with
+       | Runtime_execution.Codex_app_server _ -> None
+       | Runtime_execution.Agent_core provider_config ->
+         let caps = Runtime_agent.input_capabilities_of_runtime rt in
+         if Runtime_agent.caps_admit_required_modalities caps [ "image" ]
+         then Some (rt.Runtime.id, rt, provider_config)
+         else None)
 
 let vision_runtime_ids () : string list =
-  List.map fst (vision_runtime_candidates ())
+  List.map (fun (runtime_id, _, _) -> runtime_id) (vision_runtime_candidates ())
 
 let first_vision_runtime_id () : (string, string) result =
   match vision_runtime_ids () with
@@ -307,7 +311,7 @@ let run_candidates_outcome
            { failure_class = failure_class_of_http_error err
            ; detail = Provider_http_error.to_message err
            })
-    | (runtime_id, rt) :: rest ->
+    | (runtime_id, rt, provider_config) :: rest ->
       let continue_with last_error =
         (if not (List.is_empty rest)
          then sleep_before_next_candidate ~clock ~attempt_index);
@@ -316,7 +320,7 @@ let run_candidates_outcome
           ~attempt_index:(attempt_index + 1)
           rest
       in
-      let config = provider_for_vision rt.Runtime.provider_config in
+      let config = provider_for_vision provider_config in
       match Runtime.validate_request_body_cap ~runtime_id config with
       | Error error ->
         record_vision_candidate_attempt

@@ -1,25 +1,27 @@
+let strip_transport_prefix name =
+  if String.starts_with ~prefix:"mcp__masc__" name
+  then String.sub name 11 (String.length name - 11)
+  else name
+;;
+
 let descriptor_for_tool_name tool_name =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
+  let stripped = strip_transport_prefix tool_name in
   match Keeper_tool_descriptor.find_public stripped with
   | Some descriptor -> Some descriptor
   | None ->
     (match Keeper_tool_descriptor.descriptors_for_internal stripped with
      | descriptor :: _ -> Some descriptor
-     | [] ->
-       let internal_name =
-         match Keeper_tool_alias.canonical_internal_name tool_name with
-         | Some internal_name -> internal_name
-         | None -> stripped
-       in
-       (match Keeper_tool_descriptor.descriptors_for_internal internal_name with
-        | descriptor :: _ -> Some descriptor
-        | [] -> None))
+     | [] -> None)
 ;;
 
 let canonical_internal_name_for_tool_name tool_name =
   match descriptor_for_tool_name tool_name with
   | Some descriptor -> Some descriptor.Keeper_tool_descriptor.internal_name
-  | None -> Keeper_tool_alias.canonical_internal_name tool_name
+  | None ->
+    let stripped = strip_transport_prefix tool_name in
+    Option.map
+      Tool_schemas_misc.mcp_runtime_tool_name
+      (Tool_schemas_misc.mcp_runtime_operation_of_tool_name stripped)
 ;;
 
 let public_names_for_internal internal_name =
@@ -66,7 +68,7 @@ let capability_has kind tool_name =
 ;;
 
 let descriptor_and_input_for_tool_call ~tool_name ~input =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
+  let stripped = strip_transport_prefix tool_name in
   match Keeper_tool_descriptor.find_public stripped with
   | Some descriptor ->
     Some
@@ -75,19 +77,11 @@ let descriptor_and_input_for_tool_call ~tool_name ~input =
   | None ->
     (match Keeper_tool_descriptor.descriptors_for_internal stripped with
      | descriptor :: _ -> Some (descriptor, input)
-     | [] ->
-       let internal_name =
-         match Keeper_tool_alias.canonical_internal_name tool_name with
-         | Some internal_name -> internal_name
-         | None -> stripped
-       in
-       (match Keeper_tool_descriptor.descriptors_for_internal internal_name with
-        | descriptor :: _ -> Some (descriptor, input)
-        | [] -> None))
+     | [] -> None)
 ;;
 
 let public_descriptor_and_name_for_tool_call tool_name =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
+  let stripped = strip_transport_prefix tool_name in
   match Keeper_tool_descriptor.find_public stripped with
   | Some descriptor -> Some (stripped, descriptor)
   | None -> None
@@ -155,4 +149,57 @@ let readonly_for_tool_call ~tool_name ~input =
      | Some _ as decision -> decision
      | None -> Keeper_tool_descriptor.readonly_static_hint descriptor)
   | None -> None
+;;
+
+type runtime_decision_outcome =
+  | Route_hit of { internal : string }
+  | Already_internal of { canonical : string }
+  | Miss
+
+let runtime_decision name =
+  let stripped = strip_transport_prefix name in
+  match Keeper_tool_descriptor.find_public stripped with
+  | Some descriptor -> Route_hit { internal = descriptor.internal_name }
+  | None ->
+    (match descriptor_for_tool_name stripped with
+     | Some descriptor ->
+       Already_internal { canonical = descriptor.internal_name }
+     | None ->
+       (match
+          Tool_schemas_misc.mcp_runtime_operation_of_tool_name stripped
+        with
+        | Some operation ->
+          Already_internal
+            { canonical = Tool_schemas_misc.mcp_runtime_tool_name operation }
+        | None -> Miss))
+;;
+
+let canonical_tool_name name =
+  match runtime_decision name with
+  | Route_hit { internal } -> internal
+  | Already_internal { canonical } -> canonical
+  | Miss -> name
+;;
+
+let canonical_tool_name_observed name =
+  let stripped = strip_transport_prefix name in
+  match runtime_decision name with
+  | Route_hit { internal } ->
+    Keeper_tool_route_telemetry.record_route_outcome
+      ~tool:stripped
+      ~routed_to:internal
+      ~result:"ok";
+    internal
+  | Already_internal { canonical } ->
+    Keeper_tool_route_telemetry.record_route_outcome
+      ~tool:canonical
+      ~routed_to:canonical
+      ~result:"ok";
+    canonical
+  | Miss ->
+    Keeper_tool_route_telemetry.record_route_outcome
+      ~tool:name
+      ~routed_to:"none"
+      ~result:"miss";
+    name
 ;;

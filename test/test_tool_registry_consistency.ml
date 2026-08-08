@@ -120,7 +120,7 @@ let test_workspace_schemas_have_tool_spec_metadata () =
   let workspace_names = workspace_schema_names () in
   let missing_tool_specs =
     List.filter
-      (fun name -> not (List.mem name (Tool_spec.all_registered_names ())))
+      (fun name -> not (List.mem name (Tool_dispatch.all_registered_names ())))
       workspace_names
   in
   Alcotest.(check (list string))

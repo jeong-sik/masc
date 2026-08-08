@@ -576,10 +576,12 @@ let test_provider_for_vision_uses_runtime_temperature () =
       (match Runtime.get_runtime_by_id runtime_id with
        | None -> failwith "selected vision runtime should resolve"
        | Some runtime ->
-         let configured =
-           Vt.provider_for_vision runtime.Runtime.provider_config
-         in
-         assert (configured.temperature = Some 1.0)))
+         (match runtime.Runtime.execution with
+          | Runtime_execution.Codex_app_server _ ->
+            failwith "selected vision runtime should be agent_core"
+          | Runtime_execution.Agent_core provider_config ->
+            let configured = Vt.provider_for_vision provider_config in
+            assert (configured.temperature = Some 1.0))))
 
 let test_uncapped_vision_fallback_rejects_before_provider_call () =
   with_temp_runtime_toml uncapped_vision_fallback_runtime_toml (fun () ->

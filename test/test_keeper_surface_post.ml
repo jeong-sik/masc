@@ -76,6 +76,50 @@ let test_discord_continuation_selects_exact_bound_channel () =
     (resolve ~surface:"discord" ~channel_id:None ~continuation_channel
        ~bound_discord_channels:[ "111"; "222" ] ())
 
+let test_discord_thread_continuation_stays_in_thread () =
+  let continuation_channel =
+    match
+      Keeper_continuation_channel.discord
+        ~guild_id:(Some "guild")
+        ~channel_id:"thread-1"
+        ~parent_channel_id:(Some "parent-1")
+        ~thread_id:(Some "thread-1")
+        ~user_id:"user"
+    with
+    | Ok channel -> channel
+    | Error message -> fail message
+  in
+  check (result target string) "thread continuation selects thread channel"
+    (Ok (SP.To_discord { channel_id = "thread-1" }))
+    (resolve ~surface:"discord" ~channel_id:None ~continuation_channel
+       ~bound_discord_channels:[ "parent-1" ] ());
+  check (result target string) "explicit thread channel remains in thread"
+    (Ok (SP.To_discord { channel_id = "thread-1" }))
+    (resolve ~surface:"discord" ~channel_id:(Some "thread-1")
+       ~continuation_channel ~bound_discord_channels:[ "parent-1" ] ())
+
+let test_discord_thread_foreign_explicit_channel_is_error () =
+  let continuation_channel =
+    match
+      Keeper_continuation_channel.discord
+        ~guild_id:(Some "guild")
+        ~channel_id:"thread-1"
+        ~parent_channel_id:(Some "parent-1")
+        ~thread_id:(Some "thread-1")
+        ~user_id:"user"
+    with
+    | Ok channel -> channel
+    | Error message -> fail message
+  in
+  match
+    resolve ~surface:"discord" ~channel_id:(Some "thread-2")
+      ~continuation_channel ~bound_discord_channels:[ "parent-1" ] ()
+  with
+  | Error message ->
+      check bool "names the rejected channel" true
+        (Astring.String.is_infix ~affix:"thread-2" message)
+  | Ok _ -> fail "foreign explicit thread must not resolve"
+
 let test_mismatched_continuation_does_not_select_channel () =
   let continuation_channel =
     match
@@ -249,6 +293,10 @@ let () =
             test_discord_multiple_bindings_require_channel_id;
           test_case "Discord continuation selects exact bound channel" `Quick
             test_discord_continuation_selects_exact_bound_channel;
+          test_case "Discord thread continuation stays in thread" `Quick
+            test_discord_thread_continuation_stays_in_thread;
+          test_case "foreign explicit thread is an error" `Quick
+            test_discord_thread_foreign_explicit_channel_is_error;
           test_case "mismatched continuation stays ambiguous" `Quick
             test_mismatched_continuation_does_not_select_channel;
           test_case "foreign channel_id is an error" `Quick

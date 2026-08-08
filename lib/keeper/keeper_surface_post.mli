@@ -38,9 +38,10 @@ val resolve_target :
     - ["dashboard"] → [To_dashboard].
     - ["discord"] → the bound channel when exactly one exists; the
       given [channel_id], or the exact matching typed continuation channel,
-      when it is among the bindings; an error
-      naming the bound channels when ambiguous, unbound, or the id is
-      not bound.
+      when it is among the bindings. A typed Discord thread continuation
+      keeps its thread channel as the target while authorizing it through
+      the bound parent channel; an error names the bound channels when
+      ambiguous, unbound, or foreign.
     - ["slack"] → same semantics against [bound_slack_channels].
       A continuation for another connector never supplies an id.
     - any other label → error: P4 ships discord + dashboard + slack

@@ -22,6 +22,7 @@ import type {
   DashboardKeeperWaitingInventory,
   DashboardKeeperWaitingKeeper,
   DashboardKeeperWaitingRow,
+  DashboardKeeperWaitingSource,
 } from '../../api'
 import { StatusChip } from '../common/status-chip'
 import {
@@ -29,8 +30,9 @@ import {
   sourceTone,
   stateTone,
 } from '../tools/keeper-waiting-inventory-panel'
-import { formatDateTimeKo } from '../../lib/format-time'
+import { formatDateTimeKo, formatTimeUntil, relativeTime } from '../../lib/format-time'
 import { CountBadge } from '../v2/primitives-v2'
+import { JsonViewerCard } from '../common/json-viewer'
 import { dashboardWsReady } from '../../dashboard-ws-state'
 import {
   keeperWaitingInventoryState,
@@ -58,6 +60,22 @@ const LANE_SOURCE_LABELS: Record<string, string> = {
   turn_admission_shutdown: '종료 정리',
   operator_pending_confirm: '운영자 확인',
   read_error: '읽기 오류',
+}
+
+const LANE_SOURCE_GRAPH_COLORS: Record<DashboardKeeperWaitingSource, string> = {
+  event_queue_pending: 'var(--color-accent)',
+  chat_queue_pending: 'var(--color-accent)',
+  chat_queue_inflight: 'var(--status-warn)',
+  chat_queue_recovery_required: 'var(--color-danger)',
+  chat_queue_persistence_blocked: 'var(--color-danger)',
+  hitl_pending: 'var(--status-warn)',
+  external_attention: 'var(--color-accent)',
+  fusion_running: 'var(--status-ok)',
+  schedule_waiting: 'var(--status-warn)',
+  turn_admission_waiting: 'var(--color-fg-muted)',
+  turn_admission_shutdown: 'var(--color-fg-muted)',
+  operator_pending_confirm: 'var(--status-warn)',
+  read_error: 'var(--color-danger)',
 }
 
 function laneStateLabel(value: string): string {
@@ -121,18 +139,85 @@ function truncatedSourceLabels(entry: DashboardKeeperWaitingKeeper): string[] {
     .map(([source]) => laneSourceLabel(source))
 }
 
-function LaneWaitingRow({ row }: { row: DashboardKeeperWaitingRow }): VNode {
+function rowSince(row: DashboardKeeperWaitingRow): number | null {
+  if (row.since != null && Number.isFinite(row.since)) return row.since
+  if (row.since_iso == null) return null
+  const parsed = Date.parse(row.since_iso)
+  return Number.isFinite(parsed) ? parsed / 1000 : null
+}
+
+/** Git log convention: newest observation first. Equal/missing timestamps keep
+ * their server order, and missing timestamps stay visible at the end. This is
+ * an observation order only; independent source queues retain their own
+ * processing authority. */
+function waitingRowsNewestFirst(rows: readonly DashboardKeeperWaitingRow[]): DashboardKeeperWaitingRow[] {
+  return rows
+    .map((row, serverIndex) => ({ row, serverIndex, since: rowSince(row) }))
+    .sort((left, right) => {
+      if (left.since == null && right.since == null) return left.serverIndex - right.serverIndex
+      if (left.since == null) return 1
+      if (right.since == null) return -1
+      return right.since - left.since || left.serverIndex - right.serverIndex
+    })
+    .map(({ row }) => row)
+}
+
+function LaneWaitingRow({
+  row,
+  first,
+  last,
+}: {
+  row: DashboardKeeperWaitingRow
+  first: boolean
+  last: boolean
+}): VNode {
+  const graphColor = LANE_SOURCE_GRAPH_COLORS[row.source]
+  const sinceRelative = row.since_iso == null ? null : relativeTime(row.since_iso)
   return html`
-    <div data-testid="keeper-lane-waiting-row" class="grid gap-0.5 border-t border-[var(--color-border-subtle)] py-1.5 first:border-t-0">
-      <div class="flex min-w-0 flex-wrap items-center gap-1.5">
-        <${StatusChip} tone=${sourceTone(row.source)} uppercase=${false} title=${row.source}>${laneSourceLabel(row.source)}<//>
-        <span class="min-w-0 truncate font-mono text-2xs text-[var(--color-fg-primary)]">${row.waiting_on}</span>
+    <article
+      data-testid="keeper-lane-waiting-row"
+      data-source=${row.source}
+      data-waiting-on=${row.waiting_on}
+      class="grid grid-cols-[6.75rem_1.25rem_minmax(0,1fr)] gap-2"
+    >
+      <div class="py-2 text-right text-3xs text-[var(--color-fg-muted)]">
+        ${row.since_iso == null
+          ? html`<span>시각 미기록</span>`
+          : html`<time dateTime=${row.since_iso}>${formatDateTimeKo(row.since_iso)}</time>`}
+        ${sinceRelative == null ? null : html`<span class="block">${sinceRelative}</span>`}
       </div>
-      <div class="flex flex-wrap gap-x-3 text-2xs text-[var(--color-fg-muted)]">
-        ${row.since_iso ? html`<span>since ${formatDateTimeKo(row.since_iso)}</span>` : null}
-        <span>다음 동작 · <span class="font-mono">${enumLabel(row.next_action)}</span></span>
+      <div class="relative min-h-full" aria-hidden="true">
+        ${first ? null : html`<span class="absolute left-1/2 top-0 h-1/2 -translate-x-1/2 border-l border-[var(--color-border-default)]"></span>`}
+        ${last ? null : html`<span class="absolute bottom-0 left-1/2 h-1/2 -translate-x-1/2 border-l border-[var(--color-border-default)]"></span>`}
+        <span
+          class="absolute left-1/2 top-4 h-2.5 w-2.5 -translate-x-1/2 rounded-full border-2 border-[var(--color-bg-surface)] shadow-[0_0_0_1px_var(--color-border-default)]"
+          style=${{ background: graphColor }}
+        ></span>
       </div>
-    </div>
+      <div class="my-1 grid min-w-0 gap-1.5 rounded-[var(--r-1)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-page)] p-2">
+        <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+          <${StatusChip} tone=${sourceTone(row.source)} uppercase=${false} title=${row.source}>${laneSourceLabel(row.source)}<//>
+          <span class="min-w-0 truncate font-mono text-xs text-[var(--color-fg-primary)]" title=${row.waiting_on}>${row.waiting_on}</span>
+        </div>
+        <div class="flex min-w-0 items-start gap-1.5 text-2xs text-[var(--color-fg-muted)]">
+          <span aria-hidden="true">↳</span>
+          <span>다음 동작 · <span class="font-mono text-[var(--color-fg-secondary)]">${enumLabel(row.next_action)}</span></span>
+        </div>
+        ${row.due_at_iso == null
+          ? null
+          : html`<div class="text-2xs text-[var(--status-warn)]">실행 예정 · <time dateTime=${row.due_at_iso}>${formatDateTimeKo(row.due_at_iso)}</time> · ${formatTimeUntil(row.due_at_iso)}</div>`}
+        <details class="text-3xs text-[var(--color-fg-muted)]">
+          <summary class="cursor-pointer select-none">Typed queue evidence</summary>
+          <div class="mt-2 grid gap-2">
+            <div class="flex flex-wrap gap-x-3">
+              <span>wake producer · <code>${row.wake_producer ?? '미기록'}</code></span>
+              <span>source · <code>${row.source}</code></span>
+            </div>
+            <${JsonViewerCard} title="detail · typed" data=${row.detail ?? {}} />
+          </div>
+        </details>
+      </div>
+    </article>
   `
 }
 
@@ -156,7 +241,7 @@ export function KeeperLaneStrip({
   pushReady?: boolean
 }): VNode {
   const entry = inventoryEntry(inventory, keeper)
-  const rows = entry?.waiting_on ?? []
+  const rows = waitingRowsNewestFirst(entry?.waiting_on ?? [])
   const waitingCount = entry?.waiting_count ?? 0
   const countTruncated = entry?.waiting_count_truncated === true
   const truncatedSources = entry ? truncatedSourceLabels(entry) : []
@@ -178,10 +263,22 @@ export function KeeperLaneStrip({
               </div>
               ${rows.length > 0
                 ? html`
-                    <div class="max-h-60 overflow-y-auto">
+                    <div class="grid gap-1">
+                      <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-muted)]">
+                        <span class="font-semibold uppercase tracking-wide text-[var(--color-fg-secondary)]">HEAD</span>
+                        <span>시간축 · 최신 관측 → 오래된 관측</span>
+                        <span>source별 독립 대기열이며 처리 우선순위를 뜻하지 않습니다.</span>
+                      </div>
+                    <div class="max-h-[30rem] overflow-y-auto pr-1" data-testid="keeper-lane-graph" aria-label="대기 시작 시각순 작업 흐름">
                       ${rows.map((row, index) => html`
-                        <${LaneWaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />
+                        <${LaneWaitingRow}
+                          key=${`${row.source}:${row.waiting_on}:${index}`}
+                          row=${row}
+                          first=${index === 0}
+                          last=${index === rows.length - 1}
+                        />
                       `)}
+                    </div>
                     </div>
                   `
                 : null}

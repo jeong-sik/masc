@@ -1629,7 +1629,10 @@ let open_database ~ownership_root ~path ~create_if_missing ~schema_validation =
           (match missing with
            | true -> Sqlite3.db_open ~mutex:`FULL path
            | false -> Sqlite3.db_open ~mode:`NO_CREATE ~mutex:`FULL path)
-      with exn -> Error ("SQLite database open failed: " ^ Printexc.to_string exn)
+      with
+      | Eio.Cancel.Cancelled _ as e ->
+        Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+      | exn -> Error ("SQLite database open failed: " ^ Printexc.to_string exn)
     in
     match db_result with
     | Error _ as error -> error

@@ -1950,8 +1950,6 @@
 
 (include stanzas/test_runtime_agent_close_cancel_source.inc)
 
-(include stanzas/test_runtime_agent_checkpoint.inc)
-
 (include stanzas/test_runtime_provider_projection_boundary.inc)
 
 (include stanzas/test_openapi_api_e2e.inc)

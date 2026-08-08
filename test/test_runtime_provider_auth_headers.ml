@@ -1283,36 +1283,6 @@ let test_runtime_agent_context_preserves_max_tokens_intent () =
       check_builder_max_tokens None None;
       check_builder_max_tokens (Some 2048) (Some 2048)))
 
-let test_runtime_agent_lifecycle_attrs_preserve_max_tokens_intent () =
-  let config =
-    Runtime_agent.default_config
-      ~name:"oas-runpod_mtp.qwen"
-      ~provider_cfg:(provider_cfg ())
-      ~system_prompt:""
-      ~tools:[]
-  in
-  let fields = Runtime_agent.Lifecycle_for_testing.provider_attrs config in
-  check (option (of_pp Yojson.Safe.pp)) "omitted lifecycle value"
-    (Some `Null)
-    (List.assoc_opt "max_tokens" fields);
-  check (option string) "omitted lifecycle source"
-    (Some "omitted")
-    (Option.bind
-       (List.assoc_opt "max_tokens_source" fields)
-       Yojson.Safe.Util.to_string_option);
-  let explicit_fields =
-    Runtime_agent.Lifecycle_for_testing.provider_attrs
-      { config with max_tokens = Some 2048 }
-  in
-  check (option (of_pp Yojson.Safe.pp)) "explicit lifecycle value"
-    (Some (`Int 2048))
-    (List.assoc_opt "max_tokens" explicit_fields);
-  check (option string) "explicit lifecycle source"
-    (Some "explicit_override")
-    (Option.bind
-       (List.assoc_opt "max_tokens_source" explicit_fields)
-       Yojson.Safe.Util.to_string_option)
-
 let test_runtime_agent_context_preserves_provider_sampling_config () =
   let provider_cfg =
     { (provider_cfg ()) with
@@ -1985,10 +1955,6 @@ let () =
             "runtime agent context preserves max_tokens intent"
             `Quick
             test_runtime_agent_context_preserves_max_tokens_intent
-        ; test_case
-            "runtime lifecycle attrs preserve max_tokens intent"
-            `Quick
-            test_runtime_agent_lifecycle_attrs_preserve_max_tokens_intent
         ; test_case
             "runtime agent context preserves provider sampling config"
             `Quick

@@ -1162,10 +1162,8 @@ let start_keeper_loops_owned
   in
   (* Create and install the MASC-owned Event_bus alongside OAS's.
      MASC domain events (masc.keeper.*, masc.harness.*, ...) publish here per
-     OAS event_bus.mli:103-107
-     boundary. Dashboard SSE consumers see both channels as one stream
-     — the relay translates masc.* →
-     masc:* on the wire for backward compatibility. *)
+     OAS event_bus.mli:103-107. Dashboard SSE consumers receive both event
+     buses through the same relay. *)
   let masc_event_bus = Agent_sdk.Event_bus.create () in
   Event_bus_slots.set_masc masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)

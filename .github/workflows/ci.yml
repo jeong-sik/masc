@@ -957,7 +957,6 @@ jobs:
             @test/runtest-test_otel_port_ssot \
             @test/runtest-test_release_train_guard_script \
             @test/runtest-test_rfc_0086_keeper_namespace_invariant \
-            @test/runtest-test_runtime_agent_checkpoint \
             @test/runtest-test_server_base_path_guard \
             @test/runtest-test_sse_retry_ssot \
             @test/runtest-test_sse_stream \

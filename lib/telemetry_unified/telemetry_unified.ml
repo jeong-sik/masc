@@ -994,7 +994,13 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
       ( `Assoc
           ([
              ("source", `String (source_to_string source));
-             ("path", `String (Filename.concat keepers_root "*/execution-receipts"));
+             ( "path"
+             , `String
+                 (Filename.concat
+                    keepers_root
+                    ("*/"
+                     ^ Common.keeper_runtime_store_dirname
+                         Common.Keeper_execution_receipts)) );
              ("exists", `Bool exists);
              ("entry_count", `Int count);
           ]

@@ -774,7 +774,7 @@ let base_dir config ~keeper_name =
     (Filename.concat
        (Workspace.keepers_runtime_dir config)
        keeper_name)
-    "runtime-manifests"
+    (Common.keeper_runtime_store_dirname Common.Keeper_runtime_manifests)
 
 let path_for_trace config ~keeper_name ~trace_id =
   Filename.concat (base_dir config ~keeper_name)

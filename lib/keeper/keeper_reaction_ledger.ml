@@ -120,7 +120,7 @@ let store_dir ~masc_root ~keeper_name =
   Filename.concat
     (Filename.concat
        (Filename.concat (Filename.concat masc_root Common.keepers_runtime_dirname) keeper_name)
-       "reaction-ledger")
+       (Common.keeper_runtime_store_dirname Common.Keeper_reaction_ledger))
     storage_generation
 ;;
 

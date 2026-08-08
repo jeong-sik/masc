@@ -27,12 +27,12 @@ let execution_receipt_dir config keeper_name =
   Filename.concat
     (Filename.concat (Workspace.keepers_runtime_dir config)
        keeper_name)
-    "execution-receipts"
+    (Common.keeper_runtime_store_dirname Common.Keeper_execution_receipts)
 
 let execution_receipt_store_pattern config =
   Filename.concat
     (Workspace.keepers_runtime_dir config)
-    "*/execution-receipts"
+    ("*/" ^ Common.keeper_runtime_store_dirname Common.Keeper_execution_receipts)
 
 let count_execution_receipt_entries config keeper_names =
   keeper_names

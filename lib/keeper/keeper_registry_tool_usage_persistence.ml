@@ -13,7 +13,9 @@ let schema_version = 2
 
 let tool_usage_path ~base_path name =
   let dir =
-    Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers/tool_usage"
+    Filename.concat
+      (Common.keepers_runtime_dir_of_base ~base_path)
+      (Common.keeper_runtime_store_dirname Common.Keeper_tool_usage)
   in
   Filename.concat dir (name ^ ".json")
 ;;

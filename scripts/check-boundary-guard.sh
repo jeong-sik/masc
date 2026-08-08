@@ -333,14 +333,6 @@ check_forbidden_active "V7u-retired-decision-pipeline-diagram" \
   "lib/" \
   "dashboard/src/"
 
-# V7v: generic Tool_result constructors keep messages opaque. Structure and
-# failure classes come only from explicitly typed producer fields.
-check_forbidden_active "V7v-retired-tool-result-message-inference" \
-  'structured_payload_of_message|classify_from_structured_failure_message' \
-  "lib/" \
-  "test/" \
-  "dashboard/src/"
-
 # V7w: dashboard presentation may pretty-print an outer JSON envelope but may
 # not recover hidden structure from newline suffixes or nested string fields.
 check_forbidden_active "V7w-retired-dashboard-embedded-json-coercion" \

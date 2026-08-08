@@ -64,7 +64,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0052 | Boot-time Required Invariants (typed) | Implemented | - |
 | 0056 | Incremental Sub-Library Extraction from Flat masc Library | Active | - |
 | 0057 | Tool Descriptor Codegen — `[@@deriving tool]` via Build-Time Generation | Draft | - |
-| 0062 | Typed `Tool_result.t` + Typed `Sdk_*` Blocker Class (Reverse-Engineered Initi... | Draft | - |
+| 0062 | Typed tool-result failure classification | Implemented | - |
 | 0063 | Telemetry Feedback Loop & Cooperative Scheduling Safety | Draft | - |
 | 0064 | Capacity Probe Adapter | Active | - |
 | 0067 | Goal-Scope Observation→Claim Atomicity | Draft | - |
@@ -138,7 +138,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0180 | 24h Runtime ERROR 7-Pattern Sweep Roadmap | Draft | - |
 | 0182 | masc_* Workspace Tool Descriptor Projection + Tool_spec SSOT Consolidation | Draft | - |
 | 0184 | Runtime phonebook typed roundtrip for protocol/flavor/provider identifiers | Draft (Deferred) | - |
-| 0189 | Typed Tool_result.result variant — eliminating boolean blindness in tool disp... | Draft | - |
+| 0189 | Tool result disposition and payload ownership | Implemented | - |
 | 0190 | Descriptor as Visibility/Metadata SSOT — Surface Projection from descriptor.p... | Draft | - |
 | 0198 | Execute typed redirection | Implemented | - |
 | 0200 | Time constants 를 leaf library 로 분리 | Draft | - |

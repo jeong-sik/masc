@@ -27,8 +27,7 @@ type 'a context = 'a Tool_operator.context
 (** {1 Result} *)
 
 type tool_result = Tool_result.result
-(** Re-exported from {!Tool_result}.  RFC-0062 Phase 4c-2:
-    handlers return structured [Tool_result.result] records. *)
+(** Re-exported from {!Tool_result}. *)
 
 (** {1 Dispatch} *)
 

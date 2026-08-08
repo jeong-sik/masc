@@ -1,26 +1,14 @@
 #!/usr/bin/env bash
 # lint-no-inline-error-envelope — block inline `("status", `String "error")`
-# in lib/. Mirrors no-inline-ok-envelope. Use Tool_args.error_response /
-# error_response_with / error_assoc / error_result instead.
+# in lib/. Use the canonical Tool_args response and result constructors.
 
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
 ALLOWLIST=(
-  # SSOT definition — canonical helpers themselves.
-  # Moved to lib/tool_types/ in RFC-0086 PR-2H (PR #15531).
+  # Canonical envelope constructor.
   "lib/tool_types/tool_args.ml"
-
-  # T27 alias backstop (sibling-include runtime for tool_local_runtime_*.ml).
-  "lib/tool_local_runtime_core.ml"
-
-  # ---- Temporary allowlist — REMOVE after T27 (#14876) merges ----
-  # T27 deletes these inline json_error helpers in tool_misc_web_search,
-  # tool_misc_web_fetch, and inlines the envelope in tool_operator.
-  "lib/tool_misc_web_fetch.ml"
-  "lib/tool_misc_web_search.ml"
-  "lib/tool_operator.ml"
 )
 
 count=0
@@ -64,18 +52,18 @@ while IFS= read -r match; do
     continue
   fi
 
-  echo "ERROR: inline error-envelope literal (use Tool_args.error_response / error_response_with / error_assoc / error_result): $match"
+  echo "ERROR: inline error-envelope literal (use a canonical Tool_args constructor): $match"
   count=$((count + 1))
 done < "$matches_file"
 
 if [[ $count -gt 0 ]]; then
   echo ""
   echo "Found $count inline error-envelope literal(s) outside the allowlist."
-  echo "Migration guide:"
+  echo "Canonical constructors:"
   echo "  - Returns string (msg only)?  Tool_args.error_response msg"
   echo "  - Returns string (+ fields)?  Tool_args.error_response_with fields"
   echo "  - Returns Yojson.Safe.t?      Tool_args.error_assoc fields"
-  echo "  - Returns Tool_result.t?      Tool_args.error_result ~tool_name ~start_time msg"
+  echo "  - Returns Tool_result.result? Tool_args.error_result_typed ~code msg"
   exit 1
 fi
 

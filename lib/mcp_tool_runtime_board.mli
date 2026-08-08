@@ -7,9 +7,6 @@
       [masc_board_post] [author] field, exposed for direct test
       coverage.
 
-    RFC-0062 Phase 4c-2: {!dispatch} now returns [Tool_result.result option]
-    instead of [(bool * string) option].
-
     Internal: 11 helpers (activity emission, JSON field upsert,
     Otel_metric_store counter, identity canonicalization, surface-of-
     record helpers, board author canonicalizer) stay private — the
@@ -76,11 +73,4 @@ val dispatch :
       {!Board_dispatch.create_post} +
       {!Notify.notify_mention} on [@target].
     - everything else -> [None] (caller falls through to remaining
-      dispatchers).
-
-    This doc used to say [config] / [state] / [sw] / [clock] "are ignored at the
-    entry today … but kept in the signature for forward compat". [config],
-    [state] and [start_time] are used by the routes below; [sw] and [clock] were
-    the only unused ones and are gone. The one caller is a direct call, so a
-    later route needing a switch or a clock adds the parameter back and the
-    compiler names that caller. *)
+      dispatchers). *)

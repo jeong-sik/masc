@@ -5,10 +5,7 @@
     - Mcp_tool_runtime_comm: masc_broadcast, masc_messages
     - Mcp_tool_runtime_board: remaining tools (board, etc.)
 
-    Keeps MCP-only server helpers that need per-request server state.
-
-    RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly;
-    [wrap_result] adapter removed. *)
+    Keeps MCP-only server helpers that need per-request server state. *)
 
 (** Re-export shared types so callers can use
     [Mcp_tool_runtime.context] and [Mcp_tool_runtime.tool_result]

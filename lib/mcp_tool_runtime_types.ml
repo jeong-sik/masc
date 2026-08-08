@@ -25,8 +25,3 @@ type context = {
     timeout:float ->
     Yojson.Safe.t option;
 }
-
-(** Helper: run subprocess — uses [Dispatch] caller (default 120s).
-    Dead code since 2026-05; removed during RFC-0062 Phase 4c-2
-    (tool_result migration from (bool * string) to Tool_result.result).
-    If needed again, add ~tool_name ~start_time and return Tool_result.result. *)

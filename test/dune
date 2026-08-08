@@ -1178,6 +1178,7 @@
   test_tool_dispatch
   test_tool_spec
   test_tool_result
+  test_tool_args_envelope
   test_tool_hooks
   test_sse_external_sub
   test_ws_transport

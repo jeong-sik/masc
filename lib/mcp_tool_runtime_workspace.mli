@@ -2,13 +2,9 @@
 
     Handles project root setup and optional task bootstrapping.
 
-    Extracted from {!Mcp_tool_runtime} to keep the runtime
-    router under the lint cap.  The handler returns
+    The handler returns
     [Tool_result.result option] — [Some] when the tool name matches,
-    [None] when the dispatcher should fall through to a default handler.
-
-    RFC-0062 Phase 4c-2: handlers now accept [~tool_name ~start_time]
-    and return structured [Tool_result.result] instead of [(bool * string)]. *)
+    [None] when the dispatcher should continue routing. *)
 
 val handle_start :
   tool_name:string -> start_time:float ->

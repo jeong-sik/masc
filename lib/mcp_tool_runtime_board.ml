@@ -1,9 +1,6 @@
 (** Mcp_tool_runtime_board — MCP server-local board tool runtime
     (recall, board, conversation).
-    Returns [Some (Tool_result.result)] if handled, [None] otherwise.
-
-    RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly
-    instead of [(bool * string)]. *)
+    Returns [Some (Tool_result.result)] if handled, [None] otherwise. *)
 
 let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
   try
@@ -186,8 +183,7 @@ let enforce_caller_identity ~tool ~field ~agent_name arguments =
       | claim ->
           let claim_canonical = canonical_board_author claim in
           if String.equal ctx_canonical "" then
-            (* No ctx to compare against - preserve the caller's
-               canonicalisation as the legacy code did. *)
+            (* No context identity is available for comparison. *)
             if String.equal claim_canonical claim then arguments
             else
               `Assoc
@@ -228,13 +224,6 @@ let ensure_board_post_author ~agent_name arguments =
   enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
     ~agent_name arguments
 
-(* [sw] and [clock] used to sit here beside the others, under an [ignore] and a
-   comment calling all five "unused params kept for interface contract with
-   callers". Three of the five -- [config], [state] and [start_time] -- are used
-   in this function, and there is no interface contract: [dispatch] has one
-   caller, a direct call from [Mcp_tool_runtime], and the sibling handlers take
-   a different shape (~tool_name ~start_time ctx). What the [ignore] did was
-   suppress the warning that would have named [sw] and [clock] as dead. *)
 let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~name ~start_time =
   let arguments =
     match name with

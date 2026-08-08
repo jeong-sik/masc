@@ -152,6 +152,7 @@ all_comments_*.txt
 test-integration-*.txt
 tmp_edit/
 .tmp/
+/refute_tmp/
 
 # Runtime data directories (not source)
 data/economy/

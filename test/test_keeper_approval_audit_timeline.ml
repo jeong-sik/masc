@@ -13,7 +13,7 @@
     agree. These cases pin what that agreement renders — in particular that the
     success path and the failure path are no longer the same event. *)
 
-module Q = Masc.Keeper_approval_queue
+module Q = Keeper_approval_queue_rules_types
 module Audit = Keeper_approval.Audit
 module Timeline = Masc.Keeper_runtime_trust_timeline
 open Alcotest

@@ -12,6 +12,7 @@ module Reg = Masc.Keeper_registry
 module KT = Keeper_types
 module KR = Masc.Keeper_runtime
 module AQ = Masc.Keeper_approval_queue
+module AQT = Keeper_approval_queue_rules_types
 module KSM = Keeper_state_machine
 module KLH = Masc.Keeper_lifecycle_hooks
 module KA = Masc.Keeper_keepalive
@@ -349,7 +350,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
             (aq_resolve
                ~base_path:base_dir
                ~id
-               ~decision:(AQ.Decision.Reject "test cleanup")))
+               ~decision:(AQT.Decision.Reject "test cleanup")))
         !approval_ids;
       cleanup_dir base_dir)
     (fun () ->
@@ -1092,7 +1093,7 @@ let test_sweep_reports_pending_hitl_approval () =
              (aq_resolve
                 ~base_path:base_dir
                 ~id
-                ~decision:(AQ.Decision.Reject "test cleanup")))
+                ~decision:(AQT.Decision.Reject "test cleanup")))
         !approval_id;
       Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
@@ -1144,7 +1145,7 @@ let test_sweep_reports_pending_hitl_approval () =
            ~keeper_name:name
          |> Result.get_ok
          |> fun count -> count > 0);
-      (match aq_resolve ~base_path:base_dir ~id ~decision:AQ.Decision.Approve with
+      (match aq_resolve ~base_path:base_dir ~id ~decision:AQT.Decision.Approve with
        | Ok () -> approval_id := None
        | Error err -> fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
       check bool "resolution removes pending request" false

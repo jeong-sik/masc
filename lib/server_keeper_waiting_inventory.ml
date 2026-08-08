@@ -464,9 +464,9 @@ let turn_admission_rows ~base_path keeper_name =
 
 let hitl_rows keeper_name pending =
   pending
-  |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
+  |> List.filter (fun (entry : Keeper_approval_queue_rules_types.pending_approval) ->
     String.equal entry.keeper_name keeper_name)
-  |> List.map (fun (entry : Keeper_approval_queue.pending_approval) ->
+  |> List.map (fun (entry : Keeper_approval_queue_rules_types.pending_approval) ->
     { keeper_name = Some keeper_name
     ; source = Hitl_pending
     ; waiting_on = entry.tool_name
@@ -478,10 +478,10 @@ let hitl_rows keeper_name pending =
         `Assoc
           [ "approval_id", `String entry.id
           ; "tool_name", `String entry.tool_name
-          ; "summary_status", Keeper_approval_queue.summary_status_to_yojson entry.summary_status
-          ; "exact_attempt", Keeper_approval_queue.exact_attempt_state_to_yojson entry.exact_attempt
+          ; "summary_status", Keeper_approval_queue_rules_types.summary_status_to_yojson entry.summary_status
+          ; "exact_attempt", Keeper_approval_queue_rules_types.exact_attempt_state_to_yojson entry.exact_attempt
           ; ( "summary_attempt_disposition"
-            , Keeper_approval_queue.summary_attempt_disposition_to_yojson
+            , Keeper_approval_queue_rules_types.summary_attempt_disposition_to_yojson
                 entry.summary_attempt_disposition )
           ; "turn_id", Json_util.int_opt_to_json entry.turn_id
           ; "task_id", Json_util.string_opt_to_json entry.task_id

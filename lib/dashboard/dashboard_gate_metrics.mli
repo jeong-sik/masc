@@ -82,7 +82,7 @@ val record_tool_skipped_with_append_for_testing :
 val gate_tool_events_json_with_pending_result_for_testing :
   now_ts:float ->
   window_minutes:int ->
-  ( Keeper_approval_queue.pending_approval list
+  ( Keeper_approval_queue_rules_types.pending_approval list
   , Keeper_approval_queue.storage_error )
   result ->
   Yojson.Safe.t

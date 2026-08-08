@@ -1,4 +1,5 @@
 open Keeper_approval_queue
+open Keeper_approval_queue_rules_types
 
 module Exact_output = Agent_sdk.Exact_output
 module Registry = Runtime_exact_output_registry

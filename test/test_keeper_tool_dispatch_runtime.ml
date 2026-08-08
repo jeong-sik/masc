@@ -2262,8 +2262,8 @@ let test_approved_web_search_grant_executes_exact_request () =
          Masc.Keeper_approval_queue.resolve_with_policy
            ~base_path:config.base_path
            ~id:approval_id
-           ~decision:Masc.Keeper_approval_queue.Decision.Approve
-           ~source:Masc.Keeper_approval_queue.Auto_judge
+           ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+           ~source:Keeper_approval_queue_rules_types.Auto_judge
            ()
        with
        | Ok _ -> ()
@@ -2365,8 +2365,8 @@ let test_approved_web_search_replays_without_model_resubmission () =
          Masc.Keeper_approval_queue.resolve_with_policy
            ~base_path:config.base_path
            ~id:approval_id
-           ~decision:Masc.Keeper_approval_queue.Decision.Approve
-           ~source:Masc.Keeper_approval_queue.Auto_judge
+           ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+           ~source:Keeper_approval_queue_rules_types.Auto_judge
            ()
        with
        | Ok _ -> ()
@@ -2563,8 +2563,8 @@ let approved_web_search_resolution
      Masc.Keeper_approval_queue.resolve_with_policy
        ~base_path:config.base_path
        ~id:approval_id
-       ~decision:Masc.Keeper_approval_queue.Decision.Approve
-       ~source:Masc.Keeper_approval_queue.Auto_judge
+       ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+       ~source:Keeper_approval_queue_rules_types.Auto_judge
        ()
    with
    | Ok _ -> ()
@@ -2978,8 +2978,8 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
           Masc.Keeper_approval_queue.resolve_with_policy
             ~base_path:config.base_path
             ~id:approval_id
-            ~decision:Masc.Keeper_approval_queue.Decision.Approve
-            ~source:Masc.Keeper_approval_queue.Auto_judge
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+            ~source:Keeper_approval_queue_rules_types.Auto_judge
             ()
         with
         | Ok _ -> ()

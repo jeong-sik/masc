@@ -81,13 +81,13 @@ let dashboard_json ~base_path ~limit ~window_minutes =
       ()
   in
   let approval_rules, approval_rules_state =
-    match Keeper_approval_queue.list_rules_dashboard_json ~base_path () with
+    match Keeper_approval_queue_rules.list_rules_dashboard_json ~base_path () with
     | Ok json -> json, `Assoc [ "state", `String "ready" ]
     | Error error ->
       ( `List []
       , `Assoc
           [ "state", `String "unavailable"
-          ; "error", `String (Keeper_approval_queue.rule_store_error_to_string error)
+          ; "error", `String (Keeper_approval_queue_rules_types.rule_store_error_to_string error)
           ] )
   in
   `Assoc

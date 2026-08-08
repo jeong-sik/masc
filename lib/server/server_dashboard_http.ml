@@ -342,8 +342,8 @@ let approval_resolve_decision_name = function
 ;;
 
 let approval_resolve_decision_to_queue_decision = function
-  | Approval_resolve_approve -> Keeper_approval_queue.Decision.Approve
-  | Approval_resolve_reject reason -> Keeper_approval_queue.Decision.Reject reason
+  | Approval_resolve_approve -> Keeper_approval_queue_rules_types.Decision.Approve
+  | Approval_resolve_reject reason -> Keeper_approval_queue_rules_types.Decision.Reject reason
 ;;
 
 let approval_resolve_decision_of_json args =
@@ -463,7 +463,7 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
   let* input_hash_json = required "input_hash" in
   let* expected_input_hash =
     match input_hash_json with
-    | `String value when Keeper_approval_queue.is_lowercase_sha256 value ->
+    | `String value when Keeper_approval_queue_rules_types.is_lowercase_sha256 value ->
       Ok value
     | _ -> Error "retry request.input_hash must be a lowercase SHA-256"
   in
@@ -475,20 +475,20 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
   in
   let* exact_attempt_json = required "exact_attempt" in
   let* expected_exact_attempt =
-    Keeper_approval_queue.exact_attempt_state_of_yojson_with_error
+    Keeper_approval_queue_rules_types.exact_attempt_state_of_yojson_with_error
       exact_attempt_json
   in
   let* disposition_json = required "summary_attempt_disposition" in
   let* expected_disposition =
-    Keeper_approval_queue.summary_attempt_disposition_of_yojson_with_error
+    Keeper_approval_queue_rules_types.summary_attempt_disposition_of_yojson_with_error
       disposition_json
   in
   let* () =
     match expected_disposition with
-    | Keeper_approval_queue.Summary_attempt_identity_unbound
-    | Keeper_approval_queue.Summary_attempt_persistence_uncertain ->
+    | Keeper_approval_queue_rules_types.Summary_attempt_identity_unbound
+    | Keeper_approval_queue_rules_types.Summary_attempt_persistence_uncertain ->
       Ok ()
-    | Keeper_approval_queue.Summary_attempt_pre_worker_unavailable _ ->
+    | Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable _ ->
       Ok ()
     | _ -> Error "retry request disposition is not operator-rearmable"
   in
@@ -512,7 +512,7 @@ let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
   match Safe_ops.json_string_opt "id" args with
   | None -> Error "id is required"
   | Some id ->
-    (match Keeper_approval_queue.delete_rule ~base_path ~id () with
+    (match Keeper_approval_queue_rules.delete_rule ~base_path ~id () with
      | Ok deleted ->
          Keeper_approval.Audit.record_rule
            ~base_path
@@ -520,7 +520,7 @@ let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
            deleted;
          Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
        | Error error ->
-         Error (Keeper_approval_queue.rule_store_error_to_string error))
+         Error (Keeper_approval_queue_rules_types.rule_store_error_to_string error))
 ;;
 
 let dashboard_schedule_prune_http_json

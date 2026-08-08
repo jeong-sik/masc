@@ -90,7 +90,6 @@ module Transport : sig
     | Ws
     | Webrtc
     | Local
-    | Unknown_agent_transport of string
 
   val agent_transport_of_string : string -> agent_transport
   val agent_transport_to_string : agent_transport -> string

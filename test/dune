@@ -1634,6 +1634,8 @@
 ; add one (include stanzas/test_name.inc) line below,
 ; sorted alphabetically.
 
+(include stanzas/test_agent_transport_vocabulary.inc)
+
 (include stanzas/test_anti_rationalization_empty_reject.inc)
 (include stanzas/test_dedup_rules.inc)
 (include stanzas/test_jsonl_retention_window.inc)

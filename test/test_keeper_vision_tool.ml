@@ -577,7 +577,8 @@ let test_provider_for_vision_uses_runtime_temperature () =
        | None -> failwith "selected vision runtime should resolve"
        | Some runtime ->
          (match runtime.Runtime.execution with
-          | Runtime_execution.Codex_app_server _ ->
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Antigravity_cli _ ->
             failwith "selected vision runtime should be agent_core"
           | Runtime_execution.Agent_core provider_config ->
             let configured = Vt.provider_for_vision provider_config in

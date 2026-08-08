@@ -34,7 +34,8 @@ val parse_file : string -> (Runtime_schema.config, parse_error list) result
 val api_format_of_protocol : string -> (Runtime_schema.api_format, string) result
 (** Map a TOML protocol string to a {!Runtime_schema.api_format} variant. Only
     the canonical labels are accepted: [messages-cli], [messages-http],
-    [openai-compatible-cli], [openai-compatible-http], [ollama-http]. The
+    [openai-compatible-cli], [openai-compatible-http], [ollama-http],
+    [codex-app-server], and [antigravity-cli]. The
     deprecated provider-letter aliases [provider_d-http] / [provider-d-cli]
     (renamed in v0.19.43) are rejected with an "unknown protocol" error — they
     are NOT silently canonicalized — so a checked-in config still using them

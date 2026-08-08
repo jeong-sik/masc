@@ -48,6 +48,14 @@ type error =
 
 val error_to_string : error -> string
 
+val validate_run :
+  ?session_mode:session_mode ->
+  config ->
+  prompt:string ->
+  (unit, error) result
+(** Validate the exact process boundary before a caller persists an execution
+    claim. [run_turn] delegates to this same function. *)
+
 val run_turn :
   ?session_mode:session_mode ->
   config ->

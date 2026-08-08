@@ -83,10 +83,11 @@ let resolve_runtime_providers ~runtime_id () =
   let provider_config_of_runtime rt =
     match rt.Runtime.execution with
     | Runtime_execution.Agent_core provider_config -> Ok provider_config
-    | Runtime_execution.Codex_app_server _ ->
+    | Runtime_execution.Codex_app_server _
+    | Runtime_execution.Antigravity_cli _ ->
       Error
         (Printf.sprintf
-           "runtime %S is owned by codex-app-server, not the OAS agent_core"
+           "runtime %S is owned by an official CLI client, not the OAS agent_core"
            rt.Runtime.id)
   in
   if String.equal runtime_id "" then

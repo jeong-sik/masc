@@ -283,7 +283,8 @@ let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
   | Some runtime ->
     (match runtime.Runtime.execution with
-     | Runtime_execution.Codex_app_server _ -> Ok runtime
+     | Runtime_execution.Codex_app_server _
+     | Runtime_execution.Antigravity_cli _ -> Ok runtime
      | Runtime_execution.Agent_core provider_config ->
        let* _request_body_cap =
          validate_provider_request_cap
@@ -740,6 +741,55 @@ let run_named
              on_runtime_observation
          | Error _ -> ());
         codex_result, None
+      | Runtime_execution.Antigravity_cli config ->
+        let antigravity_result =
+          match provider_config_transform, oas_checkpoint with
+          | Some _, _ ->
+            Error
+              (Agent_sdk.Error.Config
+                 (Agent_sdk.Error.InvalidConfig
+                    { field = "provider_config_transform"
+                    ; detail =
+                        "provider config transforms cannot target an \
+                         antigravity-cli runtime"
+                    }))
+          | None, Some _ ->
+            Error
+              (Agent_sdk.Error.Config
+                 (Agent_sdk.Error.InvalidConfig
+                    { field = "oas_checkpoint"
+                    ; detail =
+                        "an OAS agent_core checkpoint cannot resume through an \
+                         antigravity-cli runtime"
+                    }))
+          | None, None ->
+            Keeper_antigravity_runtime.run
+              ~runtime_id:attempt_runtime_id
+              ~keeper_name
+              ~base_path
+              ~goal
+              ~goal_blocks
+              ~system_prompt
+              ~initial_messages
+              ~model_input_projection
+              ~hooks
+              ~config
+        in
+        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+        let antigravity_result =
+          Result.bind antigravity_result (fun run_result ->
+            Keeper_turn_driver_try_provider.apply_accept
+              ~runtime_id:attempt_runtime_id
+              ~accept
+              run_result)
+        in
+        (match antigravity_result with
+         | Ok run_result ->
+           Option.iter
+             (fun observe -> Option.iter observe run_result.Runtime_agent.runtime_observation)
+             on_runtime_observation
+         | Error _ -> ());
+        antigravity_result, None
       | Runtime_execution.Agent_core runtime_provider_config ->
        (match
           match provider_config_transform with

@@ -96,6 +96,30 @@ candidates = [
 sangsu = "codex_subscription.gpt-5.3-codex-spark"
 ```
 
+An Antigravity subscription runtime follows the same no-API-key rule. Its
+official CLI owns login, conversation state, and built-in tool execution.
+MASC currently fixes this boundary to `plan` + sandbox mode and records the
+reported permission mode, tool-call count, and token usage; those built-in
+tools are not MASC Gate executions.
+
+```toml
+[providers.antigravity_subscription]
+display-name = "Antigravity Gemini Subscription"
+protocol = "antigravity-cli"
+command = "agy"
+is-non-interactive = true
+
+[models."gemini-3.6-flash-low"]
+api-name = "gemini-3.6-flash-low"
+max-context = 128000
+tools-support = true
+
+[antigravity_subscription."gemini-3.6-flash-low"]
+
+[runtime.assignments]
+sangsu = "antigravity_subscription.gemini-3.6-flash-low"
+```
+
 The fallback candidate must already be a valid binding in the same file.
 There is intentionally no `[providers.codex_subscription.credentials]` table.
 

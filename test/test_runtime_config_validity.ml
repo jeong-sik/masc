@@ -13,7 +13,8 @@ let parse_or_fail content =
 let agent_core_provider_config (runtime : Runtime.t) =
   match runtime.execution with
   | Runtime_execution.Agent_core provider_config -> provider_config
-  | Runtime_execution.Codex_app_server _ ->
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Antigravity_cli _ ->
     failf "runtime %s is not an agent_core provider" runtime.id
 ;;
 
@@ -3189,7 +3190,9 @@ let test_codex_app_server_materializes_as_turn_runtime () =
          fail "codex-app-server was incorrectly materialized as agent_core"
        | Runtime_execution.Codex_app_server config ->
          check string "cli path" "codex" config.cli_path;
-         check (option string) "model" (Some "gpt-5.6-sol") config.model))
+         check (option string) "model" (Some "gpt-5.6-sol") config.model
+       | Runtime_execution.Antigravity_cli _ ->
+         fail "codex-app-server was incorrectly materialized as antigravity-cli"))
 ;;
 
 let test_codex_app_server_rejects_declared_credentials () =
@@ -3210,6 +3213,58 @@ let test_codex_app_server_rejects_declared_credentials () =
               "official Codex client owns subscription login"))
 ;;
 
+let antigravity_cli_runtime_toml ?credential () =
+  let credential = Option.value credential ~default:"" in
+  Printf.sprintf
+    "[providers.antigravity]\n\
+     protocol = \"antigravity-cli\"\n\
+     command = \"agy\"\n\
+     is-non-interactive = true\n\
+     %s\n\
+     [models.gemini]\n\
+     api-name = \"gemini-3.6-flash-low\"\n\
+     max-context = 128000\n\
+     \n\
+     [antigravity.gemini]\n\
+     \n\
+     [runtime]\n\
+     default = \"antigravity.gemini\"\n"
+    credential
+;;
+
+let test_antigravity_cli_materializes_as_turn_runtime () =
+  with_temp_runtime_toml (antigravity_cli_runtime_toml ()) (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error error -> failf "antigravity-cli runtime should load: %s" error
+    | Ok (runtimes, default, _, _, _, _) ->
+      check int "one runtime" 1 (List.length runtimes);
+      check string "default id" "antigravity.gemini" default.id;
+      (match default.execution with
+       | Runtime_execution.Antigravity_cli config ->
+         check string "cli path" "agy" config.cli_path;
+         check (option string) "model" (Some "gemini-3.6-flash-low") config.model
+       | Runtime_execution.Agent_core _ | Runtime_execution.Codex_app_server _ ->
+         fail "antigravity-cli was materialized through the wrong execution owner"))
+;;
+
+let test_antigravity_cli_rejects_declared_credentials () =
+  let credential =
+    "[providers.antigravity.credentials]\n\
+     type = \"env\"\n\
+     key = \"GEMINI_API_KEY\""
+  in
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml ~credential ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ -> fail "antigravity-cli incorrectly admitted declared credentials"
+       | Error error ->
+         check bool "diagnostic names official subscription ownership" true
+           (String_util.contains_substring
+              error
+              "official Antigravity client owns subscription login"))
+;;
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
@@ -3219,6 +3274,10 @@ let () =
             test_codex_app_server_materializes_as_turn_runtime;
           test_case "codex app-server rejects declared credentials" `Quick
             test_codex_app_server_rejects_declared_credentials;
+          test_case "antigravity CLI is a distinct turn runtime" `Quick
+            test_antigravity_cli_materializes_as_turn_runtime;
+          test_case "antigravity CLI rejects declared credentials" `Quick
+            test_antigravity_cli_rejects_declared_credentials;
           test_case "deployment OAS catalog covers live RunPod MTP runtime" `Quick
             test_deployment_oas_model_catalog_covers_live_runpod_mtp;
           test_case

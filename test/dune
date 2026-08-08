@@ -1943,6 +1943,7 @@
 
 (include stanzas/test_runtime_codex_app_server.inc)
 (include stanzas/test_runtime_antigravity_cli.inc)
+(include stanzas/test_keeper_antigravity_runtime.inc)
 
 (include stanzas/test_runtime_provider_projection_boundary.inc)
 

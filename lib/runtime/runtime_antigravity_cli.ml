@@ -368,6 +368,10 @@ let validate_config (config : config) ~session_mode ~prompt =
     | Start | Resume _ -> Ok ()
 ;;
 
+let validate_run ?(session_mode = Start) config ~prompt =
+  validate_config config ~session_mode ~prompt
+;;
+
 let argv config ~session_mode ~prompt =
   let base =
     [ config.cli_path
@@ -406,7 +410,7 @@ let status_detail status stderr =
 ;;
 
 let run_turn ?(session_mode = Start) config ~prompt =
-  match validate_config config ~session_mode ~prompt with
+  match validate_run ~session_mode config ~prompt with
   | Error _ as error -> error
   | Ok () ->
     let cwd = Unix.realpath config.cwd in

@@ -14,6 +14,7 @@ type api_format =
   | Chat_completions_api
   | Ollama_api
   | Codex_app_server_runtime
+  | Antigravity_cli_runtime
 [@@deriving show, eq]
 
 type transport =

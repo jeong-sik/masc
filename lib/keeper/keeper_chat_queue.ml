@@ -1108,7 +1108,13 @@ let strict_stored_receipt_of_wire wire =
             if String.equal canonical wire
             then Ok receipt
             else Error "chat queue receipt JSON is not canonical or has unknown fields"))
-  with exn -> Error ("chat queue receipt JSON decode failed: " ^ Printexc.to_string exn)
+  with
+  | Eio.Cancel.Cancelled _ as e ->
+    (* Cancellation is not a decode failure. Turning it into [Error] hands the
+       caller a value it will treat as malformed input and keeps the fiber
+       running. *)
+    Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+  | exn -> Error ("chat queue receipt JSON decode failed: " ^ Printexc.to_string exn)
 
 let state_kind_and_lease = function
   | Stored_pending _ -> "pending", None

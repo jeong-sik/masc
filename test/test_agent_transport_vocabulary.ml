@@ -50,7 +50,9 @@ let configured_value_is_stable () =
   with_env (Some "grpc") (fun () ->
     check string "configured" "grpc" (T.configure_from_env () |> T.to_string));
   with_env (Some "local") (fun () ->
-    check string "retained" "grpc" (T.from_env () |> T.to_string))
+    check string "retained" "grpc" (T.from_env () |> T.to_string);
+    check string "configure is one-shot" "grpc"
+      (T.configure_from_env () |> T.to_string))
 ;;
 
 let () =

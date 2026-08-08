@@ -1306,6 +1306,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in
+  let configured_agent_transport = Masc_grpc_transport.configure_from_env () in
   (* Route OAS provider diagnostics into the structured log before any
      provider call runs (#25148). *)
   Agent_sdk_diag_sink.install ();
@@ -1455,7 +1456,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Masc_grpc_server.start ~sw ~env ~workspace_config:(Mcp_server.workspace_config state)
         ~tool_dispatcher;
       (* Initialize gRPC client for keeper heartbeat when transport is gRPC *)
-      (match Masc_grpc_transport.configure_from_env () with
+      (match configured_agent_transport with
        | Masc_grpc_transport.Grpc ->
            (try
               let client = Masc_grpc_client.create_from_env ~sw ~env in

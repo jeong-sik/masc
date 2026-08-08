@@ -1,7 +1,5 @@
-(* Keeper_tool_execute_runtime — typed Shell IR execution pipeline.
-
-   Private sub-module included by [Keeper_tool_command_runtime]. Only exposes what the
-   facade needs. *)
+(** Keeper_tool_execute_runtime — owner of the typed Shell IR execution
+    pipeline and its public Keeper execution boundary. *)
 
 val handle_tool_execute :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->

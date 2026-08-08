@@ -7,7 +7,7 @@
     module. *)
 
 module Workspace = Masc.Workspace
-module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
+module Keeper_workspace_ops = Masc.Keeper_workspace_ops
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
@@ -170,7 +170,7 @@ let test_docker_keeper_blocks_rg_outside () =
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
   let raw =
-    Keeper_tool_command_runtime.handle_tool_search_files
+    Keeper_workspace_ops.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
       ~config ~meta
       ~args:
@@ -192,7 +192,7 @@ let test_local_keeper_rg_file_path_uses_parent_workdir () =
     let file_path = Filename.concat playground "demo.ml" in
     ignore (Fs_compat.save_file_atomic file_path "let run_named = true\n");
     let raw =
-      Keeper_tool_command_runtime.handle_tool_search_files
+      Keeper_workspace_ops.handle_tool_search_files
         ~turn_sandbox_factory:None
         ~config
         ~meta
@@ -229,7 +229,7 @@ let test_local_keeper_rg_invalid_type_surfaces_stderr () =
     let file_path = Filename.concat playground "demo.ml" in
     ignore (Fs_compat.save_file_atomic file_path "let run_named = true\n");
     let raw =
-      Keeper_tool_command_runtime.handle_tool_search_files
+      Keeper_workspace_ops.handle_tool_search_files
         ~turn_sandbox_factory:None
         ~config
         ~meta
@@ -265,7 +265,7 @@ let test_docker_keeper_invalid_type_rejects_before_docker_spawn () =
   @@ fun ~base:_ ~config ~meta ~playground:_ ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   let raw =
-    Keeper_tool_command_runtime.handle_tool_search_files
+    Keeper_workspace_ops.handle_tool_search_files
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -304,7 +304,7 @@ let test_docker_keeper_blocks_second_rg_outside () =
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
   let raw =
-    Keeper_tool_command_runtime.handle_tool_search_files
+    Keeper_workspace_ops.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
       ~config ~meta
       ~args:
@@ -324,7 +324,7 @@ let test_docker_keeper_allows_inside_playground () =
   let demo = Filename.concat playground "demo.txt" in
   ignore (Fs_compat.save_file_atomic demo "hello inside playground");
   let raw =
-    Keeper_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~config ~meta
+    Keeper_workspace_ops.handle_tool_search_files ~turn_sandbox_factory:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String "demo.txt") ])
   in
   (* Goal: containment did not block. Whether `cat` succeeds depends on

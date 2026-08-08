@@ -98,14 +98,13 @@ let handle_filesystem ctx descriptor args =
   | Tool_analyze_image -> None
 ;;
 
-(* Shell IR mechanics live under Execute lowerers. Keeper_tool_command_runtime is
-   the descriptor-selected runtime boundary that binds Execute/Grep to
-   those lowerers without keeping them under the keeper_exec* axis. *)
+(* Shell IR mechanics live under the Execute owner; Grep workspace operations
+   live under their own owner. Descriptor routing selects those owners here. *)
 let handle_shell_ir ctx descriptor args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_execute ->
       Some
-        (Keeper_tool_command_runtime.handle_tool_execute_with_outcome
+        (Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
            ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~config:ctx.config
          ~meta:ctx.meta
@@ -116,7 +115,7 @@ let handle_shell_ir ctx descriptor args =
          ())
   | Tool_search_files ->
     Some
-      (Keeper_tool_command_runtime.handle_tool_search_files_with_outcome
+      (Keeper_workspace_ops.handle_tool_search_files_with_outcome
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~config:ctx.config
          ~meta:ctx.meta

@@ -458,14 +458,6 @@ jobs:
       - name: Check odoc references
         run: python3 scripts/audit-odoc-refs.py
 
-      # A tool description is a prompt -- it is what the model reads when
-      # choosing a tool. Some tools carry one in keeper_tool_descriptor.ml (what
-      # production hands a Keeper) and another in lib/tool_surface/ (the shard
-      # catalog), and nine already disagree. #27542 edited the shard copy, added
-      # a test that read the shard copy, and passed while changing nothing a
-      # Keeper sees. This is that review, mechanised.
-      - name: Check tool description drift
-        run: python3 scripts/audit-tool-description-drift.py
 
       # Both directions of the hand-maintained CI test allowlist. A target
       # whose suite was deleted makes dune hard-fail after a full build

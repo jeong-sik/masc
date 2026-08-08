@@ -151,14 +151,14 @@ let run t tool ~args =
       ~args
     |> result_of_execution
   | Search_files ->
-    Keeper_tool_command_runtime.handle_tool_search_files_with_outcome
+    Keeper_workspace_ops.handle_tool_search_files_with_outcome
       ~turn_sandbox_factory:None
       ~config:t.config
       ~meta:t.producer_meta
       ~args
     |> result_of_execution
   | Execute ->
-    Keeper_tool_command_runtime.handle_tool_execute_with_outcome
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
       ~turn_sandbox_factory:None
       ~config:t.config
       ~meta:t.producer_meta

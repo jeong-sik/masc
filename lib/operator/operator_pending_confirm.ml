@@ -46,6 +46,15 @@ type pending_confirm_scope = {
   hidden_entries : pending_confirm list;
 }
 
+exception Store_error of string
+
+let () =
+  Printexc.register_printer (function
+    | Store_error _ -> Some "Operator_pending_confirm.Store_error"
+    | _ -> None)
+
+let raise_store_error reason = raise (Store_error reason)
+
 type available_action = {
   action_type : string;
   tool_name : string;
@@ -88,57 +97,88 @@ let preview_of_pending_confirm (entry : pending_confirm) =
       ("payload", entry.payload);
     ]
 
+let pending_confirm_common_fields (entry : pending_confirm) =
+  [
+    ("trace_id", `String entry.trace_id);
+    ("actor", `String entry.actor);
+    ("action_type", `String entry.action_type);
+    ("target_type", `String entry.target_type);
+    ("target_id", Json_util.string_option_to_yojson entry.target_id);
+    ("payload", entry.payload);
+    ("delegated_tool", `String entry.delegated_tool);
+    ("created_at", `String entry.created_at);
+    ("expires_at", Json_util.string_option_to_yojson entry.expires_at);
+  ]
+
 let pending_confirm_to_yojson (entry : pending_confirm) =
   `Assoc
-    [
-      ("token", `String entry.token);
-      ("confirm_token", `String entry.token);
-      ("trace_id", `String entry.trace_id);
-      ("actor", `String entry.actor);
-      ("action_type", `String entry.action_type);
-      ("target_type", `String entry.target_type);
-      ("target_id", Json_util.string_option_to_yojson entry.target_id);
-      ("payload", entry.payload);
-      ("delegated_tool", `String entry.delegated_tool);
-      ("created_at", `String entry.created_at);
-      ("expires_at", Json_util.string_option_to_yojson entry.expires_at);
-      ("preview", preview_of_pending_confirm entry);
-    ]
+    ( ("confirm_token", `String entry.token)
+    :: pending_confirm_common_fields entry
+    @ [ ("preview", preview_of_pending_confirm entry) ] )
 
-let pending_confirm_of_yojson json =
-  try
-    let token = Json_util.get_string_with_default json ~key:"token" ~default:"" in
-    let trace_id =
-      match Json_util.get_string json "trace_id" with
-      | Some value -> value
-      | None -> trace_id "opc"
+let pending_confirm_store_to_yojson (entry : pending_confirm) =
+  `Assoc (("confirm_token", `String entry.token) :: pending_confirm_common_fields entry)
+
+let pending_confirm_of_yojson = function
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "pending_confirm" in
+    let* () =
+      Json_util.reject_unknown_fields
+        ~surface
+        ~allowed:
+          [ "confirm_token"
+          ; "trace_id"
+          ; "actor"
+          ; "action_type"
+          ; "target_type"
+          ; "target_id"
+          ; "payload"
+          ; "delegated_tool"
+          ; "created_at"
+          ; "expires_at"
+          ]
+        fields
     in
-    let actor = Json_util.get_string_with_default json ~key:"actor" ~default:"" in
-    let action_type = Json_util.get_string_with_default json ~key:"action_type" ~default:"" in
-    let target_type = Json_util.get_string_with_default json ~key:"target_type" ~default:"" in
-    let target_id = Json_util.get_string json "target_id" in
-    let payload =
-      match Json_util.get_object json "payload" with
-      | Some payload -> payload
-      | None -> `Assoc []
+    let required_string field =
+      Json_util.require_field_string ~surface field fields
     in
-    let delegated_tool = Json_util.get_string_with_default json ~key:"delegated_tool" ~default:"" in
-    let created_at = Json_util.get_string_with_default json ~key:"created_at" ~default:"" in
-    let expires_at = Json_util.get_string json "expires_at" in
+    let required_nullable_string field =
+      match List.assoc_opt field fields with
+      | Some `Null -> Ok None
+      | Some (`String value) -> Ok (Some value)
+      | Some _ ->
+        Error (Printf.sprintf "%s.%s must be a string or null" surface field)
+      | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+    in
+    let* token = required_string "confirm_token" in
+    let* trace_id = required_string "trace_id" in
+    let* actor = required_string "actor" in
+    let* action_type = required_string "action_type" in
+    let* target_type = required_string "target_type" in
+    let* target_id = required_nullable_string "target_id" in
+    let* payload =
+      match List.assoc_opt "payload" fields with
+      | Some (`Assoc _ as payload) -> Ok payload
+      | Some _ -> Error "pending_confirm.payload must be an object"
+      | None -> Error "pending_confirm.payload is required"
+    in
+    let* delegated_tool = required_string "delegated_tool" in
+    let* created_at = required_string "created_at" in
+    let* expires_at = required_nullable_string "expires_at" in
     Ok
-      {
-        token;
-        trace_id;
-        actor;
-        action_type;
-        target_type;
-        target_id;
-        payload;
-        delegated_tool;
-        created_at;
-        expires_at;
+      { token
+      ; trace_id
+      ; actor
+      ; action_type
+      ; target_type
+      ; target_id
+      ; payload
+      ; delegated_tool
+      ; created_at
+      ; expires_at
       }
-  with Failure msg -> Error msg
+  | _ -> Error "pending_confirm must be a JSON object"
 
 let decode_pending_confirm_entries entries =
   let rec loop index acc = function
@@ -168,12 +208,10 @@ let raw_pending_confirms_result config : (pending_confirm list, string) result =
 let raw_pending_confirms config : pending_confirm list =
   match raw_pending_confirms_result config with
   | Ok entries -> entries
-  | Error msg ->
-    Log.Misc.warn "[operator_pending_confirm] %s" msg;
-    []
+  | Error msg -> raise_store_error msg
 
 let pending_confirms_to_yojson entries =
-  `List (List.map pending_confirm_to_yojson entries)
+  `List (List.map pending_confirm_store_to_yojson entries)
 
 let write_pending_confirms config (entries : pending_confirm list) =
   Workspace_utils.write_json_result config (pending_confirms_path config)
@@ -210,9 +248,7 @@ let read_pending_confirms_result config =
 let read_pending_confirms config : pending_confirm list =
   match read_pending_confirms_result config with
   | Ok entries -> entries
-  | Error msg ->
-    Log.Misc.warn "[operator_pending_confirm] %s" msg;
-    []
+  | Error msg -> raise_store_error msg
 
 let upsert_pending_confirm config entry =
   with_store_lock config (fun () ->

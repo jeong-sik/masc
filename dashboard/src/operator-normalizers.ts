@@ -179,8 +179,10 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
 }
 
 export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
-  const root = isRecord(raw) ? raw : {}
+  if (!isRecord(raw)) throw new Error('invalid operator snapshot')
+  const root = raw
   const pendingConfirmEnvelope = normalizePendingConfirmEnvelope(root.pending_confirm_envelope)
+  if (!pendingConfirmEnvelope) throw new Error('invalid pending_confirm_envelope')
   return {
     root: normalizeNamespace(root.root),
     keepers: extractArray(root.keepers, ['items', 'keepers'])
@@ -193,9 +195,7 @@ export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
     recent_messages: extractArray(root.recent_messages, ['messages'])
       .map(normalizeMessage)
       .filter((item): item is Message => item !== null),
-    pending_confirms: pendingConfirmEnvelope?.items ?? [],
-    pending_confirm_envelope: pendingConfirmEnvelope ?? undefined,
-    pending_confirm_summary: pendingConfirmEnvelope?.summary,
+    pending_confirm_envelope: pendingConfirmEnvelope,
     available_actions: extractArray(root.available_actions, ['actions'])
       .map(normalizeOperatorActionDescriptor)
       .filter((item): item is OperatorActionDescriptor => item !== null),

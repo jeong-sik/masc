@@ -1327,6 +1327,50 @@ let test_last_compaction_ago_s_removed_from_backend_serializers () =
              (Option.is_none (last_substring_index text "last_compaction_ago_s")))
     files
 
+let assert_snapshot_rejects_pending_confirm_store store_json =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      Workspace_utils.mkdir_p (Operator_control.operator_dir config);
+      (match
+         Workspace_utils.write_json_result config
+           (Operator_control.pending_confirms_path config)
+           store_json
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail error);
+      match
+        Operator_control.snapshot_json
+          (operator_ctx env sw config "operator")
+      with
+      | _ -> Alcotest.fail "malformed pending-confirm store must reject snapshot"
+      | exception Operator_control.Store_error _ -> ())
+
+let test_snapshot_rejects_non_list_pending_confirm_store () =
+  assert_snapshot_rejects_pending_confirm_store (`Assoc [])
+
+let test_snapshot_rejects_pending_confirm_without_confirm_token () =
+  assert_snapshot_rejects_pending_confirm_store
+    (`List
+      [ `Assoc
+          [ "trace_id", `String "trace-missing-token"
+          ; "actor", `String "operator"
+          ; "action_type", `String "namespace_pause"
+          ; "target_type", `String "workspace"
+          ; "target_id", `Null
+          ; "payload", `Assoc []
+          ; "delegated_tool", `String "masc_pause"
+          ; "created_at", `String "2026-08-08T00:00:00Z"
+          ; "expires_at", `Null
+          ]
+      ])
+
 let () =
   Alcotest.run
     "operator_control_snapshot"
@@ -1365,6 +1409,16 @@ let () =
             "backend serializers do not emit last_compaction_ago_s"
             `Quick
             test_last_compaction_ago_s_removed_from_backend_serializers
+        ] );
+      ( "pending-confirm store"
+      , [ Alcotest.test_case
+            "non-list store rejects snapshot"
+            `Quick
+            test_snapshot_rejects_non_list_pending_confirm_store
+        ; Alcotest.test_case
+            "missing confirm token rejects snapshot"
+            `Quick
+            test_snapshot_rejects_pending_confirm_without_confirm_token
         ] );
     ]
 ;;

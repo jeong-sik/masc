@@ -304,7 +304,7 @@ let test_confirm_consumes_pending_token_before_delegated_action_fails () =
       let entry_json =
         `Assoc
           [
-            ("token", `String token);
+            ("confirm_token", `String token);
             ("trace_id", `String "trace-retry");
             ("actor", `String "operator");
             ("action_type", `String "missing_action_type");

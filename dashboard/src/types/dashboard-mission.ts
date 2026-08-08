@@ -7,7 +7,7 @@ import type {
   MissionSignalTruth,
   MissionEvidenceSource,
 } from './core'
-import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './gate'
+import type { PendingConfirmEnvelope, PendingConfirmation, OperatorActionDescriptor } from './gate'
 
 export interface DashboardMissionSummary {
   workspace_health?: string
@@ -363,9 +363,7 @@ export interface OperatorSnapshot {
   inference_inflight?: InferenceInflightSnapshot | null
   persistent_agents?: OperatorKeeperSnapshot[]
   recent_messages: Message[]
-  pending_confirms: PendingConfirmation[]
-  pending_confirm_envelope?: PendingConfirmEnvelope | null
-  pending_confirm_summary?: PendingConfirmSummary
+  pending_confirm_envelope: PendingConfirmEnvelope
   available_actions: OperatorActionDescriptor[]
 }
 

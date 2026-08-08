@@ -568,7 +568,7 @@ let pending_confirm_row ?keeper_name
   ; next_action = "operator_confirm_action"
   ; detail =
       `Assoc
-        [ "token", `String entry.token
+        [ "confirm_token", `String entry.token
         ; "trace_id", `String entry.trace_id
         ; "actor", `String entry.actor
         ; "target_type", `String entry.target_type

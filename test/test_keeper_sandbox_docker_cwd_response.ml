@@ -74,8 +74,8 @@ let test_container_path_translation_under_sandbox () =
       let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
       let host_cwd = Filename.concat host_root "repos/foo" in
       let container_cwd =
-        Keeper_sandbox_docker.docker_private_workspace_cwd ~config ~meta
-          host_cwd
+        Keeper_sandbox_docker_container_name.docker_private_workspace_cwd
+          ~config ~meta host_cwd
       in
       (* Sanity: translation produced an in-container path rooted
          at the SSOT container playground prefix. *)

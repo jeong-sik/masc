@@ -100,8 +100,9 @@ let of_docker_result
 
 module Docker_backend = struct
   let effective_sandbox_profile = Keeper_sandbox_docker.effective_sandbox_profile
-  let ensure_runtime = Keeper_sandbox_docker.ensure_keeper_sandbox_runtime
-  let private_workspace_cwd = Keeper_sandbox_docker.docker_private_workspace_cwd
+  let ensure_runtime = Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime
+  let private_workspace_cwd =
+    Keeper_sandbox_docker_container_name.docker_private_workspace_cwd
 
   let run_shell_command_with_status ~config ~meta ~cwd ~timeout_sec ~cmd
       ~network_mode =

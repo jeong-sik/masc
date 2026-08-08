@@ -1306,6 +1306,8 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in
+  let configured_agent_transport = Masc_grpc_transport.configure_from_env () in
+  let configured_http_mode = Env_config.Transport.configure_h2_from_env () in
   (* Route OAS provider diagnostics into the structured log before any
      provider call runs (#25148). *)
   Agent_sdk_diag_sink.install ();
@@ -1352,11 +1354,10 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
   in
   let h2_error_handler = make_h2_error_handler () in
   let http_mode =
-    match Env_config.Transport.use_h2 () with
+    match configured_http_mode with
     | Env_config.Transport.H2_only -> `H2_only
     | Env_config.Transport.H1_only -> `H1_only
-    | Env_config.Transport.Auto
-    | Env_config.Transport.Unknown_h2_mode _ -> `Auto
+    | Env_config.Transport.Auto -> `Auto
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
   Transport_metrics.set_ws_same_origin_runtime_ready false;
@@ -1454,7 +1455,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Masc_grpc_server.start ~sw ~env ~workspace_config:(Mcp_server.workspace_config state)
         ~tool_dispatcher;
       (* Initialize gRPC client for keeper heartbeat when transport is gRPC *)
-      (match Masc_grpc_transport.from_env () with
+      (match configured_agent_transport with
        | Masc_grpc_transport.Grpc ->
            (try
               let client = Masc_grpc_client.create_from_env ~sw ~env in

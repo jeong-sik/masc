@@ -1,10 +1,8 @@
 (** [MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH] has to reach the ceiling it names.
 
-    Three surfaces described this knob — [docs/runtime-tunables.md],
-    [Env_config_snapshot], and [Channel_gate]'s own signature ("default 4000")
-    — while the body was [let max_content_length () = 4000] and read nothing.
-    An operator raising it got 4000, silently, and the Discord and Slack
-    gateways kept rejecting messages at the old ceiling.
+    [Env_config_snapshot] and [Channel_gate]'s signature expose the same
+    setting, so the implementation must read the configured value rather than
+    a second literal ceiling.
 
     [Env_config_core.raw_value_opt] goes to [Unix.getenv] on every call with no
     memo, so [putenv] here is observed by the next read. *)

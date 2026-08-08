@@ -484,7 +484,10 @@ client는 허용한다. 로컬 Vite cross-port는 명시된 loopback dev-origin 
 
 ### 8.1 활성화
 
-`MASC_USE_H2=1` 환경변수로 opt-in. 설정 시 HTTP/1.1과 HTTP/2 서버가 동시에 시작된다 (동일 포트, ALPN 협상 아님 - h2c cleartext).
+`MASC_USE_H2=auto`는 같은 포트에서 HTTP/1.1과 HTTP/2 prior-knowledge
+연결을 자동 판별한다. `1`/`h2_only`는 HTTP/2만, `0`/`h1_only`는
+HTTP/1.1만 허용한다. 그 밖의 값은 서버 시작 전에 거부된다. 이 경로는 TLS
+ALPN이 아닌 h2c cleartext 연결이다.
 
 ### 8.2 동작 방식
 

@@ -38,6 +38,15 @@ let with_env name value_opt f =
       | None -> Unix.putenv name "");
       f ())
 
+let check_assoc_keys label expected = function
+  | `Assoc fields ->
+    check
+      (list string)
+      label
+      (List.sort String.compare expected)
+      (fields |> List.map fst |> List.sort String.compare)
+  | _ -> fail (label ^ ": expected object")
+
 (* ============================================================
    Initialization
    ============================================================ *)
@@ -47,10 +56,8 @@ let test_init () =
     Otel_metric_store.snapshot ()
     |> List.exists (fun (m : Otel_metric_store.metric) -> String.equal m.name name)
   in
-  (* Counters zero-fill at module init (declare_counter); gauges and
-     histograms are lazy — they appear on first set/observe.  The
-     registration sweep this test originally asserted died with the
-     retired scrape backend (RFC-0217). *)
+  (* Counters zero-fill at module init; gauges and histograms appear on first
+     set or observation. *)
   check bool "http accept counter zero-filled" true
     (has_metric "masc_http_accepts_total");
   TM.set_grpc_active_streams 0;
@@ -65,8 +72,8 @@ let test_init () =
    ============================================================ *)
 
 let test_sse_sessions () =
-  TM.set_sse_sessions ~kind:"observer" 10;
-  TM.set_sse_sessions ~kind:"agent_stream" 5;
+  TM.set_sse_sessions ~kind:TM.Observer 10;
+  TM.set_sse_sessions ~kind:TM.Agent_stream 5;
   let obs = Otel_metric_store.metric_value_or_zero "masc_sse_sessions_total"
     ~labels:[("kind", "observer")] () in
   let workspace = Otel_metric_store.metric_value_or_zero "masc_sse_sessions_total"
@@ -342,40 +349,119 @@ let test_transport_health_json () =
     ~labels:[ ("stage", "append") ] ~delta:1.0 ();
   Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ ("event", "compaction_started") ] ~delta:2.0 ();
-  let hello_latency_sum_before =
-    Otel_metric_store.metric_total Otel_metric_store.metric_ws_dashboard_hello_latency_seconds
-  in
-  let hello_latency_count_before =
-    Otel_metric_store.metric_total
-      (Otel_metric_store.metric_ws_dashboard_hello_latency_seconds ^ "_count")
-  in
-  let external_fanout_count_before =
-    Otel_metric_store.metric_total
-      (Otel_metric_store.metric_sse_external_fanout_duration_seconds ^ "_count")
-  in
-  let slice_fanout_skipped_before =
-    Otel_metric_store.metric_total Otel_metric_store.metric_ws_slice_fanout_skipped
-  in
-  let delta_built_before =
-    Otel_metric_store.metric_total Otel_metric_store.metric_ws_delta_built
-  in
-  TM.observe_ws_dashboard_hello_latency ~success:true 0.125;
-  (* Drive the counter so the assertion below is not satisfied by a field that
-     is wired to the wrong metric name: [metric_value_or_zero] answers an
-     unknown name with 0, which a presence-only check accepts. *)
-  TM.inc_ws_slice_fanout_skipped ();
-  TM.inc_ws_delta_built ();
   Masc.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   Masc.Sse.sync_transport_snapshot ~force:true ();
-  let json = TM.transport_health_json ~config in
+  with_env "MASC_USE_H2" (Some "h1_only") (fun () ->
+    ignore (Env_config.Transport.configure_h2_from_env ()););
+  let json =
+    with_env "MASC_USE_H2" (Some "h2_only") (fun () ->
+      TM.transport_health_json ())
+  in
   let sse_json = json |> U.member "sse" in
   let streamable_json = json |> U.member "streamable_http" in
   let grpc_json = json |> U.member "grpc" in
   let ws_json = json |> U.member "websocket" in
   let webrtc_json = json |> U.member "webrtc" in
-  let cluster_json = json |> U.member "cluster" in
+  let http2_json = json |> U.member "http2" in
   let summary_json = json |> U.member "summary" in
   let agent_health_json = json |> U.member "agent_health" in
+  check_assoc_keys
+    "transport-health exact top-level keys"
+    [ "summary"
+    ; "sse"
+    ; "grpc"
+    ; "websocket"
+    ; "webrtc"
+    ; "streamable_http"
+    ; "http2"
+    ; "agent_health"
+    ; "generated_at"
+    ]
+    json;
+  check_assoc_keys
+    "summary exact keys"
+    [ "primary_path"; "queue_pressure"; "external_fanout_targets" ]
+    summary_json;
+  check_assoc_keys
+    "grpc exact keys"
+    [ "configured"
+    ; "listening"
+    ; "port"
+    ; "active_streams"
+    ; "subscribers"
+    ; "heartbeat_avg_seconds"
+    ; "events_delivered"
+    ; "events_dropped"
+    ]
+    grpc_json;
+  check_assoc_keys
+    "SSE exact keys"
+    [ "sessions_observer"
+    ; "sessions_agent_stream"
+    ; "sessions_presence"
+    ; "sessions_total"
+    ; "external_subscribers"
+    ; "broadcast_avg_seconds"
+    ; "broadcast_count"
+    ; "queue_avg_depth"
+    ; "queue_max_depth"
+    ; "relay_queue_depth"
+    ; "relay_retry_total"
+    ; "relay_retry_append"
+    ; "relay_retry_broadcast"
+    ; "relay_drop_total"
+    ; "relay_drop_queue"
+    ; "relay_drop_append"
+    ; "relay_drop_broadcast"
+    ; "hot_sessions"
+    ]
+    sse_json;
+  check_assoc_keys
+    "WebSocket exact keys"
+    [ "configured"
+    ; "listening"
+    ; "mode"
+    ; "port"
+    ; "sessions"
+    ; "relay_source"
+    ; "delivery"
+    ]
+    ws_json;
+  check_assoc_keys
+    "WebSocket delivery exact keys"
+    [ "bytes_cache_hits"
+    ; "bytes_cache_misses"
+    ; "client_acks"
+    ; "throttled_deliveries"
+    ; "client_buffered_bytes_sum"
+    ; "client_buffered_bytes_count"
+    ]
+    (ws_json |> U.member "delivery");
+  check_assoc_keys
+    "WebRTC exact keys"
+    [ "configured"
+    ; "signaling_available"
+    ; "signaling_mode"
+    ; "pending_offers"
+    ; "active_peers"
+    ; "live_connections"
+    ; "connected_channels"
+    ; "ice_server_count"
+    ]
+    webrtc_json;
+  check_assoc_keys
+    "streamable HTTP exact keys"
+    [ "endpoint"
+    ; "observer_stream"
+    ; "presence_stream"
+    ; "supports_post"
+    ; "supports_sse_upgrade"
+    ]
+    streamable_json;
+  check_assoc_keys
+    "HTTP/2 exact keys"
+    [ "listener_mode"; "multiplex_ready" ]
+    http2_json;
   check int "observer sessions" 1
     (sse_json |> U.member "sessions_observer" |> U.to_int);
   check int "agent_stream sessions" 1
@@ -392,61 +478,8 @@ let test_transport_health_json () =
     (sse_json |> U.member "relay_retry_total" |> U.to_int);
   check int "relay drops total" 4
     (sse_json |> U.member "relay_drop_total" |> U.to_int);
-  check bool "external fanout avg surfaced" true
-    (match sse_json |> U.member "external_fanout_avg_seconds" with
-     | `Float _ | `Int _ -> true
-     | _ -> false);
-  check bool "external fanout count surfaced" true
-    (match sse_json |> U.member "external_fanout_count" with
-     | `Int _ -> true
-     | _ -> false);
-  check bool "external fanout count advances" true
-    (float_of_int (sse_json |> U.member "external_fanout_count" |> U.to_int)
-     >= external_fanout_count_before +. 1.0);
-  (* A broadcast nothing can observe is short-circuited before the fanout
-     mutex.  Surfacing the count is what makes that skip auditable rather than
-     a silent behaviour change. *)
-  check bool "skipped-no-observer count surfaced" true
-    (match sse_json |> U.member "broadcast_skipped_no_observer" with
-     | `Int _ -> true
-     | _ -> false);
-  check bool "external fanout sum surfaced" true
-    (match sse_json |> U.member "external_fanout_sum_seconds" with
-     | `Float _ | `Int _ -> true
-     | _ -> false);
-  check bool "streamable http configured field exists" true
-    (match streamable_json |> U.member "configured" with
-    | `Bool _ -> true
-    | _ -> false);
-  check bool "streamable http protocol_capable field exists" true
-    (match streamable_json |> U.member "protocol_capable" with
-    | `Bool _ -> true
-    | _ -> false);
-  check bool "streamable http auth_policy_present field exists" true
-    (match streamable_json |> U.member "auth_policy_present" with
-    | `Bool _ -> true
-    | _ -> false);
-  let streamable_listener_json = streamable_json |> U.member "listener" in
-  check bool "streamable http listener object exists" true
-    (match streamable_listener_json with `Assoc _ -> true | _ -> false);
-  check bool "streamable http listener status exists" true
-    (match streamable_listener_json |> U.member "status" with
-    | `String _ -> true
-    | _ -> false);
-  check bool "streamable http active connection count exists" true
-    (match streamable_listener_json |> U.member "active_connections" with
-    | `Int _ -> true
-    | _ -> false);
   check string "presence stream endpoint" "/events/presence"
     (streamable_json |> U.member "presence_stream" |> U.to_string);
-  check bool "legacy SSE endpoint is not advertised" true
-    (match streamable_json |> U.member "legacy_sse_endpoint" with
-    | `Null -> true
-    | _ -> false);
-  check bool "legacy messages endpoint is not advertised" true
-    (match streamable_json |> U.member "legacy_messages_endpoint" with
-    | `Null -> true
-    | _ -> false);
   check int "grpc active streams" 1
     (grpc_json |> U.member "active_streams" |> U.to_int);
   check int "grpc subscribers" 2
@@ -456,16 +489,8 @@ let test_transport_health_json () =
      | `Int _ -> true | _ -> false);
   check bool "grpc listening field exists" true
     (match grpc_json |> U.member "listening" with `Bool _ -> true | _ -> false);
-  check bool "grpc reachable field exists" true
-    (match grpc_json |> U.member "reachable" with `Bool _ -> true | _ -> false);
-  check bool "grpc listen_status field exists" true
-    (match grpc_json |> U.member "listen_status" with `String _ -> true | _ -> false);
   check bool "websocket listening field exists" true
     (match ws_json |> U.member "listening" with `Bool _ -> true | _ -> false);
-  check bool "websocket reachable field exists" true
-    (match ws_json |> U.member "reachable" with `Bool _ -> true | _ -> false);
-  check bool "ws listen_status field exists" true
-    (match ws_json |> U.member "listen_status" with `String _ -> true | _ -> false);
   check bool "websocket section exists" true
     (match ws_json with `Assoc _ -> true | _ -> false);
   check bool "webrtc section exists" true
@@ -476,8 +501,10 @@ let test_transport_health_json () =
     (match webrtc_json |> U.member "signaling_available" with `Bool _ -> true | _ -> false);
   check bool "webrtc signaling_mode field exists" true
     (match webrtc_json |> U.member "signaling_mode" with `String _ -> true | _ -> false);
-  check string "workspace id" "default"
-    (cluster_json |> U.member "workspace_id" |> U.to_string);
+  check string "http2 reports the startup mode" "h1_only"
+    (http2_json |> U.member "listener_mode" |> U.to_string);
+  check bool "h1-only is not multiplex ready" false
+    (http2_json |> U.member "multiplex_ready" |> U.to_bool);
   check bool "summary primary path exists" true
     (String.length (summary_json |> U.member "primary_path" |> U.to_string) > 0);
   check string "summary queue pressure reflects relay drops" "high"
@@ -486,11 +513,6 @@ let test_transport_health_json () =
     (agent_health_json
      |> U.member "lifecycle_dispatch_rejections_total"
      |> U.to_int);
-  (* The [delivery] sub-object surfaces WS cache/ack/throttle counters
-     inline so the dashboard can render operational state without
-     querying external telemetry directly.  Producing metrics may not be registered
-     yet in this standalone PR, so presence (not value) is the contract
-     this test enforces. *)
   let delivery_json = ws_json |> U.member "delivery" in
   check bool "websocket delivery sub-object present" true
     (match delivery_json with `Assoc _ -> true | _ -> false);
@@ -502,36 +524,10 @@ let test_transport_health_json () =
     ; "client_acks", "client_acks"
     ; "throttled_deliveries", "throttled_deliveries"
     ; "client_buffered_bytes_count", "client_buffered_bytes_count"
-    ; "hello_latency_count", "hello_latency_count"
     ];
-  (* The slice gate's drop count: without it the gap between delivered
-     broadcasts and what reaches the bytes cache is unattributable.  Asserted
-     by advance rather than by presence — a field reading an unknown metric
-     name is emitted as 0, so presence alone proves nothing. *)
-  check bool "slice_fanout_skipped advances" true
-    (float_of_int (delivery_json |> U.member "slice_fanout_skipped" |> U.to_int)
-     >= slice_fanout_skipped_before +. 1.0);
-  (* Same shape, same reason: the counter has advanced on every delivered delta
-     since #23339, but no snapshot carried it, so no operator could see it and
-     no test could notice if it stopped. *)
-  check bool "delta_built advances" true
-    (float_of_int (delivery_json |> U.member "delta_built" |> U.to_int)
-     >= delta_built_before +. 1.0);
   check bool "client_buffered_bytes_sum field present (float)" true
     (match delivery_json |> U.member "client_buffered_bytes_sum" with
      | `Float _ | `Int _ -> true | _ -> false);
-  check bool "hello_latency_sum_seconds field present (float)" true
-    (match delivery_json |> U.member "hello_latency_sum_seconds" with
-     | `Float _ | `Int _ -> true | _ -> false);
-  check bool "hello latency count is aggregated into health json" true
-    (float_of_int (delivery_json |> U.member "hello_latency_count" |> U.to_int)
-     >= hello_latency_count_before +. 1.0);
-  check bool "hello latency sum is aggregated into health json" true
-    ((match delivery_json |> U.member "hello_latency_sum_seconds" with
-      | `Float f -> f
-      | `Int i -> float_of_int i
-      | _ -> 0.0)
-     >= hello_latency_sum_before +. 0.125);
   ignore (Masc.Sse.close_all_clients ());
   cleanup_dir base_dir
 

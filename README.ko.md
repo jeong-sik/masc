@@ -6,8 +6,8 @@
 [English version](README.md)
 
 > 정확한 설치 릴리스, 로컬 포트, provider 환경변수 같은 휘발성 값의 SSOT는
-> [`README.md`](README.md), [`config/runtime.toml`](config/runtime.toml),
-> [`docs/runtime-tunables.md`](docs/runtime-tunables.md)입니다. 이 한글 문서는
+> [`README.md`](README.md), [`config/runtime.toml`](config/runtime.toml), typed
+> `masc_config` 도구와 `/api/v1/dashboard/config`입니다. 이 한글 문서는
 > 한국어 진입점이며, 그런 값은 의도적으로 복제하지 않습니다.
 
 **MASC는 agent 작업을 위한 로컬 조율·관찰 레이어입니다.** 저장소 옆에서 MCP 서버로 돌면서 coding agent와 상주 Keeper가 goal, task, board 글, repository ownership, approval state를 같은 workspace에서 공유하게 합니다. 대시보드와 turn receipt로 agent의 결정과 실패를 들여다봅니다.
@@ -241,7 +241,7 @@ Keeper → runtime 할당은 `runtime.toml`에서 합니다 (keeper toml은 mode
 albini = "<provider>.<model>"   # config/runtime.toml에 정의된 id로 교체
 ```
 
-선택한 runtime이 cloud provider를 사용한다면 서버 시작 전에 필요한 provider credential을 export해야 합니다. runtime ID와 환경변수 knob의 SSOT는 [`config/runtime.toml`](config/runtime.toml)과 [`docs/runtime-tunables.md`](docs/runtime-tunables.md)입니다. provider key 이름을 README에 복제하지 않습니다.
+선택한 runtime이 cloud provider를 사용한다면 서버 시작 전에 필요한 provider credential을 export해야 합니다. runtime ID는 [`config/runtime.toml`](config/runtime.toml), 적용된 환경 설정은 typed `masc_config` 도구와 `/api/v1/dashboard/config`에서 확인합니다.
 
 ---
 

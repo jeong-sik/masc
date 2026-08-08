@@ -121,7 +121,7 @@ When stdin is not a TTY:
 
 - The wizard is skipped by default.
 - The existing install flow runs unchanged.
-- A helpful message is printed pointing to `.masc/config/.env.local` and `docs/runtime-tunables.md`.
+- A helpful message is printed pointing to `.masc/config/.env.local` and the typed `masc_config` surface.
 
 ## Error Handling
 

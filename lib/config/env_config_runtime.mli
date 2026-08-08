@@ -78,22 +78,12 @@ module Transport : sig
     | Auto
     | H1_only
     | H2_only
-    | Unknown_h2_mode of string
 
-  val normalize_token : string -> string
   val h2_mode_of_string : string -> h2_mode
   val h2_mode_to_string : h2_mode -> string
-
-  type agent_transport =
-    | Http
-    | Grpc
-    | Ws
-    | Webrtc
-    | Local
-    | Unknown_agent_transport of string
-
-  val agent_transport_of_string : string -> agent_transport
-  val agent_transport_to_string : agent_transport -> string
+  val configure_h2_from_env : unit -> h2_mode
+  val effective_h2_mode : unit -> h2_mode
+  val h2_snapshot_entry : Env_config_snapshot_core.entry
 
   val grpc_port : int
   val grpc_enabled : unit -> bool
@@ -101,8 +91,6 @@ module Transport : sig
   val ws_port : int
   val ws_enabled : unit -> bool
   val webrtc_enabled : unit -> bool
-  val use_h2 : unit -> h2_mode
-  val agent_transport_opt : unit -> agent_transport option
   val http_auth_strict_env_enabled : unit -> bool
   val startup_watchdog_sec : unit -> float
 end

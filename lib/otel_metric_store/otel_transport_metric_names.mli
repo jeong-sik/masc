@@ -6,6 +6,7 @@
 
 val metric_sse_sessions : string
 val metric_sse_broadcast_duration : string
+val metric_sse_broadcast_duration_count : string
 val metric_sse_broadcast_events : string
 val metric_sse_broadcast_failures : string
 val metric_sse_broadcast_skipped_no_observer : string
@@ -24,6 +25,7 @@ val metric_file_lock_retries : string
 val metric_file_lock_acquire_seconds : string
 val metric_grpc_active_streams : string
 val metric_grpc_heartbeat_latency : string
+val metric_grpc_heartbeat_latency_count : string
 val metric_grpc_subscribers : string
 val metric_grpc_events_delivered : string
 val metric_grpc_events_dropped : string
@@ -157,6 +159,7 @@ val metric_cache_stuck_elapsed_seconds : string
 
 (** Companion to {!metric_cache_hits_total}; same [cache] label values. *)
 val metric_ws_client_buffered_bytes : string
+val metric_ws_client_buffered_bytes_count : string
 
 val metric_ws_client_acks : string
 val metric_ws_throttled_deliveries : string

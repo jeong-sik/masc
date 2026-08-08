@@ -21,7 +21,16 @@ type entry =
   ; description : string
   ; default_display : string
   ; sensitive : bool
+  ; reader : reader
   }
+
+and effective_source =
+  | Default
+  | Environment
+
+and reader =
+  | Raw_env
+  | Effective of (unit -> string * effective_source)
 
 type source_provenance =
   { kind : string
@@ -36,9 +45,15 @@ type source_provenance =
   ; value_redacted : bool
   }
 
-let entry ?(sensitive = false) ~default env_name description =
+let make_entry ?(sensitive = false) ~default ~reader env_name description =
   let sensitive = sensitive || is_sensitive_name env_name in
-  { env_name; description; default_display = default; sensitive }
+  { env_name; description; default_display = default; sensitive; reader }
+
+let entry ?sensitive ~default env_name description =
+  make_entry ?sensitive ~default ~reader:Raw_env env_name description
+
+let effective_entry ?sensitive ~default ~read env_name description =
+  make_entry ?sensitive ~default ~reader:(Effective read) env_name description
 
 let default_provenance (e : entry) =
   match e.default_display with
@@ -103,6 +118,20 @@ let source_provenance (e : entry) ~raw_env raw =
       let provenance = default_provenance e in
       { provenance with raw_env_present; raw_env_blank }
 
+let applied_provenance (e : entry) source =
+  let raw_env_present = match source with Default -> false | Environment -> true in
+  { kind = (match source with Default -> "default" | Environment -> "env")
+  ; detail = "typed value resolved by the runtime owner"
+  ; derived_from = []
+  ; env_name = e.env_name
+  ; raw_source = "applied_runtime"
+  ; raw_env_present
+  ; raw_env_blank = false
+  ; default_display = e.default_display
+  ; sensitive = e.sensitive
+  ; value_redacted = e.sensitive
+  }
+
 let provenance_to_json p =
   `Assoc
     ([ "kind", `String p.kind
@@ -121,14 +150,23 @@ let provenance_to_json p =
      else [ "derived_from", `List (List.map (fun v -> `String v) p.derived_from) ])
 
 let read_entry (e : entry) =
-  let raw_env = Sys.getenv_opt e.env_name in
-  let raw = Env_config_core.trim_opt raw_env in
-  let provenance = source_provenance e ~raw_env raw in
-  let display_value =
-    match raw with
-    | None -> None
-    | Some v when e.sensitive -> Some (mask_sensitive v)
-    | Some v -> Some v
+  let provenance, display_value =
+    match e.reader with
+    | Effective read ->
+      let value, source = read () in
+      let value = if e.sensitive then mask_sensitive value else value in
+      applied_provenance e source, Some value
+    | Raw_env ->
+      let raw_env = Sys.getenv_opt e.env_name in
+      let raw = Env_config_core.trim_opt raw_env in
+      let provenance = source_provenance e ~raw_env raw in
+      let display_value =
+        match raw with
+        | None -> None
+        | Some v when e.sensitive -> Some (mask_sensitive v)
+        | Some v -> Some v
+      in
+      provenance, display_value
   in
   `Assoc
     [ "env", `String e.env_name

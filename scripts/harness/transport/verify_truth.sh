@@ -333,8 +333,8 @@ fi
 if refreshed_transport_health_json="$(fetch_transport_health_json)"; then
   transport_health_json="$refreshed_transport_health_json"
 fi
-dashboard_grpc="$(json_bool "$transport_health_json" '.grpc as $grpc | if ($grpc | has("reachable")) then $grpc.reachable else $grpc.listening end')"
-tool_grpc="$(json_bool "$transport_status_json" '.grpc as $grpc | if ($grpc | has("reachable")) then $grpc.reachable else $grpc.listening end')"
+dashboard_grpc="$(json_bool "$transport_health_json" '.grpc.listening')"
+tool_grpc="$(json_bool "$transport_status_json" '.grpc.listening')"
 compare_truth "grpc" "$dashboard_grpc" "$tool_grpc" "$actual_grpc" \
   "tcp=127.0.0.1:${grpc_port}"
 
@@ -348,8 +348,8 @@ fi
 if refreshed_transport_health_json="$(fetch_transport_health_json)"; then
   transport_health_json="$refreshed_transport_health_json"
 fi
-dashboard_ws="$(json_bool "$transport_health_json" '.websocket as $ws | if ($ws | has("reachable")) then $ws.reachable else $ws.listening end')"
-tool_ws="$(json_bool "$transport_status_json" '.websocket as $ws | if ($ws | has("reachable")) then $ws.reachable else $ws.listening end')"
+dashboard_ws="$(json_bool "$transport_health_json" '.websocket.listening')"
+tool_ws="$(json_bool "$transport_status_json" '.websocket.listening')"
 compare_truth "websocket" "$dashboard_ws" "$tool_ws" "$actual_ws" \
   "port=${ws_port:-missing}"
 

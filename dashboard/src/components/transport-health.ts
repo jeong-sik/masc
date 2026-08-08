@@ -7,9 +7,11 @@ import { FetchScheduler } from '../lib/fetch-scheduler'
 import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from '../lib/format-time'
 import {
   fetchTransportHealth,
-  decodeTransportHealthData,
+  isTransportHealthReady,
+  parseTransportHealthData,
   type HotSession,
   type TransportHealthData,
+  type TransportHealthSnapshot,
 } from '../api/transport-health'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { TextInput } from './common/input'
@@ -34,7 +36,8 @@ type PracticalCase = {
   live: (data: TransportHealthData) => string
 }
 
-const transportHealthResource = createManagedAsyncResource<TransportHealthData>()
+const transportHealthResource = createManagedAsyncResource<TransportHealthSnapshot>()
+const transportHealthWireError = signal<string | null>(null)
 let inflightTransportHealthRefresh: Promise<void> | null = null
 
 // Module-scoped search state for the hot-sessions list (stale-filter-carryover
@@ -66,14 +69,21 @@ export function filterHotSessions(
 export function resetTransportHealthState(): void {
   inflightTransportHealthRefresh = null
   hotSessionsSearchQuery.value = ''
+  transportHealthWireError.value = null
   transportHealthResource.reset()
 }
 
 /** Hydrate transport health from a server-push payload — zero HTTP fetch. */
 export function hydrateTransportHealthFromSSE(data: unknown): void {
-  const decoded = decodeTransportHealthData(data)
-  if (!decoded) return
-  transportHealthResource.reset(decoded)
+  try {
+    const decoded = parseTransportHealthData(data)
+    transportHealthWireError.value = null
+    transportHealthResource.reset(decoded)
+  } catch (error) {
+    transportHealthResource.reset()
+    transportHealthWireError.value =
+      error instanceof Error ? error.message : String(error)
+  }
 }
 
 const PRACTICAL_CASES: PracticalCase[] = [
@@ -115,7 +125,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
     transport: 'Streamable HTTP',
     endpoint: (data) => data.streamable_http.endpoint,
     description: 'Stateless POST. 세션 불필요.',
-    live: (data) => `${formatMetricValue(data.summary.recent_messages)} recent msgs · ${formatMetricValue(data.cluster.active_operations)} active ops`,
+    live: (data) => `${data.http2.listener_mode} · ${data.streamable_http.supports_post ? 'POST ready' : 'POST unavailable'}`,
   },
 ]
 
@@ -123,7 +133,17 @@ async function refreshTransportHealth(): Promise<void> {
   if (inflightTransportHealthRefresh) return inflightTransportHealthRefresh
   inflightTransportHealthRefresh = transportHealthResource
     .load((signal) => fetchTransportHealth({ signal }))
-    .then(() => {})
+    .then((data) => {
+      if (data) {
+        transportHealthWireError.value = null
+        return
+      }
+      const refreshError = transportHealthResource.state.value.error
+      if (refreshError) {
+        transportHealthResource.reset()
+        transportHealthWireError.value = refreshError
+      }
+    })
     .finally(() => {
       inflightTransportHealthRefresh = null
     })
@@ -295,13 +315,8 @@ export function agentPoolTone(data: TransportHealthData): StatusTone {
   return data.agent_health.lifecycle_dispatch_rejections_total > 0 ? 'warn' : 'ok'
 }
 
-export function formatMetricValue(value: number | null): string | number {
-  return value === null ? 'n/a' : value
-}
-
-export function transportTruthLine(data: TransportHealthData): string | null {
+export function transportTruthLine(data: TransportHealthData): string {
   const diagnostics = data.projection_diagnostics
-  if (!diagnostics) return null
   const parts = [
     diagnostics.source,
     `cache ${diagnostics.cache_state}`,
@@ -381,18 +396,24 @@ export function TransportHealthPanel() {
   }, [])
 
   const { data, loading, error } = transportHealthResource.state.value
+  const wireError = transportHealthWireError.value
+
+  if (wireError || error) {
+    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${wireError ?? error}</div>`
+  }
 
   if (loading && !data) {
     return html`<div class="p-6 text-center text-text-muted text-sm" role="status">트랜스포트 상태 로딩 중...</div>`
   }
 
-  if (error && !data) {
-    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${error}</div>`
-  }
-
   if (!data) return null
-  if (!data.summary || !data.agent_health) {
-    return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 데이터 불완전. <${ActionButton} variant="subtle" size="sm" class="underline" onClick=${() => void refreshTransportHealth()}>재시도<//></div>`
+  const producerError = data.projection_diagnostics.stale_reason
+  if (producerError) {
+    const errorAt = data.projection_diagnostics.last_error_at
+    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${producerError}${errorAt ? ` · ${errorAt}` : ''}</div>`
+  }
+  if (!isTransportHealthReady(data)) {
+    return html`<div class="p-6 text-center text-text-muted text-sm" role="status">${data.message}</div>`
   }
 
   const sseStatus = sseTone(data)
@@ -400,35 +421,20 @@ export function TransportHealthPanel() {
   const wsStatus = websocketTone(data)
   const webrtcStatus = webrtcTone(data)
   const h2Status = http2Tone(data)
-  const clusterStatus = data.cluster.topology_available ? agentPoolTone(data) : 'warn'
-  const hasAnyBadTransport = [sseStatus, grpcStatus, wsStatus, webrtcStatus, h2Status, clusterStatus].includes('bad')
-  const clusterEyebrow = data.cluster.topology_available
-    ? `${formatMetricValue(data.cluster.live_agents)} live`
-    : data.cluster.topology_source
-  const managedUnitsSub = data.cluster.topology_available
-    ? `${formatMetricValue(data.cluster.total_units)} 전체`
-    : `topology ${data.cluster.topology_source}`
-  const namespaceChip =
-    data.cluster.cluster && data.cluster.cluster !== 'unknown' && data.cluster.cluster !== 'default'
-      ? `${data.cluster.cluster} / namespace ${data.cluster.workspace_id}`
-      : `namespace ${data.cluster.workspace_id}`
+  const agentStatus = agentPoolTone(data)
+  const hasAnyBadTransport = [sseStatus, grpcStatus, wsStatus, webrtcStatus, h2Status, agentStatus].includes('bad')
   const truthLine = transportTruthLine(data)
 
   return html`
     <div class="v2-monitoring-surface flex flex-col gap-4">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <div class="flex items-center gap-2">
-            <span class="text-base text-text-strong">트랜스포트</span>
-            <span class="text-3xs uppercase tracking-wider text-text-muted">${namespaceChip}</span>
-          </div>
+          <div class="text-base text-text-strong">트랜스포트</div>
           <div class="mt-1 text-sm text-text-body">
             primary path: <span class="font-mono text-text-strong">${data.summary.primary_path}</span>
             <span class=${`ml-2 text-2xs uppercase tracking-wider ${toneTextClass(sseStatus)}`}>${data.summary.queue_pressure}</span>
           </div>
-          ${truthLine
-            ? html`<div class="mt-1 text-2xs text-text-muted">${truthLine}</div>`
-            : null}
+          <div class="mt-1 text-2xs text-text-muted">${truthLine}</div>
         </div>
         <${ActionButton}
           variant="subtle"
@@ -451,15 +457,14 @@ export function TransportHealthPanel() {
           status=${toneToStatus(queuePressureTone(data.summary.queue_pressure))}
         />
         <${StatTile}
-          label="최근 메시지"
-          value=${formatMetricValue(data.summary.recent_messages)}
-          status="brass"
+          label="gRPC 구독자"
+          value=${String(data.grpc.subscribers)}
+          status=${toneToStatus(grpcStatus)}
         />
         <${StatTile}
-          label="Live 에이전트"
-          value=${formatMetricValue(data.cluster.live_agents)}
-          status=${toneToStatus(clusterStatus)}
-          delta=${data.cluster.active_operations ? { direction: 'flat', text: `${formatMetricValue(data.cluster.active_operations)} ops` } : undefined}
+          label="WebSocket 세션"
+          value=${String(data.websocket.sessions)}
+          status=${toneToStatus(wsStatus)}
         />
       </div>
 
@@ -547,12 +552,8 @@ export function TransportHealthPanel() {
               </div>
             <//>
 
-            <${SectionCard} label="에이전트 풀" status=${clusterStatus} eyebrow=${clusterEyebrow}>
+            <${SectionCard} label="에이전트 상태" status=${agentStatus} eyebrow=${data.agent_health.stale_total === 0 ? '정상' : `${data.agent_health.stale_total} stale`}>
               <div class="divide-y divide-card-border/50">
-                <div class="text-3xs text-text-muted mb-2">클러스터 내 관리 유닛 풀. 부실(stale) = 하트비트가 끊긴 에이전트.</div>
-                <${MetricRow} label="관리 유닛" value=${formatMetricValue(data.cluster.managed_units)} sub=${managedUnitsSub} />
-                <${MetricRow} label="활성 작업" value=${formatMetricValue(data.cluster.active_operations)} />
-                <${MetricRow} label="부실 유닛" value=${formatMetricValue(data.cluster.stale_units)} />
                 <${MetricRow} label="부실 에이전트" value=${data.agent_health.stale_total} />
                 <${MetricRow} label="라이프사이클 거부" value=${data.agent_health.lifecycle_dispatch_rejections_total} />
               </div>

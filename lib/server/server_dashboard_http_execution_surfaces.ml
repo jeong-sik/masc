@@ -9,7 +9,6 @@ type cached_surface = Server_dashboard_http_cache.cached_surface
 
 let deep_surface_cache_ttl_s = Server_dashboard_http_core_cache.deep_surface_cache_ttl_s
 let shell_surface_cache_ttl_s = Server_dashboard_http_core_cache.shell_surface_cache_ttl_s
-let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 
 (* Transport health probe timeout — env-overridable with sane bounds.
    SSOT: env_config_snapshot.ml also registers the same env var. *)
@@ -461,30 +460,11 @@ let refresh_execution_default_light_http_body ~config =
   response_json
 ;;
 
-let transport_health_query_json () =
-  `Assoc [ "default_snapshot_request", `Bool true ]
-;;
-
-let with_transport_health_metadata ~config ~timeout_s json =
-  with_cached_dashboard_surface_metadata
-    ~config
-    ~dashboard_surface:"/api/v1/dashboard/transport-health"
-    ~source:"transport_health_read_model"
-    ~scope:"dashboard_transport_health"
-    ~producer:"Transport_metrics.transport_health_json"
-    ~store_kind:"process_cache"
-    ~ttl_s:config_cache_ttl_s
-    ~timeout_s
-    ~background_refresh_interval_s:30.0
-    ~query:(transport_health_query_json ())
-    json
+let with_transport_health_metadata json =
+  extend_projection_diagnostics json [ "source", `String "cached_surface" ]
 ;;
 
 let dashboard_execution_snapshot_json () = Server_dashboard_http_cache.cached_surface_json execution_cache
-
-let dashboard_transport_health_snapshot_json () =
-  Server_dashboard_http_cache.cached_surface_json transport_health_cache
-;;
 
 (* Cache patchers project a typed lifecycle transition onto dashboard row fields
    (keepalive_running / phase / pipeline_stage / paused). Phase-derived events
@@ -931,11 +911,13 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
   in
   let compute () =
     Server_dashboard_http_cache.mark_cached_surface_attempt transport_health_cache;
-    try Transport_metrics.transport_health_json ~config:(Mcp_server.workspace_config state) with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache exn;
-      raise exn
+    Transport_metrics.transport_health_json ()
+  in
+  let broadcast_snapshot () =
+    broadcast_cached_surface
+      ~event_type:"transport_health_snapshot"
+      (Server_dashboard_http_cache.cached_surface_json transport_health_cache
+       |> with_transport_health_metadata)
   in
   let interval_s = 30.0 in
   Proactive_refresh.start
@@ -944,18 +926,17 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s) with
         timeout_s
-      ; on_error = Some (Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache)
+      ; on_error =
+          Some
+            (fun exn ->
+              Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache exn;
+              broadcast_snapshot ())
       ; warm_delay_s = 0.0
       }
     ~compute
     ~on_result:(fun json ->
       Server_dashboard_http_cache.mark_cached_surface_success transport_health_cache json;
-      broadcast_cached_surface
-        ~event_type:"transport_health_snapshot"
-        (Server_dashboard_http_cache.cached_surface_json transport_health_cache
-         |> with_transport_health_metadata
-              ~config:(Mcp_server.workspace_config state)
-              ~timeout_s))
+      broadcast_snapshot ())
 ;;
 
 let compute_execution_trust_json ~state ~sw ~clock =
@@ -1169,28 +1150,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
   |> attach_surface_envelope
 ;;
 
-let transport_health_cache_diagnostics () =
-  match Server_dashboard_http_cache.cached_surface_json transport_health_cache with
-  | `Assoc fields ->
-    (match List.assoc_opt "projection_diagnostics" fields with
-     | Some (`Assoc diagnostics) -> diagnostics
-     | _ -> [])
-  | _ -> []
-;;
-
-let dashboard_transport_health_http_json ~state =
-  let timeout_s =
-    float_of_env_default
-      "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
-      ~default:transport_health_timeout_default_s
-      ~min_v:transport_health_timeout_min_s
-      ~max_v:transport_health_timeout_max_s
-  in
-  let json = Server_dashboard_http_cache.cached_surface_json transport_health_cache in
-  extend_projection_diagnostics
-    json
-    (("source", `String "cached_surface") :: transport_health_cache_diagnostics ())
+let dashboard_transport_health_http_json ~state:_ =
+  Server_dashboard_http_cache.cached_surface_json transport_health_cache
   |> with_transport_health_metadata
-       ~config:(Mcp_server.workspace_config state)
-       ~timeout_s
 ;;

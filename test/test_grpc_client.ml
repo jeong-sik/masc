@@ -169,13 +169,12 @@ let test_status_response_roundtrip () =
 (* ====== Transport selection tests ====== *)
 
 let test_transport_from_env_default () =
-  (* When MASC_AGENT_TRANSPORT is not set, should return Local *)
   let saved = Sys.getenv_opt "MASC_AGENT_TRANSPORT" in
-  Unix.putenv "MASC_AGENT_TRANSPORT" "";
+  Unix.unsetenv "MASC_AGENT_TRANSPORT";
   let t = Masc_grpc_transport.from_env () in
   (match saved with
    | Some v -> Unix.putenv "MASC_AGENT_TRANSPORT" v
-   | None -> Unix.putenv "MASC_AGENT_TRANSPORT" "");
+   | None -> Unix.unsetenv "MASC_AGENT_TRANSPORT");
   Alcotest.(check string) "default is local"
     "local" (Masc_grpc_transport.to_string t)
 

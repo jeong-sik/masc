@@ -40,6 +40,7 @@ const hydrateOasTelemetrySample = vi.fn<(event: unknown) => void>()
 const compositeTick = signal({ name: '', ts_unix: 0 })
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
+const hydrateTransportHealthFromSSE = vi.fn<(payload: unknown) => void>()
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
 const refreshActiveKeeperChatHistory = vi.fn<(opts?: { force?: boolean }) => void>()
 const reconcileKeeperChatReceipts = vi.fn<(name: string) => Promise<void>>(async () => {})
@@ -96,6 +97,9 @@ async function loadSseStore() {
   }))
   vi.doMock('./goal-tree-state', () => ({
     hydrateGoalTreeSnapshot,
+  }))
+  vi.doMock('./components/transport-health', () => ({
+    hydrateTransportHealthFromSSE,
   }))
   vi.doMock('./keeper-runtime', () => ({
     noteKeeperChatAppended,
@@ -944,15 +948,25 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshBoard).not.toHaveBeenCalled()
   })
 
-  // Every dashboard/delta the server can emit carries an event_type: the slice is
-  // DERIVED from it by dashboard_slice_for_sse_type, so a delta with a slice and
-  // no event_type is unconstructible. These two tests used to call
-  // hydrateDashboardSlice with a slice and a hand-written payload and no
-  // event_type, which exercised the snapshot-shaped branch that #27027 deleted
-  // when it made dashboard/subscribe ACK-only. They passed either way, which is
-  // why the vocabulary rotted unnoticed.
+  // Every dashboard delta carries an event_type. This table pins the complete
+  // server mapping and the typed hydration arm selected for each event.
   it('routes every server-producible dashboard delta by its event type', async () => {
     const { sseStore } = await loadSseStore()
+
+    const transportPayload = {
+      status: 'initializing',
+      generated_at: '2026-08-08T12:00:00Z',
+      message: 'transport health warming',
+      projection_diagnostics: {
+        source: 'cached_surface',
+        cache_state: 'initializing',
+        last_success_at: null,
+        last_attempt_at: '2026-08-08T12:00:00Z',
+        last_error_at: '2026-08-08T12:00:01Z',
+        stale_reason: 'transport metric read failed',
+        stale_age_ms: null,
+      },
+    }
 
     // The full image of dashboard_slice_for_sse_type
     // (lib/server/server_mcp_transport_ws.ml). If the server gains a mapping,
@@ -967,7 +981,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
         payload: { agents: [], tasks: [], messages: [], keepers: [] } },
       { eventType: 'operator_snapshot', slice: 'operator', payload: { keepers: [] } },
       { eventType: 'operator_digest', slice: 'operator', payload: { target_type: 'namespace' } },
-      { eventType: 'transport_health_snapshot', slice: 'transport', payload: { transports: [] } },
+      { eventType: 'transport_health_snapshot', slice: 'transport', payload: transportPayload },
       { eventType: 'keeper_composite_changed', slice: 'composite',
         payload: { name: 'alpha', ts_unix: 1 } },
     ]
@@ -975,11 +989,13 @@ describe('setupServerPushReaction reconnect hydration', () => {
     for (const { eventType, slice, payload } of deltas) {
       expect(() => sseStore.hydrateDashboardSlice(slice, payload, eventType)).not.toThrow()
     }
+    await flushAsyncWork()
 
     // Not merely "did not throw": the typed arms must actually hydrate.
     expect(hydrateExecutionSnapshot).toHaveBeenCalledWith(
       { agents: [], tasks: [], messages: [], keepers: [] },
     )
+    expect(hydrateTransportHealthFromSSE).toHaveBeenCalledWith(transportPayload)
   })
 
   it('routes websocket dashboard delta event types without treating payloads as snapshots', async () => {

@@ -4,8 +4,13 @@
     Included by {!Otel_metric_store} so existing callers keep using
     [Otel_metric_store.metric_*] bindings unchanged. *)
 
-let metric_sse_sessions = Otel_metric_store_core.declare_counter "masc_sse_sessions_total"
-let metric_sse_broadcast_duration = "masc_sse_broadcast_duration_seconds"
+let metric_sse_sessions = Otel_metric_store_core.declare_gauge "masc_sse_sessions_total"
+let metric_sse_broadcast_duration =
+  Otel_metric_store_core.declare_histogram "masc_sse_broadcast_duration_seconds"
+;;
+let metric_sse_broadcast_duration_count =
+  Otel_metric_store_core.histogram_count_name metric_sse_broadcast_duration
+;;
 let metric_sse_broadcast_events = Otel_metric_store_core.declare_counter "masc_sse_broadcast_events_total"
 let metric_sse_broadcast_failures = Otel_metric_store_core.declare_counter "masc_sse_broadcast_failures_total"
 
@@ -24,19 +29,26 @@ let metric_oas_sse_relay_drop_marker_failures =
   Otel_metric_store_core.declare_counter "masc_oas_sse_relay_drop_marker_failures_total"
 ;;
 
-let metric_sse_queue_depth_avg = "masc_sse_queue_depth_avg"
-let metric_sse_queue_depth_max = "masc_sse_queue_depth_max"
-let metric_sse_external_subscribers = "masc_sse_external_subscribers_total"
+let metric_sse_queue_depth_avg = Otel_metric_store_core.declare_gauge "masc_sse_queue_depth_avg"
+let metric_sse_queue_depth_max = Otel_metric_store_core.declare_gauge "masc_sse_queue_depth_max"
+let metric_sse_external_subscribers =
+  Otel_metric_store_core.declare_gauge "masc_sse_external_subscribers_total"
+;;
 let metric_sse_client_evictions = Otel_metric_store_core.declare_counter "masc_sse_client_evictions_total"
 let metric_workspace_broadcast_duration = "masc_workspace_broadcast_duration_seconds"
 let metric_file_lock_retries = Otel_metric_store_core.declare_counter "masc_file_lock_retries_total"
 let metric_file_lock_acquire_seconds = "masc_file_lock_acquire_seconds"
-let metric_grpc_active_streams = "masc_grpc_active_streams_total"
-let metric_grpc_heartbeat_latency = "masc_grpc_heartbeat_latency_seconds"
-let metric_grpc_subscribers = Otel_metric_store_core.declare_counter "masc_grpc_subscribers_total"
+let metric_grpc_active_streams = Otel_metric_store_core.declare_gauge "masc_grpc_active_streams_total"
+let metric_grpc_heartbeat_latency =
+  Otel_metric_store_core.declare_histogram "masc_grpc_heartbeat_latency_seconds"
+;;
+let metric_grpc_heartbeat_latency_count =
+  Otel_metric_store_core.histogram_count_name metric_grpc_heartbeat_latency
+;;
+let metric_grpc_subscribers = Otel_metric_store_core.declare_gauge "masc_grpc_subscribers_total"
 let metric_grpc_events_delivered = Otel_metric_store_core.declare_counter "masc_grpc_events_delivered_total"
 let metric_grpc_events_dropped = Otel_metric_store_core.declare_counter "masc_grpc_events_dropped_total"
-let metric_ws_sessions = Otel_metric_store_core.declare_counter "masc_ws_sessions_total"
+let metric_ws_sessions = Otel_metric_store_core.declare_gauge "masc_ws_sessions_total"
 
 let metric_sidecar_schema_field_types_json_parse_failures =
   Otel_metric_store_core.declare_counter "masc_sidecar_schema_field_types_json_parse_failures_total"
@@ -120,7 +132,12 @@ let metric_cache_hits_total = Otel_metric_store_core.declare_counter "masc_cache
 let metric_cache_misses_total = Otel_metric_store_core.declare_counter "masc_cache_misses_total"
 let metric_cache_stuck_evictions_total = Otel_metric_store_core.declare_counter "masc_cache_stuck_evictions_total"
 let metric_cache_stuck_elapsed_seconds = "masc_cache_stuck_elapsed_seconds"
-let metric_ws_client_buffered_bytes = "masc_ws_client_buffered_bytes"
+let metric_ws_client_buffered_bytes =
+  Otel_metric_store_core.declare_histogram "masc_ws_client_buffered_bytes"
+;;
+let metric_ws_client_buffered_bytes_count =
+  Otel_metric_store_core.histogram_count_name metric_ws_client_buffered_bytes
+;;
 let metric_ws_client_acks = Otel_metric_store_core.declare_counter "masc_ws_client_acks_total"
 let metric_ws_throttled_deliveries = Otel_metric_store_core.declare_counter "masc_ws_throttled_deliveries_total"
 let metric_ws_slice_fanout_skipped = Otel_metric_store_core.declare_counter "masc_ws_slice_fanout_skipped_total"

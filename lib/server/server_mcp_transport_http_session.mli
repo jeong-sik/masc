@@ -159,7 +159,6 @@ val get_session_id_query : string -> string option
     Returns [None] when not found.  Both casings are accepted
     as a backward-compat alias. *)
 
-val capitalize_ascii : string -> string
 val title_case_header_name : string -> string
 (** Internal but exposed because the {!get_header_any_case}
     fallback chain (lower → title-case → upper) depends on

@@ -8,21 +8,17 @@
     - [masc_ws_*] for WebSocket transport
     - [masc_agent_heartbeat_*] for agent liveness
 
-    Internal: 35 helpers stay private — [sse_hot_sessions]
-    (Atomic.t state cell mutated by {!set_sse_queue_snapshot}),
-    [grpc_runtime_listening] / [ws_runtime_listening] (bool
-    Atomic.t cells mutated by the [set_*_runtime_listening]
-    functions), [grpc_enabled] /
-    [grpc_port] / [ws_port] (env-derived), [set_agent_heartbeat_age]
-    / [inc_agent_stale] (per-agent labels, internal-only), the
-    JSON helpers ([int_field], [int_field_opt],
-    [int_option_json], [workspace_id_from_config], [cluster_summary_json]),
-    [http_listener_mode], [primary_path], [queue_pressure],
-    [tcp_port_reachable], [hot_session_json], the
-    [ws_delivery_metric_names] data table + its type.  All
-    consumed only inside {!transport_health_json}'s pipeline. *)
+    Internal state cells and JSON projection helpers stay private; the typed
+    mutation and snapshot functions below are the public boundary. *)
 
 (** {1 SSE hot-queue snapshot} *)
+
+type sse_session_kind =
+  | Observer
+  | Agent_stream
+  | Presence
+
+val sse_session_kind_to_string : sse_session_kind -> string
 
 (** Per-session snapshot recorded into the SSE hot-queue
     Atomic ref by {!set_sse_queue_snapshot}.  Concrete record
@@ -30,7 +26,7 @@
     transport-health JSON renderer + tests). *)
 type hot_queue_session =
   { session_id : string
-  ; kind : string
+  ; kind : sse_session_kind
   ; queue_depth : int
   ; last_event_id : int
   ; idle_seconds : float
@@ -39,9 +35,8 @@ type hot_queue_session =
 (** {1 SSE metrics} *)
 
 (** [set_sse_sessions ~kind count] sets the [masc_sse_sessions]
-    gauge labelled with [kind] (typically ["observer"] /
-    ["agent_stream"]). *)
-val set_sse_sessions : kind:string -> int -> unit
+    gauge labelled with the canonical session kind. *)
+val set_sse_sessions : kind:sse_session_kind -> int -> unit
 
 (** [observe_broadcast_duration ?target seconds] records a
     broadcast histogram observation AND increments
@@ -309,15 +304,12 @@ val inc_agent_stale : unit -> unit
 
 (** {1 Transport health snapshot} *)
 
-(** [transport_health_json ~config] returns a JSON object with
+(** [transport_health_json ()] returns a JSON object with
     SSE / gRPC / WebSocket / agent-health metric values plus
     derived fields ([primary_path], [queue_pressure],
     [http_listener_mode]).  Reads metric values via
-    [Otel_metric_store.metric_value_or_zero] — never raises on missing
-    metrics.  [~config] is currently used for workspace-id
-    derivation; [cluster_summary_json] is intentionally [None]
-    to keep transport health metrics-only (no Workspace I/O). *)
-val transport_health_json : config:Workspace.config -> Yojson.Safe.t
+    [Otel_metric_store.metric_value_or_zero] and performs no Workspace I/O. *)
+val transport_health_json : unit -> Yojson.Safe.t
 
 val register_webrtc_metrics :
   is_enabled:(unit -> bool) ->

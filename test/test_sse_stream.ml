@@ -7,6 +7,8 @@
 
 open Masc
 
+module U = Yojson.Safe.Util
+
 let reset () = ignore (Sse.close_all_clients ())
 
 let _dummy_push _s = ()
@@ -328,6 +330,21 @@ let test_register_defaults_to_agent_stream ~auth () =
   Alcotest.(check bool) "default does not receive Observers" true (got2 = None);
   Sse.unregister "s-default"
 
+let test_idle_session_is_not_hot ~auth () =
+  reset ();
+  ignore (register_exn ~auth ~kind:Observer "s-idle-hot-probe" ~last_event_id:0);
+  Fun.protect
+    ~finally:(fun () -> Sse.unregister "s-idle-hot-probe")
+    (fun () ->
+      Sse.sync_transport_snapshot ~force:true ();
+      let hot_sessions =
+        Transport_metrics.transport_health_json ()
+        |> U.member "sse"
+        |> U.member "hot_sessions"
+        |> U.to_list
+      in
+      Alcotest.(check int) "idle sessions are not hot" 0 (List.length hot_sessions))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -380,5 +397,10 @@ let () =
               Alcotest.test_case "non-JSON-RPC skips agent_streams" `Quick
                 (test_non_jsonrpc_broadcast_does_not_reach_agent_streams ~auth);
               Alcotest.test_case "default kind is Agent_stream" `Quick (test_register_defaults_to_agent_stream ~auth);
+            ] );
+          ( "transport_snapshot",
+            [
+              Alcotest.test_case "idle session is not hot" `Quick
+                (test_idle_session_is_not_hot ~auth);
             ] );
         ])

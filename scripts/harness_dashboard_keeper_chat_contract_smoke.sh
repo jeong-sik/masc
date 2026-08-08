@@ -192,16 +192,14 @@ if [ -x "$SERVER_EXE" ]; then
     MASC_BASE_PATH="$BASE_PATH" \
     MASC_CONFIG_DIR="$BASE_PATH/.masc/config" \
     MASC_ORCHESTRATOR_ENABLED=false \
-    MASC_AUTONOMY_ENABLED=false \
-    MASC_DASHBOARD_BRIEFING_MODELS=disabled \
+    MASC_KEEPER_AUTONOMOUS_ENABLED=false \
     "$SERVER_EXE" --port "$PORT" --base-path "$BASE_PATH" >"$SERVER_LOG" 2>&1 &
 else
   nohup env \
     MASC_BASE_PATH="$BASE_PATH" \
     MASC_CONFIG_DIR="$BASE_PATH/.masc/config" \
     MASC_ORCHESTRATOR_ENABLED=false \
-    MASC_AUTONOMY_ENABLED=false \
-    MASC_DASHBOARD_BRIEFING_MODELS=disabled \
+    MASC_KEEPER_AUTONOMOUS_ENABLED=false \
     "$REPO_ROOT/start-masc.sh" --port "$PORT" --base-path "$BASE_PATH" >"$SERVER_LOG" 2>&1 &
 fi
 SERVER_PID=$!
@@ -209,6 +207,12 @@ log "server_pid=$SERVER_PID log=$SERVER_LOG"
 
 if ! wait_for_http "http://${HOST}:${PORT}/health" "$SERVER_WAIT_SEC"; then
   echo "MASC server did not become healthy. See $SERVER_LOG" >&2
+  exit 1
+fi
+
+HEALTH_FULL="$(curl -fsS --max-time 10 "http://${HOST}:${PORT}/health?full=1")"
+if ! node -e 'const h=JSON.parse(process.argv[1]); if (h.keeper_fibers !== 0) { console.error(`expected keeper_fibers=0, got ${JSON.stringify(h.keeper_fibers)}`); process.exit(1); }' "$HEALTH_FULL"; then
+  echo "Keeper autonomous kill-switch did not prevent fibers. See $SERVER_LOG" >&2
   exit 1
 fi
 

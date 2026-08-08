@@ -84,8 +84,13 @@ let emit_persistence_utf8_repair_metric () =
   match Atomic.get persistence_utf8_repair_metric_hook with
   | None -> ()
   | Some hook ->
-      (try hook ()
-       with exn ->
+      (try hook () with
+       | Eio.Cancel.Cancelled _ as e ->
+         (* A metric hook runs inside the caller's fiber. Absorbing
+            [Cancelled] here would leave the switch waiting on a fiber that
+            already decided to stop. Same treatment as [protect] above. *)
+         Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+       | exn ->
          Log.Misc.warn
            "persistence UTF-8 repair metric hook failed: %s"
            (Printexc.to_string exn))

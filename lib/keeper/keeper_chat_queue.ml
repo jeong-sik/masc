@@ -1108,7 +1108,13 @@ let strict_stored_receipt_of_wire wire =
             if String.equal canonical wire
             then Ok receipt
             else Error "chat queue receipt JSON is not canonical or has unknown fields"))
-  with exn -> Error ("chat queue receipt JSON decode failed: " ^ Printexc.to_string exn)
+  with
+  | Eio.Cancel.Cancelled _ as e ->
+    (* Cancellation is not a decode failure. Turning it into [Error] hands the
+       caller a value it will treat as malformed input and keeps the fiber
+       running. *)
+    Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+  | exn -> Error ("chat queue receipt JSON decode failed: " ^ Printexc.to_string exn)
 
 let state_kind_and_lease = function
   | Stored_pending _ -> "pending", None
@@ -1492,7 +1498,10 @@ let initialize_database db path =
     (try
        Keeper_fs_durable_directory.fsync_directory (Filename.dirname path);
        Ok ()
-     with exn ->
+     with
+     | Eio.Cancel.Cancelled _ as e ->
+       Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+     | exn ->
        Error
          ("failed to durably publish chat queue database file: "
           ^ Printexc.to_string exn))
@@ -1580,7 +1589,10 @@ let close_database handle =
       if Sqlite3.db_close handle.db
       then Ok ()
       else Error "SQLite database close reported a busy handle"
-    with exn -> Error ("SQLite database close failed: " ^ Printexc.to_string exn)
+    with
+    | Eio.Cancel.Cancelled _ as e ->
+      Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+    | exn -> Error ("SQLite database close failed: " ^ Printexc.to_string exn)
   in
   (* Same GC-liveness pin as [sqlite_finalize]: [caml_sqlite3_close]
      also releases the runtime around [sqlite3_close] and nulls the
@@ -1617,7 +1629,10 @@ let open_database ~ownership_root ~path ~create_if_missing ~schema_validation =
           (match missing with
            | true -> Sqlite3.db_open ~mutex:`FULL path
            | false -> Sqlite3.db_open ~mode:`NO_CREATE ~mutex:`FULL path)
-      with exn -> Error ("SQLite database open failed: " ^ Printexc.to_string exn)
+      with
+      | Eio.Cancel.Cancelled _ as e ->
+        Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+      | exn -> Error ("SQLite database open failed: " ^ Printexc.to_string exn)
     in
     match db_result with
     | Error _ as error -> error

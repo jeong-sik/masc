@@ -1631,10 +1631,7 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~id:"keeper.surface.post"
       ~name:"keeper_surface_post"
-      ~description:
-        "Post a message to one conversation endpoint: 'dashboard' (appears \
-         in the operator's chat transcript) or 'discord' (sends to the bound \
-         channel). Posting to an unbound surface is an error."
+      ~description:Tool_shard_types.keeper_surface_post_description
       ~input_schema:surface_post_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_surface_post

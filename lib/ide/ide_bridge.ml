@@ -465,7 +465,10 @@ let ingest_tool_event
       }
   in
   (try append_event ~base_dir:base_path ~partition ~event
-   with exn ->
+   with
+   | Eio.Cancel.Cancelled _ as e ->
+     Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+   | exn ->
      Printf.eprintf "Ide_bridge.ingest_tool_event error: %s\n%!" (Printexc.to_string exn))
 
 let ingest_turn_event
@@ -500,7 +503,10 @@ let ingest_turn_event
       }
   in
   (try append_event ~base_dir:base_path ~partition ~event
-   with exn ->
+   with
+   | Eio.Cancel.Cancelled _ as e ->
+     Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+   | exn ->
      Printf.eprintf "Ide_bridge.ingest_turn_event error: %s\n%!" (Printexc.to_string exn))
 
 let cursor_file_path_of_input input =

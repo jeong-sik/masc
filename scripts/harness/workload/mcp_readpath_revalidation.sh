@@ -134,7 +134,6 @@ start_mode_server() {
   esac
 
   (
-    export MASC_DASHBOARD_BRIEFING_MODELS="disabled"
     export MASC_GRPC_ENABLED="$grpc_enabled"
     export MASC_GRPC_PORT="$grpc_port"
     export MASC_WS_ENABLED="$ws_enabled"

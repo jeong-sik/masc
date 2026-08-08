@@ -263,10 +263,9 @@ harness_start_server() {
     unset MCP_AUTH_TOKEN
     unset MASC_ADMIN_TOKEN
     unset MASC_TOKEN
-    export MASC_AUTONOMY_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_OTEL_ENABLED="0"
-    export MASC_TOOL_TIMEOUT_DEFAULT_SEC="${MASC_TOOL_TIMEOUT_DEFAULT_SEC:-90}"
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     exec "$server_exe" --port "$port" --base-path "$base_path"

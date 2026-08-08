@@ -18,7 +18,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { AgentAvatar } from './agent-avatar'
-import { SCHED_TERMINAL_NORMALIZED } from '../v2/schedule-constants'
+import { SCHED_TERMINAL_SET } from '../v2/schedule-constants'
 import { tasks, keepers, boardPosts, boardTotal, lastBoardRefreshAt, goals, fusionRuns } from '../../store'
 import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
 import type {
@@ -257,15 +257,10 @@ export interface OverviewScheduledAutomationDigest {
   tone: 'ok' | 'warn' | 'bad' | 'volt'
 }
 
-function normalizeScheduleStatus(value: string | undefined): string {
-  return value?.trim().toLowerCase() ?? ''
-}
-
 function requestCountByStatus(requests: readonly DashboardScheduledAutomationRequest[], target: string): number {
-  const key = normalizeScheduleStatus(target)
   let count = 0
   for (const request of requests) {
-    if (normalizeScheduleStatus(request.status) === key) count += 1
+    if (request.status === target) count += 1
   }
   return count
 }
@@ -287,17 +282,16 @@ function requestCountByProjectionCount(
   counts: Record<string, number> | undefined,
   target: string,
 ): number {
-  const key = normalizeScheduleStatus(target)
-  const projected = counts?.[key]
+  const projected = counts?.[target]
   if (typeof projected === 'number' && Number.isFinite(projected)) {
     return projected
   }
-  return requestCountByStatus(requests, key)
+  return requestCountByStatus(requests, target)
 }
 
 function sumTerminalCountFromProjection(counts: Record<string, number> | undefined): number {
   let sum = 0
-  for (const terminalStatus of SCHED_TERMINAL_NORMALIZED) {
+  for (const terminalStatus of SCHED_TERMINAL_SET) {
     const n = counts?.[terminalStatus]
     if (typeof n === 'number' && Number.isFinite(n)) sum += n
   }

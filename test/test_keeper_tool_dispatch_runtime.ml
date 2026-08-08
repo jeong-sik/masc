@@ -3473,6 +3473,47 @@ let terminal_surface_post tools =
   | None -> fail "keeper_surface_post missing from Keeper tool bundle"
 ;;
 
+let test_surface_post_bundle_names_reader_and_repeat_cost () =
+  with_exec_fixture
+    "surface_post_model_description"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let bundle =
+         Masc.Keeper_tools_oas_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       let description =
+         (terminal_surface_post bundle.tools).Agent_sdk.Tool.schema.description
+       in
+       let help_description =
+         match
+           List.find_opt
+             (fun (schema : Masc_domain.tool_schema) ->
+                String.equal schema.name "keeper_surface_post")
+             Tool_shard_types.surface_tools
+         with
+         | Some schema -> schema.description
+         | None -> fail "keeper_surface_post missing from help schema projection"
+       in
+       check string
+         "help and OAS projections use the same description"
+         help_description
+         description;
+       List.iter
+         (fun phrase ->
+            check bool
+              (Printf.sprintf "projected description contains %S" phrase)
+              true
+              (contains_substring description phrase))
+         [ "read by a person"
+         ; "unchanged status reposted every cycle"
+         ; "the turn ends without a post"
+         ])
+;;
+
 let test_invalid_surface_post_input_stays_correction_capable () =
   with_exec_fixture
     ~bind_eio_context:true
@@ -4115,5 +4156,7 @@ let () =
         test_catalog_metadata_does_not_infer_oas_descriptors;
       test_case "model-visible aliases do not infer OAS descriptors" `Quick
         test_model_visible_tools_do_not_infer_oas_descriptors;
+      test_case "surface post description reaches the OAS bundle" `Quick
+        test_surface_post_bundle_names_reader_and_repeat_cost;
     ]);
   ]

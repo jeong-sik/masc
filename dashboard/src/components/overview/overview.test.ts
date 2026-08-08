@@ -23,6 +23,7 @@ import {
 } from './overview'
 import type {
   DashboardScheduledAutomation,
+  DashboardScheduledAutomationRequest,
   DashboardToolsResponse,
   DashboardScheduleRunnerStatus,
   FusionRunRecord,
@@ -940,6 +941,25 @@ describe('computeOverviewDigest', () => {
     expect(digest.scheduledAutomation.unsupportedPayloadCount).toBe(2)
     expect(digest.scheduledAutomation.unknownPayloadCount).toBe(3)
     expect(digest.scheduledAutomation.tone).toBe('warn')
+  })
+
+  it('does not normalize invalid schedule status wire values', () => {
+    const digest = computeOverviewDigest(
+      0,
+      [],
+      [],
+      makeScheduledAutomation({
+        counts: {},
+        requests: [
+          {
+            schedule_id: 'status-skew',
+            status: ' Scheduled ' as DashboardScheduledAutomationRequest['status'],
+            source: 'operator',
+          },
+        ],
+      }),
+    )
+    expect(digest.scheduledAutomation.scheduledCount).toBe(0)
   })
 
   it('summarizes schedule runner status from /health as a digest field', () => {

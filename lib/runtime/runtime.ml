@@ -112,40 +112,12 @@ let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
   List.find_opt (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
 ;;
 
-(* One admission path for every [runtime] field that names a routing target.
-   Three validators — keeper assignments, the per-route ids, and the
-   media_failover list — answered one question, "does this id resolve to
-   something a consumer can route to", and had drifted into three resolution
-   domains and three error shapes for it. The turn driver reaches all three
-   through the same lane-aware dispatch, so a single parse is what the
-   runtime-indifference spec asks for; three parses is how they diverge.
-
-   The domain travels with the reference rather than with the call, because it is
-   a property of the field's consumer, not of the validation phase:
-
-   - [Runtime_only] for keeper assignments and media_failover entries.
-     runtime.mli documents the assignment snapshot as ids that resolve to a
-     configured runtime, and Keeper_vision_tool looks media_failover entries up
-     among runtimes (keeper_vision_tool.ml:82-89). Admitting a lane id at either
-     site would load a config its consumer cannot route.
-   - [Lane_then_runtime] for the route ids, mirroring [resolve_assignment]
-     (:1341-1348): a lane shadows a same-named runtime, so validation must judge
-     the target the consumer will actually get.
-
-   [None] stays the designed "inherit [runtime].default" case for a route, [[]]
-   the designed "derive capable runtimes from declared capabilities" case for
-   media_failover, and a keeper absent from the assignment table still falls back
-   at lookup time. An unknown id remains an operator typo rejected at load rather
-   than a silent fallback (Unknown -> Permissive anti-pattern).
-
-   Removed with the merge: [Declares_capability] and its lane-candidate helper.
-   #25719 dropped the last capability requirement after finding neither consumer
-   requests a wire response format, leaving a variant with match arms and no
-   construction site — dead weight that reads as an available option. The tool
-   channel it could not express is refused by OAS at dispatch through
-   candidate_rejection_disposition (oas/lib/llm_provider/exact_output.mli:126-132),
-   which is pre-dispatch and therefore failover-eligible: ordering rather than
-   exclusion, which is what the spec asks for. *)
+(* Each [runtime] reference is validated under its field's admission contract:
+   - [Runtime_only] requires a declared runtime id for keeper assignments and
+     media_failover entries. Assignment execution may still resolve a
+     same-named lane first.
+   - [Lane_then_runtime] admits a declared lane or runtime id for route ids.
+   Unknown ids are rejected while loading the configuration. *)
 type reference_domain =
   | Runtime_only
   | Lane_then_runtime

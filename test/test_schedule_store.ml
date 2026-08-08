@@ -845,6 +845,80 @@ let test_prune_does_not_bind_orphan_receipt_to_reused_public_id () =
     (List.length state.wakes)
 ;;
 
+let rejection_error = function
+  | Ok _ -> None
+  | Error error -> Some error
+;;
+
+let test_contract_vocabularies_own_strings_and_errors () =
+  let cases =
+    [ ("actor_kind",
+       [ "human_operator"; "automated_actor"; "system" ],
+       Schedule_contract_values.actor_kind_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.actor_kind_of_string v)),
+       rejection_error (Schedule_contract_values.actor_kind_of_string "nope"))
+    ; ("schedule_status",
+       [ "scheduled"; "due"; "running"; "succeeded"; "failed"; "cancelled"; "expired" ],
+       Schedule_contract_values.schedule_status_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.schedule_status_of_string v)),
+       rejection_error (Schedule_contract_values.schedule_status_of_string "nope"))
+    ; ("schedule_source",
+       [ "operator_request"; "automated_request"; "system_request" ],
+       Schedule_contract_values.schedule_source_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.schedule_source_of_string v)),
+       rejection_error (Schedule_contract_values.schedule_source_of_string "nope"))
+    ; ("recurrence_kind",
+       [ "one_shot"; "interval"; "daily"; "cron" ],
+       Schedule_contract_values.recurrence_kind_strings,
+       (fun v ->
+          Result.is_ok (Schedule_contract_values.recurrence_kind_of_string v)),
+       rejection_error
+         (Schedule_contract_values.recurrence_kind_of_string "nope"))
+    ; ("wake_status",
+       [ "running"; "succeeded"; "failed" ],
+       Schedule_contract_values.wake_status_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.wake_status_of_string v)),
+       rejection_error (Schedule_contract_values.wake_status_of_string "nope"))
+    ]
+  in
+  List.iter
+    (fun (field, expected, contract_strings, decodes, rejection) ->
+      check (list string)
+        (Printf.sprintf "%s has one canonical wire vocabulary" field)
+        expected
+        contract_strings;
+      match rejection with
+      | None -> Alcotest.failf "%s must reject \"nope\"" field
+      | Some error ->
+        check string
+          (Printf.sprintf "%s names its field" field)
+          field
+          error.Schedule_contract_values.field;
+        check string
+          (Printf.sprintf "%s carries the rejected value" field)
+          "nope"
+          error.rejected;
+        check (list string)
+          (Printf.sprintf "%s carries exactly its accepted set" field)
+          expected
+          error.accepted;
+        check string
+          (Printf.sprintf "%s renders one correction hint" field)
+          (Printf.sprintf
+             "unknown %s: nope; accepted: %s"
+             field
+             (String.concat ", " expected))
+          (Schedule_contract_values.decode_error_to_string error);
+        List.iter
+          (fun value ->
+            check bool
+              (Printf.sprintf "%s offers %s, which decodes" field value)
+              true
+              (decodes value))
+          error.accepted)
+    cases
+;;
+
 let () =
   run "Schedule_store"
     [
@@ -924,6 +998,8 @@ let () =
             "prune scopes wake receipt ownership by schedule instance"
             `Quick
             test_prune_does_not_bind_orphan_receipt_to_reused_public_id;
+          test_case "contract vocabularies own strings and errors" `Quick
+            test_contract_vocabularies_own_strings_and_errors;
         ] );
     ]
 ;;

@@ -4329,7 +4329,7 @@ let test_main_eio_serves_health_before_lazy_startup () =
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
-            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
@@ -4378,7 +4378,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
-            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
             ("MASC_USE_H2", "0");
@@ -4544,7 +4544,7 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
-            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
             ("MASC_USE_H2", "0");
@@ -4737,7 +4737,7 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
-            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
             ("MASC_USE_H2", "0");
@@ -4821,7 +4821,7 @@ let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
-            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
             ("MASC_USE_H2", "0");
@@ -4893,7 +4893,7 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
-            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
             ("MASC_USE_H2", "0");
@@ -4964,7 +4964,7 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
-            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
             ("MASC_USE_H2", "0");

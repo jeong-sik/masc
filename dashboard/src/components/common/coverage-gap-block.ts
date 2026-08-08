@@ -15,8 +15,8 @@ export type CoverageErrorHint = {
 }
 
 // Substring vocabulary mirrors backend SSOT in
-// `lib/keeper_disk_pressure.ml` (`is_disk_exhaustion_text`) so the
-// dashboard reaches the same classification the runtime already acts on.
+// `lib/core/system_error_class.ml` (`disk_needles`) so the dashboard
+// reaches the same classification the runtime already acts on.
 // Add new patterns here only when (a) backend has a matching typed
 // detector, and (b) there is a canonical RFC describing the operator
 // remediation.
@@ -47,8 +47,8 @@ export function classifyCoverageError(error: string | null | undefined): Coverag
       href: 'https://github.com/jeong-sik/masc/blob/main/docs/rfc/RFC-0097-keeper-sandbox-container-reuse.md',
     }
   }
-  // RFC-0122: keeper disk pressure circuit breaker — mirrors backend
-  // detector at `lib/keeper_disk_pressure.ml:55` which trips spawn slot
+  // RFC-0122: keeper disk pressure circuit breaker — mirrors the backend
+  // detector in `lib/core/system_error_class.ml` which trips spawn slot
   // admission on these substrings.
   if (DISK_EXHAUSTION_NEEDLES.some(needle => lower.includes(needle))) {
     return {

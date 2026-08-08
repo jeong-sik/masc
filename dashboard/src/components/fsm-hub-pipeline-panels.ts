@@ -224,7 +224,7 @@ function PhaseSparkline({
 
 /** Human-readable descriptions for sub-FSM states.
  *  Keys match the wire format from `keeper_composite_observer.ml` exactly:
- *    KSM phase via `phase_to_string` (lib/keeper/keeper_state_machine.ml:21-35) — lowercase + snake_case.
+ *    KSM phase via `phase_to_string` (lib/keeper_registry/keeper_state_machine.ml:21-35) — lowercase + snake_case.
  *    KTC/KDP/KCL/KMC via the per-axis to_string fns (lib/keeper/keeper_composite_observer.ml:141-201) — lowercase.
  *  Shown as native title tooltips on hover. */
 const STATE_DESCRIPTIONS: Record<string, string> = {

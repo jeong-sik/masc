@@ -105,7 +105,7 @@ export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 
 // reason/reason_code fields so dashboards can trace causality without breaking
 // consumers that don't understand the envelope.
 //
-// OCaml SSOT: lib/attribution.mli (since 2.261.0).
+// OCaml SSOT: lib/attribution/attribution.mli (since 2.261.0).
 // AttributionOutcome is a discriminated union on 'kind' — each variant
 // carries exactly the fields relevant to that outcome (no optional fields
 // shared across variants).
@@ -234,7 +234,7 @@ export interface SSEEvent {
   run_id?: string
   // Gate attribution envelope — structured verdict metadata. Emitters
   // attach this alongside existing reason/reason_code fields since 2.261.0.
-  // See lib/attribution.mli for OCaml SSOT and evidence schema per gate.
+  // See lib/attribution/attribution.mli for OCaml SSOT and evidence schema per gate.
   attribution?: Attribution
   // Global audit ledger fields (O2 Phase 2 — masc.audit_event)
   audit_id?: string

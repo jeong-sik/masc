@@ -121,7 +121,7 @@ export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
   const status = lowerToken(keeper.status)
   // RFC-0139 PR-2: the `'stopped'` status token is emitted from
   // `Keeper_state_machine.phase_to_string`
-  // (lib/keeper/keeper_lifecycle_events.ml:74) when only the
+  // (lib/keeper_registry/keeper_lifecycle_events.ml:74) when only the
   // wire-format status string is in hand (no PascalCase phase yet).
   // The legacy `lib/status-utils.isOfflineStatus` recognised it; folded
   // in here so `isOfflineStatus` can be retired as strict-subset

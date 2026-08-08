@@ -453,7 +453,7 @@ describe('classifyCoverageError', () => {
   })
 
   it('detects disk-pressure substrings shared with backend SSOT', () => {
-    // Mirrors lib/keeper_disk_pressure.ml `is_disk_exhaustion_text` vocabulary
+    // Mirrors lib/keeper_runtime/keeper_disk_pressure.ml `is_disk_exhaustion_text` vocabulary
     expect(classifyCoverageError('disk full')?.reason).toBe('disk_exhaustion')
     expect(classifyCoverageError('ENOSPC on append')?.reason).toBe('disk_exhaustion')
     expect(classifyCoverageError('Disk quota exceeded')?.reason).toBe('disk_exhaustion')

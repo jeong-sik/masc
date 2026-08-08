@@ -14,8 +14,8 @@ interface OasAgentEventBase {
 }
 
 // `phase` is the keeper FSM phase at emit time. Backend emits the
-// lowercase wire form via `Keeper_state_machine.phase_to_string`
-// (lib/runtime/runtime_events.ml:170–179); the factory in
+// lowercase wire form via `phase_to_string` in
+// `lib/keeper_registry/keeper_state_machine_phase.ml`; the factory in
 // `oas-runtime-store.ts` normalizes it to the canonical PascalCase
 // `KeeperPhase` so consumers don't carry around two casing forms.
 // `null` means either the lifecycle event genuinely had no phase

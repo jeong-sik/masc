@@ -294,7 +294,7 @@ function scheduleBoardHearthsRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
 // catches edits whose per-call event was coalesced). All already reach the
 // dashboard live; the IDE just never listened. keeper_tool_call already exists
 // in the fixed event-type allowlist (schemas/sse.ts) and is broadcast by
-// lib/keeper_tools_oas_handler_telemetry.ml.
+// lib/keeper/keeper_tools_oas_handler_telemetry.ml.
 const IDE_WORKSPACE_REFRESH_EVENTS = new Set([
   'keeper_tool_call',
   'keeper_tool_skipped',

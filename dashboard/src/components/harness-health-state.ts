@@ -50,7 +50,7 @@ export interface HarnessVerdictItem {
   gate: string
   verdict: string
   evaluator_runtime: string
-  // Added by lib/tool_task.ml#build_verdict_sse_payload as part of #6565.
+  // Emitted by `lib/eval_calibration.ml` with the calibration verdict.
   generator_runtime?: string | null
   cross_runtime?: boolean
   fallback_reason?: string | null

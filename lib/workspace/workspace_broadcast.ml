@@ -67,7 +67,7 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
   in
   ensure_initialized config;
 
-  (* RFC-0061: preserve original content and extract mention tokens BEFORE
+  (* Preserve original content and extract mention tokens BEFORE
      any fleet-wide invariant rewrite. This prevents stage-1 wake signal loss
      when [cache_invalidated] replaces the original broadcast text. *)
   let pre_extract_mention = Mention.extract content in

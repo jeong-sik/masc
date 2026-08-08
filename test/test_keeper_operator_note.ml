@@ -69,6 +69,28 @@ let test_renders_once_then_never_again () =
     | Some _ -> Alcotest.fail "a consumed note must not render on the next turn")
 ;;
 
+(* mark_consumed used to swallow every read error the same way it swallows
+   "there is no note". An unreadable note then left no trace at all, while the
+   save arm beside it reports its failures. *)
+let test_consumption_is_quiet_only_when_there_is_no_note () =
+  with_workspace (fun config ->
+    (* No note: the ordinary case, and nothing to report. *)
+    Note.mark_consumed ~config ~keeper ~absolute_turn:1;
+    (match Note.read ~config ~keeper with
+     | Error Note.No_note -> ()
+     | Error other ->
+       Alcotest.failf "expected No_note, got %s" (Note.read_error_to_string other)
+     | Ok _ -> Alcotest.fail "no note was written");
+    (* An invalid keeper name is a read error, not an absent note. It must not
+       reach the same arm. *)
+    Note.mark_consumed ~config ~keeper:"../escape" ~absolute_turn:2;
+    match Note.read ~config ~keeper:"../escape" with
+    | Error (Note.Read_unknown_keeper _) -> ()
+    | Error other ->
+      Alcotest.failf "expected Read_unknown_keeper, got %s" (Note.read_error_to_string other)
+    | Ok _ -> Alcotest.fail "an invalid keeper name must not read a note")
+;;
+
 (* Deleting the note on consumption would make these two states identical, and
    the first thing an operator asks is whether it went in. *)
 let test_consumption_leaves_a_delivery_record () =
@@ -185,7 +207,9 @@ let () =
   Alcotest.run
     "keeper operator note"
     [ ( "lifetime"
-      , [ Alcotest.test_case "renders once then never again" `Quick
+      , [ Alcotest.test_case "consumption is quiet only when there is no note" `Quick
+            test_consumption_is_quiet_only_when_there_is_no_note
+        ; Alcotest.test_case "renders once then never again" `Quick
             test_renders_once_then_never_again
         ; Alcotest.test_case "consumption leaves a delivery record" `Quick
             test_consumption_leaves_a_delivery_record

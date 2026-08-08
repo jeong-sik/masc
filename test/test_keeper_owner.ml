@@ -3,6 +3,7 @@ open Masc
 
 module Reducer = Keeper_owner_reducer
 module Owner = Keeper_owner
+module Owner_registry = Keeper_owner_registry
 
 let make_meta name =
   match
@@ -76,7 +77,7 @@ let test_actor_concurrent_commands_are_exact () =
   let owner =
     Owner.start
       ~sw
-      ~store:{ replace = (fun _ -> Ok ()); remove = (fun () -> Ok ()) }
+      ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
       ~initial_meta:(Some (make_meta "concurrent"))
   in
   let commands =
@@ -116,7 +117,7 @@ let test_mailbox_backpressures_without_drop () =
              Eio.Promise.resolve resolve_replace_entered ();
              Eio.Promise.await release_replace);
            Ok ())
-    ; remove = (fun () -> Ok ())
+    ; remove = (fun _ -> Ok ())
     }
   in
   let owner = Owner.start ~sw ~store ~initial_meta:(Some (make_meta "mailbox")) in
@@ -170,7 +171,7 @@ let rec await_idle clock owner remaining =
 let test_child_isolation_and_per_keeper_parallelism () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let store = { Owner.replace = (fun _ -> Ok ()); remove = (fun () -> Ok ()) } in
+  let store = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
   let owner_a = Owner.start ~sw ~store ~initial_meta:(Some (make_meta "a")) in
   let owner_b = Owner.start ~sw ~store ~initial_meta:(Some (make_meta "b")) in
   let child_a_started, resolve_child_a_started = Eio.Promise.create () in
@@ -231,7 +232,7 @@ let test_store_failure_is_precommit () =
       ~sw
       ~store:
         { replace = (fun _ -> Error "disk unavailable")
-        ; remove = (fun () -> Error "disk unavailable")
+        ; remove = (fun _ -> Error "disk unavailable")
         }
       ~initial_meta:(Some (make_meta "store-failure"))
   in
@@ -255,7 +256,7 @@ let test_stopping_rejects_new_commands () =
   let owner =
     Owner.start
       ~sw
-      ~store:{ replace = (fun _ -> Ok ()); remove = (fun () -> Ok ()) }
+      ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
       ~initial_meta:(Some (make_meta "stopping"))
   in
   ignore (owner_ok (Owner.begin_stopping owner));
@@ -267,6 +268,67 @@ let test_stopping_rejects_new_commands () =
    | Error (Owner.Reducer_rejected Reducer.Owner_stopping) -> ()
    | Error error -> fail ("wrong stopping error: " ^ Owner.error_to_string error)
    | Ok _ -> fail "stopping owner accepted metadata mutation")
+;;
+
+let temp_dir () =
+  let path = Filename.temp_file "keeper-owner-registry-" "" in
+  Unix.unlink path;
+  Unix.mkdir path 0o755;
+  path
+;;
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then if Sys.is_directory path
+    then (
+      Array.iter
+        (fun child -> remove_tree (Filename.concat path child))
+        (Sys.readdir path);
+      Unix.rmdir path)
+    else Unix.unlink path
+;;
+
+let test_root_inventory_loads_and_extends_exactly_once () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "owner-test"));
+       let first = make_meta "inventory-first" in
+       (match Keeper_meta_store.persist_meta config first.name first with
+        | Ok () -> ()
+        | Error detail -> fail ("failed to seed owner meta: " ^ detail));
+       (match Owner_registry.install_from_store ~sw config with
+        | Ok count -> check int "strict startup owner count" 1 count
+        | Error error -> fail (Owner_registry.install_error_to_string error));
+       let loaded =
+         match Owner_registry.get ~base_path ~keeper_name:first.name with
+         | Ok owner -> owner
+         | Error error -> fail (Owner_registry.lookup_error_to_string error)
+       in
+       let ensured =
+         match Owner_registry.ensure ~base_path (make_meta "inventory-second") with
+         | Ok owner -> owner
+         | Error error -> fail (Owner_registry.lookup_error_to_string error)
+       in
+       let loaded_again =
+         match Owner_registry.ensure ~base_path first with
+         | Ok owner -> owner
+         | Error error -> fail (Owner_registry.lookup_error_to_string error)
+       in
+       check bool "ensure preserves the existing actor" true (loaded == loaded_again);
+       check bool "different keeper receives a different actor" false (loaded == ensured);
+       check int
+         "dynamic owner extends inventory once"
+         2
+         (Owner_registry.For_testing.installed_owner_count ~base_path);
+       (match Owner_registry.all_projections ~base_path with
+        | Ok projections -> check int "fleet projection count" 2 (List.length projections)
+        | Error error -> fail (Owner_registry.lookup_error_to_string error)))
 ;;
 
 let () =
@@ -296,6 +358,10 @@ let () =
             "stopping rejects new commands"
             `Quick
             test_stopping_rejects_new_commands
+        ; test_case
+            "root inventory loads and extends exactly once"
+            `Quick
+            test_root_inventory_loads_and_extends_exactly_once
         ] )
     ]
 ;;

@@ -9,7 +9,7 @@ val mailbox_capacity : int
 
 type store =
   { replace : Keeper_meta_contract.keeper_meta -> (unit, string) result
-  ; remove : unit -> (unit, string) result
+  ; remove : Keeper_meta_contract.keeper_meta -> (unit, string) result
   }
 
 type error =

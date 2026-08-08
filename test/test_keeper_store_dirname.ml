@@ -11,20 +11,7 @@ module C = Common
 
 let name s = C.keeper_runtime_store_dirname s
 
-(* Listed here rather than read from Common: a new variant must be added to
-   this list by hand, which is the point — the cases below then cover it. *)
-let all_stores =
-  [ C.Keeper_tool_usage
-  ; C.Keeper_runtime_manifests
-  ; C.Keeper_metrics
-  ; C.Keeper_crash_events
-  ; C.Keeper_execution_receipts
-  ; C.Keeper_turn_records
-  ; C.Keeper_raw_traces
-  ; C.Keeper_reaction_ledger
-  ; C.Keeper_trajectories
-  ]
-;;
+let all_stores = C.keeper_runtime_stores
 
 let names_are_unchanged () =
   check string "metrics" "metrics" (name C.Keeper_metrics);

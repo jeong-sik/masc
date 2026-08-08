@@ -66,6 +66,7 @@ type keeper_runtime_store =
   | Keeper_raw_traces
   | Keeper_reaction_ledger
   | Keeper_trajectories
+[@@deriving enumerate]
 
 let keeper_runtime_store_dirname = function
   | Keeper_tool_usage -> "tool_usage"
@@ -78,17 +79,7 @@ let keeper_runtime_store_dirname = function
   | Keeper_reaction_ledger -> "reaction-ledger"
   | Keeper_trajectories -> "trajectories"
 
-let keeper_runtime_stores =
-  [ Keeper_tool_usage
-  ; Keeper_runtime_manifests
-  ; Keeper_metrics
-  ; Keeper_crash_events
-  ; Keeper_execution_receipts
-  ; Keeper_turn_records
-  ; Keeper_raw_traces
-  ; Keeper_reaction_ledger
-  ; Keeper_trajectories
-  ]
+let keeper_runtime_stores = all_of_keeper_runtime_store
 
 let keeper_runtime_store_of_dirname name =
   List.find_opt

@@ -65,6 +65,7 @@ type keeper_runtime_store =
     {!keepers_runtime_dirname}, while others are top-level or shared. *)
 
 val keeper_runtime_store_dirname : keeper_runtime_store -> string
+val keeper_runtime_stores : keeper_runtime_store list
 val keeper_runtime_store_of_dirname : string -> keeper_runtime_store option
 val auth_dir_from_base_path : base_path:string -> string
 (** [<base_path>/.masc/auth]. SSOT path so {!Auth} and

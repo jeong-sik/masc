@@ -478,6 +478,9 @@ let record_runtime_mcp_keeper_tool_trace
 
 (** Resolve managed agent tool call to canonical operation *)
 let resolve_managed_agent_call ?mcp_session_id params =
+  (* DET-OK: same contract as the Full/Operator_remote arm below — an empty or
+     absent name resolves to no binding and fails typed downstream, rather than
+     selecting a tool. *)
   let requested_name = Json_util.get_string params "name" |> Option.value ~default:"" in
   let arguments = arguments_of_params params in
   let identity =

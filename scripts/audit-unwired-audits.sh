@@ -21,7 +21,7 @@ set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-UNWIRED_BASELINE=10
+UNWIRED_BASELINE=9
 
 all="$(mktemp)"
 called="$(mktemp)"

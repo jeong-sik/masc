@@ -1,3 +1,7 @@
+; Superset dependency library for MASC tests.
+; Tests depend on masc_test_deps instead of repeating the shared libraries.
+; Re-exported dependencies are available directly to test modules.
+; Keep this list sorted and add shared test dependencies here.
 
 (copy_files ../../lib/server/server_grpc_tool_dispatch.ml)
 

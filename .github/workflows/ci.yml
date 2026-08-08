@@ -1682,7 +1682,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_assertion_kind_mirror @test/runtest-test_workspace_heartbeat_outcome @test/runtest-test_keeper_catchup_digest @test/runtest-test_workspace_root_state_parity"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_assertion_kind_mirror @test/runtest-test_workspace_heartbeat_outcome @test/runtest-test_h2_mode_vocabulary @test/runtest-test_keeper_catchup_digest @test/runtest-test_workspace_root_state_parity"
 
       # Four more suites landed on main without a runtest target (persona name
       # via #26962, tool-result demotion via #27013, verification authority

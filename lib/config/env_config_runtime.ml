@@ -136,23 +136,29 @@ module Transport = struct
     | Auto
     | H1_only
     | H2_only
-    | Unknown_h2_mode of string
 
   let normalize_token raw =
     raw |> String.trim |> String.lowercase_ascii
 
+  (* The vocabulary is closed: a value outside it is reported through the same
+     malformed-env path every other knob uses, then read as Auto. Carrying the
+     raw text in a variant let it reach listener_mode as a published mode. *)
   let h2_mode_of_string raw =
     match normalize_token raw with
     | "1" | "true" | "h2_only" -> H2_only
     | "0" | "false" | "h1_only" -> H1_only
     | "auto" -> Auto
-    | other -> Unknown_h2_mode other
+    | _ ->
+      Env_config_core.reject_malformed_env
+        ~name:"MASC_USE_H2"
+        ~raw
+        ~type_name:"auto|h1_only|h2_only";
+      Auto
 
   let h2_mode_to_string = function
     | Auto -> "auto"
     | H1_only -> "h1_only"
     | H2_only -> "h2_only"
-    | Unknown_h2_mode value -> value
 
   type agent_transport =
     | Http

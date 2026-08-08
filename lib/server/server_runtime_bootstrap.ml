@@ -1355,8 +1355,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
     match Env_config.Transport.use_h2 () with
     | Env_config.Transport.H2_only -> `H2_only
     | Env_config.Transport.H1_only -> `H1_only
-    | Env_config.Transport.Auto
-    | Env_config.Transport.Unknown_h2_mode _ -> `Auto
+    | Env_config.Transport.Auto -> `Auto
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
   Transport_metrics.set_ws_same_origin_runtime_ready false;

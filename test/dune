@@ -1823,6 +1823,8 @@
 
 
 
+(include stanzas/test_h2_mode_vocabulary.inc)
+
 (include stanzas/test_heartbeat_integration.inc)
 
 (include stanzas/test_http_pages_asset_read.inc)

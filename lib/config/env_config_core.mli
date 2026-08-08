@@ -36,6 +36,11 @@ val get_string : default:string -> string -> string
 val get_int : default:int -> string -> int
 val get_float : default:float -> string -> float
 val get_bool : default:bool -> string -> bool
+(** Report a value outside a knob's vocabulary: warns, and raises
+    {!Config_error} when [MASC_PARSE_WARN] escalates. Callers fall back to the
+    documented default afterwards. *)
+val reject_malformed_env : name:string -> raw:string -> type_name:string -> unit
+
 val get_bool_strict : default:bool -> string -> bool
 (** Like {!get_bool}, but a present non-empty malformed value always raises
     {!Config_error}. Missing and empty values still use [default]. Use at

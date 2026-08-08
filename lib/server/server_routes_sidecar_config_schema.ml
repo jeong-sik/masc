@@ -206,7 +206,9 @@ let coerce_value (typ : declared_type) (raw : string) : (toml_value, string) res
 (* ─── Config path / body parsing ──────────────────────────────────────── *)
 
 let config_toml_path ~base_path id =
-  Filename.concat base_path (Printf.sprintf ".gate/runtime/%s/config.toml" id)
+  Filename.concat
+    base_path
+    (Filename.concat (Channel_gate_sidecar_state.runtime_dir ~connector_id:id) "config.toml")
 ;;
 
 (** Parse a JSON body of the form [{"<KEY>": "<VALUE>", ...}] into a

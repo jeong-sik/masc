@@ -242,13 +242,13 @@ let desired_record_of_json = function
 let sidecar_desired_path ~base_path id =
   Filename.concat
     base_path
-    (Printf.sprintf ".gate/runtime/%s/sidecar_lifecycle_desired.json" id)
+    (Filename.concat (Channel_gate_sidecar_state.runtime_dir ~connector_id:id) "sidecar_lifecycle_desired.json")
 ;;
 
 let sidecar_attempt_path ~base_path id =
   Filename.concat
     base_path
-    (Printf.sprintf ".gate/runtime/%s/sidecar_lifecycle_attempt.json" id)
+    (Filename.concat (Channel_gate_sidecar_state.runtime_dir ~connector_id:id) "sidecar_lifecycle_attempt.json")
 ;;
 
 (* Silent [Sys_error _ | Yojson.Json_error _ -> None] previously collapsed
@@ -536,17 +536,16 @@ let sidecar_status_retention_json ~base_path ~id ~status_path =
     [ "scope", `String "runtime_sidecar_status"
     ; "status_path", `String status_path
     ; "default_status_path"
-      , `String (Filename.concat base_path (Printf.sprintf ".gate/runtime/%s/status.json" id))
-    ; "legacy_status_path", `String (Filename.concat base_path (legacy_status_rel id))
+      , `String (Filename.concat base_path (Channel_gate_sidecar_state.default_status_path ~connector_id:id))
     ; "lifecycle_desired_path", `String (sidecar_desired_path ~base_path id)
     ; "lifecycle_attempt_path", `String (sidecar_attempt_path ~base_path id)
     ; "binding_store_path"
-      , `String (Filename.concat base_path (Printf.sprintf ".gate/runtime/%s/bindings.json" id))
+      , `String (Filename.concat base_path (Channel_gate_sidecar_state.default_binding_store_path ~connector_id:id))
     ; "binding_audit_store_path"
       , `String
           (Filename.concat
              base_path
-             (Printf.sprintf ".gate/runtime/%s/binding_audit.jsonl" id))
+             (Channel_gate_sidecar_state.default_binding_audit_path ~connector_id:id))
     ]
 ;;
 

@@ -72,9 +72,6 @@ val missing_sidecar_dir_message :
 (** {1 Date / status path helpers} *)
 
 val today_yyyymmdd : unit -> string
-(** Local-timezone [yyyymmdd] used in log file names. *)
-
-val legacy_status_rel : string -> string
 (** Legacy relative path of the per-sidecar status JSON. *)
 
 (** {1 Sidecar status config (env / TOML lookup)} *)

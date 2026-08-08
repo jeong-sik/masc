@@ -15,7 +15,11 @@ type name_map = {
   updated_at : string;
 }
 
-let default_names_path = ".gate/runtime/discord/names.json"
+let default_names_path =
+  Filename.concat
+    (Channel_gate_sidecar_state.runtime_dir ~connector_id:"discord")
+    "names.json"
+;;
 
 let configured_write_path env_name ~default =
   match Sys.getenv_opt env_name |> Env_config_core.trim_opt with

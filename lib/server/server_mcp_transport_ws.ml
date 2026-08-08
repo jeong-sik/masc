@@ -1152,7 +1152,7 @@ let ws_upgrade_accept (request : Httpun.Request.t) : (string, string) result =
   | `GET, Some upgrade, Some connection, Some key, Some "13"
     when ci_eq upgrade "websocket"
          && connection_lists_upgrade connection
-         && (try String.length (Base64.decode_exn key) = 16 with _ -> false) ->  (* cancel-guard-ok: guards a pure decode: no Eio cancellation point *)
+         && (try String.length (Base64.decode_exn key) = 16 with _ -> false) ->
     Ok (sec_websocket_accept key)
   | _ -> Error "websocket upgrade request did not pass RFC 6455 §4.2.1 scrutiny"
 

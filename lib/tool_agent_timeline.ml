@@ -334,7 +334,7 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
        let ts = Float.of_int e.ts_ms /. 1000.0 in
        (* Pure-shape JSON access via Safe_ops: no exception swallow, no
           performative [Cancelled] re-raise. Behavior parity with the prior
-          [try ... |> to_X with _ -> default] pattern (* cancel-guard-ok: prose *) on missing/wrong-typed
+          [try ... |> to_X with _ -> default] pattern on missing/wrong-typed
           fields; widens acceptance to string-coerced numerics per the
           codebase convention documented in Safe_ops.json_*_opt. *)
        let keeper_name = Safe_ops.json_string ~default:"unknown" "keeper_name" e.payload in

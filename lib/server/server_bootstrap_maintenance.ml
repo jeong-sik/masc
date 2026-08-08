@@ -552,7 +552,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
        Grace period timestamps survive server restart, so recently-active
        clients can reconnect without "Unknown Mcp-Session-Id" errors. *)
     (try Server_mcp_transport_http_session.load_sessions_from_file ()
-     with exn ->
+     with
+     | Eio.Cancel.Cancelled _ as e ->
+       Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+     | exn ->
        Log.Server.warn "session restore failed: %s" (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock Env_config_runtime.InternalTimers.janitor_interval_sec;

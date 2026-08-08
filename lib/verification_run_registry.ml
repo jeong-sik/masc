@@ -16,6 +16,7 @@ type tool_observation =
   ; output_excerpt : string
   ; output_truncated : bool
   ; duration_ms : float
+  ; finished_at : float
   }
 
 type run_status =
@@ -111,6 +112,7 @@ module Payload = struct
         ; "output_excerpt", `String tool.output_excerpt
         ; "output_truncated", `Bool tool.output_truncated
         ; "duration_ms", `Float tool.duration_ms
+        ; "finished_at", `Float tool.finished_at
         ]
     in
     let fields =
@@ -167,6 +169,7 @@ module Payload = struct
             ; "output_excerpt"
             ; "output_truncated"
             ; "duration_ms"
+            ; "finished_at"
             ]
           fields
       in
@@ -190,6 +193,7 @@ module Payload = struct
         | None -> Error "missing field output_truncated"
       in
       let* duration_ms = Run_registry_core.Json.float_field "duration_ms" fields in
+      let* finished_at = Run_registry_core.Json.float_field "finished_at" fields in
       Ok
         { tool_name
         ; input
@@ -197,6 +201,7 @@ module Payload = struct
         ; output_excerpt
         ; output_truncated
         ; duration_ms
+        ; finished_at
         }
     in
     let rec parse_tools acc = function
@@ -274,7 +279,7 @@ let mark_completed t ~verification_id ~outcome ~tools ?evaluator_runtime ~elapse
   | `Unknown -> ()
 ;;
 
-let observe_tool_result ~input (result : Tool_result.result) =
+let observe_tool_result ~input ~finished_at (result : Tool_result.result) =
   let disposition =
     match result with
     | Tool_result.Completed _ -> Tool_result.Completed ()
@@ -296,6 +301,7 @@ let observe_tool_result ~input (result : Tool_result.result) =
   ; output_excerpt
   ; output_truncated
   ; duration_ms = Tool_result.duration_ms result
+  ; finished_at
   }
 ;;
 
@@ -361,6 +367,7 @@ let run_to_yojson run =
           ; "output_excerpt", `String tool.output_excerpt
           ; "output_truncated", `Bool tool.output_truncated
           ; "duration_ms", `Float tool.duration_ms
+          ; "finished_at", `Float tool.finished_at
           ]
       in
       [ "elapsed_s", `Float elapsed_s

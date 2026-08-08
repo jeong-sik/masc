@@ -17,9 +17,12 @@ import { registerInternalAgentRefresh } from '../sse-store'
 import { Btn } from './btn'
 import { EmptyState, ErrorState } from './common/feedback-state'
 import { StatusBadge, type StatusBadgeTone } from './common/status-badge'
-import { relativeTime } from '../lib/format-time'
+import { JsonViewerCard } from './common/json-viewer'
+import { formatDateTimeKo, relativeTime } from '../lib/format-time'
+import { hashForRoute } from '../router'
+import { keepers as keeperRosterSignal, shellRuntimeResolution } from '../store'
 
-type Filter = 'all' | 'librarian' | 'judge' | 'verification' | 'fusion'
+type Filter = 'all' | 'librarian' | 'judge' | 'compaction' | 'verification' | 'fusion'
 type Row =
   | { source: 'exact'; id: string; run: ExactLaneRunRecord }
   | { source: 'verification'; id: string; run: VerificationRunRecord }
@@ -29,6 +32,7 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'librarian', label: 'Librarian' },
   { id: 'judge', label: 'Judge' },
+  { id: 'compaction', label: 'Compaction' },
   { id: 'verification', label: 'Verification' },
   { id: 'fusion', label: 'Fusion' },
 ]
@@ -81,13 +85,57 @@ function formatElapsed(value: number | undefined): string {
   return value < 1 ? `${Math.round(value * 1000)}ms` : `${value.toFixed(1)}s`
 }
 
-function LibrarianJournal({ keeper }: { keeper: string }) {
+function finishedAt(row: Row): number | undefined {
+  const duration = elapsed(row)
+  return duration == null ? undefined : startedAt(row) + duration
+}
+
+function rowKind(row: Row): Exclude<Filter, 'all'> {
+  if (row.source === 'verification') return 'verification'
+  if (row.source === 'fusion') return 'fusion'
+  if (row.run.lane === 'librarian_exact') return 'librarian'
+  if (row.run.lane === 'compaction_exact') return 'compaction'
+  return 'judge'
+}
+
+function EvidenceBadge({ kind }: { kind: 'raw' | 'typed' | 'excerpt' }) {
+  const style = kind === 'raw'
+    ? 'border-[var(--status-warn)] text-[var(--status-warn)]'
+    : kind === 'excerpt'
+      ? 'border-[var(--color-danger)] text-[var(--color-danger)]'
+      : 'border-[var(--color-accent)] text-[var(--color-accent)]'
+  return html`<span class=${`inline-flex rounded border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide ${style}`}>${kind}</span>`
+}
+
+function keeperHref(name: string): string {
+  return hashForRoute('monitoring', { section: 'agents', view: 'keepers', keeper: name })
+}
+
+function fusionHref(): string {
+  return hashForRoute('fusion')
+}
+
+function librarianRevision(value: unknown): number | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const revision = (value as Record<string, unknown>).revision
+  return typeof revision === 'number' && Number.isFinite(revision) ? revision : undefined
+}
+
+function LibrarianJournal({
+  keeper,
+  traceId,
+  revision,
+}: {
+  keeper: string
+  traceId: string
+  revision?: number
+}) {
   const [journal, setJournal] = useState<MemoryJournal | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
-    fetchKeeperMemoryJournal(keeper, 20, { signal: controller.signal })
+    fetchKeeperMemoryJournal(keeper, 500, { signal: controller.signal })
       .then(setJournal)
       .catch((reason: unknown) => {
         if (controller.signal.aborted) return
@@ -103,19 +151,34 @@ function LibrarianJournal({ keeper }: { keeper: string }) {
     return html`<p class="text-xs text-[var(--color-fg-muted)]">기억 저널 읽는 중…</p>`
   }
   if (journal.entries.length === 0) {
-    return html`<p class="text-xs text-[var(--color-fg-muted)]">이 keeper 는 아직 저널 라인이 없습니다.</p>`
+    return html`
+      <div class="rounded-[var(--r-1)] border border-[var(--status-warn)] bg-[var(--color-bg-elevated)] p-3 text-xs">
+        <div class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /><strong>Memory journal evidence 없음</strong></div>
+        <p class="mt-1 text-[var(--color-fg-muted)]">이 실행의 revision 요약은 run registry에 있지만, 메모리 변경 원문을 담는 journal 행은 반환되지 않았습니다.</p>
+      </div>
+    `
   }
+
+  const related = journal.entries.filter(entry => {
+    if (!entry.ok || entry.traceId !== traceId) return false
+    return revision == null || (entry.outcome === 'committed' && entry.revision === revision)
+  })
 
   return html`
     <div class="grid gap-2">
-      <div class="text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">
-        기억 저널 · 최근 ${journal.entries.length}건
+      <div class="flex flex-wrap items-center gap-2 text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">
+        <${EvidenceBadge} kind="typed" />
+        <span>Memory journal · trace ${traceId}${revision == null ? '' : ` · revision ${revision}`}</span>
         ${journal.undecodableLines > 0
           ? html`<span class="text-[var(--color-danger)]"> · 읽지 못한 줄 ${journal.undecodableLines}</span>`
           : null}
       </div>
+      <p class="text-xs text-[var(--color-fg-muted)]">정규화된 commit journal입니다. Provider RAW 요청·응답은 아래 Turn inspector의 RAW 탭에서 별도로 확인합니다.</p>
+      ${related.length === 0
+        ? html`<p class="rounded border border-[var(--color-border-default)] p-3 text-xs text-[var(--color-fg-muted)]">정확히 조인되는 journal 행이 없습니다. trace만 같거나 시간상 가까운 행을 추정해서 붙이지 않았습니다.</p>`
+        : null}
       <ol class="grid gap-1">
-        ${journal.entries.map((entry, index) => {
+        ${related.map((entry, index) => {
           if (!entry.ok) {
             return html`<li key=${index} class="rounded border border-[var(--color-danger)] p-2 text-3xs">
               <strong class="text-[var(--color-danger)]">읽지 못한 줄</strong>
@@ -127,6 +190,7 @@ function LibrarianJournal({ keeper }: { keeper: string }) {
               <div class="flex flex-wrap gap-2">
                 <strong class="text-[var(--color-danger)]">실패</strong>
                 <code>${entry.kind}</code>
+                <time dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
                 <span class="text-[var(--color-fg-muted)]">
                   스냅샷 ${entry.snapshotPresent ? '있음' : '없음'}
                   ${entry.cadenceDeferred ? ' · 주기 연기' : ''}
@@ -135,22 +199,19 @@ function LibrarianJournal({ keeper }: { keeper: string }) {
               <span class="block mt-1 text-[var(--color-fg-muted)]">${entry.detail}</span>
             </li>`
           }
-          return html`<li key=${index} class="rounded border border-[var(--color-border-default)] p-2 text-3xs">
-            <div class="flex flex-wrap gap-2">
+          return html`<li key=${index} class="grid gap-3 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-3xs">
+            <div class="flex flex-wrap items-center gap-2">
               <strong>revision ${entry.revision}</strong>
+              <time class="text-[var(--color-fg-muted)]" dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
               <span class="text-[var(--color-fg-muted)]">
-                추가 ${entry.added} · 제거 ${entry.removed} · 유지 ${entry.retained}
+                추가 ${entry.added.length} · 제거 ${entry.removed.length} · 유지 ${entry.retained}
               </span>
             </div>
-            ${entry.drops.length > 0
-              ? html`<ul class="mt-1 grid gap-0.5">
-                  ${entry.drops.map((drop, dropIndex) => html`
-                    <li key=${dropIndex} class="text-[var(--color-fg-muted)]">
-                      버림 — ${drop.reason}
-                    </li>
-                  `)}
-                </ul>`
-              : null}
+            <div class="grid gap-3 lg:grid-cols-2">
+              <${JsonViewerCard} title=${`추가된 기억 ${entry.added.length}건`} data=${entry.added} />
+              <${JsonViewerCard} title=${`제거된 기억 ${entry.removed.length}건`} data=${entry.removed} />
+            </div>
+            <${JsonViewerCard} title=${`제거 판단 ${entry.drops.length}건`} data=${entry.drops} />
           </li>`
         })}
       </ol>
@@ -158,21 +219,29 @@ function LibrarianJournal({ keeper }: { keeper: string }) {
   `
 }
 
-function pretty(value: unknown): string {
-  return JSON.stringify(value, null, 2) ?? 'null'
-}
-
 function Details({ row }: { row: Row }) {
   if (row.source === 'verification') {
     const tools = row.run.tools ?? []
     return html`
       <div class="grid gap-3 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)]">
-        <div>
-          <div class="text-3xs uppercase tracking-wide text-[var(--color-fg-muted)] mb-1">Evidence path</div>
-          <code class="text-xs">producer ${row.run.producer} → ${row.run.authorityKind} → ${row.run.status}</code>
+        <div class="grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] p-3">
+          <div class="flex flex-wrap items-center gap-2"><${EvidenceBadge} kind="typed" /><strong class="text-xs">Execution path</strong></div>
+          <div class="flex flex-wrap items-center gap-2 text-xs">
+            <code>${row.run.producer}</code><span aria-hidden="true">→</span>
+            <code>${row.run.authorityKind}</code><span aria-hidden="true">→</span>
+            <code>${row.run.authorityActor}</code><span aria-hidden="true">→</span>
+            <strong>${row.run.status}</strong>
+          </div>
+          <div class="flex flex-wrap gap-3 text-3xs text-[var(--color-fg-muted)]">
+            <span>시작 <time dateTime=${new Date(row.run.startedAt * 1000).toISOString()}>${formatDateTimeKo(row.run.startedAt)}</time></span>
+            ${finishedAt(row) == null ? null : html`<span>종료 <time dateTime=${new Date(finishedAt(row)! * 1000).toISOString()}>${formatDateTimeKo(finishedAt(row)!)}</time></span>`}
+            ${row.run.evaluatorRuntime ? html`<span>runtime <code>${row.run.evaluatorRuntime}</code></span>` : null}
+          </div>
+          ${row.run.cause ? html`<p class="text-xs text-[var(--color-danger)]">${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null}
+          <p class="text-3xs text-[var(--color-fg-muted)]">Review 본문 전체는 이 registry 계약에 저장되지 않습니다. 아래 도구 입력은 redaction/preview를 거친 typed 값이며 출력은 최대 1,024 bytes excerpt입니다.</p>
         </div>
         <div>
-          <div class="text-3xs uppercase tracking-wide text-[var(--color-fg-muted)] mb-1">Tools (${tools.length})</div>
+          <div class="text-3xs uppercase tracking-wide text-[var(--color-fg-muted)] mb-1">Internal tool agents (${tools.length})</div>
           ${tools.length === 0
             ? html`<p class="text-xs text-[var(--color-fg-muted)]">No tools invoked in this verification run.</p>`
             : html`<ol class="grid gap-2">
@@ -181,11 +250,15 @@ function Details({ row }: { row: Row }) {
                     <div class="flex flex-wrap items-center gap-2 text-xs">
                       <strong>${index + 1}. ${tool.toolName}</strong>
                       <code>${tool.disposition}</code>
+                      <time class="text-[var(--color-fg-muted)]" dateTime=${new Date(tool.finishedAt * 1000).toISOString()}>종료 ${formatDateTimeKo(tool.finishedAt)}</time>
                       <span class="text-[var(--color-fg-muted)]">${tool.durationMs.toFixed(0)}ms</span>
                     </div>
                     <div class="grid gap-2 mt-2 md:grid-cols-2">
-                      <pre class="overflow-auto text-3xs whitespace-pre-wrap">${pretty(tool.input)}</pre>
-                      <pre class="overflow-auto text-3xs whitespace-pre-wrap">${tool.outputExcerpt}${tool.outputTruncated ? '\n… truncated' : ''}</pre>
+                      <div class="grid gap-1"><div class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /><span class="text-3xs">입력 preview</span></div><${JsonViewerCard} data=${tool.input} /></div>
+                      <div class="grid gap-1">
+                        <div class="flex items-center gap-2"><${EvidenceBadge} kind="excerpt" /><span class="text-3xs">출력 ${tool.outputTruncated ? '· truncated' : '· complete excerpt'}</span></div>
+                        <pre class="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3 text-3xs">${tool.outputExcerpt}${tool.outputTruncated ? '\n… 1,024 byte 이후는 registry에 보존되지 않음' : ''}</pre>
+                      </div>
                     </div>
                   </li>
                 `)}
@@ -195,30 +268,39 @@ function Details({ row }: { row: Row }) {
     `
   }
   if (row.source === 'exact') {
+    const output = row.run.output ?? { code: row.run.code, detail: row.run.detail }
     return html`
-      <div class="grid gap-3 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)] md:grid-cols-2">
-        <div>
-          <div class="text-3xs uppercase tracking-wide text-[var(--color-fg-muted)] mb-1">Input evidence</div>
-          <pre class="overflow-auto text-3xs whitespace-pre-wrap">${pretty(row.run.input)}</pre>
+      <div class="grid gap-3 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)]">
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <${EvidenceBadge} kind="typed" />
+          <strong>Exact-output registry preview</strong>
+          <span class="text-[var(--color-fg-muted)]">민감값 redaction + 긴 문자열 1,024자 preview</span>
+          <a class="ml-auto text-[var(--color-accent)] hover:underline" href=${keeperHref(row.run.actor)}>Keeper 전체 evidence 열기 →</a>
         </div>
-        <div>
-          <div class="text-3xs uppercase tracking-wide text-[var(--color-fg-muted)] mb-1">Result</div>
-          <pre class="overflow-auto text-3xs whitespace-pre-wrap">${pretty(row.run.output ?? { code: row.run.code, detail: row.run.detail })}</pre>
+        <div class="grid gap-3 lg:grid-cols-2">
+          <${JsonViewerCard} title="입력값 · typed preview" data=${row.run.input} />
+          <${JsonViewerCard} title="출력값 · typed preview" data=${output} />
         </div>
-        <p class="text-xs text-[var(--color-fg-muted)] md:col-span-2">Tools: none. This exact-output lane performs one structured model execution, not MASC tool dispatch.</p>
+        <p class="text-xs text-[var(--color-fg-muted)]">이 lane은 한 번의 structured model execution이며 MASC tool dispatch를 수행하지 않습니다. Provider 요청·응답 원문은 RAW turn evidence로 분리됩니다.</p>
         ${row.run.lane === 'librarian_exact'
-          ? html`<div class="md:col-span-2 border-t border-[var(--color-border-default)] pt-3">
-              <${LibrarianJournal} keeper=${row.run.actor} />
+          ? html`<div class="border-t border-[var(--color-border-default)] pt-3">
+              <${LibrarianJournal}
+                keeper=${row.run.actor}
+                traceId=${row.run.subjectId}
+                revision=${librarianRevision(row.run.output)}
+              />
             </div>`
           : null}
       </div>
     `
   }
   return html`
-    <div class="p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)] text-xs">
+    <div class="grid gap-2 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)] text-xs">
+      <div class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /><strong>Fusion registry summary</strong></div>
       <p>Preset <code>${row.run.preset}</code> · status <code>${row.run.status}</code></p>
       ${row.run.error ? html`<p class="mt-1 text-[var(--color-danger)]">${row.run.failureCode}: ${row.run.error}</p>` : null}
-      <p class="mt-2 text-[var(--color-fg-muted)]">Fusion participant and judge detail remains on the Fusion surface; this row uses the same run registry.</p>
+      <p class="text-[var(--color-fg-muted)]">이 registry는 input/output을 보존하지 않습니다. participant·judge 구조와 결과는 Fusion SSOT에서 확인합니다.</p>
+      <a class="w-fit text-[var(--color-accent)] hover:underline" href=${fusionHref()}>Fusion evidence 열기 →</a>
     </div>
   `
 }
@@ -228,8 +310,22 @@ function matches(row: Row, filter: Filter): boolean {
   if (filter === 'verification') return row.source === 'verification'
   if (filter === 'fusion') return row.source === 'fusion'
   if (filter === 'librarian') return row.source === 'exact' && row.run.lane === 'librarian_exact'
+  if (filter === 'compaction') return row.source === 'exact' && row.run.lane === 'compaction_exact'
   return row.source === 'exact'
     && (row.run.lane === 'hitl_auto_judge' || row.run.lane === 'board_attention_exact')
+}
+
+type KeeperIdentity = { name: string; agent_name?: string | null }
+
+function recordedOwner(row: Row): string {
+  if (row.source === 'verification') return row.run.producer
+  if (row.source === 'fusion') return row.run.keeper
+  return row.run.actor
+}
+
+function resolvedOwner(row: Row, roster: readonly KeeperIdentity[]): string {
+  const recorded = recordedOwner(row)
+  return roster.find(keeper => keeper.name === recorded || keeper.agent_name === recorded)?.name ?? recorded
 }
 
 export function InternalAgentsMonitor() {
@@ -276,30 +372,97 @@ export function InternalAgentsMonitor() {
   }, [refresh])
 
   const visible = useMemo(() => rows.filter(row => matches(row, filter)), [rows, filter])
-
-  // The inspector needs a keeper to address, and the observed runs already name
-  // every keeper that has produced one. Fusion rows carry a keeper directly;
-  // exact lanes carry it as the actor. Verification runs are keyed by evaluator
-  // runtime rather than a keeper, so they contribute none.
+  const roster = keeperRosterSignal.value
+  const pausedKeeperNames = shellRuntimeResolution.value?.fleet_safety?.paused_keepers_health?.names ?? []
   const keepers = useMemo(() => {
-    const names = new Set<string>()
-    for (const row of rows) {
-      if (row.source === 'fusion') names.add(row.run.keeper)
-      else if (row.source === 'exact') names.add(row.run.actor)
-    }
+    const names = new Set(roster.map(keeper => keeper.name))
+    for (const name of pausedKeeperNames) names.add(name)
+    for (const row of rows) names.add(resolvedOwner(row, roster))
     return Array.from(names).sort()
-  }, [rows])
+  }, [pausedKeeperNames, rows, roster])
+  const inventory = FILTERS.filter(item => item.id !== 'all').map(item => {
+    const kind = item.id as Exclude<Filter, 'all'>
+    const matching = rows.filter(row => rowKind(row) === kind)
+    return {
+      ...item,
+      count: matching.length,
+      latest: matching.reduce<number | null>((value, row) => value == null ? startedAt(row) : Math.max(value, startedAt(row)), null),
+    }
+  })
+  const owners = keepers.map(name => {
+    const owned = rows.filter(row => resolvedOwner(row, roster) === name)
+    return {
+      name,
+      total: owned.length,
+      counts: Object.fromEntries(inventory.map(item => [item.id, owned.filter(row => rowKind(row) === item.id).length])) as Record<Exclude<Filter, 'all'>, number>,
+      latest: owned.reduce<number | null>((value, row) => value == null ? startedAt(row) : Math.max(value, startedAt(row)), null),
+    }
+  })
 
   return html`
-    <section class="v2-monitoring-surface grid gap-3" data-testid="internal-agents-monitor">
-      <div class="flex flex-wrap items-center gap-2">
-        <h2 class="text-sm font-semibold text-[var(--color-fg-primary)]">Internal Agent Runs</h2>
-        <span class="text-xs text-[var(--color-fg-muted)]">${rows.length} observed</span>
+    <section class="v2-monitoring-surface grid gap-5" data-testid="internal-agents-monitor">
+      <div class="flex flex-wrap items-start gap-3">
+        <div>
+          <h2 class="text-lg font-semibold text-[var(--color-fg-primary)]">Internal execution evidence</h2>
+          <p class="mt-1 text-xs text-[var(--color-fg-muted)]">Run registry, Memory OS journal, Keeper RAW trace를 출처별로 분리하고 동일한 owner·trace·revision·시간축으로 읽습니다.</p>
+        </div>
+        <span class="rounded border border-[var(--color-border-default)] px-2 py-1 text-xs text-[var(--color-fg-muted)]">${rows.length} runs · ${keepers.length} owners</span>
         <${Btn} class="v2-monitoring-action ml-auto" onClick=${() => void refresh()} disabled=${loading}>
           ${loading ? 'Loading…' : 'Refresh'}
         <//>
       </div>
-      <p class="text-xs text-[var(--color-fg-muted)]">Typed run records from Librarian, Judge, Verification, Compaction, and Fusion. Updates arrive through WebSocket invalidation; HTTP snapshots remain the source of truth.</p>
+
+      <div class="v2-monitoring-card flex flex-wrap gap-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-xs">
+        <span class="flex items-center gap-2"><${EvidenceBadge} kind="raw" /> Provider 요청·응답 원문</span>
+        <span class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /> 정규화·redaction된 구조화 evidence</span>
+        <span class="flex items-center gap-2"><${EvidenceBadge} kind="excerpt" /> 원문 전체가 아닌 제한된 출력</span>
+      </div>
+
+      <section class="grid gap-2" aria-labelledby="internal-agent-inventory-title">
+        <div class="flex items-end gap-2">
+          <h3 id="internal-agent-inventory-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Observed run inventory</h3>
+          <span class="text-3xs text-[var(--color-fg-muted)]">0건인 lane도 숨기지 않습니다.</span>
+        </div>
+        <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+          ${inventory.map(item => html`
+            <button
+              key=${item.id}
+              type="button"
+              class=${`v2-monitoring-card grid gap-1 rounded-[var(--r-1)] border p-3 text-left ${filter === item.id ? 'border-[var(--color-accent)] bg-[var(--color-bg-elevated)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}`}
+              aria-pressed=${filter === item.id}
+              onClick=${() => setFilter(item.id)}
+            >
+              <span class="text-xs font-semibold">${item.label}</span>
+              <strong class="text-xl tabular-nums">${item.count}</strong>
+              <span class="text-3xs text-[var(--color-fg-muted)]">${item.latest == null ? '관측 기록 없음' : `최근 ${formatDateTimeKo(item.latest)}`}</span>
+            </button>
+          `)}
+        </div>
+      </section>
+
+      <section class="grid gap-2" aria-labelledby="internal-agent-owner-title">
+        <div class="flex items-end gap-2">
+          <h3 id="internal-agent-owner-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Owner × execution kind</h3>
+          <span class="text-3xs text-[var(--color-fg-muted)]">Keeper Fleet와 exact identity로 조인합니다.</span>
+        </div>
+        <div class="v2-monitoring-card overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+          <table class="w-full min-w-[48rem] text-left text-xs">
+            <thead class="border-b border-[var(--color-border-default)] text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">
+              <tr><th class="px-3 py-2">Owner</th>${inventory.map(item => html`<th key=${item.id} class="px-2 py-2 text-right">${item.label}</th>`)}<th class="px-3 py-2 text-right">Last observed</th></tr>
+            </thead>
+            <tbody>
+              ${owners.map(owner => html`
+                <tr key=${owner.name} class="border-b border-[var(--color-border-subtle)] last:border-b-0">
+                  <th class="px-3 py-2 font-medium"><a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(owner.name)}>${owner.name}</a><span class="ml-2 text-3xs text-[var(--color-fg-muted)]">${owner.total}</span></th>
+                  ${inventory.map(item => html`<td key=${item.id} class=${`px-2 py-2 text-right tabular-nums ${owner.counts[item.id as Exclude<Filter, 'all'>] === 0 ? 'text-[var(--color-fg-disabled)]' : ''}`}>${owner.counts[item.id as Exclude<Filter, 'all'>]}</td>`)}
+                  <td class="px-3 py-2 text-right text-3xs text-[var(--color-fg-muted)]">${owner.latest == null ? '없음' : formatDateTimeKo(owner.latest)}</td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <div class="flex flex-wrap gap-1" role="group" aria-label="Internal agent filters">
         ${FILTERS.map(item => html`
           <button
@@ -308,24 +471,32 @@ export function InternalAgentsMonitor() {
             class=${`rounded px-2 py-1 text-xs border ${filter === item.id ? 'border-[var(--color-accent)] text-[var(--color-fg-primary)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'}`}
             aria-pressed=${filter === item.id}
             onClick=${() => setFilter(item.id)}
-          >${item.label}</button>
+          >${item.label} ${item.id === 'all' ? rows.length : inventory.find(entry => entry.id === item.id)?.count ?? 0}</button>
         `)}
       </div>
       ${errors.length > 0 ? html`<${ErrorState}>${errors.join(' · ')}<//>` : null}
-      <${KeeperTurnInspectorPanel} keepers=${keepers} />
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+        <${KeeperTurnInspectorPanel} keepers=${keepers} />
+      </div>
+      <div class="flex items-end gap-2">
+        <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">Run timeline</h3>
+        <span class="text-3xs text-[var(--color-fg-muted)]">절대 시각 + 상대 시각 + elapsed</span>
+      </div>
       ${!loading && visible.length === 0
         ? html`<${EmptyState}>No internal agent runs for this filter.<//>`
-        : html`<div class="grid gap-2">
+        : html`<div class="relative ml-2 grid gap-2 border-l border-[var(--color-border-default)] pl-5">
             ${visible.map(row => {
               const open = expanded === row.id
+              const startIso = new Date(startedAt(row) * 1000).toISOString()
               return html`
-                <article key=${row.id} class="v2-monitoring-card rounded border border-[var(--color-border-default)] overflow-hidden">
+                <article key=${row.id} class="v2-monitoring-card relative rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] overflow-hidden before:absolute before:-left-[1.55rem] before:top-5 before:h-2 before:w-2 before:rounded-full before:bg-[var(--color-accent)]">
                   <button
                     type="button"
-                    class="w-full grid grid-cols-[auto_1fr_auto] gap-3 items-center p-3 text-left"
+                    class="w-full grid grid-cols-[8.5rem_auto_1fr_auto] gap-3 items-center p-3 text-left"
                     aria-expanded=${open}
                     onClick=${() => setExpanded(open ? null : row.id)}
                   >
+                    <span class="text-3xs text-[var(--color-fg-muted)]"><time dateTime=${startIso}>${formatDateTimeKo(startedAt(row))}</time><span class="block">${relativeTime(startIso)}</span></span>
                     <${StatusBadge} tone=${tone(row)} label=${status(row)} />
                     <span class="min-w-0">
                       <strong class="block text-xs text-[var(--color-fg-primary)]">${laneLabel(row)}</strong>
@@ -333,7 +504,7 @@ export function InternalAgentsMonitor() {
                     </span>
                     <span class="text-right text-3xs text-[var(--color-fg-muted)]">
                       <span class="block">${actor(row)}</span>
-                      <span class="block">${formatElapsed(elapsed(row))} · ${relativeTime(new Date(startedAt(row) * 1000).toISOString())}</span>
+                      <span class="block">elapsed ${formatElapsed(elapsed(row))}</span>
                     </span>
                   </button>
                   ${open ? html`<${Details} row=${row} />` : null}

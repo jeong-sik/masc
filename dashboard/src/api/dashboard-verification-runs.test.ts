@@ -82,6 +82,7 @@ describe('parseVerificationRunsResponse', () => {
           output_excerpt: 'Completion verdict recorded: APPROVE',
           output_truncated: false,
           duration_ms: 1.25,
+          finished_at: 1786000002.25,
         }],
       })],
     })
@@ -92,6 +93,7 @@ describe('parseVerificationRunsResponse', () => {
       outputExcerpt: 'Completion verdict recorded: APPROVE',
       outputTruncated: false,
       durationMs: 1.25,
+      finishedAt: 1786000002.25,
     }])
   })
 

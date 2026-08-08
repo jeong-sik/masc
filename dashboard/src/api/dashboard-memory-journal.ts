@@ -15,6 +15,12 @@ export type MemoryJournalDrop = {
   readonly reason: string
 }
 
+export type MemoryJournalFact = {
+  readonly claim: string
+  readonly category: string
+  readonly firstSeen: number
+}
+
 // A committed pass wrote a revision. A failed pass did not, so the two are
 // separate members rather than one shape with nulls — a reader that has to
 // check a null to tell them apart will eventually forget to.
@@ -25,8 +31,8 @@ export type MemoryJournalEntry =
       readonly recordedAt: number
       readonly revision: number
       readonly traceId: string
-      readonly added: number
-      readonly removed: number
+      readonly added: readonly MemoryJournalFact[]
+      readonly removed: readonly MemoryJournalFact[]
       readonly retained: number
       readonly drops: readonly MemoryJournalDrop[]
     }
@@ -56,6 +62,27 @@ function decodeDrop(raw: unknown): MemoryJournalDrop | null {
   return memoryId == null || reason == null ? null : { memoryId, reason }
 }
 
+function decodeFact(raw: unknown): MemoryJournalFact | null {
+  if (!isRecord(raw)) return null
+  const claim = asString(raw.claim)
+  const category = asString(raw.category)
+  const firstSeen = asNumber(raw.first_seen)
+  return claim == null || category == null || firstSeen == null
+    ? null
+    : { claim, category, firstSeen }
+}
+
+function decodeFacts(raw: unknown): readonly MemoryJournalFact[] | null {
+  if (!Array.isArray(raw)) return null
+  const facts: MemoryJournalFact[] = []
+  for (const item of raw) {
+    const fact = decodeFact(item)
+    if (fact === null) return null
+    facts.push(fact)
+  }
+  return facts
+}
+
 function decodeCommitted(raw: Record<string, unknown>): MemoryJournalEntry | null {
   const recordedAt = asNumber(raw.recorded_at)
   const revision = asNumber(raw.revision)
@@ -64,7 +91,9 @@ function decodeCommitted(raw: Record<string, unknown>): MemoryJournalEntry | nul
   const traceId = asString(raw.source.trace_id)
   const retained = asNumber(raw.change.retained)
   if (traceId == null || retained == null) return null
-  if (!Array.isArray(raw.change.added) || !Array.isArray(raw.change.removed)) return null
+  const added = decodeFacts(raw.change.added)
+  const removed = decodeFacts(raw.change.removed)
+  if (added === null || removed === null) return null
   const drops: MemoryJournalDrop[] = []
   if (raw.dropped !== undefined) {
     if (!Array.isArray(raw.dropped)) return null
@@ -82,8 +111,8 @@ function decodeCommitted(raw: Record<string, unknown>): MemoryJournalEntry | nul
     recordedAt,
     revision,
     traceId,
-    added: raw.change.added.length,
-    removed: raw.change.removed.length,
+    added,
+    removed,
     retained,
     drops,
   }

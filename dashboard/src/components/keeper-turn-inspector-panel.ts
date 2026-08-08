@@ -23,13 +23,14 @@ import {
 } from '../api/dashboard-keeper-prompt'
 import { Btn } from './btn'
 import { relativeTime } from '../lib/format-time'
+import { JsonViewerCard } from './common/json-viewer'
 
 type Tab = 'raw' | 'prompt' | 'note'
 
 const TABS: Array<{ id: Tab; label: string; hint: string }> = [
-  { id: 'raw', label: 'Raw turns', hint: '프로바이더로 나간 요청·응답 원문' },
-  { id: 'prompt', label: 'Next prompt', hint: '다음 턴에 조립될 시스템 컨텍스트' },
-  { id: 'note', label: 'Operator note', hint: '다음 턴 한 번에만 실리는 문장' },
+  { id: 'raw', label: 'RAW provider turns', hint: 'RAW · 프로바이더로 나간 요청·응답 원문' },
+  { id: 'prompt', label: 'Typed next prompt', hint: 'TYPED · 다음 턴에 조립될 시스템 컨텍스트' },
+  { id: 'note', label: 'Operator input', hint: 'OPERATOR INPUT · 다음 턴 한 번에만 실리는 문장' },
 ]
 
 // The store rejects a note over this rather than truncating it. Showing the
@@ -161,7 +162,7 @@ function RawTurns({ keeper }: { keeper: string }) {
             ${page.records.map((record, index) => html`
               <div key=${page.offset + index}>
                 ${record.ok
-                  ? html`<${Pre} text=${JSON.stringify(record.record, null, 2)} />`
+                  ? html`<div class="grid gap-1"><span class="w-fit rounded border border-[var(--status-warn)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--status-warn)]">RAW</span><${JsonViewerCard} data=${record.record} title=${`Provider record ${page.offset + index + 1}`} /></div>`
                   // A torn line keeps its position rather than being skipped:
                   // a damaged trace must not read as a shorter one.
                   : html`<${Danger}>레코드 ${page.offset + index + 1} 를 읽지 못했습니다: ${record.error}<//>`}

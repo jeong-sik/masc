@@ -457,7 +457,12 @@ let process_task_once
   let started_at = Eio.Time.now runtime.clock in
   let tools = ref [] in
   let on_tool_result ~input result =
-    tools := Verification_run_registry.observe_tool_result ~input result :: !tools
+    tools :=
+      Verification_run_registry.observe_tool_result
+        ~input
+        ~finished_at:(Eio.Time.now runtime.clock)
+        result
+      :: !tools
   in
   Verification_run_registry.register_running
     registry

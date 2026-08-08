@@ -1013,11 +1013,8 @@ let test_auth_config_of_yojson_ok () =
 let test_auth_config_of_yojson_error () =
   let json = `Int 42 in
   match Masc_domain.auth_config_of_yojson json with
-  | Ok config ->
-    check bool "enabled defaults true" true config.enabled;
-    check bool "require_token defaults false" false config.require_token;
-    check int "expiry defaults 24" 24 config.token_expiry_hours
-  | Error e -> fail ("expected tolerant default, got: " ^ e)
+  | Error _ -> ()
+  | Ok _ -> fail "non-object auth configuration must be rejected"
 
 (* ============================================================
    permissions Tests

@@ -24,7 +24,7 @@ val sha256_hash : string -> string
 
 val save_private_text_file : string -> string -> unit
 (** [save_private_text_file path content] writes [content] to [path] with
-    mode 0o600. Creates the file if missing, truncates otherwise. *)
+    mode 0o600 using an fsynced sibling replacement. *)
 
 (** {1 Path Helpers} *)
 
@@ -40,9 +40,15 @@ val save_internal_keeper_token_hash : string -> raw_token:string -> unit
 
 (** {1 Auth Config} *)
 
+exception Auth_config_error of {
+  file : string;
+  reason : string;
+}
+
 val load_auth_config : string -> auth_config
 (** [load_auth_config config] reads [.masc/auth/config.json] under [config].
-    Returns [default_auth_config] on missing / parse errors. *)
+    A missing file yields {!default_auth_config}. Malformed or unreadable
+    configuration raises {!Auth_config_error}. *)
 
 val save_auth_config : string -> auth_config -> unit
 (** [save_auth_config config cfg] persists the auth config. *)

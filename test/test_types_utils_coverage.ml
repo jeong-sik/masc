@@ -491,7 +491,7 @@ let test_default_auth_config () =
 let test_auth_config_roundtrip () =
   let cfg = Masc_domain.{
     enabled = true;
-    workspace_secret_hash = Some "sha256:secret";
+    workspace_secret_hash = Some (String.make 64 'a');
     require_token = true;
     token_expiry_hours = 48;
   } in

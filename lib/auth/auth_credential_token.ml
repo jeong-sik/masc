@@ -277,14 +277,13 @@ let resolve_agent_from_token config ~token : (string, masc_error) result =
 ;;
 
 let expires_at_for_auth_config auth_cfg =
-  if auth_cfg.token_expiry_hours > 0
-  then (
-    let expiry =
-      Time_compat.now ()
-      +. (float_of_int auth_cfg.token_expiry_hours *. Masc_time_constants.hour)
-    in
-    Some (Masc_domain.iso8601_of_unix_seconds expiry))
-  else None
+  if auth_cfg.token_expiry_hours < 1 || auth_cfg.token_expiry_hours > 8_760
+  then invalid_arg "auth config token_expiry_hours is outside 1..8760";
+  let expiry =
+    Time_compat.now ()
+    +. (float_of_int auth_cfg.token_expiry_hours *. Masc_time_constants.hour)
+  in
+  Some (Masc_domain.iso8601_of_unix_seconds expiry)
 ;;
 
 let save_raw_token_credential_with_expiry config ~agent_name ~role ~raw_token ~expires_at

@@ -167,9 +167,6 @@ let test_default_auth_config () =
   check bool "token required by default" true cfg.require_token;
   check int "24hr expiry by default" 24 cfg.token_expiry_hours
 
-(* An auth file that omits require_token must not be weaker than having no
-   file at all: default_auth_config requires a token, and with [false] an
-   anonymous caller is granted Worker permissions in optional-token mode. *)
 let test_auth_config_parse_defaults_match_default_config () =
   match Masc_domain.auth_config_of_yojson (`Assoc [ "enabled", `Bool true ]) with
   | Error msg -> fail ("auth_config_of_yojson failed: " ^ msg)
@@ -186,6 +183,48 @@ let test_auth_config_parse_defaults_match_default_config () =
       parsed.token_expiry_hours
 ;;
 
+let test_auth_config_rejects_present_invalid_fields () =
+  let invalid_inputs =
+    [ `Int 42
+    ; `Assoc [ "require_token", `Null ]
+    ; `Assoc [ "require_token", `String "true" ]
+    ; `Assoc [ "workspace_secret_hash", `Bool false ]
+    ; `Assoc [ "workspace_secret_hash", `String "abc" ]
+    ; `Assoc [ "token_expiry_hours", `String "24" ]
+    ; `Assoc [ "token_expiry_hours", `Int 0 ]
+    ; `Assoc [ "token_expiry_hours", `Int (-1) ]
+    ; `Assoc [ "token_expiry_hours", `Int 8_761 ]
+    ; `Assoc [ "unknown", `Bool true ]
+    ; `Assoc [ "enabled", `Bool true; "enabled", `Bool false ]
+    ]
+  in
+  List.iter
+    (fun json ->
+       match Masc_domain.auth_config_of_yojson json with
+       | Error _ -> ()
+       | Ok _ -> fail "present invalid auth configuration must be rejected")
+    invalid_inputs
+;;
+
+let test_load_auth_config_rejects_malformed_file () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      Auth.save_auth_config dir Masc_domain.default_auth_config;
+      let file = Auth.auth_config_file dir in
+      write_file file {|{"require_token":null}|};
+      match Auth.load_auth_config dir with
+      | _ -> fail "malformed auth configuration file must not load"
+      | exception (Auth.Auth_config_error { file = actual_file; reason } as error) ->
+        check string "error identifies config file" file actual_file;
+        check bool "error identifies invalid field" true
+          (contains_substring reason "require_token");
+        check string "public exception hides path and parser detail"
+          "Auth.Auth_config_error"
+          (Printexc.to_string error))
+;;
+
 let test_save_load_auth_config () =
   let dir = setup_test_workspace () in
   let cfg = { Masc_domain.default_auth_config with enabled = true; require_token = true } in
@@ -194,6 +233,50 @@ let test_save_load_auth_config () =
   check bool "enabled persisted" true loaded.enabled;
   check bool "require_token persisted" true loaded.require_token;
   cleanup_test_workspace dir
+
+let test_auth_config_reloads_same_metadata_rewrite () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      Auth.save_auth_config dir Masc_domain.default_auth_config;
+      let file = Auth.auth_config_file dir in
+      let original = read_file file in
+      let original_mtime = (Unix.stat file).st_mtime in
+      ignore (Auth.load_auth_config dir);
+      let invalid_prefix = {|{"require_token":null}|} in
+      let padding_length = String.length original - String.length invalid_prefix in
+      if padding_length < 0 then fail "saved auth config must fit malformed fixture";
+      let invalid =
+        invalid_prefix ^ String.make padding_length ' '
+      in
+      write_file file invalid;
+      Unix.utimes file original_mtime original_mtime;
+      match Auth.load_auth_config dir with
+      | _ -> fail "same-metadata malformed rewrite must be rejected"
+      | exception Auth.Auth_config_error _ -> ())
+;;
+
+let test_auth_config_save_is_atomic_and_rejects_invalid_values () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      Auth.save_auth_config dir Masc_domain.default_auth_config;
+      let file = Auth.auth_config_file dir in
+      let first_inode = (Unix.stat file).st_ino in
+      let updated =
+        { Masc_domain.default_auth_config with require_token = false }
+      in
+      Auth.save_auth_config dir updated;
+      let second_inode = (Unix.stat file).st_ino in
+      check bool "atomic replacement changes inode" true (first_inode <> second_inode);
+      let invalid = { updated with token_expiry_hours = 0 } in
+      (match Auth.save_auth_config dir invalid with
+       | () -> fail "invalid expiry must not be persisted"
+       | exception Auth.Auth_config_error _ -> ());
+      check bool "last valid policy preserved" false (Auth.load_auth_config dir).require_token)
+;;
 
 let test_save_load_auth_config_in_eio_runtime () =
   let dir = setup_test_workspace () in
@@ -1182,6 +1265,8 @@ let () =
     "token_generation", [
       test_case "parse defaults match default_auth_config" `Quick
         test_auth_config_parse_defaults_match_default_config;
+      test_case "reject present invalid config fields" `Quick
+        test_auth_config_rejects_present_invalid_fields;
       test_case "generate token" `Quick test_token_generation;
       test_case "sha256 hash" `Quick test_sha256_hash;
       test_case "Eqaf equality truth table" `Quick test_eqaf_equality_truth_table;
@@ -1189,6 +1274,12 @@ let () =
     "config", [
       test_case "default config" `Quick test_default_auth_config;
       test_case "save/load config" `Quick test_save_load_auth_config;
+      test_case "reload rejects same-metadata rewrite" `Quick
+        test_auth_config_reloads_same_metadata_rewrite;
+      test_case "atomic save rejects invalid values" `Quick
+        test_auth_config_save_is_atomic_and_rejects_invalid_values;
+      test_case "reject malformed config file" `Quick
+        test_load_auth_config_rejects_malformed_file;
       test_case "save/load config in Eio runtime" `Quick
         test_save_load_auth_config_in_eio_runtime;
       test_case "auth config saved private" `Quick

@@ -394,11 +394,11 @@ let write_fixture_file path content =
     (fun () -> output_string output content)
 ;;
 
-let fixture_tool ~name ~description =
+let fixture_tool ?(parameters = []) ~name ~description () =
   Agent_sdk.Tool.create
     ~name
     ~description
-    ~parameters:[]
+    ~parameters
     (fun _ -> Ok { Agent_sdk.Types.content = "fixture"; _meta = None })
 ;;
 
@@ -450,11 +450,39 @@ let test_codex_session_store_rejects_ambiguous_json () =
 ;;
 
 let test_codex_tool_surface_fingerprint_is_exact () =
-  let alpha = fixture_tool ~name:"alpha" ~description:"first" in
-  let beta = fixture_tool ~name:"beta" ~description:"second" in
-  let changed = fixture_tool ~name:"alpha" ~description:"changed" in
+  let alpha = fixture_tool ~name:"alpha" ~description:"first" () in
+  let beta = fixture_tool ~name:"beta" ~description:"second" () in
+  let changed = fixture_tool ~name:"alpha" ~description:"changed" () in
+  let first_param : Agent_sdk.Types.tool_param =
+    { name = "first"; description = "first parameter"; param_type = String; required = true }
+  in
+  let second_param : Agent_sdk.Types.tool_param =
+    { name = "second"
+    ; description = "second parameter"
+    ; param_type = Integer
+    ; required = true
+    }
+  in
+  let ordered =
+    fixture_tool
+      ~parameters:[ first_param; second_param ]
+      ~name:"ordered"
+      ~description:"same semantic schema"
+      ()
+  in
+  let reordered =
+    fixture_tool
+      ~parameters:[ second_param; first_param ]
+      ~name:"ordered"
+      ~description:"same semantic schema"
+      ()
+  in
   let digest tools = Keeper_codex_session_store.tool_surface_sha256 tools in
   check string "order independent" (digest [ alpha; beta ]) (digest [ beta; alpha ]);
+  check string
+    "parameter and property order independent"
+    (digest [ ordered ])
+    (digest [ reordered ]);
   check bool "description participates" true
     (not (String.equal (digest [ alpha ]) (digest [ changed ])))
 ;;
@@ -700,7 +728,7 @@ let test_keeper_rejects_changed_tool_surface_on_resume () =
              with
              | Error error -> fail (Agent_sdk.Error.to_string error)
              | Ok _ -> ());
-            let tool = fixture_tool ~name:"new_tool" ~description:"new surface" in
+            let tool = fixture_tool ~name:"new_tool" ~description:"new surface" () in
             match
               run_keeper_turn
                 ~session_dir

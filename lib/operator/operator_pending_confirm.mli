@@ -5,7 +5,7 @@ val pending_confirms_path : Workspace.config -> string
 val trace_id : string -> string
 val normalized_actor : context_actor:string -> string option -> string
 
-type pending_confirm = {
+type pending_confirm = Workspace_hooks.operator_pending_confirm_request = {
   confirm_token : string;
   trace_id : string;
   actor : string;

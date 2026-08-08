@@ -18,7 +18,6 @@ module Keeper_event_queue_operator =
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
-let realtime_cache_ttl_s = Server_dashboard_http_core_cache.realtime_cache_ttl_s
 let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
 
 let dashboard_actor_cache_segment state req =

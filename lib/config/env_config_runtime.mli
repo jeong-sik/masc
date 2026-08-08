@@ -79,7 +79,6 @@ module Transport : sig
     | H1_only
     | H2_only
 
-  val normalize_token : string -> string
   val h2_mode_of_string : string -> h2_mode
   val h2_mode_to_string : h2_mode -> string
 

@@ -130,6 +130,12 @@ if ! wait_for_http "http://${HOST}:${PORT}/health" "$SERVER_WAIT_SEC"; then
   exit 1
 fi
 
+HEALTH_FULL="$(curl -fsS --max-time 10 "http://${HOST}:${PORT}/health?full=1")"
+if ! node -e 'const h=JSON.parse(process.argv[1]); if (h.keeper_fibers !== 0) { console.error(`expected keeper_fibers=0, got ${JSON.stringify(h.keeper_fibers)}`); process.exit(1); }' "$HEALTH_FULL"; then
+  echo "Keeper autonomous kill-switch did not prevent fibers. See $SERVER_LOG" >&2
+  exit 1
+fi
+
 if ! wait_for_http "http://${HOST}:${PORT}/api/v1/dashboard/execution" 15; then
   echo "Dashboard execution endpoint did not become ready. See $SERVER_LOG" >&2
   exit 1

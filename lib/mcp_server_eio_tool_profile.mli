@@ -90,7 +90,8 @@ val tool_allowed_in_profile :
       profile tool_name] is the call-time gate (vs the
       list-time {!tool_schemas_for_profile}):
 
-    - [Full]: [tool_name] is in [Config.visible_tool_schemas].
+    - [Full]: [tool_name] is in the raw schema inventory, remains active, and
+      satisfies [Tool_catalog.allow_direct_call].
     - [Managed_agent]: SDK binding by name, OR present in the
       managed-agent profile schema list.
     - [Operator_remote]: in [Tool_operator.remote_tool_names]. *)

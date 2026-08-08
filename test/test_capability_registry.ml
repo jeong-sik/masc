@@ -6,7 +6,7 @@ open Alcotest
 
 let test_public_visible_surface_exposes_masc_transition () =
   let names =
-    Lib.Capability_registry.visible_public_tool_schemas_from
+    Lib.Capability_registry.visible_tool_schemas_from
       Lib.Config.raw_all_tool_schemas
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in

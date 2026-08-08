@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
 # TLA+ Bug Model coverage ratchet gate.
 #
-# Spec-side ratchet for the Q-P0-2 audit chain. Companion to
-# scripts/tla-ppx-ratchet.sh (PR #12151) which tracks runtime PPX
-# adoption.
-#
-# Documented in:
-#   docs/audit/TLA-SPECS-GAP-AUDIT-2026-04.md            (Phase 1)
-#   docs/audit/TLA-SPECS-GAP-AUDIT-2026-04-PHASE2.md     (Phase 2)
-#   docs/audit/TLA-SPECS-GAP-AUDIT-2026-04-PHASE3.md     (Phase 3)
-#   docs/audit/TLA-SPECS-GAP-AUDIT-2026-04-PHASE3-CLOSURE.md
+# Enforces the current Bug Model coverage contract recorded in
+# scripts/tla-bug-model-baseline.json.
 #
 # Strict metrics (gate fails on regression direction):
 #
@@ -170,7 +163,6 @@ baseline_file, cov, dom = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 data = {
     "_comment": "TLA+ Bug Model coverage baseline. Regenerate with scripts/tla-bug-model-ratchet.sh --regenerate.",
     "_metrics": "See scripts/tla-bug-model-ratchet.sh STRICT_METRICS array.",
-    "_audit": "docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md",
     "bug_model_coverage_specs": cov,
     "domains_without_bug_model": dom,
 }

@@ -1,15 +1,9 @@
 #!/usr/bin/env bash
-# audit-tla-cfg-orphan.sh — one-shot audit for cfg ↔ spec orphan references.
+# audit-tla-cfg-orphan.sh — CI gate for cfg ↔ spec orphan references.
 #
-# Detects the 5th TLA+ drift class identified in iter 44 audit
-# (`docs/tla-audit/kdp-cap2-dead-cfg-2026-05-12.md`): cfg files referencing
-# INVARIANTS or PROPERTIES that are not defined in their parent .tla.
-#
-# This is an *audit-mode* tool, intentionally NOT wired into CI.  Iter 45
-# R-F-2 full-corpus sweep (200 cfgs across 18 spec dirs) found exactly 3
-# orphans, all in a single cfg pair (KeeperDecisionPipeline-cap2.cfg),
-# already closed by iter 45 PR #14843.  CI integration (R-F-1.c) is
-# deferred until evidence of a recurring pattern emerges.
+# Every cfg must resolve to a parent .tla, and every listed INVARIANT or
+# PROPERTY must be defined by that parent. The CI Meta Guards job runs this
+# script for every pull request.
 #
 # Usage:
 #   bash scripts/audit-tla-cfg-orphan.sh
@@ -94,7 +88,7 @@ if [[ $ORPHANS -gt 0 ]]; then
   echo ""
   echo "Fix: either (a) add the named invariant/property to the parent .tla,"
   echo "or (b) remove the orphan reference from the cfg, or (c) delete the"
-  echo "cfg if it has never been executable (iter 45 #14843 R-F-1.a precedent)."
+  echo "cfg if it cannot be executed."
   exit 1
 fi
 

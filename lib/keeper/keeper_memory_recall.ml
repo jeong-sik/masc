@@ -167,11 +167,8 @@ let recent_user_messages (msgs : Agent_sdk.Types.message list) ~(max_n : int) : 
        else None)
   |> take max_n
 
-(* RFC-0149 §3.1: pure list -> list filter extracted so the legacy
-   silent-fallback path and the [_result] variant share the same
-   per-line parsing logic.  The per-line [try ... with exn -> log +
-   counter + None] is preserved here — that is a separate boundary
-   (JSONL corruption) from the file-read IO fault. *)
+(* Parse history rows independently so one corrupt JSONL row is recorded and
+   skipped without hiding a file-read failure for the complete source. *)
 let history_user_messages_from_lines
     ~(path : string)
     ~(max_n : int)

@@ -50,7 +50,13 @@ let observe_process_timeout argv ~timeout_sec ~origin =
   try
     (Atomic.get process_timeout_observer_fn)
       ~program:(argv_program argv) ~timeout_sec ~origin
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e ->
+    (* The observer is called from the process fiber; swallowing [Cancelled]
+       would report an observer failure and let the fiber continue past a
+       cancellation it was told to honour. *)
+    Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+  | exn ->
     Log.Misc.warn "[Process_eio] timeout observer failed: %s"
       (Printexc.to_string exn)
 

@@ -78,7 +78,10 @@ module FileSystem = struct
 
   let notify_mutex_observer ~kind observer ~op ~seconds =
     try observer ~op ~seconds
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e ->
+      Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+    | exn ->
       Log.legacy_traceln ~level:Log.Debug ~module_name:"Backend"
         (Printf.sprintf
            "[DEBUG] backend mutex %s observer failed for op=%s: %s"

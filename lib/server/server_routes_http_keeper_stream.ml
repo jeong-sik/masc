@@ -2939,10 +2939,14 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
   let close_stream () =
     if not !closed then begin
       closed := true;
-      (* Catch all exceptions including Cancelled — this function is called
-         from Switch.on_release where re-raising would mask the original exn. *)
+      (* An ordinary close failure is logged and absorbed so it cannot mask the
+         exception that triggered [Switch.on_release]. Cancellation remains a
+         control-flow signal and must propagate. *)
       (try Httpun.Body.Writer.close writer
-       with exn ->
+       with
+       | Eio.Cancel.Cancelled _ as e ->
+         Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+       | exn ->
          Log.Misc.warn "keeper_stream writer close: %s"
            (Printexc.to_string exn))
     end

@@ -515,6 +515,38 @@ let test_parse_json_safe_long_invalid () =
   let result = parse_json_safe ~context:"test" long_str in
   check bool "Error on long invalid" true (Result.is_error result)
 
+
+(* [emit_persistence_utf8_repair_metric] runs the caller-installed hook
+   inside the caller's fiber. It used to catch every exception and log,
+   which absorbed [Eio.Cancel.Cancelled] and left the fiber running past a
+   cancellation it was told to honour. The hook is reached through the
+   public repair entry point, so the behaviour is testable from here. *)
+
+let invalid_utf8 = "ok\xffbad"
+
+let test_metric_hook_cancellation_propagates () =
+  Safe_ops.set_persistence_utf8_repair_metric_hook (fun () ->
+    raise (Eio.Cancel.Cancelled (Failure "probe")));
+  let raised =
+    match Safe_ops.repair_utf8_text_with_stats invalid_utf8 with
+    | _ -> false
+    | exception Eio.Cancel.Cancelled _ -> true
+    | exception _ -> false
+  in
+  Safe_ops.set_persistence_utf8_repair_metric_hook (fun () -> ());
+  check bool "Cancelled from the metric hook reaches the caller" true raised
+
+let test_metric_hook_other_exception_is_absorbed () =
+  Safe_ops.set_persistence_utf8_repair_metric_hook (fun () ->
+    failwith "hook is broken");
+  let completed =
+    match Safe_ops.repair_utf8_text_with_stats invalid_utf8 with
+    | _ -> true
+    | exception _ -> false
+  in
+  Safe_ops.set_persistence_utf8_repair_metric_hook (fun () -> ());
+  check bool "a broken hook still does not fail the repair" true completed
+
 let () =
   run "Safe_ops" [
     "int_of_string_safe", [
@@ -618,6 +650,12 @@ let () =
       test_case "present" `Quick test_json_string_list_present;
       test_case "missing" `Quick test_json_string_list_missing;
       test_case "wrong type" `Quick test_json_string_list_wrong_type;
+    ];
+    "metric hook", [
+      test_case "Cancelled propagates" `Quick
+        test_metric_hook_cancellation_propagates;
+      test_case "other exceptions absorbed" `Quick
+        test_metric_hook_other_exception_is_absorbed;
     ];
     "json_stringified_coercion", [
       test_case "int from stringified int" `Quick test_json_int_coerces_stringified_int;

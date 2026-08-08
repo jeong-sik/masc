@@ -222,14 +222,6 @@ let find_task_goal_id config task_id =
   | Some [] | None -> None
 ;;
 
-let merge_current_task_id ~(latest : keeper_meta) ~(caller : keeper_meta) =
-  {
-    latest with
-    current_task_id = caller.current_task_id;
-    updated_at = caller.updated_at;
-  }
-;;
-
 let sync_keeper_meta_current_task
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
@@ -241,22 +233,33 @@ let sync_keeper_meta_current_task
       "could not sync claimed task %s into current_task_id: %s"
       task_id msg
   | Ok current_task_id ->
-    let updated_meta =
-      { meta with current_task_id = Some current_task_id; updated_at = now_iso () }
-    in
-    Keeper_registry.update_meta ~base_path:config.base_path meta.name updated_meta;
     (match
-       Keeper_meta_store.write_meta_with_merge ~merge:merge_current_task_id config updated_meta
+       Keeper_owner_registry.apply_meta
+         ~base_path:config.base_path
+         ~keeper_name:meta.name
+         (Keeper_owner_reducer.Set_current_task
+            { task_id = Some current_task_id; updated_at = now_iso () })
      with
-     | Ok () -> ()
-     | Error msg ->
+     | Ok (Some _) -> ()
+     | Ok None ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string WriteMetaFailures)
-         ~labels:[("keeper", meta.name); ("phase", "claim_task_id")]
+         ~labels:[ "keeper", meta.name; "phase", "claim_task_id" ]
          ();
-       Log.Keeper.warn ~keeper_name:meta.name
+       Log.Keeper.warn
+         ~keeper_name:meta.name
+         "owner removed metadata while syncing claimed current_task_id=%s"
+         task_id
+     | Error error ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string WriteMetaFailures)
+         ~labels:[ "keeper", meta.name; "phase", "claim_task_id" ]
+         ();
+       Log.Keeper.warn
+         ~keeper_name:meta.name
          "failed to persist claimed current_task_id=%s: %s"
-         task_id (Keeper_meta_store.write_meta_error_to_string msg))
+         task_id
+         (Keeper_owner_registry.command_error_to_string error))
 ;;
 
 (* Cluster sub-dispatch via closed sum type — string [name] is converted

@@ -320,6 +320,39 @@ let handle_tool_execute_typed
                ~fields:(typed_context_fields @ extra_fields)
                msg)
         in
+        let dispatch_plan =
+          Keeper_tooling.Execute_shell_ir.validate_dispatch
+            ~workdir:cwd
+            ~sandbox:dispatch_sandbox
+            ir
+        in
+        match dispatch_plan with
+        | Error (Keeper_tooling.Execute_shell_ir.Gate_reject diagnostic) ->
+          Log.Keeper.warn
+            "shell_ir gate_reject keeper=%s cmd=%s diagnostic=%s"
+            meta.name
+            cmd_for_log
+            (message_for_log diagnostic);
+          typed_error_json ~class_:Tool_result.Policy_rejection diagnostic
+        | Error Keeper_tooling.Execute_shell_ir.Cannot_parse ->
+          typed_error_json
+            ~class_:Tool_result.Policy_rejection
+            "Cannot parse command"
+        | Error Keeper_tooling.Execute_shell_ir.Too_complex ->
+          typed_error_json
+            ~class_:Tool_result.Policy_rejection
+            "Command too complex"
+        | Error (Keeper_tooling.Execute_shell_ir.Path_reject e) ->
+          Log.Keeper.warn
+            "shell_ir path_reject keeper=%s cmd=%s reason=%s"
+            meta.name
+            cmd_for_log
+            (message_for_log e);
+          typed_error_json
+            ~class_:Tool_result.Policy_rejection
+            ~extra_fields:[ "blocked_cmd", `String cmd_for_log ]
+            e
+        | Ok dispatch_plan ->
         let sandbox_profile_label =
           Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile
         in
@@ -422,39 +455,13 @@ let handle_tool_execute_typed
                   meta.name
                   (Printexc.to_string exn))
           in
-          let dispatch_result =
-            Keeper_tooling.Execute_shell_ir.dispatch
-              ~workdir:cwd
-              ~sandbox:dispatch_sandbox
+          let result =
+            Keeper_tooling.Execute_shell_ir.dispatch_validated
               ?timeout_sec
               ?base_host_env
               ~on_output_chunk
-              ir
+              dispatch_plan
           in
-          match dispatch_result with
-          | Error (Keeper_tooling.Execute_shell_ir.Gate_reject diagnostic) ->
-            (* RFC-0208 P1: gate denial audit line. *)
-            Log.Keeper.warn
-              "shell_ir gate_reject keeper=%s cmd=%s diagnostic=%s"
-              meta.name
-              cmd_for_log
-              (message_for_log diagnostic);
-            typed_error_json diagnostic
-          | Error Keeper_tooling.Execute_shell_ir.Cannot_parse ->
-            typed_error_json "Cannot parse command"
-          | Error Keeper_tooling.Execute_shell_ir.Too_complex ->
-            typed_error_json "Command too complex"
-          | Error (Keeper_tooling.Execute_shell_ir.Path_reject e) ->
-            (* RFC-0208 P1: path-policy denial audit line. *)
-            Log.Keeper.warn
-              "shell_ir path_reject keeper=%s cmd=%s reason=%s"
-              meta.name
-              cmd_for_log
-              (message_for_log e);
-            typed_error_json
-              ~extra_fields:[ "blocked_cmd", `String cmd_for_log ]
-              e
-          | Ok result ->
             let elapsed_ms =
               (* NDT-OK: second wall-clock read closes the elapsed telemetry
                  span recorded immediately below. *)

@@ -1486,12 +1486,6 @@ let observe_exact_rule_store_degraded (request : request) error =
     ()
 ;;
 
-let canonical_rule_match (rule_match : Keeper_approval_queue.rule_match)
-  : Keeper_approval_queue_rules_types.rule_match
-  =
-  { rule_id = rule_match.rule_id }
-;;
-
 let observe_exact_rule_expired
       (request : request)
       (rule_match : Keeper_approval_queue_rules_types.rule_match)
@@ -1559,7 +1553,6 @@ let decide_without_cycle_grant ~keeper_always_allow request =
           observe_exact_rule_store_degraded request error;
           decide_from_selected_mode request mode
         | Ok (Keeper_approval_queue.Rule_match_active rule_match) ->
-          let rule_match = canonical_rule_match rule_match in
           let source = Exact_always_rule rule_match.rule_id in
           audit_allow
             request
@@ -1568,7 +1561,6 @@ let decide_without_cycle_grant ~keeper_always_allow request =
             source;
           Allow { source }
         | Ok (Keeper_approval_queue.Rule_match_expired rule_match) ->
-          let rule_match = canonical_rule_match rule_match in
           observe_exact_rule_expired request rule_match;
           decide_from_selected_mode request mode
         | Ok Keeper_approval_queue.Rule_match_absent ->

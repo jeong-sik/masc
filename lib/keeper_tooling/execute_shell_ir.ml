@@ -52,17 +52,16 @@ type dispatch_error =
   | Too_complex
   | Path_reject of string
 
+type validated_dispatch = Validated_dispatch of Masc_exec.Shell_ir.t
+
 let validate_paths ~workdir ir =
   Exec_policy.validate_shell_ir_paths ~workdir ir
 ;;
 
-let dispatch
+let validate_dispatch
       ?(allow_pipes = true)
       ~workdir
       ~sandbox
-      ?base_host_env
-      ?timeout_sec
-      ?on_output_chunk
       ir
   =
   let gate_verdict =
@@ -76,14 +75,21 @@ let dispatch
   | Shell_gate.Reject { diagnostic; _ } -> Error (Gate_reject diagnostic)
   | Shell_gate.Cannot_parse _ -> Error Cannot_parse
   | Shell_gate.Too_complex _ -> Error Too_complex
-  | Shell_gate.Allow _context ->
-    (match validate_paths ~workdir ir with
+  | Shell_gate.Allow context ->
+    (match validate_paths ~workdir context.ast with
      | Error error -> Error (Path_reject error)
-     | Ok () ->
-       Ok
-         (Masc_exec.Exec_dispatch.dispatch
-            ?base_host_env
-            ?timeout_sec
-            ?on_output_chunk
-            ir))
+     | Ok () -> Ok (Validated_dispatch context.ast))
+;;
+
+let dispatch_validated
+      ?base_host_env
+      ?timeout_sec
+      ?on_output_chunk
+      (Validated_dispatch ir)
+  =
+  Masc_exec.Exec_dispatch.dispatch
+    ?base_host_env
+    ?timeout_sec
+    ?on_output_chunk
+    ir
 ;;

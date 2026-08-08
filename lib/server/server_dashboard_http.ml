@@ -514,14 +514,10 @@ let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
   | Some id ->
     (match Keeper_approval_queue.delete_rule ~base_path ~id () with
      | Ok deleted ->
-         Keeper_approval.Audit.record
+         Keeper_approval.Audit.record_rule
            ~base_path
            ~event_type:Keeper_approval.Audit.Rule_deleted
-           ~id:deleted.id
-           ~keeper_name:deleted.keeper_name
-           ~tool_name:deleted.tool_name
-           ?source_approval_id:deleted.source_approval_id
-           ();
+           deleted;
          Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
        | Error error ->
          Error (Keeper_approval_queue.rule_store_error_to_string error))

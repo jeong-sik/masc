@@ -16,13 +16,11 @@ code_refs:
 
 This runbook documents the current operator surface for `Execute` and
 adjacent structured process routing. Execute is typed-only: callers provide
-one non-empty `argv` process vector or `pipeline`. Raw command strings and the old
-background task lifecycle are not part of the callable surface.
+one non-empty `argv` process vector or `pipeline`.
 
 ## Related Documents
 
 - [`ENV-CONTRACT.md`](./ENV-CONTRACT.md) §4 — authoritative flag matrix
-- `planning/graceful-panda/Legendary-Execute-plan.md` — historical source plan
 
 ## Scope
 
@@ -31,17 +29,7 @@ background task lifecycle are not part of the callable surface.
 - `Grep` owns file/content search. Execute owns typed command execution.
 - Does not cover: the runtime verifier itself or the approval layer for MCP
   tools.
-- Async boundary: the typed `Execute` callable surface is synchronous. There is
-  no background shell lifecycle surface anywhere below it.
-
-## Current Rollout State
-
-| Phase | Feature | Default | Status |
-| --- | --- | --- | --- |
-| P1 | `semantic_exit` typed return code | **on** | flipped |
-| P3 | head+tail truncation | on | delivered |
-| P5 | Shell IR command gate | on | authoritative |
-| P6 | `verifiable_markers` emission | **on** | flipped |
+- Execution completes synchronously within the typed `Execute` call.
 
 ## Flag Matrix
 
@@ -111,13 +99,11 @@ scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_docker_streaming.ex
 ./_build/default/lib/exec/test/test_exec_dispatch_docker_streaming.exe
 ```
 
-## Async Boundary Proof
+## Callable Boundary Proof
 
-`Execute` remains synchronous at the callable-surface level. The public schema
-rejects legacy background flags and accepts only typed command fields:
-`executable`, `argv`, `pipeline`, `env`, `cwd`, `timeout_sec`, `stdin`,
-`stdout`, and `stderr`. It does not expose `job_id`, `request_id`, `poll`, or
-`cancel` fields.
+The public schema accepts only typed command fields: `argv`, `pipeline`, `env`,
+`cwd`, `timeout_sec`, `stdin`, `stdout`, and `stderr`. Execution completes in
+the request that admitted it.
 
 Keeper-turn async messaging is a separate surface (`keeper_msg`,
 `keeper_msg_result`, `keeper_msg_cancel`, `keeper_msg_list`) and is serialized

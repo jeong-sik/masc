@@ -968,15 +968,48 @@ let () =
       }
   in
   match
-    Keeper_tooling.Execute_shell_ir.dispatch
+    Keeper_tooling.Execute_shell_ir.validate_dispatch
       ~workdir:"/tmp"
       ~sandbox:(Masc_exec.Sandbox_target.host ())
       ir
   with
-  | Ok result ->
+  | Ok dispatch_plan ->
+    let result =
+      Keeper_tooling.Execute_shell_ir.dispatch_validated dispatch_plan
+    in
     assert (result.status = Unix.WEXITED 0);
     assert (String.trim result.stdout = "adapter")
   | Error _ -> assert false
+
+let () =
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
+  let target =
+    Masc_exec.Path_scope.classify
+      ~raw:"/var/masc-test-outside-validated-plan.txt"
+      ~cwd:"/tmp"
+  in
+  let ir =
+    Simple
+      { bin
+      ; args = [ Lit ("blocked", default_meta) ]
+      ; env = []
+      ; cwd = None
+      ; redirects =
+          [ Masc_exec.Redirect_scope.File
+              { fd = 1; target; mode = Masc_exec.Redirect_scope.Write }
+          ]
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+  in
+  match
+    Keeper_tooling.Execute_shell_ir.validate_dispatch
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      ir
+  with
+  | Error (Keeper_tooling.Execute_shell_ir.Path_reject _) -> ()
+  | Error _ | Ok _ -> assert false
 
 let () =
   Printf.printf "p7_exec_dispatch: all tests passed.\n"

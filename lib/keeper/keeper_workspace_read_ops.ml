@@ -68,10 +68,18 @@ let try_handle_with_outcome
   (* TEL-OK: read-op adapter delegates to Keeper_tooling.Execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)
   let dispatch_host_shell_ir ~workdir ir =
-    Keeper_tooling.Execute_shell_ir.dispatch
-      ~workdir
-      ~sandbox:(Masc_exec.Sandbox_target.host ())
-      ir
+    let sandbox = Masc_exec.Sandbox_target.host () in
+    match
+      Keeper_tooling.Execute_shell_ir.validate_dispatch
+        ~workdir
+        ~sandbox
+        ir
+    with
+    | Error _ as error -> error
+    | Ok dispatch_plan ->
+      Ok
+        (Keeper_tooling.Execute_shell_ir.dispatch_validated
+           dispatch_plan)
   in
   let run_host_shell_ir
         ?path

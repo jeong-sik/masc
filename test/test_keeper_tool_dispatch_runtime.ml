@@ -3105,6 +3105,52 @@ let test_manual_gate_defers_tool_execute_before_process () =
         Yojson.Safe.Util.(data |> member "gate" |> member "decision" |> to_string);
       check bool "Manual Gate starts no process" false (Sys.file_exists marker))
 
+let test_tool_execute_validates_paths_before_manual_gate () =
+  with_exec_fixture
+    "keeper_tool_dispatch_pre_gate_path_validation"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      (match
+         Masc.Keeper_gate_mode.set
+           config
+           ~actor:"test"
+           Masc.Keeper_gate_mode.Manual
+       with
+       | Ok _ -> ()
+       | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
+      let outside = "/var/masc-test-outside-approval-boundary.txt" in
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~publication_recovery
+          ~ctx_work
+          ~name:"tool_execute"
+          ~input:
+            (`Assoc
+               [ "argv", `List [ `String "echo"; `String "blocked" ]
+               ; "cwd", `String config.base_path
+               ; "stdout", `Assoc [ "file", `String outside ]
+               ])
+          ()
+      in
+      (match result.KTE.disposition with
+       | Tool_result.Failed Tool_result.Policy_rejection -> ()
+       | disposition ->
+         failf
+           "pre-Gate path validation returned %s"
+           (outcome_label disposition));
+      match
+        Masc.Keeper_approval_queue.list_pending_entries_for_workspace
+          ~base_path:config.base_path
+      with
+      | Ok [] -> ()
+      | Ok entries ->
+        failf
+          "path rejection crossed the approval boundary and created %d pending rows"
+          (List.length entries)
+      | Error error ->
+        fail (Masc.Keeper_approval_queue.storage_error_to_string error))
+
 let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
   with_exec_fixture "tool_execute_raw_cmd_requires_typed_shell_ir"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -4161,6 +4207,8 @@ let () =
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "Manual Gate defers tool_execute before process" `Quick
         test_manual_gate_defers_tool_execute_before_process;
+      test_case "tool_execute validates paths before Manual Gate" `Quick
+        test_tool_execute_validates_paths_before_manual_gate;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
       test_case "OAS handler threads Eio context to keeper dispatch" `Quick

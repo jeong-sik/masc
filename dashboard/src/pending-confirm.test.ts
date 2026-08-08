@@ -76,6 +76,20 @@ describe('normalizeOperatorActionDescriptor', () => {
 // normalizePendingConfirmation
 // ================================================================
 
+const validPendingConfirmation = {
+  confirm_token: 'tok-1',
+  trace_id: 'trace-1',
+  actor: 'agent-1',
+  action_type: 'pause',
+  target_type: 'keeper',
+  target_id: 'janitor',
+  payload: {},
+  delegated_tool: 'shell_exec',
+  created_at: '2026-04-17T12:00:00Z',
+  expires_at: null,
+  preview: { message: 'Hello' },
+}
+
 describe('normalizePendingConfirmation', () => {
   it('returns null for null', () => {
     expect(normalizePendingConfirmation(null)).toBeNull()
@@ -90,27 +104,14 @@ describe('normalizePendingConfirmation', () => {
   })
 
   it('extracts confirm_token', () => {
-    const result = normalizePendingConfirmation({
-      confirm_token: 'tok-1',
-    })
+    const result = normalizePendingConfirmation(validPendingConfirmation)
     expect(result).not.toBeNull()
     expect(result!.confirm_token).toBe('tok-1')
   })
 
-  it('rejects a token-only item', () => {
-    expect(normalizePendingConfirmation({ token: 'noncanonical' })).toBeNull()
-  })
-
   it('extracts all fields', () => {
     const result = normalizePendingConfirmation({
-      confirm_token: 'tok-1',
-      actor: 'agent-1',
-      action_type: 'pause',
-      target_type: 'keeper',
-      target_id: 'janitor',
-      delegated_tool: 'shell_exec',
-      created_at: '2026-04-17T12:00:00Z',
-      preview: { message: 'Hello' },
+      ...validPendingConfirmation,
     })
     expect(result!.actor).toBe('agent-1')
     expect(result!.action_type).toBe('pause')
@@ -121,11 +122,9 @@ describe('normalizePendingConfirmation', () => {
     expect(result!.preview).toEqual({ message: 'Hello' })
   })
 
-  it('defaults target_id to null', () => {
-    const result = normalizePendingConfirmation({
-      confirm_token: 'tok-1',
-    })
-    expect(result!.target_id).toBeNull()
+  it('rejects an item with missing required fields', () => {
+    const { target_id: _targetId, ...withoutTargetId } = validPendingConfirmation
+    expect(normalizePendingConfirmation(withoutTargetId)).toBeNull()
   })
 })
 
@@ -197,8 +196,8 @@ describe('normalizePendingConfirmEnvelope', () => {
   it('extracts the complete envelope', () => {
     const result = normalizePendingConfirmEnvelope({
       items: [
-        { confirm_token: 'tok-1' },
-        { confirm_token: 'tok-2' },
+        validPendingConfirmation,
+        { ...validPendingConfirmation, confirm_token: 'tok-2' },
       ],
       summary: {
         actor_filter: null,

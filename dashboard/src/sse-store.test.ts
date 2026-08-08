@@ -108,8 +108,9 @@ async function loadSseStore() {
   }))
   vi.doMock('./router', () => ({ route }))
   const sseStore = await import('./sse-store')
+  const operatorSignals = await import('./operator-signals')
   const wsState = await import('./dashboard-ws-state')
-  return { sseStore, wsState, compositeTick }
+  return { sseStore, wsState, compositeTick, operatorSignals }
 }
 
 describe('setupServerPushReaction reconnect hydration', () => {
@@ -308,6 +309,63 @@ describe('setupServerPushReaction reconnect hydration', () => {
     })
     expect(requestNamespaceTruthNow).not.toHaveBeenCalled()
 
+  })
+
+  it('clears operator state when a pushed snapshot violates the envelope contract', async () => {
+    const { sseStore, operatorSignals } = await loadSseStore()
+    operatorSignals.operatorSnapshot.value = {
+      root: {},
+      keepers: [],
+      inference_inflight: null,
+      persistent_agents: [],
+      recent_messages: [],
+      pending_confirm_envelope: {
+        items: [],
+        summary: {
+          actor_filter: null,
+          filter_active: false,
+          visible_count: 0,
+          total_count: 0,
+          hidden_count: 0,
+          hidden_actors: [],
+          confirm_required_actions: [],
+        },
+      },
+      available_actions: [],
+    }
+
+    sseStore.hydrateDashboardSlice('operator', {
+      keepers: [],
+      snapshot_epoch: 'epoch-invalid-envelope',
+      snapshot_generation: 1,
+      snapshot_compute_sequence: 1,
+      snapshot_terminal_sequence: 1,
+    }, 'operator_snapshot')
+
+    expect(operatorSignals.operatorSnapshot.value).toBeNull()
+    expect(operatorSignals.operatorError.value).toBe('invalid pending_confirm_envelope')
+
+    sseStore.hydrateDashboardSlice('operator', {
+      snapshot_epoch: 'epoch-recovered',
+      snapshot_generation: 1,
+      snapshot_compute_sequence: 2,
+      snapshot_terminal_sequence: 2,
+      pending_confirm_envelope: {
+        items: [],
+        summary: {
+          actor_filter: null,
+          filter_active: false,
+          visible_count: 0,
+          total_count: 0,
+          hidden_count: 0,
+          hidden_actors: [],
+          confirm_required_actions: [],
+        },
+      },
+    }, 'operator_snapshot')
+
+    expect(operatorSignals.operatorSnapshot.value).not.toBeNull()
+    expect(operatorSignals.operatorError.value).toBeNull()
   })
 
   it('does not refresh hidden heavy surfaces for keeper lifecycle events on overview', async () => {
@@ -979,7 +1037,25 @@ describe('setupServerPushReaction reconnect hydration', () => {
         payload: { root: { status: { project: 'default' } } } },
       { eventType: 'execution_snapshot', slice: 'execution',
         payload: { agents: [], tasks: [], messages: [], keepers: [] } },
-      { eventType: 'operator_snapshot', slice: 'operator', payload: { keepers: [] } },
+      { eventType: 'operator_snapshot', slice: 'operator', payload: {
+        keepers: [],
+        snapshot_epoch: 'epoch-table',
+        snapshot_generation: 1,
+        snapshot_compute_sequence: 1,
+        snapshot_terminal_sequence: 1,
+        pending_confirm_envelope: {
+          items: [],
+          summary: {
+            actor_filter: null,
+            filter_active: false,
+            visible_count: 0,
+            total_count: 0,
+            hidden_count: 0,
+            hidden_actors: [],
+            confirm_required_actions: [],
+          },
+        },
+      } },
       { eventType: 'operator_digest', slice: 'operator', payload: { target_type: 'namespace' } },
       { eventType: 'transport_health_snapshot', slice: 'transport', payload: transportPayload },
       { eventType: 'keeper_composite_changed', slice: 'composite',

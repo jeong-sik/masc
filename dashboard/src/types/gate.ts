@@ -21,13 +21,16 @@ export interface BoardMonitoring {
 
 export interface PendingConfirmation {
   confirm_token: string
-  actor?: string
-  action_type?: string
-  target_type?: string
-  target_id?: string | null
-  delegated_tool?: string
-  created_at?: string
-  preview?: unknown
+  trace_id: string
+  actor: string
+  action_type: string
+  target_type: string
+  target_id: string | null
+  payload: Record<string, unknown>
+  delegated_tool: string
+  created_at: string
+  expires_at: string | null
+  preview: Record<string, unknown>
 }
 
 export interface PendingConfirmEnvelope {

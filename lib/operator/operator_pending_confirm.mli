@@ -6,7 +6,7 @@ val trace_id : string -> string
 val normalized_actor : context_actor:string -> string option -> string
 
 type pending_confirm = {
-  token : string;
+  confirm_token : string;
   trace_id : string;
   actor : string;
   action_type : string;

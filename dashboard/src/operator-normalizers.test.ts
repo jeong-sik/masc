@@ -17,6 +17,20 @@ const emptyPendingConfirmEnvelope = {
   },
 }
 
+const validPendingConfirmation = {
+  confirm_token: 'tok-1',
+  trace_id: 'trace-1',
+  actor: 'agent-1',
+  action_type: 'pause',
+  target_type: 'keeper',
+  target_id: null,
+  payload: {},
+  delegated_tool: 'masc_pause',
+  created_at: '2026-08-08T00:00:00Z',
+  expires_at: null,
+  preview: {},
+}
+
 function normalizeOperatorSnapshot(raw: Record<string, unknown>) {
   return normalizeOperatorSnapshotWire({
     pending_confirm_envelope: emptyPendingConfirmEnvelope,
@@ -486,7 +500,7 @@ describe('normalizeOperatorSnapshot', () => {
     const result = normalizeOperatorSnapshot({
       pending_confirm_envelope: {
         items: [
-          { confirm_token: 'tok-1', actor: 'agent-1', action_type: 'pause' },
+          validPendingConfirmation,
         ],
         summary: {
           ...emptyPendingConfirmEnvelope.summary,
@@ -568,7 +582,7 @@ describe('normalizeOperatorSnapshot', () => {
     const result = normalizeOperatorSnapshot({
       pending_confirm_envelope: {
         items: [
-          { confirm_token: 'tok-e1', actor: 'agent-1' },
+          { ...validPendingConfirmation, confirm_token: 'tok-e1' },
         ],
         summary: {
           ...emptyPendingConfirmEnvelope.summary,

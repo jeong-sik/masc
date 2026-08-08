@@ -260,7 +260,7 @@ let action_json ?actor_hint (ctx : _ context) args :
     let preview = preview_of_action request in
     let entry =
       {
-        token;
+        confirm_token = token;
         trace_id;
         actor = request.actor;
         action_type = request.action_type;
@@ -293,7 +293,7 @@ let action_json ?actor_hint (ctx : _ context) args :
          [
            ("trace_id", `String trace_id);
            ("confirm_required", `Bool true);
-           ("confirm_token", `String entry.token);
+           ("confirm_token", `String entry.confirm_token);
            ("preview", preview);
            ("tool_name", `String delegated_tool);
            ("expires_at", `String expires_at);
@@ -340,7 +340,8 @@ let confirm_json ?actor_hint (ctx : _ context) args :
   | Some confirm_token -> (
       match
         raw_pending_confirms ctx.config
-        |> List.find_opt (fun entry -> String.equal entry.token confirm_token)
+        |> List.find_opt (fun entry ->
+               String.equal entry.confirm_token confirm_token)
       with
       | None -> Error "pending confirmation not found"
       | Some entry when pending_confirm_expired entry ->

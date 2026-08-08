@@ -165,7 +165,7 @@ let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
       let token = "opc_" ^ String.sub (Auth.generate_token ()) 0 32 in
       let exists =
         raw_pending_confirms config
-        |> List.exists (fun entry -> String.equal entry.token token)
+        |> List.exists (fun entry -> String.equal entry.confirm_token token)
       in
       if exists then begin
         (* Exponential backoff: 1ms, 2ms, 4ms, ... up to ~512ms *)

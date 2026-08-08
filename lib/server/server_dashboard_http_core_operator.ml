@@ -64,6 +64,13 @@ let invalidated_operator_snapshot_json () =
     ]
 ;;
 
+let unavailable_operator_snapshot_json () =
+  `Assoc
+    [ "status", `String "unavailable"
+    ; "generated_at", `String (Masc_domain.now_iso ())
+    ]
+;;
+
 let make_operator_snapshot_publication
       ~generation
       ~compute_sequence
@@ -249,17 +256,15 @@ let mark_operator_snapshot_error_if_current ~compute exn =
            && compute.sequence > publication.terminal_sequence
         then (
           mark_cached_surface_error operator_snapshot_cache exn;
+          operator_snapshot_cache.json <- unavailable_operator_snapshot_json ();
+          operator_snapshot_cache.last_success_at <- None;
+          operator_snapshot_cache.last_success_unix <- None;
           let terminal =
-            let fresh_until_unix =
-              Option.map
-                (fun deadline -> Float.min deadline (Time_compat.now ()))
-                publication.fresh_until_unix
-            in
             make_operator_snapshot_publication
               ~generation:compute.generation
               ~compute_sequence:publication.compute_sequence
               ~terminal_sequence:compute.sequence
-              ~fresh_until_unix
+              ~fresh_until_unix:None
           in
           operator_snapshot_publication_ref := terminal;
           Some terminal)

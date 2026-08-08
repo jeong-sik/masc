@@ -198,13 +198,9 @@ let json ?actor ~config ~sw ~clock ~proc_mgr
       ]
   in
   let operator_targets_json =
-    let pending_confirm_envelope =
-      member_assoc "pending_confirm_envelope" projection.snapshot_json
-    in
     `Assoc
       [
         ("keepers", `List projection.keeper_briefs);
-        ("pending_confirms", member_assoc "items" pending_confirm_envelope);
         ("available_actions", member_assoc "available_actions" projection.snapshot_json);
       ]
   in

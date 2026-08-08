@@ -27,7 +27,7 @@ let normalized_actor ~context_actor = function
       if trimmed = "" || String.equal trimmed "unknown" then "unknown" else trimmed
 
 type pending_confirm = Workspace_hooks.operator_pending_confirm_request = {
-  token : string;
+  confirm_token : string;
   trace_id : string;
   actor : string;
   action_type : string;
@@ -112,12 +112,19 @@ let pending_confirm_common_fields (entry : pending_confirm) =
 
 let pending_confirm_to_yojson (entry : pending_confirm) =
   `Assoc
-    ( ("confirm_token", `String entry.token)
+    ( ("confirm_token", `String entry.confirm_token)
     :: pending_confirm_common_fields entry
     @ [ ("preview", preview_of_pending_confirm entry) ] )
 
 let pending_confirm_store_to_yojson (entry : pending_confirm) =
-  `Assoc (("confirm_token", `String entry.token) :: pending_confirm_common_fields entry)
+  `Assoc
+    (("confirm_token", `String entry.confirm_token)
+     :: pending_confirm_common_fields entry)
+
+let parse_timestamp ~surface ~field value =
+  match Masc_domain.parse_iso8601_opt value with
+  | Some timestamp when Float.is_finite timestamp -> Ok timestamp
+  | _ -> Error (Printf.sprintf "%s.%s must be an RFC3339 timestamp" surface field)
 
 let pending_confirm_of_yojson = function
   | `Assoc fields ->
@@ -151,7 +158,7 @@ let pending_confirm_of_yojson = function
         Error (Printf.sprintf "%s.%s must be a string or null" surface field)
       | None -> Error (Printf.sprintf "%s.%s is required" surface field)
     in
-    let* token = required_string "confirm_token" in
+    let* confirm_token = required_string "confirm_token" in
     let* trace_id = required_string "trace_id" in
     let* actor = required_string "actor" in
     let* action_type = required_string "action_type" in
@@ -166,8 +173,22 @@ let pending_confirm_of_yojson = function
     let* delegated_tool = required_string "delegated_tool" in
     let* created_at = required_string "created_at" in
     let* expires_at = required_nullable_string "expires_at" in
+    let* created_at_timestamp =
+      parse_timestamp ~surface ~field:"created_at" created_at
+    in
+    let* () =
+      match expires_at with
+      | None -> Ok ()
+      | Some value ->
+        let* expires_at_timestamp =
+          parse_timestamp ~surface ~field:"expires_at" value
+        in
+        if Float.compare expires_at_timestamp created_at_timestamp > 0
+        then Ok ()
+        else Error "pending_confirm.expires_at must be later than created_at"
+    in
     Ok
-      { token
+      { confirm_token
       ; trace_id
       ; actor
       ; action_type
@@ -214,8 +235,14 @@ let pending_confirms_to_yojson entries =
   `List (List.map pending_confirm_store_to_yojson entries)
 
 let write_pending_confirms config (entries : pending_confirm list) =
-  Workspace_utils.write_json_result config (pending_confirms_path config)
-    (pending_confirms_to_yojson entries)
+  match
+    decode_pending_confirm_entries
+      (List.map pending_confirm_store_to_yojson entries)
+  with
+  | Error _ as error -> error
+  | Ok validated_entries ->
+    Workspace_utils.write_json_result config (pending_confirms_path config)
+      (pending_confirms_to_yojson validated_entries)
 
 let with_store_lock config f =
   File_lock_eio.with_mutex (pending_confirms_path config) f
@@ -223,7 +250,11 @@ let with_store_lock config f =
 
 let pending_confirm_expired (entry : pending_confirm) =
   match entry.expires_at with
-  | Some exp -> Masc_domain.now_iso () > exp
+  | Some value ->
+    (match parse_timestamp ~surface:"pending_confirm" ~field:"expires_at" value with
+     | Ok expires_at_timestamp ->
+       Float.compare (Time_compat.now ()) expires_at_timestamp >= 0
+     | Error reason -> raise_store_error reason)
   | None -> false
 
 let read_pending_confirms_result_unlocked config =
@@ -263,18 +294,23 @@ let upsert_pending_confirm config entry =
           | Ok entries ->
             let remaining =
               entries
-              |> List.filter (fun existing -> not (String.equal existing.token entry.token))
+              |> List.filter (fun existing ->
+                     not
+                       (String.equal
+                          existing.confirm_token
+                          entry.confirm_token))
             in
             write_pending_confirms config (entry :: remaining))))
 
-let remove_pending_confirm config token =
+let remove_pending_confirm config confirm_token =
   with_store_lock config (fun () ->
     match read_pending_confirms_result_unlocked config with
     | Error _ as error -> error
     | Ok entries ->
       let remaining =
         entries
-        |> List.filter (fun existing -> not (String.equal existing.token token))
+        |> List.filter (fun existing ->
+               not (String.equal existing.confirm_token confirm_token))
       in
       write_pending_confirms config remaining)
 
@@ -318,7 +354,17 @@ let pending_confirm_scope_of_entries ?actor entries =
   let all_entries =
     entries
     |> List.sort (fun (a : pending_confirm) (b : pending_confirm) ->
-           String.compare b.created_at a.created_at)
+           let timestamp entry =
+             match
+               parse_timestamp
+                 ~surface:"pending_confirm"
+                 ~field:"created_at"
+                 entry.created_at
+             with
+             | Ok value -> value
+             | Error reason -> raise_store_error reason
+           in
+           Float.compare (timestamp b) (timestamp a))
   in
   let visible_entries =
     match actor_filter with

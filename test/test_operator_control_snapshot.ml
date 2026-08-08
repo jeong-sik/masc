@@ -1371,6 +1371,23 @@ let test_snapshot_rejects_pending_confirm_without_confirm_token () =
           ]
       ])
 
+let test_snapshot_rejects_pending_confirm_with_invalid_timestamp () =
+  assert_snapshot_rejects_pending_confirm_store
+    (`List
+      [ `Assoc
+          [ "confirm_token", `String "confirm-invalid-time"
+          ; "trace_id", `String "trace-invalid-time"
+          ; "actor", `String "operator"
+          ; "action_type", `String "namespace_pause"
+          ; "target_type", `String "workspace"
+          ; "target_id", `Null
+          ; "payload", `Assoc []
+          ; "delegated_tool", `String "masc_pause"
+          ; "created_at", `String "not-a-timestamp"
+          ; "expires_at", `Null
+          ]
+      ])
+
 let () =
   Alcotest.run
     "operator_control_snapshot"
@@ -1419,6 +1436,10 @@ let () =
             "missing confirm token rejects snapshot"
             `Quick
             test_snapshot_rejects_pending_confirm_without_confirm_token
+        ; Alcotest.test_case
+            "invalid timestamp rejects snapshot"
+            `Quick
+            test_snapshot_rejects_pending_confirm_with_invalid_timestamp
         ] );
     ]
 ;;

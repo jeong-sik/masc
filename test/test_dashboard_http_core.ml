@@ -1194,6 +1194,39 @@ let test_operator_snapshot_publication_rejects_stale_races () =
               ~compute:old_generation_compute
               (`Assoc [ "winner", `String "old-generation" ]))))
 
+let test_operator_snapshot_error_clears_previous_success () =
+  let success =
+    match
+      Server_dashboard_http_core_operator.For_testing
+      .publish_operator_snapshot_success
+        (`Assoc
+          [ "pending_confirm_envelope", `Assoc [ "items", `List [] ]
+          ; "generated_at", `String "2026-08-08T00:00:00Z"
+          ])
+    with
+    | Some publication -> publication
+    | None -> fail "operator snapshot success did not publish"
+  in
+  check bool "precondition has a successful snapshot" true success.has_success;
+  let compute =
+    Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
+  in
+  let failed =
+    match
+      Server_dashboard_http_core_operator.mark_operator_snapshot_error_if_current
+        ~compute
+        (Failure "pending-confirm store unreadable")
+    with
+    | Some publication -> publication
+    | None -> fail "operator snapshot error did not publish"
+  in
+  check bool "failed publication has no last success" false failed.has_success;
+  let open Yojson.Safe.Util in
+  check string "failed publication is unavailable" "unavailable"
+    (failed.json |> member "status" |> to_string);
+  check bool "failed publication does not retain pending rows" true
+    (failed.json |> member "pending_confirm_envelope" = `Null)
+
 let test_dashboard_query_cache_segment_normalizes_missing_values () =
   check string "missing none" "missing"
     (Server_dashboard_http_core_cache.dashboard_query_cache_segment None);
@@ -3486,6 +3519,8 @@ let () =
       ( "dashboard behavior contracts",
         [ test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
+          test_case "operator snapshot error clears previous success" `Quick
+            test_operator_snapshot_error_clears_previous_success;
           test_case "catch-up prompt failure is a server error" `Quick
             test_catchup_judge_prompt_failure_is_server_error;
           test_case "proof payload exposes submission index" `Quick

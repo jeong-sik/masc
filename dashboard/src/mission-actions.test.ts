@@ -21,7 +21,6 @@ const missionPayload = {
   command_focus: {},
   operator_targets: {
     keepers: [],
-    pending_confirms: [],
     available_actions: [],
   },
   attention_queue: [],

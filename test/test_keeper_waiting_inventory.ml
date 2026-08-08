@@ -771,7 +771,7 @@ let test_corrupt_chat_queue_snapshot_is_read_error () =
 let pending_confirm_fixture ?(target_type = "goal") ?target_id ()
       : Operator_pending_confirm.pending_confirm
   =
-  { token = "confirm-goal-1"
+  { confirm_token = "confirm-goal-1"
   ; trace_id = "trace-goal-1"
   ; actor = "operator"
   ; action_type = "approve_goal"

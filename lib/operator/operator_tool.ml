@@ -777,7 +777,7 @@ let () =
     (fun config (entry : Workspace_hooks.operator_pending_confirm_request) ->
       Operator_pending_confirm.upsert_pending_confirm
         config
-        { token = entry.token
+        { confirm_token = entry.confirm_token
         ; trace_id = entry.trace_id
         ; actor = entry.actor
         ; action_type = entry.action_type
@@ -796,7 +796,7 @@ let () =
            (List.map
               (fun (entry : Operator_pending_confirm.pending_confirm) :
                    Workspace_hooks.operator_pending_confirm_request ->
-                { token = entry.token
+                { confirm_token = entry.confirm_token
                 ; trace_id = entry.trace_id
                 ; actor = entry.actor
                 ; action_type = entry.action_type

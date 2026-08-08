@@ -128,29 +128,6 @@ describe('normalizeMission', () => {
     expect(result.operator_targets.keepers[0]!.paused).toBe(true)
   })
 
-  it('extracts pending_confirms from operator_targets', () => {
-    const result = normalizeMission({
-      operator_targets: {
-        pending_confirms: [
-          { confirm_token: 'tok-1', actor: 'agent-1' },
-        ],
-      },
-    })
-    expect(result.operator_targets.pending_confirms).toHaveLength(1)
-    expect(result.operator_targets.pending_confirms[0]!.confirm_token).toBe('tok-1')
-  })
-
-  it('filters invalid pending_confirms (missing token)', () => {
-    const result = normalizeMission({
-      operator_targets: {
-        pending_confirms: [
-          { actor: 'agent-1' }, // no confirm_token
-        ],
-      },
-    })
-    expect(result.operator_targets.pending_confirms).toEqual([])
-  })
-
   it('extracts available_actions from operator_targets', () => {
     const result = normalizeMission({
       operator_targets: {

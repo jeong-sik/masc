@@ -162,6 +162,20 @@ describe('asNullableIsoTimestamp', () => {
 // ================================================================
 
 describe('normalizePendingConfirmation (board)', () => {
+  const pendingConfirmation = {
+    confirm_token: 'tok-1',
+    trace_id: 'trace-1',
+    actor: 'agent-1',
+    action_type: 'pause',
+    target_type: 'keeper',
+    target_id: 'janitor',
+    payload: {},
+    delegated_tool: 'shell',
+    created_at: '2026-04-17T12:00:00Z',
+    expires_at: null,
+    preview: { msg: 'hi' },
+  }
+
   it('returns null for null', () => {
     expect(normalizePendingConfirmation(null)).toBeNull()
   })
@@ -171,25 +185,12 @@ describe('normalizePendingConfirmation (board)', () => {
   })
 
   it('extracts confirm_token', () => {
-    const result = normalizePendingConfirmation({ confirm_token: 'tok-1' })
+    const result = normalizePendingConfirmation(pendingConfirmation)
     expect(result!.confirm_token).toBe('tok-1')
   })
 
-  it('rejects a token-only item', () => {
-    expect(normalizePendingConfirmation({ token: 'noncanonical' })).toBeNull()
-  })
-
-  it('extracts all optional fields', () => {
-    const result = normalizePendingConfirmation({
-      confirm_token: 'tok-1',
-      actor: 'agent-1',
-      action_type: 'pause',
-      target_type: 'keeper',
-      target_id: 'janitor',
-      delegated_tool: 'shell',
-      created_at: '2026-04-17T12:00:00Z',
-      preview: { msg: 'hi' },
-    })
+  it('extracts the complete item', () => {
+    const result = normalizePendingConfirmation(pendingConfirmation)
     expect(result!.actor).toBe('agent-1')
     expect(result!.target_id).toBe('janitor')
     expect(result!.preview).toEqual({ msg: 'hi' })

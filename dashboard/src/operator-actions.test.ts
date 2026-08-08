@@ -55,10 +55,25 @@ const previewResult: OperatorActionResult = {
   preview: { plan: 'restart keeper k1' },
 }
 
+const validSnapshot = {
+  pending_confirm_envelope: {
+    items: [],
+    summary: {
+      actor_filter: null,
+      filter_active: false,
+      visible_count: 0,
+      total_count: 0,
+      hidden_count: 0,
+      hidden_actors: [],
+      confirm_required_actions: [],
+    },
+  },
+}
+
 beforeEach(() => {
   apiMocks.runOperatorAction.mockResolvedValue(executedResult)
   apiMocks.confirmOperatorAction.mockResolvedValue(executedResult)
-  apiMocks.fetchOperatorSnapshot.mockResolvedValue({})
+  apiMocks.fetchOperatorSnapshot.mockResolvedValue(validSnapshot)
   apiMocks.fetchOperatorDigest.mockResolvedValue({})
 })
 
@@ -217,7 +232,10 @@ describe('confirmOperatorPendingAction', () => {
 
 describe('refreshOperatorSnapshot', () => {
   it('fetches, normalizes, and stores the snapshot while toggling the loading signal', async () => {
-    apiMocks.fetchOperatorSnapshot.mockResolvedValue({ trace_id: 'trace-1' })
+    apiMocks.fetchOperatorSnapshot.mockResolvedValue({
+      ...validSnapshot,
+      trace_id: 'trace-1',
+    })
     const { mod, signals } = await load()
 
     await mod.refreshOperatorSnapshot()
@@ -228,11 +246,13 @@ describe('refreshOperatorSnapshot', () => {
     expect(signals.operatorError.value).toBeNull()
   })
 
-  it('on failure records the error summary and allows an immediate retry to refetch', async () => {
-    apiMocks.fetchOperatorSnapshot.mockRejectedValueOnce(new Error('snapshot down'))
+  it('on failure clears the previous snapshot and allows an immediate retry to refetch', async () => {
     const { mod, signals } = await load()
 
     await mod.refreshOperatorSnapshot()
+    expect(signals.operatorSnapshot.value).not.toBeNull()
+    apiMocks.fetchOperatorSnapshot.mockRejectedValueOnce(new Error('snapshot down'))
+    await mod.refreshOperatorSnapshot({ force: true })
 
     expect(signals.operatorError.value).toBe('snapshot down')
     expect(signals.operatorErrorStatus.value).toBeNull()
@@ -241,7 +261,7 @@ describe('refreshOperatorSnapshot', () => {
 
     // A failed refresh must not stamp freshness — the next call refetches.
     await mod.refreshOperatorSnapshot()
-    expect(apiMocks.fetchOperatorSnapshot).toHaveBeenCalledTimes(2)
+    expect(apiMocks.fetchOperatorSnapshot).toHaveBeenCalledTimes(3)
     expect(signals.operatorError.value).toBeNull()
   })
 
@@ -285,7 +305,7 @@ describe('refreshOperatorSnapshot', () => {
     const second = mod.refreshOperatorSnapshot()
     expect(apiMocks.fetchOperatorSnapshot).toHaveBeenCalledTimes(1)
 
-    resolveFetch!({})
+    resolveFetch!(validSnapshot)
     await Promise.all([first, second])
     expect(signals.operatorSnapshot.value).not.toBeNull()
   })

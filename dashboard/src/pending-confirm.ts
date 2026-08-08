@@ -22,15 +22,38 @@ export function normalizeOperatorActionDescriptor(raw: unknown): OperatorActionD
 export function normalizePendingConfirmation(raw: unknown): PendingConfirmation | null {
   if (!isRecord(raw)) return null
   const confirmToken = asString(raw.confirm_token)
-  if (!confirmToken) return null
+  const traceId = asString(raw.trace_id)
+  const actor = asString(raw.actor)
+  const actionType = asString(raw.action_type)
+  const targetType = asString(raw.target_type)
+  const delegatedTool = asString(raw.delegated_tool)
+  const createdAt = asString(raw.created_at)
+  const targetId = raw.target_id === null ? null : asString(raw.target_id)
+  const expiresAt = raw.expires_at === null ? null : asString(raw.expires_at)
+  if (
+    !confirmToken
+    || !traceId
+    || !actor
+    || !actionType
+    || !targetType
+    || targetId === undefined
+    || !isRecord(raw.payload)
+    || !delegatedTool
+    || !createdAt
+    || expiresAt === undefined
+    || !isRecord(raw.preview)
+  ) return null
   return {
     confirm_token: confirmToken,
-    actor: asString(raw.actor),
-    action_type: asString(raw.action_type),
-    target_type: asString(raw.target_type),
-    target_id: asString(raw.target_id) ?? null,
-    delegated_tool: asString(raw.delegated_tool),
-    created_at: asString(raw.created_at),
+    trace_id: traceId,
+    actor,
+    action_type: actionType,
+    target_type: targetType,
+    target_id: targetId,
+    payload: raw.payload,
+    delegated_tool: delegatedTool,
+    created_at: createdAt,
+    expires_at: expiresAt,
     preview: raw.preview,
   }
 }

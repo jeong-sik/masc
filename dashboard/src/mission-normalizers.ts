@@ -1,5 +1,4 @@
 import { isRecord, asString, asNumber, asBoolean, extractArray, asStringArray } from './components/common/normalize'
-import { normalizePendingConfirmation } from './pending-confirm'
 import {
   normalizeAttentionItem,
   normalizeRecommendedAction,
@@ -27,7 +26,6 @@ import type {
   OperatorAttentionItem,
   OperatorKeeperSnapshot,
   OperatorRecommendedAction,
-  PendingConfirmation,
 } from './types'
 
 function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
@@ -105,9 +103,6 @@ function normalizeTargets(raw: unknown): DashboardMissionTargets {
     keepers: extractArray(root.keepers, ['items'])
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),
-    pending_confirms: extractArray(root.pending_confirms)
-      .map(normalizePendingConfirmation)
-      .filter((item): item is PendingConfirmation => item !== null),
     available_actions: extractArray(root.available_actions)
       .map(normalizeActionDescriptor)
       .filter((item): item is OperatorActionDescriptor => item !== null),

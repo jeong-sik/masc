@@ -26,15 +26,13 @@ let chat_page_cap = 200
    rare, so this is a generous ceiling rather than a since-scan. *)
 let crash_scan_max = 500
 
-(* Workspace-level dated-JSONL store directory names. Each store is owned by
-   another module that spells this same literal internally but exposes no
-   constant; naming them here keeps the digest's reads off bare literals and
-   records the owner so a rename is a grep away. *)
-let audit_dirname = "audit" (* Audit_log store *)
-let activity_events_dirname = "activity-events" (* Activity_graph store *)
-let transition_audit_dirname = "transition-audit" (* Keeper_transition_audit durable store *)
-let tasks_dirname = "tasks" (* Workspace_utils_paths_backend.tasks_dir *)
-let backlog_filename = "backlog.json" (* Workspace_utils_paths_backend.backlog_path basename *)
+(* Store directory names come from the module that owns each store, so a
+   rename moves this reader with it. *)
+let audit_dirname = Audit_log.store_dirname
+let activity_events_dirname = Activity_graph.store_dirname
+let transition_audit_dirname = Keeper_transition_audit.store_dirname
+let tasks_dirname = Workspace_utils.tasks_dirname
+let backlog_filename = Workspace_utils.backlog_filename
 
 (* keeper.* activity-event kinds are still raw strings pending the #8455
    Event_kind migration; the board.* kinds below come from the typed

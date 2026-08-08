@@ -12,8 +12,12 @@ module StringSet = Set_util.StringSet
 (* File storage paths                                               *)
 (* ================================================================ *)
 
+(* The directory this store occupies under [.masc]. Exposed so readers of the
+   same store name it from here instead of spelling the literal. *)
+let store_dirname = "activity-events"
+
 let root_dir (config : Workspace_utils.config) =
-  Filename.concat (Workspace_utils.masc_dir config) "activity-events"
+  Filename.concat (Workspace_utils.masc_dir config) store_dirname
 
 let month_dir (config : Workspace_utils.config) =
   let tm = Unix.gmtime (Time_compat.now ()) in

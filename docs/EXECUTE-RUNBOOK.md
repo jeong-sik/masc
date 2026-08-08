@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-08-09
+last_verified: 2026-06-11
 code_refs:
   - lib/core/exec_buffer.ml
   - lib/exec_core.ml
@@ -8,17 +8,21 @@ code_refs:
   - lib/process/process_eio.ml
   - lib/exec/command_gate/shell_command_gate.ml
   - lib/exec_policy/exec_policy.ml
+  - lib/keeper/keeper_tool_command_runtime.ml
 ---
 
 # Execute Runbook
 
 This runbook documents the current operator surface for `Execute` and
 adjacent structured process routing. Execute is typed-only: callers provide
-one non-empty `argv` process vector or `pipeline`.
+one non-empty `argv` process vector or `pipeline`. Raw command strings and the old
+background task lifecycle are not part of the callable surface.
 
 ## Related Documents
 
 - [`ENV-CONTRACT.md`](./ENV-CONTRACT.md) §4 — authoritative flag matrix
+- `planning/graceful-panda/Legendary-Execute-plan.md` — historical source plan
+
 ## Scope
 
 - Covers: `Execute`, typed semantic exit, output truncation, Shell IR command

@@ -1,10 +1,31 @@
-(** [Keeper_cwd_response] never exposes a Docker Keeper's host-absolute path
-    in LLM-facing JSON. *)
+(** Property tests for [Keeper_cwd_response].
+
+    These pin the contract that LLM-facing JSON responses
+    constructed via {!Keeper_cwd_response.to_yojson_response}
+    never reveal the host abs path of a Docker-backend keeper.
+
+    Background: PR #11080 removed [sandbox_host_root] /
+    [playground_path] from [execution_context], but sibling
+    [cwd] fields in [keeper_sandbox_docker] / [keeper_tool_command_runtime]
+    response builders still echoed the host abs path. The Docker
+    [--workdir] argument was translated via
+    [docker_private_workspace_cwd], yet that translation was not
+    propagated into the response JSON, so the LLM re-emitted
+    [cd /Users/...] on the next turn — invalid inside the
+    container.
+
+    These tests are the layer-1 guard: they pin the audience
+    semantics of the [Keeper_cwd_response] module itself. The
+    layer-2/3 guards (response builders + MLI gate) live in
+    follow-up PRs. *)
 
 open Alcotest
 open Masc
 
-(* Marker host-root prefix that must never appear in a Docker Keeper response. *)
+(* Marker host-root prefix that must never appear in a
+   Docker-keeper LLM-facing response.  Using a recognizable
+   constant lets the assertion fail loudly in future regressions
+   even if the offending path component is renamed. *)
 let host_root_marker = "/tmp/HOST_ROOT_MARKER_NEVER_LEAK"
 
 let mk_local_sandbox () : Keeper_sandbox.t =

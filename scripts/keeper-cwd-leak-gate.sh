@@ -63,8 +63,9 @@ if [ "${failures}" -gt 0 ]; then
   echo "" >&2
   echo "${failures} host_cwd leak(s) detected near a (\"via\", \`String \"docker\") tag." >&2
   echo "Wire the response builder through Keeper_cwd_response.to_yojson_response." >&2
-  echo "Reference: lib/keeper/keeper_cwd_response.mli and" >&2
+  echo "Reference: lib/keeper/keeper_cwd_response.mli (PR #11323), and the wiring patterns in" >&2
   echo "  lib/keeper/keeper_sandbox_docker.ml" >&2
+  echo "  lib/keeper/keeper_tool_command_runtime.ml (PR #11349)" >&2
   exit 1
 fi
 

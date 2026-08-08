@@ -158,8 +158,8 @@ type runtime_decision_outcome =
 
 let runtime_decision name =
   let stripped = strip_transport_prefix name in
-  match Keeper_tool_alias.route stripped with
-  | Some route -> Route_hit { internal = route.internal_name }
+  match Keeper_tool_descriptor.find_public stripped with
+  | Some descriptor -> Route_hit { internal = descriptor.internal_name }
   | None ->
     (match descriptor_for_tool_name stripped with
      | Some descriptor ->
@@ -185,15 +185,21 @@ let canonical_tool_name_observed name =
   let stripped = strip_transport_prefix name in
   match runtime_decision name with
   | Route_hit { internal } ->
-    Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
+    Keeper_tool_route_telemetry.record_route_outcome
+      ~tool:stripped
+      ~routed_to:internal
+      ~result:"ok";
     internal
   | Already_internal { canonical } ->
-    Keeper_tool_alias.record_route_outcome
+    Keeper_tool_route_telemetry.record_route_outcome
       ~tool:canonical
       ~routed_to:canonical
       ~result:"ok";
     canonical
   | Miss ->
-    Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:"none" ~result:"miss";
+    Keeper_tool_route_telemetry.record_route_outcome
+      ~tool:name
+      ~routed_to:"none"
+      ~result:"miss";
     name
 ;;

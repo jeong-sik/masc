@@ -52,8 +52,6 @@ SCAN_GLOBS=(
   "lib/keeper/keeper_tool_descriptor.mli"
   "lib/keeper/keeper_tool_runtime.ml"
   "lib/keeper/keeper_tool_runtime.mli"
-  "lib/keeper/keeper_tool_alias.ml"
-  "lib/keeper/keeper_tool_alias.mli"
   "lib/keeper/keeper_tool_policy.ml"
   "lib/keeper/keeper_tool_policy.mli"
   "lib/keeper_tool_call_log_route_evidence.ml"

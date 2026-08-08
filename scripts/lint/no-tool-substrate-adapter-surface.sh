@@ -49,8 +49,6 @@ EXECUTOR_SCAN_FILES=(
 SURFACE_SCAN_FILES=(
   "lib/keeper/keeper_tool_descriptor.ml"
   "lib/keeper/keeper_tool_descriptor.mli"
-  "lib/keeper/keeper_tool_alias.ml"
-  "lib/keeper/keeper_tool_alias.mli"
   "lib/tool/tool_catalog.ml"
   "lib/tool/tool_catalog.mli"
   "lib/tool_catalog_surfaces/tool_catalog_surfaces.ml"

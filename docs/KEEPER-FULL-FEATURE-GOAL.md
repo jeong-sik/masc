@@ -3,17 +3,11 @@
 > Status: Proposed implementation contract
 > Scope: MASC Keeper execution, Gate, compaction, asynchronous operations, and
 > the OAS composition boundary
-> Parent design: [`RFC-0000-MASTER-ROADMAP.md`](rfc/RFC-0000-MASTER-ROADMAP.md)
 
 This document states the target behavior and ownership rules. It does not claim
 that an open PR, green unit test, or private foundation is already live. Current
 commits, PR dependencies, CI, and purge targets belong in companion execution
 documents and must be refreshed from their authoritative sources.
-
-Current implementation and PR reachability:
-[`KEEPER-FULL-FEATURE-EXECUTION-MAP.md`](KEEPER-FULL-FEATURE-EXECUTION-MAP.md).
-Current browser-ready Goal Matrix:
-[`2026-07-17-keeper-full-feature-goal-matrix.html`](audit/2026-07-17-keeper-full-feature-goal-matrix.html).
 
 ## 1. Copyable Goal
 

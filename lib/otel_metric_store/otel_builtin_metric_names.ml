@@ -3,21 +3,9 @@
 include Otel_metric_names
 
 
-(* #10097: a provider cannot carry keeper-bound runtime MCP tools that
-   need request-scoped auth headers.  Every time
-   oas_worker_exec_transport strips such a tool, this counter
-   increments with the [provider] and [tool] labels so dashboards can
-   track WHICH provider strips WHICH tools and at WHAT rate.  Paired
-   with a once-per-session WARN log ([fingerprint]-deduplicated) so
-   the operator sees the structural fact exactly once while the
-   counter carries the frequency signal.
-
-   RFC-0058 §2.4 / Phase 5.4 big-bang rename: the old
-   the legacy `masc_<provider>_mcp_tool_omission_total` time series is RETIRED.
-   Operators must point Grafana queries to the new
-   `masc_provider_mcp_tool_omission_total{provider="<provider_slug>"}`
-   series.  No dual-emit alias — the rename is intentional to keep
-   provider identity out of the metric name. *)
+(* A provider cannot carry Keeper-bound runtime MCP tools that require
+   request-scoped authorization headers. This counter records each omitted
+   tool with the runtime and tool labels. *)
 
 (* #9520: durable coverage-gap records must also have an alertable
    Otel_metric_store surface.  The labels deliberately avoid raw paths and
@@ -94,9 +82,6 @@ include Otel_policy_metric_names
    the strike→crash promotion these failures repeated silently for
    hours (4h+ zombie keepers observed 2026-04-26). *)
 let metric_oas_bus_capacity = "masc_oas_bus_capacity"
-let metric_oas_bridge_unmigrated_payload_kind =
-  Otel_metric_store_core.declare_counter "masc_oas_bridge_unmigrated_payload_kind_total"
-;;
 
 let metric_process_timeout = Otel_metric_store_core.declare_counter "masc_process_timeout_total"
 let metric_build_identity_probe_failures = Otel_metric_store_core.declare_counter "masc_build_identity_probe_failures_total"

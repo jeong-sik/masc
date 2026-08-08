@@ -152,8 +152,8 @@ let optional_env ~path fields =
       (json_type_name value)
 ;;
 
-(* RFC-0198 Phase B: parse a [stdin]/[stdout]/[stderr] field into a
-   [redirect_target].  Accepted forms (all optional; absent or null
+(* Parse a [stdin]/[stdout]/[stderr] field into a [redirect_target].
+   Accepted forms (all optional; absent or null
    defaults to [Inherit]):
 
    - [{"discard": true}]    → [Discard]
@@ -262,13 +262,8 @@ let of_json (json : Yojson.Safe.t) =
     let* stderr = optional_redirect_target ~path:"$" fields "stderr" in
     Ok (Exec { argv; cwd; env; timeout_sec; stdin; stdout; stderr })
   | false, Some (path, value) ->
-    (* RFC-0198 Phase B 한계: typed redirect triple(stdin/stdout/stderr)은 [Exec]
-       variant에만 존재하고 [Pipeline]에는 없다. 그런데 이 세 키는
-       reject_unknown_fields 허용 목록(위 reject_unknown_fields ~allowed)에 들어
-       있어 pipeline과 함께 와도 파싱은 통과하고, [Pipeline { stages; cwd; env }]가
-       redirect를 버려 조용히 폐기된다 — silent failure. 명시적으로 거부해 사일런트
-       드롭을 차단한다. 근본 해결(Pipeline endpoint redirect 실제 지원)은 [Pipeline]
-       variant에 redirect_target triple을 추가하는 타입 확장이며 후속 작업이다. *)
+    (* Redirect fields belong only to [Exec]. Reject them with [Pipeline]
+       so no caller-provided redirect is discarded. *)
     let redirect_present key =
       match member fields key with
       | None | Some `Null -> false
@@ -396,8 +391,8 @@ let shell_simple
        arguments)
 ;;
 
-(* RFC-0198 Phase B: lower the typed [redirect_target] triple into the
-   IR-level [Redirect_scope.t list].  [Inherit] yields no IR entry —
+(* Lower the typed [redirect_target] triple into the IR-level
+   [Redirect_scope.t list]. [Inherit] yields no IR entry —
    the child simply inherits the parent's fd.  [Discard] resolves to
    [/dev/null] with the fd-appropriate mode (read for fd=0, write for
    fd=1/2).  [File path] uses the caller-supplied absolute path; the

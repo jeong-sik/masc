@@ -150,11 +150,6 @@ include Keeper_context_core_history
 (* End of inlined Keeper_working_context operations                  *)
 (* ================================================================ *)
 
-let timed = Inference_utils.timed
-let zero_usage = Inference_utils.zero_usage
-let usage_of_response = Inference_utils.usage_of_response
-let total_tokens = Inference_utils.total_tokens
-
 (* ================================================================ *)
 (* Checkpoint Store Delegation                                        *)
 (* ================================================================ *)

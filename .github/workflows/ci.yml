@@ -316,7 +316,7 @@ jobs:
             doc_truth=true
           fi
 
-          if has_match '^(specs/.*\.(tla|cfg)$|specs/Makefile$|lib/keeper/|lib/keeper_registry/|lib/oas_.*\.ml$|Makefile$)'; then
+          if has_match '^(specs/.*\.(tla|cfg)$|specs/Makefile$|lib/keeper/|lib/keeper_registry/|Makefile$)'; then
             tla=true
           fi
 
@@ -958,6 +958,7 @@ jobs:
             @test/runtest-test_otel_port_ssot \
             @test/runtest-test_release_train_guard_script \
             @test/runtest-test_rfc_0086_keeper_namespace_invariant \
+            @test/runtest-test_runtime_agent_checkpoint \
             @test/runtest-test_server_base_path_guard \
             @test/runtest-test_sse_retry_ssot \
             @test/runtest-test_sse_stream \
@@ -1847,7 +1848,7 @@ jobs:
           chmod +x scripts/validate-prompt-paths.sh
           scripts/validate-prompt-paths.sh
 
-      - name: Check MASC/OAS boundary ratchet
+      - name: Check Agent core boundary
         run: |
           chmod +x scripts/check-boundary-guard.sh
           scripts/check-boundary-guard.sh
@@ -1947,11 +1948,9 @@ jobs:
         if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/stringly-boundary-ratchet.sh
 
-      - name: Run OAS boundary ratchet
+      - name: Run exact-flow boundary checks
         if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.dashboard == 'true'
         run: |
-          scripts/test_oas_boundary_ratchet.sh
-          scripts/oas-boundary-ratchet.sh
           scripts/check-hitl-exact-flow-boundary.sh --self-test
           scripts/check-hitl-exact-flow-boundary.sh --check
 

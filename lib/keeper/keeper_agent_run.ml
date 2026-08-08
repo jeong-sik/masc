@@ -1003,7 +1003,7 @@ let run_turn
                      ~actual_keeper_tool_names
                      ~tool_calls:acc.tool_calls
                  in
-                 let usage = Keeper_context_runtime.usage_of_response result.response in
+                 let usage = Inference_utils.usage_of_response result.response in
                  let ctx_composition =
                    match !request_evidence_ref with
                    | Some { prompt_blocks; input_messages = Some input_messages; _ } ->

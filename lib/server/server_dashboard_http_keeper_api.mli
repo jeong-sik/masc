@@ -246,14 +246,6 @@ val memory_os_fact_json :
     from snapshot membership; no retention, score, or legacy kind field is
     serialized. *)
 
-val memory_os_dashboard_json
-  :  config:Workspace.config
-  -> keeper_id:string
-  -> Yojson.Safe.t
-(** Current-memory observability payload for one keeper. Recall and this
-    projection read the same snapshot; [change] exposes exact added/removed
-    facts from the latest atomic Librarian or explicit-write update. *)
-
 val compaction_snapshots_json :
   config:Workspace.config -> keeper_id:string -> limit:int -> Yojson.Safe.t
 (** Durable compaction snapshot payload for

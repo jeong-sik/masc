@@ -5,7 +5,7 @@
     in-process (mutable Hashtbl), while per-call observations are also
     appended to a dated JSONL audit log under [.masc/runtime_audit].
 
-    @since God file decomposition — extracted from oas_worker.ml *)
+    Runtime observations shared by the MASC execution boundary. *)
 
 (* ================================================================ *)
 (* Runtime types                                                     *)
@@ -740,4 +740,3 @@ let runtime_metrics_json () =
   let p, u = Eio.Promise.create () in
   Eio.Stream.add stream (Get_metrics_json u);
   Eio.Promise.await p
-

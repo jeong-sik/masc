@@ -1,7 +1,7 @@
 (** Workspace Hooks — Callback refs for upper-layer dependencies.
 
     Workspace modules must not depend on Activity_graph, Board,
-    Relation_materializer or Oas_worker directly.
+    Relation_materializer or the runtime execution boundary directly.
     Instead, they call these callback refs which are wired at startup
     by workspace.ml (the hub module that already depends on everything).
 

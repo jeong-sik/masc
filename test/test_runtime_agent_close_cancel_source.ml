@@ -1,4 +1,4 @@
-(* Regression guard for #11929/#10395: OAS worker cleanup must not
+(* Runtime-agent cleanup must not
    swallow Eio cancellation if Agent.close raises while handling another
    execution exception. *)
 
@@ -73,4 +73,4 @@ let () =
     close_warning;
   assert_order ~label:"cancel guard before conditional re-raise" src cancel_guard
     cancel_reraise;
-  print_endline "test_oas_worker_exec_close_cancel_source: OK"
+  print_endline "test_runtime_agent_close_cancel_source: OK"

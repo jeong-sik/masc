@@ -5,7 +5,7 @@
     or explicit model label ([run_model_by_label]), with optional MASC
     tool bridging variants.
 
-    @since God file decomposition — extracted from oas_worker.ml *)
+    Owns one Keeper turn over the MASC runtime boundary. *)
 
 open Result.Syntax
 
@@ -108,15 +108,13 @@ let project_provider_attempt_result ~replay_prefix_projection provider_result =
 let runtime_attempt_decision ~idx ~runtime_id =
   `Assoc [ ("idx", `Int idx); ("runtime_id", `String runtime_id) ]
 
-let sdk_error_kind error =
-  Agent_sdk.Error.(category error |> category_label)
-
 let runtime_failed_decision ~idx ~runtime_id error =
   `Assoc
     [
       ("idx", `Int idx);
       ("runtime_id", `String runtime_id);
-      ("error_kind", `String (sdk_error_kind error));
+      ( "error_kind"
+      , `String Agent_sdk.Error.(category error |> category_label) );
     ]
 
 let lane_should_retry
@@ -660,7 +658,7 @@ let run_named
           keeper_name
           attempt_runtime_id
           attempt
-          (sdk_error_kind error);
+          Agent_sdk.Error.(category error |> category_label);
       allowed)
     ~runtime_id:
       (match deferred_runtime_lane with

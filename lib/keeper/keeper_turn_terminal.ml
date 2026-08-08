@@ -1,6 +1,5 @@
 (** Structured terminal-reason surface for keeper turn ledgers.
 
-    RFC-0047 PR-3:
     - [code: string] field removed; [disposition] is the SSOT.
     - [severity_of_code / summary_of_code / next_action_of_code]
       substring classifiers deleted; severity / summary / next_action

@@ -35,7 +35,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
      must never rewrite an observation to zero. *)
   let observed_input_tokens = result.usage.input_tokens in
   let observed_output_tokens = result.usage.output_tokens in
-  let observed_total_tokens = Keeper_context_runtime.total_tokens result.usage in
+  let observed_total_tokens = Inference_utils.total_tokens result.usage in
   let turn_cost = estimate_usage_cost_usd result.usage in
   let substantive_tool_call_count = List.length tool_names in
   let has_substantive_tools = has_substantive_tool_calls tool_names in

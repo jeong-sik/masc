@@ -10,7 +10,8 @@
 
 ## 1. Purpose
 
-Two completed audit chains (`docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04*.md` and `docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md`) both followed the same 4-phase shape. This doc records the pattern so future surveys can reuse it without re-deriving the structure.
+The TLA specs audit used a four-phase survey and closure shape. This document
+records that current workflow pattern.
 
 This is a **process doc**, not enforced. Survey work doesn't always fit this shape — the pattern is a starting point, not a constraint.
 
@@ -122,13 +123,11 @@ Rule of thumb: **defer hard-gating until at least 2 Phase 3 PRs have moved the f
 
 ## 10. References
 
-- `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04*.md` — Q-P0-3 chain (4/4 MERGED)
 - `docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md` — Q-P0-2 chain (Phase 3 closure in #12188)
 - `docs/audit/TLA-PPX-ADOPTION-AUDIT-2026-04.md` — runtime-side PPX adoption (PR #12143 MERGED)
 - `docs/audit/DASHBOARD-OBSERVABILITY-AUDIT-2026-04*.md` — first new-domain application of codified pattern (PR #12202 Phase 1, PR #12208 Phase 2)
 - `docs/audit/AUTH-CREDENTIAL-AUDIT-2026-04*.md` — second new-domain application; surfaced anchor-falsification outcome (PR #12209 Phase 1, PR #12217 Phase 2)
 - `docs/audit/SERVER-HTTP-ROUTES-AUDIT-2026-04*.md` — third new-domain application; surfaced narrow-confirm + narrow-collapse + narrow-discover in a single chain (PR #12213 Phase 1, PR #12218 Phase 2)
-- `scripts/oas-boundary-ratchet.sh` — ratchet template (decreasing-monotonic)
 - `scripts/tla-ppx-ratchet.sh` — ratchet template (increasing-monotonic, PR #12151)
 - `scripts/tla-bug-model-ratchet.sh` — first mixed-direction ratchet (PR #12192)
 - Memory: `feedback_diagnostic_with_measurement_strongly_triggers_root_fix` — measurement matters

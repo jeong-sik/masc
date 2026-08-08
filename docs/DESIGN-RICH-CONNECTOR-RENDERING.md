@@ -408,7 +408,6 @@ Acceptance criteria:
 - `lib/gate/channel_gate_connector.ml{,i}`
 - `lib/gate_keeper_backend.ml`
 - `lib/keeper/keeper_multimodal_input.ml{,i}`
-- `lib/agent_sdk_response.ml{,i}`
 - `lib/keeper/keeper_turn.ml`
 - `lib/keeper/keeper_agent_run_response_text.ml`
 - `lib/server/server_routes_http_keeper_stream.ml`

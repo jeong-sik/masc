@@ -4,7 +4,7 @@
     functions. All model-selection and runtime logic lives in
     {!Runtime_observation} and {!Keeper_turn_driver}.
 
-    @since God file decomposition — extracted from oas_worker.ml *)
+    This module is the MASC execution boundary for Agent core. *)
 
 type oas_tool_projector =
   name:string ->
@@ -939,18 +939,18 @@ let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
       Log.Misc.warn
-        "oas_worker %s: dashboard_oas_bridge record failed: %s"
+        "runtime_agent %s: dashboard agent record failed: %s"
         config.name (Printexc.to_string exn)
 
 let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
   try Agent_sdk.Agent.close agent with
   | Eio.Cancel.Cancelled _ as e ->
       Log.Misc.warn
-        "oas_worker %s: agent close cancelled during cleanup"
+        "runtime_agent %s: agent close cancelled during cleanup"
         config.name;
       if propagate_cancel then raise e
   | close_exn ->
-      Log.Misc.warn "oas_worker %s: agent close failed during cleanup: %s"
+      Log.Misc.warn "runtime_agent %s: agent close failed during cleanup: %s"
         config.name (Printexc.to_string close_exn)
 
 (* ================================================================ *)
@@ -995,7 +995,7 @@ let resume_from_checkpoint
         Runtime_agent_context.prepare_resume ~config ~checkpoint
       in
       Log.Misc.info
-        "oas_worker %s: resume checkpoint_turn_count=%d turn_limit=unlimited"
+        "runtime_agent %s: resume checkpoint_turn_count=%d turn_limit=unlimited"
         config.name checkpoint.turn_count;
       let options = { prepared_resume.options with transport } in
       Ok
@@ -1116,7 +1116,7 @@ let run_blocks
   (match config.transport with
   | Masc_grpc_transport.Local -> ()
   | t ->
-    Log.Misc.info "oas_worker %s: transport=%s"
+    Log.Misc.info "runtime_agent %s: transport=%s"
       config.name (Masc_grpc_transport.to_string t));
   publish_lifecycle ~name:config.name ~event:"build" ~detail:goal_detail
     ~attrs:(provider_lifecycle_attrs config)
@@ -1276,7 +1276,7 @@ let run_blocks
         (match Agent_sdk.Raw_trace_query.validate_run ref_ with
          | Ok v -> Some v
          | Error err ->
-           Log.Misc.warn "oas_worker: run_validation failed: %s"
+           Log.Misc.warn "runtime_agent: run_validation failed: %s"
              (Agent_sdk.Error.to_string err);
            None)
       | None -> None
@@ -1342,7 +1342,7 @@ let run_blocks
         ~status:(dashboard_status_of_stop_reason stop_reason)
         partial_response;
       Log.Misc.info
-        "oas_worker %s: typed input required request_id=%s turns=%d"
+        "runtime_agent %s: typed input required request_id=%s turns=%d"
         config.name
         request.request_id
         turns;
@@ -1375,7 +1375,7 @@ let run_blocks
          next provider.  Emitting WARN/ERROR here creates noise on
          recovered runtimes.  The runtime layer logs [runtime-fallback] at
          INFO when it retries and emits ERROR only on full exhaustion. *)
-      Log.Misc.debug "oas_worker: agent errored: %s" detail;
+      Log.Misc.debug "runtime_agent: agent errored: %s" detail;
       close_agent_for_cleanup ~propagate_cancel:false ~config agent;
       Error err)
   with
@@ -1395,7 +1395,7 @@ let run_blocks
       ~total_duration_ms:(run_duration_ms_since run_started_at)
       ~status:(Dashboard_oas_bridge.Error { transient = false })
       error_response;
-    Log.Misc.error "oas_worker %s: execution exception: %s\nBacktrace: %s"
+    Log.Misc.error "runtime_agent %s: execution exception: %s\nBacktrace: %s"
       config.name (Printexc.to_string exn) bt;
     let typed_internal_error =
       Keeper_internal_error.Internal_unhandled_exception

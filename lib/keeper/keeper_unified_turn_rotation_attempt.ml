@@ -16,7 +16,10 @@ let build
   ; outcome
   ; productive_phase_elapsed_ms
   ; retry_phase_elapsed_ms
-  ; error_kind = Some (Keeper_agent_error.sdk_error_kind_for_receipt err)
+  ; error_kind =
+      Some
+        (Agent_sdk.Error.(category err |> category_label)
+         |> Keeper_execution_receipt.error_kind_of_string)
   ; error_message = Some (Agent_sdk.Error.to_string err)
   ; recorded_at
   }

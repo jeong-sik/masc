@@ -44,13 +44,6 @@ val serialize_context : working_context -> string
 val create_session : session_id:string -> base_dir:string -> session_context
 val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit
 
-(** {1 Inference Utilities} *)
-
-val timed : (unit -> 'a) -> 'a * int
-val zero_usage : Agent_sdk.Types.api_usage
-val usage_of_response : Agent_sdk.Types.api_response -> Agent_sdk.Types.api_usage
-val total_tokens : Agent_sdk.Types.api_usage -> int
-
 (** {1 Keeper Context Lifecycle} *)
 
 val log_keeper_exn : label:string -> exn -> unit

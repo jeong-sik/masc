@@ -1,4 +1,4 @@
-(** RFC-0047 PR-1 invariants for [Keeper_turn_disposition]:
+(** Invariants for [Keeper_turn_disposition]:
 
     1. Byte-compat: for every wire string consumed by the legacy
        [Keeper_turn_terminal.severity_of_code / summary_of_code /
@@ -46,9 +46,7 @@ let canonical_app_codes : (string * D.t) list =
    [severity_of_code] classifies via [String.starts_with ~prefix:"api_error_"]
    or via the [_ -> Unknown_bad] fallback. The legacy
    [next_action_of_code] returns [None] for these (its [_ -> None] arm),
-   which is inconsistent with the legacy "provider_error" alias path
-   that returns [Some "inspect_latest_error"]. RFC-0047 unifies the
-   two: every [Provider_error _] disposition recommends
+   Every [Provider_error _] disposition recommends
    [inspect_latest_error]. This is an intentional behaviour change
    documented in the RFC; only [severity] (rendered as string) is
    asserted against legacy here. *)
@@ -109,8 +107,8 @@ let test_canonical_next_action_byte_compat () =
     canonical_app_codes
 ;;
 
-(* Runtime-wire codes: severity-only oracle. RFC-0047 §3 documents
-   that [Provider_error _] uniformly recommends "inspect_latest_error"
+(* Runtime-wire codes: severity-only oracle. [Provider_error _]
+   uniformly recommends "inspect_latest_error"
    for next_action and uses the inner code wire as the summary suffix
    ("keeper turn ended with X"); both are intentional improvements
    over the legacy substring path. *)

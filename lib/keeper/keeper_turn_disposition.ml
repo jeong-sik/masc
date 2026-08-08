@@ -1,4 +1,4 @@
-(* RFC-0047 PR-1: operator-facing disposition closed sum.
+(* Operator-facing disposition closed sum.
 
    See [.mli] for the public contract. This file holds the type
    definition, the canonical projection from

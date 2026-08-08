@@ -45,7 +45,6 @@ in
 |------|------|------|
 | `lib/masc_oas_bridge.ml` | 26 | `get_opt ()` → `None -> None` fallback |
 | `lib/runtime/runtime_catalog_runtime.ml` | 463 | `get_opt ()` → `None -> Eio_context.get_clock_opt ()` |
-| `lib/oas_worker_named.ml` | 591 | `get_opt ()` → `None -> Eio_context.get_clock_opt ()` runtime fallback |
 | `lib/keeper/keeper_llm_bridge.ml` | 14 | **`get ()` (raising)** — `clock_opt` 추출 후 `None -> fn ()` |
 
 → **Dual global Eio context systems**: `Masc_eio_env`와 `Eio_context`가 병존. 같은 bootstrap 시점(`server_runtime_bootstrap.ml:308-314`)에 각각 `init`/`set_*` 되나 서로 다른 atomic store. Drift 가능.

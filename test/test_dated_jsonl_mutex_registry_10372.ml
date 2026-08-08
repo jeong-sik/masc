@@ -4,10 +4,10 @@
     per call.  When two instances pointed at the same JSONL
     directory, their mutexes did not serialize and concurrent
     [append] could interleave.  Real-world trigger:
-    [oas_event_bridge.ml] re-creates the store on every relay
+    [keeper_event_bridge.ml] re-creates the store on every relay
     error while another fiber still holds the previous instance,
     producing 1.52% line corruption (16/1056) on day 25 — all
-    [masc:oas_worker:build] payloads in the 4-8 KB range past
+    [masc:runtime_agent:build] payloads in the 4-8 KB range past
     POSIX [PIPE_BUF].
 
     The registry forces every store rooted at the same canonical

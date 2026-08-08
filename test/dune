@@ -716,11 +716,6 @@
  (libraries alcotest ast_grep))
 
 (test
- (name test_oas_canonical_delegation)
- (modules test_oas_canonical_delegation)
- (libraries alcotest ast_grep masc_test_deps))
-
-(test
  (name test_keeper_tool_error_text_bounded)
  (modules test_keeper_tool_error_text_bounded)
  (libraries alcotest ast_grep masc_test_deps masc.masc_core))
@@ -2029,9 +2024,9 @@
 
 (include stanzas/test_keeper_runtime_observation_boundaries.inc)
 
-(include stanzas/test_oas_worker_exec_close_cancel_source.inc)
+(include stanzas/test_runtime_agent_close_cancel_source.inc)
 
-(include stanzas/test_oas_worker_exec_checkpoint.inc)
+(include stanzas/test_runtime_agent_checkpoint.inc)
 
 (include stanzas/test_runtime_provider_projection_boundary.inc)
 

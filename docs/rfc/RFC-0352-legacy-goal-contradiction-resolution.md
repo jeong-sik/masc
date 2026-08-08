@@ -47,7 +47,7 @@ git 이력: 2026-07-08 이후 `lib/goal`·goal-loop 표면의 커밋은 전부 p
 - **작업**: MCP tool 3종 + tool schema + dispatch 행 제거 → dashboard/서버 goal-loop 표면 제거 → `active_goal_ids` decode path 제거(~60파일) → `lib/goal` 삭제 + dune 6곳 → RFC-0111/0067/0267 Superseded 처리. 스택 PR 4~6개, 예상 순삭제 ~13k LoC.
 - **장점**: 로드맵 §3.2·Non-Goals(AutoGPT식 goal-decomposition 거부)와 정합. 유지보수 표면 대폭 축소. keeper meta 계약 단순화.
 - **단점/리스크**: 제품 스펙의 "Goal/Task 약한 결합"을 재해석해야 함 — Task 단독으로 충분한지 오너 판단 필요. `workspace_goal_index.ml`(RFC-0267 goal→task 투영)의 재배치 또는 동반 삭제. 퇴역 데이터(persisted goal rows)는 acceptance대로 migration 없이 버려짐.
-- **전제 갱신 문서**: RFC-0000 §3.15 표에서 goal 행 제거, §3.2 acceptance를 done으로, RFC-0111/0067/0267 Superseded, ~~sse_event goal_loop 이벤트 타입(RFC-0291 closed sum)~~ (정정 2026-07-21: `goal_loop_status`는 atd closed sum에 없음 — `broadcast.ml:27` 문자열 상수 + WS 브릿지로만 존재), docs/GOAL-LOOP-* 2종, DASHBOARD-INTEGRATION.md, README(+ko) 로드맵 행.
+- **전제 갱신 문서**: RFC-0000 §3.15 표에서 goal 행 제거, §3.2 acceptance를 done으로, RFC-0111/0067/0267 Superseded, docs/GOAL-LOOP-* 2종, DASHBOARD-INTEGRATION.md, README(+ko) 로드맵 행.
 
 ### Path B — §3.2 개정: 현 Goal을 인정하고 legacy 기계만 절제 **[채택됨]**
 

@@ -81,7 +81,7 @@ let test_restore_messages_all_roles () =
   Alcotest.(check string) "second is assistant" "assistant"
     (match second.role with Agent_sdk.Types.Assistant -> "assistant" | _ -> "other")
 
-let test_agent_sdk_response_visible_text_excludes_non_answer_blocks () =
+let test_visible_text_excludes_non_answer_blocks () =
   let response : Agent_sdk.Types.api_response =
     { id = "resp"
     ; model = "model"
@@ -131,6 +131,6 @@ let () =
     ];
     "response_projection", [
       Alcotest.test_case "visible text excludes non-answer blocks" `Quick
-        test_agent_sdk_response_visible_text_excludes_non_answer_blocks;
+        test_visible_text_excludes_non_answer_blocks;
     ];
   ]

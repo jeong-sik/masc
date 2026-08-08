@@ -142,6 +142,5 @@ This mirrors the OAS chain's Phase 4 deferral (`bridge_adoption` monotonic floor
 - PR #12132 — Phase 2 (Draft, as of writing)
 - `specs/keeper-state-machine/KeeperOASAdvanced.tla` — canonical Bug Model recipe
 - AGENT-LLM-A.md `TLA+ Bug Model 패턴 (Mutation Testing for Specs)`
-- `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04-PHASE3.md` — sister chain Phase 3 (CI wire-up pattern)
 
 *Audit date: 2026-04-30 / Phase 3 of 4 / docs-only / fan-out enumeration*

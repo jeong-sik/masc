@@ -284,7 +284,7 @@ module Jsonl_atomic : LOGGER
 module Mcp_transport : LOGGER
 module Startup : LOGGER
 module Model_inference_metrics : LOGGER
-module Oas_worker_exec : LOGGER
+module Runtime_agent : LOGGER
 module Oas_event : LOGGER
 module H2_gateway : LOGGER
 module Voice : LOGGER

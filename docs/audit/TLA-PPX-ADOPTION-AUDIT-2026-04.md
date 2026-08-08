@@ -151,7 +151,6 @@ Same enforcement discipline as the OAS chain: defer hard-gating until at least 2
 - PR #11377 — ppx_tla Cycle 2 (deriving foundation)
 - PR #11696 — `[@@fsm_guard]` Cycle 43
 - `docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md` — sister audit chain (specs-side gap)
-- `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04*.md` — same Phase 1→4 discipline applied to OAS boundary
 - AGENT-LLM-A.md `TLA+ Bug Model 패턴` (specs side), `feedback_fsm_guard_identity_helper_counter_wrap_pattern` (runtime side)
 - Memory: `feedback_self_confession_comments_must_be_measured` — applies here: don't trust "OCaml ↔ TLA+ mapping" comments alone; PPX is the measured equivalent.
 

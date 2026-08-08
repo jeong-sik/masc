@@ -1,6 +1,6 @@
 (** Structured terminal-reason surface for keeper turn ledgers.
 
-    RFC-0047 PR-3: the [code: string] field is removed; the typed
+    The [code: string] field is removed; the typed
     [disposition] field is the SSOT. [code : t -> string] is provided
     as an accessor for callers that still need the wire string
     (Otel_metric_store labels, JSON, dashboard chips). [severity / summary /
@@ -20,7 +20,7 @@ type severity = Keeper_turn_disposition.severity =
 
 type t =
   { disposition : Keeper_turn_disposition.t
-    (** Typed operator-facing disposition. SSOT after RFC-0047 PR-3.
+    (** Typed operator-facing disposition SSOT.
           [severity / summary / next_action] are derived from this
           field at construction time. The wire-format string
           (previously [t.code]) is now [Keeper_turn_terminal.code t]. *)

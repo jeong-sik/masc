@@ -8,7 +8,7 @@
     typed MASC/OAS error helpers. Provider/model-shaped OAS runner helpers stay
     behind lower-level boundary modules.
 
-    @since God file decomposition — extracted from oas_worker.ml *)
+    Owns one Keeper turn over the MASC runtime boundary. *)
 
 (** {1 MASC/OAS structured errors}
 

@@ -20,7 +20,7 @@ val publish_lifecycle :
   ?attrs:(string * Yojson.Safe.t) list ->
   unit ->
   unit
-(** Publish a [Custom "masc.oas_worker.<event>"] event on the
+(** Publish a [Custom "masc.runtime_agent.<event>"] event on the
     process-wide [Event_bus_slots] masc slot. Missing bootstrap state is surfaced by a
     one-shot warning instead of silently dropping every lifecycle event.
 

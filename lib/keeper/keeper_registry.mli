@@ -249,9 +249,7 @@ val record_turn_tool_inflight : base_path:string -> string -> count:int -> unit
     SDK-turn-scoped).
 
     No-op when [current_turn_observation = None] (defensive: should not
-    happen in normal flow because [mark_turn_started] runs first).
-
-    See RFC-0045 (SDK turn boundary alignment with MASC keeper FSM). *)
+    happen in normal flow because [mark_turn_started] runs first). *)
 val mark_sdk_turn_started : base_path:string -> string -> unit
 
 (** Attach the most recent [Context_measured] snapshot to the live turn.

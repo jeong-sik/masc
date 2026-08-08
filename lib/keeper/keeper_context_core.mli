@@ -83,14 +83,6 @@ val has_world_state_signature : string -> bool
 val persist_message :
   ?source:string -> session_context -> Agent_sdk.Types.message -> unit
 
-(** {1 Re-exports from Inference_utils} *)
-
-val timed : (unit -> 'a) -> 'a * int
-val zero_usage : Agent_sdk.Types.api_usage
-val usage_of_response :
-  Agent_sdk.Types.api_response -> Agent_sdk.Types.api_usage
-val total_tokens : Agent_sdk.Types.api_usage -> int
-
 type 'persistence_error checkpoint_write_error =
   | Tool_history_invalid of Keeper_compaction_unit.structural_error
   | Persistence_error of 'persistence_error

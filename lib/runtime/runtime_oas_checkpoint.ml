@@ -20,7 +20,7 @@ let publish_lifecycle ~name ~event ~detail ?error ?session_id ?status
       Agent_sdk.Event_bus.publish mb
         (Agent_sdk.Event_bus.mk_event
            (Custom
-              ( Printf.sprintf "masc.oas_worker.%s" event
+              ( Printf.sprintf "masc.runtime_agent.%s" event
               , `Assoc
                   ([ ("agent", `String name)
                    ; ("detail", `String detail)

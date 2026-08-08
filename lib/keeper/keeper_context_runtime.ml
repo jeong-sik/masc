@@ -42,11 +42,6 @@ let serialize_context = Keeper_context_core.serialize_context
 let create_session = Keeper_context_core.create_session
 let persist_message = Keeper_context_core.persist_message
 
-let timed = Keeper_context_core.timed
-let zero_usage = Keeper_context_core.zero_usage
-let usage_of_response = Keeper_context_core.usage_of_response
-let total_tokens = Keeper_context_core.total_tokens
-
 let log_keeper_exn = Keeper_context_core.log_keeper_exn
 let context_of_oas_checkpoint = Keeper_context_core.context_of_oas_checkpoint
 let save_oas_checkpoint = Keeper_context_core.save_oas_checkpoint

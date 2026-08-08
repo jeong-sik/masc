@@ -49,7 +49,7 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
   let turn_cost = turn_cost_for_result result in
   let observed_input_tokens = result.usage.input_tokens in
   let observed_output_tokens = result.usage.output_tokens in
-  let observed_total_tokens = Keeper_context_runtime.total_tokens result.usage in
+  let observed_total_tokens = Inference_utils.total_tokens result.usage in
   let updated_meta = {
     meta with
     updated_at = now_iso ();
@@ -340,7 +340,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
      | Error err ->
        let reason =
          Keeper_turn_fsm.Failure_provider_error
-           { kind = Keeper_agent_error.sdk_error_kind err
+           { kind = Agent_sdk.Error.(category err |> category_label)
            ; detail = Agent_sdk.Error.to_string err
            }
        in
@@ -610,7 +610,7 @@ let run_keeper_invocation_turn_admitted_inner
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
 	            let run_result, latency_ms =
-	              Keeper_context_runtime.timed (fun () ->
+	              Inference_utils.timed (fun () ->
 	                  match Eio_context.get_clock () with
 	                  | Error msg -> Error (Agent_sdk.Error.Internal msg)
 	                  | Ok clock ->
@@ -635,7 +635,8 @@ let run_keeper_invocation_turn_admitted_inner
 	                      ~reason
 	                      ~next_runtime
 	                      ~attempt
-	                      ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+	                      ~error_kind:
+	                        (Some Agent_sdk.Error.(category err |> category_label))
 	                      ~error_message:(Some (Agent_sdk.Error.to_string err))
 	                  in
 	                  let setup_direct_retry_runtime runtime_id =
@@ -708,9 +709,9 @@ let run_keeper_invocation_turn_admitted_inner
 		                                     (Agent_sdk.Error.to_string
 		                                        fail_open_err))
 		                                ~error_kind:
-		                                  (Keeper_agent_error
-		                                   .sdk_error_kind_for_receipt
-		                                     fail_open_err)
+		                                  (Agent_sdk.Error.(
+		                                     category fail_open_err |> category_label)
+		                                   |> Keeper_execution_receipt.error_kind_of_string)
 		                                ~error_message:
 		                                  (Agent_sdk.Error.to_string fail_open_err)
 		                                ~degraded_retry_applied:true

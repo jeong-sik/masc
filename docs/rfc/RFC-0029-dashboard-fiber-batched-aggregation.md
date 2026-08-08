@@ -11,8 +11,7 @@ implementation_prs: []
 - **Status**: Draft
 - **Author**: yousleepwhen (vincent)
 - **Created**: 2026-05-05
-- **Audit reference**: `docs/audit-responses/2026-05-05-integrated-improvement-design.md` §1-2, §3-3-C
-- **Related**: RFC-0026 (work-conserving keeper admission), RFC-0027 (typed runtime), `lib/dashboard/`
+- **Owner**: `lib/dashboard/`
 
 ## 1. Problem
 

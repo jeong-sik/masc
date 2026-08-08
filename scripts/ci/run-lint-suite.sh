@@ -68,7 +68,6 @@ blocking_lints() {
   run_lint "Board attention exact-flow boundary" bash scripts/check-board-attention-exact-flow-boundary.sh --check
   run_lint "Boundary redaction SSOT (RFC-0132 PR-3)" bash scripts/lint/no-runtime-literal-outside-boundary-redaction.sh --fail
   run_lint "No fabricated telemetry" bash scripts/lint/no-fabricated-telemetry.sh
-  run_lint "No oas_* prefix in lib/ (RFC-0047)" bash scripts/lint/no-oas-prefix-in-lib.sh
   run_lint "No inline ok-envelope literals" bash scripts/lint/no-inline-ok-envelope.sh
   run_lint "No inline error-envelope literals" bash scripts/lint/no-inline-error-envelope.sh
   run_lint "No inline json_kind_name" bash scripts/lint/no-inline-json-kind-name.sh

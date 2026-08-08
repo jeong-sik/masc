@@ -1,21 +1,5 @@
 (** Error translation helpers for keeper Agent.run orchestration. *)
 
-let sdk_error_kind = function
-  | Agent_sdk.Error.Api _ -> "api"
-  | Agent_sdk.Error.Provider _ -> "provider"
-  | Agent_sdk.Error.Agent _ -> "agent"
-  | Agent_sdk.Error.Mcp _ -> "mcp"
-  | Agent_sdk.Error.Config _ -> "config"
-  | Agent_sdk.Error.Serialization _ -> "serialization"
-  | Agent_sdk.Error.Io _ -> "io"
-  | Agent_sdk.Error.Orchestration _ -> "orchestration"
-  | Agent_sdk.Error.Internal _ -> "internal"
-;;
-
-let sdk_error_kind_for_receipt err =
-  Keeper_execution_receipt.error_kind_of_string (sdk_error_kind err)
-;;
-
 let network_error_kind_user_label = function
   | Llm_provider.Http_client.Connection_refused -> "connection refused"
   | Llm_provider.Http_client.Dns_failure -> "DNS lookup failed"

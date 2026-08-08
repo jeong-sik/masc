@@ -851,7 +851,7 @@ describe('TelemetryUnified', () => {
       {
         source: 'oas_event',
         ts_unix: 1_775_709_500,
-        event_type: 'masc:oas_worker:build',
+        event_type: 'masc:runtime_agent:build',
         agent_name: 'oas-tier-group.ollama_cloud_stable',
         payload: {
           agent: 'oas-tier-group.ollama_cloud_stable',

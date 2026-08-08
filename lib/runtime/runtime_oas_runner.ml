@@ -1,6 +1,6 @@
 (** Runtime_oas_runner — Eio context, runtime resolution, runtime MCP policy.
 
-    Extracted from oas_worker_named.ml (God file decomposition).
+    Resolves MASC runtime intent into an Agent core runtime.
     Provides runtime profile defaults, Eio context validation,
     provider resolution, and tool-support filtering.
 

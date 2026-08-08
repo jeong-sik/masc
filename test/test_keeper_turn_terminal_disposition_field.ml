@@ -1,4 +1,4 @@
-(** RFC-0047 PR-2 invariant: every [Keeper_turn_terminal.t]
+(** Every [Keeper_turn_terminal.t]
     constructed via the public surface populates [disposition]
     consistently with the legacy [code] string field, i.e.
 

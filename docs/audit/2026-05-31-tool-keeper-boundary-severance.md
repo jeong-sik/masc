@@ -86,20 +86,3 @@ taxonomy). Two acceptable resolutions, user's call:
   RFC-0084. Lower ceremony; the invariant is still enforced by CI.
 
 This PR takes neither stance in code — it cites RFC-0084 as the precedent and flags the gap.
-
-## 7. Follow-up axis: Runtime → Keeper (2026-06-02)
-
-After the Tool→Keeper ratchet reached baseline=0, a systematic cross-subsystem scan
-identified Runtime→Keeper as the next clear boundary violation.
-
-**PR #19801** (2026-06-02):
-- `Keeper_oas_checkpoint` -> `Runtime_oas_checkpoint` (0 keeper callers — purely misnamed)
-- `Keeper_observation` -> `Runtime_observation` (shared 9+4, observation is runtime behavior)
-- `Keeper_observation_query_operation` -> `Runtime_observation_query_operation`
-
-Full audit: `docs/audit/2026-06-02-runtime-keeper-boundary-severance.md`
-
-### Remaining Runtime→Keeper debt
-`Keeper_identity` (2 calls in `runtime_oas_runner.ml`) and `Keeper_internal_error`
-(1 call in `runtime_inference.ml`) remain after PR #19801. These require a
-separate severance PR — see the full audit doc for details.

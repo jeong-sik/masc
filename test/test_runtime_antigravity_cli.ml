@@ -260,6 +260,33 @@ let test_subscription_environment_key_set_is_exact () =
     (Runtime_subscription_cli_env.is_metered_api_credential "PATH")
 ;;
 
+let test_runtime_observation_retains_internal_measured_labels () =
+  let capture, _metrics =
+    Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
+  in
+  Runtime_observation.record_attempt_terminal
+    capture
+    ~model_id:"gemini-3.6-flash-low"
+    ~latency_ms:(Some 12)
+    ~error:None;
+  let labels =
+    [ "tool_owner=official_client"
+    ; "permission_mode=always-proceed"
+    ; "thinking_tokens=2"
+    ]
+  in
+  let observation =
+    Runtime_observation.runtime_observation_with_metrics
+      ~runtime_id:"antigravity.gemini"
+      ~configured_labels:labels
+      ~candidate_count:1
+      ~selected_model_raw:(Some "gemini-3.6-flash-low")
+      ~capture
+      ()
+  in
+  check (list string) "internal measured labels" labels observation.configured_labels
+;;
+
 let () =
   run "runtime antigravity CLI"
     [ ( "typed stream-json boundary"
@@ -269,6 +296,10 @@ let () =
         ; test_case "failed status" `Quick test_failed_status_is_not_completion
         ; test_case "process start and resume" `Quick test_process_boundary_start_and_resume
         ; test_case "subscription env key set" `Quick test_subscription_environment_key_set_is_exact
+        ; test_case
+            "runtime observation keeps measured labels"
+            `Quick
+            test_runtime_observation_retains_internal_measured_labels
         ] )
     ; ( "live subscription"
       , [ test_case "official Antigravity CLI" `Slow test_live_subscription_client ] )

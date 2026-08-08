@@ -182,7 +182,7 @@ let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
   {
     runtime_id;
     strategy;
-    configured_labels = [];
+    configured_labels;
     candidate_models;
     primary_model;
     selected_model;

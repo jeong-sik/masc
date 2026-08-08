@@ -175,7 +175,7 @@ let parse_wire_line line =
        Ok (Response { id; result }))
   | Some _, None -> protocol_error stage "response id must be an integer"
   | None, Some (`String method_) ->
-    let params = Option.value ~default:`Null (List.assoc_opt "params" fields) in
+    let* params = required_member stage "params" fields in
     Ok (Notification { method_; params })
   | Some _, Some _ | None, Some _ -> protocol_error stage "method must be a string"
   | None, None -> protocol_error stage "message has neither id nor method"
@@ -553,10 +553,7 @@ let run_turn ~mgr ~clock config ~prompt =
     match validate_config config ~prompt with
     | Error _ as error -> error
     | Ok () ->
-      let model = Option.value config.model ~default:"default" in
-      Log.Runtime_agent.info
-        "Codex app-server subscription turn starting (model=%s)"
-        model;
+      Log.Runtime_agent.info "Codex app-server subscription turn starting";
       (try run_spawned ~mgr ~clock config ~prompt with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | Eio.Time.Timeout -> Error (Timeout config.timeout_s)

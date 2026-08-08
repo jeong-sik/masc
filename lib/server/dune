@@ -29,6 +29,7 @@
   ;; through Keeper_compaction_evidence.exact_evidence_key; dune does not
   ;; re-export it through the masc dep, so masc_server lists it explicitly.
   masc.keeper_compaction_evidence
+  masc.keeper_approval
   ;; RFC-0266 Phase 4: GET /api/v1/dashboard/fusion-runs names
   ;; Fusion_run_registry directly; dune does not re-export it through the masc
   ;; dep, so masc_server lists masc.fusion_core explicitly.

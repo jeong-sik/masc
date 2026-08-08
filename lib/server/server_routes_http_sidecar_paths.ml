@@ -228,7 +228,11 @@ let first_existing_or_first = function
 ;;
 
 let runtime_toml_path ~base_path id =
-  Filename.concat base_path (Printf.sprintf ".gate/runtime/%s/config.toml" id)
+  Filename.concat
+    base_path
+    (Filename.concat
+       (Channel_gate_sidecar_state.runtime_dir ~connector_id:id)
+       "config.toml")
 ;;
 
 let status_file_candidates ?sidecar_root ?project_root ?sidecar_dir ~base_path id =
@@ -256,7 +260,7 @@ let status_file_candidates ?sidecar_root ?project_root ?sidecar_dir ~base_path i
     |> List.concat
   in
   let default_paths =
-    resolve_relative_path ~roots (Printf.sprintf ".gate/runtime/%s/status.json" id)
+    resolve_relative_path ~roots (Channel_gate_sidecar_state.default_status_path ~connector_id:id)
   in
   let legacy_paths = resolve_relative_path ~roots (legacy_status_rel id) in
   Json_util.dedupe_keep_order (env_paths @ dotenv_paths @ toml_paths @ default_paths @ legacy_paths)

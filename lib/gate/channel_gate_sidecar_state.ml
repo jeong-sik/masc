@@ -3,13 +3,29 @@
 module U = Yojson.Safe.Util
 module Store = Channel_gate_binding_store
 
+(* Every sidecar connector keeps its files under
+   [.gate/runtime/<connector_id>/]. The three default paths derive from the id
+   so relocating the tree, or adding a channel, does not re-spell the layout. *)
+let runtime_dir ~connector_id =
+  Filename.concat (Filename.concat ".gate" "runtime") connector_id
+;;
+
+let default_status_path ~connector_id =
+  Filename.concat (runtime_dir ~connector_id) "status.json"
+;;
+
+let default_binding_store_path ~connector_id =
+  Filename.concat (runtime_dir ~connector_id) "bindings.json"
+;;
+
+let default_binding_audit_path ~connector_id =
+  Filename.concat (runtime_dir ~connector_id) "binding_audit.jsonl"
+;;
+
 module type Config = sig
   val connector_id : string
   val display_name : string
   val channel : string
-  val default_status_path : string
-  val default_binding_store_path : string
-  val default_binding_audit_path : string
   val status_path_env_names : string list
   val binding_store_path_env_names : string list
   val binding_audit_path_env_names : string list
@@ -17,6 +33,10 @@ module type Config = sig
 end
 
 module Make (Config : Config) = struct
+  let default_status_path = default_status_path ~connector_id:Config.connector_id
+  let default_binding_store_path = default_binding_store_path ~connector_id:Config.connector_id
+  let default_binding_audit_path = default_binding_audit_path ~connector_id:Config.connector_id
+
   type binding = Store.binding = {
     channel_id : string;
     keeper_name : string;
@@ -44,17 +64,17 @@ module Make (Config : Config) = struct
 
   let status_path () =
     configured_write_path Config.status_path_env_names
-      ~default:Config.default_status_path
+      ~default:default_status_path
 
   let binding_store_path () =
     configured_write_path Config.binding_store_path_env_names
-      ~default:Config.default_binding_store_path
+      ~default:default_binding_store_path
 
   let binding_store_read_path = binding_store_path
 
   let binding_audit_path () =
     configured_write_path Config.binding_audit_path_env_names
-      ~default:Config.default_binding_audit_path
+      ~default:default_binding_audit_path
 
   let binding_audit_read_path = binding_audit_path
 

@@ -20,9 +20,9 @@ let connector_id = "slack"
 let display_name = "Slack"
 let channel = "slack"
 
-let default_status_path = ".gate/runtime/slack/status.json"
-let default_binding_store_path = ".gate/runtime/slack/bindings.json"
-let default_binding_audit_path = ".gate/runtime/slack/binding_audit.jsonl"
+let default_status_path = Channel_gate_sidecar_state.default_status_path ~connector_id
+let default_binding_store_path = Channel_gate_sidecar_state.default_binding_store_path ~connector_id
+let default_binding_audit_path = Channel_gate_sidecar_state.default_binding_audit_path ~connector_id
 
 (* Slack has no Discord-style guilds; the bot token authorizes per-workspace.
    Path resolvers read an env override, else fall back to the default. *)

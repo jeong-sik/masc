@@ -13,9 +13,9 @@ let display_name = "Discord"
 let channel = "discord"
 
 
-let default_status_path = ".gate/runtime/discord/status.json"
-let default_binding_store_path = ".gate/runtime/discord/bindings.json"
-let default_binding_audit_path = ".gate/runtime/discord/binding_audit.jsonl"
+let default_status_path = Channel_gate_sidecar_state.default_status_path ~connector_id
+let default_binding_store_path = Channel_gate_sidecar_state.default_binding_store_path ~connector_id
+let default_binding_audit_path = Channel_gate_sidecar_state.default_binding_audit_path ~connector_id
 
 let stale_after_sec () =
   Env_config_core.get_int ~default:30 "MASC_DISCORD_STATUS_STALE_SEC"

@@ -667,7 +667,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
               agent_type: asString(agentRaw.agent_type),
               status: asString(agentRaw.status),
               current_task: asString(agentRaw.current_task) ?? null,
-              joined_at: asString(agentRaw.joined_at),
+              session_bound_at: asString(agentRaw.session_bound_at),
               last_seen: asString(agentRaw.last_seen),
               last_seen_ago_s: asNumber(agentRaw.last_seen_ago_s),
               capabilities: asStringArray(agentRaw.capabilities),

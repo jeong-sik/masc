@@ -71,7 +71,7 @@ export function normalizeAgent(raw: unknown): Agent | null {
     keeper_id: asString(raw.keeper_id) ?? null,
     status: normalizeAgentStatus(raw.status),
     current_task: asString(raw.current_task) ?? null,
-    joined_at: asString(raw.joined_at),
+    session_bound_at: asString(raw.session_bound_at),
     last_seen: asString(raw.last_seen),
     capabilities: asStringArray(raw.capabilities),
     emoji: asString(raw.emoji),

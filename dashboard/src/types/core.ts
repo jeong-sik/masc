@@ -33,7 +33,7 @@ export interface Agent {
   status?: 'active' | 'busy' | 'listening' | 'idle' | 'inactive' | 'offline'
   current_task: string | null
   context_ratio?: number
-  joined_at?: string
+  session_bound_at?: string
   last_seen?: string
   capabilities?: string[]
   emoji?: string
@@ -1292,7 +1292,7 @@ export interface Keeper {
     agent_type?: string
     status?: string
     current_task?: string | null
-    joined_at?: string
+    session_bound_at?: string
     last_seen?: string
     last_seen_ago_s?: number
     capabilities?: string[]

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   mergeMessages,
   normalizeDashboardRuntimeResolution,
+  normalizeAgent,
   normalizeExecutionQueueItem,
   normalizeMessage,
   normalizeTask,
@@ -101,6 +102,16 @@ describe('normalizeExecutionQueueItem', () => {
         summary: 'no provider can satisfy tool surface',
       },
     })
+  })
+})
+
+describe('normalizeAgent', () => {
+  // The server renamed this field to session_bound_at in #19656 (2026-06-01)
+  // while the dashboard kept reading joined_at, so the agent roster rendered
+  // an empty bind time from then on.
+  it('reads the bind time the server sends', () => {
+    const agent = normalizeAgent({ name: 'garnet', session_bound_at: '2026-06-01T00:00:00Z' })
+    expect(agent?.session_bound_at).toBe('2026-06-01T00:00:00Z')
   })
 })
 

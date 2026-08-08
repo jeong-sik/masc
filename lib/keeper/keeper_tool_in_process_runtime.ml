@@ -903,6 +903,25 @@ let handle_surface_post_with_outcome
   in
   let surface = String.trim (Safe_ops.json_string ~default:"" "surface" args) in
   let content = Safe_ops.json_string ~default:"" "content" args in
+  let continuation_channel =
+    Option.map
+      (fun channel ->
+         match channel with
+         | Keeper_continuation_channel.Discord
+             { channel_id; parent_channel_id = None; thread_id = None; _ } ->
+           (match
+              Channel_gate_discord_state.parent_channel_of_thread ~channel_id
+            with
+            | Some parent_channel_id ->
+              Keeper_continuation_channel.discord_thread_parent channel
+                ~parent_channel_id
+            | None -> channel)
+         | Keeper_continuation_channel.Discord _
+         | Keeper_continuation_channel.Dashboard _
+         | Keeper_continuation_channel.Slack _
+         | Keeper_continuation_channel.Unrouted _ -> channel)
+      continuation_channel
+  in
   let redaction =
     Keeper_secret_redaction.snapshot
       ~base_path:config.Workspace.base_path

@@ -3,7 +3,7 @@ set -euo pipefail
 
 : "${MCP_URL:=http://127.0.0.1:8935/mcp}"
 : "${BASE_PATH:?BASE_PATH must be set by run_all.sh}"
-: "${AGENT_NAME:=${MCP_AGENT_NAME:-public-tool-sweep-harness}}"
+: "${AGENT_NAME:=${PUBLIC_TOOL_SWEEP_AGENT_NAME:-public-tool-sweep-harness}}"
 : "${MCP_SESSION_ID:=}"
 export MCP_SESSION_ID
 
@@ -48,26 +48,6 @@ expect_ok() {
     return 0
   fi
   mcp_fail_with_context "${label}: expected success" "$(response_text_or_error "$payload")"
-}
-
-expect_ok_or_guard() {
-  local label="$1"
-  local payload="$2"
-  local guard_regex="$3"
-  if response_tool_ok "$payload"; then
-    echo "  PASS: ${label}"
-    return 0
-  fi
-  if response_transport_ok "$payload"; then
-    local text
-    text="$(response_text_or_error "$payload")"
-    if [[ -n "$text" ]] && printf '%s' "$text" | grep -Eiq "$guard_regex"; then
-      echo "  PASS: ${label} (guard)"
-      return 0
-    fi
-    mcp_fail_with_context "${label}: expected success or guard /${guard_regex}/" "$text"
-  fi
-  mcp_fail_with_context "${label}: transport/jsonrpc failure" "$payload"
 }
 
 call_method() {
@@ -198,7 +178,7 @@ expect_ok "masc_tasks" "$r_tasks"
 
 next_step "masc_transition claim"
 r_claim="$(call_tool 5015 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"claim",notes:"public tool sweep claim"}')")"
-expect_ok_or_guard "masc_transition claim" "$r_claim" 'already claimed'
+expect_ok "masc_transition claim" "$r_claim"
 
 next_step "masc_plan_init"
 r_plan_init="$(call_tool 5016 "masc_plan_init" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"

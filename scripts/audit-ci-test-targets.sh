@@ -87,15 +87,8 @@ fi
 
 echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in Dune"
 
-# 714 -> 710: this PR wires test_tool_input_validation, and #27429,
-# #27433 and #27441 each wired a suite test/dune already declared without
-# lowering this number. Measured on the merged tree after all four, not
-# computed -- #27441 landed between this branch's first push and now.
-# 708 -> 706: this branch wires test_keeper_catchup_digest and #27525 wired
-# test_tool_workspace_coverage while it was open. Measured on the merged tree --
-# the audit reported "706 unwired, 707 baseline" so 707 would have passed while
-# leaving the ratchet a notch loose.
-UNWIRED_BASELINE=706
+# Current maximum number of declared suites without an explicit CI runtime target.
+UNWIRED_BASELINE=703
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

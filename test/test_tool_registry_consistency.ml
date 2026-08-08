@@ -1,16 +1,11 @@
 open Masc
 
-(** P0-2: Registry consistency tests for the Tool_dispatch registries.
+(** Registry consistency tests for the Tool_dispatch registries.
 
     Asserts that:
     1. The runtime schema-registry key set equals the tag-registry key set.
     2. Mandatory (core-always) tools are present in the tag/schema registries.
-    3. Retired tool names are absent from the tag/schema/handler registries.
-
-    These invariants are foundational for the MASC/Keeper/OAS overhaul:
-    every tool that can be dispatched must have both a tag (for token
-    validation) and a schema (for input validation), and retired surfaces
-    must not leak back into the runtime registry. *)
+    3. Every dispatchable tool has a tag and the exact advertised input schema. *)
 
 let init () = Masc_test_deps.init_unified_tool_registry ()
 

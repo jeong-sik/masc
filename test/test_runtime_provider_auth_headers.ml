@@ -329,16 +329,16 @@ key = " OLLAMA_CLOUD_API_KEY "
         | None -> fail "expected credential")
      | _ -> fail "expected one provider")
 
-let test_runtime_toml_rejects_legacy_protocol_aliases () =
+let test_runtime_toml_rejects_unknown_protocol () =
   let content =
     {|
 [runtime]
-default = "legacy_openai_compat.test_model"
+default = "invalid_provider.test_model"
 
-[providers.legacy_openai_compat]
-display-name = "Legacy OpenAI-Compatible"
-protocol = "openai-http"
-endpoint = "https://legacy-openai-compatible.example/v1"
+[providers.invalid_provider]
+display-name = "Invalid Provider"
+protocol = "invalid-protocol"
+endpoint = "https://invalid-provider.example/v1"
 
 [models.test_model]
 api-name = "test-model"
@@ -346,23 +346,26 @@ max-context = 8192
 tools-support = true
 streaming = true
 
-[legacy_openai_compat.test_model]
+[invalid_provider.test_model]
 max-concurrent = 1
 |}
   in
   match Runtime_toml.parse_string content with
-  | Ok _ -> fail "expected runtime TOML to reject legacy provider-letter alias"
+  | Ok _ -> fail "expected runtime TOML to reject unknown protocol"
   | Error errors ->
-    check bool "rejects openai-http"
-      true
-      (List.exists
-         (fun (err : Runtime_toml.parse_error) ->
-            String.equal err.path "providers.legacy_openai_compat.protocol"
-            && String.equal err.message
-                 "unknown protocol \"openai-http\": expected one of \
-                  messages-cli, messages-http, openai-compatible-cli, \
-                  openai-compatible-http, ollama-http")
-         errors)
+    let error =
+      errors
+      |> List.find_opt (fun (err : Runtime_toml.parse_error) ->
+        String.equal err.path "providers.invalid_provider.protocol")
+    in
+    (match error with
+     | None -> fail "expected protocol-scoped parse error"
+     | Some error ->
+       check string "unknown protocol error"
+         "unknown protocol \"invalid-protocol\": expected one of messages-cli, \
+          messages-http, openai-compatible-cli, openai-compatible-http, \
+          ollama-http, codex-app-server"
+         error.message)
 
 let test_runtime_toml_accepts_messages_caching_capability () =
   let content =
@@ -1891,10 +1894,8 @@ let () =
             "runtime TOML rejects wrong-typed provider connect timeout"
             `Quick
             test_runtime_toml_rejects_wrong_typed_provider_connect_timeout
-        ; test_case
-            "runtime TOML rejects legacy protocol aliases"
-            `Quick
-            test_runtime_toml_rejects_legacy_protocol_aliases
+        ; test_case "runtime TOML rejects unknown protocol" `Quick
+            test_runtime_toml_rejects_unknown_protocol
         ; test_case
             "runtime TOML reads uses-messages-caching capability"
             `Quick

@@ -33,12 +33,6 @@ val owned_active_task_id_for_meta :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_id.Task_id.t option
 
-(** Field-level merge for [write_meta_with_merge]. *)
-val merge_current_task_id :
-  latest:Keeper_meta_contract.keeper_meta ->
-  caller:Keeper_meta_contract.keeper_meta ->
-  Keeper_meta_contract.keeper_meta
-
 (** Reconcile [meta.current_task_id] with the backlog. *)
 val sync_current_task_id_from_backlog :
   config:Workspace.config ->

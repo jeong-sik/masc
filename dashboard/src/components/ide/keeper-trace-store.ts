@@ -4,8 +4,8 @@ import { signal } from '@preact/signals'
  * RFC-0028 PR-α: keeper-trace store.
  *
  * Stitched read-side projection over existing IDE/runtime surfaces:
- *  - anchored-thread (RFC-0021)
- *  - runtime-hop     (RFC-0023)
+ *  - anchored-thread
+ *  - runtime-hop
  *  - decision-log    (RFC-0026)
  *  - activity-event  (/api/v1/activity/events normalized context)
  *

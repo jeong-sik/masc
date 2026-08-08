@@ -18,16 +18,24 @@ type error =
   | Owner_closed
 
 type turn_start =
-  | Started
+  | Started of turn_handle
   | Busy of { running_operation_id : string }
+
+and turn_terminal =
+  | Turn_succeeded
+  | Turn_failed of string
+  | Turn_cancelled
+
+and turn_handle
 
 type t
 
 val start
   :  sw:Eio.Switch.t
   -> store:store
+  -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
-  -> t
+  -> (t, error) result
 
 val projection : t -> Keeper_owner_reducer.projection
 (** Lock-free immutable snapshot. *)
@@ -50,6 +58,9 @@ val start_turn
 (** Admit one child turn and return after actor admission, without waiting for
     the child.  A child exception is contained by the owner and releases the
     running slot. *)
+
+val await_turn : turn_handle -> turn_terminal
+val turn_handle_operation_id : turn_handle -> string
 
 val begin_stopping : t -> (unit, error) result
 (** Reject future external commands.  The root switch remains the structured

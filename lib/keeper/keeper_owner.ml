@@ -11,17 +11,35 @@ type error =
   | Owner_closed
 
 type turn_start =
-  | Started
+  | Started of turn_handle
   | Busy of { running_operation_id : string }
+
+and turn_terminal =
+  | Turn_succeeded
+  | Turn_failed of string
+  | Turn_cancelled
+
+and turn_handle =
+  { operation_id : string
+  ; terminal : turn_terminal Eio.Promise.t
+  }
+
+type completion =
+  { handle : turn_handle
+  ; resolve : turn_terminal Eio.Promise.u
+  ; settled : bool Atomic.t
+  }
 
 type turn_request =
   { operation_id : string
   ; run : Eio.Switch.t -> unit
+  ; completion : completion
   }
 
 type child_outcome =
   | Child_succeeded
   | Child_failed of string
+  | Child_cancelled
 
 type _ command =
   | Exact_projection :
@@ -44,6 +62,8 @@ type t =
   { mailbox : packed_command Eio.Stream.t
   ; projection : Keeper_owner_reducer.projection Atomic.t
   ; closed : bool Atomic.t
+  ; closed_p : unit Eio.Promise.t
+  ; active_completion : completion option Atomic.t
   }
 
 let error_to_string = function
@@ -59,8 +79,36 @@ let request t command =
   then Error Owner_closed
   else (
     let response, resolve = Eio.Promise.create () in
-    Eio.Stream.add t.mailbox (Command (command, resolve));
-    Eio.Promise.await response)
+    match
+      Eio.Fiber.first
+        (fun () ->
+           Eio.Stream.add t.mailbox (Command (command, resolve));
+           `Enqueued)
+        (fun () ->
+           Eio.Promise.await t.closed_p;
+           `Closed)
+    with
+    | `Closed -> Error Owner_closed
+    | `Enqueued ->
+      Eio.Fiber.first
+        (fun () -> Eio.Promise.await response)
+        (fun () ->
+           Eio.Promise.await t.closed_p;
+           Error Owner_closed))
+;;
+
+let settle completion terminal =
+  if Atomic.compare_and_set completion.settled false true
+  then Eio.Promise.resolve completion.resolve terminal
+;;
+
+let settle_active t operation_id terminal =
+  let current = Atomic.get t.active_completion in
+  match current with
+  | Some completion when String.equal completion.handle.operation_id operation_id ->
+    if Atomic.compare_and_set t.active_completion current None
+    then settle completion terminal
+  | Some _ | None -> ()
 ;;
 
 let commit store transition =
@@ -110,7 +158,7 @@ let run_child t request =
   let outcome =
     match Eio.Switch.run (fun turn_sw -> request.run turn_sw) with
     | () -> Child_succeeded
-    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception Eio.Cancel.Cancelled _ -> Child_cancelled
     | exception exn -> Child_failed (Printexc.to_string exn)
   in
   notify_child_finished t ~operation_id:request.operation_id outcome
@@ -118,6 +166,8 @@ let run_child t request =
 
 let log_child_failure operation_id = function
   | Child_succeeded -> ()
+  | Child_cancelled ->
+    Log.Keeper.info "keeper_owner: child turn cancelled operation_id=%s" operation_id
   | Child_failed detail ->
     Log.Keeper.error
       "keeper_owner: child turn failed operation_id=%s error=%s"
@@ -125,16 +175,24 @@ let log_child_failure operation_id = function
       detail
 ;;
 
-let start ~sw ~store ~initial_meta =
-  let initial_state = Keeper_owner_reducer.create initial_meta in
+let start ~sw ~store ~keeper_name ~initial_meta =
+  match Keeper_owner_reducer.create ~keeper_name initial_meta with
+  | Error error -> Error (Reducer_rejected error)
+  | Ok initial_state ->
+  let closed_p, resolve_closed = Eio.Promise.create () in
   let t =
     { mailbox = Eio.Stream.create mailbox_capacity
     ; projection = Atomic.make (Keeper_owner_reducer.projection initial_state)
     ; closed = Atomic.make false
+    ; closed_p
+    ; active_completion = Atomic.make None
     }
   in
   Eio.Switch.on_release sw (fun () ->
     Atomic.set t.closed true;
+    Eio.Promise.resolve resolve_closed ();
+    Option.iter (fun completion -> settle completion Turn_cancelled)
+      (Atomic.exchange t.active_completion None);
     let projection = Atomic.get t.projection in
     Atomic.set t.projection { projection with stopping = true });
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -173,7 +231,8 @@ let start ~sw ~store ~initial_meta =
                 Eio.Promise.resolve resolve (Error error);
                 loop state
               | Ok state ->
-                Eio.Promise.resolve resolve (Ok Started);
+                Atomic.set t.active_completion (Some request.completion);
+                Eio.Promise.resolve resolve (Ok (Started request.completion.handle));
                 if transition_starts_child transition request.operation_id
                 then Eio.Fiber.fork ~sw:child_sw (fun () -> run_child t request);
                 loop state))
@@ -181,10 +240,12 @@ let start ~sw ~store ~initial_meta =
           log_child_failure operation_id outcome;
           (match Keeper_owner_reducer.finish_turn state ~operation_id with
            | Error error ->
+             let detail = Keeper_owner_reducer.error_to_string error in
              Log.Keeper.error
                "keeper_owner: rejected child completion operation_id=%s error=%s"
                operation_id
-               (Keeper_owner_reducer.error_to_string error);
+               detail;
+             settle_active t operation_id (Turn_failed detail);
              Eio.Promise.resolve resolve (Ok ());
              loop state
            | Ok transition ->
@@ -197,6 +258,13 @@ let start ~sw ~store ~initial_meta =
                 Eio.Promise.resolve resolve (Ok ());
                 loop state
               | Ok state ->
+                let terminal =
+                  match outcome with
+                  | Child_succeeded -> Turn_succeeded
+                  | Child_failed detail -> Turn_failed detail
+                  | Child_cancelled -> Turn_cancelled
+                in
+                settle_active t operation_id terminal;
                 Eio.Promise.resolve resolve (Ok ());
                 loop state))
         | Command (Begin_stopping, resolve) ->
@@ -210,12 +278,20 @@ let start ~sw ~store ~initial_meta =
              loop state)
       in
       loop initial_state));
-  t
+  Ok t
 ;;
 
 let exact_projection t = request t Exact_projection
 let apply_meta t command = request t (Apply_meta command)
-let start_turn t ~operation_id ~run = request t (Start_turn { operation_id; run })
+let start_turn t ~operation_id ~run =
+  let terminal, resolve = Eio.Promise.create () in
+  let handle = { operation_id; terminal } in
+  let completion = { handle; resolve; settled = Atomic.make false } in
+  request t (Start_turn { operation_id; run; completion })
+;;
+
+let await_turn handle = Eio.Promise.await handle.terminal
+let turn_handle_operation_id (handle : turn_handle) = handle.operation_id
 let begin_stopping t = request t Begin_stopping
 
 module For_testing = struct

@@ -77,7 +77,8 @@ type meta_command =
       }
 
 type state =
-  { meta : Keeper_meta_contract.keeper_meta option
+  { keeper_name : string
+  ; meta : Keeper_meta_contract.keeper_meta option
   ; running_operation_id : string option
   ; stopping : bool
   }
@@ -114,8 +115,19 @@ type error =
       ; actual : string
       }
   | Invalid_delta of string
+  | Keeper_identity_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Delete_while_running of string
 
-let create meta : state = { meta; running_operation_id = None; stopping = false }
+let create ~keeper_name meta =
+  match meta with
+  | Some meta when not (String.equal keeper_name meta.Keeper_meta_contract.name) ->
+    Error (Keeper_identity_mismatch { expected = keeper_name; actual = meta.name })
+  | Some _ | None ->
+    Ok { keeper_name; meta; running_operation_id = None; stopping = false }
+;;
 
 let projection (state : state) : projection =
   { meta = state.meta
@@ -218,6 +230,8 @@ let update_usage meta usage =
 let apply_existing (state : state) meta command =
   match command with
   | Create _ -> Error Meta_already_exists
+  | Delete when Option.is_some state.running_operation_id ->
+    Error (Delete_while_running (Option.get state.running_operation_id))
   | Delete ->
     let state = { state with meta = None } in
     Ok (publish_transition state (Remove_snapshot meta) [])
@@ -286,6 +300,14 @@ let apply_existing (state : state) meta command =
   | Record_compaction result ->
     if result.count_delta < 0
     then Error (Invalid_delta "compaction count_delta must be non-negative")
+    else if result.before_tokens < 0
+    then Error (Invalid_delta "compaction before_tokens must be non-negative")
+    else if result.after_tokens < 0
+    then Error (Invalid_delta "compaction after_tokens must be non-negative")
+    else if not (Float.is_finite result.at)
+    then Error (Invalid_delta "compaction at must be finite")
+    else if not (Float.is_finite result.checked_at)
+    then Error (Invalid_delta "compaction checked_at must be finite")
     else
       let previous = meta.runtime.compaction_rt in
       (match checked_add "compaction count" previous.count result.count_delta with
@@ -312,7 +334,12 @@ let apply_meta (state : state) command =
   then Error Owner_stopping
   else
     match state.meta, command with
-    | None, Create meta -> Ok (with_meta state meta)
+    | None, Create meta when String.equal state.keeper_name meta.name ->
+      Ok (with_meta state meta)
+    | None, Create meta ->
+      Error
+        (Keeper_identity_mismatch
+           { expected = state.keeper_name; actual = meta.name })
     | None, _ -> Error Meta_missing
     | Some meta, command -> apply_existing state meta command
 ;;
@@ -321,9 +348,10 @@ let begin_turn (state : state) ~operation_id =
   if state.stopping
   then Error Owner_stopping
   else
-    match state.running_operation_id with
-    | Some running -> Error (Turn_already_running running)
-    | None ->
+    match state.meta, state.running_operation_id with
+    | None, _ -> Error Meta_missing
+    | Some _, Some running -> Error (Turn_already_running running)
+    | Some _, None ->
       let state = { state with running_operation_id = Some operation_id } in
       Ok
         (publish_transition
@@ -357,4 +385,8 @@ let error_to_string = function
   | Turn_identity_mismatch { expected; actual } ->
     Printf.sprintf "turn identity mismatch: expected=%s actual=%s" expected actual
   | Invalid_delta detail -> "invalid additive delta: " ^ detail
+  | Keeper_identity_mismatch { expected; actual } ->
+    Printf.sprintf "Keeper identity mismatch: expected=%s actual=%s" expected actual
+  | Delete_while_running operation_id ->
+    Printf.sprintf "cannot delete Keeper while turn %s is running" operation_id
 ;;

@@ -12,6 +12,7 @@ export interface RuntimeTomlProvider {
   credentialKey: string
   credentialPath: string
   credentialValue: string
+  isNonInteractive: boolean
 }
 
 export interface RuntimeTomlModel {
@@ -289,6 +290,7 @@ function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlPr
     credentialKey: asString(credentials.key),
     credentialPath: asString(credentials.path),
     credentialValue: asString(credentials.value),
+    isNonInteractive: asBoolean(values['is-non-interactive']),
   }
 }
 
@@ -639,8 +641,8 @@ export function setRuntimeTomlDefault(sourceText: string, runtimeId: string): st
 export function setRuntimeTomlProviderField(
   sourceText: string,
   providerId: string,
-  field: 'display-name' | 'protocol' | 'endpoint' | 'command',
-  value: string,
+  field: 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive',
+  value: string | boolean,
 ): string {
   const section = `providers.${providerId}`
   if (field === 'endpoint') {
@@ -722,14 +724,16 @@ export const RUNTIME_TOML_PROTOCOLS = [
   'openai-compatible-cli',
   'messages-http',
   'messages-cli',
+  'codex-app-server',
 ] as const
 
 export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
 
 // Subset of RUNTIME_TOML_PROTOCOLS the add-provider form is allowed to offer.
-// The add-provider form only creates endpoint-backed providers. Command
-// transport is blocked at the binding form via transportKind, while
-// `provider_kind_for_http_provider` still returns `None` for `Messages_api`.
+// HTTP protocols create endpoint-backed providers. A typed official-client
+// protocol creates the command-backed runtime its backend adapter owns, while
+// generic command providers remain blocked. `provider_kind_for_http_provider`
+// still returns `None` for `Messages_api`.
 // Messages providers parse and save, but resolve to no provider_kind and
 // `Runtime.materialize_config`'s `List.filter_map` silently drops their bindings
 // from the live runtime list instead of failing the save
@@ -740,12 +744,17 @@ export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
   'openai-compatible-http',
   'ollama-http',
   'openai-compatible-cli',
+  'codex-app-server',
 ] as const
 
 export type RuntimeTomlCreatableProtocol = (typeof RUNTIME_TOML_CREATABLE_PROTOCOLS)[number]
 
 export function isRuntimeTomlCreatableProtocol(protocol: string): protocol is RuntimeTomlCreatableProtocol {
   return (RUNTIME_TOML_CREATABLE_PROTOCOLS as readonly string[]).includes(protocol)
+}
+
+export function isRuntimeTomlOfficialClientProtocol(protocol: string): boolean {
+  return protocol === 'codex-app-server'
 }
 
 const RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS = new Set([

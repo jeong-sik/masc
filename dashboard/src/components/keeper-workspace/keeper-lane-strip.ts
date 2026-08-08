@@ -178,14 +178,8 @@ function LaneWaitingRow({
       data-testid="keeper-lane-waiting-row"
       data-source=${row.source}
       data-waiting-on=${row.waiting_on}
-      class="grid grid-cols-[6.75rem_1.25rem_minmax(0,1fr)] gap-2"
+      class="grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2"
     >
-      <div class="py-2 text-right text-3xs text-[var(--color-fg-muted)]">
-        ${row.since_iso == null
-          ? html`<span>시각 미기록</span>`
-          : html`<time dateTime=${row.since_iso}>${formatDateTimeKo(row.since_iso)}</time>`}
-        ${sinceRelative == null ? null : html`<span class="block">${sinceRelative}</span>`}
-      </div>
       <div class="relative min-h-full" aria-hidden="true">
         ${first ? null : html`<span class="absolute left-1/2 top-0 h-1/2 -translate-x-1/2 border-l border-[var(--color-border-default)]"></span>`}
         ${last ? null : html`<span class="absolute bottom-0 left-1/2 h-1/2 -translate-x-1/2 border-l border-[var(--color-border-default)]"></span>`}
@@ -195,6 +189,15 @@ function LaneWaitingRow({
         ></span>
       </div>
       <div class="my-1 grid min-w-0 gap-1.5 rounded-[var(--r-1)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-page)] p-2">
+        <div
+          class="flex min-w-0 flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-3xs text-[var(--color-fg-muted)]"
+          data-testid="keeper-lane-waiting-time"
+        >
+          ${row.since_iso == null
+            ? html`<span>시각 미기록</span>`
+            : html`<time dateTime=${row.since_iso}>${formatDateTimeKo(row.since_iso)}</time>`}
+          ${sinceRelative == null ? null : html`<span>${sinceRelative}</span>`}
+        </div>
         <div class="flex min-w-0 flex-wrap items-center gap-1.5">
           <${StatusChip} tone=${sourceTone(row.source)} uppercase=${false} title=${row.source}>${laneSourceLabel(row.source)}<//>
           <span class="min-w-0 truncate font-mono text-xs text-[var(--color-fg-primary)]" title=${row.waiting_on}>${row.waiting_on}</span>

@@ -25,8 +25,7 @@
 
 (** How a tool's handler is bound to the dispatch registry. *)
 type handler_binding =
-  | Direct of Tool_dispatch.handler
-  | Shared of Tool_dispatch.handler
+  | Registered of Tool_dispatch.handler
   | Tag_dispatch
 
 type t = {

@@ -5,8 +5,7 @@
     @since 2.196.0 *)
 
 type handler_binding =
-  | Direct of Tool_dispatch.handler
-  | Shared of Tool_dispatch.handler
+  | Registered of Tool_dispatch.handler
   | Tag_dispatch
 
 type t = {
@@ -91,9 +90,9 @@ let register (spec : t) =
   (* 2. Tag + schema registry. An unclassified tool cannot reach this point. *)
   Tool_dispatch.register_module_tag
     ~schemas:[ to_tool_schema spec ] ~tag:spec.module_tag;
-  (* 3. Handler binding — auto-register Direct/Shared into Tool_dispatch *)
+  (* 3. Handler binding — register exact handlers into Tool_dispatch. *)
   (match spec.handler_binding with
-   | Direct h | Shared h ->
+   | Registered h ->
      Tool_dispatch.register ~tool_name:spec.name ~handler:h
    | Tag_dispatch -> ())
 

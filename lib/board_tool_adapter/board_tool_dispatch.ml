@@ -88,7 +88,7 @@ let register () =
       ~description:s.description
       ~module_tag:Tool_dispatch.Mod_inline
       ~input_schema:s.input_schema
-      ~handler_binding:(Shared handler)
+      ~handler_binding:(Registered handler)
       ~is_read_only:policy.readonly
       ~is_idempotent:policy.idempotent
       ~visibility:policy.visibility

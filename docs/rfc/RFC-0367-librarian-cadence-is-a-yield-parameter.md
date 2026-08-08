@@ -130,8 +130,9 @@ keeper 는 거의 매 턴 출력을 낸다 (오늘 4,222 턴 중 `output_tokens 
 # 패스 수와 no-op 비율 (keeper 별)
 #  주의: 성공 줄에는 lane= 이 없고 실패 줄에만 있다
 #  (keeper_librarian_runtime.ml:500 vs :524). lane= 으로 필터하면 실패만 세게 된다.
-rg -c 'memory os librarian committed' ~/me/.masc/logs/system_log_<DAY>.jsonl
-rg -c 'memory os librarian failed'    ~/me/.masc/logs/system_log_<DAY>.jsonl
+LOGS="${MASC_BASE_PATH:?set to the deployment base path}/.masc/logs"
+rg -c 'memory os librarian committed' "$LOGS/system_log_<DAY>.jsonl"
+rg -c 'memory os librarian failed'    "$LOGS/system_log_<DAY>.jsonl"
 ```
 
 수용 기준:

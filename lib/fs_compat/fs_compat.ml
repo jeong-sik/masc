@@ -105,11 +105,15 @@ let test_exec_home_guard ~op path =
           then String.sub trimmed 0 (len - 1)
           else trimmed
         in
-        let home_len = String.length home_norm in
+        (* Match on the separator boundary, not the bare prefix.  A bare
+           [starts_with ~prefix:home_norm] also fires for a sibling whose name
+           merely extends HOME's: with HOME=/home/runner it blocks
+           /home/runner-cache, which is not under HOME.  The first disjunct
+           keeps HOME itself blocked, which the bare prefix also covered. *)
         if
-          home_len > 0
-          && String.length path >= home_len
-          && String.starts_with path ~prefix:home_norm
+          String.length home_norm > 0
+          && (String.equal path home_norm
+              || String.starts_with path ~prefix:(home_norm ^ "/"))
         then
           raise
             (Test_isolation_breach

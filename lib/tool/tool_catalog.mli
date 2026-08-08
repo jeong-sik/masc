@@ -20,8 +20,6 @@ type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
   implementation_status : implementation_status;
-  canonical_name : string option;
-  replacement : string option;
   reason : string option;
   allow_direct_call_when_hidden : bool;
   readonly : bool option;
@@ -52,7 +50,6 @@ type execution_policy_error =
 val default_metadata : required_permission:Masc_domain.permission -> metadata
 
 val hidden_active :
-  ?canonical_name:string -> ?replacement:string ->
   ?allow_direct_call_when_hidden:bool ->
   ?implementation_status:implementation_status ->
   required_permission:Masc_domain.permission -> string -> metadata
@@ -69,7 +66,6 @@ val execution_policy_of_metadata :
   tool_name:string -> metadata -> (execution_policy, execution_policy_error) result
 val execution_policy_error_to_string : execution_policy_error -> string
 val implementation_status : string -> implementation_status
-val canonical_tool_name : string -> string
 val is_visible : ?include_hidden:bool -> string -> bool
 val allow_direct_call : string -> bool
 

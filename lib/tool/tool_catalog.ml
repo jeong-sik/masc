@@ -31,8 +31,6 @@ type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
   implementation_status : implementation_status;
-  canonical_name : string option;
-  replacement : string option;
   reason : string option;
   allow_direct_call_when_hidden : bool;
   readonly : bool option;
@@ -105,8 +103,6 @@ let default_metadata ~required_permission =
     visibility = Default;
     lifecycle = Active;
     implementation_status = Real;
-    canonical_name = None;
-    replacement = None;
     reason = None;
     allow_direct_call_when_hidden = false;
     readonly = None;
@@ -124,14 +120,12 @@ let placeholder_tools_enabled () =
   | Some "false" | Some "0" -> false
   | _ -> true
 
-let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
+let hidden_active ?(allow_direct_call_when_hidden = true)
     ?(implementation_status = Real) ~required_permission reason =
   {
     visibility = Hidden;
     lifecycle = Active;
     implementation_status;
-    canonical_name;
-    replacement;
     reason = Some reason;
     allow_direct_call_when_hidden;
     readonly = None;
@@ -521,11 +515,6 @@ let implementation_status name =
   let meta = metadata name in
   meta.implementation_status
 
-let canonical_tool_name name =
-  match (metadata name).canonical_name with
-  | Some canonical_name -> canonical_name
-  | None -> name
-
 let is_placeholder name =
   match implementation_status name with
   | Placeholder -> true
@@ -564,20 +553,10 @@ let metadata_to_fields name =
       , `String (Masc_domain.permission_to_string meta.required_permission) );
     ]
   in
-  let with_canonical =
-    match meta.canonical_name with
-    | Some canonical_name -> ("canonicalName", `String canonical_name) :: base
-    | None -> base
-  in
-  let with_replacement =
-    match meta.replacement with
-    | Some replacement -> ("replacement", `String replacement) :: with_canonical
-    | None -> with_canonical
-  in
   let with_reason =
     match meta.reason with
-    | Some reason -> ("reason", `String reason) :: with_replacement
-    | None -> with_replacement
+    | Some reason -> ("reason", `String reason) :: base
+    | None -> base
   in
   let with_mcp_context_required =
     match meta.mcp_context_required with

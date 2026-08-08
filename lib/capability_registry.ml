@@ -89,12 +89,6 @@ let require_unique_projections ~label projections =
 let prefixed_tool_names names =
   names |> List.map (fun name -> "mcp__masc__" ^ name)
 
-let canonical_capability_id tool_name =
-  match (Tool_catalog.metadata tool_name).Tool_catalog.canonical_name with
-  | Some canonical_name -> canonical_name
-  | None -> tool_name
-
-
 let surface_to_string = function
   | Public_mcp -> "public_mcp"
   | Spawned_agent_mcp -> "spawned_agent_mcp"
@@ -114,8 +108,7 @@ let make_seed ?capability_id
   let backend_tool_name = Option.value ~default:schema.name backend_tool_name in
   {
     capability_id =
-      Option.value ~default:(canonical_capability_id backend_tool_name)
-        capability_id;
+      Option.value ~default:backend_tool_name capability_id;
     audiences;
     supports_audit_evidence;
     supports_direct_user_discovery;

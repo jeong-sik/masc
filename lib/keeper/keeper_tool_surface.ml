@@ -585,8 +585,6 @@ let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
        ~is_idempotent:policy.is_idempotent
        ~visibility:metadata.visibility
        ~implementation_status:metadata.implementation_status
-       ?canonical_name:metadata.canonical_name
-       ?replacement:metadata.replacement
        ?reason:metadata.reason
        ~allow_direct_call_when_hidden:metadata.allow_direct_call_when_hidden
        ())

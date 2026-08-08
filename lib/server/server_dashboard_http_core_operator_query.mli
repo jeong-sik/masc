@@ -23,7 +23,6 @@ val operator_digest_query_json :
 
 val with_operator_surface_metadata :
   config:Workspace.config ->
-  ?cache_key:string ->
   dashboard_surface:string ->
   source:string ->
   scope:string ->
@@ -34,14 +33,12 @@ val with_operator_surface_metadata :
 
 val with_operator_snapshot_metadata :
   config:Workspace.config ->
-  ?cache_key:string ->
   query:Yojson.Safe.t ->
   Yojson.Safe.t ->
   Yojson.Safe.t
 
 val with_operator_digest_metadata :
   config:Workspace.config ->
-  ?cache_key:string ->
   query:Yojson.Safe.t ->
   Yojson.Safe.t ->
   Yojson.Safe.t

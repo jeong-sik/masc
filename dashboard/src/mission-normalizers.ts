@@ -4,6 +4,7 @@ import {
   normalizeRecommendedAction,
 } from './store-normalizers'
 import { normalizeKeeperTrust } from './keeper-store-normalize'
+import { normalizeOperatorActionDescriptor } from './pending-confirm'
 import {
   normalizeAgentBrief,
   normalizeAttentionQueueItem,
@@ -54,19 +55,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
 
 // normalizePendingConfirmation imported from pending-confirm.ts (SSOT)
 
-function normalizeActionDescriptor(raw: unknown): OperatorActionDescriptor | null {
-  if (!isRecord(raw)) return null
-  const actionType = asString(raw.action_type)
-  const targetType = asString(raw.target_type)
-  if (!actionType || !targetType) return null
-  return {
-    action_type: actionType,
-    target_type: targetType,
-    description: asString(raw.description),
-    confirm_required: asBoolean(raw.confirm_required),
-  }
-}
-
 function normalizeSummary(raw: unknown): DashboardMissionSummary {
   const root = isRecord(raw) ? raw : {}
   return {
@@ -104,7 +92,7 @@ function normalizeTargets(raw: unknown): DashboardMissionTargets {
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),
     available_actions: extractArray(root.available_actions)
-      .map(normalizeActionDescriptor)
+      .map(normalizeOperatorActionDescriptor)
       .filter((item): item is OperatorActionDescriptor => item !== null),
   }
 }

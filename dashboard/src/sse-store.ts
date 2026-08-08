@@ -686,12 +686,13 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
-  if (event.type === 'operator_snapshot' && event.payload) {
-    const payload = isRecord(event.payload) ? event.payload : null
-    if (!payload) {
+  if (event.type === 'operator_snapshot') {
+    if (!isRecord(event.payload)) {
+      failOperatorSnapshotHydration('operator snapshot payload is invalid')
       requestOperatorSnapshotRefresh('operator_snapshot_invalid_payload')
       return true
     }
+    const payload = event.payload
     const epoch = payload.snapshot_epoch
     const generation = payload.snapshot_generation
     const computeSequence = payload.snapshot_compute_sequence

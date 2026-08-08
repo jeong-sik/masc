@@ -212,8 +212,6 @@ let normalize_request_target_type (request : action_request) =
   in
   Ok { request with target_type }
 
-(** Resolve tool name for an action_type. Looks up available_actions first,
-    falls back to legacy mapping for unlisted actions. *)
 let delegated_tool_for action_type =
   match
     List.find_opt
@@ -221,8 +219,8 @@ let delegated_tool_for action_type =
         String.equal a.action_type action_type)
       Operator_pending_confirm.available_actions
   with
-  | Some action -> action.tool_name
-  | None -> "unknown"
+  | Some action -> Ok action.tool_name
+  | None -> Error (Printf.sprintf "unsupported action_type: %s" action_type)
 
 let confirm_required = Operator_action_catalog.requires_confirmation
 

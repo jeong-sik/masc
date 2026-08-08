@@ -30,7 +30,6 @@ export interface PendingConfirmation {
   delegated_tool: string
   created_at: string
   expires_at: string | null
-  preview: Record<string, unknown>
 }
 
 export interface PendingConfirmEnvelope {
@@ -247,13 +246,14 @@ export interface DashboardGateResponse {
 
 export interface OperatorActionDescriptor {
   action_type: string
+  tool_name: string
   target_type: string
-  description?: string
-  confirm_required?: boolean
+  description: string
+  confirm_required: boolean
 }
 
 export interface PendingConfirmSummary {
-  actor_filter?: string | null
+  actor_filter: string | null
   filter_active: boolean
   visible_count: number
   total_count: number

@@ -20,14 +20,8 @@ type operator_snapshot_compute =
   }
 
 (* --- Operator proactive refresh ---
-   Default (no-param) requests are served from a background-refreshed ref.
-   Parameterized requests fall back to on-demand compute with SWR cache.
-
-   Using Proactive_refresh gives circuit breaker + exponential backoff on
-   repeated failures, matching the pattern used by execution and mission loops.
-
-   Interval: 10s (was 120s). Even if compute takes ~8s, the ref is updated
-   every ~18s worst-case, which is acceptable for dashboard SSE polling. *)
+   Default requests read the background-refreshed publication and synchronously
+   replace it when stale. Parameterized requests compute directly. *)
 
 (* Late-bound broadcast refs — set by server_dashboard_http.ml after
    Sse module is in scope.  Same pattern as _broadcast_workspace_truth_ref. *)

@@ -368,6 +368,35 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(operatorSignals.operatorError.value).toBeNull()
   })
 
+  it('clears operator state when the pushed snapshot payload is not an object', async () => {
+    const { sseStore, operatorSignals } = await loadSseStore()
+    operatorSignals.operatorSnapshot.value = {
+      root: {},
+      keepers: [],
+      inference_inflight: null,
+      persistent_agents: [],
+      recent_messages: [],
+      pending_confirm_envelope: {
+        items: [],
+        summary: {
+          actor_filter: null,
+          filter_active: false,
+          visible_count: 0,
+          total_count: 0,
+          hidden_count: 0,
+          hidden_actors: [],
+          confirm_required_actions: [],
+        },
+      },
+      available_actions: [],
+    }
+
+    sseStore.hydrateDashboardSlice('operator', null, 'operator_snapshot')
+
+    expect(operatorSignals.operatorSnapshot.value).toBeNull()
+    expect(operatorSignals.operatorError.value).toBe('operator snapshot payload is invalid')
+  })
+
   it('does not refresh hidden heavy surfaces for keeper lifecycle events on overview', async () => {
     const { sseStore } = await loadSseStore()
     const refreshOperator = vi.fn()

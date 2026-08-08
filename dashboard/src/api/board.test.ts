@@ -166,14 +166,13 @@ describe('normalizePendingConfirmation (board)', () => {
     confirm_token: 'tok-1',
     trace_id: 'trace-1',
     actor: 'agent-1',
-    action_type: 'pause',
+    action_type: 'keeper_probe',
     target_type: 'keeper',
     target_id: 'janitor',
     payload: {},
-    delegated_tool: 'shell',
+    delegated_tool: 'masc_keeper_status',
     created_at: '2026-04-17T12:00:00Z',
     expires_at: null,
-    preview: { msg: 'hi' },
   }
 
   it('returns null for null', () => {
@@ -193,7 +192,7 @@ describe('normalizePendingConfirmation (board)', () => {
     const result = normalizePendingConfirmation(pendingConfirmation)
     expect(result!.actor).toBe('agent-1')
     expect(result!.target_id).toBe('janitor')
-    expect(result!.preview).toEqual({ msg: 'hi' })
+    expect(result!.delegated_tool).toBe('masc_keeper_status')
   })
 })
 

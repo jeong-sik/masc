@@ -43,7 +43,6 @@ type target =
 val register_target_gate :
   (Workspace.config -> target -> (unit, string) result) -> unit
 
-val preview_of_pending_confirm : pending_confirm -> Yojson.Safe.t
 val pending_confirm_to_yojson : pending_confirm -> Yojson.Safe.t
 val pending_confirm_of_yojson : Yojson.Safe.t -> (pending_confirm, string) result
 val raw_pending_confirms_result :

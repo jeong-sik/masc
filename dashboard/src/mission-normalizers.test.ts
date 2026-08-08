@@ -132,12 +132,12 @@ describe('normalizeMission', () => {
     const result = normalizeMission({
       operator_targets: {
         available_actions: [
-          { action_type: 'pause', target_type: 'keeper', description: 'Pause keeper' },
+          { action_type: 'keeper_probe', tool_name: 'masc_keeper_status', target_type: 'keeper', description: 'Immediate keeper diagnostic snapshot.', confirm_required: false },
         ],
       },
     })
     expect(result.operator_targets.available_actions).toHaveLength(1)
-    expect(result.operator_targets.available_actions[0]!.action_type).toBe('pause')
+    expect(result.operator_targets.available_actions[0]!.action_type).toBe('keeper_probe')
   })
 
   it('parses a full mission response', () => {

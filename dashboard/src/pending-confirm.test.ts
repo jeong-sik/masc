@@ -16,6 +16,14 @@ const emptyPendingConfirmSummary = {
   confirm_required_actions: [],
 }
 
+const keeperProbeDescriptor = {
+  action_type: 'keeper_probe',
+  tool_name: 'masc_keeper_status',
+  target_type: 'keeper',
+  description: 'Immediate keeper diagnostic snapshot.',
+  confirm_required: false,
+}
+
 // ================================================================
 // normalizeOperatorActionDescriptor
 // ================================================================
@@ -41,34 +49,20 @@ describe('normalizeOperatorActionDescriptor', () => {
     expect(normalizeOperatorActionDescriptor({ action_type: 'pause' })).toBeNull()
   })
 
-  it('extracts required fields', () => {
-    const result = normalizeOperatorActionDescriptor({
-      action_type: 'pause',
-      target_type: 'keeper',
-    })
+  it('extracts the exact descriptor', () => {
+    const result = normalizeOperatorActionDescriptor(keeperProbeDescriptor)
     expect(result).not.toBeNull()
-    expect(result!.action_type).toBe('pause')
+    expect(result!.action_type).toBe('keeper_probe')
+    expect(result!.tool_name).toBe('masc_keeper_status')
     expect(result!.target_type).toBe('keeper')
+    expect(result!.description).toBe('Immediate keeper diagnostic snapshot.')
+    expect(result!.confirm_required).toBe(false)
   })
 
-  it('extracts optional fields', () => {
-    const result = normalizeOperatorActionDescriptor({
-      action_type: 'broadcast',
-      target_type: 'workspace',
-      description: 'Alert all agents',
-      confirm_required: true,
-    })
-    expect(result!.description).toBe('Alert all agents')
-    expect(result!.confirm_required).toBe(true)
-  })
-
-  it('defaults optional fields when missing', () => {
-    const result = normalizeOperatorActionDescriptor({
-      action_type: 'pause',
-      target_type: 'keeper',
-    })
-    expect(result!.description).toBeUndefined()
-    expect(result!.confirm_required).toBeUndefined()
+  it('rejects missing and unknown fields', () => {
+    const { tool_name: _toolName, ...missingTool } = keeperProbeDescriptor
+    expect(normalizeOperatorActionDescriptor(missingTool)).toBeNull()
+    expect(normalizeOperatorActionDescriptor({ ...keeperProbeDescriptor, extra: true })).toBeNull()
   })
 })
 
@@ -80,14 +74,13 @@ const validPendingConfirmation = {
   confirm_token: 'tok-1',
   trace_id: 'trace-1',
   actor: 'agent-1',
-  action_type: 'pause',
+  action_type: 'keeper_probe',
   target_type: 'keeper',
   target_id: 'janitor',
   payload: {},
-  delegated_tool: 'shell_exec',
+  delegated_tool: 'masc_keeper_status',
   created_at: '2026-04-17T12:00:00Z',
-  expires_at: null,
-  preview: { message: 'Hello' },
+  expires_at: '2026-04-17T12:05:00Z',
 }
 
 describe('normalizePendingConfirmation', () => {
@@ -114,17 +107,25 @@ describe('normalizePendingConfirmation', () => {
       ...validPendingConfirmation,
     })
     expect(result!.actor).toBe('agent-1')
-    expect(result!.action_type).toBe('pause')
+    expect(result!.action_type).toBe('keeper_probe')
     expect(result!.target_type).toBe('keeper')
     expect(result!.target_id).toBe('janitor')
-    expect(result!.delegated_tool).toBe('shell_exec')
+    expect(result!.delegated_tool).toBe('masc_keeper_status')
     expect(result!.created_at).toBe('2026-04-17T12:00:00Z')
-    expect(result!.preview).toEqual({ message: 'Hello' })
   })
 
   it('rejects an item with missing required fields', () => {
     const { target_id: _targetId, ...withoutTargetId } = validPendingConfirmation
     expect(normalizePendingConfirmation(withoutTargetId)).toBeNull()
+  })
+
+  it('rejects unknown fields and invalid timestamp ordering', () => {
+    expect(normalizePendingConfirmation({ ...validPendingConfirmation, token: 'tok-1' })).toBeNull()
+    expect(normalizePendingConfirmation({ ...validPendingConfirmation, created_at: 'not-time' })).toBeNull()
+    expect(normalizePendingConfirmation({
+      ...validPendingConfirmation,
+      expires_at: validPendingConfirmation.created_at,
+    })).toBeNull()
   })
 })
 
@@ -154,7 +155,7 @@ describe('normalizePendingConfirmSummary', () => {
       hidden_count: 5,
       hidden_actors: ['agent-2', 'agent-3'],
       confirm_required_actions: [
-        { action_type: 'pause', target_type: 'keeper' },
+        keeperProbeDescriptor,
       ],
     })
     expect(result!.actor_filter).toBe('agent-1')
@@ -172,6 +173,17 @@ describe('normalizePendingConfirmSummary', () => {
       confirm_required_actions: [
         { action_type: 'pause' },
       ],
+    })).toBeNull()
+  })
+
+  it('rejects contradictory filter and count invariants', () => {
+    expect(normalizePendingConfirmSummary({
+      ...emptyPendingConfirmSummary,
+      filter_active: true,
+    })).toBeNull()
+    expect(normalizePendingConfirmSummary({
+      ...emptyPendingConfirmSummary,
+      total_count: 1,
     })).toBeNull()
   })
 })
@@ -236,6 +248,17 @@ describe('normalizePendingConfirmEnvelope', () => {
         hidden_actors: [],
         confirm_required_actions: [],
       },
+    })).toBeNull()
+  })
+
+  it('rejects duplicate tokens and visible-count drift', () => {
+    expect(normalizePendingConfirmEnvelope({
+      items: [validPendingConfirmation, validPendingConfirmation],
+      summary: { ...emptyPendingConfirmSummary, visible_count: 2, total_count: 2 },
+    })).toBeNull()
+    expect(normalizePendingConfirmEnvelope({
+      items: [validPendingConfirmation],
+      summary: emptyPendingConfirmSummary,
     })).toBeNull()
   })
 

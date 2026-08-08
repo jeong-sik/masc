@@ -1227,6 +1227,44 @@ let test_operator_snapshot_error_clears_previous_success () =
   check bool "failed publication does not retain pending rows" true
     (failed.json |> member "pending_confirm_envelope" = `Null)
 
+let test_operator_snapshot_http_rejects_stale_success_after_store_error () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state =
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
+  in
+  let path = Operator_control.pending_confirms_path config in
+  (match Workspace_utils.write_json_result config path (`List []) with
+   | Ok () -> ()
+   | Error reason -> fail reason);
+  let stale =
+    match
+      Server_dashboard_http_core_operator.For_testing
+      .publish_operator_snapshot_success
+        ~fresh_for_s:(-1.0)
+        (`Assoc
+          [ "pending_confirm_envelope", `Assoc [ "items", `List [] ]
+          ; "generated_at", `String "2026-08-08T00:00:00Z"
+          ])
+    with
+    | Some publication -> publication
+    | None -> fail "stale operator snapshot success did not publish"
+  in
+  check bool "precondition is stale success" true stale.has_success;
+  write_file path "{not-json";
+  Operator_control.invalidate_snapshot_cache ();
+  let json =
+    Server_dashboard_http_core.operator_snapshot_http_json
+      ~state
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      (request "/api/v1/operator")
+  in
+  let open Yojson.Safe.Util in
+  check string "HTTP returns unavailable publication" "unavailable"
+    (json |> member "status" |> to_string);
+  check bool "HTTP drops pending rows" true
+    (json |> member "pending_confirm_envelope" = `Null)
+
 let test_dashboard_query_cache_segment_normalizes_missing_values () =
   check string "missing none" "missing"
     (Server_dashboard_http_core_cache.dashboard_query_cache_segment None);
@@ -1309,13 +1347,6 @@ let test_operator_snapshot_default_route_exposes_provenance () =
   let state =
     Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
-  let current = Server_dashboard_http_core_operator.operator_snapshot_publication () in
-  let cache_key =
-    Server_dashboard_http_core_cache.dashboard_cache_key
-      config
-      "operator_snapshot"
-      (Printf.sprintf "default-summary:g%d" current.generation)
-  in
   let seed =
     `Assoc
       [ "available_actions", `List []
@@ -1324,7 +1355,6 @@ let test_operator_snapshot_default_route_exposes_provenance () =
       ]
     |> Server_dashboard_http_core_operator_query.with_operator_snapshot_metadata
          ~config
-         ~cache_key
          ~query:
            (Server_dashboard_http_core_operator_query
             .operator_snapshot_default_query ())
@@ -1376,9 +1406,8 @@ let test_operator_snapshot_default_route_exposes_provenance () =
     (json |> member "query" |> member "default_summary_request" |> to_bool);
   check bool "query includes keepers" true
     (json |> member "query" |> member "include_keepers" |> to_bool);
-  check bool "cache key surfaced" true
-    (String.length (json |> member "cache" |> member "request_cache_key" |> to_string)
-     > 0);
+  check bool "request cache metadata absent" true
+    (json |> member "cache" = `Null);
   let stale_publication =
     match
       Server_dashboard_http_core_operator.For_testing
@@ -3521,6 +3550,10 @@ let () =
             test_operator_snapshot_publication_rejects_stale_races;
           test_case "operator snapshot error clears previous success" `Quick
             test_operator_snapshot_error_clears_previous_success;
+          test_case
+            "operator snapshot HTTP rejects stale success after store error"
+            `Quick
+            test_operator_snapshot_http_rejects_stale_success_after_store_error;
           test_case "catch-up prompt failure is a server error" `Quick
             test_catchup_judge_prompt_failure_is_server_error;
           test_case "proof payload exposes submission index" `Quick

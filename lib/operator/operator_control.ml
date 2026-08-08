@@ -67,10 +67,8 @@ let keeper_recovery_outcome after_diagnostic =
 (** {1 Domain-specific action handlers} *)
 
 let workspace_action_result request result =
-  Ok (`Assoc [
-    ("tool_name", `String (delegated_tool_for request.action_type));
-    ("result", result);
-  ])
+  let* tool_name = delegated_tool_for request.action_type in
+  Ok (`Assoc [ ("tool_name", `String tool_name); ("result", result) ])
 
 let execute_workspace_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
@@ -232,26 +230,19 @@ let execute_action (ctx : 'a context) (request : action_request) :
   | "" -> Error "action_type is required"
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
 
-(** All known action_types: available_actions plus hidden canonical actions. *)
-let known_action_types =
-  let from_registry =
-    List.map
-      (fun (a : Operator_pending_confirm.available_action) -> a.action_type)
-      Operator_pending_confirm.available_actions
-  in
-  from_registry
-
 let validate_request request =
   if request.action_type = "" then Error "action_type is required"
-  else if List.mem request.action_type known_action_types then Ok ()
-  else Error (Printf.sprintf "unsupported action_type: %s" request.action_type)
+  else
+    match Operator_action_catalog.of_string request.action_type with
+    | Some _ -> Ok ()
+    | None -> Error (Printf.sprintf "unsupported action_type: %s" request.action_type)
 
 let action_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
   let* request = action_request_of_args ?actor_hint ctx args in
   let* () = validate_request request in
   let* request = normalize_request_target_type request in
-  let delegated_tool = delegated_tool_for request.action_type in
+  let* delegated_tool = delegated_tool_for request.action_type in
   let trace_id = trace_id "ops" in
   let started_at = Unix.gettimeofday () in
   if confirm_required request.action_type then (

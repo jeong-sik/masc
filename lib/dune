@@ -92,7 +92,7 @@
   ;; Owns Shell IR command/path policy and typed path-check errors.
   masc.exec_policy
   ;; RFC-0056 Phase 1N — Keeper_state_* deterministic FSM cluster extracted to
-  ;; lib/keeper_state/. Parent still references bare Keeper_state_* modules.
+  ;; lib/keeper_registry/. Parent still references bare Keeper_state_* modules.
   masc.keeper_registry
   masc.keeper_checkpoint_ref
   ;; Keeper-owned pure/type leaves extracted from lib/keeper/.
@@ -164,12 +164,12 @@
   ;; PR #21019; the library is now diagnostic-only.
   masc.tool_call_quality_benchmark
   ;; RFC-0056 Phase 1I — Keeper_event_queue (first lib/keeper/ leaf)
-  ;; extracted to lib/keeper_event_queue/. 91+87 LoC, deps: stdlib +
+  ;; extracted to lib/keeper_runtime/. deps: stdlib +
   ;; Unix only. Pure data structure (urgency variants + FIFO + dedup)
   ;; backed by specs/keeper-state-machine/KeeperEventQueue.tla.
   ;; Referenced by keeper_supervisor + keeper_registry godfiles.
   ;; RFC-0056 Phase 1J — Keeper_invariant (second lib/keeper/ leaf)
-  ;; extracted to lib/keeper_invariant/. 119+77 LoC, stdlib-only
+  ;; extracted to lib/keeper_contract/. stdlib-only
   ;; (List/Printf/Set/String/StringSet/Result). Fan-in: 1 lib + 1 test.
   ;; RFC-0056 Phase 1K — Compaction_trigger (third lib/keeper/ leaf)
   ;; extracted to lib/compaction_trigger/. 94+45 LoC, deps: stdlib +

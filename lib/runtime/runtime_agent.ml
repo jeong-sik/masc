@@ -143,19 +143,6 @@ type run_result = {
   stop_reason : stop_reason;
 }
 
-type worker_lifecycle_classification =
-  { event : string
-  ; status : string
-  ; error : string option
-  }
-
-let worker_lifecycle_classification_of_result = function
-  | Ok _ -> { event = "completed"; status = "completed"; error = None }
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _)) ->
-    { event = "completed"; status = "input_required"; error = None }
-  | Error e ->
-    { event = "failed"; status = "failed"; error = Some (Agent_sdk.Error.to_string e) }
-
 (* ================================================================ *)
 (* Internal: resolve provider                                        *)
 (* ================================================================ *)
@@ -838,42 +825,6 @@ module For_testing = struct
 end
 
 (* ================================================================ *)
-(* Internal: event publishing                                        *)
-(* ================================================================ *)
-
-let publish_lifecycle =
-  Runtime_oas_checkpoint.publish_lifecycle
-
-let provider_lifecycle_attrs (config : config) =
-  let provider_cfg = config.provider_cfg in
-  let provider_kind =
-    Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind
-  in
-  let nonempty_string key value =
-    let value = String.trim value in
-    if value = "" then [] else [ (key, `String value) ]
-  in
-  let endpoint =
-    match String.trim provider_cfg.base_url, String.trim provider_cfg.request_path with
-    | "", _ -> []
-    | base_url, "" -> [ ("endpoint", `String base_url) ]
-    | base_url, request_path -> [ ("endpoint", `String (base_url ^ request_path)) ]
-  in
-  [
-    ("provider_kind", `String provider_kind);
-    ("model_id", `String config.model_id);
-    ("provider_model_id", `String provider_cfg.model_id);
-  ]
-  @ Runtime_max_tokens.telemetry_fields config.max_tokens
-  @ nonempty_string "base_url" provider_cfg.base_url
-  @ nonempty_string "request_path" provider_cfg.request_path
-  @ endpoint
-
-module Lifecycle_for_testing = struct
-  let provider_attrs = provider_lifecycle_attrs
-end
-
-(* ================================================================ *)
 (* Internal: checkpoint persistence                                  *)
 (* ================================================================ *)
 
@@ -1013,43 +964,6 @@ let resume_from_checkpoint
 (* Run                                                               *)
 (* ================================================================ *)
 
-let content_block_detail (block : Agent_sdk.Types.content_block) =
-  match block with
-  | Agent_sdk.Types.Text text -> text
-  | Agent_sdk.Types.Thinking _ -> "[thinking block omitted]"
-  | Agent_sdk.Types.ReasoningDetails _ -> "[reasoning details block omitted]"
-  | Agent_sdk.Types.RedactedThinking _ -> "[redacted thinking block omitted]"
-  | _ -> (
-      match Agent_sdk.Canonical_tool.tool_call_of_block block with
-      | Some call ->
-          Printf.sprintf "[tool use block: %s]" call.Agent_sdk.Canonical_tool.name
-      | None -> (
-          match block with
-          | Agent_sdk.Types.ToolResult { outcome; _ } ->
-              if Agent_sdk.Types.tool_result_outcome_is_error outcome
-              then "[tool result block: error]"
-              else "[tool result block]"
-          | Agent_sdk.Types.Image { media_type; data; _ } ->
-              Printf.sprintf "[image:%s data_chars=%d]" media_type (String.length data)
-          | Agent_sdk.Types.Document { media_type; data; _ } ->
-              Printf.sprintf "[document:%s data_chars=%d]" media_type
-                (String.length data)
-          | Agent_sdk.Types.Audio { media_type; data; _ } ->
-              Printf.sprintf "[audio:%s data_chars=%d]" media_type (String.length data)
-          | Agent_sdk.Types.Text _
-          | Agent_sdk.Types.Thinking _
-          | Agent_sdk.Types.ReasoningDetails _
-          | Agent_sdk.Types.RedactedThinking _
-          | Agent_sdk.Types.ToolUse _ ->
-              invalid_arg
-                "runtime_agent: OAS canonical tool-call projection unavailable"))
-
-let content_blocks_detail (blocks : Agent_sdk.Types.content_block list) =
-  blocks
-  |> List.map content_block_detail
-  |> String.concat "\n"
-  |> String.trim
-
 let config_with_boundary_response_capture
       (config : config)
       response_ref
@@ -1083,7 +997,6 @@ let run_blocks
     ?(on_resume : (unit -> unit) option)
     ?(agent_ref : Agent_sdk.Agent.t option ref option)
     ?cooperative_yield_probe
-    ?goal_detail
     (goal_blocks : Agent_sdk.Types.content_block list)
   : (run_result, Agent_sdk.Error.sdk_error) result =
   match
@@ -1100,11 +1013,6 @@ let run_blocks
     | None -> config
     | Some _ -> config_with_boundary_response_capture config boundary_response
   in
-  let goal_detail =
-    match goal_detail with
-    | Some detail -> detail
-    | None -> content_blocks_detail goal_blocks
-  in
   let session_id = match config.session_id with
     | Some id -> id
     | None ->
@@ -1118,9 +1026,6 @@ let run_blocks
   | t ->
     Log.Misc.info "runtime_agent %s: transport=%s"
       config.name (Masc_grpc_transport.to_string t));
-  publish_lifecycle ~name:config.name ~event:"build" ~detail:goal_detail
-    ~attrs:(provider_lifecycle_attrs config)
-    ();
   let agent_result =
     select_agent_result
       ~checkpoint:oas_checkpoint
@@ -1129,15 +1034,7 @@ let run_blocks
       ~build:(fun () -> build ~sw ~net ~config)
   in
   match agent_result with
-  | Error e ->
-    publish_lifecycle ~name:config.name ~event:"build_error"
-      ~detail:(Agent_sdk.Error.to_string e)
-      ~error:(Agent_sdk.Error.to_string e)
-      ~status:"build_error"
-      ~session_id
-      ~attrs:(provider_lifecycle_attrs config)
-      ();
-    Error e
+  | Error e -> Error e
   | Ok agent ->
   (match agent_ref with Some r -> r := Some agent | None -> ());
   let run_started_at = Unix.gettimeofday () in
@@ -1250,21 +1147,6 @@ let run_blocks
              ?checkpoint_sidecar:config.checkpoint_sidecar
              agent)
     in
-    let lifecycle =
-      match result with
-      | Ok (`Completed response) ->
-        worker_lifecycle_classification_of_result (Ok response)
-      | Ok (`Yielded _) ->
-        { event = "completed"; status = "cooperative_yield"; error = None }
-      | Error error -> worker_lifecycle_classification_of_result (Error error)
-    in
-    publish_lifecycle ~name:config.name ~event:lifecycle.event
-      ~detail:(Printf.sprintf "session=%s" session_id)
-      ?error:lifecycle.error
-      ~session_id
-      ~status:lifecycle.status
-      ~attrs:(provider_lifecycle_attrs config)
-      ();
     let turns = (Agent_sdk.Agent.state agent).turn_count in
     let trace_ref = Agent_sdk.Agent.last_raw_trace_run agent in
     let close_after_success () =
@@ -1419,7 +1301,7 @@ let run
     (goal : string)
   : (run_result, Agent_sdk.Error.sdk_error) result =
   run_blocks ~sw ~net ~config ?oas_checkpoint ?on_event ?on_yield ?on_resume
-    ?agent_ref ?cooperative_yield_probe ~goal_detail:goal [Agent_sdk.Types.Text goal]
+    ?agent_ref ?cooperative_yield_probe [Agent_sdk.Types.Text goal]
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)

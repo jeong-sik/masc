@@ -1,6 +1,15 @@
 (** Tool_shard_types_schemas_surface — keeper_surface_* tool schemas
     (RFC-0223 P3). *)
 
+let keeper_surface_post_description =
+  "Post a message to one conversation endpoint: 'dashboard' (appears \
+   in the operator's chat transcript) or 'discord' (sends to the bound \
+   channel). Posting to an unbound surface is an error. Both endpoints \
+   are read by a person, so an unchanged status reposted every cycle \
+   crowds their view and says nothing the previous one did not; when \
+   there is nothing new, the turn ends without a post."
+;;
+
 let surface_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_surface_read"
     ; description =
@@ -50,10 +59,7 @@ let surface_tools : Masc_domain.tool_schema list =
           ]
     }
   ; { name = "keeper_surface_post"
-    ; description =
-        "Post a message to one conversation endpoint: 'dashboard' (appears \
-         in the operator's chat transcript) or 'discord' (sends to the bound \
-         channel). Posting to an unbound surface is an error."
+    ; description = keeper_surface_post_description
     ; input_schema =
         `Assoc
           [ "type", `String "object"

@@ -4,13 +4,22 @@
 A tool description is a prompt: it is what the model reads when deciding
 whether to call the tool. Two of them exist for some tools:
 
-    lib/keeper/keeper_tool_descriptor.ml   what production hands the model,
-                                           through model_visible_schemas ()
-    lib/tool_surface/*.ml                  the shard catalog
+    lib/keeper/keeper_tool_descriptor.ml   what a Keeper reads, through
+                                           model_visible_schemas ()
+    lib/tool_surface/*.ml                  what the verification authority
+                                           reads, through
+                                           Verification_authority_tools.schemas
 
-Only the first reaches a Keeper. PR #27542 edited the second, added a test that
-read the second, and passed while proving nothing about what any Keeper sees --
-the reviewer closed it for exactly that. This audit is that review, mechanised.
+Both reach a model, and the contract says they must say the same thing.
+verification_authority_tools.mli:
+
+    These are the keeper schemas verbatim: a judge and a producer read the
+    same description of the same tool.
+
+Nine pairs do not. PR #27542 edited only the shard copy, added a test that read
+only the shard copy, and passed while the Keeper-facing description was
+unchanged -- the reviewer closed it for exactly that. This audit is that review,
+mechanised, and it also covers the judge side the review did not name.
 
 At the time of writing, 11 tools carry a description in both places and 9 of
 them already differ. That is the baseline: the number may not grow. Lowering it
@@ -93,7 +102,7 @@ def main() -> int:
     )
 
     if drifted:
-        print("\nthe model reads the keeper_tool_descriptor.ml text; the other is unread:\n")
+        print("\na Keeper reads the first, the verification authority reads the second,\nand verification_authority_tools.mli says they are the same text:\n")
         for name in drifted:
             print(f"  {name}")
             print(f"    production: {production[name][:110]}")
@@ -106,9 +115,11 @@ def main() -> int:
         print(
             f"\n[tool-description-drift] {len(drifted)} exceeds the baseline of "
             f"{DRIFT_BASELINE}.\n"
-            "A description is what the model reads when choosing a tool. Edit the "
-            "one in\nkeeper_tool_descriptor.ml -- that is the copy production "
-            "hands a Keeper -- or\nmake both say the same thing."
+            "A description is what a model reads when choosing a tool, and both "
+            "of these\nreach one: the Keeper reads keeper_tool_descriptor.ml, "
+            "the verification\nauthority reads the shard. Make them say the "
+            "same thing -- that is what\nverification_authority_tools.mli "
+            "already claims they do."
         )
         return 1
 

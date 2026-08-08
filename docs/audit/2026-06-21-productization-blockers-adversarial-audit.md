@@ -2,7 +2,7 @@
 status: reference
 last_verified: 2026-06-21
 code_refs:
-  - lib/keeper_tooling/keeper_tool_execute_shell_ir.ml
+  - lib/keeper_tooling/execute_shell_ir.ml
   - lib/keeper/keeper_tool_execute_runtime.ml
   - lib/exec_policy/exec_policy.ml
   - lib/config/env_config_core.ml

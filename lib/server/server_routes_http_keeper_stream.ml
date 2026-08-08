@@ -303,17 +303,13 @@ let keeper_chat_request_prefixes =
     "/api/v1/keepers/chat/requests/";
   ]
 
-let has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
 
 let keeper_chat_request_suffix request =
   let path = Http.Request.path request in
   let rec loop = function
     | [] -> None
     | prefix :: rest ->
-        if has_prefix ~prefix path then
+        if String.starts_with ~prefix path then
           Some
             (String.sub path (String.length prefix)
                (String.length path - String.length prefix))

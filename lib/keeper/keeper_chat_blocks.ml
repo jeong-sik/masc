@@ -258,11 +258,6 @@ let redacted_http_url_opt ?on_drop url =
   | _ -> drop Invalid_url
 ;;
 
-let has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
-;;
-
 let opt_string_field key = function
   | None -> []
   | Some value -> [ (key, `String value) ]
@@ -497,7 +492,7 @@ let parse_text_to_blocks text : chat_block list =
       let acc = push_text_fragment acc before in
       let acc =
         match cap with
-        | Some lang when has_prefix ~prefix:"mermaid" lang ->
+        | Some lang when String.starts_with ~prefix:"mermaid" lang ->
           Mermaid { source; caption = None } :: acc
         | _ -> Code { cap; html = escape_html source; source = Some source } :: acc
       in

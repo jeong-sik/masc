@@ -102,7 +102,6 @@ let source_to_string = function
 let event_class_to_string : event_class -> string = function
   | Routine -> "routine"
 
-let has_prefix ~prefix value = String.starts_with ~prefix value
 
 (* RFC-0079: [infer_legacy_level] (a string-prefix classifier on the
    message body) was deleted along with the [?level] option on
@@ -616,7 +615,7 @@ module Ring = struct
           (Time_compat.now () -. (float_of_int keep_days *. 86400.0))
       in
       Array.iter (fun fname ->
-        if has_prefix ~prefix:"system_log_" fname
+        if String.starts_with ~prefix:"system_log_" fname
            && Filename.check_suffix fname ".jsonl" then begin
           (* Extract date from system_log_YYYY-MM-DD.jsonl *)
           let date_part = String.sub fname 11 10 in

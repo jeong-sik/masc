@@ -181,7 +181,6 @@ module Reflection_bridge = struct
   ;;
 
   let masc_symbols = [ Masc_grpc_service.service_name ]
-  let has_prefix ~prefix value = String.starts_with ~prefix value
 
   let decode_varint (bytes : string) (pos : int ref) : int =
     let result = ref 0 in
@@ -318,24 +317,24 @@ module Reflection_bridge = struct
   ;;
 
   let handles_health_symbol symbol =
-    List.mem symbol health_symbols || has_prefix ~prefix:"grpc.health.v1." symbol
+    List.mem symbol health_symbols || String.starts_with ~prefix:"grpc.health.v1." symbol
   ;;
 
   let handles_health_filename filename = List.mem filename health_proto_filenames
 
   let handles_masc_symbol symbol =
-    List.mem symbol masc_symbols || has_prefix ~prefix:"masc.workspace.v1." symbol
+    List.mem symbol masc_symbols || String.starts_with ~prefix:"masc.workspace.v1." symbol
   ;;
 
   let handles_masc_filename filename = List.mem filename masc_proto_filenames
 
   let handles_reflection_v1_symbol symbol =
-    List.mem symbol reflection_symbols || has_prefix ~prefix:"grpc.reflection.v1." symbol
+    List.mem symbol reflection_symbols || String.starts_with ~prefix:"grpc.reflection.v1." symbol
   ;;
 
   let handles_reflection_v1alpha_symbol symbol =
     List.mem symbol reflection_v1alpha_symbols
-    || has_prefix ~prefix:"grpc.reflection.v1alpha." symbol
+    || String.starts_with ~prefix:"grpc.reflection.v1alpha." symbol
   ;;
 
   let handles_reflection_v1_filename filename =

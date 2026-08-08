@@ -126,7 +126,35 @@ let oas_error_class_of_tool_failure_class = function
     as strings or reduced to the first union member. *)
 
 let params_of_json_schema schema =
-  Agent_sdk.Mcp.json_schema_to_params schema
+  let params =
+    match Agent_sdk.Mcp.json_schema_to_params_result schema with
+    | Ok params -> params
+    | Error detail -> invalid_arg detail
+  in
+  let unprojected_property =
+    match schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc properties) ->
+         List.find_opt
+           (fun (name, _) ->
+              not
+                (List.exists
+                   (fun (param : Agent_sdk.Types.tool_param) ->
+                      String.equal param.name name)
+                   params))
+           properties
+       | None | Some `Null | Some _ -> None)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      None
+  in
+  match unprojected_property with
+  | None -> params
+  | Some (name, _) ->
+    invalid_arg
+      (Printf.sprintf
+         "property %S cannot be represented by the typed tool parameter surface"
+         name)
 ;;
 
 (** {1 OAS Tool.t Creation}

@@ -473,7 +473,7 @@ let test_read_entries_since () =
     let masc_root = dir in
     let keeper = "test-keeper" in
     (* Create a trajectory file manually *)
-    let traj_dir = Filename.concat masc_root (Printf.sprintf "trajectories/%s" keeper) in
+    let traj_dir = Trajectory.trajectories_dir masc_root keeper in
     Fs_compat.mkdir_p traj_dir;
     let path = Filename.concat traj_dir "trace-100.jsonl" in
     let entry_json ts = Printf.sprintf
@@ -496,7 +496,7 @@ let test_read_entries_since_result_parses_gate_summary () =
   with_tmpdir (fun dir ->
     let masc_root = dir in
     let keeper = "test-keeper" in
-    let traj_dir = Filename.concat masc_root (Printf.sprintf "trajectories/%s" keeper) in
+    let traj_dir = Trajectory.trajectories_dir masc_root keeper in
     Fs_compat.mkdir_p traj_dir;
     let path = Filename.concat traj_dir "trace-101.jsonl" in
     let rows =
@@ -527,6 +527,21 @@ let test_read_entries_since_no_dir () =
   with_tmpdir (fun dir ->
     let entries = Trajectory.read_entries_since ~masc_root:dir ~keeper_name:"nonexistent" ~since:0.0 in
     Alcotest.(check int) "no dir" 0 (List.length entries))
+
+let test_trajectories_dir_uses_runtime_store_owner () =
+  let masc_root = "/masc" in
+  let keeper_name = "keeper-a" in
+  let expected =
+    Filename.concat
+      (Filename.concat
+         masc_root
+         (Common.keeper_runtime_store_dirname Common.Keeper_trajectories))
+      keeper_name
+  in
+  Alcotest.(check string)
+    "trajectory path derives its directory name from the runtime-store owner"
+    expected
+    (Trajectory.trajectories_dir masc_root keeper_name)
 
 (* P2 silent-failure fix: a malformed/corrupted row in the trajectory JSONL
    used to vanish from [read_recent_lines]/[read_all_lines] with zero
@@ -840,8 +855,7 @@ let test_dedupe_thinking_lines_uses_structural_key () =
 (* ================================================================ *)
 
 let read_thinking_jsonl ~masc_root ~keeper_name ~trace_id =
-  let path = Filename.concat masc_root
-    (Printf.sprintf "trajectories/%s/%s.jsonl" keeper_name trace_id) in
+  let path = Trajectory.trajectory_path masc_root keeper_name trace_id in
   if not (Sys.file_exists path) then []
   else begin
     let ic = open_in path in
@@ -963,6 +977,8 @@ let () =
         test_next_round_evicts_past_turn_keys;
     ]);
     ("read_entries_since", [
+      Alcotest.test_case "path uses runtime-store owner" `Quick
+        test_trajectories_dir_uses_runtime_store_owner;
       Alcotest.test_case "filter by timestamp" `Quick test_read_entries_since;
       Alcotest.test_case "parses persisted gate summary" `Quick
         test_read_entries_since_result_parses_gate_summary;

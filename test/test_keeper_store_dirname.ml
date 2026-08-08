@@ -1,10 +1,9 @@
-(** Per-keeper runtime stores live at
-    [<keepers>/<name>/<store>], and Common.keeper_runtime_store_dirname is
-    the closed variant that names each [<store>].
+(** Common.keeper_runtime_store_dirname is the closed variant that owns each
+    Keeper runtime store directory name. Each producer owns the surrounding
+    path layout.
 
-    Producers, readers, retention, and telemetry once built these names from
-    string literals independently. These tests pin the closed set and its
-    spellings so adding or renaming a store updates the shared owner first. *)
+    These tests pin the closed set and its spellings so adding or renaming a
+    store updates the shared owner first. *)
 
 open Alcotest
 
@@ -39,15 +38,15 @@ let names_are_unchanged () =
   check string "trajectories" "trajectories" (name C.Keeper_trajectories)
 ;;
 
-(* Two stores sharing a directory name would collide under one keeper. *)
+(* Two stores sharing a directory name would collide when projected into the
+   same parent. *)
 let names_are_distinct () =
   let all = List.map name all_stores in
   let unique = List.sort_uniq String.compare all in
   check int "no duplicate store directory" (List.length all) (List.length unique)
 ;;
 
-(* A name that arrived with a separator already in it, as "/metrics" once did,
-   composes a different path than Filename.concat produces. *)
+(* Directory names are path segments, not paths. *)
 let names_carry_no_separator () =
   List.iter
     (fun store ->

@@ -60,6 +60,23 @@ let all_sources_match_strings () =
       Alcotest.fail (Printf.sprintf "all_sources: %s does not round-trip" s)
   ) Telemetry_unified_source.all_sources
 
+let trajectory_store_uses_runtime_store_owner () =
+  let masc_root = "/masc" in
+  let expected =
+    Filename.concat
+      masc_root
+      (Printf.sprintf
+         "%s/*/*.jsonl"
+         (Common.keeper_runtime_store_dirname Common.Keeper_trajectories))
+  in
+  Alcotest.(check string)
+    "trajectory telemetry glob derives its directory name from the runtime-store owner"
+    expected
+    (Telemetry_unified_source_meta.source_durable_store
+       ~masc_root
+       ~base_path:"/base"
+       Trajectory_tool_call)
+
 (* ── Cases ──────────────────────────────────────── *)
 
 let cases = [
@@ -69,6 +86,8 @@ let cases = [
     `Quick, source_of_string_edge_cases;
   "all_sources list is complete and each entry round-trips",
     `Quick, all_sources_match_strings;
+  "trajectory store glob uses runtime-store owner",
+    `Quick, trajectory_store_uses_runtime_store_owner;
 ]
 
 let () =

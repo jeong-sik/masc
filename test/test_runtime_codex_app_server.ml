@@ -72,7 +72,7 @@ let with_fixture lines f =
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
-let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) path =
+let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp") path =
   Eio_main.run (fun env ->
     let config =
       { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
@@ -83,6 +83,7 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) path =
     Runtime_codex_app_server.run_turn
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock:(Eio.Stdenv.clock env)
+      ~cwd:Eio.Path.(Eio.Stdenv.fs env / cwd)
       ~dynamic_tools
       ?thread_mode
       ~history
@@ -385,6 +386,48 @@ let cleanup_tree root =
   in
   try remove root with
   | _ -> ()
+;;
+
+let test_declared_cwd_reaches_spawn () =
+  let workspace = temp_workspace "masc-codex-cwd-" in
+  let marker = Filename.concat workspace "spawn-cwd.txt" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree workspace)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun fixture ->
+            let wrapper = Filename.temp_file "masc-codex-cwd-wrapper-" ".sh" in
+            Fun.protect
+              ~finally:(fun () -> Sys.remove wrapper)
+              (fun () ->
+                 let output = open_out_bin wrapper in
+                 output_string output "#!/bin/sh\n";
+                 output_string output ("pwd > " ^ shell_quote marker ^ "\n");
+                 output_string output
+                   ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+                 close_out output;
+                 Unix.chmod wrapper 0o700;
+                 (match run_fixture ~cwd:workspace wrapper with
+                  | Error error ->
+                    fail (Runtime_codex_app_server.error_to_string error)
+                  | Ok _ -> ());
+                 let input = open_in_bin marker in
+                 let observed =
+                   Fun.protect
+                     ~finally:(fun () -> close_in input)
+                     (fun () -> input_line input)
+                 in
+                 check string
+                   "spawn cwd"
+                   (Unix.realpath workspace)
+                   (Unix.realpath observed))))
 ;;
 
 let write_fixture_file path content =
@@ -1110,6 +1153,7 @@ let test_live_chatgpt_subscription () =
         Runtime_codex_app_server.run_turn
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
           config
           ~prompt:"Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.")
     in
@@ -1147,6 +1191,7 @@ let test_live_dynamic_tool_subscription () =
         Runtime_codex_app_server.run_turn
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
           ~dynamic_tools:[ tool ]
           config
           ~prompt:
@@ -1174,6 +1219,7 @@ let test_live_history_injection_subscription () =
         Runtime_codex_app_server.run_turn
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
           ~history:
             [ { role = User; text = "The continuity marker is MASC_HISTORY_OK." }
             ; { role = Assistant; text = "I will retain that marker." }
@@ -1290,6 +1336,7 @@ let () =
   run "runtime codex app-server"
     [ ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
+        ; test_case "declared cwd reaches spawn" `Quick test_declared_cwd_reaches_spawn
         ; test_case "API key is rejected" `Quick test_api_key_account_is_rejected
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case

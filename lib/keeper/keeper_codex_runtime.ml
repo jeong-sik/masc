@@ -547,6 +547,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
        Runtime_codex_app_server.run_turn
          ~mgr:(Eio.Stdenv.process_mgr env)
          ~clock
+         ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
          ~dynamic_tools
          ?reasoning_effort:prepared.reasoning_effort
          ~thread_mode

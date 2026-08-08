@@ -1498,7 +1498,10 @@ let initialize_database db path =
     (try
        Keeper_fs_durable_directory.fsync_directory (Filename.dirname path);
        Ok ()
-     with exn ->
+     with
+     | Eio.Cancel.Cancelled _ as e ->
+       Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+     | exn ->
        Error
          ("failed to durably publish chat queue database file: "
           ^ Printexc.to_string exn))
@@ -1586,7 +1589,10 @@ let close_database handle =
       if Sqlite3.db_close handle.db
       then Ok ()
       else Error "SQLite database close reported a busy handle"
-    with exn -> Error ("SQLite database close failed: " ^ Printexc.to_string exn)
+    with
+    | Eio.Cancel.Cancelled _ as e ->
+      Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+    | exn -> Error ("SQLite database close failed: " ^ Printexc.to_string exn)
   in
   (* Same GC-liveness pin as [sqlite_finalize]: [caml_sqlite3_close]
      also releases the runtime around [sqlite3_close] and nulls the

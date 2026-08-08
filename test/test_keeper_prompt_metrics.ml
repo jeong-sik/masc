@@ -335,6 +335,28 @@ let test_system_block_states_product_and_capabilities () =
   check bool "goals, memory and repositories are work surfaces" true
     (has_in prompt "Your goals, memory, and repositories are work surfaces of their own")
 
+(* The Librarian decides what survives into a Keeper's next turn, and it is told
+   to drop "details recoverable from authoritative sources". Measured on the live
+   store, that criterion dropped tool lessons -- the recorded reasons read
+   "Generic tool limitation lesson that does not define the agent's current
+   conversational identity" and "Specific tool parameter constraint recoverable
+   from documentation" -- and the Keeper then repeated the mistake. One keeper
+   read a path that is not there 582 times over 7h28m, writing "foo.txt Read를
+   포함한 불필요한 도구 호출은 중단" inside the turn and calling it again the next
+   one, because the rule it wrote never came back. Fleet-wide the journals hold
+   8,338 lines and the current snapshots hold five facts.
+
+   Recurrence is the evidence that the authoritative source did not teach it. *)
+let test_librarian_keeps_a_recurring_lesson () =
+  let prompt = Prompt_registry.get_prompt Prompt_names.librarian in
+  check bool "the librarian prompt is loaded" true (String.length prompt > 100);
+  check bool "recurrence overrides recoverability" true
+    (has_in prompt "A mistake the conversation shows recurring is not recoverable");
+  check bool "the test is the conversation, not a judgement of the limitation" true
+    (has_in prompt "the source that would have taught it did not, and that recurrence is the evidence");
+  check bool "the cost of dropping it is named" true
+    (has_in prompt "returns the Keeper to the turn before it learned")
+
 (* The collaboration surface a keeper is actually given. Board alone exposes
    sixteen keeper-callable tools (post, comment, votes, search, stats, five
    sub-board operations, curation), but the prompt used to describe it in one
@@ -752,6 +774,8 @@ let () =
             test_merged_system_block_keeps_turn_intent_rules;
           test_case "system block states product and capabilities" `Quick
             test_system_block_states_product_and_capabilities;
+          test_case "librarian keeps a recurring lesson" `Quick
+            test_librarian_keeps_a_recurring_lesson;
           test_case "system block states the collaboration surface" `Quick
             test_system_block_states_the_collaboration_surface;
           test_case "no catalog repository injection (RFC-0324 B-1)" `Quick

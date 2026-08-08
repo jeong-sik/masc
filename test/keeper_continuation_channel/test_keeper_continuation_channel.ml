@@ -248,6 +248,26 @@ let test_same_route () =
   (* two Unrouted values never share a route (no destination to share) *)
   assert (not (same_route (unrouted "a") (unrouted "a")))
 
+let test_discord_thread_parent_preserves_thread_target () =
+  let channel =
+    discord_channel
+      ~guild_id:(Some "G1")
+      ~channel_id:"T1"
+      ~parent_channel_id:None
+      ~thread_id:None
+      ~user_id:"U1"
+  in
+  match discord_thread_parent channel ~parent_channel_id:"P1" with
+  | Discord
+      { channel_id; parent_channel_id; thread_id; guild_id; user_id } ->
+    assert (channel_id = "T1");
+    assert (parent_channel_id = Some "P1");
+    assert (thread_id = Some "T1");
+    assert (guild_id = Some "G1");
+    assert (user_id = "U1")
+  | Dashboard _ | Slack _ | Unrouted _ ->
+    failwith "Discord thread parent changed connector kind"
+
 let () =
   test_codec_roundtrip ();
   test_unknown_kind_is_error ();
@@ -261,4 +281,5 @@ let () =
   test_is_routable ();
   test_kind_label ();
   test_same_route ();
+  test_discord_thread_parent_preserves_thread_target ();
   print_endline "Keeper_continuation_channel: all tests passed"

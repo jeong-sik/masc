@@ -22,17 +22,6 @@ let with_dispatch_ro f = Eio_guard.with_mutex_ro dispatch_mu f
 let register ~tool_name ~(handler : handler) =
   with_dispatch_rw (fun () -> Hashtbl.replace registry tool_name handler)
 
-(** Bulk-register every tool name from a schema list to the same handler.
-    This is the primary registration path — it extracts names from the
-    module's published schemas, ensuring the registry is always in sync
-    with the advertised tool list. *)
-let register_module ~(schemas : Masc_domain.tool_schema list) ~(handler : handler) =
-  with_dispatch_rw (fun () ->
-    List.iter
-      (fun (schema : Masc_domain.tool_schema) ->
-        Hashtbl.replace registry schema.name handler)
-      schemas)
-
 (** {2 Dispatch Hooks And Observers}
 
     Pre-hooks run before the handler; observers run after the typed outcome is
@@ -40,7 +29,7 @@ let register_module ~(schemas : Masc_domain.tool_schema list) ~(handler : handle
     Multiple hooks are supported — they execute in registration order.
 
     - Pre-hook returning [Some result] short-circuits (handler is skipped).
-      Use case: permission checks (Sprint 3), request logging.
+      Use cases include permission checks and request logging.
     - Dispatch observers receive the final typed outcome for telemetry,
       metrics, and audit logging. *)
 
@@ -155,22 +144,13 @@ let run_dispatch_observers
     (result : Tool_result.result option) : unit =
   List.iter (fun hook -> hook outcome result) !dispatch_observers
 
-(** RFC-0084 §2.2 + RFC-0085 PR-14 — Single dispatch entry.
-
-    Inlines what used to be a three-step file-private chain
-    ([dispatch] -> [dispatch_structured] -> [guarded_dispatch]) into
-    one function so the lifecycle reads top-to-bottom:
+(** Single dispatch entry. The lifecycle is:
 
       1. injected span wrapper         (4-tuple emission; identity by default,
                                          [Tool_telemetry.with_span] at runtime)
       2. pre-hook chain                (reject / coerce-args)
       3. registry lookup + handler     (handler exception capture)
-      4. observer fan-out              ([run_dispatch_observers])
-
-    PR-11 already removed the three-step chain from the public mli.
-    PR-14 finishes the consolidation by removing the file-private
-    indirection — each step had exactly one caller, so the layering
-    was pure overhead. *)
+      4. observer fan-out              ([run_dispatch_observers]) *)
 let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result option =
   let result, _outcome =
     (* Injected telemetry span wrapper (default identity). The composition

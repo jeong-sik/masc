@@ -4,7 +4,7 @@
 # Tests the fundamental 10-step external MCP workflow:
 #   producer join → add_task → claim → plan_set_task → heartbeat → broadcast
 #   → status → direct-done rejection → submit_for_verification
-#   → awaiting-verification projection
+#   → post-submission producer projection
 #
 # This is the opt-in strict verification path. Advisory/default task completion
 # remains direct and is covered by the workspace and Keeper outcome suites.
@@ -176,17 +176,19 @@ else
   echo "$r9"
 fi
 
-# ── Step 10/10: submission is awaiting verification and credited to producer ──
-echo "[10/10] masc_tasks (AwaitingVerification producer credit)"
-r10="$(call_tool 1010 "masc_tasks" '{"status":"awaiting_verification"}')"
+# ── Step 10/10: submission remains credited to its producer ──
+# The application-owned authority may reject before this query runs, returning
+# the task to in_progress. Both states must retain the submitting producer.
+echo "[10/10] masc_tasks (post-submission producer credit)"
+r10="$(call_tool 1010 "masc_tasks" '{}')"
 if require_ok "$r10" \
   && [[ "$r10" == *"$task_id"* ]] \
-  && [[ "$r10" == *"awaiting_verification"* ]] \
+  && { [[ "$r10" == *"awaiting_verification"* ]] || [[ "$r10" == *"in_progress"* ]]; } \
   && [[ "$r10" == *"$AGENT_NAME"* ]]; then
   CLEANUP_TASK_FINALIZED=1
   step_pass
 else
-  step_fail "AwaitingVerification projection did not retain producer credit"
+  step_fail "post-submission projection did not retain producer credit"
   echo "$r10"
 fi
 

@@ -1,7 +1,7 @@
 (** Response suppression is restricted to typed control checkpoints. Runtime
     budget and completion-contract observations preserve model output. *)
 
-module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
+module Finalize = Masc.Keeper_replay_checkpoint
 module Response_text = Masc.Keeper_agent_run_response_text
 module Keeper_metrics = Keeper_metrics
 module Metrics = Masc.Otel_metric_store

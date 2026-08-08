@@ -530,7 +530,7 @@ export class LspConnection {
     }
     const delayMs =
       Math.min(this.reconnectDelayMs, TRANSPORT_RETRY_MAX_MS)
-      + Math.random() * TRANSPORT_RETRY_JITTER_MS
+      + Math.random() * TRANSPORT_RETRY_JITTER_MS // real-randomness-needed: transport retry jitter
     this.reconnectAttempts += 1
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null

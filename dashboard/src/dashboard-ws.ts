@@ -541,7 +541,7 @@ function scheduleReconnect(): void {
   reconnectAttempts += 1
   const exp = Math.min(reconnectAttempts, WS_RECONNECT_MAX_EXP)
   const backoff = Math.min(RECONNECT_MAX_MS, WS_RECONNECT_BASE_MS * Math.pow(2, exp))
-  const jitter = Math.random() * RECONNECT_JITTER_MS
+  const jitter = Math.random() * RECONNECT_JITTER_MS // real-randomness-needed: spreads simultaneous retries
   const delay = backoff + jitter
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null

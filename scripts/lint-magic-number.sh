@@ -64,7 +64,12 @@ fi
 # Build per-file literal histogram. Strip lines that are comments,
 # test fixtures, or generated artifacts (.mli signatures live with .ml).
 # We accept any digit run >= MIN_DIGITS, prefixed by a word boundary.
-LITERAL_RE="\\b[0-9]{${MIN_DIGITS},}\\b"
+# A digit run touching a hyphen is part of an identifier or a date, not a
+# literal: RFC-0206, PK-12345, 2026-05-16. Excluding a hyphen on either
+# side drops both without touching real literals, which sit next to
+# whitespace, "(", "=" or an operator. "RFC 6455" needs its own lookbehind
+# because the separator there is a space.
+LITERAL_RE="(?<!RFC )(?<![-\\w.])[0-9]{${MIN_DIGITS},}(?![-\\w.])"
 
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
@@ -74,7 +79,7 @@ trap 'rm -f "$tmp"' EXIT
 rg -onP --with-filename "$LITERAL_RE" "$TARGET" 2>/dev/null \
   | awk -F: '{ printf "%s\t%s\n", $1, $3 }' \
   | sort | uniq -c | sort -rn \
-  | awk -v min="$MIN_REPS" '$1 >= min { print $1"\t"$2 }' > "$tmp"
+  | awk -v min="$MIN_REPS" '$1 >= min { n=$1; sub(/^ *[0-9]+ +/, ""); print n"\t"$0 }' > "$tmp"
 
 # Output: count<TAB>file<TAB>literal
 awk -F'\t' '{ printf "%5d  %-60s  %s\n", $1, $2, $3 }' "$tmp"

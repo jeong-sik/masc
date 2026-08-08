@@ -153,7 +153,7 @@ let agent_credential_of_yojson json =
 type auth_config = {
   enabled: bool;
   workspace_secret_hash: string option; [@default None]
-  require_token: bool; [@default false]
+  require_token: bool; [@default true]
   token_expiry_hours: int; [@default 24]
 } [@@deriving show]
 
@@ -172,14 +172,95 @@ let auth_config_to_yojson c =
     ("token_expiry_hours", `Int c.token_expiry_hours);
   ]
 
+let auth_config_field_names =
+  [ "enabled"; "workspace_secret_hash"; "require_token"; "token_expiry_hours" ]
+
+let validate_auth_config_fields = function
+  | `Assoc fields ->
+    let rec loop seen = function
+      | [] -> Ok fields
+      | (name, _) :: rest ->
+        if not (List.mem name auth_config_field_names)
+        then Error (Printf.sprintf "auth_config_of_yojson: unknown field %S" name)
+        else if List.mem name seen
+        then Error (Printf.sprintf "auth_config_of_yojson: duplicate field %S" name)
+        else loop (name :: seen) rest
+    in
+    loop [] fields
+  | other ->
+    Error
+      (Printf.sprintf
+         "auth_config_of_yojson: expected JSON object, got %s"
+         (Json_util.kind_name other))
+
+let auth_config_bool fields name ~default =
+  match List.assoc_opt name fields with
+  | None -> Ok default
+  | Some (`Bool value) -> Ok value
+  | Some value ->
+    Error
+      (Printf.sprintf
+         "auth_config_of_yojson: field %S must be a boolean, got %s"
+         name
+         (Json_util.kind_name value))
+
+let auth_config_optional_string fields name =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some value ->
+    Error
+      (Printf.sprintf
+         "auth_config_of_yojson: field %S must be a string or null, got %s"
+         name
+         (Json_util.kind_name value))
+
+let auth_config_int fields name ~default =
+  match List.assoc_opt name fields with
+  | None -> Ok default
+  | Some (`Int value) -> Ok value
+  | Some value ->
+    Error
+      (Printf.sprintf
+         "auth_config_of_yojson: field %S must be an integer, got %s"
+         name
+         (Json_util.kind_name value))
+
+let is_sha256_hex value =
+  String.length value = 64
+  && String.for_all
+       (function
+         | '0' .. '9' | 'a' .. 'f' -> true
+         | _ -> false)
+       value
+;;
+
+let validate_workspace_secret_hash = function
+  | None -> Ok None
+  | Some value when is_sha256_hex value -> Ok (Some value)
+  | Some _ ->
+    Error
+      "auth_config_of_yojson: field \"workspace_secret_hash\" must be 64 lowercase hexadecimal characters"
+;;
+
+let validate_token_expiry_hours value =
+  if value >= 1 && value <= 8_760
+  then Ok value
+  else
+    Error
+      "auth_config_of_yojson: field \"token_expiry_hours\" must be between 1 and 8760"
+;;
+
 let auth_config_of_yojson json =
-  try
-    let enabled = Json_util.get_bool json "enabled" |> Option.value ~default:true in
-    let workspace_secret_hash = Json_util.get_string json "workspace_secret_hash" in
-    let require_token = Json_util.get_bool json "require_token" |> Option.value ~default:false in
-    let token_expiry_hours = Json_util.get_int json "token_expiry_hours" |> Option.value ~default:24 in
-    Ok { enabled; workspace_secret_hash; require_token; token_expiry_hours }
-  with e -> Error (Printexc.to_string e)
+  let ( let* ) = Result.bind in
+  let* fields = validate_auth_config_fields json in
+  let* enabled = auth_config_bool fields "enabled" ~default:true in
+  let* workspace_secret_hash = auth_config_optional_string fields "workspace_secret_hash" in
+  let* workspace_secret_hash = validate_workspace_secret_hash workspace_secret_hash in
+  let* require_token = auth_config_bool fields "require_token" ~default:true in
+  let* token_expiry_hours = auth_config_int fields "token_expiry_hours" ~default:24 in
+  let* token_expiry_hours = validate_token_expiry_hours token_expiry_hours in
+  Ok { enabled; workspace_secret_hash; require_token; token_expiry_hours }
 
 (** Permission matrix - what each role can do *)
 type permission =

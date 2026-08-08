@@ -64,8 +64,6 @@ val resolve_agent_from_token :
 
 (** {1 Raw token credential persistence} *)
 
-val expires_at_for_auth_config : auth_config -> string option
-
 val save_raw_token_credential_with_expiry :
   string -> agent_name:string -> role:agent_role -> raw_token:string -> expires_at:string option ->
   (agent_credential, masc_error) result

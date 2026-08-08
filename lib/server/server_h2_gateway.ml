@@ -1108,6 +1108,12 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
     else
       try dispatch_h2_route () with
       | Eio.Cancel.Cancelled _ as e -> raise e
+      | Auth.Auth_config_error _ ->
+        h2_respond_text
+          h2_reqd
+          "Authentication configuration unavailable"
+          ~status:`Service_unavailable
+          ~extra_headers:cors
       | exn ->
         let msg = Printexc.to_string exn in
         Log.Http.error "Handler error: %s" msg;

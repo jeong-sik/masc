@@ -270,6 +270,25 @@ let try_internal_error_response reqd msg =
           Log.Http.warn "main_eio internal_error response failed: %s"
             (Printexc.to_string exn))
 
+let try_auth_config_error_response reqd =
+  try
+    Http.Response.text
+      ~status:`Service_unavailable
+      "Authentication configuration unavailable"
+      reqd
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    (match Http.Late_response.classify_write_failure exn with
+     | Some failure_msg ->
+       log_late_response_failure
+         ~context:"main_eio auth configuration unavailable"
+         failure_msg
+     | None ->
+       Log.Http.warn "main_eio auth configuration response failed: %s"
+         (Printexc.to_string exn))
+;;
+
 let respond_request_authority_bad_request ~error_code ~message reqd =
   Http.Response.json_value
     ~status:`Bad_request
@@ -349,11 +368,10 @@ let make_extended_handler ~trust_policy routes =
             then ()
             else dispatch_route ~router:routes ~request ~path ~upgrade reqd
           with
-          (* Re-raise cancellation so Eio structured concurrency propagates
-             cleanly.  Previously the catch-all swallowed Cancelled and tried
-             to write a 500 response; that masks shutdown signals and
-             interferes with per-connection switch cleanup. *)
+          (* Cancellation propagates through the connection switch without
+             attempting a response from a cancelled handler. *)
           | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | Auth.Auth_config_error _ -> try_auth_config_error_response reqd
           | exn ->
             let msg = Printexc.to_string exn in
             (match Http.Late_response.classify_write_failure exn with

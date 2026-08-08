@@ -1085,12 +1085,22 @@ let handle_request
                 (Masc_domain.masc_error_to_string
                    (Masc_domain.System Masc_domain.System_error.NotInitialized))
             | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | Auth.Auth_config_error _ ->
+              make_error_typed
+                ~id
+                Mcp_error_code.Internal_error
+                "Authentication configuration unavailable"
             | exn ->
               let err = Printexc.to_string exn in
               Log.Mcp.error "Request handling failed: method=%s: %s" req.method_ err;
               make_error_typed ~id Mcp_error_code.Internal_error (Printf.sprintf "Internal error: %s" err)))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Auth.Auth_config_error _ ->
+    make_error_typed
+      ~id:`Null
+      Mcp_error_code.Internal_error
+      "Authentication configuration unavailable"
   | exn ->
     make_error_typed
       ~id:`Null

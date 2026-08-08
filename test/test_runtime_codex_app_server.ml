@@ -23,6 +23,16 @@ let turn_completed =
   {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[{"type":"agentMessage","id":"message-1","text":"MASC_SUBSCRIPTION_OK","phase":"final_answer"}],"status":"completed"}}}|}
 ;;
 
+let resumed_turn_result = {|{"id":4,"result":{"turn":{"id":"turn-2"}}}|}
+
+let resumed_item_completed =
+  {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-2","completedAtMs":2,"item":{"type":"agentMessage","id":"message-2","text":"MASC_RESUMED_OK","phase":"final_answer"}}}|}
+;;
+
+let resumed_turn_completed =
+  {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-2","items":[{"type":"agentMessage","id":"message-2","text":"MASC_RESUMED_OK","phase":"final_answer"}],"status":"completed"}}}|}
+;;
+
 let shell_quote value =
   "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
 ;;
@@ -51,6 +61,7 @@ let fixture_script lines =
   List.iter
     (fun line -> output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     (drop 3 lines);
+  output_string output "while IFS= read -r ignored; do :; done\n";
   close_out output;
   Unix.chmod path 0o700;
   path
@@ -61,7 +72,7 @@ let with_fixture lines f =
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
-let run_fixture ?(dynamic_tools = []) ?(history = []) path =
+let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) path =
   Eio_main.run (fun env ->
     let config =
       { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
@@ -73,6 +84,7 @@ let run_fixture ?(dynamic_tools = []) ?(history = []) path =
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock:(Eio.Stdenv.clock env)
       ~dynamic_tools
+      ?thread_mode
       ~history
       config
       ~prompt:"Return the fixture marker")
@@ -156,7 +168,44 @@ let test_chatgpt_subscription_turn () =
         check string "thread" "thread-1" result.thread_id;
         check string "turn" "turn-1" result.turn_id;
         check string "model" "gpt-fixture" result.model;
-        check string "plan" "pro" result.subscription.plan_type)
+        check string "plan" "pro" result.subscription.plan_type;
+        check bool "new thread" false result.resumed)
+;;
+
+let test_thread_resume_skips_history_injection () =
+  let history =
+    [ { Runtime_codex_app_server.role = User; text = "already in official thread" } ]
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+    (fun path ->
+       match
+         run_fixture
+           ~thread_mode:(Runtime_codex_app_server.Resume { thread_id = "thread-1" })
+           ~history
+           path
+       with
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok result ->
+         check bool "resumed" true result.resumed;
+         check string "thread" "thread-1" result.thread_id)
+;;
+
+let test_thread_resume_rejects_identity_mismatch () =
+  let wrong_thread =
+    {|{"id":3,"result":{"thread":{"id":"thread-other"},"model":"gpt-fixture"}}|}
+  in
+  with_fixture
+    [ init_result; account_chatgpt; wrong_thread; turn_result; item_completed; turn_completed ]
+    (fun path ->
+       match
+         run_fixture
+           ~thread_mode:(Runtime_codex_app_server.Resume { thread_id = "thread-1" })
+           path
+       with
+       | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "thread/resume admitted a different returned thread id")
 ;;
 
 let test_api_key_account_is_rejected () =
@@ -338,6 +387,78 @@ let cleanup_tree root =
   | _ -> ()
 ;;
 
+let write_fixture_file path content =
+  let output = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output content)
+;;
+
+let fixture_tool ~name ~description =
+  Agent_sdk.Tool.create
+    ~name
+    ~description
+    ~parameters:[]
+    (fun _ -> Ok { Agent_sdk.Types.content = "fixture"; _meta = None })
+;;
+
+let test_codex_session_store_roundtrip () =
+  let session_dir = temp_workspace "masc-codex-store-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree session_dir)
+    (fun () ->
+       let binding : Keeper_codex_session_store.t =
+         { runtime_id = "codex.codex"
+         ; thread_id = "thread-1"
+         ; turn_count = 2
+         ; tool_surface_sha256 = Keeper_codex_session_store.tool_surface_sha256 []
+         ; updated_at = 42.5
+         }
+       in
+       (match Keeper_codex_session_store.load ~session_dir with
+        | Ok None -> ()
+        | Ok (Some _) -> fail "missing Codex session was reported as present"
+        | Error detail -> fail detail);
+       (match Keeper_codex_session_store.save ~session_dir binding with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       match Keeper_codex_session_store.load ~session_dir with
+       | Error detail -> fail detail
+       | Ok None -> fail "saved Codex session disappeared"
+       | Ok (Some loaded) ->
+         check string "runtime" binding.runtime_id loaded.runtime_id;
+         check string "thread" binding.thread_id loaded.thread_id;
+         check int "turn count" binding.turn_count loaded.turn_count;
+         check string
+           "tool surface"
+           binding.tool_surface_sha256
+           loaded.tool_surface_sha256;
+         check (float 0.0) "updated at" binding.updated_at loaded.updated_at)
+;;
+
+let test_codex_session_store_rejects_ambiguous_json () =
+  let session_dir = temp_workspace "masc-codex-store-invalid-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree session_dir)
+    (fun () ->
+       write_fixture_file
+         (Keeper_codex_session_store.path ~session_dir)
+         {|{"runtime_id":"codex.codex","runtime_id":"codex.other","schema":"masc.keeper.codex-session.v1","thread_id":"thread-1","tool_surface_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","turn_count":1,"updated_at":1.0}|};
+       match Keeper_codex_session_store.load ~session_dir with
+       | Error _ -> ()
+       | Ok _ -> fail "ambiguous Codex session JSON was admitted")
+;;
+
+let test_codex_tool_surface_fingerprint_is_exact () =
+  let alpha = fixture_tool ~name:"alpha" ~description:"first" in
+  let beta = fixture_tool ~name:"beta" ~description:"second" in
+  let changed = fixture_tool ~name:"alpha" ~description:"changed" in
+  let digest tools = Keeper_codex_session_store.tool_surface_sha256 tools in
+  check string "order independent" (digest [ alpha; beta ]) (digest [ beta; alpha ]);
+  check bool "description participates" true
+    (not (String.equal (digest [ alpha ]) (digest [ changed ])))
+;;
+
 let production_keeper_meta ~base_path =
   let name = "codex-production-fixture" in
   match
@@ -423,11 +544,18 @@ let run_production_keeper_turn ~cli_path ~model =
 ;;
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
-    ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.")
-    ~cli_path ~model () =
+    ?session_dir
+    ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
+    ~model () =
+  let owns_session_dir = Option.is_none session_dir in
+  let session_dir =
+    Option.value session_dir ~default:(temp_workspace "masc-codex-session-")
+  in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
-    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      if owns_session_dir then cleanup_tree session_dir)
     (fun () ->
        with_runtime_config ~model cli_path (fun runtime_path ->
          Eio_main.run (fun env ->
@@ -452,6 +580,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ~keeper_name:"codex-fixture"
                       ~base_path:"/tmp"
                       ~goal
+                      ~keeper_session_dir:session_dir
                       ~tools
                       ~initial_messages:[]
                       ?model_input_projection
@@ -472,6 +601,123 @@ let test_keeper_dispatches_codex_turn_runtime () =
        | Ok result ->
          check string "Keeper response" "MASC_SUBSCRIPTION_OK" (keeper_response_text result);
          check bool "measured observation" true (Option.is_some result.runtime_observation))
+;;
+
+let test_keeper_resumes_persisted_codex_thread () =
+  let session_dir = temp_workspace "masc-codex-resume-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree session_dir)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~session_dir
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok result -> check int "initial turn count" 1 result.turns);
+       let before_turn_ordinal = ref 0 in
+       let after_turn_ordinal = ref 0 in
+       let hooks : Agent_sdk.Hooks.hooks =
+         { Agent_sdk.Hooks.empty with
+           before_turn =
+             Some
+               (function
+                 | BeforeTurn { turn; _ } ->
+                   before_turn_ordinal := turn;
+                   Continue
+                 | _ -> Continue)
+         ; after_turn =
+             Some
+               (function
+                 | AfterTurn { turn; _ } ->
+                   after_turn_ordinal := turn;
+                   Continue
+                 | _ -> Continue)
+         }
+       in
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; resumed_turn_result
+         ; resumed_item_completed
+         ; resumed_turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~session_dir
+                ~hooks
+                ~goal:"Return the resumed fixture marker"
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok result ->
+              check string "resumed response" "MASC_RESUMED_OK" (keeper_response_text result);
+              check string "official thread" "thread-1" result.session_id;
+              check int "cumulative turns" 2 result.turns;
+              check int "before-turn ordinal" 2 !before_turn_ordinal;
+              check int "after-turn ordinal" 2 !after_turn_ordinal);
+       match Keeper_codex_session_store.load ~session_dir with
+       | Error detail -> fail detail
+       | Ok None -> fail "resumed Codex binding disappeared"
+       | Ok (Some binding) -> check int "stored turns" 2 binding.turn_count)
+;;
+
+let test_keeper_rejects_changed_tool_surface_on_resume () =
+  let session_dir = temp_workspace "masc-codex-tool-change-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree session_dir)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            (match
+               run_keeper_turn
+                 ~session_dir
+                 ~cli_path
+                 ~model:"gpt-fixture"
+                 ()
+             with
+             | Error error -> fail (Agent_sdk.Error.to_string error)
+             | Ok _ -> ());
+            let tool = fixture_tool ~name:"new_tool" ~description:"new surface" in
+            match
+              run_keeper_turn
+                ~session_dir
+                ~tools:[ tool ]
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error
+                (Agent_sdk.Error.Config
+                  (Agent_sdk.Error.InvalidConfig { field; _ })) ->
+              check string
+                "fingerprint field"
+                "codex_session.tool_surface_sha256"
+                field
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok _ -> fail "changed tool surface silently resumed the Codex thread"))
 ;;
 
 let assert_production_keeper_result result =
@@ -782,6 +1028,46 @@ let test_live_keeper_dynamic_tool_subscription () =
       check string "live tool Keeper response" "MASC_TOOL_OK" (keeper_response_text result)
 ;;
 
+let test_live_keeper_resumes_official_thread () =
+  if Sys.getenv_opt "MASC_CODEX_APP_SERVER_LIVE" <> Some "1"
+  then Alcotest.skip ()
+  else
+    let session_dir = temp_workspace "masc-codex-live-resume-" in
+    Fun.protect
+      ~finally:(fun () -> cleanup_tree session_dir)
+      (fun () ->
+         (match
+            run_keeper_turn
+              ~session_dir
+              ~goal:
+                "Remember marker MASC_RESUME_MEMORY. Reply exactly MASC_RESUME_FIRST."
+              ~cli_path:"codex"
+              ~model:"gpt-5.6-sol"
+              ()
+          with
+          | Error error -> fail (Agent_sdk.Error.to_string error)
+          | Ok result ->
+            check string
+              "first live response"
+              "MASC_RESUME_FIRST"
+              (keeper_response_text result));
+         match
+           run_keeper_turn
+             ~session_dir
+             ~goal:"Reply exactly with the remembered marker."
+             ~cli_path:"codex"
+             ~model:"gpt-5.6-sol"
+             ()
+         with
+         | Error error -> fail (Agent_sdk.Error.to_string error)
+         | Ok result ->
+           check string
+             "resumed live response"
+             "MASC_RESUME_MEMORY"
+             (keeper_response_text result);
+           check int "resumed live turn count" 2 result.turns)
+;;
+
 let test_live_production_keeper_subscription () =
   if Sys.getenv_opt "MASC_CODEX_APP_SERVER_LIVE" <> Some "1"
   then Alcotest.skip ()
@@ -818,9 +1104,37 @@ let () =
         ; test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
         ; test_case "history injects before turn" `Quick test_history_is_injected_before_turn
         ; test_case
+            "thread resume skips history injection"
+            `Quick
+            test_thread_resume_skips_history_injection
+        ; test_case
+            "thread resume rejects identity mismatch"
+            `Quick
+            test_thread_resume_rejects_identity_mismatch
+        ; test_case
+            "Codex session store roundtrip"
+            `Quick
+            test_codex_session_store_roundtrip
+        ; test_case
+            "Codex session store rejects ambiguous JSON"
+            `Quick
+            test_codex_session_store_rejects_ambiguous_json
+        ; test_case
+            "Codex tool fingerprint is exact"
+            `Quick
+            test_codex_tool_surface_fingerprint_is_exact
+        ; test_case
             "Keeper dispatches Codex runtime"
             `Quick
             test_keeper_dispatches_codex_turn_runtime
+        ; test_case
+            "Keeper resumes persisted Codex thread"
+            `Quick
+            test_keeper_resumes_persisted_codex_thread
+        ; test_case
+            "Keeper rejects changed Codex tool surface"
+            `Quick
+            test_keeper_rejects_changed_tool_surface_on_resume
         ; test_case
             "production Keeper dispatches Codex runtime"
             `Quick
@@ -855,6 +1169,10 @@ let () =
             "Keeper typed tool through official Codex app-server"
             `Slow
             test_live_keeper_dynamic_tool_subscription
+        ; test_case
+            "Keeper resumes official Codex thread"
+            `Slow
+            test_live_keeper_resumes_official_thread
         ; test_case
             "production Keeper through official Codex app-server"
             `Slow

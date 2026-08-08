@@ -263,7 +263,7 @@ let () =
                 ~description:"direct handler test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
-                ~handler_binding:(Direct (fun ~name:_ ~args:_ -> Some (tool_ok "ok")))
+                ~handler_binding:(Direct (fun ~name:_ ~args:_ -> tool_ok "ok"))
                 ()
             in
             register_test_metadata name;

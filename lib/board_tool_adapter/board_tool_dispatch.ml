@@ -79,7 +79,7 @@ let tool_spec_read_only =
 ;;
 
 let register () =
-  let handler ~name ~args = Some (handle_tool name args) in
+  let handler ~name ~args = handle_tool name args in
   let make_spec board_name =
     let s = Board_tool_registry.schema_for_board_name board_name in
     let policy = Board_tool_registry.operation_policy board_name in

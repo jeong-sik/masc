@@ -4,12 +4,10 @@
     registry. Mutable handler registrations remain only for dispatch
     execution; they are not used for token validation or discovery. *)
 
-(** Unified handler type: every tool call is [name * args -> result option].
-    [None] means "this handler does not know this tool" (should not happen
-    when lookups go through the registry, but kept for compatibility).
-    RFC-0189 PR-2: handlers return the typed {!Tool_result.result}; the
-    legacy {!Tool_result.result} record is gone. *)
-type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result option
+(** Registered handlers are total for their exact registry key. Missing
+    handlers are represented by the registry lookup, not by a second optional
+    result returned from a matched handler. *)
+type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result
 
 (** Central registry — populated once during server initialisation. *)
 let registry : (string, handler) Hashtbl.t = Hashtbl.create 256
@@ -190,7 +188,7 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
           (match Hashtbl.find_opt registry name with
            | Some handler ->
              let start_time = Time_compat.now () in
-             (try handler ~name ~args:coerced_args
+             (try Some (handler ~name ~args:coerced_args)
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn -> Some (Tool_result.make_err_of_exn ~tool_name:name ~start_time exn))

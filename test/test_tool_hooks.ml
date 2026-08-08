@@ -43,7 +43,7 @@ let test_pre_hook_observes () =
     ~tool_name:"__hook_test"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (tool_ok "ok"));
+      tool_ok "ok");
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
     Tool_dispatch.Pass);
@@ -60,7 +60,7 @@ let test_pre_hook_short_circuits () =
     ~tool_name:"__hook_blocked"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (tool_ok "should not reach"));
+      tool_ok "should not reach");
   Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
     log_call "pre_block";
     Tool_dispatch.Reject
@@ -88,7 +88,7 @@ let test_multiple_pre_hooks_first_wins () =
     ~tool_name:"__hook_multi"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (tool_ok "ok"));
+      tool_ok "ok");
   (* First hook: observe only *)
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre1";
@@ -122,7 +122,7 @@ let test_dispatch_observer_observes () =
     ~tool_name:"__hook_observer"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (tool_ok "original"));
+      tool_ok "original");
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some _ -> log_call "observer"
@@ -140,7 +140,7 @@ let test_dispatch_observers_chain () =
   register_test_tool
     ~tool_name:"__hook_chain"
     ~handler:(fun ~name:_ ~args:_ ->
-      Some (tool_ok "0"));
+      tool_ok "0");
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some _ -> log_call "observer1"
@@ -166,7 +166,7 @@ let test_full_lifecycle () =
     ~tool_name:"__hook_full"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (tool_ok "data"));
+      tool_ok "data");
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
     Tool_dispatch.Pass);
@@ -185,7 +185,7 @@ let test_no_hooks_default () =
   register_test_tool
     ~tool_name:"__hook_none"
     ~handler:(fun ~name ~args:_ ->
-      Some (tool_ok ~tool_name:name "plain"));
+      tool_ok ~tool_name:name "plain");
   let token = match Tool_dispatch.mint_token ~name:"__hook_none" with Ok t -> t | Error e -> Alcotest.fail e in
   match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->

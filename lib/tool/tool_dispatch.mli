@@ -5,11 +5,10 @@
     registry. Mutable handler registrations remain only for dispatch
     execution; they are not used for token validation or discovery. *)
 
-(** Unified handler type: every tool call is [name * args -> result option].
-    [None] means "this handler does not know this tool". Handlers return
-    the typed {!Tool_result.result} directly — the legacy {!Tool_result.result}
-    record was retired in PR-2 of RFC-0189. *)
-type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result option
+(** Registered handlers are total for their exact registry key. Missing
+    handlers are represented by the registry lookup performed by
+    {!guarded_dispatch}, not by the handler result. *)
+type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result
 
 (** {1 Registration} *)
 

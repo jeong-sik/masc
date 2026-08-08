@@ -29,10 +29,10 @@ let make_schema ?(props = []) name =
       `Assoc [ "type", `String "object"; "properties", `Assoc prop_entries ] }
 
 (** Helper: a handler that returns a successful result with "ok:<name>". *)
-let echo_handler ~name ~args:_ = Some (tool_ok ~tool_name:name ("ok:" ^ name))
+let echo_handler ~name ~args:_ = tool_ok ~tool_name:name ("ok:" ^ name)
 
 (** Helper: a handler that returns (false, "fail"). *)
-let fail_handler ~name:_ ~args:_ = Some (tool_error "fail")
+let fail_handler ~name:_ ~args:_ = tool_error "fail"
 
 (** Helper: register a tool in handler, tag, and schema registries.
     The validation pre-hook is fail-closed for schema-less tools. *)

@@ -136,16 +136,7 @@ let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
    the designed "derive capable runtimes from declared capabilities" case for
    media_failover, and a keeper absent from the assignment table still falls back
    at lookup time. An unknown id remains an operator typo rejected at load rather
-   than a silent fallback (Unknown -> Permissive anti-pattern).
-
-   Removed with the merge: [Declares_capability] and its lane-candidate helper.
-   #25719 dropped the last capability requirement after finding neither consumer
-   requests a wire response format, leaving a variant with match arms and no
-   construction site — dead weight that reads as an available option. The tool
-   channel it could not express is refused by OAS at dispatch through
-   candidate_rejection_disposition (oas/lib/llm_provider/exact_output.mli:126-132),
-   which is pre-dispatch and therefore failover-eligible: ordering rather than
-   exclusion, which is what the spec asks for. *)
+   than a silent fallback (Unknown -> Permissive anti-pattern). *)
 type reference_domain =
   | Runtime_only
   | Lane_then_runtime

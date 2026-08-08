@@ -1,35 +1,7 @@
-(** Runtime_oas_checkpoint — Lifecycle, checkpoint, and idle-detail helpers.
+(** Runtime_oas_checkpoint — Checkpoint and idle-detail helpers.
 
     Keeps side-effecting run helpers separate from the main build/resume/run
     orchestration in {!Runtime_agent}. *)
-
-let missing_masc_bus_warned = Atomic.make false
-
-let publish_lifecycle ~name ~event ~detail ?error ?session_id ?status
-    ?(attrs = []) () =
-  match Event_bus_slots.get_masc () with
-  | None ->
-      if Atomic.compare_and_set missing_masc_bus_warned false true then
-        Log.Misc.warn
-          "runtime lifecycle event was not published: MASC event bus is not initialized"
-  | Some mb ->
-      let optional_string_field key = function
-        | Some value when String.trim value <> "" -> [ (key, `String value) ]
-        | _ -> []
-      in
-      Agent_sdk.Event_bus.publish mb
-        (Agent_sdk.Event_bus.mk_event
-           (Custom
-              ( Printf.sprintf "masc.runtime_agent.%s" event
-              , `Assoc
-                  ([ ("agent", `String name)
-                   ; ("detail", `String detail)
-                   ; ("timestamp", `Float (Time_compat.now ()))
-                   ]
-                   @ optional_string_field "error" error
-                   @ optional_string_field "session_id" session_id
-                   @ optional_string_field "status" status
-                   @ attrs) )))
 
 let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Agent_sdk.Agent.t) =
   match checkpoint_sidecar with

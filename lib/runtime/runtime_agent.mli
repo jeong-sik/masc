@@ -131,16 +131,6 @@ type run_result = {
   stop_reason : stop_reason;
 }
 
-type worker_lifecycle_classification =
-  { event : string
-  ; status : string
-  ; error : string option
-  }
-
-val worker_lifecycle_classification_of_result :
-  (run_result, Agent_sdk.Error.sdk_error) result -> worker_lifecycle_classification
-
-
 (** {1 Label resolution} *)
 
 val label_resolution_error_to_string :
@@ -331,22 +321,6 @@ module For_testing : sig
     Runtime_observation.runtime_observation
 end
 
-(** {1 Lifecycle / checkpoint helpers (re-exported)} *)
-
-module Lifecycle_for_testing : sig
-  val provider_attrs : config -> (string * Yojson.Safe.t) list
-end
-
-val publish_lifecycle :
-  name:string ->
-  event:string ->
-  detail:string ->
-  ?error:string ->
-  ?session_id:string ->
-  ?status:string ->
-  ?attrs:(string * Yojson.Safe.t) list ->
-  unit ->
-  unit
 (** {1 Build / resume / run} *)
 
 val build :
@@ -395,12 +369,9 @@ val run_blocks :
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
   ?cooperative_yield_probe:cooperative_yield_probe ->
-  ?goal_detail:string ->
   Agent_sdk.Types.content_block list ->
   (run_result, Agent_sdk.Error.sdk_error) result
-(** Runs an OAS agent against structured user-authored content blocks.  The
-    optional [goal_detail] is a display/log fallback only; media payloads stay
-    in typed OAS blocks and are not rendered into lifecycle strings. *)
+(** Runs an OAS agent against structured user-authored content blocks. *)
 
 val run_with_masc_tools :
   sw:Eio.Switch.t ->

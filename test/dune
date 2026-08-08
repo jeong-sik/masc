@@ -1941,8 +1941,6 @@
 
 (include stanzas/test_runtime_agent_close_cancel_source.inc)
 
-(include stanzas/test_runtime_agent_checkpoint.inc)
-
 (include stanzas/test_runtime_codex_app_server.inc)
 
 (include stanzas/test_runtime_provider_projection_boundary.inc)

@@ -61,7 +61,8 @@ let tool_schemas_for_profile ?(include_hidden = false)
         let full_profile_tools =
           List.filter
             (fun (schema : Masc_domain.tool_schema) ->
-              show_all || Tool_catalog.is_public_mcp schema.name)
+              Tool_catalog.allow_direct_call schema.name
+              && (show_all || Tool_catalog.is_public_mcp schema.name))
             all
         in
         full_profile_tools

@@ -73,7 +73,8 @@ val tool_schemas_for_profile :
       state profile] returns the schema
     list visible on [profile]:
 
-    - [Full]: [Config.visible_tool_schemas] (gated by [include_hidden]).
+    - [Full]: [Config.visible_tool_schemas] gated by [include_hidden], public
+      surface membership, and [Tool_catalog.allow_direct_call].
     - [Managed_agent]: SDK tool contract +
       [managed_agent_passthrough_tool_names] subset.
     - [Operator_remote]: pinned [Tool_operator.remote_schemas].

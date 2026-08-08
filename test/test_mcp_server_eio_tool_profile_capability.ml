@@ -171,6 +171,13 @@ let test_full_profile_admission_uses_catalog_direct_call_policy () =
     Masc.Mcp_server.For_testing.create_state
       ~base_path:(Filename.get_temp_dir_name ())
   in
+  let advertised_names =
+    Masc.Mcp_server_eio_tool_profile.tool_schemas_for_profile
+      ~include_hidden:true
+      state
+      Masc.Mcp_server_eio_tool_profile.Full
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  in
   let hidden_disallowed = ref 0 in
   List.iter
     (fun (schema : Masc_domain.tool_schema) ->
@@ -190,7 +197,12 @@ let test_full_profile_admission_uses_catalog_direct_call_policy () =
         (Masc.Mcp_server_eio_tool_profile.tool_allowed_in_profile
            state
            Masc.Mcp_server_eio_tool_profile.Full
-           schema.name))
+           schema.name);
+      check
+        bool
+        (schema.name ^ " Full-profile advertisement matches admission")
+        expected
+        (List.mem schema.name advertised_names))
     Masc.Config.raw_all_tool_schemas;
   check
     bool

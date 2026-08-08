@@ -98,7 +98,8 @@ let recurrence_of_arg args =
     | Some wire_value ->
       (match Schedule_contract_values.recurrence_kind_of_string wire_value with
        | Ok recurrence_kind -> Ok recurrence_kind
-       | Error message -> Error message)
+       | Error error ->
+         Error (Schedule_contract_values.decode_error_to_string error))
   in
   match recurrence_kind with
   | Schedule_contract_values.One_shot ->

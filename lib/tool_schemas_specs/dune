@@ -8,6 +8,4 @@
  (flags
   (:standard -w +4 -w +33 -w +37))
  (libraries yojson)
- (modules
-  schedule_contract_values
-  tool_schemas_specs_types))
+ (modules tool_schemas_specs_types))

@@ -1,21 +1,30 @@
+type decode_error =
+  { field : string
+  ; rejected : string
+  ; accepted : string list
+  }
+
+let decode_error_to_string error =
+  Printf.sprintf
+    "unknown %s: %s; accepted: %s"
+    error.field
+    error.rejected
+    (String.concat ", " error.accepted)
+;;
+
 let decode_wire_value ~field ~to_string values wire_value =
   match List.find_opt (fun value -> String.equal (to_string value) wire_value) values with
   | Some value -> Ok value
-  | None ->
-    Error
-      (Printf.sprintf
-         "unknown %s: %s; accepted: %s"
-         field
-         wire_value
-         (String.concat ", " (List.map to_string values)))
+  | None -> Error { field; rejected = wire_value; accepted = List.map to_string values }
 ;;
 
 type actor_kind =
   | Human_operator
   | Automated_actor
   | System
+[@@deriving enumerate]
 
-let actor_kinds = [ Human_operator; Automated_actor; System ]
+let actor_kinds = all_of_actor_kind
 
 let actor_kind_to_string = function
   | Human_operator -> "human_operator"
@@ -37,17 +46,9 @@ type schedule_status =
   | Failed
   | Cancelled
   | Expired
+[@@deriving enumerate]
 
-let schedule_statuses =
-  [ Scheduled
-  ; Due
-  ; Running
-  ; Succeeded
-  ; Failed
-  ; Cancelled
-  ; Expired
-  ]
-;;
+let schedule_statuses = all_of_schedule_status
 
 let schedule_status_to_string = function
   | Scheduled -> "scheduled"
@@ -72,8 +73,9 @@ type schedule_source =
   | Operator_request
   | Automated_request
   | System_request
+[@@deriving enumerate]
 
-let schedule_sources = [ Operator_request; Automated_request; System_request ]
+let schedule_sources = all_of_schedule_source
 
 let schedule_source_to_string = function
   | Operator_request -> "operator_request"
@@ -95,8 +97,9 @@ type recurrence_kind =
   | Interval
   | Daily
   | Cron
+[@@deriving enumerate]
 
-let recurrence_kinds = [ One_shot; Interval; Daily; Cron ]
+let recurrence_kinds = all_of_recurrence_kind
 
 let recurrence_kind_to_string = function
   | One_shot -> "one_shot"
@@ -118,8 +121,9 @@ type wake_status =
   | Wake_running
   | Wake_succeeded
   | Wake_failed
+[@@deriving enumerate]
 
-let wake_statuses = [ Wake_running; Wake_succeeded; Wake_failed ]
+let wake_statuses = all_of_wake_status
 
 let wake_status_to_string = function
   | Wake_running -> "running"

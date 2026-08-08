@@ -82,14 +82,27 @@ let nonempty field value =
   if String.trim value = "" then Error (field ^ " must be non-empty") else Ok value
 ;;
 
+let decode_error_to_string = Schedule_contract_values.decode_error_to_string
 let actor_kind_to_string = Schedule_contract_values.actor_kind_to_string
-let actor_kind_of_string = Schedule_contract_values.actor_kind_of_string
+
+let actor_kind_of_string value =
+  Schedule_contract_values.actor_kind_of_string value
+  |> Result.map_error decode_error_to_string
+;;
 
 let schedule_status_to_string = Schedule_contract_values.schedule_status_to_string
-let schedule_status_of_string = Schedule_contract_values.schedule_status_of_string
+
+let schedule_status_of_string value =
+  Schedule_contract_values.schedule_status_of_string value
+  |> Result.map_error decode_error_to_string
+;;
 
 let schedule_source_to_string = Schedule_contract_values.schedule_source_to_string
-let schedule_source_of_string = Schedule_contract_values.schedule_source_of_string
+
+let schedule_source_of_string value =
+  Schedule_contract_values.schedule_source_of_string value
+  |> Result.map_error decode_error_to_string
+;;
 
 let recurrence_kind = function
   | One_shot -> Schedule_contract_values.One_shot
@@ -113,7 +126,11 @@ let recurrence_summary = function
 ;;
 
 let wake_status_to_string = Schedule_contract_values.wake_status_to_string
-let wake_status_of_string = Schedule_contract_values.wake_status_of_string
+
+let wake_status_of_string value =
+  Schedule_contract_values.wake_status_of_string value
+  |> Result.map_error decode_error_to_string
+;;
 
 let is_terminal = function
   | Succeeded | Failed | Cancelled | Expired -> true
@@ -447,7 +464,10 @@ let recurrence_to_yojson recurrence =
 let recurrence_of_yojson = function
   | `Assoc fields ->
     let* kind_wire_value = string_field "kind" fields in
-    let* kind = Schedule_contract_values.recurrence_kind_of_string kind_wire_value in
+    let* kind =
+      Schedule_contract_values.recurrence_kind_of_string kind_wire_value
+      |> Result.map_error decode_error_to_string
+    in
     (match kind with
      | Schedule_contract_values.One_shot -> Ok One_shot
      | Schedule_contract_values.Interval ->

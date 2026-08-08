@@ -334,11 +334,9 @@ let schema_shape_error schema args =
 (* ---------------------------------------------------------------- *)
 (* Declared range/length constraints                                  *)
 (*                                                                    *)
-(* [Tool_bridge.params_of_json_schema] projects a JSON Schema onto the *)
-(* OAS [tool_param] record, which carries name/type/required only.     *)
-(* Every minimum/maximum/minLength/maxLength/minItems/maxItems is      *)
-(* dropped there, so the SDK validation hook cannot see it. These      *)
-(* checks therefore read the raw JSON Schema masc already holds.       *)
+(* OAS validation uses the derived [tool_param] view, which carries    *)
+(* name/type/required only. Range and length bounds remain in the      *)
+(* authoritative input schema, so these checks read that schema.       *)
 (* ---------------------------------------------------------------- *)
 
 type numeric_keyword =
@@ -822,17 +820,15 @@ let pass_reason ~schema ~args ~prepared_args =
 ;;
 
 let validation_schema_of_json ~name json_schema : Agent_sdk.Types.tool_schema =
-  let params = Tool_bridge.params_of_json_schema json_schema in
-  let json =
-    `Assoc
-      [ ("name", `String name)
-      ; ("description", `String "")
-      ; ("parameters", `List (List.map Agent_sdk.Types.tool_param_to_json params))
-      ]
-  in
-  match Agent_sdk.Types.tool_schema_of_json json with
+  match
+    Agent_sdk.Types.tool_schema_of_input_schema
+      ~name
+      ~description:""
+      ~input_schema:json_schema
+      ()
+  with
   | Ok schema -> schema
-  | Error err -> failwith ("validation_schema_of_json: " ^ err)
+  | Error detail -> failwith ("validation_schema_of_json: " ^ detail)
 ;;
 
 let reject_validation ~name ~reason ~message =

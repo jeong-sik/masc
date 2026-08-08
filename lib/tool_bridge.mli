@@ -65,13 +65,6 @@ val to_oas_typed_result :
     [externalization_error_recoverable] projects the owning tool's existing
     retry policy; the provider receives only a bounded generic error. *)
 
-(** {1 Schema Conversion} *)
-
-val params_of_json_schema : Yojson.Safe.t -> Agent_sdk.Types.tool_param list
-(** Convert a MASC [input_schema] with the OAS schema-conversion SSOT.
-    Raises [Invalid_argument] when a property type is missing, unsupported, or
-    ambiguous; no local default or union-member selection is applied. *)
-
 (** {1 OAS Tool.t Creation} *)
 
 val oas_tool_of_masc :

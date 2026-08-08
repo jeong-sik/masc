@@ -119,16 +119,6 @@ let oas_error_class_of_tool_failure_class = function
   | Tool_result.Runtime_failure -> Agent_sdk.Types.Unknown
 ;;
 
-(** {1 Schema Conversion}
-
-    OAS owns the JSON Schema to [tool_param] contract. Invalid, missing, or
-    ambiguous property types fail at this boundary instead of being guessed
-    as strings or reduced to the first union member. *)
-
-let params_of_json_schema schema =
-  Agent_sdk.Mcp.json_schema_to_params schema
-;;
-
 let oas_tool_schema ~name ~description ~input_schema =
   match
     Agent_sdk.Types.tool_schema_of_input_schema ~name ~description ~input_schema ()
@@ -140,8 +130,7 @@ let oas_tool_schema ~name ~description ~input_schema =
 
 (** {1 OAS Tool.t Creation}
 
-    Create OAS [Tool.t] from MASC schema definition + dispatch handler.
-    This allows incremental migration: each tool can be converted independently. *)
+    Create OAS [Tool.t] from MASC schema definition + dispatch handler. *)
 
 let project_result
       ?base_path

@@ -23,6 +23,22 @@ ALLOWLIST=(
   "lib/eio_context/eio_context.ml"  # deps: eio, masc_log, tls (no masc_core)
   "lib/dated_jsonl/dated_jsonl.ml"  # deps: fs_compat, eio, yojson (no masc_core)
   "lib/shared_audit/store.ml"       # deps: unix, yojson, digestif (no masc_core)
+  # fs_compat sits *below* masc_core: dated_jsonl above is allowlisted for
+  # depending on it. Its own dune is
+  # (libraries eio eio.unix unix yojson uuidm digestif optint cstruct).
+  "lib/fs_compat/fs_compat.ml"
+  "lib/fs_compat/capability_head.ml"
+  "lib/fs_compat/atomic_write.ml"
+  "lib/fs_compat/fd_cache.ml"
+  # deps: masc.masc_eio_context, masc.masc_log — no masc_core
+  "lib/masc_http_client/pool.ml"
+
+  # ---- Not production code ----
+  # The scan walks lib/**, which reaches test directories that live under a
+  # library. Whether the rule should apply to tests at all is a scope
+  # question; until it is decided this file is listed rather than silently
+  # counted as migration debt.
+  "lib/exec/test/test_bash_history.ml"
 
   # ---- Migratable but deferred ----
   # These libraries transitively depend on masc_core and therefore *can* import

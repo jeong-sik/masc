@@ -1,6 +1,6 @@
-(** Tool_local_runtime -- local model runtime management and benchmarking tools.
+(** Tool_local_runtime -- local model runtime MCP dispatch and schemas.
 
-    Facade module that re-exports sub-modules and provides MCP dispatch/schemas.
+    Handler implementations are split across:
     Implementation is split across:
     - Tool_local_runtime_core   : types, helpers, process discovery, model fetching
     - Tool_local_runtime_http   : HTTP helpers (curl wrappers, JSON member access)
@@ -12,13 +12,6 @@
 open Masc_domain
 
 module Core = Tool_local_runtime_core
-
-(* Re-export sub-module public values used by external callers *)
-let runtime_verify_json = Tool_local_runtime_verify.runtime_verify_json
-let runtime_ollama_probe_json = Tool_local_runtime_probe.runtime_ollama_probe_json
-let ollama_loaded_models_of_ps_json = Tool_local_runtime_probe.ollama_loaded_models_of_ps_json
-let ollama_probe_run_of_generate_json = Tool_local_runtime_probe.ollama_probe_run_of_generate_json
-let kv_cache_assessment_json = Tool_local_runtime_probe.kv_cache_assessment_json
 
 let ok_response ~tool_name ~start_time fields : Core.tool_result =
   Tool_result.make_ok
@@ -60,7 +53,8 @@ let handle_runtime_verify _ctx args : Core.tool_result =
     ~start_time
     [
       ( "result",
-        runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () );
+        Tool_local_runtime_verify.runtime_verify_json
+          ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () );
     ]
 
 let run_runtime_ollama_probe ?timeout_sec args : Core.tool_result =
@@ -125,7 +119,8 @@ let run_runtime_ollama_probe ?timeout_sec args : Core.tool_result =
         ~start_time
         [
           ( "result",
-            runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
+            Tool_local_runtime_probe.runtime_ollama_probe_json
+              ?server_url ?model ?prompt ?keep_alive
               ~probe_runs ~max_tokens ~think_mode ?timeout_sec
               ~generate_when_unloaded ~run_generate () );
         ]

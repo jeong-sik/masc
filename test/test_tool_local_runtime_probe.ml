@@ -21,7 +21,7 @@ let test_ollama_ps_parser_extracts_loaded_models () =
     Yojson.Safe.from_string
       {|{"models":[{"name":"qwen3.5:35b-a3b-coding-nvfp4","model":"qwen3.5:35b-a3b-coding-nvfp4","size_vram":21474836480,"context_length":262144,"expires_at":"2026-04-10T00:00:00Z"}]}|}
   in
-  let models = Masc.Tool_local_runtime.ollama_loaded_models_of_ps_json json in
+  let models = Masc.Tool_local_runtime_probe.ollama_loaded_models_of_ps_json json in
   let open Yojson.Safe.Util in
   check int "one loaded model" 1 (List.length models);
   let model = List.hd models in
@@ -39,7 +39,7 @@ let test_ollama_generate_parser_computes_tok_per_second () =
       {|{"response":"READY","done":true,"done_reason":"stop","total_duration":9104952708,"load_duration":3338399458,"prompt_eval_count":20,"prompt_eval_duration":337442459,"eval_count":311,"eval_duration":5428288000,"thinking":"hidden"}|}
   in
   let run_json =
-    Masc.Tool_local_runtime.ollama_probe_run_of_generate_json ~run_index:1
+    Masc.Tool_local_runtime_probe.ollama_probe_run_of_generate_json ~run_index:1
       ~http_status:(Some 200) ~wall_clock_ms:9120 json
   in
   let prompt_tps =
@@ -272,7 +272,7 @@ let test_kv_cache_assessment_detects_repeat_improvement () =
         ];
     ]
   in
-  let assessment = Masc.Tool_local_runtime.kv_cache_assessment_json runs in
+  let assessment = Masc.Tool_local_runtime_probe.kv_cache_assessment_json runs in
   let open Yojson.Safe.Util in
   check string "likely reuse" "likely_reused"
     (assessment |> member "signal" |> to_string);
@@ -284,7 +284,7 @@ let test_kv_cache_assessment_detects_repeat_improvement () =
 
 let test_kv_cache_assessment_requires_two_successful_runs () =
   let assessment =
-    Masc.Tool_local_runtime.kv_cache_assessment_json
+    Masc.Tool_local_runtime_probe.kv_cache_assessment_json
       [ `Assoc [ ("run_index", `Int 1) ] ]
   in
   let open Yojson.Safe.Util in

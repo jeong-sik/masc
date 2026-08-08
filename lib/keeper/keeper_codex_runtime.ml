@@ -401,7 +401,7 @@ let codex_error_to_sdk_error = function
   | error -> Agent_sdk.Error.Internal (Runtime_codex_app_server.error_to_string error)
 ;;
 
-let run ~runtime_id ~keeper_name ~base_path ~session_dir ~goal ~goal_blocks
+let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~event_bus ~enable_thinking
     ~(config : Runtime_execution.codex_app_server) =
@@ -419,7 +419,7 @@ let run ~runtime_id ~keeper_name ~base_path ~session_dir ~goal ~goal_blocks
   | Some env, Some clock ->
     let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
     let* stored_session =
-      match Keeper_codex_session_store.load ~session_dir with
+      match Keeper_codex_session_store.load ~base_path ~keeper_name with
       | Ok session -> Ok session
       | Error detail ->
         Error (internal_error ("Codex session binding load failed: " ^ detail))
@@ -435,15 +435,29 @@ let run ~runtime_id ~keeper_name ~base_path ~session_dir ~goal ~goal_blocks
                 "stored runtime %S does not match selected runtime %S"
                 session.runtime_id
                 runtime_id))
-      | Some session when session.turn_count = Int.max_int ->
+      | Some { phase = Settled _; turn_count; _ } when turn_count = Int.max_int ->
         Error
           (config_error
              ~field:"codex_session.turn_count"
              "stored Codex session turn count cannot be incremented")
-      | Some session ->
+      | Some { phase = Settled { thread_id; _ }; turn_count; _ } ->
         Ok
-          ( Runtime_codex_app_server.Resume { thread_id = session.thread_id }
-          , session.turn_count + 1 )
+          (Runtime_codex_app_server.Resume { thread_id }, turn_count + 1)
+      | Some { phase = Start _; _ } ->
+        Error
+          (config_error
+             ~field:"codex_session.phase"
+             "stored Codex session has an incomplete thread start; refusing duplicate execution")
+      | Some { phase = Active _; _ } ->
+        Error
+          (config_error
+             ~field:"codex_session.phase"
+             "stored Codex session has an active unsettled attempt; refusing duplicate execution")
+      | Some { phase = Turn_inflight _; _ } ->
+        Error
+          (config_error
+             ~field:"codex_session.phase"
+             "stored Codex session has an in-flight turn; refusing duplicate execution")
     in
     let* prepared =
       prepare_turn
@@ -470,7 +484,7 @@ let run ~runtime_id ~keeper_name ~base_path ~session_dir ~goal ~goal_blocks
           (config_error
              ~field:"codex_session.tool_surface_sha256"
              (Printf.sprintf
-                "stored Codex thread tool surface %s does not match current surface %s; explicit session reset or migration is required"
+                "stored Codex thread tool surface %s does not match current surface %s"
                 session.tool_surface_sha256
                 tool_surface_sha256))
     in
@@ -506,6 +520,28 @@ let run ~runtime_id ~keeper_name ~base_path ~session_dir ~goal ~goal_blocks
         ~context
         ~terminal_error
     in
+    let* claimed_session =
+      match
+        Keeper_codex_session_store.claim
+          ~base_path
+          ~keeper_name
+          ~expected:stored_session
+          ~runtime_id
+          ~tool_surface_sha256
+          ~updated_at:(Time_compat.now ())
+      with
+      | Ok session -> Ok session
+      | Error detail ->
+        Error (internal_error ("Codex session claim failed: " ^ detail))
+    in
+    let session_state = ref claimed_session in
+    let update_session label transition =
+      match transition !session_state with
+      | Ok next ->
+        session_state := next;
+        Ok ()
+      | Error detail -> Error (Printf.sprintf "Codex session %s failed: %s" label detail)
+    in
     let started_at = Time_compat.now () in
     (match
        Runtime_codex_app_server.run_turn
@@ -515,6 +551,31 @@ let run ~runtime_id ~keeper_name ~base_path ~session_dir ~goal ~goal_blocks
          ?reasoning_effort:prepared.reasoning_effort
          ~thread_mode
          ~history
+         ~on_thread_ready:(fun ~thread_id ->
+           update_session "active transition" (fun expected ->
+             Keeper_codex_session_store.mark_active
+               ~base_path
+               ~keeper_name
+               ~expected
+               ~thread_id
+               ~updated_at:(Time_compat.now ())))
+         ~on_turn_starting:(fun ~thread_id ->
+           update_session "turn-starting transition" (fun expected ->
+             Keeper_codex_session_store.mark_turn_starting
+               ~base_path
+               ~keeper_name
+               ~expected
+               ~thread_id
+               ~updated_at:(Time_compat.now ())))
+         ~on_turn_started:(fun ~thread_id ~turn_id ->
+           update_session "turn-started transition" (fun expected ->
+             Keeper_codex_session_store.mark_turn_started
+               ~base_path
+               ~keeper_name
+               ~expected
+               ~thread_id
+               ~turn_id
+               ~updated_at:(Time_compat.now ())))
          client_config
          ~prompt
      with
@@ -532,21 +593,6 @@ let run ~runtime_id ~keeper_name ~base_path ~session_dir ~goal ~goal_blocks
            Error
              (internal_error
                 "Codex app-server reported a thread mode different from the requested session plan")
-       in
-       let* () =
-         match
-           Keeper_codex_session_store.save
-             ~session_dir
-             { runtime_id
-             ; thread_id = turn.thread_id
-             ; turn_count
-             ; tool_surface_sha256
-             ; updated_at = Time_compat.now ()
-             }
-         with
-         | Ok () -> Ok ()
-         | Error detail ->
-           Error (internal_error ("Codex session binding save failed: " ^ detail))
        in
        let* () =
          match !terminal_error with
@@ -597,6 +643,22 @@ let run ~runtime_id ~keeper_name ~base_path ~session_dir ~goal ~goal_blocks
          | HookFailed { stage; detail } ->
            Error (hook_error ~hook_name:"on_stop" ~stage detail)
          | decision -> Error (illegal_hook_decision ~hook_name:"on_stop" decision)
+       in
+       let* () =
+         match
+           Keeper_codex_session_store.settle
+             ~base_path
+             ~keeper_name
+             ~expected:!session_state
+             ~thread_id:turn.thread_id
+             ~turn_id:turn.turn_id
+             ~updated_at:(Time_compat.now ())
+         with
+         | Ok settled ->
+           session_state := settled;
+           Ok ()
+         | Error detail ->
+           Error (internal_error ("Codex session settlement failed: " ^ detail))
        in
        let capture, _metrics =
          Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()

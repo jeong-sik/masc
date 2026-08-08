@@ -708,23 +708,10 @@ let run_named
                          codex-app-server runtime"
                     }))
           | None, None ->
-            let* session_dir =
-              match keeper_session_dir with
-              | Some session_dir -> Ok session_dir
-              | None ->
-                Error
-                  (Agent_sdk.Error.Config
-                     (Agent_sdk.Error.InvalidConfig
-                        { field = "keeper_session_dir"
-                        ; detail =
-                            "codex-app-server runtime requires the Keeper trace session directory"
-                        }))
-            in
             Keeper_codex_runtime.run
               ~runtime_id:attempt_runtime_id
               ~keeper_name
               ~base_path
-              ~session_dir
               ~goal
               ~goal_blocks
               ~system_prompt

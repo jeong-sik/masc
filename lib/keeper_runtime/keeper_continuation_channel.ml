@@ -46,6 +46,19 @@ let discord ~guild_id ~channel_id ~parent_channel_id ~thread_id ~user_id =
   Ok (Discord { guild_id; channel_id; parent_channel_id; thread_id; user_id })
 ;;
 
+let discord_thread_parent t ~parent_channel_id =
+  match t with
+  | Discord { guild_id; channel_id; user_id; _ } ->
+    Discord
+      { guild_id
+      ; channel_id
+      ; parent_channel_id = Some parent_channel_id
+      ; thread_id = Some channel_id
+      ; user_id
+      }
+  | Dashboard _ | Slack _ | Unrouted _ -> t
+;;
+
 let slack ~team_id ~channel_id ~thread_ts ~user_id =
   let* team_id = validate_optional_nonblank "team_id" team_id in
   let* channel_id = validate_nonblank "channel_id" channel_id in

@@ -282,12 +282,15 @@ let validate_provider_request_cap ~runtime_id
 let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
   | Some runtime ->
-    let* _request_body_cap =
-      validate_provider_request_cap
-        ~runtime_id:runtime.id
-        runtime.Runtime.provider_config
-    in
-    Ok runtime
+    (match runtime.Runtime.execution with
+     | Runtime_execution.Codex_app_server _ -> Ok runtime
+     | Runtime_execution.Agent_core provider_config ->
+       let* _request_body_cap =
+         validate_provider_request_cap
+           ~runtime_id:runtime.id
+           provider_config
+       in
+       Ok runtime)
   | None -> Error (runtime_candidate_missing_error id)
 
 let resolve_runtime_candidate_for_attempt ?on_missing id =
@@ -681,11 +684,67 @@ let run_named
           ~fallback_enable_thinking:enable_thinking
           ()
       in
-      match
-         match provider_config_transform with
-         | None -> Ok runtime.Runtime.provider_config
-         | Some transform -> transform runtime.Runtime.provider_config
-      with
+      match runtime.Runtime.execution with
+      | Runtime_execution.Codex_app_server config ->
+        let codex_result =
+          match provider_config_transform, oas_checkpoint with
+          | Some _, _ ->
+            Error
+              (Agent_sdk.Error.Config
+                 (Agent_sdk.Error.InvalidConfig
+                    { field = "provider_config_transform"
+                    ; detail =
+                        "provider config transforms cannot target a \
+                         codex-app-server runtime"
+                    }))
+          | None, Some _ ->
+            Error
+              (Agent_sdk.Error.Config
+                 (Agent_sdk.Error.InvalidConfig
+                    { field = "oas_checkpoint"
+                    ; detail =
+                        "an OAS agent_core checkpoint cannot resume through a \
+                         codex-app-server runtime"
+                    }))
+          | None, None ->
+            Keeper_codex_runtime.run
+              ~runtime_id:attempt_runtime_id
+              ~keeper_name
+              ~base_path
+              ~goal
+              ~goal_blocks
+              ~system_prompt
+              ~tools
+              ~initial_messages
+              ~model_input_projection
+              ~hooks
+              ~context_injector
+              ~context
+              ~event_bus
+              ~enable_thinking:inference_policy.attempt_enable_thinking
+              ~config
+        in
+        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+        let codex_result =
+          Result.bind codex_result (fun run_result ->
+            Keeper_turn_driver_try_provider.apply_accept
+              ~runtime_id:attempt_runtime_id
+              ~accept
+              run_result)
+        in
+        (match codex_result with
+         | Ok run_result ->
+           Option.iter
+             (fun observe -> Option.iter observe run_result.Runtime_agent.runtime_observation)
+             on_runtime_observation
+         | Error _ -> ());
+        codex_result, None
+      | Runtime_execution.Agent_core runtime_provider_config ->
+       (match
+          match provider_config_transform with
+          | None -> Ok runtime_provider_config
+          | Some transform -> transform runtime_provider_config
+        with
       | Error err ->
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         Error err, None
@@ -772,6 +831,7 @@ let run_named
               provider_result
           in
           outcomes.turn_result, checkpoint_after))
+       )
     attempt_candidates
 
 

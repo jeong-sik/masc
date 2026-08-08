@@ -328,6 +328,46 @@ let test_public_read_rejects_offset_without_enrichment () =
       check bool "validation names exact field" true
         (contains_substring result.raw_output "offset"))
 
+let test_surface_read_rejects_duplicate_dispatch_fields () =
+  with_exec_fixture
+    "keeper_tool_dispatch_runtime_surface_read_rejects_duplicates"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let run input =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~publication_recovery
+          ~ctx_work
+          ~name:"keeper_surface_read"
+          ~input
+          ()
+      in
+      let duplicate_mode =
+        run
+          (`Assoc
+             [ "surface", `String "discord"
+             ; "mode", `String "channel"
+             ; "mode", `String "local" ])
+      in
+      let duplicate_channel =
+        run
+          (`Assoc
+             [ "surface", `String "discord"
+             ; "mode", `String "channel"
+             ; "channel_id", `String "123"
+             ; "channel_id", `String "456" ])
+      in
+      check bool "duplicate fields produce validation output" true
+        (contains_substring duplicate_mode.raw_output "error_code");
+      check string "duplicate mode is named"
+        "keeper_surface_read arguments contains duplicate field \"mode\""
+        Yojson.Safe.Util.(member "message" (parse_json duplicate_mode.raw_output) |> to_string);
+      check bool "duplicate channel produces validation output" true
+        (contains_substring duplicate_channel.raw_output "error_code");
+      check string "duplicate channel is not silently selected"
+        "keeper_surface_read arguments contains duplicate field \"channel_id\""
+        Yojson.Safe.Util.(member "message" (parse_json duplicate_channel.raw_output) |> to_string))
+
 let test_board_runtime_rejects_unknown_route () =
   let meta = make_meta ~name:"keeper-board-runtime-guard" () in
   let raw =
@@ -4066,6 +4106,8 @@ let () =
         test_public_read_rejects_unsupported_range_fields;
       test_case "public Read rejects offset without dispatch enrichment" `Quick
         test_public_read_rejects_offset_without_enrichment;
+      test_case "surface Read rejects duplicate dispatch fields" `Quick
+        test_surface_read_rejects_duplicate_dispatch_fields;
       test_case "missing file is failure" `Quick
         test_execute_with_outcome_missing_file_is_failure;
       test_case "initializing recovery isolates only publication writes" `Quick

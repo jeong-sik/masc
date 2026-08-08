@@ -69,7 +69,9 @@ let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
   let total_count = List.length all_names in
   let visible_count = List.length allowed_names in
   let hidden_count = total_count - visible_count in
-  let public_count = List.length Tool_catalog.public_mcp_tools in
+  let public_count =
+    List.length Tool_catalog_surfaces.public_mcp_surface_tools
+  in
   let tool_dist =
     `Assoc [
       ("total", `Int total_count);

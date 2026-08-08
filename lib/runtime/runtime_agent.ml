@@ -692,8 +692,15 @@ let input_capabilities_for_config (config : config) =
    provider caps overlaid with the model's declared media capabilities (the MASC
    SSOT, [apply_runtime_model_input_capabilities]). *)
 let input_capabilities_of_runtime (rt : Runtime.t) =
+  let provider_caps =
+    match rt.Runtime.execution with
+    | Runtime_execution.Agent_core provider_config ->
+      provider_caps_of_config provider_config
+    | Runtime_execution.Codex_app_server _ ->
+      Llm_provider.Capabilities.default_capabilities
+  in
   apply_runtime_model_input_capabilities
-    (provider_caps_of_config rt.Runtime.provider_config)
+    provider_caps
     (Option.value rt.Runtime.model.capabilities
        ~default:Runtime_schema.model_capabilities_default)
 

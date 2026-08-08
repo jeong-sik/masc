@@ -6,17 +6,35 @@
 
 type error =
   | Network of string
-  | Http_status of { code : int; body : string }
-  | Discord_api of { code : int; message : string }
-  | Other of string
+  | Http_status of { request_id : string; code : int; body_bytes : int }
+  | Discord_api of { request_id : string; code : int }
+  | Other of { request_id : string; reason : string; body_bytes : int }
 
 let pp_error fmt = function
   | Network msg -> Format.fprintf fmt "network: %s" msg
-  | Http_status { code; body } ->
-      Format.fprintf fmt "http %d: %s" code body
-  | Discord_api { code; message } ->
-      Format.fprintf fmt "discord %d: %s" code message
-  | Other msg -> Format.fprintf fmt "other: %s" msg
+  | Http_status { request_id; code; body_bytes } ->
+      Format.fprintf fmt "http request=%s status=%d body_bytes=%d"
+        request_id code body_bytes
+  | Discord_api { request_id; code } ->
+      Format.fprintf fmt "discord request=%s code=%d" request_id code
+  | Other { request_id; reason; body_bytes } ->
+      Format.fprintf fmt "other request=%s reason=%s body_bytes=%d"
+        request_id reason body_bytes
+
+let request_sequence = Atomic.make 0
+
+let next_request_id operation =
+  let sequence = Atomic.fetch_and_add request_sequence 1 in
+  Printf.sprintf "discord-%s-%d" operation sequence
+
+type snowflake = Snowflake of string
+
+let snowflake_of_string value =
+  if value = "" || not (String.for_all (fun c -> c >= '0' && c <= '9') value)
+  then Error "Discord snowflake must be a non-empty decimal string"
+  else Ok (Snowflake value)
+
+let snowflake_to_string (Snowflake value) = value
 
 (* Discord text-message content limit, in Unicode scalar units.
    Messages longer than this must be split into multiple payloads. *)
@@ -41,7 +59,7 @@ let build_request ~token ~channel_id ~content ?reply_to_message_id () =
   let url =
     Printf.sprintf
       "%s/channels/%s/messages"
-      api_base channel_id
+      api_base (snowflake_to_string channel_id)
   in
   let headers =
     ("Content-Type", "application/json") :: auth_headers ~token
@@ -51,7 +69,9 @@ let build_request ~token ~channel_id ~content ?reply_to_message_id () =
     match reply_to_message_id with
     | None -> fields
     | Some ref_id ->
-        ("message_reference", `Assoc [ "message_id", `String ref_id ])
+        ( "message_reference"
+        , `Assoc
+            [ "message_id", `String (snowflake_to_string ref_id) ] )
         :: fields
   in
   let body = Yojson.Safe.to_string (`Assoc fields) in
@@ -61,57 +81,198 @@ let build_typing_request ~token ~channel_id () =
   let url =
     Printf.sprintf
       "%s/channels/%s/typing"
-      api_base channel_id
+      api_base (snowflake_to_string channel_id)
+  in
+  (url, auth_headers ~token, "")
+
+let build_channel_request ~token ~channel_id () =
+  let url =
+    Printf.sprintf "%s/channels/%s" api_base (snowflake_to_string channel_id)
+  in
+  (url, auth_headers ~token, "")
+
+let add_query_params url params =
+  Uri.of_string url
+  |> fun uri -> Uri.add_query_params' uri params
+  |> Uri.to_string
+
+let build_channel_messages_request
+      ~token
+      ~channel_id
+      ?limit
+      ?before
+      ?after
+  ()
+  =
+  let url =
+    Printf.sprintf "%s/channels/%s/messages" api_base
+      (snowflake_to_string channel_id)
+  in
+  let params =
+    (match limit with Some value -> [ "limit", string_of_int value ] | None -> [])
+    @ (match before with
+       | Some value -> [ "before", snowflake_to_string value ]
+       | None -> [])
+    @ (match after with
+       | Some value -> [ "after", snowflake_to_string value ]
+       | None -> [])
+  in
+  (add_query_params url params, auth_headers ~token, "")
+
+let build_guild_members_request
+      ~token
+      ~guild_id
+      ?query
+      ?limit
+      ?after
+      ()
+  =
+  let path =
+    match query with
+    | Some value when String.trim value <> "" -> "members/search"
+    | Some _ | None -> "members"
+  in
+  let url =
+    Printf.sprintf "%s/guilds/%s/%s" api_base (snowflake_to_string guild_id)
+      path
+  in
+  let params =
+    (match query with
+     | Some value when String.trim value <> "" -> [ "query", value ]
+     | Some _ | None -> [])
+    @ (match limit with Some value -> [ "limit", string_of_int value ] | None -> [])
+    @ (match query with
+       | Some value when String.trim value <> "" -> []
+       | Some _ | None ->
+         (match after with
+          | Some value -> [ "after", snowflake_to_string value ]
+          | None -> []))
+  in
+  (add_query_params url params, auth_headers ~token, "")
+
+let build_guild_member_request ~token ~guild_id ~user_id () =
+  let url =
+    Printf.sprintf "%s/guilds/%s/members/%s" api_base
+      (snowflake_to_string guild_id) (snowflake_to_string user_id)
   in
   (url, auth_headers ~token, "")
 
 let parse_json_safe s =
   try Some (Yojson.Safe.from_string s) with Yojson.Json_error _ -> None
 
-let field_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
+let unique_field_opt name = function
+  | `Assoc fields ->
+    (match List.filter (fun (key, _) -> String.equal key name) fields with
+     | [] -> Ok None
+     | [ (_, value) ] -> Ok (Some value)
+     | _ -> Error (Printf.sprintf "duplicate response field %S" name))
+  | _ -> Ok None
 
-let error_of_non2xx ~status ~body =
+let error_of_non2xx ~request_id ~status ~body =
   match parse_json_safe body with
-  | None -> Http_status { code = status; body }
+  | None ->
+    Http_status { request_id; code = status; body_bytes = String.length body }
   | Some json ->
       let code =
-        match field_opt "code" json with
-        | Some (`Int c) -> c
-        | _ -> status
+        match unique_field_opt "code" json with
+        | Ok (Some (`Int c)) -> c
+        | Ok _ | Error _ -> status
       in
-      let message =
-        match field_opt "message" json with
-        | Some (`String s) -> s
-        | _ -> body
-      in
-      Discord_api { code; message }
+      (match unique_field_opt "message" json with
+       | Ok (Some (`String _)) -> Discord_api { request_id; code }
+       | Ok _ | Error _ ->
+         Http_status
+           { request_id; code = status; body_bytes = String.length body })
 
-let parse_response ~status ~body =
+let parse_response ?request_id ~status ~body () =
+  let request_id =
+    match request_id with Some value -> value | None -> next_request_id "parse"
+  in
   if status >= 200 && status < 300 then
     match parse_json_safe body with
     | None ->
-        Error (Other ("2xx response body is not valid JSON: " ^ body))
+        Error
+          (Other
+             { request_id
+             ; reason = "2xx response body is not valid JSON"
+             ; body_bytes = String.length body
+             })
     | Some json ->
-        (match field_opt "id" json with
-         | Some (`String id) -> Ok id
-         | _ -> Error (Other "2xx response missing 'id' string"))
+        (match unique_field_opt "id" json with
+         | Ok (Some (`String id)) -> Ok id
+         | Error reason ->
+           Error
+             (Other
+                { request_id
+                ; reason
+                ; body_bytes = String.length body
+                })
+         | Ok _ ->
+           Error
+             (Other
+                { request_id
+                ; reason = "2xx response missing 'id' string"
+                ; body_bytes = String.length body
+                }))
   else
-    Error (error_of_non2xx ~status ~body)
+    Error (error_of_non2xx ~request_id ~status ~body)
 
-let parse_empty_response ~status ~body =
+let parse_json_response ?request_id ~status ~body () =
+  let request_id =
+    match request_id with Some value -> value | None -> next_request_id "parse"
+  in
+  if status >= 200 && status < 300 then
+    match parse_json_safe body with
+    | Some json -> Ok json
+    | None ->
+      Error
+        (Other
+           { request_id
+           ; reason = "2xx response body is not valid JSON"
+           ; body_bytes = String.length body
+           })
+  else
+    Error (error_of_non2xx ~request_id ~status ~body)
+
+let parse_empty_response ?request_id ~status ~body () =
+  let request_id =
+    match request_id with Some value -> value | None -> next_request_id "parse"
+  in
   if status >= 200 && status < 300 then Ok ()
-  else Error (error_of_non2xx ~status ~body)
+  else Error (error_of_non2xx ~request_id ~status ~body)
 
 let send_message ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
     ~token ~channel_id ~content ?reply_to_message_id () =
-  let (url, headers, body) =
-    build_request ~token ~channel_id ~content ?reply_to_message_id ()
-  in
-  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
-  | Error msg -> Error (Network msg)
-  | Ok (status, body) -> parse_response ~status ~body
+  match snowflake_of_string channel_id with
+  | Error message -> Error (Network message)
+  | Ok channel_id ->
+    (match reply_to_message_id with
+     | Some value ->
+       (match snowflake_of_string value with
+        | Error message -> Error (Network message)
+        | Ok reply_to_message_id ->
+          let (url, headers, body) =
+            build_request ~token ~channel_id ~content ~reply_to_message_id ()
+          in
+          (match
+             Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body
+               ()
+           with
+           | Error msg -> Error (Network msg)
+           | Ok (status, body) ->
+             parse_response ~request_id:(next_request_id "send") ~status ~body
+               ()))
+     | None ->
+       let (url, headers, body) =
+         build_request ~token ~channel_id ~content ()
+       in
+       (match
+          Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body ()
+        with
+        | Error msg -> Error (Network msg)
+        | Ok (status, body) ->
+          parse_response ~request_id:(next_request_id "send") ~status ~body
+            ()))
 
 (* Byte length of the UTF-8 sequence whose lead byte is [c]. An invalid
    lead byte counts as 1 so iteration always makes progress. *)
@@ -166,7 +327,7 @@ let build_edit_request ~token ~channel_id ~message_id ~content () =
   let url =
     Printf.sprintf
       "%s/channels/%s/messages/%s"
-      api_base channel_id message_id
+      api_base (snowflake_to_string channel_id) (snowflake_to_string message_id)
   in
   let headers =
     ("Content-Type", "application/json") :: auth_headers ~token
@@ -179,19 +340,75 @@ let build_edit_request ~token ~channel_id ~message_id ~content () =
 
 let edit_message ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
     ~token ~channel_id ~message_id ~content () =
-  let (url, headers, body) =
-    build_edit_request ~token ~channel_id ~message_id ~content ()
-  in
-  match Masc_http_client.patch_sync ?clock ~timeout_sec ~url ~headers ~body () with
-  | Error msg -> Error (Network msg)
-  | Ok (status, body) -> parse_empty_response ~status ~body
+  match snowflake_of_string channel_id, snowflake_of_string message_id with
+  | Error message, _ | _, Error message -> Error (Network message)
+  | Ok channel_id, Ok message_id ->
+    let (url, headers, body) =
+      build_edit_request ~token ~channel_id ~message_id ~content ()
+    in
+    match Masc_http_client.patch_sync ?clock ~timeout_sec ~url ~headers ~body () with
+    | Error msg -> Error (Network msg)
+    | Ok (status, body) ->
+      parse_empty_response ~request_id:(next_request_id "edit") ~status ~body ()
 
 let trigger_typing ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
     ~token ~channel_id () =
-  let url, headers, body = build_typing_request ~token ~channel_id () in
-  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
+  match snowflake_of_string channel_id with
+  | Error message -> Error (Network message)
+  | Ok channel_id ->
+    let url, headers, body = build_typing_request ~token ~channel_id () in
+    match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
+    | Error msg -> Error (Network msg)
+    | Ok (status, body) ->
+      parse_empty_response ~request_id:(next_request_id "typing") ~status ~body ()
+
+let get_json ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ~request_id ~url ~headers () =
+  match Masc_http_client.get_sync ?clock ~timeout_sec ~url ~headers () with
   | Error msg -> Error (Network msg)
-  | Ok (status, body) -> parse_empty_response ~status ~body
+  | Ok (status, body) -> parse_json_response ~request_id ~status ~body ()
+
+let get_channel ?clock ?timeout_sec ~token ~channel_id () =
+  let url, headers, _ = build_channel_request ~token ~channel_id () in
+  get_json ?clock ?timeout_sec ~request_id:(next_request_id "channel") ~url
+    ~headers ()
+
+let get_channel_messages
+      ?clock
+      ?timeout_sec
+      ~token
+      ~channel_id
+      ?limit
+      ?before
+      ?after
+      ()
+  =
+  let url, headers, _ =
+    build_channel_messages_request ~token ~channel_id ?limit ?before ?after ()
+  in
+  get_json ?clock ?timeout_sec ~request_id:(next_request_id "messages") ~url
+    ~headers ()
+
+let get_guild_members
+      ?clock
+      ?timeout_sec
+      ~token
+      ~guild_id
+      ?query
+      ?limit
+      ?after
+      ()
+  =
+  let url, headers, _ =
+    build_guild_members_request ~token ~guild_id ?query ?limit ?after ()
+  in
+  get_json ?clock ?timeout_sec ~request_id:(next_request_id "members") ~url
+    ~headers ()
+
+let get_guild_member ?clock ?timeout_sec ~token ~guild_id ~user_id () =
+  let url, headers, _ = build_guild_member_request ~token ~guild_id ~user_id () in
+  get_json ?clock ?timeout_sec ~request_id:(next_request_id "member") ~url
+    ~headers ()
 
 (* ── Embed support ──────────────────────────────────────────────── *)
 
@@ -273,7 +490,7 @@ let build_embed_request ~token ~channel_id ~content ?embeds () =
   let url =
     Printf.sprintf
       "%s/channels/%s/messages"
-      api_base channel_id
+      api_base (snowflake_to_string channel_id)
   in
   let headers =
     ("Content-Type", "application/json") :: auth_headers ~token
@@ -296,7 +513,7 @@ let build_edit_embed_request ~token ~channel_id ~message_id
   let url =
     Printf.sprintf
       "%s/channels/%s/messages/%s"
-      api_base channel_id message_id
+      api_base (snowflake_to_string channel_id) (snowflake_to_string message_id)
   in
   let headers =
     ("Content-Type", "application/json") :: auth_headers ~token
@@ -317,9 +534,13 @@ let build_edit_embed_request ~token ~channel_id ~message_id
 let send_embed_message ?clock
     ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
     ~token ~channel_id ~content ?embeds () =
-  let (url, headers, body) =
-    build_embed_request ~token ~channel_id ~content ?embeds ()
-  in
-  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
-  | Error msg -> Error (Network msg)
-  | Ok (status, body) -> parse_response ~status ~body
+  match snowflake_of_string channel_id with
+  | Error message -> Error (Network message)
+  | Ok channel_id ->
+    let (url, headers, body) =
+      build_embed_request ~token ~channel_id ~content ?embeds ()
+    in
+    match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
+    | Error msg -> Error (Network msg)
+    | Ok (status, body) ->
+      parse_response ~request_id:(next_request_id "embed") ~status ~body ()

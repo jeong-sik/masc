@@ -10,6 +10,13 @@ let parse_or_fail content =
   | Ok doc -> doc
   | Error msg -> failf "TOML parse failed: %s" msg
 
+let agent_core_provider_config (runtime : Runtime.t) =
+  match runtime.execution with
+  | Runtime_execution.Agent_core provider_config -> provider_config
+  | Runtime_execution.Codex_app_server _ ->
+    failf "runtime %s is not an agent_core provider" runtime.id
+;;
+
 let rec repo_root_from dir =
   let dune_project = Filename.concat dir "dune-project" in
   if Sys.file_exists dune_project then dir
@@ -309,7 +316,7 @@ let assert_ollama_cloud_seed_runtime runtimes case =
     check bool (case.runtime_id ^ " known to provider-qualified OAS catalog") true
       (Option.is_some
          (Llm_provider.Provider_config.capabilities_for_config_model
-            runtime.provider_config));
+            (agent_core_provider_config runtime)));
     (match runtime.model.capabilities with
      | None -> failf "expected capabilities for %s" case.runtime_id
      | Some caps ->
@@ -657,7 +664,7 @@ let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
       (fun (runtime : Runtime.t) ->
          match
            Llm_provider.Provider_config.capabilities_for_config_model
-             runtime.provider_config
+             (agent_core_provider_config runtime)
          with
          | None ->
            failf
@@ -665,8 +672,8 @@ let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
               OAS Provider_config"
              runtime.id
              (Llm_provider.Provider_config.capability_provider_label
-                runtime.provider_config)
-             runtime.provider_config.model_id
+                (agent_core_provider_config runtime))
+             (agent_core_provider_config runtime).model_id
          | Some _ ->
            if String.equal runtime.id "ollama_cloud.ollama-cloud-rnj-1-8b"
            then
@@ -674,7 +681,8 @@ let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
                bool
                "runtime-local alias uses the typed Provider_config override"
                true
-               (Option.is_some runtime.provider_config.model_capabilities_override))
+               (Option.is_some
+                  (agent_core_provider_config runtime).model_capabilities_override))
       runtimes
 
 let test_deployment_oas_model_catalog_modality_priorities_resolve () =
@@ -839,7 +847,7 @@ List.iter
   config.exact_output_lane_decls);
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
-      default.provider_config.connect_timeout_s;
+      (agent_core_provider_config default).connect_timeout_s;
     check int "public seed has no keeper assignments" 0
       (List.length assignments);
     let keeper_dispatch_ids =
@@ -859,7 +867,7 @@ List.iter
          with
          | None -> failf "expected bounded Keeper runtime in seed: %s" runtime_id
          | Some runtime ->
-           (match runtime.provider_config.max_request_body_bytes with
+           (match (agent_core_provider_config runtime).max_request_body_bytes with
             | Some cap when cap > 0 -> ()
             | None | Some _ ->
               failf
@@ -910,7 +918,7 @@ List.iter
      | Some runtime ->
        check (option (float 0.0)) "DeepSeek keeps OAS connect timeout default"
          None
-         runtime.provider_config.connect_timeout_s;
+         (agent_core_provider_config runtime).connect_timeout_s;
        (match runtime.model.capabilities with
         | Some caps ->
           check bool "DeepSeek Pro structured output disabled" false
@@ -964,7 +972,7 @@ List.iter
          runtime.model.api_name;
        check (option (float 0.0)) "native MiniMax M3 connect timeout"
          (Some 600.0)
-         runtime.provider_config.connect_timeout_s;
+         (agent_core_provider_config runtime).connect_timeout_s;
        (match runtime.model.capabilities with
        | Some caps ->
          check bool "native MiniMax M3 response_format json" true
@@ -2522,9 +2530,9 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
             (option int)
             (Printf.sprintf "%s provider_config max_concurrent_requests" id)
             expected
-            rt.Runtime.provider_config.max_concurrent_requests;
+            (agent_core_provider_config rt).max_concurrent_requests;
           let selected_provider_config =
-            Runtime_candidate.of_provider_config rt.Runtime.provider_config
+            Runtime_candidate.of_provider_config (agent_core_provider_config rt)
             |> Runtime_candidate.provider_cfg
           in
           check
@@ -3150,11 +3158,67 @@ let test_runtime_assignment_default_rider_resolves_to_default_runtime () =
              "local.good"
              (Runtime.get_default_runtime_id ())))
 
+let codex_app_server_runtime_toml ?credential () =
+  let credential = Option.value credential ~default:"" in
+  Printf.sprintf
+    "[providers.codex]\n\
+     protocol = \"codex-app-server\"\n\
+     command = \"codex\"\n\
+     is-non-interactive = true\n\
+     %s\n\
+     [models.codex]\n\
+     api-name = \"gpt-5.6-sol\"\n\
+     max-context = 400000\n\
+     \n\
+     [codex.codex]\n\
+     \n\
+     [runtime]\n\
+     default = \"codex.codex\"\n"
+    credential
+;;
+
+let test_codex_app_server_materializes_as_turn_runtime () =
+  with_temp_runtime_toml (codex_app_server_runtime_toml ()) (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error error -> failf "codex-app-server runtime should load: %s" error
+    | Ok (runtimes, default, _, _, _, _) ->
+      check int "one runtime" 1 (List.length runtimes);
+      check string "default id" "codex.codex" default.id;
+      (match default.execution with
+       | Runtime_execution.Agent_core _ ->
+         fail "codex-app-server was incorrectly materialized as agent_core"
+       | Runtime_execution.Codex_app_server config ->
+         check string "cli path" "codex" config.cli_path;
+         check (option string) "model" (Some "gpt-5.6-sol") config.model))
+;;
+
+let test_codex_app_server_rejects_declared_credentials () =
+  let credential =
+    "[providers.codex.credentials]\n\
+     type = \"env\"\n\
+     key = \"OPENAI_API_KEY\""
+  in
+  with_temp_runtime_toml
+    (codex_app_server_runtime_toml ~credential ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ -> fail "codex-app-server incorrectly admitted declared credentials"
+       | Error error ->
+         check bool "diagnostic names official subscription ownership" true
+           (String_util.contains_substring
+              error
+              "official Codex client owns subscription login"))
+;;
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
         [ test_case "runtime.json is not a repo config source" `Quick
             test_runtime_json_not_in_repo_config;
+          test_case "codex app-server is a distinct turn runtime" `Quick
+            test_codex_app_server_materializes_as_turn_runtime;
+          test_case "codex app-server rejects declared credentials" `Quick
+            test_codex_app_server_rejects_declared_credentials;
           test_case "deployment OAS catalog covers live RunPod MTP runtime" `Quick
             test_deployment_oas_model_catalog_covers_live_runpod_mtp;
           test_case

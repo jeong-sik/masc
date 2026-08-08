@@ -621,6 +621,9 @@ let run_keepalive_unified_turn
             | [ { Keeper_event_queue.payload = Fusion_completed completion; _ } ]
               when Keeper_continuation_channel.is_routable completion.channel ->
               Some completion.channel
+            | [ { Keeper_event_queue.payload = Connector_attention attention; _ } ]
+              when Keeper_continuation_channel.is_routable attention.channel ->
+              Some attention.channel
             | [] | [ _ ] | _ :: _ :: _ -> None
           in
           (* The event intake is the exact turn input. Keep its attribution in

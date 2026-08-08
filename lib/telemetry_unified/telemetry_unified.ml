@@ -787,7 +787,9 @@ let trajectory_file_summary path : trajectory_file_summary option =
            (* boundary past the file size: shrink/rotation — full re-parse *)
            Otel_metric_store_core.inc_counter
              Otel_builtin_metric_names.metric_telemetry_cache_rescans
-             ~labels:[ ("store", "trajectories") ]
+             ~labels:
+               [ ( "store"
+                 , Common.keeper_runtime_store_dirname Common.Keeper_trajectories ) ]
              ();
            0, 0, None
          | None -> 0, 0, None
@@ -811,7 +813,8 @@ let trajectory_file_summary path : trajectory_file_summary option =
        in
        Otel_metric_store_core.inc_counter
          Otel_builtin_metric_names.metric_telemetry_scanned_bytes
-         ~labels:[ ("store", "trajectories") ]
+         ~labels:
+           [ ("store", Common.keeper_runtime_store_dirname Common.Keeper_trajectories) ]
          ~delta:(Float.of_int (max 0 (boundary - from)))
          ();
        let entry =
@@ -927,7 +930,11 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
               ?coverage_gap ()),
         keeper_total )
     | Trajectory_tool_call ->
-      let trajectories_root = Filename.concat masc_root "trajectories" in
+      let trajectories_root =
+        Filename.concat
+          masc_root
+          (Common.keeper_runtime_store_dirname Common.Keeper_trajectories)
+      in
       let dir_state =
         classify_store_dir Trajectory_tool_call
           ~site:"summary_trajectory_root" trajectories_root

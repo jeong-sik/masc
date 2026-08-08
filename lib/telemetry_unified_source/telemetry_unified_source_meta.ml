@@ -200,7 +200,11 @@ let discover_trajectory_keeper_dirs_in_root trajectories_root =
          else None))
 
 let discover_trajectory_keeper_dirs masc_root : (string * string) list =
-  let trajectories_root = Filename.concat masc_root "trajectories" in
+  let trajectories_root =
+    Filename.concat
+      masc_root
+      (Common.keeper_runtime_store_dirname Common.Keeper_trajectories)
+  in
   match classify_store_dir Trajectory_tool_call
           ~site:"discover_trajectory_root" trajectories_root with
   | Store_missing | Store_invalid -> []

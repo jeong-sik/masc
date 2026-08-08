@@ -159,7 +159,9 @@ let prune_shared_jsonl_stores ~prune_dir ~days ~masc_root =
      Dated_jsonl.prune is a no-op there, prune by mtime keeper-scoped. *)
   + prune_children_dirs
       ~prune_dir:(prune_flat_jsonl_older_than ~days)
-      (Filename.concat masc_root "trajectories")
+      (Filename.concat
+         masc_root
+         (Common.keeper_runtime_store_dirname Common.Keeper_trajectories))
   + prune_children_dirs ~prune_dir (Filename.concat masc_root "resilience_audit")
   (* decision_audit: [<keeper>/YYYY-MM/DD.jsonl] written via
      [Keeper_decision_audit.append] ([keeper_decision_audit.ml:185]). Same

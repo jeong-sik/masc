@@ -133,7 +133,11 @@ let ok_response fields =
 let error_result ?tool_name ?start_time msg =
   let tool_name = Option.value ~default:"" tool_name in
   let start_time = Option.value ~default:(Time_compat.now ()) start_time in
-  Tool_result.error ~tool_name ~start_time msg
+  Tool_result.error
+    ~failure_class:Tool_result.Workflow_rejection
+    ~tool_name
+    ~start_time
+    msg
 
 (** [Tool_result.result] error with machine-readable error code. *)
 let error_result_typed ?tool_name ?start_time ~code msg =
@@ -186,7 +190,12 @@ let get_int_required args key =
 let ( let*! ) r f =
   match r with
   | Ok v -> f v
-  | Error e -> Tool_result.error ~tool_name:"" ~start_time:(Time_compat.now ()) e
+  | Error e ->
+    Tool_result.error
+      ~failure_class:Tool_result.Workflow_rejection
+      ~tool_name:""
+      ~start_time:(Time_compat.now ())
+      e
 
 (** {1 Structured Field Validation}
 

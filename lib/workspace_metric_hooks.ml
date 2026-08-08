@@ -329,7 +329,10 @@ let install () =
       let start_time = Time_compat.now () in
       match lookup_dispatch with
       | None ->
-        Tool_result.error ~tool_name:name ~start_time
+        Tool_result.error
+          ~failure_class:Tool_result.Workflow_rejection
+          ~tool_name:name
+          ~start_time
           (Printf.sprintf
              "unknown tool %s; this review offers only %s"
              name
@@ -337,7 +340,12 @@ let install () =
       | Some dispatch ->
         (match dispatch ~name ~args with
          | Ok output -> Tool_result.ok ~tool_name:name ~start_time output
-         | Error detail -> Tool_result.error ~tool_name:name ~start_time detail)
+         | Error detail ->
+           Tool_result.error
+             ~failure_class:Tool_result.Runtime_failure
+             ~tool_name:name
+             ~start_time
+             detail)
     in
     let dispatch_verdict ~name ~args =
       let start_time = Time_compat.now () in
@@ -350,6 +358,7 @@ let install () =
         in
         protocol_error_ref := Some detail;
         Tool_result.error
+          ~failure_class:Tool_result.Workflow_rejection
           ~tool_name:name
           ~start_time
           detail
@@ -369,6 +378,7 @@ let install () =
              "[anti-rationalization] structured verdict parse failed: %s"
              msg;
            Tool_result.error
+             ~failure_class:Tool_result.Workflow_rejection
              ~tool_name:name
              ~start_time
              (Printf.sprintf "Invalid verdict format: %s" msg))

@@ -67,7 +67,7 @@ let result_to_response ~tool_name ~start_time = function
   | Ok msg -> Tool_result.ok ~tool_name ~start_time msg
   | Error e ->
       Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time
         (Masc_domain.masc_error_to_string e)
 
@@ -131,7 +131,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
     (* RFC-0189: schema rejection — operator passed unknown
        argument names. [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf
         "Unknown argument(s): %s. Valid: %s"
@@ -161,12 +161,12 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
      caller-input violations. [Workflow_rejection]. *)
   if String.equal trimmed_title "" then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       "Task title cannot be empty or whitespace-only"
   else if priority < 1 || priority > 5 then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
   else if Option.is_some goal_id
@@ -180,7 +180,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
                        String.equal goal.id (Option.value ~default:"" goal_id)))
   then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (* DET-OK: same guarded branch — goal_id is [Some _]. *)
       (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
@@ -188,7 +188,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
     match contract_result with
     | Error error ->
         Tool_result.error
-          ~failure_class:(Some Tool_result.Workflow_rejection)
+          ~failure_class:Tool_result.Workflow_rejection
           ~tool_name ~start_time error
     | Ok contract ->
         let add_result =
@@ -223,7 +223,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
              ()
          | Error err ->
            Tool_result.error
-             ~failure_class:(Some Tool_result.Workflow_rejection)
+             ~failure_class:Tool_result.Workflow_rejection
              ~tool_name
              ~start_time
              (Workspace.add_task_error_to_string err))
@@ -237,7 +237,7 @@ let handle_set_goal ~tool_name ~start_time ctx args =
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
         (String.concat ", " unknown)
@@ -247,12 +247,12 @@ let handle_set_goal ~tool_name ~start_time ctx args =
     let goal_id = String.trim (get_string args "goal_id" "") in
     if String.equal task_id "" then
       Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time
         "task_id is required and cannot be empty"
     else if String.equal goal_id "" then
       Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time
         "goal_id is required and cannot be empty"
     else (
@@ -270,7 +270,7 @@ let handle_set_goal ~tool_name ~start_time ctx args =
           ()
       | Error err ->
         Tool_result.error
-          ~failure_class:(Some Tool_result.Workflow_rejection)
+          ~failure_class:Tool_result.Workflow_rejection
           ~tool_name ~start_time
           (Task_goal_assignment.set_task_goal_error_to_string err))
 
@@ -282,7 +282,7 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
   in
   if Stdlib.List.length tasks_json = 0 then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       "tasks array is empty or missing"
   else
@@ -334,7 +334,7 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
   let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in
   if Stdlib.List.length errors > 0 then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Validation failed:\n%s" (String.concat "\n" errors))
   else
@@ -365,7 +365,7 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
          ()
      | Error err ->
        Tool_result.error
-         ~failure_class:(Some Tool_result.Workflow_rejection)
+         ~failure_class:Tool_result.Workflow_rejection
          ~tool_name
          ~start_time
          (Workspace.batch_add_tasks_error_to_string err))
@@ -379,7 +379,7 @@ let handle_claim ~tool_name ~start_time ctx args =
      agent_name alone; gate added no real authorization. *)
   if Option.is_some (Json_util.assoc_member_opt "agent_role" args) then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       "agent_role is no longer supported"
   else
@@ -493,7 +493,7 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
        "no claimable task", "agent not allowed", "permission denied"
        — all caller-actionable. [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Error: %s" e)
 
@@ -513,13 +513,13 @@ let handle_release ~tool_name ~start_time ctx args =
    | Error error ->
        (* RFC-0189: handoff_context parse error from caller payload. *)
        Tool_result.error
-         ~failure_class:(Some Tool_result.Workflow_rejection)
+         ~failure_class:Tool_result.Workflow_rejection
          ~tool_name ~start_time error
    | Ok handoff_context ->
        if strict_release_requires_handoff task_opt && Option.is_none handoff_context
        then
          Tool_result.error
-           ~failure_class:(Some Tool_result.Workflow_rejection)
+           ~failure_class:Tool_result.Workflow_rejection
            ~tool_name ~start_time
            "Strict task release requires handoff_context.summary"
        else

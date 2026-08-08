@@ -2003,7 +2003,11 @@ let process_single_turn ~user_row_origin ~submission
           push_worker_event
             (Stream_terminal
                { status = Stream_error; body = detail; queued_outcome });
-          Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
+          Tool_result.error
+            ~failure_class:Tool_result.Runtime_failure
+            ~tool_name:"masc_keeper_msg"
+            ~start_time
+            detail
         in
         let on_admitted =
           if queued_turn then Some on_queue_turn_admitted else None
@@ -2074,7 +2078,11 @@ let process_single_turn ~user_row_origin ~submission
                  ; body = detail
                  ; queued_outcome = None
                  });
-            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
+            Tool_result.error
+              ~failure_class:Tool_result.Runtime_failure
+              ~tool_name:"masc_keeper_msg"
+              ~start_time
+              detail
         | None, Ok (`Deferred rejection) ->
             push_worker_event (Stream_queued_turn_deferred rejection);
             Tool_result.make_ok
@@ -2113,7 +2121,11 @@ let process_single_turn ~user_row_origin ~submission
                     ; body = detail
                     ; queued_outcome = None
                     });
-               Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail)
+               Tool_result.error
+                 ~failure_class:Tool_result.Runtime_failure
+                 ~tool_name:"masc_keeper_msg"
+                 ~start_time
+                 detail)
         | None, Ok (`Ran (true, body)) ->
           (match canonical_reply_payload_of_body ~redact_text body with
            | Error error ->
@@ -2181,7 +2193,11 @@ let process_single_turn ~user_row_origin ~submission
                       ; body = err
                       ; queued_outcome
                       });
-                 Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+                 Tool_result.error
+                   ~failure_class:Tool_result.Runtime_failure
+                   ~tool_name:"masc_keeper_msg"
+                   ~start_time
+                   err
              | None ->
                  let tool_calls =
                    Keeper_stream_tool_accum.to_tool_calls worker_tool_accum
@@ -2362,6 +2378,7 @@ let process_single_turn ~user_row_origin ~submission
                            ; queued_outcome
                            });
                       Tool_result.error
+                        ~failure_class:Tool_result.Runtime_failure
                         ~tool_name:"masc_keeper_msg"
                         ~start_time
                         persist_error
@@ -2374,7 +2391,11 @@ let process_single_turn ~user_row_origin ~submission
                            ; body = detail
                            ; queued_outcome
                       });
-                      Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
+                      Tool_result.error
+                        ~failure_class:Tool_result.Runtime_failure
+                        ~tool_name:"masc_keeper_msg"
+                        ~start_time
+                        detail
                   | Some (Deferred { rejection }) ->
                       push_worker_event (Stream_queued_turn_deferred rejection);
                       Tool_result.make_ok
@@ -2413,7 +2434,11 @@ let process_single_turn ~user_row_origin ~submission
                  ; body = err
                  ; queued_outcome = None
                  });
-            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+            Tool_result.error
+              ~failure_class:Tool_result.Runtime_failure
+              ~tool_name:"masc_keeper_msg"
+              ~start_time
+              err
         | None, Ok (`Ran (false, err)) ->
             let persisted = persist_failure_reply err in
             let queued_outcome =
@@ -2431,7 +2456,11 @@ let process_single_turn ~user_row_origin ~submission
             push_worker_event
               (Stream_terminal
                  { status = Stream_error; body = err; queued_outcome });
-            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+            Tool_result.error
+              ~failure_class:Tool_result.Runtime_failure
+              ~tool_name:"masc_keeper_msg"
+              ~start_time
+              err
         | None, Error err when queued_turn_not_started () ->
             push_worker_event
               (Stream_terminal
@@ -2439,7 +2468,11 @@ let process_single_turn ~user_row_origin ~submission
                  ; body = err
                  ; queued_outcome = None
                  });
-            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+            Tool_result.error
+              ~failure_class:Tool_result.Runtime_failure
+              ~tool_name:"masc_keeper_msg"
+              ~start_time
+              err
         | None, Error err ->
             let persisted = persist_failure_reply err in
             let queued_outcome =
@@ -2457,7 +2490,11 @@ let process_single_turn ~user_row_origin ~submission
             push_worker_event
               (Stream_terminal
                  { status = Stream_error; body = err; queued_outcome });
-            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+            Tool_result.error
+              ~failure_class:Tool_result.Runtime_failure
+              ~tool_name:"masc_keeper_msg"
+              ~start_time
+              err
   in
   let publish_inline_completion () =
     match !staged_completion with

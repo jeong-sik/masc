@@ -165,7 +165,7 @@ let test_to_oas_typed_error_ignores_json_metadata () =
 let test_to_oas_typed_result_preserves_workflow_rejection () =
   let tr =
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name:"masc_transition"
       ~start_time:0.0
       "Invalid task state: submit_for_verification requires verification evidence"
@@ -181,7 +181,7 @@ let test_to_oas_typed_result_preserves_workflow_rejection () =
 let test_to_oas_typed_result_preserves_transient_failure_class () =
   let tr =
     Tool_result.error
-      ~failure_class:(Some Tool_result.Transient_error)
+      ~failure_class:Tool_result.Transient_error
       ~tool_name:"tool_search_files"
       ~start_time:0.0
       {|{"ok":false,"error":"mutex contention","failure_class":"transient_error","recoverable":true,"error_class":"transient_mutex_contention"}|}

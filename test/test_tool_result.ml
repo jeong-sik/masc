@@ -48,6 +48,7 @@ let test_error_plain_string () =
   let start = Time_compat.now () in
   let r =
     Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"masc_transition"
       ~start_time:start
       "Something went wrong"
@@ -63,6 +64,7 @@ let test_error_plain_string () =
 let test_plain_dispatch_failure_does_not_infer_from_message () =
   let r =
     Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"masc_transition"
       ~start_time:0.0
       "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)"
@@ -79,7 +81,7 @@ let test_plain_dispatch_failure_does_not_infer_from_message () =
 let test_plain_dispatch_failure_honors_explicit_failure_class () =
   let r =
     Tool_result.error
-      ~failure_class:(Some Tool_result.Transient_error)
+      ~failure_class:Tool_result.Transient_error
       ~tool_name:"masc_transition"
       ~start_time:0.0
       "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog"
@@ -134,6 +136,7 @@ let test_error_message_cannot_override_failure_class () =
   in
   let r =
     Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"keeper_task_done"
       ~start_time:0.0
       message

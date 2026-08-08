@@ -167,9 +167,83 @@ let test_invalid_stored_task_id_makes_snapshot_non_authoritative () =
     | Ok _ -> fail "malformed task identity reached the typed boundary")
 ;;
 
+
+(* A count and a set of ids describe the backlog; they do not say whether it is
+   the backlog the last turn described. [taskmaster], whose instructions are to
+   take unclaimed work on sight, repeated one "nothing actionable" verbatim
+   across a day of turns -- and the reason it gave, that the three tasks were
+   blocked, appears nowhere in their records (#27629). Nothing in its frame
+   could contradict a conclusion it already held.
+
+   The revision is the value that moves when the backlog does. These cases
+   assert it reaches the rendered frame and that it is the snapshot's, not a
+   constant: a render that printed any fixed number would satisfy "a line is
+   present" and still leave two different backlogs looking identical. *)
+let frame config meta =
+  (* [observe] collects Board events, which needs an Eio context; the rest of
+     this suite reads the backlog directly and does not. *)
+  let observation =
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Keeper_world_observation.observe ~pending_board_events:None ~config ~meta)
+  in
+  let parts =
+    Keeper_unified_prompt.build_prompt_preview
+      ~meta
+      ~config
+      ~current_task:Keeper_world_observation_inputs.No_current_task
+      ~observation
+      ()
+  in
+  parts.Keeper_unified_prompt.world_state
+;;
+
+let revision_line_of frame =
+  String.split_on_char '\n' frame
+  |> List.find_opt (fun line ->
+    String.length line > 20 && String.equal (String.sub line 0 20) "- Backlog revision: ")
+;;
+
+let test_the_frame_states_the_backlog_revision () =
+  with_config (fun config meta ->
+    let _ = add config ~title:"Something to claim" ~created_by:"someone-else" in
+    let rendered = frame config meta in
+    match revision_line_of rendered with
+    | None ->
+      failf "the frame states no backlog revision. frame was:\n%s" rendered
+    | Some line ->
+      let observed = (snapshot config meta).revision in
+      check
+        (option string)
+        "the stated revision is the snapshot's"
+        (Option.map (Printf.sprintf "- Backlog revision: %d") observed)
+        (Some line))
+;;
+
+let test_the_stated_revision_moves_with_the_backlog () =
+  with_config (fun config meta ->
+    let _ = add config ~title:"First" ~created_by:"someone-else" in
+    let before = revision_line_of (frame config meta) in
+    let _ = add config ~title:"Second" ~created_by:"someone-else" in
+    let after = revision_line_of (frame config meta) in
+    check bool "a revision is stated before" true (Option.is_some before);
+    check bool "a revision is stated after" true (Option.is_some after);
+    check
+      bool
+      "the two turns do not state the same revision"
+      false
+      (Option.equal String.equal before after))
+;;
+
 let () =
   run "claimable_task_summaries"
-    [ ( "rows"
+    [ ( "revision"
+      , [ test_case "the frame states the backlog revision" `Quick
+            test_the_frame_states_the_backlog_revision
+        ; test_case "the stated revision moves with the backlog" `Quick
+            test_the_stated_revision_moves_with_the_backlog
+        ] )
+    ; ( "rows"
       , [ test_case "a claimable task is named" `Quick test_a_claimable_task_is_named
         ; test_case "the list and the count agree" `Quick
             test_the_list_and_the_count_agree

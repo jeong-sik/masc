@@ -1,4 +1,4 @@
-(** Keeper_tool_response - provider response acceptance and keeper reply text
+(** Keeper_tooling.Response - provider response acceptance and keeper reply text
     normalization. *)
 
 (** Keep [text] when non-blank. A blank tool-only turn remains blank because

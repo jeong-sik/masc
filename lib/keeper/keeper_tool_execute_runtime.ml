@@ -423,7 +423,7 @@ let handle_tool_execute_typed
                   (Printexc.to_string exn))
           in
           let dispatch_result =
-            Keeper_tool_execute_shell_ir.dispatch
+            Keeper_tooling.Execute_shell_ir.dispatch
               ~workdir:cwd
               ~sandbox:dispatch_sandbox
               ?timeout_sec
@@ -432,7 +432,7 @@ let handle_tool_execute_typed
               ir
           in
           match dispatch_result with
-          | Error (Keeper_tool_execute_shell_ir.Gate_reject diagnostic) ->
+          | Error (Keeper_tooling.Execute_shell_ir.Gate_reject diagnostic) ->
             (* RFC-0208 P1: gate denial audit line. *)
             Log.Keeper.warn
               "shell_ir gate_reject keeper=%s cmd=%s diagnostic=%s"
@@ -440,11 +440,11 @@ let handle_tool_execute_typed
               cmd_for_log
               (message_for_log diagnostic);
             typed_error_json diagnostic
-          | Error Keeper_tool_execute_shell_ir.Cannot_parse ->
+          | Error Keeper_tooling.Execute_shell_ir.Cannot_parse ->
             typed_error_json "Cannot parse command"
-          | Error Keeper_tool_execute_shell_ir.Too_complex ->
+          | Error Keeper_tooling.Execute_shell_ir.Too_complex ->
             typed_error_json "Command too complex"
-          | Error (Keeper_tool_execute_shell_ir.Path_reject e) ->
+          | Error (Keeper_tooling.Execute_shell_ir.Path_reject e) ->
             (* RFC-0208 P1: path-policy denial audit line. *)
             Log.Keeper.warn
               "shell_ir path_reject keeper=%s cmd=%s reason=%s"

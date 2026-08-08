@@ -41,7 +41,7 @@ let normalize_response_text_for_finalization
       run_result.stop_reason
   then Ok ""
   else
-    match Keeper_tool_response.normalize_response_text ~text ~tool_names () with
+    match Keeper_tooling.Response.normalize_response_text ~text ~tool_names () with
   | Ok response_text -> Ok response_text
   | Error _ ->
     (* Finalization exposes the typed accept-rejected response itself. Tool
@@ -926,7 +926,7 @@ let run_turn
                         (Keeper_runtime_resolved.body_timeout_override_sec ())
                       ~temperature
                       ~accept:
-                        Keeper_tool_response.response_has_text_or_tool_progress
+                        Keeper_tooling.Response.response_has_text_or_tool_progress
                       ?on_event
                       ?on_yield
                       ?on_resume

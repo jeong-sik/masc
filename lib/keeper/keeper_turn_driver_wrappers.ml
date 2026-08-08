@@ -111,16 +111,16 @@ let run_model_by_label
                 | Ok result when accept result.response -> Ok result
                 | Ok result ->
                     let rejection =
-                      Keeper_tool_response.accept_rejection_of_response
+                      Keeper_tooling.Response.accept_rejection_of_response
                         (* RFC-0132-EXEMPT: internal observability *)
                         ~runtime_id:"runtime"
                         result.response
                     in
                     let reason_kind =
                       match rejection.kind with
-                      | Keeper_tool_response.No_usable_progress ->
+                      | Keeper_tooling.Response.No_usable_progress ->
                         Some Accept_no_usable_progress
-                      | Keeper_tool_response.Predicate_rejected ->
+                      | Keeper_tooling.Response.Predicate_rejected ->
                         Some Accept_predicate_rejected
                     in
                     Error

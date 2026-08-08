@@ -20,12 +20,12 @@ module TD = Tool_dispatch
 
 (** Closed set of keeper task-operation names handled by
     [Keeper_tool_task_runtime.handle_keeper_task_tool]. Derived from
-    [Keeper_tool_name] so the registry and the typed handler cluster stay
+    [Keeper_tooling.Name] so the registry and the typed handler cluster stay
     in sync. *)
 let keeper_task_tool_names =
   List.map
-    Keeper_tool_name.to_string
-    Keeper_tool_name.
+    Keeper_tooling.Name.to_string
+    Keeper_tooling.Name.
       [ Tasks_list
       ; Tasks_audit
       ; Broadcast

@@ -303,12 +303,18 @@ let record
       let kind, reason = approval_decision_kind_and_reason decision in
       approval_decision_to_string decision, Some kind, reason
   in
+  let timestamp =
+    match timestamp with
+    | Some timestamp -> timestamp
+    (* NDT-OK: the audit append boundary owns an omitted event timestamp. *)
+    | None -> Unix.gettimeofday ()
+  in
   match get_audit_store ~base_path () with
   | None -> ()
   | Some store ->
     let json =
       `Assoc
-        ([ "ts", `Float (Option.value timestamp ~default:(Unix.gettimeofday ()))
+        ([ "ts", `Float timestamp
          ; "event", `String (event_to_string event_type)
          ; "id", `String id
          ; "keeper", `String keeper_name

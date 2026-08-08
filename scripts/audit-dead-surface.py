@@ -552,7 +552,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # Removing a live export and its only call site leaves the dead count where it
 # was. Measured with --exports on the merged tree -- 563 - 1 assumed the export
 # was dead, and it was not.
-DEAD_EXPORT_BASELINE = 561
+DEAD_EXPORT_BASELINE = 557
 
 
 def run_ratchet(count: int) -> int:

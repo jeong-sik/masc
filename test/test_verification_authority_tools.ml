@@ -1,11 +1,5 @@
-(* RFC-0361 D1: the completion authority runs the producer's own tools.
-
-   The properties under test are the ones that decide whether a judge can be
-   trusted with the surface: it offers exactly the keeper schemas rather than a
-   restatement of them, every advertised name reaches an implementation, a
-   producer with no meta yields no surface instead of one that fails on every
-   call, and a failed run reaches the model as a failure rather than as output
-   that could be mistaken for a clean result. *)
+(* Completion-authority descriptor, validation, dispatch, and containment
+   contracts. *)
 
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Descriptor = Masc.Keeper_tool_descriptor
@@ -38,13 +32,8 @@ let rec rm_rf path =
    canonical [Keeper_identity.keeper_agent_name], so this fixture cannot drift
    from the identity rule the meta parser enforces.
 
-   [always_allow] is the producer's own Gate posture, and the judge borrows it
-   with the meta — [Keeper_tool_execute_runtime] reads
-   [meta.always_allow] and nothing else. It is set here because a deferred
-   effect is not an answer: the judge is one review with no wake path, so a
-   producer that defers gives it a dead end rather than a result. That is the
-   real behaviour for a non-always-allow producer and it is stated in the
-   surface docs; these cases exercise the branch where the effect runs. *)
+   [always_allow] is the producer's Gate posture. These cases exercise the
+   immediate execution branch. *)
 let ensure_producer config name =
   match
     Result.bind
@@ -82,11 +71,25 @@ let with_surface f =
   | Ok surface -> f config surface
 ;;
 
-(* The judge and the producer must read one description of one tool, and
-   [Keeper_tool_descriptor] is where a model-facing description lives. Sourcing
-   this surface from [Tool_shard] instead gave the same handlers two model
-   vocabularies -- the judge was shown "path" and a Keeper "file_path" -- and
-   the copy is always the one that drifts. *)
+(* Create the producer playground used to resolve relative tool paths. *)
+let producer_playground (config : Workspace_core.config) =
+  let path =
+    Keeper_sandbox_config.host_root_abs_of_agent
+      ~base_path:
+        (Workspace_verification_store.project_root_of_base_path config.base_path)
+      ~agent_name:producer
+  in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir)
+    then (
+      mkdir_p (Filename.dirname dir);
+      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p path;
+  path
+;;
+
+(* The judge and producer share the descriptor-owned model surface. *)
 let test_schemas_are_the_descriptor_schemas () =
   with_surface (fun _config surface ->
     let offered = VAT.schemas surface in
@@ -117,34 +120,11 @@ let test_schemas_are_the_descriptor_schemas () =
       offered)
 ;;
 
-(* Every argument the surface advertises is the model's, not the handler's, and
-   the gap between them is real: [handle_read_file_with_outcome] reads "path"
-   while the advertised schema asks for "file_path". [dispatch] closes it by
-   running the descriptor's own validation and translation, the same pair a
-   Keeper's call passes through.
-
-   Both halves are asserted because either alone passes for the wrong reason. A
-   read that succeeds proves translation happened; it does not prove a bad call
-   is refused. And "the bad call returned no contents" is not refusal -- that
-   was the state this replaces, where the handler defaulted the missing required
-   string to "" and returned Ok, so a verdict reached without opening the file
-   looked exactly like one reached by reading it (#27605). The malformed case
-   therefore asserts [Error], not merely the absence of the file's text. *)
+(* A successful read proves descriptor translation reaches the runtime handler;
+   a missing required argument must be rejected at the same boundary. *)
 let test_read_translates_the_advertised_argument_and_refuses_a_malformed_one () =
   with_surface (fun config surface ->
-    let playground =
-      Keeper_sandbox_config.host_root_abs_of_agent
-        ~base_path:
-          (Workspace_verification_store.project_root_of_base_path config.base_path)
-        ~agent_name:producer
-    in
-    let rec mkdir_p path =
-      if not (Sys.file_exists path)
-      then (
-        mkdir_p (Filename.dirname path);
-        try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    in
-    mkdir_p playground;
+    let playground = producer_playground config in
     let name = "advertised-argument-probe.txt" in
     let contents = "written by the probe" in
     (try
@@ -191,6 +171,53 @@ let test_read_translates_the_advertised_argument_and_refuses_a_malformed_one () 
         "the refusal names the missing argument"
         true
         (Astring.String.is_infix ~affix:required detail))
+;;
+
+(* A search requires an explicit non-empty pattern. *)
+let test_search_refuses_a_call_without_its_required_pattern () =
+  with_surface (fun config surface ->
+    ignore (producer_playground config);
+    (match
+       VAT.dispatch surface ~name:"tool_search_files" ~args:(`Assoc [])
+     with
+     | Ok output ->
+       Alcotest.failf
+         "a search with no pattern resolved instead of being refused: %s"
+         output
+     | Error detail ->
+       Alcotest.(check bool)
+         "the refusal names the missing argument"
+         true
+         (Astring.String.is_infix ~affix:"pattern" detail));
+    match
+      VAT.dispatch
+        surface
+        ~name:"tool_search_files"
+        ~args:(`Assoc [ "pattern", `String "advertised" ])
+    with
+    | Ok _ -> ()
+    | Error detail ->
+      Alcotest.failf "a search carrying its pattern was refused: %s" detail)
+;;
+
+(* [argv] is a process vector, never a shell-line string. *)
+let test_execute_refuses_argv_that_is_not_a_process_vector () =
+  with_surface (fun _config surface ->
+    match
+      VAT.dispatch
+        surface
+        ~name:"tool_execute"
+        ~args:(`Assoc [ "argv", `String "echo durable-marker" ])
+    with
+    | Ok output ->
+      Alcotest.failf
+        "argv as a bare string resolved instead of being refused: %s"
+        output
+    | Error detail ->
+      Alcotest.(check bool)
+        "the refusal names argv"
+        true
+        (Astring.String.is_infix ~affix:"argv" detail))
 ;;
 
 (* A judge that calls a name this surface does not offer must be told so. A
@@ -324,10 +351,7 @@ let test_unknown_producer_yields_no_surface () =
       (Astring.String.is_infix ~affix:"no-such-producer" reason)
 ;;
 
-(* RFC-0361 D2. The prompt states what the evaluator can do, and the two
-   surfaces are different claims. Rendering the toolless text for a
-   tool-carrying review is the exact gap D1 exists to close, and the tool text
-   must not repeat the read-only promise this surface no longer keeps. *)
+(* The prompt states the exact tools attached to the review request. *)
 let test_prompt_states_the_available_surface () =
   with_surface (fun _config surface ->
     let request : AR.review_request =
@@ -389,6 +413,10 @@ let () =
             "read translates the advertised argument and refuses a malformed one"
             `Quick
             test_read_translates_the_advertised_argument_and_refuses_a_malformed_one
+        ; Alcotest.test_case "search refuses a call without its required pattern"
+            `Quick test_search_refuses_a_call_without_its_required_pattern
+        ; Alcotest.test_case "execute refuses argv that is not a process vector"
+            `Quick test_execute_refuses_argv_that_is_not_a_process_vector
         ; Alcotest.test_case "unknown producer yields no surface" `Quick
             test_unknown_producer_yields_no_surface
         ] )

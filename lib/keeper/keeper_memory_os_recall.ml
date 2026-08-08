@@ -18,12 +18,8 @@ let record_unavailable reason =
     ()
 ;;
 
-(* The block frames stored facts for the turn; it states no rule of its own.
-   How a Keeper is to treat memory — context rather than instruction, and
-   time-sensitive claims verified against live state — is one sentence in
-   config/prompts/keeper.md, where the Keeper's other standing rules are.
-   Leaving a second asset here meant the same reader was addressed from two
-   files, and it could fail to render. *)
+(* The block carries the selected facts and their source revision without
+   adding behavioral policy. *)
 let recall_block ~revision ~updated_at ~facts =
   Printf.sprintf
     "--- Memory OS Recall ---\nLLM-selected current memory, revision %d, updated %s.\n%s"
@@ -32,13 +28,8 @@ let recall_block ~revision ~updated_at ~facts =
     facts
 ;;
 
-(* A turn without recall injects nothing, and does so identically whether the
-   store is empty or the read failed. The reason reaches the operator through
-   the [MemoryOsRecallUnavailable] counter and the warn log at each call site.
-   It does not reach the keeper: a paragraph stating that memory is missing
-   makes the absence a fact the keeper can reason from, which is what the
-   removed keeper.memory_os_recall.unavailable asset did. Rendering therefore
-   yields the block alone — the empty string is the whole of "no recall". *)
+(* A turn without recall injects nothing. The reason remains operator-visible
+   through [MemoryOsRecallUnavailable] and the warning at each call site. *)
 let omit ?reason () =
   Option.iter record_unavailable reason;
   ""

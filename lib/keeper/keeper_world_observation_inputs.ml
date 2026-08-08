@@ -63,6 +63,29 @@ let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
 ;;
 
 (** Read workspace backlog counts. *)
+(* The same predicates [read_backlog_counts] uses for [claimable], keeping the
+   tasks instead of counting them. The count alone tells a keeper that work
+   exists and not which work, so acting on it costs a tool call the keeper has
+   to decide to make -- and one keeper spent 286 turns reasoning from a
+   12-hour-old memory about which tasks were open rather than looking. The Goal
+   surface names its rows for the same reason. *)
+let claimable_task_summaries ~(config : Workspace.config) ~(meta : keeper_meta) =
+  match Workspace.read_backlog_observation_with_source_r config with
+  | Error _ -> []
+  | Ok { Workspace.recovered_from = Some _; _ } -> []
+  | Ok { Workspace.observed_backlog = backlog; recovered_from = None } ->
+    let claim_scope_filter =
+      claim_goal_scope_filter ~config ~meta ~tasks:backlog.tasks ()
+    in
+    backlog.tasks
+    |> List.filter (fun (t : Masc_domain.task) ->
+         t.task_status = Masc_domain.Todo
+         && Workspace_task_schedule.task_is_claim_pool_candidate t
+         && claim_scope_filter t
+         && not (task_is_self_authored_todo ~meta t))
+    |> List.map (fun (t : Masc_domain.task) -> t.id, t.title)
+;;
+
 let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
   : int * int * int * int option
   =

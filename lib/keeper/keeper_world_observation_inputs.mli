@@ -45,6 +45,11 @@ val read_backlog_counts
     is never excluded. *)
 val task_is_self_authored_todo : meta:keeper_meta -> Masc_domain.task -> bool
 
+val claimable_task_summaries :
+  config:Workspace.config -> meta:keeper_meta -> (string * string) list
+(** The tasks behind [claimable_task_count] -- the same predicates, keeping the
+    rows instead of counting them. A count says work exists and not which work. *)
+
 val read_current_task
   :  config:Workspace.config
   -> meta:keeper_meta

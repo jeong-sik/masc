@@ -67,6 +67,7 @@ fi
 h2_mcp_code=$(curl -sf --max-time 5 --http2-prior-knowledge -X POST "${MASC_HTTP_BASE_URL}/mcp" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
+  "${auth_args[@]}" \
   -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"h2c-harness","version":"1.0"}},"id":1}' \
   -o /dev/null -w '%{http_code}' 2>&1 || echo "0")
 if [ "$h2_mcp_code" = "200" ]; then

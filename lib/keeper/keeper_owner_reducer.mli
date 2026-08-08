@@ -116,8 +116,16 @@ type error =
       ; actual : string
       }
   | Invalid_delta of string
+  | Keeper_identity_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Delete_while_running of string
 
-val create : Keeper_meta_contract.keeper_meta option -> state
+val create
+  :  keeper_name:string
+  -> Keeper_meta_contract.keeper_meta option
+  -> (state, error) result
 val projection : state -> projection
 val apply_meta : state -> meta_command -> (transition, error) result
 

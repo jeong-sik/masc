@@ -11,5 +11,21 @@
     Internal request/response helpers are intentionally hidden — only
     the route registration entry point is exposed. *)
 
+(** Read an absent value as [default], otherwise require a finite positive
+    decimal number. *)
+val positive_float_param
+  :  name:string
+  -> default:float
+  -> string option
+  -> (float, string) Result.t
+
+val positive_int_param
+  :  name:string
+  -> default:int
+  -> string option
+  -> (int, string) Result.t
+(** Read an absent value as [default], otherwise require positive decimal
+    digits. *)
+
 val add_agent_api_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t

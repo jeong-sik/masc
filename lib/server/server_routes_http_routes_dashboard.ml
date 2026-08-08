@@ -14,6 +14,7 @@ include Server_routes_http_routes_dashboard_setup
 module Keeper_chat_pending = Server_dashboard_http_keeper_chat_pending
 module Keeper_event_queue_operator =
   Server_dashboard_http_keeper_event_queue_operator
+module Codex_session = Server_dashboard_codex_session
 
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
@@ -44,6 +45,26 @@ let respond_dashboard_ok ?request reqd =
   Http.Response.json_value ?request ~compress:true
     (`Assoc [ ("ok", `Bool true) ])
     reqd
+
+let respond_codex_session_result request reqd = function
+  | Ok json -> Http.Response.json_value ~compress:true ~request json reqd
+  | Error ({ Codex_session.kind; code; message } : Codex_session.error) ->
+    let status =
+      match kind with
+      | Bad_request -> `Bad_request
+      | Conflict -> `Conflict
+      | Service_unavailable -> `Service_unavailable
+    in
+    Http.Response.json_value
+      ~status
+      ~request
+      (`Assoc
+        [ "schema", `String "masc.dashboard.codex-session.error.v1"
+        ; "ok", `Bool false
+        ; "error_code", `String code
+        ; "error", `String message
+        ])
+      reqd
 
 let execute_output_heartbeat_s = 15.0
 
@@ -783,6 +804,33 @@ let add_routes ~sw ~clock router =
              ~config:(Mcp_server.workspace_config state)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
+  |> Http.Router.get "/api/v1/runtime/sessions/codex" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           let keeper_name =
+             Option.value
+               (Server_utils.query_param req "keeper_name")
+               ~default:""
+           in
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           respond_codex_session_result
+             req
+             reqd
+             (Codex_session.snapshot ~base_path ~keeper_name))
+         request reqd)
+  |> Http.Router.post "/api/v1/runtime/sessions/codex/resolve" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let base_path = (Mcp_server.workspace_config state).base_path in
+             respond_codex_session_result
+               req
+               reqd
+               (Codex_session.resolve_body
+                  ~base_path
+                  ~actor:agent_name
+                  ~body)))
          request reqd)
   |> Http.Router.get "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

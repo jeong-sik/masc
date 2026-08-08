@@ -883,6 +883,105 @@ let test_codex_recovery_retry_and_adopt_paths () =
           fail "adopt-verified did not settle the verified turn"))
 ;;
 
+let test_dashboard_codex_recovery_projection_and_resolution () =
+  let base_path = temp_workspace "masc-codex-dashboard-recovery-" in
+  let keeper_name = "dashboard-codex" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let claim =
+         Keeper_codex_session_store.claim
+           ~base_path
+           ~keeper_name
+           ~expected:None
+           ~runtime_id:"codex.codex"
+           ~tool_surface_sha256:
+             (Keeper_codex_session_store.tool_surface_sha256 [])
+           ~updated_at:1.0
+         |> Result.get_ok
+       in
+       let recovery =
+         Keeper_codex_session_store.require_recovery
+           ~base_path
+           ~keeper_name
+           ~expected:claim
+           ~failure:Keeper_codex_session_store.Protocol_failed
+           ~detail:"malformed app-server event"
+           ~required_at:2.0
+         |> Result.get_ok
+       in
+       let recovery_id =
+         match recovery.phase with
+         | Recovery_required required -> required.recovery_id
+         | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+           fail "dashboard recovery fixture was not recovery-required"
+       in
+       let snapshot =
+         Server_dashboard_codex_session.snapshot ~base_path ~keeper_name
+         |> Result.get_ok
+       in
+       let open Yojson.Safe.Util in
+       check string
+         "dashboard schema"
+         "masc.dashboard.codex-session.v1"
+         (snapshot |> member "schema" |> to_string);
+       check string
+         "dashboard recovery phase"
+         "recovery_required"
+         (snapshot |> member "session" |> member "phase" |> member "kind" |> to_string);
+       check string
+         "dashboard recovery fence"
+         recovery_id
+         (snapshot
+          |> member "session"
+          |> member "phase"
+          |> member "recovery_id"
+          |> to_string);
+       let body =
+         `Assoc
+           [ "keeper_name", `String keeper_name
+           ; "recovery_id", `String recovery_id
+           ; "resolution", `String "restart_fresh"
+           ]
+         |> Yojson.Safe.to_string
+       in
+       let resolved =
+         Server_dashboard_codex_session.resolve_body
+           ~base_path
+           ~actor:"dashboard-admin"
+           ~body
+         |> Result.get_ok
+       in
+       check string
+         "dashboard resolved phase"
+         "ready"
+         (resolved |> member "session" |> member "phase" |> member "kind" |> to_string);
+       check string
+         "dashboard resolution actor"
+         "dashboard-admin"
+         (resolved
+          |> member "session"
+          |> member "last_recovery_resolution"
+          |> member "resolved_by"
+          |> to_string);
+       let duplicate_body =
+         Printf.sprintf
+           {|{"keeper_name":%S,"keeper_name":%S,"recovery_id":%S,"resolution":"restart_fresh"}|}
+           keeper_name
+           keeper_name
+           recovery_id
+       in
+       match
+         Server_dashboard_codex_session.resolve_body
+           ~base_path
+           ~actor:"dashboard-admin"
+           ~body:duplicate_body
+       with
+       | Error { kind = Bad_request; _ } -> ()
+       | Error _ -> fail "duplicate dashboard request had the wrong error class"
+       | Ok _ -> fail "duplicate dashboard request fields were admitted")
+;;
+
 let test_codex_tool_surface_fingerprint_is_exact () =
   let alpha = fixture_tool ~name:"alpha" ~description:"first" () in
   let beta = fixture_tool ~name:"beta" ~description:"second" () in
@@ -1739,6 +1838,10 @@ let () =
             "Codex recovery retry and adopt paths"
             `Quick
             test_codex_recovery_retry_and_adopt_paths
+        ; test_case
+            "dashboard Codex recovery projection and resolution"
+            `Quick
+            test_dashboard_codex_recovery_projection_and_resolution
         ; test_case
             "Codex tool fingerprint is exact"
             `Quick

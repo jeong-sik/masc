@@ -99,21 +99,21 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         Keeper_metrics.(to_string ObservationQueryFailures)
         ~labels:
           [ ( "operation"
-            , Runtime_observation_query_operation.(to_label Read_backlog_counts) )
+            , Runtime_observation_query_operation.(to_label Read_backlog_snapshot) )
           ]
         ();
-      Log.Keeper.warn "read_backlog_counts: backlog read failed: %s" message;
+      Log.Keeper.warn "read_backlog_snapshot: backlog read failed: %s" message;
       empty_backlog_snapshot
     | Ok { Workspace.recovered_from = Some recovery; _ } ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ObservationQueryFailures)
         ~labels:
           [ ( "operation"
-            , Runtime_observation_query_operation.(to_label Read_backlog_counts) )
+            , Runtime_observation_query_operation.(to_label Read_backlog_snapshot) )
           ]
         ();
       Log.Keeper.warn
-        "read_backlog_counts: recovery snapshot is non-authoritative: %s"
+        "read_backlog_snapshot: recovery snapshot is non-authoritative: %s"
         recovery.primary_error;
       empty_backlog_snapshot
     | Ok { Workspace.observed_backlog = backlog; recovered_from = None } ->
@@ -163,20 +163,12 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:
-        [ ("operation", Runtime_observation_query_operation.(to_label Read_backlog_counts)) ]
+        [ ( "operation"
+          , Runtime_observation_query_operation.(to_label Read_backlog_snapshot) )
+        ]
       ();
-    Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
+    Log.Keeper.warn "read_backlog_snapshot failed: %s" (Printexc.to_string ex);
     raise ex
-;;
-
-let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
-  : int * int * int * int option
-  =
-  let snapshot = read_backlog_snapshot ~config ~meta in
-  ( snapshot.unclaimed_count
-  , List.length snapshot.claimable_tasks
-  , snapshot.failed_count
-  , snapshot.revision )
 ;;
 
 (** Resolve the keeper's claimed task to a source-preserving observation. *)

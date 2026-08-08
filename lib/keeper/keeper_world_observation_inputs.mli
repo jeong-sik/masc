@@ -38,18 +38,6 @@ val read_backlog_snapshot : config:Workspace.config -> meta:keeper_meta -> backl
     different backlog revisions. Titles are normalized to one line and bounded
     to 160 UTF-8-safe bytes for prompt projection. *)
 
-val read_backlog_counts
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> int * int * int * int option
-(** [(unclaimed, claimable, failed, observed_revision)].
-    Uses the source-preserving observation contract. [observed_revision] is
-    [Some backlog.version] only after a valid primary read and [None] when the
-    primary is unreadable, including when a recovery snapshot is available.
-    Counts are zero on the latter path, so stale recovery data cannot drive a
-    wake or appear claimable. The typed revision absence preserves the degraded
-    observation instead of fabricating an empty authoritative backlog. *)
-
 (** [task_is_self_authored_todo ~meta task] is true when an unclaimed [Todo]
     was authored by the keeper's own stable handle ([meta.name]).
 
@@ -58,8 +46,8 @@ val read_backlog_counts
     exists" is to create a routing or report task produces a new unclaimed Todo
     authored by itself, which re-satisfies the trigger on the next observation.
     Self-authored tasks therefore stay in the [unclaimed] count (an honest view
-    of the backlog) but are excluded from [claimable] in
-    {!read_backlog_counts}. A task with no [created_by] has no known author and
+    of the backlog) but are excluded from [claimable_tasks] in
+    {!read_backlog_snapshot}. A task with no [created_by] has no known author and
     is never excluded. *)
 val task_is_self_authored_todo : meta:keeper_meta -> Masc_domain.task -> bool
 

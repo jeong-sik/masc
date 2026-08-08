@@ -17,9 +17,9 @@
   (language c)
   (names test_env_stubs))
  (libraries
-  (re_export agent_sdk)
-  (re_export agent_sdk.base)
-  (re_export agent_sdk.llm_provider)
+  (re_export masc.agent_core)
+  (re_export masc.agent_core.base)
+  (re_export masc.agent_core.llm_provider)
   (re_export alcotest)
   (re_export astring)
   (re_export base64)

@@ -48,8 +48,8 @@
   cohttp-eio
   masc.prompt_registry
   masc.masc_schedule
-  agent_sdk
-  agent_sdk.llm_provider))
+  masc.agent_core
+  masc.agent_core.llm_provider))
 
 (executable
  (name main_stdio_eio)
@@ -84,8 +84,8 @@
   cohttp-eio
   masc.prompt_registry
   masc.mcp_transport_protocol
-  agent_sdk
-  agent_sdk.llm_provider))
+  masc.agent_core
+  masc.agent_core.llm_provider))
 
 (executable
  (name masc_cost)
@@ -118,8 +118,8 @@
   cohttp-eio
   masc.prompt_registry
   masc.mcp_transport_protocol
-  agent_sdk
-  agent_sdk.llm_provider))
+  masc.agent_core
+  masc.agent_core.llm_provider))
 
 (executable
  (name public_tool_manifest)
@@ -166,7 +166,7 @@
  (modules masc_checkpoint_purge)
  (public_name masc-checkpoint-purge)
  (package masc)
- (libraries masc masc_core masc.config_dir_resolver agent_sdk unix))
+ (libraries masc masc_core masc.config_dir_resolver masc.agent_core unix))
 
 ;; Read-only keeper feature proof CLI: renders the same JSON as
 ;; /api/v1/dashboard/keeper-feature-proof without starting a server.
@@ -249,8 +249,8 @@
   cohttp-eio
   masc.prompt_registry
   masc.mcp_transport_protocol
-  agent_sdk
-  agent_sdk.llm_provider))
+  masc.agent_core
+  masc.agent_core.llm_provider))
 
 ; RFC-0057 Phase 2 — tool descriptor codegen for lib/tool_schemas/.
 ; Depends on tool_schemas_specs (types-only sibling library) to share
@@ -292,7 +292,7 @@
   cohttp-eio
   masc.prompt_registry
   masc.mcp_transport_protocol
-  agent_sdk
-  agent_sdk.llm_provider))
+  masc.agent_core
+  masc.agent_core.llm_provider))
 
 ; Executable for MASC MCP

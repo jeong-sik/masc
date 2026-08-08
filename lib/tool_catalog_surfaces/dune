@@ -12,4 +12,4 @@
  (name masc_tool_catalog_surfaces)
  (public_name masc.tool_catalog_surfaces)
  (wrapped false)
- (libraries agent_sdk))
+ (libraries masc.agent_core))

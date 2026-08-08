@@ -11,11 +11,10 @@ Usage: scripts/dune-local.sh [dune-subcommand] [args...]
 
 Local Dune wrapper for multi-agent development:
   - serializes local Dune invocations with a machine-wide lock
-  - serializes opam switch validation with opam pin mutations
+  - serializes opam switch validation with external dependency pin mutations
   - defaults local concurrency to DUNE_JOBS, or 2
   - disables the shared Dune artifact cache by default for local builds
   - injects --root <repo-root> unless --root is already present
-  - asserts agent_sdk opam pin matches the repo SSOT before each build
   - asserts the shell and opam resolve one coherent toolchain
   - asserts required findlib libraries are installed in the active switch
   - asserts OCaml exactly matches the repo version declared in dune-project
@@ -29,7 +28,6 @@ Set MASC_DUNE_LOCK_DIAG=0 to suppress best-effort lock holder diagnostics.
 Set MASC_DUNE_DRY_RUN=1 to print the command without running it.
 Set MASC_DUNE_ALLOW_LIVE_BUILD_LOCK=1 to wait behind a live _build/.lock holder.
 Set MASC_DUNE_ALLOW_BARE_DUNE=1 to run despite a live Dune process outside this wrapper.
-Set MASC_SKIP_PIN_CHECK=1 to skip the agent_sdk pin guard.
 Set MASC_SKIP_DEPS_CHECK=1 to skip the required-findlib guard.
 Set MASC_SKIP_OCAML_VERSION_CHECK=1 to skip the exact OCaml toolchain guard.
 USAGE
@@ -541,163 +539,6 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
 fi
 # -----------------------------------------------------------------------
 
-# --- agent_sdk pin guard -----------------------------------------------
-# Assert the local opam switch is pinned to the SSOT SHA before each local
-# build.  Multiple concurrent sessions that share one opam switch can
-# silently repin agent_sdk to a different SHA, producing non-deterministic
-# CMI mismatches (e.g. "inconsistent assumptions over interface Types").
-# This guard catches drift before Dune starts and prints actionable repair
-# guidance.
-#
-# Skipped when:
-#   GITHUB_ACTIONS=true     – CI pins via workflow; no local switch to check
-#   MASC_SKIP_PIN_CHECK=1   – operator opt-out for known-good environments
-#   MASC_DUNE_DRY_RUN=1     – dry-run never mutates or validates state
-#   subcommand == clean     – clean does not compile; pin irrelevant
-#   opam absent from PATH   – switch not managed here; nothing to assert
-if [[ "${GITHUB_ACTIONS:-}" != "true" \
-      && "${MASC_SKIP_PIN_CHECK:-0}" != "1" \
-      && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
-      && "${_subcommand}" != "clean" ]]; then
-  _pin_check="${repo_root}/scripts/check-oas-pin.sh"
-  if [[ -x "${_pin_check}" ]] && command -v opam >/dev/null 2>&1; then
-    printf '[dune-local] checking agent_sdk pin...\n' >&2
-    if ! "${_pin_check}" --local-only >/dev/null; then
-      printf '[dune-local] agent_sdk pin drift detected — aborting build\n' >&2
-      printf '[dune-local] repair: bash scripts/opam-pin-external-deps.sh --install\n' >&2
-      printf '[dune-local] set MASC_SKIP_PIN_CHECK=1 to bypass this guard\n' >&2
-      exit 1
-    fi
-    printf '[dune-local] agent_sdk pin OK\n' >&2
-  fi
-fi
-# -----------------------------------------------------------------------
-
-# --- auto-clean stale _build on agent_sdk pin change -------------------
-# Dune does not track opam pin identity in its incremental cache.  When
-# agent_sdk is repinned (e.g. by another worktree's build), the .cmx
-# artifacts in _build/ still reference the old pin's CMI signatures.
-# This produces "inconsistent assumptions over implementation" errors.
-#
-# Compare the SSOT pin SHA against a marker file in _build/.  On
-# mismatch, auto-clean before the build proceeds.  The marker is written
-# after every successful pin guard pass so it stays current.
-#
-# Skipped when:
-#   GITHUB_ACTIONS=true     – CI builds are clean-workspace
-#   MASC_DUNE_DRY_RUN=1     – dry-run never mutates _build
-#   subcommand == clean     – clean already removes everything
-#   MASC_SKIP_PIN_CHECK=1   – without pin check, marker is meaningless
-if [[ "${GITHUB_ACTIONS:-}" != "true" \
-      && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
-      && "${MASC_SKIP_PIN_CHECK:-0}" != "1" \
-      && "${_subcommand}" != "clean" ]]; then
-  _pin_sha_source="${repo_root}/scripts/oas-agent-sdk-pin.sh"
-  if [[ -f "${_pin_sha_source}" ]]; then
-    # shellcheck source=/dev/null
-    source "${_pin_sha_source}" 2>/dev/null || true
-    if [[ -n "${OAS_AGENT_SDK_SHA:-}" ]]; then
-      _build_marker="${DUNE_BUILD_DIR:-$repo_root/_build}/.last-agent-sdk-sha"
-      if [[ -f "${_build_marker}" ]]; then
-        _last_sha="$(cat "${_build_marker}")"
-        if [[ "${_last_sha}" != "${OAS_AGENT_SDK_SHA}" ]]; then
-          printf '[dune-local] agent_sdk pin changed (%.8s → %.8s) — cleaning stale _build artifacts\n' \
-            "${_last_sha}" "${OAS_AGENT_SDK_SHA}" >&2
-          if [[ -d "${DUNE_BUILD_DIR:-$repo_root/_build}" ]]; then
-            rm -rf "${DUNE_BUILD_DIR:-$repo_root/_build}"
-          fi
-        fi
-      fi
-      mkdir -p "$(dirname "${_build_marker}")" 2>/dev/null || true
-      printf '%s' "${OAS_AGENT_SDK_SHA}" > "${_build_marker}"
-    fi
-  fi
-fi
-# -----------------------------------------------------------------------
-
-# --- auto-clean stale _build on installed agent_sdk interface change ----
-# The pin guard can be intentionally bypassed during local surgery with
-# MASC_SKIP_PIN_CHECK=1.  Even then, the shared opam switch may have moved
-# from one agent_sdk build to another while _build still contains CMIs
-# compiled against the previous Llm_provider interfaces.  Track the actual
-# installed Provider_config and Provider_kind CMI checksums and clear _build
-# when they change, before Dune can produce a cascade of stale alias or
-# "inconsistent assumptions" diagnostics.
-#
-# This guard is intentionally independent of MASC_SKIP_PIN_CHECK.  It does
-# not prove the pin is correct; it only keeps the current build directory
-# internally consistent with whatever agent_sdk is installed right now.
-_current_agent_sdk_llm_provider_crc() {
-  local module_name="$1"
-  local unit_name="Llm_provider__${module_name}"
-  command -v ocamlobjinfo >/dev/null 2>&1 || return 1
-
-  local llm_provider_dir cmi_path
-  if command -v ocamlfind >/dev/null 2>&1; then
-    llm_provider_dir="$(ocamlfind query agent_sdk.llm_provider 2>/dev/null || true)"
-  elif command -v opam >/dev/null 2>&1; then
-    llm_provider_dir="$(opam exec -- ocamlfind query agent_sdk.llm_provider 2>/dev/null || true)"
-  else
-    return 1
-  fi
-
-  [[ -n "${llm_provider_dir}" ]] || return 1
-  cmi_path="${llm_provider_dir%/}/llm_provider__${module_name}.cmi"
-  [[ -r "${cmi_path}" ]] || return 1
-
-  ocamlobjinfo "${cmi_path}" 2>/dev/null \
-    | awk -v unit="${unit_name}" '$2 == unit { print $1; found = 1; exit }
-           END { if (!found) exit 1 }'
-}
-
-if [[ "${GITHUB_ACTIONS:-}" != "true" \
-      && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
-      && "${_subcommand}" != "clean" ]]; then
-  _agent_sdk_interface_build_dir="${DUNE_BUILD_DIR:-$repo_root/_build}"
-  _agent_sdk_interface_markers=()
-  _agent_sdk_interface_crcs=()
-  _agent_sdk_interface_changed=0
-  for _agent_sdk_interface in Provider_config Provider_kind; do
-    _agent_sdk_interface_crc="$(_current_agent_sdk_llm_provider_crc "${_agent_sdk_interface}" || true)"
-    [[ -n "${_agent_sdk_interface_crc}" ]] || continue
-    case "${_agent_sdk_interface}" in
-      Provider_config)
-        _agent_sdk_interface_marker="${_agent_sdk_interface_build_dir}/.last-agent-sdk-provider-config-crc"
-        ;;
-      Provider_kind)
-        _agent_sdk_interface_marker="${_agent_sdk_interface_build_dir}/.last-agent-sdk-provider-kind-crc"
-        ;;
-      *)
-        continue
-        ;;
-    esac
-    _agent_sdk_interface_markers+=("${_agent_sdk_interface_marker}")
-    _agent_sdk_interface_crcs+=("${_agent_sdk_interface_crc}")
-    if [[ -f "${_agent_sdk_interface_marker}" ]]; then
-      _last_agent_sdk_interface_crc="$(cat "${_agent_sdk_interface_marker}" 2>/dev/null || true)"
-      if [[ -n "${_last_agent_sdk_interface_crc}" \
-            && "${_last_agent_sdk_interface_crc}" != "${_agent_sdk_interface_crc}" ]]; then
-        printf '[dune-local] agent_sdk %s interface changed (%.8s -> %.8s) - cleaning stale _build artifacts\n' \
-          "${_agent_sdk_interface}" \
-          "${_last_agent_sdk_interface_crc}" \
-          "${_agent_sdk_interface_crc}" >&2
-        _agent_sdk_interface_changed=1
-      fi
-    fi
-  done
-  if [[ "${_agent_sdk_interface_changed}" -eq 1 ]]; then
-    rm -rf "${_agent_sdk_interface_build_dir}"
-  fi
-  if [[ "${#_agent_sdk_interface_markers[@]}" -gt 0 ]]; then
-    mkdir -p "${_agent_sdk_interface_build_dir}" 2>/dev/null || true
-    for _agent_sdk_interface_i in "${!_agent_sdk_interface_markers[@]}"; do
-      printf '%s' "${_agent_sdk_interface_crcs[${_agent_sdk_interface_i}]}" \
-        > "${_agent_sdk_interface_markers[${_agent_sdk_interface_i}]}"
-    done
-  fi
-fi
-# -----------------------------------------------------------------------
-
 # --- required findlib libraries guard ----------------------------------
 # Catch absent packages and incompatible package API layouts before Dune
 # emits a wall of cryptic library-resolution or abstract-cmi errors:
@@ -724,7 +565,6 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
       httpun
       httpun-eio
       httpun-ws
-      agent_sdk
       piaf
       piaf.stream
       opentelemetry.client

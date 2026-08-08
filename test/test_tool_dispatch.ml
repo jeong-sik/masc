@@ -194,8 +194,31 @@ let () =
               let ok = (Tool_result.is_success tr) in
               let msg = (Tool_result.message tr) in
               check bool "marked as failure" false ok;
+              check
+                (option (testable Tool_result.pp_tool_failure_class ( = )))
+                "unexpected exception class"
+                (Some Tool_result.Runtime_failure)
+                (Tool_result.failure_class tr);
               check bool "contains error info" true
                 (String.length msg > 0 && Astring.String.is_infix ~affix:"boom" msg));
+          test_case "timeout handler returns transient error" `Quick (fun () ->
+              let tool = "__test_dispatch_timeout" in
+              let timeout_handler ~name:_ ~args:_ = raise Eio.Time.Timeout in
+              register_full ~tool_name:tool ~handler:timeout_handler ();
+              let token =
+                match Tool_dispatch.mint_token ~name:tool with
+                | Ok token -> token
+                | Error error -> Alcotest.fail error
+              in
+              let result =
+                Tool_dispatch.guarded_dispatch ~token ~args:`Null ()
+                |> Option.get
+              in
+              check
+                (option (testable Tool_result.pp_tool_failure_class ( = )))
+                "timeout class"
+                (Some Tool_result.Transient_error)
+                (Tool_result.failure_class result));
         ] );
       (* PR-S3: the OTel/Otel_metric_store span wrapper is injected, not referenced
          inline. These tests assert the injection MECHANISM fires — they prove

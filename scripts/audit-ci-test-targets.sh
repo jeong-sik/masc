@@ -76,7 +76,7 @@ fi
 echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in Dune"
 
 # Measured by this script on the exact branch tree.
-UNWIRED_BASELINE=701
+UNWIRED_BASELINE=700
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

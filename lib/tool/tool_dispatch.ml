@@ -168,12 +168,19 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
           (match Hashtbl.find_opt registry name with
            | Some handler ->
              let start_time = Time_compat.now () in
-             (try Some (handler ~name ~args:coerced_args)
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Some
-                  (Tool_result.make_err_of_exn
+              (try Some (handler ~name ~args:coerced_args)
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | Eio.Time.Timeout as exn ->
+                 Some
+                   (Tool_result.make_err_of_exn
+                      ~class_:Tool_result.Transient_error
+                      ~tool_name:name
+                      ~start_time
+                      exn)
+               | exn ->
+                 Some
+                   (Tool_result.make_err_of_exn
                      ~class_:Tool_result.Runtime_failure
                      ~tool_name:name
                      ~start_time

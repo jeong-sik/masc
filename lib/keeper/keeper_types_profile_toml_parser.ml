@@ -22,29 +22,23 @@ let keeper_toml_field_names =
   ; "always_allow"
   ]
 
-(** [keeper.persona_name] lost its target when the Persona subsystem was
-    hard-cut -- no persona lookup remains to resolve it against. Pre-release
-    policy tolerates legacy-version data instead of shipping migration code
-    (CLAUDE.md, "레거시 필드... 마이그레이션을 위한 코드나 구현을 하지
-    말라는 이야기임"): every keeper TOML that predates this cut still
-    carries the key, so rejecting it as unknown would fail every one of
-    them at load. Tolerated and discarded -- accepted here, never parsed
-    into [keeper_profile_defaults]. *)
-let legacy_ignored_keeper_toml_keys = [ "persona_name" ]
+let canonical_keeper_toml_key_names = keeper_toml_field_names
 
-let known_keeper_toml_key_names =
-  keeper_toml_field_names @ legacy_ignored_keeper_toml_keys
-
-let unknown_keeper_toml_keys doc =
+(** One current-key detector shared by profile loading and config audit. *)
+let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
   let known =
-    List.map (fun key -> "keeper." ^ key) known_keeper_toml_key_names
+    List.map (fun key -> "keeper." ^ key) canonical_keeper_toml_key_names
+  in
+  let oas_env_prefix_len = String.length oas_env_key_prefix in
+  let starts_with_oas_env key =
+    String.length key > oas_env_prefix_len
+    && String.starts_with key ~prefix:oas_env_key_prefix
   in
   doc
   |> List.map fst
   |> List.filter (fun key ->
-       not (List.mem key known)
-       && not (String.starts_with key ~prefix:oas_env_key_prefix))
-  |> List.sort_uniq String.compare
+       not (List.mem key known) && not (starts_with_oas_env key))
+  |> dedupe_keep_order
 
 let toml_value_kind = function
   | Keeper_toml_loader.Toml_string _ -> "string"
@@ -128,7 +122,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let has key = List.mem_assoc (k key) doc in
   let oas_env = extract_oas_env_from_doc doc in
   let result =
-    match unknown_keeper_toml_keys doc with
+    match detect_unknown_keeper_toml_keys doc with
     | [] -> Ok ()
     | fields ->
         Error
@@ -228,33 +222,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     being declared known first. *)
 let parsed_field_key_names = keeper_toml_field_names
 
-(** Canonical TOML key names accepted by the strict parser and config audit:
-    fields parsed into the record, plus [legacy_ignored_keeper_toml_keys]
-    (accepted so old-version data still loads, never parsed into anything). *)
-let canonical_keeper_toml_key_names = known_keeper_toml_key_names
-
 let () =
   assert (
     List.for_all
       (fun key -> List.mem key canonical_keeper_toml_key_names)
       parsed_field_key_names)
-
-(** Pure detector used by the strict parser and invalid-config audit. *)
-let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
-  let known =
-    canonical_keeper_toml_key_names |> List.map (fun k -> "keeper." ^ k)
-  in
-  let oas_env_prefix = oas_env_key_prefix in
-  let oas_env_prefix_len = String.length oas_env_prefix in
-  let starts_with_oas_env k =
-    String.length k > oas_env_prefix_len
-    && String.starts_with k ~prefix:oas_env_prefix
-  in
-  doc
-  |> List.map fst
-  |> List.filter (fun key ->
-       not (List.mem key known) && not (starts_with_oas_env key))
-  |> dedupe_keep_order
 
 let merge_string_list ~base overlay =
   match overlay with [] -> base | xs -> xs

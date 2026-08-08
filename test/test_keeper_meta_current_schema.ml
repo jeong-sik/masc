@@ -154,31 +154,6 @@ let test_retired_compaction_failure_authority_requires_reset () =
      |> replace_field "compaction_consecutive_failures" (`Int 3))
 ;;
 
-(* masc#27393: the Persona hard-cut (masc#27048) dropped [persona] from the
-   current schema, and this decoder's exact-fields check made every real,
-   durable keeper meta JSON unloadable overnight -- every live keeper still
-   carried the field. Tolerated on read, never round-tripped: the writer
-   only ever emits {!Keeper_meta_json.current_field_names}, so a
-   persona-bearing meta drops the field on its own next write, with no
-   migration step. *)
-let test_legacy_persona_field_loads () =
-  expect_current
-    "meta with a legacy persona field"
-    (current_json () |> replace_field "persona" (`String "sangsu"))
-;;
-
-let test_legacy_persona_field_does_not_round_trip () =
-  let json = current_json () |> replace_field "persona" (`String "sangsu") in
-  match Keeper_meta_json_parse.meta_of_json json with
-  | Error detail -> Alcotest.failf "legacy persona field rejected: %s" detail
-  | Ok meta ->
-    let written_keys =
-      Keeper_meta_json.meta_to_json meta |> fields_exn |> List.map fst
-    in
-    check bool "next write drops the legacy persona field" false
-      (List.mem "persona" written_keys)
-;;
-
 let () =
   run
     "keeper_meta_current_schema"
@@ -201,10 +176,6 @@ let () =
             test_retired_compaction_failure_authority_requires_reset
         ; test_case "writer rejects non-finite values" `Quick
             test_current_writer_rejects_non_finite_values
-        ; test_case "legacy persona field loads (masc#27393)" `Quick
-            test_legacy_persona_field_loads
-        ; test_case "legacy persona field does not round-trip" `Quick
-            test_legacy_persona_field_does_not_round_trip
         ] )
     ]
 ;;

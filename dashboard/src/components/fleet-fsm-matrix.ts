@@ -407,7 +407,7 @@ function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
 function staleCause(snapshot: KeeperCompositeSnapshot, ageText: string): string {
   const receiptReason = snapshot.execution?.operator_disposition_reason
   // `snapshot.phase` wire format is lowercase (phase_to_string in
-  // keeper_state_machine.ml:21-35); the prior PascalCase compare was dead.
+  // lib/keeper_registry/keeper_state_machine_phase.ml); the prior PascalCase compare was dead.
   const base = snapshot.phase === 'running'
     ? 'KSM=running이지만 live turn 없음'
     : `live turn 없음 · KSM=${snapshot.phase}`

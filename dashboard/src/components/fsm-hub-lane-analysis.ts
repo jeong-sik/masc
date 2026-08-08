@@ -17,7 +17,7 @@ export function isObservedStall(
   observedForSec: number,
 ): boolean {
   if (key === 'phase') {
-    // Wire format from `phase_to_string` (lib/keeper/keeper_state_machine.ml:21-35)
+    // Wire format from `phase_to_string` (lib/keeper_registry/keeper_state_machine_phase.ml)
     // is lowercase + snake_case. Prior PascalCase compares never matched —
     // KSM stalled detection silently disabled for every non-terminal phase.
     if (value === 'failing') return observedForSec >= 90
@@ -53,7 +53,7 @@ function laneMeaning(
   const base: { tone: InsightTone; meaning: string } = (() => {
     switch (key) {
     case 'phase':
-      // Wire format from `phase_to_string` (lib/keeper/keeper_state_machine.ml:21-35)
+      // Wire format from `phase_to_string` (lib/keeper_registry/keeper_state_machine_phase.ml)
       // is lowercase + snake_case. PascalCase cases ('Stable' was the
       // 7-phase composite projection per KeeperCompositeLifecycle.tla:143,
       // never emitted by the backend; remove rather than carry the dead

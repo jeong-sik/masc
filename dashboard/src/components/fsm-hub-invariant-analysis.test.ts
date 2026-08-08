@@ -208,7 +208,7 @@ describe('deriveOperationalInsight', () => {
     expect(insight.tone).toBe('warn')
   })
 
-  // Backend wire format (keeper_state_machine.ml:21-35) emits the 13 raw KSM
+  // Backend wire format (lib/keeper_registry/keeper_state_machine_phase.ml) emits the 13 raw KSM
   // phases lowercase. A 7-phase composite projection with a 'Stable' carrier
   // is specced (KeeperCompositeLifecycle.tla:143) but not currently emitted,
   // so the dashboard surfaces `collapsed_from` directly whenever the backend

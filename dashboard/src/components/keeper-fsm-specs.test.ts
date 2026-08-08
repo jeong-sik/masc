@@ -9,7 +9,7 @@ import {
 } from './keeper-fsm-specs'
 
 // State alphabets the dashboard renders. These must stay in lockstep with
-// the OCaml runtime: KSM ← keeper_state_machine.ml `type phase` (13 ctors),
+// the OCaml runtime: KSM ← lib/keeper_registry/keeper_state_machine_phase.ml `type phase` (13 ctors),
 // KTC ← keeper_registry.ml `type turn_phase` (7 ctors), KDP/KCL/KMC ← the
 // matching keeper_registry.ml sub-FSM types. If you change one of these
 // arrays you almost certainly need a matching change on the OCaml side and

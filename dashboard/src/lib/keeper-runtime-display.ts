@@ -402,7 +402,7 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToke
   // Only `'offline'` is filtered — that is the `'Offline'.toLowerCase()`
   // case we are refining away. The prior version also filtered
   // `'inactive'`, but `KeeperPhase` does not contain that variant
-  // (audit: `keeper_state_machine.ml:21-34` `phase_to_string` emits
+  // (audit: `lib/keeper_registry/keeper_state_machine_phase.ml` `phase_to_string` emits
   // only the 13 PascalCase phases, none of which lowercase to
   // `'inactive'`), so the guard was dead defensive.
   if (keeper.last_heartbeat && isHeartbeatAlive(keeper.last_heartbeat)) {

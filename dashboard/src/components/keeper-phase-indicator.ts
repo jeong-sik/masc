@@ -118,7 +118,7 @@ export function getPhaseStyle(phase: KeeperPhase | string | null | undefined): P
   // `as KeeperPhase` assertion. `toKeeperPhase` accepts both PascalCase
   // (canonical `Keeper.phase`) and lowercase backend tokens (the same
   // shape `phase_to_string` emits in
-  // `lib/keeper/keeper_state_machine.ml:21-34`) and returns `null` on
+  // `lib/keeper_registry/keeper_state_machine_phase.ml`) and returns `null` on
   // unknown input. This matches `software-development.md` §"Parse,
   // don't validate": arbitrary strings should be narrowed through a
   // total parser, not coerced through an unchecked cast that silently

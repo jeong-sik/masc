@@ -56,7 +56,7 @@ function invariantDetail(
   }
 }
 
-// Backend (lib/keeper/keeper_state_machine.ml:21-35) emits phase strings
+// Backend (lib/keeper_registry/keeper_state_machine_phase.ml) emits phase strings
 // via `phase_to_string` in lowercase + snake_case: 'running', 'failing',
 // 'handing_off' etc. The composite observer (keeper_composite_observer.ml:628)
 // passes the same wire format through `snapshot.phase`. Compare against

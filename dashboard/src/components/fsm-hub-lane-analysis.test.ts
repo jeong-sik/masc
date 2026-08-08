@@ -6,7 +6,7 @@ import { isObservedStall } from './fsm-hub-lane-analysis'
 // ================================================================
 
 // Wire format is lowercase + snake_case (phase_to_string in
-// keeper_state_machine.ml:21-35). Prior fixtures asserted PascalCase
+// lib/keeper_registry/keeper_state_machine_phase.ml). Prior fixtures asserted PascalCase
 // that never reached the function in production — mock↔mock loophole.
 describe('isObservedStall', () => {
   // --- phase lane ---

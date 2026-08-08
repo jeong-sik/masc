@@ -184,7 +184,7 @@ function normalizeKeeperSandboxProfile(raw: unknown): Keeper['sandbox_profile'] 
   }
 }
 
-/** Maps lowercase backend phase strings (`keeper_state_machine.ml:phase_to_string`)
+/** Maps lowercase backend phase strings (`phase_to_string` in lib/keeper_registry/keeper_state_machine_phase.ml)
  *  to PascalCase `KeeperPhase` values. The two unions must stay 1:1 — this is
  *  enforced at compile time by `_BACKEND_PHASE_COVERAGE_CHECK` below.
  *

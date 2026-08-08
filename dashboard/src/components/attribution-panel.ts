@@ -27,7 +27,7 @@ const POLL_INTERVAL_MS = 5_000
 const RECENT_LIMIT = 50
 
 // The gates the backend emits. Every Attribution constructor call in masc
-// passes gate:"keeper_fsm" (keeper_state_machine.ml:544/547 and the
+// passes gate:"keeper_fsm" (lib/keeper_registry/keeper_state_machine.ml and the
 // policy_failed sites), so this is the whole set. A gate outside this list
 // still gets a card from the live data (see gatesToRender), which is what
 // makes listing a gate ahead of its first emission unnecessary: the six

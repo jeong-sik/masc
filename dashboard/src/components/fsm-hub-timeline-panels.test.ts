@@ -8,7 +8,7 @@ import {
 
 // ── swimlaneSegmentColor ──────────────────────────────────────
 
-// Wire format: backend (keeper_state_machine.ml:21-35 + keeper_composite_observer.ml:141-201)
+// Wire format: backend (lib/keeper_registry/keeper_state_machine_phase.ml + keeper_composite_observer.ml:141-201)
 // emits all lane values lowercase + snake_case. Prior fixtures asserted
 // PascalCase ('Failing', 'Overflowed', 'Stable', 'HandingOff') that the
 // backend never emits — mock↔mock loophole that hid the dead branches.

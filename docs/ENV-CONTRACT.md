@@ -64,11 +64,11 @@ should be treated as restart-required.
 
 Representative code paths:
 
-- [`server_runtime_bootstrap.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/server/server_runtime_bootstrap.ml)
-- [`config_dir_resolver.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config_dir_resolver.ml)
-- [`server_bootstrap_http.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/server/server_bootstrap_http.ml)
-- [`keeper_runtime_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper/keeper_runtime_config.ml)
-- [`keeper_tool_policy.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper/keeper_tool_policy.ml)
+- [`server_runtime_bootstrap.ml`](../lib/server/server_runtime_bootstrap.ml)
+- [`config_dir_resolver.ml`](../lib/config_dir_resolver/config_dir_resolver.ml)
+- [`server_bootstrap_http.ml`](../lib/server/server_bootstrap_http.ml)
+- [`keeper_runtime_config.ml`](../lib/keeper_runtime/keeper_runtime_config.ml)
+- [`keeper_tool_policy.ml`](../lib/keeper/keeper_tool_policy.ml)
 
 ### 2. Env-backed defaults that become runtime-dynamic through `Runtime_params`
 
@@ -82,9 +82,9 @@ runtime parameter authority is `Runtime_params`, not the parent shell env.
 
 Representative code paths:
 
-- [`runtime_params.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/runtime_params.ml)
-- [`keeper_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper/keeper_config.ml)
-- [`server_routes_http_routes_activity.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/server/server_routes_http_routes_activity.ml)
+- [`runtime_params.ml`](../lib/runtime_params.ml)
+- [`keeper_config.ml`](../lib/keeper/keeper_config.ml)
+- [`server_routes_http_routes_activity.ml`](../lib/server/server_routes_http_routes_activity.ml)
 
 ### 3. Accessor-shaped env readers with limited live effect
 
@@ -101,10 +101,10 @@ consumer is known to act on every request/turn.
 Examples:
 
 - Transport feature flags in
-  [`env_config_runtime.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config/env_config_runtime.ml)
+  [`env_config_runtime.ml`](../lib/config/env_config_runtime.ml)
   are accessor-shaped, but listener lifecycles remain boot-static.
 - `Config_dir_resolver` helpers read env accessors, but
-  [`resolve()`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config_dir_resolver.ml#L321)
+  [`resolve()`](../lib/config_dir_resolver/config_dir_resolver.ml)
   caches the result, so root changes are boot-static.
 
 ### 4. Execute exec gates (`request_dynamic`, additive-only)
@@ -118,16 +118,10 @@ never break by enabling them.
 Operator rollout procedure and observer log interpretation: see
 [`EXECUTE-RUNBOOK.md`](./EXECUTE-RUNBOOK.md).
 
-| Variable | Default | Effect |
-| --- | --- | --- |
-| `MASC_BASH_SEMANTIC_EXIT` | **on** (post flip PR) | Emits a `return_code_interpretation` object (typed `semantic_exit`) alongside the raw `status`. Set to `0` / `false` / `no` / `off` to opt out and restore the pre-P1 byte-identical shape. See `lib/exec/exec_semantic.mli`. |
-| `MASC_BASH_OUTPUT_CAP` | on (500 KB head + 500 KB tail each) | Head+tail truncation via `Exec_buffer`. `MASC_BASH_CAP_HEAD` / `MASC_BASH_CAP_TAIL` override the per-stream caps. See `lib/exec/exec_buffer.mli`. |
-
 Representative code paths:
 
-- [`exec_semantic.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec/exec_semantic.ml)
-- [`exec_buffer.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec/exec_buffer.ml)
-- [`exec_policy.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec_policy/exec_policy.ml) — Shell_command_gate policy integration
+- [`exec_buffer.ml`](../lib/core/exec_buffer.ml)
+- [`exec_policy.ml`](../lib/exec_policy/exec_policy.ml) — Shell_command_gate policy integration
 
 Because every flag here is `request_dynamic` on the Execute path
 (read at tool-invocation time), operators can flip a flag without a
@@ -156,8 +150,6 @@ Precedence:
 | `MASC_WEB_SEARCH_FALLBACKS` | built-in fallback order | Overrides fallback providers after the primary provider fails. |
 | `MASC_WEB_SEARCH_TIMEOUT_SEC` | `15` | Per-provider request timeout. |
 | `MASC_WEB_SEARCH_CACHE_TTL_SEC` | `30.0` | In-process WebSearch cache TTL. |
-| `MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC` | `30.0` | In-process WebSearch rate-limit window. |
-| `MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS` | `30` | In-process WebSearch rate-limit ceiling per window. |
 
 Equivalent `runtime.toml` keys:
 
@@ -169,16 +161,14 @@ provider_order = "searxng,brave,tavily,exa,bing_api"
 fallbacks = "duckduckgo,bing_rss"
 timeout_sec = 15
 cache_ttl_sec = 30.0
-rate_limit_window_sec = 30.0
-rate_limit_max_calls = 30
 ```
 
 Representative code paths:
 
-- [`tool_misc_web_search.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/tool_misc_web_search.ml)
-- [`env_config_runtime.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config/env_config_runtime.ml)
-- [`keeper_runtime_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper_runtime/keeper_runtime_config.ml)
-- [`masc_network_defaults.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config/masc_network_defaults.ml)
+- [`tool_misc_web_search.ml`](../lib/tool_misc_web_search.ml)
+- [`env_config_runtime.ml`](../lib/config/env_config_runtime.ml)
+- [`keeper_runtime_config.ml`](../lib/keeper_runtime/keeper_runtime_config.ml)
+- [`masc_network_defaults.ml`](../lib/config/masc_network_defaults.ml)
 
 ### 6. Test-only boot overrides
 
@@ -194,8 +184,8 @@ production launch knobs.
 
 Representative code paths:
 
-- [`workspace_utils_backend_setup.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/workspace/workspace_utils_backend_setup.ml)
-- [`config_dir_resolver.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config_dir_resolver.ml)
+- [`workspace_utils_backend_setup.ml`](../lib/workspace/workspace_utils_backend_setup.ml)
+- [`config_dir_resolver.ml`](../lib/config_dir_resolver/config_dir_resolver.ml)
 
 ## Rules for New Environment Variables
 

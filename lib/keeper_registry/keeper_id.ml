@@ -57,12 +57,13 @@ end
 
 module Task_id = struct
   type t = string
-  let is_valid s = String.length s > 0
+
   let of_string s =
-    if is_valid s then Ok s
-    else
-      Error
-        (Printf.sprintf "Invalid task_id %S: empty string" (preview_id s))
+    match Validation.Task_id.validate s with
+    | Ok task_id -> Ok (Validation.Task_id.to_string task_id)
+    | Error reason -> Error reason
+  ;;
+
   let to_string s = s
   let equal = String.equal
 end

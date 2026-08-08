@@ -573,6 +573,13 @@ let combine_prompt_sections sections =
    and the tool that fetches the remainder. Nothing is silently dropped. *)
 let board_activity_render_budget_rows = 20
 
+(* Same reason as the Board budget above: expose enough typed identities for a
+   keeper to pick one, and say how many were held back rather than truncating
+   silently. *)
+let claimable_task_render_budget_rows = 10
+
+let take n xs = List.filteri (fun i _ -> i < n) xs
+
 let board_activity_render_budget
       (events : Keeper_world_observation.pending_board_event list)
   : Keeper_world_observation.pending_board_event list
@@ -820,9 +827,10 @@ let backlog_statement_of_observation
   match observation.backlog_revision with
   | None -> Backlog_unreadable
   | Some _ ->
+    let claimable_task_count = Keeper_world_observation.claimable_task_count observation in
     if
       observation.unclaimed_task_count = 0
-      && observation.claimable_task_count = 0
+      && claimable_task_count = 0
       && observation.failed_task_count = 0
     then Backlog_readable_empty
     else Backlog_readable_with_rows
@@ -999,6 +1007,9 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     | Keeper_context_layers.Namespace_state ->
       Some (
         let ubuf = Buffer.create 256 in
+        let claimable_task_count =
+          Keeper_world_observation.claimable_task_count observation
+        in
         Buffer.add_string ubuf "### Namespace State\n";
         (match backlog_statement_of_observation observation with
          | Backlog_unreadable ->
@@ -1012,19 +1023,53 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
           Buffer.add_string ubuf
             (Printf.sprintf "- Unclaimed tasks: %d\n"
                observation.unclaimed_task_count);
-        if observation.claimable_task_count > 0 then
+        if claimable_task_count > 0 then (
           Buffer.add_string ubuf
             (Printf.sprintf "- Claimable tasks for this keeper: %d\n"
-               observation.claimable_task_count);
+               claimable_task_count);
+          (* The count says work exists; these say which. Without them a keeper
+             that wants to claim has to decide to spend a tool call first, and
+             one spent 286 turns reasoning about which tasks were open from a
+             12-hour-old memory rather than looking. The Goal blocks above name
+             their rows for the same reason.
+
+             Bounded like the Board activity render (#27369): a long backlog
+             would otherwise push the rest of the frame out, and the heading
+             says how many are shown against how many exist. *)
+          match observation.claimable_tasks with
+          | [] -> ()
+          | summaries ->
+            let shown = take claimable_task_render_budget_rows summaries in
+            Buffer.add_string ubuf
+              (String.concat ""
+                 (List.map
+                    (fun
+                      (summary :
+                        Keeper_world_observation_inputs.claimable_task_identity)
+                    ->
+                       Printf.sprintf
+                         "  - %s\n"
+                         (Yojson.Safe.to_string
+                            (`Assoc
+                               [ ( "task_id"
+                                 , `String
+                                     (Keeper_id.Task_id.to_string summary.task_id) )
+                               ])))
+                    shown));
+            if List.length summaries > List.length shown then
+              Buffer.add_string ubuf
+                (Printf.sprintf
+                   "  - (%d more — read them with keeper_tasks_list)\n"
+                   (List.length summaries - List.length shown)));
         if observation.unclaimed_task_count > 0
-           && observation.claimable_task_count = 0
+           && claimable_task_count = 0
         then
           Buffer.add_string ubuf
             "- Claimable tasks for this keeper: 0\n";
         let keeper_or_scope_blocked =
           max 0
             (observation.unclaimed_task_count
-             - observation.claimable_task_count)
+             - claimable_task_count)
         in
         if keeper_or_scope_blocked > 0 then
           Buffer.add_string ubuf

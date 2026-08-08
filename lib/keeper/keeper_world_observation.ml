@@ -135,13 +135,15 @@ let empty_scheduled_automation_observation =
   }
 ;;
 
+module Inputs = Keeper_world_observation_inputs
+
 type world_observation =
   { pending_messages : Keeper_world_observation_message_scope.pending_message list
   ; pending_board_events : pending_board_event list
   ; idle_seconds : int
   ; active_goals : string list
   ; unclaimed_task_count : int
-  ; claimable_task_count : int
+  ; claimable_tasks : Inputs.claimable_task_identity list
   ; failed_task_count : int
   ; scheduled_automation : scheduled_automation_observation
   ; backlog_revision : int option
@@ -221,13 +223,14 @@ type board_signal_match = Board_signal.match_result =
   }
 
 module Message_scope = Keeper_world_observation_message_scope
-module Inputs = Keeper_world_observation_inputs
 
 let self_ids = Message_scope.self_ids
 let is_self_author = Message_scope.is_self_author
 
 let collect_message_scope = Message_scope.collect_message_scope
-let read_backlog_counts = Inputs.read_backlog_counts
+let read_backlog_snapshot = Inputs.read_backlog_snapshot
+
+let claimable_task_count observation = List.length observation.claimable_tasks
 let count_running_keeper_fibers = Inputs.count_running_keeper_fibers
 let compute_idle_seconds = Inputs.compute_idle_seconds
 let board_signal_match = Board_signal.match_signal
@@ -1177,13 +1180,11 @@ let observe
   : world_observation
   =
   let pending_messages = collect_message_scope ~config ~meta in
-  let ( unclaimed_task_count
-      , claimable_task_count
-      , failed_task_count
-      , backlog_revision )
-    =
-    read_backlog_counts ~config ~meta
-  in
+  let backlog_snapshot = read_backlog_snapshot ~config ~meta in
+  let unclaimed_task_count = backlog_snapshot.unclaimed_count in
+  let claimable_tasks = backlog_snapshot.claimable_tasks in
+  let failed_task_count = backlog_snapshot.failed_count in
+  let backlog_revision = backlog_snapshot.revision in
   let running_keeper_fiber_count = count_running_keeper_fibers ~config in
   let idle_seconds = compute_idle_seconds ~meta in
   let scheduled_automation =
@@ -1209,7 +1210,7 @@ let observe
   ; idle_seconds
   ; active_goals = live_active_goal_ids ~config meta
   ; unclaimed_task_count
-  ; claimable_task_count
+  ; claimable_tasks
   ; failed_task_count
   ; scheduled_automation
   ; backlog_revision
@@ -1223,13 +1224,11 @@ let observe
 let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   : world_observation
   =
-  let ( unclaimed_task_count
-      , claimable_task_count
-      , failed_task_count
-      , backlog_revision )
-    =
-    read_backlog_counts ~config ~meta
-  in
+  let backlog_snapshot = read_backlog_snapshot ~config ~meta in
+  let unclaimed_task_count = backlog_snapshot.unclaimed_count in
+  let claimable_tasks = backlog_snapshot.claimable_tasks in
+  let failed_task_count = backlog_snapshot.failed_count in
+  let backlog_revision = backlog_snapshot.revision in
   let scheduled_automation =
     read_scheduled_automation_observation
       ~keeper_name:(Some meta.name)
@@ -1244,7 +1243,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; idle_seconds = compute_idle_seconds ~meta
   ; active_goals = live_active_goal_ids ~config meta
   ; unclaimed_task_count
-  ; claimable_task_count
+  ; claimable_tasks
   ; failed_task_count
   ; scheduled_automation
   ; backlog_revision
@@ -1268,7 +1267,7 @@ let failed_drives_wake failed_task_count = failed_task_count > 0
 let actionable_signal_present (observation : world_observation) =
   observation.pending_messages <> []
   || observation.pending_board_events <> []
-  || claimable_drives_wake observation.claimable_task_count
+  || claimable_drives_wake (claimable_task_count observation)
   || failed_drives_wake observation.failed_task_count
   || observation.scheduled_automation.due_ready_count > 0
 ;;
@@ -1393,7 +1392,7 @@ let keeper_cycle_decision
            idle time, and previous-turn age remain observations for the model;
            fixed local thresholds never suppress a Keeper cycle. *)
         let has_actionable_tasks =
-          claimable_drives_wake observation.claimable_task_count
+          claimable_drives_wake (claimable_task_count observation)
           || failed_drives_wake observation.failed_task_count
         in
         let has_actionable_schedule =
@@ -1406,7 +1405,7 @@ let keeper_cycle_decision
              then
                Some
                  (Task_backlog
-                    { unclaimed = observation.claimable_task_count
+                    { unclaimed = claimable_task_count observation
                     ; failed = observation.failed_task_count
                     })
              else None)

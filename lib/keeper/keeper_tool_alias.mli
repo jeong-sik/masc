@@ -56,28 +56,6 @@ val public_name_for_internal : string -> string option
     [result] is ["ok"] for a successful route or ["miss"] for an unknown name. *)
 val record_route_outcome : tool:string -> routed_to:string -> result:string -> unit
 
-(** {1 MCP prefix normalisation} *)
-
-(** [strip_mcp_masc_prefix name] removes the ["mcp__masc__"] prefix if
-    present. *)
-val strip_mcp_masc_prefix : string -> string
-
-(** Pure canonical routing result for set-logic and routing callers. *)
-type canonical_resolution =
-  | Public_name of { internal : string }
-  | Internal of { canonical : string }
-  | Unknown
-
-(** [canonical_resolution name] applies MCP-prefix stripping, descriptor-backed
-    public-name routing, and known-internal detection. *)
-val canonical_resolution : string -> canonical_resolution
-
-(** [canonical_internal_name name] returns the internal keeper/MASC tool name
-    used for pure set-logic comparisons after applying the same descriptor
-    public-name and MCP-prefix routing rules used by runtime dispatch. [None]
-    means the name is not a recognised public or internal tool. *)
-val canonical_internal_name : string -> string option
-
 (** {1 Public schemas} *)
 
 (** [public_input_schema public_name] returns the LLM-facing JSON schema

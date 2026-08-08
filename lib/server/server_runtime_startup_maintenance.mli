@@ -3,7 +3,7 @@ val prune_children_dirs : prune_dir:(string -> int) -> string -> int
     root path. Missing root counts 0; stray files are skipped.
     Exposed for unit tests. *)
 
-val keeper_scoped_dated_stores : string list
+val keeper_scoped_dated_stores : Common.keeper_runtime_store list
 (** Dated-JSONL stores pruned keeper-scoped ([keepers/<name>/<store>]) by
     BOTH the startup pass and the 24h periodic pass. SSOT for both loops —
     never reintroduce an inline store list in either caller. *)
@@ -24,7 +24,7 @@ val prune_flat_jsonl_older_than : days:int -> string -> int
     where [Dated_jsonl.prune] finds no [YYYY-MM] month dirs and is a no-op.
     Exposed for unit tests. *)
 
-val keeper_scoped_flat_stores : string list
+val keeper_scoped_flat_stores : Common.keeper_runtime_store list
 (** Flat-JSONL stores pruned keeper-scoped ([keepers/<name>/<store>]) by
     mtime in BOTH passes: [raw-traces] (one file per turn) and
     [runtime-manifests] (one rotated JSONL per trace). SSOT like

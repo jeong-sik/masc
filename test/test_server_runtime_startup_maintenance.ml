@@ -83,7 +83,9 @@ let test_keeper_scoped_store_list_is_ssot () =
   Alcotest.(check (list string))
     "keeper-scoped stores = metrics + crash-events + execution-receipts + turn-records"
     [ "crash-events"; "execution-receipts"; "metrics"; "turn-records" ]
-    (List.sort String.compare SM.keeper_scoped_dated_stores)
+    (List.sort
+       String.compare
+       (List.map Common.keeper_runtime_store_dirname SM.keeper_scoped_dated_stores))
 
 let test_top_level_store_list_is_ssot () =
   (* Drift guard for the top-level list: the startup and periodic passes
@@ -109,7 +111,9 @@ let test_keeper_scoped_flat_store_list_is_ssot () =
   Alcotest.(check (list string))
     "keeper-scoped flat stores = raw-traces + runtime-manifests"
     [ "raw-traces"; "runtime-manifests" ]
-    (List.sort String.compare SM.keeper_scoped_flat_stores)
+    (List.sort
+       String.compare
+       (List.map Common.keeper_runtime_store_dirname SM.keeper_scoped_flat_stores))
 
 let test_prune_flat_jsonl_rotation_siblings () =
   (* runtime-manifests rotate whole files to <trace>.jsonl.1 — a plain
@@ -236,7 +240,10 @@ let test_prune_keeper_scoped_stores_visits_all_stores () =
     List.concat_map
       (fun keeper ->
         List.map
-          (fun store -> Filename.concat (Filename.concat keepers keeper) store)
+          (fun store ->
+            Filename.concat
+              (Filename.concat keepers keeper)
+              (Common.keeper_runtime_store_dirname store))
           SM.keeper_scoped_dated_stores)
       [ "keeper-a"; "keeper-b" ]
   in

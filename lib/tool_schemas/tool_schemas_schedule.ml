@@ -66,21 +66,10 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
-let statuses =
-  [ "scheduled"
-  ; "due"
-  ; "running"
-  ; "succeeded"
-  ; "failed"
-  ; "cancelled"
-  ; "expired"
-  ]
-;;
-
-let actor_kinds = [ "human_operator"; "automated_actor"; "system" ]
-
-let sources = [ "operator_request"; "automated_request"; "system_request" ]
-let recurrence_kinds = [ "one_shot"; "interval"; "daily"; "cron" ]
+let statuses = Schedule_contract_values.schedule_status_strings
+let actor_kinds = Schedule_contract_values.actor_kind_strings
+let sources = Schedule_contract_values.schedule_source_strings
+let recurrence_kinds = Schedule_contract_values.recurrence_kind_strings
 
 let create_schema =
   object_schema

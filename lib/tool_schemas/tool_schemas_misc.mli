@@ -53,8 +53,23 @@ val schemas : Masc_domain.tool_schema list
     [config_category_enum_strings] is the only [*_enum_strings] that module
     exports. *)
 
-val mcp_runtime_tool_names : string list
-(** Exact names dispatched by [Mcp_tool_runtime]. *)
+type mcp_runtime_operation =
+  | Start
+  | Broadcast
+  | Messages
+(** Closed vocabulary dispatched by [Mcp_tool_runtime]. *)
+
+val mcp_runtime_operations : mcp_runtime_operation list
+(** Exhaustive stable-order projection of MCP runtime operations. *)
+
+val mcp_runtime_tool_name : mcp_runtime_operation -> string
+(** Canonical wire name for an MCP runtime operation. *)
+
+val mcp_runtime_operation_of_tool_name : string -> mcp_runtime_operation option
+(** Parse a canonical MCP runtime wire name at the dispatch boundary. *)
+
+val mcp_runtime_schema : mcp_runtime_operation -> Masc_domain.tool_schema
+(** Canonical generated schema for an MCP runtime operation. *)
 
 val mcp_runtime_schemas : Masc_domain.tool_schema list
-(** Canonical schemas for {!mcp_runtime_tool_names}, projected from {!schemas}. *)
+(** Canonical schemas projected from {!mcp_runtime_operations}. *)

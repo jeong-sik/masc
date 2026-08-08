@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-08-08
 code_refs:
   - lib/keeper/keeper_event_bridge.ml
-  - lib/agent_sdk_response.ml
+  - packages/agent_core/lib/base/error.mli
   - lib/masc_oas_bridge.ml
   - packages/agent_core/lib/agent_sdk.mli
   - lib/keeper/keeper_agent_error.ml
@@ -17,7 +17,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Agent Core Bridge |
-| Maps to | `packages/agent_core/`, `lib/agent_sdk_response.ml`, `lib/masc_oas_bridge.ml` |
+| Maps to | `packages/agent_core/`, `lib/masc_oas_bridge.ml` |
 | Dependencies | 02-types-and-invariants |
 | Version | MASC build identity; no separately released SDK version |
 
@@ -294,16 +294,20 @@ val tool_result : ?is_error:bool -> tool_use_id:string -> content:string
   -> unit -> Agent_sdk.Types.message
 ```
 
-### 6.2 Agent_sdk_response
+### 6.2 Direct typed response projection
 
-`oas_response.ml`은 OAS 응답 읽기 헬퍼:
+MASC는 별도 response facade를 두지 않고 내부 core의 typed response를 직접
+소비한다:
 
 ```ocaml
-type api_response = Agent_sdk.Types.api_response
-val text_of_response : api_response -> string
-val model_used : api_response -> string option
-val usage_or_zero : api_response -> Agent_sdk.Types.api_usage
+Agent_sdk.Types.visible_text_of_response : Agent_sdk.Types.api_response -> string
+Agent_sdk.Error.category : Agent_sdk.Error.sdk_error -> Agent_sdk.Error.category
+Agent_sdk.Error.category_label : Agent_sdk.Error.category -> string
 ```
+
+제품별 변환이 필요하면 해당 feature adapter가 typed content block을 MASC
+제품 타입으로 투영한다. 범용 MASC-side response/compat facade는 다시 만들지
+않는다.
 
 ### 6.3 Type Compatibility
 

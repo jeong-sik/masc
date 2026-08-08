@@ -108,12 +108,15 @@ let project_provider_attempt_result ~replay_prefix_projection provider_result =
 let runtime_attempt_decision ~idx ~runtime_id =
   `Assoc [ ("idx", `Int idx); ("runtime_id", `String runtime_id) ]
 
+let sdk_error_kind error =
+  Agent_sdk.Error.(category error |> category_label)
+
 let runtime_failed_decision ~idx ~runtime_id error =
   `Assoc
     [
       ("idx", `Int idx);
       ("runtime_id", `String runtime_id);
-      ("error_kind", `String (Agent_sdk_compat.error_kind error));
+      ("error_kind", `String (sdk_error_kind error));
     ]
 
 let lane_should_retry
@@ -374,7 +377,7 @@ let run_named
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?temperature
-    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
+    ?(accept = fun (_ : Agent_sdk.Types.api_response) -> true)
     ?hooks
     ?raw_trace
     ?on_event
@@ -657,7 +660,7 @@ let run_named
           keeper_name
           attempt_runtime_id
           attempt
-          (Agent_sdk_compat.error_kind error);
+          (sdk_error_kind error);
       allowed)
     ~runtime_id:
       (match deferred_runtime_lane with

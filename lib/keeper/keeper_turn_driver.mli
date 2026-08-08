@@ -94,7 +94,7 @@ val run_named :
   ?stream_idle_timeout_s:float ->
   ?body_timeout_s:float ->
   ?temperature:float ->
-  ?accept:(Agent_sdk_response.api_response -> bool) ->
+  ?accept:(Agent_sdk.Types.api_response -> bool) ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
@@ -175,7 +175,7 @@ module For_testing : sig
 
   val apply_accept :
     runtime_id:string ->
-    accept:(Agent_sdk_response.api_response -> bool) ->
+    accept:(Agent_sdk.Types.api_response -> bool) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 

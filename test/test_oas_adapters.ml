@@ -107,7 +107,7 @@ let test_agent_sdk_response_visible_text_excludes_non_answer_blocks () =
   Alcotest.(check string)
     "visible answer text"
     "visible\ntail"
-    (Agent_sdk_response.text_of_response response)
+    (Agent_sdk.Types.visible_text_of_response response)
 
 (* ================================================================ *)
 (* Runner                                                           *)

@@ -9,7 +9,7 @@
 
 open Alcotest
 
-module AQ = Masc.Keeper_approval_queue
+module AQ = Keeper_approval.Audit
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_resolved_history_" "" in
@@ -38,7 +38,7 @@ let rec mkdir_p path =
 
 (* Day file for [ts] computed independently of the module under test, mirroring
    the write path ([Jsonl_writer.dated_path], UTC). Seeding through this rather
-   than through [AQ.audit_day_string_of_ts] keeps the reader honest: a reader
+   than through [AQ.day_string_of_ts] keeps the reader honest: a reader
    that switched to local time would stop finding rows the writer placed here. *)
 let audit_day_file ~base_path ts =
   let tm = Unix.gmtime ts in
@@ -101,10 +101,10 @@ let seed_noise ~base_path ~ts ~count =
 
 let with_store f () =
   let base_path = temp_dir () in
-  AQ.For_testing.reset_audit_store ();
+  AQ.For_testing.reset_store ();
   Fun.protect
     ~finally:(fun () ->
-      AQ.For_testing.reset_audit_store ();
+      AQ.For_testing.reset_store ();
       cleanup_dir base_path)
     (fun () -> f base_path)
 ;;
@@ -133,9 +133,9 @@ let now = 1785207600.0
    every such hour. *)
 let test_day_key_is_utc () =
   check string "23:30Z stays on the UTC day" "2026-07-27"
-    (AQ.audit_day_string_of_ts 1785195000.0);
+    (AQ.day_string_of_ts 1785195000.0);
   check string "00:30Z is the next UTC day" "2026-07-28"
-    (AQ.audit_day_string_of_ts 1785198600.0)
+    (AQ.day_string_of_ts 1785198600.0)
 ;;
 
 (* Seeded newest-first on purpose: file position must not decide the order. The

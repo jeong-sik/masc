@@ -88,7 +88,7 @@ let outcome_word_of_tool_call = function
 (* Severities follow how the writer already treats each event: [Log.Keeper.error]
    at the site becomes "bad", [Log.Keeper.warn] becomes "warn", and the paths
    that log nothing because they are the success path become "ok". *)
-let severity_of_approval_event (event : Keeper_approval_queue.audit_event)
+let severity_of_approval_event (event : Keeper_approval.Audit.event)
     decision_kind =
   match event with
   | Gate_allowed | Grant_consumed | Rule_created | Rule_deleted
@@ -106,8 +106,8 @@ let severity_of_approval_event (event : Keeper_approval_queue.audit_event)
          approximating. An approval whose text merely mentioned the word came
          out as a rejection. *)
       match decision_kind with
-      | Some Keeper_approval_queue.Decision_reject -> "bad"
-      | Some (Keeper_approval_queue.Decision_approve | Decision_edit) | None ->
+      | Some Keeper_approval.Audit.Decision_reject -> "bad"
+      | Some (Keeper_approval.Audit.Decision_approve | Decision_edit) | None ->
           "ok")
 
 let tool_call_timeline_event json =
@@ -177,13 +177,13 @@ let approval_event_timeline_event json =
       let decision_kind =
         Option.bind
           (json_string_opt_member "decision_kind" json)
-          Keeper_approval_queue.decision_kind_of_string
+          Keeper_approval.Audit.decision_kind_of_string
       in
       let approval_title = Printf.sprintf "Approval · %s" tool_name in
       let rule_title = Printf.sprintf "Approval Rule · %s" tool_name in
       let gate_title = Printf.sprintf "Approval Gate · %s" tool_name in
       let judge_title = Printf.sprintf "Approval Judge · %s" tool_name in
-      let render (parsed : Keeper_approval_queue.audit_event) =
+      let render (parsed : Keeper_approval.Audit.event) =
         match parsed with
         | Pending ->
             ( "approval_requested",
@@ -256,7 +256,7 @@ let approval_event_timeline_event json =
               None )
       in
       let kind, title, summary, next_human_action, severity =
-        match Keeper_approval_queue.audit_event_of_string event with
+        match Keeper_approval.Audit.event_of_string event with
         | Some parsed ->
             let kind, title, summary, next_human_action = render parsed in
             ( kind,

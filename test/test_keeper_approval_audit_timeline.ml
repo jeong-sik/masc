@@ -14,33 +14,34 @@
     success path and the failure path are no longer the same event. *)
 
 module Q = Masc.Keeper_approval_queue
+module Audit = Keeper_approval.Audit
 module Timeline = Masc.Keeper_runtime_trust_timeline
 open Alcotest
 
 (* Every constructor. [audit_event_to_string] is exhaustive, so a new one fails
    to compile there first; this list keeps the rendered values pinned. *)
 let every_event =
-  [ Q.Pending
-  ; Q.Resolved
-  ; Q.Summary_updated
-  ; Q.Rule_created
-  ; Q.Rule_deleted
-  ; Q.Grant_consumed
-  ; Q.Gate_allowed
-  ; Q.Gate_exact_rule_expired
-  ; Q.Gate_exact_rule_store_degraded
-  ; Q.Gate_grant_unavailable
-  ; Q.Auto_judge_operator_retry_started
-  ; Q.Auto_judge_block_observation_superseded
-  ; Q.Auto_judge_restart_worker_recovered
-  ; Q.Auto_judge_restart_judgment_recovered
+  [ Audit.Pending
+  ; Audit.Resolved
+  ; Audit.Summary_updated
+  ; Audit.Rule_created
+  ; Audit.Rule_deleted
+  ; Audit.Grant_consumed
+  ; Audit.Gate_allowed
+  ; Audit.Gate_exact_rule_expired
+  ; Audit.Gate_exact_rule_store_degraded
+  ; Audit.Gate_grant_unavailable
+  ; Audit.Auto_judge_operator_retry_started
+  ; Audit.Auto_judge_block_observation_superseded
+  ; Audit.Auto_judge_restart_worker_recovered
+  ; Audit.Auto_judge_restart_judgment_recovered
   ]
 ;;
 
 let audit_record ?decision_kind event =
   `Assoc
     ([ ("ts", `Float 1_700_000_000.0)
-     ; ("event", `String (Q.audit_event_to_string event))
+     ; ("event", `String (Audit.event_to_string event))
      ; ("id", `String "appr-1")
      ; ("keeper", `String "sangsu")
      ; ("tool", `String "bash")
@@ -48,7 +49,7 @@ let audit_record ?decision_kind event =
     @
     match decision_kind with
     | None -> []
-    | Some kind -> [ ("decision_kind", `String (Q.decision_kind_to_string kind)) ])
+    | Some kind -> [ ("decision_kind", `String (Audit.decision_kind_to_string kind)) ])
 ;;
 
 let field key json =
@@ -66,14 +67,14 @@ let rendered ?decision_kind event =
   | None ->
     failf
       "no timeline event for %s; the reader dropped a record a writer emits"
-      (Q.audit_event_to_string event)
+      (Audit.event_to_string event)
 ;;
 
 let test_round_trip () =
   List.iter
     (fun event ->
-      let spelling = Q.audit_event_to_string event in
-      check bool spelling true (Q.audit_event_of_string spelling = Some event))
+      let spelling = Audit.event_to_string event in
+      check bool spelling true (Audit.event_of_string spelling = Some event))
     every_event
 ;;
 
@@ -82,7 +83,7 @@ let test_round_trip () =
 let test_no_writer_event_is_unrecognized () =
   List.iter
     (fun event ->
-      let spelling = Q.audit_event_to_string event in
+      let spelling = Audit.event_to_string event in
       check
         (option bool)
         spelling
@@ -97,7 +98,7 @@ let test_no_writer_event_is_unrecognized () =
 let test_severity_is_renderable () =
   List.iter
     (fun event ->
-      let spelling = Q.audit_event_to_string event in
+      let spelling = Audit.event_to_string event in
       match field "severity" (rendered event) with
       | Some ("ok" | "warn" | "bad") -> ()
       | other ->
@@ -111,8 +112,8 @@ let test_severity_is_renderable () =
 (* A successful gate pass used to be indistinguishable from an unreadable rule
    store: both were "warn" titled "Approval · bash". *)
 let test_success_and_failure_differ () =
-  let allowed = rendered Q.Gate_allowed in
-  let degraded = rendered Q.Gate_exact_rule_store_degraded in
+  let allowed = rendered Audit.Gate_allowed in
+  let degraded = rendered Audit.Gate_exact_rule_store_degraded in
   check (option string) "gate allow is ok" (Some "ok") (field "severity" allowed);
   check
     (option string)
@@ -131,7 +132,7 @@ let test_consumed_grant_is_not_a_warning () =
     (option string)
     "grant consumed"
     (Some "ok")
-    (field "severity" (rendered Q.Grant_consumed))
+    (field "severity" (rendered Audit.Grant_consumed))
 ;;
 
 (* Resolution severity comes off the decision_kind field the writer records, not
@@ -141,17 +142,17 @@ let test_resolution_reads_the_decision_kind () =
     (option string)
     "reject"
     (Some "bad")
-    (field "severity" (rendered ~decision_kind:Q.Decision_reject Q.Resolved));
+    (field "severity" (rendered ~decision_kind:Audit.Decision_reject Audit.Resolved));
   check
     (option string)
     "approve"
     (Some "ok")
-    (field "severity" (rendered ~decision_kind:Q.Decision_approve Q.Resolved));
+    (field "severity" (rendered ~decision_kind:Audit.Decision_approve Audit.Resolved));
   check
     (option string)
     "edit"
     (Some "ok")
-    (field "severity" (rendered ~decision_kind:Q.Decision_edit Q.Resolved))
+    (field "severity" (rendered ~decision_kind:Audit.Decision_edit Audit.Resolved))
 ;;
 
 (* The old reader scanned the rendered decision for "reject", so an approval
@@ -160,12 +161,12 @@ let test_approval_mentioning_rejection_is_not_bad () =
   let json =
     `Assoc
       [ ("ts", `Float 1_700_000_000.0)
-      ; ("event", `String (Q.audit_event_to_string Q.Resolved))
+      ; ("event", `String (Audit.event_to_string Audit.Resolved))
       ; ("id", `String "appr-2")
       ; ("keeper", `String "sangsu")
       ; ("tool", `String "bash")
       ; ("decision", `String "approve: proceed after the earlier reject")
-      ; ("decision_kind", `String (Q.decision_kind_to_string Q.Decision_approve))
+      ; ("decision_kind", `String (Audit.decision_kind_to_string Audit.Decision_approve))
       ]
   in
   match Timeline.approval_event_timeline_event json with

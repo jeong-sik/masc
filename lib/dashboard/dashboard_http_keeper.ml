@@ -232,7 +232,7 @@ let unresolved_pending_approval row =
 let latest_pending_approval ~base_path ~keeper_name =
   let rows =
     try
-      Keeper_approval_queue.read_recent_audit
+      Keeper_approval.Audit.read_recent
         ~base_path ~keeper_name ~n:128 ()
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn

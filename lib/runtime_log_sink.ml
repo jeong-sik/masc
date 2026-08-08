@@ -1,19 +1,19 @@
-(** Bridge between the OAS [agent_sdk] structured logger and the masc
+(** Sink from the in-process agent core structured logger into the MASC
     structured log ring / JSONL sink.
 
-    OAS exposes a composable [Log.sink = record -> unit] with pluggable
+    The agent core exposes a composable [Log.sink = record -> unit] with pluggable
     fields (S/I/F/B/J) and levels (Debug/Info/Warn/Error).  The global
     sink registry starts empty, so [Log.info] / [Log.warn] calls inside
-    [agent_sdk] (e.g. [lib/agent/agent.ml]'s per-turn timing) are
-    silently dropped when no host plugs in.
+    the core (e.g. [lib/agent/agent.ml]'s per-turn timing) are
+    silently dropped when MASC does not install a sink.
 
-    This module provides a single sink that forwards every OAS record
+    This module provides a single sink that forwards every core record
     into [Log.emit] (the masc [masc_log] library, which is wrapped
     false and exposes [Log] as the top-level module) with:
 
     - level translated 1:1 (Debug → Debug, Info → Info, ...)
     - [module_name] prefixed with ["oas:"] to preserve provenance and
-      keep oas records from colliding with masc's own Keeper /
+      keep core records from colliding with MASC's own Keeper /
       Server / Dashboard module names
     - [details] assembled from the record fields as a Yojson object so
       the existing JSONL sink (e.g. [<base_path>/.masc/logs/system_log_*.jsonl])
@@ -25,10 +25,10 @@
     @since (feat) telemetry chain: oas#814 (base_url + 5xx dump) +
            oas#816 (per-turn timing) + this bridge *)
 
-(** Convert an OAS field into a (key, Yojson.Safe.t) pair for the
+(** Convert an agent-core field into a (key, Yojson.Safe.t) pair for the
     [details] object.  Delegates to [Agent_sdk.Log.field_to_json] for the
     shared arms, but keeps the masc ["[REDACTED]"] placeholder for
-    [Secret]: the OAS helper renders ["<redacted>"] (oas/lib/log.mli
+    [Secret]: the core helper renders ["<redacted>"] ([lib/log.mli]
     documents that contract), while every other masc redactor in this
     JSONL stream writes ["[REDACTED]"].  Mixing placeholders in one
     stream would break grep-ability, so the divergence is deliberate. *)
@@ -179,7 +179,7 @@ let make_sink () : Agent_sdk.Log.sink =
     One [Atomic.compare_and_set] closes the hole cheaply. *)
 let installed = Atomic.make false
 
-(** Install the bridge as a global OAS sink.  First call registers the
+(** Install the adapter as the global agent-core sink. First call registers the
     sink; subsequent calls are no-ops and return cleanly.  Intended to
     be invoked exactly once during server bootstrap, before any keeper
     turn fires an LLM call. *)

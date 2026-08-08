@@ -61,7 +61,7 @@
   test_cancel_wall_bucket
   test_provider_http_error
   test_keeper_runtime_resolved_observability
-  test_agent_sdk_diag_sink
+  test_provider_diag_log_sink
   test_shutdown_benign_termination
   test_stop_reason_label
   test_workspace
@@ -359,7 +359,7 @@
   test_cancel_wall_bucket
   test_provider_http_error
   test_keeper_runtime_resolved_observability
-  test_agent_sdk_diag_sink
+  test_provider_diag_log_sink
   test_shutdown_benign_termination
   test_stop_reason_label
   test_workspace
@@ -1021,7 +1021,7 @@
   test_adaptive_cache_ttl
   test_keeper_compact_audit
   test_keeper_telemetry_consumer
-  test_oas_bus_instrument
+  test_runtime_event_bus
   test_trajectory
   test_eval_harness
   test_tool_board_coverage
@@ -1167,7 +1167,7 @@
   test_adaptive_cache_ttl
   test_keeper_compact_audit
   test_keeper_telemetry_consumer
-  test_oas_bus_instrument
+  test_runtime_event_bus
   test_trajectory
   test_eval_harness
   test_tool_board_coverage

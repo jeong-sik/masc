@@ -1175,7 +1175,7 @@ let start_keeper_loops_owned
      deserializing provider/model-bearing payloads. *)
   Keeper_telemetry_consumer.spawn_subscriber ~sw ~clock ~bus:event_bus;
   let keeper_lifecycle_sub =
-    Agent_sdk_metrics_bridge.subscribe
+    Runtime_event_bus.subscribe
       ~capacity:256
       ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"lifecycle_listener"
@@ -1183,7 +1183,7 @@ let start_keeper_loops_owned
       masc_event_bus
   in
   Eio.Switch.on_release sw (fun () ->
-    Agent_sdk_metrics_bridge.unsubscribe masc_event_bus keeper_lifecycle_sub);
+    Runtime_event_bus.unsubscribe masc_event_bus keeper_lifecycle_sub);
   (* Replay durable completion receipts only after the MASC event bus has its
      SSE/metrics subscribers and lifecycle hooks are installed. Otherwise a
      boot-time [Dead_cleaned] publish can return successfully while every
@@ -1243,7 +1243,7 @@ let start_keeper_loops_owned
     (fun () ->
     let rec loop () =
       (try
-         let events = Agent_sdk_metrics_bridge.drain keeper_lifecycle_sub in
+         let events = Runtime_event_bus.drain keeper_lifecycle_sub in
          List.iter
            (fun (evt : Agent_sdk.Event_bus.event) ->
               match evt.payload with

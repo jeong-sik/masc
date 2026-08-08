@@ -13,7 +13,7 @@
 # Prefer path::symbol: line anchors die whenever a file is split.
 
 lib/activity_graph/activity_graph_reducer.ml:32
-lib/agent_sdk_log_bridge.ml:56
+lib/runtime_log_sink.ml:56
 lib/attempt_state.ml:15
 lib/attempt_state.ml:70
 lib/workspace/workspace_utils_backend_setup.ml:67

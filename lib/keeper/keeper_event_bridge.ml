@@ -584,14 +584,14 @@ let oas_event_store ~config =
 let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
   let store = ref (oas_event_store ~config) in
   let sub =
-    Agent_sdk_metrics_bridge.subscribe
+    Runtime_event_bus.subscribe
       ~capacity:256
       ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"sse_bridge"
       ~filter:Agent_sdk.Event_bus.accept_all
       bus
   in
-  Eio.Switch.on_release sw (fun () -> Agent_sdk_metrics_bridge.unsubscribe bus sub);
+  Eio.Switch.on_release sw (fun () -> Runtime_event_bus.unsubscribe bus sub);
   let pending = ref [] in
   update_relay_queue_depth !pending;
   Eio.Fiber.fork ~sw (fun () ->
@@ -600,7 +600,7 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
          pending := process_pending ~store_ref:store [] !pending;
          if should_drain_subscription !pending
          then (
-           let events = Agent_sdk_metrics_bridge.drain sub in
+           let events = Runtime_event_bus.drain sub in
            pending := prepare_pending_events events;
            pending := process_pending ~store_ref:store [] !pending);
          update_relay_queue_depth !pending

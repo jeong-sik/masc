@@ -1,8 +1,8 @@
-(** Compatibility wrapper around [Agent_sdk.Event_bus].
+(** MASC runtime boundary for [Agent_sdk.Event_bus].
 
-    Otel_metric_store instrumentation was retired from this module.  The wrapper
-    remains because keeper/runtime code uses it as the local Event_bus
-    boundary. *)
+    This module owns the subscriber queue contract used by keeper/runtime code
+    and yields before non-blocking drains so polling loops cannot starve other
+    Eio fibers. *)
 
 type handle
 

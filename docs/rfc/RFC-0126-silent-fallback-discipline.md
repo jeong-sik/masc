@@ -224,7 +224,7 @@ V09 는 본 RFC scope 밖 (silent fallback 아니라 type API drift). 별도 RFC
 | label | 위치 | masc Phase 0/1 가능? | upstream block |
 |---|---|---|---|
 | C1 (pair-repair counter) | masc-side `keeper_compact_audit.ml` | 가능 — iter 24 PR #15792 머지 완료 | — |
-| C2 (Event_bus subscribe per-subscriber policy/buffer) | masc-side `agent_sdk_metrics_bridge.ml:58-59` | **불가** | `Agent_sdk.Event_bus.subscribe` 시그니처가 per-subscriber `?policy/?buffer_size` 미노출 |
+| C2 (Event_bus subscribe per-subscriber policy/buffer) | masc-side `runtime_event_bus.ml:58-59` | **불가** | `Agent_sdk.Event_bus.subscribe` 시그니처가 per-subscriber `?policy/?buffer_size` 미노출 |
 | C3 (retrieve contract typed) | masc-side `memory_jsonl.ml` 답습 | **불가** | `Agent_sdk.Memory.long_term_backend.retrieve : key → Yojson option` — `Result.t` 도입은 OAS 단에서 |
 | V16 (retrieve/query Result.t) | masc-side `memory_jsonl.ml` 답습 | **불가** | C3 와 동일 upstream contract |
 

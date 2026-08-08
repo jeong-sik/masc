@@ -31,7 +31,7 @@ let test_publish_lifecycle_reaches_masc_bus_with_max_tokens_intent () =
   Eio_main.run @@ fun _env ->
   let bus = Agent_sdk.Event_bus.create () in
   let subscription =
-    Agent_sdk_metrics_bridge.subscribe
+    Runtime_event_bus.subscribe
       ~capacity:256
       ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"runtime-lifecycle-test"
@@ -39,7 +39,7 @@ let test_publish_lifecycle_reaches_masc_bus_with_max_tokens_intent () =
   in
   Event_bus_slots.set_masc bus;
   Fun.protect
-    ~finally:(fun () -> Agent_sdk_metrics_bridge.unsubscribe bus subscription)
+    ~finally:(fun () -> Runtime_event_bus.unsubscribe bus subscription)
     (fun () ->
       CP.publish_lifecycle
         ~name:"keeper-a"
@@ -53,7 +53,7 @@ let test_publish_lifecycle_reaches_masc_bus_with_max_tokens_intent () =
         ~detail:"explicit"
         ~attrs:(Runtime_max_tokens.telemetry_fields (Some 4096))
         ();
-      match Agent_sdk_metrics_bridge.drain subscription with
+      match Runtime_event_bus.drain subscription with
       | [ omitted; explicit ] ->
         let omitted_fields =
           custom_payload_fields "masc.runtime_agent.build" omitted

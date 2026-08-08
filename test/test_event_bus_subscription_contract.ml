@@ -1,6 +1,6 @@
 open Alcotest
 
-module Bridge = Masc.Agent_sdk_metrics_bridge
+module Bridge = Masc.Runtime_event_bus
 
 let event index =
   Agent_sdk.Event_bus.mk_event

@@ -9,8 +9,8 @@ lib/activity_graph/activity_graph.ml,240,None,unclassified
 lib/activity_graph/activity_graph.ml,777,None,unclassified
 lib/activity_graph/activity_graph.ml,792,None,unclassified
 lib/agent_observation/agent_observation.ml,186,None,unclassified
-lib/agent_sdk_log_bridge.ml,56,None,unclassified
-lib/agent_sdk_log_bridge.ml,122,None,unclassified
+lib/runtime_log_sink.ml,56,None,unclassified
+lib/runtime_log_sink.ml,122,None,unclassified
 lib/attempt_state.ml,15,None,unclassified
 lib/attempt_state.ml,66,None,unclassified
 lib/attempt_state.ml,70,None,unclassified

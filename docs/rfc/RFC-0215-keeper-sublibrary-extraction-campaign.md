@@ -70,7 +70,7 @@ The distinct flat-ns mega-lib modules keeper reaches (the G1 cycle risk) cluster
 into the execution / observability mesh:
 
 ```
-Admission_queue Agent_sdk_metrics_bridge Approval_callbacks
+Admission_queue Runtime_event_bus Approval_callbacks
 Audit_log Auth Board Board_core_classify Board_dispatch Config
 Context_compact_oas Inference_inflight_observation
 Drift_guard Eval_gate Eval_harness Exec_core Failure_envelope

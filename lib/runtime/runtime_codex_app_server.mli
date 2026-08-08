@@ -24,8 +24,30 @@ type turn_result =
   ; turn_id : string
   ; model : string
   ; text : string
+  ; dynamic_tool_calls : int
   ; subscription : subscription
   ; user_agent : string option
+  }
+
+type dynamic_tool_result =
+  { success : bool
+  ; content : string
+  }
+
+type dynamic_tool =
+  { name : string
+  ; description : string
+  ; input_schema : Yojson.Safe.t
+  ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
+  }
+
+type history_role =
+  | User
+  | Assistant
+
+type history_message =
+  { role : history_role
+  ; text : string
   }
 
 type error =
@@ -50,8 +72,10 @@ type error =
 val error_to_string : error -> string
 
 val run_turn :
+  ?dynamic_tools:dynamic_tool list ->
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
+  ?history:history_message list ->
   config ->
   prompt:string ->
   (turn_result, error) result

@@ -60,7 +60,7 @@ let with_fixture lines f =
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
-let run_fixture path =
+let run_fixture ?(dynamic_tools = []) ?(history = []) path =
   Eio_main.run (fun env ->
     let config =
       { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
@@ -71,8 +71,77 @@ let run_fixture path =
     Runtime_codex_app_server.run_turn
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock:(Eio.Stdenv.clock env)
+      ~dynamic_tools
+      ~history
       config
       ~prompt:"Return the fixture marker")
+;;
+
+let tool_call_request =
+  {|{"id":"tool-request-1","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-1","tool":"masc_probe","namespace":null,"arguments":{"marker":"from-codex"}}}|}
+;;
+
+let test_dynamic_tool_callback () =
+  let call_id = ref None in
+  let arguments = ref `Null in
+  let tool : Runtime_codex_app_server.dynamic_tool =
+    { name = "masc_probe"
+    ; description = "Return a deterministic fixture marker"
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc [ "marker", `Assoc [ "type", `String "string" ] ]
+          ; "required", `List [ `String "marker" ]
+          ]
+    ; call =
+        (fun ~call_id:id input ->
+          call_id := Some id;
+          arguments := input;
+          { success = true; content = "MASC_TOOL_RESULT" })
+    }
+  in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; tool_call_request
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       match run_fixture ~dynamic_tools:[ tool ] path with
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok result ->
+         check int "measured tool calls" 1 result.dynamic_tool_calls;
+         check (option string) "call id" (Some "call-1") !call_id;
+         check string
+           "arguments"
+           {|{"marker":"from-codex"}|}
+           (Yojson.Safe.to_string !arguments))
+;;
+
+let test_history_is_injected_before_turn () =
+  let injected = {|{"id":4,"result":{}}|} in
+  let turn_after_injection = {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|} in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; injected
+    ; turn_after_injection
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       let history =
+         [ { Runtime_codex_app_server.role = User; text = "previous user" }
+         ; { Runtime_codex_app_server.role = Assistant; text = "previous assistant" }
+         ]
+       in
+       match run_fixture ~history path with
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok result -> check string "text" "MASC_SUBSCRIPTION_OK" result.text)
 ;;
 
 let test_chatgpt_subscription_turn () =
@@ -178,6 +247,71 @@ let test_live_chatgpt_subscription () =
         (String.trim result.subscription.plan_type <> "")
 ;;
 
+let test_live_dynamic_tool_subscription () =
+  if Sys.getenv_opt "MASC_CODEX_APP_SERVER_LIVE" <> Some "1"
+  then Alcotest.skip ()
+  else
+    let tool_calls = ref 0 in
+    let tool : Runtime_codex_app_server.dynamic_tool =
+      { name = "masc_probe"
+      ; description = "Return the exact marker MASC_TOOL_RESULT"
+      ; input_schema =
+          `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+      ; call =
+          (fun ~call_id:_ _ ->
+            incr tool_calls;
+            { success = true; content = "MASC_TOOL_RESULT" })
+      }
+    in
+    let result =
+      Eio_main.run (fun env ->
+        let config =
+          { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
+            timeout_s = 60.0
+          }
+        in
+        Runtime_codex_app_server.run_turn
+          ~mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~dynamic_tools:[ tool ]
+          config
+          ~prompt:
+            "Call masc_probe exactly once, then reply with exactly MASC_TOOL_OK.")
+    in
+    match result with
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok result ->
+      check int "live dynamic tool calls" 1 !tool_calls;
+      check int "live measured tool calls" 1 result.dynamic_tool_calls;
+      check string "live tool response" "MASC_TOOL_OK" result.text
+;;
+
+let test_live_history_injection_subscription () =
+  if Sys.getenv_opt "MASC_CODEX_APP_SERVER_LIVE" <> Some "1"
+  then Alcotest.skip ()
+  else
+    let result =
+      Eio_main.run (fun env ->
+        let config =
+          { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
+            timeout_s = 60.0
+          }
+        in
+        Runtime_codex_app_server.run_turn
+          ~mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~history:
+            [ { role = User; text = "The continuity marker is MASC_HISTORY_OK." }
+            ; { role = Assistant; text = "I will retain that marker." }
+            ]
+          config
+          ~prompt:"Reply with exactly the continuity marker from the prior history.")
+    in
+    match result with
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok result -> check string "live history response" "MASC_HISTORY_OK" result.text
+;;
+
 let () =
   run "runtime codex app-server"
     [ ( "subscription boundary"
@@ -190,12 +324,22 @@ let () =
             test_notification_without_params_fails_closed
         ; test_case "server request fails closed" `Quick test_server_request_fails_closed
         ; test_case "failed turn stays failed" `Quick test_failed_turn_is_not_completion
+        ; test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
+        ; test_case "history injects before turn" `Quick test_history_is_injected_before_turn
         ] )
     ; ( "live subscription"
       , [ test_case
             "official Codex app-server"
             `Slow
             test_live_chatgpt_subscription
+        ; test_case
+            "official Codex dynamic tool"
+            `Slow
+            test_live_dynamic_tool_subscription
+        ; test_case
+            "official Codex history injection"
+            `Slow
+            test_live_history_injection_subscription
         ] )
     ]
 ;;

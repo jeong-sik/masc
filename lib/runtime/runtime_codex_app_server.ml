@@ -31,8 +31,30 @@ type turn_result =
   ; turn_id : string
   ; model : string
   ; text : string
+  ; dynamic_tool_calls : int
   ; subscription : subscription
   ; user_agent : string option
+  }
+
+type dynamic_tool_result =
+  { success : bool
+  ; content : string
+  }
+
+type dynamic_tool =
+  { name : string
+  ; description : string
+  ; input_schema : Yojson.Safe.t
+  ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
+  }
+
+type history_role =
+  | User
+  | Assistant
+
+type history_message =
+  { role : history_role
+  ; text : string
   }
 
 type error =
@@ -146,6 +168,7 @@ type wire_message =
   | Server_request of
       { id : Yojson.Safe.t
       ; method_ : string
+      ; params : Yojson.Safe.t
       }
 
 let parse_rpc_error id fields =
@@ -166,7 +189,9 @@ let parse_wire_line line =
   let* json = json_result in
   let* fields = assoc_at stage json in
   match List.assoc_opt "id" fields, List.assoc_opt "method" fields with
-  | Some id, Some (`String method_) -> Ok (Server_request { id; method_ })
+  | Some id, Some (`String method_) ->
+    let* params = required_member stage "params" fields in
+    Ok (Server_request { id; method_; params })
   | Some (`Int id), None ->
     (match List.assoc_opt "error" fields with
      | Some _ -> parse_rpc_error id fields
@@ -204,6 +229,70 @@ let reject_server_request io id =
        ])
 ;;
 
+let dynamic_tool_spec (tool : dynamic_tool) =
+  `Assoc
+    [ "type", `String "function"
+    ; "name", `String tool.name
+    ; "description", `String tool.description
+    ; "inputSchema", tool.input_schema
+    ; "deferLoading", `Bool false
+    ]
+;;
+
+let find_dynamic_tool tools name =
+  List.find_opt (fun (tool : dynamic_tool) -> String.equal tool.name name) tools
+;;
+
+let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
+  io.send
+    (`Assoc
+       [ "id", id
+       ; ( "result"
+         , `Assoc
+             [ "success", `Bool result.success
+             ; ( "contentItems"
+               , `List
+                   [ `Assoc
+                       [ "type", `String "inputText"
+                       ; "text", `String result.content
+                       ]
+                   ] )
+             ] )
+       ])
+;;
+
+let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count ~id params =
+  let stage = "item/tool/call" in
+  let* fields = assoc_at stage params in
+  let* request_thread_id = required_string stage "threadId" fields in
+  let* request_turn_id = required_string stage "turnId" fields in
+  let* call_id = required_string stage "callId" fields in
+  let* tool_name = required_string stage "tool" fields in
+  let* namespace = optional_string stage "namespace" fields in
+  let* arguments = required_member stage "arguments" fields in
+  if request_thread_id <> thread_id || request_turn_id <> turn_id
+  then protocol_error stage "tool call identity does not match the active turn"
+  else if Option.is_some namespace
+  then protocol_error stage "function tool call unexpectedly declared a namespace"
+  else
+    match find_dynamic_tool tools tool_name with
+    | None -> protocol_error stage (Printf.sprintf "unknown dynamic tool %S" tool_name)
+    | Some tool ->
+      let result =
+        try tool.call ~call_id arguments with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Log.Runtime_agent.warn
+            "Codex dynamic tool handler raised (tool=%s error=%s)"
+            tool_name
+            (Printexc.to_string exn);
+          { success = false; content = "dynamic tool handler raised" }
+      in
+      incr tool_call_count;
+      send_dynamic_tool_response io ~id result;
+      Ok ()
+;;
+
 let rec await_response io ~id ~method_ =
   let* message = io.receive () in
   match message with
@@ -217,7 +306,7 @@ let rec await_response io ~id ~method_ =
     protocol_error method_
       (Printf.sprintf "received error response id %d while waiting for %d" response_id id)
   | Notification _ -> await_response io ~id ~method_
-  | Server_request { id; method_ = requested_method } ->
+  | Server_request { id; method_ = requested_method; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request requested_method)
 ;;
@@ -336,12 +425,32 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params =
       | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
 ;;
 
-let rec await_turn_terminal io ~thread_id ~turn_id ~seen_final ~seen_fallback =
+let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
+    ~seen_fallback =
   let* message = io.receive () in
   match message with
   | Response _ | Response_error _ ->
     protocol_error "turn" "received an unsolicited JSON-RPC response"
-  | Server_request { id; method_ } ->
+  | Server_request { id; method_ = "item/tool/call"; params } ->
+    let* () =
+      handle_dynamic_tool_call
+        io
+        ~tools
+        ~thread_id
+        ~turn_id
+        ~tool_call_count
+        ~id
+        params
+    in
+    await_turn_terminal
+      io
+      ~tools
+      ~tool_call_count
+      ~thread_id
+      ~turn_id
+      ~seen_final
+      ~seen_fallback
+  | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
   | Notification { method_ = "item/completed"; params } ->
@@ -360,13 +469,28 @@ let rec await_turn_terminal io ~thread_id ~turn_id ~seen_final ~seen_fallback =
         | Some (_, text) -> seen_final, Some text
         | None -> seen_final, seen_fallback
       in
-      await_turn_terminal io ~thread_id ~turn_id ~seen_final ~seen_fallback
+      await_turn_terminal
+        io
+        ~tools
+        ~tool_call_count
+        ~thread_id
+        ~turn_id
+        ~seen_final
+        ~seen_fallback
   | Notification { method_ = "error"; params } ->
     let stage = "error notification" in
     let* fields = assoc_at stage params in
     let* will_retry = required_bool stage "willRetry" fields in
     if will_retry
-    then await_turn_terminal io ~thread_id ~turn_id ~seen_final ~seen_fallback
+    then
+      await_turn_terminal
+        io
+        ~tools
+        ~tool_call_count
+        ~thread_id
+        ~turn_id
+        ~seen_final
+        ~seen_fallback
     else
       let* error_json = required_member stage "error" fields in
       let* error_fields = assoc_at stage error_json in
@@ -375,7 +499,14 @@ let rec await_turn_terminal io ~thread_id ~turn_id ~seen_final ~seen_fallback =
   | Notification { method_ = "turn/completed"; params } ->
     terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params
   | Notification _ ->
-    await_turn_terminal io ~thread_id ~turn_id ~seen_final ~seen_fallback
+    await_turn_terminal
+      io
+      ~tools
+      ~tool_call_count
+      ~thread_id
+      ~turn_id
+      ~seen_final
+      ~seen_fallback
 ;;
 
 let optional_field name = function
@@ -383,7 +514,26 @@ let optional_field name = function
   | Some value -> [ name, `String value ]
 ;;
 
-let run_protocol io config ~prompt =
+let history_item (message : history_message) =
+  let role, content_type =
+    match message.role with
+    | User -> "user", "input_text"
+    | Assistant -> "assistant", "output_text"
+  in
+  `Assoc
+    [ "type", `String "message"
+    ; "role", `String role
+    ; ( "content"
+      , `List
+          [ `Assoc
+              [ "type", `String content_type
+              ; "text", `String message.text
+              ]
+          ] )
+    ]
+;;
+
+let run_protocol io config ~dynamic_tools ~history ~prompt =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
       (`Assoc
@@ -410,23 +560,57 @@ let run_protocol io config ~prompt =
     ]
     @ optional_field "model" config.model
     @ optional_field "developerInstructions" config.developer_instructions
+    @
+    match dynamic_tools with
+    | [] -> []
+    | tools -> [ "dynamicTools", `List (List.map dynamic_tool_spec tools) ]
   in
   send_request io ~id:3 ~method_:"thread/start" ~params:(`Assoc thread_fields);
   let* thread = await_response io ~id:3 ~method_:"thread/start" in
   let* thread_id, model = parse_thread_start thread in
-  send_request io ~id:4 ~method_:"turn/start"
+  let turn_request_id =
+    match history with
+    | [] -> Ok 4
+    | messages ->
+      send_request io ~id:4 ~method_:"thread/inject_items"
+        ~params:
+          (`Assoc
+             [ "threadId", `String thread_id
+             ; "items", `List (List.map history_item messages)
+             ]);
+      let* _ = await_response io ~id:4 ~method_:"thread/inject_items" in
+      Ok 5
+  in
+  let* turn_request_id = turn_request_id in
+  send_request io ~id:turn_request_id ~method_:"turn/start"
     ~params:
       (`Assoc
          [ "threadId", `String thread_id
          ; ( "input"
            , `List [ `Assoc [ "type", `String "text"; "text", `String prompt ] ] )
          ]);
-  let* turn = await_response io ~id:4 ~method_:"turn/start" in
+  let* turn = await_response io ~id:turn_request_id ~method_:"turn/start" in
   let* turn_id = parse_turn_start turn in
+  let tool_call_count = ref 0 in
   let* text =
-    await_turn_terminal io ~thread_id ~turn_id ~seen_final:None ~seen_fallback:None
+    await_turn_terminal
+      io
+      ~tools:dynamic_tools
+      ~tool_call_count
+      ~thread_id
+      ~turn_id
+      ~seen_final:None
+      ~seen_fallback:None
   in
-  Ok { thread_id; turn_id; model; text; subscription; user_agent }
+  Ok
+    { thread_id
+    ; turn_id
+    ; model
+    ; text
+    ; dynamic_tool_calls = !tool_call_count
+    ; subscription
+    ; user_agent
+    }
 ;;
 
 let env_key entry =
@@ -496,7 +680,7 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
-let run_spawned ~mgr ~clock config ~prompt =
+let run_spawned ~mgr ~clock config ~dynamic_tools ~history ~prompt =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -533,7 +717,7 @@ let run_spawned ~mgr ~clock config ~prompt =
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
       (fun () ->
         Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
-          run_protocol { send; receive } config ~prompt)))
+          run_protocol { send; receive } config ~dynamic_tools ~history ~prompt)))
 ;;
 
 let validate_config config ~prompt =
@@ -548,16 +732,33 @@ let validate_config config ~prompt =
   else Ok ()
 ;;
 
-let run_turn ~mgr ~clock config ~prompt =
+let validate_dynamic_tools tools =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (tool : dynamic_tool) :: rest ->
+      let name = String.trim tool.name in
+      if name = ""
+      then Error (Invalid_config "dynamic tool name must not be empty")
+      else if List.mem name seen
+      then Error (Invalid_config (Printf.sprintf "duplicate dynamic tool name %S" name))
+      else loop (name :: seen) rest
+  in
+  loop [] tools
+;;
+
+let run_turn ?(dynamic_tools = []) ~mgr ~clock ?(history = []) config ~prompt =
   let result =
     match validate_config config ~prompt with
     | Error _ as error -> error
     | Ok () ->
+      (match validate_dynamic_tools dynamic_tools with
+       | Error _ as error -> error
+       | Ok () ->
       Log.Runtime_agent.info "Codex app-server subscription turn starting";
-      (try run_spawned ~mgr ~clock config ~prompt with
+      (try run_spawned ~mgr ~clock config ~dynamic_tools ~history ~prompt with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
-       | exn -> Error (Spawn_failed (Printexc.to_string exn)))
+       | exn -> Error (Spawn_failed (Printexc.to_string exn))))
   in
   (match result with
    | Ok turn ->

@@ -1046,13 +1046,13 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
                       (summary :
                         Keeper_world_observation_inputs.claimable_task_summary)
                     ->
-                       if summary.title_preview = ""
-                       then Printf.sprintf "  - %s\n" summary.task_id
-                       else
-                         Printf.sprintf
-                           "  - %s — %s\n"
-                           summary.task_id
-                           summary.title_preview)
+                       Printf.sprintf
+                         "  - %s\n"
+                         (Yojson.Safe.to_string
+                            (`Assoc
+                               [ "task_id", `String summary.task_id
+                               ; "title", `String summary.title_preview
+                               ])))
                     shown));
             if List.length summaries > List.length shown then
               Buffer.add_string ubuf

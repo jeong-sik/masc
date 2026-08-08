@@ -17,7 +17,7 @@
    bus. *)
 let masc_publish event =
   match Event_bus_slots.get_masc () with
-  | Some mb -> Agent_sdk_metrics_bridge.publish mb event
+  | Some mb -> Runtime_event_bus.publish mb event
   | None ->
     Log.Misc.warn "MASC observation event was not published: event bus is not initialized"
 

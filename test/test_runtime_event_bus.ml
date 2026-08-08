@@ -1,4 +1,4 @@
-(** Tests for [Agent_sdk_metrics_bridge].
+(** Tests for [Runtime_event_bus].
 
     Covers the compatibility wrapper around [Agent_sdk.Event_bus].
     The wrapper should forward subscribe/publish/drain semantics to the SDK
@@ -8,7 +8,7 @@
 open Alcotest
 
 module I = struct
-  include Masc.Agent_sdk_metrics_bridge
+  include Masc.Runtime_event_bus
 
   let subscribe = subscribe ~capacity:3 ~overflow:Agent_sdk.Event_bus.Drop_oldest
 end
@@ -36,7 +36,7 @@ let test_subscribe_forwards_purpose_to_oas_stats () =
        check int "subscriber capacity" 3 sub_stats.capacity;
        check bool "subscriber overflow" true
          (sub_stats.overflow = Agent_sdk.Event_bus.Drop_oldest)
-     | _ -> fail "expected one OAS subscription");
+     | _ -> fail "expected one runtime subscription");
     I.unsubscribe bus h)
 
 let test_publish_forwards_to_matching_subscribers () =
@@ -82,9 +82,9 @@ let test_multiple_subs_same_purpose_coexist () =
     I.unsubscribe bus b)
 
 let () =
-  run "oas_bus_instrument" [
+  run "runtime_event_bus" [
     ("backpressure", [
-      test_case "subscribe forwards purpose to OAS stats" `Quick
+      test_case "subscribe forwards purpose to runtime stats" `Quick
         test_subscribe_forwards_purpose_to_oas_stats;
       test_case "publish forwards to matching subscribers" `Quick
         test_publish_forwards_to_matching_subscribers;

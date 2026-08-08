@@ -78,7 +78,7 @@ entry states why the site cannot route through the canonical surface. Summary:
 - **Dynamic component** (`lib/config_dir_resolver/config_dir_resolver.ml`) —
   `~ctx:context` uses a runtime-computed component string; no static module
   preserves the per-call value.
-- **Runtime-computed component** (`lib/agent_sdk_log_bridge.ml`) — `Log.emit`
+- **Runtime-computed component** (`lib/runtime_log_sink.ml`) — `Log.emit`
   with `~module_name:("oas:" ^ record.module_name)`; the component is built per
   record at runtime, so no static module preserves it. (A *static* literal
   component such as `"oas:event"` is migrate-able — a module's `name` string may

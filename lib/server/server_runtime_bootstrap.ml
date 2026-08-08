@@ -844,9 +844,9 @@ let initialize_owner_state_blocking
       | Fd_accountant.Storage_space_exhausted ->
         Keeper_disk_pressure.note_exception ~site exn);
   Log.Server.info "Fd_accountant OS resource observers installed";
-  Agent_sdk_log_bridge.install ();
+  Runtime_log_sink.install ();
   Log.Server.info
-    "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
+    "Runtime_log_sink installed (agent core -> MASC structured log)";
   let state =
     create_server_state
       ~sw
@@ -1308,9 +1308,9 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
   in
   let configured_agent_transport = Masc_grpc_transport.configure_from_env () in
   let configured_http_mode = Env_config.Transport.configure_h2_from_env () in
-  (* Route OAS provider diagnostics into the structured log before any
+  (* Route provider diagnostics into the structured log before any
      provider call runs (#25148). *)
-  Agent_sdk_diag_sink.install ();
+  Provider_diag_log_sink.install ();
   (* 0. Dashboard bundle freshness — a stale bundle silently keeps calling
      routes the current binary already removed (#24332 governance->gate:
      the served SPA still called DELETE'd /api/v1/dashboard/governance for

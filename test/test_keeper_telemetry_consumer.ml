@@ -1,7 +1,7 @@
 (** Cooperative-scheduling regression test for [Keeper_telemetry_consumer].
 
     The drain fiber forked by [spawn_subscriber] consumes a non-blocking
-    primitive ([Agent_sdk_metrics_bridge.drain]). Without an explicit
+    primitive ([Runtime_event_bus.drain]). Without an explicit
     yield it pins its Eio domain at ~100% CPU and starves every
     co-located fiber on the same domain — including timer fibers, so a
     [Eio.Time.sleep] in a sibling fiber never fires.

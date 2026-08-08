@@ -1,6 +1,6 @@
 (** Keeper_telemetry_consumer — MASC-side observer for OAS telemetry events.
 
-    Subscribes to the OAS event bus via [Agent_sdk_metrics_bridge],
+    Subscribes to the OAS event bus via [Runtime_event_bus],
     filters [Custom("telemetry_event", json)] payloads, and increments
     an OTel counter for dashboard visibility.
 
@@ -23,7 +23,7 @@ let drain_interval_s = 0.1
 
 let spawn_subscriber ~sw ~clock ~bus =
   let sub =
-    Agent_sdk_metrics_bridge.subscribe
+    Runtime_event_bus.subscribe
       ~capacity:256
       ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"telemetry_consumer"
@@ -31,11 +31,11 @@ let spawn_subscriber ~sw ~clock ~bus =
       bus
   in
   Eio.Switch.on_release sw (fun () ->
-    Agent_sdk_metrics_bridge.unsubscribe bus sub);
+    Runtime_event_bus.unsubscribe bus sub);
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       (try
-         let events = Agent_sdk_metrics_bridge.drain sub in
+         let events = Runtime_event_bus.drain sub in
          List.iter
            (fun (evt : Agent_sdk.Event_bus.event) ->
               match evt.payload with

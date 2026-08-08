@@ -174,14 +174,14 @@ let test_full_profile_admission_uses_catalog_direct_call_policy () =
   let hidden_disallowed = ref 0 in
   List.iter
     (fun (schema : Masc_domain.tool_schema) ->
-      let metadata = Masc.Tool_catalog.metadata schema.name in
+      let metadata = Tool_catalog.metadata schema.name in
       if
-        metadata.visibility = Masc.Tool_catalog.Hidden
+        metadata.visibility = Tool_catalog.Hidden
         && not metadata.allow_direct_call_when_hidden
       then incr hidden_disallowed;
       let expected =
-        Masc.Tool_catalog.is_visible ~include_hidden:true schema.name
-        && Masc.Tool_catalog.allow_direct_call schema.name
+        Tool_catalog.is_visible ~include_hidden:true schema.name
+        && Tool_catalog.allow_direct_call schema.name
       in
       check
         bool

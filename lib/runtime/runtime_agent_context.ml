@@ -371,9 +371,14 @@ let prepare_resume ~(config : config) ~(checkpoint : Masc_agent_core.Checkpoint.
     ; response_format = agent_config.response_format
     }
   in
+  let hooks =
+    match config.hooks with
+    | None -> Masc_agent_core.Hooks.empty
+    | Some hooks -> hooks
+  in
   let options : Masc_agent_core.Agent.options =
     { Masc_agent_core.Agent.default_options with
-      hooks = Option.value ~default:Masc_agent_core.Hooks.empty config.hooks
+      hooks
     ; provider_config = Some config.provider_cfg
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
     ; body_timeout_s = config.body_timeout_s

@@ -310,6 +310,9 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       let next = setRuntimeTomlProviderField(current, input.id, 'display-name', input.displayName || input.id)
       next = setRuntimeTomlProviderField(next, input.id, 'protocol', input.protocol)
       next = setRuntimeTomlProviderField(next, input.id, input.transportKind, input.transportValue)
+      if (input.isNonInteractive) {
+        next = setRuntimeTomlProviderField(next, input.id, 'is-non-interactive', true)
+      }
       if (input.credentialType !== 'none' && input.credentialValue.trim() !== '') {
         next = setRuntimeTomlProviderCredential(next, input.id, input.credentialType, input.credentialValue)
       }

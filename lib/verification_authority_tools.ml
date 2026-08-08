@@ -17,36 +17,58 @@ let tool_name = function
 
 let all_tools = [ Read_file; Search_files; Execute ]
 
-let tool_of_name name =
-  List.find_opt (fun tool -> String.equal (tool_name tool) name) all_tools
-;;
-
 type t =
   { ownership_root : string
   ; config : Workspace.config
   ; producer_meta : Keeper_meta_contract.keeper_meta
+  ; tools : (tool * Keeper_tool_descriptor.t) list
   }
 
-let create ~config ~producer =
-  match Keeper_meta_store.read_meta config producer with
-  | Error message ->
-    Error (Printf.sprintf "producer %s meta unreadable: %s" producer message)
-  | Ok None ->
+let descriptor_of_tool tool =
+  match Keeper_tool_descriptor.descriptors_for_internal (tool_name tool) with
+  | [ descriptor ] -> Ok (tool, descriptor)
+  | [] ->
     Error
       (Printf.sprintf
-         "producer %s has no keeper meta; there is no tree to inspect"
-         producer)
-  | Ok (Some producer_meta) ->
-    let project_root =
-      Workspace_verification_store.project_root_of_base_path config.base_path
-    in
-    let ownership_root =
-      Keeper_sandbox_config.host_root_abs_of_agent
-        ~base_path:project_root
-        ~agent_name:producer
-      |> Env_config_core.strip_trailing_slashes
-    in
-    Ok { ownership_root; config; producer_meta }
+         "tool %s is missing from the keeper descriptor registry"
+         (tool_name tool))
+  | descriptors ->
+    Error
+      (Printf.sprintf
+         "tool %s has %d keeper descriptors"
+         (tool_name tool)
+         (List.length descriptors))
+;;
+
+let rec resolve_tools = function
+  | [] -> Ok []
+  | tool :: rest ->
+    let open Result.Syntax in
+    let* descriptor = descriptor_of_tool tool in
+    let* descriptors = resolve_tools rest in
+    Ok (descriptor :: descriptors)
+;;
+
+let create ~config ~producer =
+  let open Result.Syntax in
+  let* tools = resolve_tools all_tools in
+  let* producer_meta =
+    match Keeper_meta_store.read_meta config producer with
+    | Error message ->
+      Error (Printf.sprintf "producer %s meta unreadable: %s" producer message)
+    | Ok None -> Error (Printf.sprintf "producer %s has no keeper meta" producer)
+    | Ok (Some producer_meta) -> Ok producer_meta
+  in
+  let project_root =
+    Workspace_verification_store.project_root_of_base_path config.base_path
+  in
+  let ownership_root =
+    Keeper_sandbox_config.host_root_abs_of_agent
+      ~base_path:project_root
+      ~agent_name:producer
+    |> Env_config_core.strip_trailing_slashes
+  in
+  Ok { ownership_root; config; producer_meta; tools }
 ;;
 
 let ownership_root t = t.ownership_root
@@ -55,17 +77,14 @@ let ownership_root t = t.ownership_root
 (* Schemas                                                          *)
 (* ================================================================ *)
 
-(* The keeper catalog is the source. Restating a description here would let a
-   judge and a producer read different documentation for the same tool, and the
-   one that drifts is always the copy. *)
-let schema_of_tool tool : Types_core.tool_schema option =
-  List.find_opt
-    (fun (schema : Types_core.tool_schema) ->
-       String.equal schema.name (tool_name tool))
-    Tool_shard.all_keeper_tool_schemas
+let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.tool_schema =
+  { Types_core.name = tool_name tool
+  ; description = descriptor.description
+  ; input_schema = descriptor.input_schema
+  }
 ;;
 
-let schemas _t = List.filter_map schema_of_tool all_tools
+let schemas t = List.map schema_of_tool t.tools
 
 (* ================================================================ *)
 (* Dispatch                                                         *)
@@ -78,18 +97,18 @@ type lookup_outcome =
   | Resolved
   | Rejected
   | Unknown_tool
-  | Missing_schema
+  | Invalid_input
 
 let lookup_outcome_label = function
   | Resolved -> "resolved"
   | Rejected -> "rejected"
   | Unknown_tool -> "unknown_tool"
-  | Missing_schema -> "missing_schema"
+  | Invalid_input -> "invalid_input"
 ;;
 
 let lookup_outcome_level = function
   | Resolved -> Log.Info
-  | Rejected | Unknown_tool | Missing_schema -> Log.Warn
+  | Rejected | Unknown_tool | Invalid_input -> Log.Warn
 ;;
 
 (* What the judge ran, and whether it got an answer. An operator reading the
@@ -149,7 +168,7 @@ let run t tool ~args =
 ;;
 
 let dispatch t ~name ~args =
-  match tool_of_name name with
+  match List.find_opt (fun (tool, _) -> String.equal (tool_name tool) name) t.tools with
   | None ->
     let detail =
       Printf.sprintf
@@ -159,22 +178,20 @@ let dispatch t ~name ~args =
     in
     log_call t ~name ~argument:"" ~outcome:Unknown_tool;
     Error detail
-  | Some tool ->
-    (* A tool the evaluator was never offered cannot be answered here either:
-       [schemas] filters on the keeper catalog, so a name that resolves to a
-       constructor but has no schema was not in the surface the model saw. *)
-    (match schema_of_tool tool with
-     | None ->
-       let detail =
-         Printf.sprintf
-           "tool %s is not in the keeper schema catalog for this build"
-           name
-       in
-       log_call t ~name ~argument:"" ~outcome:Missing_schema;
+  | Some (tool, descriptor) ->
+    let argument = Yojson.Safe.to_string args in
+    (match
+       Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
+         ~tool_name:name
+         descriptor
+         ~input:args
+     with
+     | Error rejection ->
+       let detail = Tool_result.message rejection in
+       log_call t ~name ~argument ~outcome:Invalid_input;
        Error detail
-     | Some _ ->
-       let argument = Yojson.Safe.to_string args in
-       let result = run t tool ~args in
+     | Ok prepared_args ->
+       let result = run t tool ~args:prepared_args in
        log_call
          t
          ~name

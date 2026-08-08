@@ -655,7 +655,7 @@ let resume
       ?(tools = [])
       ?context
       ?(options = default_options)
-      ?(context_fit_admission = Disabled)
+      ?(context_fit_admission = Body_only)
       ?model_input_projection
       ?pre_dispatch_serialization_observer
       ?checkpoint_sink

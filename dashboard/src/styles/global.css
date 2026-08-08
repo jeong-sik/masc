@@ -254,7 +254,6 @@ tbody tr:hover {
   padding: var(--sp-1h);
 }
 
-#dashboard-side-rail,
 #main-content {
   border-color: var(--color-border-default);
   border-radius: var(--r-1);

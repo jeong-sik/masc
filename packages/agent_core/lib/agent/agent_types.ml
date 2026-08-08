@@ -28,8 +28,8 @@ type checkpoint_snapshot =
 type checkpoint_sink = checkpoint_snapshot -> (unit, string) result
 
 type context_fit_admission =
-  | Disabled
-  | Enforce_when_supported
+  | Body_only
+  | Require_exact_fit
 
 type model_input_projection = message list -> (message list, string) result
 type pre_dispatch_serialization_observer = Llm_provider.Request_wire_observer.try_observe
@@ -279,7 +279,7 @@ let create
       ?(tools = [])
       ?context
       ?(options = default_options)
-      ?(context_fit_admission = Disabled)
+      ?(context_fit_admission = Body_only)
       ?model_input_projection
       ?pre_dispatch_serialization_observer
       ?checkpoint_sink

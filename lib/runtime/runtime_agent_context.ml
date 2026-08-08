@@ -157,7 +157,15 @@ let default_config
 let oas_tracer_ref = Atomic.make Agent_sdk.Tracing.null
 let set_oas_tracer tracer = Atomic.set oas_tracer_ref tracer
 
-let context_fit_admission = Agent_sdk.Agent.Enforce_when_supported
+let context_fit_admission (provider_config : Llm_provider.Provider_config.t) =
+  if Llm_provider.Count_tokens_sync.supports_completion_request_measurement provider_config
+  then Agent_sdk.Agent.Require_exact_fit
+  else
+    match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
+    | Some { Llm_provider.Capabilities.serving_constraint = Some _; _ } ->
+      Agent_sdk.Agent.Require_exact_fit
+    | Some _ | None -> Agent_sdk.Agent.Body_only
+;;
 
 let configured_or_inherited configured inherited =
   match configured with
@@ -213,7 +221,8 @@ let builder
     |> Agent_sdk.Builder.with_name config.name
     |> Agent_sdk.Builder.with_system_prompt config.system_prompt
     |> Agent_sdk.Builder.with_tools config.tools
-    |> Agent_sdk.Builder.with_context_fit_admission context_fit_admission
+    |> Agent_sdk.Builder.with_context_fit_admission
+         (context_fit_admission config.provider_cfg)
   in
   let builder =
     match config.temperature with
@@ -384,5 +393,9 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; on_run_complete = config.on_run_complete
     }
   in
-  { patched_checkpoint; agent_config; options; context_fit_admission }
+  { patched_checkpoint
+  ; agent_config
+  ; options
+  ; context_fit_admission = context_fit_admission config.provider_cfg
+  }
 ;;

@@ -95,7 +95,7 @@ export function enqueueInput(
     if (existing) return existing
   }
   const msg: QueuedMessage = {
-    id: `${keeperName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: `${keeperName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, // real-randomness-needed: local queue id, never a measurement
     content,
     timestamp: Date.now(),
     sequence: ++_nextQueueSequence,

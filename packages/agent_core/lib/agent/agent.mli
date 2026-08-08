@@ -30,13 +30,14 @@ type checkpoint_snapshot = Agent_types.checkpoint_snapshot =
 
 type checkpoint_sink = Agent_types.checkpoint_sink
 
-(** Agent-level provider-fit policy. [Disabled] preserves the historical
-    single-call path. [Enforce_when_supported] uses provider-native request
-    measurement for protocols that OAS supports and otherwise preserves that
-    protocol's historical path; it never estimates token counts. *)
+(** Agent-level provider-fit policy. [Body_only] requires exact serialized-byte
+    admission and also requires token measurement whenever a serving constraint
+    is declared. [Require_exact_fit] additionally requires provider-native
+    measurement and a declared context limit for every call; unsupported or
+    incomplete evidence fails closed. Token counts are never estimated. *)
 type context_fit_admission = Agent_types.context_fit_admission =
-  | Disabled
-  | Enforce_when_supported
+  | Body_only
+  | Require_exact_fit
 
 type model_input_projection = Agent_types.model_input_projection
 type pre_dispatch_serialization_observer = Agent_types.pre_dispatch_serialization_observer

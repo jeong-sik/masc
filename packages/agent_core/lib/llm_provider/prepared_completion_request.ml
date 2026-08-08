@@ -207,6 +207,7 @@ let admitted_request admitted = admitted.measured.prepared
 let admitted_fit admitted = admitted.fit
 let admitted_body admitted = admitted.measured.admitted_body
 let serialized_request (serialized : serialized) = serialized.prepared
+let serialized_admitted_body (serialized : serialized) = serialized.admitted_body
 let admitted_body_http_codec admitted_body = admitted_body.http_codec
 let admitted_body_contents admitted_body = admitted_body.body
 let admitted_body_evidence admitted_body = admitted_body.evidence

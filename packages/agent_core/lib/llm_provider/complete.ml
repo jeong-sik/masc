@@ -319,6 +319,34 @@ let complete_admitted
     ()
 ;;
 
+let complete_serialized
+      ~sw
+      ~net
+      ?clock
+      ?transport
+      serialized
+      ?cache
+      ?connection_cache
+      ?metrics
+      ?body_timeout_s
+      ?request_wire_observer
+      ()
+  =
+  complete_prepared_sync
+    ~sw
+    ~net
+    ?clock
+    ?transport
+    ~prepared:(Prepared_completion_request.serialized_request serialized)
+    ~admitted_body:(Prepared_completion_request.serialized_admitted_body serialized)
+    ?cache
+    ?connection_cache
+    ?metrics
+    ?body_timeout_s
+    ?request_wire_observer
+    ()
+;;
+
 (* ── Streaming ───────────────────────────────────────── *)
 
 let complete_prepared_stream
@@ -537,6 +565,36 @@ let complete_stream_admitted
     ?request_wire_observer
     ~prepared:(Prepared_completion_request.admitted_request admitted)
     ?admitted_body
+    ~on_event
+    ?metrics
+    ?connection_cache
+    ?on_telemetry
+    ()
+;;
+
+let complete_stream_serialized
+      ~sw
+      ~net
+      ?clock
+      ?transport
+      ?wire_observer
+      ?request_wire_observer
+      serialized
+      ~on_event
+      ?metrics
+      ?connection_cache
+      ?on_telemetry
+      ()
+  =
+  complete_prepared_stream
+    ~sw
+    ~net
+    ?clock
+    ?transport
+    ?wire_observer
+    ?request_wire_observer
+    ~prepared:(Prepared_completion_request.serialized_request serialized)
+    ~admitted_body:(Prepared_completion_request.serialized_admitted_body serialized)
     ~on_event
     ?metrics
     ?connection_cache

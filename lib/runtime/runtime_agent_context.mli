@@ -126,7 +126,9 @@ val builder :
 (** [builder ~net ~config ?transport ()] builds an {!Agent_sdk.Builder.t}
     from [config]. *)
 
-val context_fit_admission : Agent_sdk.Agent.context_fit_admission
+val context_fit_admission
+  :  Llm_provider.Provider_config.t
+  -> Agent_sdk.Agent.context_fit_admission
 (** Exact provider-fit policy shared by fresh and resumed agents. The OAS
     provider capability SSOT decides whether native request measurement exists;
     unsupported providers retain compatibility dispatch. *)

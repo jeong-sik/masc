@@ -1,14 +1,8 @@
-(* RFC-0361 D1: the completion authority runs the producer's own tools.
-
-   The properties under test are the ones that decide whether a judge can be
-   trusted with the surface: it offers exactly the keeper schemas rather than a
-   restatement of them, every advertised name reaches an implementation, a
-   producer with no meta yields no surface instead of one that fails on every
-   call, and a failed run reaches the model as a failure rather than as output
-   that could be mistaken for a clean result. *)
+(* Completion-authority descriptor, validation, dispatch, and containment
+   contracts. *)
 
 module Keeper_meta_store = Masc.Keeper_meta_store
-module Tool_shard = Masc.Tool_shard
+module Descriptor = Masc.Keeper_tool_descriptor
 module VAT = Masc.Verification_authority_tools
 module AR = Masc.Task.Anti_rationalization
 
@@ -38,13 +32,8 @@ let rec rm_rf path =
    canonical [Keeper_identity.keeper_agent_name], so this fixture cannot drift
    from the identity rule the meta parser enforces.
 
-   [always_allow] is the producer's own Gate posture, and the judge borrows it
-   with the meta — [Keeper_tool_execute_runtime] reads
-   [meta.always_allow] and nothing else. It is set here because a deferred
-   effect is not an answer: the judge is one review with no wake path, so a
-   producer that defers gives it a dead end rather than a result. That is the
-   real behaviour for a non-always-allow producer and it is stated in the
-   surface docs; these cases exercise the branch where the effect runs. *)
+   [always_allow] is the producer's Gate posture. These cases exercise the
+   immediate execution branch. *)
 let ensure_producer config name =
   match
     Result.bind
@@ -82,10 +71,26 @@ let with_surface f =
   | Ok surface -> f config surface
 ;;
 
-(* The judge and the producer must read one description of one tool. A schema
-   restated here would drift from the catalog, and the copy is always the one
-   that drifts. *)
-let test_schemas_are_the_keeper_schemas () =
+(* Create the producer playground used to resolve relative tool paths. *)
+let producer_playground (config : Workspace_core.config) =
+  let path =
+    Keeper_sandbox_config.host_root_abs_of_agent
+      ~base_path:
+        (Workspace_verification_store.project_root_of_base_path config.base_path)
+      ~agent_name:producer
+  in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir)
+    then (
+      mkdir_p (Filename.dirname dir);
+      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p path;
+  path
+;;
+
+(* The judge and producer share the descriptor-owned model surface. *)
+let test_schemas_are_the_descriptor_schemas () =
   with_surface (fun _config surface ->
     let offered = VAT.schemas surface in
     let names =
@@ -97,20 +102,122 @@ let test_schemas_are_the_keeper_schemas () =
       names;
     List.iter
       (fun (schema : Masc_domain.tool_schema) ->
-         match
-           List.find_opt
-             (fun (catalog : Masc_domain.tool_schema) ->
-                String.equal catalog.name schema.name)
-             Tool_shard.all_keeper_tool_schemas
-         with
-         | None ->
-           Alcotest.failf "%s is not in the keeper catalog" schema.name
-         | Some catalog ->
+         match Descriptor.descriptors_for_internal schema.name with
+         | [ descriptor ] ->
            Alcotest.(check string)
-             (schema.name ^ " description is the catalog's")
-             catalog.description
-             schema.description)
+             (schema.name ^ " description is the descriptor's")
+             descriptor.Descriptor.description
+             schema.description;
+           Alcotest.(check bool)
+             (schema.name ^ " input schema is the descriptor's")
+             true
+             (Yojson.Safe.equal descriptor.Descriptor.input_schema schema.input_schema)
+         | found ->
+           Alcotest.failf
+             "%s resolves to %d descriptors; the surface needs exactly one"
+             schema.name
+             (List.length found))
       offered)
+;;
+
+(* A successful read proves descriptor translation reaches the runtime handler;
+   a missing required argument must be rejected at the same boundary. *)
+let test_read_translates_the_advertised_argument_and_refuses_a_malformed_one () =
+  with_surface (fun config surface ->
+    let playground = producer_playground config in
+    let name = "advertised-argument-probe.txt" in
+    let contents = "written by the probe" in
+    (try
+       Out_channel.with_open_text (Filename.concat playground name) (fun oc ->
+         output_string oc contents)
+     with
+     | Sys_error err -> Alcotest.failf "probe file could not be written: %s" err);
+    let read key =
+      VAT.dispatch surface ~name:"tool_read_file" ~args:(`Assoc [ key, `String name ])
+    in
+    let required =
+      match
+        List.find_opt
+          (fun (schema : Masc_domain.tool_schema) ->
+             String.equal schema.name "tool_read_file")
+          (VAT.schemas surface)
+      with
+      | Some { input_schema = `Assoc fields; _ } ->
+        (match List.assoc_opt "required" fields with
+         | Some (`List (`String field :: _)) -> field
+         | _ -> Alcotest.fail "tool_read_file advertises no required argument")
+      | _ -> Alcotest.fail "tool_read_file is not offered"
+    in
+    (match read required with
+     | Error detail ->
+       Alcotest.failf
+         "the advertised required argument %S did not reach the handler: %s"
+         required
+         detail
+     | Ok output ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%S returns the file's contents" required)
+         true
+         (Astring.String.is_infix ~affix:contents output));
+    match VAT.dispatch surface ~name:"tool_read_file" ~args:(`Assoc []) with
+    | Ok output ->
+      Alcotest.failf
+        "a read with no %S resolved instead of being refused, so an unopened \
+         file reads as an answer: %s"
+        required
+        output
+    | Error detail ->
+      Alcotest.(check bool)
+        "the refusal names the missing argument"
+        true
+        (Astring.String.is_infix ~affix:required detail))
+;;
+
+(* A search requires an explicit non-empty pattern. *)
+let test_search_refuses_a_call_without_its_required_pattern () =
+  with_surface (fun config surface ->
+    ignore (producer_playground config);
+    (match
+       VAT.dispatch surface ~name:"tool_search_files" ~args:(`Assoc [])
+     with
+     | Ok output ->
+       Alcotest.failf
+         "a search with no pattern resolved instead of being refused: %s"
+         output
+     | Error detail ->
+       Alcotest.(check bool)
+         "the refusal names the missing argument"
+         true
+         (Astring.String.is_infix ~affix:"pattern" detail));
+    match
+      VAT.dispatch
+        surface
+        ~name:"tool_search_files"
+        ~args:(`Assoc [ "pattern", `String "advertised" ])
+    with
+    | Ok _ -> ()
+    | Error detail ->
+      Alcotest.failf "a search carrying its pattern was refused: %s" detail)
+;;
+
+(* [argv] is a process vector, never a shell-line string. *)
+let test_execute_refuses_argv_that_is_not_a_process_vector () =
+  with_surface (fun _config surface ->
+    match
+      VAT.dispatch
+        surface
+        ~name:"tool_execute"
+        ~args:(`Assoc [ "argv", `String "echo durable-marker" ])
+    with
+    | Ok output ->
+      Alcotest.failf
+        "argv as a bare string resolved instead of being refused: %s"
+        output
+    | Error detail ->
+      Alcotest.(check bool)
+        "the refusal names argv"
+        true
+        (Astring.String.is_infix ~affix:"argv" detail))
 ;;
 
 (* A judge that calls a name this surface does not offer must be told so. A
@@ -124,23 +231,6 @@ let test_unknown_tool_name_is_an_error () =
         "names the offered tools"
         true
         (Astring.String.is_infix ~affix:"tool_execute" detail))
-;;
-
-(* Every advertised schema must reach an implementation. Advertising a name
-   dispatch does not know would put a tool in the model's list that always
-   fails with "unknown tool". *)
-let test_every_schema_name_dispatches () =
-  with_surface (fun _config surface ->
-    List.iter
-      (fun (schema : Masc_domain.tool_schema) ->
-         match VAT.dispatch surface ~name:schema.name ~args:(`Assoc []) with
-         | Ok _ -> ()
-         | Error detail ->
-           Alcotest.(check bool)
-             (Printf.sprintf "%s is not reported as unknown" schema.name)
-             false
-             (Astring.String.is_infix ~affix:"unknown tool" detail))
-      (VAT.schemas surface))
 ;;
 
 (* Where the judge's process would run is the safety property this layer owns.
@@ -202,9 +292,7 @@ let test_execute_cannot_escape_the_producer_playground () =
         (Astring.String.is_infix ~affix:"\"scope\":\"playground_root\"" detail))
 ;;
 
-(* A run that failed must not read like a run that produced nothing. Handing
-   back [raw_output] on both paths would let a build that never started look
-   like one with no findings — the exact shape that made task-136 approvable. *)
+(* A failed process is a failed lookup result. *)
 let test_a_failed_run_is_an_error_not_empty_output () =
   with_surface (fun _config surface ->
     match
@@ -244,10 +332,7 @@ let test_unknown_producer_yields_no_surface () =
       (Astring.String.is_infix ~affix:"no-such-producer" reason)
 ;;
 
-(* RFC-0361 D2. The prompt states what the evaluator can do, and the two
-   surfaces are different claims. Rendering the toolless text for a
-   tool-carrying review is the exact gap D1 exists to close, and the tool text
-   must not repeat the read-only promise this surface no longer keeps. *)
+(* The prompt states the exact tools attached to the review request. *)
 let test_prompt_states_the_available_surface () =
   with_surface (fun _config surface ->
     let request : AR.review_request =
@@ -303,16 +388,22 @@ let () =
   Alcotest.run
     "verification authority tools"
     [ ( "surface"
-      , [ Alcotest.test_case "schemas are the keeper schemas" `Quick
-            test_schemas_are_the_keeper_schemas
+      , [ Alcotest.test_case "schemas are the descriptor schemas" `Quick
+            test_schemas_are_the_descriptor_schemas
+        ; Alcotest.test_case
+            "read translates the advertised argument and refuses a malformed one"
+            `Quick
+            test_read_translates_the_advertised_argument_and_refuses_a_malformed_one
+        ; Alcotest.test_case "search refuses a call without its required pattern"
+            `Quick test_search_refuses_a_call_without_its_required_pattern
+        ; Alcotest.test_case "execute refuses argv that is not a process vector"
+            `Quick test_execute_refuses_argv_that_is_not_a_process_vector
         ; Alcotest.test_case "unknown producer yields no surface" `Quick
             test_unknown_producer_yields_no_surface
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case "unknown tool name is an error" `Quick
             test_unknown_tool_name_is_an_error
-        ; Alcotest.test_case "every schema name dispatches" `Quick
-            test_every_schema_name_dispatches
         ] )
     ; ( "execution"
       , [ Alcotest.test_case "execute resolves inside the producer playground" `Quick

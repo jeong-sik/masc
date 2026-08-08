@@ -115,7 +115,7 @@ let build_admission_agent
   let builder =
     Agent_sdk.Builder.create ~net ~model:provider_config.Provider_config.model_id
     |> Agent_sdk.Builder.with_provider_config provider_config
-    |> Agent_sdk.Builder.with_context_fit_admission Agent_sdk.Agent.Enforce_when_supported
+    |> Agent_sdk.Builder.with_context_fit_admission Agent_sdk.Agent.Require_exact_fit
     |> Agent_sdk.Builder.without_event_bus
   in
   let builder =
@@ -1326,7 +1326,7 @@ let test_invalid_count_response_is_provider_parse_failure () =
   | Ok _ -> fail "malformed provider count response must fail"
 ;;
 
-let test_unsupported_provider_preserves_compatibility () =
+let test_unsupported_provider_blocks_sync_dispatch () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -1348,9 +1348,39 @@ let test_unsupported_provider_preserves_compatibility () =
     }
   in
   let agent = build_admission_agent ~net ~provider_config ~transport () in
-  match Agent_sdk.Agent.run ~sw agent "compatibility" with
+  match Agent_sdk.Agent.run ~sw agent "require exact fit" with
+  | Error (Agent_sdk.Error.Api (Retry.InvalidRequest _)) ->
+    check bool "unsupported measurement blocks sync dispatch" false !dispatched
   | Error error -> fail (Agent_sdk.Error.to_string error)
-  | Ok _ -> check bool "compatibility dispatch" true !dispatched
+  | Ok _ -> fail "unsupported measurement must fail before sync dispatch"
+;;
+
+let test_unsupported_provider_blocks_stream_dispatch () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let provider_config =
+    { (config ~kind:Provider_config.OpenAI_compat ~max_context:512 "not-used") with
+      response_format = Types.Off
+    }
+  in
+  let dispatched = ref false in
+  let transport =
+    { Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
+    ; complete_stream =
+        (fun ?on_telemetry:_ ~on_event:_ _ ->
+          dispatched := true;
+          Ok response)
+    }
+  in
+  let agent = build_admission_agent ~net ~provider_config ~transport () in
+  match Agent_sdk.Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "require exact fit" with
+  | Error (Agent_sdk.Error.Api (Retry.InvalidRequest _)) ->
+    check bool "unsupported measurement blocks stream dispatch" false !dispatched
+  | Error error -> fail (Agent_sdk.Error.to_string error)
+  | Ok _ -> fail "unsupported measurement must fail before stream dispatch"
 ;;
 
 let test_transport_error () =
@@ -1529,9 +1559,13 @@ let () =
             `Quick
             test_invalid_count_response_is_provider_parse_failure
         ; test_case
-            "unsupported provider preserves compatibility"
+            "unsupported provider blocks sync dispatch"
             `Quick
-            test_unsupported_provider_preserves_compatibility
+            test_unsupported_provider_blocks_sync_dispatch
+        ; test_case
+            "unsupported provider blocks stream dispatch"
+            `Quick
+            test_unsupported_provider_blocks_stream_dispatch
         ; test_case "typed HTTP error" `Quick test_transport_error
         ; test_case "non-Anthropic unsupported" `Quick test_unsupported
         ; test_case

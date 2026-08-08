@@ -5,12 +5,15 @@
     Used by the keeper turn driver's [run_named] entry to map providers
     to runtime candidates with deterministic admission keys. *)
 
+(* "Quietly" covers a release that fails, not a turn that was cancelled:
+   swallowing Cancelled here would let the fiber keep running past its
+   cancellation point. *)
 let release_client_capacity_quietly = function
   | None -> ()
   | Some release ->
-      (match release () with
-       | () -> ()
-       | exception _ -> ())
+      (try release () with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | _ -> ())
 
 let provider_config_identity_key (cfg : Llm_provider.Provider_config.t) =
   Hashtbl.hash

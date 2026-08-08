@@ -30,13 +30,31 @@ try {
   }
   await timestamp.locator('time').waitFor()
 
-  await firstRow.getByText('Typed queue evidence', { exact: true }).click()
-  await firstRow.getByText('keeper_process_external_attention', { exact: true }).waitFor()
+  const evidence = firstRow.locator('details')
+  await evidence.getByText('Typed queue evidence', { exact: true }).click()
+  if (!(await evidence.evaluate((node) => node.open))) {
+    throw new Error('the typed queue evidence disclosure did not open')
+  }
+  await evidence.getByText('external_attention_store', { exact: true }).waitFor()
   await page.screenshot({ path: desktopScreenshot, fullPage: true })
 
-  await page.setViewportSize({ width: 390, height: 844 })
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
-  if (overflow > 1) throw new Error(`the timeline overflows the mobile viewport by ${overflow}px`)
+  for (const width of [390, 360, 320]) {
+    await page.setViewportSize({ width, height: 844 })
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+    if (overflow > 1) throw new Error(`the page overflows the ${width}px viewport by ${overflow}px`)
+
+    const internalOverflow = await graph.evaluate((node) => node.scrollWidth - node.clientWidth)
+    if (internalOverflow > 1) {
+      throw new Error(`the timeline overflows its graph at ${width}px by ${internalOverflow}px`)
+    }
+
+    const overflowingRow = await rows.evaluateAll((nodes) =>
+      nodes.findIndex((node) => node.scrollWidth - node.clientWidth > 1),
+    )
+    if (overflowingRow !== -1) {
+      throw new Error(`queue row ${overflowingRow} overflows at ${width}px`)
+    }
+  }
   await page.screenshot({ path: mobileScreenshot, fullPage: true })
 
   process.stdout.write(`desktop_screenshot=${desktopScreenshot}\n`)

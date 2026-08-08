@@ -26,13 +26,12 @@ const inventory: DashboardKeeperWaitingInventory = {
       state: 'waiting',
       waiting_count: 3,
       sources: { external_attention: 2, schedule_waiting: 1 },
-      next_action: 'keeper_process_external_attention',
       waiting_on: [
         {
           keeper_name: 'sangsu',
           source: 'external_attention',
           waiting_on: 'discord:product-review',
-          wake_producer: 'keeper_process_external_attention',
+          wake_producer: 'external_attention_store',
           since_iso: '2026-08-08T10:12:03Z',
           next_action: 'keeper_process_external_attention',
           detail: { event_id: 'evt-new', connector: 'discord' },
@@ -51,7 +50,7 @@ const inventory: DashboardKeeperWaitingInventory = {
           keeper_name: 'sangsu',
           source: 'external_attention',
           waiting_on: 'discord:incident-room',
-          wake_producer: 'keeper_process_external_attention',
+          wake_producer: 'external_attention_store',
           since_iso: '2026-08-06T03:59:42Z',
           next_action: 'keeper_process_external_attention',
           detail: { event_id: 'evt-old', connector: 'discord' },

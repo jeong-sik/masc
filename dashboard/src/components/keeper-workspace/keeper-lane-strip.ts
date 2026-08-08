@@ -209,10 +209,10 @@ function LaneWaitingRow({
         ${row.due_at_iso == null
           ? null
           : html`<div class="text-2xs text-[var(--status-warn)]">실행 예정 · <time dateTime=${row.due_at_iso}>${formatDateTimeKo(row.due_at_iso)}</time> · ${formatTimeUntil(row.due_at_iso)}</div>`}
-        <details class="text-3xs text-[var(--color-fg-muted)]">
+        <details class="min-w-0 text-3xs text-[var(--color-fg-muted)]" style=${{ overflowWrap: 'anywhere' }}>
           <summary class="cursor-pointer select-none">Typed queue evidence</summary>
-          <div class="mt-2 grid gap-2">
-            <div class="flex flex-wrap gap-x-3">
+          <div class="mt-2 grid min-w-0 gap-2">
+            <div class="flex min-w-0 flex-wrap gap-x-3">
               <span>wake producer · <code>${row.wake_producer ?? '미기록'}</code></span>
               <span>source · <code>${row.source}</code></span>
             </div>

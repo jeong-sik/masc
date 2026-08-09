@@ -62,11 +62,13 @@ module Operation_id = struct
     derived ~domain:"continuation" [ to_string parent; continuation_ref ]
   ;;
 
-  let for_keeper_message ~causing_operation ~ordinal ~target_keeper =
+  let for_keeper_message ~causing_operation ~tool_call_id ~ordinal ~target_keeper =
+    if String.length tool_call_id = 0
+    then invalid_arg "Keeper message tool_call_id must not be empty";
     if ordinal < 0 then invalid_arg "Keeper message ordinal must be non-negative";
     derived
       ~domain:"keeper-message"
-      [ to_string causing_operation; string_of_int ordinal; target_keeper ]
+      [ to_string causing_operation; tool_call_id; string_of_int ordinal; target_keeper ]
   ;;
 
   let for_autonomous ~keeper_key ~candidate_identity =

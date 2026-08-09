@@ -117,20 +117,22 @@ let valid_identity ~field value =
 ;;
 
 module Source_ref = struct
-  type connector =
-    | Dashboard
-    | Discord
-    | Slack
-
   type t =
     | Operator_message of { request_id : string }
-    | Connector_message of
-        { connector : connector
+    | Discord_message of
+        { guild_id : string
+        ; channel_id : string
         ; message_id : string
+        }
+    | Slack_message of
+        { team_id : string
+        ; channel_id : string
+        ; message_ts : string
         }
     | Keeper_message of
         { keeper_name : string
         ; causing_operation_id : Keeper_operation_id.Operation_id.t
+        ; tool_call_id : string
         ; ordinal : int
         }
     | Event of { event_id : string }
@@ -139,12 +141,6 @@ module Source_ref = struct
         ; delta_ref : string
         }
     | Autonomous_candidate of { candidate_id : string }
-
-  let connector_to_string = function
-    | Dashboard -> "dashboard"
-    | Discord -> "discord"
-    | Slack -> "slack"
-  ;;
 
   let to_canonical_json source =
     let open Result in
@@ -157,16 +153,32 @@ module Source_ref = struct
              [ "kind", `String "operator_message"
              ; "request_id", `String request_id
              ])
-      | Connector_message { connector; message_id } ->
+      | Discord_message { guild_id; channel_id; message_id } ->
+        let* guild_id = valid_identity ~field:"Discord guild_id" guild_id in
+        let* channel_id = valid_identity ~field:"Discord channel_id" channel_id in
         let* message_id = valid_identity ~field:"connector message_id" message_id in
         Ok
           (`Assoc
-             [ "kind", `String "connector_message"
-             ; "connector", `String (connector_to_string connector)
+             [ "kind", `String "discord_message"
+             ; "guild_id", `String guild_id
+             ; "channel_id", `String channel_id
              ; "message_id", `String message_id
              ])
-      | Keeper_message { keeper_name; causing_operation_id; ordinal } ->
+      | Slack_message { team_id; channel_id; message_ts } ->
+        let* team_id = valid_identity ~field:"Slack team_id" team_id in
+        let* channel_id = valid_identity ~field:"Slack channel_id" channel_id in
+        let* message_ts = valid_identity ~field:"Slack message_ts" message_ts in
+        Ok
+          (`Assoc
+             [ "kind", `String "slack_message"
+             ; "team_id", `String team_id
+             ; "channel_id", `String channel_id
+             ; "message_ts", `String message_ts
+             ])
+      | Keeper_message
+          { keeper_name; causing_operation_id; tool_call_id; ordinal } ->
         let* keeper_name = valid_identity ~field:"source Keeper name" keeper_name in
+        let* tool_call_id = valid_identity ~field:"host tool_call_id" tool_call_id in
         if ordinal < 0
         then Error "source Keeper message ordinal must be non-negative"
         else
@@ -177,6 +189,7 @@ module Source_ref = struct
                ; ( "causing_operation_id"
                  , `String
                      (Keeper_operation_id.Operation_id.to_string causing_operation_id) )
+               ; "tool_call_id", `String tool_call_id
                ; "ordinal", `Int ordinal
                ])
       | Event { event_id } ->
@@ -261,13 +274,13 @@ type t =
 
 let source_matches_kind kind source =
   match kind, source with
-  | Message, (Source_ref.Operator_message _ | Connector_message _ | Keeper_message _) ->
+  | Message, (Source_ref.Operator_message _ | Discord_message _ | Slack_message _ | Keeper_message _) ->
     true
   | Stimulus, (Source_ref.Event _ | Continuation _) -> true
   | Autonomous, Source_ref.Autonomous_candidate _ -> true
   | Message, (Event _ | Continuation _ | Autonomous_candidate _)
-  | Stimulus, (Operator_message _ | Connector_message _ | Keeper_message _ | Autonomous_candidate _)
-  | Autonomous, (Operator_message _ | Connector_message _ | Keeper_message _ | Event _ | Continuation _) ->
+  | Stimulus, (Operator_message _ | Discord_message _ | Slack_message _ | Keeper_message _ | Autonomous_candidate _)
+  | Autonomous, (Operator_message _ | Discord_message _ | Slack_message _ | Keeper_message _ | Event _ | Continuation _) ->
     false
 ;;
 

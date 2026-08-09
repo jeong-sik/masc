@@ -192,6 +192,22 @@ let pending_delivery_index_sql =
   "CREATE INDEX deliveries_pending_fifo ON deliveries(delivery_seq) WHERE state = 'pending'"
 ;;
 
+let operations_terminal_update_trigger_sql =
+  "CREATE TRIGGER operations_terminal_update_immutable BEFORE UPDATE ON operations WHEN OLD.state IN ('settled', 'cancelled', 'interrupted') BEGIN SELECT RAISE(ABORT, 'terminal operation is immutable'); END"
+;;
+
+let operations_terminal_delete_trigger_sql =
+  "CREATE TRIGGER operations_terminal_delete_immutable BEFORE DELETE ON operations WHEN OLD.state IN ('settled', 'cancelled', 'interrupted') BEGIN SELECT RAISE(ABORT, 'terminal operation is immutable'); END"
+;;
+
+let deliveries_terminal_update_trigger_sql =
+  "CREATE TRIGGER deliveries_terminal_update_immutable BEFORE UPDATE ON deliveries WHEN OLD.state IN ('delivered', 'failed', 'ambiguous') BEGIN SELECT RAISE(ABORT, 'terminal delivery is immutable'); END"
+;;
+
+let deliveries_terminal_delete_trigger_sql =
+  "CREATE TRIGGER deliveries_terminal_delete_immutable BEFORE DELETE ON deliveries WHEN OLD.state IN ('delivered', 'failed', 'ambiguous') BEGIN SELECT RAISE(ABORT, 'terminal delivery is immutable'); END"
+;;
+
 let expected_schema_objects =
   [ "index", "deliveries_pending_fifo", pending_delivery_index_sql
   ; "index", "operations_queued_fifo", queued_index_sql
@@ -199,6 +215,18 @@ let expected_schema_objects =
   ; "table", "deliveries", deliveries_table_sql
   ; "table", "keeper_control", keeper_control_table_sql
   ; "table", "operations", operations_table_sql
+  ; ( "trigger"
+    , "deliveries_terminal_delete_immutable"
+    , deliveries_terminal_delete_trigger_sql )
+  ; ( "trigger"
+    , "deliveries_terminal_update_immutable"
+    , deliveries_terminal_update_trigger_sql )
+  ; ( "trigger"
+    , "operations_terminal_delete_immutable"
+    , operations_terminal_delete_trigger_sql )
+  ; ( "trigger"
+    , "operations_terminal_update_immutable"
+    , operations_terminal_update_trigger_sql )
   ]
 ;;
 
@@ -252,6 +280,30 @@ let initialize_database db path =
     let* () = exec db ~operation:"create running index" running_index_sql in
     let* () =
       exec db ~operation:"create pending delivery index" pending_delivery_index_sql
+    in
+    let* () =
+      exec
+        db
+        ~operation:"create terminal operation update trigger"
+        operations_terminal_update_trigger_sql
+    in
+    let* () =
+      exec
+        db
+        ~operation:"create terminal operation delete trigger"
+        operations_terminal_delete_trigger_sql
+    in
+    let* () =
+      exec
+        db
+        ~operation:"create terminal delivery update trigger"
+        deliveries_terminal_update_trigger_sql
+    in
+    let* () =
+      exec
+        db
+        ~operation:"create terminal delivery delete trigger"
+        deliveries_terminal_delete_trigger_sql
     in
     let* () =
       exec

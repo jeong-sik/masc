@@ -87,15 +87,8 @@ fi
 
 echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in Dune"
 
-# 714 -> 710: this PR wires test_tool_input_validation, and #27429,
-# #27433 and #27441 each wired a suite test/dune already declared without
-# lowering this number. Measured on the merged tree after all four, not
-# computed -- #27441 landed between this branch's first push and now.
-# 708 -> 706: this branch wires test_keeper_catchup_digest and #27525 wired
-# test_tool_workspace_coverage while it was open. Measured on the merged tree --
-# the audit reported "706 unwired, 707 baseline" so 707 would have passed while
-# leaving the ratchet a notch loose.
-UNWIRED_BASELINE=706
+# Exact current count. Adding an unwired suite is a regression.
+UNWIRED_BASELINE=702
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then
@@ -112,11 +105,8 @@ if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then
   exit 2
 fi
 
-# Below the baseline is an improvement, not a defect, so it reports and passes.
-# Failing here made every suite-wiring PR turn main red until someone edited
-# this number: 748 went red, #27181 set 747, and 746 was red again within the
-# hour. scripts/ocaml-structure-ratchet.sh already treats its own drift-down
-# this way ("baseline can be lowered", exit 0); this now matches it.
+# A lower count is accepted so the exact baseline can be tightened in the same
+# change that wires more current suites.
 if [ "$unwired" -lt "$UNWIRED_BASELINE" ]; then
   echo "[ci-test-targets] OK - ${unwired} suites unwired, ${UNWIRED_BASELINE} baseline — lower UNWIRED_BASELINE in $0 to hold the gain"
 else

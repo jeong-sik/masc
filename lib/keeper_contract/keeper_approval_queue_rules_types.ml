@@ -121,7 +121,6 @@ module Decision = struct
   type t =
     | Approve
     | Reject of string
-    | Edit of Yojson.Safe.t
 end
 
 type decision = Decision.t
@@ -184,7 +183,6 @@ let advisory_judgment_of_string = function
 let approval_decision_to_string = function
   | Decision.Approve -> "approve"
   | Decision.Reject reason -> "reject:" ^ reason
-  | Decision.Edit _ -> "edit"
 ;;
 
 let decision_source_to_string = function

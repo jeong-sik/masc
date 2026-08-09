@@ -438,12 +438,7 @@ let reconcile_spent_selection
          }
      | Error _ ->
        Ok Selection_actionable)
-  | Hitl_resolved
-      { decision =
-          ( Keeper_event_queue.Hitl_rejected _
-          | Keeper_event_queue.Hitl_edited _ )
-      ; _
-      }
+  | Hitl_resolved { decision = Keeper_event_queue.Hitl_rejected _; _ }
   | Board_signal _
   | Board_attention _
   | Bootstrap

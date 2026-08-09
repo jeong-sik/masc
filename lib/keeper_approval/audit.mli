@@ -23,7 +23,6 @@ val event_of_string : string -> event option
 type decision_kind =
   | Decision_approve
   | Decision_reject
-  | Decision_edit
 
 val decision_kind_to_string : decision_kind -> string
 val decision_kind_of_string : string -> decision_kind option

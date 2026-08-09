@@ -147,12 +147,7 @@ let test_resolution_reads_the_decision_kind () =
     (option string)
     "approve"
     (Some "ok")
-    (field "severity" (rendered ~decision_kind:Audit.Decision_approve Audit.Resolved));
-  check
-    (option string)
-    "edit"
-    (Some "ok")
-    (field "severity" (rendered ~decision_kind:Audit.Decision_edit Audit.Resolved))
+    (field "severity" (rendered ~decision_kind:Audit.Decision_approve Audit.Resolved))
 ;;
 
 (* The old reader scanned the rendered decision for "reject", so an approval

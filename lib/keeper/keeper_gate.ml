@@ -167,7 +167,7 @@ let cycle_grant_of_resolution (resolution : Keeper_event_queue.hitl_resolution) 
     Some
       (Atomic.make
          (Cycle_grant_available { approval_id = resolution.approval_id }))
-  | Keeper_event_queue.Hitl_rejected _ | Keeper_event_queue.Hitl_edited _ -> None
+  | Keeper_event_queue.Hitl_rejected _ -> None
 ;;
 
 let rec take_matching_cycle_grant grant request =

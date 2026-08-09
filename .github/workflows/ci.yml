@@ -1314,13 +1314,9 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_observability_redact"
 
-      # The Gate is the boundary every external effect crosses, and its audit
-      # log is the only durable record of what it let through. Seven suites
-      # cover it (approval queue, rules, rules types, resolved history, audit
-      # timeline, gate effect coverage, gate replay) and none was named here, so
-      # none ran. This wires the audit-vocabulary suite, which is the one that
-      # pins what a reader of ~/.masc/audit-approvals can actually tell apart.
-      - name: Run approval audit vocabulary suite
+      # Approval persistence, typed terminal decisions, Keeper prompt
+      # projection, and audit vocabulary form one current Gate contract.
+      - name: Run approval Gate contract suites
         id: approval_audit_vocabulary_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
@@ -1330,7 +1326,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_approval_audit_timeline"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_approval_queue @test/runtest-test_keeper_hitl_resolution_prompt @test/runtest-test_keeper_approval_audit_timeline"
 
       - name: Run verification behavior suite
         id: verification_behavior_suite

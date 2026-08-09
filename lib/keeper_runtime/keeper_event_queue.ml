@@ -104,7 +104,6 @@ and fusion_terminal =
 and hitl_resolution_decision =
   | Hitl_approved
   | Hitl_rejected of string
-  | Hitl_edited of Yojson.Safe.t
 
 and hitl_resolution = {
   approval_id : string;
@@ -192,7 +191,6 @@ let task_cancellation_post_id (cancellation : task_cancellation) =
 let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
   | Hitl_rejected _ -> "reject"
-  | Hitl_edited _ -> "edit"
 
 type stimulus = {
   post_id : post_id;
@@ -544,8 +542,7 @@ let payload_to_yojson = function
        @
        match r.decision with
        | Hitl_approved -> []
-       | Hitl_rejected rationale -> [ "rationale", `String rationale ]
-       | Hitl_edited input -> [ "edited_input", input ])
+       | Hitl_rejected rationale -> [ "rationale", `String rationale ])
   | Manual_compaction_requested ->
     `Assoc [ "kind", `String "manual_compaction_requested" ]
   | Goal_assigned ga ->
@@ -712,9 +709,6 @@ let payload_of_yojson json =
       | "reject" ->
         let* rationale = string_field ~context "rationale" fields in
         Ok (Hitl_rejected rationale)
-      | "edit" ->
-        let* input = required_field ~context "edited_input" fields in
-        Ok (Hitl_edited input)
       | other -> Error (Printf.sprintf "unknown hitl_resolution decision: %s" other)
     in
     let* channel = continuation_channel_field fields in

@@ -1020,7 +1020,7 @@ let test_resolution_is_durable_and_origin_scoped () =
        in
        (match resolution.decision with
         | Keeper_event_queue.Hitl_approved -> ()
-        | Keeper_event_queue.Hitl_rejected _ | Keeper_event_queue.Hitl_edited _ ->
+        | Keeper_event_queue.Hitl_rejected _ ->
           Alcotest.fail "expected approved resolution");
        (match AQ.approved_resolution_request ~base_path ~id with
         | Ok (Some request) ->
@@ -3605,35 +3605,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
          "rejection is not a grant"
          true
          (Option.is_none (Gate.cycle_grant_of_resolution rejected));
-       let edit_id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "target", `String "before" ])
-       in
-       let edited_input =
-         `Assoc [ "target", `String "after"; "confirmed", `Bool true ]
-       in
-       (match aq_resolve ~base_path ~id:edit_id ~decision:(Rule_types.Decision.Edit edited_input) with
-        | Ok () -> ()
-        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
-       let edited =
-         durable_resolution_opt ~base_path ~keeper_name ~approval_id:edit_id
-         |> require_some "edited resolution was not delivered"
-       in
-       (match edited.decision with
-        | Keeper_event_queue.Hitl_edited actual ->
-          Alcotest.(check bool)
-            "edited input"
-            true
-            (Yojson.Safe.equal edited_input actual)
-        | _ -> Alcotest.fail "edited resolution lost its typed input");
-       Alcotest.(check bool)
-         "edit is not a grant"
-         true
-         (Option.is_none (Gate.cycle_grant_of_resolution edited));
-       drop_resolution ~base_path ~keeper_name rejected;
-       drop_resolution ~base_path ~keeper_name edited)
+       drop_resolution ~base_path ~keeper_name rejected)
 ;;
 
 (* #26126: resolution writes the judge evidence the entry carried onto the

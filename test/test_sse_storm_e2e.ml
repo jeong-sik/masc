@@ -1,5 +1,8 @@
 open Alcotest
 
+module Official_client_session_store =
+  Masc.Keeper_official_client_session_store
+
 type http_result = {
   status: int option;
   headers: (string * string) list;
@@ -357,6 +360,8 @@ provider_ref = "deepseek"
 model_id = "deepseek-v4-flash"
 |}
 
+let main_eio_test_admin_token = "sse-storm-admin-token"
+
 let seed_server_config ~base_path =
   let masc_dir = Filename.concat base_path ".masc" in
   let config_dir = Filename.concat masc_dir "config" in
@@ -396,6 +401,7 @@ let with_server f =
       [
         ("MASC_BASE_PATH", base_path);
         ("MASC_BASE_PATH_INPUT", base_path);
+        ("MASC_ADMIN_TOKEN", main_eio_test_admin_token);
         ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
@@ -677,6 +683,112 @@ let test_dashboard_dev_token_cannot_call_admin_route () =
       ()
   in
   check_status "dashboard Worker token denied CanAdmin route" 403 result
+
+let test_official_client_recovery_uses_real_admin_route () =
+  with_server @@ fun ~port ~auth_token ~base_path ->
+  let keeper_name = "official-client-http-fixture" in
+  let claim =
+    Official_client_session_store.claim
+      ~base_path
+      ~keeper_name
+      ~expected:None
+      ~client_kind:Official_client_session_store.Codex
+      ~owner_epoch:"11111111-1111-4111-8111-111111111111"
+      ~runtime_id:"codex.codex"
+      ~tool_surface_sha256:
+        (Official_client_session_store.tool_surface_sha256 [])
+      ~updated_at:1.0
+    |> Result.get_ok
+  in
+  let recovery =
+    Official_client_session_store.require_recovery
+      ~base_path
+      ~keeper_name
+      ~expected:claim
+      ~failure:Official_client_session_store.Protocol_failed
+      ~detail:"real HTTP recovery fixture"
+      ~required_at:2.0
+    |> Result.get_ok
+  in
+  let recovery_id =
+    match recovery.phase with
+    | Official_client_session_store.Recovery_required required -> required.recovery_id
+    | Official_client_session_store.Ready
+    | Official_client_session_store.Start _
+    | Official_client_session_store.Active _
+    | Official_client_session_store.Turn_inflight _
+    | Official_client_session_store.Settled _ ->
+      fail "HTTP fixture did not enter recovery-required"
+  in
+  let session_path =
+    "/api/v1/runtime/sessions/official-client?keeper_name=" ^ keeper_name
+  in
+  let worker =
+    run_curl
+      ~headers:[ "Authorization", "Bearer " ^ auth_token ]
+      ~max_time:2.0
+      ~port
+      ~path:session_path
+      ()
+  in
+  check_status "Worker cannot read official-client recovery" 403 worker;
+  let admin_headers =
+    [ "Accept", "application/json"
+    ; "Authorization", "Bearer " ^ main_eio_test_admin_token
+    ; "Content-Type", "application/json"
+    ]
+  in
+  let before =
+    run_curl ~headers:admin_headers ~max_time:2.0 ~port ~path:session_path ()
+  in
+  check_status "Admin reads official-client recovery" 200 before;
+  let open Yojson.Safe.Util in
+  check string
+    "real route recovery phase"
+    "recovery_required"
+    (Yojson.Safe.from_string before.body
+     |> member "session"
+     |> member "phase"
+     |> member "kind"
+     |> to_string);
+  let body =
+    `Assoc
+      [ "keeper_name", `String keeper_name
+      ; "recovery_id", `String recovery_id
+      ; "resolution", `String "restart_fresh"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let resolved =
+    run_curl
+      ~headers:admin_headers
+      ~method_:"POST"
+      ~body
+      ~max_time:2.0
+      ~port
+      ~path:"/api/v1/runtime/sessions/official-client/resolve"
+      ()
+  in
+  check_status "Admin resolves official-client recovery" 200 resolved;
+  let refreshed =
+    run_curl ~headers:admin_headers ~max_time:2.0 ~port ~path:session_path ()
+  in
+  check_status "Admin refreshes official-client session" 200 refreshed;
+  let refreshed_json = Yojson.Safe.from_string refreshed.body in
+  check string
+    "real route refreshed phase"
+    "ready"
+    (refreshed_json |> member "session" |> member "phase" |> member "kind"
+     |> to_string);
+  check string
+    "real route persisted recovery fence"
+    recovery_id
+    (refreshed_json
+     |> member "session"
+     |> member "last_recovery_resolution"
+     |> member "recovery_id"
+     |> to_string)
+
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ~auth_token ~base_path:_ ->
   let sid = initialize_mcp_session ~port ~auth_token in
@@ -761,6 +873,10 @@ let () =
             "dev-token cannot call admin route"
             `Slow
             test_dashboard_dev_token_cannot_call_admin_route
+        ; test_case
+            "official-client recovery uses real CanAdmin route"
+            `Slow
+            test_official_client_recovery_uses_real_admin_route
         ] )
     ; ("mcp", [test_case "follow-up reconnect accepted" `Slow test_mcp_reconnect_stays_accepted])
      ; ( "ag_ui"

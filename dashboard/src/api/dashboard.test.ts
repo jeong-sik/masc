@@ -39,6 +39,8 @@ import {
   fetchRuntimeTomlConfig,
   fetchRuntimeDefaults,
   fetchRuntimeModelMetrics,
+  fetchOfficialClientSession,
+  resolveOfficialClientSession,
   patchRuntimeAssignment,
   patchRuntimeMediaFailover,
   patchRuntimeRouting,
@@ -4152,5 +4154,307 @@ describe('fetchRuntimeDefaults', () => {
     expect(result.default_model).toBe('gpt-4o')
     expect(result.runtimes[0]?.is_default).toBe(true)
     expect(result.model_routing.cross_verifier_runtime_id).toBeNull()
+  })
+})
+
+describe('official-client session API', () => {
+  const recoveryPayload = {
+    schema: 'masc.dashboard.official-client-session.v1',
+    ok: true,
+    keeper_name: 'sangsu',
+    session: {
+      client_kind: 'codex',
+      runtime_id: 'codex.codex',
+      phase: {
+        kind: 'recovery_required',
+        recovery_id: '018f3a4a-27f4-7c9a-8fd8-330c2a3845aa',
+        failure: 'protocol_failed',
+        detail: 'malformed app-server event',
+        required_at: 1_786_230_000,
+        owner_epoch: '018f3a4a-27f4-7c9a-8fd8-330c2a3845ab',
+        observed_session_id: 'thread-1',
+        observed_turn_id: null,
+        previous_settlement: null,
+      },
+      turn_count: 1,
+      tool_surface_sha256: 'a'.repeat(64),
+      last_recovery_resolution: null,
+      last_transient_release: null,
+      updated_at: 1_786_230_000,
+    },
+  }
+
+  it('reads exact measured recovery evidence for one Keeper', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(recoveryPayload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchOfficialClientSession('sangsu')
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/runtime/sessions/official-client?keeper_name=sangsu')
+    const phase = result.session?.phase
+    expect(phase?.kind).toBe('recovery_required')
+    if (phase?.kind !== 'recovery_required') throw new Error('expected recovery-required phase')
+    expect(phase.failure).toBe('protocol_failed')
+    expect(phase.observed_session_id).toBe('thread-1')
+  })
+
+  it.each([
+    {
+      kind: 'start',
+      phase: {
+        kind: 'start',
+        owner_epoch: recoveryPayload.session.phase.owner_epoch,
+        previous_settlement: null,
+      },
+    },
+    {
+      kind: 'active',
+      phase: {
+        kind: 'active',
+        owner_epoch: recoveryPayload.session.phase.owner_epoch,
+        session_id: 'thread-active',
+        previous_settlement: null,
+      },
+    },
+    {
+      kind: 'turn_inflight',
+      phase: {
+        kind: 'turn_inflight',
+        owner_epoch: recoveryPayload.session.phase.owner_epoch,
+        session_id: 'thread-active',
+        turn_id: null,
+        previous_settlement: null,
+      },
+    },
+    {
+      kind: 'settled',
+      phase: {
+        kind: 'settled',
+        session_id: 'thread-settled',
+        turn_id: 'turn-settled',
+      },
+    },
+  ])('accepts exact $kind phase', async ({ phase }) => {
+    const payload = {
+      ...recoveryPayload,
+      session: { ...recoveryPayload.session, phase },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchOfficialClientSession('sangsu')
+
+    expect(result.session?.phase.kind).toBe(phase.kind)
+  })
+
+  it('rejects phase, record, identity, and nullable-field drift', async () => {
+    const malformedPayloads: Array<{ name: string; payload: unknown }> = [
+      {
+        name: 'unknown response field',
+        payload: { ...recoveryPayload, extra: true },
+      },
+      {
+        name: 'unknown session field',
+        payload: {
+          ...recoveryPayload,
+          session: { ...recoveryPayload.session, extra: true },
+        },
+      },
+      {
+        name: 'unknown phase field',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: { ...recoveryPayload.session.phase, extra: true },
+          },
+        },
+      },
+      {
+        name: 'missing required nullable phase field',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: Object.fromEntries(
+              Object.entries(recoveryPayload.session.phase)
+                .filter(([key]) => key !== 'observed_turn_id'),
+            ),
+          },
+        },
+      },
+      {
+        name: 'invalid recovery UUID',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: { ...recoveryPayload.session.phase, recovery_id: 'not-a-uuid' },
+          },
+        },
+      },
+      {
+        name: 'observed turn without observed session',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: {
+              ...recoveryPayload.session.phase,
+              observed_session_id: null,
+              observed_turn_id: 'turn-without-session',
+            },
+          },
+        },
+      },
+      {
+        name: 'invalid lowercase SHA-256',
+        payload: {
+          ...recoveryPayload,
+          session: { ...recoveryPayload.session, tool_surface_sha256: 'A'.repeat(64) },
+        },
+      },
+      {
+        name: 'zero completed turns outside ready',
+        payload: {
+          ...recoveryPayload,
+          session: { ...recoveryPayload.session, turn_count: 0 },
+        },
+      },
+      {
+        name: 'ready phase carrying another phase field',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: { kind: 'ready', owner_epoch: recoveryPayload.session.phase.owner_epoch },
+          },
+        },
+      },
+      {
+        name: 'settlement with an unknown field',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: {
+              ...recoveryPayload.session.phase,
+              previous_settlement: {
+                session_id: 'thread-previous',
+                turn_id: 'turn-previous',
+                extra: true,
+              },
+            },
+          },
+        },
+      },
+    ]
+
+    for (const { name, payload } of malformedPayloads) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(fetchOfficialClientSession('sangsu'), name)
+        .rejects.toThrow('유효하지 않은 official-client session payload')
+    }
+  })
+
+  it('posts the exact recovery fence and selected resolution', async () => {
+    const resolvedPayload = {
+      ...recoveryPayload,
+      resolution_application: 'applied',
+      audit: { recorded: true },
+      session: {
+        ...recoveryPayload.session,
+        phase: { kind: 'ready' },
+        last_recovery_resolution: {
+          recovery_id: recoveryPayload.session.phase.recovery_id,
+          failure: 'protocol_failed',
+          resolution: { kind: 'restart_fresh' },
+          resolved_by: 'dashboard',
+          resolved_at: 1_786_230_010,
+        },
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(resolvedPayload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await resolveOfficialClientSession(
+      'sangsu',
+      recoveryPayload.session.phase.recovery_id,
+      { resolution: 'restart_fresh' },
+    )
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/runtime/sessions/official-client/resolve')
+    expect(JSON.parse(init.body as string)).toEqual({
+      keeper_name: 'sangsu',
+      recovery_id: recoveryPayload.session.phase.recovery_id,
+      resolution: 'restart_fresh',
+    })
+    expect(result.session?.phase.kind).toBe('ready')
+    expect(result.session?.last_recovery_resolution?.resolved_by).toBe('dashboard')
+    expect(result.resolution_application).toBe('applied')
+    expect(result.audit).toEqual({ recorded: true })
+  })
+
+  it.each([
+    {
+      name: 'missing application',
+      payload: {
+        ...recoveryPayload,
+        audit: { recorded: true },
+      },
+    },
+    {
+      name: 'unknown application',
+      payload: {
+        ...recoveryPayload,
+        resolution_application: 'guessed',
+        audit: { recorded: true },
+      },
+    },
+    {
+      name: 'malformed audit receipt',
+      payload: {
+        ...recoveryPayload,
+        resolution_application: 'replayed',
+        audit: { recorded: false },
+      },
+    },
+  ])('rejects recovery operation drift: $name', async ({ payload }) => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(resolveOfficialClientSession(
+      'sangsu',
+      recoveryPayload.session.phase.recovery_id,
+      { resolution: 'restart_fresh' },
+    )).rejects.toThrow('유효하지 않은 official-client recovery payload')
   })
 })

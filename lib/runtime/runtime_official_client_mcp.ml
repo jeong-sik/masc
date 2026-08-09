@@ -13,6 +13,10 @@ type dispatch =
   ; tool_called : bool
   }
 
+type tool_call_policy =
+  | Reject_tool_calls
+  | Allow_tool_calls
+
 type phase =
   | Awaiting_initialize
   | Awaiting_initialized
@@ -240,7 +244,14 @@ let decode_message message =
     Ok { method_name; request_id; params }
 ;;
 
-let dispatch_message ~session ~server_name ~tool_specs ~call_tool message =
+let dispatch_message
+      ~session
+      ~server_name
+      ~tool_call_policy
+      ~tool_specs
+      ~call_tool
+      message
+  =
   match message.method_name, message.request_id with
     | "initialize", Some request_id ->
       let* () = require_phase session ~stage:"MCP initialize" Awaiting_initialize in
@@ -270,10 +281,16 @@ let dispatch_message ~session ~server_name ~tool_specs ~call_tool message =
         }
     | "tools/call", Some request_id ->
       let* () = require_phase session ~stage:"MCP tools/call" Ready in
-      tools_call
-        ~id:(Mcp_transport_protocol.request_id_to_yojson request_id)
-        ~params:message.params
-        ~call_tool
+      (match tool_call_policy with
+       | Reject_tool_calls ->
+         error
+           "MCP tools/call"
+           "tool calls are not admitted before the owning turn is durable"
+       | Allow_tool_calls ->
+         tools_call
+           ~id:(Mcp_transport_protocol.request_id_to_yojson request_id)
+           ~params:message.params
+           ~call_tool)
     | "notifications/initialized", None ->
       let* () =
         transition_phase
@@ -300,7 +317,20 @@ let dispatch_message ~session ~server_name ~tool_specs ~call_tool message =
         }
 ;;
 
-let handle_message ~session ~server_name ~tool_specs ~call_tool message_json =
+let handle_message
+      ~session
+      ~server_name
+      ~tool_call_policy
+      ~tool_specs
+      ~call_tool
+      message_json
+  =
   let* message = decode_message message_json in
-  dispatch_message ~session ~server_name ~tool_specs ~call_tool message
+  dispatch_message
+    ~session
+    ~server_name
+    ~tool_call_policy
+    ~tool_specs
+    ~call_tool
+    message
 ;;

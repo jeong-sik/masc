@@ -836,7 +836,7 @@ let run_named
                     }))
           | None, Some _ ->
             Log.Keeper.info
-              "%s: starting official-client runtime %s without OAS checkpoint history"
+              "%s: starting official-client runtime %s without OAS resume while importing canonical history"
               keeper_name
               attempt_runtime_id;
             emit_runtime_manifest
@@ -847,7 +847,7 @@ let run_named
                   ; ("routing_reason", `String "official_client_owns_session_state")
                   ])
               Keeper_runtime_manifest.Runtime_routed;
-            run_claude ~initial_messages:[] ()
+            run_claude ~initial_messages ()
           | None, None -> run_claude ~initial_messages ()
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;

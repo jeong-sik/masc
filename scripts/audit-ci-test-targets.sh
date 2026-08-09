@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Fail when ci.yml names a test target that the Dune test declarations cannot build.
+# Fail when the CI execution manifests name a test target that the Dune test
+# declarations cannot build.
 #
 # CI runs a hand-maintained allowlist of @test/runtest-<name> targets. Deleting
 # the test behind one is a normal cleanup, and nothing in the deleting PR looks
-# at ci.yml, so the stale target survives and dune hard-fails on the next run —
+# at the CI manifests, so the stale target survives and dune hard-fails on the next run —
 # after the full build, on main, for everyone.
 #
 # It has happened twice. #24332 retired the shell_ir subsystem and left
@@ -18,11 +19,16 @@
 # coverage-test manifest declares it, or an explicit alias declares it.
 set -uo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
+cd "$(git rev-parse --show-toplevel)" || exit
 
 declared="$(mktemp)"
 referenced="$(mktemp)"
 trap 'rm -f "$declared" "$referenced"' EXIT
+
+CI_TARGET_SOURCES=(
+  .github/workflows/ci.yml
+  scripts/ci-run-focused-tests.sh
+)
 
 # Test executables: every module listed in a (names ...) block or a (name X).
 # Field-wise, not one match per line: test/dune puts two names on a line in
@@ -63,19 +69,19 @@ for inc in test/stanzas/*.inc; do
 done
 sort -u -o "$declared" "$declared"
 
-grep -oE '@test/runtest-[a-z_0-9-]+' .github/workflows/ci.yml \
+grep -h -oE '@test/runtest-[a-z_0-9-]+' "${CI_TARGET_SOURCES[@]}" \
   | sed 's|@test/runtest-||' \
   | sort -u > "$referenced"
 
 duplicate_references="$(
-  grep -oE '@test/runtest-[a-z_0-9-]+' .github/workflows/ci.yml \
+  grep -h -oE '@test/runtest-[a-z_0-9-]+' "${CI_TARGET_SOURCES[@]}" \
     | sed 's|@test/runtest-||' \
     | sort \
     | uniq -d
 )"
 
 if [ -n "$duplicate_references" ]; then
-  echo "[ci-test-targets] FAIL - ci.yml executes the same Dune test target more than once"
+  echo "[ci-test-targets] FAIL - CI executes the same Dune test target more than once"
   echo
   printf '%s\n' "$duplicate_references" | sed 's/^/  - /'
   echo
@@ -87,7 +93,7 @@ fi
 missing="$(comm -23 "$referenced" "$declared")"
 
 if [ -n "$missing" ]; then
-  echo "[ci-test-targets] FAIL - ci.yml names targets Dune does not declare"
+  echo "[ci-test-targets] FAIL - CI names targets Dune does not declare"
   echo
   printf '%s\n' "$missing" | sed 's/^/  - /'
   echo
@@ -97,7 +103,7 @@ if [ -n "$missing" ]; then
   echo "Occurrences:"
   while IFS= read -r name; do
     [ -z "$name" ] && continue
-    grep -n "@test/runtest-${name}\b" .github/workflows/ci.yml | sed 's/^/  ci.yml:/'
+    grep -Hn "@test/runtest-${name}\b" "${CI_TARGET_SOURCES[@]}" | sed 's/^/  /'
   done <<< "$missing"
   exit 2
 fi
@@ -116,9 +122,9 @@ if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then
   echo "set is large, so diff it against main rather than reading it here:"
   echo "  comm -13 <(ci targets) <(Dune test names)"
   echo
-  echo "A suite outside ci.yml is compile-only: it never executes, so its"
+  echo "A suite outside the CI manifests is compile-only: it never executes, so its"
   echo "assertions can outlive the code they pin. Add a @test/runtest-<name>"
-  echo "target to .github/workflows/ci.yml."
+  echo "target to one of the declared CI target sources."
   exit 2
 fi
 

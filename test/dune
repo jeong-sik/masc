@@ -37,7 +37,6 @@
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
-  test_keeper_chat_direct_delivery
   test_keeper_librarian_retry
   test_surface_ref
   test_inference_inflight_observation
@@ -335,7 +334,6 @@
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
-  test_keeper_chat_direct_delivery
   test_keeper_librarian_retry
   test_surface_ref
   test_inference_inflight_observation

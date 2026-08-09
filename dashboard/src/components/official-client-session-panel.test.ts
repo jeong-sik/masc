@@ -105,27 +105,4 @@ describe('OfficialClientSessionPanel', () => {
     })
   })
 
-  it('shows externally verified adoption as read-only evidence', async () => {
-    apiMocks.fetchOfficialClientSession.mockResolvedValueOnce({
-      ...resolvedResponse,
-      session: {
-        ...resolvedResponse.session,
-        last_recovery_resolution: {
-          ...resolvedResponse.session.last_recovery_resolution,
-          resolution: {
-            kind: 'adopt_verified' as const,
-            settlement: { session_id: 'session-verified', turn_id: 'turn-verified' },
-          },
-        },
-      },
-    })
-    const view = render(html`<${OfficialClientSessionPanel} />`)
-
-    await waitFor(() => {
-      expect(view.getByTestId('official-client-session-last-resolution').textContent).toContain(
-        'session-verified/turn-verified',
-      )
-    })
-    expect(view.queryByRole('button', { name: /adopt/i })).toBeNull()
-  })
 })

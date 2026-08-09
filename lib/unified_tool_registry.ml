@@ -147,10 +147,9 @@ let register_descriptor_handlers () =
            with
            | Some schema -> schema
            | None ->
-             { Masc_domain.name = descriptor.internal_name
-             ; description = descriptor.description
-             ; input_schema = descriptor.input_schema
-             }
+             invalid_arg
+               ("descriptor internal handler has no exact runtime schema: "
+                ^ descriptor.internal_name)
          in
          register_canonical_schema
            schema

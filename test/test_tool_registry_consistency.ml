@@ -99,6 +99,22 @@ let test_schema_inventory_matches_dispatch_validation_registry () =
     Config.raw_all_tool_schemas
 ;;
 
+let test_every_descriptor_has_exact_runtime_schema () =
+  let inventory_names = schema_inventory_names () in
+  let missing =
+    Keeper_tool_descriptor.all_descriptors ()
+    |> List.filter_map (fun (descriptor : Keeper_tool_descriptor.t) ->
+      if List.mem descriptor.internal_name inventory_names
+      then None
+      else Some descriptor.internal_name)
+    |> sorted_set
+  in
+  Alcotest.(check (list string))
+    "every descriptor internal handler has an exact runtime schema"
+    []
+    missing
+;;
+
 let schema_property_names schema =
   match Json_util.assoc_member_opt "properties" schema with
   | Some (`Assoc properties) -> List.map fst properties
@@ -298,6 +314,10 @@ let () =
             "schema inventory matches dispatch validation registry"
             `Quick
             test_schema_inventory_matches_dispatch_validation_registry
+        ; test_case
+            "every descriptor has an exact runtime schema"
+            `Quick
+            test_every_descriptor_has_exact_runtime_schema
         ; test_case
             "translated descriptors keep distinct runtime schemas"
             `Quick

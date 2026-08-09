@@ -69,7 +69,9 @@ jobs:
             "${{ github.event.pull_request.base.sha }}"
       - name: Run blocking lints (push)
         if: github.event_name != 'pull_request'
-        run: bash scripts/ci/run-lint-suite.sh blocking
+        run: >-
+          bash scripts/ci/run-lint-suite.sh blocking
+          "${{ github.event.before }}"
 
   lint-advisory:
     name: Lint Suite (advisory)

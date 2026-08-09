@@ -237,7 +237,7 @@ let handle_initialize_eio ?(profile = Full) id params =
              ; ( "_meta"
                , `Assoc
                    [ "serverStartedAt", `String (Masc_domain.now_iso ())
-                   ; "serverVersion", `String Version.version
+                   ; "serverVersion", `String Runtime_build_version.current
                    ; ( "profile"
                      , `String
                          (match profile with

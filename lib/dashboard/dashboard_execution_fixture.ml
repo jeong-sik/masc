@@ -35,7 +35,7 @@ let execution_smoke_fixture_json () =
             ("project", `String "execution-smoke");
             ("tempo_interval_s", `Float 300.0);
             ("paused", `Bool false);
-            ("version", `String Version.version);
+            ("version", `String Runtime_build_version.current);
           ] );
       ( "execution_queue",
         `List

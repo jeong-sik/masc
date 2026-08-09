@@ -221,7 +221,7 @@ let test_subscription_probe_stops_before_thread () =
       let outcome =
         Eio_main.run (fun env ->
           let config =
-            { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
+            { (Runtime_codex_app_server.default_config ()) with
               cli_path = path
             ; timeout_s = 2.0
             }

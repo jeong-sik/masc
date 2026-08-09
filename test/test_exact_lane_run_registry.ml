@@ -55,34 +55,6 @@ let test_running_shape_has_no_invented_completion () =
   | _ -> fail "run serializer must emit an object"
 ;;
 
-let test_research_trace_path_is_typed_by_registry_envelope () =
-  let registry = R.create () in
-  let input =
-    R.Research_input
-      { raw_trace_path = Some "/tmp/keeper/raw-traces/research.jsonl"
-      ; payload = `Assoc [ "message_count", `Int 4 ]
-      }
-  in
-  R.register_running
-    registry
-    ~run_id:"research-1"
-    ~lane:R.Librarian
-    ~subject_id:"trace-1"
-    ~actor:"keeper-a"
-    ~started_at:20.0
-    ~input;
-  check
-    (list string)
-    "registered research path"
-    [ "/tmp/keeper/raw-traces/research.jsonl" ]
-    (R.research_raw_trace_paths registry ~actor:"keeper-a");
-  check
-    (list string)
-    "other actor cannot retain the path"
-    []
-    (R.research_raw_trace_paths registry ~actor:"keeper-b")
-;;
-
 let test_open_json_input_is_not_replayed_into_current_store () =
   let path = Filename.temp_file "exact-lane-runs-v1-" ".jsonl" in
   write_file
@@ -95,20 +67,15 @@ let test_open_json_input_is_not_replayed_into_current_store () =
   remove_if_exists path
 ;;
 
-let test_blank_research_trace_path_is_rejected_before_persistence () =
-  let registry = R.create () in
-  check_raises
-    "blank trace path"
-    (Invalid_argument "exact lane research raw trace path must not be blank")
-    (fun () ->
-       R.register_running
-         registry
-         ~run_id:"research-blank"
-         ~lane:R.Librarian
-         ~subject_id:"trace-blank"
-         ~actor:"keeper-a"
-         ~started_at:20.0
-       ~input:(R.Research_input { raw_trace_path = Some "  "; payload = `Null }))
+let test_research_input_is_not_replayed_into_current_store () =
+  let path = Filename.temp_file "exact-lane-runs-research-" ".jsonl" in
+  write_file
+    path
+    {|{"event":"register","id":"research-run","started_at":1.0,"registration":{"lane":"librarian_exact","subject_id":"trace-research","actor":"keeper-a","input":{"kind":"research","raw_trace_path":"/tmp/research.jsonl","payload":{"message_count":4}}}}
+|};
+  let replayed = R.replay path in
+  check int "research input is absent" 0 (List.length (R.list_runs replayed));
+  remove_if_exists path
 ;;
 
 let test_exact_history_is_not_pruned_across_lanes () =
@@ -200,53 +167,21 @@ let test_failed_durable_completion_keeps_running_state () =
   Unix.rmdir path
 ;;
 
-let test_deferred_external_effect_survives_replay () =
-  let path = Filename.temp_file "exact-lane-deferred-" ".jsonl" in
-  remove_if_exists path;
-  let registry = R.create ~path () in
-  R.register_running
-    registry
-    ~run_id:"deferred-run"
-    ~lane:R.Librarian
-    ~subject_id:"trace"
-    ~actor:"keeper-a"
-    ~started_at:1.0
-    ~input:(R.Research_input { raw_trace_path = Some "/tmp/raw.jsonl"; payload = `Null });
-  R.mark_completed
-    registry
-    ~run_id:"deferred-run"
-    ~outcome:
-      (R.Deferred
-         { code = "librarian_external_effect_deferred"
-         ; detail = "approval is pending"
-         })
-    ~elapsed_s:0.1
-    ~output:(`Assoc [ "outcome", `String "deferred" ]);
-  let replayed = R.replay path in
-  let run = R.get replayed ~run_id:"deferred-run" |> Option.get in
-  check string "deferred remains distinct" "deferred" (R.status_label run.status);
-  remove_if_exists path
-;;
-
 let () =
   run
     "exact_lane_run_registry"
     [ ( "registry"
       , [ test_case "durable exact evidence" `Quick test_round_trip_preserves_exact_evidence
         ; test_case "running shape" `Quick test_running_shape_has_no_invented_completion
-        ; test_case "research trace reachability envelope" `Quick
-            test_research_trace_path_is_typed_by_registry_envelope
         ; test_case "open JSON input is not replayed" `Quick
             test_open_json_input_is_not_replayed_into_current_store
-        ; test_case "blank research trace path is rejected" `Quick
-            test_blank_research_trace_path_is_rejected_before_persistence
+        ; test_case "research input is not replayed" `Quick
+            test_research_input_is_not_replayed_into_current_store
         ; test_case "exact history is not cross-lane pruned" `Quick
             test_exact_history_is_not_pruned_across_lanes
         ; test_case "failed durable registration is not published" `Quick
             test_failed_durable_registration_is_not_published_in_memory
         ; test_case "failed durable completion keeps running state" `Quick
             test_failed_durable_completion_keeps_running_state
-        ; test_case "deferred external effect survives replay" `Quick
-            test_deferred_external_effect_survives_replay
         ] )
     ]

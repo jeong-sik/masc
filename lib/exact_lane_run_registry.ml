@@ -7,10 +7,6 @@ type lane =
 type outcome =
   | Succeeded
   | Cancelled
-  | Deferred of
-      { code : string
-      ; detail : string
-      }
   | Failed of
       { code : string
       ; detail : string
@@ -24,12 +20,7 @@ type run_status =
       ; output : Yojson.Safe.t
       }
 
-type run_input =
-  | Exact_input of Yojson.Safe.t
-  | Research_input of
-      { raw_trace_path : string option
-      ; payload : Yojson.Safe.t
-      }
+type run_input = Exact_input of Yojson.Safe.t
 
 type run =
   { run_id : string
@@ -59,19 +50,11 @@ let lane_of_key = function
 let outcome_label = function
   | Succeeded -> "succeeded"
   | Cancelled -> "cancelled"
-  | Deferred _ -> "deferred"
   | Failed _ -> "failed"
 ;;
 
 let input_to_yojson = function
   | Exact_input payload -> `Assoc [ "kind", `String "exact"; "payload", payload ]
-  | Research_input { raw_trace_path; payload } ->
-    `Assoc
-      [ "kind", `String "research"
-      ; ( "raw_trace_path"
-        , Option.fold ~none:`Null ~some:(fun path -> `String path) raw_trace_path )
-      ; "payload", payload
-      ]
 ;;
 
 let input_of_yojson json =
@@ -85,24 +68,6 @@ let input_of_yojson json =
       List.assoc_opt "payload" fields |> Option.to_result ~none:"missing field payload"
     in
     Ok (Exact_input payload)
-  | "research" ->
-    let* () =
-      Run_registry_core.Json.exact_fields
-        ~required:[ "kind"; "raw_trace_path"; "payload" ]
-        fields
-    in
-    let* raw_trace_path =
-      match List.assoc_opt "raw_trace_path" fields with
-      | Some `Null -> Ok None
-      | Some (`String path) when not (String.equal (String.trim path) "") -> Some path |> Result.ok
-      | Some (`String _) -> Error "field raw_trace_path must not be blank"
-      | Some _ -> Error "field raw_trace_path must be a string or null"
-      | None -> Error "missing field raw_trace_path"
-    in
-    let* payload =
-      List.assoc_opt "payload" fields |> Option.to_result ~none:"missing field payload"
-    in
-    Ok (Research_input { raw_trace_path; payload })
   | value -> Error (Printf.sprintf "unknown exact lane input kind %S" value)
 ;;
 
@@ -158,8 +123,6 @@ module Payload = struct
     let detail =
       match completion.outcome with
       | Succeeded | Cancelled -> []
-      | Deferred { code; detail } ->
-        [ "code", `String code; "detail", `String detail ]
       | Failed { code; detail } ->
         [ "code", `String code; "detail", `String detail ]
     in
@@ -178,7 +141,7 @@ module Payload = struct
     let detail_fields =
       match label with
       | "succeeded" | "cancelled" -> Ok []
-      | "deferred" | "failed" -> Ok [ "code"; "detail" ]
+      | "failed" -> Ok [ "code"; "detail" ]
       | value -> Error (Printf.sprintf "unknown exact lane outcome %S" value)
     in
     let* detail_fields = detail_fields in
@@ -197,10 +160,6 @@ module Payload = struct
       match label with
       | "succeeded" -> Ok Succeeded
       | "cancelled" -> Ok Cancelled
-      | "deferred" ->
-        let* code = Run_registry_core.Json.string_field "code" fields in
-        let* detail = Run_registry_core.Json.string_field "detail" fields in
-        Ok (Deferred { code; detail })
       | "failed" ->
         let* code = Run_registry_core.Json.string_field "code" fields in
         let* detail = Run_registry_core.Json.string_field "detail" fields in
@@ -231,11 +190,6 @@ let notify_changed () =
 let create = Store.create
 let replay = Store.replay
 let register_running t ~run_id ~lane ~subject_id ~actor ~started_at ~input =
-  (match input with
-   | Research_input { raw_trace_path = Some path; _ }
-     when String.equal (String.trim path) "" ->
-     invalid_arg "exact lane research raw trace path must not be blank"
-   | Exact_input _ | Research_input _ -> ());
   Store.register
     t
     ~id:run_id
@@ -298,26 +252,12 @@ let run_to_yojson run =
       let detail =
         match outcome with
         | Succeeded | Cancelled -> []
-        | Deferred { code; detail } ->
-          [ "code", `String code; "detail", `String detail ]
         | Failed { code; detail } ->
           [ "code", `String code; "detail", `String detail ]
       in
       [ "elapsed_s", `Float elapsed_s; "output", output ] @ detail
   in
   `Assoc (base @ completion)
-;;
-
-let research_raw_trace_paths t ~actor =
-  list_runs t
-  |> List.filter_map (fun run ->
-    if not (String.equal run.actor actor)
-    then None
-    else
-      match run.input with
-      | Research_input { raw_trace_path = Some path; _ } -> Some path
-      | Exact_input _ | Research_input { raw_trace_path = None; _ } -> None)
-  |> List.sort_uniq String.compare
 ;;
 
 type global_install_error = Already_installed

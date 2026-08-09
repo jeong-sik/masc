@@ -6,10 +6,6 @@
 let run
   ~config
   ~(meta : Keeper_meta_contract.keeper_meta)
-  ~publication_recovery
-  ~ctx_snapshot
-  ~runtime_id
-  ?continuation_channel
   ~generation
   ~turn
   ~oas_turn_count
@@ -67,14 +63,6 @@ let run
             }
           in
           Keeper_librarian_runtime.run_best_effort
-            ~research_context:
-              { config
-              ; meta
-              ; publication_recovery
-              ; ctx_snapshot
-              ; runtime_id
-              ; continuation_channel
-              }
             ~keepers_dir
             ~keeper_id:meta.name
             ~expected_revision

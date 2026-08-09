@@ -154,14 +154,21 @@ let test_decode_malformed_marker () =
      old silent Inline fallback, a malformed marker is now a visible, typed
      [Invalid_marker] outcome; the caller decides what to do with the raw
      text. *)
-  let bad = "[masc:blob sha256=garbage that cannot scanf]" in
-  match O.decode_from_oas bad with
-  | O.Invalid_marker { detail } ->
-      Alcotest.(check bool)
-        "detail explains the failure" true (String.length detail > 0)
-  | O.Not_marker ->
-      Alcotest.fail "malformed marker must surface as Invalid_marker"
-  | O.Decoded _ -> Alcotest.fail "malformed should NOT decode as Stored"
+  let bad_markers =
+    [ "[masc:blob sha256=garbage that cannot scanf]"
+    ; "[masc:blob sha256=garbage]"
+    ]
+  in
+  List.iter
+    (fun bad ->
+       match O.decode_from_oas bad with
+       | O.Invalid_marker { detail } ->
+         Alcotest.(check bool)
+           "detail explains the failure" true (String.length detail > 0)
+       | O.Not_marker ->
+         Alcotest.fail "malformed marker must surface as Invalid_marker"
+       | O.Decoded _ -> Alcotest.fail "malformed should NOT decode as Stored")
+    bad_markers
 
 (* --- Tool_blob_store basic --- *)
 

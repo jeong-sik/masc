@@ -42,19 +42,9 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
 ;;
 
 let run_post_turn ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~turn =
-  let publication_recovery =
-    Masc.Keeper_publication_recovery_availability.
-      { provider = Masc_test_deps.non_runtime_publication_recovery_provider
-      ; keeper_name = meta.name
-      }
-  in
   Post_turn_memory.run
     ~config
     ~meta
-    ~publication_recovery
-    ~ctx_snapshot:
-      (Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test")
-    ~runtime_id:"test-runtime"
     ~generation:turn
     ~turn
     ~oas_turn_count:1

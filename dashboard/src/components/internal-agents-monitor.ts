@@ -13,10 +13,6 @@ import {
   type MemoryJournal,
   type MemoryJournalEntry,
 } from '../api/dashboard-memory-journal'
-import {
-  fetchKeeperRawTrace,
-  type RawTracePage,
-} from '../api/dashboard-keeper-prompt'
 import { KeeperTurnInspectorPanel } from './keeper-turn-inspector-panel'
 import { ApiRequestError } from '../api/core'
 import { registerInternalAgentRefresh } from '../sse-store'
@@ -80,7 +76,7 @@ function status(row: Row): string {
 function tone(row: Row): StatusBadgeTone {
   const value = status(row)
   if (value === 'succeeded' || value === 'completed' || value === 'approved') return 'ok'
-  if (value === 'running' || value === 'deferred') return 'warn'
+  if (value === 'running') return 'warn'
   if (value === 'rejected') return 'info'
   return 'bad'
 }
@@ -160,85 +156,6 @@ function librarianMemoryEvidence(value: unknown): { before: unknown; after: unkn
   const fields = value as Record<string, unknown>
   if (!('before' in fields) || !('after' in fields)) return null
   return { before: fields.before, after: fields.after }
-}
-
-function researchRawUnavailable(value: unknown): boolean {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
-  const research = (value as Record<string, unknown>).research
-  if (research === null || typeof research !== 'object' || Array.isArray(research)) return false
-  const rawTrace = (research as Record<string, unknown>).raw_trace
-  if (rawTrace === null || typeof rawTrace !== 'object' || Array.isArray(rawTrace)) return false
-  return (rawTrace as Record<string, unknown>).kind === 'unavailable'
-}
-
-function rawTraceFile(path: string): string {
-  return path.split(/[\\/]/).at(-1) ?? path
-}
-
-function ResearchRawTrace({ keeper, path }: { keeper: string; path: string | null }) {
-  const [page, setPage] = useState<RawTracePage | null>(null)
-  const [offset, setOffset] = useState(0)
-  const [view, setView] = useState<'literal' | 'tree'>('literal')
-  const [error, setError] = useState<string | null>(null)
-  const file = path === null ? null : rawTraceFile(path)
-
-  useEffect(() => {
-    if (file === null) return
-    const controller = new AbortController()
-    setPage(null)
-    setError(null)
-    fetchKeeperRawTrace(keeper, file, { signal: controller.signal, offset, limit: 20 })
-      .then(setPage)
-      .catch((reason: unknown) => {
-        if (controller.signal.aborted) return
-        setError(isForbidden(reason)
-          ? 'Admin 권한이 있어야 retained RAW blob을 읽을 수 있습니다.'
-          : reason instanceof Error ? reason.message : String(reason))
-      })
-    return () => controller.abort()
-  }, [file, keeper, offset])
-
-  if (path === null) {
-    return html`
-      <div class="rounded border border-[var(--color-danger)] p-3 text-xs">
-        <div class="flex items-center gap-2"><${EvidenceBadge} kind="raw" /><strong>RAW trace unavailable</strong></div>
-        <p class="mt-1 text-[var(--color-fg-muted)]">sink 생성 전에 실패해 연구 phase를 실행하지 않았습니다. typed registry preview와 RAW를 같은 것으로 표시하지 않습니다.</p>
-      </div>
-    `
-  }
-  if (error !== null) {
-    return html`<div class="rounded border border-[var(--color-danger)] p-3 text-xs text-[var(--color-danger)]">RAW trace를 읽지 못했습니다: ${error}</div>`
-  }
-  if (page === null) {
-    return html`<p class="text-xs text-[var(--color-fg-muted)]">RAW trace <code>${file}</code> 읽는 중…</p>`
-  }
-
-  return html`
-    <div class="grid gap-2 rounded border border-[var(--status-warn)] p-3" data-testid="research-raw-trace">
-      <div class="flex flex-wrap items-center gap-2 text-xs">
-        <${EvidenceBadge} kind="raw" />
-        <strong>Retained RAW JSONL</strong>
-        <code>${page.file}</code>
-        <span class="text-[var(--color-fg-muted)]">${page.offset + 1}–${page.offset + page.records.length} / ${page.totalRecords}</span>
-      </div>
-      <p class="text-3xs text-[var(--color-fg-muted)]">provider event를 보존한 operator-only JSONL의 실제 행입니다. registry metadata와 달리 민감한 실제 값이 포함될 수 있습니다.</p>
-      <div class="flex flex-wrap gap-1" role="group" aria-label="Librarian RAW 표시 방식">
-        <button type="button" class="rounded border px-2 py-1 text-3xs" aria-pressed=${view === 'literal'} onClick=${() => setView('literal')}>Literal RAW</button>
-        <button type="button" class="rounded border px-2 py-1 text-3xs" aria-pressed=${view === 'tree'} onClick=${() => setView('tree')}>Readable JSON</button>
-        <button type="button" class="ml-auto rounded border px-2 py-1 text-3xs" disabled=${page.offset === 0} onClick=${() => setOffset(Math.max(0, page.offset - 20))}>이전</button>
-        <button type="button" class="rounded border px-2 py-1 text-3xs" disabled=${page.offset + page.records.length >= page.totalRecords} onClick=${() => setOffset(page.offset + 20)}>다음</button>
-      </div>
-      ${page.records.map((record, index) => html`
-        <div key=${page.offset + index} class="grid gap-1">
-          <span class="text-3xs font-mono text-[var(--color-fg-muted)]">line ${page.offset + index + 1}</span>
-          ${view === 'literal' || !record.ok
-            ? html`<pre class="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-bg-page)] p-3 text-3xs">${record.raw}</pre>`
-            : html`<${JsonViewerCard} title=${`Provider record ${page.offset + index + 1}`} data=${record.record} />`}
-          ${record.ok ? null : html`<span class="text-3xs text-[var(--color-danger)]">${record.error}</span>`}
-        </div>
-      `)}
-    </div>
-  `
 }
 
 function LibrarianJournal({
@@ -423,9 +340,6 @@ function Details({ row }: { row: Row }) {
   }
   if (row.source === 'exact') {
     const output = row.run.output ?? { code: row.run.code, detail: row.run.detail }
-    const researchTracePath = row.run.input.kind === 'research'
-      ? researchRawUnavailable(row.run.output) ? null : row.run.input.rawTracePath
-      : undefined
     const memoryEvidence = row.run.lane === 'librarian_exact'
       ? librarianMemoryEvidence(row.run.output)
       : null
@@ -434,19 +348,14 @@ function Details({ row }: { row: Row }) {
         <div class="flex flex-wrap items-center gap-2 text-xs">
           <${EvidenceBadge} kind="typed" />
           <strong>Exact-output registry metadata</strong>
-          <span class="text-[var(--color-fg-muted)]">Admin-only 실제 typed 값 · provider event는 별도 RAW blob</span>
+          <span class="text-[var(--color-fg-muted)]">Admin-only 실제 typed 값 · Librarian exact에는 research RAW 입력 없음</span>
           <a class="ml-auto text-[var(--color-accent)] hover:underline" href=${keeperHref(row.run.actor)}>Keeper 전체 evidence 열기 →</a>
         </div>
         <div class="grid gap-3 lg:grid-cols-2">
           <${JsonViewerCard} title="실제 입력 · typed" data=${row.run.input.payload} expandAll=${true} />
           <${JsonViewerCard} title="실제 출력 · typed" data=${output} expandAll=${true} />
         </div>
-        ${researchTracePath === undefined
-          ? html`<p class="text-xs text-[var(--color-fg-muted)]"><span class="mr-2 inline-flex rounded border border-[var(--color-danger)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-danger)]">TRACE JOIN UNAVAILABLE</span>이 exact-only 실행에는 RAW run ref가 없습니다. 시간이나 subject 문자열로 추정 연결하지 않습니다.</p>`
-          : html`<div class="grid gap-2">
-              <p class="text-xs text-[var(--color-fg-muted)]"><strong class="text-[var(--color-fg-primary)]">Execution join</strong> · <code>${row.run.runId}</code> → research RAW → exact finalizer → memory revision</p>
-              <${ResearchRawTrace} keeper=${row.run.actor} path=${researchTracePath} />
-            </div>`}
+        <p class="text-xs text-[var(--color-fg-muted)]"><span class="mr-2 inline-flex rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">TOOL-FREE</span>이 exact 실행은 immutable Librarian input만 사용하며 외부 research/RAW 입력을 받지 않습니다.</p>
         ${memoryEvidence === null
           ? null
           : html`<div class="grid gap-2 border-t border-[var(--color-border-default)] pt-3">

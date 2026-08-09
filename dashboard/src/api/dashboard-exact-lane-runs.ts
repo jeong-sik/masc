@@ -7,11 +7,9 @@ export type ExactLane =
   | 'board_attention_exact'
   | 'compaction_exact'
 
-export type ExactLaneRunStatus = 'running' | 'succeeded' | 'cancelled' | 'deferred' | 'failed'
+export type ExactLaneRunStatus = 'running' | 'succeeded' | 'cancelled' | 'failed'
 
-export type ExactLaneRunInput =
-  | { kind: 'exact'; payload: unknown }
-  | { kind: 'research'; rawTracePath: string | null; payload: unknown }
+export type ExactLaneRunInput = { kind: 'exact'; payload: unknown }
 
 export interface ExactLaneRunRecord {
   runId: string
@@ -39,7 +37,7 @@ const LANES: readonly string[] = [
   'board_attention_exact',
   'compaction_exact',
 ]
-const STATUSES: readonly string[] = ['running', 'succeeded', 'cancelled', 'deferred', 'failed']
+const STATUSES: readonly string[] = ['running', 'succeeded', 'cancelled', 'failed']
 
 function fail(message: string): never {
   throw new Error(`Invalid exact lane runs response: ${message}`)
@@ -78,13 +76,6 @@ function parseInput(raw: unknown, context: string): ExactLaneRunInput {
     exactFields(raw, ['kind', 'payload'], [], context)
     return { kind, payload: raw.payload }
   }
-  if (kind === 'research') {
-    exactFields(raw, ['kind', 'raw_trace_path', 'payload'], [], context)
-    const rawTracePath = raw.raw_trace_path === null
-      ? null
-      : string(raw.raw_trace_path, `${context}.raw_trace_path`)
-    return { kind, rawTracePath, payload: raw.payload }
-  }
   return fail(`${context}.kind has unknown value ${JSON.stringify(kind)}`)
 }
 
@@ -98,7 +89,7 @@ function parseRun(raw: unknown, index: number): ExactLaneRunRecord {
   const base = ['run_id', 'lane', 'subject_id', 'actor', 'started_at', 'input', 'status']
   const required = status === 'running'
     ? base
-    : status === 'failed' || status === 'deferred'
+    : status === 'failed'
       ? [...base, 'elapsed_s', 'output', 'code', 'detail']
       : [...base, 'elapsed_s', 'output']
   exactFields(raw, required, [], context)
@@ -112,8 +103,8 @@ function parseRun(raw: unknown, index: number): ExactLaneRunRecord {
     status: status as ExactLaneRunStatus,
     elapsedSeconds: status === 'running' ? undefined : number(raw.elapsed_s, `${context}.elapsed_s`),
     output: status === 'running' ? undefined : raw.output,
-    code: status === 'failed' || status === 'deferred' ? string(raw.code, `${context}.code`) : undefined,
-    detail: status === 'failed' || status === 'deferred' ? string(raw.detail, `${context}.detail`) : undefined,
+    code: status === 'failed' ? string(raw.code, `${context}.code`) : undefined,
+    detail: status === 'failed' ? string(raw.detail, `${context}.detail`) : undefined,
   }
 }
 

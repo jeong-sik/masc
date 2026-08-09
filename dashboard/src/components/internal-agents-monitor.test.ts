@@ -153,8 +153,7 @@ describe('InternalAgentsMonitor', () => {
         actor: 'kidsnote',
         startedAt: 1786000000,
         input: {
-          kind: 'research',
-          rawTracePath: '/tmp/raw-traces/librarian-research-1.jsonl',
+          kind: 'exact',
           payload: { current_fact_count: 1, message_count: 5 },
         },
         status: 'succeeded',
@@ -168,12 +167,6 @@ describe('InternalAgentsMonitor', () => {
           },
         },
       }],
-    })
-    rawApi.fetchKeeperRawTrace.mockResolvedValue({
-      file: 'librarian-research-1.jsonl',
-      totalRecords: 1,
-      offset: 0,
-      records: [{ ok: true, raw: '{"type":"tool_result","value":"실제 RAW 값"}', record: { type: 'tool_result', value: '실제 RAW 값' } }],
     })
     memoryApi.fetchKeeperMemoryJournal.mockResolvedValue({
       keeper: 'kidsnote',
@@ -202,15 +195,8 @@ describe('InternalAgentsMonitor', () => {
     expect(container.textContent).toContain('새 기억')
     expect(container.textContent).toContain('낡은 기억')
     expect(container.textContent).toContain('새 근거로 대체됨')
-    expect(await screen.findByText('Retained RAW JSONL')).toBeTruthy()
-    expect(container.textContent).toContain('실제 RAW 값')
-    expect(container.textContent).toContain('Execution join')
-    expect(container.textContent).not.toContain('TRACE JOIN UNAVAILABLE')
-    expect(rawApi.fetchKeeperRawTrace).toHaveBeenCalledWith(
-      'kidsnote',
-      'librarian-research-1.jsonl',
-      expect.objectContaining({ signal: expect.any(AbortSignal), offset: 0, limit: 20 }),
-    )
+    expect(container.textContent).toContain('TOOL-FREE')
+    expect(container.textContent).toContain('외부 research/RAW 입력을 받지 않습니다')
     expect(memoryApi.fetchKeeperMemoryJournal).toHaveBeenCalledWith(
       'kidsnote',
       500,
@@ -230,7 +216,7 @@ describe('InternalAgentsMonitor', () => {
         subjectId: 'trace-shared',
         actor: 'full-cycle-probe',
         startedAt: 1786200000,
-        input: { kind: 'research', rawTracePath: null, payload: { current_fact_count: 2 } },
+        input: { kind: 'exact', payload: { current_fact_count: 2 } },
         status: 'running',
       }],
     })
@@ -260,46 +246,6 @@ describe('InternalAgentsMonitor', () => {
     expect(container.textContent).toContain('explicit_write')
     expect(container.textContent).toContain('revision 617')
     expect(container.textContent).toContain('실제 도구 체인 성공')
-  })
-
-  it('does not fetch a pre-registered trace candidate when sink creation failed', async () => {
-    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
-    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
-    api.fetchExactLaneRuns.mockResolvedValue({
-      count: 1,
-      generatedAt: 'now',
-      runs: [{
-        runId: 'librarian-research-unavailable',
-        lane: 'librarian_exact',
-        subjectId: 'trace-unavailable',
-        actor: 'rondo',
-        startedAt: 1786200000,
-        input: {
-          kind: 'research',
-          rawTracePath: '/tmp/raw-traces/candidate.jsonl',
-          payload: { message_count: 1 },
-        },
-        status: 'failed',
-        elapsedSeconds: 0.1,
-        output: {
-          research: {
-            outcome: { kind: 'not_dispatched' },
-            raw_trace: { kind: 'unavailable', category: 'internal', retryable: false },
-          },
-        },
-        code: 'librarian_failed',
-        detail: 'Librarian pass failed; inspect the operator raw trace and Memory journal',
-      }],
-    })
-    memoryApi.fetchKeeperMemoryJournal.mockResolvedValue({
-      keeper: 'rondo', returned: 0, undecodableLines: 0, entries: [],
-    })
-
-    render(html`<${InternalAgentsMonitor} />`)
-    fireEvent.click(await screen.findByRole('button', { name: /Librarian trace-unavailable/i }))
-
-    expect(await screen.findByText('RAW trace unavailable')).toBeTruthy()
-    expect(rawApi.fetchKeeperRawTrace).not.toHaveBeenCalled()
   })
 
   it('states that exact lanes and RAW require an Admin bearer', async () => {

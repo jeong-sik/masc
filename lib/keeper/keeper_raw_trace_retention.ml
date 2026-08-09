@@ -27,7 +27,6 @@ type error =
       ; actual : string
       }
   | Invalid_raw_trace_reference of string
-  | Invalid_exact_lane_raw_trace_reference of string
   | Raw_trace_directory_unreadable of string
 
 let error_to_string = function
@@ -44,10 +43,6 @@ let error_to_string = function
     Printf.sprintf "TurnRecord keeper mismatch: expected=%s actual=%s" expected actual
   | Invalid_raw_trace_reference path ->
     Printf.sprintf "TurnRecord raw-trace reference is outside the keeper store: %s" path
-  | Invalid_exact_lane_raw_trace_reference path ->
-    Printf.sprintf
-      "exact-lane raw-trace reference is outside the keeper store: %s"
-      path
   | Raw_trace_directory_unreadable detail ->
     Printf.sprintf "cannot read keeper raw-trace directory: %s" detail
 ;;
@@ -82,17 +77,7 @@ let protected_references ~config ~keeper_name ~dir =
            else Error (Invalid_raw_trace_reference run_ref.path))
     in
     let open Result.Syntax in
-    let* turn_references = collect String_set.empty entries in
-    Exact_lane_run_registry.research_raw_trace_paths
-      (Exact_lane_run_registry.global ())
-      ~actor:keeper_name
-    |> List.fold_left
-         (fun references path ->
-            let* references = references in
-            if path_is_in_store ~dir path
-            then Ok (String_set.add path references)
-            else Error (Invalid_exact_lane_raw_trace_reference path))
-         (Ok turn_references)
+    collect String_set.empty entries
 ;;
 
 let regular_trace_files dir =

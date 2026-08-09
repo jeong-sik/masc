@@ -16,6 +16,46 @@ type dispatch =
 let ( let* ) = Result.bind
 let error stage detail = Error { stage; detail }
 
+let rec validate_message_value ~stage ~path = function
+  | `Assoc fields ->
+    let seen = Hashtbl.create (min 32 (List.length fields)) in
+    let rec loop = function
+      | [] -> Ok ()
+      | (name, value) :: rest ->
+        if Hashtbl.mem seen name
+        then error stage (Printf.sprintf "duplicate object key %S at %s" name path)
+        else (
+          Hashtbl.add seen name ();
+          let* () =
+            validate_message_value ~stage ~path:(path ^ "." ^ name) value
+          in
+          loop rest)
+    in
+    loop fields
+  | `List values ->
+    let rec loop index = function
+      | [] -> Ok ()
+      | value :: rest ->
+        let* () =
+          validate_message_value
+            ~stage
+            ~path:(Printf.sprintf "%s[%d]" path index)
+            value
+        in
+        loop (index + 1) rest
+    in
+    loop 0 values
+  | `Float value when not (Float.is_finite value) ->
+    error stage (Printf.sprintf "non-finite number at %s" path)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Ok ()
+;;
+
+let reject_unknown_fields ~stage ~allowed fields =
+  match List.find_opt (fun (name, _) -> not (List.mem name allowed)) fields with
+  | None -> Ok ()
+  | Some (name, _) -> error stage (Printf.sprintf "unknown field %S" name)
+;;
+
 let assoc_at stage = function
   | `Assoc fields -> Ok fields
   | _ -> error stage "expected an object"
@@ -44,6 +84,21 @@ let request_id stage = function
   | `String id when String.trim id <> "" -> Ok (`String id, id)
   | `Int id -> Ok (`Int id, string_of_int id)
   | _ -> error stage "request id must be a non-empty string or integer"
+;;
+
+let request_id_opt stage fields =
+  match List.assoc_opt "id" fields with
+  | None -> Ok None
+  | Some id ->
+    let* id, _call_id = request_id stage id in
+    Ok (Some id)
+;;
+
+let params_object stage fields =
+  match List.assoc_opt "params" fields with
+  | None -> Ok (`Assoc [])
+  | Some (`Assoc _ as params) -> Ok params
+  | Some _ -> error stage "field \"params\" must be an object"
 ;;
 
 let initialize ~server_name ~id =
@@ -102,21 +157,21 @@ let tools_call ~id ~params ~call_tool =
 
 let handle_message ~server_name ~tool_specs ~call_tool message =
   let stage = "MCP message" in
+  let* () = validate_message_value ~stage ~path:"$" message in
   let* fields = assoc_at stage message in
+  let* () =
+    reject_unknown_fields
+      ~stage
+      ~allowed:[ "jsonrpc"; "id"; "method"; "params" ]
+      fields
+  in
   let* jsonrpc = required_string stage "jsonrpc" fields in
   if jsonrpc <> "2.0"
   then error stage (Printf.sprintf "unsupported jsonrpc %S" jsonrpc)
   else
     let* method_ = required_string stage "method" fields in
-    let id = Option.value (List.assoc_opt "id" fields) ~default:`Null in
-    let params = Option.value (List.assoc_opt "params" fields) ~default:(`Assoc []) in
-    let* request =
-      if id = `Null
-      then Ok None
-      else
-        let* id, _call_id = request_id stage id in
-        Ok (Some id)
-    in
+    let* params = params_object stage fields in
+    let* request = request_id_opt stage fields in
     match method_, request with
     | "initialize", Some id ->
       Ok

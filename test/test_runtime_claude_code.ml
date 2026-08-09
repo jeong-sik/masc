@@ -266,8 +266,10 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
         ]
     ]
   in
-  let call_tool ~name:_ ~call_id:_ ~arguments:_ =
-    fail "unknown tool dispatch reached the callback"
+  let call_tool ~name ~call_id:_ ~arguments:_ =
+    if String.equal name "missing"
+    then None
+    else failf "unexpected tool dispatch reached the callback: %s" name
   in
   let dispatch json =
     Runtime_official_client_mcp.handle_message
@@ -330,7 +332,65 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
    with
    | Error { stage = "MCP message"; _ } -> ()
    | Error _ -> fail "invalid request id had the wrong error stage"
-   | Ok _ -> fail "boolean JSON-RPC request id was admitted")
+   | Ok _ -> fail "boolean JSON-RPC request id was admitted");
+  let rejects label json =
+    match
+      Runtime_official_client_mcp.handle_message
+        ~server_name:"masc"
+        ~tool_specs
+        ~call_tool
+        json
+    with
+    | Error { stage = "MCP message"; _ } -> ()
+    | Error _ -> failf "%s had the wrong error stage" label
+    | Ok _ -> failf "%s was admitted" label
+  in
+  rejects
+    "explicit null notification id"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Null
+       ; "method", `String "notifications/initialized"
+       ; "params", `Assoc []
+       ]);
+  rejects
+    "scalar params"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Int 2
+       ; "method", `String "tools/list"
+       ; "params", `Null
+       ]);
+  rejects
+    "duplicate method"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Int 3
+       ; "method", `String "tools/list"
+       ; "method", `String "tools/call"
+       ; "params", `Assoc []
+       ]);
+  rejects
+    "unknown top-level field"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Int 4
+       ; "method", `String "tools/list"
+       ; "params", `Assoc []
+       ; "fallback", `Bool true
+       ]);
+  rejects
+    "non-finite nested value"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Int 5
+       ; "method", `String "tools/call"
+       ; ( "params"
+         , `Assoc
+             [ "name", `String "missing"
+             ; "arguments", `Assoc [ "score", `Float Float.nan ]
+             ] )
+       ])
 ;;
 
 let test_malformed_json_fails_closed () =
